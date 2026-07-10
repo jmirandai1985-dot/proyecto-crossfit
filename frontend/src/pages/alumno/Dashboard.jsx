@@ -15,7 +15,7 @@ const AlumnoDashboard = () => {
     const [wodHoy, setWodHoy] = useState(null);
     const [clasesHoy, setClasesHoy] = useState([]);
     const [reservasActivas, setReservasActivas] = useState(0);
-    const [creditosRestantes, setCreditosRestantes] = useState(0);
+    const [membresia, setMembresia] = useState(null);
     const [fetchError, setFetchError] = useState('');
 
     // Estado para modal de reserva
@@ -35,13 +35,15 @@ const AlumnoDashboard = () => {
                     gimnRes,
                     wodRes,
                     clasesRes,
-                    reservasRes
+                    reservasRes,
+                    membresiaRes
                 ] = await Promise.allSettled([
                     api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/nivel-fuerza?tenant_id=${tenant_id}`),
                     api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/nivel-gimnastico?tenant_id=${tenant_id}`),
                     api.get(`/api/v1/wods/hoy?tenant_id=${tenant_id}`),
                     api.get(`/api/v1/clases?tenant_id=${tenant_id}&fecha=${TODAY}&solo_con_cupo=true`),
-                    api.get(`/api/v1/reservas?tenant_id=${tenant_id}&usuario_id=${usuario_id}&estado=confirmada`)
+                    api.get(`/api/v1/reservas?tenant_id=${tenant_id}&usuario_id=${usuario_id}&estado=confirmada`),
+                    api.get(`/api/v1/planes/membresia-activa?tenant_id=${tenant_id}&alumno_id=${usuario_id}`)
                 ]);
 
                 if (fuerzaRes.status === 'fulfilled') setNivelFuerza(fuerzaRes.value.data);
@@ -52,6 +54,9 @@ const AlumnoDashboard = () => {
                     const data = reservasRes.value.data;
                     const count = Array.isArray(data) ? data.length : (data?.total || data?.count || 0);
                     setReservasActivas(count);
+                }
+                if (membresiaRes.status === 'fulfilled') {
+                    setMembresia(membresiaRes.value.data);
                 }
 
                 // Mostrar error si fuerza Y gimnástico fallaron (datos no cargables)
@@ -206,7 +211,23 @@ const AlumnoDashboard = () => {
                         </div>
                         <div>
                             <p className="text-xs text-gray-500 uppercase tracking-wider">Créditos Restantes</p>
-                            <p className="text-2xl font-bold text-gray-800">{creditosRestantes || '—'}</p>
+                            {membresia?.activa ? (
+                                <>
+                                    <p className="text-2xl font-bold text-gray-800">
+                                        {membresia.es_ilimitado ? '♾️' : membresia.clases_disponibles}
+                                    </p>
+                                    <p className="text-[10px] text-gray-400">
+                                        {membresia.es_ilimitado ? 'Plan Ilimitado' : `Vence en ${membresia.dias_restantes} día(s)`}
+                                    </p>
+                                </>
+                            ) : (
+                                <div>
+                                    <p className="text-sm font-bold text-gray-800">Sin plan activo</p>
+                                    <a href="/alumno/solicitar-plan" className="text-[11px] text-emerald-600 hover:underline font-medium">
+                                        Solicitar plan →
+                                    </a>
+                                </div>
+                            )}
                         </div>
                     </div>
                     <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm flex items-center gap-4">
@@ -231,9 +252,60 @@ const AlumnoDashboard = () => {
                         </div>
                     </div>
                     <div className="p-6">
-                        <p className="text-gray-700 leading-relaxed">
-                            {wodHoy?.descripcion || 'No hay WOD programado para hoy. ¡Disfruta tu descanso!'}
-                        </p>
+                        {wodHoy ? (
+                            <div className="space-y-4">
+                                {wodHoy.descripcion && (
+                                    <p className="text-gray-700 leading-relaxed">{wodHoy.descripcion}</p>
+                                )}
+
+                                {/* Mostrar movimientos si vienen en fases */}
+                                {wodHoy.fases && wodHoy.fases.length > 0 && (
+                                    <div className="space-y-3">
+                                        {wodHoy.fases.map((fase, fi) => (
+                                            <div key={fi}>
+                                                <h4 className="text-xs font-bold text-emerald-600 uppercase tracking-wider mb-1.5">
+                                                    {fase.nombre}
+                                                </h4>
+                                                {fase.movimientos && fase.movimientos.length > 0 ? (
+                                                    <div className="space-y-1">
+                                                        {fase.movimientos.map((mov, mi) => (
+                                                            <div key={mi} className="flex items-center gap-2 text-sm">
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                                                <span className="text-gray-800 font-medium">{mov.nombre}</span>
+                                                                {mov.series && <span className="text-gray-500">{mov.series}x</span>}
+                                                                {mov.repeticiones && <span className="text-gray-500">{mov.repeticiones}</span>}
+                                                                {mov.peso && <span className="text-gray-400">@ {mov.peso} kg</span>}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-xs text-gray-400 italic">Sin movimientos en esta fase</p>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Mostrar movimientos si vienen planos */}
+                                {(!wodHoy.fases || wodHoy.fases.length === 0) && wodHoy.movimientos && wodHoy.movimientos.length > 0 && (
+                                    <div className="space-y-1">
+                                        {wodHoy.movimientos.map((mov, mi) => (
+                                            <div key={mi} className="flex items-center gap-2 text-sm">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                                <span className="text-gray-800 font-medium">{mov.nombre}</span>
+                                                {mov.series && <span className="text-gray-500">{mov.series}x</span>}
+                                                {mov.repeticiones && <span className="text-gray-500">{mov.repeticiones}</span>}
+                                                {mov.peso && <span className="text-gray-400">@ {mov.peso} kg</span>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <p className="text-gray-700 leading-relaxed">
+                                No hay WOD programado para hoy. ¡Disfruta tu descanso!
+                            </p>
+                        )}
                     </div>
                 </div>
 

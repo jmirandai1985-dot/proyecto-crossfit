@@ -14,8 +14,11 @@ import AdminBazar from './pages/admin/Bazar';
 import AdminReportes from './pages/admin/Reportes';
 import CoachDashboard from './pages/coach/DashboardCoach';
 import CoachPizarra from './pages/coach/Pizarra';
+import CoachGenerarClases from './pages/coach/GenerarClases';
 import AlumnoDashboard from './pages/alumno/Dashboard';
+import AlumnoMisReservas from './pages/alumno/MisReservas';
 import AlumnoPizarraRMs from './pages/alumno/PizarraRMs';
+import AlumnoAjustes from './pages/alumno/Ajustes';
 
 // ─── Spinner compartido ────────────────────────────────────────────────
 const LoadingScreen = () => (
@@ -81,16 +84,17 @@ function App() {
           <Route path="/coach/*" element={<ProtectedRoute roles={ROLES_COACH} />}>
             <Route path="dashboard" element={<CoachDashboard />} />
             <Route path="pizarra" element={<CoachPizarra />} />
-            <Route path="*" element={<Navigate to="/coach/dashboard" replace />} />
+            <Route path="generar-clases" element={<CoachGenerarClases />} />
+            <Route path="*" element={<Navigate to="/coach/dashboard" />} />
           </Route>
 
           {/* ── Rutas de Alumno ─────────────────────────────────── */}
           <Route path="/alumno/*" element={<ProtectedRoute roles={ROLES_ALUMNO} />}>
             <Route path="dashboard" element={<AlumnoDashboard />} />
-            <Route path="mis-reservas" element={<AlumnoDashboard />} />
+            <Route path="mis-reservas" element={<AlumnoMisReservas />} />
             <Route path="rms" element={<AlumnoPizarraRMs />} />
-            <Route path="ajustes" element={<AlumnoDashboard />} />
-            <Route path="*" element={<Navigate to="/alumno/dashboard" replace />} />
+            <Route path="ajustes" element={<AlumnoAjustes />} />
+            <Route path="*" element={<Navigate to="/alumno/dashboard" />} />
           </Route>
 
           {/* ── 404 → redirige según rol o a /login ── */}
