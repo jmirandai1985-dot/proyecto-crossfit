@@ -335,3 +335,85 @@ def obtener_nivel_general_endpoint(
 ):
     """Calcula el nivel general del alumno (fuerza y gimnástico)"""
     return calcular_nivel_general(alumno_id, db, tenant_id)
+
+
+@router.get("/alumnos/{alumno_id}/nivel-fuerza")
+def obtener_nivel_fuerza_alumno(
+    alumno_id: int,
+    tenant_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Calcula el nivel de fuerza del alumno basado en sus RMs.
+    Retorna el nivel general y los top RMs de movimientos de fuerza.
+    """
+    resultado = calcular_nivel_general(alumno_id, db, tenant_id)
+
+    # Extraer top RMs de fuerza para mostrar en el dashboard
+    top_rms = []
+    for detalle in resultado.get("detalle_fuerza", []):
+        if detalle.get("nivel") and detalle["nivel"] != "Sin datos":
+            # Buscar el movimiento por nombre para obtener su ID
+            movimiento = db.query(Movimiento).filter(
+                Movimiento.nombre == detalle["movimiento"],
+                Movimiento.tenant_id == tenant_id
+            ).first()
+            if movimiento:
+                mejor = db.query(
+                    func.max(HistorialRM.peso_kg)
+                ).filter(
+                    HistorialRM.alumno_id == alumno_id,
+                    HistorialRM.tenant_id == tenant_id,
+                    HistorialRM.movimiento_id == movimiento.id
+                ).scalar()
+                if mejor:
+                    top_rms.append({
+                        "movimiento": detalle["movimiento"],
+                        "valor": f"{mejor:.0f} kg"
+                    })
+
+    return {
+        "nivel": resultado.get("nivel_fuerza", "SIN DATOS"),
+        "top_rms": top_rms[:3]  # Top 3
+    }
+
+
+@router.get("/alumnos/{alumno_id}/nivel-gimnastico")
+def obtener_nivel_gimnastico_alumno(
+    alumno_id: int,
+    tenant_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Calcula el nivel gimnástico del alumno basado en sus RMs.
+    Retorna el nivel general y los top RMs de movimientos gimnásticos.
+    """
+    resultado = calcular_nivel_general(alumno_id, db, tenant_id)
+
+    # Extraer top RMs gimnásticos para mostrar en el dashboard
+    top_rms = []
+    for detalle in resultado.get("detalle_gimnastico", []):
+        if detalle.get("nivel") and detalle["nivel"] != "Sin datos":
+            # Buscar el movimiento por nombre para obtener su ID
+            movimiento = db.query(Movimiento).filter(
+                Movimiento.nombre == detalle["movimiento"],
+                Movimiento.tenant_id == tenant_id
+            ).first()
+            if movimiento:
+                mejor = db.query(
+                    func.max(HistorialRM.peso_kg)
+                ).filter(
+                    HistorialRM.alumno_id == alumno_id,
+                    HistorialRM.tenant_id == tenant_id,
+                    HistorialRM.movimiento_id == movimiento.id
+                ).scalar()
+                if mejor:
+                    top_rms.append({
+                        "movimiento": detalle["movimiento"],
+                        "valor": f"{mejor:.0f} reps"
+                    })
+
+    return {
+        "nivel": resultado.get("nivel_gimnastico", "SIN DATOS"),
+        "top_rms": top_rms[:3]  # Top 3
+    }

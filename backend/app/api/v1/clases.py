@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import List, Optional
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timedelta
 
 from app.db.database import get_db
 from app.models.clase import Clase
@@ -16,6 +16,10 @@ def listar_clases(
     db: Session = Depends(get_db),
     tenant_id: int = Query(1),
     coach_id: Optional[int] = Query(None),
+    fecha: Optional[date] = Query(
+        None, description="Filtrar por fecha (YYYY-MM-DD)"),
+    solo_con_cupo: Optional[bool] = Query(
+        None, description="Solo clases con cupos disponibles"),
     skip: int = Query(0),
     limit: int = Query(100)
 ):
@@ -24,6 +28,11 @@ def listar_clases(
     if coach_id is not None:
         conditions.append("c.coach_id = :coach_id")
         query_params["coach_id"] = coach_id
+    if fecha is not None:
+        conditions.append("c.fecha = :fecha")
+        query_params["fecha"] = fecha
+    if solo_con_cupo:
+        conditions.append("c.asistentes_confirmados < c.cupo_maximo")
     where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
     query = text(f"""
         SELECT c.id, c.fecha, c.hora_inicio, c.hora_fin, c.disciplina_id, c.coach_id,

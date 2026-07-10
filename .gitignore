@@ -19,6 +19,10 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Env files (local, no subir a git)
+.env.local
+.env.*.local
+
 # Temp / logs
 *.log
 *.txt

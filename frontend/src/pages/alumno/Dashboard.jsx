@@ -16,6 +16,7 @@ const AlumnoDashboard = () => {
     const [clasesHoy, setClasesHoy] = useState([]);
     const [reservasActivas, setReservasActivas] = useState(0);
     const [creditosRestantes, setCreditosRestantes] = useState(0);
+    const [fetchError, setFetchError] = useState('');
 
     // Estado para modal de reserva
     const [showReservaModal, setShowReservaModal] = useState(false);
@@ -27,6 +28,7 @@ const AlumnoDashboard = () => {
     useEffect(() => {
         const fetchData = async () => {
             setLoading(true);
+            setFetchError('');
             try {
                 const [
                     fuerzaRes,
@@ -35,11 +37,11 @@ const AlumnoDashboard = () => {
                     clasesRes,
                     reservasRes
                 ] = await Promise.allSettled([
-                    api.get(`/api/v1/nivel-fuerza/${usuario_id}?tenant_id=${tenant_id}`),
-                    api.get(`/api/v1/nivel-gimnastico/${usuario_id}?tenant_id=${tenant_id}`),
-                    api.get('/api/v1/wod/hoy'),
-                    api.get(`/api/v1/clases/disponibles?fecha=${TODAY}&tenant_id=${tenant_id}`),
-                    api.get(`/api/v1/reservas/alumno/${usuario_id}?activas=true&tenant_id=${tenant_id}`)
+                    api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/nivel-fuerza?tenant_id=${tenant_id}`),
+                    api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/nivel-gimnastico?tenant_id=${tenant_id}`),
+                    api.get(`/api/v1/wods/hoy?tenant_id=${tenant_id}`),
+                    api.get(`/api/v1/clases?tenant_id=${tenant_id}&fecha=${TODAY}&solo_con_cupo=true`),
+                    api.get(`/api/v1/reservas?tenant_id=${tenant_id}&usuario_id=${usuario_id}&estado=confirmada`)
                 ]);
 
                 if (fuerzaRes.status === 'fulfilled') setNivelFuerza(fuerzaRes.value.data);
@@ -52,41 +54,13 @@ const AlumnoDashboard = () => {
                     setReservasActivas(count);
                 }
 
-                // Fallback datos demo si todo falla
+                // Mostrar error si fuerza Y gimnástico fallaron (datos no cargables)
                 if (fuerzaRes.status === 'rejected' && gimnRes.status === 'rejected') {
-                    setNivelFuerza({
-                        nivel: 'INTERMEDIO',
-                        top_rms: [
-                            { movimiento: 'Deadlift', valor: '140 kg' },
-                            { movimiento: 'Back Squat', valor: '120 kg' },
-                            { movimiento: 'Bench Press', valor: '85 kg' }
-                        ]
-                    });
-                    setNivelGimnastico({
-                        nivel: 'PRINCIPIANTE',
-                        top_rms: [
-                            { movimiento: 'Pull-ups', valor: '15 reps' },
-                            { movimiento: 'Handstand Push-ups', valor: '8 reps' },
-                            { movimiento: 'Muscle-ups', valor: '3 reps' }
-                        ]
-                    });
-                    setWodHoy({
-                        nombre: 'CROSSFIT OPEN 24.1',
-                        descripcion: 'AMRAP 14 min: 50 cal SkiErg, 50 Wall Balls, 50 Double Unders, 50 Burpees',
-                        time_cap: '14:00'
-                    });
-                    setCreditosRestantes(12);
-                    setReservasActivas(3);
-                    setClasesHoy([
-                        { id: 1, nombre: 'WOD Matutino', hora: '07:00', coach: 'Coach Carlos', disciplina: 'CrossFit', disponibles: 8, cupo: 20 },
-                        { id: 2, nombre: 'Funcional', hora: '09:00', coach: 'Coach Ana', disciplina: 'Funcional', disponibles: 5, cupo: 15 },
-                        { id: 3, nombre: 'Yoga', hora: '11:00', coach: 'Coach María', disciplina: 'Yoga', disponibles: 12, cupo: 20 },
-                        { id: 4, nombre: 'WOD Tarde', hora: '18:00', coach: 'Coach Pedro', disciplina: 'CrossFit', disponibles: 3, cupo: 20 },
-                        { id: 5, nombre: 'WOD Noche', hora: '20:00', coach: 'Coach Laura', disciplina: 'CrossFit', disponibles: 0, cupo: 20 },
-                    ]);
+                    setFetchError('No se pudieron cargar tus niveles de atleta. Verifica la conexión con el servidor.');
                 }
             } catch (error) {
                 console.error('Error fetching dashboard data:', error);
+                setFetchError('Error al cargar el dashboard. Intenta de nuevo más tarde.');
             } finally {
                 setLoading(false);
             }
@@ -149,6 +123,13 @@ const AlumnoDashboard = () => {
     return (
         <Layout>
             <div className="max-w-6xl mx-auto space-y-6">
+
+                {/* ─── MENSAJE DE ERROR ──────────────────────────────── */}
+                {fetchError && (
+                    <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 font-medium text-sm">
+                        ❌ {fetchError}
+                    </div>
+                )}
 
                 {/* ─── TARJETAS DE CLASIFICACIÓN ───────────────────────── */}
                 <div>
@@ -245,13 +226,8 @@ const AlumnoDashboard = () => {
                         <div className="flex items-center justify-between">
                             <div>
                                 <h2 className="text-white font-bold text-lg">🔥 WOD DEL DÍA</h2>
-                                <p className="text-emerald-100 text-sm">{wodHoy?.nombre || 'WOD'}</p>
+                                <p className="text-emerald-100 text-sm">{wodHoy?.titulo || 'WOD'}</p>
                             </div>
-                            {wodHoy?.time_cap && (
-                                <span className="bg-white/20 text-white px-4 py-1.5 rounded-full text-sm font-bold">
-                                    ⏱️ Time Cap: {wodHoy.time_cap}
-                                </span>
-                            )}
                         </div>
                     </div>
                     <div className="p-6">
@@ -271,47 +247,48 @@ const AlumnoDashboard = () => {
                             <table className="w-full">
                                 <thead>
                                     <tr className="bg-gray-50 border-b border-gray-200">
-                                        <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Clase</th>
+                                        <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Disciplina</th>
                                         <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Horario</th>
                                         <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Coach</th>
-                                        <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Disciplina</th>
                                         <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Cupos</th>
                                         <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider"></th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {clasesHoy.length > 0 ? (
-                                        clasesHoy.map((clase) => (
-                                            <tr key={clase.id} className="hover:bg-gray-50 transition-colors">
-                                                <td className="px-5 py-4 text-sm font-medium text-gray-900">{clase.nombre}</td>
-                                                <td className="px-5 py-4 text-sm text-gray-600">🕐 {clase.hora}</td>
-                                                <td className="px-5 py-4 text-sm text-gray-600">👨‍🏫 {clase.coach}</td>
-                                                <td className="px-5 py-4 text-sm text-gray-600">📌 {clase.disciplina}</td>
-                                                <td className="px-5 py-4">
-                                                    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${clase.disponibles > 0
+                                        clasesHoy.map((clase) => {
+                                            const cuposLibres = (clase.cupo_maximo || 0) - (clase.asistentes_confirmados || 0);
+                                            return (
+                                                <tr key={clase.id} className="hover:bg-gray-50 transition-colors">
+                                                    <td className="px-5 py-4 text-sm font-medium text-gray-900">{clase.disciplina_nombre || 'Clase'}</td>
+                                                    <td className="px-5 py-4 text-sm text-gray-600">� {clase.hora_inicio} - {clase.hora_fin}</td>
+                                                    <td className="px-5 py-4 text-sm text-gray-600">�‍🏫 {clase.coach_nombre || '—'}</td>
+                                                    <td className="px-5 py-4">
+                                                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${cuposLibres > 0
                                                             ? 'bg-green-100 text-green-700'
                                                             : 'bg-red-100 text-red-700'
-                                                        }`}>
-                                                        {clase.disponibles > 0 ? `${clase.disponibles}/${clase.cupo} libres` : 'Completo'}
-                                                    </span>
-                                                </td>
-                                                <td className="px-5 py-4 text-right">
-                                                    <button
-                                                        onClick={() => handleAbrirReserva(clase)}
-                                                        disabled={clase.disponibles === 0}
-                                                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${clase.disponibles > 0
+                                                            }`}>
+                                                            {cuposLibres > 0 ? `${cuposLibres}/${clase.cupo_maximo} libres` : 'Completo'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-5 py-4 text-right">
+                                                        <button
+                                                            onClick={() => handleAbrirReserva(clase)}
+                                                            disabled={cuposLibres === 0}
+                                                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${cuposLibres > 0
                                                                 ? 'bg-emerald-500 text-white hover:bg-emerald-600'
                                                                 : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                                                            }`}
-                                                    >
-                                                        {clase.disponibles > 0 ? 'Reservar' : 'Lleno'}
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))
+                                                                }`}
+                                                        >
+                                                            {cuposLibres > 0 ? 'Reservar' : 'Lleno'}
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })
                                     ) : (
                                         <tr>
-                                            <td colSpan="6" className="px-5 py-8 text-center text-sm text-gray-400">
+                                            <td colSpan="5" className="px-5 py-8 text-center text-sm text-gray-400">
                                                 No hay clases disponibles para hoy
                                             </td>
                                         </tr>
@@ -338,13 +315,12 @@ const AlumnoDashboard = () => {
                                 </div>
                             )}
                             <div className="bg-gray-50 rounded-xl p-4 space-y-2">
-                                <p className="font-bold text-gray-900 text-lg">{claseSeleccionada.nombre}</p>
+                                <p className="font-bold text-gray-900 text-lg">{claseSeleccionada.disciplina_nombre || 'Clase'}</p>
                                 <div className="grid grid-cols-2 gap-2 text-sm">
-                                    <p className="text-gray-600">🕐 {claseSeleccionada.hora}</p>
-                                    <p className="text-gray-600">👨‍🏫 {claseSeleccionada.coach}</p>
-                                    <p className="text-gray-600">📌 {claseSeleccionada.disciplina}</p>
+                                    <p className="text-gray-600">🕐 {claseSeleccionada.hora_inicio} - {claseSeleccionada.hora_fin}</p>
+                                    <p className="text-gray-600">�‍🏫 {claseSeleccionada.coach_nombre || '—'}</p>
                                     <p className="text-green-600 font-medium">
-                                        ✅ {claseSeleccionada.disponibles} cupos disponibles
+                                        ✅ Cupos disponibles
                                     </p>
                                 </div>
                             </div>

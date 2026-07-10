@@ -160,13 +160,17 @@ def listar_reservas(
     skip: int = 0,
     limit: int = 100,
     estado: str = None,
+    usuario_id: int = None,
     db: Session = Depends(get_db)
 ):
-    """Lista reservas de un tenant con paginación"""
+    """Lista reservas de un tenant con paginación y filtros opcionales"""
     query = db.query(Reserva).filter(Reserva.tenant_id == tenant_id)
 
     if estado is not None:
         query = query.filter(Reserva.estado == estado)
+
+    if usuario_id is not None:
+        query = query.filter(Reserva.alumno_id == usuario_id)
 
     reservas = query.offset(skip).limit(limit).all()
 

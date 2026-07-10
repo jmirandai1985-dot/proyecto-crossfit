@@ -31,6 +31,7 @@ const PizarraRMs = () => {
     const [movimientos, setMovimientos] = useState([]);
     const [rms, setRms] = useState([]);
     const [rmTab, setRmTab] = useState('todas');
+    const [fetchError, setFetchError] = useState('');
     const [showRMModal, setShowRMModal] = useState(false);
     const [rmForm, setRmForm] = useState({ movimiento_id: '', valor: '', fecha: today, notas: '' });
     const [rmSubmitting, setRmSubmitting] = useState(false);
@@ -55,18 +56,7 @@ const PizarraRMs = () => {
             setRms(mappedRMs);
         } catch (e) {
             console.error('Error fetching RMs:', e);
-            // Datos demo
-            setMovimientos([
-                { id: 1, nombre: 'Deadlift', categoria: 'fuerza' },
-                { id: 2, nombre: 'Back Squat', categoria: 'fuerza' },
-                { id: 3, nombre: 'Bench Press', categoria: 'fuerza' },
-                { id: 4, nombre: 'Pull-ups', categoria: 'gimnastico' },
-                { id: 5, nombre: 'Handstand Push-ups', categoria: 'gimnastico' },
-                { id: 6, nombre: 'Muscle-ups', categoria: 'gimnastico' },
-                { id: 7, nombre: 'Run 400m', categoria: 'cardio' },
-                { id: 8, nombre: 'Assault Bike', categoria: 'cardio' },
-                { id: 9, nombre: 'SkiErg', categoria: 'metabolico' },
-            ]);
+            setFetchError('No se pudieron cargar tus RMs. Verifica la conexión con el servidor e intenta de nuevo.');
         }
         setLoading(false);
     }, [usuario_id, tenant_id]);
@@ -145,6 +135,12 @@ const PizarraRMs = () => {
                     </div>
                 )}
 
+                {fetchError && (
+                    <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 font-medium text-sm">
+                        ❌ {fetchError}
+                    </div>
+                )}
+
                 {/* Filtros por categoría */}
                 <div className="flex flex-wrap gap-2">
                     {[
@@ -158,8 +154,8 @@ const PizarraRMs = () => {
                             key={t.key}
                             onClick={() => setRmTab(t.key)}
                             className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${rmTab === t.key
-                                    ? t.activeClass
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                ? t.activeClass
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                 }`}
                         >
                             {t.label}
