@@ -718,6 +718,30 @@ def listar_wods(tenant_id: int = Query(1), fecha: date = Query(None), estado: st
     return [schemas.WodResponse.from_orm_with_names(w) for w in wods]
 
 
+# ──────────────────────────────────────────────
+# ENDPOINT: WOD DEL DÍA
+# ──────────────────────────────────────────────
+
+@router.get("/hoy")
+def obtener_wod_hoy(tenant_id: int = Query(1), db: Session = Depends(get_db)):
+    """
+    Retorna el WOD publicado para el día de hoy del tenant especificado.
+    Si no hay WOD para hoy, retorna null (no error).
+    """
+    from datetime import date
+    hoy = date.today()
+    wod = db.query(Wod).filter(
+        Wod.tenant_id == tenant_id,
+        Wod.fecha == hoy,
+        Wod.activo == True
+    ).order_by(Wod.created_at.desc()).first()
+
+    if not wod:
+        return None
+
+    return schemas.WodResponse.from_orm_with_names(wod)
+
+
 @router.get("/{wod_id}", response_model=schemas.WodResponse)
 def obtener_wod(wod_id: int, tenant_id: int = Query(1), db: Session = Depends(get_db)):
     wod = db.query(Wod).filter(
@@ -806,30 +830,6 @@ def eliminar_wod(wod_id: int, tenant_id: int = Query(1), db: Session = Depends(g
     db.delete(wod)
     db.commit()
     return {"detail": "WOD eliminado"}
-
-
-# ──────────────────────────────────────────────
-# ENDPOINT: WOD DEL DÍA
-# ──────────────────────────────────────────────
-
-@router.get("/hoy")
-def obtener_wod_hoy(tenant_id: int = Query(1), db: Session = Depends(get_db)):
-    """
-    Retorna el WOD publicado para el día de hoy del tenant especificado.
-    Si no hay WOD para hoy, retorna null (no error).
-    """
-    from datetime import date
-    hoy = date.today()
-    wod = db.query(Wod).filter(
-        Wod.tenant_id == tenant_id,
-        Wod.fecha == hoy,
-        Wod.activo == True
-    ).order_by(Wod.created_at.desc()).first()
-
-    if not wod:
-        return None
-
-    return schemas.WodResponse.from_orm_with_names(wod)
 
 
 # ──────────────────────────────────────────────
