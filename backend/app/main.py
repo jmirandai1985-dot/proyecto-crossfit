@@ -109,10 +109,91 @@ app.include_router(fix_fechas.router,
 
 @app.on_event("startup")
 async def startup_event():
-    print("Iniciando Box CrossFit Platform API...")
-    print("Documentacion disponible en: http://localhost:8000/docs")
+    import logging
+    logger = logging.getLogger("uvicorn.startup")
 
-    # Crear movimientos de CrossFit de prueba si no existen
+    logger.info("🚀 Iniciando Box CrossFit Platform API...")
+    logger.info("📖 Documentación disponible en: http://localhost:8000/docs")
+
+    # ── 1. Inicializar scheduler de generación diaria de clases ──
+    try:
+        from app.services.scheduler import iniciar_scheduler, set_generar_clases_callback
+
+        async def callback_generar_clases():
+            """Callback async que genera clases para HOY + 4 días (5 días en total)"""
+            from datetime import date, timedelta
+            from app.db.database import SessionLocal
+            from app.services.generar_clases import generar_clases_para_rango
+
+            hoy = date.today()
+            fecha_hasta = hoy + timedelta(days=4)
+            db = SessionLocal()
+            try:
+                # Generar para tenant_id=1 (principal) en rango de 5 días
+                resultado = generar_clases_para_rango(
+                    db, tenant_id=1, fecha_desde=hoy, fecha_hasta=fecha_hasta)
+                return resultado
+            except Exception as e:
+                logger.error(
+                    f"❌ [Callback Scheduler] Error: {e}", exc_info=True)
+                return None
+            finally:
+                db.close()
+
+        set_generar_clases_callback(callback_generar_clases)
+        iniciar_scheduler()
+    except Exception as e:
+        logger.error(f"❌ Error al iniciar scheduler: {e}")
+
+    # ── 2. Ejecutar generación inmediata al iniciar (para desarrollo) ──
+    try:
+        from datetime import date, timedelta
+        from app.db.database import SessionLocal
+        from app.services.generar_clases import generar_clases_para_rango
+
+        hoy = date.today()
+        fecha_hasta = hoy + timedelta(days=4)
+        db = SessionLocal()
+        try:
+            from app.models.clase import Clase
+            from sqlalchemy import text
+
+            # Verificar si ALGUNA fecha del rango [hoy, hoy+4] está incompleta
+            faltan_clases = False
+            for i in range(5):
+                f = hoy + timedelta(days=i)
+                if f.weekday() == 6:  # domingo, skip
+                    continue
+                count_clases = db.execute(
+                    text(
+                        "SELECT COUNT(*) FROM clases WHERE tenant_id = 1 AND fecha = :fecha"),
+                    {"fecha": f}
+                ).scalar()
+                count_horarios = db.execute(
+                    text(
+                        "SELECT COUNT(*) FROM horarios WHERE tenant_id = 1 AND dia_semana = :ds AND activo = true"),
+                    {"ds": f.weekday()}
+                ).scalar()
+                if count_clases < count_horarios:
+                    faltan_clases = True
+                    logger.info(
+                        f"🔍 [Startup] {f} tiene {count_clases}/{count_horarios} clases (faltan {count_horarios - count_clases})")
+                    break
+
+            if faltan_clases:
+                resultado = generar_clases_para_rango(
+                    db, tenant_id=1, fecha_desde=hoy, fecha_hasta=fecha_hasta)
+                logger.info(
+                    f"🔄 [Startup] Se generaron {resultado['creadas']} clases faltantes para HOY + 4 días (5 días total)")
+            else:
+                logger.info(
+                    f"✅ [Startup] Rango completo, no es necesario generar clases")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"❌ Error al generar clases en startup: {e}")
+
+    # ── 3. Crear movimientos de CrossFit de prueba si no existen ──
     try:
         from app.db.database import SessionLocal
         from app.models.movimiento import Movimiento
@@ -152,7 +233,6 @@ async def startup_event():
             ]
             db_tenant = db.query(Tenant).filter(Tenant.id == 1).first()
             if db_tenant:
-                # Solo crear movimientos si NO existen (evita borrar los existentes y perder RMs por CASCADE)
                 existing_count = db.query(Movimiento).filter(
                     Movimiento.tenant_id == 1).count()
                 if existing_count == 0:
@@ -165,22 +245,28 @@ async def startup_event():
                         )
                         db.add(movimiento)
                     db.commit()
-                    print(
+                    logger.info(
                         f"✅ Creados {len(movimientos_lista)} movimientos de prueba")
                 else:
-                    print(
+                    logger.info(
                         f"✅ {existing_count} movimientos ya existen, saltando seed")
             else:
-                print("⚠️ No se encontró tenant con id=1, no se crearon movimientos")
+                logger.warning(
+                    "⚠️ No se encontró tenant con id=1, no se crearon movimientos")
         finally:
             db.close()
     except Exception as e:
-        print(f"❌ Error al crear movimientos de prueba: {e}")
+        logger.error(f"❌ Error al crear movimientos de prueba: {e}")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    print("Cerrando Box CrossFit Platform API...")
+    import logging
+    logger = logging.getLogger("uvicorn.shutdown")
+    logger.info("🛑 Cerrando Box CrossFit Platform API...")
+
+    from app.services.scheduler import detener_scheduler
+    detener_scheduler()
 
 
 if __name__ == "__main__":

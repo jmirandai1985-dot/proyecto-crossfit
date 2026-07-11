@@ -6,7 +6,8 @@ import api from '../../services/api';
 const GenerarClases = () => {
     const { tenant_id } = useAuth();
 
-    const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0]);
+    const d = new Date();
+    const [fecha, setFecha] = useState(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
     const [generando, setGenerando] = useState(false);
     const [resultado, setResultado] = useState(null);
     const [error, setError] = useState('');
@@ -71,8 +72,8 @@ const GenerarClases = () => {
                     {resultado && (
                         <div className="mt-4 space-y-3">
                             <div className={`p-4 rounded-lg border text-sm ${resultado.creadas > 0
-                                    ? 'bg-green-50 border-green-200 text-green-700'
-                                    : 'bg-blue-50 border-blue-200 text-blue-700'
+                                ? 'bg-green-50 border-green-200 text-green-700'
+                                : 'bg-blue-50 border-blue-200 text-blue-700'
                                 }`}>
                                 <p className="font-medium">
                                     {resultado.creadas > 0 ? '✅' : 'ℹ️'} {resultado.message}

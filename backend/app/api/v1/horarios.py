@@ -126,8 +126,8 @@ def generar_clases_dia(
     del día de semana correspondiente a la 'fecha' indicada (YYYY-MM-DD).
     NO duplica si ya existen clases con el mismo (horario_base_id, fecha).
     """
-    from datetime import date, datetime
-    from app.models.clase import Clase
+    from datetime import datetime
+    from app.services.generar_clases import generar_clases_para_fecha
 
     try:
         fecha_date = datetime.strptime(fecha, "%Y-%m-%d").date()
@@ -137,52 +137,5 @@ def generar_clases_dia(
             detail="Formato de fecha inválido. Use YYYY-MM-DD"
         )
 
-    dia_semana = fecha_date.weekday()  # 0=Lun ... 6=Dom
-    if dia_semana == 6:
-        return {"message": "Domingo: no hay horarios base programados", "creadas": 0}
-
-    horarios = db.query(HorarioBase).filter(
-        HorarioBase.tenant_id == tenant_id,
-        HorarioBase.dia_semana == dia_semana,
-        HorarioBase.activo == True
-    ).all()
-
-    if not horarios:
-        return {"message": f"No hay horarios base activos para el día {dia_semana}", "creadas": 0}
-
-    creadas = 0
-    omitidas = 0
-    for h in horarios:
-        existe = db.query(Clase).filter(
-            Clase.tenant_id == tenant_id,
-            Clase.horario_base_id == h.id,
-            Clase.fecha == fecha_date
-        ).first()
-        if existe:
-            omitidas += 1
-            continue
-
-        clase = Clase(
-            tenant_id=tenant_id,
-            horario_base_id=h.id,
-            disciplina_id=h.disciplina_id,
-            fecha=fecha_date,
-            hora_inicio=h.hora_inicio,
-            hora_fin=h.hora_fin,
-            cupo_maximo=h.cupo_maximo,
-            asistentes_confirmados=0,
-            cancelada=False,
-        )
-        db.add(clase)
-        creadas += 1
-
-    db.commit()
-
-    return {
-        "message": f"{creadas} clases generadas para {fecha}",
-        "creadas": creadas,
-        "omitidas": omitidas,
-        "total_horarios": len(horarios),
-        "fecha": fecha,
-        "dia_semana": dia_semana,
-    }
+    resultado = generar_clases_para_fecha(db, tenant_id, fecha_date)
+    return resultado

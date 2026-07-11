@@ -3,7 +3,26 @@ import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 
-const TODAY = new Date().toISOString().split('T')[0];
+const d = new Date();
+const TODAY = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+// Calcular próximos 5 días (HOY + 4)
+const getProximosDias = () => {
+    const dias = [];
+    const nombres = ['DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO'];
+    for (let i = 0; i < 5; i++) {
+        const fecha = new Date(d);
+        fecha.setDate(fecha.getDate() + i);
+        const fechaStr = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}-${String(fecha.getDate()).padStart(2, '0')}`;
+        dias.push({
+            fecha: fechaStr,
+            nombreDia: nombres[fecha.getDay()],
+            diaNum: fecha.getDate(),
+            mes: fecha.getMonth() + 1,
+        });
+    }
+    return dias;
+};
 
 const AlumnoDashboard = () => {
     const { usuario_id, tenant_id, usuario } = useAuth();
@@ -13,7 +32,7 @@ const AlumnoDashboard = () => {
     const [nivelFuerza, setNivelFuerza] = useState(null);
     const [nivelGimnastico, setNivelGimnastico] = useState(null);
     const [wodHoy, setWodHoy] = useState(null);
-    const [clasesHoy, setClasesHoy] = useState([]);
+    const [clasesPorDia, setClasesPorDia] = useState({});
     const [reservasActivas, setReservasActivas] = useState(0);
     const [membresia, setMembresia] = useState(null);
     const [fetchError, setFetchError] = useState('');
@@ -23,6 +42,12 @@ const AlumnoDashboard = () => {
     const [claseSeleccionada, setClaseSeleccionada] = useState(null);
     const [submitting, setSubmitting] = useState(false);
     const [errorReserva, setErrorReserva] = useState('');
+
+    // Estado para acordeon: día actualmente expandido (null = ninguno)
+    const [diaExpandido, setDiaExpandido] = useState(null);
+
+    const proximosDias = getProximosDias();
+    const fechaHasta = proximosDias[proximosDias.length - 1]?.fecha || TODAY;
 
     // ─── Fetch inicial ─────────────────────────────────────────────────
     useEffect(() => {
@@ -41,7 +66,8 @@ const AlumnoDashboard = () => {
                     api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/nivel-fuerza?tenant_id=${tenant_id}`),
                     api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/nivel-gimnastico?tenant_id=${tenant_id}`),
                     api.get(`/api/v1/wods/hoy?tenant_id=${tenant_id}`),
-                    api.get(`/api/v1/clases?tenant_id=${tenant_id}&fecha=${TODAY}&solo_con_cupo=true`),
+                    // Sin solo_con_cupo para mostrar TODAS las clases de 07:00 a 22:00
+                    api.get(`/api/v1/clases?tenant_id=${tenant_id}&fecha_desde=${TODAY}&fecha_hasta=${fechaHasta}`),
                     api.get(`/api/v1/reservas?tenant_id=${tenant_id}&usuario_id=${usuario_id}&estado=confirmada`),
                     api.get(`/api/v1/planes/membresia-activa?tenant_id=${tenant_id}&alumno_id=${usuario_id}`)
                 ]);
@@ -49,7 +75,23 @@ const AlumnoDashboard = () => {
                 if (fuerzaRes.status === 'fulfilled') setNivelFuerza(fuerzaRes.value.data);
                 if (gimnRes.status === 'fulfilled') setNivelGimnastico(gimnRes.value.data);
                 if (wodRes.status === 'fulfilled') setWodHoy(wodRes.value.data);
-                if (clasesRes.status === 'fulfilled') setClasesHoy(clasesRes.value.data?.clases || clasesRes.value.data || []);
+
+                // Procesar clases: agrupar por fecha
+                if (clasesRes.status === 'fulfilled') {
+                    const data = clasesRes.value.data?.clases || clasesRes.value.data || [];
+                    const agrupadas = {};
+                    if (Array.isArray(data)) {
+                        data.forEach(clase => {
+                            const fechaClase = clase.fecha || clase.fecha_clase;
+                            if (!agrupadas[fechaClase]) {
+                                agrupadas[fechaClase] = [];
+                            }
+                            agrupadas[fechaClase].push(clase);
+                        });
+                    }
+                    setClasesPorDia(agrupadas);
+                }
+
                 if (reservasRes.status === 'fulfilled') {
                     const data = reservasRes.value.data;
                     const count = Array.isArray(data) ? data.length : (data?.total || data?.count || 0);
@@ -59,7 +101,6 @@ const AlumnoDashboard = () => {
                     setMembresia(membresiaRes.value.data);
                 }
 
-                // Mostrar error si fuerza Y gimnástico fallaron (datos no cargables)
                 if (fuerzaRes.status === 'rejected' && gimnRes.status === 'rejected') {
                     setFetchError('No se pudieron cargar tus niveles de atleta. Verifica la conexión con el servidor.');
                 }
@@ -71,7 +112,7 @@ const AlumnoDashboard = () => {
             }
         };
         fetchData();
-    }, [usuario_id, tenant_id]);
+    }, [usuario_id, tenant_id, fechaHasta]);
 
     // ─── Manejar reserva ───────────────────────────────────────────────
     const handleAbrirReserva = (clase) => {
@@ -92,13 +133,18 @@ const AlumnoDashboard = () => {
                 estado: 'confirmada',
             });
             setReservasActivas((prev) => prev + 1);
-            setClasesHoy((prev) =>
-                prev.map((c) =>
-                    c.id === claseSeleccionada.id
-                        ? { ...c, disponibles: Math.max((c.disponibles || 0) - 1, 0) }
-                        : c
-                )
-            );
+            // Actualizar disponibilidad en el estado local
+            setClasesPorDia((prev) => {
+                const nuevas = { ...prev };
+                Object.keys(nuevas).forEach(fecha => {
+                    nuevas[fecha] = nuevas[fecha].map((c) =>
+                        c.id === claseSeleccionada.id
+                            ? { ...c, asistentes_confirmados: (c.asistentes_confirmados || 0) + 1 }
+                            : c
+                    );
+                });
+                return nuevas;
+            });
             setShowReservaModal(false);
             setClaseSeleccionada(null);
         } catch (error) {
@@ -110,6 +156,25 @@ const AlumnoDashboard = () => {
             setSubmitting(false);
         }
     };
+
+    // ─── Encontrar el PRIMER día con al menos 1 clase disponible ─────
+    const primerDiaDisponible = (() => {
+        for (const dia of proximosDias) {
+            const clases = clasesPorDia[dia.fecha] || [];
+            if (clases.length > 0) return dia.fecha;
+        }
+        return null;
+    })();
+
+    // Una vez cargados datos, si diaExpandido sigue null, abrir primer día disponible
+    useEffect(() => {
+        if (!loading && diaExpandido === null && primerDiaDisponible) {
+            setDiaExpandido(primerDiaDisponible);
+        }
+    }, [loading, primerDiaDisponible, diaExpandido]);
+
+    // ─── Calcular total de clases ──────────────────────────────────────
+    const totalClases = Object.values(clasesPorDia).flat().length;
 
     // ─── Loading ───────────────────────────────────────────────────────
     if (loading) {
@@ -235,8 +300,8 @@ const AlumnoDashboard = () => {
                             📅
                         </div>
                         <div>
-                            <p className="text-xs text-gray-500 uppercase tracking-wider">Clases Hoy</p>
-                            <p className="text-2xl font-bold text-gray-800">{clasesHoy.length}</p>
+                            <p className="text-xs text-gray-500 uppercase tracking-wider">Próximos 5 Días</p>
+                            <p className="text-2xl font-bold text-gray-800">{totalClases}</p>
                         </div>
                     </div>
                 </div>
@@ -258,7 +323,6 @@ const AlumnoDashboard = () => {
                                     <p className="text-gray-700 leading-relaxed">{wodHoy.descripcion}</p>
                                 )}
 
-                                {/* Mostrar movimientos si vienen en fases */}
                                 {wodHoy.fases && wodHoy.fases.length > 0 && (
                                     <div className="space-y-3">
                                         {wodHoy.fases.map((fase, fi) => (
@@ -286,7 +350,6 @@ const AlumnoDashboard = () => {
                                     </div>
                                 )}
 
-                                {/* Mostrar movimientos si vienen planos */}
                                 {(!wodHoy.fases || wodHoy.fases.length === 0) && wodHoy.movimientos && wodHoy.movimientos.length > 0 && (
                                     <div className="space-y-1">
                                         {wodHoy.movimientos.map((mov, mi) => (
@@ -309,66 +372,151 @@ const AlumnoDashboard = () => {
                     </div>
                 </div>
 
-                {/* ─── CLASES DISPONIBLES HOY ──────────────────────────── */}
+                {/* ─── CLASES DISPONIBLES - ACORDEÓN 5 DÍAS ──────────────── */}
                 <div>
                     <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                        <span>📋</span> CLASES DISPONIBLES HOY
+                        <span>📋</span> CLASES DISPONIBLES — PRÓXIMOS 5 DÍAS
                     </h2>
-                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                        <div className="overflow-x-auto">
-                            <table className="w-full">
-                                <thead>
-                                    <tr className="bg-gray-50 border-b border-gray-200">
-                                        <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Disciplina</th>
-                                        <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Horario</th>
-                                        <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Coach</th>
-                                        <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Cupos</th>
-                                        <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider"></th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {clasesHoy.length > 0 ? (
-                                        clasesHoy.map((clase) => {
-                                            const cuposLibres = (clase.cupo_maximo || 0) - (clase.asistentes_confirmados || 0);
-                                            return (
-                                                <tr key={clase.id} className="hover:bg-gray-50 transition-colors">
-                                                    <td className="px-5 py-4 text-sm font-medium text-gray-900">{clase.disciplina_nombre || 'Clase'}</td>
-                                                    <td className="px-5 py-4 text-sm text-gray-600">� {clase.hora_inicio} - {clase.hora_fin}</td>
-                                                    <td className="px-5 py-4 text-sm text-gray-600">�‍🏫 {clase.coach_nombre || '—'}</td>
-                                                    <td className="px-5 py-4">
-                                                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${cuposLibres > 0
-                                                            ? 'bg-green-100 text-green-700'
-                                                            : 'bg-red-100 text-red-700'
-                                                            }`}>
-                                                            {cuposLibres > 0 ? `${cuposLibres}/${clase.cupo_maximo} libres` : 'Completo'}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-5 py-4 text-right">
-                                                        <button
-                                                            onClick={() => handleAbrirReserva(clase)}
-                                                            disabled={cuposLibres === 0}
-                                                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${cuposLibres > 0
-                                                                ? 'bg-emerald-500 text-white hover:bg-emerald-600'
-                                                                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                                                                }`}
-                                                        >
-                                                            {cuposLibres > 0 ? 'Reservar' : 'Lleno'}
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })
-                                    ) : (
-                                        <tr>
-                                            <td colSpan="5" className="px-5 py-8 text-center text-sm text-gray-400">
-                                                No hay clases disponibles para hoy
-                                            </td>
-                                        </tr>
+
+                    {/* ── FILA DE BOTONES (uno por día) ── */}
+                    <div className="flex flex-wrap gap-2 mb-4">
+                        {proximosDias.map(({ fecha, nombreDia, diaNum }) => {
+                            const clasesDelDia = clasesPorDia[fecha] || [];
+                            const tieneClases = clasesDelDia.length > 0;
+                            const estaExpandido = diaExpandido === fecha;
+                            const esPrimerDisponible = primerDiaDisponible === fecha;
+
+                            // Abreviar nombre del día a 3 caracteres
+                            const nombreCorto = nombreDia.substring(0, 3);
+
+                            return (
+                                <button
+                                    key={fecha}
+                                    onClick={() => setDiaExpandido(estaExpandido ? null : fecha)}
+                                    className={`
+                                        px-4 py-2.5 rounded-xl text-sm font-bold transition-all border-2
+                                        ${estaExpandido
+                                            ? 'bg-emerald-500 text-white border-emerald-500 shadow-md'
+                                            : tieneClases
+                                                ? esPrimerDisponible
+                                                    ? 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100'
+                                                    : 'bg-white text-gray-700 border-gray-200 hover:border-emerald-300 hover:bg-emerald-50'
+                                                : 'bg-gray-100 text-gray-400 border-gray-200 opacity-60'
+                                        }
+                                    `}
+                                >
+                                    <span className="block leading-tight">{nombreCorto}</span>
+                                    <span className="block text-lg">{diaNum}</span>
+                                    {tieneClases && estaExpandido && (
+                                        <span className="block text-[10px] font-normal opacity-80">▼ abierto</span>
                                     )}
-                                </tbody>
-                            </table>
-                        </div>
+                                    {tieneClases && !estaExpandido && (
+                                        <span className="block text-[10px] font-normal opacity-60">{clasesDelDia.length} clase(s)</span>
+                                    )}
+                                    {!tieneClases && (
+                                        <span className="block text-[10px] font-normal opacity-50">sin cls</span>
+                                    )}
+                                </button>
+                            );
+                        })}
                     </div>
+
+                    {/* ── PANEL EXPANDIDO (solo el día seleccionado) ── */}
+                    {diaExpandido && (() => {
+                        const diaInfo = proximosDias.find(d => d.fecha === diaExpandido);
+                        if (!diaInfo) return null;
+                        const clasesDelDia = (clasesPorDia[diaExpandido] || [])
+                            .sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || ''));
+                        const tieneClases = clasesDelDia.length > 0;
+                        const esPrimerDisponible = primerDiaDisponible === diaExpandido;
+
+                        return (
+                            <div className={`rounded-xl border-2 overflow-hidden transition-all ${esPrimerDisponible
+                                    ? 'border-emerald-400 bg-emerald-50/50 shadow-md'
+                                    : 'border-gray-200 bg-white shadow-sm'
+                                }`}>
+                                {/* Encabezado del día expandido */}
+                                <div className={`px-5 py-3 flex items-center gap-3 ${esPrimerDisponible
+                                        ? 'bg-emerald-500 text-white'
+                                        : 'bg-gray-100 text-gray-800'
+                                    }`}>
+                                    <div className="flex-1">
+                                        <h3 className="text-base font-bold tracking-wide">
+                                            {diaInfo.nombreDia} {diaInfo.diaNum}
+                                        </h3>
+                                        <p className={`text-xs ${esPrimerDisponible ? 'text-emerald-100' : 'text-gray-500'}`}>
+                                            {diaInfo.fecha}
+                                        </p>
+                                    </div>
+                                    {esPrimerDisponible && (
+                                        <span className="text-xs font-bold bg-white text-emerald-600 px-3 py-1 rounded-full">
+                                            ⭐ PRÓXIMO DÍA
+                                        </span>
+                                    )}
+                                </div>
+
+                                {/* Tabla de horarios del día */}
+                                {tieneClases ? (
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full">
+                                            <thead>
+                                                <tr className="border-b border-gray-200">
+                                                    <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Disciplina</th>
+                                                    <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Horario</th>
+                                                    <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Coach</th>
+                                                    <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Cupos</th>
+                                                    <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider"></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {clasesDelDia.map((clase) => {
+                                                    const cuposLibres = (clase.cupo_maximo || 0) - (clase.asistentes_confirmados || 0);
+                                                    return (
+                                                        <tr key={clase.id} className="hover:bg-gray-50 transition-colors">
+                                                            <td className="px-5 py-4 text-sm font-medium text-gray-900">{clase.disciplina_nombre || 'Clase'}</td>
+                                                            <td className="px-5 py-4 text-sm text-gray-600">🕐 {clase.hora_inicio} - {clase.hora_fin}</td>
+                                                            <td className="px-5 py-4 text-sm text-gray-600">👨‍🏫 {clase.coach_nombre || '—'}</td>
+                                                            <td className="px-5 py-4">
+                                                                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${cuposLibres > 0
+                                                                        ? 'bg-green-100 text-green-700'
+                                                                        : 'bg-red-100 text-red-700'
+                                                                    }`}>
+                                                                    {cuposLibres > 0 ? `${cuposLibres}/${clase.cupo_maximo} libres` : 'Completo'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-5 py-4 text-right">
+                                                                <button
+                                                                    onClick={() => handleAbrirReserva(clase)}
+                                                                    disabled={cuposLibres === 0}
+                                                                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${cuposLibres > 0
+                                                                            ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                                                                            : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                                                        }`}
+                                                                >
+                                                                    {cuposLibres > 0 ? 'Reservar' : 'Lleno'}
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                ) : (
+                                    <div className="px-5 py-8 text-center">
+                                        <p className="text-gray-400 italic text-sm">Sin clases disponibles para este día</p>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })()}
+
+                    {/* Si no hay ningún día expandido, mostrar mensaje */}
+                    {!diaExpandido && (
+                        <div className="text-center py-6 text-gray-400 text-sm italic">
+                            Selecciona un día arriba para ver sus horarios disponibles
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -390,7 +538,8 @@ const AlumnoDashboard = () => {
                                 <p className="font-bold text-gray-900 text-lg">{claseSeleccionada.disciplina_nombre || 'Clase'}</p>
                                 <div className="grid grid-cols-2 gap-2 text-sm">
                                     <p className="text-gray-600">🕐 {claseSeleccionada.hora_inicio} - {claseSeleccionada.hora_fin}</p>
-                                    <p className="text-gray-600">�‍🏫 {claseSeleccionada.coach_nombre || '—'}</p>
+                                    <p className="text-gray-600">👨‍🏫 {claseSeleccionada.coach_nombre || '—'}</p>
+                                    <p className="text-gray-600">📅 {claseSeleccionada.fecha || claseSeleccionada.fecha_clase}</p>
                                     <p className="text-green-600 font-medium">
                                         ✅ Cupos disponibles
                                     </p>

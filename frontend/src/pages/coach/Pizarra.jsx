@@ -1,7 +1,78 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
+
+// ─── Utilidades de fechas ─────────────────────────────────────────
+const DIAS_NOMBRES = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+const DIAS_NOMBRES_CAPTION = { lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado' };
+const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+const DIAS_LABELS = [
+    { key: 'lunes', label: 'Lunes' },
+    { key: 'martes', label: 'Martes' },
+    { key: 'miercoles', label: 'Miércoles' },
+    { key: 'jueves', label: 'Jueves' },
+    { key: 'viernes', label: 'Viernes' },
+    { key: 'sabado', label: 'Sábado' },
+];
+
+/** Obtiene el lunes de la semana a la que pertenece una fecha */
+const getLunesSemana = (fecha) => {
+    const d = new Date(fecha);
+    const dia = d.getDay(); // 0=Dom
+    const diff = dia === 0 ? -6 : 1 - dia; // Si domingo, retrocede 6; si no, va al lunes
+    d.setDate(d.getDate() + diff);
+    d.setHours(0, 0, 0, 0);
+    return d;
+};
+
+/** Genera los 7 días de la semana (lunes a domingo) para una fecha dada */
+const generarSemana = (fechaRef) => {
+    const lunes = getLunesSemana(fechaRef);
+    const dias = [];
+    for (let i = 0; i < 7; i++) {
+        const d = new Date(lunes);
+        d.setDate(lunes.getDate() + i);
+        dias.push(d);
+    }
+    return dias; // [lunes, martes, ..., domingo]
+};
+
+/** Formatea una fecha como "Viernes 10 Jul" */
+const formatFecha = (date) => {
+    const diaSemana = DIAS_NOMBRES[date.getDay()];
+    const nombre = DIAS_NOMBRES_CAPTION[diaSemana] || diaSemana;
+    const dia = date.getDate();
+    const mes = MESES[date.getMonth()];
+    return { nombre, dia, mes, full: `${nombre} ${dia} ${mes}` };
+};
+
+/** Formatea rango de semana: "6 - 12 Jul 2026" */
+const formatRangoSemana = (dias) => {
+    if (!dias || dias.length === 0) return '';
+    const primero = dias[0];
+    const ultimo = dias[6];
+    const dia1 = primero.getDate();
+    const dia2 = ultimo.getDate();
+    const mes = MESES[primero.getMonth()];
+    const año = primero.getFullYear();
+    return `${dia1} - ${dia2} ${mes} ${año}`;
+};
+
+/** Compara si dos fechas son el mismo día */
+const esMismoDia = (d1, d2) => {
+    return d1.getFullYear() === d2.getFullYear() &&
+        d1.getMonth() === d2.getMonth() &&
+        d1.getDate() === d2.getDate();
+};
+
+/** Obtiene el key del día de la semana para una fecha (lunes=0, martes=1...) */
+const getDiaKey = (date) => {
+    const diaSemana = DIAS_NOMBRES[date.getDay()];
+    const idx = DIAS_LABELS.findIndex(d => d.key === diaSemana);
+    return idx >= 0 ? DIAS_LABELS[idx].key : null;
+};
 
 // ─── Horarios por día ──────────────────────────────────────────────
 const HORARIOS_SEMANA = {
@@ -13,20 +84,20 @@ const HORARIOS_SEMANA = {
     sabado: ['10:00-12:00']
 };
 
-const DIAS_ORDEN = [
-    { key: 'lunes', label: 'Lunes' },
-    { key: 'martes', label: 'Martes' },
-    { key: 'miercoles', label: 'Miércoles' },
-    { key: 'jueves', label: 'Jueves' },
-    { key: 'viernes', label: 'Viernes' },
-    { key: 'sabado', label: 'Sábado' }
-];
-
 const Pizarra = () => {
     const { tenant_id, usuario_id } = useAuth();
 
+    // ─── Estado del selector de semana ───
+    const hoy = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
+    const [semanaOffset, setSemanaOffset] = useState(0);
+    const diasSemana = useMemo(() => {
+        const ref = new Date(hoy);
+        ref.setDate(ref.getDate() + semanaOffset * 7);
+        return generarSemana(ref);
+    }, [hoy, semanaOffset]);
+
     // ─── Estado del día/hora ───
-    const [diaSeleccionado, setDiaSeleccionado] = useState(null);
+    const [diaSeleccionado, setDiaSeleccionado] = useState(null);  // objeto Date
     const [horaSeleccionada, setHoraSeleccionada] = useState(null);
     const [fechaCalculada, setFechaCalculada] = useState(null);
 
@@ -55,19 +126,10 @@ const Pizarra = () => {
     const [erroresParser, setErroresParser] = useState([]);
     const [procesando, setProcesando] = useState(false);
 
-    // ─── Calcular fecha del próximo día de semana ───
-    const calcularFecha = (diaKey, horaStr) => {
-        const diasMap = { lunes: 1, martes: 2, miercoles: 3, jueves: 4, viernes: 5, sabado: 6 };
-        const targetDay = diasMap[diaKey];
-        if (targetDay === undefined) return null;
-
-        const hoy = new Date();
-        const diaSemanaHoy = hoy.getDay(); // 0=Dom
-        let diff = targetDay - diaSemanaHoy;
-        if (diff <= 0) diff += 7; // Siempre ir al PRÓXIMO día
-
-        const fecha = new Date(hoy);
-        fecha.setDate(hoy.getDate() + diff);
+    // ─── Seleccionar día y hora ───
+    const handleSeleccionarDiaHora = (fechaDate, horaStr) => {
+        setDiaSeleccionado(fechaDate);
+        setHoraSeleccionada(horaStr);
 
         // Extraer hora_inicio y hora_fin del string "7:00-8:00"
         let horaInicio = null;
@@ -77,7 +139,6 @@ const Pizarra = () => {
             if (partes.length === 2) {
                 horaInicio = partes[0].trim();
                 horaFin = partes[1].trim();
-                // Formatear a HH:MM con dos dígitos
                 const formatHora = (h) => {
                     const nums = h.split(':');
                     return `${String(parseInt(nums[0])).padStart(2, '0')}:${nums[1] ? String(parseInt(nums[1])).padStart(2, '0') : '00'}`;
@@ -87,16 +148,8 @@ const Pizarra = () => {
             }
         }
 
-        const fechaStr = fecha.toISOString().split('T')[0];
-        return { fecha: fechaStr, hora_inicio: horaInicio, hora_fin: horaFin };
-    };
-
-    // ─── Seleccionar día y hora ───
-    const handleSeleccionarDiaHora = (diaKey, horaStr) => {
-        setDiaSeleccionado(diaKey);
-        setHoraSeleccionada(horaStr);
-        const calc = calcularFecha(diaKey, horaStr);
-        setFechaCalculada(calc);
+        const fechaStr = `${fechaDate.getFullYear()}-${String(fechaDate.getMonth() + 1).padStart(2, '0')}-${String(fechaDate.getDate()).padStart(2, '0')}`;
+        setFechaCalculada({ fecha: fechaStr, hora_inicio: horaInicio, hora_fin: horaFin });
     };
 
     useEffect(() => {
@@ -362,6 +415,8 @@ const Pizarra = () => {
         }
     };
 
+    const diaSeleccionadoKey = diaSeleccionado ? getDiaKey(diaSeleccionado) : null;
+
     return (
         <Layout>
             <div className="max-w-6xl mx-auto space-y-6">
@@ -383,26 +438,73 @@ const Pizarra = () => {
                     </div>
                 )}
 
-                {/* ─── GRILLA DE DÍAS Y HORARIOS ─── */}
+                {/* ─── SELECTOR DE SEMANA ─── */}
                 <div className="bg-white rounded-lg shadow p-6">
-                    <h2 className="text-lg font-bold text-gray-900 mb-4">📅 Selecciona Día y Horario</h2>
+                    <div className="flex items-center justify-between mb-6">
+                        <button
+                            onClick={() => setSemanaOffset(prev => prev - 1)}
+                            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-bold text-lg"
+                            title="Semana anterior"
+                        >
+                            ← Anterior
+                        </button>
+                        <div className="text-center">
+                            <h2 className="text-lg font-bold text-gray-900">📅 {formatRangoSemana(diasSemana)}</h2>
+                            <p className="text-sm text-gray-500">
+                                {semanaOffset === 0 ? 'Semana actual' : semanaOffset < 0 ? `${Math.abs(semanaOffset)} semana(s) atrás` : `${semanaOffset} semana(s) adelante`}
+                            </p>
+                        </div>
+                        <button
+                            onClick={() => setSemanaOffset(prev => prev + 1)}
+                            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-bold text-lg"
+                            title="Semana siguiente"
+                        >
+                            Siguiente →
+                        </button>
+                    </div>
 
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                        {DIAS_ORDEN.map((dia) => {
-                            const horarios = HORARIOS_SEMANA[dia.key];
+                    {/* ─── GRILLA VERTICAL POR DÍA ─── */}
+                    <div className="space-y-4">
+                        {diasSemana.map((fechaDate, idx) => {
+                            const diaKey = getDiaKey(fechaDate);
+                            if (!diaKey) return null; // domingo no mostramos
+                            const horarios = HORARIOS_SEMANA[diaKey];
+                            if (!horarios || horarios.length === 0) return null;
+                            const esHoy = esMismoDia(fechaDate, hoy);
+                            const fmt = formatFecha(fechaDate);
+
                             return (
-                                <div key={dia.key} className="space-y-1">
-                                    <h3 className="text-sm font-bold text-gray-700 text-center mb-2 uppercase tracking-wide">
-                                        {dia.label}
-                                    </h3>
-                                    <div className="space-y-1 max-h-64 overflow-y-auto">
+                                <div
+                                    key={idx}
+                                    className={`rounded-xl border-2 p-4 transition-all ${esHoy
+                                        ? 'border-orange-400 bg-orange-50/40 shadow-sm'
+                                        : 'border-gray-200 hover:border-gray-300'
+                                        } ${diaSeleccionado && esMismoDia(fechaDate, diaSeleccionado) ? 'ring-2 ring-orange-500' : ''}`}
+                                >
+                                    {/* Encabezado del día */}
+                                    <div className="flex items-center justify-between mb-3">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-lg font-bold text-gray-800">{fmt.full}</span>
+                                            {esHoy && (
+                                                <span className="px-2 py-0.5 bg-orange-500 text-white text-xs font-bold rounded-full">
+                                                    HOY
+                                                </span>
+                                            )}
+                                        </div>
+                                        {diaSeleccionado && esMismoDia(fechaDate, diaSeleccionado) && (
+                                            <span className="text-sm font-medium text-orange-600">✓ Seleccionado</span>
+                                        )}
+                                    </div>
+
+                                    {/* Horarios del día */}
+                                    <div className="flex flex-wrap gap-2">
                                         {horarios.map((hora) => {
-                                            const seleccionado = diaSeleccionado === dia.key && horaSeleccionada === hora;
+                                            const seleccionado = diaSeleccionado && esMismoDia(fechaDate, diaSeleccionado) && horaSeleccionada === hora;
                                             return (
                                                 <button
                                                     key={hora}
-                                                    onClick={() => handleSeleccionarDiaHora(dia.key, hora)}
-                                                    className={`w-full text-xs py-2 px-2 rounded-lg font-medium transition-all ${seleccionado
+                                                    onClick={() => handleSeleccionarDiaHora(fechaDate, hora)}
+                                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${seleccionado
                                                         ? 'bg-orange-500 text-white shadow-md ring-2 ring-orange-300'
                                                         : 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-orange-100 hover:text-orange-700 hover:border-orange-200'
                                                         }`}
@@ -422,8 +524,8 @@ const Pizarra = () => {
                         <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2">
                             <span className="text-lg">📅</span>
                             <span className="text-sm font-medium text-green-800">
-                                Día y hora seleccionado: <strong>{DIAS_ORDEN.find(d => d.key === diaSeleccionado)?.label} {horaSeleccionada}</strong>
-                                {' — '}Fecha: <strong>{fechaCalculada.fecha}</strong>
+                                Día y hora seleccionado: <strong>{diaSeleccionado ? formatFecha(diaSeleccionado).full : ''} — {horaSeleccionada}</strong>
+                                {' | '}Fecha real: <strong>{fechaCalculada.fecha}</strong>
                             </span>
                             <span className="ml-auto text-green-600 text-lg">✅</span>
                         </div>

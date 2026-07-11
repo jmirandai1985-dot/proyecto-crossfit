@@ -82,7 +82,7 @@ def obtener_membresia_activa(
         Suscripcion.usuario_id == alumno_id,
         Suscripcion.estado == 'activo',
         Suscripcion.fecha_expiracion > ahora
-    ).order_by(Suscripcion.fecha_expiracion.desc()).first()
+    ).order_by(Suscripcion.creditos_disponibles.desc().nulls_last(), Suscripcion.fecha_expiracion.desc()).first()
 
     if not suscripcion:
         return {"activa": False, "plan_nombre": None, "dias_restantes": 0, "clases_disponibles": 0, "es_ilimitado": False, "fecha_vencimiento": None}
@@ -95,7 +95,7 @@ def obtener_membresia_activa(
         "activa": True,
         "plan_nombre": plan.nombre if plan else None,
         "dias_restantes": max(dias_restantes, 0),
-        "clases_disponibles": suscripcion.clases_restantes if hasattr(suscripcion, 'clases_restantes') else 0,
+        "clases_disponibles": suscripcion.creditos_disponibles if hasattr(suscripcion, 'creditos_disponibles') else 0,
         "es_ilimitado": plan.es_ilimitado if plan else False,
         "fecha_vencimiento": suscripcion.fecha_expiracion,
     }
