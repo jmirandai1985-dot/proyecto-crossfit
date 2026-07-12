@@ -17,6 +17,9 @@ class Plan(Base):
     nombre = Column(String(100), nullable=False)
     creditos = Column(Integer, nullable=True)      # NULL = ilimitado
     es_ilimitado = Column(Boolean, nullable=False, default=False)
+    genero = Column(String(20), nullable=True)
+    requiere_certificado_estudiante = Column(
+        Boolean, nullable=False, default=False)
     precio_clp = Column(Integer, nullable=False)
     duracion_dias = Column(Integer, nullable=False, default=30)
     activo = Column(Boolean, nullable=False, default=True)

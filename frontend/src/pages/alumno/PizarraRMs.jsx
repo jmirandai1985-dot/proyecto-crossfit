@@ -12,15 +12,33 @@ const CATEGORIA_META = {
 
 const getCategoriaMeta = (cat) => CATEGORIA_META[cat] || CATEGORIA_META.fuerza;
 
-const formatTimeSeconds = (valor) => {
-    if (!valor) return '';
-    const str = String(valor);
-    if (str.includes(':')) return str;
-    const segundos = parseInt(str, 10);
-    if (isNaN(segundos) || segundos <= 0) return str;
-    const min = Math.floor(segundos / 60);
-    const seg = segundos % 60;
-    return `${min}:${String(seg).padStart(2, '0')}`;
+// ─── Formatear resultado según categoría y campos disponibles ───────
+const formatResultado = (rm, categoria) => {
+    const partes = [];
+    if (categoria === 'fuerza') {
+        if (rm.peso_kg) partes.push(`${rm.peso_kg} kg`);
+        if (rm.repeticiones) partes.push(`${rm.repeticiones} reps`);
+        if (rm.series) partes.push(`${rm.series} series`);
+        return partes.length > 0 ? partes.join(' x ') : `${rm.peso_kg || '?'} kg`;
+    }
+    if (categoria === 'gimnastico') {
+        if (rm.repeticiones) partes.push(`${rm.repeticiones} reps`);
+        if (rm.series) partes.push(`${rm.series} series`);
+        return partes.length > 0 ? partes.join(' x ') : `${rm.peso_kg || '?'} reps`;
+    }
+    if (categoria === 'cardio') {
+        if (rm.km) partes.push(`${rm.km} km`);
+        if (rm.minutos) partes.push(`${rm.minutos} min`);
+        if (rm.vueltas) partes.push(`${rm.vueltas} vueltas`);
+        return partes.length > 0 ? partes.join(', ') : `${rm.peso_kg || '?'}`;
+    }
+    if (categoria === 'metabolico') {
+        if (rm.calorias) partes.push(`${rm.calorias} cal`);
+        if (rm.km) partes.push(`${rm.km} km`);
+        if (rm.vueltas) partes.push(`${rm.vueltas} vueltas`);
+        return partes.length > 0 ? partes.join(', ') : `${rm.peso_kg || '?'}`;
+    }
+    return `${rm.peso_kg || '?'}`;
 };
 
 const PizarraRMs = () => {
@@ -34,7 +52,18 @@ const PizarraRMs = () => {
     const [rmTab, setRmTab] = useState('todas');
     const [fetchError, setFetchError] = useState('');
     const [showRMModal, setShowRMModal] = useState(false);
-    const [rmForm, setRmForm] = useState({ movimiento_id: '', valor: '', fecha: today, notas: '' });
+    const [rmForm, setRmForm] = useState({
+        movimiento_id: '',
+        peso_kg: '',
+        repeticiones: '',
+        series: '',
+        minutos: '',
+        vueltas: '',
+        km: '',
+        calorias: '',
+        fecha: today,
+        notas: ''
+    });
     const [rmSubmitting, setRmSubmitting] = useState(false);
     const [rmError, setRmError] = useState('');
     const [successMsg, setSuccessMsg] = useState('');
@@ -48,7 +77,6 @@ const PizarraRMs = () => {
             ]);
             setMovimientos(movRes.data || []);
             const bestRMs = rmsRes.data || [];
-            // Map the RM data to a consistent format
             const mappedRMs = bestRMs.map(r => ({
                 ...r,
                 id: r.id || r.movimiento_id,
@@ -69,17 +97,27 @@ const PizarraRMs = () => {
         return mov?.categoria || 'fuerza';
     };
 
+    // ─── Determinar qué campos mostrar según la categoría del movimiento seleccionado ──
+    const categoriaSeleccionada = rmForm.movimiento_id ? getCategoriaMovimiento(Number(rmForm.movimiento_id)) : null;
+
     const handleRegistrarRM = async () => {
         setRmSubmitting(true);
         setRmError('');
         try {
+            const cat = categoriaSeleccionada || 'fuerza';
             const payload = {
                 tenant_id,
                 alumno_id: usuario_id,
                 movimiento_id: Number(rmForm.movimiento_id),
+                peso_kg: cat === 'fuerza' ? (parseFloat(rmForm.peso_kg) || 1) : 1,
                 fecha: rmForm.fecha || today,
-                peso_kg: parseFloat(rmForm.valor) || 1,
                 notas: rmForm.notas || null,
+                repeticiones: rmForm.repeticiones ? parseInt(rmForm.repeticiones) : null,
+                series: rmForm.series ? parseInt(rmForm.series) : null,
+                minutos: rmForm.minutos ? parseInt(rmForm.minutos) : null,
+                vueltas: rmForm.vueltas ? parseInt(rmForm.vueltas) : null,
+                km: rmForm.km ? parseFloat(rmForm.km) : null,
+                calorias: rmForm.calorias ? parseInt(rmForm.calorias) : null,
             };
             await api.post('/api/v1/historial-rm', payload);
             setShowRMModal(false);
@@ -91,6 +129,22 @@ const PizarraRMs = () => {
         } finally {
             setRmSubmitting(false);
         }
+    };
+
+    const resetForm = () => {
+        setRmForm({
+            movimiento_id: '',
+            peso_kg: '',
+            repeticiones: '',
+            series: '',
+            minutos: '',
+            vueltas: '',
+            km: '',
+            calorias: '',
+            fecha: today,
+            notas: ''
+        });
+        setRmError('');
     };
 
     const rmsFiltrados = rmTab === 'todas'
@@ -123,7 +177,7 @@ const PizarraRMs = () => {
                         <p className="text-gray-500 mt-1">Tus récords personales y rankings</p>
                     </div>
                     <button
-                        onClick={() => { setRmForm({ movimiento_id: '', valor: '', fecha: today, notas: '' }); setRmError(''); setShowRMModal(true); }}
+                        onClick={() => { resetForm(); setShowRMModal(true); }}
                         className="mt-4 md:mt-0 px-5 py-2.5 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-sm"
                     >
                         <span>+</span> REGISTRAR NUEVA MARCA / RM
@@ -185,9 +239,7 @@ const PizarraRMs = () => {
                                             const cat = getCategoriaMovimiento(rm.movimiento_id);
                                             const meta = getCategoriaMeta(cat);
                                             const movName = movimientos.find(m => m.id === rm.movimiento_id)?.nombre || '—';
-                                            const valorDisplay = (cat === 'cardio' || cat === 'metabolico')
-                                                ? formatTimeSeconds(rm.peso_kg)
-                                                : (cat === 'gimnastico' ? `${rm.peso_kg} reps` : `${rm.peso_kg} kg`);
+                                            const valorDisplay = formatResultado(rm, cat);
                                             return (
                                                 <tr key={`${rm.id}-${idx}`} className="hover:bg-gray-50 transition-colors">
                                                     <td className="px-5 py-3.5 text-sm font-bold text-gray-400">#{idx + 1}</td>
@@ -198,7 +250,7 @@ const PizarraRMs = () => {
                                                             {valorDisplay}
                                                         </span>
                                                     </td>
-                                                    <td className="px-5 py-3.5 text-sm text-gray-500">—</td>
+                                                    <td className="px-5 py-3.5 text-sm text-gray-500">{meta.label}</td>
                                                 </tr>
                                             );
                                         })
@@ -236,9 +288,7 @@ const PizarraRMs = () => {
                                         {rmsFiltrados.slice(0, 15).map((rm, idx) => {
                                             const cat = getCategoriaMovimiento(rm.movimiento_id);
                                             const movName = movimientos.find(m => m.id === rm.movimiento_id)?.nombre || '—';
-                                            const valorDisplay = (cat === 'cardio' || cat === 'metabolico')
-                                                ? formatTimeSeconds(rm.peso_kg)
-                                                : (cat === 'gimnastico' ? `${rm.peso_kg} reps` : `${rm.peso_kg} kg`);
+                                            const valorDisplay = formatResultado(rm, cat);
                                             return (
                                                 <tr key={`hist-${rm.id}-${idx}`} className="hover:bg-gray-50 transition-colors">
                                                     <td className="px-5 py-3.5 text-sm text-gray-500">{rm.fecha || '—'}</td>
@@ -298,37 +348,140 @@ const PizarraRMs = () => {
                                 </div>
                             </div>
 
-                            {/* Campos de valor */}
+                            {/* ─── Campos específicos según categoría ─────────── */}
+                            {categoriaSeleccionada && (
+                                <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
+                                        {CATEGORIA_META[categoriaSeleccionada]?.icon} Datos para {CATEGORIA_META[categoriaSeleccionada]?.label}
+                                    </p>
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                        {/* Fuerza: peso_kg + reps + series */}
+                                        {(categoriaSeleccionada === 'fuerza') && (
+                                            <>
+                                                <div>
+                                                    <label className="block text-xs font-medium text-gray-600 mb-1">Peso (kg) *</label>
+                                                    <input type="number" step="0.1" min="0"
+                                                        value={rmForm.peso_kg}
+                                                        onChange={e => setRmForm(p => ({ ...p, peso_kg: e.target.value }))}
+                                                        placeholder="Ej: 100"
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-medium text-gray-600 mb-1">Repeticiones</label>
+                                                    <input type="number" min="0"
+                                                        value={rmForm.repeticiones}
+                                                        onChange={e => setRmForm(p => ({ ...p, repeticiones: e.target.value }))}
+                                                        placeholder="Ej: 5"
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-medium text-gray-600 mb-1">Series</label>
+                                                    <input type="number" min="0"
+                                                        value={rmForm.series}
+                                                        onChange={e => setRmForm(p => ({ ...p, series: e.target.value }))}
+                                                        placeholder="Ej: 3"
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+                                                </div>
+                                            </>
+                                        )}
+                                        {/* Gimnástico: reps + series */}
+                                        {(categoriaSeleccionada === 'gimnastico') && (
+                                            <>
+                                                <div>
+                                                    <label className="block text-xs font-medium text-gray-600 mb-1">Repeticiones *</label>
+                                                    <input type="number" min="0"
+                                                        value={rmForm.repeticiones}
+                                                        onChange={e => setRmForm(p => ({ ...p, repeticiones: e.target.value }))}
+                                                        placeholder="Ej: 12"
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-medium text-gray-600 mb-1">Series</label>
+                                                    <input type="number" min="0"
+                                                        value={rmForm.series}
+                                                        onChange={e => setRmForm(p => ({ ...p, series: e.target.value }))}
+                                                        placeholder="Ej: 3"
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+                                                </div>
+                                            </>
+                                        )}
+                                        {/* Cardio: minutos + vueltas + km */}
+                                        {(categoriaSeleccionada === 'cardio') && (
+                                            <>
+                                                <div>
+                                                    <label className="block text-xs font-medium text-gray-600 mb-1">Minutos</label>
+                                                    <input type="number" min="0"
+                                                        value={rmForm.minutos}
+                                                        onChange={e => setRmForm(p => ({ ...p, minutos: e.target.value }))}
+                                                        placeholder="Ej: 25"
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-medium text-gray-600 mb-1">Km</label>
+                                                    <input type="number" step="0.1" min="0"
+                                                        value={rmForm.km}
+                                                        onChange={e => setRmForm(p => ({ ...p, km: e.target.value }))}
+                                                        placeholder="Ej: 5"
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-medium text-gray-600 mb-1">Vueltas</label>
+                                                    <input type="number" min="0"
+                                                        value={rmForm.vueltas}
+                                                        onChange={e => setRmForm(p => ({ ...p, vueltas: e.target.value }))}
+                                                        placeholder="Ej: 8"
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+                                                </div>
+                                            </>
+                                        )}
+                                        {/* Máquinas: calorias + km + vueltas */}
+                                        {(categoriaSeleccionada === 'metabolico') && (
+                                            <>
+                                                <div>
+                                                    <label className="block text-xs font-medium text-gray-600 mb-1">Calorías</label>
+                                                    <input type="number" min="0"
+                                                        value={rmForm.calorias}
+                                                        onChange={e => setRmForm(p => ({ ...p, calorias: e.target.value }))}
+                                                        placeholder="Ej: 500"
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-medium text-gray-600 mb-1">Km</label>
+                                                    <input type="number" step="0.1" min="0"
+                                                        value={rmForm.km}
+                                                        onChange={e => setRmForm(p => ({ ...p, km: e.target.value }))}
+                                                        placeholder="Ej: 5"
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-medium text-gray-600 mb-1">Vueltas</label>
+                                                    <input type="number" min="0"
+                                                        value={rmForm.vueltas}
+                                                        onChange={e => setRmForm(p => ({ ...p, vueltas: e.target.value }))}
+                                                        placeholder="Ej: 10"
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Fecha */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Resultado *</label>
-                                    <input
-                                        type="text"
-                                        value={rmForm.valor}
-                                        onChange={e => setRmForm(p => ({ ...p, valor: e.target.value }))}
-                                        placeholder="Ej: 100 kg, 15 reps, 5:30"
-                                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm"
-                                    />
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Fecha</label>
+                                    <input type="date" value={rmForm.fecha}
+                                        onChange={e => setRmForm(p => ({ ...p, fecha: e.target.value }))}
+                                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm" />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Fecha</label>
-                                    <input
-                                        type="date"
-                                        value={rmForm.fecha}
-                                        onChange={e => setRmForm(p => ({ ...p, fecha: e.target.value }))}
-                                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm"
-                                    />
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Notas (opcional)</label>
+                                    <input value={rmForm.notas}
+                                        onChange={e => setRmForm(p => ({ ...p, notas: e.target.value }))}
+                                        placeholder="Ej: PR personal"
+                                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm" />
                                 </div>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Notas (opcional)</label>
-                                <input
-                                    value={rmForm.notas}
-                                    onChange={e => setRmForm(p => ({ ...p, notas: e.target.value }))}
-                                    placeholder="Ej: PR personal +5 kg"
-                                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm"
-                                />
                             </div>
 
                             {rmError && (
@@ -338,17 +491,13 @@ const PizarraRMs = () => {
                             )}
 
                             <div className="flex gap-3 pt-2">
-                                <button
-                                    onClick={() => { setShowRMModal(false); setRmError(''); }}
-                                    className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-xl font-bold text-sm hover:bg-gray-50 transition-colors"
-                                >
+                                <button onClick={() => { setShowRMModal(false); setRmError(''); }}
+                                    className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-xl font-bold text-sm hover:bg-gray-50 transition-colors">
                                     Cancelar
                                 </button>
-                                <button
-                                    onClick={handleRegistrarRM}
-                                    disabled={rmSubmitting || !rmForm.movimiento_id || !rmForm.valor}
-                                    className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                                >
+                                <button onClick={handleRegistrarRM}
+                                    disabled={rmSubmitting || !rmForm.movimiento_id}
+                                    className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-50">
                                     {rmSubmitting ? '⏳ Guardando...' : '💪 GUARDAR RM'}
                                 </button>
                             </div>

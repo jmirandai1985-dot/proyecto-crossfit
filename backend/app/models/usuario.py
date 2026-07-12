@@ -36,6 +36,7 @@ class Usuario(Base):
                  nullable=False, default=RolUsuario.alumno)
     activo = Column(Boolean, nullable=False, default=True)
     peso_kg = Column(Float, nullable=True)
+    estatura_cm = Column(Integer, nullable=True)
     genero = Column(String(10), nullable=True)
     fecha_nacimiento = Column(Date, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True),

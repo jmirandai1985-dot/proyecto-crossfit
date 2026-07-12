@@ -3,6 +3,7 @@ Router de endpoints para gestión de Reservas
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List
 
 from app.db.database import get_db
@@ -90,7 +91,7 @@ def crear_reserva(
     membresia = db.query(Suscripcion).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.usuario_id == reserva_data.alumno_id,
-        Suscripcion.estado.in_(['activo', 'active']),
+        Suscripcion.estado == 'activo',
         Suscripcion.fecha_expiracion > datetime.now(timezone.utc)
     ).first()
 
@@ -128,6 +129,120 @@ def crear_reserva(
     return db_reserva
 
 
+@router.get("/asistencia-mes")
+def obtener_asistencia_mes(
+    tenant_id: int,
+    usuario_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Calcula la asistencia del alumno en el mes actual.
+    Usa la fecha de la clase (Clase.fecha) para determinar si pertenece al mes,
+    no la fecha de creación de la reserva.
+
+    Retorna: total_reservas, asistencias, porcentaje
+    """
+    from datetime import datetime, timezone, date
+
+    hoy = date.today()
+    primer_dia_mes = date(hoy.year, hoy.month, 1)
+
+    # Total de reservas del alumno en el mes actual
+    # JOIN con Clase para filtrar por fecha de la clase (no fecha de reserva)
+    total_reservas = db.query(func.count(Reserva.id)).join(
+        Clase, Reserva.clase_id == Clase.id
+    ).filter(
+        Reserva.tenant_id == tenant_id,
+        Reserva.alumno_id == usuario_id,
+        Reserva.estado.in_(["confirmada", "completada"]),
+        Clase.fecha >= primer_dia_mes,
+        Clase.fecha <= hoy
+    ).scalar() or 0
+
+    # Asistencias confirmadas (asistio = true) en el mes actual
+    asistencias = db.query(func.count(Reserva.id)).join(
+        Clase, Reserva.clase_id == Clase.id
+    ).filter(
+        Reserva.tenant_id == tenant_id,
+        Reserva.alumno_id == usuario_id,
+        Reserva.estado.in_(["confirmada", "completada"]),
+        Reserva.asistio == True,
+        Clase.fecha >= primer_dia_mes,
+        Clase.fecha <= hoy
+    ).scalar() or 0
+
+    porcentaje = round((asistencias / total_reservas * 100),
+                       0) if total_reservas > 0 else 0
+
+    return {
+        "total_reservas": total_reservas,
+        "asistencias": asistencias,
+        "porcentaje": int(porcentaje),
+        "sin_datos": total_reservas == 0
+    }
+
+
+@router.get("")
+def listar_reservas(
+    tenant_id: int,
+    skip: int = 0,
+    limit: int = 100,
+    estado: str = None,
+    usuario_id: int = None,
+    db: Session = Depends(get_db)
+):
+    """Lista reservas de un tenant con paginación y filtros opcionales.
+    Incluye datos de la clase asociada (disciplina, fecha, horario)."""
+    query = db.query(Reserva).filter(Reserva.tenant_id == tenant_id)
+
+    if estado is not None:
+        query = query.filter(Reserva.estado == estado)
+
+    if usuario_id is not None:
+        query = query.filter(Reserva.alumno_id == usuario_id)
+
+    from app.models.clase import Clase
+    from app.models.disciplina import Disciplina
+
+    reservas = query.join(Clase, Reserva.clase_id == Clase.id).join(
+        Disciplina, Clase.disciplina_id == Disciplina.id
+    ).add_columns(
+        Disciplina.nombre.label('disciplina_nombre'),
+        Clase.fecha.label('clase_fecha'),
+        Clase.hora_inicio,
+        Clase.hora_fin
+    ).offset(skip).limit(limit).all()
+
+    # Manually build response con datos de la clase
+    result = []
+    for row in reservas:
+        # With .add_columns(), the model is nested under its class name
+        rm_obj = row.Reserva
+        disciplina_nombre = row.disciplina_nombre if hasattr(
+            row, 'disciplina_nombre') else None
+        clase_fecha = row.clase_fecha if hasattr(row, 'clase_fecha') else None
+        hora_inicio = row.hora_inicio if hasattr(row, 'hora_inicio') else None
+        hora_fin = row.hora_fin if hasattr(row, 'hora_fin') else None
+
+        result.append({
+            "id": rm_obj.id,
+            "tenant_id": rm_obj.tenant_id,
+            "clase_id": rm_obj.clase_id,
+            "alumno_id": rm_obj.alumno_id,
+            "asistio": rm_obj.asistio,
+            "tokens_gastados": rm_obj.tokens_gastados,
+            "estado": rm_obj.estado,
+            "fecha_reserva": str(rm_obj.fecha_reserva) if rm_obj.fecha_reserva else None,
+            "created_at": str(rm_obj.created_at) if rm_obj.created_at else None,
+            "disciplina_nombre": disciplina_nombre,
+            "clase_fecha": str(clase_fecha) if clase_fecha else None,
+            "hora_inicio": hora_inicio,
+            "hora_fin": hora_fin,
+        })
+
+    return result
+
+
 @router.get("/{reserva_id}", response_model=ReservaResponse)
 def obtener_reserva(
     reserva_id: int,
@@ -152,29 +267,6 @@ def obtener_reserva(
         )
 
     return reserva
-
-
-@router.get("", response_model=List[ReservaListItem])
-def listar_reservas(
-    tenant_id: int,
-    skip: int = 0,
-    limit: int = 100,
-    estado: str = None,
-    usuario_id: int = None,
-    db: Session = Depends(get_db)
-):
-    """Lista reservas de un tenant con paginación y filtros opcionales"""
-    query = db.query(Reserva).filter(Reserva.tenant_id == tenant_id)
-
-    if estado is not None:
-        query = query.filter(Reserva.estado == estado)
-
-    if usuario_id is not None:
-        query = query.filter(Reserva.alumno_id == usuario_id)
-
-    reservas = query.offset(skip).limit(limit).all()
-
-    return reservas
 
 
 @router.put("/{reserva_id}", response_model=ReservaResponse)

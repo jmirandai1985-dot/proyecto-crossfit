@@ -16,6 +16,7 @@ class SolicitudPlan(Base):
     # pending, approved, rejected
     estado = Column(String(20), default="pending", nullable=False)
     voucher_url = Column(Text, nullable=True)
+    certificado_estudiante_url = Column(Text, nullable=True)
     comentario_admin = Column(String(500), nullable=True)
     aprobado_por = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

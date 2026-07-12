@@ -23,11 +23,11 @@ def set_generar_clases_callback(callback):
 
 
 async def job_generar_clases_diarias():
-    """Job que se ejecuta a las 00:05 CLT y genera clases para HOY + 4 días (5 días total)"""
+    """Job que se ejecuta a las 00:05 CLT y genera clases para HOY + 6 días (7 días total)"""
     from datetime import date, timedelta
 
     hoy = date.today()
-    fecha_hasta = hoy + timedelta(days=4)
+    fecha_hasta = hoy + timedelta(days=6)
     fecha_str = hoy.strftime("%Y-%m-%d")
 
     logger.info(

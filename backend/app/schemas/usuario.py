@@ -42,6 +42,8 @@ class UsuarioUpdate(BaseModel):
     activo: Optional[bool] = None
     peso_kg: Optional[float] = Field(
         None, gt=0, description="Peso corporal en kg")
+    estatura_cm: Optional[int] = Field(
+        None, ge=50, le=250, description="Estatura en centímetros")
     genero: Optional[str] = Field(
         None, max_length=10, description="Género: M o F")
     fecha_nacimiento: Optional[str] = Field(
@@ -55,6 +57,7 @@ class UsuarioResponse(UsuarioBase):
     tenant_id: int
     activo: bool
     peso_kg: Optional[float] = None
+    estatura_cm: Optional[int] = None
     genero: Optional[str] = None
     created_at: datetime
 

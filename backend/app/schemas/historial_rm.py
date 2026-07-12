@@ -16,6 +16,15 @@ class HistorialRMBase(BaseModel):
         default="peso", description="Tipo de RM: peso, tiempo, reps, altura, distancia")
     valor_extra: Optional[str] = Field(
         None, max_length=100, description="Valor extra ej: 3x10 (series x reps)")
+    repeticiones: Optional[int] = Field(
+        None, ge=0, description="Número de repeticiones")
+    series: Optional[int] = Field(None, ge=0, description="Número de series")
+    minutos: Optional[int] = Field(None, ge=0, description="Minutos (cardio)")
+    vueltas: Optional[int] = Field(None, ge=0, description="Número de vueltas")
+    km: Optional[float] = Field(
+        None, ge=0, description="Kilómetros (cardio/máquinas)")
+    calorias: Optional[int] = Field(
+        None, ge=0, description="Calorías (máquinas)")
     fecha: date = Field(..., description="Fecha del registro")
     notas: Optional[str] = Field(
         None, max_length=500, description="Notas adicionales")
@@ -31,6 +40,12 @@ class HistorialRMUpdate(BaseModel):
     peso_kg: Optional[float] = Field(None, gt=0)
     tipo_rm: Optional[str] = Field(None, description="Tipo de RM")
     valor_extra: Optional[str] = Field(None, max_length=100)
+    repeticiones: Optional[int] = Field(None, ge=0)
+    series: Optional[int] = Field(None, ge=0)
+    minutos: Optional[int] = Field(None, ge=0)
+    vueltas: Optional[int] = Field(None, ge=0)
+    km: Optional[float] = Field(None, ge=0)
+    calorias: Optional[int] = Field(None, ge=0)
     fecha: Optional[date] = None
     notas: Optional[str] = Field(None, max_length=500)
     nivel_calculado: Optional[str] = Field(
@@ -55,6 +70,12 @@ class HistorialRMListItem(BaseModel):
     peso_kg: float
     tipo_rm: Optional[str] = "peso"
     valor_extra: Optional[str] = None
+    repeticiones: Optional[int] = None
+    series: Optional[int] = None
+    minutos: Optional[int] = None
+    vueltas: Optional[int] = None
+    km: Optional[float] = None
+    calorias: Optional[int] = None
     fecha: date
     notas: Optional[str]
     movimiento_nombre: Optional[str] = None
@@ -69,6 +90,12 @@ class RMPorMovimiento(BaseModel):
     peso_kg: float
     tipo_rm: Optional[str] = "peso"
     valor_extra: Optional[str] = None
+    repeticiones: Optional[int] = None
+    series: Optional[int] = None
+    minutos: Optional[int] = None
+    vueltas: Optional[int] = None
+    km: Optional[float] = None
+    calorias: Optional[int] = None
     fecha: date
     notas: Optional[str]
 

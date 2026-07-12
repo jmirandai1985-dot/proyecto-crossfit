@@ -19,6 +19,8 @@ def crear_plan(
     duracion_dias: int = 30,
     creditos: Optional[int] = None,
     es_ilimitado: bool = False,
+    genero: Optional[str] = None,
+    requiere_certificado_estudiante: bool = False,
     db: Session = Depends(get_db)
 ):
     """Crea un nuevo plan"""
@@ -39,6 +41,8 @@ def crear_plan(
         precio_clp=precio_clp,
         creditos=creditos,
         es_ilimitado=es_ilimitado,
+        genero=genero,
+        requiere_certificado_estudiante=requiere_certificado_estudiante,
         duracion_dias=duracion_dias,
         activo=True
     )
@@ -54,12 +58,15 @@ def listar_planes(
     skip: int = 0,
     limit: int = 100,
     activo: Optional[bool] = None,
+    genero: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """Lista planes de un tenant"""
     query = db.query(Plan).filter(Plan.tenant_id == tenant_id)
     if activo is not None:
         query = query.filter(Plan.activo == activo)
+    if genero is not None:
+        query = query.filter(Plan.genero == genero)
     return query.offset(skip).limit(limit).all()
 
 
@@ -125,6 +132,8 @@ def actualizar_plan(
     es_ilimitado: Optional[bool] = None,
     duracion_dias: Optional[int] = None,
     activo: Optional[bool] = None,
+    genero: Optional[str] = None,
+    requiere_certificado_estudiante: Optional[bool] = None,
     db: Session = Depends(get_db)
 ):
     """Actualiza un plan existente"""
@@ -147,6 +156,10 @@ def actualizar_plan(
         plan.duracion_dias = duracion_dias
     if activo is not None:
         plan.activo = activo
+    if genero is not None:
+        plan.genero = genero
+    if requiere_certificado_estudiante is not None:
+        plan.requiere_certificado_estudiante = requiere_certificado_estudiante
 
     db.commit()
     db.refresh(plan)

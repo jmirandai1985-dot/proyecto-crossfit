@@ -170,6 +170,7 @@ const AdminDashboard = () => {
                                         <th className="px-6 py-3 text-left text-sm font-medium">Plan</th>
                                         <th className="px-6 py-3 text-left text-sm font-medium">Precio</th>
                                         <th className="px-6 py-3 text-left text-sm font-medium">Voucher</th>
+                                        <th className="px-6 py-3 text-left text-sm font-medium">Certificado</th>
                                         <th className="px-6 py-3 text-left text-sm font-medium">Fecha</th>
                                         <th className="px-6 py-3 text-left text-sm font-medium">Acciones</th>
                                     </tr>
@@ -193,6 +194,16 @@ const AdminDashboard = () => {
                                                     </button>
                                                 ) : (
                                                     <span className="text-gray-400 text-xs">Sin voucher</span>
+                                                )}
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                {s.certificado_estudiante_url ? (
+                                                    <button onClick={() => setVoucherModal({ open: true, url: s.certificado_estudiante_url, solicitud_id: s.id })}
+                                                        className="text-amber-600 underline text-xs hover:text-amber-800">
+                                                        🎓 Ver Certificado
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-gray-400 text-xs">—</span>
                                                 )}
                                             </td>
                                             <td className="px-6 py-4 text-sm text-gray-500">

@@ -48,7 +48,8 @@ def solicitar_plan(
         alumno_id=data.alumno_id,
         plan_id=data.plan_id,
         estado="pending",
-        voucher_url=data.voucher_url
+        voucher_url=data.voucher_url,
+        certificado_estudiante_url=data.certificado_estudiante_url
     )
     db.add(solicitud)
     db.commit()
@@ -80,6 +81,7 @@ def listar_solicitudes_pendientes(
             "plan_nombre": plan.nombre if plan else "Desconocido",
             "plan_precio": plan.precio_clp if plan else 0,
             "voucher_url": s.voucher_url,
+            "certificado_estudiante_url": s.certificado_estudiante_url,
             "estado": s.estado,
             "created_at": s.created_at,
         })

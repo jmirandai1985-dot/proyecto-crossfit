@@ -3,14 +3,47 @@ import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 
+// Helper: group classes by unique (disciplina, hora_inicio, hora_fin)
+const AGRUPAR_CLASES = (clases) => {
+    const grupos = {};
+    (clases || []).forEach(c => {
+        const key = `${c.disciplina_nombre || ''}|${c.hora_inicio || ''}|${c.hora_fin || ''}`;
+        if (!grupos[key]) {
+            grupos[key] = c;
+        }
+        // Keep the first occurrence only (representative row)
+    });
+    return Object.values(grupos);
+};
+
+// Helper: split classes by time range (applied AFTER grouping)
+const SEPARAR_CLASES = (clases) => {
+    const manana = [];
+    const tarde = [];
+    const agrupadas = AGRUPAR_CLASES(clases);
+    agrupadas.forEach(c => {
+        const rawHora = c.hora_inicio;
+        const fallback = rawHora || '00:00';
+        const splits = fallback.split(':');
+        const horaStr = splits[0];
+        const hora = parseInt(horaStr, 10);
+        if (hora < 14) {
+            manana.push(c);
+        } else {
+            tarde.push(c);
+        }
+    });
+    return { manana, tarde };
+};
+
 const d = new Date();
 const TODAY = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-// Calcular próximos 5 días (HOY + 4)
+// Calcular próximos 7 días (HOY + 6)
 const getProximosDias = () => {
     const dias = [];
     const nombres = ['DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO'];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 7; i++) {
         const fecha = new Date(d);
         fecha.setDate(fecha.getDate() + i);
         const fechaStr = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}-${String(fecha.getDate()).padStart(2, '0')}`;
@@ -34,7 +67,9 @@ const AlumnoDashboard = () => {
     const [wodHoy, setWodHoy] = useState(null);
     const [clasesPorDia, setClasesPorDia] = useState({});
     const [reservasActivas, setReservasActivas] = useState(0);
+    const [misReservas, setMisReservas] = useState([]);  // lista completa de reservas para verificar duplicados
     const [membresia, setMembresia] = useState(null);
+    const [asistenciaMes, setAsistenciaMes] = useState(null);
     const [fetchError, setFetchError] = useState('');
 
     // Estado para modal de reserva
@@ -45,6 +80,14 @@ const AlumnoDashboard = () => {
 
     // Estado para acordeon: día actualmente expandido (null = ninguno)
     const [diaExpandido, setDiaExpandido] = useState(null);
+
+    // Estado para secciones Mañana/Tarde dentro del día expandido
+    const [seccionesExpandidas, setSeccionesExpandidas] = useState({ manana: false, tarde: false });
+
+    // Al cambiar de día, cerrar Mañana/Tarde
+    useEffect(() => {
+        setSeccionesExpandidas({ manana: false, tarde: false });
+    }, [diaExpandido]);
 
     const proximosDias = getProximosDias();
     const fechaHasta = proximosDias[proximosDias.length - 1]?.fecha || TODAY;
@@ -61,15 +104,17 @@ const AlumnoDashboard = () => {
                     wodRes,
                     clasesRes,
                     reservasRes,
-                    membresiaRes
+                    membresiaRes,
+                    asistenciaMesRes
                 ] = await Promise.allSettled([
                     api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/nivel-fuerza?tenant_id=${tenant_id}`),
                     api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/nivel-gimnastico?tenant_id=${tenant_id}`),
                     api.get(`/api/v1/wods/hoy?tenant_id=${tenant_id}`),
                     // Sin solo_con_cupo para mostrar TODAS las clases de 07:00 a 22:00
-                    api.get(`/api/v1/clases?tenant_id=${tenant_id}&fecha_desde=${TODAY}&fecha_hasta=${fechaHasta}`),
+                    api.get(`/api/v1/clases?tenant_id=${tenant_id}&fecha_desde=${TODAY}&fecha_hasta=${fechaHasta}&limit=500`),
                     api.get(`/api/v1/reservas?tenant_id=${tenant_id}&usuario_id=${usuario_id}&estado=confirmada`),
-                    api.get(`/api/v1/planes/membresia-activa?tenant_id=${tenant_id}&alumno_id=${usuario_id}`)
+                    api.get(`/api/v1/planes/membresia-activa?tenant_id=${tenant_id}&alumno_id=${usuario_id}`),
+                    api.get(`/api/v1/reservas/asistencia-mes?tenant_id=${tenant_id}&usuario_id=${usuario_id}`)
                 ]);
 
                 if (fuerzaRes.status === 'fulfilled') setNivelFuerza(fuerzaRes.value.data);
@@ -94,11 +139,15 @@ const AlumnoDashboard = () => {
 
                 if (reservasRes.status === 'fulfilled') {
                     const data = reservasRes.value.data;
-                    const count = Array.isArray(data) ? data.length : (data?.total || data?.count || 0);
-                    setReservasActivas(count);
+                    const reservasList = Array.isArray(data) ? data : [];
+                    setMisReservas(reservasList);
+                    setReservasActivas(reservasList.length);
                 }
                 if (membresiaRes.status === 'fulfilled') {
                     setMembresia(membresiaRes.value.data);
+                }
+                if (asistenciaMesRes.status === 'fulfilled') {
+                    setAsistenciaMes(asistenciaMesRes.value.data);
                 }
 
                 if (fuerzaRes.status === 'rejected' && gimnRes.status === 'rejected') {
@@ -128,7 +177,7 @@ const AlumnoDashboard = () => {
         try {
             await api.post('/api/v1/reservas', {
                 tenant_id,
-                usuario_id,
+                alumno_id: usuario_id,
                 clase_id: claseSeleccionada.id,
                 estado: 'confirmada',
             });
@@ -278,6 +327,11 @@ const AlumnoDashboard = () => {
                             <p className="text-xs text-gray-500 uppercase tracking-wider">Créditos Restantes</p>
                             {membresia?.activa ? (
                                 <>
+                                    {membresia.plan_nombre && (
+                                        <span className="inline-block mb-1 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700 uppercase tracking-wider">
+                                            {membresia.plan_nombre}
+                                        </span>
+                                    )}
                                     <p className="text-2xl font-bold text-gray-800">
                                         {membresia.es_ilimitado ? '♾️' : membresia.clases_disponibles}
                                     </p>
@@ -297,11 +351,25 @@ const AlumnoDashboard = () => {
                     </div>
                     <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm flex items-center gap-4">
                         <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center text-xl">
-                            📅
+                            📊
                         </div>
                         <div>
-                            <p className="text-xs text-gray-500 uppercase tracking-wider">Próximos 5 Días</p>
-                            <p className="text-2xl font-bold text-gray-800">{totalClases}</p>
+                            <p className="text-xs text-gray-500 uppercase tracking-wider">Asistencia del Mes</p>
+                            {asistenciaMes?.sin_datos ? (
+                                <div>
+                                    <p className="text-2xl font-bold text-gray-800">—</p>
+                                    <p className="text-[10px] text-gray-400">Sin reservas este mes</p>
+                                </div>
+                            ) : (
+                                <>
+                                    <p className="text-2xl font-bold text-gray-800">
+                                        {asistenciaMes?.porcentaje || 0}%
+                                    </p>
+                                    <p className="text-[10px] text-gray-400">
+                                        {asistenciaMes?.asistencias || 0} de {asistenciaMes?.total_reservas || 0} clases
+                                    </p>
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -372,10 +440,10 @@ const AlumnoDashboard = () => {
                     </div>
                 </div>
 
-                {/* ─── CLASES DISPONIBLES - ACORDEÓN 5 DÍAS ──────────────── */}
+                {/* ─── CLASES DISPONIBLES - ACORDEÓN 7 DÍAS ──────────────── */}
                 <div>
                     <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                        <span>📋</span> CLASES DISPONIBLES — PRÓXIMOS 5 DÍAS
+                        <span>📋</span> CLASES DISPONIBLES — PRÓXIMOS 7 DÍAS
                     </h2>
 
                     {/* ── FILA DE BOTONES (uno por día) ── */}
@@ -427,18 +495,68 @@ const AlumnoDashboard = () => {
                         if (!diaInfo) return null;
                         const clasesDelDia = (clasesPorDia[diaExpandido] || [])
                             .sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || ''));
+                        const { manana, tarde } = SEPARAR_CLASES(clasesDelDia);
                         const tieneClases = clasesDelDia.length > 0;
                         const esPrimerDisponible = primerDiaDisponible === diaExpandido;
 
+                        // Render table for a given array of classes
+                        const renderTabla = (clases) => (
+                            <div className="overflow-x-auto">
+                                <table className="w-full">
+                                    <thead>
+                                        <tr className="border-b border-gray-200">
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Disciplina</th>
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Horario</th>
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Coach</th>
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Cupos</th>
+                                            <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                        {clases.map((clase) => {
+                                            const cuposLibres = (clase.cupo_maximo || 0) - (clase.asistentes_confirmados || 0);
+                                            return (
+                                                <tr key={clase.id} className="hover:bg-gray-50 transition-colors">
+                                                    <td className="px-5 py-4 text-sm font-medium text-gray-900">{clase.disciplina_nombre || 'Clase'}</td>
+                                                    <td className="px-5 py-4 text-sm text-gray-600">🕐 {clase.hora_inicio} - {clase.hora_fin}</td>
+                                                    <td className="px-5 py-4 text-sm text-gray-600">👨‍🏫 {clase.coach_nombre || '—'}</td>
+                                                    <td className="px-5 py-4">
+                                                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${cuposLibres > 0
+                                                            ? 'bg-green-100 text-green-700'
+                                                            : 'bg-red-100 text-red-700'
+                                                            }`}>
+                                                            {cuposLibres > 0 ? `${cuposLibres}/${clase.cupo_maximo} libres` : 'Completo'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-5 py-4 text-right">
+                                                        <button
+                                                            onClick={() => handleAbrirReserva(clase)}
+                                                            disabled={cuposLibres === 0}
+                                                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${cuposLibres > 0
+                                                                ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                                                                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                                                }`}
+                                                        >
+                                                            {cuposLibres > 0 ? 'Reservar' : 'Lleno'}
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        );
+
                         return (
                             <div className={`rounded-xl border-2 overflow-hidden transition-all ${esPrimerDisponible
-                                    ? 'border-emerald-400 bg-emerald-50/50 shadow-md'
-                                    : 'border-gray-200 bg-white shadow-sm'
+                                ? 'border-emerald-400 bg-emerald-50/50 shadow-md'
+                                : 'border-gray-200 bg-white shadow-sm'
                                 }`}>
                                 {/* Encabezado del día expandido */}
                                 <div className={`px-5 py-3 flex items-center gap-3 ${esPrimerDisponible
-                                        ? 'bg-emerald-500 text-white'
-                                        : 'bg-gray-100 text-gray-800'
+                                    ? 'bg-emerald-500 text-white'
+                                    : 'bg-gray-100 text-gray-800'
                                     }`}>
                                     <div className="flex-1">
                                         <h3 className="text-base font-bold tracking-wide">
@@ -455,58 +573,67 @@ const AlumnoDashboard = () => {
                                     )}
                                 </div>
 
-                                {/* Tabla de horarios del día */}
-                                {tieneClases ? (
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full">
-                                            <thead>
-                                                <tr className="border-b border-gray-200">
-                                                    <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Disciplina</th>
-                                                    <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Horario</th>
-                                                    <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Coach</th>
-                                                    <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Cupos</th>
-                                                    <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider"></th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-gray-100">
-                                                {clasesDelDia.map((clase) => {
-                                                    const cuposLibres = (clase.cupo_maximo || 0) - (clase.asistentes_confirmados || 0);
-                                                    return (
-                                                        <tr key={clase.id} className="hover:bg-gray-50 transition-colors">
-                                                            <td className="px-5 py-4 text-sm font-medium text-gray-900">{clase.disciplina_nombre || 'Clase'}</td>
-                                                            <td className="px-5 py-4 text-sm text-gray-600">🕐 {clase.hora_inicio} - {clase.hora_fin}</td>
-                                                            <td className="px-5 py-4 text-sm text-gray-600">👨‍🏫 {clase.coach_nombre || '—'}</td>
-                                                            <td className="px-5 py-4">
-                                                                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${cuposLibres > 0
-                                                                        ? 'bg-green-100 text-green-700'
-                                                                        : 'bg-red-100 text-red-700'
-                                                                    }`}>
-                                                                    {cuposLibres > 0 ? `${cuposLibres}/${clase.cupo_maximo} libres` : 'Completo'}
-                                                                </span>
-                                                            </td>
-                                                            <td className="px-5 py-4 text-right">
-                                                                <button
-                                                                    onClick={() => handleAbrirReserva(clase)}
-                                                                    disabled={cuposLibres === 0}
-                                                                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${cuposLibres > 0
-                                                                            ? 'bg-emerald-500 text-white hover:bg-emerald-600'
-                                                                            : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                                                                        }`}
-                                                                >
-                                                                    {cuposLibres > 0 ? 'Reservar' : 'Lleno'}
-                                                                </button>
-                                                            </td>
-                                                        </tr>
-                                                    );
-                                                })}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                ) : (
-                                    <div className="px-5 py-8 text-center">
-                                        <p className="text-gray-400 italic text-sm">Sin clases disponibles para este día</p>
-                                    </div>
-                                )}
+                                {/* ── SECCIÓN MAÑANA ── */}
+                                <div className="border-b border-gray-100 last:border-b-0">
+                                    <button
+                                        onClick={() => setSeccionesExpandidas(prev => ({ ...prev, manana: !prev.manana }))}
+                                        className={`w-full px-5 py-3 flex items-center gap-3 transition-colors ${manana.length > 0
+                                            ? 'hover:bg-gray-50 text-gray-800'
+                                            : 'text-gray-400 cursor-pointer hover:bg-gray-50'
+                                            }`}
+                                    >
+                                        <span className={`text-sm font-bold transition-transform ${seccionesExpandidas.manana ? 'rotate-90' : ''}`}>
+                                            ▶
+                                        </span>
+                                        <span className="font-bold text-sm">🌅 MAÑANA</span>
+                                        <span className={`text-xs font-medium ${manana.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-400'} px-2 py-0.5 rounded-full`}>
+                                            {manana.length} clase(s)
+                                        </span>
+                                        {manana.length === 0 && (
+                                            <span className="text-xs italic opacity-60">Sin clases en la mañana</span>
+                                        )}
+                                    </button>
+                                    {seccionesExpandidas.manana && (
+                                        <div className="border-t border-gray-100">
+                                            {manana.length > 0 ? renderTabla(manana) : (
+                                                <div className="px-5 py-6 text-center">
+                                                    <p className="text-gray-400 italic text-sm">Sin clases en la mañana</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* ── SECCIÓN TARDE ── */}
+                                <div>
+                                    <button
+                                        onClick={() => setSeccionesExpandidas(prev => ({ ...prev, tarde: !prev.tarde }))}
+                                        className={`w-full px-5 py-3 flex items-center gap-3 transition-colors ${tarde.length > 0
+                                            ? 'hover:bg-gray-50 text-gray-800'
+                                            : 'text-gray-400 cursor-pointer hover:bg-gray-50'
+                                            }`}
+                                    >
+                                        <span className={`text-sm font-bold transition-transform ${seccionesExpandidas.tarde ? 'rotate-90' : ''}`}>
+                                            ▶
+                                        </span>
+                                        <span className="font-bold text-sm">🌆 TARDE</span>
+                                        <span className={`text-xs font-medium ${tarde.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-400'} px-2 py-0.5 rounded-full`}>
+                                            {tarde.length} clase(s)
+                                        </span>
+                                        {tarde.length === 0 && (
+                                            <span className="text-xs italic opacity-60">Sin clases en la tarde</span>
+                                        )}
+                                    </button>
+                                    {seccionesExpandidas.tarde && (
+                                        <div className="border-t border-gray-100">
+                                            {tarde.length > 0 ? renderTabla(tarde) : (
+                                                <div className="px-5 py-6 text-center">
+                                                    <p className="text-gray-400 italic text-sm">Sin clases en la tarde</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         );
                     })()}
@@ -521,52 +648,68 @@ const AlumnoDashboard = () => {
             </div>
 
             {/* ─── MODAL CONFIRMAR RESERVA ─────────────────────────────── */}
-            {showReservaModal && claseSeleccionada && (
-                <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
-                        <div className="bg-emerald-600 text-white px-6 py-4 rounded-t-xl">
-                            <h2 className="text-lg font-bold">Confirmar Reserva</h2>
-                            <p className="text-emerald-100 text-sm">¿Estás seguro de reservar esta clase?</p>
-                        </div>
-                        <div className="p-6 space-y-4">
-                            {errorReserva && (
-                                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                                    ❌ {errorReserva}
-                                </div>
-                            )}
-                            <div className="bg-gray-50 rounded-xl p-4 space-y-2">
-                                <p className="font-bold text-gray-900 text-lg">{claseSeleccionada.disciplina_nombre || 'Clase'}</p>
-                                <div className="grid grid-cols-2 gap-2 text-sm">
-                                    <p className="text-gray-600">🕐 {claseSeleccionada.hora_inicio} - {claseSeleccionada.hora_fin}</p>
-                                    <p className="text-gray-600">👨‍🏫 {claseSeleccionada.coach_nombre || '—'}</p>
-                                    <p className="text-gray-600">📅 {claseSeleccionada.fecha || claseSeleccionada.fecha_clase}</p>
-                                    <p className="text-green-600 font-medium">
-                                        ✅ Cupos disponibles
-                                    </p>
-                                </div>
+            {showReservaModal && claseSeleccionada && (() => {
+                const fechaClase = claseSeleccionada.fecha || claseSeleccionada.fecha_clase;
+                const disciplina = claseSeleccionada.disciplina_nombre;
+                const tieneDuplicado = disciplina && fechaClase && misReservas.some(r =>
+                    r.disciplina_nombre === disciplina &&
+                    (r.clase_fecha === fechaClase || r.fecha === fechaClase)
+                );
+
+                return (
+                    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
+                            <div className="bg-emerald-600 text-white px-6 py-4 rounded-t-xl">
+                                <h2 className="text-lg font-bold">Confirmar Reserva</h2>
+                                <p className="text-emerald-100 text-sm">¿Estás seguro de reservar esta clase?</p>
                             </div>
-                            <div className="flex gap-3 pt-2">
-                                <button
-                                    type="button"
-                                    onClick={() => { setShowReservaModal(false); setClaseSeleccionada(null); }}
-                                    className="flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-medium text-sm transition-colors"
-                                    disabled={submitting}
-                                >
-                                    Cancelar
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={handleConfirmarReserva}
-                                    disabled={submitting}
-                                    className="flex-1 px-4 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm transition-colors disabled:opacity-50"
-                                >
-                                    {submitting ? 'Reservando...' : '✅ Confirmar Reserva'}
-                                </button>
+                            <div className="p-6 space-y-4">
+                                {errorReserva && (
+                                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                                        ❌ {errorReserva}
+                                    </div>
+                                )}
+                                {tieneDuplicado && (
+                                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                                        ⚠️ Ya tienes una reserva de <strong>{disciplina}</strong> para esta fecha.
+                                        Esta será tu <strong>segunda clase</strong> del día y se descontará <strong>otro crédito</strong>.
+                                        ¿Confirmas igual?
+                                    </div>
+                                )}
+                                <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+                                    <p className="font-bold text-gray-900 text-lg">{disciplina || 'Clase'}</p>
+                                    <div className="grid grid-cols-2 gap-2 text-sm">
+                                        <p className="text-gray-600">🕐 {claseSeleccionada.hora_inicio} - {claseSeleccionada.hora_fin}</p>
+                                        <p className="text-gray-600">👨‍🏫 {claseSeleccionada.coach_nombre || '—'}</p>
+                                        <p className="text-gray-600">📅 {fechaClase}</p>
+                                        <p className="text-green-600 font-medium">
+                                            ✅ Cupos disponibles
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => { setShowReservaModal(false); setClaseSeleccionada(null); }}
+                                        className="flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-medium text-sm transition-colors"
+                                        disabled={submitting}
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleConfirmarReserva}
+                                        disabled={submitting}
+                                        className="flex-1 px-4 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm transition-colors disabled:opacity-50"
+                                    >
+                                        {submitting ? 'Reservando...' : '✅ Confirmar Reserva'}
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
         </Layout>
     );
 };

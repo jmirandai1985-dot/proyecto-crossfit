@@ -46,6 +46,12 @@ def crear_historial_rm(
         peso_kg=historial_data.peso_kg,
         tipo_rm=historial_data.tipo_rm or "peso",
         valor_extra=historial_data.valor_extra,
+        repeticiones=historial_data.repeticiones,
+        series=historial_data.series,
+        minutos=historial_data.minutos,
+        vueltas=historial_data.vueltas,
+        km=historial_data.km,
+        calorias=historial_data.calorias,
         fecha=historial_data.fecha,
         notas=historial_data.notas
     )

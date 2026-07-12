@@ -12,7 +12,11 @@ class HistorialRM(Base):
     """
     Modelo de Historial RM
     Registra los RMs (Récords Máximos) de los alumnos por movimiento
-    Soporta múltiples tipos: peso (kg), tiempo (segundos), reps, altura (cm), distancia (m)
+    Soporta múltiples tipos con campos estructurados según categoría:
+    - Fuerza: peso_kg + repeticiones + series
+    - Gimnástico: repeticiones + series
+    - Cardio: minutos + vueltas + km
+    - Máquinas: calorias + km + vueltas
     """
     __tablename__ = "historial_rm"
 
@@ -28,6 +32,13 @@ class HistorialRM(Base):
     tipo_rm = Column(String(20), nullable=False, default='peso')
     # ej: "3x10" para series x reps
     valor_extra = Column(String(100), nullable=True)
+    # Campos estructurados según categoría
+    repeticiones = Column(Integer, nullable=True)
+    series = Column(Integer, nullable=True)
+    minutos = Column(Integer, nullable=True)
+    vueltas = Column(Integer, nullable=True)
+    km = Column(Float, nullable=True)
+    calorias = Column(Integer, nullable=True)
     fecha = Column(Date, nullable=False)
     notas = Column(String(500), nullable=True)
     nivel_calculado = Column(String(50), nullable=True)

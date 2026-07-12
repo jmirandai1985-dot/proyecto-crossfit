@@ -10,3 +10,4 @@ class SolicitudPlanCreate(BaseModel):
     alumno_id: int = Field(..., gt=0)
     plan_id: int = Field(..., gt=0)
     voucher_url: Optional[str] = None
+    certificado_estudiante_url: Optional[str] = None

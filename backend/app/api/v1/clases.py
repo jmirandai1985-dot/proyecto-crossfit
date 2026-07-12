@@ -35,8 +35,8 @@ def listar_clases(
     try:
         from datetime import timedelta
         hoy = date.today()
-        # Generar para HOY + 4 días (5 días en total)
-        fecha_hasta_auto = hoy + timedelta(days=4)
+        # Generar para HOY + 6 días (7 días en total)
+        fecha_hasta_auto = hoy + timedelta(days=6)
 
         # Determinar si debemos auto-generar
         debe_generar = False
@@ -48,9 +48,9 @@ def listar_clases(
         if debe_generar:
             from app.services.generar_clases import generar_clases_para_rango
 
-            # Verificar si ALGUNA fecha del rango [hoy, hoy+4] está incompleta
+            # Verificar si ALGUNA fecha del rango [hoy, hoy+6] está incompleta
             faltan_clases = False
-            for i in range(5):
+            for i in range(7):
                 f = hoy + timedelta(days=i)
                 if f.weekday() == 6:  # domingo, skip
                     continue

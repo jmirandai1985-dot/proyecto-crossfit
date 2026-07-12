@@ -41,6 +41,7 @@ const Layout = ({ children }) => {
         if (rol === 'alumno') {
             return [
                 { label: 'Inicio', path: '/alumno/dashboard', icon: icons.home },
+                { label: 'Planes', path: '/alumno/solicitar-plan', icon: icons.settings },
                 { label: 'Mis Reservas', path: '/alumno/mis-reservas', icon: icons.calendar },
                 { label: 'Pizarra de RMs', path: '/alumno/rms', icon: icons.dumbbell },
                 { label: 'Ajustes', path: '/alumno/ajustes', icon: icons.settings },
@@ -93,8 +94,8 @@ const Layout = ({ children }) => {
                             key={item.label}
                             to={item.path}
                             className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm ${isActive(item.path)
-                                    ? 'bg-emerald-50 text-emerald-700 font-semibold'
-                                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
+                                ? 'bg-emerald-50 text-emerald-700 font-semibold'
+                                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
                                 }`}
                         >
                             <span className={`${isActive(item.path) ? 'text-emerald-600' : 'text-gray-400'}`}>

@@ -19,6 +19,7 @@ import AlumnoDashboard from './pages/alumno/Dashboard';
 import AlumnoMisReservas from './pages/alumno/MisReservas';
 import AlumnoPizarraRMs from './pages/alumno/PizarraRMs';
 import AlumnoAjustes from './pages/alumno/Ajustes';
+import AlumnoSolicitarPlan from './pages/alumno/SolicitarPlan';
 
 // ─── Spinner compartido ────────────────────────────────────────────────
 const LoadingScreen = () => (
@@ -94,6 +95,7 @@ function App() {
             <Route path="mis-reservas" element={<AlumnoMisReservas />} />
             <Route path="rms" element={<AlumnoPizarraRMs />} />
             <Route path="ajustes" element={<AlumnoAjustes />} />
+            <Route path="solicitar-plan" element={<AlumnoSolicitarPlan />} />
             <Route path="*" element={<Navigate to="/alumno/dashboard" />} />
           </Route>
 
