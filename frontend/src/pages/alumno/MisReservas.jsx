@@ -90,8 +90,25 @@ const MisReservas = () => {
         fetchReservas();
     }, [fetchReservas]);
 
-    const handleCancelar = async (reservaId) => {
-        if (!window.confirm('¿Estás seguro de cancelar esta reserva?')) return;
+    const handleCancelar = async (reservaId, reserva) => {
+        // Calcular horas restantes hasta la clase
+        let horasRestantes = 999;
+        if (reserva.clase_fecha && reserva.hora_inicio) {
+            const ahora = new Date();
+            const [h, m] = reserva.hora_inicio.split(':');
+            const inicioClase = new Date(reserva.clase_fecha + 'T' + reserva.hora_inicio);
+            horasRestantes = (inicioClase - ahora) / (1000 * 60 * 60);
+        }
+
+        // Si faltan menos de 6 horas, mostrar advertencia de penalización
+        if (horasRestantes < 6) {
+            const msg = horasRestantes >= 0
+                ? `Faltan menos de 6 horas para esta clase (${Math.round(horasRestantes)}h). Si cancelas ahora, NO se te devolverá el crédito. ¿Confirmas la cancelación?`
+                : 'Esta clase ya pasó. Si cancelas, no se te devolverá el crédito. ¿Confirmas la cancelación?';
+            if (!window.confirm(msg)) return;
+        } else {
+            if (!window.confirm('¿Estás seguro de cancelar esta reserva?')) return;
+        }
 
         setCancelando(reservaId);
         setMensaje(null);
@@ -184,7 +201,7 @@ const MisReservas = () => {
                                         </div>
 
                                         <button
-                                            onClick={() => handleCancelar(reserva.id)}
+                                            onClick={() => handleCancelar(reserva.id, reserva)}
                                             disabled={cancelando === reserva.id}
                                             className="ml-4 px-4 py-2 text-sm font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                                         >

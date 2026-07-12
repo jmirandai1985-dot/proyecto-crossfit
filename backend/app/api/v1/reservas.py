@@ -93,6 +93,9 @@ def crear_reserva(
         Suscripcion.usuario_id == reserva_data.alumno_id,
         Suscripcion.estado == 'activo',
         Suscripcion.fecha_expiracion > datetime.now(timezone.utc)
+    ).order_by(
+        Suscripcion.creditos_disponibles.desc().nulls_last(),
+        Suscripcion.fecha_expiracion.desc()
     ).first()
 
     if not membresia:
@@ -313,12 +316,19 @@ def eliminar_reserva(
     """
     Cancela una reserva (soft delete) y DECREMENTA asistentes_confirmados.
 
+    Política de cancelación:
+    - Si faltan >= 6 horas para la clase: cancela y DEVUELVE el crédito.
+    - Si faltan < 6 horas: cancela pero NO devuelve el crédito (penalización).
+
     ARREGLO 1: Al eliminar reserva → DECREMENTA -1 asistentes_confirmados
     Usa transacción para integridad.
 
     ARREGLO 3: Protección IDOR
     - Valida que tenant_id del usuario = tenant_id del recurso
     """
+    from datetime import datetime, timezone, timedelta
+    from app.models.suscripcion import Suscripcion
+
     reserva = db.query(Reserva).filter(
         Reserva.id == reserva_id,
         Reserva.tenant_id == tenant_id
@@ -335,6 +345,29 @@ def eliminar_reserva(
 
     if clase and clase.asistentes_confirmados > 0:
         clase.asistentes_confirmados -= 1
+
+    # Calcular horas restantes hasta la clase
+    ahora = datetime.now(timezone.utc)
+    hora_inicio = clase.hora_inicio
+    inicio_clase = datetime(
+        clase.fecha.year, clase.fecha.month, clase.fecha.day,
+        hora_inicio.hour, hora_inicio.minute, tzinfo=timezone.utc
+    )
+    horas_restantes = (inicio_clase - ahora).total_seconds() / 3600
+
+    # Buscar membresía activa para devolver el crédito si aplica
+    if horas_restantes >= 6:
+        membresia = db.query(Suscripcion).filter(
+            Suscripcion.tenant_id == tenant_id,
+            Suscripcion.usuario_id == reserva.alumno_id,
+            Suscripcion.estado == 'activo',
+            Suscripcion.fecha_expiracion > ahora
+        ).order_by(
+            Suscripcion.creditos_disponibles.desc().nulls_last(),
+            Suscripcion.fecha_expiracion.desc()
+        ).first()
+        if membresia and membresia.creditos_disponibles is not None:
+            membresia.creditos_disponibles += 1
 
     reserva.estado = "cancelled"
     db.commit()
