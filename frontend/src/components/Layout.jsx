@@ -44,6 +44,7 @@ const Layout = ({ children }) => {
                 { label: 'Planes', path: '/alumno/solicitar-plan', icon: icons.settings },
                 { label: 'Mis Reservas', path: '/alumno/mis-reservas', icon: icons.calendar },
                 { label: 'Pizarra de RMs', path: '/alumno/rms', icon: icons.dumbbell },
+                { label: 'Evolución', path: '/alumno/evolucion', icon: icons.home },
                 { label: 'Ajustes', path: '/alumno/ajustes', icon: icons.settings },
             ];
         } else if (rol === 'coach') {

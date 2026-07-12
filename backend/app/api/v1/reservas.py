@@ -132,6 +132,58 @@ def crear_reserva(
     return db_reserva
 
 
+@router.get("/asistencia-semanal")
+def obtener_asistencia_semanal(
+    tenant_id: int,
+    usuario_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna la asistencia del alumno agrupada por semana en los últimos 3 meses.
+    Cada elemento tiene: semana (fecha ISO), asistencias, total_reservas.
+    """
+    from datetime import datetime, timezone, date, timedelta
+
+    hoy = date.today()
+    hace_3_meses = date(hoy.year, hoy.month, 1) - timedelta(days=90)
+
+    reservas = db.query(
+        Clase.fecha,
+        Reserva.asistio
+    ).join(
+        Clase, Reserva.clase_id == Clase.id
+    ).filter(
+        Reserva.tenant_id == tenant_id,
+        Reserva.alumno_id == usuario_id,
+        Reserva.estado.in_(["confirmada", "completada"]),
+        Clase.fecha >= hace_3_meses,
+        Clase.fecha <= hoy
+    ).order_by(Clase.fecha.asc()).all()
+
+    # Agrupar por semana (ISO week)
+    from collections import defaultdict
+    semanas = defaultdict(lambda: {"asistencias": 0, "total": 0})
+
+    for fecha, asistio in reservas:
+        semana_key = fecha.isocalendar()[:2]  # (year, week)
+        label = f"{semana_key[0]}-S{semana_key[1]:02d}"
+        semanas[label]["total"] += 1
+        if asistio:
+            semanas[label]["asistencias"] += 1
+
+    resultado = []
+    for label in sorted(semanas.keys()):
+        d = semanas[label]
+        resultado.append({
+            "semana": label,
+            "asistencias": d["asistencias"],
+            "total": d["total"],
+            "porcentaje": round((d["asistencias"] / d["total"] * 100), 0) if d["total"] > 0 else 0,
+        })
+
+    return resultado
+
+
 @router.get("/asistencia-mes")
 def obtener_asistencia_mes(
     tenant_id: int,

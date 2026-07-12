@@ -388,6 +388,51 @@ def calcular_nivel_gimnastico_endpoint(
     return obtener_nivel_gimnastico(movimiento.nombre, valor, genero)
 
 
+@router.get("/alumnos/{alumno_id}/movimiento/{movimiento_id}")
+def obtener_historial_movimiento(
+    alumno_id: int,
+    movimiento_id: int,
+    tenant_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene el historial COMPLETO de un movimiento específico para un alumno,
+    ordenado por fecha ascendente (para gráficos de evolución).
+    """
+    from app.models.movimiento import Movimiento
+
+    movimiento = db.query(Movimiento).filter(
+        Movimiento.id == movimiento_id,
+        Movimiento.tenant_id == tenant_id
+    ).first()
+    if not movimiento:
+        raise HTTPException(status_code=404, detail="Movimiento no encontrado")
+
+    registros = db.query(HistorialRM).filter(
+        HistorialRM.alumno_id == alumno_id,
+        HistorialRM.tenant_id == tenant_id,
+        HistorialRM.movimiento_id == movimiento_id
+    ).order_by(HistorialRM.fecha.asc(), HistorialRM.id.asc()).all()
+
+    return [
+        {
+            "id": r.id,
+            "fecha": str(r.fecha),
+            "peso_kg": r.peso_kg,
+            "repeticiones": r.repeticiones,
+            "series": r.series,
+            "minutos": r.minutos,
+            "vueltas": r.vueltas,
+            "km": r.km,
+            "calorias": r.calorias,
+            "notas": r.notas,
+            "movimiento_nombre": movimiento.nombre,
+            "categoria": movimiento.categoria,
+        }
+        for r in registros
+    ]
+
+
 @router.get("/alumnos/{alumno_id}/nivel-general")
 def obtener_nivel_general_endpoint(
     alumno_id: int,
