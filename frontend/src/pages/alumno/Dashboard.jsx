@@ -360,6 +360,18 @@ const AlumnoDashboard = () => {
                                     <p className="text-2xl font-bold text-gray-800">—</p>
                                     <p className="text-[10px] text-gray-400">Sin reservas este mes</p>
                                 </div>
+                            ) : asistenciaMes?.solo_futuras ? (
+                                <div>
+                                    <p className="text-2xl font-bold text-amber-500">
+                                        📅 {asistenciaMes.reservas_futuras}
+                                    </p>
+                                    <p className="text-[10px] text-amber-600 font-medium">
+                                        Próximas clases reservadas
+                                    </p>
+                                    <p className="text-[10px] text-gray-400">
+                                        Aún no hay clases completadas este mes
+                                    </p>
+                                </div>
                             ) : (
                                 <>
                                     <p className="text-2xl font-bold text-gray-800">

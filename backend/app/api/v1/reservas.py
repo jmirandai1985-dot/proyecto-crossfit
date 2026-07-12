@@ -177,11 +177,32 @@ def obtener_asistencia_mes(
     porcentaje = round((asistencias / total_reservas * 100),
                        0) if total_reservas > 0 else 0
 
+    # Contar reservas confirmadas FUTURAS (fecha > hoy, dentro del mismo mes)
+    # para mejorar el mensaje en la UI
+    import calendar
+    ultimo_dia_mes = date(hoy.year, hoy.month,
+                          calendar.monthrange(hoy.year, hoy.month)[1])
+    reservas_futuras = db.query(func.count(Reserva.id)).join(
+        Clase, Reserva.clase_id == Clase.id
+    ).filter(
+        Reserva.tenant_id == tenant_id,
+        Reserva.alumno_id == usuario_id,
+        Reserva.estado.in_(["confirmada", "completada"]),
+        Clase.fecha >= primer_dia_mes,
+        Clase.fecha > hoy,
+        Clase.fecha <= ultimo_dia_mes
+    ).scalar() or 0
+
+    sin_reservas = total_reservas == 0 and reservas_futuras == 0
+    solo_futuras = total_reservas == 0 and reservas_futuras > 0
+
     return {
         "total_reservas": total_reservas,
         "asistencias": asistencias,
         "porcentaje": int(porcentaje),
-        "sin_datos": total_reservas == 0
+        "sin_datos": sin_reservas,
+        "solo_futuras": solo_futuras,
+        "reservas_futuras": reservas_futuras,
     }
 
 
