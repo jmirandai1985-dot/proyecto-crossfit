@@ -1,3 +1,3 @@
 """
-Módulo de tests
+Tests para el backend de Box CrossFit Platform.
 """
