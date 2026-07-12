@@ -206,7 +206,8 @@ def calcular_nivel_general(alumno_id, db, tenant_id):
                 idx = NIVELES_ORDEN.get(nivel, -1)
                 if nivel_fuerza is None or idx < NIVELES_ORDEN.get(nivel_fuerza, 99):
                     nivel_fuerza = nivel
-                detalle_fuerza.append({"movimiento": nombre, "nivel": nivel})
+                detalle_fuerza.append(
+                    {"movimiento": nombre, "movimiento_id": mov_id, "nivel": nivel})
             else:
                 detalle_fuerza.append(
                     {"movimiento": nombre, "nivel": "Sin datos"})
@@ -224,7 +225,7 @@ def calcular_nivel_general(alumno_id, db, tenant_id):
                 if nivel_gimnastico is None or idx < NIVELES_ORDEN.get(nivel_gimnastico, 99):
                     nivel_gimnastico = nivel
                 detalle_gimnastico.append(
-                    {"movimiento": nombre, "nivel": nivel})
+                    {"movimiento": nombre, "movimiento_id": mov_id, "nivel": nivel})
             else:
                 detalle_gimnastico.append(
                     {"movimiento": nombre, "nivel": "Sin datos"})

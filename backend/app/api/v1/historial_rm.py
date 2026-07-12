@@ -396,30 +396,29 @@ def obtener_nivel_gimnastico_alumno(
     """
     resultado = calcular_nivel_general(alumno_id, db, tenant_id)
 
-    # Extraer top RMs gimnásticos para mostrar en el dashboard
+    # Extraer top RMs gimnásticos: consultar DIRECTAMENTE los RMs del alumno
+    # para movimientos con categoria='gimnastico', en vez de filtrar solo
+    # por los que estan en CROSSFIT_HABILIDADES (que excluye variantes
+    # como Strict Pull-up, Kipping Pull-up).
     top_rms = []
-    for detalle in resultado.get("detalle_gimnastico", []):
-        if detalle.get("nivel") and detalle["nivel"] != "Sin datos":
-            # Buscar el movimiento por nombre para obtener su ID
-            movimiento = db.query(Movimiento).filter(
-                Movimiento.nombre == detalle["movimiento"],
-                Movimiento.tenant_id == tenant_id
-            ).first()
-            if movimiento:
-                mejor = db.query(
-                    func.max(HistorialRM.peso_kg)
-                ).filter(
-                    HistorialRM.alumno_id == alumno_id,
-                    HistorialRM.tenant_id == tenant_id,
-                    HistorialRM.movimiento_id == movimiento.id
-                ).scalar()
-                if mejor:
-                    top_rms.append({
-                        "movimiento": detalle["movimiento"],
-                        "valor": f"{mejor:.0f} reps"
-                    })
+    rms_gimnasticos = db.query(
+        Movimiento.nombre,
+        func.max(HistorialRM.peso_kg).label('max_valor')
+    ).join(
+        HistorialRM, Movimiento.id == HistorialRM.movimiento_id
+    ).filter(
+        HistorialRM.alumno_id == alumno_id,
+        HistorialRM.tenant_id == tenant_id,
+        Movimiento.categoria == 'gimnastico'
+    ).group_by(Movimiento.id, Movimiento.nombre).all()
+
+    for nombre, max_valor in rms_gimnasticos:
+        top_rms.append({
+            "movimiento": nombre,
+            "valor": f"{max_valor:.0f} reps"
+        })
 
     return {
         "nivel": resultado.get("nivel_gimnastico", "SIN DATOS"),
-        "top_rms": top_rms[:3]  # Top 3
+        "top_rms": top_rms[:5]  # Top 5
     }
