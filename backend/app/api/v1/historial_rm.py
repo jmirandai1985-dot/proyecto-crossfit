@@ -111,6 +111,12 @@ def crear_historial_rm(
         "peso_kg": db_historial.peso_kg,
         "tipo_rm": db_historial.tipo_rm,
         "valor_extra": db_historial.valor_extra,
+        "repeticiones": db_historial.repeticiones,
+        "series": db_historial.series,
+        "minutos": db_historial.minutos,
+        "vueltas": db_historial.vueltas,
+        "km": db_historial.km,
+        "calorias": db_historial.calorias,
         "fecha": str(db_historial.fecha),
         "notas": db_historial.notas,
         "nivel_calculado": db_historial.nivel_calculado,
@@ -178,6 +184,12 @@ def listar_historial_rm(
             "peso_kg": rm.peso_kg,
             "tipo_rm": rm.tipo_rm,
             "valor_extra": rm.valor_extra,
+            "repeticiones": rm.repeticiones,
+            "series": rm.series,
+            "minutos": rm.minutos,
+            "vueltas": rm.vueltas,
+            "km": rm.km,
+            "calorias": rm.calorias,
             "fecha": rm.fecha,
             "notas": rm.notas,
             "movimiento_nombre": mov_nombre
@@ -191,23 +203,60 @@ def obtener_rms_alumno(
     tenant_id: int,
     db: Session = Depends(get_db)
 ):
-    """Obtiene el mejor RM por movimiento para un alumno"""
-    # Obtener el mejor RM por movimiento (usando peso_kg como valor principal)
-    rms = db.query(
+    """Obtiene el mejor RM por movimiento para un alumno.
+
+    Para movimientos de FUERZA y GIMNASTICO se usa el criterio actual:
+    mayor peso_kg (o mayor reps para gimnástico).
+
+    Para movimientos de CARDIO y MAQUINAS (metabolico) no tiene sentido
+    comparar por peso_kg (es un dummy), así que se usa el registro MÁS RECIENTE.
+    """
+    cols = [
         HistorialRM.movimiento_id,
         Movimiento.nombre.label('movimiento_nombre'),
         HistorialRM.peso_kg,
         HistorialRM.tipo_rm,
         HistorialRM.valor_extra,
+        HistorialRM.repeticiones,
+        HistorialRM.series,
+        HistorialRM.minutos,
+        HistorialRM.vueltas,
+        HistorialRM.km,
+        HistorialRM.calorias,
         HistorialRM.fecha,
-        HistorialRM.notas
-    ).join(Movimiento, HistorialRM.movimiento_id == Movimiento.id).filter(
+        HistorialRM.notas,
+    ]
+
+    base_filter = [
         HistorialRM.alumno_id == alumno_id,
-        HistorialRM.tenant_id == tenant_id
+        HistorialRM.tenant_id == tenant_id,
+    ]
+
+    # --- Fuerza y Gimnástico: se elige por mayor peso_kg ---
+    rms_fuerza = db.query(*cols).join(
+        Movimiento, HistorialRM.movimiento_id == Movimiento.id
+    ).filter(
+        *base_filter,
+        Movimiento.categoria.in_(['fuerza', 'gimnastico'])
     ).order_by(
         HistorialRM.movimiento_id,
         HistorialRM.peso_kg.desc()
     ).distinct(HistorialRM.movimiento_id).all()
+
+    # --- Cardio y Máquinas (metabolico): se elige el REGISTRO MÁS RECIENTE ---
+    # Usamos id.desc() como desempate para garantizar que sea el último creado
+    rms_cardio = db.query(*cols).join(
+        Movimiento, HistorialRM.movimiento_id == Movimiento.id
+    ).filter(
+        *base_filter,
+        Movimiento.categoria.in_(['cardio', 'metabolico'])
+    ).order_by(
+        HistorialRM.movimiento_id,
+        HistorialRM.fecha.desc(),
+        HistorialRM.id.desc()
+    ).distinct(HistorialRM.movimiento_id).all()
+
+    rms = rms_fuerza + rms_cardio
 
     return [
         RMPorMovimiento(
@@ -216,8 +265,14 @@ def obtener_rms_alumno(
             peso_kg=rm[2],
             tipo_rm=rm[3] or 'peso',
             valor_extra=rm[4],
-            fecha=rm[5],
-            notas=rm[6]
+            repeticiones=rm[5],
+            series=rm[6],
+            minutos=rm[7],
+            vueltas=rm[8],
+            km=rm[9],
+            calorias=rm[10],
+            fecha=rm[11],
+            notas=rm[12]
         )
         for rm in rms
     ]
