@@ -484,6 +484,126 @@ def obtener_nivel_fuerza_alumno(
     }
 
 
+@router.get("/alumnos/{alumno_id}/progreso-destacado")
+def obtener_progreso_destacado(
+    alumno_id: int,
+    tenant_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna los movimientos con MEJOR progreso del alumno.
+    Para cada movimiento con al menos 2 registros, calcula:
+    - diferencia entre primer y último valor
+    - periodo entre esos registros
+    Retorna top 3 ordenados por mejora absoluta descendente.
+
+    También retorna los movimiento_ids que tienen al menos 1 registro
+    (para destacar en el dropdown del frontend).
+    """
+    from app.models.movimiento import Movimiento
+    from datetime import date
+
+    # Obtener todos los movimiento_ids con registros para este alumno
+    movs_con_marcas = db.query(
+        HistorialRM.movimiento_id,
+        func.count(HistorialRM.id).label('total')
+    ).filter(
+        HistorialRM.alumno_id == alumno_id,
+        HistorialRM.tenant_id == tenant_id
+    ).group_by(HistorialRM.movimiento_id).having(
+        func.count(HistorialRM.id) >= 1
+    ).all()
+
+    ids_con_marcas = [m.movimiento_id for m in movs_con_marcas]
+
+    # Para cada movimiento con >= 2 registros, calcular mejora
+    mejoras = []
+    for m in movs_con_marcas:
+        if m.total < 2:
+            continue
+        registros = db.query(
+            HistorialRM.fecha,
+            HistorialRM.peso_kg,
+            HistorialRM.repeticiones,
+            HistorialRM.minutos,
+            HistorialRM.km,
+            HistorialRM.vueltas,
+            HistorialRM.calorias,
+        ).filter(
+            HistorialRM.alumno_id == alumno_id,
+            HistorialRM.tenant_id == tenant_id,
+            HistorialRM.movimiento_id == m.movimiento_id
+        ).order_by(HistorialRM.fecha.asc(), HistorialRM.id.asc()).all()
+
+        if len(registros) < 2:
+            continue
+
+        primero = registros[0]
+        ultimo = registros[-1]
+
+        # Obtener valor según categoría
+        movimiento = db.query(Movimiento).filter(
+            Movimiento.id == m.movimiento_id,
+            Movimiento.tenant_id == tenant_id
+        ).first()
+        if not movimiento:
+            continue
+
+        cat = movimiento.categoria
+        val_primero = primero.peso_kg or 0
+        val_ultimo = ultimo.peso_kg or 0
+
+        if cat == 'gimnastico':
+            val_primero = primero.repeticiones or primero.peso_kg or 0
+            val_ultimo = ultimo.repeticiones or ultimo.peso_kg or 0
+        elif cat == 'cardio':
+            val_primero = primero.minutos or primero.km or primero.vueltas or 0
+            val_ultimo = ultimo.minutos or ultimo.km or ultimo.vueltas or 0
+        elif cat == 'metabolico':
+            val_primero = primero.calorias or primero.km or primero.vueltas or 0
+            val_ultimo = ultimo.calorias or ultimo.km or ultimo.vueltas or 0
+
+        diff = val_ultimo - val_primero
+        if diff <= 0:
+            continue  # Solo mejoras positivas
+
+        # Periodo
+        dias = (ultimo.fecha -
+                primero.fecha).days if ultimo.fecha and primero.fecha else 0
+        if dias == 0:
+            periodo = "mismo día"
+        elif dias == 1:
+            periodo = "1 día"
+        else:
+            periodo = f"{dias} días"
+
+        unidad = "kg"
+        if cat == 'gimnastico':
+            unidad = "reps"
+        elif cat == 'cardio':
+            unidad = "min" if primero.minutos else "km" if primero.km else "vueltas"
+        elif cat == 'metabolico':
+            unidad = "cal" if primero.calorias else "km" if primero.km else "vueltas"
+
+        mejoras.append({
+            "movimiento_id": m.movimiento_id,
+            "movimiento_nombre": movimiento.nombre,
+            "categoria": cat,
+            "diferencia": round(diff, 1),
+            "unidad": unidad,
+            "periodo": periodo,
+            "dias": dias,
+        })
+
+    # Ordenar por diferencia descendente, top 3
+    mejoras.sort(key=lambda x: x["diferencia"], reverse=True)
+
+    return {
+        "ids_con_marcas": ids_con_marcas,
+        "top_mejoras": mejoras[:3],
+    }
+
+
 @router.get("/alumnos/{alumno_id}/nivel-gimnastico")
 def obtener_nivel_gimnastico_alumno(
     alumno_id: int,

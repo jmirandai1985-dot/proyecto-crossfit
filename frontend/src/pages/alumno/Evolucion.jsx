@@ -11,6 +11,8 @@ const Evolucion = () => {
 
     // ── Estado para RM ──
     const [movimientos, setMovimientos] = useState([]);
+    const [idsConMarcas, setIdsConMarcas] = useState([]);
+    const [topMejoras, setTopMejoras] = useState([]);
     const [movimientoSeleccionado, setMovimientoSeleccionado] = useState('');
     const [historialRM, setHistorialRM] = useState([]);
     const [loadingRM, setLoadingRM] = useState(false);
@@ -29,6 +31,31 @@ const Evolucion = () => {
             })
             .catch(err => console.error('Error cargando movimientos:', err));
     }, [tenantId]);
+
+    // ── Cargar progreso destacado + ids con marcas ──
+    useEffect(() => {
+        api.get(`/api/v1/historial-rm/alumnos/${alumnoId}/progreso-destacado?tenant_id=${tenantId}`)
+            .then(res => {
+                const data = res.data || {};
+                setIdsConMarcas(data.ids_con_marcas || []);
+                setTopMejoras(data.top_mejoras || []);
+            })
+            .catch(err => console.error('Error cargando progreso destacado:', err));
+    }, [alumnoId, tenantId]);
+
+    // ── Movimientos ordenados: con marcas primero ──
+    const movimientosOrdenados = React.useMemo(() => {
+        const conMarcas = [];
+        const sinMarcas = [];
+        movimientos.forEach(m => {
+            if (idsConMarcas.includes(m.id)) {
+                conMarcas.push(m);
+            } else {
+                sinMarcas.push(m);
+            }
+        });
+        return [...conMarcas, ...sinMarcas];
+    }, [movimientos, idsConMarcas]);
 
     // ── Cargar historial del movimiento seleccionado ──
     useEffect(() => {
@@ -136,6 +163,44 @@ const Evolucion = () => {
                 </div>
 
                 {/* ============================================================ */}
+                {/* TARJETAS: Mejor Progreso */}
+                {/* ============================================================ */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                    <h2 className="text-lg font-semibold text-gray-800 mb-4">
+                        🏆 Mejor Progreso
+                    </h2>
+                    {topMejoras.length === 0 && (
+                        <div className="text-center py-6 text-gray-400 text-sm">
+                            Registra más marcas para ver tu progreso destacado aquí
+                        </div>
+                    )}
+                    {topMejoras.length > 0 && (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            {topMejoras.map((item, idx) => (
+                                <div
+                                    key={item.movimiento_id}
+                                    className="border border-gray-200 rounded-lg p-4 bg-gradient-to-br from-purple-50 to-blue-50 hover:shadow-md transition-shadow cursor-pointer"
+                                    onClick={() => setMovimientoSeleccionado(String(item.movimiento_id))}
+                                >
+                                    <div className="flex items-start justify-between">
+                                        <div>
+                                            <p className="text-sm font-semibold text-gray-800">{item.movimiento_nombre}</p>
+                                            <p className="text-xs text-gray-400 capitalize">{item.categoria}</p>
+                                        </div>
+                                        <span className="text-2xl">📈</span>
+                                    </div>
+                                    <div className="mt-3 flex items-baseline gap-1">
+                                        <span className="text-2xl font-bold text-emerald-600">+{item.diferencia}</span>
+                                        <span className="text-sm text-gray-500">{item.unidad}</span>
+                                    </div>
+                                    <p className="text-xs text-gray-400 mt-1">en {item.periodo}</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* ============================================================ */}
                 {/* GRÁFICO 1: Progreso de RM */}
                 {/* ============================================================ */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
@@ -154,28 +219,54 @@ const Evolucion = () => {
                             className="w-full max-w-md px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
                         >
                             <option value="">-- Elegir movimiento --</option>
-                            {movimientos.map(m => (
-                                <option key={m.id} value={m.id}>
-                                    {m.nombre} ({m.categoria})
-                                </option>
-                            ))}
+                            {/* Separador: movimientos CON marcas */}
+                            {movimientosOrdenados.filter(m => idsConMarcas.includes(m.id)).length > 0 && (
+                                <optgroup label="✦ Con registros">
+                                    {movimientosOrdenados
+                                        .filter(m => idsConMarcas.includes(m.id))
+                                        .map(m => (
+                                            <option key={m.id} value={m.id} className="font-semibold">
+                                                {m.nombre} ({m.categoria})
+                                            </option>
+                                        ))
+                                    }
+                                </optgroup>
+                            )}
+                            {/* Separador: movimientos SIN marcas */}
+                            {movimientosOrdenados.filter(m => !idsConMarcas.includes(m.id)).length > 0 && (
+                                <optgroup label="— Sin registros aún">
+                                    {movimientosOrdenados
+                                        .filter(m => !idsConMarcas.includes(m.id))
+                                        .map(m => (
+                                            <option key={m.id} value={m.id} className="text-gray-400">
+                                                {m.nombre} ({m.categoria})
+                                            </option>
+                                        ))
+                                    }
+                                </optgroup>
+                            )}
                         </select>
+                        {idsConMarcas.length > 0 && (
+                            <p className="text-xs text-gray-400 mt-1">
+                                {idsConMarcas.length} movimiento(s) con marcas — aparecen primero en la lista
+                            </p>
+                        )}
                     </div>
 
                     {/* SVG Defs for gradients */}
                     <svg width="0" height="0">
                         <defs>
                             <linearGradient id="barGradientUp" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="#7c3aed" />   {/* purple-600 */}
-                                <stop offset="100%" stopColor="#3b82f6" />  {/* blue-500 */}
+                                <stop offset="0%" stopColor="#7c3aed" />
+                                <stop offset="100%" stopColor="#3b82f6" />
                             </linearGradient>
                             <linearGradient id="barGradientDown" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="#ef4444" />   {/* red-500 */}
-                                <stop offset="100%" stopColor="#f97316" />  {/* orange-500 */}
+                                <stop offset="0%" stopColor="#ef4444" />
+                                <stop offset="100%" stopColor="#f97316" />
                             </linearGradient>
                             <linearGradient id="barGradientNeutral" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="#8b5cf6" />   {/* purple-500 */}
-                                <stop offset="100%" stopColor="#6366f1" />  {/* indigo-500 */}
+                                <stop offset="0%" stopColor="#8b5cf6" />
+                                <stop offset="100%" stopColor="#6366f1" />
                             </linearGradient>
                         </defs>
                     </svg>
