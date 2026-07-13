@@ -164,35 +164,53 @@ def listar_historial_rm(
     if movimiento_id is not None:
         query = query.filter(HistorialRM.movimiento_id == movimiento_id)
 
-    # Join with Movimiento to include movimiento_nombre
+    # ── Construir query con columnas explícitas ──
+    # NOTA: Usamos with_entities() en vez de .add_columns() para evitar
+    # el patrón frágil de desempaquetado de tupla (rm, mov_nombre = row)
+    # que causó bugs previos en otros endpoints.
     from app.models.movimiento import Movimiento
-    historial = query.add_columns(
-        Movimiento.nombre.label('movimiento_nombre')
+    rows = query.with_entities(
+        HistorialRM.id,
+        HistorialRM.alumno_id,
+        HistorialRM.movimiento_id,
+        HistorialRM.peso_kg,
+        HistorialRM.tipo_rm,
+        HistorialRM.valor_extra,
+        HistorialRM.repeticiones,
+        HistorialRM.series,
+        HistorialRM.minutos,
+        HistorialRM.vueltas,
+        HistorialRM.km,
+        HistorialRM.calorias,
+        HistorialRM.fecha,
+        HistorialRM.notas,
+        Movimiento.nombre.label('movimiento_nombre'),
     ).join(
         Movimiento, HistorialRM.movimiento_id == Movimiento.id, isouter=True
     ).order_by(HistorialRM.fecha.desc()).offset(
         skip).limit(limit).all()
 
-    # Manually build response with movimiento_nombre
+    # ── Construir respuesta con acceso directo a columnas ──
+    # Resultado son named tuples, cada columna es un atributo directo (row.columna)
+    # NO hay anidamiento ni desempaquetado de tupla
     result = []
-    for row in historial:
-        rm, mov_nombre = row
+    for row in rows:
         result.append({
-            "id": rm.id,
-            "alumno_id": rm.alumno_id,
-            "movimiento_id": rm.movimiento_id,
-            "peso_kg": rm.peso_kg,
-            "tipo_rm": rm.tipo_rm,
-            "valor_extra": rm.valor_extra,
-            "repeticiones": rm.repeticiones,
-            "series": rm.series,
-            "minutos": rm.minutos,
-            "vueltas": rm.vueltas,
-            "km": rm.km,
-            "calorias": rm.calorias,
-            "fecha": rm.fecha,
-            "notas": rm.notas,
-            "movimiento_nombre": mov_nombre
+            "id": row.id,
+            "alumno_id": row.alumno_id,
+            "movimiento_id": row.movimiento_id,
+            "peso_kg": row.peso_kg,
+            "tipo_rm": row.tipo_rm,
+            "valor_extra": row.valor_extra,
+            "repeticiones": row.repeticiones,
+            "series": row.series,
+            "minutos": row.minutos,
+            "vueltas": row.vueltas,
+            "km": row.km,
+            "calorias": row.calorias,
+            "fecha": row.fecha,
+            "notas": row.notas,
+            "movimiento_nombre": row.movimiento_nombre,
         })
     return result
 
