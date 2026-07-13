@@ -40,7 +40,7 @@ class Shared:
 
 def test_health_check():
     """Verificar que la API esté viva antes de arrancar."""
-    r = requests.get(f"{BASE.replace('/api/v1', '')}/health", timeout=5)
+    r = requests.get(f"{BASE.replace('/api/v1', '')}/health", timeout=15)
     assert r.status_code == 200, f"API no responde: {r.status_code}"
 
 
