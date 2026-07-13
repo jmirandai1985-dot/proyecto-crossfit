@@ -3,8 +3,11 @@ Script para crear SOLO la tabla asistencias
 Ignora tablas y ENUMs que ya existen en Neon
 """
 import psycopg2
+from app.core.config import settings
+DATABASE_URL = settings.DATABASE_URL
 
-DATABASE_URL = "postgresql://neondb_owner:npg_uFlE47iJbMgn@ep-withered-silence-acly7gq5-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require"
+
+# DATABASE_URL ahora se obtiene de settings
 
 
 def create_tables():

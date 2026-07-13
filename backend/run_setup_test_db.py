@@ -7,6 +7,9 @@ from datetime import datetime, timedelta, timezone, date, time
 import importlib
 import os
 import sys
+# PROD se obtiene de settings.DATABASE_URL con ENVIRONMENT='' 
+# (definido en _run_tests_orchestrator.py)
+
 
 # MUST be set before any app import
 os.environ["ENVIRONMENT"] = "test"
@@ -32,7 +35,7 @@ HistorialRM = importlib.import_module("app.models.historial_rm").HistorialRM
 Reserva = importlib.import_module("app.models.reserva").Reserva
 
 
-PROD = "postgresql://neondb_owner:npg_uFlE47iJbMgn@ep-withered-silence-acly7gq5-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+PROD = settings.DATABASE_URL
 TEST = settings.DATABASE_URL
 
 print("="*60)

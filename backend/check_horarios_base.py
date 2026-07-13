@@ -1,7 +1,10 @@
 import psycopg2
+from app.core.config import settings
+conn_str = settings.DATABASE_URL.replace('?sslmode=require&channel_binding=require', '?sslmode=require')
+
 
 conn = psycopg2.connect(
-    'postgresql://neondb_owner:npg_uFlE47iJbMgn@ep-withered-silence-acly7gq5-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require')
+    conn_str)
 conn.autocommit = True
 cur = conn.cursor()
 

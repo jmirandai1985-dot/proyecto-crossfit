@@ -7,6 +7,9 @@ import psycopg2
 import bcrypt
 import sys
 import os
+from app.core.config import settings
+# URL se obtiene de settings.DATABASE_URL
+
 
 # Agregar el directorio backend al path para importar módulos del proyecto
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -14,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # ── Configuración de conexión ──────────────────────────────────────────────
 DATABASE_URL = (
-    "postgresql://neondb_owner:npg_uFlE47iJbMgn"
+    settings.DATABASE_URL.split("@")[0] + "@" + settings.DATABASE_URL.split("@")[1].split("/")[0]
     "@ep-withered-silence-acly7gq5-pooler.sa-east-1.aws.neon.tech"
     "/neondb?sslmode=require&channel_binding=require"
 )

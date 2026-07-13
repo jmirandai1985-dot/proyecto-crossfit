@@ -4,8 +4,11 @@ Usa psycopg2 directo, no necesita uvicorn corriendo.
 """
 import psycopg2
 from datetime import datetime
+from app.core.config import settings
+DATABASE_URL = settings.DATABASE_URL
 
-DATABASE_URL = "postgresql://neondb_owner:npg_uFlE47iJbMgn@ep-withered-silence-acly7gq5-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+
+# DATABASE_URL ahora se obtiene de settings
 
 print("🔌 Conectando a la base de datos...")
 conn = psycopg2.connect(DATABASE_URL)

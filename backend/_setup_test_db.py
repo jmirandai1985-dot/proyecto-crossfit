@@ -17,7 +17,7 @@ os.environ["ENVIRONMENT"] = "test"
 
 # Register models
 
-PROD = "postgresql://neondb_owner:npg_uFlE47iJbMgn@ep-withered-silence-acly7gq5-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+PROD = settings.DATABASE_URL
 TEST = settings.DATABASE_URL
 
 print("=" * 60)

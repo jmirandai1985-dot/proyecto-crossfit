@@ -4,9 +4,12 @@ Ejecutar con: python test_db_simple.py
 """
 import psycopg2
 from urllib.parse import urlparse
+from app.core.config import settings
+DATABASE_URL = settings.DATABASE_URL
+
 
 # Cadena de conexión
-DATABASE_URL = "postgresql://neondb_owner:npg_uFlE47iJbMgn@ep-withered-silence-acly7gq5-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require"
+# DATABASE_URL ahora se obtiene de settings
 
 
 def test_connection():
