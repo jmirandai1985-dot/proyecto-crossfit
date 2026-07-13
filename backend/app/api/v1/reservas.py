@@ -9,6 +9,7 @@ from typing import List
 from app.db.database import get_db
 from app.models.reserva import Reserva
 from app.models.clase import Clase
+from app.models.disciplina import Disciplina
 from app.models.usuario import Usuario
 from app.schemas.reserva import (
     ReservaCreate, ReservaUpdate, ReservaResponse, ReservaListItem
@@ -267,9 +268,35 @@ def listar_reservas(
     usuario_id: int = None,
     db: Session = Depends(get_db)
 ):
-    """Lista reservas de un tenant con paginación y filtros opcionales.
-    Incluye datos de la clase asociada (disciplina, fecha, horario)."""
-    query = db.query(Reserva).filter(Reserva.tenant_id == tenant_id)
+    """
+    Lista reservas de un tenant con paginación y filtros opcionales.
+    Incluye datos de la clase asociada (disciplina, fecha, horario).
+
+    NOTA: Usa columnas explícitas (with_entities) en vez de .add_columns()
+    para evitar el patrón frágil de acceso row.ModelName que causó bugs previos.
+    """
+    # ── Construir query con columnas explícitas ──
+    query = db.query(
+        Reserva.id,
+        Reserva.tenant_id,
+        Reserva.clase_id,
+        Reserva.alumno_id,
+        Reserva.asistio,
+        Reserva.tokens_gastados,
+        Reserva.estado,
+        Reserva.fecha_reserva,
+        Reserva.created_at,
+        Clase.fecha.label('clase_fecha'),
+        Clase.hora_inicio,
+        Clase.hora_fin,
+        Disciplina.nombre.label('disciplina_nombre'),
+    ).join(
+        Clase, Reserva.clase_id == Clase.id
+    ).join(
+        Disciplina, Clase.disciplina_id == Disciplina.id
+    ).filter(
+        Reserva.tenant_id == tenant_id
+    )
 
     if estado is not None:
         query = query.filter(Reserva.estado == estado)
@@ -277,43 +304,27 @@ def listar_reservas(
     if usuario_id is not None:
         query = query.filter(Reserva.alumno_id == usuario_id)
 
-    from app.models.clase import Clase
-    from app.models.disciplina import Disciplina
+    rows = query.offset(skip).limit(limit).all()
 
-    reservas = query.join(Clase, Reserva.clase_id == Clase.id).join(
-        Disciplina, Clase.disciplina_id == Disciplina.id
-    ).add_columns(
-        Disciplina.nombre.label('disciplina_nombre'),
-        Clase.fecha.label('clase_fecha'),
-        Clase.hora_inicio,
-        Clase.hora_fin
-    ).offset(skip).limit(limit).all()
-
-    # Manually build response con datos de la clase
+    # ── Construir respuesta con acceso directo a columnas ──
+    # Resultado son named tuples, cada columna es un atributo directo (row.columna)
+    # NO hay anidamiento row.ModelName — eso se elimina con columnas explícitas
     result = []
-    for row in reservas:
-        # With .add_columns(), the model is nested under its class name
-        rm_obj = row.Reserva
-        disciplina_nombre = row.disciplina_nombre if hasattr(
-            row, 'disciplina_nombre') else None
-        clase_fecha = row.clase_fecha if hasattr(row, 'clase_fecha') else None
-        hora_inicio = row.hora_inicio if hasattr(row, 'hora_inicio') else None
-        hora_fin = row.hora_fin if hasattr(row, 'hora_fin') else None
-
+    for r in rows:
         result.append({
-            "id": rm_obj.id,
-            "tenant_id": rm_obj.tenant_id,
-            "clase_id": rm_obj.clase_id,
-            "alumno_id": rm_obj.alumno_id,
-            "asistio": rm_obj.asistio,
-            "tokens_gastados": rm_obj.tokens_gastados,
-            "estado": rm_obj.estado,
-            "fecha_reserva": str(rm_obj.fecha_reserva) if rm_obj.fecha_reserva else None,
-            "created_at": str(rm_obj.created_at) if rm_obj.created_at else None,
-            "disciplina_nombre": disciplina_nombre,
-            "clase_fecha": str(clase_fecha) if clase_fecha else None,
-            "hora_inicio": hora_inicio,
-            "hora_fin": hora_fin,
+            "id": r.id,
+            "tenant_id": r.tenant_id,
+            "clase_id": r.clase_id,
+            "alumno_id": r.alumno_id,
+            "asistio": r.asistio,
+            "tokens_gastados": r.tokens_gastados,
+            "estado": r.estado,
+            "fecha_reserva": str(r.fecha_reserva) if r.fecha_reserva else None,
+            "created_at": str(r.created_at) if r.created_at else None,
+            "disciplina_nombre": r.disciplina_nombre,
+            "clase_fecha": str(r.clase_fecha) if r.clase_fecha else None,
+            "hora_inicio": r.hora_inicio,
+            "hora_fin": r.hora_fin,
         })
 
     return result

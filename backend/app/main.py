@@ -40,6 +40,22 @@ async def root():
     return {"message": "Box CrossFit Platform API", "status": "online", "version": "1.0.0"}
 
 
+@app.get("/debug/db-url")
+async def debug_db_url():
+    """Endpoint de seguridad: usado por conftest.py para verificar que el servidor
+    NO esté apuntando a producción.
+    - En TEST: devuelve {"is_safe": true}
+    - En PRODUCCIÓN: devuelve 404 para no exponer información de infraestructura
+    Nunca expone la URL completa ni credenciales."""
+    from app.core.config import settings
+    url = settings.DATABASE_URL
+    if "soft-bar" in url:
+        return {"is_safe": True, "is_test": True}
+    # En producción o cualquier otro entorno, no revelar información
+    from fastapi import HTTPException
+    raise HTTPException(status_code=404, detail="Not found")
+
+
 @app.get("/health")
 async def health_check():
     from app.db.database import engine
@@ -202,45 +218,46 @@ async def startup_event():
         db = SessionLocal()
         try:
             movimientos_lista = [
-                "Clean (Cargada)",
-                "Snatch (Arrancada)",
-                "Jerk (Envión)",
-                "Thruster",
-                "Deadlift (Peso Muerto)",
-                "Front Squat (Sentadilla Frontal)",
-                "Back Squat (Sentadilla Trasera)",
-                "Overhead Squat (Sentadilla Over-Head)",
-                "Pull-ups (Dominadas)",
-                "Chest to Bar (C2B)",
-                "Toes to Bar (T2B)",
-                "Bar Muscle-up (BMU)",
-                "Ring Muscle-up (RMU)",
-                "Handstand Push-ups / HSPU (Flexiones invertidas)",
-                "Handstand Walk / HSW (Caminata de manos)",
-                "Rope Climb (Subida de cuerda usando los pies)",
-                "Legless Rope Climb (Subida de cuerda solo con manos / sin piernas)",
-                "Double Unders / DU (Saltos dobles)",
-                "Single Unders / SU (Saltos simples)",
-                "Pistol Squat",
-                "Burpees",
-                "Wall Balls (Lanzamiento de balón)",
-                "Box Jumps (Saltos al cajón)",
-                "Box Jump Over",
-                "Dumbbell Snatch",
-                "Kettlebell Swing",
-                "Toes to Ring (T2R)",
-                "Bear Crawl (Caminata de oso)"
+                ("Clean (Cargada)", "fuerza"),
+                ("Snatch (Arrancada)", "fuerza"),
+                ("Jerk (Envión)", "fuerza"),
+                ("Thruster", "fuerza"),
+                ("Deadlift (Peso Muerto)", "fuerza"),
+                ("Front Squat (Sentadilla Frontal)", "fuerza"),
+                ("Back Squat (Sentadilla Trasera)", "fuerza"),
+                ("Overhead Squat (Sentadilla Over-Head)", "fuerza"),
+                ("Pull-ups (Dominadas)", "gimnastico"),
+                ("Chest to Bar (C2B)", "gimnastico"),
+                ("Toes to Bar (T2B)", "gimnastico"),
+                ("Bar Muscle-up (BMU)", "gimnastico"),
+                ("Ring Muscle-up (RMU)", "gimnastico"),
+                ("Handstand Push-ups / HSPU (Flexiones invertidas)", "gimnastico"),
+                ("Handstand Walk / HSW (Caminata de manos)", "gimnastico"),
+                ("Rope Climb (Subida de cuerda usando los pies)", "gimnastico"),
+                ("Legless Rope Climb (Subida de cuerda solo con manos / sin piernas)", "gimnastico"),
+                ("Double Unders / DU (Saltos dobles)", "gimnastico"),
+                ("Single Unders / SU (Saltos simples)", "gimnastico"),
+                ("Pistol Squat", "gimnastico"),
+                ("Burpees", "metabolico"),
+                ("Wall Balls (Lanzamiento de balón)", "metabolico"),
+                ("Box Jumps (Saltos al cajón)", "gimnastico"),
+                ("Box Jump Over", "gimnastico"),
+                ("Dumbbell Snatch", "fuerza"),
+                ("Kettlebell Swing", "fuerza"),
+                ("Toes to Ring (T2R)", "gimnastico"),
+                ("Bear Crawl (Caminata de oso)", "gimnastico"),
             ]
             db_tenant = db.query(Tenant).filter(Tenant.id == 1).first()
             if db_tenant:
                 existing_count = db.query(Movimiento).filter(
                     Movimiento.tenant_id == 1).count()
                 if existing_count == 0:
-                    for nombre in movimientos_lista:
+                    for nombre, categoria in movimientos_lista:
                         movimiento = Movimiento(
                             tenant_id=1,
                             nombre=nombre,
                             descripcion=f"Movimiento de CrossFit: {nombre}",
+                            categoria=categoria,
                             activo=True
                         )
                         db.add(movimiento)

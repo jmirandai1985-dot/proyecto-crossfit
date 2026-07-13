@@ -423,7 +423,7 @@ def test_16_crear_wod_y_verificar_hoy():
         "fecha": HOY_STR,
         "titulo": "TEST WOD automatico - borrar",
         "descripcion": "WOD creado por test automatico",
-        "coach_id": 4,
+        "coach_id": 1000,
         "estado": "publicado",
         "movimientos": [
             {

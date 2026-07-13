@@ -6,10 +6,14 @@ from pydantic_settings import BaseSettings
 from typing import List
 
 
+import os
+
+
 class Settings(BaseSettings):
     """
     Configuración de la aplicación usando Pydantic Settings
     Lee automáticamente las variables de entorno desde .env
+    Si ENVIRONMENT=test, carga .env.test en vez de .env
     """
 
     # Información de la aplicación
@@ -42,10 +46,12 @@ class Settings(BaseSettings):
     class Config:
         """
         Configuración de Pydantic Settings
+        Si ENVIRONMENT=test, carga .env.test; si no, carga .env
         """
-        env_file = ".env"  # Archivo de donde leer las variables
+        env_file = ".env.test" if os.getenv(
+            "ENVIRONMENT") == "test" else ".env"
         env_file_encoding = "utf-8"
-        case_sensitive = True  # Las variables son case-sensitive
+        case_sensitive = True
 
 
 # Instancia global de configuración
