@@ -1,7 +1,7 @@
 """
 Modelo SQLAlchemy para la tabla wods (Workout of the Day)
 """
-from sqlalchemy import Column, Integer, String, Date, Boolean, ForeignKey, Enum, Index, Time
+from sqlalchemy import Column, Integer, String, Date, Boolean, ForeignKey, Enum, Index, Time, Text
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -18,7 +18,7 @@ class EstadoWod(enum.Enum):
 
 class Wod(Base):
     """
-    Modelo de WOD (Workout of the Day)
+    Modelo de WOD (Workout of the Day) - v2 con campos de texto libre
     Representa un entrenamiento programado para una fecha específica
     """
     __tablename__ = "wods"
@@ -31,6 +31,12 @@ class Wod(Base):
     hora_fin = Column(Time, nullable=True)
     titulo = Column(String(200), nullable=True)
     descripcion = Column(String(500), nullable=True)
+    # Nuevos campos de texto libre (migración 006)
+    calentamiento = Column(Text, nullable=True)
+    fuerza_habilidad = Column(Text, nullable=True)
+    wod_principal = Column(Text, nullable=True)
+    # AMRAP, EMOM, RFT, FOR TIME
+    tipo_metcon = Column(String(50), nullable=True)
     coach_id = Column(Integer, ForeignKey(
         "usuarios.id", ondelete="SET NULL"), nullable=True)
     estado = Column(Enum(EstadoWod), default=EstadoWod.draft, nullable=False)
@@ -40,7 +46,7 @@ class Wod(Base):
     updated_at = Column(TIMESTAMP(timezone=True),
                         nullable=True, onupdate=func.now())
 
-    # Relaciones
+    # Relaciones (mantenemos compatibilidad para migración, se puede eliminar después)
     movimientos = relationship(
         "WodMovimiento", back_populates="wod", cascade="all, delete-orphan")
 

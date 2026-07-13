@@ -658,6 +658,10 @@ def crear_wod(wod_data: schemas.WodCreate, tenant_id: int = Query(1), db: Sessio
         hora_fin=wod_data.hora_fin,
         titulo=wod_data.titulo,
         descripcion=wod_data.descripcion,
+        calentamiento=wod_data.calentamiento,
+        fuerza_habilidad=wod_data.fuerza_habilidad,
+        wod_principal=wod_data.wod_principal,
+        tipo_metcon=wod_data.tipo_metcon,
         coach_id=wod_data.coach_id,
         estado=EstadoWod[estado_valor]
     )
@@ -769,6 +773,16 @@ def actualizar_wod(wod_id: int, wod_data: schemas.WodUpdate, tenant_id: int = Qu
         wod.descripcion = wod_data.descripcion
     if wod_data.estado is not None:
         wod.estado = EstadoWod[wod_data.estado]
+
+    # Actualizar campos de texto libre
+    if wod_data.calentamiento is not None:
+        wod.calentamiento = wod_data.calentamiento
+    if wod_data.fuerza_habilidad is not None:
+        wod.fuerza_habilidad = wod_data.fuerza_habilidad
+    if wod_data.wod_principal is not None:
+        wod.wod_principal = wod_data.wod_principal
+    if wod_data.tipo_metcon is not None:
+        wod.tipo_metcon = wod_data.tipo_metcon
 
     # Actualizar horarios
     if wod_data.hora_inicio is not None:

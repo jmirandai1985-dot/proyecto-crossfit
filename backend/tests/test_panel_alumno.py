@@ -411,35 +411,34 @@ def test_15_actualizar_peso_alumno():
 # ===================================================================
 
 def test_16_crear_wod_y_verificar_hoy():
-    """[16] POST /wods/ y GET /wods/hoy - Crear WOD y verificar que aparece."""
-    movs = _obtener_movimientos()
-    fuerza = [m for m in movs if m.get("categoria") == "fuerza"]
-    mov_wod = fuerza[0] if fuerza else (movs[0] if movs else None)
-    if not mov_wod:
-        pytest.skip("No hay movimientos para crear WOD")
-
+    """[16] POST /wods/ y GET /wods/hoy - Crear WOD (v2 texto libre) y verificar."""
     payload = {
         "tenant_id": TENANT_ID,
         "fecha": HOY_STR,
-        "titulo": "TEST WOD automatico - borrar",
-        "descripcion": "WOD creado por test automatico",
+        "titulo": "WOD Test v2 - borrar",
+        "descripcion": "WOD creado por test (v2 texto libre)",
+        "calentamiento": "Movilidad articular y activacion\n5 min de cardio ligero",
+        "fuerza_habilidad": "Clean 5x3 @ 75%\nPush Press 3x5",
+        "wod_principal": "AMRAP 12 minutos:\n10 Clean\n15 Box Jumps\n20 Burpees",
+        "tipo_metcon": "AMRAP",
         "coach_id": 1000,
-        "estado": "publicado",
-        "movimientos": [
-            {
-                "movimiento_id": mov_wod["id"],
-                "orden": 1,
-                "series": 3,
-                "repeticiones": "10",
-                "peso": None
-            }
-        ]
+        "estado": "publicado"
     }
     r = requests.post(f"{BASE}/wods/", json=payload,
                       params={"tenant_id": TENANT_ID})
     assert r.status_code < 300, f"Status {r.status_code}: {r.text[:200]}"
-    wod_id = r.json().get("id")
+    data = r.json()
+    wod_id = data.get("id")
     assert wod_id is not None, "Debe devolver id del WOD"
+    # Verificar campos de texto libre
+    assert data.get("calentamiento") == payload["calentamiento"], \
+        f"calentamiento no coincide: {data.get('calentamiento')}"
+    assert data.get("fuerza_habilidad") == payload["fuerza_habilidad"], \
+        f"fuerza_habilidad no coincide: {data.get('fuerza_habilidad')}"
+    assert data.get("wod_principal") == payload["wod_principal"], \
+        f"wod_principal no coincide: {data.get('wod_principal')}"
+    assert data.get("tipo_metcon") == payload["tipo_metcon"], \
+        f"tipo_metcon no coincide: {data.get('tipo_metcon')}"
     Shared.wod_creado_id = wod_id
 
     # Verificar que aparece en /wods/hoy
@@ -450,6 +449,8 @@ def test_16_crear_wod_y_verificar_hoy():
         assert wod_hoy.get("id") == wod_id, (
             f"/wods/hoy no muestra el WOD: esperado id={wod_id}, real id={wod_hoy.get('id')}"
         )
+        assert wod_hoy.get("calentamiento") == payload["calentamiento"]
+        assert wod_hoy.get("tipo_metcon") == payload["tipo_metcon"]
     elif isinstance(wod_hoy, list):
         ids = [w.get("id") for w in wod_hoy]
         assert wod_id in ids, f"/wods/hoy no contiene el WOD (ids: {ids})"

@@ -79,11 +79,15 @@ class WodCreate(BaseModel):
     hora_fin: Optional[time] = None
     titulo: Optional[str] = None
     descripcion: Optional[str] = None
+    # Nuevos campos de texto libre
+    calentamiento: Optional[str] = None
+    fuerza_habilidad: Optional[str] = None
+    wod_principal: Optional[str] = None
+    tipo_metcon: Optional[str] = None  # AMRAP, EMOM, RFT, FOR TIME
     coach_id: Optional[int] = None
     estado: Optional[str] = "draft"
-    # Formato tradicional (plano) - sin fase
+    # Mantenemos compatibilidad con formato viejo por ahora
     movimientos: List[WodMovimientoCreate] = []
-    # Nuevo formato con fases agrupadas (prioritario si se envía)
     fases: List[FaseWodCreate] = []
 
 
@@ -93,6 +97,11 @@ class WodUpdate(BaseModel):
     estado: Optional[str] = None
     hora_inicio: Optional[time] = None
     hora_fin: Optional[time] = None
+    # Nuevos campos de texto libre
+    calentamiento: Optional[str] = None
+    fuerza_habilidad: Optional[str] = None
+    wod_principal: Optional[str] = None
+    tipo_metcon: Optional[str] = None
     movimientos: Optional[List[WodMovimientoCreate]] = None
     fases: Optional[List[FaseWodCreate]] = None
 
@@ -112,6 +121,11 @@ class WodResponse(BaseModel):
     hora_fin: Optional[time] = None
     titulo: Optional[str]
     descripcion: Optional[str]
+    # Nuevos campos de texto libre
+    calentamiento: Optional[str] = None
+    fuerza_habilidad: Optional[str] = None
+    wod_principal: Optional[str] = None
+    tipo_metcon: Optional[str] = None
     coach_id: Optional[int]
     estado: str
     activo: bool
@@ -146,6 +160,10 @@ class WodResponse(BaseModel):
             hora_fin=wod.hora_fin,
             titulo=wod.titulo,
             descripcion=wod.descripcion,
+            calentamiento=wod.calentamiento,
+            fuerza_habilidad=wod.fuerza_habilidad,
+            wod_principal=wod.wod_principal,
+            tipo_metcon=wod.tipo_metcon,
             coach_id=wod.coach_id,
             estado=wod.estado.value if hasattr(
                 wod.estado, 'value') else wod.estado,
