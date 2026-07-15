@@ -727,13 +727,44 @@ def listar_wods(tenant_id: int = Query(1), fecha: date = Query(None), estado: st
 # ──────────────────────────────────────────────
 
 @router.get("/hoy")
-def obtener_wod_hoy(tenant_id: int = Query(1), db: Session = Depends(get_db)):
+def obtener_wod_hoy(tenant_id: int = Query(1), alumno_id: int = Query(None), db: Session = Depends(get_db)):
     """
     Retorna el WOD publicado para el día de hoy del tenant especificado.
-    Si no hay WOD para hoy, retorna null (no error).
+    Si se proporciona alumno_id, retorna el WOD de la clase donde ese
+    alumno tiene una reserva activa HOY (discrimina por disciplina).
+    Si no hay WOD para hoy o el alumno no tiene reserva, retorna None.
     """
     from datetime import date
+    from app.models.reserva import Reserva
+    from app.models.clase import Clase
     hoy = date.today()
+
+    # Si se especifica alumno, buscar el WOD de su clase reservada hoy
+    if alumno_id:
+        reserva_hoy = db.query(Reserva).join(Clase, Reserva.clase_id == Clase.id).filter(
+            Reserva.alumno_id == alumno_id,
+            Reserva.tenant_id == tenant_id,
+            Clase.fecha == hoy,
+            Reserva.estado != "cancelled"
+        ).order_by(Reserva.created_at.desc()).first()
+
+        if reserva_hoy:
+            # Obtener la clase directamente (no hay relationship, usamos FK)
+            clase_reservada = db.query(Clase).filter(
+                Clase.id == reserva_hoy.clase_id,
+                Clase.tenant_id == tenant_id
+            ).first()
+            if clase_reservada and clase_reservada.wod_id:
+                wod = db.query(Wod).filter(
+                    Wod.id == clase_reservada.wod_id,
+                    Wod.tenant_id == tenant_id,
+                    Wod.activo == True
+                ).first()
+                if wod:
+                    return schemas.WodResponse.from_orm_with_names(wod)
+        return None
+
+    # Sin alumno_id: comportamiento anterior (primer WOD del día)
     wod = db.query(Wod).filter(
         Wod.tenant_id == tenant_id,
         Wod.fecha == hoy,

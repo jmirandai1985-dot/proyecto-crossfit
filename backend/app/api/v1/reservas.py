@@ -1,7 +1,7 @@
 """
 Router de endpoints para gestión de Reservas
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
@@ -131,6 +131,72 @@ def crear_reserva(
     db.refresh(db_reserva)
 
     return db_reserva
+
+
+@router.put("/{reserva_id}/asistencia")
+def marcar_asistencia(
+    reserva_id: int,
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    asistio: bool = Body(True, embed=True)
+):
+    """
+    Marca la asistencia de una reserva.
+    SOLO registra el dato de asistencia — NO modifica créditos.
+    El crédito ya se maneja en el flujo de reserva/cancelación existente.
+    """
+    reserva = db.query(Reserva).filter(
+        Reserva.id == reserva_id,
+        Reserva.tenant_id == tenant_id
+    ).first()
+
+    if not reserva:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Reserva no encontrada"
+        )
+
+    reserva.asistio = asistio
+    db.commit()
+    db.refresh(reserva)
+
+    return {
+        "id": reserva.id,
+        "clase_id": reserva.clase_id,
+        "alumno_id": reserva.alumno_id,
+        "asistio": reserva.asistio,
+        "estado": reserva.estado,
+    }
+
+
+@router.get("/por-clase/{clase_id}")
+def listar_reservas_por_clase(
+    clase_id: int,
+    tenant_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Lista todas las reservas de una clase específica.
+    """
+    reservas = db.query(Reserva).filter(
+        Reserva.clase_id == clase_id,
+        Reserva.tenant_id == tenant_id
+    ).order_by(Reserva.created_at.asc()).all()
+
+    result = []
+    for r in reservas:
+        result.append({
+            "id": r.id,
+            "tenant_id": r.tenant_id,
+            "clase_id": r.clase_id,
+            "alumno_id": r.alumno_id,
+            "asistio": r.asistio,
+            "activa": r.estado not in ("cancelled",),
+            "tokens_gastados": r.tokens_gastados,
+            "fecha_reserva": str(r.fecha_reserva) if r.fecha_reserva else None,
+            "alumno_nombre": None,
+        })
+    return result
 
 
 @router.get("/asistencia-semanal")
