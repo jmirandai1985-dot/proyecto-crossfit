@@ -36,6 +36,19 @@ const Layout = ({ children }) => {
     const { usuario, rol, logout } = useAuth();
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const location = useLocation();
+    const searchParams = new URLSearchParams(location.search);
+    const currentTab = searchParams.get('tab') || 'resumen';
+
+    const coachSubTabs = [
+        { key: 'resumen', label: '📊 Resumen', path: '/coach/dashboard?tab=resumen' },
+        { key: 'clases', label: '📅 Clases', path: '/coach/dashboard?tab=clases' },
+        { key: 'alumnos', label: '👥 Alumnos & RMs', path: '/coach/dashboard?tab=alumnos' },
+        { key: 'progreso', label: '📈 Progreso', path: '/coach/dashboard?tab=progreso' },
+        { key: 'wods', label: '📋 Mis WODs', path: '/coach/dashboard?tab=wods' },
+        { key: 'riesgo', label: '⚠️ Riesgo', path: '/coach/dashboard?tab=riesgo' },
+    ];
+
+    const isCoachDashboard = location.pathname === '/coach/dashboard';
 
     const getMenuItems = () => {
         if (rol === 'alumno') {
@@ -50,7 +63,7 @@ const Layout = ({ children }) => {
         } else if (rol === 'coach') {
             return [
                 { label: 'Dashboard', path: '/coach/dashboard', icon: icons.home },
-                { label: 'Pizarra', path: '/coach/pizarra', icon: icons.dumbbell },
+                { label: 'Gestión de Clases', path: '/coach/gestion-clases', icon: icons.calendar },
             ];
         } else if (rol === 'administrador' || rol === 'admin') {
             return [
@@ -89,21 +102,56 @@ const Layout = ({ children }) => {
                 </div>
 
                 {/* Menu Items */}
-                <nav className="flex-1 p-3 space-y-1">
+                <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
                     {menuItems.map((item) => (
-                        <Link
-                            key={item.label}
-                            to={item.path}
-                            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm ${isActive(item.path)
-                                ? 'bg-emerald-50 text-emerald-700 font-semibold'
-                                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
-                                }`}
-                        >
-                            <span className={`${isActive(item.path) ? 'text-emerald-600' : 'text-gray-400'}`}>
-                                {item.icon}
-                            </span>
-                            {sidebarOpen && <span>{item.label}</span>}
-                        </Link>
+                        <div key={item.label}>
+                            <Link
+                                to={item.path}
+                                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm ${isActive(item.path) || (rol === 'coach' && item.label === 'Dashboard' && isCoachDashboard)
+                                    ? 'bg-emerald-50 text-emerald-700 font-semibold'
+                                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
+                                    }`}
+                            >
+                                <span className={`${isActive(item.path) ? 'text-emerald-600' : 'text-gray-400'}`}>
+                                    {item.icon}
+                                </span>
+                                {sidebarOpen && <span>{item.label}</span>}
+                            </Link>
+                            {/* Coach sub-tabs under Dashboard */}
+                            {rol === 'coach' && item.label === 'Dashboard' && sidebarOpen && isCoachDashboard && (
+                                <div className="ml-6 mt-1 space-y-0.5 border-l-2 border-emerald-200 pl-2">
+                                    {coachSubTabs.map((sub) => (
+                                        <Link
+                                            key={sub.key}
+                                            to={sub.path}
+                                            className={`block px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${currentTab === sub.key
+                                                ? 'bg-emerald-100 text-emerald-800'
+                                                : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
+                                                }`}
+                                        >
+                                            {sub.label}
+                                        </Link>
+                                    ))}
+                                </div>
+                            )}
+                            {/* Always show sub-tabs when coach is on dashboard path */}
+                            {rol === 'coach' && item.label === 'Dashboard' && sidebarOpen && !isCoachDashboard && (
+                                <div className="ml-6 mt-1 space-y-0.5 border-l-2 border-gray-200 pl-2">
+                                    {coachSubTabs.map((sub) => (
+                                        <Link
+                                            key={sub.key}
+                                            to={sub.path}
+                                            className={`block px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${false
+                                                ? 'bg-emerald-100 text-emerald-800'
+                                                : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
+                                                }`}
+                                        >
+                                            {sub.label}
+                                        </Link>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     ))}
                 </nav>
 

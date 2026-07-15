@@ -15,6 +15,7 @@ import AdminReportes from './pages/admin/Reportes';
 import CoachDashboard from './pages/coach/DashboardCoach';
 import CoachPizarra from './pages/coach/Pizarra';
 import CoachGenerarClases from './pages/coach/GenerarClases';
+import CoachGestionClases from './pages/coach/GestionClases';
 import AlumnoDashboard from './pages/alumno/Dashboard';
 import AlumnoMisReservas from './pages/alumno/MisReservas';
 import AlumnoPizarraRMs from './pages/alumno/PizarraRMs';
@@ -87,6 +88,7 @@ function App() {
             <Route path="dashboard" element={<CoachDashboard />} />
             <Route path="pizarra" element={<CoachPizarra />} />
             <Route path="generar-clases" element={<CoachGenerarClases />} />
+            <Route path="gestion-clases" element={<CoachGestionClases />} />
             <Route path="*" element={<Navigate to="/coach/dashboard" />} />
           </Route>
 

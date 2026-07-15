@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 
 const DashboardCoach = () => {
     const navigate = useNavigate();
+    const location = useLocation();
+    const searchParams = new URLSearchParams(location.search);
+    const activeTab = searchParams.get('tab') || 'resumen';
+
     const { usuario_id, tenant_id, usuario } = useAuth();
-    const [activeTab, setActiveTab] = useState('resumen');
 
     // Data states
     const [clasesHoy, setClasesHoy] = useState([]);
@@ -25,20 +28,6 @@ const DashboardCoach = () => {
     const [selectedAlumno, setSelectedAlumno] = useState(null);
     const [alumnoRMs, setAlumnoRMs] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
-
-    // WOD creation modal
-    const [showWodModal, setShowWodModal] = useState(false);
-    const [editingWodId, setEditingWodId] = useState(null);
-    const [wodForm, setWodForm] = useState({
-        titulo: '',
-        descripcion: '',
-        estado: 'draft',
-        coach_id: usuario_id,
-        movimientos: []
-    });
-    const [wodMovimientos, setWodMovimientos] = useState([]);
-    const [saving, setSaving] = useState(false);
-    const [deleteConfirmWodId, setDeleteConfirmWodId] = useState(null);
 
     // ---- Helper: Fechas ----
     const toLocalDateStr = (d) => {
@@ -274,154 +263,17 @@ const DashboardCoach = () => {
         }
     };
 
-    const handleCrearWOD = async () => {
-        if (!wodForm.titulo) {
-            alert('Debes ingresar un título para el WOD');
-            return;
-        }
-        setSaving(true);
-        try {
-            const payload = {
-                ...wodForm,
-                fecha: today,
-                tenant_id: tenant_id,
-                movimientos: wodMovimientos.map(m => ({
-                    movimiento_id: m.movimiento_id,
-                    orden: m.orden || 1,
-                    series: m.series || 0,
-                    repeticiones: m.repeticiones ? String(m.repeticiones) : null,
-                    peso: m.peso || 0,
-                    tiempo: m.tiempo || '',
-                    notas: m.notas || ''
-                }))
-            };
-            const response = await api.post(`/api/v1/wods?tenant_id=${tenant_id}`, payload);
-            setWodHoy(response.data);
-            setShowWodModal(false);
-            setEditingWodId(null);
-            setWodForm({ titulo: '', descripcion: '', estado: 'draft', coach_id: usuario_id, movimientos: [] });
-            setWodMovimientos([]);
-            fetchAllData();
-        } catch (error) {
-            console.error('Error creating WOD:', error);
-            alert('Error al crear el WOD: ' + (error.response?.data?.detail || error.message));
-        }
-        setSaving(false);
-    };
-
-    // ---- Editar WOD ----
-    const handleEditWod = async (wod) => {
-        try {
-            const res = await api.get(`/api/v1/wods/${wod.id}?tenant_id=${tenant_id}`);
-            const wodData = res.data;
-            setEditingWodId(wod.id);
-            setWodForm({
-                titulo: wodData.titulo || '',
-                descripcion: wodData.descripcion || '',
-                estado: wodData.estado || 'draft',
-                coach_id: wodData.coach_id || usuario_id,
-                movimientos: []
-            });
-            const movs = [];
-            if (wodData.fases && wodData.fases.length > 0) {
-                wodData.fases.forEach(fase => {
-                    fase.movimientos.forEach((mov) => {
-                        movs.push({
-                            movimiento_id: mov.movimiento_id,
-                            orden: movs.length + 1,
-                            series: mov.series || 0,
-                            repeticiones: mov.repeticiones || '',
-                            peso: mov.peso || 0,
-                            tiempo: mov.tiempo || '',
-                            notas: mov.notas || ''
-                        });
-                    });
-                });
-            } else if (wodData.movimientos && wodData.movimientos.length > 0) {
-                wodData.movimientos.forEach(mov => {
-                    movs.push({
-                        movimiento_id: mov.movimiento_id || mov.id,
-                        orden: mov.orden || movs.length + 1,
-                        series: mov.series || 0,
-                        repeticiones: mov.repeticiones || '',
-                        peso: mov.peso || 0,
-                        tiempo: mov.tiempo || '',
-                        notas: mov.notas || ''
-                    });
-                });
-            }
-            setWodMovimientos(movs);
-            setShowWodModal(true);
-        } catch (error) {
-            console.error('Error fetching WOD for edit:', error);
-            alert('Error al cargar el WOD para editar');
-        }
-    };
-
-    // ---- Guardar Edición de WOD (FIXED 422 error) ----
-    const handleUpdateWOD = async () => {
-        if (!wodForm.titulo || !editingWodId) {
-            alert('Debes ingresar un título para el WOD');
-            return;
-        }
-        setSaving(true);
-        try {
-            const payload = {
-                titulo: wodForm.titulo,
-                descripcion: wodForm.descripcion,
-                estado: wodForm.estado,
-                movimientos: wodMovimientos
-                    .filter(m => m.movimiento_id && Number(m.movimiento_id) > 0)
-                    .map(m => ({
-                        movimiento_id: Number(m.movimiento_id),
-                        orden: Number(m.orden) || 1,
-                        series: m.series ? Number(m.series) : null,
-                        repeticiones: m.repeticiones ? String(m.repeticiones) : null,
-                        peso: m.peso ? Number(m.peso) : null,
-                        tiempo: m.tiempo || null,
-                        notas: m.notas || null
-                    }))
-            };
-            await api.put(`/api/v1/wods/${editingWodId}?tenant_id=${tenant_id}`, payload);
-            setShowWodModal(false);
-            setEditingWodId(null);
-            setWodForm({ titulo: '', descripcion: '', estado: 'draft', coach_id: usuario_id, movimientos: [] });
-            setWodMovimientos([]);
-            fetchAllData();
-        } catch (error) {
-            console.error('Error updating WOD:', error);
-            alert('Error al actualizar el WOD: ' + (error.response?.data?.detail || error.message));
-        }
-        setSaving(false);
-    };
-
-    // ---- Eliminar WOD ----
-    const handleDeleteWod = async (wodId) => {
-        setDeleteConfirmWodId(wodId);
-    };
-
-    const confirmDeleteWod = async () => {
-        if (!deleteConfirmWodId) return;
-        setSaving(true);
-        try {
-            await api.delete(`/api/v1/wods/${deleteConfirmWodId}?tenant_id=${tenant_id}`);
-            setDeleteConfirmWodId(null);
-            fetchAllData();
-        } catch (error) {
-            console.error('Error deleting WOD:', error);
-            alert('Error al eliminar el WOD');
-        }
-        setSaving(false);
-    };
-
     const handlePublicarWOD = async () => {
         if (!wodHoy) return;
-        setSaving(true);
         try {
             await api.put(`/api/v1/wods/${wodHoy.id}?tenant_id=${tenant_id}`, {
                 estado: 'publicado',
                 titulo: wodHoy.titulo,
-                descripcion: wodHoy.descripcion
+                descripcion: wodHoy.descripcion,
+                calentamiento: wodHoy.calentamiento,
+                fuerza_habilidad: wodHoy.fuerza_habilidad,
+                wod_principal: wodHoy.wod_principal,
+                tipo_metcon: wodHoy.tipo_metcon
             });
             setWodHoy({ ...wodHoy, estado: 'publicado' });
             fetchAllData();
@@ -429,29 +281,6 @@ const DashboardCoach = () => {
             console.error('Error publishing WOD:', error);
             alert('Error al publicar el WOD');
         }
-        setSaving(false);
-    };
-
-    const addMovimientoToWod = () => {
-        setWodMovimientos([...wodMovimientos, {
-            movimiento_id: movimientos[0]?.id || '',
-            orden: wodMovimientos.length + 1,
-            series: 0,
-            repeticiones: '',
-            peso: 0,
-            tiempo: '',
-            notas: ''
-        }]);
-    };
-
-    const updateWodMovimiento = (index, field, value) => {
-        const updated = [...wodMovimientos];
-        updated[index][field] = value;
-        setWodMovimientos(updated);
-    };
-
-    const removeWodMovimiento = (index) => {
-        setWodMovimientos(wodMovimientos.filter((_, i) => i !== index));
     };
 
     const filteredAlumnos = alumnos.filter((alumno) =>
@@ -532,7 +361,7 @@ const DashboardCoach = () => {
     return (
         <Layout>
             <div className="space-y-6">
-                {/* Header */}
+                {/* Header — sin botón de crear WOD, solo informativo */}
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between">
                     <div>
                         <h1 className="text-3xl font-bold text-gray-900">Dashboard Coach</h1>
@@ -540,10 +369,10 @@ const DashboardCoach = () => {
                     </div>
                     <div className="mt-4 md:mt-0 flex gap-2">
                         <button
-                            onClick={() => navigate('/coach/pizarra')}
-                            className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-medium flex items-center gap-2"
+                            onClick={() => navigate('/coach/gestion-clases')}
+                            className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm font-medium flex items-center gap-2"
                         >
-                            <span>➕</span> Crear WOD
+                            <span>📋</span> Ir a Gestión de Clases
                         </button>
                     </div>
                 </div>
@@ -566,35 +395,13 @@ const DashboardCoach = () => {
                     ))}
                 </div>
 
-                {/* Tabs (WOD tab eliminated, only "📋 Mis WODs" remains) */}
+                {/* ─── CONTENIDO BASADO EN URL (sin pestañas internas duplicadas) ─── */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                    <div className="flex border-b border-gray-200 overflow-x-auto">
-                        {[
-                            { key: 'resumen', label: '📊 Resumen', icon: '📊' },
-                            { key: 'clases', label: '📅 Clases', icon: '📅' },
-                            { key: 'alumnos', label: '👥 Alumnos & RMs', icon: '👥' },
-                            { key: 'progreso', label: '📈 Progreso', icon: '📈' },
-                            { key: 'wods', label: '📋 Mis WODs', icon: '📋' },
-                            { key: 'riesgo', label: '⚠️ Riesgo', icon: '⚠️' }
-                        ].map(tab => (
-                            <button
-                                key={tab.key}
-                                onClick={() => setActiveTab(tab.key)}
-                                className={`px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors ${activeTab === tab.key
-                                    ? 'text-orange-500 border-b-2 border-orange-500 bg-orange-50/50'
-                                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                                    }`}
-                            >
-                                {tab.label}
-                            </button>
-                        ))}
-                    </div>
-
                     <div className="p-6">
                         {/* ─── TAB: RESUMEN ─── */}
                         {activeTab === 'resumen' && (
                             <div className="space-y-6">
-                                {/* WOD del Día */}
+                                {/* WOD del Día — solo lectura + publicar */}
                                 <div className="bg-gradient-to-r from-orange-50 to-amber-50 rounded-xl p-6 border border-orange-200">
                                     <div className="flex items-start justify-between">
                                         <div>
@@ -602,44 +409,36 @@ const DashboardCoach = () => {
                                             {wodHoy ? (
                                                 <div className="mt-3">
                                                     <p className="text-xl font-bold text-gray-900">{wodHoy.titulo}</p>
-                                                    <p className="text-sm text-gray-600 mt-1">{wodHoy.descripcion || 'Sin descripción'}</p>
+                                                    {wodHoy.wod_principal && (
+                                                        <div className="mt-2">
+                                                            <p className="text-xs font-bold text-gray-500 uppercase">WOD Principal</p>
+                                                            <pre className="whitespace-pre-wrap text-sm text-gray-700 bg-white/60 p-3 rounded-lg mt-1 border border-orange-100">{wodHoy.wod_principal}</pre>
+                                                        </div>
+                                                    )}
+                                                    {wodHoy.calentamiento && (
+                                                        <div className="mt-2">
+                                                            <p className="text-xs font-bold text-gray-500 uppercase">Calentamiento</p>
+                                                            <pre className="whitespace-pre-wrap text-sm text-gray-600 bg-white/60 p-2 rounded-lg mt-1">{wodHoy.calentamiento}</pre>
+                                                        </div>
+                                                    )}
+                                                    {wodHoy.fuerza_habilidad && (
+                                                        <div className="mt-2">
+                                                            <p className="text-xs font-bold text-gray-500 uppercase">Fuerza / Habilidad</p>
+                                                            <pre className="whitespace-pre-wrap text-sm text-gray-600 bg-white/60 p-2 rounded-lg mt-1">{wodHoy.fuerza_habilidad}</pre>
+                                                        </div>
+                                                    )}
                                                     <span className={`inline-block mt-2 px-2 py-1 text-xs font-medium rounded-full ${getEstadoColor(wodHoy.estado)}`}>
                                                         {wodHoy.estado === 'publicado' ? 'Publicado' : 'Borrador'}
                                                     </span>
-                                                    {(wodHoy.fases && wodHoy.fases.length > 0) ? (
-                                                        <div className="mt-3 space-y-2">
-                                                            {wodHoy.fases.map(fase => (
-                                                                <div key={fase.nombre} className="text-sm">
-                                                                    <p className="font-bold text-orange-600 text-xs uppercase">{fase.nombre}</p>
-                                                                    <div className="ml-2">
-                                                                        {fase.movimientos.map((mov, i) => (
-                                                                            <span key={i} className="text-gray-600">
-                                                                                {i > 0 && ', '}{mov.nombre}{mov.series && ` ${mov.series}x`}{mov.repeticiones && ` ${mov.repeticiones}`}{mov.peso && ` @${mov.peso}kg`}
-                                                                            </span>
-                                                                        ))}
-                                                                    </div>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    ) : wodHoy.movimientos && wodHoy.movimientos.length > 0 ? (
-                                                        <div className="mt-3 text-sm text-gray-600">
-                                                            <p className="font-bold text-gray-700 text-xs uppercase mb-1">MOVIMIENTOS</p>
-                                                            {wodHoy.movimientos.map((mov, i) => (
-                                                                <span key={i}>
-                                                                    {i > 0 && ', '}{mov.nombre}{mov.series && ` ${mov.series}x`}{mov.repeticiones && ` ${mov.repeticiones}`}{mov.peso && ` @${mov.peso}kg`}
-                                                                </span>
-                                                            ))}
-                                                        </div>
-                                                    ) : null}
                                                 </div>
                                             ) : (
                                                 <div className="mt-3">
                                                     <p className="text-gray-600">No hay WOD para hoy</p>
                                                     <button
-                                                        onClick={() => navigate('/coach/pizarra')}
-                                                        className="mt-2 px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600 transition-colors"
+                                                        onClick={() => navigate('/coach/gestion-clases')}
+                                                        className="mt-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
                                                     >
-                                                        Crear WOD
+                                                        Ir a Gestión de Clases
                                                     </button>
                                                 </div>
                                             )}
@@ -647,10 +446,9 @@ const DashboardCoach = () => {
                                         {wodHoy && wodHoy.estado === 'draft' && (
                                             <button
                                                 onClick={handlePublicarWOD}
-                                                disabled={saving}
-                                                className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 transition-colors disabled:opacity-50"
+                                                className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 transition-colors"
                                             >
-                                                {saving ? 'Publicando...' : 'Publicar'}
+                                                Publicar
                                             </button>
                                         )}
                                     </div>
@@ -710,7 +508,7 @@ const DashboardCoach = () => {
                                                         </td>
                                                         <td className="px-4 py-3">
                                                             <button
-                                                                onClick={() => { setSelectedAlumno(alumno); setActiveTab('alumnos'); }}
+                                                                onClick={() => setSelectedAlumno(alumno)}
                                                                 className="text-xs text-orange-500 hover:text-orange-700 font-medium"
                                                             >
                                                                 Ver RMs
@@ -770,7 +568,7 @@ const DashboardCoach = () => {
                             </div>
                         )}
 
-                        {/* ─── TAB: CLASES (Weekly Schedule Grid) ─── */}
+                        {/* ─── TAB: CLASES (Solo lectura — redirige a GestionClases) ─── */}
                         {activeTab === 'clases' && (
                             <div className="space-y-6">
                                 <div className="flex items-center justify-between">
@@ -780,9 +578,15 @@ const DashboardCoach = () => {
                                             Semana: {weekRange.start} → {weekRange.end}
                                         </p>
                                     </div>
+                                    <button
+                                        onClick={() => navigate('/coach/gestion-clases')}
+                                        className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+                                    >
+                                        📋 Gestionar Clases
+                                    </button>
                                 </div>
 
-                                {/* Week Grid */}
+                                {/* Week Grid — Solo lectura, sin botones de crear/editar */}
                                 <div className="overflow-x-auto">
                                     <table className="w-full border-collapse min-w-[900px]">
                                         <thead>
@@ -826,19 +630,8 @@ const DashboardCoach = () => {
                                                             <td
                                                                 key={`${date}-${hour}`}
                                                                 className={`p-2 text-center transition-all ${isToday ? 'bg-orange-50/50' : 'bg-white'
-                                                                    } ${isEmpty ? 'hover:bg-gray-100 cursor-pointer' : 'hover:shadow-inner cursor-pointer'
                                                                     } border-r border-gray-100 ${dayIdx === 6 ? 'border-r-0' : ''
                                                                     }`}
-                                                                onClick={() => {
-                                                                    if (isEmpty) {
-                                                                        navigate('/coach/pizarra');
-                                                                    } else {
-                                                                        // Click on class with WOD → show edit
-                                                                        if (wodDelDia) {
-                                                                            handleEditWod(wodDelDia);
-                                                                        }
-                                                                    }
-                                                                }}
                                                             >
                                                                 {clase ? (
                                                                     <div className="space-y-1">
@@ -866,7 +659,7 @@ const DashboardCoach = () => {
                                                                     </div>
                                                                 ) : (
                                                                     <div className="flex items-center justify-center h-full py-3">
-                                                                        <span className="text-gray-300 hover:text-orange-400 text-lg transition-colors">+</span>
+                                                                        <span className="text-gray-300 text-xs italic">—</span>
                                                                     </div>
                                                                 )}
                                                             </td>
@@ -889,8 +682,10 @@ const DashboardCoach = () => {
                                     <span className="flex items-center gap-1">✅ WOD Publicado</span>
                                     <span className="flex items-center gap-1">📝 WOD Borrador</span>
                                     <span className="flex items-center gap-1">⬜ Sin WOD asignado</span>
-                                    <span className="flex items-center gap-1">+ Crear nuevo WOD</span>
                                 </div>
+                                <p className="text-xs text-gray-400 text-center">
+                                    ℹ️ Para crear o editar clases/WODs, usa la sección "Gestión de Clases" en el sidebar.
+                                </p>
                             </div>
                         )}
 
@@ -1031,7 +826,7 @@ const DashboardCoach = () => {
                                                         </td>
                                                         <td className="px-6 py-4 text-sm">
                                                             <button
-                                                                onClick={() => { setSelectedAlumno(alumno); setActiveTab('alumnos'); }}
+                                                                onClick={() => setSelectedAlumno(alumno)}
                                                                 className="text-orange-500 hover:text-orange-700 font-medium text-xs"
                                                             >
                                                                 Ver RMs
@@ -1049,34 +844,25 @@ const DashboardCoach = () => {
                             </div>
                         )}
 
-                        {/* ─── TAB: MIS WODs ─── */}
+                        {/* ─── TAB: MIS WODs (SOLO LECTURA) ─── */}
                         {activeTab === 'wods' && (
                             <div className="space-y-6">
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <h2 className="text-xl font-bold text-gray-900">📋 Mis WODs de la Semana</h2>
-                                        <p className="text-sm text-gray-600 mt-1">
-                                            Semana: {weekRange.start} → {weekRange.end} — Total: {wods.length} WODs
-                                        </p>
-                                    </div>
-                                    <button
-                                        onClick={() => navigate('/coach/pizarra')}
-                                        className="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600 transition-colors flex items-center gap-2"
-                                    >
-                                        <span>➕</span> Crear WOD
-                                    </button>
+                                <div>
+                                    <h2 className="text-xl font-bold text-gray-900">📋 Mis WODs de la Semana</h2>
+                                    <p className="text-sm text-gray-600 mt-1">
+                                        Semana: {weekRange.start} → {weekRange.end} — Total: {wods.length} WODs
+                                    </p>
                                 </div>
 
-                                {/* Tabla de WODs */}
+                                {/* Tabla de WODs — Solo lectura, sin botones de crear/editar/eliminar */}
                                 <div className="overflow-x-auto">
                                     <table className="w-full">
                                         <thead className="bg-gray-800 text-white">
                                             <tr>
                                                 <th className="px-6 py-3 text-left text-sm font-medium">Día / Horario</th>
                                                 <th className="px-6 py-3 text-left text-sm font-medium">Título</th>
-                                                <th className="px-6 py-3 text-left text-sm font-medium">Movimientos</th>
+                                                <th className="px-6 py-3 text-left text-sm font-medium">WOD Principal</th>
                                                 <th className="px-6 py-3 text-left text-sm font-medium">Estado</th>
-                                                <th className="px-6 py-3 text-left text-sm font-medium">Acciones</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-200">
@@ -1084,38 +870,36 @@ const DashboardCoach = () => {
                                                 [...wods]
                                                     .sort((a, b) => new Date(b.fecha || 0) - new Date(a.fecha || 0))
                                                     .map((wod, index) => {
-                                                        const numMovs = (wod.fases ? wod.fases.reduce((sum, f) => sum + (f.movimientos?.length || 0), 0) : 0) ||
-                                                            (wod.movimientos?.length || 0);
+                                                        // Generar resumen del wod_principal (primeros 100 caracteres)
+                                                        const resumenWod = wod.wod_principal
+                                                            ? wod.wod_principal.substring(0, 120) + (wod.wod_principal.length > 120 ? '...' : '')
+                                                            : (wod.descripcion ? wod.descripcion.substring(0, 120) + (wod.descripcion.length > 120 ? '...' : '') : 'Sin descripción');
+
+                                                        // Find associated class for hora
+                                                        const claseAsociada = clasesSemana.find(c => {
+                                                            const fechaC = c.fecha ? (typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha) : '';
+                                                            const fechaW = wod.fecha ? (typeof wod.fecha === 'string' ? wod.fecha.split('T')[0] : wod.fecha) : '';
+                                                            return fechaC === fechaW;
+                                                        });
+
                                                         return (
                                                             <tr key={wod.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                                                                 <td className="px-6 py-4 text-sm whitespace-nowrap">
                                                                     <span className="font-medium text-gray-900">{formatFecha(wod.fecha)}</span>
+                                                                    {claseAsociada && (
+                                                                        <span className="text-xs text-gray-500 ml-2">
+                                                                            {claseAsociada.hora_inicio?.substring(0, 5)}
+                                                                        </span>
+                                                                    )}
                                                                 </td>
                                                                 <td className="px-6 py-4 text-sm font-medium text-gray-900">
                                                                     {wod.titulo || 'WOD sin título'}
+                                                                    {wod.tipo_metcon && (
+                                                                        <span className="ml-2 text-xs text-orange-500 font-medium">({wod.tipo_metcon})</span>
+                                                                    )}
                                                                 </td>
-                                                                <td className="px-6 py-4 text-sm text-gray-600">
-                                                                    <span className="inline-flex items-center gap-1">
-                                                                        <span>🏋️</span>
-                                                                        <span>{numMovs} movimiento(s)</span>
-                                                                    </span>
-                                                                    {numMovs > 0 && wod.movimientos && (
-                                                                        <div className="text-xs text-gray-400 mt-1">
-                                                                            {wod.movimientos.slice(0, 3).map((m, i) => (
-                                                                                <span key={i}>{i > 0 && ', '}{m.nombre}</span>
-                                                                            ))}
-                                                                            {wod.movimientos.length > 3 && '...'}
-                                                                        </div>
-                                                                    )}
-                                                                    {numMovs > 0 && wod.fases && (
-                                                                        <div className="text-xs text-gray-400 mt-1">
-                                                                            {wod.fases.map(f => (
-                                                                                <span key={f.nombre} className="mr-2">
-                                                                                    <span className="font-medium text-orange-500">{f.nombre}:</span> {f.movimientos?.length || 0} movs
-                                                                                </span>
-                                                                            ))}
-                                                                        </div>
-                                                                    )}
+                                                                <td className="px-6 py-4 text-sm text-gray-600 max-w-xs">
+                                                                    <p className="text-xs text-gray-500 leading-relaxed">{resumenWod}</p>
                                                                 </td>
                                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                                     <span className={`inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full ${wod.estado === 'publicado'
@@ -1127,58 +911,20 @@ const DashboardCoach = () => {
                                                                         {wod.estado === 'publicado' ? 'Publicado' : 'Borrador'}
                                                                     </span>
                                                                 </td>
-                                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                                    <div className="flex gap-2">
-                                                                        {(wod.estado === 'draft' || wod.estado === 'borrador') && (
-                                                                            <button
-                                                                                onClick={async () => {
-                                                                                    try {
-                                                                                        setSaving(true);
-                                                                                        await api.put(`/api/v1/wods/${wod.id}?tenant_id=${tenant_id}`, {
-                                                                                            estado: 'publicado',
-                                                                                            titulo: wod.titulo,
-                                                                                            descripcion: wod.descripcion
-                                                                                        });
-                                                                                        fetchAllData();
-                                                                                    } catch (error) {
-                                                                                        console.error('Error publishing WOD:', error);
-                                                                                        alert('Error al publicar el WOD');
-                                                                                    }
-                                                                                    setSaving(false);
-                                                                                }}
-                                                                                className="px-3 py-1.5 bg-green-500 text-white rounded-lg text-xs font-medium hover:bg-green-600 transition-colors flex items-center gap-1"
-                                                                            >
-                                                                                <span>📢</span> Publicar
-                                                                            </button>
-                                                                        )}
-                                                                        <button
-                                                                            onClick={() => handleEditWod(wod)}
-                                                                            className="px-3 py-1.5 bg-orange-500 text-white rounded-lg text-xs font-medium hover:bg-orange-600 transition-colors flex items-center gap-1"
-                                                                        >
-                                                                            <span>✏️</span> Editar
-                                                                        </button>
-                                                                        <button
-                                                                            onClick={() => handleDeleteWod(wod.id)}
-                                                                            className="px-3 py-1.5 bg-red-500 text-white rounded-lg text-xs font-medium hover:bg-red-600 transition-colors flex items-center gap-1"
-                                                                        >
-                                                                            <span>🗑️</span> Eliminar
-                                                                        </button>
-                                                                    </div>
-                                                                </td>
                                                             </tr>
                                                         );
                                                     })
                                             ) : (
                                                 <tr>
-                                                    <td colSpan="5" className="px-6 py-12 text-center text-gray-500">
+                                                    <td colSpan="4" className="px-6 py-12 text-center text-gray-500">
                                                         <div className="text-4xl mb-3">💪</div>
                                                         <p className="text-lg font-medium text-gray-700">No hay WODs creados</p>
-                                                        <p className="text-sm text-gray-500 mt-1">Crea tu primer WOD para que los alumnos puedan verlo</p>
+                                                        <p className="text-sm text-gray-500 mt-1">Crea WODs desde la sección "Gestión de Clases"</p>
                                                         <button
-                                                            onClick={() => navigate('/coach/pizarra')}
-                                                            className="mt-4 px-6 py-2 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600 transition-colors"
+                                                            onClick={() => navigate('/coach/gestion-clases')}
+                                                            className="mt-4 px-6 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
                                                         >
-                                                            Crear Primer WOD
+                                                            Ir a Gestión de Clases
                                                         </button>
                                                     </td>
                                                 </tr>
@@ -1186,6 +932,9 @@ const DashboardCoach = () => {
                                         </tbody>
                                     </table>
                                 </div>
+                                <p className="text-xs text-gray-400 text-center">
+                                    ℹ️ Vista informativa. Para crear o editar WODs, usa la sección "Gestión de Clases" en el sidebar.
+                                </p>
                             </div>
                         )}
 
@@ -1220,7 +969,7 @@ const DashboardCoach = () => {
                                                         📞 Contactar
                                                     </button>
                                                     <button
-                                                        onClick={() => { setSelectedAlumno(alumno); setActiveTab('alumnos'); }}
+                                                        onClick={() => setSelectedAlumno(alumno)}
                                                         className="px-3 py-2 bg-white border border-red-300 text-red-600 rounded text-sm font-medium hover:bg-red-50 transition-colors"
                                                     >
                                                         Ver Perfil
@@ -1241,189 +990,6 @@ const DashboardCoach = () => {
                     </div>
                 </div>
             </div>
-
-            {/* ─── CONFIRMACIÓN ELIMINAR WOD ─── */}
-            {deleteConfirmWodId && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
-                        <div className="text-center">
-                            <div className="text-5xl mb-4">⚠️</div>
-                            <h3 className="text-xl font-bold text-gray-900 mb-2">¿Eliminar WOD?</h3>
-                            <p className="text-gray-600 mb-6">Esta acción no se puede deshacer. El WOD se eliminará permanentemente.</p>
-                            <div className="flex gap-3 justify-center">
-                                <button
-                                    onClick={() => setDeleteConfirmWodId(null)}
-                                    className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-                                >
-                                    Cancelar
-                                </button>
-                                <button
-                                    onClick={confirmDeleteWod}
-                                    disabled={saving}
-                                    className="px-6 py-2 bg-red-500 text-white rounded-lg text-sm font-medium hover:bg-red-600 transition-colors disabled:opacity-50"
-                                >
-                                    {saving ? 'Eliminando...' : 'Sí, Eliminar'}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* ─── MODAL CREAR/EDITAR WOD ─── */}
-            {showWodModal && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="p-6 border-b border-gray-200 flex justify-between items-center">
-                            <h2 className="text-2xl font-bold text-gray-900">
-                                {editingWodId ? 'Editar WOD' : 'Crear WOD del Día'}
-                            </h2>
-                            <button
-                                onClick={() => {
-                                    setShowWodModal(false);
-                                    setEditingWodId(null);
-                                    setWodForm({ titulo: '', descripcion: '', estado: 'draft', coach_id: usuario_id, movimientos: [] });
-                                    setWodMovimientos([]);
-                                }}
-                                className="text-gray-400 hover:text-gray-600 text-2xl"
-                            >
-                                ✕
-                            </button>
-                        </div>
-
-                        <div className="p-6 space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Título del WOD *</label>
-                                <input
-                                    type="text"
-                                    placeholder="Ej: 'Fran', 'Cindy', 'Hero WOD'..."
-                                    value={wodForm.titulo}
-                                    onChange={(e) => setWodForm({ ...wodForm, titulo: e.target.value })}
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
-                                <textarea
-                                    placeholder="Describe el WOD: rondas, ejercicios, tiempos..."
-                                    value={wodForm.descripcion}
-                                    onChange={(e) => setWodForm({ ...wodForm, descripcion: e.target.value })}
-                                    rows={3}
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Estado</label>
-                                <select
-                                    value={wodForm.estado}
-                                    onChange={(e) => setWodForm({ ...wodForm, estado: e.target.value })}
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                                >
-                                    <option value="draft">Borrador</option>
-                                    <option value="publicado">Publicado</option>
-                                </select>
-                            </div>
-
-                            {/* Movimientos */}
-                            <div>
-                                <div className="flex items-center justify-between mb-2">
-                                    <label className="text-sm font-medium text-gray-700">Movimientos</label>
-                                    <button
-                                        onClick={addMovimientoToWod}
-                                        className="text-sm text-orange-500 hover:text-orange-700 font-medium"
-                                    >
-                                        + Agregar movimiento
-                                    </button>
-                                </div>
-                                {wodMovimientos.length === 0 && (
-                                    <p className="text-sm text-gray-500 text-center py-4 border-2 border-dashed border-gray-200 rounded-lg">
-                                        No has agregado movimientos. Haz clic en "Agregar movimiento"
-                                    </p>
-                                )}
-                                <div className="space-y-3">
-                                    {wodMovimientos.map((mov, idx) => (
-                                        <div key={idx} className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                                            <div className="flex justify-between items-start mb-2">
-                                                <span className="text-xs font-medium text-gray-500">Movimiento #{idx + 1}</span>
-                                                <button
-                                                    onClick={() => removeWodMovimiento(idx)}
-                                                    className="text-red-500 hover:text-red-700 text-xs"
-                                                >
-                                                    Eliminar
-                                                </button>
-                                            </div>
-                                            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                                                <select
-                                                    value={mov.movimiento_id}
-                                                    onChange={(e) => updateWodMovimiento(idx, 'movimiento_id', e.target.value ? parseInt(e.target.value) : '')}
-                                                    className="col-span-2 px-2 py-1 border border-gray-300 rounded text-sm"
-                                                >
-                                                    <option value="">Seleccionar...</option>
-                                                    {movimientos.map((m) => (
-                                                        <option key={m.id} value={m.id}>{m.nombre}</option>
-                                                    ))}
-                                                </select>
-                                                <input
-                                                    type="number"
-                                                    placeholder="Series"
-                                                    value={mov.series || ''}
-                                                    onChange={(e) => updateWodMovimiento(idx, 'series', e.target.value ? parseInt(e.target.value) || 0 : 0)}
-                                                    className="px-2 py-1 border border-gray-300 rounded text-sm"
-                                                />
-                                                <input
-                                                    type="text"
-                                                    placeholder="Reps"
-                                                    value={mov.repeticiones || ''}
-                                                    onChange={(e) => updateWodMovimiento(idx, 'repeticiones', e.target.value)}
-                                                    className="px-2 py-1 border border-gray-300 rounded text-sm"
-                                                />
-                                                <input
-                                                    type="number"
-                                                    step="0.5"
-                                                    placeholder="Peso (kg)"
-                                                    value={mov.peso || ''}
-                                                    onChange={(e) => updateWodMovimiento(idx, 'peso', e.target.value ? parseFloat(e.target.value) || 0 : 0)}
-                                                    className="px-2 py-1 border border-gray-300 rounded text-sm"
-                                                />
-                                            </div>
-                                            <input
-                                                type="text"
-                                                placeholder="Notas (opcional)"
-                                                value={mov.notas || ''}
-                                                onChange={(e) => updateWodMovimiento(idx, 'notas', e.target.value)}
-                                                className="mt-2 w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                                            />
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
-                            <button
-                                onClick={() => {
-                                    setShowWodModal(false);
-                                    setEditingWodId(null);
-                                    setWodForm({ titulo: '', descripcion: '', estado: 'draft', coach_id: usuario_id, movimientos: [] });
-                                    setWodMovimientos([]);
-                                }}
-                                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                onClick={editingWodId ? handleUpdateWOD : handleCrearWOD}
-                                disabled={saving || !wodForm.titulo}
-                                className="px-6 py-2 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600 transition-colors disabled:opacity-50"
-                            >
-                                {saving ? (editingWodId ? 'Actualizando...' : 'Creando...') : (editingWodId ? 'Actualizar WOD' : 'Crear WOD')}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </Layout>
     );
 };
