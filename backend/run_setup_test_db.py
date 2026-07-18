@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone, date, time
 import importlib
 import os
 import sys
-# PROD se obtiene de settings.DATABASE_URL con ENVIRONMENT='' 
+# PROD se obtiene de settings.DATABASE_URL con ENVIRONMENT=''
 # (definido en _run_tests_orchestrator.py)
 
 
@@ -42,9 +42,9 @@ print("="*60)
 print(f"PROD: {PROD[:70]}...")
 print(f"TEST: {TEST[:70]}...")
 print(f"DIFFERENT: {PROD != TEST}")
-print(f"SOFT-BAR: {'soft-bar' in TEST}")
+print(f"PURPLE-CHERRY (DIRECT): {'purple-cherry' in TEST}")
 print("="*60)
-if 'soft-bar' not in TEST:
+if 'purple-cherry' not in TEST:
     sys.exit("FATAL: Not test branch")
 
 Base.metadata.create_all(bind=engine)
@@ -55,6 +55,8 @@ try:
     # ── 1. LIMPIAR TODO ───────────────────────────────────
     print("\n=== LIMPIANDO datos anteriores...")
     # Orden inverso de FK
+    db.execute(text("DELETE FROM solicitudes_planes"))
+    db.execute(text("DELETE FROM notificaciones"))
     db.execute(text("DELETE FROM reservas"))
     db.execute(text("DELETE FROM wod_movimientos"))
     db.execute(text("DELETE FROM historial_rm"))
@@ -94,6 +96,12 @@ try:
     db.flush()
     print("   Coach 1000")
 
+    db.add(Usuario(id=1001, tenant_id=1, rut="11.111.111-2",
+                   nombre="Admin Test",
+                   correo="admin@test.com", password_hash="x", rol="administrador", activo=True))
+    db.flush()
+    print("   Admin 1001")
+
     # ── 5. MOVIMIENTOS (con categorías) ───────────────────
     mov_data = [
         ("Clean", "fuerza"), ("Snatch", "fuerza"),
@@ -118,13 +126,19 @@ try:
     db.flush()
     print("   Plan 1")
 
-    # ── 7. SUSCRIPCIÓN ────────────────────────────────────
+    # ── 7. SUSCRIPCIÓN (una sola, siempre) ────────────────
+    # Asegurar que solo exista UNA suscripción activa
+    db.execute(text("DELETE FROM suscripciones WHERE usuario_id = 999"))
+    db.flush()
     db.add(Suscripcion(tenant_id=1, usuario_id=999, plan_id=1,
                        fecha_inicio=ahora - timedelta(days=10),
                        fecha_expiracion=ahora + timedelta(days=20),
                        creditos_disponibles=50, estado='activo'))
     db.flush()
-    print("   Suscripcion activa (50 creditos)")
+    count = db.execute(text(
+        "SELECT COUNT(*) FROM suscripciones WHERE usuario_id = 999 AND estado = 'activo'")).scalar()
+    assert count == 1, f"Esperaba exactamente 1 suscripcion activa, hay {count}"
+    print("   Suscripcion activa (50 creditos) [OK: exactamente 1]")
 
     # ── 8. DISCIPLINA ─────────────────────────────────────
     db.add(Disciplina(id=1, tenant_id=1, nombre="CrossFit", activo=True))
@@ -166,7 +180,27 @@ try:
     db.flush()
     print("   WOD publicado para hoy")
 
+    # Extra safety: force-clean any suscripcion for user 999 that startup_event might have created
+    # and ensure exactly 1 remains
+    db.execute(text(
+        "DELETE FROM suscripciones WHERE usuario_id = 999 AND creditos_disponibles != 50"))
+    db.flush()
+    count_final = db.execute(text(
+        "SELECT COUNT(*) FROM suscripciones WHERE usuario_id = 999 AND estado = 'activo'")).scalar()
+    if count_final != 1:
+        db.execute(text("DELETE FROM suscripciones WHERE usuario_id = 999"))
+        db.flush()
+        db.add(Suscripcion(tenant_id=1, usuario_id=999, plan_id=1,
+                           fecha_inicio=ahora - timedelta(days=10),
+                           fecha_expiracion=ahora + timedelta(days=20),
+                           creditos_disponibles=50, estado='activo'))
+        db.flush()
+        print("   [SAFETY] Suscripcion recreada forzosamente")
+
     db.commit()
+    count_verify = db.execute(text(
+        "SELECT COUNT(*) FROM suscripciones WHERE usuario_id = 999 AND estado = 'activo'")).scalar()
+    assert count_verify == 1, f"FATAL: {count_verify} suscripciones activas para alumno 999 despues del commit"
     print(f"\n=== DONE! Test DB ready. Fecha: {hoy} ===")
 except Exception as e:
     db.rollback()

@@ -12,6 +12,7 @@ from app.db.database import get_db
 from app.models.solicitud_plan import SolicitudPlan
 from app.models.suscripcion import Suscripcion
 from app.models.plan import Plan
+from app.models.usuario import Usuario
 from app.models.notificacion import Notificacion
 from app.schemas.solicitud import SolicitudPlanCreate
 from datetime import timedelta
@@ -146,7 +147,17 @@ def aprobar_solicitud(
     """
     Admin aprueba solicitud: cambia estado, crea suscripción y activa el plan.
     Además crea una notificación para el alumno.
+    VALIDACIÓN DE SEGURIDAD: verifica que el usuario autenticado tenga rol admin.
     """
+    # 🔒 Validación crítica: verificar que admin_id corresponde a un usuario con rol admin
+    admin = db.query(Usuario).filter(Usuario.id == admin_id).first()
+    if not admin:
+        raise HTTPException(
+            status_code=404, detail="Usuario admin no encontrado")
+    if admin.rol not in ("administrador", "admin"):
+        raise HTTPException(
+            status_code=403, detail="Acción no permitida: se requiere rol de administrador")
+
     solicitud = db.query(SolicitudPlan).filter(
         SolicitudPlan.id == solicitud_id).first()
     if not solicitud:
@@ -201,7 +212,16 @@ def rechazar_solicitud(
     motivo: Optional[str] = "Rechazado",
     db: Session = Depends(get_db)
 ):
-    """Admin rechaza solicitud y crea notificación"""
+    """Admin rechaza solicitud y crea notificación. VALIDACIÓN DE SEGURIDAD incluida."""
+    # 🔒 Validación crítica: verificar rol admin
+    admin = db.query(Usuario).filter(Usuario.id == admin_id).first()
+    if not admin:
+        raise HTTPException(
+            status_code=404, detail="Usuario admin no encontrado")
+    if admin.rol not in ("administrador", "admin"):
+        raise HTTPException(
+            status_code=403, detail="Acción no permitida: se requiere rol de administrador")
+
     solicitud = db.query(SolicitudPlan).filter(
         SolicitudPlan.id == solicitud_id).first()
     if not solicitud:

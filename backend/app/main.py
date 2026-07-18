@@ -49,8 +49,8 @@ async def debug_db_url():
     Nunca expone la URL completa ni credenciales."""
     from app.core.config import settings
     url = settings.DATABASE_URL
-    if "soft-bar" in url:
-        return {"is_safe": True, "is_test": True}
+    if "purple-cherry" in url:
+        return {"is_safe": True, "is_test": True, "branch": "purple-cherry"}
     # En producción o cualquier otro entorno, no revelar información
     from fastapi import HTTPException
     raise HTTPException(status_code=404, detail="Not found")

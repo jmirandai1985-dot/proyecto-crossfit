@@ -31,7 +31,7 @@ try:
         sys.exit(1)
     data = r.json()
     if data.get("is_safe"):
-        print(f"\n[OK] SERVIDOR apunta a TEST BRANCH (soft-bar)\n")
+        print(f"\n[OK] SERVIDOR apunta a TEST BRANCH (purple-cherry)\n")
     else:
         print(f"\n[WARN] SERVIDOR DB URL no clasificada: {data}\n")
 except requests.ConnectionError:
