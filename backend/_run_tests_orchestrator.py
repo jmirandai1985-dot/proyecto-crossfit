@@ -8,10 +8,6 @@ import sys
 import subprocess
 import time
 
-# Force UTF-8 encoding for stdout/stderr (Windows cp1252 doesn't support emojis)
-sys.stdout.reconfigure(encoding='utf-8')
-sys.stderr.reconfigure(encoding='utf-8')
-
 # Force test environment BEFORE any app import
 os.environ["ENVIRONMENT"] = "test"
 
