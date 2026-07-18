@@ -75,7 +75,6 @@ def analizar_fidelizacion(
     Analiza la última asistencia de cada alumno
     y detecta quiénes llevan más de X días sin ir
     """
-    # Traer solo alumnos activos del tenant
     alumnos = db.query(Usuario).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
@@ -88,7 +87,6 @@ def analizar_fidelizacion(
             detail="No hay alumnos activos en este box"
         )
 
-    # Traer última asistencia de cada alumno con SQLAlchemy
     ultimas = db.query(
         Asistencia.usuario_id,
         func.max(Asistencia.fecha).label("ultima_fecha")
@@ -96,15 +94,13 @@ def analizar_fidelizacion(
         Asistencia.tenant_id == tenant_id
     ).group_by(Asistencia.usuario_id).all()
 
-    # Convertir a diccionario para búsqueda rápida
     mapa_asistencias = {r.usuario_id: r.ultima_fecha for r in ultimas}
 
-    # Construir DataFrame con Pandas
     hoy = date.today()
     data = []
     for alumno in alumnos:
         ultima = mapa_asistencias.get(alumno.id)
-        dias = (hoy - ultima).days if ultima else 999  # 999 = nunca asistió
+        dias = (hoy - ultima).days if ultima else 999
         data.append({
             "id": alumno.id,
             "nombre": alumno.nombre,
@@ -115,12 +111,8 @@ def analizar_fidelizacion(
         })
 
     df = pd.DataFrame(data)
-
-    # Aplicar regla de negocio
     df_alerta = df[df["dias_ausente"] >= umbral_dias].copy()
     df_ok = df[df["dias_ausente"] < umbral_dias].copy()
-
-    # Ordenar por más días ausente primero
     df_alerta = df_alerta.sort_values("dias_ausente", ascending=False)
 
     return {
@@ -147,8 +139,6 @@ def registrar_asistencia(
     db: Session = Depends(get_db)
 ):
     """Registra la asistencia de un alumno al box"""
-
-    # Verificar que el usuario existe y pertenece al tenant
     usuario = db.query(Usuario).filter(
         Usuario.id == usuario_id,
         Usuario.tenant_id == tenant_id,
@@ -163,7 +153,6 @@ def registrar_asistencia(
 
     fecha_asistencia = fecha or date.today()
 
-    # Evitar duplicado del mismo día
     ya_asistio = db.query(Asistencia).filter(
         Asistencia.usuario_id == usuario_id,
         Asistencia.fecha == fecha_asistencia
@@ -205,11 +194,7 @@ def enviar_campana_email(
     background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db)
 ):
-    """
-    Envía emails automáticos a alumnos ausentes
-    Usa Gmail con smtplib — SIN costo adicional
-    """
-    # Reusar el análisis
+    """Envía emails automáticos a alumnos ausentes"""
     analisis = analizar_fidelizacion(tenant_id, umbral_dias, db)
     alumnos_alerta = analisis["alumnos_alerta"]
 
@@ -253,11 +238,9 @@ def alumnos_coach_en_riesgo(
 ):
     """
     Obtiene alumnos en riesgo (días sin asistir > umbral) para un coach específico.
-
     Un alumno "es de un coach" si tiene al menos una reserva en una clase 
     donde clases.coach_id coincide con ese coach.
     """
-    # 1. Obtener alumnos distintos que tienen reservas en clases del coach
     alumnos_coach = db.query(
         distinct(Reserva.alumno_id)
     ).join(
@@ -266,11 +249,9 @@ def alumnos_coach_en_riesgo(
         Clase.coach_id == coach_id
     ).all()
 
-    # Extraer IDs de alumnos
     alumno_ids = [r[0] for r in alumnos_coach]
 
     if not alumno_ids:
-        # Coach no tiene alumnos (nunca nadie reservó sus clases)
         return {
             "status": "success",
             "coach_id": coach_id,
@@ -279,7 +260,6 @@ def alumnos_coach_en_riesgo(
             "alumnos_alerta": []
         }
 
-    # 2. Filtrar alumnos activos del tenant
     alumnos = db.query(Usuario).filter(
         Usuario.id.in_(alumno_ids),
         Usuario.tenant_id == tenant_id,
@@ -288,7 +268,6 @@ def alumnos_coach_en_riesgo(
     ).all()
 
     if not alumnos:
-        # Coach tiene alumnos pero no están activos o no pertenecen al tenant
         return {
             "status": "success",
             "coach_id": coach_id,
@@ -297,7 +276,6 @@ def alumnos_coach_en_riesgo(
             "alumnos_alerta": []
         }
 
-    # 3. Traer última asistencia de cada alumno
     ultimas = db.query(
         Asistencia.usuario_id,
         func.max(Asistencia.fecha).label("ultima_fecha")
@@ -308,26 +286,34 @@ def alumnos_coach_en_riesgo(
 
     mapa_asistencias = {r.usuario_id: r.ultima_fecha for r in ultimas}
 
-    # 4. Calcular días ausentes para cada alumno (misma lógica que analizar_fidelizacion)
     hoy = date.today()
     data = []
     for alumno in alumnos:
         ultima = mapa_asistencias.get(alumno.id)
-        dias = (hoy - ultima).days if ultima else 999  # 999 = nunca asistió
+        if ultima:
+            dias = (hoy - ultima).days
+            tiene_historial = True
+            ultima_str = str(ultima)
+        else:
+            dias = None
+            tiene_historial = False
+            ultima_str = "Nunca"
         data.append({
             "id": alumno.id,
             "nombre": alumno.nombre,
             "correo": alumno.correo,
             "telefono": alumno.telefono,
-            "ultima_asistencia": str(ultima) if ultima else "Nunca",
-            "dias_ausente": dias
+            "ultima_asistencia": ultima_str,
+            "dias_ausente": dias,
+            "tiene_historial": tiene_historial
         })
 
     df = pd.DataFrame(data)
-
-    # 5. Filtrar por umbral
-    df_alerta = df[df["dias_ausente"] >= umbral_dias].copy()
-    df_alerta = df_alerta.sort_values("dias_ausente", ascending=False)
+    df_alerta = df[
+        (df["tiene_historial"] == False) | (df["dias_ausente"] >= umbral_dias)
+    ].copy()
+    df_alerta = df_alerta.sort_values(
+        "dias_ausente", ascending=False, na_position="last")
 
     return {
         "status": "success",
@@ -335,4 +321,131 @@ def alumnos_coach_en_riesgo(
         "total_alumnos": len(alumnos),
         "total_alerta": len(df_alerta),
         "alumnos_alerta": df_alerta.to_dict(orient="records")
+    }
+
+
+# ─────────────────────────────────────────
+# ENDPOINT 5: Alumnos en riesgo del tenant (para admin, sin filtrar por coach)
+# ─────────────────────────────────────────
+@router.get("/tenant/{tenant_id}/en-riesgo")
+def alumnos_tenant_en_riesgo(
+    tenant_id: int,
+    umbral_dias: int = UMBRAL_ALERTA_DIAS,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene TODOS los alumnos activos del tenant que estan en riesgo
+    (dias sin asistir > umbral). Version global para admin, sin filtrar por coach.
+    """
+    alumnos = db.query(Usuario).filter(
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == RolUsuario.alumno,
+        Usuario.activo == True
+    ).all()
+
+    if not alumnos:
+        return {
+            "status": "success",
+            "total_alumnos": 0,
+            "total_alerta": 0,
+            "alumnos_alerta": []
+        }
+
+    ultimas = db.query(
+        Asistencia.usuario_id,
+        func.max(Asistencia.fecha).label("ultima_fecha")
+    ).filter(
+        Asistencia.tenant_id == tenant_id,
+        Asistencia.usuario_id.in_([a.id for a in alumnos])
+    ).group_by(Asistencia.usuario_id).all()
+
+    mapa_asistencias = {r.usuario_id: r.ultima_fecha for r in ultimas}
+
+    hoy = date.today()
+    data = []
+    for alumno in alumnos:
+        ultima = mapa_asistencias.get(alumno.id)
+        if ultima:
+            dias = (hoy - ultima).days
+            tiene_historial = True
+            ultima_str = str(ultima)
+        else:
+            dias = None  # Nunca ha asistido
+            tiene_historial = False
+            ultima_str = "Nunca"
+        data.append({
+            "id": alumno.id,
+            "nombre": alumno.nombre,
+            "correo": alumno.correo,
+            "telefono": alumno.telefono,
+            "ultima_asistencia": ultima_str,
+            "dias_ausente": dias,
+            "tiene_historial": tiene_historial
+        })
+
+    df = pd.DataFrame(data)
+    df_alerta = df[
+        (df["tiene_historial"] == False) | (df["dias_ausente"] >= umbral_dias)
+    ].copy()
+    df_alerta = df_alerta.sort_values(
+        "dias_ausente", ascending=False, na_position="last")
+
+    return {
+        "status": "success",
+        "total_alumnos": len(alumnos),
+        "total_alerta": len(df_alerta),
+        "alumnos_alerta": df_alerta.to_dict(orient="records")
+    }
+
+
+# ─────────────────────────────────────────
+# ENDPOINT 6: Vencimientos inminentes (proximos 5 dias)
+# ─────────────────────────────────────────
+@router.get("/tenant/{tenant_id}/vencimientos")
+def vencimientos_inminentes(
+    tenant_id: int,
+    dias_umbral: int = 5,
+    db: Session = Depends(get_db)
+):
+    """
+    Devuelve alumnos con membresia activa cuya fecha_expiracion esta
+    dentro de los proximos N dias (default 5).
+    """
+    from app.models.suscripcion import Suscripcion
+    from app.models.plan import Plan
+    from datetime import timedelta
+
+    hoy = date.today()
+    fecha_limite = hoy + timedelta(days=dias_umbral)
+
+    suscripciones = db.query(Suscripcion, Usuario, Plan).join(
+        Usuario, Suscripcion.usuario_id == Usuario.id
+    ).join(
+        Plan, Suscripcion.plan_id == Plan.id
+    ).filter(
+        Suscripcion.tenant_id == tenant_id,
+        Suscripcion.estado == 'activo',
+        Suscripcion.fecha_expiracion >= hoy,
+        Suscripcion.fecha_expiracion <= fecha_limite
+    ).all()
+
+    resultado = []
+    for s, u, p in suscripciones:
+        dias_restantes = (s.fecha_expiracion.date() - hoy).days
+        resultado.append({
+            "id": s.id,
+            "usuario_id": u.id,
+            "nombre": u.nombre,
+            "correo": u.correo,
+            "plan_nombre": p.nombre,
+            "fecha_expiracion": str(s.fecha_expiracion.date()),
+            "dias_restantes": dias_restantes,
+            "creditos_disponibles": s.creditos_disponibles
+        })
+
+    return {
+        "status": "success",
+        "total_vencimientos": len(resultado),
+        "dias_umbral": dias_umbral,
+        "alumnos": resultado
     }

@@ -102,13 +102,6 @@ try:
     db.flush()
     print("   Admin 1001")
 
-    db.add(Usuario(id=1010, tenant_id=1, rut="11.111.111-3",
-                   nombre="Alumno Admin Test",
-                   correo="alumno_admin@test.com", password_hash="x", rol="alumno",
-                   peso_kg=75, genero="masculino", activo=True))
-    db.flush()
-    print("   Alumno Admin 1010")
-
     # ── 5. MOVIMIENTOS (con categorías) ───────────────────
     mov_data = [
         ("Clean", "fuerza"), ("Snatch", "fuerza"),

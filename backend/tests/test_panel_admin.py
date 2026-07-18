@@ -5,17 +5,13 @@ endpoint de reportes del dashboard, y flujo de compra del bazar.
 
 Sigue el mismo patron que test_panel_coach.py.
 Usa usuario admin (id=1001) creado por run_setup_test_db.py.
-
-IMPORTANTE: Usa alumno DEDICADO (id=1010) para no contaminar los datos
-del alumno compartido (id=999) que usan test_panel_alumno y test_panel_coach.
 """
 import pytest
 import requests
 from datetime import date, timedelta
 
-from tests.conftest import BASE, TENANT_ID
+from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, HOY_STR
 
-ALUMNO_ADMIN_ID = 1010  # Dedicado solo para tests admin
 ADMIN_ID = 1001
 COACH_ID = 1000
 
@@ -43,10 +39,10 @@ def test_a01_aprobar_solicitud_con_usuario_invalido():
 
 
 def test_a02_crear_solicitud_para_test():
-    """[2] Crear solicitud de prueba para testear aprobacion admin (usa alumno 1010)."""
+    """[2] Crear solicitud de prueba para testear aprobacion admin."""
     r_solicitud = requests.post(f"{BASE}/solicitudes/solicitar", json={
         "tenant_id": TENANT_ID,
-        "alumno_id": ALUMNO_ADMIN_ID,
+        "alumno_id": ALUMNO_ID,
         "plan_id": 1,
         "voucher_url": None,
         "certificado_estudiante_url": None
@@ -60,7 +56,7 @@ def test_a02_crear_solicitud_para_test():
         if solicitudes:
             Shared.solicitud_id = solicitudes[0]["id"]
     assert Shared.solicitud_id is not None, "Debe haber una solicitud"
-    print(f"  Solicitud: id={Shared.solicitud_id} (alumno {ALUMNO_ADMIN_ID})")
+    print(f"  Solicitud: id={Shared.solicitud_id}")
 
 
 def test_a03_admin_puede_aprobar():
@@ -117,15 +113,17 @@ def test_a06_listar_planes():
 # ===================================================================
 
 def test_a07_crear_producto_con_stock():
-    """[7] POST /productos — Crear producto con stock inicial=5 (usa form-data)."""
-    # El endpoint espera Form data (multipart), no json ni query params
-    r = requests.post(f"{BASE}/productos", data={
+    """[7] POST /productos — Crear producto con stock inicial=5."""
+    from io import BytesIO
+    # Usar multipart/form-data ya que crear_producto espera Form params
+    payload = {
         "nombre": "Camiseta Test",
         "precio": 15000,
         "stock": 5,
         "tenant_id": TENANT_ID,
-        "activo": "true"
-    })
+        "activo": True
+    }
+    r = requests.post(f"{BASE}/productos", params=payload)
     assert r.status_code in (
         200, 201), f"Status {r.status_code}: {r.text[:200]}"
     data = r.json()
@@ -143,7 +141,7 @@ def test_a08_comprar_2_unidades_stock_baja_a_3():
     # Crear pedido de 2 unidades
     pedido = {
         "tenant_id": TENANT_ID,
-        "alumno_id": ALUMNO_ADMIN_ID,
+        "alumno_id": ALUMNO_ID,
         "producto_id": Shared.producto_id,
         "cantidad": 2,
         "estado": "pendiente"
@@ -173,7 +171,7 @@ def test_a09_compra_excede_stock_rechazada():
 
     pedido = {
         "tenant_id": TENANT_ID,
-        "alumno_id": ALUMNO_ADMIN_ID,
+        "alumno_id": ALUMNO_ID,
         "producto_id": Shared.producto_id,
         "cantidad": 10,
         "estado": "pendiente"

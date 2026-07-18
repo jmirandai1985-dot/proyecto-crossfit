@@ -1,7 +1,3 @@
-import os
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from app.api.v1 import (
     usuarios, tenants, dashboard, fidelizacion,
     disciplinas, planes, horarios, clases, reservas,
@@ -10,6 +6,10 @@ from app.api.v1 import (
     suscripciones, wods, solicitudes_planes, upload, membresias,
     notificaciones, migracion, comprar_emergencia, fix_fechas
 )
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI
+import os
 
 app = FastAPI(
     title="Box CrossFit Platform API",

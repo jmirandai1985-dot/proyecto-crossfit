@@ -953,7 +953,9 @@ const DashboardCoach = () => {
                                                     <div>
                                                         <p className="font-bold text-gray-900">{alumno.nombre}</p>
                                                         <p className="text-sm text-gray-600 mt-1">
-                                                            🕐 Sin entrenar: <span className="font-semibold text-red-600">{alumno.dias_ausente} días</span>
+                                                            🕐 {alumno.tiene_historial === false
+                                                                ? <span className="font-semibold text-red-600">Sin actividad registrada</span>
+                                                                : <>Sin entrenar: <span className="font-semibold text-red-600">{alumno.dias_ausente} días</span></>}
                                                         </p>
                                                         <p className="text-xs text-gray-500 mt-1">Última asistencia: {alumno.ultima_asistencia || 'Nunca'}</p>
                                                         {alumno.correo && <p className="text-xs text-gray-500">📧 {alumno.correo}</p>}

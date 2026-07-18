@@ -12,9 +12,14 @@ const AdminDashboard = () => {
     const [msg, setMsg] = useState('');
     const [voucherModal, setVoucherModal] = useState({ open: false, url: '', solicitud_id: null });
     const [rechazoModal, setRechazoModal] = useState({ open: false, solicitud_id: null, motivo: '' });
+    // Fidelización state
+    const [alumnosRiesgo, setAlumnosRiesgo] = useState([]);
+    const [vencimientos, setVencimientos] = useState([]);
+    const [fidelizacionLoading, setFidelizacionLoading] = useState(true);
 
     useEffect(() => {
         cargarSolicitudes();
+        cargarFidelizacion();
     }, [tenant_id]);
 
     const cargarStats = async () => {
@@ -39,6 +44,22 @@ const AdminDashboard = () => {
         setLoading(false);
     };
 
+    const cargarFidelizacion = async () => {
+        setFidelizacionLoading(true);
+        try {
+            const [riesgoRes, vencRes] = await Promise.all([
+                api.get(`/api/v1/fidelizacion/tenant/${tenant_id}/en-riesgo`),
+                api.get(`/api/v1/fidelizacion/tenant/${tenant_id}/vencimientos`)
+            ]);
+            setAlumnosRiesgo(riesgoRes.data?.alumnos_alerta || []);
+            setVencimientos(vencRes.data?.alumnos || []);
+        } catch {
+            setAlumnosRiesgo([]);
+            setVencimientos([]);
+        }
+        setFidelizacionLoading(false);
+    };
+
     const handleAprobar = async (id) => {
         setProcessingId(id);
         setMsg('');
@@ -47,6 +68,7 @@ const AdminDashboard = () => {
             setMsg(`✅ Solicitud #${id} aprobada. Tokens asignados.`);
             setTimeout(() => setMsg(''), 4000);
             cargarSolicitudes();
+            cargarFidelizacion();
         } catch (err) {
             setMsg('❌ ' + (err.response?.data?.detail || err.message));
             setTimeout(() => setMsg(''), 4000);
@@ -71,13 +93,38 @@ const AdminDashboard = () => {
 
     const handleDescargarVoucher = async (solicitud_id) => {
         try {
-            // Usar el endpoint que devuelve FileResponse con attachment
             window.location.href = `/api/v1/solicitudes/${solicitud_id}/voucher`;
         } catch (err) {
             setMsg('❌ Error al descargar voucher');
             setTimeout(() => setMsg(''), 4000);
         }
     };
+
+    const handleAccionRapida = (alumno, tipo) => {
+        // STUB: Envío de email pendiente — falta configurar Resend
+        const actionName = tipo === 'riesgo' ? 'recuperación' : 'renovación';
+        setMsg(`💡 [STUB Email] Alerta de ${actionName} para ${alumno.nombre} — Pendiente configuración de Resend`);
+        setTimeout(() => setMsg(''), 5000);
+    };
+
+    // Combinar alertas para la tabla de acción (máximo 10)
+    const alertsCombinadas = [
+        ...alumnosRiesgo.map(a => ({
+            ...a,
+            tipo_alerta: 'riesgo',
+            label: a.tiene_historial === false
+                ? 'Sin actividad registrada'
+                : `Inactivo hace ${a.dias_ausente} días`
+        })),
+        ...vencimientos.map(v => ({
+            id: v.usuario_id,
+            nombre: v.nombre,
+            correo: v.correo,
+            tipo_alerta: 'vencimiento',
+            label: `Vence en ${v.dias_restantes} días`,
+            plan_nombre: v.plan_nombre
+        }))
+    ].slice(0, 10);
 
     if (loading) {
         return (
@@ -96,15 +143,15 @@ const AdminDashboard = () => {
                 <div className="flex items-center justify-between">
                     <div>
                         <h1 className="text-3xl font-bold text-gray-900">Dashboard Administrativo</h1>
-                        <p className="text-gray-600">Panel de gestión de membresías y solicitudes</p>
+                        <p className="text-gray-600">Panel de gestión de membresías y fidelización</p>
                     </div>
-                    <button onClick={cargarSolicitudes} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold">
+                    <button onClick={() => { cargarSolicitudes(); cargarFidelizacion(); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold">
                         🔄 Recargar
                     </button>
                 </div>
 
                 {msg && (
-                    <div className={`p-4 rounded-lg font-bold shadow-lg transition-all ${msg.includes('✅') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                    <div className={`p-4 rounded-lg font-bold shadow-lg transition-all ${msg.includes('✅') ? 'bg-green-100 text-green-800' : msg.includes('❌') ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
                         {msg}
                     </div>
                 )}
@@ -148,6 +195,83 @@ const AdminDashboard = () => {
                             <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Solicitudes Pendientes</p>
                             <p className="text-3xl font-bold text-rose-700 mt-1">{solicitudes.length}</p>
                             <p className="text-xs text-gray-400 mt-1">Esperando aprobación</p>
+                        </div>
+                    </div>
+                )}
+
+                {/* TARJETAS DE FIDELIZACIÓN */}
+                {!fidelizacionLoading && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Tarjeta Alumnos en Riesgo */}
+                        <div className="bg-white rounded-lg shadow p-5 border-l-4 border-red-600">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Alumnos en Riesgo</p>
+                                    <p className="text-3xl font-bold text-red-700 mt-1">{alumnosRiesgo.length}</p>
+                                    <p className="text-xs text-gray-400 mt-1">Sin actividad {'>'} 7 días</p>
+                                </div>
+                                <span className="text-4xl">⚠️</span>
+                            </div>
+                        </div>
+                        {/* Tarjeta Vencimientos Inminentes */}
+                        <div className="bg-white rounded-lg shadow p-5 border-l-4 border-orange-600">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Vencimientos Inminentes</p>
+                                    <p className="text-3xl font-bold text-orange-700 mt-1">{vencimientos.length}</p>
+                                    <p className="text-xs text-gray-400 mt-1">Próximos 5 días</p>
+                                </div>
+                                <span className="text-4xl">⏰</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* PANEL DE ACCIÓN Y FIDELIZACIÓN */}
+                {alertsCombinadas.length > 0 && (
+                    <div className="bg-white rounded-lg shadow overflow-hidden">
+                        <div className="px-6 py-4 border-b border-gray-200">
+                            <h2 className="text-lg font-bold text-gray-900">
+                                🎯 Panel de Acción y Fidelización ({alertsCombinadas.length} alertas)
+                            </h2>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead className="bg-amber-800 text-white">
+                                    <tr>
+                                        <th className="px-6 py-3 text-left text-sm font-medium">Nombre</th>
+                                        <th className="px-6 py-3 text-left text-sm font-medium">Correo</th>
+                                        <th className="px-6 py-3 text-left text-sm font-medium">Estado de Alerta</th>
+                                        <th className="px-6 py-3 text-left text-sm font-medium">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200">
+                                    {alertsCombinadas.map((a, idx) => (
+                                        <tr key={`${a.tipo_alerta}-${a.id}`} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                            <td className="px-6 py-4">
+                                                <p className="text-sm font-bold text-gray-900">{a.nombre}</p>
+                                            </td>
+                                            <td className="px-6 py-4 text-sm text-gray-500">{a.correo}</td>
+                                            <td className="px-6 py-4">
+                                                <span className={`inline-block px-2 py-1 text-xs font-bold rounded-full ${a.tipo_alerta === 'riesgo'
+                                                    ? 'bg-red-100 text-red-800'
+                                                    : 'bg-orange-100 text-orange-800'
+                                                    }`}>
+                                                    {a.label}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <button
+                                                    onClick={() => handleAccionRapida(a, a.tipo_alerta)}
+                                                    className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700"
+                                                >
+                                                    ⚡ Acción Rápida
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 )}
