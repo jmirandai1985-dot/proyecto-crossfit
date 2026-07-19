@@ -12,6 +12,10 @@ import AdminCoaches from './pages/admin/Coaches';
 import AdminClases from './pages/admin/Clases';
 import AdminBazar from './pages/admin/Bazar';
 import AdminReportes from './pages/admin/Reportes';
+import AdminSupervisionClases from './pages/admin/SupervisionClases';
+import AdminPlanes from './pages/admin/Planes';
+import AdminDisciplinas from './pages/admin/Disciplinas';
+import AdminHorarios from './pages/admin/Horarios';
 import CoachDashboard from './pages/coach/DashboardCoach';
 import CoachPizarra from './pages/coach/Pizarra';
 import CoachGenerarClases from './pages/coach/GenerarClases';
@@ -78,6 +82,10 @@ function App() {
             <Route path="alumnos" element={<AdminAlumnos />} />
             <Route path="coaches" element={<AdminCoaches />} />
             <Route path="clases" element={<AdminClases />} />
+            <Route path="supervision-clases" element={<AdminSupervisionClases />} />
+            <Route path="planes" element={<AdminPlanes />} />
+            <Route path="disciplinas" element={<AdminDisciplinas />} />
+            <Route path="horarios" element={<AdminHorarios />} />
             <Route path="bazar" element={<AdminBazar />} />
             <Route path="reportes" element={<AdminReportes />} />
             <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
