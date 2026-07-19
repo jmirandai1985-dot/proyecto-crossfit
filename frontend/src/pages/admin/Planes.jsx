@@ -3,6 +3,12 @@ import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 
+const GENEROS = [
+    { key: 'masculino', label: '💪 Masculino', color: 'border-blue-300 bg-blue-50' },
+    { key: 'femenino', label: '🌸 Femenino', color: 'border-pink-300 bg-pink-50' },
+    { key: 'unisex', label: '👥 Unisex', color: 'border-gray-300 bg-gray-50' },
+];
+
 const Planes = () => {
     const { tenant_id } = useAuth();
     const [planes, setPlanes] = useState([]);
@@ -21,7 +27,7 @@ const Planes = () => {
 
     useEffect(() => { fetchPlanes(); }, [tenant_id]);
 
-    const openNew = () => { setEditingId(null); setFormData({ nombre: '', precio_clp: 0, creditos: 0, duracion_dias: 30, genero: 'unisex', activo: true }); setShowForm(true); };
+    const openNew = (genero = 'unisex') => { setEditingId(null); setFormData({ nombre: '', precio_clp: 0, creditos: 0, duracion_dias: 30, genero, activo: true }); setShowForm(true); };
 
     const openEdit = (p) => { setEditingId(p.id); setFormData({ nombre: p.nombre, precio_clp: p.precio_clp, creditos: p.creditos, duracion_dias: p.duracion_dias, genero: p.genero || 'unisex', activo: p.activo ?? true }); setShowForm(true); };
 
@@ -48,6 +54,9 @@ const Planes = () => {
         } catch (e) { alert('Error: ' + (e.response?.data?.detail || e.message)); }
     };
 
+    const planesPorGenero = (genero) => planes.filter(p => (p.genero || 'unisex') === genero && p.activo !== false);
+    const tieneEstudiante = planes.some(p => (p.genero || '').toLowerCase().includes('estudiante'));
+
     if (loading) {
         return (<Layout><div className="flex items-center justify-center h-96"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900"></div></div></Layout>);
     }
@@ -57,50 +66,53 @@ const Planes = () => {
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
                     <div><h1 className="text-3xl font-bold text-gray-900">Planes</h1><p className="text-gray-600 mt-1">Administra los planes de suscripción</p></div>
-                    <button onClick={openNew} className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium text-sm">+ Nuevo Plan</button>
+                    <button onClick={() => openNew()} className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium text-sm">+ Nuevo Plan</button>
                 </div>
 
-                <div className="bg-white rounded-lg shadow overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="w-full">
-                            <thead className="bg-blue-900 text-white">
-                                <tr>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Nombre</th>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Precio</th>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Créditos</th>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Duración</th>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Género</th>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Estado</th>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Acciones</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200">
-                                {planes.length === 0 ? (
-                                    <tr><td colSpan="7" className="px-6 py-8 text-center text-gray-600">No hay planes</td></tr>
-                                ) : planes.map((p, i) => (
-                                    <tr key={p.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{p.nombre}</td>
-                                        <td className="px-6 py-4 text-sm text-gray-600">${(p.precio_clp || 0).toLocaleString()}</td>
-                                        <td className="px-6 py-4 text-sm text-gray-600">{p.creditos || 0}</td>
-                                        <td className="px-6 py-4 text-sm text-gray-600">{p.duracion_dias || 0} días</td>
-                                        <td className="px-6 py-4 text-sm text-gray-600">{p.genero || 'unisex'}</td>
-                                        <td className="px-6 py-4 text-sm">
-                                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${p.activo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                                {p.activo ? 'Activo' : 'Inactivo'}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 text-sm space-x-2">
-                                            <button onClick={() => openEdit(p)} className="px-3 py-1 text-blue-600 hover:bg-blue-50 rounded text-xs font-medium">Editar</button>
-                                            <button onClick={() => handleDelete(p.id)} className="px-3 py-1 text-red-600 hover:bg-red-50 rounded text-xs font-medium">Eliminar</button>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                {GENEROS.map(gen => {
+                    const planesGen = planesPorGenero(gen.key);
+                    return (
+                        <div key={gen.key} className={`border-2 rounded-lg ${gen.color} overflow-hidden`}>
+                            <div className="px-5 py-3 flex items-center justify-between border-b border-gray-200 bg-white bg-opacity-50">
+                                <h2 className="text-lg font-bold">{gen.label} ({planesGen.length})</h2>
+                                <button onClick={() => openNew(gen.key)} className="px-3 py-1.5 bg-blue-900 text-white rounded hover:bg-blue-800 text-xs font-medium">+ Añadir</button>
+                            </div>
+                            {planesGen.length === 0 ? (
+                                <div className="px-5 py-8 text-center text-gray-400 text-sm">No hay planes {gen.key === 'unisex' ? 'unisex' : `para ${gen.label}`}</div>
+                            ) : (
+                                <div className="p-3 space-y-2">
+                                    {planesGen.map(p => (
+                                        <div key={p.id} className="bg-white rounded-lg border border-gray-200 p-4 flex items-center justify-between hover:shadow-sm transition-shadow">
+                                            <div className="flex-1">
+                                                <div className="font-semibold text-gray-900">{p.nombre}</div>
+                                                <div className="text-sm text-gray-500 mt-1">
+                                                    ${(p.precio_clp || 0).toLocaleString()} · {p.creditos || 0} créditos · {p.duracion_dias || 0} días
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.activo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                                    {p.activo ? 'Activo' : 'Inactivo'}
+                                                </span>
+                                                <button onClick={() => openEdit(p)} className="px-2 py-1 text-blue-600 hover:bg-blue-50 rounded text-xs">Editar</button>
+                                                <button onClick={() => handleDelete(p.id)} className="px-2 py-1 text-red-600 hover:bg-red-50 rounded text-xs">Eliminar</button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+
+                {/* Nota sobre estudiante */}
+                {!tieneEstudiante && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-sm text-yellow-800">
+                        ⚠️ No existen planes de tipo "estudiante" como categoría separada.
+                        Si se necesita, documentar en PENDIENTE_DECISION_USUARIO.md si es una
+                        tercera columna de género o un descuento aplicable sobre cualquier plan.
                     </div>
-                </div>
+                )}
 
-                {/* Modal */}
                 {showForm && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                         <div className="bg-white rounded-lg p-6 w-full max-w-md">

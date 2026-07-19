@@ -1,20 +1,49 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import ModalClase from '../../components/ModalClase';
 
+const TURNOS = [
+    { id: 'am', label: '🌅 Turno AM', desde: 7, hasta: 11 },
+    { id: 'md', label: '☀️ Turno Medio Día', desde: 12, hasta: 17 },
+    { id: 'pm', label: '🌆 Turno Tarde/Noche', desde: 18, hasta: 23 },
+];
+
+function parseHora(h) {
+    if (!h) return -1;
+    return parseInt(h.split(':')[0]) || -1;
+}
+
 const Clases = () => {
     const { tenant_id } = useAuth();
     const [clases, setClases] = useState([]);
+    const [disciplinas, setDisciplinas] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [claseEditar, setClaseEditar] = useState(null);
+    const [filtroDisciplina, setFiltroDisciplina] = useState('');
+    const [filtroTurno, setFiltroTurno] = useState('');
 
-    const fetchClases = async () => {
+    const fetchDisciplinas = useCallback(async () => {
         try {
-            const response = await api.get(`/api/v1/clases?tenant_id=${tenant_id}`);
-            setClases(response.data || []);
+            const r = await api.get('/api/v1/disciplinas', { params: { tenant_id } });
+            setDisciplinas(r.data || []);
+        } catch (e) { console.error(e); }
+    }, [tenant_id]);
+
+    const fetchClases = async (disciplinaId, turnoId) => {
+        setLoading(true);
+        try {
+            const params = { tenant_id, limit: 500 };
+            if (disciplinaId) params.disciplina_id = disciplinaId;
+            const response = await api.get('/api/v1/clases', { params });
+            let data = response.data || [];
+            if (turnoId) {
+                const turno = TURNOS.find(t => t.id === turnoId);
+                if (turno) data = data.filter(c => { const h = parseHora(c.hora_inicio); return h >= turno.desde && h <= turno.hasta; });
+            }
+            setClases(data);
         } catch (error) {
             console.error('Error fetching clases:', error);
             setClases([]);
@@ -24,8 +53,13 @@ const Clases = () => {
     };
 
     useEffect(() => {
-        fetchClases();
+        fetchDisciplinas();
+        fetchClases('', '');
     }, [tenant_id]);
+
+    useEffect(() => {
+        fetchClases(filtroDisciplina, filtroTurno);
+    }, [filtroDisciplina, filtroTurno]);
 
     const getOccupancyColor = (inscritos, cupo) => {
         const percentage = ((inscritos || 0) / (cupo || 1)) * 100;
@@ -66,7 +100,7 @@ const Clases = () => {
         fetchClases();
     };
 
-    if (loading) {
+    if (loading && clases.length === 0) {
         return (
             <Layout>
                 <div className="flex items-center justify-center h-96">
@@ -82,24 +116,37 @@ const Clases = () => {
     return (
         <Layout>
             <div className="space-y-6">
-                {/* Título */}
                 <div>
                     <h1 className="text-3xl font-bold text-gray-900">Gestión de Clases</h1>
                     <p className="text-gray-600 mt-1">Administra el calendario de clases de tu box</p>
                 </div>
 
-                {/* Tarjeta de tabla */}
+                {/* Filtros */}
+                <div className="bg-white rounded-lg shadow p-4 flex flex-wrap gap-4 items-center">
+                    <div>
+                        <label className="text-xs font-medium text-gray-600 block mb-1">Disciplina</label>
+                        <select value={filtroDisciplina} onChange={e => setFiltroDisciplina(e.target.value)} className="border rounded px-3 py-1.5 text-sm">
+                            <option value="">Todas</option>
+                            {disciplinas.map(d => <option key={d.id} value={d.id}>{d.nombre}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-xs font-medium text-gray-600 block mb-1">Turno</label>
+                        <select value={filtroTurno} onChange={e => setFiltroTurno(e.target.value)} className="border rounded px-3 py-1.5 text-sm">
+                            <option value="">Todos</option>
+                            {TURNOS.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                        </select>
+                    </div>
+                    <div className="text-sm text-gray-500 self-end pb-1">
+                        {clases.length} clase{clases.length !== 1 ? 's' : ''} encontrada{clases.length !== 1 ? 's' : ''}
+                    </div>
+                </div>
+
                 <div className="bg-white rounded-lg shadow overflow-hidden">
-                    {/* Header */}
                     <div className="px-6 py-4 border-b border-gray-200">
                         <div className="flex items-center justify-between">
                             <h2 className="text-lg font-bold text-gray-900">Clases Programadas</h2>
-                            <button
-                                onClick={handleNuevaClase}
-                                className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-medium text-sm"
-                            >
-                                + Nueva Clase
-                            </button>
+                            <button onClick={handleNuevaClase} className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-medium text-sm">+ Nueva Clase</button>
                         </div>
                     </div>
 
