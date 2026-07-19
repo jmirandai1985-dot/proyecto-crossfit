@@ -11,7 +11,21 @@ import sys
 # (definido en _run_tests_orchestrator.py)
 
 
-# MUST be set before any app import
+# ── SEGURIDAD: Verificar que ENVIRONMENT sea 'test' ───────────────
+# Si alguien ejecuta este script directamente sin ENVIRONMENT=test,
+# config.py cargaría .env (producción) y borraría datos reales.
+# Esta verificación ocurre ANTES de cualquier import que cargue config.
+ENV = os.environ.get("ENVIRONMENT", "")
+if ENV != "test":
+    print("="*60)
+    print("ABORTADO: ENVIRONMENT debe ser 'test' para correr este seed.")
+    print("Usa el orquestador (python _run_tests_orchestrator.py) o")
+    print("exporta ENVIRONMENT=test manualmente antes de ejecutar.")
+    print(f"ENVIRONMENT actual: '{ENV}'")
+    print("="*60)
+    sys.exit(1)
+
+# MUST be set before any app import (redundante pero explícito)
 os.environ["ENVIRONMENT"] = "test"
 
 settings = importlib.import_module("app.core.config").settings
@@ -35,17 +49,14 @@ HistorialRM = importlib.import_module("app.models.historial_rm").HistorialRM
 Reserva = importlib.import_module("app.models.reserva").Reserva
 
 
-PROD = settings.DATABASE_URL
-TEST = settings.DATABASE_URL
+DB_URL = settings.DATABASE_URL
 
 print("="*60)
-print(f"PROD: {PROD[:70]}...")
-print(f"TEST: {TEST[:70]}...")
-print(f"DIFFERENT: {PROD != TEST}")
-print(f"PURPLE-CHERRY (DIRECT): {'purple-cherry' in TEST}")
+print(f"BD de TEST: {DB_URL[:70]}...")
+print(f"PURPLE-CHERRY (DIRECT): {'purple-cherry' in DB_URL}")
 print("="*60)
-if 'purple-cherry' not in TEST:
-    sys.exit("FATAL: Not test branch")
+if 'purple-cherry' not in DB_URL:
+    sys.exit("FATAL: Not test branch (purple-cherry)")
 
 Base.metadata.create_all(bind=engine)
 print("Tables created")
