@@ -192,21 +192,26 @@ def obtener_reportes_analytics(
             Clase.fecha <= fin_mes.date()
         ).count()
 
-        # Asistencia promedio (ocupacion de clases con reservas)
-        clases_mes = db.query(Clase).filter(
+        # Asistencia promedio (ocupacion de clases con reservas) — OPTIMIZADO
+        # Antes: N+1 queries por cada clase. Ahora: 2 queries totales
+        asistencias_por_clase = db.query(
+            Reserva.clase_id,
+            func.count(Reserva.id)
+        ).join(
+            Clase, Reserva.clase_id == Clase.id
+        ).filter(
+            Clase.tenant_id == tenant_id,
+            Clase.fecha >= inicio_mes.date(),
+            Clase.fecha <= fin_mes.date(),
+            Reserva.asistio == True
+        ).group_by(Reserva.clase_id).all()
+        total_asistentes = sum(
+            c[1] for c in asistencias_por_clase) if asistencias_por_clase else 0
+        total_cupo = db.query(func.coalesce(func.sum(Clase.cupo_maximo), 0)).filter(
             Clase.tenant_id == tenant_id,
             Clase.fecha >= inicio_mes.date(),
             Clase.fecha <= fin_mes.date()
-        ).all()
-        total_cupo = 0
-        total_asistentes = 0
-        for c in clases_mes:
-            asistentes = db.query(Reserva).filter(
-                Reserva.clase_id == c.id,
-                Reserva.asistio == True
-            ).count()
-            total_asistentes += asistentes
-            total_cupo += c.cupo_maximo or 20
+        ).scalar() or 0
         asistencia_promedio = round(
             (total_asistentes / total_cupo * 100)) if total_cupo > 0 else 0
 
