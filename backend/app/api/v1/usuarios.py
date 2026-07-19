@@ -167,7 +167,7 @@ def listar_usuarios(
     tenant_id: int,
     skip: int = 0,
     limit: int = 100,
-    activo: bool = None,
+    activo: bool = True,
     rol: str = None,
     db: Session = Depends(get_db)
 ):
@@ -176,6 +176,9 @@ def listar_usuarios(
 
     if activo is not None:
         query = query.filter(Usuario.activo == activo)
+    else:
+        # Por defecto, solo mostrar usuarios activos
+        query = query.filter(Usuario.activo == True)
 
     if rol is not None:
         query = query.filter(Usuario.rol == rol)

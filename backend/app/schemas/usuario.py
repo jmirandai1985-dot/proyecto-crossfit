@@ -70,7 +70,9 @@ class UsuarioListItem(BaseModel):
     id: int
     nombre: str
     correo: str
+    telefono: Optional[str] = None
     rol: RolUsuario
     activo: bool
+    fechaRegistro: Optional[str] = Field(None, alias="created_at")
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)

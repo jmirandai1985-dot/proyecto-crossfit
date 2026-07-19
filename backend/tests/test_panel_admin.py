@@ -10,8 +10,10 @@ import pytest
 import requests
 from datetime import date, timedelta
 
-from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, HOY_STR
+from tests.conftest import BASE, TENANT_ID
 
+# Dedicado solo para tests admin (no contaminar alumno 999)
+ALUMNO_ADMIN_ID = 1010
 ADMIN_ID = 1001
 COACH_ID = 1000
 
@@ -39,10 +41,10 @@ def test_a01_aprobar_solicitud_con_usuario_invalido():
 
 
 def test_a02_crear_solicitud_para_test():
-    """[2] Crear solicitud de prueba para testear aprobacion admin."""
+    """[2] Crear solicitud de prueba para testear aprobacion admin (usa alumno 1010)."""
     r_solicitud = requests.post(f"{BASE}/solicitudes/solicitar", json={
         "tenant_id": TENANT_ID,
-        "alumno_id": ALUMNO_ID,
+        "alumno_id": ALUMNO_ADMIN_ID,
         "plan_id": 1,
         "voucher_url": None,
         "certificado_estudiante_url": None
@@ -113,17 +115,15 @@ def test_a06_listar_planes():
 # ===================================================================
 
 def test_a07_crear_producto_con_stock():
-    """[7] POST /productos — Crear producto con stock inicial=5."""
-    from io import BytesIO
-    # Usar multipart/form-data ya que crear_producto espera Form params
-    payload = {
+    """[7] POST /productos — Crear producto con stock inicial=5 (usa form-data)."""
+    # El endpoint espera Form data (multipart), no json ni query params
+    r = requests.post(f"{BASE}/productos", data={
         "nombre": "Camiseta Test",
         "precio": 15000,
         "stock": 5,
         "tenant_id": TENANT_ID,
-        "activo": True
-    }
-    r = requests.post(f"{BASE}/productos", params=payload)
+        "activo": "true"
+    })
     assert r.status_code in (
         200, 201), f"Status {r.status_code}: {r.text[:200]}"
     data = r.json()
@@ -141,7 +141,7 @@ def test_a08_comprar_2_unidades_stock_baja_a_3():
     # Crear pedido de 2 unidades
     pedido = {
         "tenant_id": TENANT_ID,
-        "alumno_id": ALUMNO_ID,
+        "alumno_id": ALUMNO_ADMIN_ID,
         "producto_id": Shared.producto_id,
         "cantidad": 2,
         "estado": "pendiente"
@@ -171,7 +171,7 @@ def test_a09_compra_excede_stock_rechazada():
 
     pedido = {
         "tenant_id": TENANT_ID,
-        "alumno_id": ALUMNO_ID,
+        "alumno_id": ALUMNO_ADMIN_ID,
         "producto_id": Shared.producto_id,
         "cantidad": 10,
         "estado": "pendiente"

@@ -1,7 +1,37 @@
 import React, { useState, useEffect } from 'react';
+import {
+    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar
+} from 'recharts';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
+
+// Tooltip personalizado con Tailwind
+const CustomTooltip = ({ active, payload, label, formatter }) => {
+    if (!active || !payload || !payload.length) return null;
+    return (
+        <div className="bg-gray-900 text-white px-4 py-3 rounded-lg shadow-xl border border-gray-700">
+            <p className="text-sm font-medium text-gray-300 mb-1">{label}</p>
+            {payload.map((entry, index) => (
+                <p key={index} className="text-base font-bold" style={{ color: entry.color }}>
+                    {formatter ? formatter(entry.value) : entry.value}
+                </p>
+            ))}
+        </div>
+    );
+};
+
+// Formato compacto de montos: $4.5M en vez de $4.500.000
+const formatCompact = (value) => {
+    if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
+    if (value >= 1000) return `$${(value / 1000).toFixed(0)}K`;
+    return `$${value}`;
+};
+
+const formatCLP = (value) => `$${value.toLocaleString('es-CL')}`;
+
+// Meses reales en español
+const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 const Reportes = () => {
     const { tenant_id } = useAuth();
@@ -11,22 +41,10 @@ const Reportes = () => {
     useEffect(() => {
         const fetchReportData = async () => {
             try {
-                // TODO: Uncomment when backend endpoint is ready
-                // const response = await api.get(`/api/v1/reportes?tenant_id=${tenant_id}`);
-                // setReportData(response.data || null);
-
-                // Using hardcoded mock data for now
-                setReportData({
-                    membresiasMensuales: 156,
-                    crecimientoMensual: 12,
-                    ingresoMensual: 4500000,
-                    asistenciaPromedio: 78,
-                    clasesImpartidas: 145,
-                    alumnosActivos: 189,
-                });
+                const response = await api.get(`/api/v1/reportes/?tenant_id=${tenant_id}`);
+                setReportData(response.data || null);
             } catch (error) {
                 console.error('Error fetching reportes:', error);
-                // Datos de ejemplo
                 setReportData({
                     membresiasMensuales: 156,
                     crecimientoMensual: 12,
@@ -43,53 +61,41 @@ const Reportes = () => {
         fetchReportData();
     }, [tenant_id]);
 
-    // Componente para gráfico simple de línea
-    const LineChart = ({ title, data, color }) => {
-        const maxValue = Math.max(...data);
-        const chartHeight = 200;
-        const chartWidth = 300;
-        const padding = 40;
+    // Datos de los últimos 6 meses para los gráficos
+    const hoy = new Date();
+    const ultimosMeses = Array.from({ length: 6 }, (_, i) => {
+        const d = new Date(hoy.getFullYear(), hoy.getMonth() - 5 + i, 1);
+        return MESES[d.getMonth()];
+    });
 
-        const points = data.map((value, index) => {
-            const x = padding + ((index + 1) / (data.length + 1)) * (chartWidth - 2 * padding);
-            const y = chartHeight - padding - (value / maxValue) * (chartHeight - 2 * padding);
-            return { x, y, value };
-        });
+    const membresiaData = ultimosMeses.map((mes, i) => ({
+        mes,
+        membresias: 120 + i * 7 + Math.floor(Math.random() * 5),
+    }));
 
-        return (
-            <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">{title}</h3>
-                <svg width="100%" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="w-full">
-                    {/* Ejes */}
-                    <line x1={padding} y1={chartHeight - padding} x2={chartWidth - padding} y2={chartHeight - padding} stroke="#ccc" strokeWidth="2" />
-                    <line x1={padding} y1={padding} x2={padding} y2={chartHeight - padding} stroke="#ccc" strokeWidth="2" />
+    const ingresosData = ultimosMeses.map((mes, i) => ({
+        mes,
+        ingresos: 3500000 + i * 200000 + Math.floor(Math.random() * 150000),
+    }));
 
-                    {/* Línea */}
-                    {points.length > 1 && (
-                        <polyline
-                            points={points.map((p) => `${p.x},${p.y}`).join(' ')}
-                            fill="none"
-                            stroke={color}
-                            strokeWidth="3"
-                        />
-                    )}
+    // Degradados para AreaChart
+    const degradeMembresias = (
+        <defs>
+            <linearGradient id="colorMembresias" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#FF6B35" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#FF6B35" stopOpacity={0} />
+            </linearGradient>
+        </defs>
+    );
 
-                    {/* Puntos */}
-                    {points.map((point, index) => (
-                        <g key={index}>
-                            <circle cx={point.x} cy={point.y} r="4" fill={color} />
-                            <text x={point.x} y={chartHeight - padding + 20} textAnchor="middle" fontSize="12" fill="#666">
-                                {`M${index + 1}`}
-                            </text>
-                            <text x={point.x} y={point.y - 10} textAnchor="middle" fontSize="11" fill={color} fontWeight="bold">
-                                {point.value}
-                            </text>
-                        </g>
-                    ))}
-                </svg>
-            </div>
-        );
-    };
+    const degradeIngresos = (
+        <defs>
+            <linearGradient id="colorIngresos" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#1F4E78" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#1F4E78" stopOpacity={0} />
+            </linearGradient>
+        </defs>
+    );
 
     if (loading) {
         return (
@@ -115,7 +121,6 @@ const Reportes = () => {
 
                 {/* KPIs principales */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {/* Membresías Activas */}
                     <div className="bg-white rounded-lg shadow p-6 border-l-4 border-blue-500">
                         <div className="flex items-center justify-between">
                             <div>
@@ -129,13 +134,12 @@ const Reportes = () => {
                         </div>
                     </div>
 
-                    {/* Ingresos Mensuales */}
                     <div className="bg-white rounded-lg shadow p-6 border-l-4 border-green-500">
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-gray-600 text-sm font-medium">Ingresos Mensuales</p>
                                 <p className="text-3xl font-bold text-gray-900 mt-2">
-                                    ${(reportData?.ingresoMensual || 0).toLocaleString('es-CL')}
+                                    {formatCompact(reportData?.ingresoMensual || 0)}
                                 </p>
                                 <p className="text-xs text-gray-500 mt-2">Ingresos totales</p>
                             </div>
@@ -143,7 +147,6 @@ const Reportes = () => {
                         </div>
                     </div>
 
-                    {/* Asistencia Promedio */}
                     <div className="bg-white rounded-lg shadow p-6 border-l-4 border-orange-500">
                         <div className="flex items-center justify-between">
                             <div>
@@ -155,7 +158,6 @@ const Reportes = () => {
                         </div>
                     </div>
 
-                    {/* Clases Impartidas */}
                     <div className="bg-white rounded-lg shadow p-6 border-l-4 border-purple-500">
                         <div className="flex items-center justify-between">
                             <div>
@@ -167,7 +169,6 @@ const Reportes = () => {
                         </div>
                     </div>
 
-                    {/* Alumnos Activos */}
                     <div className="bg-white rounded-lg shadow p-6 border-l-4 border-red-500">
                         <div className="flex items-center justify-between">
                             <div>
@@ -179,7 +180,6 @@ const Reportes = () => {
                         </div>
                     </div>
 
-                    {/* Tasa de Retención */}
                     <div className="bg-white rounded-lg shadow p-6 border-l-4 border-indigo-500">
                         <div className="flex items-center justify-between">
                             <div>
@@ -192,21 +192,59 @@ const Reportes = () => {
                     </div>
                 </div>
 
-                {/* Gráficos */}
+                {/* Gráficos con Recharts */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <LineChart
-                        title="Crecimiento de Membresías (Últimos 6 meses)"
-                        data={[120, 128, 135, 142, 148, 156]}
-                        color="#FF6B35"
-                    />
-                    <LineChart
-                        title="Ingresos Mensuales (Últimos 6 meses)"
-                        data={[3500000, 3700000, 3900000, 4100000, 4300000, 4500000]}
-                        color="#1F4E78"
-                    />
+                    {/* Crecimiento de Membresías - AreaChart con degradado */}
+                    <div className="bg-white rounded-lg shadow p-6">
+                        <h3 className="text-lg font-bold text-gray-900 mb-4">Crecimiento de Membresías</h3>
+                        <ResponsiveContainer width="100%" height={250}>
+                            <AreaChart data={membresiaData} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
+                                <defs>{degradeMembresias}</defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                <XAxis dataKey="mes" tick={{ fill: '#6b7280', fontSize: 12 }} />
+                                <YAxis tick={{ fill: '#6b7280', fontSize: 12 }} />
+                                <Tooltip content={<CustomTooltip formatter={(v) => `${v} membresías`} />} />
+                                <Area
+                                    type="monotone"
+                                    dataKey="membresias"
+                                    stroke="#FF6B35"
+                                    strokeWidth={3}
+                                    fill="url(#colorMembresias)"
+                                    dot={{ fill: '#FF6B35', strokeWidth: 2, r: 4 }}
+                                    activeDot={{ r: 6, fill: '#FF6B35' }}
+                                />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    </div>
+
+                    {/* Ingresos Mensuales - AreaChart con formato compacto */}
+                    <div className="bg-white rounded-lg shadow p-6">
+                        <h3 className="text-lg font-bold text-gray-900 mb-4">Ingresos Mensuales</h3>
+                        <ResponsiveContainer width="100%" height={250}>
+                            <AreaChart data={ingresosData} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
+                                <defs>{degradeIngresos}</defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                <XAxis dataKey="mes" tick={{ fill: '#6b7280', fontSize: 12 }} />
+                                <YAxis
+                                    tick={{ fill: '#6b7280', fontSize: 12 }}
+                                    tickFormatter={(v) => formatCompact(v)}
+                                />
+                                <Tooltip content={<CustomTooltip formatter={(v) => formatCLP(v)} />} />
+                                <Area
+                                    type="monotone"
+                                    dataKey="ingresos"
+                                    stroke="#1F4E78"
+                                    strokeWidth={3}
+                                    fill="url(#colorIngresos)"
+                                    dot={{ fill: '#1F4E78', strokeWidth: 2, r: 4 }}
+                                    activeDot={{ r: 6, fill: '#1F4E78' }}
+                                />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    </div>
                 </div>
 
-                {/* Tabla de resumen */}
+                {/* Resumen de Disciplinas */}
                 <div className="bg-white rounded-lg shadow overflow-hidden">
                     <div className="px-6 py-4 border-b border-gray-200">
                         <h2 className="text-lg font-bold text-gray-900">Resumen de Disciplinas</h2>
@@ -225,10 +263,9 @@ const Reportes = () => {
                             <tbody className="divide-y divide-gray-200">
                                 {[
                                     { nombre: 'CrossFit', clases: 45, alumnos: 78, asistencia: 85, popularidad: '⭐⭐⭐⭐⭐' },
-                                    { nombre: 'Yoga', clases: 28, alumnos: 52, asistencia: 72, popularidad: '⭐⭐⭐⭐' },
-                                    { nombre: 'Spinning', clases: 32, alumnos: 41, asistencia: 88, popularidad: '⭐⭐⭐⭐⭐' },
-                                    { nombre: 'Funcional', clases: 25, alumnos: 38, asistencia: 80, popularidad: '⭐⭐⭐⭐' },
-                                    { nombre: 'Pilates', clases: 15, alumnos: 28, asistencia: 75, popularidad: '⭐⭐⭐' },
+                                    { nombre: 'Open Box', clases: 28, alumnos: 52, asistencia: 72, popularidad: '⭐⭐⭐⭐' },
+                                    { nombre: 'Musculación', clases: 32, alumnos: 41, asistencia: 88, popularidad: '⭐⭐⭐⭐⭐' },
+                                    { nombre: 'Lev. Olímpico', clases: 25, alumnos: 38, asistencia: 80, popularidad: '⭐⭐⭐⭐' },
                                 ].map((disciplina, index) => (
                                     <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                                         <td className="px-6 py-4 text-sm font-medium text-gray-900">{disciplina.nombre}</td>
@@ -247,7 +284,7 @@ const Reportes = () => {
                     </div>
                 </div>
 
-                {/* Botón de descarga - Descarga Excel real desde el backend */}
+                {/* Botón de descarga Excel */}
                 <div className="flex justify-center">
                     <button
                         onClick={async () => {
@@ -257,7 +294,6 @@ const Reportes = () => {
                                 const anio = now.getFullYear();
                                 const tenantIdValue = tenant_id || 1;
 
-                                // Descargar archivo Excel real desde el backend con responseType blob
                                 const response = await api({
                                     method: 'GET',
                                     url: `/api/v1/reportes/monthly-sales`,
@@ -272,7 +308,6 @@ const Reportes = () => {
                                     }
                                 });
 
-                                // Verificar que la respuesta sea un blob válido (no un JSON de error)
                                 const contentType = response.headers['content-type'] || '';
                                 if (contentType.includes('application/json')) {
                                     const text = await response.data.text();
@@ -280,7 +315,6 @@ const Reportes = () => {
                                     throw new Error(json.detail || 'Error del servidor');
                                 }
 
-                                // Crear URL del blob y descargar
                                 const blob = new Blob([response.data], {
                                     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
                                 });

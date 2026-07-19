@@ -27,18 +27,19 @@ const Alumnos = () => {
         estado: 'activo',
     });
 
+    const fetchAlumnos = async () => {
+        try {
+            const response = await api.get(`/api/v1/usuarios?rol=alumno&tenant_id=${tenant_id}&activo=true`);
+            setAlumnos(response.data || []);
+        } catch (error) {
+            console.error('Error fetching alumnos:', error);
+            setAlumnos([]);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     useEffect(() => {
-        const fetchAlumnos = async () => {
-            try {
-                const response = await api.get(`/api/v1/usuarios?rol=alumno&tenant_id=${tenant_id}`);
-                setAlumnos(response.data || []);
-            } catch (error) {
-                console.error('Error fetching alumnos:', error);
-                setAlumnos([]);
-            } finally {
-                setLoading(false);
-            }
-        };
         fetchAlumnos();
     }, [tenant_id]);
 
@@ -112,8 +113,19 @@ const Alumnos = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (editingAlumno) {
-            setAlumnos(alumnos.map((a) => (a.id === editingAlumno.id ? { ...a, ...formData } : a)));
-            closeModal();
+            try {
+                await api.put(`/api/v1/usuarios/${editingAlumno.id}`, {
+                    nombre: formData.nombre,
+                    correo: formData.correo,
+                    telefono: formData.telefono,
+                    estado: formData.estado,
+                });
+                await fetchAlumnos();
+                closeModal();
+            } catch (error) {
+                console.error('Error al actualizar usuario:', error);
+                alert('Error al actualizar: ' + (error.response?.data?.detail || 'Intenta nuevamente'));
+            }
             return;
         }
         try {
@@ -126,12 +138,22 @@ const Alumnos = () => {
                 rut: formData.rut,
                 tenant_id: tenant_id,
             });
-            const response = await api.get(`/api/v1/usuarios?rol=alumno&tenant_id=${tenant_id}`);
-            setAlumnos(response.data || []);
+            await fetchAlumnos();
             closeModal();
         } catch (error) {
             console.error('Error al crear usuario:', error);
             alert('Error al crear usuario: ' + (error.response?.data?.detail || 'Intenta nuevamente'));
+        }
+    };
+
+    const handleDelete = async (alumno) => {
+        if (!window.confirm(`¿Estás seguro de eliminar a ${alumno.nombre}?`)) return;
+        try {
+            await api.delete(`/api/v1/usuarios/${alumno.id}`);
+            setAlumnos(alumnos.filter((a) => a.id !== alumno.id));
+        } catch (error) {
+            console.error('Error al eliminar alumno:', error);
+            alert('Error al eliminar: ' + (error.response?.data?.detail || 'Intenta nuevamente'));
         }
     };
 
@@ -160,12 +182,6 @@ const Alumnos = () => {
                     <div className="px-6 py-4 border-b border-gray-200">
                         <div className="flex items-center justify-between">
                             <h2 className="text-lg font-bold text-gray-900">Lista de Alumnos</h2>
-                            <button
-                                onClick={() => openModal()}
-                                className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-medium text-sm"
-                            >
-                                + Nuevo Alumno
-                            </button>
                             <button
                                 onClick={() => openModal(null, 'coach')}
                                 className="px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition-colors font-medium text-sm ml-2"
@@ -242,7 +258,7 @@ const Alumnos = () => {
                                                     Editar
                                                 </button>
                                                 <button
-                                                    onClick={() => setAlumnos(alumnos.filter((a) => a.id !== alumno.id))}
+                                                    onClick={() => handleDelete(alumno)}
                                                     className="px-3 py-1 text-red-600 hover:bg-red-50 rounded transition-colors text-xs font-medium"
                                                 >
                                                     Eliminar
