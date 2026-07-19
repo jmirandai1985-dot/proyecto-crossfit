@@ -29,7 +29,7 @@ const Alumnos = () => {
 
     const fetchAlumnos = async () => {
         try {
-            const response = await api.get(`/api/v1/usuarios?rol=alumno&tenant_id=${tenant_id}&activo=true`);
+            const response = await api.get(`/api/v1/usuarios?rol=alumno&tenant_id=${tenant_id}`);
             setAlumnos(response.data || []);
         } catch (error) {
             console.error('Error fetching alumnos:', error);
@@ -182,12 +182,20 @@ const Alumnos = () => {
                     <div className="px-6 py-4 border-b border-gray-200">
                         <div className="flex items-center justify-between">
                             <h2 className="text-lg font-bold text-gray-900">Lista de Alumnos</h2>
-                            <button
-                                onClick={() => openModal(null, 'coach')}
-                                className="px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition-colors font-medium text-sm ml-2"
-                            >
-                                + Nuevo Coach
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => openModal()}
+                                    className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-medium text-sm"
+                                >
+                                    + Nuevo Alumno
+                                </button>
+                                <button
+                                    onClick={() => openModal(null, 'coach')}
+                                    className="px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition-colors font-medium text-sm"
+                                >
+                                    + Nuevo Coach
+                                </button>
+                            </div>
                         </div>
                     </div>
 

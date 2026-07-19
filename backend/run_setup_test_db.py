@@ -147,32 +147,77 @@ try:
     assert count == 1, f"Esperaba exactamente 1 suscripcion activa, hay {count}"
     print("   Suscripcion activa (50 creditos) [OK: exactamente 1]")
 
-    # ── 8. DISCIPLINA ─────────────────────────────────────
-    db.add(Disciplina(id=1, tenant_id=1, nombre="CrossFit", activo=True))
+    # ── 8. DISCIPLINAS ─────────────────────────────────────
+    disc_data = [
+        (1, "CrossFit"), (2, "Open Box"), (3,
+                                           "Musculación"), (4, "Levantamiento Olímpico"),
+    ]
+    # Gap se crea como INACTIVA y se filtrará por activo=true en lugar de nombre hardcodeado
+    db.add(Disciplina(id=5, tenant_id=1, nombre="Gap", activo=False))
+    for d_id, d_nombre in disc_data:
+        db.add(Disciplina(id=d_id, tenant_id=1, nombre=d_nombre, activo=True))
     db.flush()
-    print("   Disciplina 1")
+    print(f"   {len(disc_data)} disciplinas activas + Gap (inactiva)")
+    db.flush()
 
-    # ── 9. HORARIOS BASE (Lun-Vie dinámicos) ──────────────
-    for i in range(5):
-        db.add(Horario(tenant_id=1, disciplina_id=1,
-                       dia_semana=(hoy.weekday() + i) % 7,
-                       hora_inicio=time(10, 0), hora_fin=time(11, 0),
-                       cupo_maximo=20, activo=True))
+    # ── 9. HORARIOS BASE (varios turnos por disciplina) ───
+    horario_id_map = {}
+    horario_counter = 1
+    turnos = [
+        # (disciplina_id, hora_inicio, hora_fin, cupo)
+        (1, time(7, 0), time(8, 0), 20),   # CrossFit AM
+        (1, time(8, 0), time(9, 0), 20),
+        (1, time(10, 0), time(11, 0), 20),  # CrossFit AM2
+        (1, time(12, 0), time(13, 0), 15),  # CrossFit MD
+        (1, time(17, 0), time(18, 0), 20),  # CrossFit PM
+        (1, time(18, 0), time(19, 0), 20),
+        (1, time(19, 0), time(20, 0), 20),
+        (2, time(8, 0), time(9, 0), 10),   # Open Box
+        (2, time(10, 0), time(11, 0), 10),
+        (2, time(12, 0), time(13, 0), 10),
+        (2, time(17, 0), time(18, 0), 10),
+        (2, time(18, 0), time(19, 0), 10),
+        (3, time(7, 0), time(8, 0), 15),   # Musculación
+        (3, time(10, 0), time(11, 0), 15),
+        (3, time(12, 0), time(13, 0), 15),
+        (3, time(17, 0), time(19, 0), 15),
+        (4, time(8, 0), time(9, 0), 12),   # Lev. Olímpico
+        (4, time(10, 0), time(11, 0), 12),
+        (4, time(17, 0), time(18, 0), 12),
+    ]
+    for disc_id, h_ini, h_fin, cupo in turnos:
+        db.add(Horario(id=horario_counter, tenant_id=1, disciplina_id=disc_id,
+                       dia_semana=(hoy.weekday() + 0) % 7,  # Hoy
+                       hora_inicio=h_ini, hora_fin=h_fin,
+                       cupo_maximo=cupo, activo=True))
+        horario_id_map[(disc_id, h_ini)] = horario_counter
+        horario_counter += 1
     db.flush()
-    horario_id = db.query(Horario).filter(Horario.tenant_id == 1).first().id
-    print(f"   5 horarios base (desde {hoy.weekday()})")
+    print(f"   {len(turnos)} horarios base (hoy, multiples turnos)")
 
     # ── 10. CLASES (próximos 7 días) ──────────────────────
+    class_counter = 1
     for offset in range(7):
         dia = hoy + timedelta(days=offset)
-        db.add(Clase(tenant_id=1, disciplina_id=1,
-                     horario_base_id=horario_id,
-                     fecha=dia,
-                     hora_inicio=time(10, 0),
-                     hora_fin=time(11, 0),
-                     coach_id=1000, cupo_maximo=20))
+        dia_sem = (hoy.weekday() + offset) % 7
+        # Por cada disciplina, crear clases para los horarios de ese día
+        for disc_id, h_ini, h_fin, cupo in turnos:
+            # Solo crear si el dia_semana coincide con el horario (todos son hoy por simplicidad)
+            if offset > 0 and dia_sem > 4:  # Finde: menos clases
+                if disc_id not in [1, 3]:
+                    continue
+                if h_ini.hour not in [10, 12, 17]:
+                    continue
+            db.add(Clase(id=class_counter, tenant_id=1, disciplina_id=disc_id,
+                         horario_base_id=horario_id_map.get(
+                             (disc_id, h_ini), 1),
+                         fecha=dia,
+                         hora_inicio=h_ini, hora_fin=h_fin,
+                         coach_id=1000, cupo_maximo=cupo))
+            class_counter += 1
     db.flush()
-    print("   7 clases (proximos 7 dias)")
+    total_clases = class_counter - 1
+    print(f"   {total_clases} clases ({7} dias)")
 
     # ── 11. WOD PUBLICADO PARA HOY ────────────────────────
     clean_id = mov_ids.get("Clean", 1)

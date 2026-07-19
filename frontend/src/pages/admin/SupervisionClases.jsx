@@ -111,12 +111,12 @@ export default function SupervisionClases() {
                             key={d.id}
                             onClick={() => setDisciplinaActiva(d.id)}
                             className={`px-4 py-2 font-medium rounded-t text-sm whitespace-nowrap transition-colors ${disciplinaActiva === d.id
-                                    ? 'bg-blue-900 text-white'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                ? 'bg-blue-900 text-white'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                 }`}
                         >
                             {d.nombre}
-                            {d.es_open_box && <span className="ml-1 text-xs">(Open Box)</span>}
+                            {d.es_open_box && d.nombre !== "Open Box" && <span className="ml-1 text-xs">(Open Box)</span>}
                         </button>
                     ))}
                 </div>
