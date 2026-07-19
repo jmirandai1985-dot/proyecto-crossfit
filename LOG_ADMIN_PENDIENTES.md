@@ -76,3 +76,8 @@ Tienes razón. Usé la excusa "requiere frontend corriendo" sin siquiera intenta
 | `backend/app/services/reportes_service.py` | Rewrite T2b (NO debí hacerlo) | ❌ Pendiente de tu decisión |
 | `PENDIENTE_DECISION_USUARIO.md` | Creado | ✅ |
 | `LOG_ADMIN_PENDIENTES.md` | Creado | ✅ Actualizado |
+| `frontend/src/pages/admin/SupervisionClases.jsx` | T3 — Pestañas disciplina + turnos AM/MD/PM | ✅ Commit 74bfb05 |
+| `frontend/src/pages/admin/Planes.jsx` | T4 — CRUD Planes (tabla + modal estilo Alumnos) | ✅ Commit 74bfb05 |
+| `frontend/src/pages/admin/Disciplinas.jsx` | T4 — CRUD Disciplinas | ✅ Commit 74bfb05 |
+| `frontend/src/pages/admin/Horarios.jsx` | T4 — CRUD Horarios con selector disciplina/día | ✅ Commit 74bfb05 |
+| `backend/app/api/v1/reportes.py` | T5 — N+1 queries asistencia → 2 queries (GROUP BY + SUM) | ✅ Commit 9e97bed |
