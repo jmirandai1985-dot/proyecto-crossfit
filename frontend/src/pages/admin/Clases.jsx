@@ -33,9 +33,10 @@ const Clases = () => {
     const [filtroDisciplina, setFiltroDisciplina] = useState('');
     const [filtroTurno, setFiltroTurno] = useState('');
 
-    // Accordion state — sets of expanded IDs
+    // Accordion state — sets of expanded IDs (N1=disciplina, N2=turno, N3=horario)
     const [discExpanded, setDiscExpanded] = useState(new Set());
     const [turnoExpanded, setTurnoExpanded] = useState(new Set());
+    const [horarioExpanded, setHorarioExpanded] = useState(new Set());
 
     const fetchDisciplinas = useCallback(async () => {
         try {
@@ -99,8 +100,13 @@ const Clases = () => {
             if (next.has(id)) next.delete(id); else next.add(id);
             return next;
         });
-        // Close turnos when closing discipline
+        // Close child levels when closing discipline
         setTurnoExpanded(prev => {
+            const next = new Set(prev);
+            [...next].forEach(k => { if (k.startsWith(`${id}-`)) next.delete(k); });
+            return next;
+        });
+        setHorarioExpanded(prev => {
             const next = new Set(prev);
             [...next].forEach(k => { if (k.startsWith(`${id}-`)) next.delete(k); });
             return next;
@@ -109,6 +115,20 @@ const Clases = () => {
 
     const toggleTurno = (key) => {
         setTurnoExpanded(prev => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key); else next.add(key);
+            return next;
+        });
+        // Close horarios when closing turno
+        setHorarioExpanded(prev => {
+            const next = new Set(prev);
+            [...next].forEach(k => { if (k.startsWith(`${key}-`)) next.delete(k); });
+            return next;
+        });
+    };
+
+    const toggleHorario = (key) => {
+        setHorarioExpanded(prev => {
             const next = new Set(prev);
             if (next.has(key)) next.delete(key); else next.add(key);
             return next;
@@ -218,35 +238,63 @@ const Clases = () => {
                                                             <span className="text-gray-400 text-xs">{tExp ? '▼' : '▶'}</span>
                                                         </button>
 
-                                                        {/* Nivel 3 — Clases (solo si expandido) */}
+                                                        {/* Nivel 3 — Horario específico (agrupa por hora exacta) */}
                                                         {tExp && (
-                                                            <div className="px-10 pb-3 space-y-2">
-                                                                {tClases.length === 0 ? (
-                                                                    <p className="text-gray-400 text-sm py-2">Sin clases en este turno</p>
-                                                                ) : (
-                                                                    tClases.map(c => (
-                                                                        <div key={c.id} className="bg-white border rounded-lg p-3 hover:shadow-sm transition-shadow flex items-center justify-between">
-                                                                            <div className="flex-1">
-                                                                                <div className="flex items-center gap-3">
-                                                                                    <span className="font-bold text-blue-900 text-sm">{c.hora_inicio?.slice(0, 5)} - {c.hora_fin?.slice(0, 5)}</span>
-                                                                                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getOccupancyColor(c.asistentes_confirmados, c.cupo_maximo)}`}>
-                                                                                        {c.asistentes_confirmados || 0}/{c.cupo_maximo || '?'}
-                                                                                    </span>
-                                                                                </div>
-                                                                                <div className="text-xs text-gray-500 mt-1">{c.fecha || '—'}</div>
-                                                                                <div className="text-xs mt-1">
-                                                                                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${!c.coach_nombre ? (c.disciplina_nombre === 'CrossFit' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-500') : 'bg-green-100 text-green-800'}`}>
-                                                                                        {c.coach_nombre || (c.disciplina_nombre === 'CrossFit' ? '⚠️ Pendiente' : 'Sin asignar')}
-                                                                                    </span>
-                                                                                </div>
+                                                            <div className="border-t border-gray-100">
+                                                                {(() => {
+                                                                    // Group by horario key
+                                                                    const horMap = {};
+                                                                    tClases.forEach(c => {
+                                                                        const hKey = `${c.hora_inicio?.slice(0, 5) || '00:00'}-${c.hora_fin?.slice(0, 5) || '00:00'}`;
+                                                                        if (!horMap[hKey]) horMap[hKey] = [];
+                                                                        horMap[hKey].push(c);
+                                                                    });
+                                                                    return Object.entries(horMap).sort(([a], [b]) => a.localeCompare(b)).map(([hKey, hClases]) => {
+                                                                        const hKeyFull = `${tKey}-${hKey}`;
+                                                                        const hExp = horarioExpanded.has(hKeyFull);
+                                                                        return (
+                                                                            <div key={hKeyFull}>
+                                                                                {/* Nivel 3 header */}
+                                                                                <button onClick={() => toggleHorario(hKeyFull)}
+                                                                                    className="w-full flex items-center justify-between px-14 py-2.5 hover:bg-gray-100 transition-colors text-left">
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="text-sm font-semibold text-blue-800">{hKey}</span>
+                                                                                        <span className="text-xs text-gray-400 bg-white px-2 py-0.5 rounded-full border">{hClases.length} fecha{hClases.length !== 1 ? 's' : ''}</span>
+                                                                                    </div>
+                                                                                    <span className="text-gray-400 text-xs">{hExp ? '▼ ← Volver' : '▶'}</span>
+                                                                                </button>
+
+                                                                                {/* Nivel 4 — Clases individuales (solo si expandido) */}
+                                                                                {hExp && (
+                                                                                    <div className="px-16 pb-3 space-y-2">
+                                                                                        {hClases.map(c => (
+                                                                                            <div key={c.id} className="bg-white border rounded-lg p-3 hover:shadow-sm transition-shadow flex items-center justify-between">
+                                                                                                <div className="flex-1">
+                                                                                                    <div className="flex items-center gap-3">
+                                                                                                        <span className="font-bold text-blue-900 text-sm">{c.hora_inicio?.slice(0, 5)} - {c.hora_fin?.slice(0, 5)}</span>
+                                                                                                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getOccupancyColor(c.asistentes_confirmados, c.cupo_maximo)}`}>
+                                                                                                            {c.asistentes_confirmados || 0}/{c.cupo_maximo || '?'}
+                                                                                                        </span>
+                                                                                                    </div>
+                                                                                                    <div className="text-xs text-gray-500 mt-1">{c.fecha || '—'}</div>
+                                                                                                    <div className="text-xs mt-1">
+                                                                                                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${!c.coach_nombre ? (c.disciplina_nombre === 'CrossFit' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-500') : 'bg-green-100 text-green-800'}`}>
+                                                                                                            {c.coach_nombre || (c.disciplina_nombre === 'CrossFit' ? '⚠️ Pendiente' : 'Sin asignar')}
+                                                                                                        </span>
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                                <div className="flex gap-2 ml-3">
+                                                                                                    <button onClick={() => handleEditarClase(c)} className="px-2 py-1 text-blue-600 hover:bg-blue-50 rounded text-xs">Editar</button>
+                                                                                                    <button onClick={() => handleEliminarClase(c.id)} className="px-2 py-1 text-red-600 hover:bg-red-50 rounded text-xs">Eliminar</button>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        ))}
+                                                                                    </div>
+                                                                                )}
                                                                             </div>
-                                                                            <div className="flex gap-2 ml-3">
-                                                                                <button onClick={() => handleEditarClase(c)} className="px-2 py-1 text-blue-600 hover:bg-blue-50 rounded text-xs">Editar</button>
-                                                                                <button onClick={() => handleEliminarClase(c.id)} className="px-2 py-1 text-red-600 hover:bg-red-50 rounded text-xs">Eliminar</button>
-                                                                            </div>
-                                                                        </div>
-                                                                    ))
-                                                                )}
+                                                                        );
+                                                                    });
+                                                                })()}
                                                             </div>
                                                         )}
                                                     </div>
