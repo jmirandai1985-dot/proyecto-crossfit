@@ -150,85 +150,47 @@ const Clases = () => {
                         </div>
                     </div>
 
-                    {/* Tabla responsiva */}
-                    <div className="overflow-x-auto">
-                        <table className="w-full">
-                            <thead className="bg-blue-900 text-white">
-                                <tr>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Clase</th>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Disciplina</th>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Fecha</th>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Hora</th>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Coach</th>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Ocupación</th>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Acciones</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200">
-                                {clases.length > 0 ? (
-                                    clases.map((clase, index) => (
-                                        <tr key={clase.id || `clase-${index}`} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                            <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                                                {clase.disciplina_nombre || 'Sin disciplina'} — {clase.hora_inicio?.slice(0, 5) || '00:00'} a {clase.hora_fin?.slice(0, 5) || '00:00'}
-                                            </td>
-                                            <td className="px-6 py-4 text-sm text-gray-600">
-                                                <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-                                                    {clase.disciplina_nombre || 'Sin disciplina'}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 text-sm text-gray-600">{clase.fecha || 'Sin fecha'}</td>
-                                            <td className="px-6 py-4 text-sm text-gray-600 font-medium">
-                                                {clase.hora_inicio?.slice(0, 5) || '00:00'}
-                                            </td>
-                                            <td className="px-6 py-4 text-sm">
-                                                <span className={`px-2 py-1 rounded text-xs font-medium ${!clase.coach_nombre ? (clase.disciplina_nombre === 'CrossFit' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-500') : 'bg-green-100 text-green-800'}`}>
-                                                    {clase.coach_nombre || (clase.disciplina_nombre === 'CrossFit' ? '⚠️ Pendiente' : 'Sin asignar')}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 text-sm">
-                                                <div className="flex items-center space-x-2">
-                                                    <span
-                                                        className={`px-3 py-1 rounded-full text-xs font-medium ${getOccupancyColor(
-                                                            clase.asistentes_confirmados || 0,
-                                                            clase.cupo_maximo || 1
-                                                        )}`}
-                                                    >
-                                                        {clase.asistentes_confirmados || 0}/{clase.cupo_maximo || 0}
-                                                    </span>
+                    {/* Tarjetas por turno */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4">
+                        {TURNOS.map(turno => {
+                            const clasesTurno = clases.filter(c => {
+                                const h = parseHora(c.hora_inicio);
+                                return h >= turno.desde && h <= turno.hasta;
+                            });
+                            return (
+                                <div key={turno.id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                                    <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 font-bold text-gray-800 text-sm">
+                                        {turno.label} ({clasesTurno.length})
+                                    </div>
+                                    <div className="p-3 space-y-2 min-h-[100px]">
+                                        {clasesTurno.length === 0 ? (
+                                            <p className="text-gray-400 text-sm text-center py-6">Sin clases en este turno</p>
+                                        ) : (
+                                            clasesTurno.map(c => (
+                                                <div key={c.id} className="border rounded-lg p-3 hover:shadow-md transition-shadow">
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <span className="font-bold text-blue-900 text-sm">{c.hora_inicio?.slice(0, 5)} - {c.hora_fin?.slice(0, 5)}</span>
+                                                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getOccupancyColor(c.asistentes_confirmados, c.cupo_maximo)}`}>
+                                                            {c.asistentes_confirmados || 0}/{c.cupo_maximo || '?'}
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-xs text-gray-500">{c.disciplina_nombre || '—'} · {c.fecha || '—'}</div>
+                                                    <div className="text-xs mt-1">
+                                                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${!c.coach_nombre ? (c.disciplina_nombre === 'CrossFit' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-500') : 'bg-green-100 text-green-800'}`}>
+                                                            {c.coach_nombre || (c.disciplina_nombre === 'CrossFit' ? '⚠️ Pendiente' : 'Sin asignar')}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex gap-2 mt-2">
+                                                        <button onClick={() => handleEditarClase(c)} className="px-2 py-0.5 text-blue-600 hover:bg-blue-50 rounded text-xs">Editar</button>
+                                                        <button onClick={() => handleEliminarClase(c.id)} className="px-2 py-0.5 text-red-600 hover:bg-red-50 rounded text-xs">Eliminar</button>
+                                                    </div>
                                                 </div>
-                                            </td>
-                                            <td className="px-6 py-4 text-sm space-x-2">
-                                                <button
-                                                    onClick={() => handleEditarClase(clase)}
-                                                    className="px-3 py-1 text-blue-600 hover:bg-blue-50 rounded transition-colors text-xs font-medium"
-                                                >
-                                                    Editar
-                                                </button>
-                                                <button
-                                                    onClick={() => handleEliminarClase(clase.id)}
-                                                    className="px-3 py-1 text-red-600 hover:bg-red-50 rounded transition-colors text-xs font-medium"
-                                                >
-                                                    Eliminar
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))
-                                ) : (
-                                    <tr>
-                                        <td colSpan="7" className="px-6 py-8 text-center text-gray-600">
-                                            No hay clases programadas
-                                        </td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    {/* Footer */}
-                    <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
-                        <p className="text-sm text-gray-600">
-                            Total de clases: <span className="font-bold text-gray-900">{clases.length}</span>
-                        </p>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
 

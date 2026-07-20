@@ -191,17 +191,20 @@ try:
     db.flush()
     print(f"   {len(horario_data)} horario(s) base (1 por disciplina)")
 
-    # ── 10. CLASES (próximo dia) ─────────────────────────
+    # ── 10. CLASES (hoy + mañana para tests de reserva futura) ─
     class_counter = 1
-    for disc_id, (h_id, h_ini, h_fin, cupo) in {d[1]: (d[0], d[2], d[3], d[4]) for d in horario_data}.items():
-        db.add(Clase(id=class_counter, tenant_id=1, disciplina_id=disc_id,
-                     horario_base_id=h_id, fecha=hoy,
-                     hora_inicio=h_ini, hora_fin=h_fin,
-                     coach_id=1000 if disc_id == 1 else None, cupo_maximo=cupo))
-        class_counter += 1
+    manana = hoy + timedelta(days=1)
+    for fecha_clase in [hoy, manana]:
+        for disc_id, (h_id, h_ini, h_fin, cupo) in {d[1]: (d[0], d[2], d[3], d[4]) for d in horario_data}.items():
+            db.add(Clase(id=class_counter, tenant_id=1, disciplina_id=disc_id,
+                         horario_base_id=h_id, fecha=fecha_clase,
+                         hora_inicio=h_ini, hora_fin=h_fin,
+                         coach_id=1000 if disc_id == 1 else None, cupo_maximo=cupo))
+            class_counter += 1
     db.flush()
     total_clases = class_counter - 1
-    print(f"   {total_clases} clase(s) para hoy ({len(horario_data)} disciplinas)")
+    print(
+        f"   {total_clases} clase(s) (hoy + manana, {len(horario_data)} disciplinas c/u)")
 
     # ── 11. WOD PUBLICADO PARA HOY ────────────────────────
     clean_id = mov_ids.get("Clean", 1)

@@ -22,8 +22,13 @@ Horarios.jsx actualmente lista plana ordenada por hora. Se recomienda agrupar po
 
 ### BUG 10 — Bazar: productos inactivos cuentan en stats
 Producto marcado inactivo sigue sumando en "Total de Productos", "Stock Total" y "Valor Inventario" del Dashboard de Bazar. Pendiente para próxima sesión.
-A simple vista, es probable que incluya datos de asistencia individual.
-Se documentará con detalle cuando se analice.
+
+### P6 — Dashboard Administrativo: gráficos de negocio
+Pendiente de decisión: ¿el Dashboard (/admin/dashboard) debe mostrar los **mismos** gráficos que ya existen en Reportes (/admin/reportes), o gráficos **distintos/más resumidos**? Opciones:
+a) Mismos gráficos pero como vista rápida (duplicar componentes Recharts ya creados)
+b) Solo KPIs numéricos sin gráficos (alumnos activos, membresías mes, ingreso mes)
+c) Gráficos resumidos diferentes a Reportes (ej. solo tendencia de membresías, no ventas)
+No implementar hasta decidir.
 
 ## Duda 2: Manejo de eliminación de alumnos
 Confirmado: backend hace soft delete (activo=false). 
