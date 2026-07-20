@@ -1,6 +1,10 @@
 """
 Orchestrator: seed test DB, start uvicorn with ENVIRONMENT=test, run pytest, cleanup.
 Runs everything in the same Python process tree to guarantee ENVIRONMENT inheritance.
+
+FIX 2026-07-20: Use py -3.12 launcher instead of sys.executable.
+sys.executable resolves to Python 3.13 (installed after project creation) which
+does NOT have uvicorn/fastapi/pytest installed. Python 3.12 has all deps.
 """
 import requests
 import os
@@ -14,6 +18,13 @@ os.environ["ENVIRONMENT"] = "test"
 # Set working directory to the backend folder (where this script lives)
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BACKEND_DIR)
+
+# ── Python interpreter: use full path to Python 3.12 (not sys.executable) ──
+# sys.executable resolves to Python 3.13 which lacks uvicorn/fastapi/pytest.
+# "py -3.12" launcher doesn't reliably add cwd to sys.path for subprocesses,
+# so use the full path to the Python 3.12 WindowsApps interpreter.
+PYTHON_CMD = [
+    r"C:\Users\Asus\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe"]
 
 # ── 0. Kill any existing process on port 8000 ──
 print("[STOP] Killing any existing uvicorn on port 8000...")
@@ -45,7 +56,7 @@ except Exception as e:
 
 # 1. Seed
 print("[SEED] Seeding test DB...")
-ret = subprocess.call([sys.executable, "run_setup_test_db.py"])
+ret = subprocess.call(PYTHON_CMD + ["run_setup_test_db.py"])
 if ret != 0:
     sys.exit(ret)
 
@@ -54,8 +65,8 @@ print("[START] Starting uvicorn with ENVIRONMENT=test...")
 uvicorn_env = os.environ.copy()
 uvicorn_env["ENVIRONMENT"] = "test"
 proc = subprocess.Popen(
-    [sys.executable, "-m", "uvicorn", "app.main:app",
-        "--host", "127.0.0.1", "--port", "8000"],
+    PYTHON_CMD + ["-m", "uvicorn", "app.main:app",
+                  "--host", "127.0.0.1", "--port", "8000"],
     env=uvicorn_env,
     stdout=subprocess.DEVNULL,
     stderr=None,
@@ -105,7 +116,7 @@ else:
 
 # 4. Run pytest
 print("[PYTEST] Running tests...")
-test_ret = subprocess.call([sys.executable, "-m", "pytest", "tests/", "-v"])
+test_ret = subprocess.call(PYTHON_CMD + ["-m", "pytest", "tests/", "-v"])
 
 # 5. Cleanup
 print("[STOP] Shutting down...")

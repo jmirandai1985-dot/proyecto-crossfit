@@ -16,4 +16,4 @@ echo ============================================================
 echo.
 
 set ENVIRONMENT=test
-python -m uvicorn app.main:app --reload
+C:\Users\Asus\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe -m uvicorn app.main:app --reload
