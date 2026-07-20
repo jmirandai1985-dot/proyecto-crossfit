@@ -73,6 +73,6 @@ class UsuarioListItem(BaseModel):
     telefono: Optional[str] = None
     rol: RolUsuario
     activo: bool
-    fechaRegistro: Optional[str] = Field(None, alias="created_at")
+    fechaRegistro: Optional[datetime] = Field(None, alias="created_at")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)

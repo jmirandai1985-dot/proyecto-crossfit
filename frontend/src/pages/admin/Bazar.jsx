@@ -17,15 +17,7 @@ const Bazar = () => {
             setProductos(response.data || []);
         } catch (error) {
             console.error('Error fetching productos:', error);
-            // Datos de ejemplo
-            setProductos([
-                { id: 1, nombre: 'Protein Powder Whey', stock: 25, precio: 45000, descripcion: 'Suplemento proteico', activo: true },
-                { id: 2, nombre: 'Hand Grips Pro', stock: 12, precio: 15000, descripcion: 'Accesorios de entrenamiento', activo: true },
-                { id: 3, nombre: 'Water Bottle 1L', stock: 40, precio: 12000, descripcion: 'Hidratación', activo: true },
-                { id: 4, nombre: 'Urban Box T-Shirt', stock: 35, precio: 25000, descripcion: 'Ropa deportiva', activo: true },
-                { id: 5, nombre: 'Lifting Belt', stock: 8, precio: 35000, descripcion: 'Accesorios de levantamiento', activo: true },
-                { id: 6, nombre: 'Resistance Bands Set', stock: 18, precio: 22000, descripcion: 'Bandas de resistencia', activo: true },
-            ]);
+            setProductos([]);
         } finally {
             setLoading(false);
         }
