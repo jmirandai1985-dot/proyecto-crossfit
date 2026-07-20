@@ -183,3 +183,30 @@ def test_a09_compra_excede_stock_rechazada():
     assert "stock" in data.get("detail", "").lower(), \
         f"Debe mencionar stock insuficiente: {data.get('detail', '')}"
     print(f"  [OK] Compra de 10 rechazada (400) - stock insuficiente")
+
+
+# ===================================================================
+# BLOQUE 4 — LISTADO DE USUARIOS (test de serialización)
+# ===================================================================
+
+def test_a10_listar_usuarios_serializable():
+    """[10] GET /usuarios?rol=alumno&tenant_id=1 — Verificar que la
+    respuesta sea 200 y que fechaRegistro sea serializable como ISO datetime.
+    Esto protege contra el bug de UsuarioListItem.fechaRegistro como str
+    cuando SQLAlchemy devuelve datetime real (causaba 500)."""
+    r = requests.get(f"{BASE}/usuarios", params={
+        "tenant_id": TENANT_ID, "rol": "alumno"})
+    assert r.status_code == 200, \
+        f"Status {r.status_code}: {r.text[:300]}"
+    data = r.json()
+    assert isinstance(data, list), "Debe devolver una lista"
+    assert len(data) > 0, "Debe haber al menos un alumno"
+    for u in data:
+        # Puede llegar como fechaRegistro (alias Pydantic) o created_at (columna SQL)
+        fr = u.get("fechaRegistro") or u.get("created_at")
+        assert fr is not None, \
+            f"Falta fechaRegistro/created_at en user {u.get('id')}: tiene {list(u.keys())}"
+        assert isinstance(fr, str), \
+            f"fechaRegistro debe ser string, obtuvo {type(fr)} en user {u.get('id')}"
+    print(
+        f"  [OK] Listado de {len(data)} usuarios con fechaRegistro ISO válido")
