@@ -180,8 +180,10 @@ const Clases = () => {
                                             <td className="px-6 py-4 text-sm text-gray-600 font-medium">
                                                 {clase.hora_inicio?.slice(0, 5) || '00:00'}
                                             </td>
-                                            <td className="px-6 py-4 text-sm text-gray-600">
-                                                {clase.coach_nombre || 'Sin asignar'}
+                                            <td className="px-6 py-4 text-sm">
+                                                <span className={`px-2 py-1 rounded text-xs font-medium ${!clase.coach_nombre ? (clase.disciplina_nombre === 'CrossFit' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-500') : 'bg-green-100 text-green-800'}`}>
+                                                    {clase.coach_nombre || (clase.disciplina_nombre === 'CrossFit' ? '⚠️ Pendiente' : 'Sin asignar')}
+                                                </span>
                                             </td>
                                             <td className="px-6 py-4 text-sm">
                                                 <div className="flex items-center space-x-2">

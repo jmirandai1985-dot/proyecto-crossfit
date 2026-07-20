@@ -69,40 +69,42 @@ const Planes = () => {
                     <button onClick={() => openNew()} className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium text-sm">+ Nuevo Plan</button>
                 </div>
 
-                {GENEROS.map(gen => {
-                    const planesGen = planesPorGenero(gen.key);
-                    return (
-                        <div key={gen.key} className={`border-2 rounded-lg ${gen.color} overflow-hidden`}>
-                            <div className="px-5 py-3 flex items-center justify-between border-b border-gray-200 bg-white bg-opacity-50">
-                                <h2 className="text-lg font-bold">{gen.label} ({planesGen.length})</h2>
-                                <button onClick={() => openNew(gen.key)} className="px-3 py-1.5 bg-blue-900 text-white rounded hover:bg-blue-800 text-xs font-medium">+ Añadir</button>
-                            </div>
-                            {planesGen.length === 0 ? (
-                                <div className="px-5 py-8 text-center text-gray-400 text-sm">No hay planes {gen.key === 'unisex' ? 'unisex' : `para ${gen.label}`}</div>
-                            ) : (
-                                <div className="p-3 space-y-2">
-                                    {planesGen.map(p => (
-                                        <div key={p.id} className="bg-white rounded-lg border border-gray-200 p-4 flex items-center justify-between hover:shadow-sm transition-shadow">
-                                            <div className="flex-1">
-                                                <div className="font-semibold text-gray-900">{p.nombre}</div>
-                                                <div className="text-sm text-gray-500 mt-1">
-                                                    ${(p.precio_clp || 0).toLocaleString()} · {p.creditos || 0} créditos · {p.duracion_dias || 0} días
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {GENEROS.map(gen => {
+                        const planesGen = planesPorGenero(gen.key);
+                        return (
+                            <div key={gen.key} className={`border-2 rounded-lg ${gen.color} overflow-hidden`}>
+                                <div className="px-5 py-3 flex items-center justify-between border-b border-gray-200 bg-white bg-opacity-50">
+                                    <h2 className="text-lg font-bold">{gen.label} ({planesGen.length})</h2>
+                                    <button onClick={() => openNew(gen.key)} className="px-3 py-1.5 bg-blue-900 text-white rounded hover:bg-blue-800 text-xs font-medium">+ Añadir</button>
+                                </div>
+                                {planesGen.length === 0 ? (
+                                    <div className="px-5 py-8 text-center text-gray-400 text-sm">No hay planes {gen.key === 'unisex' ? 'unisex' : `para ${gen.label}`}</div>
+                                ) : (
+                                    <div className="p-3 space-y-2">
+                                        {planesGen.map(p => (
+                                            <div key={p.id} className="bg-white rounded-lg border border-gray-200 p-4 flex items-center justify-between hover:shadow-sm transition-shadow">
+                                                <div className="flex-1">
+                                                    <div className="font-semibold text-gray-900">{p.nombre}</div>
+                                                    <div className="text-sm text-gray-500 mt-1">
+                                                        ${(p.precio_clp || 0).toLocaleString()} · {p.creditos || 0} créditos · {p.duracion_dias || 0} días
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.activo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                                        {p.activo ? 'Activo' : 'Inactivo'}
+                                                    </span>
+                                                    <button onClick={() => openEdit(p)} className="px-2 py-1 text-blue-600 hover:bg-blue-50 rounded text-xs">Editar</button>
+                                                    <button onClick={() => handleDelete(p.id)} className="px-2 py-1 text-red-600 hover:bg-red-50 rounded text-xs">Eliminar</button>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-3">
-                                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.activo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                                    {p.activo ? 'Activo' : 'Inactivo'}
-                                                </span>
-                                                <button onClick={() => openEdit(p)} className="px-2 py-1 text-blue-600 hover:bg-blue-50 rounded text-xs">Editar</button>
-                                                <button onClick={() => handleDelete(p.id)} className="px-2 py-1 text-red-600 hover:bg-red-50 rounded text-xs">Eliminar</button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    );
-                })}
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
 
                 {/* Nota sobre estudiante */}
                 {!tieneEstudiante && (
