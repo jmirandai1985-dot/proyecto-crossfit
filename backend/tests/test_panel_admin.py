@@ -25,8 +25,38 @@ class Shared:
 
 
 # ===================================================================
-# BLOQUE 1 — VALIDACION DE ROL ADMIN (tests 1-4)
+# BLOQUE 4 — TEST PERMANENTE DE LIMPIEZA DE DUPLICADOS
 # ===================================================================
+
+def test_c16_sin_clases_duplicadas():
+    """Verifica que no existan duplicados en clases (misma fecha, hora, disciplina).
+    Tambien verifica que no haya clases en Domingo (operacion confirmada cerrada)."""
+    import psycopg2
+    DB = 'postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-curly-rain-acg2z9h1-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+    c = psycopg2.connect(DB)
+    cur = c.cursor()
+    cur.execute("""
+        SELECT COUNT(*) FROM (
+            SELECT fecha, hora_inicio, disciplina_id, COUNT(*) as cnt
+            FROM clases WHERE tenant_id=1
+            GROUP BY fecha, hora_inicio, disciplina_id
+            HAVING COUNT(*) > 1
+        ) sub
+    """)
+    dupes = cur.fetchone()[0]
+    assert dupes == 0, f"Hay {dupes} grupos duplicados en clases"
+    cur.execute(
+        "SELECT COUNT(*) FROM clases WHERE tenant_id=1 AND EXTRACT(DOW FROM fecha)::int=0")
+    domingo = cur.fetchone()[0]
+    assert domingo == 0, f"Hay {domingo} clases en Domingo"
+    cur.close()
+    c.close()
+    print(f"  ✅ Sin duplicados en clases (0 grupos) y sin clases en Domingo (0) — permanente")
+
+# ===================================================================
+# BLOQUE 5 — LIMPIEZA
+# ===================================================================
+
 
 def test_a01_aprobar_solicitud_con_usuario_invalido():
     """[1] Verificar que un coach NO puede aprobar solicitudes (seguridad)."""

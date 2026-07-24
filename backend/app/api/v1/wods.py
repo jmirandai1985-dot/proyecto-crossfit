@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.db.database import get_db
 from app.models.wod import Wod, EstadoWod
+from app.core.dependencies import get_current_user, verificar_coach_disciplina
 from app.models.wod_movimiento import WodMovimiento
 from app.models.movimiento import Movimiento
 from app.models.clase import Clase
@@ -643,13 +644,46 @@ def parsear_wod(data: WodParseRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=schemas.WodResponse)
-def crear_wod(wod_data: schemas.WodCreate, tenant_id: int = Query(1), db: Session = Depends(get_db)):
+def crear_wod(
+    wod_data: schemas.WodCreate,
+    tenant_id: int = Query(1),
+    current_user: dict = Depends(get_current_user),
+    disciplina_id: int = Query(
+        None, description="ID de la disciplina para validar permisos del coach (OBLIGATORIO para coaches)"),
+    modo_emergencia: bool = Query(
+        False, description="Modo cobertura de emergencia"),
+    db: Session = Depends(get_db)
+):
     """
     Crea un WOD con movimientos.
     Acepta dos formatos:
       - movimientos[]: formato tradicional plano
       - fases[]: formato agrupado por fases (CALENTAMIENTO, FUERZA, WOD)
+
+    Seguridad: coach_id se obtiene del token JWT (current_user), NO de un parametro del cliente.
+    Los coaches solo pueden crear WODs en disciplinas a las que estan asignados.
+    modo_emergencia=true permite crear WODs en disciplinas no asignadas (con auditoria).
     """
+    coach_id = current_user["usuario_id"]
+    rol = current_user.get("rol", "")
+
+    # Verificar que el coach_id del body coincida con el usuario autenticado
+    if wod_data.coach_id and wod_data.coach_id != coach_id:
+        raise HTTPException(
+            status_code=403, detail="No puedes crear WODs en nombre de otro coach")
+
+    # Para coaches: validacion OBLIGATORIA de pertenencia a la disciplina
+    if rol == "coach":
+        if not disciplina_id:
+            raise HTTPException(
+                status_code=400, detail="disciplina_id es obligatorio para coaches")
+        verificar_coach_disciplina(
+            coach_id, disciplina_id, db,
+            modo_emergencia=modo_emergencia,
+            accion="crear_wod", tenant_id=tenant_id
+        )
+    # Admin: sin restricciones (bypass)
+
     estado_valor = wod_data.estado if wod_data.estado else "draft"
     nueva_wod = Wod(
         tenant_id=tenant_id,
@@ -787,15 +821,50 @@ def obtener_wod(wod_id: int, tenant_id: int = Query(1), db: Session = Depends(ge
 
 
 @router.put("/{wod_id}", response_model=schemas.WodResponse)
-def actualizar_wod(wod_id: int, wod_data: schemas.WodUpdate, tenant_id: int = Query(1), db: Session = Depends(get_db)):
+def actualizar_wod(
+    wod_id: int,
+    wod_data: schemas.WodUpdate,
+    tenant_id: int = Query(1),
+    current_user: dict = Depends(get_current_user),
+    disciplina_id: int = Query(
+        None, description="ID de la disciplina para validar permisos del coach (OBLIGATORIO para coaches)"),
+    modo_emergencia: bool = Query(
+        False, description="Modo cobertura de emergencia"),
+    db: Session = Depends(get_db)
+):
     """
     Actualiza un WOD existente.
     Si envía movimientos[] o fases[], reemplaza todos los movimientos previos.
+
+    Seguridad: coach_id se obtiene del token JWT (current_user), NO de un parametro del cliente.
+    Los coaches solo pueden editar WODs en disciplinas a las que estan asignados.
+    modo_emergencia=true permite editar WODs en disciplinas no asignadas (con auditoria).
     """
     wod = db.query(Wod).filter(
         Wod.id == wod_id, Wod.tenant_id == tenant_id).first()
     if not wod:
         raise HTTPException(status_code=404, detail="WOD no encontrado")
+
+    coach_id = current_user["usuario_id"]
+    rol = current_user.get("rol", "")
+
+    # Verificar que el coach_id del body coincida con el usuario autenticado (si viene en el body)
+    body_coach_id = getattr(wod_data, 'coach_id', None)
+    if body_coach_id and body_coach_id != coach_id:
+        raise HTTPException(
+            status_code=403, detail="No puedes editar WODs en nombre de otro coach")
+
+    # Para coaches: validacion OBLIGATORIA de pertenencia a la disciplina
+    if rol == "coach":
+        if not disciplina_id:
+            raise HTTPException(
+                status_code=400, detail="disciplina_id es obligatorio para coaches")
+        verificar_coach_disciplina(
+            coach_id, disciplina_id, db,
+            modo_emergencia=modo_emergencia,
+            accion="editar_wod", tenant_id=tenant_id
+        )
+    # Admin: sin restricciones (bypass)
 
     # Actualizar campos basicos
     if wod_data.titulo is not None:
@@ -882,10 +951,22 @@ def eliminar_wod(wod_id: int, tenant_id: int = Query(1), db: Session = Depends(g
 # ──────────────────────────────────────────────
 
 @router.post("/clases/{clase_id}/asignar-wod/{wod_id}")
-def asignar_wod_a_clase(clase_id: int, wod_id: int, tenant_id: int = Query(1), db: Session = Depends(get_db)):
+def asignar_wod_a_clase(
+    clase_id: int,
+    wod_id: int,
+    tenant_id: int = Query(1),
+    current_user: dict = Depends(get_current_user),
+    modo_emergencia: bool = Query(
+        False, description="Modo cobertura de emergencia"),
+    db: Session = Depends(get_db)
+):
     """
     Vincula un WOD a una clase especifica.
     La clase debe existir y el WOD debe existir.
+
+    Seguridad: coach validado OBLIGATORIAMENTE contra la disciplina de la clase.
+    modo_emergencia=true permite operar en disciplinas no asignadas (con auditoria).
+    Admin: sin restricciones.
     """
     # Verificar que la clase existe
     clase = db.query(Clase).filter(
@@ -894,6 +975,17 @@ def asignar_wod_a_clase(clase_id: int, wod_id: int, tenant_id: int = Query(1), d
     ).first()
     if not clase:
         raise HTTPException(status_code=404, detail="Clase no encontrada")
+
+    # Validacion OBLIGATORIA: coach debe pertenecer a la disciplina de la clase
+    coach_id = current_user["usuario_id"]
+    rol = current_user.get("rol", "")
+    if rol == "coach" and clase.disciplina_id:
+        verificar_coach_disciplina(
+            coach_id, clase.disciplina_id, db,
+            modo_emergencia=modo_emergencia,
+            clase_id=clase_id, accion="asignar_wod", tenant_id=tenant_id
+        )
+    # Admin: bypass
 
     # Verificar que el WOD existe
     wod = db.query(Wod).filter(
@@ -913,5 +1005,76 @@ def asignar_wod_a_clase(clase_id: int, wod_id: int, tenant_id: int = Query(1), d
         "clase_id": clase.id,
         "wod_id": wod.id,
         "fecha": str(clase.fecha),
+        "wod_titulo": wod.titulo
+    }
+
+
+# ──────────────────────────────────────────────
+# ENDPOINT: ASIGNAR WOD A VARIAS CLASES (BATCH)
+# ──────────────────────────────────────────────
+
+@router.post("/batch")
+def asignar_wod_batch(
+    body: dict,
+    tenant_id: int = Query(1),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Asigna un WOD a varias clases en una sola operacion.
+    Body: { "wod_id": int, "clase_ids": [int, int, ...] }
+
+    Seguridad: valida que el coach autenticado pertenezca a la disciplina
+    de CADA clase. Si una sola clase es de una disciplina ajena, TODO el batch falla con 403.
+    """
+    wod_id = body.get("wod_id")
+    clase_ids = body.get("clase_ids", [])
+
+    if not wod_id or not isinstance(clase_ids, list) or len(clase_ids) == 0:
+        raise HTTPException(
+            status_code=400, detail="wod_id (int) y clase_ids (list) son obligatorios")
+
+    coach_id = current_user["usuario_id"]
+    rol = current_user.get("rol", "")
+
+    # Verificar que el WOD existe
+    wod = db.query(Wod).filter(
+        Wod.id == wod_id,
+        Wod.tenant_id == tenant_id
+    ).first()
+    if not wod:
+        raise HTTPException(status_code=404, detail="WOD no encontrado")
+
+    # FASE 1: Validar TODAS las clases ANTES de asignar (todo o nada)
+    clases_a_asignar = []
+    for cid in clase_ids:
+        clase = db.query(Clase).filter(
+            Clase.id == cid,
+            Clase.tenant_id == tenant_id
+        ).first()
+        if not clase:
+            raise HTTPException(
+                status_code=404, detail=f"Clase {cid} no encontrada")
+
+        # Validar que el coach pertenece a la disciplina de esta clase
+        if rol == "coach" and clase.disciplina_id:
+            verificar_coach_disciplina(
+                coach_id, clase.disciplina_id, db,
+                modo_emergencia=body.get("modo_emergencia", False),
+                clase_id=cid, accion="asignar_wod", tenant_id=tenant_id
+            )
+
+        clases_a_asignar.append(clase)
+
+    # FASE 2: Asignar WOD a todas las clases validadas
+    for clase in clases_a_asignar:
+        clase.wod_id = wod_id
+
+    db.commit()
+
+    return {
+        "mensaje": f"WOD asignado a {len(clases_a_asignar)} clase(s)",
+        "wod_id": wod_id,
+        "actualizadas": len(clases_a_asignar),
         "wod_titulo": wod.titulo
     }

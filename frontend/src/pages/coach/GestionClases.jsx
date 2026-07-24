@@ -42,11 +42,21 @@ export default function GestionClases() {
     const [wodForm, setWodForm] = useState({ titulo: '', calentamiento: '', fuerza_habilidad: '', wod_principal: '', tipo_metcon: '', estado: 'publicado' });
     const [asistencia, setAsistencia] = useState([]);
     const [claseAsistencia, setClaseAsistencia] = useState(null);
+    const [modoEmergencia, setModoEmergencia] = useState(false);
+    const [confirmarEmergencia, setConfirmarEmergencia] = useState(null); // { disciplinaNombre }
+    const [coachDisciplinas, setCoachDisciplinas] = useState([]); // disciplinas asignadas al coach
 
     // Clases de Hoy
     const [fechaClases, setFechaClases] = useState(hoyStr());
     const [clasesConWod, setClasesConWod] = useState([]);
     const [claseEnCurso, setClaseEnCurso] = useState(null);
+
+    // Filtrar disciplinas según modo
+    const disciplinasVisibles = React.useMemo(() => {
+        if (modoEmergencia) return disciplinas; // Emergencia: mostrar TODAS
+        if (coachDisciplinas.length === 0) return disciplinas; // Aún no cargadas: mostrar todas
+        return disciplinas.filter(d => coachDisciplinas.includes(d.id)); // Normal: solo las asignadas al coach
+    }, [disciplinas, coachDisciplinas, modoEmergencia]);
 
     // Cargar disciplinas
     useEffect(() => {
@@ -59,7 +69,14 @@ export default function GestionClases() {
                 setDisciplinas(filt);
             })
             .catch(e => console.error('Error disciplinas', e));
-    }, [tenant_id]);
+        // Cargar disciplinas asignadas al coach
+        api.get(`${API_BASE}/coach-disciplinas`, { params: { tenant_id, coach_id } })
+            .then(r => {
+                const ids = (r.data || []).filter(cd => cd.activo).map(cd => cd.disciplina_id);
+                setCoachDisciplinas(ids);
+            })
+            .catch(() => setCoachDisciplinas([]));
+    }, [tenant_id, coach_id]);
 
     const cargarClases = useCallback(async (f) => {
         try {
@@ -116,28 +133,42 @@ export default function GestionClases() {
 
     const guardarWod = async () => {
         if (!wodForm.wod_principal.trim()) { setMsg({ tipo: 'error', texto: 'El WOD principal es obligatorio' }); return; }
+        // Confirmación de emergencia: si el coach no está asignado a esta disciplina y modoEmergencia está activo
+        if (modoEmergencia && disciplinaActiva && coachDisciplinas.length > 0 && !coachDisciplinas.includes(disciplinaActiva)) {
+            const discNombre = disciplinas.find(d => d.id === disciplinaActiva)?.nombre || 'esta disciplina';
+            setConfirmarEmergencia({ disciplinaNombre: discNombre });
+            return;
+        }
+        await ejecutarGuardarWod();
+    };
+
+    const ejecutarGuardarWod = async () => {
         setLoading(true); setMsg({ tipo: '', texto: '' });
+        const esEmergencia = modoEmergencia && disciplinaActiva && coachDisciplinas.length > 0 && !coachDisciplinas.includes(disciplinaActiva);
         try {
             let wodRes;
+            const params = { tenant_id, disciplina_id: disciplinaActiva };
+            if (esEmergencia) params.modo_emergencia = true;
             if (wod && wod.id) {
-                const r = await api.put(`${API_BASE}/wods/${wod.id}`, { ...wodForm, fecha: fechaPlanif, coach_id }, { params: { tenant_id } });
-                wodRes = r.data; setMsg({ tipo: 'exito', texto: 'WOD actualizado' });
+                const r = await api.put(`${API_BASE}/wods/${wod.id}`, { ...wodForm, fecha: fechaPlanif, coach_id }, { params });
+                wodRes = r.data; setMsg({ tipo: 'exito', texto: 'WOD actualizado' + (esEmergencia ? ' (modo emergencia)' : '') });
             } else {
-                const r = await api.post(`${API_BASE}/wods/`, { ...wodForm, fecha: fechaPlanif, coach_id }, { params: { tenant_id } });
-                wodRes = r.data; setMsg({ tipo: 'exito', texto: 'WOD creado' });
+                const r = await api.post(`${API_BASE}/wods/`, { ...wodForm, fecha: fechaPlanif, coach_id }, { params });
+                wodRes = r.data; setMsg({ tipo: 'exito', texto: 'WOD creado' + (esEmergencia ? ' (modo emergencia)' : '') });
             }
             setWod(wodRes); setModoEdicion(false);
             const seleccionadas = Object.entries(horariosSel).filter(([, v]) => v).map(([k]) => parseInt(k));
-            let ok = 0, err = 0;
-            for (const horarioId of seleccionadas) {
-                try {
-                    const clase = clasesDelDia.find(c => c.horario_base_id === horarioId && c.fecha === fechaPlanif);
-                    if (!clase) { err++; continue; }
-                    await api.post(`${API_BASE}/wods/clases/${clase.id}/asignar-wod/${wodRes.id}`, {}, { params: { tenant_id } });
-                    ok++;
-                } catch (e) { err++; }
+            const claseIds = seleccionadas
+                .map(horarioId => clasesDelDia.find(c => c.horario_base_id === horarioId && c.fecha === fechaPlanif))
+                .filter(c => c)
+                .map(c => c.id);
+            if (claseIds.length > 0) {
+                const batchBody = { wod_id: wodRes.id, clase_ids: claseIds };
+                if (esEmergencia) batchBody.modo_emergencia = true;
+                const res = await api.post(`${API_BASE}/wods/batch`, batchBody, { params: { tenant_id } });
+                setMsg({ tipo: 'exito', texto: `WOD asignado a ${res.data.actualizadas} clase(s)` + (esEmergencia ? ' (modo emergencia)' : '') });
             }
-            if (ok > 0) setMsg({ tipo: 'exito', texto: `WOD asignado a ${ok} clase(s) (${err} error(es))` });
+            setConfirmarEmergencia(null);
             cargarClases(fechaPlanif).then(setClasesDelDia);
         } catch (e) {
             setMsg({ tipo: 'error', texto: `Error: ${e.response?.data?.detail || e.message}` });
@@ -172,6 +203,47 @@ export default function GestionClases() {
                 {msg.texto && (
                     <div className={`mb-4 p-3 rounded ${msg.tipo === 'error' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>{msg.texto}</div>
                 )}
+
+                {/* MODAL DE CONFIRMACIÓN MODO EMERGENCIA */}
+                {confirmarEmergencia && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+                        <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md mx-4 border-2 border-red-400">
+                            <div className="text-4xl mb-4 text-center">⚠️</div>
+                            <h2 className="text-xl font-bold text-center mb-3 text-red-700">Cobertura de Emergencia</h2>
+                            <p className="text-gray-700 text-center mb-4">
+                                Vas a cubrir esta clase de <strong>{confirmarEmergencia.disciplinaNombre}</strong> en modo emergencia.
+                            </p>
+                            <p className="text-sm text-gray-500 text-center mb-6">
+                                Esta acción quedará registrada en la auditoría para Supervisión.
+                            </p>
+                            <div className="flex gap-3 justify-center">
+                                <button onClick={() => setConfirmarEmergencia(null)}
+                                    className="px-5 py-2 rounded-lg bg-gray-200 text-gray-700 font-medium hover:bg-gray-300">
+                                    Cancelar
+                                </button>
+                                <button onClick={ejecutarGuardarWod} disabled={loading}
+                                    className="px-5 py-2 rounded-lg bg-red-600 text-white font-bold hover:bg-red-700">
+                                    {loading ? 'Ejecutando...' : '✅ Confirmar Cobertura'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* TOGGLE MODO EMERGENCIA */}
+                <div className="mb-4 flex items-center gap-3">
+                    <button
+                        onClick={() => { setModoEmergencia(!modoEmergencia); setDisciplinaActiva(null); setHorariosTurno([]); setTurnoActivo(null); }}
+                        className={`px-4 py-2 rounded-lg font-bold text-sm transition-colors ${modoEmergencia ? 'bg-red-600 text-white animate-pulse' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
+                    >
+                        {modoEmergencia ? '⚠️ MODO EMERGENCIA ACTIVO' : '⚠️ Modo Emergencia'}
+                    </button>
+                    {modoEmergencia && (
+                        <span className="text-xs text-red-600 font-medium">
+                            Puedes operar sobre clases de CUALQUIER disciplina. Las acciones quedarán auditadas.
+                        </span>
+                    )}
+                </div>
 
                 {/* PESTAÑAS */}
                 <div className="flex gap-1 mb-6 border-b">
@@ -212,7 +284,7 @@ export default function GestionClases() {
                                 <button onClick={() => setTurnoActivo(null)} className="text-sm text-gray-500 hover:text-gray-700 mb-3">&larr; Volver a turnos</button>
                                 <p className="text-sm text-gray-500 mb-3">{turnoLabel?.label} — Disciplina:</p>
                                 <div className="flex gap-3 flex-wrap">
-                                    {disciplinas.map(d => (
+                                    {disciplinasVisibles.map(d => (
                                         <button key={d.id} onClick={() => seleccionarDisciplina(d.id)}
                                             className="px-6 py-4 rounded-xl border-2 border-gray-200 bg-white hover:border-emerald-400 hover:shadow transition-all font-medium">{d.nombre}</button>
                                     ))}

@@ -133,6 +133,7 @@ def actualizar_plan(
     duracion_dias: Optional[int] = None,
     activo: Optional[bool] = None,
     genero: Optional[str] = None,
+    es_estudiante: Optional[bool] = None,
     requiere_certificado_estudiante: Optional[bool] = None,
     db: Session = Depends(get_db)
 ):
@@ -158,6 +159,8 @@ def actualizar_plan(
         plan.activo = activo
     if genero is not None:
         plan.genero = genero
+    if es_estudiante is not None:
+        plan.es_estudiante = es_estudiante
     if requiere_certificado_estudiante is not None:
         plan.requiere_certificado_estudiante = requiere_certificado_estudiante
 

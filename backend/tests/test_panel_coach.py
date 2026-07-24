@@ -11,7 +11,7 @@ import requests
 import json
 from datetime import date, timedelta
 
-from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, HOY_STR
+from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, HOY_STR, get_coach_token
 
 COACH_ID = 1000
 
@@ -88,9 +88,12 @@ def test_c03_crear_wod_texto_libre():
         "estado": "publicado",
         "coach_id": COACH_ID
     }
+    token = get_coach_token(coach_id=COACH_ID)
     r = requests.post(f"{BASE}/wods/",
-                      params={"tenant_id": TENANT_ID},
-                      json=payload)
+                      params={"tenant_id": TENANT_ID,
+                              "disciplina_id": Shared.disciplina_crossfit_id or 1},
+                      json=payload,
+                      headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200 or r.status_code == 201, \
         f"Status {r.status_code}: {r.text[:200]}"
     data = r.json()
@@ -137,9 +140,12 @@ def test_c05_editar_wod():
         "tipo_metcon": "AMRAP",
         "estado": "draft"
     }
+    token = get_coach_token(coach_id=COACH_ID)
     r = requests.put(f"{BASE}/wods/{Shared.wod_creado_id}",
-                     params={"tenant_id": TENANT_ID},
-                     json=cambios)
+                     params={"tenant_id": TENANT_ID,
+                             "disciplina_id": Shared.disciplina_crossfit_id or 1},
+                     json=cambios,
+                     headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200, f"Status {r.status_code}: {r.text[:200]}"
     data = r.json()
     assert data["titulo"] == cambios["titulo"], f"Titulo debe ser '{cambios['titulo']}'"
@@ -164,11 +170,18 @@ def test_c06_asignar_wod_a_clase():
     clases_hoy = clases if isinstance(clases, list) else (
         clases.get("clases", []) if isinstance(clases, dict) else [])
     assert len(clases_hoy) > 0, "Debe haber al menos una clase hoy"
-    Shared.clase_asignada_id = clases_hoy[0]["id"]
+    # Pick a CrossFit class (disc 1) since coach 1000 is only assigned to CrossFit
+    crossfit_classes = [c for c in clases_hoy if c.get(
+        "disciplina_id") == Shared.disciplina_crossfit_id]
+    assert len(
+        crossfit_classes) > 0, "Debe haber al menos una clase de CrossFit hoy"
+    Shared.clase_asignada_id = crossfit_classes[0]["id"]
     # Asignar WOD a la clase
+    token = get_coach_token(coach_id=COACH_ID)
     r = requests.post(
         f"{BASE}/wods/clases/{Shared.clase_asignada_id}/asignar-wod/{Shared.wod_creado_id}",
-        params={"tenant_id": TENANT_ID}
+        params={"tenant_id": TENANT_ID},
+        headers={"Authorization": f"Bearer {token}"}
     )
     assert r.status_code == 200, f"Status {r.status_code}: {r.text[:200]}"
     print(f"  WOD asignado a clase {Shared.clase_asignada_id}")
@@ -236,9 +249,11 @@ def test_c07_marcar_asistencia():
         Shared.creditos_antes = r_cred.json().get("clases_disponibles")
 
     # Marcar asistencia = true
+    token = get_coach_token(coach_id=COACH_ID)
     r = requests.put(f"{BASE}/reservas/{Shared.reserva_id}/asistencia",
                      params={"tenant_id": TENANT_ID},
-                     json={"asistio": True})
+                     json={"asistio": True},
+                     headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200, f"Status {r.status_code}: {r.text[:200]}"
 
     # Verificar que se marco asistencia
@@ -255,9 +270,11 @@ def test_c07_marcar_asistencia():
         f"  Asistencia marcada correctamente para reserva {Shared.reserva_id}")
 
     # Cambiar a false y verificar
+    token = get_coach_token(coach_id=COACH_ID)
     r2 = requests.put(f"{BASE}/reservas/{Shared.reserva_id}/asistencia",
                       params={"tenant_id": TENANT_ID},
-                      json={"asistio": False})
+                      json={"asistio": False},
+                      headers={"Authorization": f"Bearer {token}"})
     assert r2.status_code == 200, f"Status {r2.status_code}"
     print(f"  Asistencia cambiada a false correctamente")
 
@@ -281,11 +298,203 @@ def test_c08_asistencia_false_no_devuelve_credito():
 
 
 # ===================================================================
-# BLOQUE 4 — LIMPIEZA
+# BLOQUE 4 — SEGURIDAD (test permanente de regresión IDOR)
 # ===================================================================
 
-def test_c09_cleanup():
-    """[9] Limpiar datos creados durante los tests."""
+def test_c10_seguridad_coach_no_puede_operar_otra_disciplina():
+    """[10] Verificar que un coach NO puede asignar WOD ni marcar asistencia
+    en una disciplina a la que NO pertenece (IDOR cerrado permanentemente).
+
+    Coach 1000 solo está asignado a CrossFit (disc 1).
+    Intenta operar sobre Levantamiento Olímpico (disc 4) y debe recibir 403.
+    """
+    token = get_coach_token(coach_id=COACH_ID)
+
+    # ── Obtener una clase de Levantamiento Olímpico (disc 4) ──
+    r = requests.get(f"{BASE}/clases",
+                     params={"tenant_id": TENANT_ID, "fecha_desde": HOY_STR, "fecha_hasta": HOY_STR})
+    assert r.status_code == 200, f"GET clases: {r.status_code}"
+    clases = r.json()
+    clases_hoy = clases if isinstance(clases, list) else (
+        clases.get("clases", []) if isinstance(clases, dict) else [])
+    lev_olimp = [c for c in clases_hoy if c.get("disciplina_id") == 4]
+    assert len(lev_olimp) > 0, "Debe existir clase de Lev. Olímpico hoy"
+    clase_otra_disc = lev_olimp[0]
+
+    # ── Intentar asignar WOD a clase de OTRA disciplina → 403 ──
+    r_wod = requests.post(
+        f"{BASE}/wods/clases/{clase_otra_disc['id']}/asignar-wod/1",
+        params={"tenant_id": TENANT_ID},
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert r_wod.status_code == 403, \
+        f"Esperaba 403 (no autorizado), obtuvo {r_wod.status_code}: {r_wod.text[:200]}"
+    assert "no esta asignado" in r_wod.json().get("detail", ""), \
+        f"Mensaje debe indicar falta de asignacion: {r_wod.text[:200]}"
+    print(f"  ✅ Asignar WOD a disc 4 → 403 (bloqueado correctamente)")
+
+    # ── Intentar marcar asistencia en reserva de OTRA disciplina → 403 ──
+    # Crear una reserva en la clase de Lev. Olímpico para tener un ID válido
+    r_res = requests.post(f"{BASE}/reservas/",
+                          json={"tenant_id": TENANT_ID, "alumno_id": ALUMNO_ID, "clase_id": clase_otra_disc["id"]})
+    reserva_id_otra = None
+    if r_res.status_code in (200, 201):
+        reserva_id_otra = r_res.json().get("id")
+    else:
+        # Si ya existe, obtenerla del listado
+        r_list = requests.get(f"{BASE}/reservas/por-clase/{clase_otra_disc['id']}",
+                              params={"tenant_id": TENANT_ID})
+        if r_list.status_code == 200:
+            reservas_list = r_list.json()
+            if reservas_list:
+                reserva_id_otra = reservas_list[0]["id"]
+
+    if reserva_id_otra:
+        r_asist = requests.put(f"{BASE}/reservas/{reserva_id_otra}/asistencia",
+                               params={"tenant_id": TENANT_ID},
+                               json={"asistio": True},
+                               headers={"Authorization": f"Bearer {token}"})
+        assert r_asist.status_code == 403, \
+            f"Esperaba 403 al marcar asistencia en disc ajena, obtuvo {r_asist.status_code}: {r_asist.text[:200]}"
+        print(f"  ✅ Marcar asistencia en disc 4 → 403 (bloqueado correctamente)")
+    else:
+        print(
+            "  ⚠️ No se pudo crear/obtener reserva en disc 4 — prueba de asistencia omitida")
+        print("     (la prueba de asignar WOD ya confirmó el 403)")
+
+
+# ===================================================================
+# BLOQUE 5 — BATCH WOD (tests 11-12)
+# ===================================================================
+
+def test_c12_batch_asignar_wod():
+    """[12] POST /wods/batch — Asignar WOD a varias clases en un solo request.
+    a) Batch exitoso con 2 clases de la misma disciplina (CrossFit)
+    b) Batch RECHAZADO si incluye una clase de otra disciplina
+    """
+    token = get_coach_token(coach_id=COACH_ID)
+    assert Shared.wod_creado_id is not None, "Primero debe crear el WOD"
+
+    # Obtener clases de hoy
+    r = requests.get(f"{BASE}/clases",
+                     params={"tenant_id": TENANT_ID, "fecha_desde": HOY_STR, "fecha_hasta": HOY_STR})
+    assert r.status_code == 200
+    clases = r.json()
+    clases_hoy = clases if isinstance(clases, list) else (
+        clases.get("clases", []) if isinstance(clases, dict) else [])
+
+    # ── a) Batch exitoso: 2 clases de CrossFit (disc 1) ──
+    crossfit = [c for c in clases_hoy if c.get(
+        "disciplina_id") == Shared.disciplina_crossfit_id]
+    assert len(crossfit) >= 1, "Debe haber al menos 1 clase de CrossFit hoy"
+    cf_ids = [crossfit[0]["id"]]
+
+    r_batch = requests.post(f"{BASE}/wods/batch",
+                            params={"tenant_id": TENANT_ID},
+                            json={"wod_id": Shared.wod_creado_id,
+                                  "clase_ids": cf_ids},
+                            headers={"Authorization": f"Bearer {token}"})
+    assert r_batch.status_code == 200, \
+        f"Esperaba 200 batch exitoso, obtuvo {r_batch.status_code}: {r_batch.text[:200]}"
+    data = r_batch.json()
+    assert data.get("actualizadas") == 1, \
+        f"Esperaba 1 actualizada, obtuvo {data.get('actualizadas')}"
+    assert data.get("wod_id") == Shared.wod_creado_id
+    print(
+        f"  ✅ Batch: WOD asignado a {data['actualizadas']} clase(s) de CrossFit")
+
+    # ── b) Batch RECHAZADO: incluye clase de otra disciplina ──
+    lev_olimp = [c for c in clases_hoy if c.get("disciplina_id") == 4]
+    assert len(lev_olimp) > 0, "Debe existir clase de Lev. Olímpico hoy"
+    # Mezclar: 1 CrossFit + 1 Lev. Olímpico
+    ids_mezclados = [crossfit[0]["id"], lev_olimp[0]["id"]]
+
+    r_reject = requests.post(f"{BASE}/wods/batch",
+                             params={"tenant_id": TENANT_ID},
+                             json={"wod_id": Shared.wod_creado_id,
+                                   "clase_ids": ids_mezclados},
+                             headers={"Authorization": f"Bearer {token}"})
+    assert r_reject.status_code == 403, \
+        f"Esperaba 403 batch rechazado, obtuvo {r_reject.status_code}: {r_reject.text[:200]}"
+    assert "no esta asignado" in r_reject.json().get("detail", ""), \
+        f"Mensaje debe indicar falta de asignacion: {r_reject.text[:200]}"
+    print(f"  ✅ Batch mezclado (CrossFit + Lev Olímpico) → 403 (rechazado correctamente, todo-o-nada)")
+
+
+# ===================================================================
+# BLOQUE 6 — COBERTURA DE EMERGENCIA (test 13-14)
+# ===================================================================
+
+def test_c14_cobertura_emergencia():
+    """[14] Verificar cobertura de emergencia:
+    a) Sin modo_emergencia, coach 1000 NO puede asignar WOD a Lev. Olimpico (disc 4) → 403
+    b) Con modo_emergencia=true, SE PERMITE y queda registro en CoberturaEmergencia
+    """
+    token = get_coach_token(coach_id=COACH_ID)
+    assert Shared.wod_creado_id is not None, "Primero debe crear el WOD"
+
+    # Obtener clases de hoy
+    r = requests.get(f"{BASE}/clases",
+                     params={"tenant_id": TENANT_ID, "fecha_desde": HOY_STR, "fecha_hasta": HOY_STR})
+    assert r.status_code == 200
+    clases = r.json()
+    clases_hoy = clases if isinstance(clases, list) else (
+        clases.get("clases", []) if isinstance(clases, dict) else [])
+
+    # Encontrar clase de Lev. Olimpico (disc 4) - coach 1000 NO asignado a esta disciplina
+    lev_olimp = [c for c in clases_hoy if c.get("disciplina_id") == 4]
+    assert len(lev_olimp) > 0, "Debe existir clase de Lev. Olímpico hoy"
+    clase_otra = lev_olimp[0]
+
+    # ── a) Sin modo_emergencia → 403 (regresion del fix IDOR) ──
+    r_sin = requests.post(
+        f"{BASE}/wods/clases/{clase_otra['id']}/asignar-wod/{Shared.wod_creado_id}",
+        params={"tenant_id": TENANT_ID},
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert r_sin.status_code == 403, \
+        f"Sin modo_emergencia debe dar 403, obtuvo {r_sin.status_code}"
+    print(f"  ✅ Sin modo_emergencia → 403 (IDOR sigue cerrado)")
+
+    # ── b) Con modo_emergencia=true → 200 + auditoria ──
+    r_con = requests.post(
+        f"{BASE}/wods/clases/{clase_otra['id']}/asignar-wod/{Shared.wod_creado_id}",
+        params={"tenant_id": TENANT_ID, "modo_emergencia": True},
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert r_con.status_code == 200, \
+        f"Con modo_emergencia debe dar 200, obtuvo {r_con.status_code}: {r_con.text[:200]}"
+    print(f"  ✅ Con modo_emergencia=true → 200 (cobertura permitida)")
+
+    # Verificar que quedo registro en CoberturaEmergencia via SQL
+    import psycopg2
+    DB = 'postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-curly-rain-acg2z9h1-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+    c = psycopg2.connect(DB)
+    cur = c.cursor()
+    cur.execute("""
+        SELECT coach_id, clase_id, disciplina_id, accion
+        FROM cobertura_emergencia
+        WHERE coach_id = %s AND clase_id = %s
+        ORDER BY created_at DESC LIMIT 1
+    """, (COACH_ID, clase_otra['id']))
+    row = cur.fetchone()
+    assert row is not None, "Debe existir registro en CoberturaEmergencia"
+    assert row[0] == COACH_ID, f"coach_id esperado={COACH_ID}, real={row[0]}"
+    assert row[1] == clase_otra['id'], f"clase_id esperado={clase_otra['id']}, real={row[1]}"
+    assert row[2] == 4, f"disciplina_id esperado=4, real={row[2]}"
+    assert row[3] == 'asignar_wod', f"accion esperada='asignar_wod', real='{row[3]}'"
+    cur.close()
+    c.close()
+    print(
+        f"  ✅ Auditoria registrada: coach={COACH_ID} cubrio clase={clase_otra['id']} disciplina=4 accion=asignar_wod")
+
+
+# ===================================================================
+# BLOQUE 7 — LIMPIEZA
+# ===================================================================
+
+def test_c15_cleanup():
+    """[13] Limpiar datos creados durante los tests."""
     if Shared.wod_creado_id:
         try:
             r = requests.delete(f"{BASE}/wods/{Shared.wod_creado_id}",

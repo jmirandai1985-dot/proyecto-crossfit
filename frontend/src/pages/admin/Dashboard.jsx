@@ -16,11 +16,23 @@ const AdminDashboard = () => {
     const [alumnosRiesgo, setAlumnosRiesgo] = useState([]);
     const [vencimientos, setVencimientos] = useState([]);
     const [fidelizacionLoading, setFidelizacionLoading] = useState(true);
+    const [ocupacionHoy, setOcupacionHoy] = useState([]);
+    const [ocupacionLoading, setOcupacionLoading] = useState(true);
 
     useEffect(() => {
         cargarSolicitudes();
         cargarFidelizacion();
+        cargarOcupacionHoy();
     }, [tenant_id]);
+
+    const cargarOcupacionHoy = async () => {
+        setOcupacionLoading(true);
+        try {
+            const res = await api.get(`/api/v1/dashboard/${tenant_id}/ocupacion-hoy`);
+            setOcupacionHoy(res.data || []);
+        } catch { setOcupacionHoy([]); }
+        setOcupacionLoading(false);
+    };
 
     const cargarStats = async () => {
         try {
@@ -198,6 +210,39 @@ const AdminDashboard = () => {
                         </div>
                     </div>
                 )}
+
+                {/* WIDGET OCUPACION CLASES HOY */}
+                <div className="bg-white rounded-lg shadow p-5">
+                    <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                        📅 Clases de hoy — estado de ocupación
+                    </h2>
+                    <p className="text-xs text-gray-500 mt-0.5">CrossFit y Levantamiento Olímpico, solo clases con coach asignado</p>
+                    {ocupacionLoading ? (
+                        <div className="flex justify-center py-6"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-900"></div></div>
+                    ) : ocupacionHoy.length === 0 ? (
+                        <div className="py-6 text-center text-gray-400 text-sm">Sin clases de CrossFit/Levantamiento con coach asignado hoy</div>
+                    ) : (
+                        <div className="mt-4 space-y-3">
+                            {ocupacionHoy.map(c => (
+                                <div key={c.id} className="flex items-center gap-4">
+                                    <div className="text-sm font-semibold text-gray-700 w-16 shrink-0">{c.hora} hrs</div>
+                                    <div className="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden">
+                                        <div className={`h-full rounded-full transition-all ${c.color === 'red' ? 'bg-red-500' : c.color === 'amber' ? 'bg-amber-500' : 'bg-green-500'}`}
+                                            style={{ width: `${Math.min(c.porcentaje, 100)}%` }} />
+                                    </div>
+                                    <div className="text-sm text-gray-600 w-20 shrink-0">{c.ocupados}/{c.cupo}</div>
+                                    <div className="text-sm font-semibold w-14 shrink-0">{c.porcentaje}%</div>
+                                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0
+                                        ${c.color === 'red' ? 'bg-red-100 text-red-800' :
+                                            c.color === 'amber' ? 'bg-amber-100 text-amber-800' :
+                                                'bg-green-100 text-green-800'}`}>
+                                        {c.estado}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
 
                 {/* TARJETAS DE FIDELIZACIÓN */}
                 {!fidelizacionLoading && (

@@ -1,7 +1,7 @@
 """
 Router de endpoints para gestión de Reservas
 """
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
@@ -11,6 +11,7 @@ from app.models.reserva import Reserva
 from app.models.clase import Clase
 from app.models.disciplina import Disciplina
 from app.models.usuario import Usuario
+from app.core.dependencies import get_current_user, verificar_coach_disciplina
 from app.schemas.reserva import (
     ReservaCreate, ReservaUpdate, ReservaResponse, ReservaListItem
 )
@@ -138,12 +139,19 @@ def marcar_asistencia(
     reserva_id: int,
     tenant_id: int,
     db: Session = Depends(get_db),
-    asistio: bool = Body(True, embed=True)
+    asistio: bool = Body(True, embed=True),
+    current_user: dict = Depends(get_current_user),
+    modo_emergencia: bool = Query(
+        False, description="Modo cobertura de emergencia")
 ):
     """
     Marca la asistencia de una reserva.
     SOLO registra el dato de asistencia — NO modifica créditos.
     El crédito ya se maneja en el flujo de reserva/cancelación existente.
+
+    Seguridad: coach_id se obtiene del token JWT (current_user).
+    Los coaches solo pueden marcar asistencia en clases de disciplinas a las que pertenecen.
+    modo_emergencia=true permite marcar asistencia en disciplinas no asignadas (con auditoria).
     """
     reserva = db.query(Reserva).filter(
         Reserva.id == reserva_id,
@@ -155,6 +163,23 @@ def marcar_asistencia(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Reserva no encontrada"
         )
+
+    # Validacion OBLIGATORIA: coach debe pertenecer a la disciplina de la clase
+    coach_id = current_user["usuario_id"]
+    rol = current_user.get("rol", "")
+    if rol == "coach":
+        clase = db.query(Clase).filter(
+            Clase.id == reserva.clase_id,
+            Clase.tenant_id == tenant_id
+        ).first()
+        if clase and clase.disciplina_id:
+            verificar_coach_disciplina(
+                coach_id, clase.disciplina_id, db,
+                modo_emergencia=modo_emergencia,
+                clase_id=reserva.clase_id,
+                accion="marcar_asistencia", tenant_id=tenant_id
+            )
+    # Admin: bypass
 
     reserva.asistio = asistio
     db.commit()
@@ -183,8 +208,11 @@ def listar_reservas_por_clase(
         Reserva.tenant_id == tenant_id
     ).order_by(Reserva.created_at.asc()).all()
 
+    # JOIN con usuarios para obtener nombres reales
     result = []
     for r in reservas:
+        alumno = db.query(Usuario).filter(
+            Usuario.id == r.alumno_id, Usuario.tenant_id == tenant_id).first()
         result.append({
             "id": r.id,
             "tenant_id": r.tenant_id,
@@ -194,7 +222,7 @@ def listar_reservas_por_clase(
             "activa": r.estado not in ("cancelled",),
             "tokens_gastados": r.tokens_gastados,
             "fecha_reserva": str(r.fecha_reserva) if r.fecha_reserva else None,
-            "alumno_nombre": None,
+            "alumno_nombre": alumno.nombre if alumno else f"Alumno #{r.alumno_id}",
         })
     return result
 

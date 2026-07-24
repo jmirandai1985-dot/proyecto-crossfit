@@ -13,7 +13,7 @@ import requests
 import json
 from datetime import date, timedelta
 
-from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, HOY_STR
+from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, HOY_STR, get_coach_token
 
 
 # ── Estado compartido entre tests (se llena en orden) ──
@@ -424,8 +424,10 @@ def test_16_crear_wod_y_verificar_hoy():
         "coach_id": 1000,
         "estado": "publicado"
     }
+    token = get_coach_token(coach_id=1000)
     r = requests.post(f"{BASE}/wods/", json=payload,
-                      params={"tenant_id": TENANT_ID})
+                      params={"tenant_id": TENANT_ID, "disciplina_id": 1},
+                      headers={"Authorization": f"Bearer {token}"})
     assert r.status_code < 300, f"Status {r.status_code}: {r.text[:200]}"
     data = r.json()
     wod_id = data.get("id")

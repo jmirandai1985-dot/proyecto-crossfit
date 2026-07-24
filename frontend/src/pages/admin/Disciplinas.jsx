@@ -7,7 +7,7 @@ const Disciplinas = () => {
     const { tenant_id } = useAuth();
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [formData, setFormData] = useState({ nombre: '', activo: true });
+    const [formData, setFormData] = useState({ nombre: '', requiere_coach: true, activo: true });
     const [editingId, setEditingId] = useState(null);
     const [showForm, setShowForm] = useState(false);
 
@@ -21,8 +21,8 @@ const Disciplinas = () => {
 
     useEffect(() => { fetch(); }, [tenant_id]);
 
-    const openNew = () => { setEditingId(null); setFormData({ nombre: '', activo: true }); setShowForm(true); };
-    const openEdit = (d) => { setEditingId(d.id); setFormData({ nombre: d.nombre, activo: d.activo ?? true }); setShowForm(true); };
+    const openNew = () => { setEditingId(null); setFormData({ nombre: '', requiere_coach: true, activo: true }); setShowForm(true); };
+    const openEdit = (d) => { setEditingId(d.id); setFormData({ nombre: d.nombre, requiere_coach: d.requiere_coach ?? true, activo: d.activo ?? true }); setShowForm(true); };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -65,16 +65,22 @@ const Disciplinas = () => {
                             <thead className="bg-blue-900 text-white">
                                 <tr>
                                     <th className="px-6 py-3 text-left text-sm font-medium">Nombre</th>
+                                    <th className="px-6 py-3 text-left text-sm font-medium">Coach</th>
                                     <th className="px-6 py-3 text-left text-sm font-medium">Estado</th>
                                     <th className="px-6 py-3 text-left text-sm font-medium">Acciones</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200">
                                 {items.length === 0 ? (
-                                    <tr><td colSpan="3" className="px-6 py-8 text-center text-gray-600">No hay disciplinas</td></tr>
+                                    <tr><td colSpan="4" className="px-6 py-8 text-center text-gray-600">No hay disciplinas</td></tr>
                                 ) : items.map((d, i) => (
                                     <tr key={d.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                                         <td className="px-6 py-4 text-sm font-medium text-gray-900">{d.nombre}</td>
+                                        <td className="px-6 py-4 text-sm">
+                                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${d.requiere_coach ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'}`}>
+                                                {d.requiere_coach ? '🤼 Requiere coach' : '🏠 Self-service'}
+                                            </span>
+                                        </td>
                                         <td className="px-6 py-4 text-sm">
                                             <span className={`px-3 py-1 rounded-full text-xs font-medium ${d.activo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                                                 {d.activo ? 'Activo' : 'Inactivo'}
@@ -98,6 +104,10 @@ const Disciplinas = () => {
                             <form onSubmit={handleSubmit} className="space-y-4">
                                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Nombre</label>
                                     <input type="text" value={formData.nombre} onChange={e => setFormData({ ...formData, nombre: e.target.value })} required className="w-full border rounded px-3 py-2" /></div>
+                                <div className="flex items-center gap-2">
+                                    <input type="checkbox" checked={formData.requiere_coach} onChange={e => setFormData({ ...formData, requiere_coach: e.target.checked })} id="requiere_coach" />
+                                    <label htmlFor="requiere_coach" className="text-sm text-gray-700">🤼 Requiere Coach</label>
+                                </div>
                                 <div className="flex items-center gap-2">
                                     <input type="checkbox" checked={formData.activo} onChange={e => setFormData({ ...formData, activo: e.target.checked })} id="activo" />
                                     <label htmlFor="activo" className="text-sm text-gray-700">Activo</label>

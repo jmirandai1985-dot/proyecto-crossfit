@@ -70,7 +70,6 @@ const Layout = ({ children }) => {
                 { label: 'Dashboard', path: '/admin/dashboard', icon: icons.home },
                 { label: 'Alumnos', path: '/admin/alumnos', icon: icons.calendar },
                 { label: 'Coaches', path: '/admin/coaches', icon: icons.settings },
-                { label: 'Clases', path: '/admin/clases', icon: icons.calendar },
                 { label: 'Supervisión', path: '/admin/supervision-clases', icon: icons.calendar },
                 { label: 'Planes', path: '/admin/planes', icon: icons.settings },
                 { label: 'Disciplinas', path: '/admin/disciplinas', icon: icons.dumbbell },

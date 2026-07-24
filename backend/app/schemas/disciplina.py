@@ -12,6 +12,8 @@ class DisciplinaBase(BaseModel):
                         description="Nombre de la disciplina")
     descripcion: Optional[str] = Field(
         None, max_length=500, description="Descripción de la disciplina")
+    requiere_coach: bool = Field(
+        True, description="Indica si la disciplina requiere coach asignado")
     activa: bool = Field(
         True, description="Indica si la disciplina está activa")
 
@@ -25,6 +27,7 @@ class DisciplinaUpdate(BaseModel):
     """Esquema para actualizar una Disciplina"""
     nombre: Optional[str] = Field(None, min_length=1, max_length=100)
     descripcion: Optional[str] = Field(None, max_length=500)
+    requiere_coach: Optional[bool] = None
     activa: Optional[bool] = None
 
 
@@ -42,6 +45,7 @@ class DisciplinaListItem(BaseModel):
     """Esquema simplificado para listados de disciplinas"""
     id: int
     nombre: str
+    requiere_coach: bool
     activa: bool
 
     model_config = ConfigDict(from_attributes=True)

@@ -17,6 +17,7 @@ def crear_disciplina(
     nombre: str,
     descripcion: Optional[str] = None,
     es_open_box: bool = False,
+    requiere_coach: bool = True,
     db: Session = Depends(get_db)
 ):
     existing = db.query(Disciplina).filter(
@@ -35,6 +36,7 @@ def crear_disciplina(
         nombre=nombre,
         descripcion=descripcion,
         es_open_box=es_open_box,
+        requiere_coach=requiere_coach,
         activo=True
     )
     db.add(db_disciplina)
@@ -79,6 +81,7 @@ def actualizar_disciplina(
     nombre: Optional[str] = None,
     descripcion: Optional[str] = None,
     es_open_box: Optional[bool] = None,
+    requiere_coach: Optional[bool] = None,
     activo: Optional[bool] = None,
     db: Session = Depends(get_db)
 ):
@@ -96,6 +99,8 @@ def actualizar_disciplina(
         disciplina.descripcion = descripcion
     if es_open_box is not None:
         disciplina.es_open_box = es_open_box
+    if requiere_coach is not None:
+        disciplina.requiere_coach = requiere_coach
     if activo is not None:
         disciplina.activo = activo
 

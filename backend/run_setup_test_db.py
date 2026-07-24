@@ -53,10 +53,10 @@ DB_URL = settings.DATABASE_URL
 
 print("="*60)
 print(f"BD de TEST: {DB_URL[:70]}...")
-print(f"PURPLE-CHERRY (DIRECT): {'purple-cherry' in DB_URL}")
+print(f"CURLY-RAIN (DIRECT): {'curly-rain' in DB_URL}")
 print("="*60)
-if 'purple-cherry' not in DB_URL:
-    sys.exit("FATAL: Not test branch (purple-cherry)")
+if 'curly-rain' not in DB_URL:
+    sys.exit("FATAL: Not test branch (curly-rain/test-nuevo)")
 
 Base.metadata.create_all(bind=engine)
 print("Tables created")
@@ -169,6 +169,13 @@ try:
         db.add(Disciplina(id=d_id, tenant_id=1, nombre=d_nombre, activo=True))
     db.flush()
     print(f"   {len(disc_data)} disciplinas activas + Gap (inactiva)")
+
+    # ── 8b. COACH-DISCIPLINA (coach 1000 asignado a CrossFit disc 1) ──
+    CoachDisciplina = importlib.import_module(
+        "app.models.coach_disciplina").CoachDisciplina
+    db.add(CoachDisciplina(tenant_id=1, coach_id=1000, disciplina_id=1, activo=True))
+    db.flush()
+    print("   Coach 1000 asignado a CrossFit (disc 1)")
     db.flush()
 
     # ── 9. HORARIO BASE (UNO por disciplina activa) ──────

@@ -9,11 +9,20 @@ Para ejecutar (recomendado):
 SEGURIDAD: antes de cualquier test, verifica que el SERVIDOR (no solo pytest)
 esté apuntando al branch test, no a producción.
 """
+from app.core.security import create_access_token
 import os
 import sys
 import pytest
 import requests
 from datetime import date, timedelta
+import sys as _sys
+import os as _os
+
+# Add backend to path so we can import app.core.security
+_backend_dir = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _backend_dir not in _sys.path:
+    _sys.path.insert(0, _backend_dir)
+
 
 # ── Seguridad: verificar que el servidor NO apunte a producción ──
 # Se hace via HTTP al endpoint /debug/db-url del propio servidor.
@@ -71,6 +80,26 @@ def hoy():
 @pytest.fixture(scope="session")
 def hoy_str():
     return HOY_STR
+
+
+def get_coach_token(coach_id=1000, tenant_id=1):
+    """Generate a valid JWT for a coach (for tests that need auth)."""
+    return create_access_token({
+        "usuario_id": coach_id,
+        "tenant_id": tenant_id,
+        "rol": "coach",
+        "correo": f"coach{coach_id}@test.com"
+    })
+
+
+def get_admin_token():
+    """Generate a valid JWT for an admin (for tests that need auth)."""
+    return create_access_token({
+        "usuario_id": 1001,
+        "tenant_id": 1,
+        "rol": "admin",
+        "correo": "admin@test.com"
+    })
 
 
 @pytest.fixture(scope="session")

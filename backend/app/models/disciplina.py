@@ -17,6 +17,7 @@ class Disciplina(Base):
     nombre = Column(String(100), nullable=False)
     descripcion = Column(String(500), nullable=True)
     es_open_box = Column(Boolean, nullable=False, default=False)
+    requiere_coach = Column(Boolean, nullable=False, default=True)
     activo = Column(Boolean, nullable=False, default=True)
     updated_at = Column(TIMESTAMP(timezone=True), nullable=True)
 

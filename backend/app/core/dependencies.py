@@ -8,6 +8,9 @@ from sqlalchemy import text
 
 from app.db.database import get_db
 from app.core.security import verify_token
+from app.models.coach_disciplina import CoachDisciplina
+from app.models.disciplina import Disciplina
+from app.models.cobertura_emergencia import CoberturaEmergencia
 
 # Esquema de seguridad HTTP Bearer
 security = HTTPBearer()
@@ -103,6 +106,75 @@ async def get_current_admin(
         )
 
     return current_user
+
+
+def verificar_coach_disciplina(
+    coach_id: int,
+    disciplina_id: int,
+    db: Session,
+    modo_emergencia: bool = False,
+    clase_id: int = None,
+    accion: str = "operacion",
+    tenant_id: int = None
+):
+    """
+    Verifica que un coach pertenezca a la disciplina especificada.
+    Los admins tienen acceso a cualquier disciplina.
+
+    Si modo_emergencia=True y el coach NO pertenece a la disciplina:
+    - Registra auditoria en CoberturaEmergencia
+    - PERMITE la operacion (no lanza 403)
+    - Esto es para cobertura de emergencia: un coach cubriendo una clase de otra disciplina
+
+    Args:
+        coach_id: ID del coach/usuario
+        disciplina_id: ID de la disciplina
+        db: Sesion de base de datos
+        modo_emergencia: Si es True, permite operar en disciplinas no asignadas (con auditoria)
+        clase_id: ID de la clase (para el registro de auditoria)
+        accion: Tipo de accion (asignar_wod, marcar_asistencia, crear_wod, editar_wod)
+        tenant_id: ID del tenant (para el registro de auditoria)
+
+    Raises:
+        HTTPException 403: Si el usuario no pertenece a la disciplina Y no esta en modo emergencia
+    """
+    # Verificar si es admin - los admins pueden operar en cualquier disciplina
+    from sqlalchemy import text
+    user = db.execute(
+        text("SELECT rol FROM usuarios WHERE id = :uid"),
+        {"uid": coach_id}
+    ).first()
+
+    if user and user.rol == 'admin':
+        return  # Admin tiene acceso total
+
+    # Verificar relacion coach-disciplina
+    relacion = db.query(CoachDisciplina).filter(
+        CoachDisciplina.coach_id == coach_id,
+        CoachDisciplina.disciplina_id == disciplina_id,
+        CoachDisciplina.activo == True
+    ).first()
+
+    if not relacion:
+        if modo_emergencia and clase_id and tenant_id:
+            # Cobertura de emergencia: registrar auditoria y permitir
+            from sqlalchemy import text as sa_text
+            db.execute(
+                sa_text("""
+                    INSERT INTO cobertura_emergencia 
+                    (tenant_id, usuario_id, coach_id, clase_id, disciplina_id, accion)
+                    VALUES (:tid, :uid, :cid, :clid, :did, :acc)
+                """),
+                {"tid": tenant_id, "uid": coach_id, "cid": coach_id,
+                 "clid": clase_id, "did": disciplina_id, "acc": accion}
+            )
+            db.flush()
+            return  # Permitir la operacion bajo cobertura de emergencia
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"El coach (id={coach_id}) no esta asignado a la disciplina (id={disciplina_id}). No puede operar sobre clases de otra disciplina."
+            )
 
 
 async def get_current_coach(

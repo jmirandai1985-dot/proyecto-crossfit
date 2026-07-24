@@ -7,6 +7,7 @@ from typing import Optional
 
 from app.db.database import get_db
 from app.models.horario_base import HorarioBase
+from sqlalchemy import text
 
 router = APIRouter()
 
@@ -49,6 +50,51 @@ def listar_horarios(
     if activo is not None:
         query = query.filter(HorarioBase.activo == activo)
     return query.order_by(HorarioBase.dia_semana, HorarioBase.hora_inicio).all()
+
+
+# ── MUST be before /{horario_id} to avoid route collision ──
+@router.get("/grid-semanal")
+def grid_semanal(
+    tenant_id: int,
+    db: Session = Depends(get_db)
+):
+    """Devuelve horarios agrupados por (dia_semana, hora_inicio, hora_fin)
+    con lista de disciplinas en cada celda. Para alimentar el grid Lun-Dom."""
+    from sqlalchemy import text as sql_text
+    rows = db.execute(sql_text("""
+        SELECT h.dia_semana, h.hora_inicio::text, h.hora_fin::text,
+               MAX(h.cupo_maximo) as cupo_maximo,
+               json_agg(json_build_object(
+                   'id', h.id, 'disciplina_id', h.disciplina_id,
+                   'disciplina_nombre', d.nombre,
+                   'cupo_maximo', h.cupo_maximo,
+                   'activo', h.activo
+               ) ORDER BY d.nombre) as disciplinas
+        FROM horarios h
+        JOIN disciplinas d ON h.disciplina_id = d.id
+        WHERE h.tenant_id = :tid AND h.activo = true
+        GROUP BY h.dia_semana, h.hora_inicio, h.hora_fin
+        ORDER BY h.dia_semana, h.hora_inicio
+    """), {"tid": tenant_id}).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+@router.get("/generar-clases-dia")
+def generar_clases_dia_route(
+    tenant_id: int,
+    fecha: str,
+    db: Session = Depends(get_db)
+):
+    """Genera clases desde horarios_base para una fecha."""
+    from datetime import datetime
+    from app.services.generar_clases import generar_clases_para_fecha
+    try:
+        fecha_date = datetime.strptime(fecha, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="Formato de fecha invalido. Use YYYY-MM-DD")
+    resultado = generar_clases_para_fecha(db, tenant_id, fecha_date)
+    return resultado
 
 
 @router.get("/{horario_id}")
@@ -113,29 +159,3 @@ def eliminar_horario(
     horario.activo = False
     db.commit()
     return None
-
-
-@router.post("/generar-clases-dia")
-def generar_clases_dia(
-    tenant_id: int,
-    fecha: str,
-    db: Session = Depends(get_db)
-):
-    """
-    Genera clases en la tabla 'clases' a partir de los horarios_base
-    del día de semana correspondiente a la 'fecha' indicada (YYYY-MM-DD).
-    NO duplica si ya existen clases con el mismo (horario_base_id, fecha).
-    """
-    from datetime import datetime
-    from app.services.generar_clases import generar_clases_para_fecha
-
-    try:
-        fecha_date = datetime.strptime(fecha, "%Y-%m-%d").date()
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="Formato de fecha inválido. Use YYYY-MM-DD"
-        )
-
-    resultado = generar_clases_para_fecha(db, tenant_id, fecha_date)
-    return resultado

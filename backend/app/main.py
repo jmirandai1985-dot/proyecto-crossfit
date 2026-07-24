@@ -4,7 +4,7 @@ from app.api.v1 import (
     coach_disciplinas, movimientos, historial_rm,
     retencion, productos, pedidos, reportes, auditoria, auth,
     suscripciones, wods, solicitudes_planes, upload, membresias,
-    notificaciones, migracion, comprar_emergencia, fix_fechas
+    notificaciones, migracion, comprar_emergencia, fix_fechas, supervision
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,13 +44,13 @@ async def root():
 async def debug_db_url():
     """Endpoint de seguridad: usado por conftest.py para verificar que el servidor
     NO esté apuntando a producción.
-    - En TEST: devuelve {"is_safe": true}
+    - En TEST (curly-rain): devuelve {"is_safe": true}
     - En PRODUCCIÓN: devuelve 404 para no exponer información de infraestructura
     Nunca expone la URL completa ni credenciales."""
     from app.core.config import settings
     url = settings.DATABASE_URL
-    if "purple-cherry" in url:
-        return {"is_safe": True, "is_test": True, "branch": "purple-cherry"}
+    if "curly-rain" in url:
+        return {"is_safe": True, "is_test": True, "branch": "curly-rain"}
     # En producción o cualquier otro entorno, no revelar información
     from fastapi import HTTPException
     raise HTTPException(status_code=404, detail="Not found")
@@ -121,6 +121,8 @@ app.include_router(comprar_emergencia.router,
                    prefix="/api/v1/planes", tags=["Compra Emergencia"])
 app.include_router(fix_fechas.router,
                    prefix="/api/v1/fix", tags=["Fix Fechas"])
+app.include_router(supervision.router,
+                   prefix="/api/v1/supervision", tags=["Supervision"])
 
 
 @app.on_event("startup")
