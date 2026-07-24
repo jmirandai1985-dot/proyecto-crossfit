@@ -8,6 +8,7 @@ from datetime import datetime, date, time, timedelta
 from app.db.database import get_db
 from app.models.clase import Clase
 from app.schemas import clase as schemas
+from app.core.dependencies import verificar_coach_disciplina
 
 logger = logging.getLogger("uvicorn.clases")
 
@@ -18,6 +19,8 @@ router = APIRouter(tags=["Clases"])
 def listar_clases(
     db: Session = Depends(get_db),
     tenant_id: int = Query(1),
+    disciplina_id: Optional[int] = Query(
+        None, description="Filtrar por disciplina"),
     coach_id: Optional[int] = Query(None),
     fecha: Optional[date] = Query(
         None, description="Filtrar por fecha unica (YYYY-MM-DD)"),
@@ -92,6 +95,9 @@ def listar_clases(
 
     conditions = ["c.tenant_id = :tenant_id"]
     query_params = {"tenant_id": tenant_id, "limit": limit, "skip": skip}
+    if disciplina_id is not None:
+        conditions.append("c.disciplina_id = :disciplina_id")
+        query_params["disciplina_id"] = disciplina_id
     if coach_id is not None:
         conditions.append("c.coach_id = :coach_id")
         query_params["coach_id"] = coach_id
@@ -187,7 +193,9 @@ def actualizar_clase(
     clase_id: int,
     clase_update: schemas.ClaseCreate,
     db: Session = Depends(get_db),
-    tenant_id: int = Query(1)
+    tenant_id: int = Query(1),
+    modo_emergencia: bool = Query(
+        False, description="Si true, permite asignar coach de otra disciplina con auditoria")
 ):
     clase = db.query(Clase).filter(
         Clase.id == clase_id,
@@ -196,6 +204,37 @@ def actualizar_clase(
 
     if not clase:
         raise HTTPException(status_code=404, detail="Clase no encontrada")
+
+    # Si se actualiza coach_id, verificar relación coach-disciplina (con emergencia)
+    if clase_update.coach_id is not None:
+        try:
+            verificar_coach_disciplina(
+                coach_id=clase_update.coach_id,
+                disciplina_id=clase.disciplina_id,
+                db=db,
+                modo_emergencia=modo_emergencia,
+                clase_id=clase_id,
+                accion="asignar_coach_admin",
+                tenant_id=tenant_id
+            )
+            clase.coach_id = clase_update.coach_id
+        except HTTPException as e:
+            # Si no es emergencia y falla, relanzar
+            if not modo_emergencia:
+                raise e
+            # Si modo_emergencia y falló, es porque el coach no pertenece
+            # Pero verificar_coach_disciplina ya registró auditoria si se llamó con modo_emergencia
+            # Re-intentar con modo_emergencia=True para forzar auditoria
+            verificar_coach_disciplina(
+                coach_id=clase_update.coach_id,
+                disciplina_id=clase.disciplina_id,
+                db=db,
+                modo_emergencia=True,
+                clase_id=clase_id,
+                accion="asignar_coach_admin",
+                tenant_id=tenant_id
+            )
+            clase.coach_id = clase_update.coach_id
 
     clase.hora_inicio = clase_update.hora_inicio
     clase.hora_fin = clase_update.hora_fin

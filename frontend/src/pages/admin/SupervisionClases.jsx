@@ -44,15 +44,35 @@ export default function SupervisionClases() {
     const [datosDisc, setDatosDisc] = useState({}); // { [discId]: [] } datos por disciplina
     const [loadingDisc, setLoadingDisc] = useState(false);
     const [detalleClase, setDetalleClase] = useState(null); // { claseId, reservas: [] }
-    const [coachSelector, setCoachSelector] = useState(null); // { claseId, disciplinaId } 
+    const [coachSelector, setCoachSelector] = useState(null); // { claseId, disciplinaId }
     const [coachesDisponibles, setCoachesDisponibles] = useState([]);
+    const [emergenciaConfirm, setEmergenciaConfirm] = useState(null); // { coach, claseId, discId }
+
+    // ═══ CARGA AUTOMÁTICA AL ABRIR ═══
+    useEffect(() => {
+        const fetchDisciplinas = async () => {
+            try {
+                const r = await api.get(`${API_BASE}/disciplinas`, { params: { tenant_id } });
+                setDisciplinas(r.data || []);
+            } catch (e) { console.error('Error cargando disciplinas', e); }
+        };
+        fetchDisciplinas();
+    }, [tenant_id]);
+
+    useEffect(() => {
+        if (disciplinas.length > 0 && fechaDesde && fechaHasta) {
+            // Cargar datos de la primera disciplina por defecto
+            setDiscExpandida(disciplinas[0].id);
+            cargarDatosDisc(disciplinas[0].id, fechaDesde, fechaHasta);
+        }
+    }, [disciplinas, fechaDesde, fechaHasta]);
 
     // ═══ FUNCIONES PARA VISTA TARJETAS ═══
     const cargarDatosDisc = useCallback(async (discId, desde, hasta) => {
         if (!discId) return;
         setLoadingDisc(true);
         try {
-            const r = await api.get(`${API_BASE}/clases`, {
+            const r = await api.get(`${API_BASE}/clases/`, {
                 params: { tenant_id, disciplina_id: discId, fecha_desde: desde, fecha_hasta: hasta, limit: 500 }
             });
             const data = r.data || [];
@@ -80,21 +100,44 @@ export default function SupervisionClases() {
 
     const discConCoach = (discId) => disciplinas.find(d => d.id === discId)?.requiere_coach ?? true;
 
+    // ── Selector de coach con cobertura de emergencia ──
     const abrirSelectorCoach = async (claseId, disciplinaId) => {
         try {
-            const r = await api.get(`${API_BASE}/coach-disciplinas`, { params: { tenant_id, disciplina_id: disciplinaId } });
+            // Listar TODOS los coaches (no solo los de la disciplina)
+            const r = await api.get(`${API_BASE}/supervision/coaches-todos`, {
+                params: { tenant_id, disciplina_id: disciplinaId }
+            });
             setCoachesDisponibles(r.data || []);
             setCoachSelector({ claseId, disciplinaId });
         } catch { setCoachesDisponibles([]); }
     };
 
-    const asignarCoach = async (claseId, coachId) => {
+    const asignarCoach = async (claseId, coachId, pertenece) => {
+        if (pertenece) {
+            // Coach pertenece a la disciplina → asignación normal
+            try {
+                await api.put(`${API_BASE}/clases/${claseId}`, { coach_id: coachId, tenant_id }, { params: { tenant_id } });
+                setCoachSelector(null);
+                if (discExpandida) cargarDatosDisc(discExpandida, fechaDesde, fechaHasta);
+            } catch (e) { console.error('Error asignando coach', e); }
+        } else {
+            // Coach NO pertenece → mostrar confirmación de emergencia
+            setEmergenciaConfirm({ coachId, claseId });
+        }
+    };
+
+    const confirmarEmergencia = async () => {
+        if (!emergenciaConfirm) return;
+        const { coachId, claseId } = emergenciaConfirm;
         try {
-            await api.put(`${API_BASE}/clases/${claseId}`, { coach_id: coachId, tenant_id }, { params: { tenant_id } });
+            // Enviar con modo_emergencia=true para auditar
+            await api.put(`${API_BASE}/clases/${claseId}`, { coach_id: coachId, tenant_id }, {
+                params: { tenant_id, modo_emergencia: true }
+            });
+            setEmergenciaConfirm(null);
             setCoachSelector(null);
-            // Refrescar datos de la disciplina expandida
             if (discExpandida) cargarDatosDisc(discExpandida, fechaDesde, fechaHasta);
-        } catch (e) { console.error('Error asignando coach', e); }
+        } catch (e) { console.error('Error asignando coach emergencia', e); }
     };
 
     const cargarGridSemanal = useCallback(async (fechaRef) => {
@@ -145,7 +188,7 @@ export default function SupervisionClases() {
         setLoading(true);
         setError('');
         try {
-            const r = await api.get(`${API_BASE}/clases`, {
+            const r = await api.get(`${API_BASE}/clases/`, {
                 params: { tenant_id, disciplina_id: dId, fecha_desde: f, fecha_hasta: f, limit: 200 }
             });
             const data = r.data || [];
@@ -184,6 +227,11 @@ export default function SupervisionClases() {
         if (pct >= 90) return 'bg-red-100 text-red-800 border-red-300';
         if (pct >= 70) return 'bg-yellow-100 text-yellow-800 border-yellow-300';
         return 'bg-green-100 text-green-800 border-green-300';
+    };
+
+    const coachNombrePorId = (coachId) => {
+        const c = coachesDisponibles.find(cd => cd.id === coachId);
+        return c ? c.nombre : `Coach #${coachId}`;
     };
 
     return (
@@ -336,24 +384,67 @@ export default function SupervisionClases() {
                     </div>
                 )}
 
-                {/* Modal selector de coach */}
+                {/* Modal selector de coach (con cobertura de emergencia) */}
                 {coachSelector && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => setCoachSelector(null)}>
-                        <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm mx-4 w-full" onClick={(e) => e.stopPropagation()}>
-                            <h3 className="font-bold text-lg mb-3">👤 Asignar coach a clase #{coachSelector.claseId}</h3>
-                            <div className="space-y-2 max-h-64 overflow-y-auto">
-                                {coachesDisponibles.filter(cd => cd.activo).map(cd => (
-                                    <button key={cd.coach_id || cd.id}
-                                        onClick={() => asignarCoach(coachSelector.claseId, cd.coach_id || cd.id)}
-                                        className="w-full text-left p-2 rounded bg-gray-50 hover:bg-blue-100 border border-gray-200">
-                                        <span className="font-medium">{cd.coach_nombre || `Coach #${cd.coach_id || cd.id}`}</span>
+                        <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full" onClick={(e) => e.stopPropagation()}>
+                            <h3 className="font-bold text-lg mb-1">👤 Asignar coach a clase #{coachSelector.claseId}</h3>
+                            <p className="text-sm text-gray-500 mb-3">
+                                {disciplinas.find(d => d.id === coachSelector.disciplinaId)?.nombre || ''}
+                                {coachesDisponibles.length > 0 && <span className="ml-2 text-xs text-gray-400">({coachesDisponibles.length} coaches disponibles)</span>}
+                            </p>
+                            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                                {coachesDisponibles.map(cd => (
+                                    <button key={cd.id}
+                                        onClick={() => asignarCoach(coachSelector.claseId, cd.id, cd.pertenece)}
+                                        className={`w-full text-left p-3 rounded border ${cd.pertenece ? 'bg-gray-50 hover:bg-blue-100 border-gray-200' : 'bg-yellow-50 hover:bg-yellow-100 border-yellow-300'}`}>
+                                        <div className="flex items-center justify-between">
+                                            <span className="font-medium">{cd.nombre}</span>
+                                            {!cd.pertenece && (
+                                                <span className="text-xs text-yellow-700 font-bold px-2 py-0.5 rounded bg-yellow-200">⚠️ Otra disciplina</span>
+                                            )}
+                                            {cd.pertenece && (
+                                                <span className="text-xs text-emerald-700">✅ Asignado</span>
+                                            )}
+                                        </div>
+                                        {!cd.pertenece && cd.disciplinas.length > 0 && (
+                                            <div className="text-xs text-gray-500 mt-1">
+                                                Sus disciplinas: {cd.disciplinas.join(', ')}
+                                            </div>
+                                        )}
                                     </button>
                                 ))}
-                                {coachesDisponibles.filter(cd => cd.activo).length === 0 && (
-                                    <p className="text-gray-400 text-sm text-center py-4">No hay coaches asignados a esta disciplina</p>
+                                {coachesDisponibles.length === 0 && (
+                                    <p className="text-gray-400 text-sm text-center py-4">No hay coaches activos en el sistema</p>
                                 )}
                             </div>
                             <button onClick={() => setCoachSelector(null)} className="mt-3 w-full py-2 bg-gray-200 rounded text-sm font-medium hover:bg-gray-300">Cancelar</button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Modal de confirmación de Cobertura de Emergencia */}
+                {emergenciaConfirm && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60" onClick={() => setEmergenciaConfirm(null)}>
+                        <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full border-2 border-yellow-400" onClick={(e) => e.stopPropagation()}>
+                            <h3 className="font-bold text-lg mb-2 text-yellow-700">⚠️ Cobertura de Emergencia</h3>
+                            <p className="text-gray-700 mb-4">
+                                Vas a asignar a <strong>{coachNombrePorId(emergenciaConfirm.coachId)}</strong> como <strong>cobertura de emergencia</strong> para esta clase de{' '}
+                                <strong>{disciplinas.find(d => d.id === coachSelector?.disciplinaId)?.nombre || ''}</strong>.
+                            </p>
+                            <p className="text-sm text-gray-500 mb-4">
+                                Este coach no pertenece a esta disciplina. Se registrará una auditoría en la tabla de cobertura de emergencia.
+                            </p>
+                            <div className="flex gap-2">
+                                <button onClick={confirmarEmergencia}
+                                    className="flex-1 py-2 bg-yellow-500 text-white rounded text-sm font-bold hover:bg-yellow-600">
+                                    ✅ Sí, asignar como emergencia
+                                </button>
+                                <button onClick={() => setEmergenciaConfirm(null)}
+                                    className="flex-1 py-2 bg-gray-200 rounded text-sm font-medium hover:bg-gray-300">
+                                    Cancelar
+                                </button>
+                            </div>
                         </div>
                     </div>
                 )}

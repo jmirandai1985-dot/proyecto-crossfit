@@ -7,8 +7,17 @@ from sqlalchemy import text as sql_text
 from datetime import datetime, timedelta, date
 
 from app.db.database import get_db
+from typing import List
+from pydantic import BaseModel
 
 router = APIRouter()
+
+
+class CoachConPertenencia(BaseModel):
+    id: int
+    nombre: str
+    pertenece: bool
+    disciplinas: List[str] = []
 
 
 @router.get("/grid-semanal")
@@ -101,3 +110,55 @@ def supervision_grid_semanal(
             for (dia, h_ini, h_fin), clases in sorted(grid.items())
         ]
     }
+
+
+@router.get("/coaches-todos")
+def listar_coaches_con_pertenencia(
+    disciplina_id: int = Query(...,
+                               description="ID de la disciplina para verificar pertenencia"),
+    tenant_id: int = Query(1),
+    db: Session = Depends(get_db)
+):
+    """
+    Lista TODOS los coaches activos del tenant, indicando si pertenecen a la disciplina especificada.
+    Usado desde Supervisión para asignación de coaches con/sin cobertura de emergencia.
+    """
+    # Todos los usuarios con rol=coach activos
+    coaches = db.execute(sql_text("""
+        SELECT u.id, u.nombre
+        FROM usuarios u
+        WHERE u.tenant_id = :tid AND u.rol = 'coach' AND u.activo = true
+        ORDER BY u.nombre
+    """), {"tid": tenant_id}).fetchall()
+
+    # IDs de coaches que pertenecen a la disciplina
+    pertenecen = set()
+    rels = db.execute(sql_text("""
+        SELECT cd.coach_id
+        FROM coach_disciplinas cd
+        WHERE cd.tenant_id = :tid AND cd.disciplina_id = :did AND cd.activo = true
+    """), {"tid": tenant_id, "did": disciplina_id}).fetchall()
+    for r in rels:
+        pertenecen.add(r.coach_id)
+
+    # Disciplinas de cada coach (para mostrar detalle)
+    coach_disciplinas_map = {}
+    all_rels = db.execute(sql_text("""
+        SELECT cd.coach_id, d.nombre
+        FROM coach_disciplinas cd
+        JOIN disciplinas d ON cd.disciplina_id = d.id
+        WHERE cd.tenant_id = :tid AND cd.activo = true
+    """), {"tid": tenant_id}).fetchall()
+    for r in all_rels:
+        coach_disciplinas_map.setdefault(r.coach_id, []).append(r.nombre)
+
+    result = []
+    for c in coaches:
+        result.append({
+            "id": c.id,
+            "nombre": c.nombre,
+            "pertenece": c.id in pertenecen,
+            "disciplinas": coach_disciplinas_map.get(c.id, [])
+        })
+
+    return result
