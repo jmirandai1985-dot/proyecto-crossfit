@@ -267,7 +267,7 @@ export default function SupervisionClases() {
                     <button className="px-3 py-1 bg-blue-900 text-white rounded text-sm font-medium">+ Agregar Clase</button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-                    {disciplinas.filter(d => d.activo !== false).map(d => {
+                    {disciplinas.map(d => {
                         const r = resumenDisciplina(d.id);
                         const requiereCoach = d.requiere_coach ?? true;
                         return (
@@ -279,7 +279,7 @@ export default function SupervisionClases() {
                                 }}
                                 className={`rounded-xl border-2 p-5 cursor-pointer transition-all hover:shadow-lg ${discExpandida === d.id ? 'border-blue-500 bg-blue-50 shadow-md' : 'border-gray-200 bg-white'}`}>
                                 <div className="flex items-center justify-between mb-3">
-                                    <h3 className="font-bold text-lg text-gray-900">{d.nombre}</h3>
+                                    <h3 className="font-bold text-lg text-gray-900">{d.nombre}{!d.activo && <span className="ml-2 text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600">⚠️ Inactiva</span>}</h3>
                                     <span className="text-xs text-gray-400">{discExpandida === d.id ? '▲' : '▼'}</span>
                                 </div>
                                 <div className="space-y-1 text-sm text-gray-600">
@@ -354,9 +354,9 @@ export default function SupervisionClases() {
                                                     {discConCoach(discExpandida) && (
                                                         <td className="px-3 py-2">
                                                             {c.wod_id ? (
-                                                                <span className="text-xs text-emerald-600 font-medium">✅ {c.wod_titulo?.substring(0, 15) || 'Publicado'}</span>
+                                                                <span className="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-800">✅ Publicado</span>
                                                             ) : (
-                                                                <span className="text-xs text-gray-400">—</span>
+                                                                <span className="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-yellow-100 text-yellow-800">⚠️ Sin publicar</span>
                                                             )}
                                                         </td>
                                                     )}

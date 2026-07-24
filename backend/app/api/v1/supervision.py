@@ -162,3 +162,76 @@ def listar_coaches_con_pertenencia(
         })
 
     return result
+
+
+@router.patch("/cupo-disciplina")
+def actualizar_cupo_disciplina(
+    disciplina_id: int = Query(..., description="ID de la disciplina"),
+    cupo_maximo: int = Query(..., ge=1, le=200,
+                             description="Nuevo cupo máximo (1-200)"),
+    tenant_id: int = Query(1),
+    db: Session = Depends(get_db)
+):
+    """
+    Actualiza el cupo_maximo en TODOS los horario_base de una disciplina.
+    Afecta las próximas clases generadas, no reescribe clases ya creadas.
+    """
+    # Verificar que la disciplina existe
+    disc = db.execute(
+        sql_text("SELECT id FROM disciplinas WHERE id = :did AND tenant_id = :tid"),
+        {"did": disciplina_id, "tid": tenant_id}
+    ).first()
+    if not disc:
+        raise HTTPException(status_code=404, detail="Disciplina no encontrada")
+
+    # Actualizar cupo en todos los horario_base de esa disciplina
+    result = db.execute(
+        sql_text("""
+            UPDATE horarios
+            SET cupo_maximo = :cupo
+            WHERE disciplina_id = :did AND tenant_id = :tid
+        """),
+        {"cupo": cupo_maximo, "did": disciplina_id, "tid": tenant_id}
+    )
+    filas_afectadas = result.rowcount
+    db.commit()
+
+    return {
+        "ok": True,
+        "disciplina_id": disciplina_id,
+        "cupo_maximo": cupo_maximo,
+        "horarios_actualizados": filas_afectadas
+    }
+
+
+@router.get("/cupos-disciplinas")
+def listar_cupos_disciplinas(
+    tenant_id: int = Query(1),
+    db: Session = Depends(get_db)
+):
+    """
+    Lista TODAS las disciplinas con su cupo actual (tomado del horario_base más reciente/representativo).
+    """
+    rows = db.execute(sql_text("""
+        SELECT
+            d.id,
+            d.nombre,
+            d.activo,
+            COALESCE(
+                (SELECT h.cupo_maximo FROM horarios h WHERE h.disciplina_id = d.id AND h.tenant_id = :tid ORDER BY h.id DESC LIMIT 1),
+                16
+            ) AS cupo_actual
+        FROM disciplinas d
+        WHERE d.tenant_id = :tid
+        ORDER BY d.id
+    """), {"tid": tenant_id}).fetchall()
+
+    return [
+        {
+            "id": r.id,
+            "nombre": r.nombre.strip() if r.nombre else r.nombre,
+            "activo": r.activo,
+            "cupo_actual": r.cupo_actual
+        }
+        for r in rows
+    ]

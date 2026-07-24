@@ -73,7 +73,6 @@ const Layout = ({ children }) => {
                 { label: 'Supervisión', path: '/admin/supervision-clases', icon: icons.calendar },
                 { label: 'Planes', path: '/admin/planes', icon: icons.settings },
                 { label: 'Disciplinas', path: '/admin/disciplinas', icon: icons.dumbbell },
-                { label: 'Horarios', path: '/admin/horarios', icon: icons.calendar },
                 { label: 'Bazar', path: '/admin/bazar', icon: icons.settings },
                 { label: 'Reportes', path: '/admin/reportes', icon: icons.dumbbell },
             ];

@@ -191,7 +191,7 @@ def crear_clase(
 @router.put("/{clase_id}", response_model=schemas.ClaseResponse)
 def actualizar_clase(
     clase_id: int,
-    clase_update: schemas.ClaseCreate,
+    clase_update: schemas.ClaseUpdate,
     db: Session = Depends(get_db),
     tenant_id: int = Query(1),
     modo_emergencia: bool = Query(
@@ -217,14 +217,9 @@ def actualizar_clase(
                 accion="asignar_coach_admin",
                 tenant_id=tenant_id
             )
-            clase.coach_id = clase_update.coach_id
         except HTTPException as e:
-            # Si no es emergencia y falla, relanzar
             if not modo_emergencia:
                 raise e
-            # Si modo_emergencia y falló, es porque el coach no pertenece
-            # Pero verificar_coach_disciplina ya registró auditoria si se llamó con modo_emergencia
-            # Re-intentar con modo_emergencia=True para forzar auditoria
             verificar_coach_disciplina(
                 coach_id=clase_update.coach_id,
                 disciplina_id=clase.disciplina_id,
@@ -234,12 +229,14 @@ def actualizar_clase(
                 accion="asignar_coach_admin",
                 tenant_id=tenant_id
             )
-            clase.coach_id = clase_update.coach_id
+        clase.coach_id = clase_update.coach_id
 
-    clase.hora_inicio = clase_update.hora_inicio
-    clase.hora_fin = clase_update.hora_fin
-    clase.cupo_maximo = clase_update.cupo_maximo
-    clase.fecha = clase_update.fecha
+    if clase_update.hora_inicio is not None:
+        clase.hora_inicio = clase_update.hora_inicio
+    if clase_update.hora_fin is not None:
+        clase.hora_fin = clase_update.hora_fin
+    if clase_update.cupo_maximo is not None:
+        clase.cupo_maximo = clase_update.cupo_maximo
 
     db.commit()
     db.refresh(clase)
