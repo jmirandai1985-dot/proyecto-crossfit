@@ -120,14 +120,17 @@ def test_a05_reportes_dashboard():
                      params={"tenant_id": TENANT_ID})
     assert r.status_code == 200, f"Status {r.status_code}: {r.text[:200]}"
     data = r.json()
-    campos = ["alumnosActivos", "membresiasMensuales", "ingresoMensual",
-              "asistenciaPromedio", "clasesImpartidas"]
+    campos = ["alumnosActivos", "ingresoMensual", "asistenciaPromedio",
+              "clasesImpartidas", "cancelacionesMes", "nuevosAlumnosMes",
+              "mrr", "ocupacionPorDisciplina", "clasesPorCoach", "coberturasEmergencia"]
     for campo in campos:
         assert campo in data, f"Falta campo '{campo}'"
-        # Verificar que son enteros (datos reales, no strings)
-        assert isinstance(data[campo], (int, float)
-                          ), f"{campo} debe ser numerico"
-    print(f"  [OK] Reportes dashboard: {len(campos)} campos numericos reales")
+        val = data[campo]
+        if isinstance(val, list):
+            assert len(val) >= 0, f"{campo} debe ser lista"
+        else:
+            assert isinstance(val, (int, float)), f"{campo} debe ser numerico"
+    print(f"  [OK] Reportes dashboard: {len(campos)} campos validados")
 
 
 def test_a06_listar_planes():

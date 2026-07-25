@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 from app.db.database import get_db
 from app.models.suscripcion import Suscripcion
+from app.models.transaccion_financiera import TransaccionFinanciera
 
 router = APIRouter()
 
@@ -41,6 +42,31 @@ def crear_suscripcion(data: SuscripcionCreate, db: Session = Depends(get_db)):
     db.add(db_sus)
     db.commit()
     db.refresh(db_sus)
+
+    # Auto-insertar ingreso en transacciones_financieras
+    try:
+        from datetime import date
+        from app.models.plan import Plan
+        plan = db.query(Plan).filter(Plan.id == data.plan_id).first()
+        if plan and plan.precio_clp > 0:
+            tx = TransaccionFinanciera(
+                tenant_id=data.tenant_id,
+                tipo='ingreso',
+                categoria='membresia',
+                monto=plan.precio_clp,
+                descripcion=f"Suscripcion plan {plan.nombre} (usuario #{data.usuario_id})",
+                referencia_tipo='suscripcion',
+                referencia_id=db_sus.id,
+                fecha=date.today(),
+            )
+            db.add(tx)
+            db.commit()
+    except Exception as e:
+        # No debe impedir la creacion de la suscripcion si falla la transaccion
+        import logging
+        logging.getLogger("uvicorn").warning(
+            f"No se pudo registrar transaccion financiera: {e}")
+
     return db_sus
 
 

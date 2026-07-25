@@ -37,6 +37,9 @@ const Reportes = () => {
     const { tenant_id } = useAuth();
     const [reportData, setReportData] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [showMovModal, setShowMovModal] = useState(false);
+    const [movForm, setMovForm] = useState({ tipo: 'egreso', categoria: '', monto: '', descripcion: '', fecha: new Date().toISOString().split('T')[0], tenant_id: tenant_id });
+    const [savingMov, setSavingMov] = useState(false);
 
     useEffect(() => {
         const fetchReportData = async () => {
@@ -45,14 +48,8 @@ const Reportes = () => {
                 setReportData(response.data || null);
             } catch (error) {
                 console.error('Error fetching reportes:', error);
-                setReportData({
-                    membresiasMensuales: 156,
-                    crecimientoMensual: 12,
-                    ingresoMensual: 4500000,
-                    asistenciaPromedio: 78,
-                    clasesImpartidas: 145,
-                    alumnosActivos: 189,
-                });
+                // Fallback: no mostrar datos hardcodeados
+                setReportData(null);
             } finally {
                 setLoading(false);
             }
@@ -61,21 +58,15 @@ const Reportes = () => {
         fetchReportData();
     }, [tenant_id]);
 
-    // Datos de los últimos 6 meses para los gráficos
-    const hoy = new Date();
-    const ultimosMeses = Array.from({ length: 6 }, (_, i) => {
-        const d = new Date(hoy.getFullYear(), hoy.getMonth() - 5 + i, 1);
-        return MESES[d.getMonth()];
-    });
-
-    const membresiaData = ultimosMeses.map((mes, i) => ({
-        mes,
-        membresias: 120 + i * 7 + Math.floor(Math.random() * 5),
+    // Datos de los últimos 6 meses para los gráficos (desde BD real)
+    const membresiaData = (reportData?.historicoMembresias || []).map(item => ({
+        mes: item.mes,
+        membresias: item.membresias,
     }));
 
-    const ingresosData = ultimosMeses.map((mes, i) => ({
-        mes,
-        ingresos: 3500000 + i * 200000 + Math.floor(Math.random() * 150000),
+    const ingresosData = (reportData?.historicoIngresos || []).map(item => ({
+        mes: item.mes,
+        ingresos: item.ingresos,
     }));
 
     // Degradados para AreaChart
@@ -124,10 +115,10 @@ const Reportes = () => {
                     <div className="bg-white rounded-lg shadow p-6 border-l-4 border-blue-500">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-gray-600 text-sm font-medium">Membresías Activas</p>
-                                <p className="text-3xl font-bold text-gray-900 mt-2">{reportData?.membresiasMensuales || 0}</p>
+                                <p className="text-gray-600 text-sm font-medium">Alumnos Activos</p>
+                                <p className="text-3xl font-bold text-gray-900 mt-2">{reportData?.alumnosActivos || 0}</p>
                                 <p className="text-xs text-green-600 mt-2">
-                                    ↑ {reportData?.crecimientoMensual || 0}% este mes
+                                    ↑ {reportData?.crecimientoMensual || 0}% MoM
                                 </p>
                             </div>
                             <span className="text-4xl">👥</span>
@@ -184,8 +175,17 @@ const Reportes = () => {
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-gray-600 text-sm font-medium">Retención Mensual</p>
-                                <p className="text-3xl font-bold text-gray-900 mt-2">92%</p>
-                                <p className="text-xs text-green-600 mt-2">↑ Excelente</p>
+                                {reportData?.tieneDatosRetencion ? (
+                                    <>
+                                        <p className="text-3xl font-bold text-gray-900 mt-2">{reportData.retencion}%</p>
+                                        <p className="text-xs text-green-600 mt-2">Últimos 30 días</p>
+                                    </>
+                                ) : (
+                                    <>
+                                        <p className="text-2xl font-bold text-gray-400 mt-2">Sin datos</p>
+                                        <p className="text-xs text-yellow-600 mt-2">⚠️ Historial insuficiente</p>
+                                    </>
+                                )}
                             </div>
                             <span className="text-4xl">✓</span>
                         </div>
@@ -244,6 +244,25 @@ const Reportes = () => {
                     </div>
                 </div>
 
+                {/* Nuevos Alumnos / Cancelaciones */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-emerald-500">
+                        <p className="text-gray-600 text-sm font-medium">Nuevos Alumnos (Mes)</p>
+                        <p className="text-3xl font-bold text-gray-900 mt-2">{reportData?.nuevosAlumnosMes || 0}</p>
+                        <span className="text-4xl">✨</span>
+                    </div>
+                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-red-500">
+                        <p className="text-gray-600 text-sm font-medium">Cancelaciones (Mes)</p>
+                        <p className="text-3xl font-bold text-gray-900 mt-2">{reportData?.cancelacionesMes || 0}</p>
+                        <span className="text-4xl">📉</span>
+                    </div>
+                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-purple-500">
+                        <p className="text-gray-600 text-sm font-medium">MRR (Ingresos Recurrentes)</p>
+                        <p className="text-3xl font-bold text-gray-900 mt-2">{formatCompact(reportData?.mrr || 0)}</p>
+                        <p className="text-xs text-gray-500 mt-2">ARPU: {formatCompact(reportData?.arpu || 0)}/alumno</p>
+                    </div>
+                </div>
+
                 {/* Resumen de Disciplinas */}
                 <div className="bg-white rounded-lg shadow overflow-hidden">
                     <div className="px-6 py-4 border-b border-gray-200">
@@ -255,37 +274,137 @@ const Reportes = () => {
                                 <tr>
                                     <th className="px-6 py-3 text-left text-sm font-medium">Disciplina</th>
                                     <th className="px-6 py-3 text-left text-sm font-medium">Clases</th>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Alumnos</th>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Asistencia</th>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Popularidad</th>
+                                    <th className="px-6 py-3 text-left text-sm font-medium">Alumnos Únicos</th>
+                                    <th className="px-6 py-3 text-left text-sm font-medium">Asist. Total</th>
+                                    <th className="px-6 py-3 text-left text-sm font-medium">Ocupación</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200">
-                                {[
-                                    { nombre: 'CrossFit', clases: 45, alumnos: 78, asistencia: 85, popularidad: '⭐⭐⭐⭐⭐' },
-                                    { nombre: 'Open Box', clases: 28, alumnos: 52, asistencia: 72, popularidad: '⭐⭐⭐⭐' },
-                                    { nombre: 'Musculación', clases: 32, alumnos: 41, asistencia: 88, popularidad: '⭐⭐⭐⭐⭐' },
-                                    { nombre: 'Lev. Olímpico', clases: 25, alumnos: 38, asistencia: 80, popularidad: '⭐⭐⭐⭐' },
-                                ].map((disciplina, index) => (
-                                    <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{disciplina.nombre}</td>
-                                        <td className="px-6 py-4 text-sm text-gray-600">{disciplina.clases}</td>
-                                        <td className="px-6 py-4 text-sm text-gray-600">{disciplina.alumnos}</td>
-                                        <td className="px-6 py-4 text-sm">
-                                            <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
-                                                {disciplina.asistencia}%
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 text-sm text-gray-600">{disciplina.popularidad}</td>
-                                    </tr>
-                                ))}
+                                {(reportData?.ocupacionPorDisciplina || []).length > 0 ? (
+                                    reportData.ocupacionPorDisciplina.map((d, index) => (
+                                        <tr key={d.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                            <td className="px-6 py-4 text-sm font-medium text-gray-900">{d.nombre}</td>
+                                            <td className="px-6 py-4 text-sm text-gray-600">{d.clases || 0}</td>
+                                            <td className="px-6 py-4 text-sm text-gray-600">{d.alumnos_unicos || 0}</td>
+                                            <td className="px-6 py-4 text-sm text-gray-600">{d.asistentes || 0}</td>
+                                            <td className="px-6 py-4 text-sm">
+                                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${d.ocupacion_pct >= 70 ? 'bg-green-100 text-green-800' : d.ocupacion_pct >= 40 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
+                                                    {d.ocupacion_pct}%
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    ))
+                                ) : (
+                                    <tr><td colSpan={5} className="px-6 py-6 text-center text-gray-400">Sin datos de ocupación este mes</td></tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
                 </div>
 
+                {/* Coaches: clases dictadas + coberturas */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="bg-white rounded-lg shadow overflow-hidden">
+                        <div className="px-6 py-4 border-b border-gray-200">
+                            <h2 className="text-lg font-bold text-gray-900">👨‍🏫 Clases por Coach (Mes)</h2>
+                        </div>
+                        <div className="p-6">
+                            {(reportData?.clasesPorCoach || []).length > 0 ? (
+                                <div className="space-y-3">
+                                    {reportData.clasesPorCoach.map((c, i) => (
+                                        <div key={c.id} className="flex items-center justify-between">
+                                            <span className="text-sm font-medium text-gray-700">{c.nombre}</span>
+                                            <span className="text-sm font-bold text-gray-900">{c.clases} clases</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="text-gray-400 text-sm text-center py-4">Sin datos de coaches este mes</p>
+                            )}
+                        </div>
+                    </div>
+                    <div className="bg-white rounded-lg shadow overflow-hidden">
+                        <div className="px-6 py-4 border-b border-gray-200">
+                            <h2 className="text-lg font-bold text-gray-900">🆘 Coberturas de Emergencia</h2>
+                        </div>
+                        <div className="p-6">
+                            <p className="text-3xl font-bold text-gray-900">{reportData?.coberturasEmergencia || 0}</p>
+                            <p className="text-sm text-gray-500 mt-1">Usos como cobertura este mes</p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Modal de registro de movimiento */}
+                {showMovModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => setShowMovModal(false)}>
+                        <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full" onClick={e => e.stopPropagation()}>
+                            <h3 className="font-bold text-lg mb-4">💰 Registrar Movimiento</h3>
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="text-sm font-medium text-gray-700">Tipo</label>
+                                    <select value={movForm.tipo} onChange={e => setMovForm({ ...movForm, tipo: e.target.value })}
+                                        className="w-full border rounded px-3 py-2 text-sm mt-1">
+                                        <option value="egreso">💸 Egreso</option>
+                                        <option value="ingreso">💵 Ingreso</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium text-gray-700">Categoría</label>
+                                    <input type="text" value={movForm.categoria} onChange={e => setMovForm({ ...movForm, categoria: e.target.value })}
+                                        className="w-full border rounded px-3 py-2 text-sm mt-1" placeholder="ej: gasto_operativo" />
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium text-gray-700">Monto ($)</label>
+                                    <input type="number" value={movForm.monto} onChange={e => setMovForm({ ...movForm, monto: e.target.value })}
+                                        className="w-full border rounded px-3 py-2 text-sm mt-1" placeholder="5000" />
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium text-gray-700">Descripción</label>
+                                    <input type="text" value={movForm.descripcion} onChange={e => setMovForm({ ...movForm, descripcion: e.target.value })}
+                                        className="w-full border rounded px-3 py-2 text-sm mt-1" placeholder="ej: gastos varios" />
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium text-gray-700">Fecha</label>
+                                    <input type="date" value={movForm.fecha} onChange={e => setMovForm({ ...movForm, fecha: e.target.value })}
+                                        className="w-full border rounded px-3 py-2 text-sm mt-1" />
+                                </div>
+                            </div>
+                            <div className="flex gap-2 mt-5">
+                                <button onClick={async () => {
+                                    if (!movForm.monto || !movForm.categoria) return;
+                                    setSavingMov(true);
+                                    try {
+                                        await api.post('/api/v1/finanzas/transaccion', {
+                                            ...movForm,
+                                            monto: parseFloat(movForm.monto),
+                                            tenant_id: tenant_id || 1,
+                                        });
+                                        setShowMovModal(false);
+                                        setMovForm({ tipo: 'egreso', categoria: '', monto: '', descripcion: '', fecha: new Date().toISOString().split('T')[0], tenant_id: tenant_id || 1 });
+                                        // Recargar KPIs
+                                        const resp = await api.get(`/api/v1/reportes/?tenant_id=${tenant_id || 1}`);
+                                        setReportData(resp.data || null);
+                                    } catch (e) { console.error(e); alert('Error al guardar'); }
+                                    setSavingMov(false);
+                                }} disabled={savingMov}
+                                    className="flex-1 py-2 bg-blue-600 text-white rounded text-sm font-bold hover:bg-blue-700">
+                                    {savingMov ? 'Guardando...' : '✅ Guardar'}
+                                </button>
+                                <button onClick={() => setShowMovModal(false)}
+                                    className="flex-1 py-2 bg-gray-200 rounded text-sm font-medium hover:bg-gray-300">Cancelar</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Botón de descarga Excel */}
-                <div className="flex justify-center">
+                <div className="flex justify-center gap-3">
+                    <button
+                        onClick={() => setShowMovModal(true)}
+                        className="px-6 py-3 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors font-bold"
+                    >
+                        💰 + Registrar Movimiento
+                    </button>
                     <button
                         onClick={async () => {
                             try {

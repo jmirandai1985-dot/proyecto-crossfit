@@ -235,6 +235,7 @@ def obtener_reportes_analytics(
         ocupacion_por_disciplina = []
         disc_rows = db.execute(sql_text("""
             SELECT d.id, d.nombre,
+                   COUNT(c.id) as total_clases,
                    COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0)), 0) as asistentes,
                    COALESCE(SUM(COALESCE(c.cupo_maximo, 1)), 0) as cupo
             FROM clases c
@@ -248,11 +249,22 @@ def obtener_reportes_analytics(
         for r in disc_rows:
             cupo = r.cupo or 0
             pct = round(r.asistentes / cupo * 100) if cupo > 0 else 0
+            # Alumnos unicos con reserva confirmada (asistio=true) en esta disciplina este mes
+            alumnos_unicos = db.execute(sql_text("""
+                SELECT COUNT(DISTINCT r.alumno_id)
+                FROM reservas r
+                JOIN clases c ON r.clase_id = c.id
+                WHERE c.tenant_id = :tid AND c.disciplina_id = :did
+                  AND r.asistio = true
+                  AND c.fecha >= :ini_d AND c.fecha <= :fin_d
+            """), {"tid": tenant_id, "did": r.id, "ini_d": inicio_mes.date(), "fin_d": fin_mes.date()}).scalar() or 0
             ocupacion_por_disciplina.append({
                 "id": r.id,
                 "nombre": r.nombre.strip() if r.nombre else "—",
+                "clases": r.total_clases,
                 "asistentes": r.asistentes,
                 "cupo_total": cupo,
+                "alumnos_unicos": alumnos_unicos,
                 "ocupacion_pct": pct
             })
 
