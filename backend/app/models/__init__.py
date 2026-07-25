@@ -10,7 +10,9 @@ from app.models.movimiento import Movimiento
 from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
 from app.models.cobertura_emergencia import CoberturaEmergencia
+from app.models.transaccion_financiera import TransaccionFinanciera
 
 __all__ = ["Tenant", "Usuario", "RolUsuario",
            "Wod", "EstadoWod", "WodMovimiento", "Notificacion",
-           "Movimiento", "Plan", "Suscripcion", "CoberturaEmergencia"]
+           "Movimiento", "Plan", "Suscripcion", "CoberturaEmergencia",
+           "TransaccionFinanciera"]
