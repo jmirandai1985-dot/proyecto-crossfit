@@ -40,6 +40,21 @@ const Reportes = () => {
     const [showMovModal, setShowMovModal] = useState(false);
     const [movForm, setMovForm] = useState({ tipo: 'egreso', categoria: '', monto: '', descripcion: '', fecha: new Date().toISOString().split('T')[0], tenant_id: tenant_id });
     const [savingMov, setSavingMov] = useState(false);
+    const [movimientosList, setMovimientosList] = useState([]);
+    const [loadingMovs, setLoadingMovs] = useState(false);
+
+    useEffect(() => {
+        const fetchMovimientos = async () => {
+            setLoadingMovs(true);
+            try {
+                const r = await api.get(`/api/v1/finanzas/transacciones?tenant_id=${tenant_id || 1}`);
+                setMovimientosList(r.data || []);
+            } catch (e) { console.error('Error movimientos', e); }
+            setLoadingMovs(false);
+        };
+        fetchMovimientos();
+    }, [tenant_id]);
+
 
     useEffect(() => {
         const fetchReportData = async () => {
@@ -128,11 +143,11 @@ const Reportes = () => {
                     <div className="bg-white rounded-lg shadow p-6 border-l-4 border-green-500">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-gray-600 text-sm font-medium">Ingresos Mensuales</p>
+                                <p className="text-gray-600 text-sm font-medium">Ingreso Neto Mensual</p>
                                 <p className="text-3xl font-bold text-gray-900 mt-2">
                                     {formatCompact(reportData?.ingresoMensual || 0)}
                                 </p>
-                                <p className="text-xs text-gray-500 mt-2">Ingresos totales</p>
+                                <p className="text-xs text-gray-500 mt-2">Ingresos - Egresos del mes</p>
                             </div>
                             <span className="text-4xl">💰</span>
                         </div>
@@ -331,6 +346,45 @@ const Reportes = () => {
                             <p className="text-3xl font-bold text-gray-900">{reportData?.coberturasEmergencia || 0}</p>
                             <p className="text-sm text-gray-500 mt-1">Usos como cobertura este mes</p>
                         </div>
+                    </div>
+                </div>
+
+                {/* Detalle de Movimientos */}
+                <div className="bg-white rounded-lg shadow overflow-hidden">
+                    <div className="px-6 py-4 border-b border-gray-200">
+                        <h2 className="text-lg font-bold text-gray-900">📋 Detalle de Movimientos</h2>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full">
+                            <thead className="bg-blue-900 text-white">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-sm font-medium">Fecha</th>
+                                    <th className="px-6 py-3 text-left text-sm font-medium">Tipo</th>
+                                    <th className="px-6 py-3 text-left text-sm font-medium">Categoría</th>
+                                    <th className="px-6 py-3 text-left text-sm font-medium">Monto</th>
+                                    <th className="px-6 py-3 text-left text-sm font-medium">Descripción</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                                {loadingMovs ? (
+                                    <tr><td colSpan={5} className="px-6 py-6 text-center text-gray-400">Cargando movimientos...</td></tr>
+                                ) : movimientosList.length === 0 ? (
+                                    <tr><td colSpan={5} className="px-6 py-6 text-center text-gray-400">Sin movimientos este mes</td></tr>
+                                ) : movimientosList.map((m, i) => (
+                                    <tr key={m.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                        <td className="px-6 py-3 text-sm text-gray-700">{m.fecha}</td>
+                                        <td className="px-6 py-3 text-sm">
+                                            {m.tipo === 'ingreso' ? '⬆️ Ingreso' : '⬇️ Egreso'}
+                                        </td>
+                                        <td className="px-6 py-3 text-sm text-gray-600">{m.categoria}</td>
+                                        <td className={`px-6 py-3 text-sm font-bold ${m.tipo === 'ingreso' ? 'text-green-600' : 'text-red-600'}`}>
+                                            {m.tipo === 'ingreso' ? '+' : '-'}${Number(m.monto).toLocaleString('es-CL')}
+                                        </td>
+                                        <td className="px-6 py-3 text-sm text-gray-500">{m.descripcion || '—'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
 

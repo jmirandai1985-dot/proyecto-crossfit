@@ -47,6 +47,18 @@ export default function SupervisionClases() {
     const [coachSelector, setCoachSelector] = useState(null); // { claseId, disciplinaId }
     const [coachesDisponibles, setCoachesDisponibles] = useState([]);
     const [emergenciaConfirm, setEmergenciaConfirm] = useState(null); // { coach, claseId, discId }
+    const [showCupos, setShowCupos] = useState(false);
+    const [cuposData, setCuposData] = useState([]);
+    const [cuposLoading, setCuposLoading] = useState(false);
+
+    const fetchCupos = useCallback(async () => {
+        setCuposLoading(true);
+        try {
+            const r = await api.get(`${API_BASE}/supervision/cupos-disciplinas`, { params: { tenant_id } });
+            setCuposData(r.data || []);
+        } catch (e) { console.error('Error cupos', e); }
+        setCuposLoading(false);
+    }, [tenant_id]);
 
     // ═══ CARGA AUTOMÁTICA AL ABRIR ═══
     useEffect(() => {
@@ -265,7 +277,66 @@ export default function SupervisionClases() {
                         🔍 Cargar / Refrescar
                     </button>
                     <button className="px-3 py-1 bg-blue-900 text-white rounded text-sm font-medium">+ Agregar Clase</button>
+                    <button
+                        onClick={() => { setShowCupos(!showCupos); if (!showCupos) fetchCupos(); }}
+                        className={`px-3 py-1 rounded text-sm font-medium ${showCupos ? 'bg-purple-700 text-white' : 'bg-purple-100 text-purple-800'}`}
+                    >
+                        📊 Gestión de Cupos
+                    </button>
                 </div>
+                {showCupos && (
+                    <div className="bg-white rounded-xl border-2 border-purple-200 p-5 mb-6">
+                        <h3 className="font-bold text-lg text-purple-900 mb-4">📊 Gestión de Cupos por Disciplina</h3>
+                        {cuposLoading ? (
+                            <div className="text-gray-400 text-center py-8">Cargando cupos...</div>
+                        ) : cuposData.length === 0 ? (
+                            <div className="text-gray-400 text-center py-8">Sin datos de cupos</div>
+                        ) : (
+                            <div className="divide-y divide-gray-200">
+                                {cuposData.map(d => (
+                                    <div key={d.id} className="flex items-center justify-between py-3">
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-medium text-gray-900">{d.nombre}</span>
+                                            {!d.activo && <span className="text-xs px-1.5 py-0.5 rounded bg-gray-200 text-gray-500">Inactiva</span>}
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={async () => {
+                                                    const nuevo = Math.max(1, d.cupo_actual - 1);
+                                                    if (nuevo === d.cupo_actual) return;
+                                                    try {
+                                                        const r = await api.patch(`/api/v1/supervision/cupo-disciplina`, null, { params: { disciplina_id: d.id, cupo_maximo: nuevo, tenant_id } });
+                                                        if (r.data?.ok) {
+                                                            setCuposData(prev => prev.map(x => x.id === d.id ? { ...x, cupo_actual: nuevo } : x));
+                                                        }
+                                                    } catch (e) { console.error(e); }
+                                                }}
+                                                disabled={d.cupo_actual <= 1}
+                                                className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${d.cupo_actual <= 1 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-red-100 text-red-600 hover:bg-red-200'}`}
+                                            >−</button>
+                                            <span className="w-12 text-center text-xl font-bold text-gray-900">{d.cupo_actual}</span>
+                                            <button
+                                                onClick={async () => {
+                                                    const nuevo = Math.min(200, d.cupo_actual + 1);
+                                                    if (nuevo === d.cupo_actual) return;
+                                                    try {
+                                                        const r = await api.patch(`/api/v1/supervision/cupo-disciplina`, null, { params: { disciplina_id: d.id, cupo_maximo: nuevo, tenant_id } });
+                                                        if (r.data?.ok) {
+                                                            setCuposData(prev => prev.map(x => x.id === d.id ? { ...x, cupo_actual: nuevo } : x));
+                                                        }
+                                                    } catch (e) { console.error(e); }
+                                                }}
+                                                disabled={d.cupo_actual >= 200}
+                                                className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${d.cupo_actual >= 200 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-green-100 text-green-600 hover:bg-green-200'}`}
+                                            >+</button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
                     {disciplinas.map(d => {
                         const r = resumenDisciplina(d.id);
