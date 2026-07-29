@@ -58,6 +58,7 @@ const Layout = ({ children }) => {
                 { label: 'Mis Reservas', path: '/alumno/mis-reservas', icon: icons.calendar },
                 { label: 'Pizarra de RMs', path: '/alumno/rms', icon: icons.dumbbell },
                 { label: 'Evolución', path: '/alumno/evolucion', icon: icons.home },
+                { label: 'Performance Hub', path: '/alumno/performance-hub', icon: icons.dumbbell },
                 { label: 'Bazar', path: '/alumno/bazar', icon: icons.dumbbell },
                 { label: 'Mis Pedidos', path: '/alumno/mis-pedidos', icon: icons.calendar },
                 { label: 'Ajustes', path: '/alumno/ajustes', icon: icons.settings },

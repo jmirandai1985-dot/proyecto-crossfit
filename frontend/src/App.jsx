@@ -28,6 +28,7 @@ import AlumnoSolicitarPlan from './pages/alumno/SolicitarPlan';
 import AlumnoEvolucion from './pages/alumno/Evolucion';
 import AlumnoBazar from './pages/alumno/Bazar';
 import AlumnoMisPedidos from './pages/alumno/MisPedidos';
+import AlumnoPerformanceHub from './pages/alumno/PerformanceHub';
 
 // ─── Spinner compartido ────────────────────────────────────────────────
 const LoadingScreen = () => (
@@ -112,6 +113,7 @@ function App() {
             <Route path="evolucion" element={<AlumnoEvolucion />} />
             <Route path="bazar" element={<AlumnoBazar />} />
             <Route path="mis-pedidos" element={<AlumnoMisPedidos />} />
+            <Route path="performance-hub" element={<AlumnoPerformanceHub />} />
             <Route path="*" element={<Navigate to="/alumno/dashboard" />} />
           </Route>
 

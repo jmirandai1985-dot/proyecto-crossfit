@@ -250,6 +250,16 @@ const AlumnoDashboard = () => {
                     </div>
                 )}
 
+                {/* ─── BOTÓN PERFORMANCE HUB ─────────────────────────── */}
+                <div className="flex justify-center">
+                    <a href="/alumno/performance-hub"
+                        className="inline-flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl hover:from-emerald-600 hover:to-emerald-700 font-bold text-sm shadow-md hover:shadow-lg transition-all">
+                        <span className="text-xl">🏆</span>
+                        <span>Ver mi Performance Hub</span>
+                        <span>→</span>
+                    </a>
+                </div>
+
                 {/* ─── TARJETAS DE CLASIFICACIÓN ───────────────────────── */}
                 <div>
                     <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
