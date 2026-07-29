@@ -5,7 +5,7 @@ from app.api.v1 import (
     retencion, productos, pedidos, reportes, auditoria, auth,
     suscripciones, wods, solicitudes_planes, upload, membresias,
     notificaciones, migracion, comprar_emergencia, fix_fechas, supervision,
-    finanzas
+    finanzas, configuracion
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -126,6 +126,8 @@ app.include_router(supervision.router,
                    prefix="/api/v1/supervision", tags=["Supervision"])
 app.include_router(finanzas.router,
                    prefix="/api/v1/finanzas", tags=["Finanzas"])
+app.include_router(configuracion.router,
+                   prefix="/api/v1/configuracion", tags=["Configuración"])
 
 
 @app.on_event("startup")

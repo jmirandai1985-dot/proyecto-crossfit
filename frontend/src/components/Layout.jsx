@@ -75,6 +75,7 @@ const Layout = ({ children }) => {
                 { label: 'Disciplinas', path: '/admin/disciplinas', icon: icons.dumbbell },
                 { label: 'Bazar', path: '/admin/bazar', icon: icons.settings },
                 { label: 'Reportes', path: '/admin/reportes', icon: icons.dumbbell },
+                { label: 'Configuración', path: '/admin/configuracion', icon: icons.settings },
             ];
         }
         return [];

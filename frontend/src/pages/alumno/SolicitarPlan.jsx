@@ -8,6 +8,7 @@ const SolicitarPlan = () => {
 
     // ─── Estados ───────────────────────────────────────────────────────
     const [planes, setPlanes] = useState([]);
+    const [configBancaria, setConfigBancaria] = useState(null);
     const [planesFiltrados, setPlanesFiltrados] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -23,6 +24,21 @@ const SolicitarPlan = () => {
     const [subiendo, setSubiendo] = useState(false);
     const [mensajeExito, setMensajeExito] = useState('');
     const [mensajeError, setMensajeError] = useState('');
+
+    // ─── Cargar configuracion bancaria ────────────────────────────────
+    useEffect(() => {
+        const fetchConfig = async () => {
+            try {
+                const res = await api.get(`/api/v1/configuracion?tenant_id=${tenant_id}`);
+                if (res.data.configurado) {
+                    setConfigBancaria(res.data);
+                }
+            } catch (err) {
+                console.error('Error cargando config bancaria:', err);
+            }
+        };
+        fetchConfig();
+    }, [tenant_id]);
 
     // ─── Cargar perfil del alumno y planes ─────────────────────────────
     useEffect(() => {
@@ -305,6 +321,33 @@ const SolicitarPlan = () => {
                                     {formatearPrecio(planSeleccionado.precio_clp)}
                                 </span>
                             </div>
+                        </div>
+
+                        {/* ─── DATOS BANCARIOS PARA TRANSFERENCIA ── */}
+                        <div className="bg-blue-50 rounded-xl border border-blue-200 p-5 shadow-sm">
+                            <h4 className="font-bold text-blue-800 mb-3 flex items-center gap-2">
+                                <span>🏦</span> Datos para Transferencia
+                            </h4>
+                            {configBancaria ? (
+                                <div className="space-y-2 text-sm text-blue-900">
+                                    <p className="font-semibold text-blue-700">Transfiere a:</p>
+                                    <div className="bg-white rounded-lg p-3 border border-blue-100 space-y-1.5">
+                                        <p><span className="font-medium text-gray-600">Banco:</span> {configBancaria.banco}</p>
+                                        <p><span className="font-medium text-gray-600">Tipo de Cuenta:</span> {configBancaria.tipo_cuenta}</p>
+                                        <p><span className="font-medium text-gray-600">N° de Cuenta:</span> <span className="font-bold text-blue-800">{configBancaria.numero_cuenta}</span></p>
+                                        <p><span className="font-medium text-gray-600">RUT:</span> {configBancaria.rut}</p>
+                                        <p><span className="font-medium text-gray-600">Email comprobantes:</span> {configBancaria.email_comprobantes}</p>
+                                    </div>
+                                    <p className="text-xs text-blue-600 mt-2 italic">
+                                        Luego de transferir, sube el comprobante abajo para que validemos tu pago.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="text-sm text-blue-600 bg-white rounded-lg p-3 border border-blue-100">
+                                    <p>⏳ El box aún no ha configurado sus datos de pago.</p>
+                                    <p className="text-xs mt-1">Por favor contacta al administrador para obtener la información de transferencia.</p>
+                                </div>
+                            )}
                         </div>
 
                         {/* ─── SUBIR VOUCHER DE PAGO ──────────────── */}
