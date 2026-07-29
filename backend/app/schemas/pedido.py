@@ -17,6 +17,8 @@ class PedidoBase(BaseModel):
 class PedidoCreate(PedidoBase):
     """Esquema para crear un Pedido"""
     tenant_id: int = Field(..., gt=0, description="ID del tenant")
+    voucher_url: Optional[str] = Field(
+        None, description="URL del comprobante de pago")
 
 
 class PedidoUpdate(BaseModel):
@@ -33,6 +35,7 @@ class PedidoResponse(BaseModel):
     cantidad: int
     total: float
     estado: str
+    voucher_url: Optional[str] = None
     fecha_pedido: datetime
     created_at: datetime
     updated_at: datetime
@@ -48,6 +51,7 @@ class PedidoListItem(BaseModel):
     cantidad: int
     total: float
     estado: str
+    voucher_url: Optional[str] = None
     fecha_pedido: datetime
 
     model_config = ConfigDict(from_attributes=True)

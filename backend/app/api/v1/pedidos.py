@@ -62,7 +62,8 @@ def crear_pedido(
         producto_id=pedido_data.producto_id,
         cantidad=pedido_data.cantidad,
         total=total,
-        estado=pedido_data.estado
+        estado=pedido_data.estado,
+        voucher_url=pedido_data.voucher_url
     )
 
     # Descontar stock

@@ -26,6 +26,7 @@ class Pedido(Base):
     total = Column(Float, nullable=False)
     # pendiente, validado, entregado
     estado = Column(String(20), nullable=False, default="pendiente")
+    voucher_url = Column(String(500), nullable=True)
     fecha_pedido = Column(TIMESTAMP(timezone=True),
                           nullable=False, server_default=func.now())
     created_at = Column(TIMESTAMP(timezone=True),
