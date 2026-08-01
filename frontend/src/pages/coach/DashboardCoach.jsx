@@ -28,6 +28,22 @@ const DashboardCoach = () => {
     const [selectedAlumno, setSelectedAlumno] = useState(null);
     const [alumnoRMs, setAlumnoRMs] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
+    const [coachDisciplinas, setCoachDisciplinas] = useState([]);
+
+    // ---- Terminología dinámica por disciplina ----
+    const TERMINO_POR_DISCIPLINA = {
+        'CrossFit': 'WOD',
+        'Gap': 'WOD',
+        'Levantamiento Olímpico': 'WOD',
+        'Musculación': 'Entrenamiento',
+        'Musculacion': 'Entrenamiento',
+        'Open Box': 'Entrenamiento',
+    };
+    const getTerminoDisciplina = (nombre) => {
+        if (!nombre) return 'WOD';
+        const nombreLower = nombre.trim();
+        return TERMINO_POR_DISCIPLINA[nombreLower] || 'WOD';
+    };
 
     // ---- Helper: Fechas ----
     const toLocalDateStr = (d) => {
@@ -53,7 +69,23 @@ const DashboardCoach = () => {
         };
     };
 
-    const weekRange = getWeekRange();
+    const [weekRange, setWeekRange] = useState(getWeekRange);
+    const irSemanaAnterior = () => {
+        const start = new Date(weekRange.start + 'T12:00:00');
+        start.setDate(start.getDate() - 7);
+        setWeekRange({
+            start: toLocalDateStr(start),
+            end: toLocalDateStr(new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6))
+        });
+    };
+    const irSemanaSiguiente = () => {
+        const start = new Date(weekRange.start + 'T12:00:00');
+        start.setDate(start.getDate() + 7);
+        setWeekRange({
+            start: toLocalDateStr(start),
+            end: toLocalDateStr(new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6))
+        });
+    };
 
     // Days of week (Monday–Sunday)
     const DAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
@@ -99,13 +131,21 @@ const DashboardCoach = () => {
     const fetchAllData = useCallback(async () => {
         setLoading(true);
         try {
-            const [clasesRes, alumnosRes, wodsRes, riesgoRes, movRes] = await Promise.all([
+            const [clasesRes, alumnosRes, wodsRes, riesgoRes, movRes, coachDiscRes] = await Promise.all([
                 api.get(`/api/v1/clases?coach_id=${usuario_id}&tenant_id=${tenant_id}`),
                 api.get(`/api/v1/usuarios?tenant_id=${tenant_id}&rol=alumno&activo=true`),
                 api.get(`/api/v1/wods?tenant_id=${tenant_id}`),
                 api.get(`/api/v1/fidelizacion/coach/${usuario_id}/en-riesgo?tenant_id=${tenant_id}`),
-                api.get(`/api/v1/movimientos?tenant_id=${tenant_id}`)
+                api.get(`/api/v1/movimientos?tenant_id=${tenant_id}`),
+                api.get(`/api/v1/coach-disciplinas?tenant_id=${tenant_id}`)
             ]);
+
+            // Disciplinas asignadas al coach (activo=True)
+            const coachDiscData = coachDiscRes.data || [];
+            const discIds = coachDiscData
+                .filter(cd => cd.activo && cd.coach_id === usuario_id)
+                .map(cd => cd.disciplina_id);
+            setCoachDisciplinas(discIds);
 
             const clasesData = clasesRes.data || [];
             const alumnosData = alumnosRes.data || [];
@@ -118,15 +158,20 @@ const DashboardCoach = () => {
             setWods(wodsData);
             setMovimientos(movimientosData);
 
+            // Filtrar SOLO las disciplinas asignadas al coach (tabla coach_disciplinas activo=True)
+            const clasesFiltradas = coachDisciplinas.length > 0
+                ? clasesData.filter(c => coachDisciplinas.includes(c.disciplina_id))
+                : clasesData;
+
             // Filter today's classes
-            const hoyClases = clasesData.filter(c => {
+            const hoyClases = clasesFiltradas.filter(c => {
                 const fechaStr = c.fecha ? (typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha) : '';
                 return fechaStr === today;
             });
             setClasesHoy(hoyClases);
 
             // Filter week classes
-            const semanaClases = clasesData.filter(c => {
+            const semanaClases = clasesFiltradas.filter(c => {
                 const fechaStr = c.fecha ? (typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha) : '';
                 return fechaStr >= weekRange.start && fechaStr <= weekRange.end;
             });
@@ -153,23 +198,25 @@ const DashboardCoach = () => {
     }, [usuario_id, tenant_id, today, weekRange.start, weekRange.end]);
 
     const calcularProgresoAlumnos = async (alumnosData, wodsData) => {
-        const progreso = [];
-        for (const alumno of alumnosData.slice(0, 50)) {
+        // Fix rendimiento N+1: lanzar TODAS las consultas de RM en paralelo
+        // (Promise.all) en vez de un for con await secuencial que bloqueaba
+        // la carga del dashboard (hasta 50 llamadas HTTP en fila).
+        const alumnos = alumnosData.slice(0, 50);
+        const resultados = await Promise.all(alumnos.map(async (alumno) => {
             try {
                 const rmsRes = await api.get(`/api/v1/historial-rm/alumnos/${alumno.id}/rms?tenant_id=${tenant_id}`);
                 const rms = rmsRes.data || [];
-                const totalRMs = rms.length;
-                progreso.push({
+                return {
                     id: alumno.id,
                     nombre: alumno.nombre,
                     correo: alumno.correo,
                     telefono: alumno.telefono,
-                    total_rms: totalRMs,
+                    total_rms: rms.length,
                     rms: rms,
-                    estado: totalRMs >= 5 ? 'activo' : totalRMs > 0 ? 'iniciando' : 'sin_datos'
-                });
+                    estado: rms.length >= 5 ? 'activo' : rms.length > 0 ? 'iniciando' : 'sin_datos'
+                };
             } catch {
-                progreso.push({
+                return {
                     id: alumno.id,
                     nombre: alumno.nombre,
                     correo: alumno.correo,
@@ -177,10 +224,10 @@ const DashboardCoach = () => {
                     total_rms: 0,
                     rms: [],
                     estado: 'sin_datos'
-                });
+                };
             }
-        }
-        setProgresoAlumnos(progreso);
+        }));
+        setProgresoAlumnos(resultados);
     };
 
     const fetchRegistrosRecientes = async (wodsData) => {
@@ -377,22 +424,58 @@ const DashboardCoach = () => {
                     </div>
                 </div>
 
-                {/* Stats Cards */}
+                {/* Stats Cards — ahora clickeables, cada una navega a su pantalla */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {statsCards.map((stat, idx) => (
-                        <div key={idx} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow">
-                            <div className="flex items-start justify-between">
-                                <div>
-                                    <p className="text-sm font-medium text-gray-500">{stat.titulo}</p>
-                                    <p className="text-2xl font-bold text-gray-900 mt-1">{stat.valor}</p>
-                                    <p className="text-xs text-gray-500 mt-1">{stat.descripcion}</p>
-                                </div>
-                                <div className={`${stat.color} w-12 h-12 rounded-lg flex items-center justify-center text-xl`}>
-                                    {stat.icono}
-                                </div>
+                    <button onClick={() => navigate('/coach?tab=clases')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
+                        <div className="flex items-start justify-between">
+                            <div>
+                                <p className="text-sm font-medium text-gray-500">Clases Hoy</p>
+                                <p className="text-2xl font-bold text-gray-900 mt-1">{clasesHoy.length}</p>
+                                <p className="text-xs text-gray-500 mt-1">{clasesHoy.reduce((sum, c) => sum + (c.asistentes_confirmados || 0), 0)} asistentes — Clic para ver</p>
                             </div>
+                            <div className="bg-blue-500 w-12 h-12 rounded-lg flex items-center justify-center text-xl">📅</div>
                         </div>
-                    ))}
+                    </button>
+                    <button onClick={() => navigate('/coach?tab=alumnos')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
+                        <div className="flex items-start justify-between">
+                            <div>
+                                <p className="text-sm font-medium text-gray-500">Alumnos Activos</p>
+                                <p className="text-2xl font-bold text-gray-900 mt-1">{alumnos.length}</p>
+                                <p className="text-xs text-gray-500 mt-1">{progresoAlumnos.filter(a => a.total_rms > 0).length} con RMs — Clic para ver</p>
+                            </div>
+                            <div className="bg-green-500 w-12 h-12 rounded-lg flex items-center justify-center text-xl">👥</div>
+                        </div>
+                    </button>
+                    <button onClick={() => navigate('/coach?tab=wods')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
+                        <div className="flex items-start justify-between">
+                            <div>
+                                <p className="text-sm font-medium text-gray-500">WOD del Día</p>
+                                <p className="text-2xl font-bold text-gray-900 mt-1">{wodHoy ? (wodHoy.estado === 'publicado' ? 'Publicado' : 'Borrador') : 'Sin WOD'}</p>
+                                <p className="text-xs text-gray-500 mt-1">{wodHoy?.titulo || 'Crea el WOD — Clic para ver'}</p>
+                            </div>
+                            <div className={`${wodHoy?.estado === 'publicado' ? 'bg-orange-500' : 'bg-gray-500'} w-12 h-12 rounded-lg flex items-center justify-center text-xl`}>💪</div>
+                        </div>
+                    </button>
+                    <button onClick={() => navigate('/coach?tab=riesgo')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
+                        <div className="flex items-start justify-between">
+                            <div>
+                                <p className="text-sm font-medium text-gray-500">Alumnos en Riesgo</p>
+                                <p className="text-2xl font-bold text-gray-900 mt-1">{alumnosEnRiesgo.length}</p>
+                                <p className="text-xs text-gray-500 mt-1">{alumnosEnRiesgo.length > 0 ? 'Requieren atención — Clic para ver' : 'Todos activos'}</p>
+                            </div>
+                            <div className={`${alumnosEnRiesgo.length > 0 ? 'bg-red-500' : 'bg-emerald-500'} w-12 h-12 rounded-lg flex items-center justify-center text-xl`}>⚠️</div>
+                        </div>
+                    </button>
+                    <button onClick={() => navigate('/coach?tab=wods')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left col-span-1">
+                        <div className="flex items-start justify-between">
+                            <div>
+                                <p className="text-sm font-medium text-gray-500">WODs esta semana</p>
+                                <p className="text-2xl font-bold text-gray-900 mt-1">{clasesSemana.filter(c => c.wod_id != null).length}/{clasesSemana.length} publicados</p>
+                                <p className="text-xs text-gray-500 mt-1">Clic para ver Mis WODs</p>
+                            </div>
+                            <div className="bg-orange-500 w-12 h-12 rounded-lg flex items-center justify-center text-xl">💪</div>
+                        </div>
+                    </button>
                 </div>
 
                 {/* ─── CONTENIDO BASADO EN URL (sin pestañas internas duplicadas) ─── */}
@@ -401,58 +484,8 @@ const DashboardCoach = () => {
                         {/* ─── TAB: RESUMEN ─── */}
                         {activeTab === 'resumen' && (
                             <div className="space-y-6">
-                                {/* WOD del Día — solo lectura + publicar */}
-                                <div className="bg-gradient-to-r from-orange-50 to-amber-50 rounded-xl p-6 border border-orange-200">
-                                    <div className="flex items-start justify-between">
-                                        <div>
-                                            <h3 className="text-lg font-bold text-gray-900">💪 WOD del Día</h3>
-                                            {wodHoy ? (
-                                                <div className="mt-3">
-                                                    <p className="text-xl font-bold text-gray-900">{wodHoy.titulo}</p>
-                                                    {wodHoy.wod_principal && (
-                                                        <div className="mt-2">
-                                                            <p className="text-xs font-bold text-gray-500 uppercase">WOD Principal</p>
-                                                            <pre className="whitespace-pre-wrap text-sm text-gray-700 bg-white/60 p-3 rounded-lg mt-1 border border-orange-100">{wodHoy.wod_principal}</pre>
-                                                        </div>
-                                                    )}
-                                                    {wodHoy.calentamiento && (
-                                                        <div className="mt-2">
-                                                            <p className="text-xs font-bold text-gray-500 uppercase">Calentamiento</p>
-                                                            <pre className="whitespace-pre-wrap text-sm text-gray-600 bg-white/60 p-2 rounded-lg mt-1">{wodHoy.calentamiento}</pre>
-                                                        </div>
-                                                    )}
-                                                    {wodHoy.fuerza_habilidad && (
-                                                        <div className="mt-2">
-                                                            <p className="text-xs font-bold text-gray-500 uppercase">Fuerza / Habilidad</p>
-                                                            <pre className="whitespace-pre-wrap text-sm text-gray-600 bg-white/60 p-2 rounded-lg mt-1">{wodHoy.fuerza_habilidad}</pre>
-                                                        </div>
-                                                    )}
-                                                    <span className={`inline-block mt-2 px-2 py-1 text-xs font-medium rounded-full ${getEstadoColor(wodHoy.estado)}`}>
-                                                        {wodHoy.estado === 'publicado' ? 'Publicado' : 'Borrador'}
-                                                    </span>
-                                                </div>
-                                            ) : (
-                                                <div className="mt-3">
-                                                    <p className="text-gray-600">No hay WOD para hoy</p>
-                                                    <button
-                                                        onClick={() => navigate('/coach/gestion-clases')}
-                                                        className="mt-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
-                                                    >
-                                                        Ir a Gestión de Clases
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
-                                        {wodHoy && wodHoy.estado === 'draft' && (
-                                            <button
-                                                onClick={handlePublicarWOD}
-                                                className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 transition-colors"
-                                            >
-                                                Publicar
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
+                                {/* (Fase 1) Bloque "WOD del Día" duplicado eliminado — la tarjeta superior
+                                    ya muestra el estado e invita a ver Mis WODs (abre ?tab=wods). */}
 
                                 {/* Clases de Hoy */}
                                 <div>
@@ -467,12 +500,20 @@ const DashboardCoach = () => {
                                                             <p className="text-sm text-gray-600">⏰ {clase.hora_inicio} - {clase.hora_fin}</p>
                                                             <p className="text-sm text-gray-600">👥 {clase.asistentes_confirmados || 0}/{clase.cupo_maximo || 0} alumnos</p>
                                                         </div>
-                                                        <button
-                                                            onClick={() => handleMarcarAsistencia(clase.id)}
-                                                            className="px-3 py-1 bg-orange-500 text-white rounded text-xs font-medium hover:bg-orange-600 transition-colors"
-                                                        >
-                                                            Asistencia
-                                                        </button>
+                                                        <div className="flex flex-col sm:flex-row gap-2">
+                                                            <button
+                                                                onClick={() => navigate(`/coach/gestion-clases?clase=${clase.id}`)}
+                                                                className="px-3 py-1 bg-emerald-600 text-white rounded text-xs font-medium hover:bg-emerald-700 transition-colors"
+                                                            >
+                                                                📝 Publicar {getTerminoDisciplina(clase.disciplina_nombre)}
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleMarcarAsistencia(clase.id)}
+                                                                className="px-3 py-1 bg-orange-500 text-white rounded text-xs font-medium hover:bg-orange-600 transition-colors"
+                                                            >
+                                                                Asistencia
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             ))}
@@ -571,19 +612,33 @@ const DashboardCoach = () => {
                         {/* ─── TAB: CLASES (Solo lectura — redirige a GestionClases) ─── */}
                         {activeTab === 'clases' && (
                             <div className="space-y-6">
-                                <div className="flex items-center justify-between">
+                                <div className="flex items-center justify-between flex-wrap gap-3">
                                     <div>
                                         <h2 className="text-xl font-bold text-gray-900">📅 Planificación Semanal</h2>
                                         <p className="text-sm text-gray-600 mt-1">
                                             Semana: {weekRange.start} → {weekRange.end}
                                         </p>
                                     </div>
-                                    <button
-                                        onClick={() => navigate('/coach/gestion-clases')}
-                                        className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
-                                    >
-                                        📋 Gestionar Clases
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={irSemanaAnterior}
+                                            className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors"
+                                        >
+                                            ◀ Semana anterior
+                                        </button>
+                                        <button
+                                            onClick={irSemanaSiguiente}
+                                            className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors"
+                                        >
+                                            Semana siguiente ▶
+                                        </button>
+                                        <button
+                                            onClick={() => navigate('/coach/gestion-clases')}
+                                            className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+                                        >
+                                            📋 Gestionar Clases
+                                        </button>
+                                    </div>
                                 </div>
 
                                 {/* Week Grid — Solo lectura, sin botones de crear/editar */}
@@ -591,7 +646,7 @@ const DashboardCoach = () => {
                                     <table className="w-full border-collapse min-w-[900px]">
                                         <thead>
                                             <tr>
-                                                <th className="bg-gray-800 text-white px-3 py-3 text-xs font-medium uppercase sticky left-0 z-10 min-w-[80px]">
+                                                <th className="bg-gray-800 text-white px-3 py-3 text-sm font-bold uppercase sticky left-0 z-10 min-w-[90px]">
                                                     Horario
                                                 </th>
                                                 {DAYS.map((day, i) => {
@@ -599,11 +654,11 @@ const DashboardCoach = () => {
                                                     return (
                                                         <th
                                                             key={day}
-                                                            className={`px-3 py-3 text-xs font-medium uppercase text-center min-w-[120px] ${isToday ? 'bg-orange-500 text-white' : 'bg-gray-800 text-white'
+                                                            className={`px-3 py-3 text-sm font-bold uppercase text-center min-w-[130px] ${isToday ? 'bg-orange-500 text-white' : 'bg-gray-800 text-white'
                                                                 }`}
                                                         >
-                                                            <div className="text-sm">{day}</div>
-                                                            <div className="text-lg font-bold">{dayDates[i].split('-')[2]}</div>
+                                                            <div className="text-base">{day}</div>
+                                                            <div className="text-xl font-bold">{dayDates[i].split('-')[2]}</div>
                                                         </th>
                                                     );
                                                 })}
@@ -612,7 +667,7 @@ const DashboardCoach = () => {
                                         <tbody>
                                             {SCHEDULE_HOURS.map(hour => (
                                                 <tr key={hour} className="border-b border-gray-200 hover:bg-gray-50/50">
-                                                    <td className="sticky left-0 bg-white border-r border-gray-200 px-3 py-3 text-sm font-bold text-gray-700 whitespace-nowrap z-10">
+                                                    <td className="sticky left-0 bg-white border-r border-gray-200 px-3 py-3 text-base font-bold text-gray-700 whitespace-nowrap z-10">
                                                         {hour}
                                                     </td>
                                                     {dayDates.map((date, dayIdx) => {
@@ -634,32 +689,33 @@ const DashboardCoach = () => {
                                                                     }`}
                                                             >
                                                                 {clase ? (
-                                                                    <div className="space-y-1">
-                                                                        <div className="text-xs font-semibold text-gray-800 leading-tight">
-                                                                            {clase.disciplina_nombre || 'CrossFit'}
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            // Usar el string de fecha ISO directamente (sin new Date)
+                                                                            // para evitar corrimiento de dia por zona horaria (UTC -> local).
+                                                                            const fechaISO = clase.fecha ? (typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha) : dayDates[dayIdx];
+                                                                            navigate(`/coach/gestion-clases?fecha=${fechaISO}&clase=${clase.id}`);
+                                                                        }}
+                                                                        className={`w-full h-full min-h-[64px] flex flex-col items-center justify-center gap-1 rounded-lg transition-all cursor-pointer ${clase.wod_id != null
+                                                                            ? 'bg-green-50 border border-green-300 hover:bg-green-100'
+                                                                            : 'bg-yellow-50 border border-yellow-300 hover:bg-yellow-100'
+                                                                            }`}
+                                                                    >
+                                                                        <div className="text-sm font-bold text-gray-900 leading-tight">
+                                                                            {clase.disciplina_nombre || 'Clase'}
                                                                         </div>
-                                                                        {wodDelDia ? (
-                                                                            <div className="text-[10px] leading-tight">
-                                                                                <span className="font-medium text-orange-600">
-                                                                                    {wodDelDia.titulo}
-                                                                                </span>
-                                                                                <span className={`ml-1 inline-block px-1 py-0.5 rounded text-[8px] font-bold ${wodDelDia.estado === 'publicado'
-                                                                                    ? 'bg-green-100 text-green-700'
-                                                                                    : 'bg-yellow-100 text-yellow-700'
-                                                                                    }`}>
-                                                                                    {wodDelDia.estado === 'publicado' ? '✅' : '📝'}
-                                                                                </span>
-                                                                            </div>
-                                                                        ) : (
-                                                                            <div className="text-[10px] text-gray-400 italic">⬜ Sin WOD</div>
-                                                                        )}
-                                                                        <div className="text-[9px] text-gray-500">
+                                                                        <div className="text-xs text-gray-600">
+                                                                            {clase.wod_id != null
+                                                                                ? '✅ ' + getTerminoDisciplina(clase.disciplina_nombre) + ' publicado'
+                                                                                : '⬜ Sin ' + getTerminoDisciplina(clase.disciplina_nombre)}
+                                                                        </div>
+                                                                        <div className="text-xs text-gray-500">
                                                                             👥 {clase.asistentes_confirmados || 0}/{clase.cupo_maximo || 0}
                                                                         </div>
-                                                                    </div>
+                                                                    </button>
                                                                 ) : (
                                                                     <div className="flex items-center justify-center h-full py-3">
-                                                                        <span className="text-gray-300 text-xs italic">—</span>
+                                                                        <span className="text-gray-300 text-base italic">—</span>
                                                                     </div>
                                                                 )}
                                                             </td>
@@ -844,96 +900,138 @@ const DashboardCoach = () => {
                             </div>
                         )}
 
-                        {/* ─── TAB: MIS WODs (SOLO LECTURA) ─── */}
+                        {/* ─── TAB: MIS WODs (CALENDARIO 7 DÍAS) ─── */}
                         {activeTab === 'wods' && (
                             <div className="space-y-6">
-                                <div>
-                                    <h2 className="text-xl font-bold text-gray-900">📋 Mis WODs de la Semana</h2>
-                                    <p className="text-sm text-gray-600 mt-1">
-                                        Semana: {weekRange.start} → {weekRange.end} — Total: {wods.length} WODs
-                                    </p>
+                                <div className="flex items-center justify-between flex-wrap gap-3">
+                                    <div>
+                                        <h2 className="text-xl font-bold text-gray-900">📋 Mis WODs de la Semana</h2>
+                                        <p className="text-sm text-gray-600 mt-1">
+                                            Semana: {weekRange.start} → {weekRange.end}
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={irSemanaAnterior}
+                                            className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors"
+                                        >
+                                            ◀ Semana anterior
+                                        </button>
+                                        <button
+                                            onClick={irSemanaSiguiente}
+                                            className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors"
+                                        >
+                                            Semana siguiente ▶
+                                        </button>
+                                        <button
+                                            onClick={() => navigate('/coach/gestion-clases')}
+                                            className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+                                        >
+                                            📋 Gestionar Clases
+                                        </button>
+                                    </div>
                                 </div>
 
-                                {/* Tabla de WODs — Solo lectura, sin botones de crear/editar/eliminar */}
                                 <div className="overflow-x-auto">
-                                    <table className="w-full">
-                                        <thead className="bg-gray-800 text-white">
+                                    <table className="w-full border-collapse min-w-[900px]">
+                                        <thead>
                                             <tr>
-                                                <th className="px-6 py-3 text-left text-sm font-medium">Día / Horario</th>
-                                                <th className="px-6 py-3 text-left text-sm font-medium">Título</th>
-                                                <th className="px-6 py-3 text-left text-sm font-medium">WOD Principal</th>
-                                                <th className="px-6 py-3 text-left text-sm font-medium">Estado</th>
+                                                <th className="bg-gray-800 text-white px-3 py-3 text-sm font-bold uppercase sticky left-0 z-10 min-w-[90px]">
+                                                    Horario
+                                                </th>
+                                                {DAYS.map((day, i) => {
+                                                    const isToday = dayDates[i] === today;
+                                                    return (
+                                                        <th
+                                                            key={day}
+                                                            className={`px-3 py-3 text-sm font-bold uppercase text-center min-w-[130px] ${isToday ? 'bg-orange-500 text-white' : 'bg-gray-800 text-white'
+                                                                }`}
+                                                        >
+                                                            <div className="text-base">{day}</div>
+                                                            <div className="text-xl font-bold">{dayDates[i].split('-')[2]}</div>
+                                                        </th>
+                                                    );
+                                                })}
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-gray-200">
-                                            {wods.length > 0 ? (
-                                                [...wods]
-                                                    .sort((a, b) => new Date(b.fecha || 0) - new Date(a.fecha || 0))
-                                                    .map((wod, index) => {
-                                                        // Generar resumen del wod_principal (primeros 100 caracteres)
-                                                        const resumenWod = wod.wod_principal
-                                                            ? wod.wod_principal.substring(0, 120) + (wod.wod_principal.length > 120 ? '...' : '')
-                                                            : (wod.descripcion ? wod.descripcion.substring(0, 120) + (wod.descripcion.length > 120 ? '...' : '') : 'Sin descripción');
-
-                                                        // Find associated class for hora
-                                                        const claseAsociada = clasesSemana.find(c => {
-                                                            const fechaC = c.fecha ? (typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha) : '';
-                                                            const fechaW = wod.fecha ? (typeof wod.fecha === 'string' ? wod.fecha.split('T')[0] : wod.fecha) : '';
-                                                            return fechaC === fechaW;
-                                                        });
+                                        <tbody>
+                                            {SCHEDULE_HOURS.map(hour => (
+                                                <tr key={hour} className="border-b border-gray-200 hover:bg-gray-50/50">
+                                                    <td className="sticky left-0 bg-white border-r border-gray-200 px-3 py-3 text-base font-bold text-gray-700 whitespace-nowrap z-10">
+                                                        {hour}
+                                                    </td>
+                                                    {dayDates.map((date, dayIdx) => {
+                                                        const clase = weekGrid[date]?.[hour];
+                                                        const isToday = date === today;
+                                                        // WOD asociado a esta clase (directamente desde el objeto clase que ahora trae wod_id)
+                                                        const wodDeClase = clase ? wods.find(w => {
+                                                            const fechaW = w.fecha ? (typeof w.fecha === 'string' ? w.fecha.split('T')[0] : w.fecha) : '';
+                                                            return fechaW === date && w.id === clase.wod_id;
+                                                        }) : null;
 
                                                         return (
-                                                            <tr key={wod.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                                                <td className="px-6 py-4 text-sm whitespace-nowrap">
-                                                                    <span className="font-medium text-gray-900">{formatFecha(wod.fecha)}</span>
-                                                                    {claseAsociada && (
-                                                                        <span className="text-xs text-gray-500 ml-2">
-                                                                            {claseAsociada.hora_inicio?.substring(0, 5)}
-                                                                        </span>
-                                                                    )}
-                                                                </td>
-                                                                <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                                                                    {wod.titulo || 'WOD sin título'}
-                                                                    {wod.tipo_metcon && (
-                                                                        <span className="ml-2 text-xs text-orange-500 font-medium">({wod.tipo_metcon})</span>
-                                                                    )}
-                                                                </td>
-                                                                <td className="px-6 py-4 text-sm text-gray-600 max-w-xs">
-                                                                    <p className="text-xs text-gray-500 leading-relaxed">{resumenWod}</p>
-                                                                </td>
-                                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                                    <span className={`inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full ${wod.estado === 'publicado'
-                                                                        ? 'bg-green-100 text-green-800 border border-green-300'
-                                                                        : 'bg-gray-100 text-gray-600 border border-gray-200'
-                                                                        }`}>
-                                                                        <span className={`w-2 h-2 rounded-full mr-1.5 ${wod.estado === 'publicado' ? 'bg-green-500' : 'bg-gray-400'
-                                                                            }`}></span>
-                                                                        {wod.estado === 'publicado' ? 'Publicado' : 'Borrador'}
-                                                                    </span>
-                                                                </td>
-                                                            </tr>
+                                                            <td
+                                                                key={`${date}-${hour}`}
+                                                                className={`p-2 text-center transition-all ${isToday ? 'bg-orange-50/50' : 'bg-white'
+                                                                    } border-r border-gray-100 ${dayIdx === 6 ? 'border-r-0' : ''
+                                                                    }`}
+                                                            >
+                                                                {clase ? (
+                                                                    wodDeClase ? (
+                                                                        // Celda con WOD publicado — estilo verde + título
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                const fechaISO = clase.fecha ? (typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha) : date;
+                                                                                navigate(`/coach/gestion-clases?fecha=${fechaISO}&clase=${clase.id}`);
+                                                                            }}
+                                                                            className="w-full h-full min-h-[64px] flex flex-col items-center justify-center gap-1 rounded-lg transition-all cursor-pointer bg-green-50 border border-green-300 hover:bg-green-100"
+                                                                        >
+                                                                            <div className="text-sm font-bold text-gray-900 leading-tight">
+                                                                                {clase.disciplina_nombre || 'Clase'}
+                                                                            </div>
+                                                                            <div className="text-xs text-green-700 font-medium leading-tight max-w-[110px] text-center">
+                                                                                💪 {wodDeClase.titulo || 'WOD publicado'}
+                                                                            </div>
+                                                                            <div className="text-xs text-gray-500">
+                                                                                ✅ {getTerminoDisciplina(clase.disciplina_nombre)} publicado
+                                                                            </div>
+                                                                        </button>
+                                                                    ) : (
+                                                                        // Celda con clase sin WOD — click-to-WOD igual que en Clases
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                const fechaISO = clase.fecha ? (typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha) : date;
+                                                                                navigate(`/coach/gestion-clases?fecha=${fechaISO}&clase=${clase.id}`);
+                                                                            }}
+                                                                            className="w-full h-full min-h-[64px] flex flex-col items-center justify-center gap-1 rounded-lg transition-all cursor-pointer bg-yellow-50 border border-yellow-300 hover:bg-yellow-100"
+                                                                        >
+                                                                            <div className="text-sm font-bold text-gray-900 leading-tight">
+                                                                                {clase.disciplina_nombre || 'Clase'}
+                                                                            </div>
+                                                                            <div className="text-xs text-gray-600">
+                                                                                ⬜ Sin {getTerminoDisciplina(clase.disciplina_nombre)}
+                                                                            </div>
+                                                                            <div className="text-xs text-gray-500">
+                                                                                👥 {clase.asistentes_confirmados || 0}/{clase.cupo_maximo || 0}
+                                                                            </div>
+                                                                        </button>
+                                                                    )
+                                                                ) : (
+                                                                    <div className="flex items-center justify-center h-full py-3">
+                                                                        <span className="text-gray-300 text-base italic">—</span>
+                                                                    </div>
+                                                                )}
+                                                            </td>
                                                         );
-                                                    })
-                                            ) : (
-                                                <tr>
-                                                    <td colSpan="4" className="px-6 py-12 text-center text-gray-500">
-                                                        <div className="text-4xl mb-3">💪</div>
-                                                        <p className="text-lg font-medium text-gray-700">No hay WODs creados</p>
-                                                        <p className="text-sm text-gray-500 mt-1">Crea WODs desde la sección "Gestión de Clases"</p>
-                                                        <button
-                                                            onClick={() => navigate('/coach/gestion-clases')}
-                                                            className="mt-4 px-6 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
-                                                        >
-                                                            Ir a Gestión de Clases
-                                                        </button>
-                                                    </td>
+                                                    })}
                                                 </tr>
-                                            )}
+                                            ))}
                                         </tbody>
                                     </table>
                                 </div>
+
                                 <p className="text-xs text-gray-400 text-center">
-                                    ℹ️ Vista informativa. Para crear o editar WODs, usa la sección "Gestión de Clases" en el sidebar.
+                                    ℹ️ Clic en una celda para publicar/editar el WOD de esa clase. Para crear o editar, usa "Gestión de Clases".
                                 </p>
                             </div>
                         )}

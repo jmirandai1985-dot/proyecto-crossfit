@@ -53,13 +53,51 @@ DB_URL = settings.DATABASE_URL
 
 print("="*60)
 print(f"BD de TEST: {DB_URL[:70]}...")
-print(f"CURLY-RAIN (DIRECT): {'curly-rain' in DB_URL}")
+print(f"MUDDY-TERM (DIRECT): {'muddy-term' in DB_URL}")
 print("="*60)
-if 'curly-rain' not in DB_URL:
-    sys.exit("FATAL: Not test branch (curly-rain/test-nuevo)")
+if 'muddy-term' not in DB_URL:
+    sys.exit("FATAL: Not test branch (muddy-term/test-nuevo)")
 
 Base.metadata.create_all(bind=engine)
 print("Tables created")
+
+# ── MIGRACIONES POST-CREATE (BD nueva puede no tener columnas migradas) ──
+# Son idempotentes; el mismo ALTER/CREATE existe en sync_test_from_prod.py
+with engine.connect() as conn:
+    conn.execute(text(
+        "ALTER TABLE disciplinas ADD COLUMN IF NOT EXISTS requiere_coach BOOLEAN NOT NULL DEFAULT true"))
+    conn.execute(text(
+        "ALTER TABLE planes ADD COLUMN IF NOT EXISTS es_estudiante BOOLEAN NOT NULL DEFAULT false"))
+    conn.execute(text(
+        "ALTER TABLE planes ADD COLUMN IF NOT EXISTS requiere_certificado_estudiante BOOLEAN NOT NULL DEFAULT false"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS coach_disciplinas (
+            id SERIAL PRIMARY KEY,
+            tenant_id INT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+            coach_id INT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+            disciplina_id INT NOT NULL REFERENCES disciplinas(id) ON DELETE CASCADE,
+            activo BOOLEAN NOT NULL DEFAULT true,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS cobertura_emergencia (
+            id SERIAL PRIMARY KEY,
+            tenant_id INT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+            usuario_id INT REFERENCES usuarios(id) ON DELETE CASCADE,
+            coach_id INT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+            clase_id INT NOT NULL REFERENCES clases(id) ON DELETE CASCADE,
+            disciplina_id INT NOT NULL REFERENCES disciplinas(id) ON DELETE CASCADE,
+            accion VARCHAR(50) NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """))
+    conn.execute(text(
+        "ALTER TABLE cobertura_emergencia ADD COLUMN IF NOT EXISTS usuario_id INT REFERENCES usuarios(id) ON DELETE CASCADE"))
+    conn.execute(text(
+        "ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS voucher_url VARCHAR(500)"))
+    conn.commit()
+print("[OK] Migraciones post-create aplicadas (requiere_coach, es_estudiante, coach_disciplinas, cobertura_emergencia, pedidos.voucher_url)")
 
 db = DB()
 try:
@@ -200,7 +238,11 @@ try:
 
     # ── 10. CLASES (hoy + mañana para tests de reserva futura) ─
     class_counter = 1
+    # Saltar domingos: la operación está cerrada los domingos (test_c16 lo verifica).
+    # Si "mañana" es domingo, usar el lunes siguiente para la clase futura.
     manana = hoy + timedelta(days=1)
+    if manana.weekday() == 6:  # Sunday
+        manana = manana + timedelta(days=1)
     for fecha_clase in [hoy, manana]:
         for disc_id, (h_id, h_ini, h_fin, cupo) in {d[1]: (d[0], d[2], d[3], d[4]) for d in horario_data}.items():
             db.add(Clase(id=class_counter, tenant_id=1, disciplina_id=disc_id,

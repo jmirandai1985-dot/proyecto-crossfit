@@ -113,8 +113,8 @@ const PerformanceHub = () => {
         return (
             <div key={cat} className="bg-white rounded-xl border p-4 shadow-sm" style={{ borderLeft: `4px solid ${cfg.color}` }}>
                 <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2"><span>{cfg.icon}</span><span className="font-bold text-gray-800 text-sm">{cfg.label}</span></div>
-                    {tieneDatos && <span className="text-lg font-bold" style={{ color: cfg.color }}>{data.valor}<span className="text-xs font-normal text-gray-400 ml-1">{cat === 'gimnastico' ? 'reps' : cat === 'fuerza' ? 'kg' : ''}</span></span>}
+                    <div className="flex items-center gap-2"><span>{cfg.icon}</span><span className="font-bold text-gray-800 text-xl">{cfg.label}</span></div>
+                    {tieneDatos && <span className="text-4xl font-bold" style={{ color: cfg.color }}>{data.valor}<span className="text-base font-normal text-gray-400 ml-1">{cat === 'gimnastico' ? 'reps' : cat === 'fuerza' ? 'kg' : ''}</span></span>}
                 </div>
                 {tieneDatos && chart.length >= 2 ? (
                     <div style={{ height: 100 }}>
@@ -129,9 +129,9 @@ const PerformanceHub = () => {
                         </ResponsiveContainer>
                     </div>
                 ) : tieneDatos ? (
-                    <div className="h-[100px] flex items-center justify-center text-gray-400 text-xs italic">Registra más RMs para ver tu evolución</div>
+                    <div className="h-[100px] flex items-center justify-center text-gray-400 text-sm italic">Registra más RMs para ver tu evolución</div>
                 ) : (
-                    <div className="h-[100px] flex items-center justify-center text-gray-400 text-xs">Sin registros aún</div>
+                    <div className="h-[100px] flex items-center justify-center text-gray-400 text-sm">Sin registros aún</div>
                 )}
             </div>
         );
@@ -144,12 +144,12 @@ const PerformanceHub = () => {
                     <span className="text-3xl">🏆</span>
                     <div><h1 className="text-2xl font-bold text-gray-800">Performance Hub</h1><p className="text-sm text-gray-500">Perfil completo de atleta basado en tus RMs</p></div>
                 </div>
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-                    <div className="lg:col-span-5 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                        <div className="px-3 py-3 border-b border-gray-100"><h2 className="font-bold text-gray-800 text-sm">📋 Tus RMs</h2></div>
+                <div className="space-y-6">
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                        <div className="px-3 py-3 border-b border-gray-100"><h2 className="font-bold text-gray-800 text-xl">📋 Tus RMs</h2></div>
                         <div className="overflow-x-auto">
                             <table className="w-full" style={{ tableLayout: 'fixed' }}>
-                                <thead><tr className="text-[10px] text-gray-500 uppercase bg-gray-50">
+                                <thead><tr className="text-sm text-gray-500 uppercase bg-gray-50">
                                     <th className="px-2 py-2 text-left w-[30%]">Movimiento</th>
                                     <th className="px-1 py-2 text-center w-[12%]">RM</th>
                                     <th className="px-1 py-2 text-center w-[10%]">Ud.</th>
@@ -164,20 +164,20 @@ const PerformanceHub = () => {
                                     return (
                                         <tr key={rm.movimiento_id || i} onClick={() => navigate(`/alumno/evolucion?movimiento=${rm.movimiento_id}`)}
                                             className="border-t border-gray-100 hover:bg-emerald-50 cursor-pointer transition-colors">
-                                            <td className="px-2 py-1.5 font-medium text-gray-800 text-[11px] truncate">{rm.movimiento_nombre}{isPB && <span className="ml-0.5 text-amber-500 text-[10px]">⭐</span>}</td>
-                                            <td className="px-1 py-1.5 text-center font-bold text-emerald-600 text-[11px]">{getValorNumerico(rm) || '—'}</td>
-                                            <td className="px-1 py-1.5 text-center text-gray-500 text-[10px]">{getUnidad(rm) || '—'}</td>
-                                            <td className="px-1 py-1.5 text-center text-gray-500 text-[10px]">{rm.repeticiones || '—'}</td>
-                                            <td className="px-1 py-1.5 text-center text-gray-500 text-[10px]">{rm.series || '—'}</td>
-                                            <td className="px-1 py-1.5 text-center text-gray-400 text-[10px]">{rm.fecha ? formatFecha(rm.fecha) : '—'}</td>
-                                            <td className="px-2 py-1.5 text-gray-400 italic text-[10px] truncate max-w-0">{rm.notas || '—'}</td>
+                                            <td className="px-2 py-1.5 font-medium text-gray-800 text-base truncate">{rm.movimiento_nombre}{isPB && <span className="ml-0.5 text-amber-500 text-xs">⭐</span>}</td>
+                                            <td className="px-1 py-1.5 text-center font-bold text-emerald-600 text-base">{getValorNumerico(rm) || '—'}</td>
+                                            <td className="px-1 py-1.5 text-center text-gray-500 text-base">{getUnidad(rm) || '—'}</td>
+                                            <td className="px-1 py-1.5 text-center text-gray-500 text-base">{rm.repeticiones || '—'}</td>
+                                            <td className="px-1 py-1.5 text-center text-gray-500 text-base">{rm.series || '—'}</td>
+                                            <td className="px-1 py-1.5 text-center text-gray-400 text-base">{rm.fecha ? formatFecha(rm.fecha) : '—'}</td>
+                                            <td className="px-2 py-1.5 text-gray-400 italic text-base truncate max-w-0">{rm.notas || '—'}</td>
                                         </tr>
                                     );
                                 })}</tbody>
                             </table>
                         </div>
                     </div>
-                    <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                         {Object.keys(CAT_CONFIG).map(cat => renderCuadrante(cat))}
                     </div>
                 </div>

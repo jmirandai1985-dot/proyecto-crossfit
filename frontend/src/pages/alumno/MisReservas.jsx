@@ -23,6 +23,7 @@ const TRADUCIR_ESTADO = {
     cancelada: 'Cancelada',
     pending: 'Pendiente',
     pendiente: 'Pendiente',
+    descontada: 'Descontada',
 };
 
 const COLORES_ESTADO = {
@@ -36,6 +37,25 @@ const COLORES_ESTADO = {
     cancelada: 'bg-red-50 text-red-500 border-red-200',
     pending: 'bg-yellow-100 text-yellow-700 border-yellow-300',
     pendiente: 'bg-yellow-100 text-yellow-700 border-yellow-300',
+    descontada: 'bg-gray-100 text-gray-600 border-gray-300',
+};
+
+const ESTADOS_ACTIVOS = ['confirmada', 'confirmed'];
+
+const getEstadoEfectivo = (reserva) => {
+    const estado = (reserva.estado || '').toLowerCase();
+    // Solo evaluar si es confirmada/confirmed
+    if (estado === 'confirmada' || estado === 'confirmed') {
+        if (reserva.clase_fecha && reserva.hora_fin) {
+            const ahora = new Date();
+            const finClase = new Date(reserva.clase_fecha + 'T' + reserva.hora_fin);
+            const diffHoras = (ahora - finClase) / (1000 * 60 * 60);
+            if (diffHoras >= 24) {
+                return 'descontada';
+            }
+        }
+    }
+    return estado;
 };
 
 const getEstadoDisplay = (estado) => {
@@ -123,8 +143,8 @@ const MisReservas = () => {
         }
     };
 
-    const reservasActivas = reservas.filter(r => r.estado?.toLowerCase() === 'confirmada' || r.estado?.toLowerCase() === 'confirmed');
-    const reservasHistorial = reservas.filter(r => r.estado?.toLowerCase() !== 'confirmada' && r.estado?.toLowerCase() !== 'confirmed');
+    const reservasActivas = reservas.filter(r => ESTADOS_ACTIVOS.includes(getEstadoEfectivo(r)));
+    const reservasHistorial = reservas.filter(r => !ESTADOS_ACTIVOS.includes(getEstadoEfectivo(r)));
 
     return (
         <Layout>
@@ -174,42 +194,45 @@ const MisReservas = () => {
                     ) : (
                         <div className="divide-y divide-gray-100">
                             {/* Activas primero */}
-                            {reservasActivas.map((reserva) => (
-                                <div key={reserva.id} className="p-5 hover:bg-green-50 transition-colors border-l-4 border-l-green-500">
-                                    <div className="flex items-start justify-between">
-                                        <div className="space-y-1.5 flex-1">
-                                            <div className="flex items-center gap-2 flex-wrap">
-                                                <h3 className="font-bold text-gray-900">
-                                                    🏋️ {reserva.disciplina_nombre || 'Clase'}
-                                                </h3>
-                                                <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${getEstadoColor(reserva.estado)}`}>
-                                                    {getEstadoDisplay(reserva.estado)}
-                                                </span>
-                                            </div>
-                                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
-                                                {reserva.clase_fecha && (
-                                                    <span className="flex items-center gap-1">
-                                                        📅 {formatearFecha(reserva.clase_fecha)}
+                            {reservasActivas.map((reserva) => {
+                                const estadoEf = getEstadoEfectivo(reserva);
+                                return (
+                                    <div key={reserva.id} className="p-5 hover:bg-green-50 transition-colors border-l-4 border-l-green-500">
+                                        <div className="flex items-start justify-between">
+                                            <div className="space-y-1.5 flex-1">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <h3 className="font-bold text-gray-900">
+                                                        🏋️ {reserva.disciplina_nombre || 'Clase'}
+                                                    </h3>
+                                                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${getEstadoColor(estadoEf)}`}>
+                                                        {getEstadoDisplay(estadoEf)}
                                                     </span>
-                                                )}
-                                                {reserva.hora_inicio && (
-                                                    <span className="flex items-center gap-1">
-                                                        🕐 {reserva.hora_inicio} - {reserva.hora_fin || '—'}
-                                                    </span>
-                                                )}
+                                                </div>
+                                                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
+                                                    {reserva.clase_fecha && (
+                                                        <span className="flex items-center gap-1">
+                                                            📅 {formatearFecha(reserva.clase_fecha)}
+                                                        </span>
+                                                    )}
+                                                    {reserva.hora_inicio && (
+                                                        <span className="flex items-center gap-1">
+                                                            🕐 {reserva.hora_inicio} - {reserva.hora_fin || '—'}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
-                                        </div>
 
-                                        <button
-                                            onClick={() => handleCancelar(reserva.id, reserva)}
-                                            disabled={cancelando === reserva.id}
-                                            className="ml-4 px-4 py-2 text-sm font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                                        >
-                                            {cancelando === reserva.id ? 'Cancelando...' : 'Cancelar'}
-                                        </button>
+                                            <button
+                                                onClick={() => handleCancelar(reserva.id, reserva)}
+                                                disabled={cancelando === reserva.id}
+                                                className="ml-4 px-4 py-2 text-sm font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                                            >
+                                                {cancelando === reserva.id ? 'Cancelando...' : 'Cancelar'}
+                                            </button>
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
 
                             {/* Historial */}
                             {reservasHistorial.length > 0 && reservasActivas.length > 0 && (

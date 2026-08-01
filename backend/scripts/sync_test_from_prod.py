@@ -1,15 +1,18 @@
 """
-SYNC PROD -> TEST (curly-rain).
+SYNC PROD -> TEST (muddy-term).
 IDEMPOTENTE: TRUNCATE + copia todos los datos desde PRODUCCIÓN.
 Preserva tablas custom (transacciones_financieras) mediante backup/restore.
+Incluye migraciones post-sync (requiere_coach, es_estudiante, coach_disciplinas, cobertura_emergencia).
 """
-from app.core.config import settings
+import subprocess
+import psycopg2
 import os
 import sys
-import psycopg2
-import json
 import importlib
-import re
+
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.chdir(BACKEND_DIR)
+sys.path.insert(0, BACKEND_DIR)
 
 # ── SEGURIDAD: Verificar ENVIRONMENT ──
 ENV = os.environ.get("ENVIRONMENT", "")
@@ -20,16 +23,20 @@ if ENV != "test":
     print("  Abortando.")
     sys.exit(1)
 
-# ── CONFIGS y URLs ──
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["ENVIRONMENT"] = "test"
 
-URL_PROD = settings.DATABASE_URL_PROD
+# ── URLs ──
+# TEST: se obtiene de settings (carga .env.test)
+settings = importlib.import_module("app.core.config").settings
 URL_TEST = settings.DATABASE_URL
+
+# PROD: hardcodeada desde .env (withered-silence)
+URL_PROD = "postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-withered-silence-acly7gq5-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+
 
 print("="*60)
 print(f"BD de TEST: {URL_TEST[:100]}...")
-print(f"CURLY-RAIN (DIRECT): {'curly-rain' in URL_TEST}")
+print(f"MUDDY-TERM (DIRECT): {'muddy-term' in URL_TEST}")
 print("="*60)
 
 # ── CONECTAR ──
@@ -57,7 +64,7 @@ cur_test.execute("""
         tenants, usuarios, movimientos, disciplinas, planes, horarios,
         clases, reservas, historial_rm, notificaciones, productos, pedidos,
         suscripciones, coach_disciplinas, cobertura_emergencia, wods, wod_movimientos,
-        solicitudes_plan, compras_emergencia, transacciones_financieras
+        transacciones_financieras
     CASCADE
 """)
 print("TEST limpia")
@@ -114,7 +121,57 @@ if backup_tx:
 else:
     print("  Sin datos para restaurar (tabla estaba vacía)")
 
-# ── 5. VERIFICACION ──
+# ── 5. MIGRACIONES POST-SYNC (antes eran _apply_migrations_post_sync.py) ──
+print("\n[MIGRACIONES POST-SYNC]...")
+
+# 5a. requiere_coach on disciplinas
+cur_test.execute(
+    "ALTER TABLE disciplinas ADD COLUMN IF NOT EXISTS requiere_coach BOOLEAN NOT NULL DEFAULT true")
+cur_test.execute(
+    "UPDATE disciplinas SET requiere_coach=true WHERE nombre IN ('crossfit','Gap','Levantamiento Olimpico') OR nombre LIKE '%Clase Intensiva%'")
+cur_test.execute(
+    "UPDATE disciplinas SET requiere_coach=false WHERE nombre IN ('Musculacion','Open Box')")
+print("[OK] requiere_coach")
+
+# 5b. es_estudiante on planes
+cur_test.execute(
+    "ALTER TABLE planes ADD COLUMN IF NOT EXISTS es_estudiante BOOLEAN NOT NULL DEFAULT false")
+cur_test.execute(
+    "UPDATE planes SET es_estudiante=true WHERE nombre IN ('Girly','Aesthetic','Influencer','Brocoli','Diddy Kong','Donkey Kong')")
+print("[OK] es_estudiante")
+
+# 5c. coach_disciplinas table
+cur_test.execute("""
+    CREATE TABLE IF NOT EXISTS coach_disciplinas (
+        id SERIAL PRIMARY KEY,
+        tenant_id INT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        coach_id INT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+        disciplina_id INT NOT NULL REFERENCES disciplinas(id) ON DELETE CASCADE,
+        activo BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+""")
+cur_test.execute("INSERT INTO coach_disciplinas (tenant_id, coach_id, disciplina_id) SELECT 1, id, 1 FROM usuarios WHERE rol='coach' AND tenant_id=1 AND activo=true AND NOT EXISTS (SELECT 1 FROM coach_disciplinas cd WHERE cd.coach_id=usuarios.id AND cd.disciplina_id=1)")
+print("[OK] coach_disciplinas table + inserts")
+
+# 5d. cobertura_emergencia table
+cur_test.execute("""
+    CREATE TABLE IF NOT EXISTS cobertura_emergencia (
+        id SERIAL PRIMARY KEY,
+        tenant_id INT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        coach_id INT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+        clase_id INT NOT NULL REFERENCES clases(id) ON DELETE CASCADE,
+        disciplina_id INT NOT NULL REFERENCES disciplinas(id) ON DELETE CASCADE,
+        accion VARCHAR(50) NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+""")
+print("[OK] cobertura_emergencia table")
+
+c_test.commit()
+print("[OK] Migraciones post-sync aplicadas")
+
+# ── 6. VERIFICACION ──
 print("\nVERIFICACION:")
 for tabla in ["tenants", "movimientos", "disciplinas", "planes", "horarios",
               "usuarios", "suscripciones", "productos", "clases", "reservas",
@@ -137,3 +194,12 @@ cur_test.close()
 c_test.close()
 
 print("\nSYNC COMPLETE")
+
+# 7. OVERRIDES DE DESARROLLO (solo TEST)
+print("\n[OVERRIDES] Aplicando overrides de desarrollo en TEST...")
+ret = subprocess.call(
+    [sys.executable, os.path.join(
+        BACKEND_DIR, "scripts", "aplicar_overrides_test.py")],
+    env={**os.environ, "ENVIRONMENT": "test"}
+)
+print(f"[OVERRIDES] Exit: {ret}")

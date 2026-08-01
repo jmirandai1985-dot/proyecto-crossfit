@@ -8,7 +8,7 @@ from typing import List
 from app.db.database import get_db
 from app.models.coach_disciplina import CoachDisciplina
 from app.schemas.coach_disciplina import (
-    CoachDisciplinaCreate, CoachDisciplinaUpdate, CoachDisciplinaResponse, CoachDisciplinaListItem
+    CoachDisciplinaCreate, CoachDisciplinaUpdate, CoachDisciplinaResponse, CoachDisciplinaListItem, CoachDisciplinaReplaceRequest
 )
 
 router = APIRouter()
@@ -84,6 +84,60 @@ def listar_coach_disciplinas(
     coach_disciplinas = query.offset(skip).limit(limit).all()
 
     return coach_disciplinas
+
+
+@router.put("/reemplazar", response_model=List[CoachDisciplinaResponse])
+def reemplazar_coach_disciplinas(
+    data: CoachDisciplinaReplaceRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Reemplaza TODAS las asignaciones de disciplinas de un coach.
+    - Las disciplinas en disciplina_ids se marcan activo=true (upsert)
+    - Las que ya no están se marcan activo=false (no se borran)
+    """
+    # Obtener asignaciones actuales
+    actuales = db.query(CoachDisciplina).filter(
+        CoachDisciplina.tenant_id == data.tenant_id,
+        CoachDisciplina.coach_id == data.coach_id
+    ).all()
+
+    ids_actuales = {cd.disciplina_id for cd in actuales if cd.activo}
+    ids_nuevos = set(data.disciplina_ids)
+
+    # Desactivar las que ya no están
+    for cd in actuales:
+        if cd.disciplina_id not in ids_nuevos and cd.activo:
+            cd.activo = False
+
+    # Crear o reactivar las nuevas
+    for disc_id in ids_nuevos:
+        existing = None
+        for cd in actuales:
+            if cd.disciplina_id == disc_id:
+                existing = cd
+                break
+        if existing:
+            if not existing.activo:
+                existing.activo = True
+        else:
+            nueva = CoachDisciplina(
+                tenant_id=data.tenant_id,
+                coach_id=data.coach_id,
+                disciplina_id=disc_id,
+                activo=True
+            )
+            db.add(nueva)
+
+    db.commit()
+
+    # Retornar asignaciones activas resultantes
+    resultado = db.query(CoachDisciplina).filter(
+        CoachDisciplina.tenant_id == data.tenant_id,
+        CoachDisciplina.coach_id == data.coach_id,
+        CoachDisciplina.activo == True
+    ).all()
+    return resultado
 
 
 @router.put("/{coach_disciplina_id}", response_model=CoachDisciplinaResponse)

@@ -997,6 +997,9 @@ def asignar_wod_a_clase(
 
     # Asignar WOD a la clase
     clase.wod_id = wod_id
+    # Auto-asignar coach si la clase no tiene coach_id
+    if clase.coach_id is None:
+        clase.coach_id = current_user["usuario_id"]
     db.commit()
     db.refresh(clase)
 
@@ -1069,6 +1072,9 @@ def asignar_wod_batch(
     # FASE 2: Asignar WOD a todas las clases validadas
     for clase in clases_a_asignar:
         clase.wod_id = wod_id
+        # Auto-asignar coach si la clase no tiene coach_id
+        if clase.coach_id is None:
+            clase.coach_id = current_user["usuario_id"]
 
     db.commit()
 

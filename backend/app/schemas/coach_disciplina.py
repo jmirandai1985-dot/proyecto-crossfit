@@ -2,41 +2,52 @@
 Esquemas Pydantic para Coach-Disciplina
 """
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 
 class CoachDisciplinaBase(BaseModel):
-    """Esquema base para Coach-Disciplina"""
+    """Campos base de coach-disciplina"""
+    tenant_id: int = Field(..., gt=0, description="ID del tenant")
     coach_id: int = Field(..., gt=0, description="ID del coach")
-    disciplina_id: int = Field(..., gt=0, description="ID de la disciplina")
-    activo: bool = Field(True, description="Indica si la relación está activa")
+    disciplina_id: int = Field(
+        ..., gt=0, description="ID de la disciplina")
+    activo: bool = Field(
+        default=True, description="Si la relación está activa")
 
 
 class CoachDisciplinaCreate(CoachDisciplinaBase):
-    """Esquema para crear una Coach-Disciplina"""
-    tenant_id: int = Field(..., gt=0, description="ID del tenant (box)")
+    """Schema para crear una relación coach-disciplina"""
+    pass
 
 
 class CoachDisciplinaUpdate(BaseModel):
-    """Esquema para actualizar una Coach-Disciplina"""
+    """Schema para actualizar una relación coach-disciplina"""
     activo: Optional[bool] = None
 
 
 class CoachDisciplinaResponse(CoachDisciplinaBase):
-    """Esquema de respuesta para Coach-Disciplina"""
+    """Schema de respuesta"""
     id: int
-    tenant_id: int
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class CoachDisciplinaListItem(BaseModel):
-    """Esquema simplificado para listados de coach-disciplinas"""
+    """Schema simplificado para listados"""
     id: int
+    tenant_id: int
     coach_id: int
     disciplina_id: int
     activo: bool
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CoachDisciplinaReplaceRequest(BaseModel):
+    """Schema para reemplazar todas las asignaciones de disciplinas de un coach"""
+    tenant_id: int = Field(..., gt=0)
+    coach_id: int = Field(..., gt=0)
+    disciplina_ids: List[int] = Field(
+        ..., description="Lista de IDs de disciplinas a asignar (activo=true)")

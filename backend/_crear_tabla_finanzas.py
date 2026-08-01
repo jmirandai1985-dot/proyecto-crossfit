@@ -1,7 +1,7 @@
 """Script temporal para crear la tabla transacciones_financieras en TEST."""
 import psycopg2
 
-URL = 'postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-curly-rain-acg2z9h1-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+URL = 'postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-muddy-term-aclwd3w7-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
 
 c = psycopg2.connect(URL)
 c.autocommit = True

@@ -54,6 +54,7 @@ class ClaseListItem(BaseModel):
     hora_fin: time
     disciplina_id: int
     coach_id: Optional[int]
+    wod_id: Optional[int] = None
     cupo_maximo: int
     asistentes_confirmados: int
     cancelada: bool

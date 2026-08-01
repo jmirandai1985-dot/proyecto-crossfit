@@ -99,7 +99,8 @@ def listar_clases(
         conditions.append("c.disciplina_id = :disciplina_id")
         query_params["disciplina_id"] = disciplina_id
     if coach_id is not None:
-        conditions.append("c.coach_id = :coach_id")
+        conditions.append(
+            "c.disciplina_id IN (SELECT disciplina_id FROM coach_disciplinas WHERE coach_id = :coach_id AND activo = true)")
         query_params["coach_id"] = coach_id
     if fecha is not None:
         conditions.append("c.fecha = :fecha")
@@ -115,6 +116,7 @@ def listar_clases(
     where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
     query = text(f"""
         SELECT c.id, c.fecha, c.hora_inicio, c.hora_fin, c.disciplina_id, c.coach_id,
+               c.wod_id,
                c.cupo_maximo, c.asistentes_confirmados, c.cancelada,
                c.horario_base_id, c.tenant_id, c.created_at, c.updated_at,
                d.nombre AS disciplina_nombre,
@@ -127,8 +129,40 @@ def listar_clases(
         LIMIT :limit OFFSET :skip
     """)
     rows = db.execute(query, query_params).fetchall()
+
+    # ── Fix N+1: precomputar en UNA sola query el coach unico activo por
+    #    disciplina (fallback para clases sin coach_id asignado), evitando
+    #    una query dentro del loop por cada clase. ──
+    if rows:
+        coach_fallback_por_disciplina = {}
+        filas_fallback = db.execute(
+            text("""
+                SELECT cd.disciplina_id, u.nombre
+                FROM coach_disciplinas cd
+                JOIN usuarios u ON u.id = cd.coach_id
+                WHERE cd.tenant_id = :tenant_id
+                  AND cd.activo = true
+                  AND u.activo = true
+                GROUP BY cd.disciplina_id, u.nombre
+            """),
+            {"tenant_id": tenant_id}
+        ).fetchall()
+        from collections import defaultdict
+        nombres_por_disc = defaultdict(list)
+        for fdisc, fnombre in filas_fallback:
+            nombres_por_disc[fdisc].append(fnombre)
+        for disc_id, nombres in nombres_por_disc.items():
+            if len(nombres) == 1:
+                coach_fallback_por_disciplina[disc_id] = nombres[0]
+
     result = []
     for row in rows:
+        coach_nombre = row.coach_nombre
+        # Fallback: si la clase NO tiene coach, usar el UNICO coach activo
+        # de esa disciplina (visible en el dict precomputado = 1 sola query).
+        if row.coach_id is None and row.disciplina_id is not None:
+            coach_nombre = coach_fallback_por_disciplina.get(
+                row.disciplina_id, None)
         result.append({
             "id": row.id,
             "fecha": row.fecha,
@@ -136,11 +170,12 @@ def listar_clases(
             "hora_fin": row.hora_fin,
             "disciplina_id": row.disciplina_id,
             "coach_id": row.coach_id,
+            "wod_id": row.wod_id,
             "cupo_maximo": row.cupo_maximo,
             "asistentes_confirmados": row.asistentes_confirmados,
             "cancelada": row.cancelada,
             "disciplina_nombre": row.disciplina_nombre,
-            "coach_nombre": row.coach_nombre,
+            "coach_nombre": coach_nombre,
         })
     return result
 

@@ -10,17 +10,18 @@ const Coaches = () => {
     const [showModal, setShowModal] = useState(false);
     const [editingCoach, setEditingCoach] = useState(null);
     const [disciplinas, setDisciplinas] = useState([]);
+    const [coachDisciplinasMap, setCoachDisciplinasMap] = useState({});
     const [formData, setFormData] = useState({
         nombre: '',
         correo: '',
         password: '',
-        especialidad: '',
+        disciplina_ids: [],
         estado: 'activo',
     });
 
     const fetchCoaches = async () => {
         try {
-            const response = await api.get(`/api/v1/usuarios?rol=coach&tenant_id=${tenant_id}`);
+            const response = await api.get('/api/v1/usuarios', { params: { rol: 'coach', tenant_id } });
             setCoaches(response.data || []);
         } catch (error) {
             console.error('Error fetching coaches:', error);
@@ -37,9 +38,25 @@ const Coaches = () => {
         } catch (e) { console.error(e); }
     };
 
+    const fetchCoachDisciplinas = async () => {
+        try {
+            const r = await api.get('/api/v1/coach-disciplinas', { params: { tenant_id, limit: 500 } });
+            const data = r.data || [];
+            const map = {};
+            data.forEach(cd => {
+                if (cd.activo) {
+                    if (!map[cd.coach_id]) map[cd.coach_id] = [];
+                    map[cd.coach_id].push(cd.disciplina_id);
+                }
+            });
+            setCoachDisciplinasMap(map);
+        } catch (e) { console.error(e); }
+    };
+
     useEffect(() => {
         fetchCoaches();
         fetchDisciplinas();
+        fetchCoachDisciplinas();
     }, [tenant_id]);
 
     const openModal = (coach = null) => {
@@ -49,12 +66,12 @@ const Coaches = () => {
                 nombre: coach.nombre,
                 correo: coach.correo,
                 password: '',
-                especialidad: coach.especialidad || '',
+                disciplina_ids: coachDisciplinasMap[coach.id] || [],
                 estado: coach.activo ? 'activo' : 'inactivo',
             });
         } else {
             setEditingCoach(null);
-            setFormData({ nombre: '', correo: '', password: '', especialidad: '', estado: 'activo' });
+            setFormData({ nombre: '', correo: '', password: '', disciplina_ids: [], estado: 'activo' });
         }
         setShowModal(true);
     };
@@ -62,21 +79,22 @@ const Coaches = () => {
     const closeModal = () => {
         setShowModal(false);
         setEditingCoach(null);
-        setFormData({ nombre: '', correo: '', password: '', especialidad: '', estado: 'activo' });
+        setFormData({ nombre: '', correo: '', password: '', disciplina_ids: [], estado: 'activo' });
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
+            let coachId;
             if (editingCoach) {
                 await api.put(`/api/v1/usuarios/${editingCoach.id}`, {
                     nombre: formData.nombre,
                     correo: formData.correo,
-                    especialidad: formData.especialidad,
-                    estado: formData.estado,
+                    activo: formData.estado === 'activo',
                 });
+                coachId = editingCoach.id;
             } else {
-                await api.post('/api/v1/usuarios', {
+                const res = await api.post('/api/v1/usuarios', {
                     nombre: formData.nombre,
                     correo: formData.correo,
                     password: formData.password,
@@ -84,9 +102,21 @@ const Coaches = () => {
                     rut: '12.345.678-0',
                     tenant_id: tenant_id,
                 });
+                coachId = res.data.id;
             }
+
+            // Asignar disciplinas en coach_disciplinas
+            if (coachId) {
+                await api.put('/api/v1/coach-disciplinas/reemplazar', {
+                    tenant_id: tenant_id,
+                    coach_id: coachId,
+                    disciplina_ids: formData.disciplina_ids,
+                });
+            }
+
             closeModal();
             fetchCoaches();
+            fetchCoachDisciplinas();
         } catch (error) {
             alert('Error: ' + (error.response?.data?.detail || error.message));
         }
@@ -100,6 +130,20 @@ const Coaches = () => {
         } catch (error) {
             alert('Error al eliminar: ' + (error.response?.data?.detail || 'Intenta nuevamente'));
         }
+    };
+
+    const toggleDisciplina = (discId) => {
+        setFormData(prev => ({
+            ...prev,
+            disciplina_ids: prev.disciplina_ids.includes(discId)
+                ? prev.disciplina_ids.filter(id => id !== discId)
+                : [...prev.disciplina_ids, discId],
+        }));
+    };
+
+    const getDisciplinaNombre = (discId) => {
+        const disc = disciplinas.find(d => d.id === discId);
+        return disc ? disc.nombre : `ID ${discId}`;
     };
 
     if (loading) {
@@ -134,45 +178,61 @@ const Coaches = () => {
                         <p className="text-3xl font-bold text-gray-900 mt-2">{coaches.filter((c) => c.activo !== false).length}</p>
                     </div>
                     <div className="bg-white rounded-lg shadow p-6 border-l-4 border-orange-500">
-                        <p className="text-gray-600 text-sm font-medium">Especialidades</p>
-                        <p className="text-3xl font-bold text-gray-900 mt-2">{new Set(coaches.map(c => c.especialidad).filter(Boolean)).size}</p>
+                        <p className="text-gray-600 text-sm font-medium">Disciplinas Asignadas</p>
+                        <p className="text-3xl font-bold text-gray-900 mt-2">{new Set(Object.values(coachDisciplinasMap).flat()).size}</p>
                     </div>
                 </div>
 
                 {/* Grid de tarjetas */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {coaches.length > 0 ? (
-                        coaches.map((coach) => (
-                            <div key={coach.id} className="bg-white rounded-lg shadow hover:shadow-lg transition-shadow overflow-hidden">
-                                <div className="bg-gradient-to-r from-blue-900 to-blue-800 px-6 py-4">
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <h3 className="text-lg font-bold text-white">{coach.nombre}</h3>
-                                            <p className="text-blue-100 text-sm">{coach.especialidad || 'Sin especialidad'}</p>
-                                        </div>
-                                        <span className="text-3xl">🏋️</span>
-                                    </div>
-                                </div>
-                                <div className="px-6 py-4 space-y-4">
-                                    <div className="flex items-center space-x-3">
-                                        <span className="text-gray-400">📧</span>
-                                        <div>
-                                            <p className="text-xs text-gray-500">Correo</p>
-                                            <p className="text-sm text-gray-900 font-medium">{coach.correo}</p>
+                        coaches.map((coach) => {
+                            const discIds = coachDisciplinasMap[coach.id] || [];
+                            return (
+                                <div key={coach.id} className="bg-white rounded-lg shadow hover:shadow-lg transition-shadow overflow-hidden">
+                                    <div className="bg-gradient-to-r from-blue-900 to-blue-800 px-6 py-4">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <h3 className="text-lg font-bold text-white">{coach.nombre}</h3>
+                                                <p className="text-blue-100 text-sm">
+                                                    {discIds.length > 0
+                                                        ? discIds.map(id => getDisciplinaNombre(id)).join(', ')
+                                                        : 'Sin disciplinas asignadas'}
+                                                </p>
+                                            </div>
+                                            <span className="text-3xl">🏋️</span>
                                         </div>
                                     </div>
-                                    <div className="pt-2 border-t border-gray-200">
-                                        <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${coach.activo !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                            {coach.activo !== false ? '✓ Activo' : '✗ Inactivo'}
-                                        </span>
+                                    <div className="px-6 py-4 space-y-4">
+                                        <div className="flex items-center space-x-3">
+                                            <span className="text-gray-400">📧</span>
+                                            <div>
+                                                <p className="text-xs text-gray-500">Correo</p>
+                                                <p className="text-sm text-gray-900 font-medium">{coach.correo}</p>
+                                            </div>
+                                        </div>
+                                        {discIds.length > 0 && (
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {discIds.map(id => (
+                                                    <span key={id} className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
+                                                        {getDisciplinaNombre(id)}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
+                                        <div className="pt-2 border-t border-gray-200">
+                                            <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${coach.activo !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                                {coach.activo !== false ? '✓ Activo' : '✗ Inactivo'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex gap-2">
+                                        <button onClick={() => openModal(coach)} className="flex-1 px-3 py-2 text-blue-600 hover:bg-blue-50 rounded text-sm font-medium">Editar</button>
+                                        <button onClick={() => handleDelete(coach)} className="flex-1 px-3 py-2 text-red-600 hover:bg-red-50 rounded text-sm font-medium">Eliminar</button>
                                     </div>
                                 </div>
-                                <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex gap-2">
-                                    <button onClick={() => openModal(coach)} className="flex-1 px-3 py-2 text-blue-600 hover:bg-blue-50 rounded text-sm font-medium">Editar</button>
-                                    <button onClick={() => handleDelete(coach)} className="flex-1 px-3 py-2 text-red-600 hover:bg-red-50 rounded text-sm font-medium">Eliminar</button>
-                                </div>
-                            </div>
-                        ))
+                            );
+                        })
                     ) : (
                         <div className="col-span-full text-center py-12"><p className="text-gray-600 text-lg">No hay coaches registrados</p></div>
                     )}
@@ -200,11 +260,23 @@ const Coaches = () => {
                                     </div>
                                 )}
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Especialidad</label>
-                                    <select value={formData.especialidad} onChange={e => setFormData({ ...formData, especialidad: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
-                                        <option value="">Seleccionar...</option>
-                                        {disciplinas.map(d => <option key={d.id} value={d.nombre}>{d.nombre}</option>)}
-                                    </select>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Disciplinas Asignadas</label>
+                                    <div className="space-y-2 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3">
+                                        {disciplinas.length === 0 && (
+                                            <p className="text-sm text-gray-400 italic">No hay disciplinas activas</p>
+                                        )}
+                                        {disciplinas.map(d => (
+                                            <label key={d.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1.5 rounded">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={formData.disciplina_ids.includes(d.id)}
+                                                    onChange={() => toggleDisciplina(d.id)}
+                                                    className="rounded border-gray-300 text-orange-500 focus:ring-orange-500"
+                                                />
+                                                <span className="text-sm text-gray-700">{d.nombre}</span>
+                                            </label>
+                                        ))}
+                                    </div>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Estado</label>

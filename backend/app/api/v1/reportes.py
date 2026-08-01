@@ -56,8 +56,10 @@ def descargar_reporte_ventas_mensual(
         )
     except Exception as e:
         import traceback
+        tb = traceback.format_exc()
+        print(f"ERROR REPORT: {tb}")
         raise HTTPException(
-            status_code=500, detail=f"Error al generar reporte: {str(e)}")
+            status_code=500, detail=f"Error al generar reporte: {str(e)} | {tb[:500]}")
 
 
 @router.get("/dashboard")

@@ -468,7 +468,7 @@ def test_c14_cobertura_emergencia():
 
     # Verificar que quedo registro en CoberturaEmergencia via SQL
     import psycopg2
-    DB = 'postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-curly-rain-acg2z9h1-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+    DB = 'postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-muddy-term-aclwd3w7-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
     c = psycopg2.connect(DB)
     cur = c.cursor()
     cur.execute("""

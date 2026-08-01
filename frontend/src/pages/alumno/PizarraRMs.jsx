@@ -318,33 +318,28 @@ const PizarraRMs = () => {
                             {/* Selección de movimiento por categoría */}
                             <div>
                                 <label className="block text-sm font-semibold text-gray-700 mb-3">Selecciona un movimiento:</label>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                    {Object.entries(CATEGORIA_META).map(([catKey, catMeta]) => (
-                                        <div key={catKey} className={`border ${catMeta.borderClass} rounded-xl p-2 ${catMeta.bgClass}`}>
-                                            <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 px-1 ${catMeta.textClass}`}>
-                                                {catMeta.icon} {catMeta.label}
-                                            </p>
-                                            <div className="space-y-0.5 max-h-32 overflow-y-auto">
-                                                {movimientos.filter(m => m.categoria === catKey).length === 0 && (
-                                                    <p className="text-[10px] px-2 py-1.5 text-gray-400">Sin movimientos</p>
+                                <div className="relative">
+                                    <select
+                                        value={rmForm.movimiento_id}
+                                        onChange={(e) => setRmForm(prev => ({ ...prev, movimiento_id: e.target.value }))}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent appearance-none cursor-pointer"
+                                    >
+                                        <option value="">-- Elige un movimiento --</option>
+                                        {Object.entries(CATEGORIA_META).map(([catKey, catMeta]) => (
+                                            <optgroup key={catKey} label={`${catMeta.icon} ${catMeta.label}`}>
+                                                {movimientos.filter(m => m.categoria === catKey).length === 0 ? (
+                                                    <option disabled>Sin movimientos</option>
+                                                ) : (
+                                                    movimientos.filter(m => m.categoria === catKey).map(m => (
+                                                        <option key={m.id} value={m.id}>{m.nombre}</option>
+                                                    ))
                                                 )}
-                                                {movimientos.filter(m => m.categoria === catKey).map(m => {
-                                                    const sel = parseInt(rmForm.movimiento_id) === m.id;
-                                                    return (
-                                                        <button
-                                                            key={m.id}
-                                                            type="button"
-                                                            onClick={() => setRmForm(prev => ({ ...prev, movimiento_id: m.id }))}
-                                                            className={`w-full text-left px-2 py-1.5 rounded-lg text-[11px] font-bold transition-all ${sel ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
-                                                                }`}
-                                                        >
-                                                            {m.nombre}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    ))}
+                                            </optgroup>
+                                        ))}
+                                    </select>
+                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400">
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                    </div>
                                 </div>
                             </div>
 
