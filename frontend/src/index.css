@@ -1,1 +1,634 @@
 @import "tailwindcss";
+
+/* ============================================================================
+   URBAN BOX — DARK MODE (gimnasio premium: naranja/negro)
+   Capa de skin global aplicada sobre Tailwind. Convierte la paleta light
+   original (fondos blancos, textos grises, acento emerald) a dark zinc + naranja.
+   Usado por los 3 paneles (alumno/coach/admin) para verse como la misma app.
+   ============================================================================ */
+
+/* ── Fondo root / body ── */
+html,
+body,
+#root {
+    background-color: #09090b;
+    /* zinc-950 */
+    color: #f4f4f5;
+    /* zinc-100 */
+    min-height: 100vh;
+}
+
+/* ── Tarjetas / paneles: bg-white → zinc-900 (más claro que el fondo) ── */
+.bg-white {
+    background-color: #18181b !important;
+    /* zinc-900 */
+}
+
+.bg-gray-50 {
+    background-color: #18181b !important;
+    /* zinc-900 */
+}
+
+.bg-gray-100 {
+    background-color: #27272a !important;
+    /* zinc-800 */
+}
+
+.bg-gray-200 {
+    background-color: #3f3f46 !important;
+    /* zinc-700 */
+}
+
+/* ── Bordes sutiles: gray-100/200/300 → zinc-800/700/600 ── */
+.border-gray-100 {
+    border-color: #27272a !important;
+    /* zinc-800 */
+}
+
+.border-gray-200 {
+    border-color: #3f3f46 !important;
+    /* zinc-700 */
+}
+
+.border-gray-300 {
+    border-color: #52525b !important;
+    /* zinc-600 */
+}
+
+.divide-gray-100 {
+    --tw-divide-opacity: 1;
+    border-color: #27272a !important;
+    /* zinc-800 */
+}
+
+/* ── Texto principal: gris oscuro → claro (contraste WCAG AA) ── */
+.text-gray-800,
+.text-gray-900 {
+    color: #f4f4f5 !important;
+    /* zinc-100 */
+}
+
+.text-gray-700 {
+    color: #e4e4e7 !important;
+    /* zinc-200 */
+}
+
+.text-gray-600 {
+    color: #d4d4d8 !important;
+    /* zinc-300 */
+}
+
+.text-gray-500 {
+    color: #a1a1aa !important;
+    /* zinc-400 */
+}
+
+.text-gray-400 {
+    color: #a1a1aa !important;
+    /* zinc-400 */
+}
+
+/* ── Acento principal: emerald → naranja (botones CTA, badges, iconos) ── */
+.bg-emerald-500 {
+    background-color: #f97316 !important;
+    /* orange-500 */
+}
+
+.bg-emerald-600 {
+    background-color: #ea580c !important;
+    /* orange-600 */
+}
+
+.bg-emerald-700 {
+    background-color: #c2410c !important;
+    /* orange-700 */
+}
+
+.hover\:bg-emerald-600:hover {
+    background-color: #ea580c !important;
+    /* orange-600 */
+}
+
+.hover\:bg-emerald-700:hover {
+    background-color: #c2410c !important;
+    /* orange-700 */
+}
+
+.hover\:from-emerald-600:hover {
+    --tw-gradient-stops: #ea580c, #c2410c !important;
+}
+
+.hover\:to-emerald-700:hover {
+    --tw-gradient-to: #c2410c !important;
+}
+
+.from-emerald-500 {
+    --tw-gradient-from: #f97316 !important;
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, transparent) !important;
+}
+
+.from-emerald-600 {
+    --tw-gradient-from: #ea580c !important;
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, transparent) !important;
+}
+
+.to-emerald-500 {
+    --tw-gradient-to: #f97316 !important;
+}
+
+.to-emerald-600 {
+    --tw-gradient-to: #ea580c !important;
+}
+
+.text-emerald-500 {
+    color: #fb923c !important;
+    /* orange-400 */
+}
+
+.text-emerald-600 {
+    color: #fb923c !important;
+    /* orange-400 */
+}
+
+.text-emerald-700 {
+    color: #fb923c !important;
+    /* orange-400 */
+}
+
+.text-emerald-100 {
+    color: #ffedd5 !important;
+    /* orange-100 */
+}
+
+.bg-emerald-100 {
+    background-color: rgba(249, 115, 22, 0.15) !important;
+    /* orange-500/15 */
+}
+
+.bg-emerald-50 {
+    background-color: rgba(249, 115, 22, 0.08) !important;
+    /* orange-500/8 */
+}
+
+.hover\:bg-emerald-50:hover {
+    background-color: rgba(249, 115, 22, 0.1) !important;
+}
+
+.border-emerald-400 {
+    border-color: #fb923c !important;
+    /* orange-400 */
+}
+
+.border-emerald-500 {
+    border-color: #f97316 !important;
+    /* orange-500 */
+}
+
+.hover\:border-emerald-300:hover {
+    border-color: #fdba74 !important;
+    /* orange-300 */
+}
+
+.hover\:bg-emerald-100:hover {
+    background-color: rgba(249, 115, 22, 0.15) !important;
+}
+
+/* ── Badges de estado: azul/verde/ámbar/rojo → tonos oscuros legibles ── */
+.bg-blue-100 {
+    background-color: rgba(59, 130, 246, 0.18) !important;
+    /* blue-500/18 */
+}
+
+.text-blue-600,
+.text-blue-700 {
+    color: #60a5fa !important;
+    /* blue-400 */
+}
+
+.bg-green-100 {
+    background-color: rgba(34, 197, 94, 0.18) !important;
+    /* green-500/18 */
+}
+
+.text-green-600,
+.text-green-700 {
+    color: #4ade80 !important;
+    /* green-400 */
+}
+
+.bg-red-50 {
+    background-color: rgba(239, 68, 68, 0.12) !important;
+    /* red-500/12 */
+}
+
+.border-red-200 {
+    border-color: rgba(239, 68, 68, 0.35) !important;
+}
+
+.text-red-700 {
+    color: #f87171 !important;
+    /* red-400 */
+}
+
+.bg-red-100 {
+    background-color: rgba(239, 68, 68, 0.18) !important;
+}
+
+.text-red-500 {
+    color: #f87171 !important;
+}
+
+.bg-amber-50 {
+    background-color: rgba(245, 158, 11, 0.12) !important;
+    /* amber-500/12 */
+}
+
+.border-amber-200 {
+    border-color: rgba(245, 158, 11, 0.4) !important;
+}
+
+.border-amber-300 {
+    border-color: rgba(245, 158, 11, 0.5) !important;
+}
+
+.text-amber-500 {
+    color: #fbbf24 !important;
+    /* amber-400 */
+}
+
+.text-amber-600,
+.text-amber-700,
+.text-amber-800 {
+    color: #fbbf24 !important;
+    /* amber-400 */
+}
+
+.bg-amber-100 {
+    background-color: rgba(245, 158, 11, 0.18) !important;
+}
+
+/* ── Hover en filas de tabla: gris claro → zinc oscuro ── */
+.hover\:bg-gray-50:hover {
+    background-color: #27272a !important;
+    /* zinc-800 */
+}
+
+/* ── Tabla thead (bg-gray-50) ya cubierto por .bg-gray-50 arriba ── */
+
+/* ── Separadores de encabezados y filas ── */
+.border-b {
+    border-color: #3f3f46 !important;
+    /* zinc-700 */
+}
+
+/* ── Tonos del grid semanal del panel COACH (celdas verde/amarillo/naranja) ── */
+.bg-green-50 {
+    background-color: rgba(34, 197, 94, 0.1) !important;
+}
+
+.bg-green-100 {
+    background-color: rgba(34, 197, 94, 0.18) !important;
+}
+
+.hover\:bg-green-100:hover {
+    background-color: rgba(34, 197, 94, 0.28) !important;
+}
+
+.border-green-200 {
+    border-color: rgba(34, 197, 94, 0.35) !important;
+}
+
+.border-green-300 {
+    border-color: rgba(34, 197, 94, 0.5) !important;
+}
+
+.text-green-700,
+.text-green-800 {
+    color: #4ade80 !important;
+}
+
+.bg-yellow-50 {
+    background-color: rgba(245, 158, 11, 0.1) !important;
+}
+
+.bg-yellow-100 {
+    background-color: rgba(245, 158, 11, 0.18) !important;
+}
+
+.hover\:bg-yellow-100:hover {
+    background-color: rgba(245, 158, 11, 0.28) !important;
+}
+
+.border-yellow-200 {
+    border-color: rgba(245, 158, 11, 0.35) !important;
+}
+
+.border-yellow-300 {
+    border-color: rgba(245, 158, 11, 0.5) !important;
+}
+
+.text-yellow-700,
+.text-yellow-800 {
+    color: #fbbf24 !important;
+}
+
+.bg-orange-50 {
+    background-color: rgba(249, 115, 22, 0.12) !important;
+}
+
+.border-orange-200 {
+    border-color: rgba(249, 115, 22, 0.4) !important;
+}
+
+.border-orange-300 {
+    border-color: rgba(249, 115, 22, 0.55) !important;
+}
+
+.text-orange-600,
+.text-orange-700 {
+    color: #fb923c !important;
+}
+
+.hover\:border-orange-300:hover {
+    border-color: rgba(249, 115, 22, 0.55) !important;
+}
+
+.hover\:border-orange-400:hover {
+    border-color: rgba(249, 115, 22, 0.75) !important;
+}
+
+.hover\:bg-orange-50:hover {
+    background-color: rgba(249, 115, 22, 0.12) !important;
+}
+
+.hover\:bg-orange-100:hover {
+    background-color: rgba(249, 115, 22, 0.18) !important;
+}
+
+.text-orange-500 {
+    color: #fb923c !important;
+}
+
+.bg-orange-500 {
+    background-color: #f97316 !important;
+}
+
+.bg-orange-600 {
+    background-color: #ea580c !important;
+}
+
+.hover\:bg-orange-600:hover {
+    background-color: #ea580c !important;
+}
+
+.text-gray-300 {
+    color: #71717a !important;
+}
+
+.text-gray-200 {
+    color: #a1a1aa !important;
+}
+
+/* ── Placeholder / texto itálico secundario ── */
+.text-gray-400 {
+    color: #a1a1aa !important;
+}
+
+/* ── Gradientes claros (fondos) → dark zinc ── */
+.from-purple-50 {
+    --tw-gradient-from: #27272a !important;
+    /* zinc-800 */
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, transparent) !important;
+}
+
+.to-blue-50 {
+    --tw-gradient-to: #18181b !important;
+    /* zinc-900 */
+}
+
+.from-purple-600 {
+    --tw-gradient-from: #a855f7 !important;
+    /* purple-500 */
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, transparent) !important;
+}
+
+.to-blue-500 {
+    --tw-gradient-to: #3b82f6 !important;
+    /* blue-500 */
+}
+
+.from-red-500 {
+    --tw-gradient-from: #ef4444 !important;
+    /* red-500 */
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, transparent) !important;
+}
+
+.to-orange-500 {
+    --tw-gradient-to: #f97316 !important;
+    /* orange-500 */
+}
+
+.from-purple-500 {
+    --tw-gradient-from: #a855f7 !important;
+    /* purple-500 */
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, transparent) !important;
+}
+
+.to-indigo-500 {
+    --tw-gradient-to: #6366f1 !important;
+    /* indigo-500 */
+}
+
+/* ── Recharts: tooltip y grid claros → dark ── */
+.recharts-default-tooltip {
+    background-color: #18181b !important;
+    /* zinc-900 */
+    border: 1px solid #3f3f46 !important;
+    /* zinc-700 */
+    border-radius: 8px;
+    color: #f4f4f5 !important;
+}
+
+.recharts-tooltip-wrapper .recharts-tooltip-item {
+    color: #f4f4f5 !important;
+}
+
+.recharts-cartesian-grid line {
+    stroke: #3f3f46 !important;
+    /* zinc-700 en vez de #f0f0f0/#f3f4f6 */
+}
+
+.recharts-cartesian-axis-tick text {
+    fill: #a1a1aa !important;
+    /* zinc-400 */
+}
+
+.recharts-legend-item-text {
+    color: #d4d4d8 !important;
+    /* zinc-300 */
+}
+
+/* ── Evolución: tarjeta de movimiento con gradiente claro → dark ── */
+/* bg-gradient-to-br from-purple-50 to-blue-50 queda cubierto por los from/to */
+
+/* ── Texto de categoría en cards del panel alumno ── */
+.text-purple-600,
+.text-purple-700 {
+    color: #c084fc !important;
+    /* purple-400 */
+}
+
+.text-indigo-600,
+.text-indigo-700 {
+    color: #818cf8 !important;
+    /* indigo-400 */
+}
+
+.bg-purple-100 {
+    background-color: rgba(168, 85, 247, 0.18) !important;
+}
+
+.bg-indigo-100 {
+    background-color: rgba(99, 102, 241, 0.18) !important;
+}
+
+.text-orange-500,
+.text-orange-600 {
+    color: #fb923c !important;
+}
+
+.bg-orange-100 {
+    background-color: rgba(249, 115, 22, 0.18) !important;
+}
+
+.text-violet-600,
+.text-violet-700 {
+    color: #a78bfa !important;
+}
+
+.bg-violet-100 {
+    background-color: rgba(139, 92, 246, 0.18) !important;
+}
+
+.text-sky-600,
+.text-sky-700 {
+    color: #38bdf8 !important;
+}
+
+.bg-sky-100 {
+    background-color: rgba(14, 165, 233, 0.18) !important;
+}
+
+.text-teal-600,
+.text-teal-700 {
+    color: #2dd4bf !important;
+}
+
+.bg-teal-100 {
+    background-color: rgba(20, 184, 166, 0.18) !important;
+}
+
+.text-lime-600,
+.text-lime-700 {
+    color: #a3e635 !important;
+}
+
+.bg-lime-100 {
+    background-color: rgba(132, 204, 22, 0.18) !important;
+}
+
+.text-yellow-600,
+.text-yellow-700 {
+    color: #facc15 !important;
+}
+
+.bg-yellow-100 {
+    background-color: rgba(234, 179, 8, 0.18) !important;
+}
+
+.text-pink-600,
+.text-pink-700 {
+    color: #f472b6 !important;
+}
+
+.bg-pink-100 {
+    background-color: rgba(236, 72, 153, 0.18) !important;
+}
+
+.text-rose-600,
+.text-rose-700 {
+    color: #fb7185 !important;
+}
+
+.bg-rose-100 {
+    background-color: rgba(244, 63, 94, 0.18) !important;
+}
+
+.text-cyan-600,
+.text-cyan-700 {
+    color: #22d3ee !important;
+}
+
+.bg-cyan-100 {
+    background-color: rgba(6, 182, 212, 0.18) !important;
+}
+
+.text-fuchsia-600,
+.text-fuchsia-700 {
+    color: #e879f9 !important;
+}
+
+.bg-fuchsia-100 {
+    background-color: rgba(217, 70, 239, 0.18) !important;
+}
+
+.text-emerald-500 {
+    color: #fb923c !important;
+    /* naranja (acento unificado) */
+}
+
+/* ── Inputs y selects (fondos claros) → dark ── */
+input,
+select,
+textarea {
+    background-color: #27272a !important;
+    /* zinc-800 */
+    color: #f4f4f5 !important;
+    border-color: #3f3f46 !important;
+    border-radius: 0.5rem;
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: #71717a !important;
+    /* zinc-500 */
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    border-color: #f97316 !important;
+    /* orange-500 */
+    outline: none !important;
+    box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.3) !important;
+}
+
+button {
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+/* ── Tablas: hover fila ya cubierto; encabezados con bg-gray-50 cubiertos ── */
+thead tr {
+    background-color: #27272a !important;
+    /* zinc-800 */
+}
+
+th {
+    color: #a1a1aa !important;
+    /* zinc-400 */
+}
+
+td {
+    color: #d4d4d8 !important;
+    /* zinc-300 */
+}

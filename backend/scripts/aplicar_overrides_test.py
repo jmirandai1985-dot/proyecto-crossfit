@@ -30,21 +30,25 @@ except Exception as e:
     db.rollback()
     print(f"[ERROR] usuario: {e}")
 
-try:
-    ex = db.execute(text(
-        "SELECT id FROM coach_disciplinas WHERE tenant_id=1 AND coach_id=7 AND disciplina_id=1")).first()
-    if ex:
-        db.execute(
-            text("UPDATE coach_disciplinas SET activo=true WHERE id=:i"), {"i": ex[0]})
-        print(f"[OK] coach_disciplinas reactivada id={ex[0]}")
-    else:
-        db.execute(text(
-            "INSERT INTO coach_disciplinas (tenant_id,coach_id,disciplina_id,activo) VALUES (1,7,1,true)"))
-        print("[OK] coach_disciplinas creada (7->1)")
-    db.commit()
-except Exception as e:
-    db.rollback()
-    print(f"[ERROR] coach_disciplinas: {e}")
+# Upsert coach_disciplinas para TODAS las disciplinas del coach 7
+for disc_id in (1, 6):  # crossfit + Clase Intensiva Sabado
+    try:
+        ex = db.execute(text(
+            "SELECT id FROM coach_disciplinas WHERE tenant_id=1 AND coach_id=7 AND disciplina_id=:d"
+        ), {"d": disc_id}).first()
+        if ex:
+            db.execute(
+                text("UPDATE coach_disciplinas SET activo=true WHERE id=:i"), {"i": ex[0]})
+            print(f"[OK] coach_disciplinas reactivada id={ex[0]} (7->{disc_id})")
+        else:
+            db.execute(text(
+                "INSERT INTO coach_disciplinas (tenant_id,coach_id,disciplina_id,activo) VALUES (1,7,:d,true)"
+            ), {"d": disc_id})
+            print(f"[OK] coach_disciplinas creada (7->{disc_id})")
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[ERROR] coach_disciplinas disc {disc_id}: {e}")
 
 try:
     # Auto-generar clases [hoy, hoy+6] (misma funcion que GET /clases)

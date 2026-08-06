@@ -6,6 +6,7 @@ from app.models.usuario import Usuario, RolUsuario
 from app.models.wod import Wod, EstadoWod
 from app.models.wod_movimiento import WodMovimiento
 from app.models.notificacion import Notificacion
+from app.models.notificacion_enviada import NotificacionEnviada
 from app.models.movimiento import Movimiento
 from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion

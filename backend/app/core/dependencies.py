@@ -99,7 +99,7 @@ async def get_current_admin(
     Raises:
         HTTPException 403: Si el usuario no es administrador
     """
-    if current_user.get("rol") != "admin":
+    if current_user.get("rol") not in ("admin", "administrador"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Se requieren permisos de administrador"
@@ -145,7 +145,7 @@ def verificar_coach_disciplina(
         {"uid": coach_id}
     ).first()
 
-    if user and user.rol == 'admin':
+    if user and user.rol in ('admin', 'administrador'):
         return  # Admin tiene acceso total
 
     # Verificar relacion coach-disciplina
@@ -192,7 +192,7 @@ async def get_current_coach(
     Raises:
         HTTPException 403: Si el usuario no es coach ni admin
     """
-    if current_user.get("rol") not in ["coach", "admin"]:
+    if current_user.get("rol") not in ["coach", "admin", "administrador"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Se requieren permisos de coach o administrador"

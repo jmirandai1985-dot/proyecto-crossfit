@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "./uploads/vouchers"
     MAX_UPLOAD_SIZE_MB: int = 5
 
+    # Resend (correos transaccionales)
+    RESEND_API_KEY: str = ""
+
     @property
     def cors_origins_list(self) -> List[str]:
         """

@@ -8,9 +8,7 @@ from sqlalchemy import func, distinct
 from datetime import datetime, date
 from typing import List, Optional
 import pandas as pd
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+from app.services.email_service import enviar_email_fidelizacion
 
 from app.db.database import get_db
 from app.models.usuario import Usuario, RolUsuario
@@ -21,45 +19,6 @@ from app.models.clase import Clase
 router = APIRouter()
 
 UMBRAL_ALERTA_DIAS = 7  # Días sin asistir para considerar alumno en riesgo
-
-
-# ─────────────────────────────────────────
-# FUNCIÓN INTERNA: Envío de email con Gmail
-# ─────────────────────────────────────────
-def enviar_email_fidelizacion(
-    nombre: str,
-    correo: str,
-    dias_ausente: int,
-    gmail_user: str,
-    gmail_password: str
-):
-    """Envía email de recuperación al alumno ausente"""
-    try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"¡Te extrañamos en el box, {nombre.split()[0]}! 💪"
-        msg["From"] = gmail_user
-        msg["To"] = correo
-
-        html = f"""
-        <html><body>
-        <h2>¡Hola {nombre.split()[0]}! 👋</h2>
-        <p>Notamos que llevas <strong>{dias_ausente} días</strong> sin visitarnos.</p>
-        <p>Tu progreso te está esperando. ¡Vuelve cuando quieras!</p>
-        <p>Si necesitas ayuda o tienes alguna consulta, responde este correo.</p>
-        <br>
-        <p><strong>El equipo de tu Box CrossFit</strong> 🏋️</p>
-        </body></html>
-        """
-        msg.attach(MIMEText(html, "html"))
-
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(gmail_user, gmail_password)
-            server.sendmail(gmail_user, correo, msg.as_string())
-
-        return True
-    except Exception as e:
-        print(f"[EMAIL ERROR] {correo}: {e}")
-        return False
 
 
 # ─────────────────────────────────────────

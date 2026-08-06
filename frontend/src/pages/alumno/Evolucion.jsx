@@ -346,11 +346,14 @@ const Evolucion = () => {
                                 <YAxis tick={{ fontSize: 12 }} />
                                 <Tooltip
                                     contentStyle={{
-                                        backgroundColor: '#fff',
-                                        border: '1px solid #e5e7eb',
+                                        backgroundColor: '#18181b',
+                                        border: '1px solid #3f3f46',
                                         borderRadius: '8px',
                                         fontSize: '13px',
+                                        color: '#f4f4f5',
                                     }}
+                                    labelStyle={{ color: '#f4f4f5' }}
+                                    itemStyle={{ color: '#d4d4d8' }}
                                 />
                                 <Legend />
                                 <Bar dataKey="asistencias" name="Asistió" fill="#10b981" radius={[4, 4, 0, 0]} />

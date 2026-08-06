@@ -4,7 +4,8 @@ from app.api.v1 import (
     coach_disciplinas, movimientos, historial_rm,
     retencion, productos, pedidos, reportes, auditoria, auth,
     suscripciones, wods, solicitudes_planes, upload, membresias,
-    notificaciones, migracion, comprar_emergencia, fix_fechas, supervision,
+    notificaciones, notificaciones_enviadas, migracion,
+    comprar_emergencia, fix_fechas, supervision,
     finanzas, configuracion
 )
 from fastapi.staticfiles import StaticFiles
@@ -116,6 +117,8 @@ app.include_router(membresias.router,
                    prefix="/api/v1/membresias", tags=["Membresías"])
 app.include_router(notificaciones.router,
                    prefix="/api/v1/notificaciones", tags=["Notificaciones"])
+app.include_router(notificaciones_enviadas.router,
+                   prefix="/api/v1/notificaciones-enviadas", tags=["Notificaciones Enviadas"])
 app.include_router(migracion.router,
                    prefix="/api/v1/migracion", tags=["Migración"])
 app.include_router(comprar_emergencia.router,

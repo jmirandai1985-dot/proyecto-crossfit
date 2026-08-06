@@ -44,7 +44,6 @@ const Layout = ({ children }) => {
         { key: 'clases', label: '📅 Clases', path: '/coach/dashboard?tab=clases' },
         { key: 'alumnos', label: '👥 Alumnos & RMs', path: '/coach/dashboard?tab=alumnos' },
         { key: 'progreso', label: '📈 Progreso', path: '/coach/dashboard?tab=progreso' },
-        { key: 'wods', label: '📋 Mis WODs', path: '/coach/dashboard?tab=wods' },
         { key: 'riesgo', label: '⚠️ Riesgo', path: '/coach/dashboard?tab=riesgo' },
     ];
 
@@ -77,6 +76,7 @@ const Layout = ({ children }) => {
                 { label: 'Planes', path: '/admin/planes', icon: icons.settings },
                 { label: 'Disciplinas', path: '/admin/disciplinas', icon: icons.dumbbell },
                 { label: 'Bazar', path: '/admin/bazar', icon: icons.settings },
+                { label: 'Notificaciones', path: '/admin/notificaciones', icon: icons.settings },
                 { label: 'Reportes', path: '/admin/reportes', icon: icons.dumbbell },
                 { label: 'Configuración', path: '/admin/configuracion', icon: icons.settings },
             ];
@@ -88,20 +88,20 @@ const Layout = ({ children }) => {
     const isActive = (path) => location.pathname === path;
 
     return (
-        <div className="flex h-screen bg-gray-50">
+        <div className="flex h-screen bg-zinc-950">
             {/* Sidebar */}
             <div
                 className={`${sidebarOpen ? 'w-64' : 'w-20'
-                    } bg-white border-r border-gray-200 transition-all duration-300 flex flex-col shadow-sm`}
+                    } bg-zinc-900 border-r border-zinc-800 transition-all duration-300 flex flex-col shadow-sm`}
             >
                 {/* Logo */}
-                <div className="p-5 border-b border-gray-100">
+                <div className="p-5 border-b border-zinc-800">
                     <div className="flex items-center gap-3">
                         <span className="text-2xl">🏋️</span>
                         {sidebarOpen && (
                             <div>
-                                <h2 className="font-bold text-gray-800 text-sm leading-tight">URBAN BOX</h2>
-                                <p className="text-[10px] text-gray-400">CrossFit Maipú</p>
+                                <h2 className="font-bold text-white text-sm leading-tight">URBAN BOX</h2>
+                                <p className="text-[10px] text-zinc-400">CrossFit Maipú</p>
                             </div>
                         )}
                     </div>
@@ -113,26 +113,26 @@ const Layout = ({ children }) => {
                         <div key={item.label}>
                             <Link
                                 to={item.path}
-                                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm ${isActive(item.path) || (rol === 'coach' && item.label === 'Dashboard' && isCoachDashboard)
-                                    ? 'bg-emerald-50 text-emerald-700 font-semibold'
-                                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
+                                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-base ${isActive(item.path) || (rol === 'coach' && item.label === 'Dashboard' && isCoachDashboard)
+                                    ? 'bg-orange-500/20 text-orange-300 font-semibold ring-1 ring-orange-500/40'
+                                    : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
                                     }`}
                             >
-                                <span className={`${isActive(item.path) ? 'text-emerald-600' : 'text-gray-400'}`}>
+                                <span className={`${isActive(item.path) ? 'text-orange-500' : 'text-zinc-500'}`}>
                                     {item.icon}
                                 </span>
                                 {sidebarOpen && <span>{item.label}</span>}
                             </Link>
                             {/* Coach sub-tabs under Dashboard */}
                             {rol === 'coach' && item.label === 'Dashboard' && sidebarOpen && isCoachDashboard && (
-                                <div className="ml-6 mt-1 space-y-0.5 border-l-2 border-emerald-200 pl-2">
+                                <div className="ml-6 mt-1 space-y-0.5 border-l-2 border-orange-500/40 pl-2">
                                     {coachSubTabs.map((sub) => (
                                         <Link
                                             key={sub.key}
                                             to={sub.path}
-                                            className={`block px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${currentTab === sub.key
-                                                ? 'bg-emerald-100 text-emerald-800'
-                                                : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
+                                            className={`block px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${currentTab === sub.key
+                                                ? 'bg-orange-500/20 text-orange-400'
+                                                : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
                                                 }`}
                                         >
                                             {sub.label}
@@ -142,14 +142,14 @@ const Layout = ({ children }) => {
                             )}
                             {/* Always show sub-tabs when coach is on dashboard path */}
                             {rol === 'coach' && item.label === 'Dashboard' && sidebarOpen && !isCoachDashboard && (
-                                <div className="ml-6 mt-1 space-y-0.5 border-l-2 border-gray-200 pl-2">
+                                <div className="ml-6 mt-1 space-y-0.5 border-l-2 border-zinc-700 pl-2">
                                     {coachSubTabs.map((sub) => (
                                         <Link
                                             key={sub.key}
                                             to={sub.path}
-                                            className={`block px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${false
-                                                ? 'bg-emerald-100 text-emerald-800'
-                                                : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
+                                            className={`block px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${false
+                                                ? 'bg-orange-500/20 text-orange-400'
+                                                : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
                                                 }`}
                                         >
                                             {sub.label}
@@ -162,23 +162,23 @@ const Layout = ({ children }) => {
                 </nav>
 
                 {/* User & Logout */}
-                <div className="p-4 border-t border-gray-100 space-y-3">
+                <div className="p-4 border-t border-zinc-800 space-y-3">
                     {sidebarOpen && (
                         <div className="px-2">
-                            <p className="text-sm font-medium text-gray-800 truncate">{usuario || 'Usuario'}</p>
-                            <p className="text-xs text-gray-400 capitalize">{rol}</p>
+                            <p className="text-sm font-medium text-zinc-100 truncate">{usuario || 'Usuario'}</p>
+                            <p className="text-xs text-zinc-500 capitalize">{rol}</p>
                         </div>
                     )}
                     <button
                         onClick={logout}
-                        className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        className="w-full flex items-center gap-3 px-3 py-2.5 text-base text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                     >
-                        <span className="text-red-400">{icons.logout}</span>
+                        <span className="text-red-500">{icons.logout}</span>
                         {sidebarOpen && <span>Cerrar Sesión</span>}
                     </button>
                     <button
                         onClick={() => setSidebarOpen(!sidebarOpen)}
-                        className="w-full flex items-center justify-center py-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors text-xs"
+                        className="w-full flex items-center justify-center py-2 text-zinc-500 hover:bg-zinc-800 rounded-lg transition-colors text-xs"
                     >
                         {sidebarOpen ? '◀ Colapsar' : '▶'}
                     </button>
@@ -188,14 +188,14 @@ const Layout = ({ children }) => {
             {/* Main Content */}
             <div className="flex-1 flex flex-col overflow-hidden">
                 {/* Header */}
-                <header className="bg-white border-b border-gray-200">
+                <header className="bg-zinc-900 border-b border-zinc-800">
                     <div className="flex items-center justify-between px-6 py-3">
                         <div className="flex items-center gap-2">
                             <span className="text-lg">🏋️</span>
-                            <h1 className="text-lg font-bold text-gray-800">URBAN BOX</h1>
+                            <h1 className="text-lg font-bold text-white">URBAN BOX</h1>
                         </div>
                         <div className="flex items-center gap-4">
-                            <span className="text-sm text-gray-500">
+                            <span className="text-sm text-zinc-400">
                                 {new Date().toLocaleDateString('es-CL', {
                                     weekday: 'long',
                                     year: 'numeric',
@@ -205,7 +205,7 @@ const Layout = ({ children }) => {
                             </span>
                             {sidebarOpen && (
                                 <div className="text-right hidden md:block">
-                                    <p className="text-sm font-medium text-gray-800">👋 ¡Hola, {usuario || 'Atleta'}!</p>
+                                    <p className="text-sm font-medium text-zinc-100">👋 ¡Hola, {usuario || 'Atleta'}!</p>
                                 </div>
                             )}
                         </div>
@@ -213,7 +213,7 @@ const Layout = ({ children }) => {
                 </header>
 
                 {/* Page Content */}
-                <main className="flex-1 overflow-auto p-6 bg-gray-50">{children}</main>
+                <main className="flex-1 overflow-auto p-6 bg-zinc-950">{children}</main>
             </div>
         </div>
     );

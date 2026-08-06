@@ -29,6 +29,13 @@ const DashboardCoach = () => {
     const [alumnoRMs, setAlumnoRMs] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [coachDisciplinas, setCoachDisciplinas] = useState([]);
+    // Toggle Fase 2: "Ver todas" vs "Ver solo con WOD publicado"
+    const [verSoloConWod, setVerSoloConWod] = useState(false);
+    // ── Asistencia inline en tarjetas de "Mis Clases de Hoy" ──
+    const [claseAsistenciaExpandida, setClaseAsistenciaExpandida] = useState(null);
+    const [asistenciaPorClase, setAsistenciaPorClase] = useState({});
+    const [cargandoAsistencia, setCargandoAsistencia] = useState(false);
+    const [msgAsistencia, setMsgAsistencia] = useState(null); // { claseId, texto, tipo }
 
     // ---- Terminología dinámica por disciplina ----
     const TERMINO_POR_DISCIPLINA = {
@@ -294,8 +301,71 @@ const DashboardCoach = () => {
     }, [selectedAlumno, tenant_id]);
 
     // ---- Handlers ----
-    const handleMarcarAsistencia = (claseId) => {
-        alert(`Asistencia marcada para clase ${claseId}`);
+    const cargarAsistenciaClase = async (claseId) => {
+        // Toggle: si ya está expandida, colapsar
+        if (claseAsistenciaExpandida === claseId) {
+            setClaseAsistenciaExpandida(null);
+            return;
+        }
+        setCargandoAsistencia(true);
+        setMsgAsistencia(null);
+        try {
+            const r = await api.get(`/api/v1/reservas/por-clase/${claseId}`, { params: { tenant_id } });
+            const reservas = r.data || [];
+            setAsistenciaPorClase(prev => ({
+                ...prev,
+                [claseId]: reservas.map(r => ({
+                    reserva_id: r.id,
+                    alumno_id: r.alumno_id,
+                    nombre: r.alumno_nombre || `#${r.alumno_id}`,
+                    asistio: r.asistio || false
+                }))
+            }));
+            setClaseAsistenciaExpandida(claseId);
+        } catch (e) {
+            console.error('Error cargando asistencia:', e);
+            setMsgAsistencia({ claseId, texto: 'Error al cargar la asistencia', tipo: 'error' });
+        }
+        setCargandoAsistencia(false);
+    };
+
+    const toggleAsistenciaAlumno = async (claseId, reservaId, valor) => {
+        try {
+            await api.put(`/api/v1/reservas/${reservaId}/asistencia`, { asistio: valor }, { params: { tenant_id } });
+            setAsistenciaPorClase(prev => ({
+                ...prev,
+                [claseId]: (prev[claseId] || []).map(a => a.reserva_id === reservaId ? { ...a, asistio: valor } : a)
+            }));
+            setMsgAsistencia({ claseId, texto: valor ? '✅ Asistencia guardada (asistió)' : '❌ Asistencia guardada (no asistió)', tipo: 'exito' });
+        } catch (e) {
+            console.error('Error marcando asistencia:', e);
+            setMsgAsistencia({ claseId, texto: 'Error al guardar la asistencia', tipo: 'error' });
+        }
+    };
+
+    const marcarTodosAsistencia = async (claseId, valor) => {
+        const reservas = asistenciaPorClase[claseId] || [];
+        if (reservas.length === 0) return;
+        let errores = 0;
+        for (const a of reservas) {
+            try {
+                await api.put(`/api/v1/reservas/${a.reserva_id}/asistencia`, { asistio: valor }, { params: { tenant_id } });
+                setAsistenciaPorClase(prev => ({
+                    ...prev,
+                    [claseId]: (prev[claseId] || []).map(r => r.reserva_id === a.reserva_id ? { ...r, asistio: valor } : r)
+                }));
+            } catch (e) {
+                console.error(`Error marcando reserva ${a.reserva_id}:`, e);
+                errores++;
+            }
+        }
+        setMsgAsistencia({
+            claseId,
+            texto: errores === 0
+                ? (valor ? '✅ Todos marcados como ASISTIERON' : '❌ Todos marcados como NO ASISTIERON')
+                : `⚠️ ${errores} error(es) al marcar`,
+            tipo: errores === 0 ? 'exito' : 'error'
+        });
     };
 
     const handleContactar = (alumno) => {
@@ -426,7 +496,7 @@ const DashboardCoach = () => {
 
                 {/* Stats Cards — ahora clickeables, cada una navega a su pantalla */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <button onClick={() => navigate('/coach?tab=clases')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
+                    <button onClick={() => navigate('/coach/dashboard?tab=clases')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
                         <div className="flex items-start justify-between">
                             <div>
                                 <p className="text-sm font-medium text-gray-500">Clases Hoy</p>
@@ -436,7 +506,7 @@ const DashboardCoach = () => {
                             <div className="bg-blue-500 w-12 h-12 rounded-lg flex items-center justify-center text-xl">📅</div>
                         </div>
                     </button>
-                    <button onClick={() => navigate('/coach?tab=alumnos')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
+                    <button onClick={() => navigate('/coach/dashboard?tab=alumnos')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
                         <div className="flex items-start justify-between">
                             <div>
                                 <p className="text-sm font-medium text-gray-500">Alumnos Activos</p>
@@ -446,7 +516,7 @@ const DashboardCoach = () => {
                             <div className="bg-green-500 w-12 h-12 rounded-lg flex items-center justify-center text-xl">👥</div>
                         </div>
                     </button>
-                    <button onClick={() => navigate('/coach?tab=wods')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
+                    <button onClick={() => navigate('/coach/dashboard?tab=clases')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
                         <div className="flex items-start justify-between">
                             <div>
                                 <p className="text-sm font-medium text-gray-500">WOD del Día</p>
@@ -456,7 +526,7 @@ const DashboardCoach = () => {
                             <div className={`${wodHoy?.estado === 'publicado' ? 'bg-orange-500' : 'bg-gray-500'} w-12 h-12 rounded-lg flex items-center justify-center text-xl`}>💪</div>
                         </div>
                     </button>
-                    <button onClick={() => navigate('/coach?tab=riesgo')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
+                    <button onClick={() => navigate('/coach/dashboard?tab=riesgo')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
                         <div className="flex items-start justify-between">
                             <div>
                                 <p className="text-sm font-medium text-gray-500">Alumnos en Riesgo</p>
@@ -466,12 +536,12 @@ const DashboardCoach = () => {
                             <div className={`${alumnosEnRiesgo.length > 0 ? 'bg-red-500' : 'bg-emerald-500'} w-12 h-12 rounded-lg flex items-center justify-center text-xl`}>⚠️</div>
                         </div>
                     </button>
-                    <button onClick={() => navigate('/coach?tab=wods')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left col-span-1">
+                    <button onClick={() => navigate('/coach/dashboard?tab=clases')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left col-span-1">
                         <div className="flex items-start justify-between">
                             <div>
                                 <p className="text-sm font-medium text-gray-500">WODs esta semana</p>
                                 <p className="text-2xl font-bold text-gray-900 mt-1">{clasesSemana.filter(c => c.wod_id != null).length}/{clasesSemana.length} publicados</p>
-                                <p className="text-xs text-gray-500 mt-1">Clic para ver Mis WODs</p>
+                                <p className="text-xs text-gray-500 mt-1">Clic para ver Clases y WODs</p>
                             </div>
                             <div className="bg-orange-500 w-12 h-12 rounded-lg flex items-center justify-center text-xl">💪</div>
                         </div>
@@ -508,13 +578,75 @@ const DashboardCoach = () => {
                                                                 📝 Publicar {getTerminoDisciplina(clase.disciplina_nombre)}
                                                             </button>
                                                             <button
-                                                                onClick={() => handleMarcarAsistencia(clase.id)}
-                                                                className="px-3 py-1 bg-orange-500 text-white rounded text-xs font-medium hover:bg-orange-600 transition-colors"
+                                                                onClick={() => cargarAsistenciaClase(clase.id)}
+                                                                className={`px-3 py-1 rounded text-xs font-medium transition-colors ${claseAsistenciaExpandida === clase.id
+                                                                    ? 'bg-orange-600 text-white'
+                                                                    : 'bg-orange-500 text-white hover:bg-orange-600'
+                                                                    }`}
                                                             >
-                                                                Asistencia
+                                                                {claseAsistenciaExpandida === clase.id ? '▼ Cerrar Asistencia' : '📋 Asistencia'}
                                                             </button>
                                                         </div>
                                                     </div>
+
+                                                    {/* Panel de asistencia expandible inline */}
+                                                    {claseAsistenciaExpandida === clase.id && (
+                                                        <div className="mt-4 p-3 bg-orange-50 rounded-lg border border-orange-200">
+                                                            {/* Feedback visual de guardado */}
+                                                            {msgAsistencia?.claseId === clase.id && (
+                                                                <div className={`mb-3 px-3 py-2 rounded-md text-sm font-medium ${msgAsistencia.tipo === 'exito'
+                                                                    ? 'bg-green-100 text-green-800 border border-green-300'
+                                                                    : 'bg-red-100 text-red-800 border border-red-300'
+                                                                    }`}>
+                                                                    {msgAsistencia.texto}
+                                                                </div>
+                                                            )}
+
+                                                            {cargandoAsistencia ? (
+                                                                <div className="flex items-center justify-center py-6">
+                                                                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-orange-500"></div>
+                                                                </div>
+                                                            ) : (asistenciaPorClase[clase.id] || []).length === 0 ? (
+                                                                <p className="text-sm text-gray-500 text-center py-4">
+                                                                    Sin alumnos reservados en esta clase
+                                                                </p>
+                                                            ) : (
+                                                                <>
+                                                                    {/* Botones "marcar todos" */}
+                                                                    <div className="flex gap-2 mb-3">
+                                                                        <button
+                                                                            onClick={() => marcarTodosAsistencia(clase.id, true)}
+                                                                            className="px-3 py-1.5 bg-emerald-500 text-white rounded text-xs font-bold hover:bg-emerald-600 transition-colors"
+                                                                        >
+                                                                            ✅ Todos ASISTIERON
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={() => marcarTodosAsistencia(clase.id, false)}
+                                                                            className="px-3 py-1.5 bg-red-500 text-white rounded text-xs font-bold hover:bg-red-600 transition-colors"
+                                                                        >
+                                                                            ❌ Todos FALTA
+                                                                        </button>
+                                                                    </div>
+                                                                    {/* Lista de alumnos con toggle individual */}
+                                                                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                                                                        {(asistenciaPorClase[clase.id] || []).map(a => (
+                                                                            <button
+                                                                                key={a.reserva_id}
+                                                                                onClick={() => toggleAsistenciaAlumno(clase.id, a.reserva_id, !a.asistio)}
+                                                                                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${a.asistio
+                                                                                    ? 'bg-emerald-100 text-emerald-800 border-emerald-400 hover:bg-emerald-200'
+                                                                                    : 'bg-red-100 text-red-800 border-red-400 hover:bg-red-200'
+                                                                                    }`}
+                                                                            >
+                                                                                <span>{a.nombre}</span>
+                                                                                <span>{a.asistio ? '✅ ASISTIÓ' : '❌ FALTA'}</span>
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             ))}
                                         </div>
@@ -549,7 +681,7 @@ const DashboardCoach = () => {
                                                         </td>
                                                         <td className="px-4 py-3">
                                                             <button
-                                                                onClick={() => setSelectedAlumno(alumno)}
+                                                                onClick={() => { setSelectedAlumno(alumno); navigate('/coach/dashboard?tab=alumnos'); }}
                                                                 className="text-xs text-orange-500 hover:text-orange-700 font-medium"
                                                             >
                                                                 Ver RMs
@@ -609,12 +741,14 @@ const DashboardCoach = () => {
                             </div>
                         )}
 
-                        {/* ─── TAB: CLASES (Solo lectura — redirige a GestionClases) ─── */}
-                        {activeTab === 'clases' && (
+                        {/* ─── TAB: CLASES (Fusión Fase 2: Clases + Mis WODs con toggle) ───
+                            NOTA: activeTab === 'wods' se conserva como alias de compatibilidad
+                            (URLs viejas ?tab=wods ahora muestran la vista fusionada). */}
+                        {(activeTab === 'clases' || activeTab === 'wods') && (
                             <div className="space-y-6">
                                 <div className="flex items-center justify-between flex-wrap gap-3">
                                     <div>
-                                        <h2 className="text-xl font-bold text-gray-900">📅 Planificación Semanal</h2>
+                                        <h2 className="text-xl font-bold text-gray-900">📅 Clases y {getTerminoDisciplina('CrossFit')}s de la Semana</h2>
                                         <p className="text-sm text-gray-600 mt-1">
                                             Semana: {weekRange.start} → {weekRange.end}
                                         </p>
@@ -641,8 +775,117 @@ const DashboardCoach = () => {
                                     </div>
                                 </div>
 
-                                {/* Week Grid — Solo lectura, sin botones de crear/editar */}
-                                <div className="overflow-x-auto">
+                                {/* Toggle Fase 2: "Ver todas" / "Ver solo con WOD publicado" */}
+                                <div className="inline-flex items-center gap-3 p-2 bg-gray-100 rounded-xl">
+                                    <button
+                                        onClick={() => setVerSoloConWod(false)}
+                                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${!verSoloConWod
+                                            ? 'bg-white text-gray-900 shadow-sm ring-1 ring-gray-200'
+                                            : 'text-gray-500 hover:text-gray-700'
+                                            }`}
+                                    >
+                                        👁️ Ver todas
+                                    </button>
+                                    <button
+                                        onClick={() => setVerSoloConWod(true)}
+                                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${verSoloConWod
+                                            ? 'bg-white text-gray-900 shadow-sm ring-1 ring-gray-200'
+                                            : 'text-gray-500 hover:text-gray-700'
+                                            }`}
+                                    >
+                                        ✅ Ver solo con {getTerminoDisciplina('CrossFit')} publicado
+                                    </button>
+                                </div>
+
+                                {/* Vista MOBILE (Fase 3): lista vertical de clases — visible solo en < md */}
+                                <div className="block md:hidden space-y-3">
+                                    {dayDates.map((date, dayIdx) => {
+                                        // Clases de este día, ordenadas por hora
+                                        const clasesDelDia = (clasesSemana || [])
+                                            .filter(c => {
+                                                const fechaStr = c.fecha ? (typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha) : '';
+                                                return fechaStr === date;
+                                            })
+                                            .sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || ''));
+
+                                        // WODs de este día
+                                        const wodDeClase = (clase) => clase ? wods.find(w => {
+                                            const fechaW = w.fecha ? (typeof w.fecha === 'string' ? w.fecha.split('T')[0] : w.fecha) : '';
+                                            return fechaW === date && w.id === clase.wod_id;
+                                        }) : null;
+
+                                        // Fase 2/3: si el toggle está en "solo con WOD publicado", filtrar
+                                        const clasesVisibles = verSoloConWod
+                                            ? clasesDelDia.filter(c => wodDeClase(c))
+                                            : clasesDelDia;
+
+                                        return (
+                                            <div key={date} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                                                {/* Encabezado del día */}
+                                                <div className={`px-4 py-2.5 flex items-center justify-between ${date === today ? 'bg-orange-50 border-b border-orange-200' : 'bg-gray-50 border-b border-gray-200'}`}>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`text-sm font-bold ${date === today ? 'text-orange-600' : 'text-gray-700'}`}>
+                                                            {DAYS[dayIdx]} {date.split('-')[2]}
+                                                        </span>
+                                                        {date === today && (
+                                                            <span className="text-[10px] font-bold bg-orange-500 text-white px-2 py-0.5 rounded-full uppercase">Hoy</span>
+                                                        )}
+                                                    </div>
+                                                    <span className="text-xs text-gray-500">{clasesVisibles.length} clase(s)</span>
+                                                </div>
+
+                                                {/* Clases del día (vertical) */}
+                                                <div className="divide-y divide-gray-100">
+                                                    {clasesVisibles.length > 0 ? (
+                                                        clasesVisibles.map((clase) => {
+                                                            const wod = wodDeClase(clase);
+                                                            return (
+                                                                <button
+                                                                    key={clase.id}
+                                                                    onClick={() => {
+                                                                        const fechaISO = clase.fecha ? (typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha) : date;
+                                                                        navigate(`/coach/gestion-clases?fecha=${fechaISO}&clase=${clase.id}`);
+                                                                    }}
+                                                                    className={`w-full px-4 py-3 flex items-center gap-3 text-left transition-colors ${wod
+                                                                        ? 'bg-green-50/50 hover:bg-green-100'
+                                                                        : 'bg-yellow-50/50 hover:bg-yellow-100'
+                                                                        }`}
+                                                                >
+                                                                    <span className="text-lg font-bold text-gray-800 w-14 shrink-0">
+                                                                        {clase.hora_inicio ? clase.hora_inicio.substring(0, 5) : '--:--'}
+                                                                    </span>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <p className="text-sm font-semibold text-gray-900 truncate">
+                                                                            {clase.disciplina_nombre || 'Clase'}
+                                                                        </p>
+                                                                        <p className={`text-xs truncate ${wod ? 'text-green-700 font-medium' : 'text-gray-600'}`}>
+                                                                            {wod
+                                                                                ? `💪 ${wod.titulo || 'WOD publicado'}`
+                                                                                : `⬜ Sin ${getTerminoDisciplina(clase.disciplina_nombre)}`}
+                                                                        </p>
+                                                                        <p className="text-xs text-gray-500">
+                                                                            👥 {clase.asistentes_confirmados || 0}/{clase.cupo_maximo || 0}
+                                                                        </p>
+                                                                    </div>
+                                                                    <div className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-lg ${wod ? 'bg-green-100' : 'bg-yellow-100'}`}>
+                                                                        {wod ? '✅' : '📝'}
+                                                                    </div>
+                                                                </button>
+                                                            );
+                                                        })
+                                                    ) : (
+                                                        <p className="px-4 py-4 text-sm text-gray-400 text-center italic">
+                                                            {verSoloConWod ? 'Sin WODs publicados este día' : 'Sin clases este día'}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* Week Grid (DESKTOP) — celda clickeable: crear WOD si no existe, editar si ya existe */}
+                                <div className="hidden md:block overflow-x-auto">
                                     <table className="w-full border-collapse min-w-[900px]">
                                         <thead>
                                             <tr>
@@ -654,11 +897,12 @@ const DashboardCoach = () => {
                                                     return (
                                                         <th
                                                             key={day}
-                                                            className={`px-3 py-3 text-sm font-bold uppercase text-center min-w-[130px] ${isToday ? 'bg-orange-500 text-white' : 'bg-gray-800 text-white'
+                                                            className={`px-3 py-3 text-sm font-bold uppercase text-center min-w-[130px] ${isToday ? 'bg-orange-600 text-white ring-2 ring-orange-300 shadow-inner' : 'bg-gray-800 text-white'
                                                                 }`}
                                                         >
                                                             <div className="text-base">{day}</div>
                                                             <div className="text-xl font-bold">{dayDates[i].split('-')[2]}</div>
+                                                            {isToday && <div className="text-[10px] font-black bg-white text-orange-600 rounded-full mt-1 px-2 py-0.5">HOY</div>}
                                                         </th>
                                                     );
                                                 })}
@@ -673,49 +917,66 @@ const DashboardCoach = () => {
                                                     {dayDates.map((date, dayIdx) => {
                                                         const clase = weekGrid[date]?.[hour];
                                                         const isToday = date === today;
-                                                        const isEmpty = !clase;
+                                                        // WOD asociado a esta clase (directamente desde el objeto clase que ahora trae wod_id)
+                                                        const wodDeClase = clase ? wods.find(w => {
+                                                            const fechaW = w.fecha ? (typeof w.fecha === 'string' ? w.fecha.split('T')[0] : w.fecha) : '';
+                                                            return fechaW === date && w.id === clase.wod_id;
+                                                        }) : null;
 
-                                                        // Find WOD for this day
-                                                        const wodDelDia = wods.find(w => {
-                                                            const fechaWod = w.fecha ? (typeof w.fecha === 'string' ? w.fecha.split('T')[0] : w.fecha) : '';
-                                                            return fechaWod === date;
-                                                        });
+                                                        // Fase 2: si el toggle está en "solo con WOD publicado" y la celda no tiene WOD, ocultarla
+                                                        if (verSoloConWod && (!clase || !wodDeClase)) {
+                                                            return null;
+                                                        }
 
                                                         return (
                                                             <td
                                                                 key={`${date}-${hour}`}
-                                                                className={`p-2 text-center transition-all ${isToday ? 'bg-orange-50/50' : 'bg-white'
-                                                                    } border-r border-gray-100 ${dayIdx === 6 ? 'border-r-0' : ''
+                                                                className={`p-2 text-center transition-all border-r border-zinc-700 ${dayIdx === 6 ? 'border-r-0' : ''
                                                                     }`}
                                                             >
                                                                 {clase ? (
-                                                                    <button
-                                                                        onClick={() => {
-                                                                            // Usar el string de fecha ISO directamente (sin new Date)
-                                                                            // para evitar corrimiento de dia por zona horaria (UTC -> local).
-                                                                            const fechaISO = clase.fecha ? (typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha) : dayDates[dayIdx];
-                                                                            navigate(`/coach/gestion-clases?fecha=${fechaISO}&clase=${clase.id}`);
-                                                                        }}
-                                                                        className={`w-full h-full min-h-[64px] flex flex-col items-center justify-center gap-1 rounded-lg transition-all cursor-pointer ${clase.wod_id != null
-                                                                            ? 'bg-green-50 border border-green-300 hover:bg-green-100'
-                                                                            : 'bg-yellow-50 border border-yellow-300 hover:bg-yellow-100'
-                                                                            }`}
-                                                                    >
-                                                                        <div className="text-sm font-bold text-gray-900 leading-tight">
-                                                                            {clase.disciplina_nombre || 'Clase'}
-                                                                        </div>
-                                                                        <div className="text-xs text-gray-600">
-                                                                            {clase.wod_id != null
-                                                                                ? '✅ ' + getTerminoDisciplina(clase.disciplina_nombre) + ' publicado'
-                                                                                : '⬜ Sin ' + getTerminoDisciplina(clase.disciplina_nombre)}
-                                                                        </div>
-                                                                        <div className="text-xs text-gray-500">
-                                                                            👥 {clase.asistentes_confirmados || 0}/{clase.cupo_maximo || 0}
-                                                                        </div>
-                                                                    </button>
+                                                                    wodDeClase ? (
+                                                                        // Celda con WOD publicado — fondo naranja translúcido sobre dark + ícono ✅
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                const fechaISO = clase.fecha ? (typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha) : date;
+                                                                                navigate(`/coach/gestion-clases?fecha=${fechaISO}&clase=${clase.id}`);
+                                                                            }}
+                                                                            className="w-full h-full min-h-[64px] flex flex-col items-center justify-center gap-1 rounded-lg transition-all cursor-pointer bg-orange-500/20 border-2 border-orange-500 hover:bg-orange-500/30"
+                                                                        >
+                                                                            <div className="text-base font-bold text-orange-200 leading-tight capitalize">
+                                                                                {clase.disciplina_nombre || 'Clase'}
+                                                                            </div>
+                                                                            <div className="text-sm text-orange-300 font-bold leading-tight max-w-[110px] text-center">
+                                                                                ✅ {wodDeClase.titulo || 'WOD publicado'}
+                                                                            </div>
+                                                                            <div className="text-sm text-orange-400">
+                                                                                ✔ Publicado
+                                                                            </div>
+                                                                        </button>
+                                                                    ) : (
+                                                                        // Celda con clase sin WOD — fondo zinc-800 oscuro + texto claro legible
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                const fechaISO = clase.fecha ? (typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha) : date;
+                                                                                navigate(`/coach/gestion-clases?fecha=${fechaISO}&clase=${clase.id}`);
+                                                                            }}
+                                                                            className="w-full h-full min-h-[64px] flex flex-col items-center justify-center gap-1 rounded-lg transition-all cursor-pointer bg-zinc-800 border border-zinc-600 hover:bg-zinc-700"
+                                                                        >
+                                                                            <div className="text-base font-semibold text-zinc-200 leading-tight capitalize">
+                                                                                {clase.disciplina_nombre || 'Clase'}
+                                                                            </div>
+                                                                            <div className="text-sm text-zinc-300">
+                                                                                ⬜ Sin {getTerminoDisciplina(clase.disciplina_nombre)}
+                                                                            </div>
+                                                                            <div className="text-sm text-zinc-400">
+                                                                                👥 {clase.asistentes_confirmados || 0}/{clase.cupo_maximo || 0}
+                                                                            </div>
+                                                                        </button>
+                                                                    )
                                                                 ) : (
-                                                                    <div className="flex items-center justify-center h-full py-3">
-                                                                        <span className="text-gray-300 text-base italic">—</span>
+                                                                    <div className="flex items-center justify-center h-full py-3 bg-zinc-900/60 rounded-lg">
+                                                                        <span className="text-zinc-500 text-base italic">—</span>
                                                                     </div>
                                                                 )}
                                                             </td>
@@ -728,19 +989,22 @@ const DashboardCoach = () => {
                                 </div>
 
                                 {/* Legend */}
-                                <div className="flex flex-wrap gap-4 text-xs text-gray-600 mt-2 p-3 bg-gray-50 rounded-lg">
+                                <div className="flex flex-wrap gap-4 text-xs text-zinc-400 mt-2 p-3 bg-zinc-900 rounded-lg border border-zinc-800">
                                     <span className="flex items-center gap-1">
-                                        <span className="w-3 h-3 rounded-sm bg-orange-50 border border-orange-200"></span> Celda con clase
+                                        <span className="w-3 h-3 rounded-sm bg-orange-500/30 border-2 border-orange-500"></span> Con {getTerminoDisciplina('CrossFit')} publicado (naranja)
                                     </span>
                                     <span className="flex items-center gap-1">
-                                        <span className="w-3 h-3 rounded-sm bg-white border border-gray-200"></span> Celda vacía
+                                        <span className="w-3 h-3 rounded-sm bg-zinc-800 border border-zinc-600"></span> Sin {getTerminoDisciplina('CrossFit')} (gris oscuro)
                                     </span>
-                                    <span className="flex items-center gap-1">✅ WOD Publicado</span>
-                                    <span className="flex items-center gap-1">📝 WOD Borrador</span>
-                                    <span className="flex items-center gap-1">⬜ Sin WOD asignado</span>
+                                    <span className="flex items-center gap-1">
+                                        <span className="w-3 h-3 rounded-sm bg-zinc-900/60 border border-zinc-700"></span> Celda vacía
+                                    </span>
+                                    {!verSoloConWod && (
+                                        <span className="text-zinc-500 italic">📌 Clic en una celda gris oscura para crear el {getTerminoDisciplina('CrossFit')} de esa clase</span>
+                                    )}
                                 </div>
                                 <p className="text-xs text-gray-400 text-center">
-                                    ℹ️ Para crear o editar clases/WODs, usa la sección "Gestión de Clases" en el sidebar.
+                                    ℹ️ Clic en una celda para publicar/editar el {getTerminoDisciplina('CrossFit')} de esa clase. Para crear o editar, usa "Gestión de Clases".
                                 </p>
                             </div>
                         )}
@@ -882,7 +1146,7 @@ const DashboardCoach = () => {
                                                         </td>
                                                         <td className="px-6 py-4 text-sm">
                                                             <button
-                                                                onClick={() => setSelectedAlumno(alumno)}
+                                                                onClick={() => { setSelectedAlumno(alumno); navigate('/coach/dashboard?tab=alumnos'); }}
                                                                 className="text-orange-500 hover:text-orange-700 font-medium text-xs"
                                                             >
                                                                 Ver RMs
@@ -897,142 +1161,6 @@ const DashboardCoach = () => {
                                 {progresoAlumnos.length === 0 && (
                                     <p className="text-gray-500 text-center py-8">No hay datos de progreso disponibles</p>
                                 )}
-                            </div>
-                        )}
-
-                        {/* ─── TAB: MIS WODs (CALENDARIO 7 DÍAS) ─── */}
-                        {activeTab === 'wods' && (
-                            <div className="space-y-6">
-                                <div className="flex items-center justify-between flex-wrap gap-3">
-                                    <div>
-                                        <h2 className="text-xl font-bold text-gray-900">📋 Mis WODs de la Semana</h2>
-                                        <p className="text-sm text-gray-600 mt-1">
-                                            Semana: {weekRange.start} → {weekRange.end}
-                                        </p>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <button
-                                            onClick={irSemanaAnterior}
-                                            className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors"
-                                        >
-                                            ◀ Semana anterior
-                                        </button>
-                                        <button
-                                            onClick={irSemanaSiguiente}
-                                            className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors"
-                                        >
-                                            Semana siguiente ▶
-                                        </button>
-                                        <button
-                                            onClick={() => navigate('/coach/gestion-clases')}
-                                            className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
-                                        >
-                                            📋 Gestionar Clases
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div className="overflow-x-auto">
-                                    <table className="w-full border-collapse min-w-[900px]">
-                                        <thead>
-                                            <tr>
-                                                <th className="bg-gray-800 text-white px-3 py-3 text-sm font-bold uppercase sticky left-0 z-10 min-w-[90px]">
-                                                    Horario
-                                                </th>
-                                                {DAYS.map((day, i) => {
-                                                    const isToday = dayDates[i] === today;
-                                                    return (
-                                                        <th
-                                                            key={day}
-                                                            className={`px-3 py-3 text-sm font-bold uppercase text-center min-w-[130px] ${isToday ? 'bg-orange-500 text-white' : 'bg-gray-800 text-white'
-                                                                }`}
-                                                        >
-                                                            <div className="text-base">{day}</div>
-                                                            <div className="text-xl font-bold">{dayDates[i].split('-')[2]}</div>
-                                                        </th>
-                                                    );
-                                                })}
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {SCHEDULE_HOURS.map(hour => (
-                                                <tr key={hour} className="border-b border-gray-200 hover:bg-gray-50/50">
-                                                    <td className="sticky left-0 bg-white border-r border-gray-200 px-3 py-3 text-base font-bold text-gray-700 whitespace-nowrap z-10">
-                                                        {hour}
-                                                    </td>
-                                                    {dayDates.map((date, dayIdx) => {
-                                                        const clase = weekGrid[date]?.[hour];
-                                                        const isToday = date === today;
-                                                        // WOD asociado a esta clase (directamente desde el objeto clase que ahora trae wod_id)
-                                                        const wodDeClase = clase ? wods.find(w => {
-                                                            const fechaW = w.fecha ? (typeof w.fecha === 'string' ? w.fecha.split('T')[0] : w.fecha) : '';
-                                                            return fechaW === date && w.id === clase.wod_id;
-                                                        }) : null;
-
-                                                        return (
-                                                            <td
-                                                                key={`${date}-${hour}`}
-                                                                className={`p-2 text-center transition-all ${isToday ? 'bg-orange-50/50' : 'bg-white'
-                                                                    } border-r border-gray-100 ${dayIdx === 6 ? 'border-r-0' : ''
-                                                                    }`}
-                                                            >
-                                                                {clase ? (
-                                                                    wodDeClase ? (
-                                                                        // Celda con WOD publicado — estilo verde + título
-                                                                        <button
-                                                                            onClick={() => {
-                                                                                const fechaISO = clase.fecha ? (typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha) : date;
-                                                                                navigate(`/coach/gestion-clases?fecha=${fechaISO}&clase=${clase.id}`);
-                                                                            }}
-                                                                            className="w-full h-full min-h-[64px] flex flex-col items-center justify-center gap-1 rounded-lg transition-all cursor-pointer bg-green-50 border border-green-300 hover:bg-green-100"
-                                                                        >
-                                                                            <div className="text-sm font-bold text-gray-900 leading-tight">
-                                                                                {clase.disciplina_nombre || 'Clase'}
-                                                                            </div>
-                                                                            <div className="text-xs text-green-700 font-medium leading-tight max-w-[110px] text-center">
-                                                                                💪 {wodDeClase.titulo || 'WOD publicado'}
-                                                                            </div>
-                                                                            <div className="text-xs text-gray-500">
-                                                                                ✅ {getTerminoDisciplina(clase.disciplina_nombre)} publicado
-                                                                            </div>
-                                                                        </button>
-                                                                    ) : (
-                                                                        // Celda con clase sin WOD — click-to-WOD igual que en Clases
-                                                                        <button
-                                                                            onClick={() => {
-                                                                                const fechaISO = clase.fecha ? (typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha) : date;
-                                                                                navigate(`/coach/gestion-clases?fecha=${fechaISO}&clase=${clase.id}`);
-                                                                            }}
-                                                                            className="w-full h-full min-h-[64px] flex flex-col items-center justify-center gap-1 rounded-lg transition-all cursor-pointer bg-yellow-50 border border-yellow-300 hover:bg-yellow-100"
-                                                                        >
-                                                                            <div className="text-sm font-bold text-gray-900 leading-tight">
-                                                                                {clase.disciplina_nombre || 'Clase'}
-                                                                            </div>
-                                                                            <div className="text-xs text-gray-600">
-                                                                                ⬜ Sin {getTerminoDisciplina(clase.disciplina_nombre)}
-                                                                            </div>
-                                                                            <div className="text-xs text-gray-500">
-                                                                                👥 {clase.asistentes_confirmados || 0}/{clase.cupo_maximo || 0}
-                                                                            </div>
-                                                                        </button>
-                                                                    )
-                                                                ) : (
-                                                                    <div className="flex items-center justify-center h-full py-3">
-                                                                        <span className="text-gray-300 text-base italic">—</span>
-                                                                    </div>
-                                                                )}
-                                                            </td>
-                                                        );
-                                                    })}
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-
-                                <p className="text-xs text-gray-400 text-center">
-                                    ℹ️ Clic en una celda para publicar/editar el WOD de esa clase. Para crear o editar, usa "Gestión de Clases".
-                                </p>
                             </div>
                         )}
 

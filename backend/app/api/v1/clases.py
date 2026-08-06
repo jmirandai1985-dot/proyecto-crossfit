@@ -38,24 +38,43 @@ def listar_clases(
     try:
         from datetime import timedelta
         hoy = date.today()
-        # Generar para HOY + 6 días (7 días en total)
-        fecha_hasta_auto = hoy + timedelta(days=6)
+        # ¿Qué rango se está consultando?
+        rango_desde = fecha_desde if fecha_desde is not None else (
+            fecha if fecha is not None else hoy)
+        rango_hasta = fecha_hasta if fecha_hasta is not None else (
+            fecha if fecha is not None else hoy)
 
-        # Determinar si debemos auto-generar
+        # Determinar si debemos auto-generar:
+        #  - Si el rango consultado es futuro (rango_desde > hoy), generar para ESE rango.
+        #  - Si el rango incluye hoy o días cercanos, generar hasta hoy+6 (vista 7 días).
         debe_generar = False
-        if fecha is not None and fecha == hoy:
-            debe_generar = True
-        elif fecha_desde is not None and fecha_desde <= hoy and (fecha_hasta is None or fecha_hasta >= hoy):
-            debe_generar = True
+        gen_desde = None
+        gen_hasta = None
 
-        if debe_generar:
+        if fecha is not None:
+            # Consulta de un solo día: generar solo ese día si faltan clases
+            debe_generar = True
+            gen_desde = fecha
+            gen_hasta = fecha
+        elif rango_desde is not None and rango_hasta is not None:
+            # Consulta de rango: generamos SIEMPRE el rango consultado
+            # (no solo [hoy, hoy+6]) para que navegar a semanas futuras funcione.
+            debe_generar = True
+            gen_desde = rango_desde
+            gen_hasta = rango_hasta
+            # Si el rango empieza antes/igual que hoy, aseguramos también hasta hoy+6
+            if gen_desde <= hoy:
+                gen_hasta = max(gen_hasta, hoy + timedelta(days=6))
+
+        if debe_generar and gen_desde is not None and gen_hasta is not None:
             from app.services.generar_clases import generar_clases_para_rango
 
-            # Verificar si ALGUNA fecha del rango [hoy, hoy+6] está incompleta
+            # Verificar si ALGUNA fecha del rango [gen_desde, gen_hasta] está incompleta
             faltan_clases = False
-            for i in range(7):
-                f = hoy + timedelta(days=i)
+            f = gen_desde
+            while f <= gen_hasta:
                 if f.weekday() == 6:  # domingo, skip
+                    f += timedelta(days=1)
                     continue
                 # Contar clases existentes para esta fecha
                 count_clases = db.execute(
@@ -74,12 +93,13 @@ def listar_clases(
                     logger.info(
                         f"🔍 [Auto-generación] {f} tiene {count_clases}/{count_horarios} clases (faltan {count_horarios - count_clases})")
                     break
+                f += timedelta(days=1)
 
             if faltan_clases:
                 logger.info(
-                    f"🔄 [Auto-generación] Faltan clases en el rango [{hoy} -> {fecha_hasta_auto}], generando desde horarios_base...")
+                    f"🔄 [Auto-generación] Faltan clases en el rango [{gen_desde} -> {gen_hasta}], generando desde horarios_base...")
                 resultado = generar_clases_para_rango(
-                    db, tenant_id, fecha_desde=hoy, fecha_hasta=fecha_hasta_auto)
+                    db, tenant_id, fecha_desde=gen_desde, fecha_hasta=gen_hasta)
                 if resultado["creadas"] > 0:
                     logger.info(
                         f"✅ [Auto-generación] Creadas {resultado['creadas']} clases (tenant={tenant_id})")
