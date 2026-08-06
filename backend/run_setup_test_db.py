@@ -105,6 +105,7 @@ try:
     print("\n=== LIMPIANDO datos anteriores...")
     # Orden inverso de FK
     db.execute(text("DELETE FROM solicitudes_planes"))
+    db.execute(text("DELETE FROM notificaciones_enviadas"))
     db.execute(text("DELETE FROM notificaciones"))
     db.execute(text("DELETE FROM reservas"))
     db.execute(text("DELETE FROM wod_movimientos"))

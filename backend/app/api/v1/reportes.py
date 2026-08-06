@@ -300,6 +300,24 @@ def obtener_reportes_analytics(
 
         # --- 14. PLANES VENDIDOS ESTE MES ---
         planes_vendidos = []
+        # --- 14b. SUSCRIPCIONES DEL MES (detalle por alumno/plan/fecha) ---
+        suscripciones_mes = []
+        sub_rows = db.execute(sql_text("""
+            SELECT u.nombre AS alumno_nombre, p.nombre AS plan_nombre, s.fecha_inicio
+            FROM suscripciones s
+            JOIN usuarios u ON s.usuario_id = u.id
+            JOIN planes p ON s.plan_id = p.id
+            WHERE s.tenant_id = :tid
+              AND s.fecha_inicio >= :inicio
+              AND s.fecha_inicio <= :fin
+            ORDER BY s.fecha_inicio DESC
+        """), {"tid": tenant_id, "inicio": inicio_mes, "fin": fin_mes}).fetchall()
+        for r in sub_rows:
+            suscripciones_mes.append({
+                "alumno_nombre": r.alumno_nombre,
+                "plan_nombre": r.plan_nombre,
+                "fecha_inicio": str(r.fecha_inicio)[:10] if r.fecha_inicio else None,
+            })
         plan_rows = db.execute(sql_text("""
             SELECT p.id, p.nombre, COUNT(s.id) as total
             FROM suscripciones s
@@ -335,6 +353,9 @@ def obtener_reportes_analytics(
 
         # --- RESPUESTA COMPLETA ---
         result = {
+            # Suscripciones del mes (detalle para modal)
+            "suscripcionesMes": suscripciones_mes,
+            "totalSuscripcionesMes": len(suscripciones_mes),
             # Membresía / Clientes
             "alumnosActivos": alumnos_activos,
             "nuevosAlumnosMes": nuevos_alumnos_mes,

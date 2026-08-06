@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 
 const AdminDashboard = () => {
+    const navigate = useNavigate();
     const { tenant_id, usuario_id } = useAuth();
     const [solicitudes, setSolicitudes] = useState([]);
     const [stats, setStats] = useState(null);
@@ -18,6 +20,10 @@ const AdminDashboard = () => {
     const [fidelizacionLoading, setFidelizacionLoading] = useState(true);
     const [ocupacionHoy, setOcupacionHoy] = useState([]);
     const [ocupacionLoading, setOcupacionLoading] = useState(true);
+    // Fidelización — modal detalle + dropdown acción rápida
+    const [fidelizacionModal, setFidelizacionModal] = useState(null); // 'riesgo' | 'vencimiento'
+    const [menuAccion, setMenuAccion] = useState(null); // alumno id con dropdown abierto
+    const [enviandoCorreo, setEnviandoCorreo] = useState(null); // alumno id enviando
 
     useEffect(() => {
         cargarSolicitudes();
@@ -112,11 +118,35 @@ const AdminDashboard = () => {
         }
     };
 
-    const handleAccionRapida = (alumno, tipo) => {
-        // STUB: Envío de email pendiente — falta configurar Resend
-        const actionName = tipo === 'riesgo' ? 'recuperación' : 'renovación';
-        setMsg(`💡 [STUB Email] Alerta de ${actionName} para ${alumno.nombre} — Pendiente configuración de Resend`);
+    const toggleMenuAccion = (id) => {
+        setMenuAccion(menuAccion === id ? null : id);
+    };
+
+    const enviarCorreoManual = async (alumno, tipo) => {
+        setMenuAccion(null);
+        setEnviandoCorreo(alumno.id);
+        setMsg('');
+        try {
+            // tipo_alerta: 'riesgo' → 'inactividad' | 'vencimiento' → 'vencimiento'
+            const tipoEnvio = tipo === 'riesgo' ? 'inactividad' : 'vencimiento';
+            const res = await api.post(`/api/v1/notificaciones-enviadas/enviar-manual`, null, {
+                params: { alumno_id: alumno.id, tipo: tipoEnvio }
+            });
+            if (res.data?.exito) {
+                setMsg(`✅ Correo de ${tipoEnvio === 'inactividad' ? 'recuperación' : 'renovación'} enviado a ${alumno.nombre}`);
+            } else {
+                setMsg(`❌ Error al enviar correo a ${alumno.nombre}`);
+            }
+        } catch (err) {
+            setMsg('❌ ' + (err.response?.data?.detail || err.message));
+        }
+        setEnviandoCorreo(null);
         setTimeout(() => setMsg(''), 5000);
+    };
+
+    const verDetalleAlumno = (id) => {
+        setMenuAccion(null);
+        window.location.href = '/admin/alumnos';
     };
 
     // Combinar alertas para la tabla de acción (máximo 10)
@@ -171,21 +201,21 @@ const AdminDashboard = () => {
                 {/* TARJETAS DE ESTADÍSTICAS */}
                 {stats && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-                        <div className="bg-white rounded-lg shadow p-5 border-l-4 border-blue-600">
+                        <button onClick={() => navigate('/admin/alumnos')} className="bg-white rounded-lg shadow p-5 border-l-4 border-blue-600 hover:shadow-md hover:border-blue-700 transition-all cursor-pointer text-left">
                             <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Alumnos Activos</p>
                             <p className="text-3xl font-bold text-blue-700 mt-1">{stats.alumnosActivos || 0}</p>
-                            <p className="text-xs text-gray-400 mt-1">Total miembros con plan vigente</p>
-                        </div>
-                        <div className="bg-white rounded-lg shadow p-5 border-l-4 border-green-600">
+                            <p className="text-xs text-gray-400 mt-1">Total miembros con plan vigente — Clic para ver</p>
+                        </button>
+                        <button onClick={() => setFidelizacionModal('membresias')} className="bg-white rounded-lg shadow p-5 border-l-4 border-green-600 hover:shadow-md hover:border-green-700 transition-all cursor-pointer text-left">
                             <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Membresías Mensuales</p>
                             <p className="text-3xl font-bold text-green-700 mt-1">{stats.membresiasMensuales || 0}</p>
                             <div className="flex items-center gap-1 mt-1">
                                 <span className={`text-xs font-bold ${(stats.crecimientoMensual || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                     {stats.crecimientoMensual > 0 ? '📈' : '📉'} {Math.abs(stats.crecimientoMensual || 0)}%
                                 </span>
-                                <span className="text-xs text-gray-400">vs mes anterior</span>
+                                <span className="text-xs text-gray-400">vs mes anterior — Clic para ver detalle</span>
                             </div>
-                        </div>
+                        </button>
                         <div className="bg-white rounded-lg shadow p-5 border-l-4 border-amber-600">
                             <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Ingreso Mensual</p>
                             <p className="text-3xl font-bold text-amber-700 mt-1">
@@ -203,11 +233,11 @@ const AdminDashboard = () => {
                             <p className="text-3xl font-bold text-indigo-700 mt-1">{stats.clasesImpartidas || 0}</p>
                             <p className="text-xs text-gray-400 mt-1">Clases realizadas este mes</p>
                         </div>
-                        <div className="bg-white rounded-lg shadow p-5 border-l-4 border-rose-600">
+                        <button onClick={() => document.getElementById('solicitudes-pendientes')?.scrollIntoView({ behavior: 'smooth' })} className="bg-white rounded-lg shadow p-5 border-l-4 border-rose-600 hover:shadow-md hover:border-rose-700 transition-all cursor-pointer text-left">
                             <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Solicitudes Pendientes</p>
                             <p className="text-3xl font-bold text-rose-700 mt-1">{solicitudes.length}</p>
-                            <p className="text-xs text-gray-400 mt-1">Esperando aprobación</p>
-                        </div>
+                            <p className="text-xs text-gray-400 mt-1">Esperando aprobación — Clic para ver</p>
+                        </button>
                     </div>
                 )}
 
@@ -248,27 +278,27 @@ const AdminDashboard = () => {
                 {!fidelizacionLoading && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Tarjeta Alumnos en Riesgo */}
-                        <div className="bg-white rounded-lg shadow p-5 border-l-4 border-red-600">
+                        <button onClick={() => setFidelizacionModal('riesgo')} className="bg-white rounded-lg shadow p-5 border-l-4 border-red-600 hover:shadow-md hover:border-red-700 transition-all cursor-pointer text-left">
                             <div className="flex items-center justify-between">
                                 <div>
                                     <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Alumnos en Riesgo</p>
                                     <p className="text-3xl font-bold text-red-700 mt-1">{alumnosRiesgo.length}</p>
-                                    <p className="text-xs text-gray-400 mt-1">Sin actividad {'>'} 7 días</p>
+                                    <p className="text-xs text-gray-400 mt-1">Sin actividad {'>'} 7 días — Clic para ver detalle</p>
                                 </div>
                                 <span className="text-4xl">⚠️</span>
                             </div>
-                        </div>
+                        </button>
                         {/* Tarjeta Vencimientos Inminentes */}
-                        <div className="bg-white rounded-lg shadow p-5 border-l-4 border-orange-600">
+                        <button onClick={() => setFidelizacionModal('vencimiento')} className="bg-white rounded-lg shadow p-5 border-l-4 border-orange-600 hover:shadow-md hover:border-orange-700 transition-all cursor-pointer text-left">
                             <div className="flex items-center justify-between">
                                 <div>
                                     <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Vencimientos Inminentes</p>
                                     <p className="text-3xl font-bold text-orange-700 mt-1">{vencimientos.length}</p>
-                                    <p className="text-xs text-gray-400 mt-1">Próximos 5 días</p>
+                                    <p className="text-xs text-gray-400 mt-1">Próximos 5 días — Clic para ver detalle</p>
                                 </div>
                                 <span className="text-4xl">⏰</span>
                             </div>
-                        </div>
+                        </button>
                     </div>
                 )}
 
@@ -306,12 +336,32 @@ const AdminDashboard = () => {
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4">
-                                                <button
-                                                    onClick={() => handleAccionRapida(a, a.tipo_alerta)}
-                                                    className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700"
-                                                >
-                                                    ⚡ Acción Rápida
-                                                </button>
+                                                <div className="relative inline-block">
+                                                    <button
+                                                        onClick={() => toggleMenuAccion(a.id)}
+                                                        disabled={enviandoCorreo === a.id}
+                                                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 disabled:opacity-50"
+                                                    >
+                                                        {enviandoCorreo === a.id ? '⏳ Enviando...' : '⚡ Acción Rápida'}
+                                                    </button>
+                                                    {menuAccion === a.id && (
+                                                        <div className="absolute right-0 mt-1 w-44 bg-zinc-900 rounded-lg shadow-xl border border-zinc-700 z-20 overflow-hidden">
+                                                            <button
+                                                                onClick={() => enviarCorreoManual(a, a.tipo_alerta)}
+                                                                disabled={enviandoCorreo === a.id}
+                                                                className="w-full px-4 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+                                                            >
+                                                                ✉️ Enviar correo
+                                                            </button>
+                                                            <button
+                                                                onClick={() => verDetalleAlumno(a.id)}
+                                                                className="w-full px-4 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-800 border-t border-zinc-700"
+                                                            >
+                                                                👤 Ver detalle
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
@@ -322,7 +372,7 @@ const AdminDashboard = () => {
                 )}
 
                 {/* SOLICITUDES PENDIENTES */}
-                <div className="bg-white rounded-lg shadow overflow-hidden">
+                <div id="solicitudes-pendientes" className="bg-white rounded-lg shadow overflow-hidden">
                     <div className="px-6 py-4 border-b border-gray-200">
                         <h2 className="text-lg font-bold text-gray-900">
                             📋 Solicitudes Pendientes {solicitudes.length > 0 && `(${solicitudes.length})`}
@@ -425,6 +475,97 @@ const AdminDashboard = () => {
                                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-bold">
                                 📥 Descargar
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL DETALLE FIDELIZACIÓN */}
+            {fidelizacionModal && (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+                    onClick={() => setFidelizacionModal(null)}>
+                    <div className="bg-zinc-900 rounded-xl max-w-2xl max-h-[90vh] overflow-auto shadow-2xl border border-zinc-700"
+                        onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-zinc-700 flex justify-between items-center">
+                            <h3 className="font-bold text-zinc-100">
+                                {fidelizacionModal === 'riesgo' ? `⚠️ Alumnos en Riesgo (${alumnosRiesgo.length})` : `⏰ Vencimientos Inminentes (${vencimientos.length})`}
+                            </h3>
+                            <button onClick={() => setFidelizacionModal(null)}
+                                className="text-zinc-400 hover:text-zinc-200 text-xl font-bold">✕</button>
+                        </div>
+                        <div className="p-4">
+                            {fidelizacionModal === 'membresias' ? (
+                                !stats?.suscripcionesMes || stats.suscripcionesMes.length === 0 ? (
+                                    <p className="text-center text-zinc-500 py-6">No hay membresías vendidas este mes</p>
+                                ) : (
+                                    <table className="w-full">
+                                        <thead className="bg-zinc-800">
+                                            <tr>
+                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Alumno</th>
+                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Plan</th>
+                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Fecha</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-zinc-800">
+                                            {(stats.suscripcionesMes || []).map((s, idx) => (
+                                                <tr key={idx}>
+                                                    <td className="px-4 py-2.5 text-sm font-medium text-zinc-100">{s.alumno_nombre}</td>
+                                                    <td className="px-4 py-2.5 text-sm text-green-400">{s.plan_nombre}</td>
+                                                    <td className="px-4 py-2.5 text-sm text-zinc-400">{s.fecha_inicio || '-'}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )
+                            ) : fidelizacionModal === 'riesgo' ? (
+                                alumnosRiesgo.length === 0 ? (
+                                    <p className="text-center text-zinc-500 py-6">No hay alumnos en riesgo</p>
+                                ) : (
+                                    <table className="w-full">
+                                        <thead className="bg-zinc-800">
+                                            <tr>
+                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Nombre</th>
+                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Correo</th>
+                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Inactividad</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-zinc-800">
+                                            {alumnosRiesgo.map(a => (
+                                                <tr key={a.id}>
+                                                    <td className="px-4 py-2.5 text-sm font-medium text-zinc-100">{a.nombre}</td>
+                                                    <td className="px-4 py-2.5 text-sm text-zinc-400">{a.correo}</td>
+                                                    <td className="px-4 py-2.5 text-sm text-red-400 font-medium">
+                                                        {a.tiene_historial === false ? 'Sin actividad registrada' : `${a.dias_ausente} días`}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )
+                            ) : (
+                                vencimientos.length === 0 ? (
+                                    <p className="text-center text-zinc-500 py-6">No hay vencimientos próximos</p>
+                                ) : (
+                                    <table className="w-full">
+                                        <thead className="bg-zinc-800">
+                                            <tr>
+                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Nombre</th>
+                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Correo</th>
+                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Días para vencer</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-zinc-800">
+                                            {vencimientos.map(v => (
+                                                <tr key={v.usuario_id}>
+                                                    <td className="px-4 py-2.5 text-sm font-medium text-zinc-100">{v.nombre}</td>
+                                                    <td className="px-4 py-2.5 text-sm text-zinc-400">{v.correo}</td>
+                                                    <td className="px-4 py-2.5 text-sm text-orange-400 font-medium">{v.dias_restantes} días</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )
+                            )}
                         </div>
                     </div>
                 </div>

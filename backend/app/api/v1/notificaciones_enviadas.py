@@ -87,6 +87,44 @@ def listar_notificaciones_enviadas(
     return {"total": total, "items": result, "skip": skip, "limit": limit}
 
 
+@router.post("/enviar-manual")
+def enviar_manual(
+    alumno_id: int,
+    tipo: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Envía correo manual (riesgo→inactividad, vencimiento→vencimiento plan) y registra."""
+    if tipo not in TIPOS_VALIDOS:
+        raise HTTPException(400, f"tipo debe ser uno de {sorted(TIPOS_VALIDOS)}")
+    alumno = db.query(Usuario).filter(Usuario.id == alumno_id).first()
+    if not alumno:
+        raise HTTPException(404, "Alumno no encontrado")
+    alumno_dict = {"nombre": alumno.nombre, "correo": alumno.correo, "id": alumno.id, "plan_nombre": "plan"}
+    exito = False
+    try:
+        if tipo == "inactividad":
+            exito = enviar_email_fidelizacion(alumno.nombre, alumno.correo, 7)
+        elif tipo == "vencimiento":
+            from app.models.suscripcion import Suscripcion
+            sus = db.query(Suscripcion).filter(
+                Suscripcion.usuario_id == alumno.id,
+                Suscripcion.estado == "activo",
+            ).order_by(Suscripcion.fecha_expiracion.desc()).first()
+            fecha = sus.fecha_expiracion if sus else None
+            exito = enviar_email_vencimiento_plan(alumno_dict, fecha)
+        else:
+            raise HTTPException(400, f"tipo no soportado para envio manual: {tipo}")
+    except Exception as e:
+        exito = False
+        detalle = str(e)
+        _registrar(db, alumno_id, tipo, "fallido", detalle)
+        return {"exito": False, "estado": "fallido", "detalle_error": detalle}
+    _registrar(db, alumno_id, tipo, "enviado" if exito else "fallido",
+               None if exito else "Error de Resend")
+    return {"exito": exito, "estado": "enviado" if exito else "fallido"}
+
+
 @router.post("/{notif_id}/reenviar")
 def reenviar_notificacion(
     notif_id: int,

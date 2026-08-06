@@ -2,8 +2,9 @@
 import os
 import base64
 import logging
+import smtplib
+from email.message import EmailMessage
 from datetime import datetime, date
-import resend
 
 logger = logging.getLogger("uvicorn.email")
 
@@ -74,25 +75,45 @@ def _registrar_envio(alumno_id, tipo, estado, detalle_error=None):
 
 
 def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, tipo: str = "") -> bool:
-    """Envia via Resend API v2 con logo como attachment inline + log en BD."""
+    """Envia via Gmail SMTP (puerto 587, TLS) con logo inline + log en BD."""
     try:
-        resend.api_key = os.environ.get("RESEND_API_KEY", "")
-        if not resend.api_key:
-            from app.core.config import settings
-            resend.api_key = settings.RESEND_API_KEY
-        params = {
-            "from": FROM_EMAIL,
-            "to": [destinatario],
-            "subject": asunto,
-            "html": html,
-            "attachments": [_logo_attachment()],
-        }
-        resend.Emails.send(params)
+        from app.core.config import settings
+        smtp_user = os.environ.get("GMAIL_SMTP_USER", settings.GMAIL_SMTP_USER)
+        smtp_pass = os.environ.get("GMAIL_SMTP_APP_PASSWORD", settings.GMAIL_SMTP_APP_PASSWORD)
+        remitente = f'"Urban Training Box" <{smtp_user}>'
+
+        msg = EmailMessage()
+        msg["From"] = remitente
+        msg["To"] = destinatario
+        msg["Subject"] = asunto
+        msg.set_content("Correo de Urban Training Box. Si no ves el contenido HTML, abre este correo en tu navegador.")
+        msg.add_alternative(html, subtype="html")
+
+        # Adjuntar el logo INLINE usando add_related (método oficial de Python)
+        html_part = msg.get_payload()[-1]  # la parte HTML recién agregada
+        att = _logo_attachment()
+        if att:
+            try:
+                with open(LOGO_PATH, "rb") as f:
+                    html_part.add_related(
+                        f.read(),
+                        maintype="image",
+                        subtype="jpeg",
+                        cid=f"<{att['content_id']}>",
+                    )
+            except Exception as e:
+                logger.warning(f"No se pudo adjuntar logo inline: {e}")
+
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(smtp_user, destinatario, msg.as_string())
+
         logger.info(f"Correo enviado a {destinatario}: {asunto}")
         _registrar_envio(alumno_id, tipo, "enviado") if alumno_id else None
         return True
     except Exception as e:
-        logger.error(f"[RESEND ERROR] {destinatario}: {e}")
+        logger.error(f"[SMTP ERROR] {destinatario}: {e}")
         _registrar_envio(alumno_id, tipo, "fallido", str(e)) if alumno_id else None
         return False
 
