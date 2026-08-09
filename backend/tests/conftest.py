@@ -55,6 +55,13 @@ TENANT_ID = 1
 HOY = date.today()
 HOY_STR = str(HOY)
 
+# â”€â”€ Fecha de referencia para tests que necesitan clases CONFIRMADAS â”€â”€
+# REGLA DE NEGOCIO: los domingos NO hay clases (dia de descanso).
+# DIA_REF = HOY si HOY no es domingo, si no, el proximo lunes (HOY+1).
+# Esto garantiza que los tests c06-c14SIEMPRE tengan clases disponibles.
+DIA_REF = HOY if HOY.weekday() != 6 else HOY + timedelta(days=1)
+DIA_REF_STR = str(DIA_REF)
+
 
 @pytest.fixture(scope="session")
 def base_url():

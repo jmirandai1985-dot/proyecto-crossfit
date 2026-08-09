@@ -55,11 +55,11 @@ const Disciplinas = () => {
         <Layout>
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
-                    <div><h1 className="text-3xl font-bold text-gray-900">Disciplinas</h1><p className="text-gray-600 mt-1">Administra las disciplinas del box</p></div>
+                    <div><h1 className="text-3xl font-bold text-zinc-100">Disciplinas</h1><p className="text-zinc-400 mt-1">Administra las disciplinas del box</p></div>
                     <button onClick={openNew} className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium text-sm">+ Nueva Disciplina</button>
                 </div>
 
-                <div className="bg-white rounded-lg shadow overflow-hidden">
+                <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full">
                             <thead className="bg-blue-900 text-white">
@@ -70,14 +70,14 @@ const Disciplinas = () => {
                                     <th className="px-6 py-3 text-left text-sm font-medium">Acciones</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-200">
+                            <tbody className="divide-y divide-zinc-800">
                                 {items.length === 0 ? (
-                                    <tr><td colSpan="4" className="px-6 py-8 text-center text-gray-600">No hay disciplinas</td></tr>
+                                    <tr><td colSpan="4" className="px-6 py-8 text-center text-zinc-400">No hay disciplinas</td></tr>
                                 ) : items.map((d, i) => (
-                                    <tr key={d.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{d.nombre}</td>
+                                    <tr key={d.id} className={i % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
+                                        <td className="px-6 py-4 text-sm font-medium text-zinc-100">{d.nombre}</td>
                                         <td className="px-6 py-4 text-sm">
-                                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${d.requiere_coach ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'}`}>
+                                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${d.requiere_coach ? 'bg-blue-500/20 text-blue-300' : 'bg-zinc-800 text-zinc-400'}`}>
                                                 {d.requiere_coach ? '🤼 Requiere coach' : '🏠 Self-service'}
                                             </span>
                                         </td>
@@ -87,7 +87,7 @@ const Disciplinas = () => {
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 text-sm space-x-2">
-                                            <button onClick={() => openEdit(d)} className="px-3 py-1 text-blue-600 hover:bg-blue-50 rounded text-xs font-medium">Editar</button>
+                                            <button onClick={() => openEdit(d)} className="px-3 py-1 text-blue-400 hover:bg-zinc-800 rounded text-xs font-medium">Editar</button>
                                             <button onClick={() => handleDelete(d.id)} className="px-3 py-1 text-red-600 hover:bg-red-50 rounded text-xs font-medium">Eliminar</button>
                                         </td>
                                     </tr>
@@ -99,21 +99,21 @@ const Disciplinas = () => {
 
                 {showForm && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                        <div className="bg-white rounded-lg p-6 w-full max-w-md">
+                        <div className="bg-zinc-900 rounded-lg p-6 w-full max-w-md">
                             <h2 className="text-xl font-bold mb-4">{editingId ? 'Editar Disciplina' : 'Nueva Disciplina'}</h2>
                             <form onSubmit={handleSubmit} className="space-y-4">
-                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Nombre</label>
+                                <div><label className="block text-sm font-medium text-zinc-300 mb-1">Nombre</label>
                                     <input type="text" value={formData.nombre} onChange={e => setFormData({ ...formData, nombre: e.target.value })} required className="w-full border rounded px-3 py-2" /></div>
                                 <div className="flex items-center gap-2">
                                     <input type="checkbox" checked={formData.requiere_coach} onChange={e => setFormData({ ...formData, requiere_coach: e.target.checked })} id="requiere_coach" />
-                                    <label htmlFor="requiere_coach" className="text-sm text-gray-700">🤼 Requiere Coach</label>
+                                    <label htmlFor="requiere_coach" className="text-sm text-zinc-300">🤼 Requiere Coach</label>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <input type="checkbox" checked={formData.activo} onChange={e => setFormData({ ...formData, activo: e.target.checked })} id="activo" />
-                                    <label htmlFor="activo" className="text-sm text-gray-700">Activo</label>
+                                    <label htmlFor="activo" className="text-sm text-zinc-300">Activo</label>
                                 </div>
                                 <div className="flex gap-3 justify-end pt-2">
-                                    <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">Cancelar</button>
+                                    <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-zinc-400 hover:bg-zinc-800 rounded">Cancelar</button>
                                     <button type="submit" className="px-4 py-2 bg-blue-900 text-white rounded hover:bg-blue-800">{editingId ? 'Guardar' : 'Crear'}</button>
                                 </div>
                             </form>

@@ -140,7 +140,11 @@ def listar_clases(
                c.cupo_maximo, c.asistentes_confirmados, c.cancelada,
                c.horario_base_id, c.tenant_id, c.created_at, c.updated_at,
                d.nombre AS disciplina_nombre,
-               u.nombre AS coach_nombre
+               u.nombre AS coach_nombre,
+               CASE WHEN EXISTS (
+                   SELECT 1 FROM cobertura_emergencia ce
+                   WHERE ce.clase_id = c.id AND ce.tenant_id = c.tenant_id
+               ) THEN true ELSE false END AS cobertura_emergencia
         FROM clases c
         LEFT JOIN disciplinas d ON c.disciplina_id = d.id
         LEFT JOIN usuarios u ON c.coach_id = u.id
@@ -196,6 +200,7 @@ def listar_clases(
             "cancelada": row.cancelada,
             "disciplina_nombre": row.disciplina_nombre,
             "coach_nombre": coach_nombre,
+            "cobertura_emergencia": bool(row.cobertura_emergencia),
         })
     return result
 

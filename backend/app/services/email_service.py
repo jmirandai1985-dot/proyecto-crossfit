@@ -12,6 +12,9 @@ BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__
 LOGO_PATH = os.path.join(os.path.dirname(BACKEND_DIR), "logo", "images (17).jfif")
 FROM_EMAIL = "Urban Training Box <onboarding@resend.dev>"
 
+# Último error SMTP (para exponer detalle útil al admin en el Dashboard)
+ULTIMO_ERROR_SMTP = None
+
 LOGO_CID = "logo-urban-training"
 LOGO_FILENAME = "logo-urban-training.jpg"
 
@@ -113,6 +116,8 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
         _registrar_envio(alumno_id, tipo, "enviado") if alumno_id else None
         return True
     except Exception as e:
+        global ULTIMO_ERROR_SMTP
+        ULTIMO_ERROR_SMTP = str(e)
         logger.error(f"[SMTP ERROR] {destinatario}: {e}")
         _registrar_envio(alumno_id, tipo, "fallido", str(e)) if alumno_id else None
         return False

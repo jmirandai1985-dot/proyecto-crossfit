@@ -135,7 +135,8 @@ const AdminDashboard = () => {
             if (res.data?.exito) {
                 setMsg(`✅ Correo de ${tipoEnvio === 'inactividad' ? 'recuperación' : 'renovación'} enviado a ${alumno.nombre}`);
             } else {
-                setMsg(`❌ Error al enviar correo a ${alumno.nombre}`);
+                const detalle = res.data?.detalle_error || 'No se pudo enviar el correo via Gmail SMTP (revisar credenciales o destinatario).';
+                setMsg(`❌ Error al enviar correo a ${alumno.nombre}: ${detalle}`);
             }
         } catch (err) {
             setMsg('❌ ' + (err.response?.data?.detail || err.message));
@@ -173,7 +174,7 @@ const AdminDashboard = () => {
             <Layout>
                 <div className="flex items-center justify-center h-96">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900 mx-auto mb-4" />
-                    <p className="text-gray-600">Cargando...</p>
+                    <p className="text-zinc-400">Cargando...</p>
                 </div>
             </Layout>
         );
@@ -184,8 +185,8 @@ const AdminDashboard = () => {
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h1 className="text-3xl font-bold text-gray-900">Dashboard Administrativo</h1>
-                        <p className="text-gray-600">Panel de gestión de membresías y fidelización</p>
+                        <h1 className="text-3xl font-bold text-zinc-100">Dashboard Administrativo</h1>
+                        <p className="text-zinc-400">Panel de gestión de membresías y fidelización</p>
                     </div>
                     <button onClick={() => { cargarSolicitudes(); cargarFidelizacion(); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold">
                         🔄 Recargar
@@ -193,7 +194,7 @@ const AdminDashboard = () => {
                 </div>
 
                 {msg && (
-                    <div className={`p-4 rounded-lg font-bold shadow-lg transition-all ${msg.includes('✅') ? 'bg-green-100 text-green-800' : msg.includes('❌') ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
+                    <div className={`p-4 rounded-lg font-bold shadow-lg transition-all ${msg.includes('✅') ? 'bg-green-100 text-green-800' : msg.includes('❌') ? 'bg-red-100 text-red-800' : 'bg-blue-500/20 text-blue-300'}`}>
                         {msg}
                     </div>
                 )}
@@ -201,66 +202,66 @@ const AdminDashboard = () => {
                 {/* TARJETAS DE ESTADÍSTICAS */}
                 {stats && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-                        <button onClick={() => navigate('/admin/alumnos')} className="bg-white rounded-lg shadow p-5 border-l-4 border-blue-600 hover:shadow-md hover:border-blue-700 transition-all cursor-pointer text-left">
-                            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Alumnos Activos</p>
-                            <p className="text-3xl font-bold text-blue-700 mt-1">{stats.alumnosActivos || 0}</p>
-                            <p className="text-xs text-gray-400 mt-1">Total miembros con plan vigente — Clic para ver</p>
+                        <button onClick={() => navigate('/admin/alumnos')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-blue-600 hover:shadow-md hover:border-blue-700 transition-all cursor-pointer text-left">
+                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos Activos</p>
+                            <p className="text-3xl font-bold text-blue-400 mt-1">{stats.alumnosActivos || 0}</p>
+                            <p className="text-xs text-zinc-500 mt-1">Total miembros con plan vigente — Clic para ver</p>
                         </button>
-                        <button onClick={() => setFidelizacionModal('membresias')} className="bg-white rounded-lg shadow p-5 border-l-4 border-green-600 hover:shadow-md hover:border-green-700 transition-all cursor-pointer text-left">
-                            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Membresías Mensuales</p>
+                        <button onClick={() => setFidelizacionModal('membresias')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-green-600 hover:shadow-md hover:border-green-700 transition-all cursor-pointer text-left">
+                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Membresías Mensuales</p>
                             <p className="text-3xl font-bold text-green-700 mt-1">{stats.membresiasMensuales || 0}</p>
                             <div className="flex items-center gap-1 mt-1">
                                 <span className={`text-xs font-bold ${(stats.crecimientoMensual || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                     {stats.crecimientoMensual > 0 ? '📈' : '📉'} {Math.abs(stats.crecimientoMensual || 0)}%
                                 </span>
-                                <span className="text-xs text-gray-400">vs mes anterior — Clic para ver detalle</span>
+                                <span className="text-xs text-zinc-500">vs mes anterior — Clic para ver detalle</span>
                             </div>
                         </button>
-                        <div className="bg-white rounded-lg shadow p-5 border-l-4 border-amber-600">
-                            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Ingreso Mensual</p>
+                        <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-amber-600">
+                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Ingreso Mensual</p>
                             <p className="text-3xl font-bold text-amber-700 mt-1">
                                 ${(stats.ingresoMensual || 0).toLocaleString('es-CL')}
                             </p>
-                            <p className="text-xs text-gray-400 mt-1">Ingresos del mes actual</p>
+                            <p className="text-xs text-zinc-500 mt-1">Ingresos del mes actual</p>
                         </div>
-                        <div className="bg-white rounded-lg shadow p-5 border-l-4 border-purple-600">
-                            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Asistencia Promedio</p>
+                        <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-purple-600">
+                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Asistencia Promedio</p>
                             <p className="text-3xl font-bold text-purple-700 mt-1">{stats.asistenciaPromedio || 0}%</p>
-                            <p className="text-xs text-gray-400 mt-1">Ocupación en clases</p>
+                            <p className="text-xs text-zinc-500 mt-1">Ocupación en clases</p>
                         </div>
-                        <div className="bg-white rounded-lg shadow p-5 border-l-4 border-indigo-600">
-                            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Clases Impartidas</p>
+                        <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-indigo-600">
+                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Clases Impartidas</p>
                             <p className="text-3xl font-bold text-indigo-700 mt-1">{stats.clasesImpartidas || 0}</p>
-                            <p className="text-xs text-gray-400 mt-1">Clases realizadas este mes</p>
+                            <p className="text-xs text-zinc-500 mt-1">Clases realizadas este mes</p>
                         </div>
-                        <button onClick={() => document.getElementById('solicitudes-pendientes')?.scrollIntoView({ behavior: 'smooth' })} className="bg-white rounded-lg shadow p-5 border-l-4 border-rose-600 hover:shadow-md hover:border-rose-700 transition-all cursor-pointer text-left">
-                            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Solicitudes Pendientes</p>
+                        <button onClick={() => document.getElementById('solicitudes-pendientes')?.scrollIntoView({ behavior: 'smooth' })} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-rose-600 hover:shadow-md hover:border-rose-700 transition-all cursor-pointer text-left">
+                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Solicitudes Pendientes</p>
                             <p className="text-3xl font-bold text-rose-700 mt-1">{solicitudes.length}</p>
-                            <p className="text-xs text-gray-400 mt-1">Esperando aprobación — Clic para ver</p>
+                            <p className="text-xs text-zinc-500 mt-1">Esperando aprobación — Clic para ver</p>
                         </button>
                     </div>
                 )}
 
                 {/* WIDGET OCUPACION CLASES HOY */}
-                <div className="bg-white rounded-lg shadow p-5">
-                    <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <div className="bg-zinc-900 rounded-lg shadow p-5">
+                    <h2 className="text-lg font-bold text-zinc-100 flex items-center gap-2">
                         📅 Clases de hoy — estado de ocupación
                     </h2>
-                    <p className="text-xs text-gray-500 mt-0.5">CrossFit y Levantamiento Olímpico, solo clases con coach asignado</p>
+                    <p className="text-xs text-zinc-400 mt-0.5">CrossFit y Levantamiento Olímpico, solo clases con coach asignado</p>
                     {ocupacionLoading ? (
                         <div className="flex justify-center py-6"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-900"></div></div>
                     ) : ocupacionHoy.length === 0 ? (
-                        <div className="py-6 text-center text-gray-400 text-sm">Sin clases de CrossFit/Levantamiento con coach asignado hoy</div>
+                        <div className="py-6 text-center text-zinc-500 text-sm">Sin clases de CrossFit/Levantamiento con coach asignado hoy</div>
                     ) : (
                         <div className="mt-4 space-y-3">
                             {ocupacionHoy.map(c => (
                                 <div key={c.id} className="flex items-center gap-4">
-                                    <div className="text-sm font-semibold text-gray-700 w-16 shrink-0">{c.hora} hrs</div>
-                                    <div className="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden">
+                                    <div className="text-sm font-semibold text-zinc-300 w-16 shrink-0">{c.hora} hrs</div>
+                                    <div className="flex-1 bg-zinc-800 rounded-full h-4 overflow-hidden">
                                         <div className={`h-full rounded-full transition-all ${c.color === 'red' ? 'bg-red-500' : c.color === 'amber' ? 'bg-amber-500' : 'bg-green-500'}`}
                                             style={{ width: `${Math.min(c.porcentaje, 100)}%` }} />
                                     </div>
-                                    <div className="text-sm text-gray-600 w-20 shrink-0">{c.ocupados}/{c.cupo}</div>
+                                    <div className="text-sm text-zinc-400 w-20 shrink-0">{c.ocupados}/{c.cupo}</div>
                                     <div className="text-sm font-semibold w-14 shrink-0">{c.porcentaje}%</div>
                                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0
                                         ${c.color === 'red' ? 'bg-red-100 text-red-800' :
@@ -278,23 +279,23 @@ const AdminDashboard = () => {
                 {!fidelizacionLoading && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Tarjeta Alumnos en Riesgo */}
-                        <button onClick={() => setFidelizacionModal('riesgo')} className="bg-white rounded-lg shadow p-5 border-l-4 border-red-600 hover:shadow-md hover:border-red-700 transition-all cursor-pointer text-left">
+                        <button onClick={() => setFidelizacionModal('riesgo')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-red-600 hover:shadow-md hover:border-red-700 transition-all cursor-pointer text-left">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Alumnos en Riesgo</p>
+                                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos en Riesgo</p>
                                     <p className="text-3xl font-bold text-red-700 mt-1">{alumnosRiesgo.length}</p>
-                                    <p className="text-xs text-gray-400 mt-1">Sin actividad {'>'} 7 días — Clic para ver detalle</p>
+                                    <p className="text-xs text-zinc-500 mt-1">Sin actividad {'>'} 7 días — Clic para ver detalle</p>
                                 </div>
                                 <span className="text-4xl">⚠️</span>
                             </div>
                         </button>
                         {/* Tarjeta Vencimientos Inminentes */}
-                        <button onClick={() => setFidelizacionModal('vencimiento')} className="bg-white rounded-lg shadow p-5 border-l-4 border-orange-600 hover:shadow-md hover:border-orange-700 transition-all cursor-pointer text-left">
+                        <button onClick={() => setFidelizacionModal('vencimiento')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-orange-600 hover:shadow-md hover:border-orange-700 transition-all cursor-pointer text-left">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Vencimientos Inminentes</p>
+                                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Vencimientos Inminentes</p>
                                     <p className="text-3xl font-bold text-orange-700 mt-1">{vencimientos.length}</p>
-                                    <p className="text-xs text-gray-400 mt-1">Próximos 5 días — Clic para ver detalle</p>
+                                    <p className="text-xs text-zinc-500 mt-1">Próximos 5 días — Clic para ver detalle</p>
                                 </div>
                                 <span className="text-4xl">⏰</span>
                             </div>
@@ -304,9 +305,9 @@ const AdminDashboard = () => {
 
                 {/* PANEL DE ACCIÓN Y FIDELIZACIÓN */}
                 {alertsCombinadas.length > 0 && (
-                    <div className="bg-white rounded-lg shadow overflow-hidden">
-                        <div className="px-6 py-4 border-b border-gray-200">
-                            <h2 className="text-lg font-bold text-gray-900">
+                    <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
+                        <div className="px-6 py-4 border-b border-zinc-800">
+                            <h2 className="text-lg font-bold text-zinc-100">
                                 🎯 Panel de Acción y Fidelización ({alertsCombinadas.length} alertas)
                             </h2>
                         </div>
@@ -320,13 +321,13 @@ const AdminDashboard = () => {
                                         <th className="px-6 py-3 text-left text-sm font-medium">Acción</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-gray-200">
+                                <tbody className="divide-y divide-zinc-800">
                                     {alertsCombinadas.map((a, idx) => (
-                                        <tr key={`${a.tipo_alerta}-${a.id}`} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                        <tr key={`${a.tipo_alerta}-${a.id}`} className={idx % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
                                             <td className="px-6 py-4">
-                                                <p className="text-sm font-bold text-gray-900">{a.nombre}</p>
+                                                <p className="text-sm font-bold text-zinc-100">{a.nombre}</p>
                                             </td>
-                                            <td className="px-6 py-4 text-sm text-gray-500">{a.correo}</td>
+                                            <td className="px-6 py-4 text-sm text-zinc-400">{a.correo}</td>
                                             <td className="px-6 py-4">
                                                 <span className={`inline-block px-2 py-1 text-xs font-bold rounded-full ${a.tipo_alerta === 'riesgo'
                                                     ? 'bg-red-100 text-red-800'
@@ -372,14 +373,14 @@ const AdminDashboard = () => {
                 )}
 
                 {/* SOLICITUDES PENDIENTES */}
-                <div id="solicitudes-pendientes" className="bg-white rounded-lg shadow overflow-hidden">
-                    <div className="px-6 py-4 border-b border-gray-200">
-                        <h2 className="text-lg font-bold text-gray-900">
+                <div id="solicitudes-pendientes" className="bg-zinc-900 rounded-lg shadow overflow-hidden">
+                    <div className="px-6 py-4 border-b border-zinc-800">
+                        <h2 className="text-lg font-bold text-zinc-100">
                             📋 Solicitudes Pendientes {solicitudes.length > 0 && `(${solicitudes.length})`}
                         </h2>
                     </div>
                     {solicitudes.length === 0 ? (
-                        <div className="p-8 text-center text-gray-500">No hay solicitudes pendientes</div>
+                        <div className="p-8 text-center text-zinc-400">No hay solicitudes pendientes</div>
                     ) : (
                         <div className="overflow-x-auto">
                             <table className="w-full">
@@ -394,25 +395,25 @@ const AdminDashboard = () => {
                                         <th className="px-6 py-3 text-left text-sm font-medium">Acciones</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-gray-200">
+                                <tbody className="divide-y divide-zinc-800">
                                     {solicitudes.map((s, idx) => (
-                                        <tr key={s.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                        <tr key={s.id} className={idx % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
                                             <td className="px-6 py-4">
-                                                <p className="text-sm font-bold text-gray-900">{s.alumno_nombre}</p>
-                                                <p className="text-xs text-gray-500">{s.alumno_email}</p>
+                                                <p className="text-sm font-bold text-zinc-100">{s.alumno_nombre}</p>
+                                                <p className="text-xs text-zinc-400">{s.alumno_email}</p>
                                             </td>
-                                            <td className="px-6 py-4 text-sm text-gray-900">{s.plan_nombre}</td>
+                                            <td className="px-6 py-4 text-sm text-zinc-100">{s.plan_nombre}</td>
                                             <td className="px-6 py-4 text-sm font-bold text-green-700">
                                                 ${(s.plan_precio || 0).toLocaleString('es-CL')}
                                             </td>
                                             <td className="px-6 py-4">
                                                 {s.voucher_url ? (
                                                     <button onClick={() => setVoucherModal({ open: true, url: s.voucher_url, solicitud_id: s.id })}
-                                                        className="text-blue-600 underline text-xs hover:text-blue-800">
+                                                        className="text-blue-400 underline text-xs hover:text-blue-300">
                                                         📎 Ver Voucher
                                                     </button>
                                                 ) : (
-                                                    <span className="text-gray-400 text-xs">Sin voucher</span>
+                                                    <span className="text-zinc-500 text-xs">Sin voucher</span>
                                                 )}
                                             </td>
                                             <td className="px-6 py-4">
@@ -422,10 +423,10 @@ const AdminDashboard = () => {
                                                         🎓 Ver Certificado
                                                     </button>
                                                 ) : (
-                                                    <span className="text-gray-400 text-xs">—</span>
+                                                    <span className="text-zinc-500 text-xs">—</span>
                                                 )}
                                             </td>
-                                            <td className="px-6 py-4 text-sm text-gray-500">
+                                            <td className="px-6 py-4 text-sm text-zinc-400">
                                                 {s.created_at ? new Date(s.created_at).toLocaleDateString('es-CL') : '-'}
                                             </td>
                                             <td className="px-6 py-4">
@@ -456,12 +457,12 @@ const AdminDashboard = () => {
             {voucherModal.open && (
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
                     onClick={() => setVoucherModal({ open: false, url: '', solicitud_id: null })}>
-                    <div className="bg-white rounded-xl max-w-2xl max-h-[90vh] overflow-auto shadow-2xl"
+                    <div className="bg-zinc-900 rounded-xl max-w-2xl max-h-[90vh] overflow-auto shadow-2xl"
                         onClick={e => e.stopPropagation()}>
                         <div className="p-4 border-b flex justify-between items-center">
-                            <h3 className="font-bold text-gray-900">📎 Voucher de Pago</h3>
+                            <h3 className="font-bold text-zinc-100">📎 Voucher de Pago</h3>
                             <button onClick={() => setVoucherModal({ open: false, url: '', solicitud_id: null })}
-                                className="text-gray-500 hover:text-gray-700 text-xl font-bold">✕</button>
+                                className="text-zinc-400 hover:text-zinc-300 text-xl font-bold">✕</button>
                         </div>
                         <div className="p-4">
                             {voucherModal.url.match(/\.(pdf)$/i) ? (
@@ -575,15 +576,15 @@ const AdminDashboard = () => {
             {rechazoModal.open && (
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
                     onClick={() => setRechazoModal({ open: false, solicitud_id: null, motivo: '' })}>
-                    <div className="bg-white rounded-xl max-w-md w-full shadow-2xl"
+                    <div className="bg-zinc-900 rounded-xl max-w-md w-full shadow-2xl"
                         onClick={e => e.stopPropagation()}>
                         <div className="p-4 border-b flex justify-between items-center">
-                            <h3 className="font-bold text-gray-900">❌ Rechazar Solicitud</h3>
+                            <h3 className="font-bold text-zinc-100">❌ Rechazar Solicitud</h3>
                             <button onClick={() => setRechazoModal({ open: false, solicitud_id: null, motivo: '' })}
-                                className="text-gray-500 hover:text-gray-700 text-xl font-bold">✕</button>
+                                className="text-zinc-400 hover:text-zinc-300 text-xl font-bold">✕</button>
                         </div>
                         <div className="p-4 space-y-4">
-                            <p className="text-sm text-gray-600">Indica el motivo del rechazo:</p>
+                            <p className="text-sm text-zinc-400">Indica el motivo del rechazo:</p>
                             <textarea
                                 value={rechazoModal.motivo}
                                 onChange={e => setRechazoModal(prev => ({ ...prev, motivo: e.target.value }))}
@@ -593,7 +594,7 @@ const AdminDashboard = () => {
                             />
                             <div className="flex gap-2 justify-end">
                                 <button onClick={() => setRechazoModal({ open: false, solicitud_id: null, motivo: '' })}
-                                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-bold">
+                                    className="px-4 py-2 bg-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-600 text-sm font-bold">
                                     Cancelar
                                 </button>
                                 <button onClick={() => {

@@ -91,7 +91,7 @@ const Bazar = () => {
                 <div className="flex items-center justify-center h-96">
                     <div className="text-center">
                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900 mx-auto mb-4"></div>
-                        <p className="text-gray-600">Cargando inventario...</p>
+                        <p className="text-zinc-400">Cargando inventario...</p>
                     </div>
                 </div>
             </Layout>
@@ -104,8 +104,8 @@ const Bazar = () => {
                 {/* Título */}
                 <div className="flex items-center justify-between">
                     <div>
-                        <h1 className="text-3xl font-bold text-gray-900">Bazar - Inventario</h1>
-                        <p className="text-gray-600 mt-1">Gestiona los productos disponibles en tu box</p>
+                        <h1 className="text-3xl font-bold text-zinc-100">Bazar - Inventario</h1>
+                        <p className="text-zinc-400 mt-1">Gestiona los productos disponibles en tu box</p>
                     </div>
                     <button
                         onClick={handleNuevoProducto}
@@ -117,19 +117,19 @@ const Bazar = () => {
 
                 {/* Estadísticas */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-blue-500">
-                        <p className="text-gray-600 text-sm font-medium">Total de Productos</p>
-                        <p className="text-3xl font-bold text-gray-900 mt-2">{productos.length}</p>
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-blue-500">
+                        <p className="text-zinc-400 text-sm font-medium">Total de Productos</p>
+                        <p className="text-3xl font-bold text-zinc-100 mt-2">{productos.length}</p>
                     </div>
-                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-green-500">
-                        <p className="text-gray-600 text-sm font-medium">Stock Total</p>
-                        <p className="text-3xl font-bold text-gray-900 mt-2">
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-green-500">
+                        <p className="text-zinc-400 text-sm font-medium">Stock Total</p>
+                        <p className="text-3xl font-bold text-zinc-100 mt-2">
                             {productos.reduce((sum, p) => sum + (p.stock || 0), 0)}
                         </p>
                     </div>
-                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-orange-500">
-                        <p className="text-gray-600 text-sm font-medium">Valor Inventario</p>
-                        <p className="text-3xl font-bold text-gray-900 mt-2">
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-orange-500">
+                        <p className="text-zinc-400 text-sm font-medium">Valor Inventario</p>
+                        <p className="text-3xl font-bold text-zinc-100 mt-2">
                             ${(productos.reduce((sum, p) => sum + (p.stock || 0) * (p.precio || 0), 0) / 1000000).toFixed(1)}M
                         </p>
                     </div>
@@ -139,7 +139,7 @@ const Bazar = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {productos.length > 0 ? (
                         productos.map((producto) => (
-                            <div key={producto.id} className="bg-white rounded-lg shadow hover:shadow-lg transition-shadow overflow-hidden">
+                            <div key={producto.id} className="bg-zinc-900 rounded-lg shadow hover:shadow-lg transition-shadow overflow-hidden">
                                 {/* Header con emoji */}
                                 <div className="h-40 bg-gradient-to-r from-blue-900 to-blue-800 flex items-center justify-center">
                                     <span className="text-6xl">{getProductoEmoji(producto.nombre)}</span>
@@ -149,15 +149,15 @@ const Bazar = () => {
                                 <div className="px-6 py-4 space-y-3">
                                     {/* Nombre */}
                                     <div>
-                                        <h3 className="text-lg font-bold text-gray-900">{producto.nombre}</h3>
+                                        <h3 className="text-lg font-bold text-zinc-100">{producto.nombre}</h3>
                                         {producto.descripcion && (
-                                            <p className="text-xs text-gray-500 mt-1 line-clamp-2">{producto.descripcion}</p>
+                                            <p className="text-xs text-zinc-400 mt-1 line-clamp-2">{producto.descripcion}</p>
                                         )}
                                     </div>
 
                                     {/* Stock */}
                                     <div className="flex items-center justify-between">
-                                        <span className="text-sm text-gray-600">Stock:</span>
+                                        <span className="text-sm text-zinc-400">Stock:</span>
                                         <span
                                             className={`px-3 py-1 rounded-full text-xs font-medium ${getStockColor(producto.stock || 0)}`}
                                         >
@@ -166,8 +166,8 @@ const Bazar = () => {
                                     </div>
 
                                     {/* Precio */}
-                                    <div className="flex items-center justify-between pt-2 border-t border-gray-200">
-                                        <span className="text-sm text-gray-600">Precio:</span>
+                                    <div className="flex items-center justify-between pt-2 border-t border-zinc-800">
+                                        <span className="text-sm text-zinc-400">Precio:</span>
                                         <span className="text-lg font-bold text-orange-500">
                                             ${(producto.precio || 0).toLocaleString('es-CL')}
                                         </span>
@@ -176,16 +176,16 @@ const Bazar = () => {
                                     {/* Estado */}
                                     {producto.activo === false && (
                                         <div className="text-center">
-                                            <span className="px-2 py-1 bg-gray-100 text-gray-500 rounded text-xs">Inactivo</span>
+                                            <span className="px-2 py-1 bg-zinc-800 text-zinc-400 rounded text-xs">Inactivo</span>
                                         </div>
                                     )}
                                 </div>
 
                                 {/* Acciones */}
-                                <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex gap-2">
+                                <div className="px-6 py-4 bg-zinc-800/50 border-t border-zinc-800 flex gap-2">
                                     <button
                                         onClick={() => handleEditarProducto(producto)}
-                                        className="flex-1 px-3 py-2 text-blue-600 hover:bg-blue-50 rounded transition-colors text-sm font-medium border border-blue-200"
+                                        className="flex-1 px-3 py-2 text-blue-400 hover:bg-zinc-800 rounded transition-colors text-sm font-medium border border-blue-200"
                                     >
                                         ✏️ Editar
                                     </button>
@@ -200,7 +200,7 @@ const Bazar = () => {
                         ))
                     ) : (
                         <div className="col-span-full text-center py-12">
-                            <p className="text-gray-600 text-lg mb-4">No hay productos en el inventario</p>
+                            <p className="text-zinc-400 text-lg mb-4">No hay productos en el inventario</p>
                             <button
                                 onClick={handleNuevoProducto}
                                 className="px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-bold"

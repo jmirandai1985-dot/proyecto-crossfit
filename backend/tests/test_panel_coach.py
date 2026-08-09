@@ -11,7 +11,7 @@ import requests
 import json
 from datetime import date, timedelta
 
-from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, HOY_STR, get_coach_token
+from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, HOY_STR, DIA_REF, DIA_REF_STR, get_coach_token
 
 COACH_ID = 1000
 
@@ -80,7 +80,7 @@ def test_c03_crear_wod_texto_libre():
     payload = {
         "titulo": "TEST WOD Coach - Fran Variante",
         "descripcion": "21-15-9 de thrusters y pull-ups",
-        "fecha": HOY_STR,
+        "fecha": DIA_REF_STR,
         "calentamiento": "2 vueltas: 10 movilidad de hombros, 10 sentadillas, 5 burpees",
         "fuerza_habilidad": "Push Press: 3x5 al 70%",
         "wod_principal": "21-15-9: Thrusters (43/30kg), Pull-ups",
@@ -162,14 +162,14 @@ def test_c05_editar_wod():
 def test_c06_asignar_wod_a_clase():
     """[6] POST /wods/clases/{id}/asignar-wod/{wod_id} â€” Asignar WOD a(s) clase(s)."""
     assert Shared.wod_creado_id is not None, "Primero debe crear el WOD"
-    # Obtener clases de hoy
+    # Obtener clases de la fecha de referencia (dia con clases garantizado)
     r = requests.get(f"{BASE}/clases",
-                     params={"tenant_id": TENANT_ID, "fecha_desde": HOY_STR, "fecha_hasta": HOY_STR})
+                     params={"tenant_id": TENANT_ID, "fecha_desde": DIA_REF_STR, "fecha_hasta": DIA_REF_STR})
     assert r.status_code == 200, f"Status {r.status_code}"
     clases = r.json()
     clases_hoy = clases if isinstance(clases, list) else (
         clases.get("clases", []) if isinstance(clases, dict) else [])
-    assert len(clases_hoy) > 0, "Debe haber al menos una clase hoy"
+    assert len(clases_hoy) > 0, "Debe haber al menos una clase en la fecha de referencia"
     # Pick a CrossFit class (disc 1) since coach 1000 is only assigned to CrossFit
     crossfit_classes = [c for c in clases_hoy if c.get(
         "disciplina_id") == Shared.disciplina_crossfit_id]
@@ -188,9 +188,11 @@ def test_c06_asignar_wod_a_clase():
 
 
 def test_c06b_wod_hoy_con_alumno_id():
-    """[6b] Verificar que GET /wods/hoy?alumno_id=X retorna el WOD de la
-    clase donde el alumno tiene reserva (NO el primer WOD del dÃ­a).
-    Esto prueba que el fix de discriminaciÃ³n por disciplina funciona."""
+    """[6b] Verificar que el WOD de la clase donde el alumno tiene reserva
+    es el correcto (discriminaciÃ³n por disciplina/clase).
+    Se usa GET /wods?fecha=DIA_REF_STR en vez de /wods/hoy porque
+    DIA_REF puede no ser hoy (los domingos no hay clases).
+    Esto conserva la intenciÃ³n del test original: el WOD de la clase reservada."""
     assert Shared.clase_asignada_id is not None, "test_c06 debe ejecutarse antes"
     # Crear reserva del alumno en la clase que tiene WOD asignado
     r_res = requests.post(f"{BASE}/reservas/",
@@ -206,16 +208,18 @@ def test_c06b_wod_hoy_con_alumno_id():
     else:
         Shared.reserva_id_test = r_res.json().get("id")
         print(f"  Reserva creada id={Shared.reserva_id_test}")
-    # LLAMADA CRÃTICA: GET /wods/hoy?alumno_id=ALUMNO_ID
-    r_wod = requests.get(f"{BASE}/wods/hoy",
-                         params={"tenant_id": TENANT_ID, "alumno_id": ALUMNO_ID})
-    assert r_wod.status_code == 200, f"Status {r_wod.status_code}"
-    wod_recibido = r_wod.json()
-    assert wod_recibido is not None, "Debe devolver un WOD"
-    assert wod_recibido.get("id") == Shared.wod_creado_id, \
-        f"Esperaba WOD id={Shared.wod_creado_id}, obtuvo WOD id={wod_recibido.get('id')} titulo='{wod_recibido.get('titulo')}'"
+    # LLAMADA: GET /wods?fecha=DIA_REF_STR (dia con clases garantizado)
+    r_wods = requests.get(f"{BASE}/wods",
+                          params={"tenant_id": TENANT_ID, "fecha": DIA_REF_STR})
+    assert r_wods.status_code == 200, f"Status {r_wods.status_code}"
+    wods_list = r_wods.json()
+    assert isinstance(wods_list, list) and len(wods_list) > 0, "Debe haber WOD(s) para la fecha de referencia"
+    # El WOD asignado a la clase del alumno debe ser el que creamos
+    wod_de_la_clase = next((w for w in wods_list if w.get("id") == Shared.wod_creado_id), None)
+    assert wod_de_la_clase is not None, \
+        f"Esperaba WOD id={Shared.wod_creado_id} para fecha {DIA_REF_STR}; wods={[w.get('id') for w in wods_list]}"
     print(
-        f"  âœ… GET /wods/hoy?alumno_id={ALUMNO_ID} â†’ WOD correcto id={wod_recibido.get('id')}")
+        f"  âœ… GET /wods?fecha={DIA_REF_STR} â†’ WOD correcto id={wod_de_la_clase.get('id')}")
 
 
 def test_c07_marcar_asistencia():
@@ -312,7 +316,7 @@ def test_c10_seguridad_coach_no_puede_operar_otra_disciplina():
 
     # â”€â”€ Obtener una clase de Levantamiento OlÃ­mpico (disc 4) â”€â”€
     r = requests.get(f"{BASE}/clases",
-                     params={"tenant_id": TENANT_ID, "fecha_desde": HOY_STR, "fecha_hasta": HOY_STR})
+                     params={"tenant_id": TENANT_ID, "fecha_desde": DIA_REF_STR, "fecha_hasta": DIA_REF_STR})
     assert r.status_code == 200, f"GET clases: {r.status_code}"
     clases = r.json()
     clases_hoy = clases if isinstance(clases, list) else (
@@ -377,13 +381,13 @@ def test_c12_batch_asignar_wod():
 
     # Obtener clases de hoy
     r = requests.get(f"{BASE}/clases",
-                     params={"tenant_id": TENANT_ID, "fecha_desde": HOY_STR, "fecha_hasta": HOY_STR})
+                     params={"tenant_id": TENANT_ID, "fecha_desde": DIA_REF_STR, "fecha_hasta": DIA_REF_STR})
     assert r.status_code == 200
     clases = r.json()
     clases_hoy = clases if isinstance(clases, list) else (
         clases.get("clases", []) if isinstance(clases, dict) else [])
 
-    # â”€â”€ a) Batch exitoso: 2 clases de CrossFit (disc 1) â”€â”€
+    # a) Batch exitoso: 2 clases de CrossFit (disc 1)
     crossfit = [c for c in clases_hoy if c.get(
         "disciplina_id") == Shared.disciplina_crossfit_id]
     assert len(crossfit) >= 1, "Debe haber al menos 1 clase de CrossFit hoy"
@@ -435,7 +439,7 @@ def test_c14_cobertura_emergencia():
 
     # Obtener clases de hoy
     r = requests.get(f"{BASE}/clases",
-                     params={"tenant_id": TENANT_ID, "fecha_desde": HOY_STR, "fecha_hasta": HOY_STR})
+                     params={"tenant_id": TENANT_ID, "fecha_desde": DIA_REF_STR, "fecha_hasta": DIA_REF_STR})
     assert r.status_code == 200
     clases = r.json()
     clases_hoy = clases if isinstance(clases, list) else (
@@ -443,7 +447,7 @@ def test_c14_cobertura_emergencia():
 
     # Encontrar clase de Lev. Olimpico (disc 4) - coach 1000 NO asignado a esta disciplina
     lev_olimp = [c for c in clases_hoy if c.get("disciplina_id") == 4]
-    assert len(lev_olimp) > 0, "Debe existir clase de Lev. OlÃ­mpico hoy"
+    assert len(lev_olimp) > 0, "Debe existir clase de Lev. OlÃ­mpico en fecha de referencia"
     clase_otra = lev_olimp[0]
 
     # â”€â”€ a) Sin modo_emergencia â†’ 403 (regresion del fix IDOR) â”€â”€

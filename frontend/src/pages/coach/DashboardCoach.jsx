@@ -485,6 +485,15 @@ const DashboardCoach = () => {
                         <p className="text-gray-600 mt-1">Bienvenido, {usuario || 'Coach'} — {today}</p>
                     </div>
                     <div className="mt-4 md:mt-0 flex gap-2">
+                        {/* PUNTO DE ENTRADA ÚNICO (TAREA 6): publicar WOD de la clase de hoy */}
+                        {clasesHoy.length > 0 && (
+                            <button
+                                onClick={() => navigate(`/coach/gestion-clases?clase=${clasesHoy[0].id}`)}
+                                className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-bold flex items-center gap-2 animate-pulse"
+                            >
+                                <span>📝</span> Publicar WOD de Hoy
+                            </button>
+                        )}
                         <button
                             onClick={() => navigate('/coach/gestion-clases')}
                             className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm font-medium flex items-center gap-2"
@@ -859,9 +868,16 @@ const DashboardCoach = () => {
                                                                             {clase.disciplina_nombre || 'Clase'}
                                                                         </p>
                                                                         <p className={`text-xs truncate ${wod ? 'text-green-700 font-medium' : 'text-gray-600'}`}>
-                                                                            {wod
-                                                                                ? `💪 ${wod.titulo || 'WOD publicado'}`
-                                                                                : `⬜ Sin ${getTerminoDisciplina(clase.disciplina_nombre)}`}
+                                                                            {wod ? (
+                                                                                <span className="whitespace-pre-line">
+                                                                                    <span className="font-bold text-green-700">💪 {wod.titulo || 'WOD publicado'}</span>
+                                                                                    {wod.calentamiento && <span className="block text-[10px] text-gray-600 mt-0.5">🔥 {wod.calentamiento}</span>}
+                                                                                    {wod.fuerza_habilidad && <span className="block text-[10px] text-gray-600">🏋️ {wod.fuerza_habilidad}</span>}
+                                                                                    {wod.wod_principal && <span className="block text-[10px] text-gray-700">💥 {wod.wod_principal}</span>}
+                                                                                </span>
+                                                                            ) : (
+                                                                                `⬜ Sin ${getTerminoDisciplina(clase.disciplina_nombre)}`
+                                                                            )}
                                                                         </p>
                                                                         <p className="text-xs text-gray-500">
                                                                             👥 {clase.asistentes_confirmados || 0}/{clase.cupo_maximo || 0}
@@ -949,6 +965,11 @@ const DashboardCoach = () => {
                                                                             </div>
                                                                             <div className="text-sm text-orange-300 font-bold leading-tight max-w-[110px] text-center">
                                                                                 ✅ {wodDeClase.titulo || 'WOD publicado'}
+                                                                            </div>
+                                                                            <div className="text-[9px] text-orange-400 leading-tight max-w-[110px] text-center whitespace-pre-line overflow-hidden">
+                                                                                {wodDeClase.calentamiento && `🔥 ${wodDeClase.calentamiento.split('\n').slice(0, 2).join('\n')}`}
+                                                                                {wodDeClase.fuerza_habilidad && `\n🏋️ ${wodDeClase.fuerza_habilidad.split('\n').slice(0, 2).join('\n')}`}
+                                                                                {wodDeClase.wod_principal && `\n💥 ${wodDeClase.wod_principal.split('\n').slice(0, 2).join('\n')}`}
                                                                             </div>
                                                                             <div className="text-sm text-orange-400">
                                                                                 ✔ Publicado

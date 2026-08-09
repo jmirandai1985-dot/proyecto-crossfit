@@ -109,7 +109,7 @@ const Reportes = () => {
                 <div className="flex items-center justify-center h-96">
                     <div className="text-center">
                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900 mx-auto mb-4"></div>
-                        <p className="text-gray-600">Cargando reportes...</p>
+                        <p className="text-zinc-400">Cargando reportes...</p>
                     </div>
                 </div>
             </Layout>
@@ -121,17 +121,17 @@ const Reportes = () => {
             <div className="space-y-6">
                 {/* Título */}
                 <div>
-                    <h1 className="text-3xl font-bold text-gray-900">Reportes & Analytics</h1>
-                    <p className="text-gray-600 mt-1">Análisis de desempeño y estadísticas de tu box</p>
+                    <h1 className="text-3xl font-bold text-zinc-100">Reportes & Analytics</h1>
+                    <p className="text-zinc-400 mt-1">Análisis de desempeño y estadísticas de tu box</p>
                 </div>
 
                 {/* KPIs principales */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-blue-500">
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-blue-500">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-gray-600 text-sm font-medium">Alumnos Activos</p>
-                                <p className="text-3xl font-bold text-gray-900 mt-2">{reportData?.alumnosActivos || 0}</p>
+                                <p className="text-zinc-400 text-sm font-medium">Alumnos Activos</p>
+                                <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.alumnosActivos || 0}</p>
                                 <p className="text-xs text-green-600 mt-2">
                                     ↑ {reportData?.crecimientoMensual || 0}% MoM
                                 </p>
@@ -140,64 +140,64 @@ const Reportes = () => {
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-green-500">
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-green-500">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-gray-600 text-sm font-medium">Ingreso Neto Mensual</p>
-                                <p className="text-3xl font-bold text-gray-900 mt-2">
+                                <p className="text-zinc-400 text-sm font-medium">Ingreso Neto Mensual</p>
+                                <p className="text-3xl font-bold text-zinc-100 mt-2">
                                     {formatCompact(reportData?.ingresoMensual || 0)}
                                 </p>
-                                <p className="text-xs text-gray-500 mt-2">Ingresos - Egresos del mes</p>
+                                <p className="text-xs text-zinc-400 mt-2">Ingresos - Egresos del mes</p>
                             </div>
                             <span className="text-4xl">💰</span>
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-orange-500">
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-orange-500">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-gray-600 text-sm font-medium">Asistencia Promedio</p>
-                                <p className="text-3xl font-bold text-gray-900 mt-2">{reportData?.asistenciaPromedio || 0}%</p>
-                                <p className="text-xs text-gray-500 mt-2">Tasa de asistencia</p>
+                                <p className="text-zinc-400 text-sm font-medium">Asistencia Promedio</p>
+                                <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.asistenciaPromedio || 0}%</p>
+                                <p className="text-xs text-zinc-400 mt-2">Tasa de asistencia</p>
                             </div>
                             <span className="text-4xl">📊</span>
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-purple-500">
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-purple-500">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-gray-600 text-sm font-medium">Clases Impartidas</p>
-                                <p className="text-3xl font-bold text-gray-900 mt-2">{reportData?.clasesImpartidas || 0}</p>
-                                <p className="text-xs text-gray-500 mt-2">Este mes</p>
+                                <p className="text-zinc-400 text-sm font-medium">Clases Impartidas</p>
+                                <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.clasesImpartidas || 0}</p>
+                                <p className="text-xs text-zinc-400 mt-2">Este mes</p>
                             </div>
                             <span className="text-4xl">📅</span>
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-red-500">
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-red-500">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-gray-600 text-sm font-medium">Alumnos Activos</p>
-                                <p className="text-3xl font-bold text-gray-900 mt-2">{reportData?.alumnosActivos || 0}</p>
-                                <p className="text-xs text-gray-500 mt-2">Usuarios registrados</p>
+                                <p className="text-zinc-400 text-sm font-medium">Alumnos Activos</p>
+                                <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.alumnosActivos || 0}</p>
+                                <p className="text-xs text-zinc-400 mt-2">Usuarios registrados</p>
                             </div>
                             <span className="text-4xl">🏋️</span>
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-indigo-500">
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-indigo-500">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-gray-600 text-sm font-medium">Retención Mensual</p>
+                                <p className="text-zinc-400 text-sm font-medium">Retención Mensual</p>
                                 {reportData?.tieneDatosRetencion ? (
                                     <>
-                                        <p className="text-3xl font-bold text-gray-900 mt-2">{reportData.retencion}%</p>
+                                        <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData.retencion}%</p>
                                         <p className="text-xs text-green-600 mt-2">Últimos 30 días</p>
                                     </>
                                 ) : (
                                     <>
-                                        <p className="text-2xl font-bold text-gray-400 mt-2">Sin datos</p>
+                                        <p className="text-2xl font-bold text-zinc-500 mt-2">Sin datos</p>
                                         <p className="text-xs text-yellow-600 mt-2">⚠️ Historial insuficiente</p>
                                     </>
                                 )}
@@ -210,8 +210,8 @@ const Reportes = () => {
                 {/* Gráficos con Recharts */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {/* Crecimiento de Membresías - AreaChart con degradado */}
-                    <div className="bg-white rounded-lg shadow p-6">
-                        <h3 className="text-lg font-bold text-gray-900 mb-4">Crecimiento de Membresías</h3>
+                    <div className="bg-zinc-900 rounded-lg shadow p-6">
+                        <h3 className="text-lg font-bold text-zinc-100 mb-4">Crecimiento de Membresías</h3>
                         <ResponsiveContainer width="100%" height={250}>
                             <AreaChart data={membresiaData} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
                                 <defs>{degradeMembresias}</defs>
@@ -233,8 +233,8 @@ const Reportes = () => {
                     </div>
 
                     {/* Ingresos Mensuales - AreaChart con formato compacto */}
-                    <div className="bg-white rounded-lg shadow p-6">
-                        <h3 className="text-lg font-bold text-gray-900 mb-4">Ingresos Mensuales</h3>
+                    <div className="bg-zinc-900 rounded-lg shadow p-6">
+                        <h3 className="text-lg font-bold text-zinc-100 mb-4">Ingresos Mensuales</h3>
                         <ResponsiveContainer width="100%" height={250}>
                             <AreaChart data={ingresosData} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
                                 <defs>{degradeIngresos}</defs>
@@ -261,27 +261,27 @@ const Reportes = () => {
 
                 {/* Nuevos Alumnos / Cancelaciones */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-emerald-500">
-                        <p className="text-gray-600 text-sm font-medium">Nuevos Alumnos (Mes)</p>
-                        <p className="text-3xl font-bold text-gray-900 mt-2">{reportData?.nuevosAlumnosMes || 0}</p>
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-emerald-500">
+                        <p className="text-zinc-400 text-sm font-medium">Nuevos Alumnos (Mes)</p>
+                        <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.nuevosAlumnosMes || 0}</p>
                         <span className="text-4xl">✨</span>
                     </div>
-                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-red-500">
-                        <p className="text-gray-600 text-sm font-medium">Cancelaciones (Mes)</p>
-                        <p className="text-3xl font-bold text-gray-900 mt-2">{reportData?.cancelacionesMes || 0}</p>
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-red-500">
+                        <p className="text-zinc-400 text-sm font-medium">Cancelaciones (Mes)</p>
+                        <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.cancelacionesMes || 0}</p>
                         <span className="text-4xl">📉</span>
                     </div>
-                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-purple-500">
-                        <p className="text-gray-600 text-sm font-medium">MRR (Ingresos Recurrentes)</p>
-                        <p className="text-3xl font-bold text-gray-900 mt-2">{formatCompact(reportData?.mrr || 0)}</p>
-                        <p className="text-xs text-gray-500 mt-2">ARPU: {formatCompact(reportData?.arpu || 0)}/alumno</p>
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-purple-500">
+                        <p className="text-zinc-400 text-sm font-medium">MRR (Ingresos Recurrentes)</p>
+                        <p className="text-3xl font-bold text-zinc-100 mt-2">{formatCompact(reportData?.mrr || 0)}</p>
+                        <p className="text-xs text-zinc-400 mt-2">ARPU: {formatCompact(reportData?.arpu || 0)}/alumno</p>
                     </div>
                 </div>
 
                 {/* Resumen de Disciplinas */}
-                <div className="bg-white rounded-lg shadow overflow-hidden">
-                    <div className="px-6 py-4 border-b border-gray-200">
-                        <h2 className="text-lg font-bold text-gray-900">Resumen de Disciplinas</h2>
+                <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
+                    <div className="px-6 py-4 border-b border-zinc-800">
+                        <h2 className="text-lg font-bold text-zinc-100">Resumen de Disciplinas</h2>
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full">
@@ -294,14 +294,14 @@ const Reportes = () => {
                                     <th className="px-6 py-3 text-left text-sm font-medium">Ocupación</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-200">
+                            <tbody className="divide-y divide-zinc-800">
                                 {(reportData?.ocupacionPorDisciplina || []).length > 0 ? (
                                     reportData.ocupacionPorDisciplina.map((d, index) => (
-                                        <tr key={d.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                            <td className="px-6 py-4 text-sm font-medium text-gray-900">{d.nombre}</td>
-                                            <td className="px-6 py-4 text-sm text-gray-600">{d.clases || 0}</td>
-                                            <td className="px-6 py-4 text-sm text-gray-600">{d.alumnos_unicos || 0}</td>
-                                            <td className="px-6 py-4 text-sm text-gray-600">{d.asistentes || 0}</td>
+                                        <tr key={d.id} className={index % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
+                                            <td className="px-6 py-4 text-sm font-medium text-zinc-100">{d.nombre}</td>
+                                            <td className="px-6 py-4 text-sm text-zinc-400">{d.clases || 0}</td>
+                                            <td className="px-6 py-4 text-sm text-zinc-400">{d.alumnos_unicos || 0}</td>
+                                            <td className="px-6 py-4 text-sm text-zinc-400">{d.asistentes || 0}</td>
                                             <td className="px-6 py-4 text-sm">
                                                 <span className={`px-3 py-1 rounded-full text-xs font-medium ${d.ocupacion_pct >= 70 ? 'bg-green-100 text-green-800' : d.ocupacion_pct >= 40 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
                                                     {d.ocupacion_pct}%
@@ -310,7 +310,7 @@ const Reportes = () => {
                                         </tr>
                                     ))
                                 ) : (
-                                    <tr><td colSpan={5} className="px-6 py-6 text-center text-gray-400">Sin datos de ocupación este mes</td></tr>
+                                    <tr><td colSpan={5} className="px-6 py-6 text-center text-zinc-500">Sin datos de ocupación este mes</td></tr>
                                 )}
                             </tbody>
                         </table>
@@ -319,40 +319,40 @@ const Reportes = () => {
 
                 {/* Coaches: clases dictadas + coberturas */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div className="bg-white rounded-lg shadow overflow-hidden">
-                        <div className="px-6 py-4 border-b border-gray-200">
-                            <h2 className="text-lg font-bold text-gray-900">👨‍🏫 Clases por Coach (Mes)</h2>
+                    <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
+                        <div className="px-6 py-4 border-b border-zinc-800">
+                            <h2 className="text-lg font-bold text-zinc-100">👨‍🏫 Clases por Coach (Mes)</h2>
                         </div>
                         <div className="p-6">
                             {(reportData?.clasesPorCoach || []).length > 0 ? (
                                 <div className="space-y-3">
                                     {reportData.clasesPorCoach.map((c, i) => (
                                         <div key={c.id} className="flex items-center justify-between">
-                                            <span className="text-sm font-medium text-gray-700">{c.nombre}</span>
-                                            <span className="text-sm font-bold text-gray-900">{c.clases} clases</span>
+                                            <span className="text-sm font-medium text-zinc-300">{c.nombre}</span>
+                                            <span className="text-sm font-bold text-zinc-100">{c.clases} clases</span>
                                         </div>
                                     ))}
                                 </div>
                             ) : (
-                                <p className="text-gray-400 text-sm text-center py-4">Sin datos de coaches este mes</p>
+                                <p className="text-zinc-500 text-sm text-center py-4">Sin datos de coaches este mes</p>
                             )}
                         </div>
                     </div>
-                    <div className="bg-white rounded-lg shadow overflow-hidden">
-                        <div className="px-6 py-4 border-b border-gray-200">
-                            <h2 className="text-lg font-bold text-gray-900">🆘 Coberturas de Emergencia</h2>
+                    <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
+                        <div className="px-6 py-4 border-b border-zinc-800">
+                            <h2 className="text-lg font-bold text-zinc-100">🆘 Coberturas de Emergencia</h2>
                         </div>
                         <div className="p-6">
-                            <p className="text-3xl font-bold text-gray-900">{reportData?.coberturasEmergencia || 0}</p>
-                            <p className="text-sm text-gray-500 mt-1">Usos como cobertura este mes</p>
+                            <p className="text-3xl font-bold text-zinc-100">{reportData?.coberturasEmergencia || 0}</p>
+                            <p className="text-sm text-zinc-400 mt-1">Usos como cobertura este mes</p>
                         </div>
                     </div>
                 </div>
 
                 {/* Detalle de Movimientos */}
-                <div className="bg-white rounded-lg shadow overflow-hidden">
-                    <div className="px-6 py-4 border-b border-gray-200">
-                        <h2 className="text-lg font-bold text-gray-900">📋 Detalle de Movimientos</h2>
+                <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
+                    <div className="px-6 py-4 border-b border-zinc-800">
+                        <h2 className="text-lg font-bold text-zinc-100">📋 Detalle de Movimientos</h2>
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full">
@@ -365,22 +365,22 @@ const Reportes = () => {
                                     <th className="px-6 py-3 text-left text-sm font-medium">Descripción</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-200">
+                            <tbody className="divide-y divide-zinc-800">
                                 {loadingMovs ? (
-                                    <tr><td colSpan={5} className="px-6 py-6 text-center text-gray-400">Cargando movimientos...</td></tr>
+                                    <tr><td colSpan={5} className="px-6 py-6 text-center text-zinc-500">Cargando movimientos...</td></tr>
                                 ) : movimientosList.length === 0 ? (
-                                    <tr><td colSpan={5} className="px-6 py-6 text-center text-gray-400">Sin movimientos este mes</td></tr>
+                                    <tr><td colSpan={5} className="px-6 py-6 text-center text-zinc-500">Sin movimientos este mes</td></tr>
                                 ) : movimientosList.map((m, i) => (
-                                    <tr key={m.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                        <td className="px-6 py-3 text-sm text-gray-700">{m.fecha}</td>
+                                    <tr key={m.id} className={i % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
+                                        <td className="px-6 py-3 text-sm text-zinc-300">{m.fecha}</td>
                                         <td className="px-6 py-3 text-sm">
                                             {m.tipo === 'ingreso' ? '⬆️ Ingreso' : '⬇️ Egreso'}
                                         </td>
-                                        <td className="px-6 py-3 text-sm text-gray-600">{m.categoria}</td>
+                                        <td className="px-6 py-3 text-sm text-zinc-400">{m.categoria}</td>
                                         <td className={`px-6 py-3 text-sm font-bold ${m.tipo === 'ingreso' ? 'text-green-600' : 'text-red-600'}`}>
                                             {m.tipo === 'ingreso' ? '+' : '-'}${Number(m.monto).toLocaleString('es-CL')}
                                         </td>
-                                        <td className="px-6 py-3 text-sm text-gray-500">{m.descripcion || '—'}</td>
+                                        <td className="px-6 py-3 text-sm text-zinc-400">{m.descripcion || '—'}</td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -391,11 +391,11 @@ const Reportes = () => {
                 {/* Modal de registro de movimiento */}
                 {showMovModal && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => setShowMovModal(false)}>
-                        <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full" onClick={e => e.stopPropagation()}>
+                        <div className="bg-zinc-900 rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full" onClick={e => e.stopPropagation()}>
                             <h3 className="font-bold text-lg mb-4">💰 Registrar Movimiento</h3>
                             <div className="space-y-3">
                                 <div>
-                                    <label className="text-sm font-medium text-gray-700">Tipo</label>
+                                    <label className="text-sm font-medium text-zinc-300">Tipo</label>
                                     <select value={movForm.tipo} onChange={e => setMovForm({ ...movForm, tipo: e.target.value })}
                                         className="w-full border rounded px-3 py-2 text-sm mt-1">
                                         <option value="egreso">💸 Egreso</option>
@@ -403,22 +403,22 @@ const Reportes = () => {
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="text-sm font-medium text-gray-700">Categoría</label>
+                                    <label className="text-sm font-medium text-zinc-300">Categoría</label>
                                     <input type="text" value={movForm.categoria} onChange={e => setMovForm({ ...movForm, categoria: e.target.value })}
                                         className="w-full border rounded px-3 py-2 text-sm mt-1" placeholder="ej: gasto_operativo" />
                                 </div>
                                 <div>
-                                    <label className="text-sm font-medium text-gray-700">Monto ($)</label>
+                                    <label className="text-sm font-medium text-zinc-300">Monto ($)</label>
                                     <input type="number" value={movForm.monto} onChange={e => setMovForm({ ...movForm, monto: e.target.value })}
                                         className="w-full border rounded px-3 py-2 text-sm mt-1" placeholder="5000" />
                                 </div>
                                 <div>
-                                    <label className="text-sm font-medium text-gray-700">Descripción</label>
+                                    <label className="text-sm font-medium text-zinc-300">Descripción</label>
                                     <input type="text" value={movForm.descripcion} onChange={e => setMovForm({ ...movForm, descripcion: e.target.value })}
                                         className="w-full border rounded px-3 py-2 text-sm mt-1" placeholder="ej: gastos varios" />
                                 </div>
                                 <div>
-                                    <label className="text-sm font-medium text-gray-700">Fecha</label>
+                                    <label className="text-sm font-medium text-zinc-300">Fecha</label>
                                     <input type="date" value={movForm.fecha} onChange={e => setMovForm({ ...movForm, fecha: e.target.value })}
                                         className="w-full border rounded px-3 py-2 text-sm mt-1" />
                                 </div>
@@ -445,7 +445,7 @@ const Reportes = () => {
                                     {savingMov ? 'Guardando...' : '✅ Guardar'}
                                 </button>
                                 <button onClick={() => setShowMovModal(false)}
-                                    className="flex-1 py-2 bg-gray-200 rounded text-sm font-medium hover:bg-gray-300">Cancelar</button>
+                                    className="flex-1 py-2 bg-zinc-700 rounded text-sm font-medium hover:bg-zinc-600">Cancelar</button>
                             </div>
                         </div>
                     </div>

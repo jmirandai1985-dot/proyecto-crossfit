@@ -41,8 +41,8 @@ const Notificaciones = () => {
                 {loading && <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div></div>}
                 {!loading && (
                     <>
-                        <p className="text-sm text-gray-500 mb-3">Total de registros: {total}</p>
-                        <div className="overflow-x-auto bg-white rounded-lg border">
+                        <p className="text-sm text-zinc-400 mb-3">Total de registros: {total}</p>
+                        <div className="overflow-x-auto bg-zinc-900 rounded-lg border">
                             <table className="w-full">
                                 <thead className="bg-gray-800 text-white">
                                     <tr>
@@ -53,12 +53,12 @@ const Notificaciones = () => {
                                         <th className="px-4 py-3 text-left text-xs font-medium">Acción</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-gray-200">
+                                <tbody className="divide-y divide-zinc-800">
                                     {items.map(n => (
-                                        <tr key={n.id} className="hover:bg-gray-50">
-                                            <td className="px-4 py-3 text-sm font-medium text-gray-900">{n.alumno_nombre}</td>
-                                            <td className="px-4 py-3 text-sm text-gray-600">{n.tipo}</td>
-                                            <td className="px-4 py-3 text-sm text-gray-600">{n.fecha_envio ? n.fecha_envio.slice(0, 19).replace('T', ' ') : '-'}</td>
+                                        <tr key={n.id} className="hover:bg-zinc-800/50">
+                                            <td className="px-4 py-3 text-sm font-medium text-zinc-100">{n.alumno_nombre}</td>
+                                            <td className="px-4 py-3 text-sm text-zinc-400">{n.tipo}</td>
+                                            <td className="px-4 py-3 text-sm text-zinc-400">{n.fecha_envio ? n.fecha_envio.slice(0, 19).replace('T', ' ') : '-'}</td>
                                             <td className="px-4 py-3 text-sm">
                                                 <span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full border ${n.estado === 'enviado' ? 'bg-green-100 text-green-800 border-green-300' : 'bg-red-100 text-red-800 border-red-300'}`}>
                                                     {n.estado === 'enviado' ? '✅ Enviado' : '❌ Fallido'}
@@ -80,7 +80,7 @@ const Notificaciones = () => {
                                 </tbody>
                             </table>
                             {items.length === 0 && (
-                                <p className="text-gray-500 text-center py-6">No hay notificaciones registradas</p>
+                                <p className="text-zinc-400 text-center py-6">No hay notificaciones registradas</p>
                             )}
                         </div>
                     </>

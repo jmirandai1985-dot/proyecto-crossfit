@@ -14,15 +14,15 @@ const TURNOS = [
 // ── Celda del grid (memoizada) ──
 const GridCell = React.memo(({ horaKey, dia, cell, onCellClick }) => {
     if (!cell) {
-        return <div className="h-16 bg-gray-50 rounded border border-dashed border-gray-200"></div>;
+        return <div className="h-16 bg-zinc-800/50 rounded border border-dashed border-zinc-800"></div>;
     }
     const nomDia = DIAS[dia];
     return (
         <button onClick={() => onCellClick(horaKey, dia, cell)}
-            className="h-16 bg-white rounded border border-gray-200 hover:shadow-md hover:border-blue-300 transition-all p-1 text-left overflow-hidden">
+            className="h-16 bg-zinc-900 rounded border border-zinc-800 hover:shadow-md hover:border-blue-300 transition-all p-1 text-left overflow-hidden">
             <div className="flex flex-wrap gap-0.5">
                 {cell.disciplinas.map(d => (
-                    <span key={d.id} className="text-xs leading-tight px-1 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                    <span key={d.id} className="text-xs leading-tight px-1 rounded bg-zinc-800/50 text-blue-400 border border-blue-200">
                         {ICONS[d.disciplina_nombre] || '📋'} {d.disciplina_nombre}
                     </span>
                 ))}
@@ -121,17 +121,17 @@ export default function Horarios() {
         <Layout>
             <div className="p-6">
                 <div className="flex items-center justify-between mb-6">
-                    <div><h1 className="text-3xl font-bold text-gray-900">Horarios</h1><p className="text-gray-600 mt-1">Grid semanal de horarios base por disciplina</p></div>
+                    <div><h1 className="text-3xl font-bold text-zinc-100">Horarios</h1><p className="text-zinc-400 mt-1">Grid semanal de horarios base por disciplina</p></div>
                 </div>
 
                 {/* Grid Lun-Dom */}
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
+                <div className="bg-zinc-900 rounded-xl border border-zinc-800 shadow-sm overflow-x-auto">
                     <div className="min-w-[800px]">
                         {/* Cabecera: días */}
-                        <div className="grid grid-cols-[120px_repeat(7,1fr)] bg-gray-50 border-b border-gray-200">
-                            <div className="px-3 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Horario</div>
+                        <div className="grid grid-cols-[120px_repeat(7,1fr)] bg-zinc-800/50 border-b border-zinc-800">
+                            <div className="px-3 py-3 text-xs font-semibold text-zinc-400 uppercase tracking-wider">Horario</div>
                             {DIAS.map((d, i) => (
-                                <div key={i} className="px-3 py-3 text-sm font-bold text-gray-700 text-center border-l border-gray-200">{d}</div>
+                                <div key={i} className="px-3 py-3 text-sm font-bold text-zinc-300 text-center border-l border-zinc-800">{d}</div>
                             ))}
                         </div>
 
@@ -143,10 +143,10 @@ export default function Horarios() {
                             const isExpanded = expandedCell?.startsWith(horaKey);
                             return (
                                 <div key={horaKey}>
-                                    <div className="grid grid-cols-[120px_repeat(7,1fr)] border-b border-gray-100 hover:bg-blue-50/30">
-                                        <div className="px-3 py-4 text-sm font-semibold text-blue-800 border-r border-gray-100 flex items-center gap-1">
+                                    <div className="grid grid-cols-[120px_repeat(7,1fr)] border-b border-zinc-800 hover:bg-zinc-800/30">
+                                        <div className="px-3 py-4 text-sm font-semibold text-blue-300 border-r border-zinc-800 flex items-center gap-1">
                                             <span>{turno?.label}</span>
-                                            <span className="text-gray-700">{horaKey}</span>
+                                            <span className="text-zinc-300">{horaKey}</span>
                                         </div>
                                         {[0, 1, 2, 3, 4, 5, 6].map(dia => {
                                             const cell = celdasMap[horaKey]?.[dia] || null;
@@ -171,15 +171,15 @@ export default function Horarios() {
                                         if (!cell) return null;
                                         const available = getAvailableDisciplinas(horaKey, dia);
                                         return (
-                                            <div key={`exp-${celKey}`} className="bg-gray-50 border-b border-gray-200 px-4 py-3">
-                                                <div className="text-sm font-semibold text-gray-700 mb-2">{DIAS[dia]} · {horaKey} · Cupo: {cell.cupo_maximo}</div>
+                                            <div key={`exp-${celKey}`} className="bg-zinc-800/50 border-b border-zinc-800 px-4 py-3">
+                                                <div className="text-sm font-semibold text-zinc-300 mb-2">{DIAS[dia]} · {horaKey} · Cupo: {cell.cupo_maximo}</div>
                                                 <div className="space-y-1 mb-3">
                                                     {cell.disciplinas.map(d => (
-                                                        <div key={d.id} className="flex items-center justify-between bg-white rounded px-3 py-1.5 border border-gray-200">
+                                                        <div key={d.id} className="flex items-center justify-between bg-zinc-900 rounded px-3 py-1.5 border border-zinc-800">
                                                             <span className="text-sm">{ICONS[d.disciplina_nombre] || '📋'} {d.disciplina_nombre}</span>
                                                             <div className="flex gap-2">
                                                                 <button onClick={() => openEdit({ ...d, dia_semana: dia, hora_inicio: h_ini, hora_fin: h_fin, cupo_maximo: cell.cupo_maximo })}
-                                                                    className="px-2 py-0.5 text-blue-600 hover:bg-blue-50 rounded text-xs">Editar</button>
+                                                                    className="px-2 py-0.5 text-blue-400 hover:bg-zinc-800 rounded text-xs">Editar</button>
                                                                 <button onClick={() => handleDelete(d.id)}
                                                                     className="px-2 py-0.5 text-red-600 hover:bg-red-50 rounded text-xs">Eliminar</button>
                                                             </div>
@@ -189,7 +189,7 @@ export default function Horarios() {
                                                 {available.length > 0 && (
                                                     <div>
                                                         <button onClick={() => openNew(horaKey, dia)}
-                                                            className="text-xs text-blue-600 hover:text-blue-800 font-medium">+ Agregar disciplina a este horario</button>
+                                                            className="text-xs text-blue-400 hover:text-blue-300 font-medium">+ Agregar disciplina a este horario</button>
                                                     </div>
                                                 )}
                                             </div>
@@ -203,28 +203,28 @@ export default function Horarios() {
 
                 {showForm && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                        <div className="bg-white rounded-lg p-6 w-full max-w-md">
+                        <div className="bg-zinc-900 rounded-lg p-6 w-full max-w-md">
                             <h2 className="text-xl font-bold mb-4">{editingId ? 'Editar Horario' : 'Nuevo Horario'}</h2>
                             <form onSubmit={handleSubmit} className="space-y-4">
-                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Disciplina</label>
+                                <div><label className="block text-sm font-medium text-zinc-300 mb-1">Disciplina</label>
                                     <select value={formData.disciplina_id} onChange={e => setFormData({ ...formData, disciplina_id: parseInt(e.target.value) })} required className="w-full border rounded px-3 py-2">
                                         <option value="">Seleccionar...</option>
                                         {disciplinas.filter(d => d.activo !== false).map(d => <option key={d.id} value={d.id}>{d.nombre}</option>)}
                                     </select></div>
-                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Día</label>
+                                <div><label className="block text-sm font-medium text-zinc-300 mb-1">Día</label>
                                     <select value={formData.dia_semana} onChange={e => setFormData({ ...formData, dia_semana: parseInt(e.target.value) })} className="w-full border rounded px-3 py-2">
                                         {DIAS.map((d, i) => <option key={i} value={i}>{d}</option>)}
                                     </select></div>
                                 <div className="grid grid-cols-2 gap-3">
-                                    <div><label className="block text-sm font-medium text-gray-700 mb-1">Desde</label>
+                                    <div><label className="block text-sm font-medium text-zinc-300 mb-1">Desde</label>
                                         <input type="time" value={formData.hora_inicio} onChange={e => setFormData({ ...formData, hora_inicio: e.target.value })} className="w-full border rounded px-3 py-2" /></div>
-                                    <div><label className="block text-sm font-medium text-gray-700 mb-1">Hasta</label>
+                                    <div><label className="block text-sm font-medium text-zinc-300 mb-1">Hasta</label>
                                         <input type="time" value={formData.hora_fin} onChange={e => setFormData({ ...formData, hora_fin: e.target.value })} className="w-full border rounded px-3 py-2" /></div>
                                 </div>
-                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Cupo Máximo</label>
+                                <div><label className="block text-sm font-medium text-zinc-300 mb-1">Cupo Máximo</label>
                                     <input type="number" value={formData.cupo_maximo} onChange={e => setFormData({ ...formData, cupo_maximo: parseInt(e.target.value) || 20 })} className="w-full border rounded px-3 py-2" /></div>
                                 <div className="flex gap-3 justify-end pt-2">
-                                    <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">Cancelar</button>
+                                    <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-zinc-400 hover:bg-zinc-800 rounded">Cancelar</button>
                                     <button type="submit" className="px-4 py-2 bg-blue-900 text-white rounded hover:bg-blue-800">{editingId ? 'Guardar' : 'Crear'}</button>
                                 </div>
                             </form>

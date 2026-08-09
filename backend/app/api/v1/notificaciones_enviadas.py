@@ -120,9 +120,18 @@ def enviar_manual(
         detalle = str(e)
         _registrar(db, alumno_id, tipo, "fallido", detalle)
         return {"exito": False, "estado": "fallido", "detalle_error": detalle}
+    detalle_fallo = None
+    if not exito:
+        # Gmail SMTP ya no usa Resend: exponer el error SMTP real si existe
+        try:
+            from app.services import email_service
+            detalle_fallo = email_service.ULTIMO_ERROR_SMTP or "No se pudo enviar el correo via Gmail SMTP (revisar credenciales o destinatario)."
+        except Exception:
+            detalle_fallo = "No se pudo enviar el correo via Gmail SMTP (revisar credenciales o destinatario)."
     _registrar(db, alumno_id, tipo, "enviado" if exito else "fallido",
-               None if exito else "Error de Resend")
-    return {"exito": exito, "estado": "enviado" if exito else "fallido"}
+               None if exito else detalle_fallo)
+    return {"exito": exito, "estado": "enviado" if exito else "fallido",
+            "detalle_error": None if exito else detalle_fallo}
 
 
 @router.post("/{notif_id}/reenviar")

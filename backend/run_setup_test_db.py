@@ -241,13 +241,19 @@ try:
     # Regla de negocio: el seed genera 1 horario por disciplina.
     # En produccion real, un box puede tener multiples turnos por disciplina.
     # Eso es una decision de negocio separada, no del seed de test.
+    # REGLA DE NEGOCIO CONFIRMADA: los domingos NO hay clases (dia de descanso).
+    # El horario base se asocia al primer dia con clases (hoy si no es domingo,
+    # si no, manana que siempre es lunes).
+    dia_horario = hoy.weekday()
+    if hoy.weekday() == 6:  # hoy es domingo -> no hay clases hoy
+        dia_horario = (hoy + timedelta(days=1)).weekday()
     horario_id_map = {}
     horario_data = [
         # (id, disciplina_id, hora_inicio, hora_fin, cupo, dia_semana)
-        (1, 1, time(10, 0), time(11, 0), 20, hoy.weekday()),  # CrossFit - hoy
-        (2, 2, time(10, 0), time(11, 0), 10, hoy.weekday()),  # Open Box - hoy
-        (3, 3, time(10, 0), time(11, 0), 15, hoy.weekday()),  # MusculaciÃ³n - hoy
-        (4, 4, time(10, 0), time(11, 0), 12, hoy.weekday()),  # Lev. OlÃ­mpico - hoy
+        (1, 1, time(10, 0), time(11, 0), 20, dia_horario),  # CrossFit
+        (2, 2, time(10, 0), time(11, 0), 10, dia_horario),  # Open Box
+        (3, 3, time(10, 0), time(11, 0), 15, dia_horario),  # Musculacion
+        (4, 4, time(10, 0), time(11, 0), 12, dia_horario),  # Levantamiento
     ]
     for h_id, disc_id, h_ini, h_fin, cupo, dia in horario_data:
         db.add(Horario(id=h_id, tenant_id=1, disciplina_id=disc_id,
@@ -264,7 +270,18 @@ try:
     manana = hoy + timedelta(days=1)
     if manana.weekday() == 6:  # Sunday
         manana = manana + timedelta(days=1)
-    for fecha_clase in [hoy, manana]:
+    # REGLA DE NEGOCIO: domingo es dia sin clases (test_c16 lo verifica).
+    # - "hoy": si es domingo, simplemente NO se generan clases para hoy (sin desplazar).
+    # - "manana": conserva su logica ya existente de saltar si cae domingo.
+    fechas_clases = []
+    if hoy.weekday() != 6:
+        fechas_clases.append(hoy)
+    manana = hoy + timedelta(days=1)
+    if manana.weekday() == 6:
+        manana = manana + timedelta(days=1)
+    fechas_clases.append(manana)
+
+    for fecha_clase in fechas_clases:
         for disc_id, (h_id, h_ini, h_fin, cupo) in {d[1]: (d[0], d[2], d[3], d[4]) for d in horario_data}.items():
             db.add(Clase(id=class_counter, tenant_id=1, disciplina_id=disc_id,
                          horario_base_id=h_id, fecha=fecha_clase,
@@ -274,7 +291,7 @@ try:
     db.flush()
     total_clases = class_counter - 1
     print(
-        f"   {total_clases} clase(s) (hoy + manana, {len(horario_data)} disciplinas c/u)")
+        f"   {total_clases} clase(s) ({', '.join(str(f) for f in fechas_clases)}, {len(horario_data)} disciplinas c/u)")
 
     # â”€â”€ 11. WOD PUBLICADO PARA HOY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     clean_id = mov_ids.get("Clean", 1)

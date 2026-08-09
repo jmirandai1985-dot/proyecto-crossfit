@@ -109,6 +109,44 @@ for tabla, columnas in TABLAS:
 
 c_test.commit()
 
+# â”€â”€ 3b. RESINCRONIZAR SECUENCIAS SERIAL (fix: auto-generacion de clases despues del sync) â”€â”€
+# Al copiar IDs explicitos desde PROD, las secuencias SERIAL de TEST quedan sin
+# sincronizar. Si luego la app intenta insertar (ej. auto-generar clases para
+# fechas recientes), choca con IDs ya existentes (UniqueViolation).
+# Aplicar a TODAS las tablas copiadas con IDs explicitos.
+print("\n[RESYNC SECUENCIAS]...")
+SECUENCIAS = {
+    "tenants": "tenants_id_seq",
+    "usuarios": "usuarios_id_seq",
+    "movimientos": "movimientos_id_seq",
+    "disciplinas": "disciplinas_id_seq",
+    "planes": "planes_id_seq",
+    "horarios": "horarios_id_seq",
+    "clases": "clases_id_seq",
+    "reservas": "reservas_id_seq",
+    "historial_rm": "historial_rm_id_seq",
+    "notificaciones": "notificaciones_id_seq",
+    "suscripciones": "suscripciones_id_seq",
+    "productos": "productos_id_seq",
+    "pedidos": "pedidos_id_seq",
+    "wods": "wods_id_seq",
+    "wod_movimientos": "wod_movimientos_id_seq",
+    "cobertura_emergencia": "cobertura_emergencia_id_seq",
+    "coach_disciplinas": "coach_disciplinas_id_seq",
+}
+for tabla, seq in SECUENCIAS.items():
+    try:
+        # setval con COALESCE: si la tabla esta vacia, MAX(id) es NULL -> 1
+        cur_test.execute(f"""
+            SELECT setval('{seq}',
+              COALESCE((SELECT MAX(id)+1 FROM {tabla}), 1), false)
+        """)
+        c_test.commit()
+        print(f"  [OK] {tabla} -> {seq}")
+    except Exception as e:
+        # Ignorar secuencias/tablas que no existen en este schema
+        pass
+
 # â”€â”€ 4. RESTAURAR tablas custom â”€â”€
 print("\n[RESTORE] Restaurando transacciones_financieras...")
 if backup_tx:

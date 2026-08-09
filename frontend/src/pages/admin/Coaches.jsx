@@ -152,7 +152,7 @@ const Coaches = () => {
                 <div className="flex items-center justify-center h-96">
                     <div className="text-center">
                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900 mx-auto mb-4"></div>
-                        <p className="text-gray-600">Cargando coaches...</p>
+                        <p className="text-zinc-400">Cargando coaches...</p>
                     </div>
                 </div>
             </Layout>
@@ -163,23 +163,23 @@ const Coaches = () => {
         <Layout>
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
-                    <div><h1 className="text-3xl font-bold text-gray-900">Gestión de Coaches</h1><p className="text-gray-600 mt-1">Administra los entrenadores de tu box</p></div>
+                    <div><h1 className="text-3xl font-bold text-zinc-100">Gestión de Coaches</h1><p className="text-zinc-400 mt-1">Administra los entrenadores de tu box</p></div>
                     <button onClick={() => openModal()} className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium text-sm">+ Agregar Coach</button>
                 </div>
 
                 {/* Estadísticas */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-blue-500">
-                        <p className="text-gray-600 text-sm font-medium">Total de Coaches</p>
-                        <p className="text-3xl font-bold text-gray-900 mt-2">{coaches.length}</p>
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-blue-500">
+                        <p className="text-zinc-400 text-sm font-medium">Total de Coaches</p>
+                        <p className="text-3xl font-bold text-zinc-100 mt-2">{coaches.length}</p>
                     </div>
-                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-green-500">
-                        <p className="text-gray-600 text-sm font-medium">Coaches Activos</p>
-                        <p className="text-3xl font-bold text-gray-900 mt-2">{coaches.filter((c) => c.activo !== false).length}</p>
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-green-500">
+                        <p className="text-zinc-400 text-sm font-medium">Coaches Activos</p>
+                        <p className="text-3xl font-bold text-zinc-100 mt-2">{coaches.filter((c) => c.activo !== false).length}</p>
                     </div>
-                    <div className="bg-white rounded-lg shadow p-6 border-l-4 border-orange-500">
-                        <p className="text-gray-600 text-sm font-medium">Disciplinas Asignadas</p>
-                        <p className="text-3xl font-bold text-gray-900 mt-2">{new Set(Object.values(coachDisciplinasMap).flat()).size}</p>
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-orange-500">
+                        <p className="text-zinc-400 text-sm font-medium">Disciplinas Asignadas</p>
+                        <p className="text-3xl font-bold text-zinc-100 mt-2">{new Set(Object.values(coachDisciplinasMap).flat()).size}</p>
                     </div>
                 </div>
 
@@ -189,7 +189,7 @@ const Coaches = () => {
                         coaches.map((coach) => {
                             const discIds = coachDisciplinasMap[coach.id] || [];
                             return (
-                                <div key={coach.id} className="bg-white rounded-lg shadow hover:shadow-lg transition-shadow overflow-hidden">
+                                <div key={coach.id} className="bg-zinc-900 rounded-lg shadow hover:shadow-lg transition-shadow overflow-hidden">
                                     <div className="bg-gradient-to-r from-blue-900 to-blue-800 px-6 py-4">
                                         <div className="flex items-center justify-between">
                                             <div>
@@ -205,10 +205,10 @@ const Coaches = () => {
                                     </div>
                                     <div className="px-6 py-4 space-y-4">
                                         <div className="flex items-center space-x-3">
-                                            <span className="text-gray-400">📧</span>
+                                            <span className="text-zinc-500">📧</span>
                                             <div>
-                                                <p className="text-xs text-gray-500">Correo</p>
-                                                <p className="text-sm text-gray-900 font-medium">{coach.correo}</p>
+                                                <p className="text-xs text-zinc-400">Correo</p>
+                                                <p className="text-sm text-zinc-100 font-medium">{coach.correo}</p>
                                             </div>
                                         </div>
                                         {discIds.length > 0 && (
@@ -220,73 +220,73 @@ const Coaches = () => {
                                                 ))}
                                             </div>
                                         )}
-                                        <div className="pt-2 border-t border-gray-200">
+                                        <div className="pt-2 border-t border-zinc-800">
                                             <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${coach.activo !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                                                 {coach.activo !== false ? '✓ Activo' : '✗ Inactivo'}
                                             </span>
                                         </div>
                                     </div>
-                                    <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex gap-2">
-                                        <button onClick={() => openModal(coach)} className="flex-1 px-3 py-2 text-blue-600 hover:bg-blue-50 rounded text-sm font-medium">Editar</button>
+                                    <div className="px-6 py-4 bg-zinc-800/50 border-t border-zinc-800 flex gap-2">
+                                        <button onClick={() => openModal(coach)} className="flex-1 px-3 py-2 text-blue-400 hover:bg-zinc-800 rounded text-sm font-medium">Editar</button>
                                         <button onClick={() => handleDelete(coach)} className="flex-1 px-3 py-2 text-red-600 hover:bg-red-50 rounded text-sm font-medium">Eliminar</button>
                                     </div>
                                 </div>
                             );
                         })
                     ) : (
-                        <div className="col-span-full text-center py-12"><p className="text-gray-600 text-lg">No hay coaches registrados</p></div>
+                        <div className="col-span-full text-center py-12"><p className="text-zinc-400 text-lg">No hay coaches registrados</p></div>
                     )}
                 </div>
 
                 {showModal && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                        <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+                        <div className="bg-zinc-900 rounded-lg shadow-xl max-w-md w-full">
                             <div className="bg-blue-900 text-white px-6 py-4 rounded-t-lg">
                                 <h2 className="text-xl font-bold">{editingCoach ? 'Editar Coach' : 'Nuevo Coach'}</h2>
                             </div>
                             <form onSubmit={handleSubmit} className="p-6 space-y-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Nombre Completo</label>
-                                    <input type="text" value={formData.nombre} onChange={e => setFormData({ ...formData, nombre: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" required />
+                                    <label className="block text-sm font-medium text-zinc-300 mb-1">Nombre Completo</label>
+                                    <input type="text" value={formData.nombre} onChange={e => setFormData({ ...formData, nombre: e.target.value })} className="w-full px-3 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" required />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Correo Electrónico</label>
-                                    <input type="email" value={formData.correo} onChange={e => setFormData({ ...formData, correo: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" required />
+                                    <label className="block text-sm font-medium text-zinc-300 mb-1">Correo Electrónico</label>
+                                    <input type="email" value={formData.correo} onChange={e => setFormData({ ...formData, correo: e.target.value })} className="w-full px-3 py-2 border border-zinc-700 rounded-lg" required />
                                 </div>
                                 {!editingCoach && (
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Contraseña</label>
-                                        <input type="password" value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" required />
+                                        <label className="block text-sm font-medium text-zinc-300 mb-1">Contraseña</label>
+                                        <input type="password" value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} className="w-full px-3 py-2 border border-zinc-700 rounded-lg" required />
                                     </div>
                                 )}
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">Disciplinas Asignadas</label>
-                                    <div className="space-y-2 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3">
+                                    <label className="block text-sm font-medium text-zinc-300 mb-2">Disciplinas Asignadas</label>
+                                    <div className="space-y-2 max-h-48 overflow-y-auto border border-zinc-800 rounded-lg p-3">
                                         {disciplinas.length === 0 && (
-                                            <p className="text-sm text-gray-400 italic">No hay disciplinas activas</p>
+                                            <p className="text-sm text-zinc-500 italic">No hay disciplinas activas</p>
                                         )}
                                         {disciplinas.map(d => (
-                                            <label key={d.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1.5 rounded">
+                                            <label key={d.id} className="flex items-center gap-2 cursor-pointer hover:bg-zinc-800/50 p-1.5 rounded">
                                                 <input
                                                     type="checkbox"
                                                     checked={formData.disciplina_ids.includes(d.id)}
                                                     onChange={() => toggleDisciplina(d.id)}
-                                                    className="rounded border-gray-300 text-orange-500 focus:ring-orange-500"
+                                                    className="rounded border-zinc-700 text-orange-500 focus:ring-orange-500"
                                                 />
-                                                <span className="text-sm text-gray-700">{d.nombre}</span>
+                                                <span className="text-sm text-zinc-300">{d.nombre}</span>
                                             </label>
                                         ))}
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Estado</label>
-                                    <select value={formData.estado} onChange={e => setFormData({ ...formData, estado: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                                    <label className="block text-sm font-medium text-zinc-300 mb-1">Estado</label>
+                                    <select value={formData.estado} onChange={e => setFormData({ ...formData, estado: e.target.value })} className="w-full px-3 py-2 border border-zinc-700 rounded-lg">
                                         <option value="activo">Activo</option>
                                         <option value="inactivo">Inactivo</option>
                                     </select>
                                 </div>
                                 <div className="flex gap-3 pt-4">
-                                    <button type="button" onClick={closeModal} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium">Cancelar</button>
+                                    <button type="button" onClick={closeModal} className="flex-1 px-4 py-2 border border-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-800/50 font-medium">Cancelar</button>
                                     <button type="submit" className="flex-1 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium">{editingCoach ? 'Actualizar' : 'Crear'}</button>
                                 </div>
                             </form>

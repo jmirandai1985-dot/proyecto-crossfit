@@ -73,8 +73,8 @@ const Configuracion = () => {
                 <div className="flex items-center gap-3">
                     <span className="text-3xl">⚙️</span>
                     <div>
-                        <h1 className="text-2xl font-bold text-gray-800">Configuración</h1>
-                        <p className="text-sm text-gray-500">Datos bancarios para transferencias de los alumnos</p>
+                        <h1 className="text-2xl font-bold text-zinc-100">Configuración</h1>
+                        <p className="text-sm text-zinc-400">Datos bancarios para transferencias de los alumnos</p>
                     </div>
                 </div>
 
@@ -87,23 +87,23 @@ const Configuracion = () => {
                     </div>
                 )}
 
-                <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm space-y-5">
+                <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6 shadow-sm space-y-5">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Banco</label>
+                        <label className="block text-sm font-medium text-zinc-300 mb-1">Banco</label>
                         <input type="text" name="banco" value={form.banco} onChange={handleChange}
                             placeholder="Ej: Banco Santander"
-                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm" />
+                            className="w-full px-4 py-2.5 border border-zinc-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm" />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Número de Cuenta</label>
+                        <label className="block text-sm font-medium text-zinc-300 mb-1">Número de Cuenta</label>
                         <input type="text" name="numero_cuenta" value={form.numero_cuenta} onChange={handleChange}
                             placeholder="Ej: 12345678"
-                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm" />
+                            className="w-full px-4 py-2.5 border border-zinc-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm" />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Cuenta</label>
+                        <label className="block text-sm font-medium text-zinc-300 mb-1">Tipo de Cuenta</label>
                         <select name="tipo_cuenta" value={form.tipo_cuenta} onChange={handleChange}
-                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm">
+                            className="w-full px-4 py-2.5 border border-zinc-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm">
                             <option value="">Seleccionar...</option>
                             <option value="Corriente">Corriente</option>
                             <option value="Vista">Vista</option>
@@ -112,16 +112,16 @@ const Configuracion = () => {
                         </select>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">RUT</label>
+                        <label className="block text-sm font-medium text-zinc-300 mb-1">RUT</label>
                         <input type="text" name="rut" value={form.rut} onChange={handleChange}
                             placeholder="Ej: 12.345.678-9"
-                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm" />
+                            className="w-full px-4 py-2.5 border border-zinc-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm" />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Email para Comprobantes</label>
+                        <label className="block text-sm font-medium text-zinc-300 mb-1">Email para Comprobantes</label>
                         <input type="email" name="email_comprobantes" value={form.email_comprobantes} onChange={handleChange}
                             placeholder="Ej: pagos@urbanbox.cl"
-                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm" />
+                            className="w-full px-4 py-2.5 border border-zinc-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm" />
                     </div>
 
                     <button onClick={handleSave} disabled={saving}

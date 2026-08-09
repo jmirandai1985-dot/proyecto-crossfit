@@ -50,6 +50,10 @@ export default function SupervisionClases() {
     const [showCupos, setShowCupos] = useState(false);
     const [cuposData, setCuposData] = useState([]);
     const [cuposLoading, setCuposLoading] = useState(false);
+    // ── POLLING (TAREA 5) ──
+    const [ultimaActualizacion, setUltimaActualizacion] = useState(null);
+    const [refrescando, setRefrescando] = useState(false);
+    const POLLING_INTERVALO_MS = 45000; // 45 segundos (razonable 30-60s)
 
     const fetchCupos = useCallback(async () => {
         setCuposLoading(true);
@@ -163,7 +167,30 @@ export default function SupervisionClases() {
         setGridLoading(false);
     }, [tenant_id, gridFecha]);
 
-    // Polling cada 15 segundos (pausado si hay celda expandida)
+    // ── REFRESCO AUTOMÁTICO (POLLING) de todas las tarjetas por disciplina ──
+    const refrescarDatos = useCallback(async () => {
+        setRefrescando(true);
+        const desde = fechaDesde || hoyStr();
+        const hasta = fechaHasta || hoyStr();
+        const tareas = (disciplinas.length > 0 ? disciplinas : [])
+            .filter(d => d.activo !== false)
+            .map(d => cargarDatosDisc(d.id, desde, hasta));
+        try {
+            await Promise.all(tareas);
+            setUltimaActualizacion(new Date());
+        } catch { /* silencioso: el polling no debe romper la vista */ }
+        setRefrescando(false);
+    }, [disciplinas, fechaDesde, fechaHasta, cargarDatosDisc]);
+
+    // Polling cada 45s en la vista principal (tarjetas) — TAREA 5: tiempo real vía polling
+    useEffect(() => {
+        if (!disciplinas.length) return;
+        refrescarDatos();
+        const interval = setInterval(() => { refrescarDatos(); }, POLLING_INTERVALO_MS);
+        return () => clearInterval(interval);
+    }, [disciplinas.length, refrescarDatos]);
+
+    // Polling cada 15 segundos para el grid semanal (pausado si hay celda expandida)
     useEffect(() => {
         if (vistaModo !== 'grid') return;
         cargarGridSemanal(gridFecha);
@@ -249,12 +276,12 @@ export default function SupervisionClases() {
     return (
         <Layout>
             <div className="p-6 max-w-7xl mx-auto">
-                <h1 className="text-2xl font-bold text-gray-900 mb-2">Supervisión de Clases</h1>
-                <p className="text-gray-500 mb-6">Vista general de la programación del box por disciplina y turno</p>
+                <h1 className="text-2xl font-bold text-zinc-100 mb-2">Supervisión de Clases</h1>
+                <p className="text-zinc-400 mb-6">Vista general de la programación del box por disciplina y turno</p>
 
                 {/* Fecha */}
                 <div className="flex items-center gap-4 mb-6">
-                    <label className="font-medium text-gray-700">Fecha:</label>
+                    <label className="font-medium text-zinc-300">Fecha:</label>
                     <input
                         type="date"
                         value={fecha}
@@ -285,19 +312,19 @@ export default function SupervisionClases() {
                     </button>
                 </div>
                 {showCupos && (
-                    <div className="bg-white rounded-xl border-2 border-purple-200 p-5 mb-6">
+                    <div className="bg-zinc-900 rounded-xl border-2 border-purple-200 p-5 mb-6">
                         <h3 className="font-bold text-lg text-purple-900 mb-4">📊 Gestión de Cupos por Disciplina</h3>
                         {cuposLoading ? (
-                            <div className="text-gray-400 text-center py-8">Cargando cupos...</div>
+                            <div className="text-zinc-500 text-center py-8">Cargando cupos...</div>
                         ) : cuposData.length === 0 ? (
-                            <div className="text-gray-400 text-center py-8">Sin datos de cupos</div>
+                            <div className="text-zinc-500 text-center py-8">Sin datos de cupos</div>
                         ) : (
-                            <div className="divide-y divide-gray-200">
+                            <div className="divide-y divide-zinc-800">
                                 {cuposData.map(d => (
                                     <div key={d.id} className="flex items-center justify-between py-3">
                                         <div className="flex items-center gap-2">
-                                            <span className="font-medium text-gray-900">{d.nombre}</span>
-                                            {!d.activo && <span className="text-xs px-1.5 py-0.5 rounded bg-gray-200 text-gray-500">Inactiva</span>}
+                                            <span className="font-medium text-zinc-100">{d.nombre}</span>
+                                            {!d.activo && <span className="text-xs px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-400">Inactiva</span>}
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <button
@@ -312,9 +339,9 @@ export default function SupervisionClases() {
                                                     } catch (e) { console.error(e); }
                                                 }}
                                                 disabled={d.cupo_actual <= 1}
-                                                className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${d.cupo_actual <= 1 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-red-100 text-red-600 hover:bg-red-200'}`}
+                                                className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${d.cupo_actual <= 1 ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed' : 'bg-red-100 text-red-600 hover:bg-red-200'}`}
                                             >−</button>
-                                            <span className="w-12 text-center text-xl font-bold text-gray-900">{d.cupo_actual}</span>
+                                            <span className="w-12 text-center text-xl font-bold text-zinc-100">{d.cupo_actual}</span>
                                             <button
                                                 onClick={async () => {
                                                     const nuevo = Math.min(200, d.cupo_actual + 1);
@@ -327,7 +354,7 @@ export default function SupervisionClases() {
                                                     } catch (e) { console.error(e); }
                                                 }}
                                                 disabled={d.cupo_actual >= 200}
-                                                className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${d.cupo_actual >= 200 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-green-100 text-green-600 hover:bg-green-200'}`}
+                                                className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${d.cupo_actual >= 200 ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed' : 'bg-green-100 text-green-600 hover:bg-green-200'}`}
                                             >+</button>
                                         </div>
                                     </div>
@@ -348,20 +375,25 @@ export default function SupervisionClases() {
                                     setDiscExpandida(d.id);
                                     cargarDatosDisc(d.id, fechaDesde, fechaHasta);
                                 }}
-                                className={`rounded-xl border-2 p-5 cursor-pointer transition-all hover:shadow-lg ${discExpandida === d.id ? 'border-blue-500 bg-blue-50 shadow-md' : 'border-gray-200 bg-white'}`}>
+                                className={`rounded-xl border-2 p-5 cursor-pointer transition-all hover:shadow-lg ${discExpandida === d.id ? 'border-blue-500 bg-zinc-800/50 shadow-md' : 'border-zinc-800 bg-zinc-900'}`}>
                                 <div className="flex items-center justify-between mb-3">
-                                    <h3 className="font-bold text-lg text-gray-900">{d.nombre}{!d.activo && <span className="ml-2 text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600">⚠️ Inactiva</span>}</h3>
-                                    <span className="text-xs text-gray-400">{discExpandida === d.id ? '▲' : '▼'}</span>
+                                    <h3 className="font-bold text-lg text-zinc-100">{d.nombre}{!d.activo && <span className="ml-2 text-xs px-2 py-0.5 rounded bg-zinc-700 text-zinc-400">⚠️ Inactiva</span>}</h3>
+                                    <span className="text-xs text-zinc-500">{discExpandida === d.id ? '▲' : '▼'}</span>
                                 </div>
-                                <div className="space-y-1 text-sm text-gray-600">
+                                <div className="space-y-1 text-sm text-zinc-400">
                                     <div>📊 {r.total} clase(s) en el rango</div>
                                     <div>📈 Ocupación promedio: {r.ocupProm}%</div>
                                     {requiereCoach && r.sinCoach > 0 && (
                                         <div className="text-red-600 font-bold">⚠️ {r.sinCoach} sin coach</div>
                                     )}
-                                    {!requiereCoach && <div className="text-gray-400 text-xs">🏠 Self-service</div>}
+                                    {!requiereCoach && <div className="text-zinc-500 text-xs">🏠 Self-service</div>}
                                     {r.emergencia > 0 && (
-                                        <div className="text-orange-600 font-bold">⚠️ {r.emergencia} en emergencia</div>
+                                        <div className="flex items-center gap-2 text-orange-600 font-bold animate-pulse">
+                                            <span className="inline-block px-2 py-0.5 rounded-full bg-orange-500/20 border border-orange-500 text-orange-400 text-xs font-black uppercase tracking-wide">
+                                                🚨 Cobertura de Emergencia
+                                            </span>
+                                            <span className="text-sm">{r.emergencia} en emergencia</span>
+                                        </div>
                                     )}
                                 </div>
                             </div>
@@ -371,9 +403,9 @@ export default function SupervisionClases() {
 
                 {/* Tabla desplegable de la disciplina seleccionada */}
                 {discExpandida && (
-                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mt-4">
-                        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                            <h2 className="text-lg font-bold text-gray-900">
+                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 shadow-sm overflow-hidden mt-4">
+                        <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-800/50">
+                            <h2 className="text-lg font-bold text-zinc-100">
                                 {disciplinas.find(d => d.id === discExpandida)?.nombre} — {fechaDesde} a {fechaHasta}
                             </h2>
                         </div>
@@ -394,19 +426,19 @@ export default function SupervisionClases() {
                                             <th className="px-3 py-3 text-left font-medium"></th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-gray-200">
+                                    <tbody className="divide-y divide-zinc-800">
                                         {(datosDisc[discExpandida] || []).map(c => {
                                             const sinCoach = discConCoach(discExpandida) && !c.coach_id;
                                             return (
-                                                <tr key={c.id} className={`hover:bg-blue-50 ${sinCoach ? 'bg-red-50 border-l-4 border-red-500' : ''}`}>
-                                                    <td className="px-3 py-2 text-gray-800">
+                                                <tr key={c.id} className={`hover:bg-zinc-800 ${sinCoach ? 'bg-red-50 border-l-4 border-red-500' : ''}`}>
+                                                    <td className="px-3 py-2 text-zinc-100">
                                                         {DIAS[new Date(c.fecha + 'T12:00:00').getDay()] || '—'}
-                                                        <div className="text-xs text-gray-400">{c.fecha}</div>
+                                                        <div className="text-xs text-zinc-500">{c.fecha}</div>
                                                     </td>
                                                     <td className="px-3 py-2 font-mono text-xs">{c.hora_inicio?.slice(0, 5)} — {c.hora_fin?.slice(0, 5)}</td>
                                                     {discConCoach(discExpandida) && (
                                                         <td className="px-3 py-2">
-                                                            <span className={sinCoach ? 'text-red-600 font-bold' : 'text-gray-700'}>
+                                                            <span className={sinCoach ? 'text-red-600 font-bold' : 'text-zinc-300'}>
                                                                 {c.coach_nombre || 'Sin asignar'}
                                                             </span>
                                                             {c.cobertura_emergencia && (
@@ -438,7 +470,7 @@ export default function SupervisionClases() {
                                                     </td>
                                                     <td className="px-3 py-2">
                                                         <button onClick={(e) => { e.stopPropagation(); cargarReservas(c.id); }}
-                                                            className="px-2 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600">
+                                                            className="px-2 py-1 bg-zinc-800/500 text-white rounded text-xs hover:bg-blue-600">
                                                             📄 Detalles
                                                         </button>
                                                     </td>
@@ -446,7 +478,7 @@ export default function SupervisionClases() {
                                             );
                                         })}
                                         {(datosDisc[discExpandida] || []).length === 0 && (
-                                            <tr><td colSpan={discConCoach(discExpandida) ? 6 : 4} className="px-3 py-6 text-center text-gray-400">Sin clases en este rango</td></tr>
+                                            <tr><td colSpan={discConCoach(discExpandida) ? 6 : 4} className="px-3 py-6 text-center text-zinc-500">Sin clases en este rango</td></tr>
                                         )}
                                     </tbody>
                                 </table>
@@ -458,17 +490,17 @@ export default function SupervisionClases() {
                 {/* Modal selector de coach (con cobertura de emergencia) */}
                 {coachSelector && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => setCoachSelector(null)}>
-                        <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full" onClick={(e) => e.stopPropagation()}>
+                        <div className="bg-zinc-900 rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full" onClick={(e) => e.stopPropagation()}>
                             <h3 className="font-bold text-lg mb-1">👤 Asignar coach a clase #{coachSelector.claseId}</h3>
-                            <p className="text-sm text-gray-500 mb-3">
+                            <p className="text-sm text-zinc-400 mb-3">
                                 {disciplinas.find(d => d.id === coachSelector.disciplinaId)?.nombre || ''}
-                                {coachesDisponibles.length > 0 && <span className="ml-2 text-xs text-gray-400">({coachesDisponibles.length} coaches disponibles)</span>}
+                                {coachesDisponibles.length > 0 && <span className="ml-2 text-xs text-zinc-500">({coachesDisponibles.length} coaches disponibles)</span>}
                             </p>
                             <div className="space-y-1.5 max-h-64 overflow-y-auto">
                                 {coachesDisponibles.map(cd => (
                                     <button key={cd.id}
                                         onClick={() => asignarCoach(coachSelector.claseId, cd.id, cd.pertenece)}
-                                        className={`w-full text-left p-3 rounded border ${cd.pertenece ? 'bg-gray-50 hover:bg-blue-100 border-gray-200' : 'bg-yellow-50 hover:bg-yellow-100 border-yellow-300'}`}>
+                                        className={`w-full text-left p-3 rounded border ${cd.pertenece ? 'bg-zinc-800/50 hover:bg-blue-500/20 border-zinc-800' : 'bg-yellow-50 hover:bg-yellow-100 border-yellow-300'}`}>
                                         <div className="flex items-center justify-between">
                                             <span className="font-medium">{cd.nombre}</span>
                                             {!cd.pertenece && (
@@ -479,17 +511,17 @@ export default function SupervisionClases() {
                                             )}
                                         </div>
                                         {!cd.pertenece && cd.disciplinas.length > 0 && (
-                                            <div className="text-xs text-gray-500 mt-1">
+                                            <div className="text-xs text-zinc-400 mt-1">
                                                 Sus disciplinas: {cd.disciplinas.join(', ')}
                                             </div>
                                         )}
                                     </button>
                                 ))}
                                 {coachesDisponibles.length === 0 && (
-                                    <p className="text-gray-400 text-sm text-center py-4">No hay coaches activos en el sistema</p>
+                                    <p className="text-zinc-500 text-sm text-center py-4">No hay coaches activos en el sistema</p>
                                 )}
                             </div>
-                            <button onClick={() => setCoachSelector(null)} className="mt-3 w-full py-2 bg-gray-200 rounded text-sm font-medium hover:bg-gray-300">Cancelar</button>
+                            <button onClick={() => setCoachSelector(null)} className="mt-3 w-full py-2 bg-zinc-700 rounded text-sm font-medium hover:bg-zinc-600">Cancelar</button>
                         </div>
                     </div>
                 )}
@@ -497,13 +529,13 @@ export default function SupervisionClases() {
                 {/* Modal de confirmación de Cobertura de Emergencia */}
                 {emergenciaConfirm && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60" onClick={() => setEmergenciaConfirm(null)}>
-                        <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full border-2 border-yellow-400" onClick={(e) => e.stopPropagation()}>
+                        <div className="bg-zinc-900 rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full border-2 border-yellow-400" onClick={(e) => e.stopPropagation()}>
                             <h3 className="font-bold text-lg mb-2 text-yellow-700">⚠️ Cobertura de Emergencia</h3>
-                            <p className="text-gray-700 mb-4">
+                            <p className="text-zinc-300 mb-4">
                                 Vas a asignar a <strong>{coachNombrePorId(emergenciaConfirm.coachId)}</strong> como <strong>cobertura de emergencia</strong> para esta clase de{' '}
                                 <strong>{disciplinas.find(d => d.id === coachSelector?.disciplinaId)?.nombre || ''}</strong>.
                             </p>
-                            <p className="text-sm text-gray-500 mb-4">
+                            <p className="text-sm text-zinc-400 mb-4">
                                 Este coach no pertenece a esta disciplina. Se registrará una auditoría en la tabla de cobertura de emergencia.
                             </p>
                             <div className="flex gap-2">
@@ -512,7 +544,7 @@ export default function SupervisionClases() {
                                     ✅ Sí, asignar como emergencia
                                 </button>
                                 <button onClick={() => setEmergenciaConfirm(null)}
-                                    className="flex-1 py-2 bg-gray-200 rounded text-sm font-medium hover:bg-gray-300">
+                                    className="flex-1 py-2 bg-zinc-700 rounded text-sm font-medium hover:bg-zinc-600">
                                     Cancelar
                                 </button>
                             </div>
@@ -523,17 +555,17 @@ export default function SupervisionClases() {
                 {/* Modal de detalle de reservas */}
                 {detalleClase && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-                        <div className="bg-white rounded-xl shadow-2xl p-6 max-w-lg mx-4 w-full max-h-96 overflow-y-auto">
+                        <div className="bg-zinc-900 rounded-xl shadow-2xl p-6 max-w-lg mx-4 w-full max-h-96 overflow-y-auto">
                             <div className="flex justify-between items-center mb-4">
                                 <h3 className="font-bold text-lg">Reservas — Clase #{detalleClase.claseId}</h3>
-                                <button onClick={() => setDetalleClase(null)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                                <button onClick={() => setDetalleClase(null)} className="text-zinc-500 hover:text-zinc-400 text-xl">&times;</button>
                             </div>
                             {detalleClase.reservas.length === 0 ? (
-                                <p className="text-gray-400 text-sm">Sin reservas en esta clase</p>
+                                <p className="text-zinc-500 text-sm">Sin reservas en esta clase</p>
                             ) : (
                                 <div className="space-y-2">
                                     {detalleClase.reservas.map(r => (
-                                        <div key={r.id} className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                                        <div key={r.id} className="flex justify-between items-center p-2 bg-zinc-800/50 rounded">
                                             <span className="text-sm font-medium">{r.alumno_nombre || `Alumno #${r.alumno_id}`}</span>
                                             <span className={`text-xs px-2 py-0.5 rounded ${r.asistio ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                                                 {r.asistio ? '✅ Asistió' : '❌ Falta'}

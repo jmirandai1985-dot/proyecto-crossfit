@@ -163,7 +163,7 @@ const Alumnos = () => {
                 <div className="flex items-center justify-center h-96">
                     <div className="text-center">
                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900 mx-auto mb-4"></div>
-                        <p className="text-gray-600">Cargando alumnos...</p>
+                        <p className="text-zinc-400">Cargando alumnos...</p>
                     </div>
                 </div>
             </Layout>
@@ -174,14 +174,14 @@ const Alumnos = () => {
         <Layout>
             <div className="space-y-6">
                 <div>
-                    <h1 className="text-3xl font-bold text-gray-900">Gestión de Alumnos</h1>
-                    <p className="text-gray-600 mt-1">Administra los miembros de tu box</p>
+                    <h1 className="text-3xl font-bold text-zinc-100">Gestión de Alumnos</h1>
+                    <p className="text-zinc-400 mt-1">Administra los miembros de tu box</p>
                 </div>
 
-                <div className="bg-white rounded-lg shadow overflow-hidden">
-                    <div className="px-6 py-4 border-b border-gray-200">
+                <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
+                    <div className="px-6 py-4 border-b border-zinc-800">
                         <div className="flex items-center justify-between">
-                            <h2 className="text-lg font-bold text-gray-900">Lista de Alumnos</h2>
+                            <h2 className="text-lg font-bold text-zinc-100">Lista de Alumnos</h2>
                             <div className="flex gap-2">
                                 <button
                                     onClick={() => openModal()}
@@ -199,13 +199,13 @@ const Alumnos = () => {
                         </div>
                     </div>
 
-                    <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+                    <div className="px-6 py-4 bg-zinc-800/50 border-b border-zinc-800">
                         <input
                             type="text"
                             placeholder="Buscar por nombre o correo..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                            className="w-full px-4 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                         />
                     </div>
 
@@ -223,33 +223,33 @@ const Alumnos = () => {
                                     <th className="px-6 py-3 text-left text-sm font-medium">Acciones</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-200">
+                            <tbody className="divide-y divide-zinc-800">
                                 {filteredAlumnos.length > 0 ? (
                                     filteredAlumnos.map((alumno, index) => (
-                                        <tr key={alumno.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                            <td className="px-6 py-4 text-sm font-medium text-gray-900">{alumno.nombre}</td>
-                                            <td className="px-6 py-4 text-sm text-gray-600">{alumno.correo}</td>
-                                            <td className="px-6 py-4 text-sm text-gray-600">{alumno.telefono}</td>
+                                        <tr key={alumno.id} className={index % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
+                                            <td className="px-6 py-4 text-sm font-medium text-zinc-100">{alumno.nombre}</td>
+                                            <td className="px-6 py-4 text-sm text-zinc-400">{alumno.correo}</td>
+                                            <td className="px-6 py-4 text-sm text-zinc-400">{alumno.telefono}</td>
                                             <td className="px-6 py-4 text-sm">
                                                 <span className={`px-3 py-1 rounded-full text-xs font-medium ${alumno.activo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                                                     {alumno.activo ? 'activo' : 'inactivo'}
                                                 </span>
                                             </td>
-                                            <td className="px-6 py-4 text-sm text-gray-600">{alumno.fechaRegistro}</td>
-                                            <td className="px-6 py-4 text-sm text-gray-600">
+                                            <td className="px-6 py-4 text-sm text-zinc-400">{alumno.fechaRegistro}</td>
+                                            <td className="px-6 py-4 text-sm text-zinc-400">
                                                 {(() => {
                                                     const sus = getSuscripcionAlumno(alumno.id);
-                                                    if (!sus) return <span className="text-gray-400">Sin plan</span>;
+                                                    if (!sus) return <span className="text-zinc-500">Sin plan</span>;
                                                     const plan = planes.find(p => p.id === sus.plan_id);
-                                                    return <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">{plan ? plan.nombre : `Plan ID ${sus.plan_id}`}</span>;
+                                                    return <span className="px-2 py-1 bg-blue-500/20 text-blue-300 rounded-full text-xs font-medium">{plan ? plan.nombre : `Plan ID ${sus.plan_id}`}</span>;
                                                 })()}
                                             </td>
-                                            <td className="px-6 py-4 text-sm text-gray-600">
+                                            <td className="px-6 py-4 text-sm text-zinc-400">
                                                 {(() => {
                                                     const sus = getSuscripcionAlumno(alumno.id);
-                                                    if (!sus) return <span className="text-gray-400">—</span>;
+                                                    if (!sus) return <span className="text-zinc-500">—</span>;
                                                     if (sus.creditos_disponibles === null) return <span className="font-bold text-orange-500">∞</span>;
-                                                    return <span className="font-bold text-gray-900">{sus.creditos_disponibles}</span>;
+                                                    return <span className="font-bold text-zinc-100">{sus.creditos_disponibles}</span>;
                                                 })()}
                                             </td>
                                             <td className="px-6 py-4 text-sm space-x-2">
@@ -261,7 +261,7 @@ const Alumnos = () => {
                                                 </button>
                                                 <button
                                                     onClick={() => openModal(alumno)}
-                                                    className="px-3 py-1 text-blue-600 hover:bg-blue-50 rounded transition-colors text-xs font-medium"
+                                                    className="px-3 py-1 text-blue-400 hover:bg-zinc-800 rounded transition-colors text-xs font-medium"
                                                 >
                                                     Editar
                                                 </button>
@@ -276,7 +276,7 @@ const Alumnos = () => {
                                     ))
                                 ) : (
                                     <tr>
-                                        <td colSpan="8" className="px-6 py-8 text-center text-gray-600">
+                                        <td colSpan="8" className="px-6 py-8 text-center text-zinc-400">
                                             No se encontraron alumnos
                                         </td>
                                     </tr>
@@ -285,51 +285,51 @@ const Alumnos = () => {
                         </table>
                     </div>
 
-                    <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
-                        <p className="text-sm text-gray-600">
-                            Total de alumnos: <span className="font-bold text-gray-900">{filteredAlumnos.length}</span>
+                    <div className="px-6 py-4 bg-zinc-800/50 border-t border-zinc-800">
+                        <p className="text-sm text-zinc-400">
+                            Total de alumnos: <span className="font-bold text-zinc-100">{filteredAlumnos.length}</span>
                         </p>
                     </div>
                 </div>
 
                 {showModal && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                        <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+                        <div className="bg-zinc-900 rounded-lg shadow-xl max-w-md w-full">
                             <div className="bg-blue-900 text-white px-6 py-4 rounded-t-lg">
                                 <h2 className="text-xl font-bold">{editingAlumno ? 'Editar Alumno' : (formData.rol === 'coach' ? 'Nuevo Coach' : 'Nuevo Alumno')}</h2>
                             </div>
                             <form onSubmit={handleSubmit} className="p-6 space-y-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Nombre Completo</label>
-                                    <input type="text" value={formData.nombre} onChange={(e) => setFormData({ ...formData, nombre: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" required />
+                                    <label className="block text-sm font-medium text-zinc-300 mb-1">Nombre Completo</label>
+                                    <input type="text" value={formData.nombre} onChange={(e) => setFormData({ ...formData, nombre: e.target.value })} className="w-full px-3 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" required />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">RUT</label>
-                                    <input type="text" value={formData.rut} onChange={(e) => setFormData({ ...formData, rut: e.target.value })} placeholder="12345678-9" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" required />
+                                    <label className="block text-sm font-medium text-zinc-300 mb-1">RUT</label>
+                                    <input type="text" value={formData.rut} onChange={(e) => setFormData({ ...formData, rut: e.target.value })} placeholder="12345678-9" className="w-full px-3 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" required />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Correo Electrónico</label>
-                                    <input type="email" value={formData.correo} onChange={(e) => setFormData({ ...formData, correo: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" required />
+                                    <label className="block text-sm font-medium text-zinc-300 mb-1">Correo Electrónico</label>
+                                    <input type="email" value={formData.correo} onChange={(e) => setFormData({ ...formData, correo: e.target.value })} className="w-full px-3 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" required />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Teléfono</label>
-                                    <input type="tel" value={formData.telefono} onChange={(e) => setFormData({ ...formData, telefono: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" required />
+                                    <label className="block text-sm font-medium text-zinc-300 mb-1">Teléfono</label>
+                                    <input type="tel" value={formData.telefono} onChange={(e) => setFormData({ ...formData, telefono: e.target.value })} className="w-full px-3 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" required />
                                 </div>
                                 {!editingAlumno && (
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Contraseña</label>
-                                        <input type="password" value={formData.password} onChange={(e) => setFormData({ ...formData, password: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" required />
+                                        <label className="block text-sm font-medium text-zinc-300 mb-1">Contraseña</label>
+                                        <input type="password" value={formData.password} onChange={(e) => setFormData({ ...formData, password: e.target.value })} className="w-full px-3 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" required />
                                     </div>
                                 )}
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Estado</label>
-                                    <select value={formData.estado} onChange={(e) => setFormData({ ...formData, estado: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                                    <label className="block text-sm font-medium text-zinc-300 mb-1">Estado</label>
+                                    <select value={formData.estado} onChange={(e) => setFormData({ ...formData, estado: e.target.value })} className="w-full px-3 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
                                         <option value="activo">Activo</option>
                                         <option value="inactivo">Inactivo</option>
                                     </select>
                                 </div>
                                 <div className="flex gap-3 pt-4">
-                                    <button type="button" onClick={closeModal} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium">Cancelar</button>
+                                    <button type="button" onClick={closeModal} className="flex-1 px-4 py-2 border border-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-800/50 transition-colors font-medium">Cancelar</button>
                                     <button type="submit" className="flex-1 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-medium">{editingAlumno ? 'Actualizar' : 'Crear'}</button>
                                 </div>
                             </form>
@@ -339,31 +339,31 @@ const Alumnos = () => {
 
                 {showVoucherModal && selectedAlumnoVoucher && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                        <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full">
+                        <div className="bg-zinc-900 rounded-lg shadow-xl max-w-2xl w-full">
                             <div className="bg-purple-600 text-white px-6 py-4 rounded-t-lg flex items-center justify-between">
                                 <h2 className="text-xl font-bold">Comprobante de Pago</h2>
                                 <button onClick={closeVoucherModal} className="text-white hover:text-gray-200 text-2xl">×</button>
                             </div>
                             <div className="p-6 space-y-6">
-                                <div className="bg-gray-50 p-4 rounded-lg">
-                                    <h3 className="text-sm font-semibold text-gray-700 mb-3">Información del Alumno</h3>
+                                <div className="bg-zinc-800/50 p-4 rounded-lg">
+                                    <h3 className="text-sm font-semibold text-zinc-300 mb-3">Información del Alumno</h3>
                                     <div className="grid grid-cols-2 gap-4">
-                                        <div><p className="text-xs text-gray-500">Nombre</p><p className="text-sm font-medium text-gray-900">{selectedAlumnoVoucher.nombre}</p></div>
-                                        <div><p className="text-xs text-gray-500">Correo</p><p className="text-sm font-medium text-gray-900">{selectedAlumnoVoucher.correo}</p></div>
-                                        <div><p className="text-xs text-gray-500">Teléfono</p><p className="text-sm font-medium text-gray-900">{selectedAlumnoVoucher.telefono}</p></div>
-                                        <div><p className="text-xs text-gray-500">Fecha Registro</p><p className="text-sm font-medium text-gray-900">{selectedAlumnoVoucher.fechaRegistro}</p></div>
+                                        <div><p className="text-xs text-zinc-400">Nombre</p><p className="text-sm font-medium text-zinc-100">{selectedAlumnoVoucher.nombre}</p></div>
+                                        <div><p className="text-xs text-zinc-400">Correo</p><p className="text-sm font-medium text-zinc-100">{selectedAlumnoVoucher.correo}</p></div>
+                                        <div><p className="text-xs text-zinc-400">Teléfono</p><p className="text-sm font-medium text-zinc-100">{selectedAlumnoVoucher.telefono}</p></div>
+                                        <div><p className="text-xs text-zinc-400">Fecha Registro</p><p className="text-sm font-medium text-zinc-100">{selectedAlumnoVoucher.fechaRegistro}</p></div>
                                     </div>
                                 </div>
-                                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center bg-gray-50">
+                                <div className="border-2 border-dashed border-zinc-700 rounded-lg p-8 text-center bg-zinc-800/50">
                                     <div className="text-6xl mb-4">📋</div>
-                                    <h4 className="text-lg font-semibold text-gray-900 mb-2">Comprobante de Pago</h4>
-                                    <p className="text-sm text-gray-600 mb-4">Transacción ID: <span className="font-mono font-bold">TXN-{selectedAlumnoVoucher.id}-2026</span></p>
-                                    <div className="bg-white p-4 rounded border border-gray-200 mb-4">
-                                        <p className="text-xs text-gray-500 mb-2">Monto Pagado</p>
+                                    <h4 className="text-lg font-semibold text-zinc-100 mb-2">Comprobante de Pago</h4>
+                                    <p className="text-sm text-zinc-400 mb-4">Transacción ID: <span className="font-mono font-bold">TXN-{selectedAlumnoVoucher.id}-2026</span></p>
+                                    <div className="bg-zinc-900 p-4 rounded border border-zinc-800 mb-4">
+                                        <p className="text-xs text-zinc-400 mb-2">Monto Pagado</p>
                                         <p className="text-2xl font-bold text-green-600">$49.990</p>
-                                        <p className="text-xs text-gray-500 mt-2">Membresía Mensual</p>
+                                        <p className="text-xs text-zinc-400 mt-2">Membresía Mensual</p>
                                     </div>
-                                    <p className="text-xs text-gray-500">Fecha de Pago: {new Date().toLocaleDateString('es-CL')}</p>
+                                    <p className="text-xs text-zinc-400">Fecha de Pago: {new Date().toLocaleDateString('es-CL')}</p>
                                 </div>
                                 <div className="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-lg">
                                     <span className="text-2xl">✓</span>
@@ -373,8 +373,8 @@ const Alumnos = () => {
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Seleccionar Plan</label>
-                                    <select value={planSeleccionado} onChange={(e) => setPlanSeleccionado(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500">
+                                    <label className="block text-sm font-medium text-zinc-300 mb-1">Seleccionar Plan</label>
+                                    <select value={planSeleccionado} onChange={(e) => setPlanSeleccionado(e.target.value)} className="w-full px-3 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500">
                                         <option value="">-- Elige un plan --</option>
                                         {planes.map((p) => (
                                             <option key={p.id} value={p.id}>{p.nombre} — ${p.precio_clp?.toLocaleString('es-CL')} / {p.duracion_dias} días</option>
@@ -387,7 +387,7 @@ const Alumnos = () => {
                                     </p>
                                 )}
                                 <div className="flex gap-3 pt-4">
-                                    <button onClick={closeVoucherModal} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium">Cerrar</button>
+                                    <button onClick={closeVoucherModal} className="flex-1 px-4 py-2 border border-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-800/50 transition-colors font-medium">Cerrar</button>
                                     <button
                                         disabled={aprobandoPago}
                                         onClick={async () => {

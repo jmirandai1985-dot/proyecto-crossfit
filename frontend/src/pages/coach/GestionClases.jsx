@@ -15,6 +15,30 @@ function hoyStr() {
     return new Date().toISOString().split('T')[0];
 }
 
+function toLocalFechaStr(d) {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+const NOMBRES_DIAS_LARGO = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
+function getSemanaActual() {
+    const hoy = new Date();
+    const dia = hoy.getDay();
+    const diff = dia === 0 ? 6 : dia - 1; // lunes = inicio
+    const lunes = new Date(hoy);
+    lunes.setDate(hoy.getDate() - diff);
+    const fechas = [];
+    for (let i = 0; i < 7; i++) {
+        const d = new Date(lunes);
+        d.setDate(lunes.getDate() + i);
+        fechas.push(toLocalFechaStr(d));
+    }
+    return fechas;
+}
+
 function parseHora(h) {
     if (!h) return -1;
     const partes = h.split(':');
@@ -56,6 +80,12 @@ export default function GestionClases() {
     const [modoEmergencia, setModoEmergencia] = useState(false);
     const [confirmarEmergencia, setConfirmarEmergencia] = useState(null); // { disciplinaNombre }
     const [coachDisciplinas, setCoachDisciplinas] = useState([]); // disciplinas asignadas al coach
+
+    // ── TAREA 4: selección múltiple de días (semana actual) ──
+    const semanaActual = getSemanaActual();
+    const [diasSeleccionados, setDiasSeleccionados] = useState(new Set([hoyStr()]));
+    const [clasesPorFecha, setClasesPorFecha] = useState({}); // { fechaStr: [clases] }
+    const [wodsPorFecha, setWodsPorFecha] = useState({}); // { fechaStr: [wods] }
 
     // Clase abierta desde DashboardCoach (?clase=ID) — formulario WOD pre-vinculado
     const [claseDestino, setClaseDestino] = useState(null);
@@ -173,16 +203,53 @@ export default function GestionClases() {
         setDisciplinaActiva(dId); setHorariosSel({}); setWod(null); setModoEdicion(false);
         try {
             const turno = TURNOS.find(t => t.id === turnoActivo);
-            // Fuente de verdad: clases REALES ya generadas para la fecha seleccionada
-            // (no horarios_base, que son plantillas y pueden no existir aunque la clase sí)
-            const r = await api.get(`${API_BASE}/clases`, { params: { tenant_id, disciplina_id: dId, fecha_desde: fechaPlanif, fecha_hasta: fechaPlanif, limit: 200 } });
+            // TAREA 4: cargar TODA la semana para el calendario multi-día
+            const desdeSemana = semanaActual[0];
+            const hastaSemana = semanaActual[6];
+            const r = await api.get(`${API_BASE}/clases`, { params: { tenant_id, disciplina_id: dId, fecha_desde: desdeSemana, fecha_hasta: hastaSemana, limit: 500 } });
             const data = r.data || [];
-            let clases = Array.isArray(data) ? data : (data.clases || []);
-            if (turno) clases = clases.filter(c => { const hora = parseHora(c.hora_inicio); return hora >= turno.desde && hora <= turno.hasta; });
-            setHorariosTurno(clases);
-            const sel = {}; clases.forEach(c => { sel[c.id] = false; });
+            let clasesSemana = Array.isArray(data) ? data : (data.clases || []);
+            if (turno) clasesSemana = clasesSemana.filter(c => { const hora = parseHora(c.hora_inicio); return hora >= turno.desde && hora <= turno.hasta; });
+
+            // Clases de la fecha seleccionada (comportamiento previo)
+            const clasesHoy = clasesSemana.filter(c => c.fecha === fechaPlanif);
+            setHorariosTurno(clasesHoy);
+            const sel = {}; clasesHoy.forEach(c => { sel[c.id] = false; });
             setHorariosSel(sel);
+
+            // Agrupar por fecha para el calendario
+            const porFecha = {};
+            semanaActual.forEach(f => {
+                const fechaK = f;
+                porFecha[fechaK] = clasesSemana.filter(c => {
+                    const cf = c.fecha ? (typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha) : '';
+                    return cf === fechaK;
+                });
+            });
+            setClasesPorFecha(porFecha);
+
+            // Cargar WODs de la semana (GET /wods/?fecha= acepta fecha arbitraria)
+            const wodsSemana = {};
+            await Promise.all(semanaActual.map(async (f) => {
+                try {
+                    const wr = await api.get(`${API_BASE}/wods/`, { params: { tenant_id, fecha: f } });
+                    wodsSemana[f] = wr.data || [];
+                } catch { wodsSemana[f] = []; }
+            }));
+            setWodsPorFecha(wodsSemana);
         } catch (e) { console.error('Error horarios', e); }
+    };
+
+    // TAREA 4: toggle de día para el calendario (solo si hay clases ese día)
+    const toggleDia = (fechaStr) => {
+        const tieneClases = (clasesPorFecha[fechaStr] || []).length > 0;
+        if (!tieneClases) return; // solo días con mismo horario+disciplina seleccionables
+        setDiasSeleccionados(prev => {
+            const nuevo = new Set(prev);
+            if (nuevo.has(fechaStr)) nuevo.delete(fechaStr);
+            else nuevo.add(fechaStr);
+            return nuevo;
+        });
     };
 
     const horarioTieneWod = (horarioId) => clasesDelDia.some(c => c.horario_base_id === horarioId && c.wod_id);
@@ -202,41 +269,48 @@ export default function GestionClases() {
         setLoading(true); setMsg({ tipo: '', texto: '' });
         const esEmergencia = modoEmergencia && disciplinaActiva && coachDisciplinas.length > 0 && !coachDisciplinas.includes(disciplinaActiva);
         try {
-            let wodRes;
             const params = { tenant_id, disciplina_id: disciplinaActiva };
             if (esEmergencia) params.modo_emergencia = true;
+            let wodRes;
             if (wod && wod.id) {
+                // Modo edición: solo actualiza el WOD existente del día
                 const r = await api.put(`${API_BASE}/wods/${wod.id}`, { ...wodForm, fecha: fechaPlanif, coach_id }, { params });
                 wodRes = r.data; setMsg({ tipo: 'exito', texto: 'WOD actualizado' + (esEmergencia ? ' (modo emergencia)' : '') });
             } else {
-                const r = await api.post(`${API_BASE}/wods/`, { ...wodForm, fecha: fechaPlanif, coach_id }, { params });
-                wodRes = r.data; setMsg({ tipo: 'exito', texto: 'WOD creado' + (esEmergencia ? ' (modo emergencia)' : '') });
+                // TAREA 4: crear un WOD INDEPENDIENTE por cada día marcado
+                const diasMarcados = [...diasSeleccionados].sort();
+                if (diasMarcados.length === 0) throw new Error('Selecciona al menos un día');
+                let creados = 0;
+                for (const fechaDia of diasMarcados) {
+                    const r = await api.post(`${API_BASE}/wods/`, { ...wodForm, fecha: fechaDia, coach_id }, { params });
+                    wodRes = r.data;
+                    creados++;
+                    // Vincular el WOD a las clases de ESE día (mismo horario+disciplina)
+                    const clasesDelDia = (clasesPorFecha[fechaDia] || []);
+                    const claseIds = clasesDelDia
+                        .filter(c => c.disciplina_id === disciplinaActiva)
+                        .map(c => c.id);
+                    if (claseIds.length > 0) {
+                        const batchBody = { wod_id: wodRes.id, clase_ids: claseIds };
+                        if (esEmergencia) batchBody.modo_emergencia = true;
+                        await api.post(`${API_BASE}/wods/batch`, batchBody, { params: { tenant_id } });
+                    }
+                }
+                setMsg({ tipo: 'exito', texto: `✅ ${creados} WOD(s) creado(s) y publicado(s)` + (esEmergencia ? ' (modo emergencia)' : '') });
             }
             setWod(wodRes); setModoEdicion(false);
-            // Si se abrió desde ?clase=ID, vincular el WOD a ESA clase específica
+            // Si se abrió desde ?clase=ID, asegurar el vínculo a ESA clase específica
             if (claseDestino && claseDestino.id) {
                 const body = { wod_id: wodRes.id, clase_ids: [claseDestino.id] };
                 if (esEmergencia) body.modo_emergencia = true;
                 const res = await api.post(`${API_BASE}/wods/batch`, body, { params: { tenant_id } });
                 setMsg({ tipo: 'exito', texto: `WOD creado y asignado a la clase #${claseDestino.id}` + (esEmergencia ? ' (modo emergencia)' : '') });
-                // Volver a la Planificación Semanal (Dashboard Coach → Clases) para
-                // que el usuario vea la celda verde con el WOD publicado.
                 setTimeout(() => navigate('/coach?tab=clases'), 1200);
-            } else {
-                const seleccionadas = Object.entries(horariosSel).filter(([, v]) => v).map(([k]) => parseInt(k));
-                const claseIds = seleccionadas
-                    .map(horarioId => clasesDelDia.find(c => c.horario_base_id === horarioId && c.fecha === fechaPlanif))
-                    .filter(c => c)
-                    .map(c => c.id);
-                if (claseIds.length > 0) {
-                    const batchBody = { wod_id: wodRes.id, clase_ids: claseIds };
-                    if (esEmergencia) batchBody.modo_emergencia = true;
-                    const res = await api.post(`${API_BASE}/wods/batch`, batchBody, { params: { tenant_id } });
-                    setMsg({ tipo: 'exito', texto: `WOD asignado a ${res.data.actualizadas} clase(s)` + (esEmergencia ? ' (modo emergencia)' : '') });
-                }
             }
             setConfirmarEmergencia(null);
             cargarClases(fechaPlanif).then(setClasesDelDia);
+            // Recargar WODs de la semana para actualizar el calendario
+            if (disciplinaActiva) seleccionarDisciplina(disciplinaActiva);
         } catch (e) {
             setMsg({ tipo: 'error', texto: `Error: ${e.response?.data?.detail || e.message}` });
         } finally { setLoading(false); }
@@ -346,6 +420,49 @@ export default function GestionClases() {
                         <p className="text-sm text-gray-600 mb-4">
                             Clase #{claseDestino.id} — {claseDestino.disciplina_nombre || 'Clase'} · {fechaPlanif} · {claseDestino.hora_inicio ? String(claseDestino.hora_inicio).substring(0, 5) : ''} - {claseDestino.hora_fin ? String(claseDestino.hora_fin).substring(0, 5) : ''}
                         </p>
+
+                        {/* ── TAREA 4: CALENDARIO SEMANA (7 días, multi-selección) ── */}
+                        <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                            <p className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">
+                                📅 Días donde publicar (semana actual)
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                                {semanaActual.map((fechaStr, idx) => {
+                                    const fechaDate = new Date(fechaStr + 'T12:00:00');
+                                    const nombreDia = NOMBRES_DIAS_LARGO[fechaDate.getDay()];
+                                    const esHoy = fechaStr === hoyStr();
+                                    const tieneClases = (clasesPorFecha[fechaStr] || []).length > 0;
+                                    const yaTieneWod = (wodsPorFecha[fechaStr] || []).some(w => w.estado === 'publicado');
+                                    const seleccionado = diasSeleccionados.has(fechaStr);
+                                    const deshabilitado = !tieneClases && !esHoy;
+                                    return (
+                                        <button
+                                            key={fechaStr}
+                                            type="button"
+                                            disabled={deshabilitado}
+                                            onClick={() => toggleDia(fechaStr)}
+                                            title={!tieneClases && !esHoy ? 'Sin clases este día' : (yaTieneWod ? 'Ya tiene WOD publicado' : '')}
+                                            className={`px-2 py-1.5 rounded-lg text-xs font-medium transition-all border
+                                                ${deshabilitado ? 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
+                                                    : seleccionado ? 'bg-emerald-600 text-white border-emerald-700'
+                                                        : yaTieneWod ? 'bg-orange-100 text-orange-800 border-orange-300'
+                                                            : 'bg-white text-gray-700 border-gray-300 hover:border-emerald-400'}`}
+                                        >
+                                            <span className="block font-bold">{nombreDia.slice(0, 3)}</span>
+                                            <span className="block text-base font-black">{fechaDate.getDate()}</span>
+                                            <span className="block text-[9px] opacity-80">
+                                                {esHoy ? '● HOY' : yaTieneWod ? '✓ WOD' : tieneClases ? '☑ clase' : '—'}
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <p className="text-[10px] text-gray-500 mt-1">
+                                Seleccionados: {diasSeleccionados.size} día(s). Se creará un WOD independiente por cada día marcado.
+                                {!disciplinaActiva && ' Selecciona un turno y disciplina para habilitar el calendario.'}
+                            </p>
+                        </div>
+
                         <div className="space-y-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Título</label>
