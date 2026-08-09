@@ -75,4 +75,4 @@ class UsuarioListItem(BaseModel):
     activo: bool
     fechaRegistro: Optional[datetime] = Field(None, alias="created_at")
 
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True, serialize_by_alias=True)

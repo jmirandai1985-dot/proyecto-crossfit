@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modelo SQLAlchemy para la tabla clases
 """
 from sqlalchemy import Column, Integer, Boolean, ForeignKey, Index, Date, Time
@@ -12,13 +12,13 @@ from app.db.database import Base
 class Clase(Base):
     """
     Modelo de Clase
-    Representa una clase específica en una fecha y hora determinada
+    Representa una clase especÃ­fica en una fecha y hora determinada
     """
     __tablename__ = "clases"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
-        "tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+        "tenants.id", ondelete="CASCADE"), nullable=False)
     horario_base_id = Column(Integer, ForeignKey(
         "horarios.id", ondelete="CASCADE"), nullable=False)
     coach_id = Column(Integer, ForeignKey(
@@ -31,9 +31,9 @@ class Clase(Base):
     cupo_maximo = Column(Integer, nullable=False, default=20)
     asistentes_confirmados = Column(Integer, nullable=False, default=0)
     cancelada = Column(Boolean, nullable=False, default=False)
-    # WOD asociado a esta clase (FK → wods.id)
+    # WOD asociado a esta clase (FK â†’ wods.id)
     wod_id = Column(Integer, ForeignKey(
-        "wods.id", ondelete="SET NULL"), nullable=True, index=True)
+        "wods.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True),
@@ -42,7 +42,7 @@ class Clase(Base):
     # Relaciones
     wod = relationship("Wod", foreign_keys=[wod_id], lazy="joined")
 
-    # Índices para búsquedas
+    # Ãndices para bÃºsquedas
     __table_args__ = (
         Index('ix_clases_tenant_id', 'tenant_id'),
         Index('ix_clases_fecha', 'fecha'),

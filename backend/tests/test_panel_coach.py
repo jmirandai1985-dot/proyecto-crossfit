@@ -1,5 +1,5 @@
-"""
-Test del Panel del Coach — Suite de integración (9 pruebas).
+﻿"""
+Test del Panel del Coach â€” Suite de integraciÃ³n (9 pruebas).
 Cubre el flujo completo de gestion de clases por parte del coach:
 disciplinas, horarios, creacion de WODs, edicion, y asistencia.
 
@@ -16,7 +16,7 @@ from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, HOY_STR, get_coach_t
 COACH_ID = 1000
 
 
-# ── Estado compartido entre tests ──
+# â”€â”€ Estado compartido entre tests â”€â”€
 class Shared:
     disciplinas = []
     disciplina_crossfit_id = None
@@ -30,11 +30,11 @@ class Shared:
 
 
 # ===================================================================
-# BLOQUE 1 — DISCIPLINAS Y HORARIOS (tests 1-2)
+# BLOQUE 1 â€” DISCIPLINAS Y HORARIOS (tests 1-2)
 # ===================================================================
 
 def test_c01_disciplinas():
-    """[1] GET /disciplinas — Listar disciplinas y verificar filtro es_open_box."""
+    """[1] GET /disciplinas â€” Listar disciplinas y verificar filtro es_open_box."""
     r = requests.get(f"{BASE}/disciplinas",
                      params={"tenant_id": TENANT_ID})
     assert r.status_code == 200, f"Status {r.status_code}"
@@ -55,7 +55,7 @@ def test_c01_disciplinas():
 
 
 def test_c02_horarios_por_disciplina():
-    """[2] GET /horarios — Horarios filtrados por disciplina y dia de semana."""
+    """[2] GET /horarios â€” Horarios filtrados por disciplina y dia de semana."""
     dia_semana = HOY.weekday()  # 0=Lunes ... 6=Domingo
     r = requests.get(f"{BASE}/horarios",
                      params={"tenant_id": TENANT_ID, "disciplina_id": Shared.disciplina_crossfit_id})
@@ -72,11 +72,11 @@ def test_c02_horarios_por_disciplina():
 
 
 # ===================================================================
-# BLOQUE 2 — WODs (tests 3-5)
+# BLOQUE 2 â€” WODs (tests 3-5)
 # ===================================================================
 
 def test_c03_crear_wod_texto_libre():
-    """[3] POST /wods — Crear un WOD con campos de texto libre."""
+    """[3] POST /wods â€” Crear un WOD con campos de texto libre."""
     payload = {
         "titulo": "TEST WOD Coach - Fran Variante",
         "descripcion": "21-15-9 de thrusters y pull-ups",
@@ -112,7 +112,7 @@ def test_c03_crear_wod_texto_libre():
 
 
 def test_c04_obtener_wod():
-    """[4] GET /wods/{id} — Verificar que el WOD se recupera con todos los campos."""
+    """[4] GET /wods/{id} â€” Verificar que el WOD se recupera con todos los campos."""
     assert Shared.wod_creado_id is not None, "Primero debe crear el WOD"
     r = requests.get(f"{BASE}/wods/{Shared.wod_creado_id}",
                      params={"tenant_id": TENANT_ID})
@@ -129,7 +129,7 @@ def test_c04_obtener_wod():
 
 
 def test_c05_editar_wod():
-    """[5] PUT /wods/{id} — Editar el WOD y verificar cambios."""
+    """[5] PUT /wods/{id} â€” Editar el WOD y verificar cambios."""
     assert Shared.wod_creado_id is not None, "Primero debe crear el WOD"
     cambios = {
         "titulo": "TEST WOD Coach - Editado",
@@ -156,11 +156,11 @@ def test_c05_editar_wod():
 
 
 # ===================================================================
-# BLOQUE 3 — ASISTENCIA Y CREDITOS (tests 6-8)
+# BLOQUE 3 â€” ASISTENCIA Y CREDITOS (tests 6-8)
 # ===================================================================
 
 def test_c06_asignar_wod_a_clase():
-    """[6] POST /wods/clases/{id}/asignar-wod/{wod_id} — Asignar WOD a(s) clase(s)."""
+    """[6] POST /wods/clases/{id}/asignar-wod/{wod_id} â€” Asignar WOD a(s) clase(s)."""
     assert Shared.wod_creado_id is not None, "Primero debe crear el WOD"
     # Obtener clases de hoy
     r = requests.get(f"{BASE}/clases",
@@ -189,8 +189,8 @@ def test_c06_asignar_wod_a_clase():
 
 def test_c06b_wod_hoy_con_alumno_id():
     """[6b] Verificar que GET /wods/hoy?alumno_id=X retorna el WOD de la
-    clase donde el alumno tiene reserva (NO el primer WOD del día).
-    Esto prueba que el fix de discriminación por disciplina funciona."""
+    clase donde el alumno tiene reserva (NO el primer WOD del dÃ­a).
+    Esto prueba que el fix de discriminaciÃ³n por disciplina funciona."""
     assert Shared.clase_asignada_id is not None, "test_c06 debe ejecutarse antes"
     # Crear reserva del alumno en la clase que tiene WOD asignado
     r_res = requests.post(f"{BASE}/reservas/",
@@ -206,7 +206,7 @@ def test_c06b_wod_hoy_con_alumno_id():
     else:
         Shared.reserva_id_test = r_res.json().get("id")
         print(f"  Reserva creada id={Shared.reserva_id_test}")
-    # LLAMADA CRÍTICA: GET /wods/hoy?alumno_id=ALUMNO_ID
+    # LLAMADA CRÃTICA: GET /wods/hoy?alumno_id=ALUMNO_ID
     r_wod = requests.get(f"{BASE}/wods/hoy",
                          params={"tenant_id": TENANT_ID, "alumno_id": ALUMNO_ID})
     assert r_wod.status_code == 200, f"Status {r_wod.status_code}"
@@ -215,11 +215,11 @@ def test_c06b_wod_hoy_con_alumno_id():
     assert wod_recibido.get("id") == Shared.wod_creado_id, \
         f"Esperaba WOD id={Shared.wod_creado_id}, obtuvo WOD id={wod_recibido.get('id')} titulo='{wod_recibido.get('titulo')}'"
     print(
-        f"  ✅ GET /wods/hoy?alumno_id={ALUMNO_ID} → WOD correcto id={wod_recibido.get('id')}")
+        f"  âœ… GET /wods/hoy?alumno_id={ALUMNO_ID} â†’ WOD correcto id={wod_recibido.get('id')}")
 
 
 def test_c07_marcar_asistencia():
-    """[7] PUT /reservas/{id}/asistencia — Marcar asistencia y verificar que se guarda."""
+    """[7] PUT /reservas/{id}/asistencia â€” Marcar asistencia y verificar que se guarda."""
     # Primero crear una reserva para el alumno en la clase
     r = requests.post(f"{BASE}/reservas/",
                       json={
@@ -229,7 +229,7 @@ def test_c07_marcar_asistencia():
     })
     # Si no se puede crear (ya existe), intentamos listar reservas de la clase
     if r.status_code not in (200, 201):
-        print(f"  POST reservas falló: {r.status_code} {r.text[:200]}")
+        print(f"  POST reservas fallÃ³: {r.status_code} {r.text[:200]}")
         r = requests.get(f"{BASE}/reservas/por-clase/{Shared.clase_asignada_id}",
                          params={"tenant_id": TENANT_ID})
         assert r.status_code == 200, f"Status {r.status_code}: {r.text[:200]}"
@@ -298,19 +298,19 @@ def test_c08_asistencia_false_no_devuelve_credito():
 
 
 # ===================================================================
-# BLOQUE 4 — SEGURIDAD (test permanente de regresión IDOR)
+# BLOQUE 4 â€” SEGURIDAD (test permanente de regresiÃ³n IDOR)
 # ===================================================================
 
 def test_c10_seguridad_coach_no_puede_operar_otra_disciplina():
     """[10] Verificar que un coach NO puede asignar WOD ni marcar asistencia
     en una disciplina a la que NO pertenece (IDOR cerrado permanentemente).
 
-    Coach 1000 solo está asignado a CrossFit (disc 1).
-    Intenta operar sobre Levantamiento Olímpico (disc 4) y debe recibir 403.
+    Coach 1000 solo estÃ¡ asignado a CrossFit (disc 1).
+    Intenta operar sobre Levantamiento OlÃ­mpico (disc 4) y debe recibir 403.
     """
     token = get_coach_token(coach_id=COACH_ID)
 
-    # ── Obtener una clase de Levantamiento Olímpico (disc 4) ──
+    # â”€â”€ Obtener una clase de Levantamiento OlÃ­mpico (disc 4) â”€â”€
     r = requests.get(f"{BASE}/clases",
                      params={"tenant_id": TENANT_ID, "fecha_desde": HOY_STR, "fecha_hasta": HOY_STR})
     assert r.status_code == 200, f"GET clases: {r.status_code}"
@@ -318,10 +318,10 @@ def test_c10_seguridad_coach_no_puede_operar_otra_disciplina():
     clases_hoy = clases if isinstance(clases, list) else (
         clases.get("clases", []) if isinstance(clases, dict) else [])
     lev_olimp = [c for c in clases_hoy if c.get("disciplina_id") == 4]
-    assert len(lev_olimp) > 0, "Debe existir clase de Lev. Olímpico hoy"
+    assert len(lev_olimp) > 0, "Debe existir clase de Lev. OlÃ­mpico hoy"
     clase_otra_disc = lev_olimp[0]
 
-    # ── Intentar asignar WOD a clase de OTRA disciplina → 403 ──
+    # â”€â”€ Intentar asignar WOD a clase de OTRA disciplina â†’ 403 â”€â”€
     r_wod = requests.post(
         f"{BASE}/wods/clases/{clase_otra_disc['id']}/asignar-wod/1",
         params={"tenant_id": TENANT_ID},
@@ -331,10 +331,10 @@ def test_c10_seguridad_coach_no_puede_operar_otra_disciplina():
         f"Esperaba 403 (no autorizado), obtuvo {r_wod.status_code}: {r_wod.text[:200]}"
     assert "no esta asignado" in r_wod.json().get("detail", ""), \
         f"Mensaje debe indicar falta de asignacion: {r_wod.text[:200]}"
-    print(f"  ✅ Asignar WOD a disc 4 → 403 (bloqueado correctamente)")
+    print(f"  âœ… Asignar WOD a disc 4 â†’ 403 (bloqueado correctamente)")
 
-    # ── Intentar marcar asistencia en reserva de OTRA disciplina → 403 ──
-    # Crear una reserva en la clase de Lev. Olímpico para tener un ID válido
+    # â”€â”€ Intentar marcar asistencia en reserva de OTRA disciplina â†’ 403 â”€â”€
+    # Crear una reserva en la clase de Lev. OlÃ­mpico para tener un ID vÃ¡lido
     r_res = requests.post(f"{BASE}/reservas/",
                           json={"tenant_id": TENANT_ID, "alumno_id": ALUMNO_ID, "clase_id": clase_otra_disc["id"]})
     reserva_id_otra = None
@@ -356,19 +356,19 @@ def test_c10_seguridad_coach_no_puede_operar_otra_disciplina():
                                headers={"Authorization": f"Bearer {token}"})
         assert r_asist.status_code == 403, \
             f"Esperaba 403 al marcar asistencia en disc ajena, obtuvo {r_asist.status_code}: {r_asist.text[:200]}"
-        print(f"  ✅ Marcar asistencia en disc 4 → 403 (bloqueado correctamente)")
+        print(f"  âœ… Marcar asistencia en disc 4 â†’ 403 (bloqueado correctamente)")
     else:
         print(
-            "  ⚠️ No se pudo crear/obtener reserva en disc 4 — prueba de asistencia omitida")
-        print("     (la prueba de asignar WOD ya confirmó el 403)")
+            "  âš ï¸ No se pudo crear/obtener reserva en disc 4 â€” prueba de asistencia omitida")
+        print("     (la prueba de asignar WOD ya confirmÃ³ el 403)")
 
 
 # ===================================================================
-# BLOQUE 5 — BATCH WOD (tests 11-12)
+# BLOQUE 5 â€” BATCH WOD (tests 11-12)
 # ===================================================================
 
 def test_c12_batch_asignar_wod():
-    """[12] POST /wods/batch — Asignar WOD a varias clases en un solo request.
+    """[12] POST /wods/batch â€” Asignar WOD a varias clases en un solo request.
     a) Batch exitoso con 2 clases de la misma disciplina (CrossFit)
     b) Batch RECHAZADO si incluye una clase de otra disciplina
     """
@@ -383,7 +383,7 @@ def test_c12_batch_asignar_wod():
     clases_hoy = clases if isinstance(clases, list) else (
         clases.get("clases", []) if isinstance(clases, dict) else [])
 
-    # ── a) Batch exitoso: 2 clases de CrossFit (disc 1) ──
+    # â”€â”€ a) Batch exitoso: 2 clases de CrossFit (disc 1) â”€â”€
     crossfit = [c for c in clases_hoy if c.get(
         "disciplina_id") == Shared.disciplina_crossfit_id]
     assert len(crossfit) >= 1, "Debe haber al menos 1 clase de CrossFit hoy"
@@ -401,12 +401,12 @@ def test_c12_batch_asignar_wod():
         f"Esperaba 1 actualizada, obtuvo {data.get('actualizadas')}"
     assert data.get("wod_id") == Shared.wod_creado_id
     print(
-        f"  ✅ Batch: WOD asignado a {data['actualizadas']} clase(s) de CrossFit")
+        f"  âœ… Batch: WOD asignado a {data['actualizadas']} clase(s) de CrossFit")
 
-    # ── b) Batch RECHAZADO: incluye clase de otra disciplina ──
+    # â”€â”€ b) Batch RECHAZADO: incluye clase de otra disciplina â”€â”€
     lev_olimp = [c for c in clases_hoy if c.get("disciplina_id") == 4]
-    assert len(lev_olimp) > 0, "Debe existir clase de Lev. Olímpico hoy"
-    # Mezclar: 1 CrossFit + 1 Lev. Olímpico
+    assert len(lev_olimp) > 0, "Debe existir clase de Lev. OlÃ­mpico hoy"
+    # Mezclar: 1 CrossFit + 1 Lev. OlÃ­mpico
     ids_mezclados = [crossfit[0]["id"], lev_olimp[0]["id"]]
 
     r_reject = requests.post(f"{BASE}/wods/batch",
@@ -418,16 +418,16 @@ def test_c12_batch_asignar_wod():
         f"Esperaba 403 batch rechazado, obtuvo {r_reject.status_code}: {r_reject.text[:200]}"
     assert "no esta asignado" in r_reject.json().get("detail", ""), \
         f"Mensaje debe indicar falta de asignacion: {r_reject.text[:200]}"
-    print(f"  ✅ Batch mezclado (CrossFit + Lev Olímpico) → 403 (rechazado correctamente, todo-o-nada)")
+    print(f"  âœ… Batch mezclado (CrossFit + Lev OlÃ­mpico) â†’ 403 (rechazado correctamente, todo-o-nada)")
 
 
 # ===================================================================
-# BLOQUE 6 — COBERTURA DE EMERGENCIA (test 13-14)
+# BLOQUE 6 â€” COBERTURA DE EMERGENCIA (test 13-14)
 # ===================================================================
 
 def test_c14_cobertura_emergencia():
     """[14] Verificar cobertura de emergencia:
-    a) Sin modo_emergencia, coach 1000 NO puede asignar WOD a Lev. Olimpico (disc 4) → 403
+    a) Sin modo_emergencia, coach 1000 NO puede asignar WOD a Lev. Olimpico (disc 4) â†’ 403
     b) Con modo_emergencia=true, SE PERMITE y queda registro en CoberturaEmergencia
     """
     token = get_coach_token(coach_id=COACH_ID)
@@ -443,10 +443,10 @@ def test_c14_cobertura_emergencia():
 
     # Encontrar clase de Lev. Olimpico (disc 4) - coach 1000 NO asignado a esta disciplina
     lev_olimp = [c for c in clases_hoy if c.get("disciplina_id") == 4]
-    assert len(lev_olimp) > 0, "Debe existir clase de Lev. Olímpico hoy"
+    assert len(lev_olimp) > 0, "Debe existir clase de Lev. OlÃ­mpico hoy"
     clase_otra = lev_olimp[0]
 
-    # ── a) Sin modo_emergencia → 403 (regresion del fix IDOR) ──
+    # â”€â”€ a) Sin modo_emergencia â†’ 403 (regresion del fix IDOR) â”€â”€
     r_sin = requests.post(
         f"{BASE}/wods/clases/{clase_otra['id']}/asignar-wod/{Shared.wod_creado_id}",
         params={"tenant_id": TENANT_ID},
@@ -454,9 +454,9 @@ def test_c14_cobertura_emergencia():
     )
     assert r_sin.status_code == 403, \
         f"Sin modo_emergencia debe dar 403, obtuvo {r_sin.status_code}"
-    print(f"  ✅ Sin modo_emergencia → 403 (IDOR sigue cerrado)")
+    print(f"  âœ… Sin modo_emergencia â†’ 403 (IDOR sigue cerrado)")
 
-    # ── b) Con modo_emergencia=true → 200 + auditoria ──
+    # â”€â”€ b) Con modo_emergencia=true â†’ 200 + auditoria â”€â”€
     r_con = requests.post(
         f"{BASE}/wods/clases/{clase_otra['id']}/asignar-wod/{Shared.wod_creado_id}",
         params={"tenant_id": TENANT_ID, "modo_emergencia": True},
@@ -464,11 +464,11 @@ def test_c14_cobertura_emergencia():
     )
     assert r_con.status_code == 200, \
         f"Con modo_emergencia debe dar 200, obtuvo {r_con.status_code}: {r_con.text[:200]}"
-    print(f"  ✅ Con modo_emergencia=true → 200 (cobertura permitida)")
+    print(f"  âœ… Con modo_emergencia=true â†’ 200 (cobertura permitida)")
 
     # Verificar que quedo registro en CoberturaEmergencia via SQL
     import psycopg2
-    DB = 'postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-muddy-term-aclwd3w7-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+    DB = 'postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-lingering-shape-ac953re8-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
     c = psycopg2.connect(DB)
     cur = c.cursor()
     cur.execute("""
@@ -486,11 +486,11 @@ def test_c14_cobertura_emergencia():
     cur.close()
     c.close()
     print(
-        f"  ✅ Auditoria registrada: coach={COACH_ID} cubrio clase={clase_otra['id']} disciplina=4 accion=asignar_wod")
+        f"  âœ… Auditoria registrada: coach={COACH_ID} cubrio clase={clase_otra['id']} disciplina=4 accion=asignar_wod")
 
 
 # ===================================================================
-# BLOQUE 7 — LIMPIEZA
+# BLOQUE 7 â€” LIMPIEZA
 # ===================================================================
 
 def test_c15_cleanup():

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modelo SQLAlchemy para la tabla usuarios
 """
 from sqlalchemy import Column, Integer, Float, String, Boolean, Date, ForeignKey, Enum as SQLEnum
@@ -24,7 +24,7 @@ class Usuario(Base):
     """
     __tablename__ = "usuarios"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
         "tenants.id", ondelete="CASCADE"), nullable=False)
     rut = Column(String(12), nullable=False)

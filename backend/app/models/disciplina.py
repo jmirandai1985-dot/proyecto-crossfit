@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modelo SQLAlchemy para la tabla disciplinas
 """
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Index
@@ -11,9 +11,9 @@ from app.db.database import Base
 class Disciplina(Base):
     __tablename__ = "disciplinas"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
-        "tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+        "tenants.id", ondelete="CASCADE"), nullable=False)
     nombre = Column(String(100), nullable=False)
     descripcion = Column(String(500), nullable=True)
     es_open_box = Column(Boolean, nullable=False, default=False)

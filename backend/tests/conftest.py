@@ -1,13 +1,13 @@
-"""
-Configuración de pytest para los tests del backend.
-Estos tests son de integración contra la API real (localhost:8000).
+﻿"""
+ConfiguraciÃ³n de pytest para los tests del backend.
+Estos tests son de integraciÃ³n contra la API real (localhost:8000).
 Usan la base de datos Neon branch test y el alumno de prueba (id=999).
 
 Para ejecutar (recomendado):
   run_tests.bat
 
 SEGURIDAD: antes de cualquier test, verifica que el SERVIDOR (no solo pytest)
-esté apuntando al branch test, no a producción.
+estÃ© apuntando al branch test, no a producciÃ³n.
 """
 from app.core.security import create_access_token
 import os
@@ -24,10 +24,10 @@ if _backend_dir not in _sys.path:
     _sys.path.insert(0, _backend_dir)
 
 
-# ── Seguridad: verificar que el servidor NO apunte a producción ──
+# â”€â”€ Seguridad: verificar que el servidor NO apunte a producciÃ³n â”€â”€
 # Se hace via HTTP al endpoint /debug/db-url del propio servidor.
-# Este endpoint SOLO responde en TEST (soft-bar). En producción devuelve 404.
-# Así detectamos incluso si uvicorn se levantó sin ENVIRONMENT=test.
+# Este endpoint SOLO responde en TEST (soft-bar). En producciÃ³n devuelve 404.
+# AsÃ­ detectamos incluso si uvicorn se levantÃ³ sin ENVIRONMENT=test.
 try:
     r = requests.get("http://localhost:8000/debug/db-url", timeout=3)
     if r.status_code == 404:
@@ -40,7 +40,7 @@ try:
         sys.exit(1)
     data = r.json()
     if data.get("is_safe"):
-        print(f"\n[OK] SERVIDOR apunta a TEST BRANCH (muddy-term)\n")
+        print(f"\n[OK] SERVIDOR apunta a TEST BRANCH (lingering-shape)\n")
     else:
         print(f"\n[WARN] SERVIDOR DB URL no clasificada: {data}\n")
 except requests.ConnectionError:
@@ -48,7 +48,7 @@ except requests.ConnectionError:
 except Exception as e:
     print(f"\n[WARN] Error al verificar DB del servidor: {e}\n")
 
-# ── Configuración compartida ──
+# â”€â”€ ConfiguraciÃ³n compartida â”€â”€
 BASE = "http://localhost:8000/api/v1"
 ALUMNO_ID = 999      # Alumno de prueba (creado por run_setup_test_db.py)
 TENANT_ID = 1
@@ -104,7 +104,7 @@ def get_admin_token():
 
 @pytest.fixture(scope="session")
 def health_check():
-    """Verifica que la API esté corriendo antes de ejecutar tests."""
+    """Verifica que la API estÃ© corriendo antes de ejecutar tests."""
     try:
         r = requests.get(f"{BASE.replace('/api/v1', '')}/health", timeout=5)
         assert r.status_code == 200, f"API no responde: {r.text}"

@@ -20,9 +20,9 @@ class HistorialRM(Base):
     """
     __tablename__ = "historial_rm"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
-        "tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+        "tenants.id", ondelete="CASCADE"), nullable=False)
     alumno_id = Column(Integer, ForeignKey(
         "usuarios.id", ondelete="CASCADE"), nullable=False)
     movimiento_id = Column(Integer, ForeignKey(

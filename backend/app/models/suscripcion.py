@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modelo SQLAlchemy para la tabla suscripciones
 """
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Index
@@ -11,11 +11,11 @@ from app.db.database import Base
 class Suscripcion(Base):
     __tablename__ = "suscripciones"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
-        "tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+        "tenants.id", ondelete="CASCADE"), nullable=False)
     usuario_id = Column(Integer, ForeignKey(
-        "usuarios.id", ondelete="CASCADE"), nullable=False, index=True)
+        "usuarios.id", ondelete="CASCADE"), nullable=False)
     plan_id = Column(Integer, ForeignKey(
         "planes.id", ondelete="CASCADE"), nullable=False)
     estado = Column(String(20), nullable=False, default="activa")

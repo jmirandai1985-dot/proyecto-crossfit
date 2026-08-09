@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modelo de Notificaciones para alumnos
 """
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Text
@@ -9,7 +9,7 @@ from app.db.database import Base
 class Notificacion(Base):
     __tablename__ = "notificaciones"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     alumno_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
     # aprobado, rechazado, plan_activo
     tipo = Column(String(20), nullable=False)

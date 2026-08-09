@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modelo SQLAlchemy para la tabla retencion_alumnos
 """
 from sqlalchemy import Column, Integer, String, ForeignKey, Index, Date
@@ -10,14 +10,14 @@ from app.db.database import Base
 
 class RetencionAlumno(Base):
     """
-    Modelo de Retención de Alumnos
-    Registra información de retención y riesgo de abandono
+    Modelo de RetenciÃ³n de Alumnos
+    Registra informaciÃ³n de retenciÃ³n y riesgo de abandono
     """
     __tablename__ = "retencion_alumnos"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
-        "tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+        "tenants.id", ondelete="CASCADE"), nullable=False)
     alumno_id = Column(Integer, ForeignKey(
         "usuarios.id", ondelete="CASCADE"), nullable=False)
     coach_id = Column(Integer, ForeignKey(
@@ -31,7 +31,7 @@ class RetencionAlumno(Base):
     updated_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now(), onupdate=func.now())
 
-    # Índices para búsquedas
+    # Ãndices para bÃºsquedas
     __table_args__ = (
         Index('ix_retencion_tenant_id', 'tenant_id'),
         Index('ix_retencion_alumno_id', 'alumno_id'),

@@ -1,5 +1,5 @@
-"""
-Modelo SQLAlchemy para la tabla coach_disciplinas (relación M2M)
+﻿"""
+Modelo SQLAlchemy para la tabla coach_disciplinas (relaciÃ³n M2M)
 """
 from sqlalchemy import Column, Integer, Boolean, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import TIMESTAMP
@@ -11,14 +11,14 @@ from app.db.database import Base
 class CoachDisciplina(Base):
     """
     Modelo de Coach-Disciplina
-    Relación muchos-a-muchos entre coaches y disciplinas
-    Indica qué disciplinas puede dictar cada coach
+    RelaciÃ³n muchos-a-muchos entre coaches y disciplinas
+    Indica quÃ© disciplinas puede dictar cada coach
     """
     __tablename__ = "coach_disciplinas"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
-        "tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+        "tenants.id", ondelete="CASCADE"), nullable=False)
     coach_id = Column(Integer, ForeignKey(
         "usuarios.id", ondelete="CASCADE"), nullable=False)
     disciplina_id = Column(Integer, ForeignKey(
@@ -27,7 +27,7 @@ class CoachDisciplina(Base):
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())
 
-    # Índices para búsquedas
+    # Ãndices para bÃºsquedas
     __table_args__ = (
         Index('ix_coach_disciplinas_tenant_id', 'tenant_id'),
         Index('ix_coach_disciplinas_coach_id', 'coach_id'),

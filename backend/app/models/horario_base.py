@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modelo SQLAlchemy para la tabla horarios
 """
 from sqlalchemy import Column, Integer, Boolean, ForeignKey, Index, Time
@@ -11,9 +11,9 @@ from app.db.database import Base
 class HorarioBase(Base):
     __tablename__ = "horarios"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
-        "tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+        "tenants.id", ondelete="CASCADE"), nullable=False)
     disciplina_id = Column(Integer, ForeignKey(
         "disciplinas.id", ondelete="CASCADE"), nullable=False)
     dia_semana = Column(Integer, nullable=False)  # 0=Lunes, 6=Domingo

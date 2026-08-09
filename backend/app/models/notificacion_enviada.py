@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modelo para registrar correos enviados (bienvenida, vencimiento, inactividad).
 No confundir con notificaciones in-app (tabla notificaciones).
 """
@@ -10,8 +10,8 @@ from app.db.database import Base
 class NotificacionEnviada(Base):
     __tablename__ = "notificaciones_enviadas"
 
-    id = Column(Integer, primary_key=True, index=True)
-    alumno_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False, index=True)
+    id = Column(Integer, primary_key=True)
+    alumno_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
     # bienvenida | vencimiento | inactividad
     tipo = Column(String(20), nullable=False)
     fecha_envio = Column(DateTime(timezone=True), server_default=func.now())

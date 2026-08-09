@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modelo SQLAlchemy para registro de asistencias
 """
 from sqlalchemy import Column, Integer, ForeignKey, Date, String
@@ -11,7 +11,7 @@ from app.db.database import Base
 class Asistencia(Base):
     __tablename__ = "asistencias"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
         "tenants.id", ondelete="CASCADE"), nullable=False)
     usuario_id = Column(Integer, ForeignKey(

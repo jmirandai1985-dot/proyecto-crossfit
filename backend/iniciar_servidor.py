@@ -1,5 +1,5 @@
-"""
-Start uvicorn with ENVIRONMENT=test (muddy-term BD).
+﻿"""
+Start uvicorn with ENVIRONMENT=test (lingering-shape BD).
 Uses importlib to ensure ENV is set BEFORE any app import.
 """
 import uvicorn
@@ -23,7 +23,7 @@ print("=" * 60)
 print()
 print("  ENVIRONMENT=test")
 if is_test:
-    print("  CONECTADO A BD de TEST (muddy-term)")
+    print("  CONECTADO A BD de TEST (lingering-shape)")
 else:
     print("  ALERTA: BD NO es TEST")
     print(f"  URL: {db_url[:50]}...")

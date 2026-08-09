@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modelo SQLAlchemy para la tabla pivote wod_movimientos
 """
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, Index
@@ -12,15 +12,15 @@ from app.db.database import Base
 class WodMovimiento(Base):
     """
     Modelo pivote WodMovimiento
-    Relaciona un WOD con un Movimiento, incluyendo parámetros del ejercicio
+    Relaciona un WOD con un Movimiento, incluyendo parÃ¡metros del ejercicio
     """
     __tablename__ = "wod_movimientos"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     wod_id = Column(Integer, ForeignKey(
-        "wods.id", ondelete="CASCADE"), nullable=False, index=True)
+        "wods.id", ondelete="CASCADE"), nullable=False)
     movimiento_id = Column(Integer, ForeignKey(
-        "movimientos.id", ondelete="CASCADE"), nullable=False, index=True)
+        "movimientos.id", ondelete="CASCADE"), nullable=False)
     orden = Column(Integer, nullable=False, default=1)
     series = Column(Integer, nullable=True)
     repeticiones = Column(String(100), nullable=True)
@@ -28,7 +28,7 @@ class WodMovimiento(Base):
     tiempo = Column(String(100), nullable=True)
     notas = Column(String(500), nullable=True)
     # Fase del WOD: CALENTAMIENTO, FUERZA, WOD, o NULL
-    fase = Column(String(30), nullable=True, index=True)
+    fase = Column(String(30), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())
 
@@ -36,7 +36,7 @@ class WodMovimiento(Base):
     wod = relationship("Wod", back_populates="movimientos")
     movimiento = relationship("Movimiento")
 
-    # Índices para búsquedas
+    # Ãndices para bÃºsquedas
     __table_args__ = (
         Index('ix_wod_movimientos_wod_id', 'wod_id'),
         Index('ix_wod_movimientos_movimiento_id', 'movimiento_id'),

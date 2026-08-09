@@ -1,4 +1,4 @@
-from app.api.v1 import (
+﻿from app.api.v1 import (
     usuarios, tenants, dashboard, fidelizacion,
     disciplinas, planes, horarios, clases, reservas,
     coach_disciplinas, movimientos, historial_rm,
@@ -15,13 +15,13 @@ import os
 
 app = FastAPI(
     title="Box CrossFit Platform API",
-    description="API REST para gestión multi-tenant de boxes de CrossFit",
+    description="API REST para gestiÃ³n multi-tenant de boxes de CrossFit",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
 
-# ---- CONFIGURACIÓN DE CORS - PERMITIR TODOS LOS ORÍGENES ----
+# ---- CONFIGURACIÃ“N DE CORS - PERMITIR TODOS LOS ORÃGENES ----
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,7 +31,7 @@ app.add_middleware(
 )
 
 
-# Montar directorio de archivos estáticos para servir imágenes de productos
+# Montar directorio de archivos estÃ¡ticos para servir imÃ¡genes de productos
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(os.path.join(_static_dir, "uploads"), exist_ok=True)
 app.mount("/static", StaticFiles(directory=_static_dir), name="static")
@@ -45,15 +45,15 @@ async def root():
 @app.get("/debug/db-url")
 async def debug_db_url():
     """Endpoint de seguridad: usado por conftest.py para verificar que el servidor
-    NO esté apuntando a producción.
-    - En TEST (muddy-term): devuelve {"is_safe": true}
-    - En PRODUCCIÓN: devuelve 404 para no exponer información de infraestructura
+    NO estÃ© apuntando a producciÃ³n.
+    - En TEST (lingering-shape): devuelve {"is_safe": true}
+    - En PRODUCCIÃ“N: devuelve 404 para no exponer informaciÃ³n de infraestructura
     Nunca expone la URL completa ni credenciales."""
     from app.core.config import settings
     url = settings.DATABASE_URL
-    if "muddy-term" in url:
-        return {"is_safe": True, "is_test": True, "branch": "muddy-term"}
-    # En producción o cualquier otro entorno, no revelar información
+    if "lingering-shape" in url:
+        return {"is_safe": True, "is_test": True, "branch": "lingering-shape"}
+    # En producciÃ³n o cualquier otro entorno, no revelar informaciÃ³n
     from fastapi import HTTPException
     raise HTTPException(status_code=404, detail="Not found")
 
@@ -71,14 +71,14 @@ async def health_check():
     return {"status": "healthy", "database": db_status}
 
 
-# ---- INCLUSIÓN DE TODOS LOS ROUTERS CON SUS PREFIJOS CORRECTOS ----
+# ---- INCLUSIÃ“N DE TODOS LOS ROUTERS CON SUS PREFIJOS CORRECTOS ----
 app.include_router(
     usuarios.router, prefix="/api/v1/usuarios", tags=["Usuarios"])
 app.include_router(tenants.router, prefix="/api/v1/tenants", tags=["Tenants"])
 app.include_router(
     dashboard.router, prefix="/api/v1/dashboard", tags=["Dashboard"])
 app.include_router(fidelizacion.router,
-                   prefix="/api/v1/fidelizacion", tags=["Fidelización"])
+                   prefix="/api/v1/fidelizacion", tags=["FidelizaciÃ³n"])
 app.include_router(disciplinas.router,
                    prefix="/api/v1/disciplinas", tags=["Disciplinas"])
 app.include_router(planes.router, prefix="/api/v1/planes", tags=["Planes"])
@@ -90,13 +90,13 @@ app.include_router(
 app.include_router(coach_disciplinas.router,
                    prefix="/api/v1/coach-disciplinas", tags=["Coach-Disciplinas"])
 
-# Módulos corregidos con el nombre del recurso en el prefijo (Evita errores 500 y 404)
+# MÃ³dulos corregidos con el nombre del recurso en el prefijo (Evita errores 500 y 404)
 app.include_router(movimientos.router,
                    prefix="/api/v1/movimientos", tags=["RMs - Movimientos"])
 app.include_router(historial_rm.router,
                    prefix="/api/v1/historial-rm", tags=["RMs - Historial"])
 app.include_router(
-    retencion.router, prefix="/api/v1/retencion", tags=["Retención"])
+    retencion.router, prefix="/api/v1/retencion", tags=["RetenciÃ³n"])
 app.include_router(productos.router, prefix="/api/v1/productos",
                    tags=["Bazar - Productos"])
 app.include_router(pedidos.router, prefix="/api/v1/pedidos",
@@ -104,8 +104,8 @@ app.include_router(pedidos.router, prefix="/api/v1/pedidos",
 app.include_router(reportes.router, prefix="/api/v1/reportes",
                    tags=["Reportes Excel"])
 app.include_router(
-    auditoria.router, prefix="/api/v1/auditoria", tags=["Auditoría"])
-app.include_router(auth.router, prefix="/api/v1/auth", tags=["Autenticación"])
+    auditoria.router, prefix="/api/v1/auditoria", tags=["AuditorÃ­a"])
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["AutenticaciÃ³n"])
 app.include_router(suscripciones.router, prefix="/api/v1",
                    tags=["Suscripciones"])
 app.include_router(wods.router, tags=["WODs"])
@@ -114,13 +114,13 @@ app.include_router(solicitudes_planes.router,
 app.include_router(upload.router,
                    prefix="/api/v1/upload", tags=["Upload"])
 app.include_router(membresias.router,
-                   prefix="/api/v1/membresias", tags=["Membresías"])
+                   prefix="/api/v1/membresias", tags=["MembresÃ­as"])
 app.include_router(notificaciones.router,
                    prefix="/api/v1/notificaciones", tags=["Notificaciones"])
 app.include_router(notificaciones_enviadas.router,
                    prefix="/api/v1/notificaciones-enviadas", tags=["Notificaciones Enviadas"])
 app.include_router(migracion.router,
-                   prefix="/api/v1/migracion", tags=["Migración"])
+                   prefix="/api/v1/migracion", tags=["MigraciÃ³n"])
 app.include_router(comprar_emergencia.router,
                    prefix="/api/v1/planes", tags=["Compra Emergencia"])
 app.include_router(fix_fechas.router,
@@ -130,7 +130,7 @@ app.include_router(supervision.router,
 app.include_router(finanzas.router,
                    prefix="/api/v1/finanzas", tags=["Finanzas"])
 app.include_router(configuracion.router,
-                   prefix="/api/v1/configuracion", tags=["Configuración"])
+                   prefix="/api/v1/configuracion", tags=["ConfiguraciÃ³n"])
 
 
 @app.on_event("startup")
@@ -138,15 +138,15 @@ async def startup_event():
     import logging
     logger = logging.getLogger("uvicorn.startup")
 
-    logger.info("🚀 Iniciando Box CrossFit Platform API...")
-    logger.info("📖 Documentación disponible en: http://localhost:8000/docs")
+    logger.info("ðŸš€ Iniciando Box CrossFit Platform API...")
+    logger.info("ðŸ“– DocumentaciÃ³n disponible en: http://localhost:8000/docs")
 
-    # ── 1. Inicializar scheduler de generación diaria de clases ──
+    # â”€â”€ 1. Inicializar scheduler de generaciÃ³n diaria de clases â”€â”€
     try:
         from app.services.scheduler import iniciar_scheduler, set_generar_clases_callback
 
         async def callback_generar_clases():
-            """Callback async que genera clases para HOY + 6 días (7 días en total)"""
+            """Callback async que genera clases para HOY + 6 dÃ­as (7 dÃ­as en total)"""
             from datetime import date, timedelta
             from app.db.database import SessionLocal
             from app.services.generar_clases import generar_clases_para_rango
@@ -155,13 +155,13 @@ async def startup_event():
             fecha_hasta = hoy + timedelta(days=6)
             db = SessionLocal()
             try:
-                # Generar para tenant_id=1 (principal) en rango de 7 días
+                # Generar para tenant_id=1 (principal) en rango de 7 dÃ­as
                 resultado = generar_clases_para_rango(
                     db, tenant_id=1, fecha_desde=hoy, fecha_hasta=fecha_hasta)
                 return resultado
             except Exception as e:
                 logger.error(
-                    f"❌ [Callback Scheduler] Error: {e}", exc_info=True)
+                    f"âŒ [Callback Scheduler] Error: {e}", exc_info=True)
                 return None
             finally:
                 db.close()
@@ -169,9 +169,9 @@ async def startup_event():
         set_generar_clases_callback(callback_generar_clases)
         iniciar_scheduler()
     except Exception as e:
-        logger.error(f"❌ Error al iniciar scheduler: {e}")
+        logger.error(f"âŒ Error al iniciar scheduler: {e}")
 
-    # ── 2. Ejecutar generación inmediata al iniciar (para desarrollo) ──
+    # â”€â”€ 2. Ejecutar generaciÃ³n inmediata al iniciar (para desarrollo) â”€â”€
     try:
         from datetime import date, timedelta
         from app.db.database import SessionLocal
@@ -184,7 +184,7 @@ async def startup_event():
             from app.models.clase import Clase
             from sqlalchemy import text
 
-            # Verificar si ALGUNA fecha del rango [hoy, hoy+6] está incompleta
+            # Verificar si ALGUNA fecha del rango [hoy, hoy+6] estÃ¡ incompleta
             faltan_clases = False
             for i in range(7):
                 f = hoy + timedelta(days=i)
@@ -203,23 +203,23 @@ async def startup_event():
                 if count_clases < count_horarios:
                     faltan_clases = True
                     logger.info(
-                        f"🔍 [Startup] {f} tiene {count_clases}/{count_horarios} clases (faltan {count_horarios - count_clases})")
+                        f"ðŸ” [Startup] {f} tiene {count_clases}/{count_horarios} clases (faltan {count_horarios - count_clases})")
                     break
 
             if faltan_clases:
                 resultado = generar_clases_para_rango(
                     db, tenant_id=1, fecha_desde=hoy, fecha_hasta=fecha_hasta)
                 logger.info(
-                    f"🔄 [Startup] Se generaron {resultado['creadas']} clases faltantes para HOY + 6 días (7 días total)")
+                    f"ðŸ”„ [Startup] Se generaron {resultado['creadas']} clases faltantes para HOY + 6 dÃ­as (7 dÃ­as total)")
             else:
                 logger.info(
-                    f"✅ [Startup] Rango completo, no es necesario generar clases")
+                    f"âœ… [Startup] Rango completo, no es necesario generar clases")
         finally:
             db.close()
     except Exception as e:
-        logger.error(f"❌ Error al generar clases en startup: {e}")
+        logger.error(f"âŒ Error al generar clases en startup: {e}")
 
-    # ── 3. Crear movimientos de CrossFit de prueba si no existen ──
+    # â”€â”€ 3. Crear movimientos de CrossFit de prueba si no existen â”€â”€
     try:
         from app.db.database import SessionLocal
         from app.models.movimiento import Movimiento
@@ -230,7 +230,7 @@ async def startup_event():
             movimientos_lista = [
                 ("Clean (Cargada)", "fuerza"),
                 ("Snatch (Arrancada)", "fuerza"),
-                ("Jerk (Envión)", "fuerza"),
+                ("Jerk (EnviÃ³n)", "fuerza"),
                 ("Thruster", "fuerza"),
                 ("Deadlift (Peso Muerto)", "fuerza"),
                 ("Front Squat (Sentadilla Frontal)", "fuerza"),
@@ -249,8 +249,8 @@ async def startup_event():
                 ("Single Unders / SU (Saltos simples)", "gimnastico"),
                 ("Pistol Squat", "gimnastico"),
                 ("Burpees", "metabolico"),
-                ("Wall Balls (Lanzamiento de balón)", "metabolico"),
-                ("Box Jumps (Saltos al cajón)", "gimnastico"),
+                ("Wall Balls (Lanzamiento de balÃ³n)", "metabolico"),
+                ("Box Jumps (Saltos al cajÃ³n)", "gimnastico"),
                 ("Box Jump Over", "gimnastico"),
                 ("Dumbbell Snatch", "fuerza"),
                 ("Kettlebell Swing", "fuerza"),
@@ -273,24 +273,24 @@ async def startup_event():
                         db.add(movimiento)
                     db.commit()
                     logger.info(
-                        f"✅ Creados {len(movimientos_lista)} movimientos de prueba")
+                        f"âœ… Creados {len(movimientos_lista)} movimientos de prueba")
                 else:
                     logger.info(
-                        f"✅ {existing_count} movimientos ya existen, saltando seed")
+                        f"âœ… {existing_count} movimientos ya existen, saltando seed")
             else:
                 logger.warning(
-                    "⚠️ No se encontró tenant con id=1, no se crearon movimientos")
+                    "âš ï¸ No se encontrÃ³ tenant con id=1, no se crearon movimientos")
         finally:
             db.close()
     except Exception as e:
-        logger.error(f"❌ Error al crear movimientos de prueba: {e}")
+        logger.error(f"âŒ Error al crear movimientos de prueba: {e}")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     import logging
     logger = logging.getLogger("uvicorn.shutdown")
-    logger.info("🛑 Cerrando Box CrossFit Platform API...")
+    logger.info("ðŸ›‘ Cerrando Box CrossFit Platform API...")
 
     from app.services.scheduler import detener_scheduler
     detener_scheduler()

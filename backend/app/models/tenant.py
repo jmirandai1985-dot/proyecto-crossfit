@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modelo SQLAlchemy para la tabla tenants
 """
 from sqlalchemy import Column, Integer, String, Boolean
@@ -16,7 +16,7 @@ class Tenant(Base):
     """
     __tablename__ = "tenants"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     nombre = Column(String(150), nullable=False)
     subdomain = Column(String(63), nullable=False, unique=True)
     activo = Column(Boolean, nullable=False, default=True)

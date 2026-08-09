@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modelo SQLAlchemy para la tabla cobertura_emergencia.
 Audita cada vez que un coach opera sobre una disciplina que no tiene asignada
 (Modo Emergencia activado).
@@ -13,11 +13,11 @@ from app.db.database import Base
 class CoberturaEmergencia(Base):
     __tablename__ = "cobertura_emergencia"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
-        "tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+        "tenants.id", ondelete="CASCADE"), nullable=False)
     coach_id = Column(Integer, ForeignKey(
-        "usuarios.id", ondelete="CASCADE"), nullable=False, index=True)
+        "usuarios.id", ondelete="CASCADE"), nullable=False)
     clase_id = Column(Integer, ForeignKey(
         "clases.id", ondelete="CASCADE"), nullable=False)
     disciplina_id = Column(Integer, ForeignKey(

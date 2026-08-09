@@ -1,5 +1,5 @@
-"""
-Modelo de Solicitud de Plan (pendiente de aprobación admin)
+﻿"""
+Modelo de Solicitud de Plan (pendiente de aprobaciÃ³n admin)
 """
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
 from sqlalchemy.sql import func
@@ -9,7 +9,7 @@ from app.db.database import Base
 class SolicitudPlan(Base):
     __tablename__ = "solicitudes_planes"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
     alumno_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
     plan_id = Column(Integer, ForeignKey("planes.id"), nullable=False)

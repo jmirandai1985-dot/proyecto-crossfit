@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modelo SQLAlchemy para la tabla planes
 """
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Index
@@ -11,9 +11,9 @@ from app.db.database import Base
 class Plan(Base):
     __tablename__ = "planes"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
-        "tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+        "tenants.id", ondelete="CASCADE"), nullable=False)
     nombre = Column(String(100), nullable=False)
     creditos = Column(Integer, nullable=True)      # NULL = ilimitado
     es_ilimitado = Column(Boolean, nullable=False, default=False)

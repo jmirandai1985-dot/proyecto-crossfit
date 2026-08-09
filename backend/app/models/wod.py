@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modelo SQLAlchemy para la tabla wods (Workout of the Day)
 """
 from sqlalchemy import Column, Integer, String, Date, Boolean, ForeignKey, Enum, Index, Time, Text
@@ -19,19 +19,19 @@ class EstadoWod(enum.Enum):
 class Wod(Base):
     """
     Modelo de WOD (Workout of the Day) - v2 con campos de texto libre
-    Representa un entrenamiento programado para una fecha específica
+    Representa un entrenamiento programado para una fecha especÃ­fica
     """
     __tablename__ = "wods"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
-        "tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+        "tenants.id", ondelete="CASCADE"), nullable=False)
     fecha = Column(Date, nullable=False)
     hora_inicio = Column(Time, nullable=True)
     hora_fin = Column(Time, nullable=True)
     titulo = Column(String(200), nullable=True)
     descripcion = Column(String(500), nullable=True)
-    # Nuevos campos de texto libre (migración 006)
+    # Nuevos campos de texto libre (migraciÃ³n 006)
     calentamiento = Column(Text, nullable=True)
     fuerza_habilidad = Column(Text, nullable=True)
     wod_principal = Column(Text, nullable=True)
@@ -46,11 +46,11 @@ class Wod(Base):
     updated_at = Column(TIMESTAMP(timezone=True),
                         nullable=True, onupdate=func.now())
 
-    # Relaciones (mantenemos compatibilidad para migración, se puede eliminar después)
+    # Relaciones (mantenemos compatibilidad para migraciÃ³n, se puede eliminar despuÃ©s)
     movimientos = relationship(
         "WodMovimiento", back_populates="wod", cascade="all, delete-orphan")
 
-    # Índices para búsquedas
+    # Ãndices para bÃºsquedas
     __table_args__ = (
         Index('ix_wods_tenant_id', 'tenant_id'),
         Index('ix_wods_fecha', 'fecha'),

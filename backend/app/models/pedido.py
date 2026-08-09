@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modelo SQLAlchemy para la tabla pedidos
 """
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, Index
@@ -15,9 +15,9 @@ class Pedido(Base):
     """
     __tablename__ = "pedidos"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
-        "tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+        "tenants.id", ondelete="CASCADE"), nullable=False)
     alumno_id = Column(Integer, ForeignKey(
         "usuarios.id", ondelete="CASCADE"), nullable=False)
     producto_id = Column(Integer, ForeignKey(
@@ -34,7 +34,7 @@ class Pedido(Base):
     updated_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now(), onupdate=func.now())
 
-    # Índices para búsquedas
+    # Ãndices para bÃºsquedas
     __table_args__ = (
         Index('ix_pedidos_tenant_id', 'tenant_id'),
         Index('ix_pedidos_alumno_id', 'alumno_id'),

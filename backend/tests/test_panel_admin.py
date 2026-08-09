@@ -1,5 +1,5 @@
-"""
-Test del Panel de Administracion — Suite de integracion.
+﻿"""
+Test del Panel de Administracion â€” Suite de integracion.
 Cubre: validacion de rol admin, flujo de aprobacion/rechazo de solicitudes,
 endpoint de reportes del dashboard, y flujo de compra del bazar.
 
@@ -18,21 +18,21 @@ ADMIN_ID = 1001
 COACH_ID = 1000
 
 
-# ── Estado compartido entre tests ──
+# â”€â”€ Estado compartido entre tests â”€â”€
 class Shared:
     solicitud_id = None
     producto_id = None
 
 
 # ===================================================================
-# BLOQUE 4 — TEST PERMANENTE DE LIMPIEZA DE DUPLICADOS
+# BLOQUE 4 â€” TEST PERMANENTE DE LIMPIEZA DE DUPLICADOS
 # ===================================================================
 
 def test_c16_sin_clases_duplicadas():
     """Verifica que no existan duplicados en clases (misma fecha, hora, disciplina).
     Tambien verifica que no haya clases en Domingo (operacion confirmada cerrada)."""
     import psycopg2
-    DB = 'postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-muddy-term-aclwd3w7-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+    DB = 'postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-lingering-shape-ac953re8-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
     c = psycopg2.connect(DB)
     cur = c.cursor()
     cur.execute("""
@@ -51,10 +51,10 @@ def test_c16_sin_clases_duplicadas():
     assert domingo == 0, f"Hay {domingo} clases en Domingo"
     cur.close()
     c.close()
-    print(f"  ✅ Sin duplicados en clases (0 grupos) y sin clases en Domingo (0) — permanente")
+    print(f"  âœ… Sin duplicados en clases (0 grupos) y sin clases en Domingo (0) â€” permanente")
 
 # ===================================================================
-# BLOQUE 5 — LIMPIEZA
+# BLOQUE 5 â€” LIMPIEZA
 # ===================================================================
 
 
@@ -111,11 +111,11 @@ def test_a04_rechazar_con_coach_devuelve_403():
 
 
 # ===================================================================
-# BLOQUE 2 — REPORTES Y LISTADOS (tests 5-6)
+# BLOQUE 2 â€” REPORTES Y LISTADOS (tests 5-6)
 # ===================================================================
 
 def test_a05_reportes_dashboard():
-    """[5] GET /reportes/ — Endpoint de stats del Dashboard con datos reales."""
+    """[5] GET /reportes/ â€” Endpoint de stats del Dashboard con datos reales."""
     r = requests.get(f"{BASE}/reportes/",
                      params={"tenant_id": TENANT_ID})
     assert r.status_code == 200, f"Status {r.status_code}: {r.text[:200]}"
@@ -134,7 +134,7 @@ def test_a05_reportes_dashboard():
 
 
 def test_a06_listar_planes():
-    """[6] GET /planes — Listar planes funciona."""
+    """[6] GET /planes â€” Listar planes funciona."""
     r = requests.get(f"{BASE}/planes",
                      params={"tenant_id": TENANT_ID})
     assert r.status_code == 200, f"Status {r.status_code}"
@@ -144,11 +144,11 @@ def test_a06_listar_planes():
 
 
 # ===================================================================
-# BLOQUE 3 — BAZAR: FLUJO DE COMPRA CON STOCK (tests 7-9)
+# BLOQUE 3 â€” BAZAR: FLUJO DE COMPRA CON STOCK (tests 7-9)
 # ===================================================================
 
 def test_a07_crear_producto_con_stock():
-    """[7] POST /productos — Crear producto con stock inicial=5 (usa form-data)."""
+    """[7] POST /productos â€” Crear producto con stock inicial=5 (usa form-data)."""
     # El endpoint espera Form data (multipart), no json ni query params
     r = requests.post(f"{BASE}/productos", data={
         "nombre": "Camiseta Test",
@@ -168,7 +168,7 @@ def test_a07_crear_producto_con_stock():
 
 
 def test_a08_comprar_2_unidades_stock_baja_a_3():
-    """[8] POST /pedidos — Comprar 2 unidades, verificar stock baja a 3."""
+    """[8] POST /pedidos â€” Comprar 2 unidades, verificar stock baja a 3."""
     assert Shared.producto_id is not None, "Primero debe crear producto"
 
     # Crear pedido de 2 unidades
@@ -199,7 +199,7 @@ def test_a08_comprar_2_unidades_stock_baja_a_3():
 
 
 def test_a09_compra_excede_stock_rechazada():
-    """[9] Intentar comprar 10 unidades (solo quedan 3) — debe ser rechazado."""
+    """[9] Intentar comprar 10 unidades (solo quedan 3) â€” debe ser rechazado."""
     assert Shared.producto_id is not None, "Primero debe crear producto"
 
     pedido = {
@@ -219,11 +219,11 @@ def test_a09_compra_excede_stock_rechazada():
 
 
 # ===================================================================
-# BLOQUE 4 — LISTADO DE USUARIOS (test de serialización)
+# BLOQUE 4 â€” LISTADO DE USUARIOS (test de serializaciÃ³n)
 # ===================================================================
 
 def test_a10_listar_usuarios_serializable():
-    """[10] GET /usuarios?rol=alumno&tenant_id=1 — Verificar que la
+    """[10] GET /usuarios?rol=alumno&tenant_id=1 â€” Verificar que la
     respuesta sea 200 y que fechaRegistro sea serializable como ISO datetime.
     Esto protege contra el bug de UsuarioListItem.fechaRegistro como str
     cuando SQLAlchemy devuelve datetime real (causaba 500)."""
@@ -242,4 +242,4 @@ def test_a10_listar_usuarios_serializable():
         assert isinstance(fr, str), \
             f"fechaRegistro debe ser string, obtuvo {type(fr)} en user {u.get('id')}"
     print(
-        f"  [OK] Listado de {len(data)} usuarios con fechaRegistro ISO válido")
+        f"  [OK] Listado de {len(data)} usuarios con fechaRegistro ISO vÃ¡lido")

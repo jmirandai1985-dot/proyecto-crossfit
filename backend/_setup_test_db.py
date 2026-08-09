@@ -31,8 +31,9 @@ if 'soft-bar' not in TEST:
     print("FATAL: Not pointing to test branch")
     sys.exit(1)
 
-Base.metadata.create_all(bind=engine)
-print("Tables created.")
+if __name__ == "__main__":
+    Base.metadata.create_all(bind=engine)
+    print("Tables created.")
 
 db = DB()
 try:

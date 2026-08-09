@@ -1,7 +1,7 @@
-"""
+﻿"""
 Modelo SQLAlchemy para la tabla transacciones_financieras.
 Registra ingresos y egresos reales del box.
-Creada 2026-07-25 desde cero (sin histórico retroactivo).
+Creada 2026-07-25 desde cero (sin histÃ³rico retroactivo).
 """
 from sqlalchemy import Column, Integer, String, Numeric, Date, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import TIMESTAMP
@@ -13,9 +13,9 @@ from app.db.database import Base
 class TransaccionFinanciera(Base):
     __tablename__ = "transacciones_financieras"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
-        "tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+        "tenants.id", ondelete="CASCADE"), nullable=False)
     tipo = Column(String(20), nullable=False)  # 'ingreso' o 'egreso'
     # 'membresia', 'bazar', 'planilla', etc.
     categoria = Column(String(50), nullable=False)

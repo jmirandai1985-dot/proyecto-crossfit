@@ -1,6 +1,6 @@
-"""
-SYNC PROD -> TEST (muddy-term).
-IDEMPOTENTE: TRUNCATE + copia todos los datos desde PRODUCCIÓN.
+﻿"""
+SYNC PROD -> TEST (lingering-shape).
+IDEMPOTENTE: TRUNCATE + copia todos los datos desde PRODUCCIÃ“N.
 Preserva tablas custom (transacciones_financieras) mediante backup/restore.
 Incluye migraciones post-sync (requiere_coach, es_estudiante, coach_disciplinas, cobertura_emergencia).
 """
@@ -14,7 +14,7 @@ BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(BACKEND_DIR)
 sys.path.insert(0, BACKEND_DIR)
 
-# ── SEGURIDAD: Verificar ENVIRONMENT ──
+# â”€â”€ SEGURIDAD: Verificar ENVIRONMENT â”€â”€
 ENV = os.environ.get("ENVIRONMENT", "")
 if ENV != "test":
     print("="*60)
@@ -25,7 +25,7 @@ if ENV != "test":
 
 os.environ["ENVIRONMENT"] = "test"
 
-# ── URLs ──
+# â”€â”€ URLs â”€â”€
 # TEST: se obtiene de settings (carga .env.test)
 settings = importlib.import_module("app.core.config").settings
 URL_TEST = settings.DATABASE_URL
@@ -36,17 +36,17 @@ URL_PROD = "postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-withered-silence-acly7
 
 print("="*60)
 print(f"BD de TEST: {URL_TEST[:100]}...")
-print(f"MUDDY-TERM (DIRECT): {'muddy-term' in URL_TEST}")
+print(f"lingering-shape (DIRECT): {'lingering-shape' in URL_TEST}")
 print("="*60)
 
-# ── CONECTAR ──
+# â”€â”€ CONECTAR â”€â”€
 c_prod = psycopg2.connect(URL_PROD)
 c_test = psycopg2.connect(URL_TEST)
 c_test.autocommit = True
 cur_prod = c_prod.cursor()
 cur_test = c_test.cursor()
 
-# ── 1. RESPALDAR tablas custom ──
+# â”€â”€ 1. RESPALDAR tablas custom â”€â”€
 print("\n[BACKUP] Respaldo transacciones_financieras...")
 try:
     cur_test.execute(
@@ -57,7 +57,7 @@ except Exception as e:
     print(f"  No hay datos para respaldar: {e}")
     backup_tx = []
 
-# ── 2. TRUNCATE CASCADE TEST ──
+# â”€â”€ 2. TRUNCATE CASCADE TEST â”€â”€
 print("\nTRUNCATE CASCADE TEST...")
 cur_test.execute("""
     TRUNCATE TABLE
@@ -69,7 +69,11 @@ cur_test.execute("""
 """)
 print("TEST limpia")
 
-# ── 3. COPIAR PROD→TEST (tablas estándar) ──
+cur_test.execute("ALTER TABLE disciplinas DROP COLUMN IF EXISTS requiere_coach")
+cur_test.execute("ALTER TABLE planes DROP COLUMN IF EXISTS es_estudiante")
+cur_test.execute("ALTER TABLE planes ADD COLUMN IF NOT EXISTS requiere_certificado_estudiante BOOLEAN NOT NULL DEFAULT false")
+
+# â”€â”€ 3. COPIAR PRODâ†’TEST (tablas estÃ¡ndar) â”€â”€
 print("\nCopiando PROD->TEST...")
 TABLAS = [
     ("tenants", None),
@@ -105,7 +109,7 @@ for tabla, columnas in TABLAS:
 
 c_test.commit()
 
-# ── 4. RESTAURAR tablas custom ──
+# â”€â”€ 4. RESTAURAR tablas custom â”€â”€
 print("\n[RESTORE] Restaurando transacciones_financieras...")
 if backup_tx:
     for row in backup_tx:
@@ -119,9 +123,9 @@ if backup_tx:
     c_test.commit()
     print(f"  {len(backup_tx)} transacciones restauradas")
 else:
-    print("  Sin datos para restaurar (tabla estaba vacía)")
+    print("  Sin datos para restaurar (tabla estaba vacÃ­a)")
 
-# ── 5. MIGRACIONES POST-SYNC (antes eran _apply_migrations_post_sync.py) ──
+# â”€â”€ 5. MIGRACIONES POST-SYNC (antes eran _apply_migrations_post_sync.py) â”€â”€
 print("\n[MIGRACIONES POST-SYNC]...")
 
 # 5a. requiere_coach on disciplinas
@@ -171,7 +175,7 @@ print("[OK] cobertura_emergencia table")
 c_test.commit()
 print("[OK] Migraciones post-sync aplicadas")
 
-# ── 6. VERIFICACION ──
+# â”€â”€ 6. VERIFICACION â”€â”€
 print("\nVERIFICACION:")
 for tabla in ["tenants", "movimientos", "disciplinas", "planes", "horarios",
               "usuarios", "suscripciones", "productos", "clases", "reservas",

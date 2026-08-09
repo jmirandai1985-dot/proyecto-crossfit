@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modelo SQLAlchemy para la tabla auditoria
 """
 from sqlalchemy import Column, Integer, String, ForeignKey, Index
@@ -10,14 +10,14 @@ from app.db.database import Base
 
 class Auditoria(Base):
     """
-    Modelo de Auditoría
+    Modelo de AuditorÃ­a
     Registra todas las acciones realizadas en el sistema
     """
     __tablename__ = "auditoria"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
-        "tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+        "tenants.id", ondelete="CASCADE"), nullable=False)
     usuario_id = Column(Integer, ForeignKey(
         "usuarios.id", ondelete="SET NULL"), nullable=True)
     # CREATE, UPDATE, DELETE, LOGIN
@@ -29,7 +29,7 @@ class Auditoria(Base):
     fecha = Column(TIMESTAMP(timezone=True),
                    nullable=False, server_default=func.now())
 
-    # Índices para búsquedas
+    # Ãndices para bÃºsquedas
     __table_args__ = (
         Index('ix_auditoria_tenant_id', 'tenant_id'),
         Index('ix_auditoria_usuario_id', 'usuario_id'),
