@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import Layout from '../../components/Layout';
 import api from '../../services/api';
+import ModalClase from '../../components/ModalClase';
 
 const API_BASE = '/api/v1';
 
@@ -41,12 +42,13 @@ export default function SupervisionClases() {
     const [fechaDesde, setFechaDesde] = useState(hoyStr());
     const [fechaHasta, setFechaHasta] = useState(hoyStr());
     const [discExpandida, setDiscExpandida] = useState(null); // id de disciplina expandida
-    const [datosDisc, setDatosDisc] = useState({}); // { [discId]: [] } datos por disciplina
-    const [loadingDisc, setLoadingDisc] = useState(false);
-    const [detalleClase, setDetalleClase] = useState(null); // { claseId, reservas: [] }
+    const [horariosDisc, setHorariosDisc] = useState({}); // { [discId]: [...] } horarios base por disciplina
+    const [loadingHorariosDisc, setLoadingHorariosDisc] = useState(false);
     const [coachSelector, setCoachSelector] = useState(null); // { claseId, disciplinaId }
     const [coachesDisponibles, setCoachesDisponibles] = useState([]);
     const [emergenciaConfirm, setEmergenciaConfirm] = useState(null); // { coach, claseId, discId }
+    const [showModalClase, setShowModalClase] = useState(false); // modal "+ Agregar Clase"
+    const [modalReservasHorario, setModalReservasHorario] = useState(null); // { horario, cargando, data } self-service
     const [showCupos, setShowCupos] = useState(false);
     const [cuposData, setCuposData] = useState([]);
     const [cuposLoading, setCuposLoading] = useState(false);
@@ -76,45 +78,63 @@ export default function SupervisionClases() {
     }, [tenant_id]);
 
     useEffect(() => {
-        if (disciplinas.length > 0 && fechaDesde && fechaHasta) {
-            // Cargar datos de la primera disciplina por defecto
+        if (disciplinas.length > 0) {
+            // Cargar calendario semanal de la primera disciplina por defecto.
+            // NOTA: sin dependencias de fechaDesde/fechaHasta para no
+            // sobreescribir la disciplina expandida al cambiar el filtro.
             setDiscExpandida(disciplinas[0].id);
-            cargarDatosDisc(disciplinas[0].id, fechaDesde, fechaHasta);
+            cargarHorariosDisc(disciplinas[0].id);
         }
-    }, [disciplinas, fechaDesde, fechaHasta]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [disciplinas]);
 
     // ═══ FUNCIONES PARA VISTA TARJETAS ═══
-    const cargarDatosDisc = useCallback(async (discId, desde, hasta) => {
+    const cargarHorariosDisc = useCallback(async (discId) => {
         if (!discId) return;
-        setLoadingDisc(true);
+        setLoadingHorariosDisc(true);
         try {
-            const r = await api.get(`${API_BASE}/clases/`, {
-                params: { tenant_id, disciplina_id: discId, fecha_desde: desde, fecha_hasta: hasta, limit: 500 }
+            const r = await api.get(`${API_BASE}/supervision/horarios-base`, {
+                params: { tenant_id, disciplina_id: discId }
             });
-            const data = r.data || [];
-            const lista = Array.isArray(data) ? data : (data.clases || []);
-            setDatosDisc(prev => ({ ...prev, [discId]: lista }));
-        } catch { setDatosDisc(prev => ({ ...prev, [discId]: [] })); }
-        setLoadingDisc(false);
+            setHorariosDisc(prev => ({ ...prev, [discId]: (r.data?.horarios || []) }));
+        } catch { setHorariosDisc(prev => ({ ...prev, [discId]: [] })); }
+        setLoadingHorariosDisc(false);
     }, [tenant_id]);
 
-    const cargarReservas = async (claseId) => {
-        try {
-            const r = await api.get(`${API_BASE}/reservas/por-clase/${claseId}`, { params: { tenant_id } });
-            setDetalleClase({ claseId, reservas: r.data || [] });
-        } catch { setDetalleClase(null); }
-    };
-
     const resumenDisciplina = (discId) => {
-        const datos = datosDisc[discId] || [];
-        const sinCoach = datos.filter(c => !c.coach_id).length;
-        const emergencia = datos.filter(c => c.cobertura_emergencia).length;
-        const total = datos.length;
-        const ocupProm = total > 0 ? Math.round(datos.reduce((s, c) => s + ((c.asistentes_confirmados || 0) / (c.cupo_maximo || 1)) * 100, 0) / total) : 0;
-        return { sinCoach, emergencia, total, ocupProm };
+        const horarios = horariosDisc[discId] || [];
+        const sinCoach = horarios.filter(h => !h.coach_nombre).length;
+        return { total: horarios.length, sinCoach };
     };
 
     const discConCoach = (discId) => disciplinas.find(d => d.id === discId)?.requiere_coach ?? true;
+
+    // ── Refrescar TODO el panel (disciplinas + cupos + calendarios) ──
+    const refrescarTodo = async () => {
+        setError('');
+        let lista = disciplinas;
+        try {
+            const r = await api.get(`${API_BASE}/disciplinas`, { params: { tenant_id } });
+            lista = r.data || [];
+            setDisciplinas(lista);
+        } catch (e) { console.error('Error recargando disciplinas', e); }
+        fetchCupos();
+        const activas = lista.filter(d => d.activo !== false);
+        await Promise.all(activas.map(d => cargarHorariosDisc(d.id)));
+    };
+
+    // ── Modal de reservas (solo self-service: Open Box / Musculación) ──
+    const abrirModalReservas = async (horario) => {
+        setModalReservasHorario({ horario, cargando: true, data: null });
+        try {
+            const r = await api.get(`${API_BASE}/supervision/proxima-clase-reservas`, {
+                params: { tenant_id, horario_base_id: horario.id }
+            });
+            setModalReservasHorario({ horario, cargando: false, data: r.data || {} });
+        } catch (e) {
+            setModalReservasHorario({ horario, cargando: false, data: null, error: e.message });
+        }
+    };
 
     // ── Selector de coach con cobertura de emergencia ──
     const abrirSelectorCoach = async (claseId, disciplinaId) => {
@@ -134,7 +154,7 @@ export default function SupervisionClases() {
             try {
                 await api.put(`${API_BASE}/clases/${claseId}`, { coach_id: coachId, tenant_id }, { params: { tenant_id } });
                 setCoachSelector(null);
-                if (discExpandida) cargarDatosDisc(discExpandida, fechaDesde, fechaHasta);
+                if (discExpandida) cargarHorariosDisc(discExpandida);
             } catch (e) { console.error('Error asignando coach', e); }
         } else {
             // Coach NO pertenece → mostrar confirmación de emergencia
@@ -152,7 +172,7 @@ export default function SupervisionClases() {
             });
             setEmergenciaConfirm(null);
             setCoachSelector(null);
-            if (discExpandida) cargarDatosDisc(discExpandida, fechaDesde, fechaHasta);
+            if (discExpandida) cargarHorariosDisc(discExpandida);
         } catch (e) { console.error('Error asignando coach emergencia', e); }
     };
 
@@ -174,13 +194,13 @@ export default function SupervisionClases() {
         const hasta = fechaHasta || hoyStr();
         const tareas = (disciplinas.length > 0 ? disciplinas : [])
             .filter(d => d.activo !== false)
-            .map(d => cargarDatosDisc(d.id, desde, hasta));
+            .map(d => cargarHorariosDisc(d.id));
         try {
             await Promise.all(tareas);
             setUltimaActualizacion(new Date());
         } catch { /* silencioso: el polling no debe romper la vista */ }
         setRefrescando(false);
-    }, [disciplinas, fechaDesde, fechaHasta, cargarDatosDisc]);
+    }, [disciplinas, cargarHorariosDisc]);
 
     // Polling cada 45s en la vista principal (tarjetas) — TAREA 5: tiempo real vía polling
     useEffect(() => {
@@ -219,7 +239,7 @@ export default function SupervisionClases() {
         setFechaDesde(hoy);
         setFechaHasta(hoy);
         disciplinas.filter(d => d.activo !== false).forEach(d => {
-            cargarDatosDisc(d.id, hoy, hoy);
+            cargarHorariosDisc(d.id);
         });
     }, [disciplinas]); // eslint-disable-line
 
@@ -298,12 +318,17 @@ export default function SupervisionClases() {
                     <label className="text-sm font-medium">Hasta:</label>
                     <input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} className="border rounded px-3 py-1 text-sm" />
                     <button
-                        onClick={() => discExpandida && cargarDatosDisc(discExpandida, fechaDesde, fechaHasta)}
+                        onClick={refrescarTodo}
                         className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm font-medium"
                     >
                         🔍 Cargar / Refrescar
                     </button>
-                    <button className="px-3 py-1 bg-blue-900 text-white rounded text-sm font-medium">+ Agregar Clase</button>
+                    <button
+                        onClick={() => setShowModalClase(true)}
+                        className="px-3 py-1 bg-blue-900 text-white rounded text-sm font-medium hover:bg-blue-800"
+                    >
+                        + Agregar Clase
+                    </button>
                     <button
                         onClick={() => { setShowCupos(!showCupos); if (!showCupos) fetchCupos(); }}
                         className={`px-3 py-1 rounded text-sm font-medium ${showCupos ? 'bg-purple-700 text-white' : 'bg-purple-100 text-purple-800'}`}
@@ -373,27 +398,30 @@ export default function SupervisionClases() {
                                 onClick={() => {
                                     if (discExpandida === d.id) { setDiscExpandida(null); return; }
                                     setDiscExpandida(d.id);
-                                    cargarDatosDisc(d.id, fechaDesde, fechaHasta);
+                                    cargarHorariosDisc(d.id);
                                 }}
                                 className={`rounded-xl border-2 p-5 cursor-pointer transition-all hover:shadow-lg ${discExpandida === d.id ? 'border-blue-500 bg-zinc-800/50 shadow-md' : 'border-zinc-800 bg-zinc-900'}`}>
                                 <div className="flex items-center justify-between mb-3">
-                                    <h3 className="font-bold text-lg text-zinc-100">{d.nombre}{!d.activo && <span className="ml-2 text-xs px-2 py-0.5 rounded bg-zinc-700 text-zinc-400">⚠️ Inactiva</span>}</h3>
+                                    <h3 className="font-bold text-lg text-zinc-100">
+                                        {d.nombre}
+                                        {!d.activo && <span className="ml-2 text-xs px-2 py-0.5 rounded bg-zinc-700 text-zinc-400">⚠️ Inactiva</span>}
+                                        {(resumenDisciplina(d.id).total === 0) && (
+                                            <span className="ml-2 text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-bold">⏰ Sin horarios</span>
+                                        )}
+                                    </h3>
                                     <span className="text-xs text-zinc-500">{discExpandida === d.id ? '▲' : '▼'}</span>
                                 </div>
                                 <div className="space-y-1 text-sm text-zinc-400">
-                                    <div>📊 {r.total} clase(s) en el rango</div>
-                                    <div>📈 Ocupación promedio: {r.ocupProm}%</div>
-                                    {requiereCoach && r.sinCoach > 0 && (
-                                        <div className="text-red-600 font-bold">⚠️ {r.sinCoach} sin coach</div>
-                                    )}
-                                    {!requiereCoach && <div className="text-zinc-500 text-xs">🏠 Self-service</div>}
-                                    {r.emergencia > 0 && (
-                                        <div className="flex items-center gap-2 text-orange-600 font-bold animate-pulse">
-                                            <span className="inline-block px-2 py-0.5 rounded-full bg-orange-500/20 border border-orange-500 text-orange-400 text-xs font-black uppercase tracking-wide">
-                                                🚨 Cobertura de Emergencia
-                                            </span>
-                                            <span className="text-sm">{r.emergencia} en emergencia</span>
-                                        </div>
+                                    {r.total === 0 ? (
+                                        <div className="text-zinc-500 text-xs">Sin horarios base asignados</div>
+                                    ) : (
+                                        <>
+                                            <div>📅 {r.total} horario(s) semanal(es)</div>
+                                            {requiereCoach && r.sinCoach > 0 && (
+                                                <div className="text-red-600 font-bold">⚠️ {r.sinCoach} sin coach</div>
+                                            )}
+                                            {!requiereCoach && <div className="text-zinc-500 text-xs">🏠 Self-service</div>}
+                                        </>
                                     )}
                                 </div>
                             </div>
@@ -401,87 +429,77 @@ export default function SupervisionClases() {
                     })}
                 </div>
 
-                {/* Tabla desplegable de la disciplina seleccionada */}
+                {/* Calendario semanal de la disciplina seleccionada */}
                 {discExpandida && (
                     <div className="bg-zinc-900 rounded-xl border border-zinc-800 shadow-sm overflow-hidden mt-4">
                         <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-800/50">
                             <h2 className="text-lg font-bold text-zinc-100">
-                                {disciplinas.find(d => d.id === discExpandida)?.nombre} — {fechaDesde} a {fechaHasta}
+                                📅 {disciplinas.find(d => d.id === discExpandida)?.nombre} — Calendario semanal (Lun a Dom)
                             </h2>
+                            <p className="text-xs text-zinc-400 mt-1">
+                                Horarios base fijos que se repiten cada semana (independiente del filtro de fechas)
+                            </p>
                         </div>
-                        {loadingDisc ? (
+                        {loadingHorariosDisc ? (
                             <div className="flex items-center justify-center py-12">
                                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-900"></div>
                             </div>
                         ) : (
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-sm border-collapse">
-                                    <thead>
-                                        <tr className="bg-blue-900 text-white">
-                                            <th className="px-3 py-3 text-left font-medium">Día</th>
-                                            <th className="px-3 py-3 text-left font-medium">Horario</th>
-                                            {discConCoach(discExpandida) && <th className="px-3 py-3 text-left font-medium">Coach</th>}
-                                            {discConCoach(discExpandida) && <th className="px-3 py-3 text-left font-medium">WOD</th>}
-                                            <th className="px-3 py-3 text-left font-medium">Reservas</th>
-                                            <th className="px-3 py-3 text-left font-medium"></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-zinc-800">
-                                        {(datosDisc[discExpandida] || []).map(c => {
-                                            const sinCoach = discConCoach(discExpandida) && !c.coach_id;
+                            <div className="overflow-x-auto p-4">
+                                {!horariosDisc[discExpandida] || horariosDisc[discExpandida].length === 0 ? (
+                                    <p className="text-center text-zinc-500 py-8">Esta disciplina no tiene horarios base asignados</p>
+                                ) : (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 min-w-[900px]">
+                                        {[0, 1, 2, 3, 4, 5, 6].map(ds => {
+                                            const horariosDia = (horariosDisc[discExpandida] || []).filter(h => h.dia_semana === ds);
                                             return (
-                                                <tr key={c.id} className={`hover:bg-zinc-800 ${sinCoach ? 'bg-red-50 border-l-4 border-red-500' : ''}`}>
-                                                    <td className="px-3 py-2 text-zinc-100">
-                                                        {DIAS[new Date(c.fecha + 'T12:00:00').getDay()] || '—'}
-                                                        <div className="text-xs text-zinc-500">{c.fecha}</div>
-                                                    </td>
-                                                    <td className="px-3 py-2 font-mono text-xs">{c.hora_inicio?.slice(0, 5)} — {c.hora_fin?.slice(0, 5)}</td>
-                                                    {discConCoach(discExpandida) && (
-                                                        <td className="px-3 py-2">
-                                                            <span className={sinCoach ? 'text-red-600 font-bold' : 'text-zinc-300'}>
-                                                                {c.coach_nombre || 'Sin asignar'}
-                                                            </span>
-                                                            {c.cobertura_emergencia && (
-                                                                <span className="ml-1 inline-block px-2 py-0.5 rounded-full bg-red-100 text-red-800 text-xs font-bold animate-pulse">
-                                                                    ⚠️ Cobertura de Emergencia
-                                                                </span>
-                                                            )}
-                                                            {sinCoach && (
-                                                                <button className="ml-2 px-2 py-0.5 bg-red-500 text-white rounded text-xs font-bold hover:bg-red-600"
-                                                                    onClick={(e) => { e.stopPropagation(); abrirSelectorCoach(c.id, discExpandida); }}>
-                                                                    👤 Asignar coach
-                                                                </button>
-                                                            )}
-                                                        </td>
+                                                <div key={ds} className="bg-zinc-800/40 rounded-lg border border-zinc-800 p-3">
+                                                    <p className={`text-xs font-bold mb-2 ${ds === 6 ? 'text-red-400' : 'text-zinc-400'}`}>
+                                                        {DIAS[ds + 1]}
+                                                    </p>
+                                                    {horariosDia.length === 0 ? (
+                                                        <p className="text-xs text-zinc-600">—</p>
+                                                    ) : (
+                                                        horariosDia.map(h => {
+                                                            const esSelfService = !discConCoach(discExpandida);
+                                                            return (
+                                                                <div key={h.id}
+                                                                    onClick={esSelfService ? () => abrirModalReservas(h) : undefined}
+                                                                    className={`mb-2 p-2 rounded border ${esSelfService
+                                                                        ? 'bg-zinc-800/70 border-blue-500/40 cursor-pointer hover:bg-blue-900/30 transition-colors'
+                                                                        : 'bg-zinc-900/80 border-zinc-700/60'}`}
+                                                                >
+                                                                    <p className="text-sm font-bold text-zinc-200">
+                                                                        {h.hora_inicio}-{h.hora_fin}
+                                                                    </p>
+                                                                    {esSelfService ? (
+                                                                        <p className="text-xs mt-0.5 text-blue-300 font-medium">
+                                                                            📋 Ver reservas
+                                                                        </p>
+                                                                    ) : (
+                                                                        <>
+                                                                            <p className={`text-xs mt-0.5 ${h.coach_nombre ? 'text-emerald-400 font-medium' : 'text-red-400 font-bold'}`}>
+                                                                                {h.coach_nombre ? `👤 ${h.coach_nombre}` : '⚠️ Sin coach'}
+                                                                            </p>
+                                                                            {!h.coach_nombre && discConCoach(discExpandida) && h.clase_reciente_id && (
+                                                                                <button
+                                                                                    onClick={(e) => { e.stopPropagation(); abrirSelectorCoach(h.clase_reciente_id, discExpandida); }}
+                                                                                    className="mt-1.5 w-full px-2 py-1 bg-blue-600 text-white rounded text-xs font-bold hover:bg-blue-700"
+                                                                                >
+                                                                                    👤 Asignar coach
+                                                                                </button>
+                                                                            )}
+                                                                        </>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })
                                                     )}
-                                                    {discConCoach(discExpandida) && (
-                                                        <td className="px-3 py-2">
-                                                            {c.wod_id ? (
-                                                                <span className="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-800">✅ Publicado</span>
-                                                            ) : (
-                                                                <span className="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-yellow-100 text-yellow-800">⚠️ Sin publicar</span>
-                                                            )}
-                                                        </td>
-                                                    )}
-                                                    <td className="px-3 py-2">
-                                                        <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${getOcupacionColor(c.asistentes_confirmados, c.cupo_maximo)}`}>
-                                                            {c.asistentes_confirmados || 0}/{c.cupo_maximo || '?'}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-3 py-2">
-                                                        <button onClick={(e) => { e.stopPropagation(); cargarReservas(c.id); }}
-                                                            className="px-2 py-1 bg-zinc-800/500 text-white rounded text-xs hover:bg-blue-600">
-                                                            📄 Detalles
-                                                        </button>
-                                                    </td>
-                                                </tr>
+                                                </div>
                                             );
                                         })}
-                                        {(datosDisc[discExpandida] || []).length === 0 && (
-                                            <tr><td colSpan={discConCoach(discExpandida) ? 6 : 4} className="px-3 py-6 text-center text-zinc-500">Sin clases en este rango</td></tr>
-                                        )}
-                                    </tbody>
-                                </table>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
@@ -552,31 +570,66 @@ export default function SupervisionClases() {
                     </div>
                 )}
 
-                {/* Modal de detalle de reservas */}
-                {detalleClase && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-                        <div className="bg-zinc-900 rounded-xl shadow-2xl p-6 max-w-lg mx-4 w-full max-h-96 overflow-y-auto">
+                {/* Modal "+ Agregar Clase" (clase puntual) */}
+                <ModalClase
+                    isOpen={showModalClase}
+                    onClose={() => setShowModalClase(false)}
+                    onSuccess={() => { setShowModalClase(false); refrescarTodo(); }}
+                    tenant_id={tenant_id}
+                />
+
+                {/* Modal de reservas self-service (Open Box / Musculación) */}
+                {modalReservasHorario && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60"
+                        onClick={() => setModalReservasHorario(null)}>
+                        <div className="bg-zinc-900 rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full"
+                            onClick={(e) => e.stopPropagation()}>
                             <div className="flex justify-between items-center mb-4">
-                                <h3 className="font-bold text-lg">Reservas — Clase #{detalleClase.claseId}</h3>
-                                <button onClick={() => setDetalleClase(null)} className="text-zinc-500 hover:text-zinc-400 text-xl">&times;</button>
+                                <h3 className="font-bold text-lg text-zinc-100">
+                                    📋 Reservas — {modalReservasHorario.horario.hora_inicio}-{modalReservasHorario.horario.hora_fin}
+                                </h3>
+                                <button onClick={() => setModalReservasHorario(null)} className="text-zinc-500 hover:text-zinc-400 text-xl">&times;</button>
                             </div>
-                            {detalleClase.reservas.length === 0 ? (
-                                <p className="text-zinc-500 text-sm">Sin reservas en esta clase</p>
-                            ) : (
-                                <div className="space-y-2">
-                                    {detalleClase.reservas.map(r => (
-                                        <div key={r.id} className="flex justify-between items-center p-2 bg-zinc-800/50 rounded">
-                                            <span className="text-sm font-medium">{r.alumno_nombre || `Alumno #${r.alumno_id}`}</span>
-                                            <span className={`text-xs px-2 py-0.5 rounded ${r.asistio ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                                {r.asistio ? '✅ Asistió' : '❌ Falta'}
-                                            </span>
-                                        </div>
-                                    ))}
+                            {modalReservasHorario.cargando ? (
+                                <div className="flex justify-center py-8">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
                                 </div>
+                            ) : modalReservasHorario.error ? (
+                                <p className="text-red-400 text-sm py-4 text-center">{modalReservasHorario.error}</p>
+                            ) : !modalReservasHorario.data?.hay_clase ? (
+                                <p className="text-zinc-500 text-sm py-6 text-center">
+                                    {modalReservasHorario.data?.mensaje || 'No hay próxima clase generada para este horario'}
+                                </p>
+                            ) : (
+                                <>
+                                    <div className="mb-3 p-3 rounded bg-zinc-800/60 text-sm">
+                                        <p className="text-zinc-200 font-medium">
+                                            📅 {new Date(modalReservasHorario.data.clase.fecha + 'T12:00:00').toLocaleDateString('es-CL')}
+                                        </p>
+                                        <p className="text-zinc-400 text-xs mt-1">
+                                            Cupo: {modalReservasHorario.data.clase.asistentes_confirmados || 0}/{modalReservasHorario.data.clase.cupo_maximo || '?'}
+                                        </p>
+                                    </div>
+                                    {modalReservasHorario.data.reservas.length === 0 ? (
+                                        <p className="text-zinc-500 text-sm py-4 text-center">Sin reservas para esta clase</p>
+                                    ) : (
+                                        <div className="space-y-2 max-h-64 overflow-y-auto">
+                                            {modalReservasHorario.data.reservas.map(r => (
+                                                <div key={r.id} className="flex justify-between items-center p-2 bg-zinc-800/50 rounded">
+                                                    <span className="text-sm font-medium text-zinc-200">{r.alumno_nombre}</span>
+                                                    <span className={`text-xs px-2 py-0.5 rounded font-bold ${r.asistio ? 'bg-green-100 text-green-800' : r.activa ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'}`}>
+                                                        {r.asistio ? '✅ Asistió' : r.activa ? '📌 Reservado' : '❌ Cancelada'}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     </div>
                 )}
+
             </div>
         </Layout>
     );

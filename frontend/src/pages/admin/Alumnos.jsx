@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
+import AlumnoFichaModal from '../../components/AlumnoFichaModal';
 
 const Alumnos = () => {
     const { tenant_id } = useAuth();
@@ -17,6 +18,7 @@ const Alumnos = () => {
     const [mensajeAprobacion, setMensajeAprobacion] = useState('');
     const [suscripciones, setSuscripciones] = useState([]);
     const [editingAlumno, setEditingAlumno] = useState(null);
+    const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
     const [formData, setFormData] = useState({
         nombre: '',
         correo: '',
@@ -260,6 +262,12 @@ const Alumnos = () => {
                                                     📄 Voucher
                                                 </button>
                                                 <button
+                                                    onClick={() => setFichaAlumnoId(alumno.id)}
+                                                    className="px-3 py-1 text-emerald-400 hover:bg-zinc-800 rounded transition-colors text-xs font-medium"
+                                                >
+                                                    👤 Ficha
+                                                </button>
+                                                <button
                                                     onClick={() => openModal(alumno)}
                                                     className="px-3 py-1 text-blue-400 hover:bg-zinc-800 rounded transition-colors text-xs font-medium"
                                                 >
@@ -428,6 +436,15 @@ const Alumnos = () => {
                     </div>
                 )}
             </div>
+
+            {/* MODAL FICHA ALUMNO */}
+            {fichaAlumnoId && (
+                <AlumnoFichaModal
+                    alumnoId={fichaAlumnoId}
+                    tenantId={tenant_id}
+                    onClose={() => setFichaAlumnoId(null)}
+                />
+            )}
         </Layout>
     );
 };

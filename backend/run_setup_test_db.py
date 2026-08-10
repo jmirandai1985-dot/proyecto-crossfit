@@ -220,14 +220,15 @@ try:
     # â”€â”€ 8. DISCIPLINAS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     disc_data = [
         (1, "CrossFit"), (2, "Open Box"), (3,
-                                           "MusculaciÃ³n"), (4, "Levantamiento OlÃ­mpico"),
+                                           "Musculación"), (4, "Levantamiento Olímpico"),
     ]
-    # Gap se crea como INACTIVA y se filtrarÃ¡ por activo=true en lugar de nombre hardcodeado
-    db.add(Disciplina(id=5, tenant_id=1, nombre="Gap", activo=False))
+    # Gap se crea como ACTIVA (sin horarios asignados todavía; se mostrará
+    # con el badge "sin horarios" en lugar de tratarla como inactiva)
+    db.add(Disciplina(id=5, tenant_id=1, nombre="Gap", activo=True))
     for d_id, d_nombre in disc_data:
         db.add(Disciplina(id=d_id, tenant_id=1, nombre=d_nombre, activo=True))
     db.flush()
-    print(f"   {len(disc_data)} disciplinas activas + Gap (inactiva)")
+    print(f"   {len(disc_data)} disciplinas activas + Gap (activa)")
 
     # â”€â”€ 8b. COACH-DISCIPLINA (coach 1000 asignado a CrossFit disc 1) â”€â”€
     CoachDisciplina = importlib.import_module(

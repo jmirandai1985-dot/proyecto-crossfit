@@ -76,6 +76,7 @@ const Layout = ({ children }) => {
                 { label: 'Planes', path: '/admin/planes', icon: icons.settings },
                 { label: 'Disciplinas', path: '/admin/disciplinas', icon: icons.dumbbell },
                 { label: 'Bazar', path: '/admin/bazar', icon: icons.settings },
+                { label: 'Fidelización', path: '/admin/fidelizacion', icon: icons.dumbbell },
                 { label: 'Notificaciones', path: '/admin/notificaciones', icon: icons.settings },
                 { label: 'Reportes', path: '/admin/reportes', icon: icons.dumbbell },
                 { label: 'Configuración', path: '/admin/configuracion', icon: icons.settings },
@@ -97,7 +98,7 @@ const Layout = ({ children }) => {
                 {/* Logo */}
                 <div className="p-5 border-b border-zinc-800">
                     <div className="flex items-center gap-3">
-                        <span className="text-2xl">🏋️</span>
+                        <img src="/imgs/logo.png" alt="Urban Box" className="w-10 h-10 object-contain shrink-0" />
                         {sidebarOpen && (
                             <div>
                                 <h2 className="font-bold text-white text-sm leading-tight">URBAN BOX</h2>
@@ -191,7 +192,7 @@ const Layout = ({ children }) => {
                 <header className="bg-zinc-900 border-b border-zinc-800">
                     <div className="flex items-center justify-between px-6 py-3">
                         <div className="flex items-center gap-2">
-                            <span className="text-lg">🏋️</span>
+                            <img src="/imgs/logo.png" alt="Urban Box" className="h-7 w-7 object-contain" />
                             <h1 className="text-lg font-bold text-white">URBAN BOX</h1>
                         </div>
                         <div className="flex items-center gap-4">
@@ -213,7 +214,26 @@ const Layout = ({ children }) => {
                 </header>
 
                 {/* Page Content */}
-                <main className="flex-1 overflow-auto p-6 bg-zinc-950">{children}</main>
+                <main className="flex-1 overflow-auto p-6 bg-zinc-950">
+                    {/* Fondo decorativo sutil — solo en dashboards (marca de agua) */}
+                    {location.pathname.endsWith('/dashboard') && (
+                        <>
+                            {rol === 'administrador' && (
+                                <img src="/imgs/silueta-gym-3.png" alt=""
+                                    className="pointer-events-none fixed -right-12 top-24 w-80 opacity-10 invert z-0 select-none" />
+                            )}
+                            {rol === 'coach' && (
+                                <img src="/imgs/silueta-gym-4.png" alt=""
+                                    className="pointer-events-none fixed -left-10 bottom-8 w-80 opacity-10 invert z-0 select-none" />
+                            )}
+                            {rol === 'alumno' && (
+                                <img src="/imgs/silueta-gym-5.png" alt=""
+                                    className="pointer-events-none fixed -right-10 bottom-8 w-80 opacity-10 invert z-0 select-none" />
+                            )}
+                        </>
+                    )}
+                    <div className="relative z-10">{children}</div>
+                </main>
             </div>
         </div>
     );

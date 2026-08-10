@@ -4,7 +4,7 @@ Define la estructura de datos para requests y responses
 """
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
 from app.models.usuario import RolUsuario
 
 
@@ -59,6 +59,8 @@ class UsuarioResponse(UsuarioBase):
     peso_kg: Optional[float] = None
     estatura_cm: Optional[int] = None
     genero: Optional[str] = None
+    fecha_nacimiento: Optional[date] = Field(
+        None, description="Fecha de nacimiento YYYY-MM-DD")
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

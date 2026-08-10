@@ -4,10 +4,10 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 
 const TARJETAS = [
-    { key: 'masculino', label: '💪 Masculino', color: 'border-blue-300 bg-zinc-800/50', genero: 'masculino', soloEstudiante: false },
-    { key: 'femenino', label: '🌸 Femenino', color: 'border-pink-300 bg-pink-50', genero: 'femenino', soloEstudiante: false },
-    { key: 'estudiante_m', label: '🎓 Estudiante Masculino', color: 'border-blue-300 bg-zinc-800/50', genero: 'masculino', soloEstudiante: true },
-    { key: 'estudiante_f', label: '🎓 Estudiante Femenino', color: 'border-pink-300 bg-pink-50', genero: 'femenino', soloEstudiante: true },
+    { key: 'masculino', label: '💪 Masculino', color: 'border-zinc-800 bg-zinc-900', genero: 'masculino', soloEstudiante: false },
+    { key: 'femenino', label: '🌸 Femenino', color: 'border-zinc-800 bg-zinc-900', genero: 'femenino', soloEstudiante: false },
+    { key: 'estudiante_m', label: '🎓 Estudiante Masculino', color: 'border-zinc-800 bg-zinc-900', genero: 'masculino', soloEstudiante: true },
+    { key: 'estudiante_f', label: '🎓 Estudiante Femenino', color: 'border-zinc-800 bg-zinc-900', genero: 'femenino', soloEstudiante: true },
 ];
 
 const Planes = () => {

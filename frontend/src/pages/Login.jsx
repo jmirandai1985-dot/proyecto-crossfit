@@ -33,13 +33,19 @@ const Login = () => {
     };
 
     return (
-        <div className="min-h-screen bg-blue-900 flex items-center justify-center p-4">
-            <div className="w-full max-w-md">
+        <div className="relative min-h-screen bg-blue-900 flex items-center justify-center p-4 overflow-hidden">
+            {/* Fondo decorativo sutil (marca de agua) */}
+            <img src="/imgs/silueta-gym-1.png" alt=""
+                className="pointer-events-none absolute -right-16 top-1/2 -translate-y-1/2 w-[30rem] opacity-10 invert z-0 select-none" />
+            <img src="/imgs/silueta-gym-2.png" alt=""
+                className="pointer-events-none absolute -left-10 bottom-0 w-64 opacity-10 invert z-0 select-none" />
+            <div className="w-full max-w-md relative z-10">
                 {/* Card */}
                 <div className="bg-white rounded-lg shadow-2xl p-8">
                     {/* Logo */}
                     <div className="text-center mb-8">
-                        <div className="text-6xl mb-4">🏋️</div>
+                        <img src="/imgs/logo.png" alt="Urban Training Box"
+                            className="w-24 h-24 object-contain mx-auto mb-4" />
                         <h1 className="text-3xl font-bold text-blue-900 mb-2">Urban Training Box</h1>
                         <p className="text-gray-600">Plataforma de Gestión</p>
                     </div>

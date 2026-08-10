@@ -20,10 +20,8 @@ const AdminDashboard = () => {
     const [fidelizacionLoading, setFidelizacionLoading] = useState(true);
     const [ocupacionHoy, setOcupacionHoy] = useState([]);
     const [ocupacionLoading, setOcupacionLoading] = useState(true);
-    // Fidelización — modal detalle + dropdown acción rápida
-    const [fidelizacionModal, setFidelizacionModal] = useState(null); // 'riesgo' | 'vencimiento'
-    const [menuAccion, setMenuAccion] = useState(null); // alumno id con dropdown abierto
-    const [enviandoCorreo, setEnviandoCorreo] = useState(null); // alumno id enviando
+    // Fidelización — modal membresías del mes
+    const [fidelizacionModal, setFidelizacionModal] = useState(null); // 'membresias'
 
     useEffect(() => {
         cargarSolicitudes();
@@ -117,57 +115,6 @@ const AdminDashboard = () => {
             setTimeout(() => setMsg(''), 4000);
         }
     };
-
-    const toggleMenuAccion = (id) => {
-        setMenuAccion(menuAccion === id ? null : id);
-    };
-
-    const enviarCorreoManual = async (alumno, tipo) => {
-        setMenuAccion(null);
-        setEnviandoCorreo(alumno.id);
-        setMsg('');
-        try {
-            // tipo_alerta: 'riesgo' → 'inactividad' | 'vencimiento' → 'vencimiento'
-            const tipoEnvio = tipo === 'riesgo' ? 'inactividad' : 'vencimiento';
-            const res = await api.post(`/api/v1/notificaciones-enviadas/enviar-manual`, null, {
-                params: { alumno_id: alumno.id, tipo: tipoEnvio }
-            });
-            if (res.data?.exito) {
-                setMsg(`✅ Correo de ${tipoEnvio === 'inactividad' ? 'recuperación' : 'renovación'} enviado a ${alumno.nombre}`);
-            } else {
-                const detalle = res.data?.detalle_error || 'No se pudo enviar el correo via Gmail SMTP (revisar credenciales o destinatario).';
-                setMsg(`❌ Error al enviar correo a ${alumno.nombre}: ${detalle}`);
-            }
-        } catch (err) {
-            setMsg('❌ ' + (err.response?.data?.detail || err.message));
-        }
-        setEnviandoCorreo(null);
-        setTimeout(() => setMsg(''), 5000);
-    };
-
-    const verDetalleAlumno = (id) => {
-        setMenuAccion(null);
-        window.location.href = '/admin/alumnos';
-    };
-
-    // Combinar alertas para la tabla de acción (máximo 10)
-    const alertsCombinadas = [
-        ...alumnosRiesgo.map(a => ({
-            ...a,
-            tipo_alerta: 'riesgo',
-            label: a.tiene_historial === false
-                ? 'Sin actividad registrada'
-                : `Inactivo hace ${a.dias_ausente} días`
-        })),
-        ...vencimientos.map(v => ({
-            id: v.usuario_id,
-            nombre: v.nombre,
-            correo: v.correo,
-            tipo_alerta: 'vencimiento',
-            label: `Vence en ${v.dias_restantes} días`,
-            plan_nombre: v.plan_nombre
-        }))
-    ].slice(0, 10);
 
     if (loading) {
         return (
@@ -279,96 +226,27 @@ const AdminDashboard = () => {
                 {!fidelizacionLoading && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Tarjeta Alumnos en Riesgo */}
-                        <button onClick={() => setFidelizacionModal('riesgo')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-red-600 hover:shadow-md hover:border-red-700 transition-all cursor-pointer text-left">
+                        <button onClick={() => navigate('/admin/fidelizacion')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-red-600 hover:shadow-md hover:border-red-700 transition-all cursor-pointer text-left">
                             <div className="flex items-center justify-between">
                                 <div>
                                     <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos en Riesgo</p>
                                     <p className="text-3xl font-bold text-red-700 mt-1">{alumnosRiesgo.length}</p>
-                                    <p className="text-xs text-zinc-500 mt-1">Sin actividad {'>'} 7 días — Clic para ver detalle</p>
+                                    <p className="text-xs text-zinc-500 mt-1">Sin actividad {'>'} 7 días — Clic para ir a Fidelización</p>
                                 </div>
                                 <span className="text-4xl">⚠️</span>
                             </div>
                         </button>
                         {/* Tarjeta Vencimientos Inminentes */}
-                        <button onClick={() => setFidelizacionModal('vencimiento')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-orange-600 hover:shadow-md hover:border-orange-700 transition-all cursor-pointer text-left">
+                        <button onClick={() => navigate('/admin/fidelizacion')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-orange-600 hover:shadow-md hover:border-orange-700 transition-all cursor-pointer text-left">
                             <div className="flex items-center justify-between">
                                 <div>
                                     <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Vencimientos Inminentes</p>
                                     <p className="text-3xl font-bold text-orange-700 mt-1">{vencimientos.length}</p>
-                                    <p className="text-xs text-zinc-500 mt-1">Próximos 5 días — Clic para ver detalle</p>
+                                    <p className="text-xs text-zinc-500 mt-1">Próximos 5 días — Clic para ir a Fidelización</p>
                                 </div>
                                 <span className="text-4xl">⏰</span>
                             </div>
                         </button>
-                    </div>
-                )}
-
-                {/* PANEL DE ACCIÓN Y FIDELIZACIÓN */}
-                {alertsCombinadas.length > 0 && (
-                    <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
-                        <div className="px-6 py-4 border-b border-zinc-800">
-                            <h2 className="text-lg font-bold text-zinc-100">
-                                🎯 Panel de Acción y Fidelización ({alertsCombinadas.length} alertas)
-                            </h2>
-                        </div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full">
-                                <thead className="bg-amber-800 text-white">
-                                    <tr>
-                                        <th className="px-6 py-3 text-left text-sm font-medium">Nombre</th>
-                                        <th className="px-6 py-3 text-left text-sm font-medium">Correo</th>
-                                        <th className="px-6 py-3 text-left text-sm font-medium">Estado de Alerta</th>
-                                        <th className="px-6 py-3 text-left text-sm font-medium">Acción</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-zinc-800">
-                                    {alertsCombinadas.map((a, idx) => (
-                                        <tr key={`${a.tipo_alerta}-${a.id}`} className={idx % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
-                                            <td className="px-6 py-4">
-                                                <p className="text-sm font-bold text-zinc-100">{a.nombre}</p>
-                                            </td>
-                                            <td className="px-6 py-4 text-sm text-zinc-400">{a.correo}</td>
-                                            <td className="px-6 py-4">
-                                                <span className={`inline-block px-2 py-1 text-xs font-bold rounded-full ${a.tipo_alerta === 'riesgo'
-                                                    ? 'bg-red-100 text-red-800'
-                                                    : 'bg-orange-100 text-orange-800'
-                                                    }`}>
-                                                    {a.label}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="relative inline-block">
-                                                    <button
-                                                        onClick={() => toggleMenuAccion(a.id)}
-                                                        disabled={enviandoCorreo === a.id}
-                                                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 disabled:opacity-50"
-                                                    >
-                                                        {enviandoCorreo === a.id ? '⏳ Enviando...' : '⚡ Acción Rápida'}
-                                                    </button>
-                                                    {menuAccion === a.id && (
-                                                        <div className="absolute right-0 mt-1 w-44 bg-zinc-900 rounded-lg shadow-xl border border-zinc-700 z-20 overflow-hidden">
-                                                            <button
-                                                                onClick={() => enviarCorreoManual(a, a.tipo_alerta)}
-                                                                disabled={enviandoCorreo === a.id}
-                                                                className="w-full px-4 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
-                                                            >
-                                                                ✉️ Enviar correo
-                                                            </button>
-                                                            <button
-                                                                onClick={() => verDetalleAlumno(a.id)}
-                                                                className="w-full px-4 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-800 border-t border-zinc-700"
-                                                            >
-                                                                👤 Ver detalle
-                                                            </button>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
                     </div>
                 )}
 
@@ -481,24 +359,21 @@ const AdminDashboard = () => {
                 </div>
             )}
 
-            {/* MODAL DETALLE FIDELIZACIÓN */}
-            {fidelizacionModal && (
+            {/* MODAL MEMBRESÍAS DEL MES */}
+            {fidelizacionModal === 'membresias' && (
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
                     onClick={() => setFidelizacionModal(null)}>
                     <div className="bg-zinc-900 rounded-xl max-w-2xl max-h-[90vh] overflow-auto shadow-2xl border border-zinc-700"
                         onClick={e => e.stopPropagation()}>
                         <div className="p-4 border-b border-zinc-700 flex justify-between items-center">
-                            <h3 className="font-bold text-zinc-100">
-                                {fidelizacionModal === 'riesgo' ? `⚠️ Alumnos en Riesgo (${alumnosRiesgo.length})` : `⏰ Vencimientos Inminentes (${vencimientos.length})`}
-                            </h3>
+                            <h3 className="font-bold text-zinc-100">📦 Membresías del Mes</h3>
                             <button onClick={() => setFidelizacionModal(null)}
                                 className="text-zinc-400 hover:text-zinc-200 text-xl font-bold">✕</button>
                         </div>
                         <div className="p-4">
-                            {fidelizacionModal === 'membresias' ? (
-                                !stats?.suscripcionesMes || stats.suscripcionesMes.length === 0 ? (
-                                    <p className="text-center text-zinc-500 py-6">No hay membresías vendidas este mes</p>
-                                ) : (
+                            {!stats?.suscripcionesMes || stats.suscripcionesMes.length === 0 ? (
+                                <p className="text-center text-zinc-500 py-6">No hay membresías vendidas este mes</p>
+                            ) : (
                                     <table className="w-full">
                                         <thead className="bg-zinc-800">
                                             <tr>
@@ -517,55 +392,6 @@ const AdminDashboard = () => {
                                             ))}
                                         </tbody>
                                     </table>
-                                )
-                            ) : fidelizacionModal === 'riesgo' ? (
-                                alumnosRiesgo.length === 0 ? (
-                                    <p className="text-center text-zinc-500 py-6">No hay alumnos en riesgo</p>
-                                ) : (
-                                    <table className="w-full">
-                                        <thead className="bg-zinc-800">
-                                            <tr>
-                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Nombre</th>
-                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Correo</th>
-                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Inactividad</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-zinc-800">
-                                            {alumnosRiesgo.map(a => (
-                                                <tr key={a.id}>
-                                                    <td className="px-4 py-2.5 text-sm font-medium text-zinc-100">{a.nombre}</td>
-                                                    <td className="px-4 py-2.5 text-sm text-zinc-400">{a.correo}</td>
-                                                    <td className="px-4 py-2.5 text-sm text-red-400 font-medium">
-                                                        {a.tiene_historial === false ? 'Sin actividad registrada' : `${a.dias_ausente} días`}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                )
-                            ) : (
-                                vencimientos.length === 0 ? (
-                                    <p className="text-center text-zinc-500 py-6">No hay vencimientos próximos</p>
-                                ) : (
-                                    <table className="w-full">
-                                        <thead className="bg-zinc-800">
-                                            <tr>
-                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Nombre</th>
-                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Correo</th>
-                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Días para vencer</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-zinc-800">
-                                            {vencimientos.map(v => (
-                                                <tr key={v.usuario_id}>
-                                                    <td className="px-4 py-2.5 text-sm font-medium text-zinc-100">{v.nombre}</td>
-                                                    <td className="px-4 py-2.5 text-sm text-zinc-400">{v.correo}</td>
-                                                    <td className="px-4 py-2.5 text-sm text-orange-400 font-medium">{v.dias_restantes} días</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                )
                             )}
                         </div>
                     </div>
@@ -612,6 +438,7 @@ const AdminDashboard = () => {
                     </div>
                 </div>
             )}
+
         </Layout>
     );
 };

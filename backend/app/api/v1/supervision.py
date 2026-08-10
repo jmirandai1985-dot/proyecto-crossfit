@@ -20,6 +20,127 @@ class CoachConPertenencia(BaseModel):
     disciplinas: List[str] = []
 
 
+@router.get("/proxima-clase-reservas")
+def proxima_clase_reservas(
+    horario_base_id: int = Query(..., description="ID del horario base"),
+    tenant_id: int = Query(1),
+    db: Session = Depends(get_db)
+):
+    """
+    Dado un horario_base_id, devuelve la PRÓXIMA clase futura de ese horario
+    base y sus reservas (alumno_nombre, asistio, activa).
+    Para disciplinas self-service (Open Box, Musculación).
+    """
+    from datetime import date as _date
+    hoy = _date.today()
+
+    clase = db.execute(sql_text("""
+        SELECT c.id, c.fecha::text, c.hora_inicio::text, c.hora_fin::text,
+               c.cupo_maximo, c.asistentes_confirmados, c.disciplina_id
+        FROM clases c
+        WHERE c.horario_base_id = :hid
+          AND c.tenant_id = :tid
+          AND c.fecha >= :hoy
+          AND c.cancelada = false
+        ORDER BY c.fecha, c.hora_inicio
+        LIMIT 1
+    """), {"hid": horario_base_id, "tid": tenant_id, "hoy": hoy}).first()
+
+    if not clase:
+        return {
+            "status": "success",
+            "hay_clase": False,
+            "mensaje": "No hay próxima clase generada para este horario",
+            "clase": None,
+            "reservas": [],
+        }
+
+    reservas = db.execute(sql_text("""
+        SELECT r.id, r.alumno_id, r.estado, r.asistio, r.fecha_reserva::text,
+               u.nombre AS alumno_nombre
+        FROM reservas r
+        LEFT JOIN usuarios u ON u.id = r.alumno_id
+        WHERE r.clase_id = :cid AND r.tenant_id = :tid
+        ORDER BY r.created_at ASC
+    """), {"cid": clase.id, "tid": tenant_id}).fetchall()
+
+    return {
+        "status": "success",
+        "hay_clase": True,
+        "clase": {
+            "id": clase.id,
+            "fecha": clase.fecha,
+            "hora_inicio": clase.hora_inicio[:5] if clase.hora_inicio else None,
+            "hora_fin": clase.hora_fin[:5] if clase.hora_fin else None,
+            "cupo_maximo": clase.cupo_maximo,
+            "asistentes_confirmados": clase.asistentes_confirmados,
+            "disciplina_id": clase.disciplina_id,
+        },
+        "reservas": [
+            {
+                "id": r.id,
+                "alumno_id": r.alumno_id,
+                "alumno_nombre": r.alumno_nombre or f"Alumno #{r.alumno_id}",
+                "asistio": r.asistio,
+                "activa": r.estado not in ("cancelled",),
+            }
+            for r in reservas
+        ],
+    }
+
+
+@router.get("/horarios-base")
+def horarios_base_por_disciplina(
+    disciplina_id: int = Query(..., description="ID de la disciplina"),
+    tenant_id: int = Query(1),
+    db: Session = Depends(get_db)
+):
+    """
+    Devuelve los HORARIOS BASE (tabla `horarios`) de una disciplina con el coach
+    asignado en la clase más reciente de cada horario (patrón semanal real).
+    Fuente: horarios_base, NO la tabla `clases` (instancias generadas).
+    """
+    rows = db.execute(sql_text("""
+        SELECT h.id, h.dia_semana, h.hora_inicio::text, h.hora_fin::text,
+               h.cupo_maximo, h.activo,
+               c.coach_id, u.nombre AS coach_nombre,
+               c.clase_id AS clase_reciente_id
+        FROM horarios h
+        LEFT JOIN LATERAL (
+            SELECT c2.coach_id, c2.id AS clase_id
+            FROM clases c2
+            WHERE c2.horario_base_id = h.id
+              AND c2.tenant_id = :tid
+            ORDER BY c2.fecha DESC, c2.id DESC
+            LIMIT 1
+        ) c ON true
+        LEFT JOIN usuarios u ON u.id = c.coach_id
+        WHERE h.tenant_id = :tid
+          AND h.disciplina_id = :did
+          AND h.activo = true
+        ORDER BY h.dia_semana, h.hora_inicio
+    """), {"tid": tenant_id, "did": disciplina_id}).fetchall()
+
+    return {
+        "disciplina_id": disciplina_id,
+        "total_horarios": len(rows),
+        "horarios": [
+            {
+                "id": r.id,
+                "dia_semana": r.dia_semana,
+                "hora_inicio": r.hora_inicio[:5] if r.hora_inicio else None,
+                "hora_fin": r.hora_fin[:5] if r.hora_fin else None,
+                "cupo_maximo": r.cupo_maximo,
+                "activo": r.activo,
+                "coach_id": r.coach_id,
+                "coach_nombre": r.coach_nombre or None,
+                "clase_reciente_id": r.clase_reciente_id,
+            }
+            for r in rows
+        ],
+    }
+
+
 @router.get("/grid-semanal")
 def supervision_grid_semanal(
     fecha: str = Query(..., description="Fecha en formato YYYY-MM-DD"),
