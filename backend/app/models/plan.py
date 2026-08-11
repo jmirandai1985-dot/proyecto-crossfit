@@ -24,6 +24,8 @@ class Plan(Base):
     precio_clp = Column(Integer, nullable=False)
     duracion_dias = Column(Integer, nullable=False, default=30)
     activo = Column(Boolean, nullable=False, default=True)
+    # ── Plan de prueba (registro de alumno nuevo) ──
+    primera_clase_tomada = Column(Boolean, nullable=False, default=False)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())
 

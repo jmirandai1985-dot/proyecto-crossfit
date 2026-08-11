@@ -6,7 +6,7 @@
     suscripciones, wods, solicitudes_planes, upload, membresias,
     notificaciones, notificaciones_enviadas, migracion,
     comprar_emergencia, fix_fechas, supervision,
-    finanzas, configuracion
+    finanzas, configuracion, alumnos
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -131,6 +131,8 @@ app.include_router(finanzas.router,
                    prefix="/api/v1/finanzas", tags=["Finanzas"])
 app.include_router(configuracion.router,
                    prefix="/api/v1/configuracion", tags=["ConfiguraciÃ³n"])
+app.include_router(alumnos.router, prefix="/api/v1/alumnos",
+                   tags=["Alumnos - Registro y ActivaciÃ³n"])
 
 
 @app.on_event("startup")

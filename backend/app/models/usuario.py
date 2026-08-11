@@ -35,6 +35,10 @@ class Usuario(Base):
     rol = Column(SQLEnum(RolUsuario, name="rol_usuario"),
                  nullable=False, default=RolUsuario.alumno)
     activo = Column(Boolean, nullable=False, default=True)
+    # ── Flujo de registro/activación de alumno nuevo ──
+    estado = Column(String(20), nullable=False, default="activo")
+    # 'pendiente_activacion' | 'activo' | 'rechazado'
+    cambiar_password_al_login = Column(Boolean, nullable=False, default=False)
     peso_kg = Column(Float, nullable=True)
     estatura_cm = Column(Integer, nullable=True)
     genero = Column(String(10), nullable=True)

@@ -33,11 +33,18 @@ def login(
         HTTPException 401: Si email o contraseña son inválidos
         HTTPException 403: Si el usuario está inactivo
     """
-    # Buscar usuario por correo
+    # Buscar usuario por correo.
+    # FIX: ante correos duplicados, prioriza el usuario ACTIVO y, en segundo
+    # lugar, el rol administrador (evita que un alumno pendiente inactivo
+    # "bloquee" el login de un admin que comparte correo).
+    # NOTA: el valor es 'administrador' (enum rol_usuario no acepta 'admin').
     query = text("""
         SELECT id, tenant_id, nombre, correo, password_hash, rol, activo
         FROM usuarios
         WHERE correo = :correo
+        ORDER BY activo DESC,
+                 CASE WHEN rol = 'administrador' THEN 0 ELSE 1 END
+        LIMIT 1
     """)
 
     usuario = db.execute(

@@ -177,3 +177,49 @@ def enviar_email_fidelizacion(nombre: str, correo: str, dias_ausente: int, gmail
     html = _template(titulo, saludo, cuerpo, "Volver a entrenar", url)
     return _enviar(correo, f"¡Te extrañamos en el box, {nombre.split()[0]}! 💪", html,
                    alumno.get("id"), tipo="inactividad")
+
+
+def enviar_email_solicitud_admin(alumno: dict) -> bool:
+    """Notifica al admin que un alumno nuevo está pendiente de activación."""
+    nombre = alumno.get("nombre", "Alumno nuevo")
+    correo_alumno = alumno.get("correo", "")
+    correo_admin = None
+    try:
+        from app.db.database import SessionLocal
+        from app.models.usuario import Usuario
+        db = SessionLocal()
+        admin = db.query(Usuario).filter(
+            Usuario.rol.in_(["admin", "administrador"]), Usuario.activo == True
+        ).order_by(Usuario.id).first()
+        correo_admin = admin.correo if admin else None
+        db.close()
+    except Exception as e:
+        logger.warning(f"No se pudo obtener admin: {e}")
+    if not correo_admin:
+        logger.warning("No hay admin con correo para notificar solicitud de registro")
+        return False
+    titulo = "Nueva solicitud de registro"
+    saludo = "Un nuevo alumno solicitó su ingreso al box y está esperando tu revisión."
+    cuerpo = (f"<strong>{nombre}</strong> (<em>{correo_alumno}</em>) está pendiente de activación. "
+              "Ingresá al panel de administración para aprobar o rechazar la solicitud.")
+    url = "https://app.urbantrainingbox.cl/admin/alumnos-pendientes"
+    html = _template(titulo, saludo, cuerpo, "Revisar solicitudes", url)
+    return _enviar(correo_admin, "📋 Nueva solicitud de registro en el box", html,
+                   None, tipo="solicitud_registro")
+
+
+def enviar_email_activacion_alumno(alumno: dict, password: str) -> bool:
+    """Envía al alumno sus credenciales al ser activado por el admin."""
+    nombre = alumno.get("nombre", "Atleta")
+    correo = alumno.get("correo", "")
+    if not correo:
+        return False
+    titulo = "¡Tu cuenta está activa!"
+    saludo = f"Hola {nombre.split()[0]}, tu cuenta en Urban Training Box fue activada y ya podés ingresar."
+    cuerpo = ("Estas son tus credenciales de acceso. Recordá que deberás cambiarlas en tu primer ingreso.<br/><br/>"
+              f"<strong>Correo:</strong> {correo}<br/>"
+              f"<strong>Contrase&ntilde;a provisional:</strong> {password}")
+    url = "https://app.urbantrainingbox.cl/login"
+    html = _template(titulo, saludo, cuerpo, "Ingresar a mi cuenta", url)
+    return _enviar(correo, f"¡Bienvenido a Urban Training Box, {nombre.split()[0]}! 🔑", html,
+                   alumno.get("id"), tipo="activacion")
