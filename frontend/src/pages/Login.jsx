@@ -1,12 +1,16 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import RegistroAlumnoNuevo from '../components/RegistroAlumnoNuevo';
+import ResetContrasena from '../components/ResetContrasena';
 
 const Login = () => {
     const [correo, setCorreo] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [showRegistro, setShowRegistro] = useState(false);
+    const [showReset, setShowReset] = useState(false);
     const { login } = useAuth();
     const navigate = useNavigate();
 
@@ -111,11 +115,21 @@ const Login = () => {
                         </button>
 
                         {/* Links opcionales */}
-                        <div className="flex items-center justify-center">
-                            <a href="#" onClick={(e) => e.preventDefault()}
-                                className="text-[#ff8c00] hover:text-[#ffb066] transition-colors text-sm">
+                        <div className="flex flex-col items-center gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setShowReset(true)}
+                                className="text-[#ff8c00] hover:text-[#ffb066] transition-colors text-sm"
+                            >
                                 ¿Olvidaste tu contraseña?
-                            </a>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setShowRegistro(true)}
+                                className="text-[#ff8c00] hover:text-[#ffb066] transition-colors text-sm underline underline-offset-4"
+                            >
+                                ¿Eres alumno nuevo? Regístrate aquí
+                            </button>
                         </div>
                     </form>
 
@@ -127,6 +141,9 @@ const Login = () => {
                     </div>
                 </div>
             </div>
+
+            {showRegistro && <RegistroAlumnoNuevo onClose={() => setShowRegistro(false)} />}
+            {showReset && <ResetContrasena onClose={() => setShowReset(false)} />}
         </div>
     );
 };

@@ -8,7 +8,7 @@ from app.models.clase import Clase
 from app.models.reserva import Reserva
 from app.db.database import get_db
 from typing import List
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 """
@@ -54,8 +54,18 @@ def crear_reserva(
             detail="Clase no encontrada"
         )
 
-    # ARREGLO 1: Verificar aforo disponible
-    if clase.asistentes_confirmados >= clase.cupo_maximo:
+    # ARREGLO 1+3: Validación de aforo + incremento ATÓMICOS.
+    # UPDATE condicional: solo incrementa si hay cupo (WHERE asistentes < cupo).
+    # Elimina la race condition check-then-use: si la clase se llenó entre la
+    # lectura del objeto y este UPDATE, rowcount=0 -> 400 (sin overbooking).
+    result = db.execute(
+        update(Clase)
+        .where(Clase.id == clase.id)
+        .where(Clase.asistentes_confirmados < Clase.cupo_maximo)
+        .values(asistentes_confirmados=Clase.asistentes_confirmados + 1)
+    )
+
+    if result.rowcount == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Clase sin cupos disponibles"
@@ -123,9 +133,6 @@ def crear_reserva(
     # Descontar token
     if membresia.creditos_disponibles is not None:
         membresia.creditos_disponibles -= 1
-
-    # ARREGLO 1: Incrementar asistentes_confirmados en la misma transacción
-    clase.asistentes_confirmados += 1
 
     db.add(db_reserva)
     db.commit()

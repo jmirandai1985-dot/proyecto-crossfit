@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import api from '../services/api';
 
 // ─── Iconos SVG inline ───────────────────────────────────────────────────
 const icons = {
@@ -35,9 +36,19 @@ const icons = {
 const Layout = ({ children }) => {
     const { usuario, rol, logout } = useAuth();
     const [sidebarOpen, setSidebarOpen] = useState(true);
+    const [esPrueba, setEsPrueba] = useState(null);
     const location = useLocation();
     const searchParams = new URLSearchParams(location.search);
     const currentTab = searchParams.get('tab') || 'resumen';
+
+    // Alumno nuevo con plan de prueba: menú restringido a Clases + Planes
+    useEffect(() => {
+        if (rol === 'alumno') {
+            api.get('/api/v1/alumnos/me/es-prueba')
+                .then(({ data }) => setEsPrueba(Boolean(data?.es_prueba)))
+                .catch(() => setEsPrueba(false));
+        }
+    }, [rol]);
 
     const coachSubTabs = [
         { key: 'resumen', label: '📊 Resumen', path: '/coach/dashboard?tab=resumen' },
@@ -51,7 +62,7 @@ const Layout = ({ children }) => {
 
     const getMenuItems = () => {
         if (rol === 'alumno') {
-            return [
+            const itemsAlumno = [
                 { label: 'Inicio', path: '/alumno/dashboard', icon: icons.home },
                 { label: 'Planes', path: '/alumno/solicitar-plan', icon: icons.settings },
                 { label: 'Mis Reservas', path: '/alumno/mis-reservas', icon: icons.calendar },
@@ -62,6 +73,11 @@ const Layout = ({ children }) => {
                 { label: 'Mis Pedidos', path: '/alumno/mis-pedidos', icon: icons.calendar },
                 { label: 'Ajustes', path: '/alumno/ajustes', icon: icons.settings },
             ];
+            // Alumno nuevo en plan de prueba: solo Clases (Inicio) + Planes
+            if (esPrueba) {
+                return itemsAlumno.filter((i) => i.label === 'Inicio' || i.label === 'Planes');
+            }
+            return itemsAlumno;
         } else if (rol === 'coach') {
             return [
                 { label: 'Dashboard', path: '/coach/dashboard', icon: icons.home },
@@ -71,6 +87,7 @@ const Layout = ({ children }) => {
             return [
                 { label: 'Dashboard', path: '/admin/dashboard', icon: icons.home },
                 { label: 'Alumnos', path: '/admin/alumnos', icon: icons.calendar },
+                { label: 'Pendientes', path: '/admin/alumnos-pendientes', icon: icons.calendar },
                 { label: 'Coaches', path: '/admin/coaches', icon: icons.settings },
                 { label: 'Supervisión', path: '/admin/supervision-clases', icon: icons.calendar },
                 { label: 'Planes', path: '/admin/planes', icon: icons.settings },

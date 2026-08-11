@@ -8,6 +8,7 @@ const AdminDashboard = () => {
     const navigate = useNavigate();
     const { tenant_id, usuario_id } = useAuth();
     const [solicitudes, setSolicitudes] = useState([]);
+    const [countPendientes, setCountPendientes] = useState(0);
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
     const [processingId, setProcessingId] = useState(null);
@@ -25,6 +26,7 @@ const AdminDashboard = () => {
 
     useEffect(() => {
         cargarSolicitudes();
+        cargarCountPendientes();
         cargarFidelizacion();
         cargarOcupacionHoy();
     }, [tenant_id]);
@@ -58,6 +60,15 @@ const AdminDashboard = () => {
             setStats(null);
         }
         setLoading(false);
+    };
+
+    const cargarCountPendientes = async () => {
+        try {
+            const res = await api.get('/api/v1/alumnos/pendientes-activacion/count');
+            setCountPendientes(res.data?.count || 0);
+        } catch {
+            setCountPendientes(0);
+        }
     };
 
     const cargarFidelizacion = async () => {
@@ -183,7 +194,7 @@ const AdminDashboard = () => {
                         </div>
                         <button onClick={() => document.getElementById('solicitudes-pendientes')?.scrollIntoView({ behavior: 'smooth' })} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-rose-600 hover:shadow-md hover:border-rose-700 transition-all cursor-pointer text-left">
                             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Solicitudes Pendientes</p>
-                            <p className="text-3xl font-bold text-rose-700 mt-1">{solicitudes.length}</p>
+                            <p className="text-3xl font-bold text-rose-700 mt-1">{countPendientes}</p>
                             <p className="text-xs text-zinc-500 mt-1">Esperando aprobación — Clic para ver</p>
                         </button>
                     </div>
