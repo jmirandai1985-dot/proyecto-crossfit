@@ -54,11 +54,14 @@ class Settings(BaseSettings):
         """
         Configuración de Pydantic Settings
         Si ENVIRONMENT=test, carga .env.test; si no, carga .env
+        extra='ignore': tolera variables del .env que no están declaradas
+        (p.ej. DATABASE_URL_PROD) sin romper la carga de settings.
         """
         env_file = ".env.test" if os.getenv(
             "ENVIRONMENT") == "test" else ".env"
         env_file_encoding = "utf-8"
         case_sensitive = True
+        extra = "ignore"
 
 
 # Instancia global de configuración

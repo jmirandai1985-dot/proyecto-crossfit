@@ -22,7 +22,8 @@ router = APIRouter()
 @router.post("", response_model=ReservaResponse, status_code=status.HTTP_201_CREATED)
 def crear_reserva(
     reserva_data: ReservaCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Crea una nueva reserva con validaciones de aforo y cálculo automático de tokens.
@@ -35,12 +36,22 @@ def crear_reserva(
     ARREGLO 3: Protección IDOR
     - tenant_id se extrae del usuario autenticado (no del body)
     - tokens_gastados se calcula automáticamente según plan/disciplina
+
+    CRÍTICO 1 (IDOR): El endpoint exige autenticación y el alumno solo puede
+    reservar para sí mismo (alumno_id == usuario_id del token JWT).
     """
 
+    # CRÍTICO 1 (IDOR): Validar que el usuario reserva para sí mismo.
+    # La clave del payload del JWT es 'usuario_id' (ver app/core/dependencies.py).
+    if reserva_data.alumno_id != current_user.get("usuario_id"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No puedes reservar para otro usuario",
+        )
+
     # ARREGLO 3: Extraer tenant_id del usuario autenticado (no del JSON)
-    # En producción, esto vendría del token JWT
-    # TODO: Reemplazar con get_current_user_from_token()
-    tenant_id = reserva_data.tenant_id
+    # (endurecimiento IDOR: el body no puede forzar otro tenant)
+    tenant_id = current_user.get("tenant_id") or reserva_data.tenant_id
 
     # Verificar que la clase existe y pertenece al tenant
     clase = db.query(Clase).filter(

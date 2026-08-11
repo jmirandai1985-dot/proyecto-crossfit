@@ -13,7 +13,9 @@ from app.models.disciplina import Disciplina
 from app.models.cobertura_emergencia import CoberturaEmergencia
 
 # Esquema de seguridad HTTP Bearer
-security = HTTPBearer()
+# auto_error=False: no lanza 403 automáticamente si falta el header;
+# get_current_user emite 401 con WWW-Authenticate (semántica HTTP correcta).
+security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
@@ -31,10 +33,17 @@ async def get_current_user(
         Diccionario con datos del usuario
 
     Raises:
-        HTTPException 401: Si el token es inválido o expirado
+        HTTPException 401: Si el token es inválido, expirado o no se envió
         HTTPException 404: Si el usuario no existe en BD
     """
-    token = credentials.credentials
+    token = credentials.credentials if credentials else None
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No autenticado: se requiere token Bearer",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     # Verificar token
     payload = verify_token(token)
