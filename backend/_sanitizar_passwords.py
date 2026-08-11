@@ -1,6 +1,7 @@
 """
-SANITIZAR: Reemplazar contrasena vieja (npg_uFlE47iJbMgn) por la nueva
-ROTADA por el usuario en Neon (npg_dgH4Goce5DkB) en todos los archivos .py
+SANITIZAR: Reemplazar contrasena vieja por la nueva ROTADA por el usuario en Neon
+en todos los archivos .py. Las contrasenas NUNCA se escriben en este script:
+las credenciales reales viven solo en backend/.env (fuera de git).
 """
 import os
 

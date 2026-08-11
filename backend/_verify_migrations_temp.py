@@ -1,8 +1,14 @@
 
 """Verificar que las 4 migraciones post-sync se aplicaron correctamente."""
+import os
+import sys
 import psycopg2
 
-URL = "postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-curly-rain-acg2z9h1-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+# Credenciales NUNCA en git: leer DATABASE_URL del entorno / backend/.env
+URL = os.getenv("DATABASE_URL")
+if not URL or "postgresql://" not in URL:
+    print("FATAL: Define DATABASE_URL en el entorno / backend/.env")
+    sys.exit(1)
 
 c = psycopg2.connect(URL)
 c.autocommit = True

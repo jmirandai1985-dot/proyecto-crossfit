@@ -32,7 +32,10 @@ def test_c16_sin_clases_duplicadas():
     """Verifica que no existan duplicados en clases (misma fecha, hora, disciplina).
     Tambien verifica que no haya clases en Domingo (operacion confirmada cerrada)."""
     import psycopg2
-    DB = 'postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-lingering-shape-ac953re8-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+    from app.core.config import settings
+    if settings.DATABASE_URL.startswith("postgresql://user:pass@"):
+        raise SystemExit("FATAL: Define DATABASE_URL en backend/.env.test (copia .env.example)")
+    DB = settings.DATABASE_URL
     c = psycopg2.connect(DB)
     cur = c.cursor()
     cur.execute("""

@@ -1,7 +1,16 @@
 ﻿"""Script de diagnostico: consulta transacciones_financieras directamente."""
+import os
+import sys
 import psycopg2
 
-URL = 'postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-lingering-shape-ac953re8-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+os.environ.setdefault("ENVIRONMENT", "test")
+from app.core.config import settings
+
+if settings.DATABASE_URL.startswith("postgresql://user:pass@"):
+    print("FATAL: Define DATABASE_URL en backend/.env.test (copia .env.example)")
+    sys.exit(1)
+URL = settings.DATABASE_URL
 
 c = psycopg2.connect(URL)
 cur = c.cursor()

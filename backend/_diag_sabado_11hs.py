@@ -1,7 +1,16 @@
 ﻿"""DIAG: Sabado sin clases + bloque 11hs."""
+import os
+import sys
 import psycopg2
 
-DB = "postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-lingering-shape-ac953re8-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+os.environ.setdefault("ENVIRONMENT", "test")
+from app.core.config import settings
+
+if settings.DATABASE_URL.startswith("postgresql://user:pass@"):
+    print("FATAL: Define DATABASE_URL en backend/.env.test (copia .env.example)")
+    sys.exit(1)
+DB = settings.DATABASE_URL
 conn = psycopg2.connect(DB, connect_timeout=10)
 cur = conn.cursor()
 

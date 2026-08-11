@@ -1,7 +1,13 @@
 """SOLO LECTURA: lista columnas de la tabla planes en PRODUCCION (withered-silence)."""
+import os
+import sys
 import psycopg2
 
-URL_PROD = "postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-withered-silence-acly7gq5-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+# Credenciales NUNCA en git: leer DATABASE_URL_PROD del entorno / backend/.env
+URL_PROD = os.getenv("DATABASE_URL_PROD")
+if not URL_PROD or "postgresql://" not in URL_PROD:
+    print("FATAL: Define DATABASE_URL_PROD en backend/.env")
+    sys.exit(1)
 
 print("SOLO LECTURA - PRODUCCION (withered-silence)")
 print("=" * 60)

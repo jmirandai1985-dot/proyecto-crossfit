@@ -16,11 +16,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 # ── Configuración de conexión ──────────────────────────────────────────────
-DATABASE_URL = (
-    settings.DATABASE_URL.split("@")[0] + "@" + settings.DATABASE_URL.split("@")[1].split("/")[0]
-    "@ep-withered-silence-acly7gq5-pooler.sa-east-1.aws.neon.tech"
-    "/neondb?sslmode=require&channel_binding=require"
-)
+# Credenciales NUNCA hardcodeadas: se leen de backend/.env via settings.
+if settings.DATABASE_URL.startswith("postgresql://user:pass@"):
+    print("FATAL: Define DATABASE_URL en backend/.env (copia .env.example)")
+    sys.exit(1)
+DATABASE_URL = settings.DATABASE_URL
 
 # ── Datos del usuario a insertar ───────────────────────────────────────────
 CORREO = "alumno@urbantraining.cl"

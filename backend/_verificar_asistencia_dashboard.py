@@ -17,7 +17,12 @@ import psycopg2
 from datetime import date
 
 os.environ["ENVIRONMENT"] = "test"
-DB_URL = "postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-lingering-shape-ac953re8-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+from app.core.config import settings
+
+if settings.DATABASE_URL.startswith("postgresql://user:pass@"):
+    print("FATAL: Define DATABASE_URL en backend/.env.test (copia .env.example)")
+    sys.exit(1)
+DB_URL = settings.DATABASE_URL
 
 BASE = "http://localhost:8000/api/v1"
 TENANT_ID = 1

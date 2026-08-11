@@ -30,8 +30,14 @@ os.environ["ENVIRONMENT"] = "test"
 settings = importlib.import_module("app.core.config").settings
 URL_TEST = settings.DATABASE_URL
 
-# PROD: hardcodeada desde .env (withered-silence)
-URL_PROD = "postgresql://neondb_owner:npg_dgH4Goce5DkB@ep-withered-silence-acly7gq5-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+# PROD: se obtiene del entorno (NUNCA hardcodear credenciales en el repo).
+# Definir DATABASE_URL_PROD en backend/.env (fuera de git).
+URL_PROD = os.getenv("DATABASE_URL_PROD")
+if not URL_PROD or "postgresql://" not in URL_PROD:
+    print("=" * 60)
+    print("  FATAL: Define DATABASE_URL_PROD en backend/.env para poder sincronizar desde PRODUCCION")
+    print("=" * 60)
+    sys.exit(1)
 
 
 print("="*60)
