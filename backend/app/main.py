@@ -13,6 +13,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI
 import os
 
+# ── Aumentar threadpool de Starlette/FastAPI (default: 40 tokens) ──
+# Necesario para soportar carga concurrente alta (tests k6: 500 logins).
+# Los endpoints `def` (síncronos) se ejecutan en este pool de hilos.
+# Se aplica en el startup event porque current_default_thread_limiter()
+# requiere un event loop asyncio activo (no existe al momento del import).
+from anyio import to_thread
+
 app = FastAPI(
     title="Box CrossFit Platform API",
     description="API REST para gestiÃ³n multi-tenant de boxes de CrossFit",
@@ -20,6 +27,14 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+
+@app.on_event("startup")
+def _expand_threadpool():
+    try:
+        to_thread.current_default_thread_limiter().total_tokens = 150
+    except Exception:
+        pass
 
 # ---- CONFIGURACIÃ“N DE CORS - PERMITIR TODOS LOS ORÃGENES ----
 app.add_middleware(

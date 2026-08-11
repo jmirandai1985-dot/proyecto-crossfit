@@ -17,6 +17,7 @@ import AdminConfiguracion from './pages/admin/Configuracion';
 import AdminNotificaciones from './pages/admin/Notificaciones';
 import AdminFidelizacion from './pages/admin/Fidelizacion';
 import AdminPlanes from './pages/admin/Planes';
+import AdminAlumnosPendientes from './pages/admin/AdminAlumnosPendientes';
 import AdminDisciplinas from './pages/admin/Disciplinas';
 import CoachDashboard from './pages/coach/DashboardCoach';
 import CoachPizarra from './pages/coach/Pizarra';
@@ -85,6 +86,7 @@ function App() {
           <Route path="/admin/*" element={<ProtectedRoute roles={ROLES_ADMIN} />}>
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="alumnos" element={<AdminAlumnos />} />
+            <Route path="alumnos-pendientes" element={<AdminAlumnosPendientes />} />
             <Route path="coaches" element={<AdminCoaches />} />
             <Route path="clases" element={<AdminClases />} />
             <Route path="supervision-clases" element={<AdminSupervisionClases />} />
