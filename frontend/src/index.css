@@ -598,6 +598,23 @@ textarea {
     border-radius: 0.5rem;
 }
 
+/* ── Login: inputs translúcidos (anula el override global de inputs) ── */
+.login-input {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+    border-color: rgba(255, 255, 255, 0.2) !important;
+    color: #ffffff !important;
+    border-radius: 0.5rem;
+}
+.login-input::placeholder {
+    color: rgba(255, 255, 255, 0.45) !important;
+}
+.login-input:focus {
+    border-color: #ff8c00 !important;
+    outline: none !important;
+    box-shadow: 0 0 0 3px rgba(255, 140, 0, 0.25) !important;
+}
+
+
 input::placeholder,
 textarea::placeholder {
     color: #71717a !important;

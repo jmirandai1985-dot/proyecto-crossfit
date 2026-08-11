@@ -1,20 +1,20 @@
-"""
-Router de endpoints para gestión de Reservas
-"""
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
-from sqlalchemy import func
-from typing import List
-
-from app.db.database import get_db
-from app.models.reserva import Reserva
-from app.models.clase import Clase
-from app.models.disciplina import Disciplina
-from app.models.usuario import Usuario
-from app.core.dependencies import get_current_user, verificar_coach_disciplina
 from app.schemas.reserva import (
     ReservaCreate, ReservaUpdate, ReservaResponse, ReservaListItem
 )
+from app.core.dependencies import get_current_user, verificar_coach_disciplina
+from app.models.usuario import Usuario
+from app.models.disciplina import Disciplina
+from app.models.clase import Clase
+from app.models.reserva import Reserva
+from app.db.database import get_db
+from typing import List
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+"""
+Router de endpoints para gestión de Reservas
+"""
+
 
 router = APIRouter()
 
