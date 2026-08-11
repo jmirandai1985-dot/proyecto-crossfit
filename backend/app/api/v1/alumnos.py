@@ -5,7 +5,7 @@ import secrets
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, AliasChoices
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -16,7 +16,8 @@ from app.models.suscripcion import Suscripcion
 from app.api.v1.usuarios import hash_password
 from app.core.dependencies import get_current_user, get_current_admin
 from app.services.email_service import (
-    enviar_email_solicitud_admin, enviar_email_activacion_alumno
+    enviar_email_solicitud_admin,
+    send_solicitud_prueba_clase, send_bienvenida_activacion
 )
 
 router = APIRouter()
@@ -51,10 +52,16 @@ class RegistroAlumnoNuevo(BaseModel):
     nombre: str
     correo: EmailStr
     sexo: Optional[str] = None
-    peso: Optional[float] = None
-    estatura: Optional[float] = None
+    peso: Optional[float] = Field(
+        None, validation_alias=AliasChoices("peso", "peso_kg"),
+        description="Peso en kg (acepta campo 'peso' o 'peso_kg')")
+    estatura: Optional[float] = Field(
+        None, validation_alias=AliasChoices("estatura", "estatura_cm"),
+        description="Estatura en cm (acepta campo 'estatura' o 'estatura_cm')")
     rut: str
     tenant_id: int = 1
+
+    model_config = {"populate_by_name": True}
 
 
 # ─── POST /registro/alumno-nuevo (público) ───
@@ -134,11 +141,18 @@ def registrar_alumno_nuevo(
     db.commit()
 
     try:
+        # Notifica al admin que hay un nuevo alumno pendiente de activación
         enviar_email_solicitud_admin({
             "nombre": usuario.nombre,
             "correo": usuario.correo,
             "id": usuario.id,
         })
+    except Exception:
+        pass
+
+    try:
+        # Confirma al LEAD que su solicitud de clase de prueba fue recibida
+        send_solicitud_prueba_clase(usuario.nombre, usuario.correo)
     except Exception:
         pass
 
@@ -218,15 +232,20 @@ def activar_alumno(
     db.commit()
 
     try:
-        enviar_email_activacion_alumno({
-            "id": usuario.id,
-            "nombre": usuario.nombre,
-            "correo": usuario.correo,
-        }, password_provisional)
+        send_bienvenida_activacion(
+            usuario.nombre,
+            usuario.correo,
+            password_provisional,
+            "https://app.urbantrainingbox.cl/login",
+        )
     except Exception:
         pass
 
-    return {"ok": True, "mensaje": "Alumno activado y credenciales enviadas"}
+    return {
+        "ok": True,
+        "mensaje": "Alumno activado y credenciales enviadas",
+        "password_provisional": password_provisional,
+    }
 
 
 # ─── PUT /{alumno_id}/rechazar (admin only) ───
@@ -246,6 +265,32 @@ def rechazar_alumno(
     usuario.activo = False
     db.commit()
     return {"ok": True, "mensaje": "Solicitud rechazada"}
+
+
+# ─── GET /me (alumno autenticado) ───
+@router.get("/me")
+def obtener_mi_perfil(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Perfil del usuario autenticado (requiere token JWT)."""
+    uid = current_user.get("usuario_id")
+    usuario = db.query(Usuario).filter(Usuario.id == uid).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return {
+        "id": usuario.id,
+        "nombre": usuario.nombre,
+        "correo": usuario.correo,
+        "rut": usuario.rut,
+        "rol": usuario.rol,
+        "estado": usuario.estado,
+        "activo": usuario.activo,
+        "cambiar_password_al_login": usuario.cambiar_password_al_login,
+        "peso_kg": usuario.peso_kg,
+        "estatura_cm": usuario.estatura_cm,
+        "genero": usuario.genero,
+    }
 
 
 # ─── GET /me/es-prueba (alumno autenticado) ───

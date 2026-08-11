@@ -5,6 +5,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import { DASHBOARD_MAP, ROLES_ADMIN, ROLES_COACH, ROLES_ALUMNO } from './config/roles';
 
 // ─── Pages ──────────────────────────────────────────────────────────────
+import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
 import AdminDashboard from './pages/admin/Dashboard';
 import AdminAlumnos from './pages/admin/Alumnos';
@@ -69,8 +70,9 @@ function App() {
       <AuthProvider>
         <Routes>
 
-          {/* ── "/" → redirige según rol o a /login ── */}
-          <Route path="/" element={<RootRedirect />} />
+          {/* ── /landing y "/" → Landing pública de registro (clase de prueba) ── */}
+          <Route path="/landing" element={<LandingPage />} />
+          <Route path="/" element={<LandingPage />} />
 
           {/* ── /login → si ya autenticado, redirige a su dashboard ── */}
           <Route
