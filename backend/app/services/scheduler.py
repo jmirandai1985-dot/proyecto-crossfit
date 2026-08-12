@@ -54,7 +54,7 @@ async def job_generar_clases_diarias():
 
 
 def iniciar_scheduler():
-    """Inicia el scheduler con el job diario a las 00:05 CLT"""
+    """Inicia el scheduler con el job diario a las 00:05 CLT + alertas de email."""
     scheduler.add_job(
         job_generar_clases_diarias,
         CronTrigger(hour=0, minute=5,
@@ -64,9 +64,75 @@ def iniciar_scheduler():
         replace_existing=True,
         misfire_grace_time=3600,  # Si falla por hasta 1h, igual lo ejecuta
     )
+    # ── Alertas automáticas de email ──
+    scheduler.add_job(
+        job_alerta_urgencia_renovacion,
+        CronTrigger(hour=6, minute=0, timezone=pytz.timezone("America/Santiago")),
+        id="alerta_urgencia_renovacion",
+        name="Alerta urgencia: planes que vencen HOY",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        job_alerta_renovacion,
+        CronTrigger(hour=8, minute=0, timezone=pytz.timezone("America/Santiago")),
+        id="alerta_renovacion",
+        name="Alerta renovación: planes que vencen en 3 días",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        job_alerta_inactividad,
+        CronTrigger(hour=9, minute=0, timezone=pytz.timezone("America/Santiago")),
+        id="alerta_inactividad",
+        name="Alerta inactividad: 7+ días sin asistencia (cada 24h)",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
     scheduler.start()
     logger.info(
-        "🚀 Scheduler iniciado - Job 'generar_clases_diarias' a las 00:05 CLT")
+        "🚀 Scheduler iniciado - generación de clases 00:05, "
+        "alertas de email 06:00 / 08:00 / 09:00 CLT")
+
+
+async def _ejecutar_alertas(tipo: str):
+    """Wrapper genérico: abre sesión DB y ejecuta la alerta indicada."""
+    from app.db.database import SessionLocal
+    db = SessionLocal()
+    try:
+        if tipo == "renovacion":
+            from app.services.alertas_email_service import enviar_alertas_renovacion
+            res = enviar_alertas_renovacion(db)
+        elif tipo == "inactividad":
+            from app.services.alertas_email_service import enviar_alertas_inactividad
+            res = enviar_alertas_inactividad(db)
+        elif tipo == "urgencia":
+            from app.services.alertas_email_service import enviar_alertas_urgencia
+            res = enviar_alertas_urgencia(db)
+        else:
+            return
+        logger.info(
+            f"⏰ [Scheduler] Alerta {tipo}: {res.get('enviados', 0)} enviados, "
+            f"{res.get('fallidos', 0)} fallidos")
+    except Exception as e:
+        logger.error(f"❌ [Scheduler] Error alerta {tipo}: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+async def job_alerta_renovacion():
+    """Diario 08:00 CLT - planes que vencen en 3 días (Email 3)."""
+    await _ejecutar_alertas("renovacion")
+
+
+async def job_alerta_inactividad():
+    """Cada 24h (09:00 CLT) - alumnos con 7+ días sin asistencia (Email 4)."""
+    await _ejecutar_alertas("inactividad")
+
+
+async def job_alerta_urgencia_renovacion():
+    """Diario 06:00 CLT - planes que vencen HOY (Email 5)."""
+    await _ejecutar_alertas("urgencia")
 
 
 def detener_scheduler():

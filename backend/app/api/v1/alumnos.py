@@ -17,7 +17,8 @@ from app.api.v1.usuarios import hash_password
 from app.core.dependencies import get_current_user, get_current_admin
 from app.services.email_service import (
     enviar_email_solicitud_admin,
-    send_solicitud_prueba_clase, send_bienvenida_activacion
+    send_solicitud_prueba_clase, send_bienvenida_activacion,
+    send_confirmacion_renovacion_plan, formatear_fecha_es
 )
 
 router = APIRouter()
@@ -151,8 +152,13 @@ def registrar_alumno_nuevo(
         pass
 
     try:
-        # Confirma al LEAD que su solicitud de clase de prueba fue recibida
-        send_solicitud_prueba_clase(usuario.nombre, usuario.correo)
+        # Confirma al LEAD con sus credenciales temporales para agendar la clase de prueba
+        send_solicitud_prueba_clase(
+            usuario.nombre,
+            usuario.correo,
+            password_tmp,
+            "https://app.urbantrainingbox.cl/login",
+        )
     except Exception:
         pass
 
@@ -222,22 +228,52 @@ def activar_alumno(
     usuario.cambiar_password_al_login = True
     db.flush()
 
+    # Detectar si es RENOVACIÓN: existía al menos 1 suscripción ACTIVA previa.
+    # (El lead nuevo solo tiene su suscripción 'pendiente' → count=0 → bienvenida)
+    es_renovacion = db.query(Suscripcion).filter(
+        Suscripcion.usuario_id == alumno_id,
+        Suscripcion.tenant_id == tenant_id,
+        Suscripcion.estado == "activo",
+    ).count() > 0
+
     sus = db.query(Suscripcion).filter(
         Suscripcion.usuario_id == alumno_id,
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.estado == "pendiente"
     ).first()
+    plan_nombre, cantidad_clases, fecha_vigencia = "Plan", 0, ""
     if sus:
         sus.estado = "activo"
+        plan = db.query(Plan).filter(Plan.id == sus.plan_id).first()
+        if plan:
+            plan_nombre = plan.nombre
+            cantidad_clases = plan.creditos if plan.creditos else 0
+        if sus.fecha_expiracion:
+            fecha_vigencia = formatear_fecha_es(sus.fecha_expiracion)
     db.commit()
 
     try:
-        send_bienvenida_activacion(
-            usuario.nombre,
-            usuario.correo,
-            password_provisional,
-            "https://app.urbantrainingbox.cl/login",
-        )
+        if es_renovacion:
+            # RENOVACIÓN → Email 6: confirmación de renovación
+            send_confirmacion_renovacion_plan(
+                usuario.nombre,
+                usuario.correo,
+                plan_nombre,
+                cantidad_clases,
+                fecha_vigencia,
+                "https://app.urbantrainingbox.cl/dashboard",
+            )
+        else:
+            # PRIMERA ACTIVACIÓN → Email 2: bienvenida con credenciales + resumen
+            send_bienvenida_activacion(
+                usuario.nombre,
+                usuario.correo,
+                password_provisional,
+                plan_nombre,
+                cantidad_clases,
+                fecha_vigencia,
+                "https://app.urbantrainingbox.cl/login",
+            )
     except Exception:
         pass
 
@@ -245,6 +281,8 @@ def activar_alumno(
         "ok": True,
         "mensaje": "Alumno activado y credenciales enviadas",
         "password_provisional": password_provisional,
+        "es_renovacion": es_renovacion,
+        "plan_nombre": plan_nombre,
     }
 
 

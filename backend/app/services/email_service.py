@@ -11,6 +11,8 @@ logger = logging.getLogger("uvicorn.email")
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Logo real: proyecto_root/logo/logo.png (el archivo 'images (17).jfif' no existe)
 LOGO_PATH = os.path.join(os.path.dirname(BACKEND_DIR), "logo", "logo.png")
+# Logo servido desde repo público de assets (GitHub raw) para usar URL en vez de adjunto
+LOGO_URL = "https://raw.githubusercontent.com/jmirandai1985-dot/urban-box-assets/main/logo.png"
 FROM_EMAIL = "Urban Training Box <onboarding@resend.dev>"
 
 # Último error SMTP (para exponer detalle útil al admin en el Dashboard)
@@ -21,7 +23,7 @@ LOGO_FILENAME = "logo-urban-training.jpg"
 
 
 def _logo_attachment() -> dict:
-    """Lee el logo y devuelve dict attachment inline para Resend (base64 sin prefijo)."""
+    """Lee el logo y devuelve dict attachment inline (misma versión que funcionaba)."""
     try:
         with open(LOGO_PATH, "rb") as f:
             b64 = base64.b64encode(f.read()).decode()
@@ -38,8 +40,17 @@ def _logo_attachment() -> dict:
 
 
 def _template(titulo: str, saludo: str, cuerpo: str, boton_texto: str, boton_url: str) -> str:
-    """Template visual comun: header negro con logo via cid, cuerpo motivacional, boton CTA."""
-    logo_html = f'<img src="cid:{LOGO_CID}" alt="Urban Training Box" style="height:48px;width:auto;">'
+    """Template visual comun: header de marca (negro/blanco/naranja), cuerpo motivacional, boton CTA."""
+    logo_html = """
+    <div style="background: #000000; padding: 40px 20px; text-align: center; width: 100%; margin: 0; border: 3px solid #ff8c00; border-radius: 8px;">
+      <h1 style="color: #ffffff; font-size: 44px; font-weight: 900; margin: 0; letter-spacing: 2px; font-family: Arial, sans-serif; line-height: 1.3;">
+        URBAN<br>TRAINING<br>BOX
+      </h1>
+      <p style="color: #ff8c00; font-size: 13px; margin: 16px 0 0 0; font-weight: bold; letter-spacing: 3px; font-family: Arial, sans-serif;">
+        – TU BOX DE ÉLITE –
+      </p>
+    </div>
+    """
     return f"""<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background-color:#f4f4f5;font-family:Arial,Helvetica,sans-serif;">
 <div style="max-width:600px;margin:0 auto;background-color:#ffffff;">
@@ -92,21 +103,8 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
         msg["Subject"] = asunto
         msg.set_content("Correo de Urban Training Box. Si no ves el contenido HTML, abre este correo en tu navegador.")
         msg.add_alternative(html, subtype="html")
-
-        # Adjuntar el logo INLINE usando add_related (método oficial de Python)
-        html_part = msg.get_payload()[-1]  # la parte HTML recién agregada
-        att = _logo_attachment()
-        if att:
-            try:
-                with open(LOGO_PATH, "rb") as f:
-                    html_part.add_related(
-                        f.read(),
-                        maintype="image",
-                        subtype="jpeg",
-                        cid=f"<{att['content_id']}>",
-                    )
-            except Exception as e:
-                logger.warning(f"No se pudo adjuntar logo inline: {e}")
+        # NOTA: el logo se sirve desde la URL pública (LOGO_URL) embebida en el HTML.
+        # No se adjunta ningún archivo -> bandeja sin "datos adjuntos".
 
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.starttls()
@@ -227,66 +225,155 @@ def enviar_email_activacion_alumno(alumno: dict, password: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# PLANTILLAS DEL FLUJO DE REGISTRO / RENOVACIÓN (BLOQUE SEGURIDAD)
+# PLANTILLAS DE CORREO — FLUJO REGISTRO / ACTIVACIÓN / RENOVACIÓN (COPY OFICIAL)
+# Los placeholders [entre corchetes] se rellenan con datos reales de la BD.
 # ─────────────────────────────────────────────────────────────────────────
-def send_solicitud_prueba_clase(nombre: str, correo: str) -> bool:
-    """Lead nuevo - Sin credenciales, solo confirmación de solicitud de clase de prueba."""
+
+MESES_ES = {
+    1: "enero", 2: "febrero", 3: "marzo", 4: "abril", 5: "mayo", 6: "junio",
+    7: "julio", 8: "agosto", 9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre",
+}
+
+
+def formatear_fecha_es(fecha) -> str:
+    """Convierte date/datetime a formato '11 de septiembre de 2026'."""
+    try:
+        return f"{fecha.day} de {MESES_ES[fecha.month]} de {fecha.year}"
+    except Exception:
+        return str(fecha)[:10]
+
+
+def send_solicitud_prueba_clase(nombre: str, correo: str, password_temporal: str, link_app: str) -> bool:
+    """Lead nuevo - Bienvenida con credenciales temporales para agendar la clase de prueba."""
     if not correo:
         return False
-    titulo = "¡Solicitud recibida!"
-    saludo = f"Hola {nombre.split()[0]}, tu solicitud de clase de prueba ha sido recibida."
-    cuerpo = ("Nuestro equipo se contactará pronto para confirmar tu sesión y contarte todos los detalles. "
-              "Gracias por elegir Urban Training Box 💪")
-    url = "https://app.urbantrainingbox.cl/landing"
-    html = _template(titulo, saludo, cuerpo, "Conoce el box", url)
-    ok = _enviar(correo, "¡Tu clase de prueba ha sido recibida! 💪", html,
+    titulo = "¡Felicidades! Has tomado la mejor decisión de tu vida 🔥"
+    saludo = f"¡Hola, {nombre}!"
+    cuerpo = (
+        "<p>Queremos felicitarte. Acabas de tomar la mejor decisión: hoy comienza el camino hacia tu mejor versión.</p>"
+        "<p>Estás a un paso de pisar el box y comprobar de lo que eres capaz. En Urban Training Box no solo venimos a entrenar; "
+        "venimos a romper barreras, a dejar atrás las excusas y a entrenar en una comunidad que te empuja a superarte todos los días.</p>"
+        "<p>Hemos creado tu cuenta de acceso temporal en nuestra plataforma para que puedas agendar tu primera clase de prueba "
+        "y revisar nuestros planes.</p>"
+        f"<p><strong>Tu usuario (correo):</strong> {correo}<br/>"
+        f"<strong>Tu contraseña temporal:</strong> {password_temporal}</p>"
+        "<p>Ingresa a la plataforma, revisa los horarios, agenda tu clase de prueba y prepárate para vivir la experiencia real "
+        "de Urban. Una vez que tomes tu clase y elijas tu plan, se te habilitarán todas las funciones completas del sistema.</p>"
+        "<p>⚠️ <strong>IMPORTANTE (Postdata):</strong> Como este es nuestro primer correo, revisa muy bien tu bandeja de SPAM "
+        "o correo no deseado, por si nuestras próximas notifications deciden esconderse por ahí.</p>"
+        "<p>¡Nos vemos pronto en el box a darle con todo!<br/>— El equipo de Urban Training Box 🏋️‍♂️</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Ingresar a mi cuenta", link_app)
+    ok = _enviar(correo, "¡Felicidades! Has tomado la mejor decisión de tu vida 🔥", html,
                  None, tipo="solicitud_prueba_clase")
     logger.info(f"[solicitud_prueba_clase] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
 
 
-def send_bienvenida_activacion(nombre: str, correo: str, password: str, link_app: str) -> bool:
-    """Pago validado - Con credenciales de acceso al sistema."""
+def send_bienvenida_activacion(nombre: str, correo: str, password: str, plan_nombre: str,
+                               cantidad_clases: int, fecha_vigencia: str, link_app: str) -> bool:
+    """Pago validado (primera activación) - Cuenta activa con resumen del plan."""
     if not correo:
         return False
-    titulo = "¡Bienvenido a Urban Training Box!"
-    saludo = f"¡Hola {nombre.split()[0]}! Tu cuenta ha sido activada y ya podés ingresar."
-    cuerpo = ("Estas son tus credenciales de acceso. Recordá cambiarlas en tu primer ingreso.<br/><br/>"
-              f"<strong>Correo:</strong> {correo}<br/>"
-              f"<strong>Contrase&ntilde;a:</strong> {password}")
-    html = _template(titulo, saludo, cuerpo, "Iniciar sesión", link_app)
-    ok = _enviar(correo, f"¡Bienvenido, {nombre.split()[0]}! Tus credenciales de acceso 🔑", html,
+    titulo = "¡Bienvenido a la manada! Tu cuenta en Urban Training Box ya está activa 🔥"
+    saludo = (f"¡Felicidades, {nombre}! El administrador ya validó tu comprobante y tu cuenta está 100% activa. "
+              "Ya eres parte oficial de la manada Urban.")
+    cuerpo = (
+        "<p>Aquí tienes el resumen de tu contratación para que lo tengas siempre presente:</p>"
+        f"<p><strong>Plan contratado:</strong> {plan_nombre}<br/>"
+        f"<strong>Clases disponibles:</strong> {cantidad_clases} clases al mes<br/>"
+        f"<strong>Vigencia:</strong> Hasta el {fecha_vigencia}</p>"
+        "<p>Ya tienes acceso total a la plataforma. Entra ahora a tu panel, agenda tus próximos entrenamientos y prepárate "
+        "para romper tus marcas en el Performance Hub. La constancia es la única que da resultados.</p>"
+        "<p>Nos vemos en el box a darlo todo.<br/>— El equipo de Urban Training Box</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Ir a mi panel", link_app)
+    ok = _enviar(correo, "¡Bienvenido a la manada! Tu cuenta en Urban Training Box ya está activa 🔥", html,
                  None, tipo="bienvenida_activacion")
     logger.info(f"[bienvenida_activacion] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
 
 
-def send_renovacion_plan(nombre: str, correo: str, fecha_vencimiento: str) -> bool:
-    """Vencimiento próximo - Recordatorio de renovación de plan."""
+def send_renovacion_plan(nombre: str, correo: str, fecha_vencimiento: str, link_renovar: str) -> bool:
+    """Vencimiento próximo (3 días antes) - Recordatorio de renovación."""
     if not correo:
         return False
-    titulo = "Tu plan está por vencer"
-    saludo = f"Hola {nombre.split()[0]}, tu plan vence el <strong>{fecha_vencimiento}</strong>."
-    cuerpo = "Renová ahora para no perder acceso a las clases ni tu progreso. ¡Te esperamos en el box!"
-    url = "https://app.urbantrainingbox.cl/planes"
-    html = _template(titulo, saludo, cuerpo, "Renovar mi plan", url)
-    ok = _enviar(correo, f"Tu plan vence el {fecha_vencimiento}, {nombre.split()[0]} ⏳", html,
+    titulo = f"¡Atención, {nombre}! Tu plan en Urban Training Box está por vencer ⏳"
+    saludo = (f"¡Hola, {nombre}! Queremos avisarte que tu plan actual está a punto de agotarse o cumplir su fecha de vigencia "
+              "(Te quedan pocos días / clases disponibles).")
+    cuerpo = (
+        "<p>Para que no pierdas tu ritmo, tus horarios favoritos ni te quedes fuera de los WODs, te invitamos a renovar "
+        "tu membresía con anticipación.</p>"
+        "<p>Ingresa a la plataforma, revisa los planes, haz tu transferencia y envía tu comprobante al administrador "
+        "para mantener tu cuenta activa al 100%.</p>"
+        "<p>¡No bajes el ritmo ahora! Nos vemos en el box.</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Renovar mi plan", link_renovar)
+    ok = _enviar(correo, f"¡Atención, {nombre}! Tu plan en Urban Training Box está por vencer ⏳", html,
                  None, tipo="renovacion_plan")
     logger.info(f"[renovacion_plan] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
 
 
-def send_vencimiento_inminente(nombre: str, correo: str) -> bool:
-    """Último día - Urgencia: el acceso vence HOY."""
+def send_alerta_inactividad(nombre: str, correo: str) -> bool:
+    """Inactividad (7+ días sin asistencia) - Email motivacional de la manada."""
     if not correo:
         return False
-    titulo = "¡ÚLTIMO DÍA de tu plan!"
-    saludo = f"¡{nombre.split()[0]}! ⏰ Tu acceso vence HOY."
-    cuerpo = "Renová ahora mismo para no perder tu cupo ni tu progreso. Solo te toma 2 minutos."
-    url = "https://app.urbantrainingbox.cl/planes"
-    html = _template(titulo, saludo, cuerpo, "Renovar ahora", url)
-    ok = _enviar(correo, f"¡{nombre.split()[0]}! ⏰ ÚLTIMO DÍA para renovar tu plan", html,
+    titulo = f"¡Te echamos de menos en la manada, {nombre}! ¿Cuándo vuelves? 👀🏋️‍♂️"
+    saludo = f"¡Hola, {nombre}! Hemos notado que llevas unos días sin aparecer por el box y la barra se siente sola sin ti."
+    cuerpo = (
+        "<p>Sabemos que las semanas se ponen pesadas, pero la constancia es la que construye los verdaderos resultados. "
+        "No dejes que la flojera le gane a tus metas.</p>"
+        "<p>Entra ahora mismo a la plataforma, revisa la programación y agenda tu próxima clase. ¡La manada te espera "
+        "para darle con todo!</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Agendar mi próxima clase", "https://app.urbantrainingbox.cl/reservas")
+    ok = _enviar(correo, f"¡Te echamos de menos en la manada, {nombre}! ¿Cuándo vuelves? 👀🏋️‍♂️", html,
+                 None, tipo="inactividad")
+    logger.info(f"[alerta_inactividad] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    return ok
+
+
+def send_alerta_urgencia_renovacion(nombre: str, correo: str) -> bool:
+    """Último día - El plan expira HOY, cuenta pasa a acceso restringido."""
+    if not correo:
+        return False
+    titulo = f"¡{nombre}, tu plan ha expirado! Renueva y vuelve al ruedo 🚨"
+    saludo = (f"¡Hola, {nombre}! Te informamos que tu membresía en Urban Training Box ha caducado. "
+              "Tu cuenta ha pasado a modo de acceso restringido.")
+    cuerpo = (
+        "<p>Para volver a agendar tus clases, registrar tus marcas en el Performance Hub y seguir entrenando con nosotros, "
+        "necesitas activar tu nuevo plan.</p>"
+        "<p>Entra a la plataforma, selecciona tu plan, realiza el pago y envía tu comprobante al administrador "
+        "para habilitar tu cuenta de inmediato.</p>"
+        "<p>¡No te quedes fuera del box! Te esperamos para seguir sumando.</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Activar mi plan", "https://app.urbantrainingbox.cl/planes")
+    ok = _enviar(correo, f"¡{nombre}, tu plan ha expirado! Renueva y vuelve al ruedo 🚨", html,
                  None, tipo="vencimiento_inminente")
-    logger.info(f"[vencimiento_inminente] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    logger.info(f"[alerta_urgencia_renovacion] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    return ok
+
+
+def send_confirmacion_renovacion_plan(nombre: str, correo: str, plan_nombre: str,
+                                      cantidad_clases: int, fecha_vigencia: str, link_app: str) -> bool:
+    """Confirmación de renovación - Admin validó el comprobante y el plan se extendió."""
+    if not correo:
+        return False
+    titulo = f"¡Excelente decisión, {nombre}! Tu plan ha sido renovado con éxito 🚀"
+    saludo = (f"¡Felicidades, {nombre}! Vemos que te gusta el ritmo y eso es mentalidad de la manada. "
+              "El administrador ya validó tu comprobante de renovación y tu membresía ha sido extendida sin interrupciones.")
+    cuerpo = (
+        "<p>Aquí tienes los detalles actualizados de tu nuevo ciclo:</p>"
+        f"<p><strong>Plan renovado:</strong> {plan_nombre}<br/>"
+        f"<strong>Clases disponibles:</strong> {cantidad_clases} clases al mes<br/>"
+        f"<strong>Nueva fecha de vigencia:</strong> Hasta el {fecha_vigencia}</p>"
+        "<p>Tu cuenta sigue 100% activa y con acceso total al Performance Hub. Sigue agendando tus clases y destrozando tus metas.</p>"
+        "<p>¡Nos vemos entrenando en el box!<br/>— El equipo de Urban Training Box 🏋️‍♂️</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Ir a mi panel", link_app)
+    ok = _enviar(correo, f"¡Excelente decisión, {nombre}! Tu plan ha sido renovado con éxito 🚀", html,
+                 None, tipo="confirmacion_renovacion")
+    logger.info(f"[confirmacion_renovacion] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
 
