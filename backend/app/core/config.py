@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # SECRET_KEY legacy (alias de JWT_SECRET_KEY; se normaliza al final)
     SECRET_KEY: str = ""
 
+    # CORS / Frontend
+    FRONTEND_URL: str = "http://localhost:5173"
+
+    # Monitoreo de errores (Sentry) — DSN opcional. Si está vacío, no se envía.
+    SENTRY_DSN: str = ""
+
     # CORS - Dominios permitidos
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
 

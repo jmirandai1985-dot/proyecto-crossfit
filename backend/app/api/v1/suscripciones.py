@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, timezone
@@ -7,6 +7,7 @@ from app.db.database import get_db
 from app.models.suscripcion import Suscripcion
 from app.models.transaccion_financiera import TransaccionFinanciera
 from app.core.dependencies import get_current_admin
+from app.core.rate_limit import limiter, LIMIT_CRITICO
 
 router = APIRouter()
 
@@ -23,7 +24,9 @@ class SuscripcionCreate(BaseModel):
 
 
 @router.post("/suscripciones", status_code=201)
+@limiter.limit(LIMIT_CRITICO)
 def crear_suscripcion(
+    request: Request,
     data: SuscripcionCreate,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),

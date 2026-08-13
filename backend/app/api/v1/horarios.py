@@ -132,6 +132,12 @@ def actualizar_horario(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Horario {horario_id} no encontrado"
         )
+    # 🔒 Verificar que el horario pertenezca al tenant del admin
+    if horario.tenant_id != current_user.get("tenant_id"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes acceso a este horario",
+        )
     if dia_semana is not None:
         horario.dia_semana = dia_semana
     if hora_inicio is not None:

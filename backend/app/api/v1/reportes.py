@@ -10,6 +10,7 @@ import io
 from typing import Optional
 
 from app.db.database import get_db
+from app.core.dependencies import get_current_admin
 
 router = APIRouter()
 
@@ -32,9 +33,16 @@ def descargar_reporte_ventas_mensual(
     tenant_id: int,
     mes: int,
     anio: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Genera y descarga un reporte Excel con ventas mensuales."""
+    """Genera y descarga un reporte Excel con ventas mensuales. Solo admin (su tenant)."""
+    # 🔒 El admin solo puede descargar reportes de su propio tenant
+    if current_user.get("tenant_id") != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes acceso a este tenant",
+        )
     from app.services.reportes_service import crear_reporte_ventas_mensual_bytes
     if mes < 1 or mes > 12:
         raise HTTPException(
@@ -67,9 +75,16 @@ def descargar_reporte_dashboard(
     tenant_id: int,
     mes: int = None,
     anio: int = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Genera un reporte de Dashboard Negocio."""
+    """Genera un reporte de Dashboard Negocio. Solo admin (su tenant)."""
+    # 🔒 El admin solo puede descargar reportes de su propio tenant
+    if current_user.get("tenant_id") != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes acceso a este tenant",
+        )
     from app.services.reportes_service import crear_reporte_ventas_mensual_bytes
     if mes is None or anio is None:
         ahora = datetime.now()
@@ -92,12 +107,20 @@ def descargar_reporte_dashboard(
 @router.get("/")
 def obtener_reportes_analytics(
     tenant_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     ENDPOINT PRINCIPAL DE KPIs REALES.
     Calcula todos los indicadores desde las tablas reales de la BD.
+    Solo admin (su tenant).
     """
+    # 🔒 El admin solo puede ver KPIs de su propio tenant
+    if current_user.get("tenant_id") != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes acceso a este tenant",
+        )
     try:
         ahora = datetime.now(timezone.utc)
         mes_actual_num = ahora.month

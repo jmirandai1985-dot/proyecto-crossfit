@@ -32,5 +32,9 @@ backend/.env.test
 *.log
 *.txt
 
+# requirements.txt es esencial para el despliegue (no ignorar)
+!backend/requirements.txt
+!requirements.txt
+
 # Backups de BD (dumps SQL sensibles)
 backups/

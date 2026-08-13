@@ -1,7 +1,7 @@
 """
 Router de endpoints para gestión de Usuarios
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 import bcrypt
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -11,6 +11,7 @@ from app.db.database import get_db
 from app.models.usuario import Usuario
 from app.schemas.usuario import UsuarioCreate, UsuarioUpdate, UsuarioResponse, UsuarioListItem
 from app.core.dependencies import get_current_user, get_current_admin
+from app.core.rate_limit import limiter, LIMIT_CRITICO
 
 router = APIRouter()
 
@@ -95,7 +96,9 @@ def cambiar_password(
 
 
 @router.post("/", response_model=UsuarioResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit(LIMIT_CRITICO)
 def crear_usuario(
+    request: Request,
     usuario_data: UsuarioCreate,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),

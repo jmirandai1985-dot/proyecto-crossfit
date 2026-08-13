@@ -1,7 +1,7 @@
 """
 Endpoint para compra de emergencia de planes
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 from calendar import monthrange
@@ -10,6 +10,8 @@ from pydantic import BaseModel
 from app.db.database import get_db
 from app.models.suscripcion import Suscripcion
 from app.models.plan import Plan
+from app.core.dependencies import get_current_user
+from app.core.rate_limit import limiter, LIMIT_CRITICO
 
 router = APIRouter()
 
@@ -21,15 +23,27 @@ class CompraEmergenciaRequest(BaseModel):
 
 
 @router.post("/comprar-emergencia")
+@limiter.limit(LIMIT_CRITICO)
 def comprar_emergencia(
+    request: Request,
     data: CompraEmergenciaRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Compra de emergencia cuando el alumno agotó sus clases.
     - 1ra vez al año: acumula tokens sobrantes al mes siguiente
     - 2da vez al año: NO acumula, vence fin de mes
+
+    Solo el alumno dueño de la suscripción (o admin/coach) puede ejecutarla.
     """
+    # 🔒 IDOR: solo el propio alumno o staff puede comprar emergencia para ese alumno
+    rol = current_user.get("rol", "")
+    if rol not in ("coach", "admin", "administrador") and data.alumno_id != current_user.get("usuario_id"):
+        raise HTTPException(
+            status_code=403,
+            detail="No puedes comprar emergencia para otro alumno",
+        )
     # Verificar plan
     plan = db.query(Plan).filter(
         Plan.id == data.plan_id,

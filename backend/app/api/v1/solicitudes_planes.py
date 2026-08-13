@@ -2,7 +2,7 @@
 Router de endpoints para Solicitudes de Planes (flujo admin)
 """
 import os
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -16,6 +16,7 @@ from app.models.usuario import Usuario
 from app.models.notificacion import Notificacion
 from app.schemas.solicitud import SolicitudPlanCreate
 from app.core.dependencies import get_current_admin, get_current_user
+from app.core.rate_limit import limiter, LIMIT_CRITICO
 from datetime import timedelta
 
 router = APIRouter()
@@ -138,7 +139,9 @@ def descargar_voucher(
 
 
 @router.put("/{solicitud_id}/aprobar")
+@limiter.limit(LIMIT_CRITICO)
 def aprobar_solicitud(
+    request: Request,
     solicitud_id: int,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
@@ -200,7 +203,9 @@ def aprobar_solicitud(
 
 
 @router.put("/{solicitud_id}/rechazar")
+@limiter.limit(LIMIT_CRITICO)
 def rechazar_solicitud(
+    request: Request,
     solicitud_id: int,
     motivo: Optional[str] = "Rechazado",
     db: Session = Depends(get_db),

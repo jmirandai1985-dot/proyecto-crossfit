@@ -126,6 +126,12 @@ def eliminar_disciplina(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Disciplina {disciplina_id} no encontrada"
         )
+    # 🔒 Verificar que la disciplina pertenezca al tenant del admin
+    if disciplina.tenant_id != current_user.get("tenant_id"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes acceso a esta disciplina",
+        )
     disciplina.activo = False
     db.commit()
     return None

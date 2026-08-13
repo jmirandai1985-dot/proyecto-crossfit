@@ -2,14 +2,17 @@
 import re
 import string
 import secrets
+import logging
+import sentry_sdk
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel, EmailStr, Field, AliasChoices
 from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.db.database import get_db
+from app.core.rate_limit import limiter, LIMIT_REGISTRO
 from app.models.usuario import Usuario, RolUsuario
 from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
@@ -65,9 +68,11 @@ class RegistroAlumnoNuevo(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-# ─── POST /registro/alumno-nuevo (público) ───
+# ─── POST /registro/alumno-nuevo (público con rate limit) ───
 @router.post("/registro/alumno-nuevo", status_code=status.HTTP_201_CREATED)
+@limiter.limit(LIMIT_REGISTRO)
 def registrar_alumno_nuevo(
+    request: Request,
     datos: RegistroAlumnoNuevo,
     db: Session = Depends(get_db)
 ):
@@ -148,8 +153,10 @@ def registrar_alumno_nuevo(
             "correo": usuario.correo,
             "id": usuario.id,
         })
-    except Exception:
-        pass
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        logging.getLogger("uvicorn.alumnos").warning(
+            "Fallo al notificar al admin (email solicitud)")
 
     try:
         # Confirma al LEAD con sus credenciales temporales para agendar la clase de prueba
@@ -159,8 +166,10 @@ def registrar_alumno_nuevo(
             password_tmp,
             "https://app.urbantrainingbox.cl/login",
         )
-    except Exception:
-        pass
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        logging.getLogger("uvicorn.alumnos").warning(
+            "Fallo al enviar email de clase de prueba")
 
     return {"mensaje": "Registro exitoso, admin revisará"}
 

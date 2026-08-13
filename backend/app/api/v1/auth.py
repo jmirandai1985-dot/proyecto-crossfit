@@ -1,19 +1,22 @@
 """
 Router de autenticación - Login y generación de JWT
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.db.database import get_db
 from app.schemas.auth import LoginRequest, TokenResponse
 from app.core.security import verify_password, create_access_token
+from app.core.rate_limit import limiter, LIMIT_LOGIN
 
 router = APIRouter()
 
 
 @router.post("/login", response_model=TokenResponse)
+@limiter.limit(LIMIT_LOGIN)
 def login(
+    request: Request,
     login_data: LoginRequest,
     db: Session = Depends(get_db)
 ):

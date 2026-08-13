@@ -11,7 +11,37 @@
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
 import os
+
+import sentry_sdk
+
+from app.core.config import settings
+from app.core.rate_limit import limiter
+from app.core.logging import setup_logger
+from app.middleware.security_headers import SecurityHeadersMiddleware
+
+# ── Logger con sanitización de PII ──
+logger = setup_logger()
+
+# ── Sentry (monitoreo de errores) ──
+# Si SENTRY_DSN está configurado en .env, se envían los errores a Sentry.
+# Sin DSN, sentry_sdk.capture_exception() es un no-op (no rompe la app).
+if settings.SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        environment=(
+            "production" if os.getenv("ENVIRONMENT") != "test" else "test"
+        ),
+        traces_sample_rate=0.1,
+        send_default_pii=False,  # NO enviar emails/IPs (PII) a Sentry
+    )
+    logger.info("Sentry inicializado (environment=%s)",
+                "production" if os.getenv("ENVIRONMENT") != "test" else "test")
+else:
+    logger.warning("SENTRY_DSN no configurado: los errores solo van al log local")
 
 # ── Aumentar threadpool de Starlette/FastAPI (default: 40 tokens) ──
 # Necesario para soportar carga concurrente alta (tests k6: 500 logins).
@@ -36,14 +66,36 @@ def _expand_threadpool():
     except Exception:
         pass
 
-# ---- CONFIGURACIÃ“N DE CORS - PERMITIR TODOS LOS ORÃGENES ----
+# ---- CONFIGURACIÃ“N DE CORS - SOLO ORÃGENES CONFIGURADOS (no "*") ----
+# Los orÃ­genes permitidos vienen de .env (CORS_ORIGINS / FRONTEND_URL).
+_cors_origins = settings.cors_origins_list
+if settings.FRONTEND_URL and settings.FRONTEND_URL not in _cors_origins:
+    _cors_origins.append(settings.FRONTEND_URL)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---- HEADERS DE SEGURIDAD (X-Frame-Options, CSP, HSTS, etc.) ----
+app.add_middleware(SecurityHeadersMiddleware)
+
+# ---- RATE LIMITING GLOBAL (slowapi) ----
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# ---- SENTRY: capturar excepciones no manejadas de TODOS los endpoints ----
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, exc):
+    sentry_sdk.capture_exception(exc)
+    logger.error(
+        "Error no manejado en %s: %s", request.url.path, exc, exc_info=True)
+    return JSONResponse(
+        status_code=500, content={"detail": "Error interno del servidor"})
 
 
 # Montar directorio de archivos estÃ¡ticos para servir imÃ¡genes de productos
@@ -84,6 +136,13 @@ async def health_check():
     except Exception as e:
         db_status = f"error: {str(e)}"
     return {"status": "healthy", "database": db_status}
+
+
+@app.get("/sentry-debug")
+async def sentry_debug():
+    """Endpoint SOLO de prueba: fuerza una excepción para verificar que los
+    errores llegan a Sentry (y al log local). Retorna 500 intencionalmente."""
+    raise ValueError("Test de captura de errores /sentry-debug")
 
 
 # ---- INCLUSIÃ“N DE TODOS LOS ROUTERS CON SUS PREFIJOS CORRECTOS ----
