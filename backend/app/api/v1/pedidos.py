@@ -11,6 +11,7 @@ from app.models.producto import Producto
 from app.schemas.pedido import (
     PedidoCreate, PedidoUpdate, PedidoResponse, PedidoListItem
 )
+from app.core.dependencies import get_current_admin
 
 router = APIRouter()
 
@@ -26,11 +27,12 @@ TRANSICIONES_PERMITIDAS = {
 @router.post("", response_model=PedidoResponse, status_code=status.HTTP_201_CREATED)
 def crear_pedido(
     pedido_data: PedidoCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     Crea un nuevo pedido.
-    Valida stock y descuenta automáticamente.
+    Valida stock y descuenta automáticamente. Solo admin.
     """
 
     # Obtener el producto
@@ -126,7 +128,8 @@ def actualizar_estado_pedido(
     pedido_id: int,
     nuevo_estado: str,
     tenant_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     Actualiza el estado de un pedido.
@@ -169,9 +172,10 @@ def actualizar_pedido(
     pedido_id: int,
     pedido_data: PedidoUpdate,
     tenant_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Actualiza un pedido existente"""
+    """Actualiza un pedido existente. Solo admin."""
     pedido = db.query(Pedido).filter(
         Pedido.id == pedido_id,
         Pedido.tenant_id == tenant_id
@@ -198,9 +202,10 @@ def actualizar_pedido(
 def eliminar_pedido(
     pedido_id: int,
     tenant_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Elimina un pedido (solo si está en estado pendiente)"""
+    """Elimina un pedido (solo si está en estado pendiente). Solo admin."""
     pedido = db.query(Pedido).filter(
         Pedido.id == pedido_id,
         Pedido.tenant_id == tenant_id

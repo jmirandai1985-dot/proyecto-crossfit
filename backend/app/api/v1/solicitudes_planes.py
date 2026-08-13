@@ -15,6 +15,7 @@ from app.models.plan import Plan
 from app.models.usuario import Usuario
 from app.models.notificacion import Notificacion
 from app.schemas.solicitud import SolicitudPlanCreate
+from app.core.dependencies import get_current_admin, get_current_user
 from datetime import timedelta
 
 router = APIRouter()
@@ -62,9 +63,10 @@ def solicitar_plan(
 @router.get("/pendientes")
 def listar_solicitudes_pendientes(
     tenant_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Lista solicitudes pendientes para el admin"""
+    """Lista solicitudes pendientes para el admin (solo admin)."""
     solicitudes = db.query(SolicitudPlan).filter(
         SolicitudPlan.tenant_id == tenant_id,
         SolicitudPlan.estado == "pending"
@@ -92,10 +94,11 @@ def listar_solicitudes_pendientes(
 @router.get("/{solicitud_id}/voucher")
 def descargar_voucher(
     solicitud_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
-    Descarga el voucher de pago de una solicitud.
+    Descarga el voucher de pago de una solicitud (usuario autenticado).
     Retorna el archivo como attachment (descarga forzada).
     """
     solicitud = db.query(SolicitudPlan).filter(
@@ -106,22 +109,18 @@ def descargar_voucher(
     if not solicitud.voucher_url:
         raise HTTPException(status_code=404, detail="Sin voucher disponible")
 
-    # La URL guardada es como "/static/uploads/voucher_xxx.jpg"
-    # Convertir a ruta de archivo real
-    # static dir está en backend/app/static
-    # __file__ está en backend/app/api/v1/ -> subir 3 niveles: .., .., ../
-    static_dir = os.path.join(os.path.dirname(__file__), "..", "..", "static")
-    voucher_path = os.path.join(
-        static_dir, solicitud.voucher_url.replace("/static/", ""))
+    # ── SEGURIDAD: prevenir path traversal ──
+    # La URL guardada es como "/static/uploads/voucher_xxx.jpg".
+    # Se resuelve contra el directorio estático y se valida que el archivo
+    # resultante quede DENTRO de static/ (evita '../../../etc/passwd').
+    static_dir = os.path.realpath(os.path.join(
+        os.path.dirname(__file__), "..", "..", "static"))
+    rel = solicitud.voucher_url.replace("/static/", "").lstrip("/")
+    voucher_path = os.path.realpath(os.path.join(static_dir, rel))
 
-    # Si no existe en la ruta relativa, buscar en la ruta absoluta
-    if not os.path.exists(voucher_path):
-        # Intentar con la ruta completa desde la URL
-        voucher_path = os.path.join(
-            os.path.dirname(os.path.dirname(
-                os.path.dirname(os.path.dirname(__file__)))),
-            solicitud.voucher_url.lstrip("/")
-        )
+    if not voucher_path.startswith(static_dir + os.sep):
+        raise HTTPException(
+            status_code=403, detail="Acceso denegado")
 
     if not os.path.exists(voucher_path):
         raise HTTPException(
@@ -141,22 +140,17 @@ def descargar_voucher(
 @router.put("/{solicitud_id}/aprobar")
 def aprobar_solicitud(
     solicitud_id: int,
-    admin_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     Admin aprueba solicitud: cambia estado, crea suscripción y activa el plan.
     Además crea una notificación para el alumno.
-    VALIDACIÓN DE SEGURIDAD: verifica que el usuario autenticado tenga rol admin.
+    SEGURIDAD: el admin sale del token JWT (get_current_admin), NO de un
+    parámetro enviado por el cliente (elimina el spoofing de admin_id).
     """
-    # 🔒 Validación crítica: verificar que admin_id corresponde a un usuario con rol admin
-    admin = db.query(Usuario).filter(Usuario.id == admin_id).first()
-    if not admin:
-        raise HTTPException(
-            status_code=404, detail="Usuario admin no encontrado")
-    if admin.rol not in ("administrador", "admin"):
-        raise HTTPException(
-            status_code=403, detail="Acción no permitida: se requiere rol de administrador")
+    # 🔒 El admin autenticado por token (get_current_admin ya validó el rol)
+    admin_id = current_user["usuario_id"]
 
     solicitud = db.query(SolicitudPlan).filter(
         SolicitudPlan.id == solicitud_id).first()
@@ -208,19 +202,13 @@ def aprobar_solicitud(
 @router.put("/{solicitud_id}/rechazar")
 def rechazar_solicitud(
     solicitud_id: int,
-    admin_id: int,
     motivo: Optional[str] = "Rechazado",
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Admin rechaza solicitud y crea notificación. VALIDACIÓN DE SEGURIDAD incluida."""
-    # 🔒 Validación crítica: verificar rol admin
-    admin = db.query(Usuario).filter(Usuario.id == admin_id).first()
-    if not admin:
-        raise HTTPException(
-            status_code=404, detail="Usuario admin no encontrado")
-    if admin.rol not in ("administrador", "admin"):
-        raise HTTPException(
-            status_code=403, detail="Acción no permitida: se requiere rol de administrador")
+    """Admin rechaza solicitud y crea notificación. El admin sale del token JWT."""
+    # 🔒 El admin autenticado por token (elimina el spoofing de admin_id)
+    admin_id = current_user["usuario_id"]
 
     solicitud = db.query(SolicitudPlan).filter(
         SolicitudPlan.id == solicitud_id).first()

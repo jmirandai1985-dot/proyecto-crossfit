@@ -7,6 +7,7 @@ from typing import Optional
 
 from app.db.database import get_db
 from app.models.disciplina import Disciplina
+from app.core.dependencies import get_current_admin
 
 router = APIRouter()
 
@@ -18,7 +19,8 @@ def crear_disciplina(
     descripcion: Optional[str] = None,
     es_open_box: bool = False,
     requiere_coach: bool = True,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     existing = db.query(Disciplina).filter(
         Disciplina.tenant_id == tenant_id,
@@ -83,7 +85,8 @@ def actualizar_disciplina(
     es_open_box: Optional[bool] = None,
     requiere_coach: Optional[bool] = None,
     activo: Optional[bool] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     disciplina = db.query(Disciplina).filter(
         Disciplina.id == disciplina_id
@@ -112,7 +115,8 @@ def actualizar_disciplina(
 @router.delete("/{disciplina_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_disciplina(
     disciplina_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     disciplina = db.query(Disciplina).filter(
         Disciplina.id == disciplina_id

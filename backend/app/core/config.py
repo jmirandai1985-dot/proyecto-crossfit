@@ -25,9 +25,14 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql://user:pass@localhost/dbname"
 
     # Seguridad JWT
-    JWT_SECRET_KEY: str = "CHANGE_THIS_SECRET_KEY_IN_PRODUCTION"
+    # La clave se lee del entorno (.env): JWT_SECRET_KEY o SECRET_KEY (legacy).
+    # Nunca usar placeholders hardcodeados (ver normalización abajo).
+    JWT_SECRET_KEY: str = ""
     JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 horas
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+
+    # SECRET_KEY legacy (alias de JWT_SECRET_KEY; se normaliza al final)
+    SECRET_KEY: str = ""
 
     # CORS - Dominios permitidos
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
@@ -67,3 +72,10 @@ class Settings(BaseSettings):
 # Instancia global de configuración
 # Se carga automáticamente desde .env al importar este módulo
 settings = Settings()
+
+# ── Normalización de la clave JWT ────────────────────────────────────────────
+# Prioridad 1: JWT_SECRET_KEY (definida en .env)
+# Prioridad 2: SECRET_KEY (variable legacy, misma clave)
+# Si ninguna está definida, security.py lanza error al firmar (sin secretos hardcodeados).
+if not settings.JWT_SECRET_KEY:
+    settings.JWT_SECRET_KEY = settings.SECRET_KEY

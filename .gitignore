@@ -23,9 +23,14 @@ Thumbs.db
 .env.local
 .env.*.local
 .env.test
+.env.prod
+.env.staging
 backend/.env
 backend/.env.test
 
 # Temp / logs
 *.log
 *.txt
+
+# Backups de BD (dumps SQL sensibles)
+backups/

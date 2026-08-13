@@ -8,6 +8,7 @@ from sqlalchemy import func, case, text
 from datetime import datetime, timedelta, date
 from app.db.database import get_db
 from app.models.usuario import Usuario
+from app.core.dependencies import get_current_admin, get_current_user
 
 router = APIRouter()
 
@@ -15,9 +16,11 @@ router = APIRouter()
 @router.get("/{tenant_id}/ocupacion-hoy")
 def ocupacion_hoy(
     tenant_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Devuelve las clases de HOY de CrossFit/Levantamiento Olimpico con coach."""
+    """Devuelve las clases de HOY de CrossFit/Levantamiento Olimpico con coach.
+    Requiere usuario autenticado."""
     hoy = date.today()
     rows = db.execute(text("""
         SELECT c.id, c.hora_inicio::text, d.nombre as disciplina,
@@ -56,8 +59,15 @@ def ocupacion_hoy(
 @router.get("/{tenant_id}", response_model=DashboardStats)
 def obtener_estadisticas_dashboard(
     tenant_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
+    # 🔒 SEGURIDAD: el admin solo puede ver su propio tenant
+    if current_user.get("tenant_id") != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No puedes acceder al dashboard de otro tenant",
+        )
     total_alumnos = db.query(func.count(Usuario.id)).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == 'alumno',

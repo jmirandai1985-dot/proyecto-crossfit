@@ -1,18 +1,21 @@
 """
-Endpoint para corregir fechas de suscripciones existentes
+Endpoint para corregir fechas de suscripciones existentes (solo admin)
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from app.db.database import engine
 from datetime import datetime, timezone
 from calendar import monthrange
+from app.core.dependencies import get_current_admin
 
 router = APIRouter()
 
 
 @router.post("/corregir-fechas")
-def corregir_fechas_membresias():
-    """Corrige fecha_expiracion de todas las suscripciones activas al último día del mes actual"""
+def corregir_fechas_membresias(
+    current_user: dict = Depends(get_current_admin),
+):
+    """Corrige fecha_expiracion de todas las suscripciones activas al último día del mes actual. Solo admin."""
     from app.db.database import SessionLocal
     from app.models.suscripcion import Suscripcion
 

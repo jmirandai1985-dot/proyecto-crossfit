@@ -1,16 +1,19 @@
 """
-Endpoint temporal para ejecutar migraciones via HTTP
+Endpoint temporal para ejecutar migraciones via HTTP (solo admin)
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from app.db.database import engine
+from app.core.dependencies import get_current_admin
 
 router = APIRouter()
 
 
 @router.post("/run")
-def ejecutar_migracion():
-    """Ejecuta migraciones pendientes"""
+def ejecutar_migracion(
+    current_user: dict = Depends(get_current_admin),
+):
+    """Ejecuta migraciones pendientes. Solo admin."""
     resultados = []
     with engine.connect() as conn:
         # Columna es_compra_emergencia

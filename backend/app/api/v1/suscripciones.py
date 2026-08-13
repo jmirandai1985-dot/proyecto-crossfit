@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from app.db.database import get_db
 from app.models.suscripcion import Suscripcion
 from app.models.transaccion_financiera import TransaccionFinanciera
+from app.core.dependencies import get_current_admin
 
 router = APIRouter()
 
@@ -22,7 +23,11 @@ class SuscripcionCreate(BaseModel):
 
 
 @router.post("/suscripciones", status_code=201)
-def crear_suscripcion(data: SuscripcionCreate, db: Session = Depends(get_db)):
+def crear_suscripcion(
+    data: SuscripcionCreate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
     try:
         fecha_exp = datetime.fromisoformat(
             data.fecha_expiracion.replace('Z', '+00:00'))
@@ -75,7 +80,8 @@ def listar_suscripciones(
     tenant_id: int,
     usuario_id: Optional[int] = None,
     estado: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     query = db.query(Suscripcion).filter(Suscripcion.tenant_id == tenant_id)
     if usuario_id:

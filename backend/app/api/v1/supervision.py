@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, date
 from app.db.database import get_db
 from typing import List
 from pydantic import BaseModel
+from app.core.dependencies import get_current_admin
 
 router = APIRouter()
 
@@ -291,11 +292,13 @@ def actualizar_cupo_disciplina(
     cupo_maximo: int = Query(..., ge=1, le=200,
                              description="Nuevo cupo máximo (1-200)"),
     tenant_id: int = Query(1),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     Actualiza el cupo_maximo en TODOS los horario_base de una disciplina.
     Afecta las próximas clases generadas, no reescribe clases ya creadas.
+    Solo admin.
     """
     # Verificar que la disciplina existe
     disc = db.execute(

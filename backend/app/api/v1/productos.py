@@ -14,6 +14,7 @@ from app.models.producto import Producto
 from app.schemas.producto import (
     ProductoUpdate, ProductoResponse, ProductoListItem
 )
+from app.core.dependencies import get_current_admin
 
 router = APIRouter()
 
@@ -35,9 +36,10 @@ async def crear_producto(
     descripcion: Optional[str] = Form(None),
     activo: bool = Form(True),
     file: Optional[UploadFile] = File(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Crea un nuevo producto. Acepta multipart/form-data para soportar imagen opcional."""
+    """Crea un nuevo producto. Acepta multipart/form-data para soportar imagen opcional. Solo admin."""
 
     imagen_url = None
 
@@ -130,9 +132,10 @@ def actualizar_producto(
     producto_id: int,
     producto_data: ProductoUpdate,
     tenant_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Actualiza un producto existente"""
+    """Actualiza un producto existente. Solo admin."""
     producto = db.query(Producto).filter(
         Producto.id == producto_id,
         Producto.tenant_id == tenant_id
@@ -159,9 +162,10 @@ def actualizar_producto(
 def eliminar_producto(
     producto_id: int,
     tenant_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Desactiva un producto (soft delete)"""
+    """Desactiva un producto (soft delete). Solo admin."""
     producto = db.query(Producto).filter(
         Producto.id == producto_id,
         Producto.tenant_id == tenant_id

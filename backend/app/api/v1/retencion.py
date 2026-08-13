@@ -14,6 +14,7 @@ from app.schemas.retencion import (
     RetencionAlumnoCreate, RetencionAlumnoUpdate, RetencionAlumnoResponse,
     RetencionAlumnoListItem, AlumnoEnRiesgo, KPICoach
 )
+from app.core.dependencies import get_current_admin
 
 router = APIRouter()
 
@@ -21,9 +22,10 @@ router = APIRouter()
 @router.post("", response_model=RetencionAlumnoResponse, status_code=status.HTTP_201_CREATED)
 def crear_retencion(
     retencion_data: RetencionAlumnoCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Crea un nuevo registro de retención"""
+    """Crea un nuevo registro de retención. Solo admin."""
 
     db_retencion = RetencionAlumno(
         tenant_id=retencion_data.tenant_id,
@@ -183,9 +185,10 @@ def actualizar_retencion(
     retencion_id: int,
     retencion_data: RetencionAlumnoUpdate,
     tenant_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Actualiza un registro de retención existente"""
+    """Actualiza un registro de retención existente. Solo admin."""
     retencion = db.query(RetencionAlumno).filter(
         RetencionAlumno.id == retencion_id,
         RetencionAlumno.tenant_id == tenant_id
@@ -212,9 +215,10 @@ def actualizar_retencion(
 def eliminar_retencion(
     retencion_id: int,
     tenant_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Elimina un registro de retención"""
+    """Elimina un registro de retención. Solo admin."""
     retencion = db.query(RetencionAlumno).filter(
         RetencionAlumno.id == retencion_id,
         RetencionAlumno.tenant_id == tenant_id

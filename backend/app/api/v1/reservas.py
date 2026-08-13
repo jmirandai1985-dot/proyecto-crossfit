@@ -1,7 +1,7 @@
 from app.schemas.reserva import (
     ReservaCreate, ReservaUpdate, ReservaResponse, ReservaListItem
 )
-from app.core.dependencies import get_current_user, verificar_coach_disciplina
+from app.core.dependencies import get_current_user, get_current_coach, verificar_coach_disciplina
 from app.models.usuario import Usuario
 from app.models.disciplina import Disciplina
 from app.models.clase import Clase
@@ -158,7 +158,7 @@ def marcar_asistencia(
     tenant_id: int,
     db: Session = Depends(get_db),
     asistio: bool = Body(True, embed=True),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_coach),
     modo_emergencia: bool = Query(
         False, description="Modo cobertura de emergencia")
 ):
@@ -446,13 +446,12 @@ def listar_reservas(
 def obtener_reserva(
     reserva_id: int,
     tenant_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Obtiene una reserva por su ID.
-
-    ARREGLO 3: Protección IDOR
-    - Valida que tenant_id del usuario = tenant_id del recurso
+    Solo el dueño de la reserva, coaches o admins pueden verla.
     """
     reserva = db.query(Reserva).filter(
         Reserva.id == reserva_id,
@@ -465,6 +464,14 @@ def obtener_reserva(
             detail=f"Reserva con ID {reserva_id} no encontrada"
         )
 
+    # 🔒 IDOR: verificar ownership
+    rol = current_user.get("rol", "")
+    if rol not in ("coach", "admin", "administrador") and reserva.alumno_id != current_user.get("usuario_id"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No puedes ver reservas de otro usuario",
+        )
+
     return reserva
 
 
@@ -473,13 +480,12 @@ def actualizar_reserva(
     reserva_id: int,
     reserva_data: ReservaUpdate,
     tenant_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Actualiza una reserva existente.
-
-    ARREGLO 3: Protección IDOR
-    - Valida que tenant_id del usuario = tenant_id del recurso
+    Solo el dueño de la reserva, coaches o admins pueden modificarla.
     """
     reserva = db.query(Reserva).filter(
         Reserva.id == reserva_id,
@@ -490,6 +496,14 @@ def actualizar_reserva(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Reserva con ID {reserva_id} no encontrada"
+        )
+
+    # 🔒 IDOR: verificar ownership
+    rol = current_user.get("rol", "")
+    if rol not in ("coach", "admin", "administrador") and reserva.alumno_id != current_user.get("usuario_id"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No puedes modificar reservas de otro usuario",
         )
 
     update_data = reserva_data.model_dump(exclude_unset=True)
@@ -507,7 +521,8 @@ def actualizar_reserva(
 def eliminar_reserva(
     reserva_id: int,
     tenant_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Cancela una reserva (soft delete) y DECREMENTA asistentes_confirmados.
@@ -516,11 +531,7 @@ def eliminar_reserva(
     - Si faltan >= 6 horas para la clase: cancela y DEVUELVE el crédito.
     - Si faltan < 6 horas: cancela pero NO devuelve el crédito (penalización).
 
-    ARREGLO 1: Al eliminar reserva → DECREMENTA -1 asistentes_confirmados
-    Usa transacción para integridad.
-
-    ARREGLO 3: Protección IDOR
-    - Valida que tenant_id del usuario = tenant_id del recurso
+    Solo el dueño de la reserva, coaches o admins pueden cancelarla.
     """
     from datetime import datetime, timezone, timedelta
     from app.models.suscripcion import Suscripcion
@@ -534,6 +545,14 @@ def eliminar_reserva(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Reserva con ID {reserva_id} no encontrada"
+        )
+
+    # 🔒 IDOR: verificar ownership
+    rol = current_user.get("rol", "")
+    if rol not in ("coach", "admin", "administrador") and reserva.alumno_id != current_user.get("usuario_id"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No puedes cancelar reservas de otro usuario",
         )
 
     # ARREGLO 1: Obtener la clase y decrementar asistentes_confirmados

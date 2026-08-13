@@ -8,6 +8,7 @@ from typing import List
 from app.db.database import get_db
 from app.models.tenant import Tenant
 from app.schemas.tenant import TenantCreate, TenantResponse
+from app.core.dependencies import get_current_admin
 
 router = APIRouter()
 
@@ -15,7 +16,8 @@ router = APIRouter()
 @router.post("/", response_model=TenantResponse, status_code=status.HTTP_201_CREATED)
 def crear_tenant(
     tenant_data: TenantCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     Crea un nuevo tenant (box) en el sistema

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.db.database import get_db
 from app.models.wod import Wod, EstadoWod
-from app.core.dependencies import get_current_user, verificar_coach_disciplina
+from app.core.dependencies import get_current_user, get_current_coach, verificar_coach_disciplina
 from app.models.wod_movimiento import WodMovimiento
 from app.models.movimiento import Movimiento
 from app.models.clase import Clase
@@ -647,7 +647,7 @@ def parsear_wod(data: WodParseRequest, db: Session = Depends(get_db)):
 def crear_wod(
     wod_data: schemas.WodCreate,
     tenant_id: int = Query(1),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_coach),
     disciplina_id: int = Query(
         None, description="ID de la disciplina para validar permisos del coach (OBLIGATORIO para coaches)"),
     modo_emergencia: bool = Query(
@@ -825,7 +825,7 @@ def actualizar_wod(
     wod_id: int,
     wod_data: schemas.WodUpdate,
     tenant_id: int = Query(1),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_coach),
     disciplina_id: int = Query(
         None, description="ID de la disciplina para validar permisos del coach (OBLIGATORIO para coaches)"),
     modo_emergencia: bool = Query(
@@ -936,7 +936,12 @@ def actualizar_wod(
 
 
 @router.delete("/{wod_id}")
-def eliminar_wod(wod_id: int, tenant_id: int = Query(1), db: Session = Depends(get_db)):
+def eliminar_wod(
+    wod_id: int,
+    tenant_id: int = Query(1),
+    current_user: dict = Depends(get_current_coach),
+    db: Session = Depends(get_db)
+):
     wod = db.query(Wod).filter(
         Wod.id == wod_id, Wod.tenant_id == tenant_id).first()
     if not wod:
@@ -955,7 +960,7 @@ def asignar_wod_a_clase(
     clase_id: int,
     wod_id: int,
     tenant_id: int = Query(1),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_coach),
     modo_emergencia: bool = Query(
         False, description="Modo cobertura de emergencia"),
     db: Session = Depends(get_db)

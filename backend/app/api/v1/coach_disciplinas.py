@@ -10,6 +10,7 @@ from app.models.coach_disciplina import CoachDisciplina
 from app.schemas.coach_disciplina import (
     CoachDisciplinaCreate, CoachDisciplinaUpdate, CoachDisciplinaResponse, CoachDisciplinaListItem, CoachDisciplinaReplaceRequest
 )
+from app.core.dependencies import get_current_admin
 
 router = APIRouter()
 
@@ -17,7 +18,8 @@ router = APIRouter()
 @router.post("", response_model=CoachDisciplinaResponse, status_code=status.HTTP_201_CREATED)
 def crear_coach_disciplina(
     coach_disciplina_data: CoachDisciplinaCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """Crea una nueva relación coach-disciplina"""
 
@@ -89,7 +91,8 @@ def listar_coach_disciplinas(
 @router.put("/reemplazar", response_model=List[CoachDisciplinaResponse])
 def reemplazar_coach_disciplinas(
     data: CoachDisciplinaReplaceRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     Reemplaza TODAS las asignaciones de disciplinas de un coach.
@@ -144,7 +147,8 @@ def reemplazar_coach_disciplinas(
 def actualizar_coach_disciplina(
     coach_disciplina_id: int,
     coach_disciplina_data: CoachDisciplinaUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """Actualiza una relación coach-disciplina existente"""
     coach_disciplina = db.query(CoachDisciplina).filter(
@@ -170,7 +174,8 @@ def actualizar_coach_disciplina(
 @router.delete("/{coach_disciplina_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_coach_disciplina(
     coach_disciplina_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """Desactiva una relación coach-disciplina (soft delete)"""
     coach_disciplina = db.query(CoachDisciplina).filter(

@@ -8,7 +8,7 @@ from datetime import datetime, date, time, timedelta
 from app.db.database import get_db
 from app.models.clase import Clase
 from app.schemas import clase as schemas
-from app.core.dependencies import verificar_coach_disciplina
+from app.core.dependencies import verificar_coach_disciplina, get_current_coach
 
 logger = logging.getLogger("uvicorn.clases")
 
@@ -226,7 +226,8 @@ def obtener_clase(
 def crear_clase(
     clase: schemas.ClaseCreate,
     db: Session = Depends(get_db),
-    tenant_id: int = Query(1)
+    tenant_id: int = Query(1),
+    current_user: dict = Depends(get_current_coach),
 ):
     nueva_clase = Clase(
         tenant_id=tenant_id,
@@ -255,7 +256,8 @@ def actualizar_clase(
     db: Session = Depends(get_db),
     tenant_id: int = Query(1),
     modo_emergencia: bool = Query(
-        False, description="Si true, permite asignar coach de otra disciplina con auditoria")
+        False, description="Si true, permite asignar coach de otra disciplina con auditoria"),
+    current_user: dict = Depends(get_current_coach),
 ):
     clase = db.query(Clase).filter(
         Clase.id == clase_id,
@@ -308,7 +310,8 @@ def actualizar_clase(
 def eliminar_clase(
     clase_id: int,
     db: Session = Depends(get_db),
-    tenant_id: int = Query(1)
+    tenant_id: int = Query(1),
+    current_user: dict = Depends(get_current_coach),
 ):
     clase = db.query(Clase).filter(
         Clase.id == clase_id,

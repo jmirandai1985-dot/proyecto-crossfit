@@ -7,6 +7,7 @@ from typing import Optional
 
 from app.db.database import get_db
 from app.models.plan import Plan
+from app.core.dependencies import get_current_admin
 
 router = APIRouter()
 
@@ -21,9 +22,10 @@ def crear_plan(
     es_ilimitado: bool = False,
     genero: Optional[str] = None,
     requiere_certificado_estudiante: bool = False,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Crea un nuevo plan"""
+    """Crea un nuevo plan. Solo admin."""
     existing = db.query(Plan).filter(
         Plan.tenant_id == tenant_id,
         Plan.nombre == nombre
@@ -135,9 +137,10 @@ def actualizar_plan(
     genero: Optional[str] = None,
     es_estudiante: Optional[bool] = None,
     requiere_certificado_estudiante: Optional[bool] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Actualiza un plan existente"""
+    """Actualiza un plan existente. Solo admin."""
     plan = db.query(Plan).filter(Plan.id == plan_id).first()
     if not plan:
         raise HTTPException(
@@ -172,9 +175,10 @@ def actualizar_plan(
 @router.delete("/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_plan(
     plan_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Desactiva un plan (soft delete)"""
+    """Desactiva un plan (soft delete). Solo admin."""
     plan = db.query(Plan).filter(Plan.id == plan_id).first()
     if not plan:
         raise HTTPException(

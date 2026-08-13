@@ -11,6 +11,7 @@ from typing import Optional, List
 
 from app.db.database import get_db
 from app.models.transaccion_financiera import TransaccionFinanciera
+from app.core.dependencies import get_current_admin
 
 router = APIRouter()
 
@@ -29,9 +30,10 @@ class TransaccionCreate(BaseModel):
 @router.post("/transaccion")
 def crear_transaccion(
     data: TransaccionCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Registra un ingreso o egreso manual."""
+    """Registra un ingreso o egreso manual. Solo admin."""
     tx = TransaccionFinanciera(
         tenant_id=data.tenant_id,
         tipo=data.tipo,
@@ -53,9 +55,10 @@ def listar_transacciones(
     tenant_id: int = Query(...),
     mes: Optional[int] = None,
     anio: Optional[int] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Lista todas las transacciones financieras del mes."""
+    """Lista todas las transacciones financieras del mes. Solo admin."""
     ahora = datetime.now(timezone.utc)
     mes = mes or ahora.month
     anio = anio or ahora.year

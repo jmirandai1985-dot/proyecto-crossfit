@@ -5,9 +5,9 @@
 ### 🔗 Conexión a Base de Datos
 
 **Proveedor:** Neon PostgreSQL (Serverless)  
-**Host:** `ep-withered-silence-acly7gq5-pooler.sa-east-1.aws.neon.tech`  
-**Base de datos:** `neondb`  
-**Usuario:** `neondb_owner`  
+**Host:** `[configurar en .env como DATABASE_URL]`  
+**Base de datos:** `[no exponer en código]`  
+**Usuario:** `[no exponer en código]`  
 **Región:** South America East (São Paulo)  
 **Versión PostgreSQL:** 18.4
 

@@ -3,8 +3,9 @@ Router para subida de archivos (vouchers, imágenes)
 """
 import os
 import uuid
-from fastapi import APIRouter, UploadFile, File, HTTPException, status
+from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
+from app.core.dependencies import get_current_user
 
 router = APIRouter()
 
@@ -18,9 +19,13 @@ MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 
 
 @router.post("/voucher", status_code=status.HTTP_201_CREATED)
-async def upload_voucher(file: UploadFile = File(...)):
+async def upload_voucher(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
     """
     Sube un archivo de voucher y devuelve la URL pública.
+    Requiere usuario autenticado.
     """
     # Validar extensión
     ext = os.path.splitext(file.filename)[1].lower()

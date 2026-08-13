@@ -8,6 +8,7 @@ from typing import Optional
 from app.db.database import get_db
 from app.models.horario_base import HorarioBase
 from sqlalchemy import text
+from app.core.dependencies import get_current_admin
 
 router = APIRouter()
 
@@ -20,7 +21,8 @@ def crear_horario(
     hora_inicio: str,
     hora_fin: str,
     cupo_maximo: int = 16,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     db_horario = HorarioBase(
         tenant_id=tenant_id,
@@ -120,7 +122,8 @@ def actualizar_horario(
     hora_fin: Optional[str] = None,
     cupo_maximo: Optional[int] = None,
     activo: Optional[bool] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     horario = db.query(HorarioBase).filter(
         HorarioBase.id == horario_id).first()
@@ -147,7 +150,8 @@ def actualizar_horario(
 @router.delete("/{horario_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_horario(
     horario_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     horario = db.query(HorarioBase).filter(
         HorarioBase.id == horario_id).first()

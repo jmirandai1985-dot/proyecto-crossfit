@@ -15,6 +15,7 @@ from app.models.usuario import Usuario, RolUsuario
 from app.models.asistencia import Asistencia
 from app.models.reserva import Reserva
 from app.models.clase import Clase
+from app.core.dependencies import get_current_admin
 
 router = APIRouter()
 
@@ -95,9 +96,10 @@ def registrar_asistencia(
     usuario_id: int,
     clase: Optional[str] = "WOD",
     fecha: Optional[date] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Registra la asistencia de un alumno al box"""
+    """Registra la asistencia de un alumno al box. Solo admin."""
     usuario = db.query(Usuario).filter(
         Usuario.id == usuario_id,
         Usuario.tenant_id == tenant_id,
@@ -151,9 +153,10 @@ def enviar_campana_email(
     gmail_password: str,
     umbral_dias: int = UMBRAL_ALERTA_DIAS,
     background_tasks: BackgroundTasks = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Envía emails automáticos a alumnos ausentes"""
+    """Envía emails automáticos a alumnos ausentes. Solo admin."""
     analisis = analizar_fidelizacion(tenant_id, umbral_dias, db)
     alumnos_alerta = analisis["alumnos_alerta"]
 

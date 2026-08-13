@@ -10,7 +10,7 @@ from typing import List, Optional
 from app.db.database import get_db
 from app.models.usuario import Usuario
 from app.schemas.usuario import UsuarioCreate, UsuarioUpdate, UsuarioResponse, UsuarioListItem
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_current_admin
 
 router = APIRouter()
 
@@ -97,9 +97,10 @@ def cambiar_password(
 @router.post("/", response_model=UsuarioResponse, status_code=status.HTTP_201_CREATED)
 def crear_usuario(
     usuario_data: UsuarioCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Crea un nuevo usuario en el sistema"""
+    """Crea un nuevo usuario en el sistema. Solo admin."""
 
     # Verificar si el RUT ya existe en este tenant
     existing_rut = db.query(Usuario).filter(
@@ -147,9 +148,10 @@ def crear_usuario(
 @router.get("/{usuario_id}", response_model=UsuarioResponse)
 def obtener_usuario(
     usuario_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Obtiene un usuario por su ID"""
+    """Obtiene un usuario por su ID. Solo admin."""
     usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
 
     if not usuario:
@@ -168,9 +170,10 @@ def listar_usuarios(
     limit: int = 100,
     activo: Optional[bool] = Query(None),
     rol: str = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Lista usuarios de un tenant con paginación"""
+    """Lista usuarios de un tenant con paginación. Solo admin."""
     query = db.query(Usuario).filter(Usuario.tenant_id == tenant_id)
 
     if activo is not None:
@@ -188,9 +191,10 @@ def listar_usuarios(
 def actualizar_usuario(
     usuario_id: int,
     usuario_data: UsuarioUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Actualiza los datos de un usuario existente"""
+    """Actualiza los datos de un usuario existente. Solo admin."""
     usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
 
     if not usuario:
@@ -232,9 +236,10 @@ def actualizar_usuario(
 @router.delete("/{usuario_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_usuario(
     usuario_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Desactiva un usuario (soft delete)"""
+    """Desactiva un usuario (soft delete). Solo admin."""
     usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
 
     if not usuario:
