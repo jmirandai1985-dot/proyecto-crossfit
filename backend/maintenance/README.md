@@ -36,3 +36,28 @@ python -m maintenance.backup_neon    # Backup solo
 ## Logs
 
 Todos los jobs generan logs en `backend/logs/maintenance_*.log`
+
+## Requisito `backup_neon.py` — pg_dump en PATH
+
+`backup_neon.py` ejecuta `pg_dump` (cliente PostgreSQL). En Windows suele instalarse en
+`C:\Program Files\PostgreSQL\<version>\bin` y **no está en el PATH por defecto**.
+
+Para que el backup funcione, agregar esa carpeta al PATH **del usuario** (una vez):
+
+```powershell
+# PowerShell (los procesos ya abiertos deben reiniciarse para tomar el PATH nuevo)
+$bin = 'C:\Program Files\PostgreSQL\18\bin'
+$cur = [Environment]::GetEnvironmentVariable('Path', 'User')
+[Environment]::SetEnvironmentVariable('Path', "$cur;$bin", 'User')
+```
+
+> Alternativa sin tocar PATH: invocar el backup con el path completo
+> `& 'C:\Program Files\PostgreSQL\18\bin\pg_dump.exe'` (ver `backend/_backup_full.py`,
+> que ya usa el binario directo).
+
+## Conexión a base de datos
+
+Los scripts usan **`settings.DATABASE_URL`** (singleton de `app/core/config.py`), es decir
+la del `.env` **activo** del proceso. No definen `ENVIRONMENT=test` por defecto
+(verificado 19/08/2026): si el proceso arranca con `ENVIRONMENT=test` carga `.env.test`
+(BD de TEST), si no, carga `.env` (BD activa).

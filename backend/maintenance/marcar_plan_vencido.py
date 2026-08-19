@@ -6,9 +6,6 @@ en usuarios son 'pendiente_activacion' | 'activo' | 'rechazado').
 """
 import logging
 from datetime import date
-import os
-
-os.environ.setdefault('ENVIRONMENT', 'test')
 
 from app.db.database import SessionLocal
 from app.models import Suscripcion, Usuario

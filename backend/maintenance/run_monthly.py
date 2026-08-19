@@ -8,7 +8,6 @@ import sys
 import logging
 from datetime import datetime
 
-os.environ.setdefault('ENVIRONMENT', 'test')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + '/..')
 
 log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')

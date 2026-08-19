@@ -8,8 +8,6 @@ import sys
 import logging
 from datetime import datetime
 
-# ENVIRONMENT por defecto 'test' (NO pisa un valor ya definido por el scheduler/app)
-os.environ.setdefault('ENVIRONMENT', 'test')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + '/..')
 
 # Crear logger

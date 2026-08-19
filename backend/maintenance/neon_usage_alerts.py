@@ -4,9 +4,6 @@ Neon free tier: 3 GB de almacenamiento.
 Se calcula el tamaño real con pg_database_size(current_database()).
 """
 import logging
-import os
-
-os.environ.setdefault('ENVIRONMENT', 'test')
 
 from sqlalchemy import text
 from app.db.database import SessionLocal

@@ -1,8 +1,5 @@
 """Verifica integridad de datos: RUT/correos únicos, FKs válidas y fechas válidas."""
 import logging
-import os
-
-os.environ.setdefault('ENVIRONMENT', 'test')
 
 from sqlalchemy import text
 from app.db.database import SessionLocal

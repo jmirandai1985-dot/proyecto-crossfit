@@ -4,8 +4,6 @@ import os
 
 import requests
 
-os.environ.setdefault('ENVIRONMENT', 'test')
-
 from sqlalchemy import text
 from app.db.database import SessionLocal
 

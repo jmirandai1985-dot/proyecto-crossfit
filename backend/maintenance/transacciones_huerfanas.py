@@ -7,9 +7,6 @@ Adaptado a los modelos reales del proyecto:
 """
 import logging
 from datetime import datetime, timedelta
-import os
-
-os.environ.setdefault('ENVIRONMENT', 'test')
 
 from app.db.database import SessionLocal
 from app.models import Suscripcion, SolicitudPlan, Usuario

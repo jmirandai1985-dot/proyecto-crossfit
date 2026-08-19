@@ -8,8 +8,6 @@ import subprocess
 from datetime import datetime, timedelta
 import logging
 
-os.environ.setdefault('ENVIRONMENT', 'test')
-
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)

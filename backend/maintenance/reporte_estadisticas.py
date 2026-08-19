@@ -4,8 +4,6 @@ import logging
 import os
 from datetime import date, timedelta
 
-os.environ.setdefault('ENVIRONMENT', 'test')
-
 from sqlalchemy import text
 from app.db.database import SessionLocal
 

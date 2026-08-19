@@ -24,7 +24,7 @@
 - Scripts temporales (3): `check_after_put.py`, `test_fix_vivo.py`, `start_server_final.py`
 
 **4. Archivos útiles permanentes confirmados (PASO 3):**
-- `iniciar_servidor.py` — script canónico de inicio
+- `iniciar_servidor.py` — ⚠️ **OBSOLETO como canónico (19/08/2026)**: fuerza `ENVIRONMENT=test` → carga `.env.test` (BD de TEST con credenciales rotadas). Usar `start_server.py` (usa `.env`) o `uvicorn app.main:app`.
 - `iniciar_servidor.bat` — entry point, fix sin --reload
 
 ### ESTADO ACTUAL (git status)
