@@ -26,10 +26,10 @@ const AlumnoFichaModal = ({ alumnoId, tenantId, onClose }) => {
                 const [usrRes, susRes, planesRes] = await Promise.all([
                     api.get(`/api/v1/usuarios/${alumnoId}`),
                     api.get('/api/v1/suscripciones', {
-                        params: { tenant_id: tenantId, usuario_id: alumnoId, estado: 'activo' }
+                        params: { usuario_id: alumnoId, estado: 'activo' }
                     }),
                     api.get('/api/v1/planes', {
-                        params: { tenant_id: tenantId, activo: true }
+                        params: { activo: true }
                     })
                 ]);
                 setData(usrRes.data || {});

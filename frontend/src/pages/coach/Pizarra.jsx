@@ -155,7 +155,7 @@ const Pizarra = () => {
     useEffect(() => {
         const cargarMovimientos = async () => {
             try {
-                const response = await api.get(`/api/v1/movimientos?tenant_id=${tenant_id}`);
+                const response = await api.get(`/api/v1/movimientos`);
                 setMovimientosDisponibles(response.data);
             } catch (error) {
                 console.error('Error cargando movimientos:', error);
@@ -266,7 +266,7 @@ const Pizarra = () => {
                 });
                 const nuevoMov = response.data;
 
-                const movs = await api.get(`/api/v1/movimientos?tenant_id=${tenant_id}`);
+                const movs = await api.get(`/api/v1/movimientos`);
                 setMovimientosDisponibles(movs.data);
 
                 setMovimientosAgregados([
@@ -394,7 +394,7 @@ const Pizarra = () => {
                 };
             }
 
-            await api.post(`/api/v1/wods?tenant_id=${tenant_id}`, payload);
+            await api.post(`/api/v1/wods`, payload);
 
             const textoEstado = estado === 'publicado' ? 'publicado' : 'guardado como borrador';
             setMensaje({ tipo: 'exito', texto: `WOD ${textoEstado} exitosamente` });

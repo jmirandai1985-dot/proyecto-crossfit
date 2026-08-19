@@ -55,7 +55,7 @@ const ModalClase = ({ isOpen, onClose, onSuccess, tenant_id, claseEditar }) => {
 
     const fetchCoaches = async () => {
         try {
-            const response = await api.get(`/api/v1/usuarios?rol=coach&tenant_id=${tenant_id}`);
+            const response = await api.get(`/api/v1/usuarios?rol=coach`);
             const coachesData = Array.isArray(response.data) ? response.data : [];
             setCoaches(coachesData.length > 0 ? coachesData : [
                 { id: 1, nombre: 'Juan Pérez' },
@@ -74,7 +74,7 @@ const ModalClase = ({ isOpen, onClose, onSuccess, tenant_id, claseEditar }) => {
 
     const fetchDisciplinas = async () => {
         try {
-            const response = await api.get(`/api/v1/disciplinas?tenant_id=${tenant_id}`);
+            const response = await api.get(`/api/v1/disciplinas`);
             // Asegurar que cada disciplina tenga id y nombre válidos
             const disciplinasData = Array.isArray(response.data) ? response.data : [];
             const disciplinasValidas = disciplinasData.filter(d => d && d.id && d.nombre);
@@ -145,17 +145,16 @@ const ModalClase = ({ isOpen, onClose, onSuccess, tenant_id, claseEditar }) => {
                 hora_fin: formData.hora_fin,
                 cupo_maximo: parseInt(formData.cupo_maximo),
                 horario_base_id: parseInt(formData.horario_base_id),
-                tenant_id: tenant_id,
                 asistentes_confirmados: claseEditar?.asistentes_confirmados || 0,
                 cancelada: claseEditar?.cancelada || false,
             };
 
             if (esEdicion) {
                 // PUT para editar
-                await api.put(`/api/v1/clases/${claseEditar.id}?tenant_id=${tenant_id}`, payload);
+                await api.put(`/api/v1/clases/${claseEditar.id}`, payload);
             } else {
                 // POST para crear
-                await api.post(`/api/v1/clases?tenant_id=${tenant_id}`, payload);
+                await api.post(`/api/v1/clases`, payload);
             }
 
             setFormData({

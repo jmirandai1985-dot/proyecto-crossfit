@@ -52,7 +52,7 @@ const SolicitarPlan = () => {
                 setSexoAlumno(sexo);
                 setSinSexo(!sexo);
 
-                const res = await api.get(`/api/v1/planes?tenant_id=${tenant_id}&activo=true`);
+                const res = await api.get(`/api/v1/planes?activo=true`);
                 const data = res.data?.planes || res.data || [];
                 const todosLosPlanes = Array.isArray(data) ? data : [];
                 setPlanes(todosLosPlanes);

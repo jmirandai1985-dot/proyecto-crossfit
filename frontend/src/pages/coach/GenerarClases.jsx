@@ -1,11 +1,8 @@
 import React, { useState } from 'react';
 import Layout from '../../components/Layout';
-import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 
 const GenerarClases = () => {
-    const { tenant_id } = useAuth();
-
     const d = new Date();
     const [fecha, setFecha] = useState(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
     const [generando, setGenerando] = useState(false);
@@ -18,7 +15,7 @@ const GenerarClases = () => {
         setError('');
         try {
             const res = await api.post(
-                `/api/v1/horarios/generar-clases-dia?tenant_id=${tenant_id}&fecha=${fecha}`
+                `/api/v1/horarios/generar-clases-dia?fecha=${fecha}`
             );
             setResultado(res.data);
         } catch (err) {

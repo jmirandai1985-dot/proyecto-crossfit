@@ -21,7 +21,7 @@ const Coaches = () => {
 
     const fetchCoaches = async () => {
         try {
-            const response = await api.get('/api/v1/usuarios', { params: { rol: 'coach', tenant_id } });
+            const response = await api.get('/api/v1/usuarios', { params: { rol: 'coach' } });
             setCoaches(response.data || []);
         } catch (error) {
             console.error('Error fetching coaches:', error);
@@ -33,14 +33,14 @@ const Coaches = () => {
 
     const fetchDisciplinas = async () => {
         try {
-            const r = await api.get('/api/v1/disciplinas', { params: { tenant_id } });
+            const r = await api.get('/api/v1/disciplinas');
             setDisciplinas(r.data?.filter(d => d.activo !== false) || []);
         } catch (e) { console.error(e); }
     };
 
     const fetchCoachDisciplinas = async () => {
         try {
-            const r = await api.get('/api/v1/coach-disciplinas', { params: { tenant_id, limit: 500 } });
+            const r = await api.get('/api/v1/coach-disciplinas', { params: { limit: 500 } });
             const data = r.data || [];
             const map = {};
             data.forEach(cd => {

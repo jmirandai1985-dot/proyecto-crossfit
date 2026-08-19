@@ -95,7 +95,7 @@ export default function GestionClases() {
     useEffect(() => {
         if (!urlClaseId) return;
         setCargandoClase(true);
-        api.get(`${API_BASE}/clases/${urlClaseId}`, { params: { tenant_id } })
+        api.get(`${API_BASE}/clases/${urlClaseId}`)
             .then(r => {
                 const c = r.data;
                 setClaseDestino(c);
@@ -110,7 +110,7 @@ export default function GestionClases() {
                 // Si la clase YA tiene un WOD publicado (clase.wod_id), cargar
                 // ese WOD y PRE-CARGAR el formulario en modo edición.
                 if (c.wod_id) {
-                    return api.get(`${API_BASE}/wods/${c.wod_id}`, { params: { tenant_id } })
+                    return api.get(`${API_BASE}/wods/${c.wod_id}`)
                         .then(wr => {
                             const wodData = wr.data;
                             setWod(wodData); // hace que el guardado use PUT en vez de POST
@@ -145,7 +145,7 @@ export default function GestionClases() {
 
     // Cargar disciplinas
     useEffect(() => {
-        api.get(`${API_BASE}/disciplinas`, { params: { tenant_id } })
+        api.get(`${API_BASE}/disciplinas`)
             .then(r => {
                 const data = r.data || [];
                 const filt = data.filter(d =>
@@ -155,7 +155,7 @@ export default function GestionClases() {
             })
             .catch(e => console.error('Error disciplinas', e));
         // Cargar disciplinas asignadas al coach
-        api.get(`${API_BASE}/coach-disciplinas`, { params: { tenant_id, coach_id } })
+        api.get(`${API_BASE}/coach-disciplinas`, { params: { coach_id } })
             .then(r => {
                 const ids = (r.data || []).filter(cd => cd.activo).map(cd => cd.disciplina_id);
                 setCoachDisciplinas(ids);
@@ -165,7 +165,7 @@ export default function GestionClases() {
 
     const cargarClases = useCallback(async (f) => {
         try {
-            const r = await api.get(`${API_BASE}/clases`, { params: { tenant_id, fecha_desde: f, fecha_hasta: f, limit: 200 } });
+            const r = await api.get(`${API_BASE}/clases`, { params: { fecha_desde: f, fecha_hasta: f, limit: 200 } });
             const data = r.data || [];
             return Array.isArray(data) ? data : (data.clases || []);
         } catch (e) { console.error('Error clases', e); return []; }
@@ -206,7 +206,7 @@ export default function GestionClases() {
             // TAREA 4: cargar TODA la semana para el calendario multi-día
             const desdeSemana = semanaActual[0];
             const hastaSemana = semanaActual[6];
-            const r = await api.get(`${API_BASE}/clases`, { params: { tenant_id, disciplina_id: dId, fecha_desde: desdeSemana, fecha_hasta: hastaSemana, limit: 500 } });
+            const r = await api.get(`${API_BASE}/clases`, { params: { disciplina_id: dId, fecha_desde: desdeSemana, fecha_hasta: hastaSemana, limit: 500 } });
             const data = r.data || [];
             let clasesSemana = Array.isArray(data) ? data : (data.clases || []);
             if (turno) clasesSemana = clasesSemana.filter(c => { const hora = parseHora(c.hora_inicio); return hora >= turno.desde && hora <= turno.hasta; });
@@ -232,7 +232,7 @@ export default function GestionClases() {
             const wodsSemana = {};
             await Promise.all(semanaActual.map(async (f) => {
                 try {
-                    const wr = await api.get(`${API_BASE}/wods/`, { params: { tenant_id, fecha: f } });
+                    const wr = await api.get(`${API_BASE}/wods/`, { params: { fecha: f } });
                     wodsSemana[f] = wr.data || [];
                 } catch { wodsSemana[f] = []; }
             }));
@@ -269,7 +269,7 @@ export default function GestionClases() {
         setLoading(true); setMsg({ tipo: '', texto: '' });
         const esEmergencia = modoEmergencia && disciplinaActiva && coachDisciplinas.length > 0 && !coachDisciplinas.includes(disciplinaActiva);
         try {
-            const params = { tenant_id, disciplina_id: disciplinaActiva };
+            const params = { disciplina_id: disciplinaActiva };
             if (esEmergencia) params.modo_emergencia = true;
             let wodRes;
             if (wod && wod.id) {
@@ -293,7 +293,7 @@ export default function GestionClases() {
                     if (claseIds.length > 0) {
                         const batchBody = { wod_id: wodRes.id, clase_ids: claseIds };
                         if (esEmergencia) batchBody.modo_emergencia = true;
-                        await api.post(`${API_BASE}/wods/batch`, batchBody, { params: { tenant_id } });
+                        await api.post(`${API_BASE}/wods/batch`, batchBody);
                     }
                 }
                 setMsg({ tipo: 'exito', texto: `✅ ${creados} WOD(s) creado(s) y publicado(s)` + (esEmergencia ? ' (modo emergencia)' : '') });
@@ -303,7 +303,7 @@ export default function GestionClases() {
             if (claseDestino && claseDestino.id) {
                 const body = { wod_id: wodRes.id, clase_ids: [claseDestino.id] };
                 if (esEmergencia) body.modo_emergencia = true;
-                const res = await api.post(`${API_BASE}/wods/batch`, body, { params: { tenant_id } });
+                const res = await api.post(`${API_BASE}/wods/batch`, body);
                 setMsg({ tipo: 'exito', texto: `WOD creado y asignado a la clase #${claseDestino.id}` + (esEmergencia ? ' (modo emergencia)' : '') });
                 setTimeout(() => navigate('/coach?tab=clases'), 1200);
             }
@@ -318,7 +318,7 @@ export default function GestionClases() {
 
     const cargarAsistencia = async (claseId) => {
         try {
-            const r = await api.get(`${API_BASE}/reservas/por-clase/${claseId}`, { params: { tenant_id } });
+            const r = await api.get(`${API_BASE}/reservas/por-clase/${claseId}`);
             const reservas = r.data || [];
             setAsistencia(reservas.map(r => ({ reserva_id: r.id, alumno_id: r.alumno_id, nombre: r.alumno_nombre || `#${r.alumno_id}`, asistio: r.asistio || false })));
             setClaseAsistencia(claseId);
@@ -327,7 +327,7 @@ export default function GestionClases() {
 
     const toggleAsistencia = async (reservaId, valor) => {
         try {
-            await api.put(`${API_BASE}/reservas/${reservaId}/asistencia`, { asistio: valor }, { params: { tenant_id } });
+            await api.put(`${API_BASE}/reservas/${reservaId}/asistencia`, { asistio: valor });
             setAsistencia(prev => prev.map(a => a.reserva_id === reservaId ? { ...a, asistio: valor } : a));
         } catch (e) { console.error(e); }
     };

@@ -13,7 +13,7 @@ const Bazar = () => {
 
     const fetchProductos = async () => {
         try {
-            const response = await api.get(`/api/v1/productos?tenant_id=${tenant_id}`);
+            const response = await api.get(`/api/v1/productos`);
             setProductos(response.data || []);
         } catch (error) {
             console.error('Error fetching productos:', error);
@@ -65,7 +65,7 @@ const Bazar = () => {
     const handleEliminarProducto = async (id) => {
         if (!window.confirm('¿Estás seguro de desactivar este producto?')) return;
         try {
-            await api.delete(`/api/v1/productos/${id}?tenant_id=${tenant_id}`);
+            await api.delete(`/api/v1/productos/${id}`);
             fetchProductos();
         } catch (error) {
             console.error('Error eliminando producto:', error);

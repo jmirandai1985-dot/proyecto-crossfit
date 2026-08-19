@@ -50,7 +50,7 @@ const AdminDashboard = () => {
     const cargarSolicitudes = async () => {
         try {
             const [sols, statsRes] = await Promise.all([
-                api.get(`/api/v1/solicitudes/pendientes?tenant_id=${tenant_id}`),
+                api.get(`/api/v1/solicitudes/pendientes`),
                 api.get(`/api/v1/reportes/?tenant_id=${tenant_id}`)
             ]);
             setSolicitudes(sols.data || []);

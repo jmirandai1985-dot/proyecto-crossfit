@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Layout from '../../components/Layout';
-import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 
 const DIAS_NOMBRES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -69,8 +68,6 @@ const getEstadoColor = (estado) => {
 };
 
 const MisReservas = () => {
-    const { usuario_id, tenant_id } = useAuth();
-
     const [reservas, setReservas] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -82,7 +79,7 @@ const MisReservas = () => {
         setError('');
         try {
             const response = await api.get(
-                `/api/v1/reservas?tenant_id=${tenant_id}&usuario_id=${usuario_id}`
+                `/api/v1/reservas`
             );
             const data = response.data;
             const reservasList = Array.isArray(data) ? data : [];
@@ -104,7 +101,7 @@ const MisReservas = () => {
         } finally {
             setLoading(false);
         }
-    }, [tenant_id, usuario_id]);
+    }, []);
 
     useEffect(() => {
         fetchReservas();
@@ -133,7 +130,7 @@ const MisReservas = () => {
         setCancelando(reservaId);
         setMensaje(null);
         try {
-            await api.delete(`/api/v1/reservas/${reservaId}?tenant_id=${tenant_id}`);
+            await api.delete(`/api/v1/reservas/${reservaId}`);
             setMensaje({ tipo: 'exito', texto: 'Reserva cancelada exitosamente' });
             fetchReservas();
         } catch (err) {

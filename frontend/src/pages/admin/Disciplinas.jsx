@@ -13,7 +13,7 @@ const Disciplinas = () => {
 
     const fetch = async () => {
         try {
-            const r = await api.get('/api/v1/disciplinas', { params: { tenant_id } });
+            const r = await api.get('/api/v1/disciplinas');
             setItems(r.data || []);
         } catch (e) { console.error(e); setItems([]); }
         finally { setLoading(false); }
@@ -28,7 +28,7 @@ const Disciplinas = () => {
         e.preventDefault();
         try {
             if (editingId) {
-                await api.put(`/api/v1/disciplinas/${editingId}`, formData, { params: { tenant_id } });
+                await api.put(`/api/v1/disciplinas/${editingId}`, formData);
             } else {
                 await api.post('/api/v1/disciplinas', { ...formData, tenant_id });
             }
@@ -42,7 +42,7 @@ const Disciplinas = () => {
     const handleDelete = async (id) => {
         if (!window.confirm('¿Eliminar esta disciplina?')) return;
         try {
-            await api.delete(`/api/v1/disciplinas/${id}`, { params: { tenant_id } });
+            await api.delete(`/api/v1/disciplinas/${id}`);
             fetch();
         } catch (e) { alert('Error: ' + (e.response?.data?.detail || e.message)); }
     };

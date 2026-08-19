@@ -19,7 +19,7 @@ const Bazar = () => {
         const fetchData = async () => {
             try {
                 const [prodRes, configRes] = await Promise.all([
-                    api.get(`/api/v1/productos?tenant_id=${tenant_id}&activo=true`),
+                    api.get(`/api/v1/productos?activo=true`),
                     api.get(`/api/v1/configuracion?tenant_id=${tenant_id}`)
                 ]);
                 setProductos(prodRes.data || []);

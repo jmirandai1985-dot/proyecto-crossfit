@@ -8,25 +8,24 @@ const Notificaciones = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [reenviando, setReenviando] = useState(null);
-    const { tenant_id } = { tenant_id: 1 }; // AuthContext tenant
 
     const cargar = useCallback(async () => {
         setLoading(true); setError('');
         try {
-            const r = await api.get('/api/v1/notificaciones-enviadas', { params: { tenant_id, limit: 100 } });
+            const r = await api.get('/api/v1/notificaciones-enviadas', { params: { limit: 100 } });
             const data = r.data || {};
             setItems(data.items || []);
             setTotal(data.total || 0);
         } catch (e) {
             setError('Error al cargar notificaciones: ' + (e.response?.data?.detail || e.message));
         } finally { setLoading(false); }
-    }, [tenant_id]);
+    }, []);
     useEffect(() => { cargar(); }, [cargar]);
 
     const reenviar = async (id) => {
         setReenviando(id); setError('');
         try {
-            await api.post(`/api/v1/notificaciones-enviadas/${id}/reenviar`, {}, { params: { tenant_id } });
+            await api.post(`/api/v1/notificaciones-enviadas/${id}/reenviar`, {});
             await cargar();
         } catch (e) {
             setError('Error al reenviar: ' + (e.response?.data?.detail || e.message));

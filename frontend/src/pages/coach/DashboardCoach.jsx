@@ -139,12 +139,12 @@ const DashboardCoach = () => {
         setLoading(true);
         try {
             const [clasesRes, alumnosRes, wodsRes, riesgoRes, movRes, coachDiscRes] = await Promise.all([
-                api.get(`/api/v1/clases?coach_id=${usuario_id}&tenant_id=${tenant_id}`),
-                api.get(`/api/v1/usuarios?tenant_id=${tenant_id}&rol=alumno&activo=true`),
-                api.get(`/api/v1/wods?tenant_id=${tenant_id}`),
-                api.get(`/api/v1/fidelizacion/coach/${usuario_id}/en-riesgo?tenant_id=${tenant_id}`),
-                api.get(`/api/v1/movimientos?tenant_id=${tenant_id}`),
-                api.get(`/api/v1/coach-disciplinas?tenant_id=${tenant_id}`)
+                api.get(`/api/v1/clases?coach_id=${usuario_id}`),
+                api.get(`/api/v1/usuarios?rol=alumno&activo=true`),
+                api.get(`/api/v1/wods`),
+                api.get(`/api/v1/fidelizacion/coach/${usuario_id}/en-riesgo`),
+                api.get(`/api/v1/movimientos`),
+                api.get(`/api/v1/coach-disciplinas`)
             ]);
 
             // Disciplinas asignadas al coach (activo=True)
@@ -211,7 +211,7 @@ const DashboardCoach = () => {
         const alumnos = alumnosData.slice(0, 50);
         const resultados = await Promise.all(alumnos.map(async (alumno) => {
             try {
-                const rmsRes = await api.get(`/api/v1/historial-rm/alumnos/${alumno.id}/rms?tenant_id=${tenant_id}`);
+                const rmsRes = await api.get(`/api/v1/historial-rm/alumnos/${alumno.id}/rms`);
                 const rms = rmsRes.data || [];
                 return {
                     id: alumno.id,
@@ -253,7 +253,7 @@ const DashboardCoach = () => {
             }));
 
             try {
-                const rmsRes = await api.get(`/api/v1/historial-rm?tenant_id=${tenant_id}&limit=5`);
+                const rmsRes = await api.get(`/api/v1/historial-rm?limit=5`);
                 const rmsData = rmsRes.data || [];
                 const rmsRecientes = rmsData.map(r => ({
                     tipo: 'rm',
@@ -288,7 +288,7 @@ const DashboardCoach = () => {
             const fetchAlumnoRMs = async () => {
                 setLoading(true);
                 try {
-                    const response = await api.get(`/api/v1/historial-rm/alumnos/${selectedAlumno.id}/rms?tenant_id=${tenant_id}`);
+                    const response = await api.get(`/api/v1/historial-rm/alumnos/${selectedAlumno.id}/rms`);
                     setAlumnoRMs(response.data || []);
                 } catch (error) {
                     console.error('Error fetching alumno RMs:', error);
@@ -310,7 +310,7 @@ const DashboardCoach = () => {
         setCargandoAsistencia(true);
         setMsgAsistencia(null);
         try {
-            const r = await api.get(`/api/v1/reservas/por-clase/${claseId}`, { params: { tenant_id } });
+            const r = await api.get(`/api/v1/reservas/por-clase/${claseId}`);
             const reservas = r.data || [];
             setAsistenciaPorClase(prev => ({
                 ...prev,
@@ -331,7 +331,7 @@ const DashboardCoach = () => {
 
     const toggleAsistenciaAlumno = async (claseId, reservaId, valor) => {
         try {
-            await api.put(`/api/v1/reservas/${reservaId}/asistencia`, { asistio: valor }, { params: { tenant_id } });
+            await api.put(`/api/v1/reservas/${reservaId}/asistencia`, { asistio: valor });
             setAsistenciaPorClase(prev => ({
                 ...prev,
                 [claseId]: (prev[claseId] || []).map(a => a.reserva_id === reservaId ? { ...a, asistio: valor } : a)
@@ -349,7 +349,7 @@ const DashboardCoach = () => {
         let errores = 0;
         for (const a of reservas) {
             try {
-                await api.put(`/api/v1/reservas/${a.reserva_id}/asistencia`, { asistio: valor }, { params: { tenant_id } });
+                await api.put(`/api/v1/reservas/${a.reserva_id}/asistencia`, { asistio: valor });
                 setAsistenciaPorClase(prev => ({
                     ...prev,
                     [claseId]: (prev[claseId] || []).map(r => r.reserva_id === a.reserva_id ? { ...r, asistio: valor } : r)
@@ -383,7 +383,7 @@ const DashboardCoach = () => {
     const handlePublicarWOD = async () => {
         if (!wodHoy) return;
         try {
-            await api.put(`/api/v1/wods/${wodHoy.id}?tenant_id=${tenant_id}`, {
+            await api.put(`/api/v1/wods/${wodHoy.id}`, {
                 estado: 'publicado',
                 titulo: wodHoy.titulo,
                 descripcion: wodHoy.descripcion,

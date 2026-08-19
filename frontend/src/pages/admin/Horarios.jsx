@@ -44,8 +44,8 @@ export default function Horarios() {
     const fetchGrid = useCallback(async () => {
         try {
             const [rG, rD] = await Promise.all([
-                api.get('/api/v1/horarios/grid-semanal', { params: { tenant_id } }),
-                api.get('/api/v1/disciplinas', { params: { tenant_id } })
+                api.get('/api/v1/horarios/grid-semanal'),
+                api.get('/api/v1/disciplinas')
             ]);
             setGridData(rG.data || []);
             setDisciplinas(rD.data || []);
@@ -91,7 +91,7 @@ export default function Horarios() {
         try {
             const payload = { ...formData, tenant_id };
             if (editingId) {
-                await api.put(`/api/v1/horarios/${editingId}`, payload, { params: { tenant_id } });
+                await api.put(`/api/v1/horarios/${editingId}`, payload);
             } else {
                 await api.post('/api/v1/horarios', payload);
             }
@@ -102,7 +102,7 @@ export default function Horarios() {
 
     const handleDelete = async (id) => {
         if (!window.confirm('¿Eliminar este horario?')) return;
-        try { await api.delete(`/api/v1/horarios/${id}`, { params: { tenant_id } }); fetchGrid(); }
+        try { await api.delete(`/api/v1/horarios/${id}`); fetchGrid(); }
         catch (e) { alert('Error: ' + (e.response?.data?.detail || e.message)); }
     };
 

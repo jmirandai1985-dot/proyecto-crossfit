@@ -86,7 +86,7 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                     stock: parseInt(formData.stock),
                     activo: formData.activo,
                 };
-                await api.put(`/api/v1/productos/${productoEditar.id}?tenant_id=${tenant_id}`, payload);
+                await api.put(`/api/v1/productos/${productoEditar.id}`, payload);
             } else {
                 // POST para crear con FormData (multipart/form-data para soportar imagen)
                 const data = new FormData();
@@ -95,7 +95,6 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                 data.append('precio', parseFloat(formData.precio));
                 data.append('stock', parseInt(formData.stock));
                 data.append('activo', formData.activo);
-                data.append('tenant_id', tenant_id);
                 if (imagenArchivo) {
                     data.append('file', imagenArchivo);
                 }

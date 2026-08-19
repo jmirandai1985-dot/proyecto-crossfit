@@ -60,7 +60,7 @@ export default function SupervisionClases() {
     const fetchCupos = useCallback(async () => {
         setCuposLoading(true);
         try {
-            const r = await api.get(`${API_BASE}/supervision/cupos-disciplinas`, { params: { tenant_id } });
+            const r = await api.get(`${API_BASE}/supervision/cupos-disciplinas`);
             setCuposData(r.data || []);
         } catch (e) { console.error('Error cupos', e); }
         setCuposLoading(false);
@@ -70,7 +70,7 @@ export default function SupervisionClases() {
     useEffect(() => {
         const fetchDisciplinas = async () => {
             try {
-                const r = await api.get(`${API_BASE}/disciplinas`, { params: { tenant_id } });
+                const r = await api.get(`${API_BASE}/disciplinas`);
                 setDisciplinas(r.data || []);
             } catch (e) { console.error('Error cargando disciplinas', e); }
         };
@@ -94,7 +94,7 @@ export default function SupervisionClases() {
         setLoadingHorariosDisc(true);
         try {
             const r = await api.get(`${API_BASE}/supervision/horarios-base`, {
-                params: { tenant_id, disciplina_id: discId }
+                params: { disciplina_id: discId }
             });
             setHorariosDisc(prev => ({ ...prev, [discId]: (r.data?.horarios || []) }));
         } catch { setHorariosDisc(prev => ({ ...prev, [discId]: [] })); }
@@ -114,7 +114,7 @@ export default function SupervisionClases() {
         setError('');
         let lista = disciplinas;
         try {
-            const r = await api.get(`${API_BASE}/disciplinas`, { params: { tenant_id } });
+            const r = await api.get(`${API_BASE}/disciplinas`);
             lista = r.data || [];
             setDisciplinas(lista);
         } catch (e) { console.error('Error recargando disciplinas', e); }
@@ -128,7 +128,7 @@ export default function SupervisionClases() {
         setModalReservasHorario({ horario, cargando: true, data: null });
         try {
             const r = await api.get(`${API_BASE}/supervision/proxima-clase-reservas`, {
-                params: { tenant_id, horario_base_id: horario.id }
+                params: { horario_base_id: horario.id }
             });
             setModalReservasHorario({ horario, cargando: false, data: r.data || {} });
         } catch (e) {
@@ -141,7 +141,7 @@ export default function SupervisionClases() {
         try {
             // Listar TODOS los coaches (no solo los de la disciplina)
             const r = await api.get(`${API_BASE}/supervision/coaches-todos`, {
-                params: { tenant_id, disciplina_id: disciplinaId }
+                params: { disciplina_id: disciplinaId }
             });
             setCoachesDisponibles(r.data || []);
             setCoachSelector({ claseId, disciplinaId });
@@ -152,7 +152,7 @@ export default function SupervisionClases() {
         if (pertenece) {
             // Coach pertenece a la disciplina → asignación normal
             try {
-                await api.put(`${API_BASE}/clases/${claseId}`, { coach_id: coachId, tenant_id }, { params: { tenant_id } });
+                await api.put(`${API_BASE}/clases/${claseId}`, { coach_id: coachId });
                 setCoachSelector(null);
                 if (discExpandida) cargarHorariosDisc(discExpandida);
             } catch (e) { console.error('Error asignando coach', e); }
@@ -167,8 +167,8 @@ export default function SupervisionClases() {
         const { coachId, claseId } = emergenciaConfirm;
         try {
             // Enviar con modo_emergencia=true para auditar
-            await api.put(`${API_BASE}/clases/${claseId}`, { coach_id: coachId, tenant_id }, {
-                params: { tenant_id, modo_emergencia: true }
+            await api.put(`${API_BASE}/clases/${claseId}`, { coach_id: coachId }, {
+                params: { modo_emergencia: true }
             });
             setEmergenciaConfirm(null);
             setCoachSelector(null);
@@ -179,7 +179,7 @@ export default function SupervisionClases() {
     const cargarGridSemanal = useCallback(async (fechaRef) => {
         setGridLoading(true);
         try {
-            const r = await api.get(`${API_BASE}/supervision/grid-semanal`, { params: { tenant_id, fecha: fechaRef || gridFecha } });
+            const r = await api.get(`${API_BASE}/supervision/grid-semanal`, { params: { fecha: fechaRef || gridFecha } });
             setGridSemanal(r.data || null);
         } catch {
             setGridSemanal(null);
@@ -221,7 +221,7 @@ export default function SupervisionClases() {
 
     // Cargar disciplinas
     useEffect(() => {
-        api.get(`${API_BASE}/disciplinas`, { params: { tenant_id } })
+        api.get(`${API_BASE}/disciplinas`)
             .then(r => {
                 const data = r.data || [];
                 setDisciplinas(data);
@@ -248,7 +248,7 @@ export default function SupervisionClases() {
         setError('');
         try {
             const r = await api.get(`${API_BASE}/clases/`, {
-                params: { tenant_id, disciplina_id: dId, fecha_desde: f, fecha_hasta: f, limit: 200 }
+                params: { disciplina_id: dId, fecha_desde: f, fecha_hasta: f, limit: 200 }
             });
             const data = r.data || [];
             const lista = Array.isArray(data) ? data : (data.clases || []);
@@ -357,7 +357,7 @@ export default function SupervisionClases() {
                                                     const nuevo = Math.max(1, d.cupo_actual - 1);
                                                     if (nuevo === d.cupo_actual) return;
                                                     try {
-                                                        const r = await api.patch(`/api/v1/supervision/cupo-disciplina`, null, { params: { disciplina_id: d.id, cupo_maximo: nuevo, tenant_id } });
+                                                        const r = await api.patch(`/api/v1/supervision/cupo-disciplina`, null, { params: { disciplina_id: d.id, cupo_maximo: nuevo } });
                                                         if (r.data?.ok) {
                                                             setCuposData(prev => prev.map(x => x.id === d.id ? { ...x, cupo_actual: nuevo } : x));
                                                         }
@@ -372,7 +372,7 @@ export default function SupervisionClases() {
                                                     const nuevo = Math.min(200, d.cupo_actual + 1);
                                                     if (nuevo === d.cupo_actual) return;
                                                     try {
-                                                        const r = await api.patch(`/api/v1/supervision/cupo-disciplina`, null, { params: { disciplina_id: d.id, cupo_maximo: nuevo, tenant_id } });
+                                                        const r = await api.patch(`/api/v1/supervision/cupo-disciplina`, null, { params: { disciplina_id: d.id, cupo_maximo: nuevo } });
                                                         if (r.data?.ok) {
                                                             setCuposData(prev => prev.map(x => x.id === d.id ? { ...x, cupo_actual: nuevo } : x));
                                                         }

@@ -38,7 +38,7 @@ function getUnidad(rm) {
 }
 
 const PerformanceHub = () => {
-    const { usuario_id, tenant_id } = useAuth();
+    const { usuario_id } = useAuth();
     const navigate = useNavigate();
     const [loading, setLoading] = useState(true);
     const [rms, setRms] = useState([]);
@@ -48,11 +48,11 @@ const PerformanceHub = () => {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const rmsRes = await api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/rms?tenant_id=${tenant_id}`);
+                const rmsRes = await api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/rms`);
                 const rmsData = (rmsRes.data || []).map(rm => ({ ...rm, categoria: inferirCategoria(rm) }));
                 setRms(rmsData);
 
-                const allRes = await api.get(`/api/v1/historial-rm?tenant_id=${tenant_id}&alumno_id=${usuario_id}&limit=500`);
+                const allRes = await api.get(`/api/v1/historial-rm?limit=500`);
                 const allRms = (allRes.data || []).map(rm => ({ ...rm, categoria: inferirCategoria(rm) }));
 
                 const cats = { fuerza: [], gimnastico: [], cardio: [], metabolico: [] };
@@ -92,7 +92,7 @@ const PerformanceHub = () => {
             finally { setLoading(false); }
         };
         fetchData();
-    }, [usuario_id, tenant_id]);
+    }, [usuario_id]);
 
     if (loading) return (<Layout><div className="flex items-center justify-center h-96"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500" /></div></Layout>);
 

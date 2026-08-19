@@ -23,7 +23,7 @@ const Evolucion = () => {
 
     // ── Cargar movimientos disponibles ──
     useEffect(() => {
-        api.get(`/api/v1/movimientos?tenant_id=${tenantId}`)
+        api.get(`/api/v1/movimientos`)
             .then(res => {
                 if (Array.isArray(res.data)) {
                     setMovimientos(res.data);
@@ -34,7 +34,7 @@ const Evolucion = () => {
 
     // ── Cargar progreso destacado + ids con marcas ──
     useEffect(() => {
-        api.get(`/api/v1/historial-rm/alumnos/${alumnoId}/progreso-destacado?tenant_id=${tenantId}`)
+        api.get(`/api/v1/historial-rm/alumnos/${alumnoId}/progreso-destacado`)
             .then(res => {
                 const data = res.data || {};
                 setIdsConMarcas(data.ids_con_marcas || []);
@@ -64,7 +64,7 @@ const Evolucion = () => {
             return;
         }
         setLoadingRM(true);
-        api.get(`/api/v1/historial-rm/alumnos/${alumnoId}/movimiento/${movimientoSeleccionado}?tenant_id=${tenantId}`)
+        api.get(`/api/v1/historial-rm/alumnos/${alumnoId}/movimiento/${movimientoSeleccionado}`)
             .then(res => {
                 const data = Array.isArray(res.data) ? res.data : [];
                 setHistorialRM(data);
@@ -79,7 +79,7 @@ const Evolucion = () => {
     // ── Cargar asistencia semanal ──
     useEffect(() => {
         setLoadingAsistencia(true);
-        api.get(`/api/v1/reservas/asistencia-semanal?tenant_id=${tenantId}&usuario_id=${alumnoId}`)
+        api.get(`/api/v1/reservas/asistencia-semanal`)
             .then(res => {
                 const data = Array.isArray(res.data) ? res.data : [];
                 setAsistenciaSemanal(data);

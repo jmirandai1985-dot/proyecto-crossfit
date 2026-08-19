@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../../components/Layout';
-import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 
 const MisPedidos = () => {
-    const { usuario_id, tenant_id } = useAuth();
     const [pedidos, setPedidos] = useState([]);
     const [loading, setLoading] = useState(true);
     const [productosMap, setProductosMap] = useState({});
@@ -13,8 +11,8 @@ const MisPedidos = () => {
         const fetchData = async () => {
             try {
                 const [pedRes, prodRes] = await Promise.all([
-                    api.get(`/api/v1/pedidos?tenant_id=${tenant_id}&alumno_id=${usuario_id}`),
-                    api.get(`/api/v1/productos?tenant_id=${tenant_id}`)
+                    api.get(`/api/v1/pedidos`),
+                    api.get(`/api/v1/productos`)
                 ]);
                 const prodMap = {};
                 (prodRes.data || []).forEach(p => { prodMap[p.id] = p.nombre; });
@@ -27,7 +25,7 @@ const MisPedidos = () => {
             }
         };
         fetchData();
-    }, [tenant_id, usuario_id]);
+    }, []);
 
     const getEstadoStyle = (estado) => {
         if (estado === 'pendiente') return 'bg-yellow-100 text-yellow-800';

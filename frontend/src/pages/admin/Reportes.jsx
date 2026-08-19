@@ -47,7 +47,7 @@ const Reportes = () => {
         const fetchMovimientos = async () => {
             setLoadingMovs(true);
             try {
-                const r = await api.get(`/api/v1/finanzas/transacciones?tenant_id=${tenant_id || 1}`);
+                const r = await api.get(`/api/v1/finanzas/transacciones`);
                 setMovimientosList(r.data || []);
             } catch (e) { console.error('Error movimientos', e); }
             setLoadingMovs(false);

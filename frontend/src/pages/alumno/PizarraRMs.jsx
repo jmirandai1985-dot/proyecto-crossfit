@@ -72,8 +72,8 @@ const PizarraRMs = () => {
         setLoading(true);
         try {
             const [movRes, rmsRes] = await Promise.all([
-                api.get(`/api/v1/movimientos?tenant_id=${tenant_id}`),
-                api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/rms?tenant_id=${tenant_id}`)
+                api.get(`/api/v1/movimientos`),
+                api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/rms`)
             ]);
             setMovimientos(movRes.data || []);
             const bestRMs = rmsRes.data || [];
@@ -88,7 +88,7 @@ const PizarraRMs = () => {
             setFetchError('No se pudieron cargar tus RMs. Verifica la conexión con el servidor e intenta de nuevo.');
         }
         setLoading(false);
-    }, [usuario_id, tenant_id]);
+    }, [usuario_id]);
 
     useEffect(() => { fetchAll(); }, [fetchAll]);
 

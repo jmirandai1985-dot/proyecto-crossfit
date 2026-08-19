@@ -31,7 +31,7 @@ const Alumnos = () => {
 
     const fetchAlumnos = async () => {
         try {
-            const response = await api.get(`/api/v1/usuarios?rol=alumno&tenant_id=${tenant_id}`);
+            const response = await api.get(`/api/v1/usuarios?rol=alumno`);
             setAlumnos(response.data || []);
         } catch (error) {
             console.error('Error fetching alumnos:', error);
@@ -48,7 +48,7 @@ const Alumnos = () => {
     useEffect(() => {
         const fetchSuscripciones = async () => {
             try {
-                const response = await api.get(`/api/v1/suscripciones?tenant_id=${tenant_id}&estado=activo`);
+                const response = await api.get(`/api/v1/suscripciones?estado=activo`);
                 setSuscripciones(response.data || []);
             } catch (error) {
                 console.error('Error fetching suscripciones:', error);
@@ -60,7 +60,7 @@ const Alumnos = () => {
     useEffect(() => {
         const fetchPlanes = async () => {
             try {
-                const response = await api.get(`/api/v1/planes?tenant_id=${tenant_id}&activo=true`);
+                const response = await api.get(`/api/v1/planes?activo=true`);
                 setPlanes(response.data || []);
             } catch (error) {
                 console.error('Error fetching planes:', error);

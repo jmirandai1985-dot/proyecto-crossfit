@@ -20,7 +20,7 @@ const Planes = () => {
 
     const fetchPlanes = async () => {
         try {
-            const r = await api.get('/api/v1/planes', { params: { tenant_id } });
+            const r = await api.get('/api/v1/planes');
             setPlanes(r.data || []);
         } catch (e) { console.error(e); setPlanes([]); }
         finally { setLoading(false); }
@@ -57,7 +57,7 @@ const Planes = () => {
         e.preventDefault();
         try {
             if (editingId) {
-                await api.put(`/api/v1/planes/${editingId}`, formData, { params: { tenant_id } });
+                await api.put(`/api/v1/planes/${editingId}`, formData);
             } else {
                 await api.post('/api/v1/planes', { ...formData, tenant_id });
             }
@@ -71,7 +71,7 @@ const Planes = () => {
     const handleDelete = async (id) => {
         if (!window.confirm('¿Eliminar este plan?')) return;
         try {
-            await api.delete(`/api/v1/planes/${id}`, { params: { tenant_id } });
+            await api.delete(`/api/v1/planes/${id}`);
             fetchPlanes();
         } catch (e) { alert('Error: ' + (e.response?.data?.detail || e.message)); }
     };

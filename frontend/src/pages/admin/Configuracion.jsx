@@ -47,7 +47,7 @@ const Configuracion = () => {
         setSaving(true);
         setMessage({ type: '', text: '' });
         try {
-            await api.put(`/api/v1/configuracion?tenant_id=${tenant_id}`, form);
+            await api.put(`/api/v1/configuracion`, form);
             setMessage({ type: 'success', text: 'Datos bancarios guardados exitosamente.' });
         } catch (err) {
             const detalle = err.response?.data?.detail || 'Error al guardar. Intenta nuevamente.';

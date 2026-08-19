@@ -40,7 +40,7 @@ const Clases = () => {
 
     const fetchDisciplinas = useCallback(async () => {
         try {
-            const r = await api.get('/api/v1/disciplinas', { params: { tenant_id } });
+            const r = await api.get('/api/v1/disciplinas');
             setDisciplinas(r.data || []);
         } catch (e) { console.error(e); }
     }, [tenant_id]);
@@ -48,7 +48,7 @@ const Clases = () => {
     const fetchClases = async (disciplinaId, turnoId) => {
         setLoading(true);
         try {
-            const params = { tenant_id, limit: 500 };
+            const params = { limit: 500 };
             if (disciplinaId) params.disciplina_id = disciplinaId;
             const response = await api.get('/api/v1/clases', { params });
             let data = response.data || [];
@@ -147,7 +147,7 @@ const Clases = () => {
 
     const handleEliminarClase = async (claseId) => {
         if (!window.confirm('¿Estás seguro de eliminar esta clase?')) return;
-        try { await api.delete(`/api/v1/clases/${claseId}?tenant_id=${tenant_id}`); fetchClases(); }
+        try { await api.delete(`/api/v1/clases/${claseId}`); fetchClases(); }
         catch (error) { console.error('Error eliminando clase:', error); alert('Error al eliminar la clase.'); }
     };
 

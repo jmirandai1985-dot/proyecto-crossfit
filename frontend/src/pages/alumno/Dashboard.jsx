@@ -110,14 +110,14 @@ const AlumnoDashboard = () => {
                     membresiaRes,
                     asistenciaMesRes
                 ] = await Promise.allSettled([
-                    api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/nivel-fuerza?tenant_id=${tenant_id}`),
-                    api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/nivel-gimnastico?tenant_id=${tenant_id}`),
-                    api.get(`/api/v1/wods/hoy?tenant_id=${tenant_id}`),
+                    api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/nivel-fuerza`),
+                    api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/nivel-gimnastico`),
+                    api.get(`/api/v1/wods/hoy`),
                     // Sin solo_con_cupo para mostrar TODAS las clases de 07:00 a 22:00
-                    api.get(`/api/v1/clases?tenant_id=${tenant_id}&fecha_desde=${TODAY}&fecha_hasta=${fechaHasta}&limit=500`),
-                    api.get(`/api/v1/reservas?tenant_id=${tenant_id}&usuario_id=${usuario_id}&estado=confirmada`),
-                    api.get(`/api/v1/planes/membresia-activa?tenant_id=${tenant_id}&alumno_id=${usuario_id}`),
-                    api.get(`/api/v1/reservas/asistencia-mes?tenant_id=${tenant_id}&usuario_id=${usuario_id}`)
+                    api.get(`/api/v1/clases?fecha_desde=${TODAY}&fecha_hasta=${fechaHasta}&limit=500`),
+                    api.get(`/api/v1/reservas?estado=confirmada`),
+                    api.get(`/api/v1/planes/membresia-activa`),
+                    api.get(`/api/v1/reservas/asistencia-mes`)
                 ]);
 
                 if (fuerzaRes.status === 'fulfilled') setNivelFuerza(fuerzaRes.value.data);
