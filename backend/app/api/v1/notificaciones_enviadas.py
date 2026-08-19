@@ -19,9 +19,11 @@ ESTADOS_VALIDOS = {"enviado", "fallido"}
 
 
 def _registrar(db: Session, alumno_id: int, tipo: str, estado: str, detalle_error: str = None):
-    """Crea un registro en notificaciones_enviadas."""
+    """Crea un registro en notificaciones_enviadas (tenant inferido del alumno)."""
+    alumno = db.query(Usuario).filter(Usuario.id == alumno_id).first()
     reg = NotificacionEnviada(
         alumno_id=alumno_id,
+        tenant_id=alumno.tenant_id if alumno else None,
         tipo=tipo,
         estado=estado,
         detalle_error=detalle_error,
@@ -40,13 +42,28 @@ def registrar_notificacion(
     estado: str,
     detalle_error: str = None,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Registra un envío de correo realizado (llamado por n8n o por email_service)."""
+    """Registra un envío de correo realizado (SÓLO admin).
+
+    ── FIX S6 (seguridad) ──
+    Antes aceptaba a cualquier usuario autenticado y permitía forjar registros
+    de correos "enviados". Verificado: nadie lo llama (email_service escribe
+    directo en la BD; n8n no autentica con JWT de usuario). Se restringe a admin
+    + alumno del mismo box en lugar de eliminarlo, por si alguna automatización
+    externa depende del endpoint.
+    """
     if tipo not in TIPOS_VALIDOS:
         raise HTTPException(400, f"tipo debe ser uno de {sorted(TIPOS_VALIDOS)}")
     if estado not in ESTADOS_VALIDOS:
         raise HTTPException(400, f"estado debe ser uno de {sorted(ESTADOS_VALIDOS)}")
+    # S5: el alumno debe existir y pertenecer al box del admin.
+    alumno = db.query(Usuario).filter(
+        Usuario.id == alumno_id,
+        Usuario.tenant_id == current_user["tenant_id"],
+    ).first()
+    if not alumno:
+        raise HTTPException(404, "Alumno no encontrado en este box")
     reg = _registrar(db, alumno_id, tipo, estado, detalle_error)
     return {"id": reg.id, "alumno_id": reg.alumno_id, "tipo": reg.tipo,
             "estado": reg.estado, "fecha_envio": str(reg.fecha_envio)}
@@ -62,8 +79,12 @@ def listar_notificaciones_enviadas(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Listado paginado con filtros (solo admin)."""
-    q = db.query(NotificacionEnviada)
+    """Listado paginado con filtros (solo admin, tenant del token)."""
+    # ── FIX S5 (seguridad): scoping por tenant del admin ──
+    # La columna tenant_id se agrega por migración 011 (backfill desde usuarios).
+    tenant_id = current_user["tenant_id"]
+    q = db.query(NotificacionEnviada).filter(
+        NotificacionEnviada.tenant_id == tenant_id)
     if tipo:
         q = q.filter(NotificacionEnviada.tipo == tipo)
     if estado:
@@ -97,9 +118,14 @@ def enviar_manual(
     """Envía correo manual (riesgo→inactividad, vencimiento→vencimiento plan) y registra."""
     if tipo not in TIPOS_VALIDOS:
         raise HTTPException(400, f"tipo debe ser uno de {sorted(TIPOS_VALIDOS)}")
-    alumno = db.query(Usuario).filter(Usuario.id == alumno_id).first()
+    # S5: el alumno debe pertenecer al box del admin (evita enviar correos
+    # manuales a alumnos de otro tenant).
+    alumno = db.query(Usuario).filter(
+        Usuario.id == alumno_id,
+        Usuario.tenant_id == current_user["tenant_id"],
+    ).first()
     if not alumno:
-        raise HTTPException(404, "Alumno no encontrado")
+        raise HTTPException(404, "Alumno no encontrado en este box")
     alumno_dict = {"nombre": alumno.nombre, "correo": alumno.correo, "id": alumno.id, "plan_nombre": "plan"}
     exito = False
     try:
@@ -141,13 +167,20 @@ def reenviar_notificacion(
     current_user: dict = Depends(get_current_admin),
 ):
     """Reenvía un correo según el tipo registrado y actualiza estado (solo admin)."""
-    reg = db.query(NotificacionEnviada).filter(NotificacionEnviada.id == notif_id).first()
+    # S5: el registro y su alumno deben pertenecer al box del admin.
+    reg = db.query(NotificacionEnviada).filter(
+        NotificacionEnviada.id == notif_id,
+        NotificacionEnviada.tenant_id == current_user["tenant_id"],
+    ).first()
     if not reg:
         raise HTTPException(404, "Registro no encontrado")
 
-    alumno = db.query(Usuario).filter(Usuario.id == reg.alumno_id).first()
+    alumno = db.query(Usuario).filter(
+        Usuario.id == reg.alumno_id,
+        Usuario.tenant_id == current_user["tenant_id"],
+    ).first()
     if not alumno:
-        raise HTTPException(404, "Alumno no encontrado")
+        raise HTTPException(404, "Alumno no encontrado en este box")
 
     alumno_dict = {"nombre": alumno.nombre, "correo": alumno.correo, "plan_nombre": "plan"}
     exito = False

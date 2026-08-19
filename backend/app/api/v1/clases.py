@@ -283,8 +283,21 @@ def actualizar_clase(
     if not clase:
         raise HTTPException(status_code=404, detail="Clase no encontrada")
 
+    # ── FIX S11 (seguridad): solo admin reasigna un TERCER coach ──
+    # Un coach puede auto-asignarse (cobertura de emergencia propia, intencional)
+    # pero NO puede asignar a otro coach: eso es exclusivo de admin (Supervisión).
+    # La auditoría distingue quién lo hizo (asignar_coach_admin vs _self).
+    rol = current_user.get("rol", "")
+    es_admin = rol in ("admin", "administrador")
+
     # Si se actualiza coach_id, verificar relación coach-disciplina (con emergencia)
     if clase_update.coach_id is not None:
+        if not es_admin and clase_update.coach_id != current_user["usuario_id"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Solo un administrador puede asignar otro coach a una clase",
+            )
+        accion = "asignar_coach_admin" if es_admin else "asignar_coach_self"
         try:
             verificar_coach_disciplina(
                 coach_id=clase_update.coach_id,
@@ -292,7 +305,7 @@ def actualizar_clase(
                 db=db,
                 modo_emergencia=modo_emergencia,
                 clase_id=clase_id,
-                accion="asignar_coach_admin",
+                accion=accion,
                 tenant_id=tenant_id
             )
         except HTTPException as e:
@@ -304,7 +317,7 @@ def actualizar_clase(
                 db=db,
                 modo_emergencia=True,
                 clase_id=clase_id,
-                accion="asignar_coach_admin",
+                accion=accion,
                 tenant_id=tenant_id
             )
         clase.coach_id = clase_update.coach_id

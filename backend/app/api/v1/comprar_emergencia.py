@@ -45,6 +45,10 @@ def comprar_emergencia(
             status_code=403,
             detail="No puedes comprar emergencia para otro alumno",
         )
+    # ── FIX S3 (seguridad): tenant_id SIEMPRE del token JWT ──
+    # El body puede traer tenant_id pero se ignora/sobreescribe: un coach/admin
+    # del box A no puede operar sobre suscripciones del box B (cross-tenant).
+    data.tenant_id = current_user["tenant_id"]
     # Verificar plan
     plan = db.query(Plan).filter(
         Plan.id == data.plan_id,

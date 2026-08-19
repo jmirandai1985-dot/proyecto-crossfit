@@ -73,15 +73,21 @@ def _template(titulo: str, saludo: str, cuerpo: str, boton_texto: str, boton_url
 
 
 def _registrar_envio(alumno_id, tipo, estado, detalle_error=None):
-    """Inserta registro en notificaciones_enviadas."""
+    """Inserta registro en notificaciones_enviadas (con tenant del alumno)."""
     try:
         from app.db.database import SessionLocal
         from app.models.notificacion_enviada import NotificacionEnviada
+        from app.models.usuario import Usuario
         from datetime import datetime
         db = SessionLocal()
+        tenant_id = None
+        if alumno_id:
+            alumno = db.query(Usuario).filter(Usuario.id == alumno_id).first()
+            tenant_id = alumno.tenant_id if alumno else None
         reg = NotificacionEnviada(
             alumno_id=alumno_id, tipo=tipo, estado=estado,
-            detalle_error=detalle_error, fecha_envio=datetime.utcnow())
+            detalle_error=detalle_error, fecha_envio=datetime.utcnow(),
+            tenant_id=tenant_id)
         db.add(reg)
         db.commit()
         db.close()
@@ -164,8 +170,13 @@ def enviar_email_vencimiento_plan(alumno: dict, fecha_vencimiento) -> bool:
                    alumno.get("id"), tipo="vencimiento")
 
 
-def enviar_email_fidelizacion(nombre: str, correo: str, dias_ausente: int, gmail_user: str = "", gmail_password: str = "") -> bool:
-    """Correo de inactividad (migrado de Gmail SMTP a Resend). Se mantiene la firma para compatibilidad."""
+def enviar_email_fidelizacion(nombre: str, correo: str, dias_ausente: int) -> bool:
+    """Correo de inactividad (SMTP centralizado via _enviar/settings GMAIL).
+
+    FIX S4: se eliminaron los parámetros gmail_user/gmail_password (código muerto
+    tras la migración a SMTP central; solo exponían credenciales en la firma y
+    en el endpoint campana-email).
+    """
     alumno = {"nombre": nombre, "correo": correo}
     titulo = "Tu box te está esperando"
     saludo = f"Hola {nombre.split()[0]}, notamos que llevas <strong>{dias_ausente} d&iacute;as</strong> sin entrenar."

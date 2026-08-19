@@ -154,14 +154,20 @@ def registrar_asistencia(
 @router.post("/campana-email/{tenant_id}")
 def enviar_campana_email(
     tenant_id: Optional[int] = None,
-    gmail_user: str = None,
-    gmail_password: str = None,
     umbral_dias: int = UMBRAL_ALERTA_DIAS,
     background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Envía emails automáticos a alumnos ausentes. Solo admin (tenant del token)."""
+    """Envía emails automáticos a alumnos ausentes. Solo admin (tenant del token).
+
+    ── FIX S4 (seguridad) ──
+    Se eliminaron los query params gmail_user/gmail_password (credenciales SMTP
+    expuestas en URL/logs). Los correos se envían SIEMPRE con las credenciales
+    centralizadas del sistema (settings.GMAIL_SMTP_USER / GMAIL_SMTP_APP_PASSWORD),
+    igual que el resto de email_service. Los parámetros manuales eran código
+    muerto: enviar_email_fidelizacion ya no los usa (migrado a SMTP central).
+    """
     # 🔒 SEGURIDAD: tenant_id del token; el path param se ignora.
     tenant_id = current_user["tenant_id"]
     analisis = analizar_fidelizacion(tenant_id, umbral_dias, db, current_user)
@@ -178,8 +184,6 @@ def enviar_campana_email(
             nombre=alumno["nombre"],
             correo=alumno["correo"],
             dias_ausente=alumno["dias_ausente"],
-            gmail_user=gmail_user,
-            gmail_password=gmail_password
         )
         if exito:
             enviados.append(alumno["correo"])
