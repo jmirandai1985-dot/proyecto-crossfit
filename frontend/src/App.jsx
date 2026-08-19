@@ -70,9 +70,10 @@ function App() {
       <AuthProvider>
         <Routes>
 
-          {/* ── /landing y "/" → Landing pública de registro (clase de prueba) ── */}
+          {/* ── /landing → Landing pública de registro (clase de prueba) ── */}
           <Route path="/landing" element={<LandingPage />} />
-          <Route path="/" element={<LandingPage />} />
+          {/* ── "/" → redirige según rol o a /login (RootRedirect) ── */}
+          <Route path="/" element={<RootRedirect />} />
 
           {/* ── /login → si ya autenticado, redirige a su dashboard ── */}
           <Route
