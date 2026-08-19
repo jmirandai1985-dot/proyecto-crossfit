@@ -149,6 +149,24 @@ def descargar_voucher(
     if not solicitud:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
 
+    # ── FIX S1 (seguridad): control de propiedad/tenant ──
+    # El voucher es un comprobante de pago sensible. Solo pueden descargarlo:
+    # (a) el alumno dueño de la solicitud, o (b) un admin/coach del MISMO box
+    # al que pertenece la solicitud. Sin esto, cualquier usuario autenticado
+    # podía leer vouchers ajenos de cualquier tenant con solo cambiar el id (IDOR).
+    rol = current_user.get("rol", "")
+    es_dueno = current_user["usuario_id"] == solicitud.alumno_id
+    es_staff_mismo_box = (
+        rol in ("coach", "admin", "administrador")
+        and current_user["tenant_id"] == solicitud.tenant_id
+    )
+    if not (es_dueno or es_staff_mismo_box):
+        # 403 explícito (convención del proyecto: no silenciar la autorización)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No puedes descargar el voucher de esta solicitud",
+        )
+
     if not solicitud.voucher_url:
         raise HTTPException(status_code=404, detail="Sin voucher disponible")
 
@@ -197,8 +215,13 @@ def aprobar_solicitud(
     # 🔒 El admin autenticado por token (get_current_admin ya validó el rol)
     admin_id = current_user["usuario_id"]
 
+    # ── FIX S2 (seguridad): la solicitud debe ser del tenant del admin ──
+    # Un admin del box A ya no puede aprobar solicitudes del box B (cross-tenant).
+    # Se devuelve 404 (no 403) para no revelar que el id existe en otro tenant.
     solicitud = db.query(SolicitudPlan).filter(
-        SolicitudPlan.id == solicitud_id).first()
+        SolicitudPlan.id == solicitud_id,
+        SolicitudPlan.tenant_id == current_user["tenant_id"],
+    ).first()
     if not solicitud:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
 
@@ -317,8 +340,13 @@ def rechazar_solicitud(
     # 🔒 El admin autenticado por token (elimina el spoofing de admin_id)
     admin_id = current_user["usuario_id"]
 
+    # ── FIX S2 (seguridad): la solicitud debe ser del tenant del admin ──
+    # Un admin del box A ya no puede rechazar solicitudes del box B (cross-tenant).
+    # Se devuelve 404 (no 403) para no revelar que el id existe en otro tenant.
     solicitud = db.query(SolicitudPlan).filter(
-        SolicitudPlan.id == solicitud_id).first()
+        SolicitudPlan.id == solicitud_id,
+        SolicitudPlan.tenant_id == current_user["tenant_id"],
+    ).first()
     if not solicitud:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
 
