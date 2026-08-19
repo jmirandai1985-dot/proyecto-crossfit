@@ -3,12 +3,15 @@ Router de endpoints para gestión de Usuarios
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 import bcrypt
+from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.db.database import get_db
-from app.models.usuario import Usuario
+from app.models.usuario import Usuario, RolUsuario
+from app.models.plan import Plan
+from app.models.suscripcion import Suscripcion
 from app.schemas.usuario import UsuarioCreate, UsuarioUpdate, UsuarioResponse, UsuarioListItem
 from app.core.dependencies import get_current_user, get_current_admin
 from app.core.rate_limit import limiter, LIMIT_CRITICO
@@ -145,6 +148,38 @@ def crear_usuario(
     )
 
     db.add(db_usuario)
+    db.flush()
+
+    # ── FIX P3 (consistencia: alta por admin == flujo de landing) ──
+    # Antes el alta directa dejaba al alumno SIN suscripción: no entraba al gate
+    # de modo prueba (veía todo el menú) y además no podía reservar (sin
+    # membresía activa). Ahora se crea la misma suscripción "Prueba" del landing
+    # (1 token, 7 días), en estado ACTIVO porque el usuario ya se crea activo
+    # (en el landing la suscripción pasa de pendiente→activa al activarse).
+    # Resultado: el alumno entra al modo prueba real (require_full_access).
+    if usuario_data.rol == RolUsuario.alumno:
+        plan_prueba = db.query(Plan).filter(
+            Plan.tenant_id == db_usuario.tenant_id,
+            Plan.nombre == "Prueba",
+        ).first()
+        if not plan_prueba:
+            plan_prueba = Plan(
+                tenant_id=db_usuario.tenant_id, nombre="Prueba", creditos=1,
+                es_ilimitado=False, precio_clp=0, duracion_dias=7, activo=True,
+            )
+            db.add(plan_prueba)
+            db.flush()
+        db.add(Suscripcion(
+            tenant_id=db_usuario.tenant_id,
+            usuario_id=db_usuario.id,
+            plan_id=plan_prueba.id,
+            estado="activo",
+            creditos_totales=1,
+            creditos_disponibles=1,
+            fecha_inicio=datetime.now(timezone.utc),
+            fecha_expiracion=datetime.now(timezone.utc) + timedelta(days=7),
+        ))
+
     db.commit()
     db.refresh(db_usuario)
 

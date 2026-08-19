@@ -16,14 +16,25 @@ router = APIRouter()
 
 
 def _inicio_fin_mes(offset_meses=0):
-    """Retorna (inicio_mes, fin_mes) para el mes actual + offset_meses."""
+    """Retorna (inicio_mes, fin_mes) para el mes actual + offset_meses.
+
+    FIX S12b: la versión anterior usaba (day=28 + 4*offset).replace(day=1), que
+    para offsets -1..-5 colapsaba al MES ACTUAL (28-4=24, 28-8=20, ... siempre
+    dentro del mismo mes). Consecuencia: ingresos_mes_ant, historico_membresias
+    e historico_ingresos mostraban siempre el mes actual. Se reemplaza por
+    aritmética de meses (calendar-safe, no depende de la duración del mes).
+    """
     ahora = datetime.now(timezone.utc)
-    # Calcular primer día del MES ACTUAL
+    # Primer día del MES ACTUAL
     inicio_actual = ahora.replace(
         day=1, hour=0, minute=0, second=0, microsecond=0)
-    # Si offset=0: mes actual. Si offset=-1: mes anterior
-    inicio = (inicio_actual.replace(day=28) + timedelta(days=4*offset_meses)
-              ).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    # Desplazamiento en meses sin depender de la duración del mes
+    total_meses = inicio_actual.year * 12 + (inicio_actual.month - 1) + offset_meses
+    anio_obj = total_meses // 12
+    mes_obj = total_meses % 12 + 1
+    inicio = inicio_actual.replace(
+        year=anio_obj, month=mes_obj, day=1,
+        hour=0, minute=0, second=0, microsecond=0)
     fin = (inicio + timedelta(days=32)).replace(day=1) - timedelta(seconds=1)
     return inicio, fin
 
@@ -371,8 +382,28 @@ def obtener_reportes_analytics(
             """), {"tid": tenant_id, "ini": ini, "fin": (ini + timedelta(days=32)).replace(day=1) - timedelta(seconds=1)}).scalar() or 0
             historico_membresias.append({"mes": label, "membresias": cnt})
 
-        # Historico ingresos 6 meses - PENDIENTE: no existe tabla de transacciones
+        # --- 15b. HISTORICO INGRESOS 6 MESES (desde transacciones_financieras) ---
+        # FIX S12: antes hardcodeado [] con comentario desactualizado ("no existe
+        # tabla de transacciones"). La tabla SI existe y es la misma fuente que
+        # ingresos_mes: se agrupa por mes (ingreso - egreso) los ultimos 6 meses.
         historico_ingresos = []
+        for i in range(5, -1, -1):
+            ini_h, fin_h = _inicio_fin_mes(-i)
+            label_h = f"{MESES[ini_h.month - 1]} {ini_h.year}"
+            ing_h = db.execute(sql_text("""
+                SELECT COALESCE(SUM(CASE WHEN tipo='ingreso' THEN monto ELSE 0 END), 0)
+                FROM transacciones_financieras
+                WHERE tenant_id = :tid AND fecha >= :ini_d AND fecha <= :fin_d
+            """), {"tid": tenant_id, "ini_d": ini_h.date(), "fin_d": fin_h.date()}).scalar() or 0
+            eg_h = db.execute(sql_text("""
+                SELECT COALESCE(SUM(CASE WHEN tipo='egreso' THEN monto ELSE 0 END), 0)
+                FROM transacciones_financieras
+                WHERE tenant_id = :tid AND fecha >= :ini_d AND fecha <= :fin_d
+            """), {"tid": tenant_id, "ini_d": ini_h.date(), "fin_d": fin_h.date()}).scalar() or 0
+            historico_ingresos.append({
+                "mes": label_h,
+                "ingresos": float(ing_h) - float(eg_h),
+            })
 
         # --- RESPUESTA COMPLETA ---
         result = {
