@@ -5,6 +5,7 @@ import os
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import FileResponse
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -218,16 +219,31 @@ def aprobar_solicitud(
     # ── FIX S2 (seguridad): la solicitud debe ser del tenant del admin ──
     # Un admin del box A ya no puede aprobar solicitudes del box B (cross-tenant).
     # Se devuelve 404 (no 403) para no revelar que el id existe en otro tenant.
+    # ── FIX doble-procesamiento (ATOMICO): una solicitud solo puede aprobarse
+    # UNA vez. El UPDATE condicional con estado='pending' garantiza que de dos
+    # admins aprobando en paralelo la misma solicitud, solo uno obtenga
+    # rowcount=1. El check leído-comprobar previo NO era seguro bajo MVCC.
+    result = db.execute(
+        update(SolicitudPlan)
+        .where(SolicitudPlan.id == solicitud_id)
+        .where(SolicitudPlan.tenant_id == current_user["tenant_id"])
+        .where(SolicitudPlan.estado == "pending")
+        .values(estado="approved", aprobado_por=admin_id, comentario_admin="Aprobado")
+    )
+    if result.rowcount == 0:
+        # Distinguir 404 (no existe / otro tenant) de 400 (ya procesada)
+        solicitud = db.query(SolicitudPlan).filter(
+            SolicitudPlan.id == solicitud_id,
+            SolicitudPlan.tenant_id == current_user["tenant_id"],
+        ).first()
+        if not solicitud:
+            raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+        raise HTTPException(
+            status_code=400,
+            detail="La solicitud ya fue procesada (aprobada o rechazada)",
+        )
     solicitud = db.query(SolicitudPlan).filter(
-        SolicitudPlan.id == solicitud_id,
-        SolicitudPlan.tenant_id == current_user["tenant_id"],
-    ).first()
-    if not solicitud:
-        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-
-    solicitud.estado = "approved"
-    solicitud.aprobado_por = admin_id
-    solicitud.comentario_admin = "Aprobado"
+        SolicitudPlan.id == solicitud_id).first()
 
     # Crear suscripción activa
     plan = db.query(Plan).filter(Plan.id == solicitud.plan_id).first()
@@ -343,16 +359,28 @@ def rechazar_solicitud(
     # ── FIX S2 (seguridad): la solicitud debe ser del tenant del admin ──
     # Un admin del box A ya no puede rechazar solicitudes del box B (cross-tenant).
     # Se devuelve 404 (no 403) para no revelar que el id existe en otro tenant.
+    # ── FIX doble-procesamiento (ATOMICO): igual que aprobar.
+    result = db.execute(
+        update(SolicitudPlan)
+        .where(SolicitudPlan.id == solicitud_id)
+        .where(SolicitudPlan.tenant_id == current_user["tenant_id"])
+        .where(SolicitudPlan.estado == "pending")
+        .values(estado="rejected", aprobado_por=admin_id, comentario_admin=motivo)
+    )
+    if result.rowcount == 0:
+        # Distinguir 404 (no existe / otro tenant) de 400 (ya procesada)
+        solicitud = db.query(SolicitudPlan).filter(
+            SolicitudPlan.id == solicitud_id,
+            SolicitudPlan.tenant_id == current_user["tenant_id"],
+        ).first()
+        if not solicitud:
+            raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+        raise HTTPException(
+            status_code=400,
+            detail="La solicitud ya fue procesada (aprobada o rechazada)",
+        )
     solicitud = db.query(SolicitudPlan).filter(
-        SolicitudPlan.id == solicitud_id,
-        SolicitudPlan.tenant_id == current_user["tenant_id"],
-    ).first()
-    if not solicitud:
-        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-
-    solicitud.estado = "rejected"
-    solicitud.aprobado_por = admin_id
-    solicitud.comentario_admin = motivo
+        SolicitudPlan.id == solicitud_id).first()
     db.commit()
 
     # ── Auditoría interna: rechazo de comprobante ──

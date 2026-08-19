@@ -2,6 +2,7 @@
 Router de endpoints para gestión de Pedidos
 """
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -101,8 +102,22 @@ def crear_pedido(
         voucher_url=pedido_data.voucher_url
     )
 
-    # Descontar stock
-    producto.stock -= pedido_data.cantidad
+    # Descontar stock ATÓMICAMENTE (FIX concurrencia / test de esfuerzo):
+    # UPDATE condicional — solo descuenta si hay stock suficiente. Si dos
+    # compras concurrentes piden el último ítem, solo una obtiene rowcount=1
+    # (la otra ve rowcount=0 → 400), evitando stock negativo.
+    result = db.execute(
+        update(Producto)
+        .where(Producto.id == producto.id)
+        .where(Producto.tenant_id == pedido_data.tenant_id)
+        .where(Producto.stock >= pedido_data.cantidad)
+        .values(stock=Producto.stock - pedido_data.cantidad)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Stock insuficiente. Disponible: {producto.stock}, Solicitado: {pedido_data.cantidad}"
+        )
 
     db.add(db_pedido)
     db.commit()
