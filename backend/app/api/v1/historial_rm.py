@@ -86,9 +86,10 @@ def crear_historial_rm(
     tenant_id = current_user["tenant_id"]
     rol = current_user.get("rol", "")
 
-    # 🔒 IDOR: un alumno solo puede registrar PRs para sí mismo.
-    #        coach/admin pueden registrar en nombre de un alumno del mismo box.
-    if rol not in ROLES_STAFF and historial_data.alumno_id != current_user["usuario_id"]:
+    # 🔒 FIX coach (tanda 1): SOLO el propio alumno o admin/administrador pueden
+    # crear PRs. El coach NO registra PRs (vista de solo lectura, diseño de
+    # negocio). Mismo criterio que el PUT /historial-rm.
+    if rol not in ("admin", "administrador") and historial_data.alumno_id != current_user["usuario_id"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No puedes registrar un PR para otro alumno",
@@ -416,8 +417,10 @@ def actualizar_historial_rm(
             detail=f"Historial RM con ID {historial_id} no encontrado"
         )
 
-    # 🔒 IDOR: ownership (propio alumno o staff del mismo box)
-    if rol not in ROLES_STAFF and historial.alumno_id != current_user["usuario_id"]:
+    # 🔒 FIX coach (tanda 1): SOLO el propio alumno (dentro de la ventana de
+    # 24h) o admin/administrador pueden editar un PR. El coach NO edita PRs:
+    # su vista es de solo lectura según el diseño de negocio.
+    if rol not in ("admin", "administrador") and historial.alumno_id != current_user["usuario_id"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No puedes editar los PRs de otro alumno",

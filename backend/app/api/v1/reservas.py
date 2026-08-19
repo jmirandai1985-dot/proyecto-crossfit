@@ -221,12 +221,41 @@ def listar_reservas_por_clase(
     tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_coach),
+    modo_emergencia: bool = Query(
+        False, description="Modo cobertura de emergencia"),
 ):
     """
     Lista todas las reservas de una clase específica. Solo coach/admin.
+
+    🔒 FIX 2: el coach solo puede ver reservas de clases de disciplinas a las
+    que está asignado (misma validación que la creación/edición de WODs).
+    Admin/administrador siempre pasa. modo_emergencia=true permite verlas en
+    disciplinas no asignadas (con auditoría en cobertura_emergencia).
     """
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
+
+    # 🔒 FIX 2: validar pertenencia del coach a la disciplina de la clase.
+    if current_user.get("rol") == "coach":
+        clase = db.query(Clase).filter(
+            Clase.id == clase_id,
+            Clase.tenant_id == tenant_id,
+        ).first()
+        if not clase:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Clase no encontrada",
+            )
+        if clase.disciplina_id:
+            verificar_coach_disciplina(
+                coach_id=current_user["usuario_id"],
+                disciplina_id=clase.disciplina_id,
+                db=db,
+                modo_emergencia=modo_emergencia,
+                clase_id=clase_id,
+                accion="ver_reservas",
+                tenant_id=tenant_id,
+            )
 
     reservas = db.query(Reserva).filter(
         Reserva.clase_id == clase_id,
