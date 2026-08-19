@@ -1,10 +1,13 @@
 """
 Dependencias de FastAPI para autenticación y autorización
 """
+import logging
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+
+logger = logging.getLogger(__name__)
 
 from app.db.database import get_db
 from app.core.security import verify_token
@@ -168,24 +171,92 @@ def verificar_coach_disciplina(
 
     if not relacion:
         if modo_emergencia and clase_id and tenant_id:
-            # Cobertura de emergencia: registrar auditoria y permitir
+            # Cobertura de emergencia: registrar auditoria, actualizar el coach
+            # de la clase al sustituto y notificar al admin. Se PERMITE la
+            # operación (sin aprobación previa, comportamiento intencional).
+            from app.models.clase import Clase
+            clase = db.query(Clase).filter(
+                Clase.id == clase_id, Clase.tenant_id == tenant_id).first()
+            coach_original_id = clase.coach_id if clase else None
+
             from sqlalchemy import text as sa_text
             db.execute(
                 sa_text("""
-                    INSERT INTO cobertura_emergencia 
-                    (tenant_id, usuario_id, coach_id, clase_id, disciplina_id, accion)
-                    VALUES (:tid, :uid, :cid, :clid, :did, :acc)
+                    INSERT INTO cobertura_emergencia
+                    (tenant_id, usuario_id, coach_id, coach_original_id,
+                     clase_id, disciplina_id, accion)
+                    VALUES (:tid, :uid, :cid, :coid, :clid, :did, :acc)
                 """),
                 {"tid": tenant_id, "uid": coach_id, "cid": coach_id,
-                 "clid": clase_id, "did": disciplina_id, "acc": accion}
+                 "coid": coach_original_id, "clid": clase_id,
+                 "did": disciplina_id, "acc": accion}
             )
+            if clase:
+                # Ajuste 2: la clase pasa a reflejar quién la da en la práctica.
+                clase.coach_id = coach_id
             db.flush()
+
+            # Ajuste 1: alerta al admin (in-app + email).
+            _notificar_emergencia(
+                db, tenant_id, coach_id, disciplina_id,
+                clase_id, coach_original_id, accion)
             return  # Permitir la operacion bajo cobertura de emergencia
         else:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"El coach (id={coach_id}) no esta asignado a la disciplina (id={disciplina_id}). No puede operar sobre clases de otra disciplina."
             )
+
+
+def _notificar_emergencia(db: Session, tenant_id: int, coach_id: int,
+                          disciplina_id: int, clase_id: int,
+                          coach_original_id: int, accion: str) -> None:
+    """Alerta a los admin(s) del box cuando un coach cubre una clase en modo
+    emergencia: notificación in-app (tabla notificaciones, destinatario=admin)
+    + email.
+
+    Decisión (19/08/2026): el canal real de alerta al admin es EMAIL (mismo
+    patrón que health_check/enviar_email_solicitud_admin). La in-app queda
+    como registro (el admin aún no tiene inbox in-app propio; el badge de
+    Supervisión sigue siendo la señal visual del panel).
+    """
+    try:
+        from app.models.notificacion import Notificacion
+        from app.models.usuario import Usuario
+        from app.models.disciplina import Disciplina
+        from app.models.clase import Clase
+        from app.services.email_service import send_emergencia_cobertura
+
+        coach = db.query(Usuario).filter(Usuario.id == coach_id).first()
+        coach_nombre = coach.nombre if coach else f"Coach #{coach_id}"
+        disc = db.query(Disciplina).filter(Disciplina.id == disciplina_id).first()
+        disc_nombre = disc.nombre if disc else f"Disciplina #{disciplina_id}"
+        clase = db.query(Clase).filter(Clase.id == clase_id).first()
+        detalle = f"clase #{clase_id}"
+        if clase:
+            detalle = f"clase #{clase_id} ({clase.fecha} {clase.hora_inicio}-{clase.hora_fin})"
+        mensaje = (
+            f"🚨 Cobertura de emergencia: {coach_nombre} cubrió la {detalle} "
+            f"de {disc_nombre} (acción: {accion})"
+        )
+
+        admins = db.query(Usuario).filter(
+            Usuario.tenant_id == tenant_id,
+            Usuario.rol == "administrador",
+        ).all()
+        for ad in admins:
+            db.add(Notificacion(
+                alumno_id=ad.id, tipo="emergencia", mensaje=mensaje, leida=False))
+        db.flush()
+
+        for ad in admins:
+            try:
+                send_emergencia_cobertura(ad.correo, ad.id, mensaje,
+                                          coach_nombre, disc_nombre)
+            except Exception as e:
+                logger.warning(f"No se pudo notificar por email al admin {ad.id}: {e}")
+    except Exception as e:
+        logger.warning(f"No se pudo notificar cobertura de emergencia: {e}")
 
 
 async def get_current_coach(

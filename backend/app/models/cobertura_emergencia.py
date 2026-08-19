@@ -18,6 +18,12 @@ class CoberturaEmergencia(Base):
         "tenants.id", ondelete="CASCADE"), nullable=False)
     coach_id = Column(Integer, ForeignKey(
         "usuarios.id", ondelete="CASCADE"), nullable=False)
+    # Coach que activó la cobertura (mismo valor que coach_id en el flujo actual)
+    usuario_id = Column(Integer, ForeignKey(
+        "usuarios.id", ondelete="SET NULL"), nullable=True)
+    # Coach titular de la clase ANTES de la cobertura (preserva el dato histórico)
+    coach_original_id = Column(Integer, ForeignKey(
+        "usuarios.id", ondelete="SET NULL"), nullable=True)
     clase_id = Column(Integer, ForeignKey(
         "clases.id", ondelete="CASCADE"), nullable=False)
     disciplina_id = Column(Integer, ForeignKey(

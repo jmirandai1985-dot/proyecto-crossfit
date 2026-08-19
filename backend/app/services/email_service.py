@@ -355,6 +355,27 @@ def send_alerta_urgencia_renovacion(nombre: str, correo: str) -> bool:
     return ok
 
 
+def send_emergencia_cobertura(admin_correo: str, admin_id: int, mensaje: str,
+                              coach_nombre: str, disciplina_nombre: str) -> bool:
+    """Alerta al admin cuando un coach cubre una clase en modo emergencia.
+
+    Decisión (19/08/2026): el canal real de alerta al admin es EMAIL (mismo
+    patrón que health_check/enviar_email_solicitud_admin); la notificación
+    in-app se guarda en la tabla `notificaciones` apuntando al admin.
+    """
+    if not admin_correo:
+        return False
+    titulo = "🚨 Cobertura de emergencia registrada"
+    saludo = "Un coach activó la cobertura de emergencia en una clase."
+    cuerpo = f"<p>{mensaje}</p><p>Revisá el panel de Supervisión para ver el detalle.</p>"
+    url = "https://app.urbantrainingbox.cl/admin/supervision-clases"
+    html = _template(titulo, saludo, cuerpo, "Ver supervisión", url)
+    return _enviar(
+        admin_correo,
+        f"🚨 Cobertura de emergencia: {coach_nombre} cubrió {disciplina_nombre}",
+        html, admin_id, tipo="emergencia_cobertura")
+
+
 def send_confirmacion_renovacion_plan(nombre: str, correo: str, plan_nombre: str,
                                       cantidad_clases: int, fecha_vigencia: str, link_app: str) -> bool:
     """Confirmación de renovación - Admin validó el comprobante y el plan se extendió."""
