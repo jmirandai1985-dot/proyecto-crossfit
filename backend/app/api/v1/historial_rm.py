@@ -8,7 +8,7 @@ from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
 from app.db.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_full_access
 from app.services.auditoria_service import registrar_auditoria
 from app.models.historial_rm import HistorialRM
 from app.models.movimiento import Movimiento
@@ -23,7 +23,8 @@ from app.db.crossfit_ratios import CROSSFIT_RATIOS
 from app.db.crossfit_habilidades import CROSSFIT_HABILIDADES
 from app.services.nivel_service import NIVELES
 
-router = APIRouter()
+# FIX 1: alumnos con plan de prueba NO pueden usar RM/Performance Hub/Evolución
+router = APIRouter(dependencies=[Depends(require_full_access)])
 
 # Roles con acceso de staff (pueden operar sobre datos de cualquier alumno del box)
 ROLES_STAFF = ("coach", "admin", "administrador")

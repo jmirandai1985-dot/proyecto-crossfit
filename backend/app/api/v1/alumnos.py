@@ -17,7 +17,7 @@ from app.models.usuario import Usuario, RolUsuario
 from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
 from app.api.v1.usuarios import hash_password
-from app.core.dependencies import get_current_user, get_current_admin
+from app.core.dependencies import get_current_user, get_current_admin, es_usuario_prueba
 from app.services.auditoria_service import registrar_auditoria
 from app.services.email_service import (
     enviar_email_solicitud_admin,
@@ -375,15 +375,12 @@ def es_prueba(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
+    """True si el alumno tiene una suscripción ACTIVA del plan 'Prueba'.
+
+    Comparte criterio con la dependency `require_full_access` (misma lógica).
+    """
     uid = current_user.get("usuario_id")
-    sus = db.query(Suscripcion, Plan).join(
-        Plan, Suscripcion.plan_id == Plan.id
-    ).filter(
-        Suscripcion.usuario_id == uid,
-        Suscripcion.estado == "activo",
-        Plan.nombre == "Prueba"
-    ).first()
-    return {"es_prueba": sus is not None}
+    return {"es_prueba": es_usuario_prueba(db, uid)}
 
 
 # ─── POST /me/primera-clase (alumno autenticado) ───

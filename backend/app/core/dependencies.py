@@ -11,6 +11,8 @@ from app.core.security import verify_token
 from app.models.coach_disciplina import CoachDisciplina
 from app.models.disciplina import Disciplina
 from app.models.cobertura_emergencia import CoberturaEmergencia
+from app.models.suscripcion import Suscripcion
+from app.models.plan import Plan
 
 # Esquema de seguridad HTTP Bearer
 # auto_error=False: no lanza 403 automáticamente si falta el header;
@@ -207,4 +209,47 @@ async def get_current_coach(
             detail="Se requieren permisos de coach o administrador"
         )
 
+    return current_user
+
+
+# ── Acceso limitado: alumnos con plan de prueba (FIX 1, Fase alumno nuevo) ──
+def es_usuario_prueba(db: Session, usuario_id: int) -> bool:
+    """True si el usuario tiene una suscripción ACTIVA del plan 'Prueba'.
+
+    Es el mismo criterio que usa el frontend (GET /alumnos/me/es-prueba) para
+    poder mantener la consistencia UI/backend.
+    """
+    sus = db.query(Suscripcion).join(
+        Plan, Suscripcion.plan_id == Plan.id
+    ).filter(
+        Suscripcion.usuario_id == usuario_id,
+        Suscripcion.estado == "activo",
+        Plan.nombre == "Prueba",
+    ).first()
+    return sus is not None
+
+
+async def require_full_access(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Bloquea a alumnos en modo 'plan de prueba' (acceso limitado).
+
+    El alumno de prueba solo puede usar Clases, Planes y Reservas. Cualquier
+    sección de pago (Performance Hub/RMs, Bazar, Evolución, catálogo de
+    movimientos) devuelve 403 hasta que el admin apruebe su plan pago.
+    Staff (coach/admin) siempre pasa. Se aplica a nivel de router.
+    """
+    rol = current_user.get("rol")
+    if rol in ("coach", "admin", "administrador"):
+        return current_user
+    if es_usuario_prueba(db, current_user.get("usuario_id")):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Acceso limitado: tu plan de prueba solo incluye Clases, "
+                "Planes y Reservas. Elige un plan y espera la aprobación "
+                "para desbloquear esta sección."
+            ),
+        )
     return current_user

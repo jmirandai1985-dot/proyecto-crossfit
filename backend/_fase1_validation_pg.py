@@ -153,16 +153,24 @@ def cleanup():
     test_validacion_) para recuperar también leftovers de una corrida anterior
     que haya muerto a mitad de camino. Se ejecuta antes del seed y en finally.
     """
-    uids = ", ".join(str(u) for u in UID_LIST)
     tids = ", ".join(str(t) for t in TID_LIST)
+
+    # Subquery de alumnos de prueba: la corrida actual (ids) MÁS cualquier
+    # leftover de corridas previas detectado por prefijos. Esto evita el FK
+    # violation al borrar usuarios por prefijo sin haber borrado antes sus
+    # notificaciones/solicitudes (bug visto el 19/08/2026).
+    sub_alumnos = (
+        f"(SELECT id FROM usuarios WHERE correo LIKE 'test_validacion_%' "
+        f"OR rut LIKE 'TV%' OR tenant_id IN ({tids}))"
+    )
 
     # Pasos de borrado en orden seguro de FKs. Cada paso declara su tabla para
     # poder omitir la que no exista en esta BD (schema divergido: ver AUDIT.md §3.1).
     PASOS_CLEANUP = [
-        ("notificaciones", f"DELETE FROM notificaciones WHERE alumno_id IN ({uids})"),
-        ("notificaciones_enviadas", f"DELETE FROM notificaciones_enviadas WHERE alumno_id IN ({uids})"),
+        ("notificaciones", f"DELETE FROM notificaciones WHERE alumno_id IN {sub_alumnos}"),
+        ("notificaciones_enviadas", f"DELETE FROM notificaciones_enviadas WHERE alumno_id IN {sub_alumnos}"),
         ("solicitudes_planes", f"DELETE FROM solicitudes_planes WHERE tenant_id IN ({tids}) "
-                              f"OR alumno_id IN ({uids})"),
+                              f"OR alumno_id IN {sub_alumnos}"),
         ("transacciones_financieras", f"DELETE FROM transacciones_financieras WHERE tenant_id IN ({tids})"),
         ("cobertura_emergencia", f"DELETE FROM cobertura_emergencia WHERE tenant_id IN ({tids})"),
         ("auditoria", f"DELETE FROM auditoria WHERE tenant_id IN ({tids})"),
@@ -175,7 +183,7 @@ def cleanup():
         ("wods", f"DELETE FROM wods WHERE tenant_id IN ({tids})"),
         ("asistencias", f"DELETE FROM asistencias WHERE tenant_id IN ({tids})"),
         ("pedidos", f"DELETE FROM pedidos WHERE tenant_id IN ({tids}) "
-                    f"OR alumno_id IN ({uids})"),
+                    f"OR alumno_id IN {sub_alumnos}"),
         ("productos", f"DELETE FROM productos WHERE tenant_id IN ({tids})"),
         ("usuarios", f"DELETE FROM usuarios WHERE tenant_id IN ({tids}) "
                     f"OR correo LIKE 'test_validacion_%' OR rut LIKE 'TV%'"),

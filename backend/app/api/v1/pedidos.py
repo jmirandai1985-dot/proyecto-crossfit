@@ -8,12 +8,15 @@ from typing import List, Optional
 from app.db.database import get_db
 from app.models.pedido import Pedido
 from app.models.producto import Producto
+from app.models.usuario import Usuario
 from app.schemas.pedido import (
     PedidoCreate, PedidoUpdate, PedidoResponse, PedidoListItem
 )
-from app.core.dependencies import get_current_admin, get_current_user
+from app.core.dependencies import get_current_admin, get_current_user, require_full_access
 
-router = APIRouter()
+# FIX 1: alumnos con plan de prueba NO pueden ver/comprar en el Bazar.
+# FIX 2: el POST de pedidos pasa a get_current_user (alumno con acceso completo).
+router = APIRouter(dependencies=[Depends(require_full_access)])
 
 # Estados válidos y transiciones permitidas
 ESTADOS_VALIDOS = ["pendiente", "validado", "entregado"]
@@ -28,14 +31,42 @@ TRANSICIONES_PERMITIDAS = {
 def crear_pedido(
     pedido_data: PedidoCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_admin),
+    current_user: dict = Depends(get_current_user),
 ):
     """
-    Crea un nuevo pedido.
-    Valida stock y descuenta automáticamente. Solo admin (tenant del token).
+    Crea un nuevo pedido (Bazar).
+
+    🔒 FIX 2: un alumno con acceso completo (no prueba) puede comprar SOLO para
+    sí mismo: tenant y alumno_id salen del token, estado forzado a 'pendiente'.
+    Staff/admin: pueden crear en nombre de un alumno del box (tenant del token).
+    Alumnos de prueba quedan bloqueados por require_full_access (403).
+    Valida stock y descuenta automáticamente.
     """
     # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
-    pedido_data.tenant_id = current_user["tenant_id"]
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+
+    if rol not in ("coach", "admin", "administrador"):
+        # Alumno: solo compra para sí mismo, en estado pendiente.
+        pedido_data.tenant_id = tenant_id
+        pedido_data.alumno_id = current_user["usuario_id"]
+        pedido_data.estado = "pendiente"
+    else:
+        pedido_data.tenant_id = tenant_id
+        if pedido_data.alumno_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Debes indicar el alumno destino del pedido",
+            )
+        alumno = db.query(Usuario).filter(
+            Usuario.id == pedido_data.alumno_id,
+            Usuario.tenant_id == tenant_id,
+        ).first()
+        if not alumno:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="El alumno destino no pertenece a este box",
+            )
 
     # Obtener el producto
     producto = db.query(Producto).filter(

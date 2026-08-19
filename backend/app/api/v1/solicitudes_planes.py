@@ -2,6 +2,7 @@
 Router de endpoints para Solicitudes de Planes (flujo admin)
 """
 import os
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -14,6 +15,7 @@ from app.models.suscripcion import Suscripcion
 from app.models.plan import Plan
 from app.models.usuario import Usuario
 from app.models.notificacion import Notificacion
+from app.models.transaccion_financiera import TransaccionFinanciera
 from app.schemas.solicitud import SolicitudPlanCreate
 from app.core.dependencies import get_current_admin, get_current_user
 from app.core.rate_limit import limiter, LIMIT_CRITICO
@@ -21,6 +23,8 @@ from app.services.auditoria_service import registrar_auditoria
 from datetime import timedelta
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 @router.post("/solicitar", status_code=status.HTTP_201_CREATED)
@@ -235,7 +239,51 @@ def aprobar_solicitud(
     )
     db.add(notificacion)
 
+    # ── FIX 3: desbloqueo de acceso completo tras pagar ──
+    # Si el alumno aún tiene una suscripción ACTIVA del plan 'Prueba', se
+    # expira (estado='vencido') para que es_prueba pase a false y se habiliten
+    # las secciones de pago. NO se borra el historial (solo cambia de estado).
+    # DECISIÓN: se usa 'vencido' porque el enum estado_suscripcion de la BD
+    # solo admite pendiente/activo/vencido/rechazado (un valor
+    # 'expirada_por_upgrade' exigiría ALTER TYPE, fuera de alcance).
+    sus_prueba = db.query(Suscripcion).join(
+        Plan, Suscripcion.plan_id == Plan.id
+    ).filter(
+        Suscripcion.usuario_id == solicitud.alumno_id,
+        Suscripcion.estado == "activo",
+        Plan.nombre == "Prueba",
+    ).all()
+    for sp in sus_prueba:
+        sp.estado = "vencido"
+        logger.info(
+            f"Suscripcion Prueba #{sp.id} del alumno {solicitud.alumno_id} "
+            "expirada por upgrade a plan pago"
+        )
+
     db.commit()
+
+    # ── FIX 4: registrar la transacción financiera del pago aprobado ──
+    # Mismo formato que POST /suscripciones (suscripciones.py) para mantener
+    # consistencia. No debe impedir la aprobación si falla.
+    try:
+        from datetime import date
+        tx = TransaccionFinanciera(
+            tenant_id=suscripcion.tenant_id,
+            tipo="ingreso",
+            categoria="membresia",
+            monto=plan.precio_clp if plan.precio_clp else 0,
+            descripcion=(
+                f"Suscripcion plan {plan.nombre} (usuario #{solicitud.alumno_id})"
+            ),
+            referencia_tipo="suscripcion",
+            referencia_id=suscripcion.id,
+            fecha=date.today(),
+        )
+        db.add(tx)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"No se pudo registrar transaccion financiera: {e}")
 
     # ── Auditoría interna: quién, cuándo, qué (aprobación de comprobante) ──
     registrar_auditoria(

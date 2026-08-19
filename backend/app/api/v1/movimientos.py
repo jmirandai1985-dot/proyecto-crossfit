@@ -6,13 +6,14 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.db.database import get_db
-from app.core.dependencies import get_current_user, get_current_coach
+from app.core.dependencies import get_current_user, get_current_coach, require_full_access
 from app.models.movimiento import Movimiento
 from app.schemas.movimiento import (
     MovimientoCreate, MovimientoUpdate, MovimientoResponse, MovimientoListItem
 )
 
-router = APIRouter()
+# FIX 1: catálogo de movimientos restringido para alumnos de prueba
+router = APIRouter(dependencies=[Depends(require_full_access)])
 
 
 @router.post("", response_model=MovimientoResponse, status_code=status.HTTP_201_CREATED)

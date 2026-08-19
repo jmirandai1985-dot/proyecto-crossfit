@@ -14,10 +14,11 @@ from app.models.producto import Producto
 from app.schemas.producto import (
     ProductoUpdate, ProductoResponse, ProductoListItem
 )
-from app.core.dependencies import get_current_admin, get_current_user
+from app.core.dependencies import get_current_admin, get_current_user, require_full_access
 from app.core.file_validation import validar_archivo, EXTENSIONES_IMAGEN
 
-router = APIRouter()
+# FIX 1: catálogo de movimientos restringido para alumnos de prueba
+router = APIRouter(dependencies=[Depends(require_full_access)])
 
 # Directorio donde se guardarán las imágenes subidas
 UPLOAD_DIR = os.path.join(os.path.dirname(
