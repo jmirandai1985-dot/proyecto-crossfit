@@ -8,7 +8,9 @@ from datetime import datetime, date, time, timedelta
 from app.db.database import get_db
 from app.models.clase import Clase
 from app.schemas import clase as schemas
-from app.core.dependencies import verificar_coach_disciplina, get_current_coach
+from app.core.dependencies import (
+    verificar_coach_disciplina, get_current_coach, get_current_user,
+)
 
 logger = logging.getLogger("uvicorn.clases")
 
@@ -18,7 +20,7 @@ router = APIRouter(tags=["Clases"])
 @router.get("/", response_model=List[schemas.ClaseListItem])
 def listar_clases(
     db: Session = Depends(get_db),
-    tenant_id: int = Query(1),
+    tenant_id: Optional[int] = Query(None),
     disciplina_id: Optional[int] = Query(
         None, description="Filtrar por disciplina"),
     coach_id: Optional[int] = Query(None),
@@ -31,8 +33,12 @@ def listar_clases(
     solo_con_cupo: Optional[bool] = Query(
         None, description="Solo clases con cupos disponibles"),
     skip: int = Query(0),
-    limit: int = Query(100)
+    limit: int = Query(100),
+    current_user: dict = Depends(get_current_user),
 ):
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT (nunca del query).
+    tenant_id = current_user["tenant_id"]
+
     # ── RESPALDO AUTOMÁTICO: Si se consulta un rango y faltan clases,
     #    se generan automáticamente desde horarios_base ──
     try:
@@ -209,8 +215,12 @@ def listar_clases(
 def obtener_clase(
     clase_id: int,
     db: Session = Depends(get_db),
-    tenant_id: int = Query(1)
+    tenant_id: Optional[int] = Query(None),
+    current_user: dict = Depends(get_current_user),
 ):
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
+
     clase = db.query(Clase).filter(
         Clase.id == clase_id,
         Clase.tenant_id == tenant_id
@@ -226,9 +236,12 @@ def obtener_clase(
 def crear_clase(
     clase: schemas.ClaseCreate,
     db: Session = Depends(get_db),
-    tenant_id: int = Query(1),
+    tenant_id: Optional[int] = Query(None),
     current_user: dict = Depends(get_current_coach),
 ):
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
+
     nueva_clase = Clase(
         tenant_id=tenant_id,
         horario_base_id=clase.horario_base_id,
@@ -254,11 +267,14 @@ def actualizar_clase(
     clase_id: int,
     clase_update: schemas.ClaseUpdate,
     db: Session = Depends(get_db),
-    tenant_id: int = Query(1),
+    tenant_id: Optional[int] = Query(None),
     modo_emergencia: bool = Query(
         False, description="Si true, permite asignar coach de otra disciplina con auditoria"),
     current_user: dict = Depends(get_current_coach),
 ):
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
+
     clase = db.query(Clase).filter(
         Clase.id == clase_id,
         Clase.tenant_id == tenant_id
@@ -310,9 +326,12 @@ def actualizar_clase(
 def eliminar_clase(
     clase_id: int,
     db: Session = Depends(get_db),
-    tenant_id: int = Query(1),
+    tenant_id: Optional[int] = Query(None),
     current_user: dict = Depends(get_current_coach),
 ):
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
+
     clase = db.query(Clase).filter(
         Clase.id == clase_id,
         Clase.tenant_id == tenant_id

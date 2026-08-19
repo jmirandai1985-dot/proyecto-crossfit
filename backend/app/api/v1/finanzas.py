@@ -33,7 +33,9 @@ def crear_transaccion(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Registra un ingreso o egreso manual. Solo admin."""
+    """Registra un ingreso o egreso manual. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT (el body se ignora).
+    data.tenant_id = current_user["tenant_id"]
     tx = TransaccionFinanciera(
         tenant_id=data.tenant_id,
         tipo=data.tipo,
@@ -52,13 +54,15 @@ def crear_transaccion(
 
 @router.get("/transacciones")
 def listar_transacciones(
-    tenant_id: int = Query(...),
+    tenant_id: Optional[int] = Query(None),
     mes: Optional[int] = None,
     anio: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Lista todas las transacciones financieras del mes. Solo admin."""
+    """Lista todas las transacciones financieras del mes. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     ahora = datetime.now(timezone.utc)
     mes = mes or ahora.month
     anio = anio or ahora.year

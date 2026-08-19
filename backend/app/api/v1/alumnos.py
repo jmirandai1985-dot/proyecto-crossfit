@@ -18,6 +18,7 @@ from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
 from app.api.v1.usuarios import hash_password
 from app.core.dependencies import get_current_user, get_current_admin
+from app.services.auditoria_service import registrar_auditoria
 from app.services.email_service import (
     enviar_email_solicitud_admin,
     send_solicitud_prueba_clase, send_bienvenida_activacion,
@@ -177,10 +178,12 @@ def registrar_alumno_nuevo(
 # ─── GET /pendientes-activacion (admin only) ───
 @router.get("/pendientes-activacion")
 def alumnos_pendientes(
-    tenant_id: int = 1,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     lista = db.query(Usuario).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
@@ -220,10 +223,12 @@ def contar_alumnos_pendientes(
 @router.put("/{alumno_id}/activar")
 def activar_alumno(
     alumno_id: int,
-    tenant_id: int = 1,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     usuario = db.query(Usuario).filter(
         Usuario.id == alumno_id, Usuario.tenant_id == tenant_id
     ).first()
@@ -260,6 +265,17 @@ def activar_alumno(
         if sus.fecha_expiracion:
             fecha_vigencia = formatear_fecha_es(sus.fecha_expiracion)
     db.commit()
+
+    # ── Auditoría interna: activación de alumno (alta/cambio de estado) ──
+    registrar_auditoria(
+        db,
+        tenant_id=current_user["tenant_id"],
+        usuario_id=current_user["usuario_id"],
+        accion="UPDATE",
+        entidad="usuario",
+        entidad_id=usuario.id,
+        detalle={"alumno_id": usuario.id, "estado": "activo", "es_renovacion": es_renovacion},
+    )
 
     try:
         if es_renovacion:
@@ -299,10 +315,12 @@ def activar_alumno(
 @router.put("/{alumno_id}/rechazar")
 def rechazar_alumno(
     alumno_id: int,
-    tenant_id: int = 1,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     usuario = db.query(Usuario).filter(
         Usuario.id == alumno_id, Usuario.tenant_id == tenant_id
     ).first()
@@ -311,6 +329,17 @@ def rechazar_alumno(
     usuario.estado = "rechazado"
     usuario.activo = False
     db.commit()
+
+    # ── Auditoría interna: rechazo de registro de alumno ──
+    registrar_auditoria(
+        db,
+        tenant_id=current_user["tenant_id"],
+        usuario_id=current_user["usuario_id"],
+        accion="UPDATE",
+        entidad="usuario",
+        entidad_id=usuario.id,
+        detalle={"alumno_id": usuario.id, "estado": "rechazado"},
+    )
     return {"ok": True, "mensaje": "Solicitud rechazada"}
 
 

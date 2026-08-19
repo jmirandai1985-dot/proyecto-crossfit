@@ -11,7 +11,7 @@ from typing import Optional
 from app.db.database import get_db
 from app.models.configuracion import ConfiguracionNegocio
 from app.models.usuario import Usuario
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_current_admin
 
 router = APIRouter()
 
@@ -59,19 +59,14 @@ def obtener_configuracion(
 
 @router.put("")
 def actualizar_configuracion(
-    tenant_id: int,
-    data: ConfiguracionUpdate,
-    current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    data: ConfiguracionUpdate = None,
+    current_user: dict = Depends(get_current_admin),
+    db: Session = Depends(get_db),
 ):
-    """Actualiza o crea la configuracion del negocio. Solo admin."""
-    # Verificar rol admin
-    user = db.query(Usuario).filter(
-        Usuario.id == current_user["usuario_id"]).first()
-    if not user or user.rol not in ("administrador", "admin"):
-        raise HTTPException(
-            status_code=403, detail="Accion no permitida: se requiere rol de administrador"
-        )
+    """Actualiza o crea la configuracion del negocio. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
 
     # Buscar o crear configuracion
     config = db.query(ConfiguracionNegocio).filter(

@@ -5,7 +5,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 from calendar import monthrange
+from typing import Optional
+
 from app.db.database import get_db
+from app.core.dependencies import get_current_user
 from app.models.suscripcion import Suscripcion
 from app.models.plan import Plan
 
@@ -14,11 +17,20 @@ router = APIRouter()
 
 @router.get("/mi-membresia")
 def obtener_mi_membresia(
-    tenant_id: int,
-    alumno_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    alumno_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Devuelve la membresía activa con tokens del alumno"""
+    """Devuelve la membresía activa con tokens del alumno autenticado.
+
+    🔒 SEGURIDAD: tenant_id y alumno_id se derivan del JWT; los parámetros
+    de query se ignoran (cerraba IDOR que exponía el saldo de tokens de
+    cualquier alumno).
+    """
+    tenant_id = current_user["tenant_id"]
+    alumno_id = current_user["usuario_id"]
+
     suscripcion = db.query(Suscripcion).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.usuario_id == alumno_id,

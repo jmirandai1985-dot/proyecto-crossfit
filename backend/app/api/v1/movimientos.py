@@ -3,9 +3,10 @@ Router de endpoints para gestión de Movimientos
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from app.db.database import get_db
+from app.core.dependencies import get_current_user, get_current_coach
 from app.models.movimiento import Movimiento
 from app.schemas.movimiento import (
     MovimientoCreate, MovimientoUpdate, MovimientoResponse, MovimientoListItem
@@ -17,9 +18,13 @@ router = APIRouter()
 @router.post("", response_model=MovimientoResponse, status_code=status.HTTP_201_CREATED)
 def crear_movimiento(
     movimiento_data: MovimientoCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
 ):
-    """Crea un nuevo movimiento"""
+    """Crea un nuevo movimiento. Solo coach/admin (antes estaba abierto)."""
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
+    movimiento_data.tenant_id = tenant_id
 
     db_movimiento = Movimiento(
         tenant_id=movimiento_data.tenant_id,
@@ -38,10 +43,14 @@ def crear_movimiento(
 @router.get("/{movimiento_id}", response_model=MovimientoResponse)
 def obtener_movimiento(
     movimiento_id: int,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Obtiene un movimiento por su ID"""
+    """Obtiene un movimiento por su ID (tenant del token)"""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
+
     movimiento = db.query(Movimiento).filter(
         Movimiento.id == movimiento_id,
         Movimiento.tenant_id == tenant_id
@@ -58,13 +67,17 @@ def obtener_movimiento(
 
 @router.get("", response_model=List[MovimientoListItem])
 def listar_movimientos(
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     skip: int = 0,
     limit: int = 100,
-    activo: bool = None,
-    db: Session = Depends(get_db)
+    activo: Optional[bool] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Lista movimientos de un tenant con paginación"""
+    """Lista movimientos del tenant (derivado del token) con paginación"""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
+
     query = db.query(Movimiento).filter(Movimiento.tenant_id == tenant_id)
 
     if activo is not None:
@@ -79,10 +92,14 @@ def listar_movimientos(
 def actualizar_movimiento(
     movimiento_id: int,
     movimiento_data: MovimientoUpdate,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
 ):
-    """Actualiza un movimiento existente"""
+    """Actualiza un movimiento existente. Solo coach/admin."""
+    # 🔒 SEGURIDAD: tenant_id del token.
+    tenant_id = current_user["tenant_id"]
+
     movimiento = db.query(Movimiento).filter(
         Movimiento.id == movimiento_id,
         Movimiento.tenant_id == tenant_id
@@ -108,10 +125,14 @@ def actualizar_movimiento(
 @router.delete("/{movimiento_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_movimiento(
     movimiento_id: int,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
 ):
-    """Desactiva un movimiento (soft delete)"""
+    """Desactiva un movimiento (soft delete). Solo coach/admin."""
+    # 🔒 SEGURIDAD: tenant_id del token.
+    tenant_id = current_user["tenant_id"]
+
     movimiento = db.query(Movimiento).filter(
         Movimiento.id == movimiento_id,
         Movimiento.tenant_id == tenant_id

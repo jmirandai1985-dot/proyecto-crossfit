@@ -12,6 +12,7 @@ from app.models.usuario import Usuario
 from app.schemas.usuario import UsuarioCreate, UsuarioUpdate, UsuarioResponse, UsuarioListItem
 from app.core.dependencies import get_current_user, get_current_admin
 from app.core.rate_limit import limiter, LIMIT_CRITICO
+from app.services.auditoria_service import registrar_auditoria
 
 router = APIRouter()
 
@@ -103,7 +104,9 @@ def crear_usuario(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Crea un nuevo usuario en el sistema. Solo admin."""
+    """Crea un nuevo usuario en el sistema. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    usuario_data.tenant_id = current_user["tenant_id"]
 
     # Verificar si el RUT ya existe en este tenant
     existing_rut = db.query(Usuario).filter(
@@ -145,6 +148,18 @@ def crear_usuario(
     db.commit()
     db.refresh(db_usuario)
 
+    # ── Auditoría interna: alta de usuario (posible cambio de rol) ──
+    registrar_auditoria(
+        db,
+        tenant_id=current_user["tenant_id"],
+        usuario_id=current_user["usuario_id"],
+        accion="CREATE",
+        entidad="usuario",
+        entidad_id=db_usuario.id,
+        detalle={"rol": db_usuario.rol.value if hasattr(db_usuario.rol, "value") else str(db_usuario.rol),
+                 "correo": db_usuario.correo},
+    )
+
     return db_usuario
 
 
@@ -154,8 +169,13 @@ def obtener_usuario(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Obtiene un usuario por su ID. Solo admin."""
-    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    """Obtiene un usuario por su ID. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant del token (antes no filtraba por tenant).
+    tenant_id = current_user["tenant_id"]
+    usuario = db.query(Usuario).filter(
+        Usuario.id == usuario_id,
+        Usuario.tenant_id == tenant_id,
+    ).first()
 
     if not usuario:
         raise HTTPException(
@@ -168,7 +188,7 @@ def obtener_usuario(
 
 @router.get("/", response_model=List[UsuarioListItem])
 def listar_usuarios(
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     skip: int = 0,
     limit: int = 100,
     activo: Optional[bool] = Query(None),
@@ -176,7 +196,9 @@ def listar_usuarios(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Lista usuarios de un tenant con paginación. Solo admin."""
+    """Lista usuarios del tenant (derivado del token) con paginación. Solo admin."""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     query = db.query(Usuario).filter(Usuario.tenant_id == tenant_id)
 
     if activo is not None:
@@ -197,14 +219,21 @@ def actualizar_usuario(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Actualiza los datos de un usuario existente. Solo admin."""
-    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    """Actualiza los datos de un usuario existente. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant del token (antes no filtraba por tenant).
+    tenant_id = current_user["tenant_id"]
+    usuario = db.query(Usuario).filter(
+        Usuario.id == usuario_id,
+        Usuario.tenant_id == tenant_id,
+    ).first()
 
     if not usuario:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Usuario con ID {usuario_id} no encontrado"
         )
+
+    rol_anterior = usuario.rol.value if hasattr(usuario.rol, "value") else str(usuario.rol)
 
     update_data = usuario_data.model_dump(exclude_unset=True)
 
@@ -233,6 +262,23 @@ def actualizar_usuario(
     db.commit()
     db.refresh(usuario)
 
+    # ── Auditoría interna: cambio de datos/rol de usuario ──
+    rol_nuevo = usuario.rol.value if hasattr(usuario.rol, "value") else str(usuario.rol)
+    registrar_auditoria(
+        db,
+        tenant_id=current_user["tenant_id"],
+        usuario_id=current_user["usuario_id"],
+        accion="UPDATE",
+        entidad="usuario",
+        entidad_id=usuario.id,
+        detalle={
+            "campos": sorted(update_data.keys()),
+            "rol_anterior": rol_anterior,
+            "rol_nuevo": rol_nuevo,
+            "hubo_cambio_rol": rol_anterior != rol_nuevo,
+        },
+    )
+
     return usuario
 
 
@@ -242,8 +288,13 @@ def eliminar_usuario(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Desactiva un usuario (soft delete). Solo admin."""
-    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    """Desactiva un usuario (soft delete). Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant del token (antes no filtraba por tenant).
+    tenant_id = current_user["tenant_id"]
+    usuario = db.query(Usuario).filter(
+        Usuario.id == usuario_id,
+        Usuario.tenant_id == tenant_id,
+    ).first()
 
     if not usuario:
         raise HTTPException(
@@ -253,5 +304,16 @@ def eliminar_usuario(
 
     usuario.activo = False
     db.commit()
+
+    # ── Auditoría interna: baja (soft delete) de usuario ──
+    registrar_auditoria(
+        db,
+        tenant_id=current_user["tenant_id"],
+        usuario_id=current_user["usuario_id"],
+        accion="DELETE",
+        entidad="usuario",
+        entidad_id=usuario.id,
+        detalle={"rol": str(usuario.rol)},
+    )
 
     return None

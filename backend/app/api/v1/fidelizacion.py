@@ -15,7 +15,7 @@ from app.models.usuario import Usuario, RolUsuario
 from app.models.asistencia import Asistencia
 from app.models.reserva import Reserva
 from app.models.clase import Clase
-from app.core.dependencies import get_current_admin
+from app.core.dependencies import get_current_admin, get_current_coach
 
 router = APIRouter()
 
@@ -27,14 +27,17 @@ UMBRAL_ALERTA_DIAS = 7  # Días sin asistir para considerar alumno en riesgo
 # ─────────────────────────────────────────
 @router.get("/analizar/{tenant_id}")
 def analizar_fidelizacion(
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     umbral_dias: int = UMBRAL_ALERTA_DIAS,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     Analiza la última asistencia de cada alumno
-    y detecta quiénes llevan más de X días sin ir
+    y detecta quiénes llevan más de X días sin ir. Solo admin (tenant del token).
     """
+    # 🔒 SEGURIDAD: tenant_id del token; el path param se ignora.
+    tenant_id = current_user["tenant_id"]
     alumnos = db.query(Usuario).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
@@ -92,14 +95,16 @@ def analizar_fidelizacion(
 # ─────────────────────────────────────────
 @router.post("/registrar", status_code=status.HTTP_201_CREATED)
 def registrar_asistencia(
-    tenant_id: int,
-    usuario_id: int,
+    tenant_id: Optional[int] = None,
+    usuario_id: int = None,
     clase: Optional[str] = "WOD",
     fecha: Optional[date] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Registra la asistencia de un alumno al box. Solo admin."""
+    """Registra la asistencia de un alumno al box. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     usuario = db.query(Usuario).filter(
         Usuario.id == usuario_id,
         Usuario.tenant_id == tenant_id,
@@ -148,16 +153,18 @@ def registrar_asistencia(
 # ─────────────────────────────────────────
 @router.post("/campana-email/{tenant_id}")
 def enviar_campana_email(
-    tenant_id: int,
-    gmail_user: str,
-    gmail_password: str,
+    tenant_id: Optional[int] = None,
+    gmail_user: str = None,
+    gmail_password: str = None,
     umbral_dias: int = UMBRAL_ALERTA_DIAS,
     background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Envía emails automáticos a alumnos ausentes. Solo admin."""
-    analisis = analizar_fidelizacion(tenant_id, umbral_dias, db)
+    """Envía emails automáticos a alumnos ausentes. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id del token; el path param se ignora.
+    tenant_id = current_user["tenant_id"]
+    analisis = analizar_fidelizacion(tenant_id, umbral_dias, db, current_user)
     alumnos_alerta = analisis["alumnos_alerta"]
 
     if not alumnos_alerta:
@@ -194,21 +201,32 @@ def enviar_campana_email(
 @router.get("/coach/{coach_id}/en-riesgo")
 def alumnos_coach_en_riesgo(
     coach_id: int,
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     umbral_dias: int = UMBRAL_ALERTA_DIAS,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
 ):
     """
     Obtiene alumnos en riesgo (días sin asistir > umbral) para un coach específico.
     Un alumno "es de un coach" si tiene al menos una reserva en una clase 
     donde clases.coach_id coincide con ese coach.
+    Coach/admin del box (un coach solo puede consultar su propio coach_id).
     """
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+    if rol == "coach" and current_user["usuario_id"] != coach_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo puedes consultar los alumnos en riesgo de tus propias clases",
+        )
     alumnos_coach = db.query(
         distinct(Reserva.alumno_id)
     ).join(
         Clase, Reserva.clase_id == Clase.id
     ).filter(
-        Clase.coach_id == coach_id
+        Clase.coach_id == coach_id,
+        Clase.tenant_id == tenant_id,
     ).all()
 
     alumno_ids = [r[0] for r in alumnos_coach]
@@ -291,14 +309,17 @@ def alumnos_coach_en_riesgo(
 # ─────────────────────────────────────────
 @router.get("/tenant/{tenant_id}/en-riesgo")
 def alumnos_tenant_en_riesgo(
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     umbral_dias: int = UMBRAL_ALERTA_DIAS,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     Obtiene TODOS los alumnos activos del tenant que estan en riesgo
     (dias sin asistir > umbral). Version global para admin, sin filtrar por coach.
     """
+    # 🔒 SEGURIDAD: tenant_id del token; el path param se ignora.
+    tenant_id = current_user["tenant_id"]
     alumnos = db.query(Usuario).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
@@ -365,17 +386,21 @@ def alumnos_tenant_en_riesgo(
 # ─────────────────────────────────────────
 @router.get("/tenant/{tenant_id}/vencimientos")
 def vencimientos_inminentes(
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     dias_umbral: int = 5,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     Devuelve alumnos con membresia activa cuya fecha_expiracion esta
-    dentro de los proximos N dias (default 5).
+    dentro de los proximos N dias (default 5). Solo admin (tenant del token).
     """
     from app.models.suscripcion import Suscripcion
     from app.models.plan import Plan
     from datetime import timedelta
+
+    # 🔒 SEGURIDAD: tenant_id del token; el path param se ignora.
+    tenant_id = current_user["tenant_id"]
 
     hoy = date.today()
     fecha_limite = hoy + timedelta(days=dias_umbral)

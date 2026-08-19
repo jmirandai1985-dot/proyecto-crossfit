@@ -12,6 +12,7 @@ from app.models.suscripcion import Suscripcion
 from app.models.plan import Plan
 from app.core.dependencies import get_current_user
 from app.core.rate_limit import limiter, LIMIT_CRITICO
+from app.services.auditoria_service import registrar_auditoria
 
 router = APIRouter()
 
@@ -99,6 +100,23 @@ def comprar_emergencia(
     suscripcion.creditos_disponibles = plan.creditos or 999
 
     db.commit()
+
+    # ── Auditoría interna: compra de emergencia (ajuste de tokens) ──
+    registrar_auditoria(
+        db,
+        tenant_id=current_user["tenant_id"],
+        usuario_id=current_user["usuario_id"],
+        accion="UPDATE",
+        entidad="suscripcion",
+        entidad_id=suscripcion.id,
+        detalle={
+            "tipo": "compra_emergencia",
+            "alumno_id": data.alumno_id,
+            "plan_id": data.plan_id,
+            "creditos_nuevos": suscripcion.creditos_disponibles,
+            "tokens_sobrantes": tokens_sobrantes,
+        },
+    )
 
     # Si es primera compra y tiene tokens sobrantes (deberían ser 0 pero por si acaso)
     acumula = tokens_sobrantes > 0

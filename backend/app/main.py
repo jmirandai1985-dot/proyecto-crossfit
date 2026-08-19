@@ -22,6 +22,7 @@ from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.core.logging import setup_logger
 from app.middleware.security_headers import SecurityHeadersMiddleware
+from app.middleware.tenant_audit import TenantAuditMiddleware
 
 # ── Logger con sanitización de PII ──
 logger = setup_logger()
@@ -82,6 +83,9 @@ app.add_middleware(
 
 # ---- HEADERS DE SEGURIDAD (X-Frame-Options, CSP, HSTS, etc.) ----
 app.add_middleware(SecurityHeadersMiddleware)
+
+# ---- AUDITORIA DE TENANT_ID (solo loguea patrones inseguros: None / 1) ----
+app.add_middleware(TenantAuditMiddleware)
 
 # ---- RATE LIMITING GLOBAL (slowapi) ----
 app.state.limiter = limiter

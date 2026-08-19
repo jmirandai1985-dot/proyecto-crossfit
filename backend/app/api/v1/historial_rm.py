@@ -4,9 +4,12 @@ Router de endpoints para gestión de Historial RM
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List
+from typing import List, Optional
+from datetime import datetime, timezone, timedelta
 
 from app.db.database import get_db
+from app.core.dependencies import get_current_user
+from app.services.auditoria_service import registrar_auditoria
 from app.models.historial_rm import HistorialRM
 from app.models.movimiento import Movimiento
 from app.models.usuario import Usuario
@@ -22,16 +25,77 @@ from app.services.nivel_service import NIVELES
 
 router = APIRouter()
 
+# Roles con acceso de staff (pueden operar sobre datos de cualquier alumno del box)
+ROLES_STAFF = ("coach", "admin", "administrador")
+
+# Ventana de edición de PRs (regla de negocio): 24 horas desde su creación.
+VENTANA_EDICION_PR_HORAS = 24
+
+
+def _verificar_acceso_alumno(current_user: dict, alumno_id: int) -> None:
+    """
+    Solo el propio alumno (mismo tenant por token) o staff del box puede
+    acceder a los datos de un alumno_id que no sea el suyo.
+    """
+    rol = current_user.get("rol", "")
+    if rol in ROLES_STAFF:
+        return
+    if current_user.get("usuario_id") != alumno_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para acceder a los datos de otro alumno",
+        )
+
+
+def _verificar_ventana_edicion(created_at) -> None:
+    """
+    Regla de negocio: un PR solo puede editarse dentro de las 24 horas
+    posteriores a su registro.
+    """
+    if created_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="El registro no tiene fecha de creación; no se permite editarlo",
+        )
+    creado = created_at
+    if creado.tzinfo is None:
+        creado = creado.replace(tzinfo=timezone.utc)
+    antiguedad = datetime.now(timezone.utc) - creado
+    if antiguedad > timedelta(hours=VENTANA_EDICION_PR_HORAS):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Edición no permitida: el PR se registró hace más de "
+                f"{VENTANA_EDICION_PR_HORAS} horas. "
+                "La edición solo está habilitada dentro de las 24h posteriores al registro."
+            ),
+        )
+
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def crear_historial_rm(
     historial_data: HistorialRMCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """Crea un nuevo registro de RM y calcula nivel automáticamente"""
     from app.models.movimiento import Movimiento
 
-    # Verify movimiento exists
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT (nunca del body).
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+
+    # 🔒 IDOR: un alumno solo puede registrar PRs para sí mismo.
+    #        coach/admin pueden registrar en nombre de un alumno del mismo box.
+    if rol not in ROLES_STAFF and historial_data.alumno_id != current_user["usuario_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No puedes registrar un PR para otro alumno",
+        )
+
+    historial_data.tenant_id = tenant_id  # sobreescribe lo que venga del body
+
+    # Verify movimiento existe
     movimiento = db.query(Movimiento).filter(
         Movimiento.id == historial_data.movimiento_id,
         Movimiento.tenant_id == historial_data.tenant_id
@@ -128,10 +192,14 @@ def crear_historial_rm(
 @router.get("/{historial_id}", response_model=HistorialRMResponse)
 def obtener_historial_rm(
     historial_id: int,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Obtiene un registro de RM por su ID"""
+    """Obtiene un registro de RM por su ID (solo el propio alumno o staff del box)"""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
+
     historial = db.query(HistorialRM).filter(
         HistorialRM.id == historial_id,
         HistorialRM.tenant_id == tenant_id
@@ -143,19 +211,33 @@ def obtener_historial_rm(
             detail=f"Historial RM con ID {historial_id} no encontrado"
         )
 
+    _verificar_acceso_alumno(current_user, historial.alumno_id)
+
     return historial
 
 
 @router.get("", response_model=List[HistorialRMListItem])
 def listar_historial_rm(
-    tenant_id: int,
-    alumno_id: int = None,
-    movimiento_id: int = None,
+    tenant_id: Optional[int] = None,
+    alumno_id: Optional[int] = None,
+    movimiento_id: Optional[int] = None,
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Lista registros de RM con filtros opcionales"""
+    """Lista registros de RM con filtros opcionales (solo propios o staff)"""
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+
+    # 🔒 IDOR: si se filtra por alumno, validar acceso.
+    # Si no se filtra y el usuario es alumno, listar solo los propios.
+    if alumno_id is not None:
+        _verificar_acceso_alumno(current_user, alumno_id)
+    elif rol not in ROLES_STAFF:
+        alumno_id = current_user["usuario_id"]
+
     query = db.query(HistorialRM).filter(HistorialRM.tenant_id == tenant_id)
 
     if alumno_id is not None:
@@ -218,10 +300,11 @@ def listar_historial_rm(
 @router.get("/alumnos/{alumno_id}/rms", response_model=List[RMPorMovimiento])
 def obtener_rms_alumno(
     alumno_id: int,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Obtiene el mejor RM por movimiento para un alumno.
+    """Obtiene el mejor RM por movimiento para un alumno (propio o staff del box).
 
     Para movimientos de FUERZA y GIMNASTICO se usa el criterio actual:
     mayor peso_kg (o mayor reps para gimnástico).
@@ -229,6 +312,10 @@ def obtener_rms_alumno(
     Para movimientos de CARDIO y MAQUINAS (metabolico) no tiene sentido
     comparar por peso_kg (es un dummy), así que se usa el registro MÁS RECIENTE.
     """
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
+    _verificar_acceso_alumno(current_user, alumno_id)
+
     cols = [
         HistorialRM.movimiento_id,
         Movimiento.nombre.label('movimiento_nombre'),
@@ -300,10 +387,23 @@ def obtener_rms_alumno(
 def actualizar_historial_rm(
     historial_id: int,
     historial_data: HistorialRMUpdate,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Actualiza un registro de RM existente"""
+    """
+    Actualiza un registro de RM existente.
+
+    🔒 Seguridad:
+    - tenant_id siempre del token JWT.
+    - Solo el propio alumno o staff del mismo box puede editar.
+    - Regla de negocio: la edición solo está permitida dentro de las 24h
+      posteriores al registro (created_at).
+    """
+    # 🔒 SEGURIDAD: tenant_id del token.
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+
     historial = db.query(HistorialRM).filter(
         HistorialRM.id == historial_id,
         HistorialRM.tenant_id == tenant_id
@@ -314,6 +414,16 @@ def actualizar_historial_rm(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Historial RM con ID {historial_id} no encontrado"
         )
+
+    # 🔒 IDOR: ownership (propio alumno o staff del mismo box)
+    if rol not in ROLES_STAFF and historial.alumno_id != current_user["usuario_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No puedes editar los PRs de otro alumno",
+        )
+
+    # ⏱ Regla de negocio: ventana de edición de 24 horas.
+    _verificar_ventana_edicion(historial.created_at)
 
     update_data = historial_data.model_dump(exclude_unset=True)
 
@@ -323,16 +433,40 @@ def actualizar_historial_rm(
     db.commit()
     db.refresh(historial)
 
+    # ── Auditoría interna: edición de PR ──
+    registrar_auditoria(
+        db,
+        tenant_id=current_user["tenant_id"],
+        usuario_id=current_user["usuario_id"],
+        accion="UPDATE",
+        entidad="historial_rm",
+        entidad_id=historial.id,
+        detalle={
+            "alumno_id": historial.alumno_id,
+            "movimiento_id": historial.movimiento_id,
+            "campos": sorted(update_data.keys()),
+        },
+    )
+
     return historial
 
 
 @router.delete("/{historial_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_historial_rm(
     historial_id: int,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Elimina un registro de RM"""
+    """
+    Elimina un registro de RM.
+
+    🔒 Seguridad: solo el propio alumno o admin del mismo tenant.
+    """
+    # 🔒 SEGURIDAD: tenant_id del token.
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+
     historial = db.query(HistorialRM).filter(
         HistorialRM.id == historial_id,
         HistorialRM.tenant_id == tenant_id
@@ -344,8 +478,26 @@ def eliminar_historial_rm(
             detail=f"Historial RM con ID {historial_id} no encontrado"
         )
 
+    # 🔒 IDOR: solo el propio alumno o admin del mismo box.
+    if rol not in ("admin", "administrador") and historial.alumno_id != current_user["usuario_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo puedes eliminar tus propios PRs (o ser administrador del box)",
+        )
+
     db.delete(historial)
     db.commit()
+
+    # ── Auditoría interna: borrado de PR ──
+    registrar_auditoria(
+        db,
+        tenant_id=current_user["tenant_id"],
+        usuario_id=current_user["usuario_id"],
+        accion="DELETE",
+        entidad="historial_rm",
+        entidad_id=historial_id,
+        detalle={"alumno_id": historial.alumno_id, "movimiento_id": historial.movimiento_id},
+    )
 
     return None
 
@@ -355,10 +507,15 @@ def calcular_nivel_fuerza_endpoint(
     alumno_id: int,
     movimiento_id: int,
     peso_rm: float,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Calcula el nivel de fuerza para un movimiento específico"""
+    """Calcula el nivel de fuerza para un movimiento específico (propio o staff)"""
+    # 🔒 SEGURIDAD: tenant_id del token + acceso al alumno.
+    tenant_id = current_user["tenant_id"]
+    _verificar_acceso_alumno(current_user, alumno_id)
+
     movimiento = db.query(Movimiento).filter(
         Movimiento.id == movimiento_id,
         Movimiento.tenant_id == tenant_id
@@ -386,10 +543,15 @@ def calcular_nivel_gimnastico_endpoint(
     alumno_id: int,
     movimiento_id: int,
     valor: float,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Calcula el nivel gimnástico para un movimiento específico"""
+    """Calcula el nivel gimnástico para un movimiento específico (propio o staff)"""
+    # 🔒 SEGURIDAD: tenant_id del token + acceso al alumno.
+    tenant_id = current_user["tenant_id"]
+    _verificar_acceso_alumno(current_user, alumno_id)
+
     movimiento = db.query(Movimiento).filter(
         Movimiento.id == movimiento_id,
         Movimiento.tenant_id == tenant_id
@@ -410,14 +572,20 @@ def calcular_nivel_gimnastico_endpoint(
 def obtener_historial_movimiento(
     alumno_id: int,
     movimiento_id: int,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Obtiene el historial COMPLETO de un movimiento específico para un alumno,
     ordenado por fecha ascendente (para gráficos de evolución).
+    Solo el propio alumno o staff del box.
     """
     from app.models.movimiento import Movimiento
+
+    # 🔒 SEGURIDAD: tenant_id del token + acceso al alumno.
+    tenant_id = current_user["tenant_id"]
+    _verificar_acceso_alumno(current_user, alumno_id)
 
     movimiento = db.query(Movimiento).filter(
         Movimiento.id == movimiento_id,
@@ -454,23 +622,33 @@ def obtener_historial_movimiento(
 @router.get("/alumnos/{alumno_id}/nivel-general")
 def obtener_nivel_general_endpoint(
     alumno_id: int,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Calcula el nivel general del alumno (fuerza y gimnástico)"""
+    """Calcula el nivel general del alumno (fuerza y gimnástico). Propio o staff."""
+    # 🔒 SEGURIDAD: tenant_id del token + acceso al alumno.
+    tenant_id = current_user["tenant_id"]
+    _verificar_acceso_alumno(current_user, alumno_id)
     return calcular_nivel_general(alumno_id, db, tenant_id)
 
 
 @router.get("/alumnos/{alumno_id}/nivel-fuerza")
 def obtener_nivel_fuerza_alumno(
     alumno_id: int,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Calcula el nivel de fuerza del alumno basado en sus RMs.
     Retorna el nivel general y los top RMs de movimientos de fuerza.
+    Solo el propio alumno o staff del box.
     """
+    # 🔒 SEGURIDAD: tenant_id del token + acceso al alumno.
+    tenant_id = current_user["tenant_id"]
+    _verificar_acceso_alumno(current_user, alumno_id)
+
     resultado = calcular_nivel_general(alumno_id, db, tenant_id)
 
     # Extraer top RMs de fuerza para mostrar en el dashboard
@@ -505,8 +683,9 @@ def obtener_nivel_fuerza_alumno(
 @router.get("/alumnos/{alumno_id}/progreso-destacado")
 def obtener_progreso_destacado(
     alumno_id: int,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Retorna los movimientos con MEJOR progreso del alumno.
@@ -517,7 +696,12 @@ def obtener_progreso_destacado(
 
     También retorna los movimiento_ids que tienen al menos 1 registro
     (para destacar en el dropdown del frontend).
+    Solo el propio alumno o staff del box.
     """
+    # 🔒 SEGURIDAD: tenant_id del token + acceso al alumno.
+    tenant_id = current_user["tenant_id"]
+    _verificar_acceso_alumno(current_user, alumno_id)
+
     from app.models.movimiento import Movimiento
     from datetime import date
 
@@ -625,13 +809,19 @@ def obtener_progreso_destacado(
 @router.get("/alumnos/{alumno_id}/nivel-gimnastico")
 def obtener_nivel_gimnastico_alumno(
     alumno_id: int,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Calcula el nivel gimnástico del alumno basado en sus RMs.
     Retorna el nivel general y los top RMs de movimientos gimnásticos.
+    Solo el propio alumno o staff del box.
     """
+    # 🔒 SEGURIDAD: tenant_id del token + acceso al alumno.
+    tenant_id = current_user["tenant_id"]
+    _verificar_acceso_alumno(current_user, alumno_id)
+
     resultado = calcular_nivel_general(alumno_id, db, tenant_id)
 
     # Extraer top RMs gimnásticos: consultar DIRECTAMENTE los RMs del alumno

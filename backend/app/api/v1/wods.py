@@ -623,13 +623,21 @@ def parse_wod_texto(texto: str, tenant_id: int, db: Session):
 # ──────────────────────────────────────────────
 
 @router.post("/parse", response_model=WodParseResponse)
-def parsear_wod(data: WodParseRequest, db: Session = Depends(get_db)):
+def parsear_wod(
+    data: WodParseRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
     """
     Recibe texto plano de un WOD y devuelve los movimientos parseados,
     agrupados por fases (CALENTAMIENTO, FUERZA, WOD).
     Busca cada movimiento en la base de datos.
     Incluye debug_info con el detalle de cada línea procesada.
+
+    🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT (nunca del body).
     """
+    # 🔒 SEGURIDAD: tenant_id del token.
+    data.tenant_id = current_user["tenant_id"]
     movimientos, errores, debug_list, fases = parse_wod_texto(
         texto=data.texto,
         tenant_id=data.tenant_id,
@@ -646,7 +654,7 @@ def parsear_wod(data: WodParseRequest, db: Session = Depends(get_db)):
 @router.post("/", response_model=schemas.WodResponse)
 def crear_wod(
     wod_data: schemas.WodCreate,
-    tenant_id: int = Query(1),
+    tenant_id: int = Query(None),
     current_user: dict = Depends(get_current_coach),
     disciplina_id: int = Query(
         None, description="ID de la disciplina para validar permisos del coach (OBLIGATORIO para coaches)"),
@@ -661,9 +669,12 @@ def crear_wod(
       - fases[]: formato agrupado por fases (CALENTAMIENTO, FUERZA, WOD)
 
     Seguridad: coach_id se obtiene del token JWT (current_user), NO de un parametro del cliente.
+    tenant_id también se deriva del token JWT.
     Los coaches solo pueden crear WODs en disciplinas a las que estan asignados.
     modo_emergencia=true permite crear WODs en disciplinas no asignadas (con auditoria).
     """
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
     coach_id = current_user["usuario_id"]
     rol = current_user.get("rol", "")
 
@@ -744,7 +755,15 @@ def crear_wod(
 
 
 @router.get("/", response_model=list[schemas.WodResponse])
-def listar_wods(tenant_id: int = Query(1), fecha: date = Query(None), estado: str = Query(None), db: Session = Depends(get_db)):
+def listar_wods(
+    tenant_id: int = Query(None),
+    fecha: date = Query(None),
+    estado: str = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     query = db.query(Wod).filter(
         Wod.tenant_id == tenant_id, Wod.activo == True)
     if fecha:
@@ -761,16 +780,36 @@ def listar_wods(tenant_id: int = Query(1), fecha: date = Query(None), estado: st
 # ──────────────────────────────────────────────
 
 @router.get("/hoy")
-def obtener_wod_hoy(tenant_id: int = Query(1), alumno_id: int = Query(None), db: Session = Depends(get_db)):
+def obtener_wod_hoy(
+    tenant_id: int = Query(None),
+    alumno_id: int = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
     """
-    Retorna el WOD publicado para el día de hoy del tenant especificado.
+    Retorna el WOD publicado para el día de hoy del tenant del usuario.
     Si se proporciona alumno_id, retorna el WOD de la clase donde ese
     alumno tiene una reserva activa HOY (discrimina por disciplina).
     Si no hay WOD para hoy o el alumno no tiene reserva, retorna None.
+
+    🔒 SEGURIDAD: tenant_id del token. Si viene alumno_id, solo se permite
+    consultarlo para sí mismo (o staff del mismo box).
     """
     from datetime import date
     from app.models.reserva import Reserva
     from app.models.clase import Clase
+
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+
+    # 🔒 IDOR: si se pasa alumno_id, validar que sea el propio o staff.
+    if alumno_id is not None:
+        if rol not in ("coach", "admin", "administrador") and alumno_id != current_user["usuario_id"]:
+            raise HTTPException(
+                status_code=403,
+                detail="No puedes consultar el WOD de otro alumno",
+            )
+
     hoy = date.today()
 
     # Si se especifica alumno, buscar el WOD de su clase reservada hoy
@@ -812,7 +851,14 @@ def obtener_wod_hoy(tenant_id: int = Query(1), alumno_id: int = Query(None), db:
 
 
 @router.get("/{wod_id}", response_model=schemas.WodResponse)
-def obtener_wod(wod_id: int, tenant_id: int = Query(1), db: Session = Depends(get_db)):
+def obtener_wod(
+    wod_id: int,
+    tenant_id: int = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     wod = db.query(Wod).filter(
         Wod.id == wod_id, Wod.tenant_id == tenant_id).first()
     if not wod:
@@ -824,7 +870,7 @@ def obtener_wod(wod_id: int, tenant_id: int = Query(1), db: Session = Depends(ge
 def actualizar_wod(
     wod_id: int,
     wod_data: schemas.WodUpdate,
-    tenant_id: int = Query(1),
+    tenant_id: int = Query(None),
     current_user: dict = Depends(get_current_coach),
     disciplina_id: int = Query(
         None, description="ID de la disciplina para validar permisos del coach (OBLIGATORIO para coaches)"),
@@ -837,9 +883,12 @@ def actualizar_wod(
     Si envía movimientos[] o fases[], reemplaza todos los movimientos previos.
 
     Seguridad: coach_id se obtiene del token JWT (current_user), NO de un parametro del cliente.
+    tenant_id también se deriva del token JWT.
     Los coaches solo pueden editar WODs en disciplinas a las que estan asignados.
     modo_emergencia=true permite editar WODs en disciplinas no asignadas (con auditoria).
     """
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
     wod = db.query(Wod).filter(
         Wod.id == wod_id, Wod.tenant_id == tenant_id).first()
     if not wod:
@@ -938,10 +987,12 @@ def actualizar_wod(
 @router.delete("/{wod_id}")
 def eliminar_wod(
     wod_id: int,
-    tenant_id: int = Query(1),
+    tenant_id: int = Query(None),
     current_user: dict = Depends(get_current_coach),
     db: Session = Depends(get_db)
 ):
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
     wod = db.query(Wod).filter(
         Wod.id == wod_id, Wod.tenant_id == tenant_id).first()
     if not wod:
@@ -959,7 +1010,7 @@ def eliminar_wod(
 def asignar_wod_a_clase(
     clase_id: int,
     wod_id: int,
-    tenant_id: int = Query(1),
+    tenant_id: int = Query(None),
     current_user: dict = Depends(get_current_coach),
     modo_emergencia: bool = Query(
         False, description="Modo cobertura de emergencia"),
@@ -970,9 +1021,12 @@ def asignar_wod_a_clase(
     La clase debe existir y el WOD debe existir.
 
     Seguridad: coach validado OBLIGATORIAMENTE contra la disciplina de la clase.
+    tenant_id se deriva del token JWT.
     modo_emergencia=true permite operar en disciplinas no asignadas (con auditoria).
     Admin: sin restricciones.
     """
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
     # Verificar que la clase existe
     clase = db.query(Clase).filter(
         Clase.id == clase_id,
@@ -1024,7 +1078,7 @@ def asignar_wod_a_clase(
 @router.post("/batch")
 def asignar_wod_batch(
     body: dict,
-    tenant_id: int = Query(1),
+    tenant_id: int = Query(None),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -1034,7 +1088,10 @@ def asignar_wod_batch(
 
     Seguridad: valida que el coach autenticado pertenezca a la disciplina
     de CADA clase. Si una sola clase es de una disciplina ajena, TODO el batch falla con 403.
+    tenant_id se deriva del token JWT.
     """
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
     wod_id = body.get("wod_id")
     clase_ids = body.get("clase_ids", [])
 

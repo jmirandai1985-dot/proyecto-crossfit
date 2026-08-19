@@ -3,14 +3,14 @@ Router de endpoints para gestión de Coach-Disciplinas
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from app.db.database import get_db
 from app.models.coach_disciplina import CoachDisciplina
 from app.schemas.coach_disciplina import (
     CoachDisciplinaCreate, CoachDisciplinaUpdate, CoachDisciplinaResponse, CoachDisciplinaListItem, CoachDisciplinaReplaceRequest
 )
-from app.core.dependencies import get_current_admin
+from app.core.dependencies import get_current_admin, get_current_coach
 
 router = APIRouter()
 
@@ -21,7 +21,9 @@ def crear_coach_disciplina(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Crea una nueva relación coach-disciplina"""
+    """Crea una nueva relación coach-disciplina (tenant del token)"""
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    coach_disciplina_data.tenant_id = current_user["tenant_id"]
 
     # Verificar que no exista una relación duplicada
     existing = db.query(CoachDisciplina).filter(
@@ -53,11 +55,16 @@ def crear_coach_disciplina(
 @router.get("/{coach_disciplina_id}", response_model=CoachDisciplinaResponse)
 def obtener_coach_disciplina(
     coach_disciplina_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
 ):
-    """Obtiene una relación coach-disciplina por su ID"""
+    """Obtiene una relación coach-disciplina por su ID (coach/admin, tenant del token)"""
+    # 🔒 SEGURIDAD: tenant del token (antes no filtraba por tenant).
+    tenant_id = current_user["tenant_id"]
     coach_disciplina = db.query(CoachDisciplina).filter(
-        CoachDisciplina.id == coach_disciplina_id).first()
+        CoachDisciplina.id == coach_disciplina_id,
+        CoachDisciplina.tenant_id == tenant_id,
+    ).first()
 
     if not coach_disciplina:
         raise HTTPException(
@@ -70,13 +77,16 @@ def obtener_coach_disciplina(
 
 @router.get("", response_model=List[CoachDisciplinaListItem])
 def listar_coach_disciplinas(
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     skip: int = 0,
     limit: int = 100,
     activo: bool = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
 ):
-    """Lista relaciones coach-disciplina de un tenant con paginación"""
+    """Lista relaciones coach-disciplina del tenant (derivado del token) con paginación"""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     query = db.query(CoachDisciplina).filter(
         CoachDisciplina.tenant_id == tenant_id)
 
@@ -99,6 +109,8 @@ def reemplazar_coach_disciplinas(
     - Las disciplinas en disciplina_ids se marcan activo=true (upsert)
     - Las que ya no están se marcan activo=false (no se borran)
     """
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    data.tenant_id = current_user["tenant_id"]
     # Obtener asignaciones actuales
     actuales = db.query(CoachDisciplina).filter(
         CoachDisciplina.tenant_id == data.tenant_id,
@@ -150,9 +162,13 @@ def actualizar_coach_disciplina(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Actualiza una relación coach-disciplina existente"""
+    """Actualiza una relación coach-disciplina existente (tenant del token)"""
+    # 🔒 SEGURIDAD: tenant del token (antes no filtraba por tenant).
+    tenant_id = current_user["tenant_id"]
     coach_disciplina = db.query(CoachDisciplina).filter(
-        CoachDisciplina.id == coach_disciplina_id).first()
+        CoachDisciplina.id == coach_disciplina_id,
+        CoachDisciplina.tenant_id == tenant_id,
+    ).first()
 
     if not coach_disciplina:
         raise HTTPException(
@@ -177,9 +193,13 @@ def eliminar_coach_disciplina(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Desactiva una relación coach-disciplina (soft delete)"""
+    """Desactiva una relación coach-disciplina (soft delete, tenant del token)"""
+    # 🔒 SEGURIDAD: tenant del token (antes no filtraba por tenant).
+    tenant_id = current_user["tenant_id"]
     coach_disciplina = db.query(CoachDisciplina).filter(
-        CoachDisciplina.id == coach_disciplina_id).first()
+        CoachDisciplina.id == coach_disciplina_id,
+        CoachDisciplina.tenant_id == tenant_id,
+    ).first()
 
     if not coach_disciplina:
         raise HTTPException(

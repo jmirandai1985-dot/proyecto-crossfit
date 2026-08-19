@@ -3,9 +3,11 @@ Router para subida de archivos (vouchers, imágenes)
 """
 import os
 import uuid
-from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends, Request
 from fastapi.responses import JSONResponse
 from app.core.dependencies import get_current_user
+from app.core.file_validation import validar_archivo
+from app.core.rate_limit import limiter, LIMIT_CRITICO
 
 router = APIRouter()
 
@@ -19,7 +21,9 @@ MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 
 
 @router.post("/voucher", status_code=status.HTTP_201_CREATED)
+@limiter.limit(LIMIT_CRITICO)
 async def upload_voucher(
+    request: Request,
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user),
 ):
@@ -41,6 +45,15 @@ async def upload_voucher(
         raise HTTPException(
             status_code=400, detail="Archivo demasiado grande. Máximo 5MB")
 
+    # Validar contenido real (magic bytes), no solo la extensión.
+    # Evita subir ejecutables o archivos disfrazados con extensión .jpg/.pdf.
+    if not validar_archivo(ext, content, content_type=file.content_type):
+        raise HTTPException(
+            status_code=400,
+            detail="El contenido del archivo no coincide con su extensión. "
+                   "Envía una imagen (JPG, PNG, GIF, WEBP) o PDF válido."
+        )
+
     # Generar nombre único
     unique_name = f"voucher_{uuid.uuid4().hex}{ext}"
     file_path = os.path.join(UPLOAD_DIR, unique_name)
@@ -52,3 +65,4 @@ async def upload_voucher(
     # Devolver URL pública
     public_url = f"/static/uploads/{unique_name}"
     return {"url": public_url, "filename": unique_name}
+

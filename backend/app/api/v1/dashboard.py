@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, case, text
 from datetime import datetime, timedelta, date
 from app.db.database import get_db
+from typing import Optional
 from app.models.usuario import Usuario
 from app.core.dependencies import get_current_admin, get_current_user
 
@@ -15,12 +16,14 @@ router = APIRouter()
 
 @router.get("/{tenant_id}/ocupacion-hoy")
 def ocupacion_hoy(
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """Devuelve las clases de HOY de CrossFit/Levantamiento Olimpico con coach.
-    Requiere usuario autenticado."""
+    Requiere usuario autenticado. 🔒 SEGURIDAD: tenant_id del token (el path param se ignora)."""
+    # 🔒 SEGURIDAD: tenant_id del token; el path param se ignora.
+    tenant_id = current_user["tenant_id"]
     hoy = date.today()
     rows = db.execute(text("""
         SELECT c.id, c.hora_inicio::text, d.nombre as disciplina,

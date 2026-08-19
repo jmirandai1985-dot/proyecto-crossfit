@@ -4,7 +4,7 @@ Router de endpoints para gestión de Retención
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List
+from typing import List, Optional
 from datetime import datetime, date, timedelta
 
 from app.db.database import get_db
@@ -25,7 +25,10 @@ def crear_retencion(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Crea un nuevo registro de retención. Solo admin."""
+    """Crea un nuevo registro de retención. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
+    retencion_data.tenant_id = tenant_id
 
     db_retencion = RetencionAlumno(
         tenant_id=retencion_data.tenant_id,
@@ -46,10 +49,13 @@ def crear_retencion(
 @router.get("/{retencion_id}", response_model=RetencionAlumnoResponse)
 def obtener_retencion(
     retencion_id: int,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Obtiene un registro de retención por su ID"""
+    """Obtiene un registro de retención por su ID. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     retencion = db.query(RetencionAlumno).filter(
         RetencionAlumno.id == retencion_id,
         RetencionAlumno.tenant_id == tenant_id
@@ -66,13 +72,16 @@ def obtener_retencion(
 
 @router.get("", response_model=List[RetencionAlumnoListItem])
 def listar_retencion(
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     skip: int = 0,
     limit: int = 100,
     estado_plan: str = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Lista registros de retención con filtros opcionales"""
+    """Lista registros de retención con filtros opcionales. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     query = db.query(RetencionAlumno).filter(
         RetencionAlumno.tenant_id == tenant_id)
 
@@ -86,14 +95,18 @@ def listar_retencion(
 
 @router.get("/en-riesgo", response_model=List[AlumnoEnRiesgo])
 def obtener_alumnos_en_riesgo(
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     dias_alerta: int = 7,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     Obtiene alumnos en riesgo de abandono.
     Criterios: proxima_renovacion <= hoy + dias_alerta y estado_plan != inactivo
+    Solo admin (tenant del token).
     """
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     hoy = date.today()
     fecha_limite = hoy + timedelta(days=dias_alerta)
 
@@ -128,13 +141,17 @@ def obtener_alumnos_en_riesgo(
 
 @router.get("/kpi-coach", response_model=List[KPICoach])
 def obtener_kpi_coach(
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     Obtiene KPI de retención por coach.
     Retorna: total_alumnos, alumnos_en_riesgo, tasa_retencion (%)
+    Solo admin (tenant del token).
     """
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     hoy = date.today()
     fecha_limite = hoy + timedelta(days=7)
 
@@ -184,11 +201,13 @@ def obtener_kpi_coach(
 def actualizar_retencion(
     retencion_id: int,
     retencion_data: RetencionAlumnoUpdate,
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Actualiza un registro de retención existente. Solo admin."""
+    """Actualiza un registro de retención existente. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id del token.
+    tenant_id = current_user["tenant_id"]
     retencion = db.query(RetencionAlumno).filter(
         RetencionAlumno.id == retencion_id,
         RetencionAlumno.tenant_id == tenant_id
@@ -214,11 +233,13 @@ def actualizar_retencion(
 @router.delete("/{retencion_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_retencion(
     retencion_id: int,
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Elimina un registro de retención. Solo admin."""
+    """Elimina un registro de retención. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id del token.
+    tenant_id = current_user["tenant_id"]
     retencion = db.query(RetencionAlumno).filter(
         RetencionAlumno.id == retencion_id,
         RetencionAlumno.tenant_id == tenant_id

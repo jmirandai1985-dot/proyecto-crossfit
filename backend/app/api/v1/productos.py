@@ -14,7 +14,8 @@ from app.models.producto import Producto
 from app.schemas.producto import (
     ProductoUpdate, ProductoResponse, ProductoListItem
 )
-from app.core.dependencies import get_current_admin
+from app.core.dependencies import get_current_admin, get_current_user
+from app.core.file_validation import validar_archivo, EXTENSIONES_IMAGEN
 
 router = APIRouter()
 
@@ -32,20 +33,22 @@ async def crear_producto(
     nombre: str = Form(...),
     precio: float = Form(...),
     stock: int = Form(...),
-    tenant_id: int = Form(...),
+    tenant_id: Optional[int] = Form(None),
     descripcion: Optional[str] = Form(None),
     activo: bool = Form(True),
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Crea un nuevo producto. Acepta multipart/form-data para soportar imagen opcional. Solo admin."""
+    """Crea un nuevo producto. Acepta multipart/form-data para soportar imagen opcional. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT (el Form se ignora).
+    tenant_id = current_user["tenant_id"]
 
     imagen_url = None
 
     # Procesar imagen si se adjuntó
     if file and file.filename:
-        # Validar tipo de contenido
+        # Validar tipo de contenido declarado (chequeo primario)
         if file.content_type not in ALLOWED_CONTENT_TYPES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -60,8 +63,19 @@ async def crear_producto(
                 detail="El archivo supera el tamaño máximo permitido de 5 MB."
             )
 
-        # Generar nombre único para evitar colisiones
+        # Validar contenido real por magic bytes (el content-type lo declara el
+        # cliente y es spoofeable). Rechaza ejecutables disfrazados de imagen.
         extension = os.path.splitext(file.filename)[1].lower()
+        if not validar_archivo(
+            extension, contenido,
+            content_type=file.content_type, permitidas=EXTENSIONES_IMAGEN
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El contenido del archivo no coincide con una imagen válida (JPG, PNG, WEBP o GIF)."
+            )
+
+        # Generar nombre único para evitar colisiones
         nombre_archivo = f"{uuid.uuid4().hex}{extension}"
         ruta_destino = os.path.join(UPLOAD_DIR, nombre_archivo)
 
@@ -90,10 +104,14 @@ async def crear_producto(
 @router.get("/{producto_id}", response_model=ProductoResponse)
 def obtener_producto(
     producto_id: int,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Obtiene un producto por su ID"""
+    """Obtiene un producto por su ID (tenant del token)"""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
+
     producto = db.query(Producto).filter(
         Producto.id == producto_id,
         Producto.tenant_id == tenant_id
@@ -110,13 +128,17 @@ def obtener_producto(
 
 @router.get("", response_model=List[ProductoListItem])
 def listar_productos(
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     skip: int = 0,
     limit: int = 100,
-    activo: bool = None,
-    db: Session = Depends(get_db)
+    activo: Optional[bool] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Lista productos de un tenant con paginación"""
+    """Lista productos del tenant (derivado del token) con paginación"""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
+
     query = db.query(Producto).filter(Producto.tenant_id == tenant_id)
 
     if activo is not None:
@@ -131,11 +153,13 @@ def listar_productos(
 def actualizar_producto(
     producto_id: int,
     producto_data: ProductoUpdate,
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Actualiza un producto existente. Solo admin."""
+    """Actualiza un producto existente. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     producto = db.query(Producto).filter(
         Producto.id == producto_id,
         Producto.tenant_id == tenant_id
@@ -161,11 +185,13 @@ def actualizar_producto(
 @router.delete("/{producto_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_producto(
     producto_id: int,
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Desactiva un producto (soft delete). Solo admin."""
+    """Desactiva un producto (soft delete). Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     producto = db.query(Producto).filter(
         Producto.id == producto_id,
         Producto.tenant_id == tenant_id

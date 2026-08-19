@@ -3,7 +3,7 @@ Router de endpoints para gestión de Pedidos
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from app.db.database import get_db
 from app.models.pedido import Pedido
@@ -11,7 +11,7 @@ from app.models.producto import Producto
 from app.schemas.pedido import (
     PedidoCreate, PedidoUpdate, PedidoResponse, PedidoListItem
 )
-from app.core.dependencies import get_current_admin
+from app.core.dependencies import get_current_admin, get_current_user
 
 router = APIRouter()
 
@@ -32,8 +32,10 @@ def crear_pedido(
 ):
     """
     Crea un nuevo pedido.
-    Valida stock y descuenta automáticamente. Solo admin.
+    Valida stock y descuenta automáticamente. Solo admin (tenant del token).
     """
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    pedido_data.tenant_id = current_user["tenant_id"]
 
     # Obtener el producto
     producto = db.query(Producto).filter(
@@ -81,10 +83,15 @@ def crear_pedido(
 @router.get("/{pedido_id}", response_model=PedidoResponse)
 def obtener_pedido(
     pedido_id: int,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Obtiene un pedido por su ID"""
+    """Obtiene un pedido por su ID (propio o staff del box, tenant del token)"""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+
     pedido = db.query(Pedido).filter(
         Pedido.id == pedido_id,
         Pedido.tenant_id == tenant_id
@@ -96,19 +103,40 @@ def obtener_pedido(
             detail=f"Pedido con ID {pedido_id} no encontrado"
         )
 
+    # 🔒 IDOR: solo el dueño del pedido o staff del box.
+    if rol not in ("coach", "admin", "administrador") and pedido.alumno_id != current_user["usuario_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No puedes ver los pedidos de otro alumno",
+        )
+
     return pedido
 
 
 @router.get("", response_model=List[PedidoListItem])
 def listar_pedidos(
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     skip: int = 0,
     limit: int = 100,
     estado: str = None,
-    alumno_id: int = None,
-    db: Session = Depends(get_db)
+    alumno_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Lista pedidos de un tenant con filtros opcionales"""
+    """Lista pedidos del tenant con filtros opcionales (propios o staff)"""
+    # 🔒 SEGURIDAD: tenant_id del token + ownership.
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+
+    if alumno_id is not None:
+        if rol not in ("coach", "admin", "administrador") and alumno_id != current_user["usuario_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No puedes ver los pedidos de otro alumno",
+            )
+    elif rol not in ("coach", "admin", "administrador"):
+        alumno_id = current_user["usuario_id"]
+
     query = db.query(Pedido).filter(Pedido.tenant_id == tenant_id)
 
     if estado is not None:
@@ -127,7 +155,7 @@ def listar_pedidos(
 def actualizar_estado_pedido(
     pedido_id: int,
     nuevo_estado: str,
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
@@ -135,6 +163,8 @@ def actualizar_estado_pedido(
     Actualiza el estado de un pedido.
     Solo permite avanzar: pendiente → validado → entregado (no retroceder)
     """
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     pedido = db.query(Pedido).filter(
         Pedido.id == pedido_id,
         Pedido.tenant_id == tenant_id
@@ -171,11 +201,13 @@ def actualizar_estado_pedido(
 def actualizar_pedido(
     pedido_id: int,
     pedido_data: PedidoUpdate,
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Actualiza un pedido existente. Solo admin."""
+    """Actualiza un pedido existente. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     pedido = db.query(Pedido).filter(
         Pedido.id == pedido_id,
         Pedido.tenant_id == tenant_id
@@ -201,11 +233,13 @@ def actualizar_pedido(
 @router.delete("/{pedido_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_pedido(
     pedido_id: int,
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Elimina un pedido (solo si está en estado pendiente). Solo admin."""
+    """Elimina un pedido (solo si está en estado pendiente). Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     pedido = db.query(Pedido).filter(
         Pedido.id == pedido_id,
         Pedido.tenant_id == tenant_id

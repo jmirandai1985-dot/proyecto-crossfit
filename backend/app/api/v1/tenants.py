@@ -53,12 +53,11 @@ def crear_tenant(
 @router.get("/{tenant_id}", response_model=TenantResponse)
 def obtener_tenant(
     tenant_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
-    Obtiene un tenant por su ID
-
-    - **tenant_id**: ID del tenant a consultar
+    Obtiene un tenant por su ID. Solo admin (antes estaba público).
     """
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
 
@@ -76,14 +75,11 @@ def listar_tenants(
     skip: int = 0,
     limit: int = 100,
     activo: bool = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
-    Lista todos los tenants con paginación
-
-    - **skip**: Número de registros a saltar (paginación)
-    - **limit**: Número máximo de registros a devolver
-    - **activo**: Filtrar por tenants activos/inactivos (opcional)
+    Lista todos los tenants con paginación. Solo admin (antes estaba público).
     """
     query = db.query(Tenant)
 
@@ -98,12 +94,11 @@ def listar_tenants(
 @router.get("/subdomain/{subdomain}", response_model=TenantResponse)
 def obtener_tenant_por_subdominio(
     subdomain: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
-    Obtiene un tenant por su subdominio
-
-    - **subdomain**: Subdominio del tenant
+    Obtiene un tenant por su subdominio. Solo admin (antes estaba público).
     """
     tenant = db.query(Tenant).filter(Tenant.subdomain == subdomain).first()
 

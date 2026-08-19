@@ -7,21 +7,23 @@ from typing import Optional
 
 from app.db.database import get_db
 from app.models.disciplina import Disciplina
-from app.core.dependencies import get_current_admin
+from app.core.dependencies import get_current_admin, get_current_user
 
 router = APIRouter()
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 def crear_disciplina(
-    tenant_id: int,
-    nombre: str,
+    tenant_id: Optional[int] = None,
+    nombre: str = None,
     descripcion: Optional[str] = None,
     es_open_box: bool = False,
     requiere_coach: bool = True,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
     existing = db.query(Disciplina).filter(
         Disciplina.tenant_id == tenant_id,
         Disciplina.nombre == nombre
@@ -49,12 +51,16 @@ def crear_disciplina(
 
 @router.get("/")
 def listar_disciplinas(
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     skip: int = 0,
     limit: int = 100,
     activo: Optional[bool] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
+
     query = db.query(Disciplina).filter(Disciplina.tenant_id == tenant_id)
     if activo is not None:
         query = query.filter(Disciplina.activo == activo)
@@ -64,10 +70,14 @@ def listar_disciplinas(
 @router.get("/{disciplina_id}")
 def obtener_disciplina(
     disciplina_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
+    # 🔒 SEGURIDAD: scoping por tenant del token.
+    tenant_id = current_user["tenant_id"]
     disciplina = db.query(Disciplina).filter(
-        Disciplina.id == disciplina_id
+        Disciplina.id == disciplina_id,
+        Disciplina.tenant_id == tenant_id,
     ).first()
     if not disciplina:
         raise HTTPException(
@@ -88,8 +98,11 @@ def actualizar_disciplina(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
+    # 🔒 SEGURIDAD: tenant del token (antes no filtraba por tenant).
+    tenant_id = current_user["tenant_id"]
     disciplina = db.query(Disciplina).filter(
-        Disciplina.id == disciplina_id
+        Disciplina.id == disciplina_id,
+        Disciplina.tenant_id == tenant_id,
     ).first()
     if not disciplina:
         raise HTTPException(
@@ -118,8 +131,11 @@ def eliminar_disciplina(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
+    # 🔒 SEGURIDAD: tenant del token (antes no filtraba por tenant).
+    tenant_id = current_user["tenant_id"]
     disciplina = db.query(Disciplina).filter(
-        Disciplina.id == disciplina_id
+        Disciplina.id == disciplina_id,
+        Disciplina.tenant_id == tenant_id,
     ).first()
     if not disciplina:
         raise HTTPException(

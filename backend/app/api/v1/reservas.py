@@ -7,7 +7,7 @@ from app.models.disciplina import Disciplina
 from app.models.clase import Clase
 from app.models.reserva import Reserva
 from app.db.database import get_db
-from typing import List
+from typing import List, Optional
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
@@ -51,7 +51,7 @@ def crear_reserva(
 
     # ARREGLO 3: Extraer tenant_id del usuario autenticado (no del JSON)
     # (endurecimiento IDOR: el body no puede forzar otro tenant)
-    tenant_id = current_user.get("tenant_id") or reserva_data.tenant_id
+    tenant_id = current_user["tenant_id"]
 
     # Verificar que la clase existe y pertenece al tenant
     clase = db.query(Clase).filter(
@@ -155,7 +155,7 @@ def crear_reserva(
 @router.put("/{reserva_id}/asistencia")
 def marcar_asistencia(
     reserva_id: int,
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     asistio: bool = Body(True, embed=True),
     current_user: dict = Depends(get_current_coach),
@@ -171,6 +171,9 @@ def marcar_asistencia(
     Los coaches solo pueden marcar asistencia en clases de disciplinas a las que pertenecen.
     modo_emergencia=true permite marcar asistencia en disciplinas no asignadas (con auditoria).
     """
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
+
     reserva = db.query(Reserva).filter(
         Reserva.id == reserva_id,
         Reserva.tenant_id == tenant_id
@@ -215,12 +218,16 @@ def marcar_asistencia(
 @router.get("/por-clase/{clase_id}")
 def listar_reservas_por_clase(
     clase_id: int,
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
 ):
     """
-    Lista todas las reservas de una clase específica.
+    Lista todas las reservas de una clase específica. Solo coach/admin.
     """
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
+
     reservas = db.query(Reserva).filter(
         Reserva.clase_id == clase_id,
         Reserva.tenant_id == tenant_id
@@ -247,15 +254,31 @@ def listar_reservas_por_clase(
 
 @router.get("/asistencia-semanal")
 def obtener_asistencia_semanal(
-    tenant_id: int,
-    usuario_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    usuario_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Retorna la asistencia del alumno agrupada por semana en los últimos 3 meses.
     Cada elemento tiene: semana (fecha ISO), asistencias, total_reservas.
+
+    🔒 SEGURIDAD: tenant_id del token. Si usuario_id no es el propio, se
+    requiere rol coach/admin del mismo box.
     """
     from datetime import datetime, timezone, date, timedelta
+
+    # 🔒 SEGURIDAD: tenant_id del token + acceso al usuario.
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+    if usuario_id is not None:
+        if rol not in ("coach", "admin", "administrador") and usuario_id != current_user["usuario_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No puedes ver la asistencia de otro alumno",
+            )
+    else:
+        usuario_id = current_user["usuario_id"]
 
     hoy = date.today()
     hace_3_meses = date(hoy.year, hoy.month, 1) - timedelta(days=90)
@@ -299,9 +322,10 @@ def obtener_asistencia_semanal(
 
 @router.get("/asistencia-mes")
 def obtener_asistencia_mes(
-    tenant_id: int,
-    usuario_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    usuario_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Calcula la asistencia del alumno en el mes actual.
@@ -309,8 +333,23 @@ def obtener_asistencia_mes(
     no la fecha de creación de la reserva.
 
     Retorna: total_reservas, asistencias, porcentaje
+
+    🔒 SEGURIDAD: tenant_id del token. Si usuario_id no es el propio, se
+    requiere rol coach/admin del mismo box.
     """
     from datetime import datetime, timezone, date
+
+    # 🔒 SEGURIDAD: tenant_id del token + acceso al usuario.
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+    if usuario_id is not None:
+        if rol not in ("coach", "admin", "administrador") and usuario_id != current_user["usuario_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No puedes ver la asistencia de otro alumno",
+            )
+    else:
+        usuario_id = current_user["usuario_id"]
 
     hoy = date.today()
     primer_dia_mes = date(hoy.year, hoy.month, 1)
@@ -373,20 +412,37 @@ def obtener_asistencia_mes(
 
 @router.get("")
 def listar_reservas(
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     skip: int = 0,
     limit: int = 100,
-    estado: str = None,
-    usuario_id: int = None,
-    db: Session = Depends(get_db)
+    estado: Optional[str] = None,
+    usuario_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
-    Lista reservas de un tenant con paginación y filtros opcionales.
+    Lista reservas del tenant con paginación y filtros opcionales.
     Incluye datos de la clase asociada (disciplina, fecha, horario).
 
     NOTA: Usa columnas explícitas (with_entities) en vez de .add_columns()
     para evitar el patrón frágil de acceso row.ModelName que causó bugs previos.
+
+    🔒 SEGURIDAD: tenant_id del token. Si se filtra por usuario, se requiere
+    que sea el propio alumno o staff del box.
     """
+    # 🔒 SEGURIDAD: tenant_id del token + acceso al usuario.
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+    if usuario_id is not None:
+        if rol not in ("coach", "admin", "administrador") and usuario_id != current_user["usuario_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No puedes ver las reservas de otro alumno",
+            )
+    elif rol not in ("coach", "admin", "administrador"):
+        # Alumno sin filtro: listar solo sus propias reservas.
+        usuario_id = current_user["usuario_id"]
+
     # ── Construir query con columnas explícitas ──
     query = db.query(
         Reserva.id,
@@ -445,7 +501,7 @@ def listar_reservas(
 @router.get("/{reserva_id}", response_model=ReservaResponse)
 def obtener_reserva(
     reserva_id: int,
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -453,6 +509,8 @@ def obtener_reserva(
     Obtiene una reserva por su ID.
     Solo el dueño de la reserva, coaches o admins pueden verla.
     """
+    # 🔒 SEGURIDAD: tenant_id del token.
+    tenant_id = current_user["tenant_id"]
     reserva = db.query(Reserva).filter(
         Reserva.id == reserva_id,
         Reserva.tenant_id == tenant_id
@@ -479,7 +537,7 @@ def obtener_reserva(
 def actualizar_reserva(
     reserva_id: int,
     reserva_data: ReservaUpdate,
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -487,6 +545,9 @@ def actualizar_reserva(
     Actualiza una reserva existente.
     Solo el dueño de la reserva, coaches o admins pueden modificarla.
     """
+    # 🔒 SEGURIDAD: tenant_id del token.
+    tenant_id = current_user["tenant_id"]
+
     reserva = db.query(Reserva).filter(
         Reserva.id == reserva_id,
         Reserva.tenant_id == tenant_id
@@ -520,7 +581,7 @@ def actualizar_reserva(
 @router.delete("/{reserva_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_reserva(
     reserva_id: int,
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -535,6 +596,9 @@ def eliminar_reserva(
     """
     from datetime import datetime, timezone, timedelta
     from app.models.suscripcion import Suscripcion
+
+    # 🔒 SEGURIDAD: tenant_id del token.
+    tenant_id = current_user["tenant_id"]
 
     reserva = db.query(Reserva).filter(
         Reserva.id == reserva_id,

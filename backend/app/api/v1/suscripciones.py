@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, timezone
@@ -8,6 +8,7 @@ from app.models.suscripcion import Suscripcion
 from app.models.transaccion_financiera import TransaccionFinanciera
 from app.core.dependencies import get_current_admin
 from app.core.rate_limit import limiter, LIMIT_CRITICO
+from app.services.auditoria_service import registrar_auditoria
 
 router = APIRouter()
 
@@ -31,6 +32,8 @@ def crear_suscripcion(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT (el body se ignora).
+    data.tenant_id = current_user["tenant_id"]
     try:
         fecha_exp = datetime.fromisoformat(
             data.fecha_expiracion.replace('Z', '+00:00'))
@@ -50,6 +53,23 @@ def crear_suscripcion(
     db.add(db_sus)
     db.commit()
     db.refresh(db_sus)
+
+    # ── Auditoría interna: alta de suscripción (ajuste de tokens) ──
+    registrar_auditoria(
+        db,
+        tenant_id=current_user["tenant_id"],
+        usuario_id=current_user["usuario_id"],
+        accion="CREATE",
+        entidad="suscripcion",
+        entidad_id=db_sus.id,
+        detalle={
+            "usuario_id": data.usuario_id,
+            "plan_id": data.plan_id,
+            "estado": data.estado,
+            "creditos_totales": data.creditos_totales,
+            "creditos_disponibles": data.creditos_disponibles,
+        },
+    )
 
     # Auto-insertar ingreso en transacciones_financieras
     try:
@@ -80,12 +100,14 @@ def crear_suscripcion(
 
 @router.get("/suscripciones")
 def listar_suscripciones(
-    tenant_id: int,
+    tenant_id: Optional[int] = Query(None),
     usuario_id: Optional[int] = None,
     estado: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     query = db.query(Suscripcion).filter(Suscripcion.tenant_id == tenant_id)
     if usuario_id:
         query = query.filter(Suscripcion.usuario_id == usuario_id)

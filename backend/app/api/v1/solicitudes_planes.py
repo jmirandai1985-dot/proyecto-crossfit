@@ -17,20 +17,56 @@ from app.models.notificacion import Notificacion
 from app.schemas.solicitud import SolicitudPlanCreate
 from app.core.dependencies import get_current_admin, get_current_user
 from app.core.rate_limit import limiter, LIMIT_CRITICO
+from app.services.auditoria_service import registrar_auditoria
 from datetime import timedelta
 
 router = APIRouter()
 
 
 @router.post("/solicitar", status_code=status.HTTP_201_CREATED)
+@limiter.limit(LIMIT_CRITICO)
 def solicitar_plan(
+    request: Request,
     data: SolicitudPlanCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Crea una solicitud de plan pendiente de aprobación admin.
     NO activa el plan automáticamente.
+
+    🔒 SEGURIDAD: tenant_id y alumno_id se derivan del JWT. Un alumno solo
+    puede solicitar para sí mismo; coach/admin pueden hacerlo en nombre de
+    un alumno del mismo box.
     """
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+
+    # 🔒 IDOR: un alumno solo puede solicitar para sí mismo.
+    #   Si manda un alumno_id ajeno → 403 explícito (no se silencia).
+    if rol not in ("coach", "admin", "administrador"):
+        if data.alumno_id != current_user["usuario_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No puedes solicitar un plan para otro alumno",
+            )
+        data.alumno_id = current_user["usuario_id"]
+    else:
+        # Staff: permitir pedido en nombre de un alumno, pero dentro del box.
+        # El alumno destino debe pertenecer al tenant del token.
+        alumno_destino = db.query(Usuario).filter(
+            Usuario.id == data.alumno_id,
+            Usuario.tenant_id == tenant_id
+        ).first()
+        if not alumno_destino:
+            raise HTTPException(
+                status_code=403,
+                detail="El alumno destino no pertenece a este box",
+            )
+
+    # El tenant SIEMPRE sale del token (nunca del body).
+    data.tenant_id = tenant_id
+
     # Verificar que el plan existe
     plan = db.query(Plan).filter(Plan.id == data.plan_id).first()
     if not plan:
@@ -63,11 +99,13 @@ def solicitar_plan(
 
 @router.get("/pendientes")
 def listar_solicitudes_pendientes(
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Lista solicitudes pendientes para el admin (solo admin)."""
+    """Lista solicitudes pendientes para el admin (solo admin, tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     solicitudes = db.query(SolicitudPlan).filter(
         SolicitudPlan.tenant_id == tenant_id,
         SolicitudPlan.estado == "pending"
@@ -199,6 +237,22 @@ def aprobar_solicitud(
 
     db.commit()
 
+    # ── Auditoría interna: quién, cuándo, qué (aprobación de comprobante) ──
+    registrar_auditoria(
+        db,
+        tenant_id=current_user["tenant_id"],
+        usuario_id=current_user["usuario_id"],
+        accion="UPDATE",
+        entidad="solicitud_plan",
+        entidad_id=solicitud.id,
+        detalle={
+            "estado": "approved",
+            "alumno_id": solicitud.alumno_id,
+            "plan_id": solicitud.plan_id,
+            "voucher_url": solicitud.voucher_url,
+        },
+    )
+
     return {"status": "approved", "message": "Plan activado exitosamente"}
 
 
@@ -224,6 +278,22 @@ def rechazar_solicitud(
     solicitud.aprobado_por = admin_id
     solicitud.comentario_admin = motivo
     db.commit()
+
+    # ── Auditoría interna: rechazo de comprobante ──
+    registrar_auditoria(
+        db,
+        tenant_id=current_user["tenant_id"],
+        usuario_id=current_user["usuario_id"],
+        accion="UPDATE",
+        entidad="solicitud_plan",
+        entidad_id=solicitud.id,
+        detalle={
+            "estado": "rejected",
+            "alumno_id": solicitud.alumno_id,
+            "plan_id": solicitud.plan_id,
+            "motivo": motivo,
+        },
+    )
 
     # Crear notificación de rechazo
     plan = db.query(Plan).filter(Plan.id == solicitud.plan_id).first()

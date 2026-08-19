@@ -7,7 +7,7 @@ from sqlalchemy import text as sql_text
 from datetime import datetime, timedelta, date
 
 from app.db.database import get_db
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 from app.core.dependencies import get_current_admin
 
@@ -24,15 +24,18 @@ class CoachConPertenencia(BaseModel):
 @router.get("/proxima-clase-reservas")
 def proxima_clase_reservas(
     horario_base_id: int = Query(..., description="ID del horario base"),
-    tenant_id: int = Query(1),
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     Dado un horario_base_id, devuelve la PRÓXIMA clase futura de ese horario
     base y sus reservas (alumno_nombre, asistio, activa).
-    Para disciplinas self-service (Open Box, Musculación).
+    Para disciplinas self-service (Open Box, Musculación). Solo admin.
     """
     from datetime import date as _date
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     hoy = _date.today()
 
     clase = db.execute(sql_text("""
@@ -93,14 +96,18 @@ def proxima_clase_reservas(
 @router.get("/horarios-base")
 def horarios_base_por_disciplina(
     disciplina_id: int = Query(..., description="ID de la disciplina"),
-    tenant_id: int = Query(1),
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     Devuelve los HORARIOS BASE (tabla `horarios`) de una disciplina con el coach
     asignado en la clase más reciente de cada horario (patrón semanal real).
     Fuente: horarios_base, NO la tabla `clases` (instancias generadas).
+    Solo admin.
     """
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     rows = db.execute(sql_text("""
         SELECT h.id, h.dia_semana, h.hora_inicio::text, h.hora_fin::text,
                h.cupo_maximo, h.activo,
@@ -145,14 +152,18 @@ def horarios_base_por_disciplina(
 @router.get("/grid-semanal")
 def supervision_grid_semanal(
     fecha: str = Query(..., description="Fecha en formato YYYY-MM-DD"),
-    tenant_id: int = Query(1),
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     Devuelve el estado REAL de todas las clases de la semana que contiene la fecha dada.
     Agrupado por (dia_semana, hora_inicio, hora_fin) con datos por clase:
     coach, ocupacion/cupo, WOD publicado, cobertura de emergencia.
+    Solo admin.
     """
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     try:
         fecha_date = datetime.strptime(fecha, "%Y-%m-%d").date()
     except ValueError:
@@ -238,13 +249,17 @@ def supervision_grid_semanal(
 def listar_coaches_con_pertenencia(
     disciplina_id: int = Query(...,
                                description="ID de la disciplina para verificar pertenencia"),
-    tenant_id: int = Query(1),
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     Lista TODOS los coaches activos del tenant, indicando si pertenecen a la disciplina especificada.
     Usado desde Supervisión para asignación de coaches con/sin cobertura de emergencia.
+    Solo admin.
     """
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     # Todos los usuarios con rol=coach activos
     coaches = db.execute(sql_text("""
         SELECT u.id, u.nombre
@@ -291,7 +306,7 @@ def actualizar_cupo_disciplina(
     disciplina_id: int = Query(..., description="ID de la disciplina"),
     cupo_maximo: int = Query(..., ge=1, le=200,
                              description="Nuevo cupo máximo (1-200)"),
-    tenant_id: int = Query(1),
+    tenant_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
@@ -300,6 +315,8 @@ def actualizar_cupo_disciplina(
     Afecta las próximas clases generadas, no reescribe clases ya creadas.
     Solo admin.
     """
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
     # Verificar que la disciplina existe
     disc = db.execute(
         sql_text("SELECT id FROM disciplinas WHERE id = :did AND tenant_id = :tid"),
@@ -330,12 +347,16 @@ def actualizar_cupo_disciplina(
 
 @router.get("/cupos-disciplinas")
 def listar_cupos_disciplinas(
-    tenant_id: int = Query(1),
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
 ):
     """
     Lista TODAS las disciplinas con su cupo actual (tomado del horario_base más reciente/representativo).
+    Solo admin.
     """
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     rows = db.execute(sql_text("""
         SELECT
             d.id,

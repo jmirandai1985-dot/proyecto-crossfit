@@ -7,16 +7,16 @@ from typing import Optional
 
 from app.db.database import get_db
 from app.models.plan import Plan
-from app.core.dependencies import get_current_admin
+from app.core.dependencies import get_current_admin, get_current_user
 
 router = APIRouter()
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def crear_plan(
-    tenant_id: int,
-    nombre: str,
-    precio_clp: int,
+    tenant_id: Optional[int] = None,
+    nombre: str = None,
+    precio_clp: int = None,
     duracion_dias: int = 30,
     creditos: Optional[int] = None,
     es_ilimitado: bool = False,
@@ -25,7 +25,9 @@ def crear_plan(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Crea un nuevo plan. Solo admin."""
+    """Crea un nuevo plan. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
     existing = db.query(Plan).filter(
         Plan.tenant_id == tenant_id,
         Plan.nombre == nombre
@@ -56,14 +58,18 @@ def crear_plan(
 
 @router.get("")
 def listar_planes(
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     skip: int = 0,
     limit: int = 100,
     activo: Optional[bool] = None,
     genero: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Lista planes de un tenant"""
+    """Lista planes del tenant (el tenant se deriva del JWT, no del query)"""
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
+
     query = db.query(Plan).filter(Plan.tenant_id == tenant_id)
     if activo is not None:
         query = query.filter(Plan.activo == activo)
@@ -74,15 +80,23 @@ def listar_planes(
 
 @router.get("/membresia-activa")
 def obtener_membresia_activa(
-    tenant_id: int,
-    alumno_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    alumno_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
-    Retorna la membresía activa del alumno (suscripción vigente).
+    Retorna la membresía activa del alumno autenticado (suscripción vigente).
+
+    🔒 SEGURIDAD: tenant_id y alumno_id se derivan del JWT; los parámetros
+    de query se ignoran (cerraba IDOR que exponía el saldo de tokens de
+    cualquier alumno).
     """
     from datetime import datetime, timezone
     from app.models.suscripcion import Suscripcion
+
+    tenant_id = current_user["tenant_id"]
+    alumno_id = current_user["usuario_id"]
 
     ahora = datetime.now(timezone.utc)
 
@@ -113,10 +127,16 @@ def obtener_membresia_activa(
 @router.get("/{plan_id}")
 def obtener_plan(
     plan_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Obtiene un plan por su ID"""
-    plan = db.query(Plan).filter(Plan.id == plan_id).first()
+    """Obtiene un plan por su ID (scoped al tenant del token)"""
+    # 🔒 SEGURIDAD: tenant del token (antes no filtraba por tenant).
+    tenant_id = current_user["tenant_id"]
+    plan = db.query(Plan).filter(
+        Plan.id == plan_id,
+        Plan.tenant_id == tenant_id,
+    ).first()
     if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -140,8 +160,13 @@ def actualizar_plan(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Actualiza un plan existente. Solo admin."""
-    plan = db.query(Plan).filter(Plan.id == plan_id).first()
+    """Actualiza un plan existente. Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant del token (antes no filtraba por tenant).
+    tenant_id = current_user["tenant_id"]
+    plan = db.query(Plan).filter(
+        Plan.id == plan_id,
+        Plan.tenant_id == tenant_id,
+    ).first()
     if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -178,8 +203,13 @@ def eliminar_plan(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Desactiva un plan (soft delete). Solo admin."""
-    plan = db.query(Plan).filter(Plan.id == plan_id).first()
+    """Desactiva un plan (soft delete). Solo admin (tenant del token)."""
+    # 🔒 SEGURIDAD: tenant del token (antes no filtraba por tenant).
+    tenant_id = current_user["tenant_id"]
+    plan = db.query(Plan).filter(
+        Plan.id == plan_id,
+        Plan.tenant_id == tenant_id,
+    ).first()
     if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
