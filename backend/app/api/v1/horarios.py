@@ -8,22 +8,24 @@ from typing import Optional
 from app.db.database import get_db
 from app.models.horario_base import HorarioBase
 from sqlalchemy import text
-from app.core.dependencies import get_current_admin
+from app.core.dependencies import get_current_admin, get_current_user, get_current_coach
 
 router = APIRouter()
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def crear_horario(
-    tenant_id: int,
-    disciplina_id: int,
-    dia_semana: int,
-    hora_inicio: str,
-    hora_fin: str,
+    tenant_id: Optional[int] = None,
+    disciplina_id: int = None,
+    dia_semana: int = None,
+    hora_inicio: str = None,
+    hora_fin: str = None,
     cupo_maximo: int = 16,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
     db_horario = HorarioBase(
         tenant_id=tenant_id,
         disciplina_id=disciplina_id,
@@ -41,11 +43,15 @@ def crear_horario(
 
 @router.get("")
 def listar_horarios(
-    tenant_id: int,
+    tenant_id: Optional[int] = None,
     dia_semana: Optional[int] = None,
     activo: Optional[bool] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
+
     query = db.query(HorarioBase).filter(HorarioBase.tenant_id == tenant_id)
     if dia_semana is not None:
         query = query.filter(HorarioBase.dia_semana == dia_semana)
@@ -57,12 +63,16 @@ def listar_horarios(
 # ── MUST be before /{horario_id} to avoid route collision ──
 @router.get("/grid-semanal")
 def grid_semanal(
-    tenant_id: int,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """Devuelve horarios agrupados por (dia_semana, hora_inicio, hora_fin)
     con lista de disciplinas en cada celda. Para alimentar el grid Lun-Dom."""
     from sqlalchemy import text as sql_text
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
+
     rows = db.execute(sql_text("""
         SELECT h.dia_semana, h.hora_inicio::text, h.hora_fin::text,
                MAX(h.cupo_maximo) as cupo_maximo,
@@ -81,15 +91,18 @@ def grid_semanal(
     return [dict(r._mapping) for r in rows]
 
 
-@router.get("/generar-clases-dia")
+@router.post("/generar-clases-dia")
 def generar_clases_dia_route(
-    tenant_id: int,
-    fecha: str,
-    db: Session = Depends(get_db)
+    tenant_id: Optional[int] = None,
+    fecha: str = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
 ):
-    """Genera clases desde horarios_base para una fecha."""
+    """Genera clases desde horarios_base para una fecha. Coach/admin (tenant del token)."""
     from datetime import datetime
     from app.services.generar_clases import generar_clases_para_fecha
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
     try:
         fecha_date = datetime.strptime(fecha, "%Y-%m-%d").date()
     except ValueError:
@@ -102,10 +115,15 @@ def generar_clases_dia_route(
 @router.get("/{horario_id}")
 def obtener_horario(
     horario_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
+    # 🔒 SEGURIDAD: tenant del token (antes no filtraba por tenant).
+    tenant_id = current_user["tenant_id"]
     horario = db.query(HorarioBase).filter(
-        HorarioBase.id == horario_id).first()
+        HorarioBase.id == horario_id,
+        HorarioBase.tenant_id == tenant_id,
+    ).first()
     if not horario:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -159,8 +177,12 @@ def eliminar_horario(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
+    # 🔒 SEGURIDAD: tenant del token (antes no filtraba por tenant).
+    tenant_id = current_user["tenant_id"]
     horario = db.query(HorarioBase).filter(
-        HorarioBase.id == horario_id).first()
+        HorarioBase.id == horario_id,
+        HorarioBase.tenant_id == tenant_id,
+    ).first()
     if not horario:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
