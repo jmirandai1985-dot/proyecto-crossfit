@@ -7,6 +7,8 @@ from typing import List, Optional
 
 from app.db.database import get_db
 from app.models.coach_disciplina import CoachDisciplina
+from app.models.usuario import Usuario
+from app.models.disciplina import Disciplina
 from app.schemas.coach_disciplina import (
     CoachDisciplinaCreate, CoachDisciplinaUpdate, CoachDisciplinaResponse, CoachDisciplinaListItem, CoachDisciplinaReplaceRequest
 )
@@ -24,6 +26,26 @@ def crear_coach_disciplina(
     """Crea una nueva relación coach-disciplina (tenant del token)"""
     # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
     coach_disciplina_data.tenant_id = current_user["tenant_id"]
+
+    # 🔒 FIX 7: validar que el coach y la disciplina existen y pertenecen al tenant.
+    coach = db.query(Usuario).filter(
+        Usuario.id == coach_disciplina_data.coach_id,
+        Usuario.tenant_id == coach_disciplina_data.tenant_id,
+    ).first()
+    if not coach:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El coach no existe o no pertenece a este box",
+        )
+    disciplina = db.query(Disciplina).filter(
+        Disciplina.id == coach_disciplina_data.disciplina_id,
+        Disciplina.tenant_id == coach_disciplina_data.tenant_id,
+    ).first()
+    if not disciplina:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="La disciplina no existe o no pertenece a este box",
+        )
 
     # Verificar que no exista una relación duplicada
     existing = db.query(CoachDisciplina).filter(
@@ -111,6 +133,28 @@ def reemplazar_coach_disciplinas(
     """
     # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
     data.tenant_id = current_user["tenant_id"]
+
+    # 🔒 FIX 7: validar que el coach y las disciplinas existen y pertenecen al tenant.
+    coach = db.query(Usuario).filter(
+        Usuario.id == data.coach_id,
+        Usuario.tenant_id == data.tenant_id,
+    ).first()
+    if not coach:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El coach no existe o no pertenece a este box",
+        )
+    for did in data.disciplina_ids:
+        d = db.query(Disciplina).filter(
+            Disciplina.id == did,
+            Disciplina.tenant_id == data.tenant_id,
+        ).first()
+        if not d:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"La disciplina {did} no existe o no pertenece a este box",
+            )
+
     # Obtener asignaciones actuales
     actuales = db.query(CoachDisciplina).filter(
         CoachDisciplina.tenant_id == data.tenant_id,

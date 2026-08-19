@@ -1079,7 +1079,7 @@ def asignar_wod_a_clase(
 def asignar_wod_batch(
     body: dict,
     tenant_id: int = Query(None),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_coach),
     db: Session = Depends(get_db)
 ):
     """

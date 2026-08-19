@@ -321,6 +321,19 @@ Los siguientes mutan/escriben datos **sin ningún `Depends(get_current_*)`**:
 
 *Fin de AUDIT.md.*
 
+---
+
+## Nota — Generación de clases: comportamiento intencional (19/08/2026)
+
+Aclaración del hallazgo menor "horario fijo" de la auditoría del panel Coach:
+
+- El **horario base** es admin-only: `crear/actualizar/eliminar horario` usan `get_current_admin`; el coach **no puede modificarlo**.
+- Las **instancias de clase** se generan a partir del horario base por 3 vías: (a) **scheduler diario 00:05 CLT** (`app/services/scheduler.py`), (b) **auto-generación on-read** en `GET /clases`, y (c) **disparo manual del coach** `POST /horarios/generar-clases-dia` (página `GenerarClases.jsx`).
+- Conclusión: es **intencional** — se generan instancias derivadas del horario fijo, no se modifica el horario base. No es un bug.
+- Si en el futuro se quisiera generación 100% scheduler (sin disparo manual ni auto-gen on-read), los cambios serían: restringir `generar-clases-dia` a admin y quitar la auto-generación de `GET /clases` (decisión de diseño pendiente, no bloqueante).
+
+
+
 
 
 
