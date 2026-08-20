@@ -189,8 +189,14 @@ def enviar_email_fidelizacion(nombre: str, correo: str, dias_ausente: int) -> bo
                    alumno.get("id"), tipo="inactividad")
 
 
-def enviar_email_solicitud_admin(alumno: dict) -> bool:
-    """Notifica al admin que un alumno nuevo está pendiente de activación."""
+def enviar_email_solicitud_admin(alumno: dict, tenant_id: int) -> bool:
+    """Notifica al admin del MISMO tenant que un alumno nuevo está pendiente
+    de activación.
+
+    FIX cierre (test de esfuerzo): antes buscaba el primer admin GLOBAL de la
+    BD (sin filtro de tenant) y un alumno de un box podía generar un correo al
+    admin de otro box. Ahora filtra por tenant_id del alumno registrado.
+    """
     nombre = alumno.get("nombre", "Alumno nuevo")
     correo_alumno = alumno.get("correo", "")
     correo_admin = None
@@ -199,7 +205,9 @@ def enviar_email_solicitud_admin(alumno: dict) -> bool:
         from app.models.usuario import Usuario, RolUsuario
         db = SessionLocal()
         admin = db.query(Usuario).filter(
-            Usuario.rol == RolUsuario.administrador, Usuario.activo == True
+            Usuario.tenant_id == tenant_id,
+            Usuario.rol == RolUsuario.administrador,
+            Usuario.activo == True,
         ).order_by(Usuario.id).first()
         correo_admin = admin.correo if admin else None
         db.close()

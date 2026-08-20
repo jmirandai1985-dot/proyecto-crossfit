@@ -4,6 +4,7 @@ Router de endpoints para gestión de Historial RM
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.exc import DBAPIError
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
@@ -122,9 +123,19 @@ def crear_historial_rm(
         notas=historial_data.notas
     )
 
-    db.add(db_historial)
-    db.commit()
-    db.refresh(db_historial)
+    # ── FIX cierre (test de esfuerzo): wrapper de errores de BD ──
+    # Bajo concurrencia (Escenario F2) el INSERT/commit puede fallar con
+    # deadlock o timeout; se devuelve 503 "Alta demanda" en vez de 500.
+    try:
+        db.add(db_historial)
+        db.commit()
+        db.refresh(db_historial)
+    except DBAPIError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Alta demanda, intentá de nuevo",
+        )
 
     # --- CALCULO AUTOMATICO DE NIVEL ---
     movimiento_nombre = movimiento.nombre

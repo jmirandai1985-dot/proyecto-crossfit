@@ -153,7 +153,7 @@ def registrar_alumno_nuevo(
             "nombre": usuario.nombre,
             "correo": usuario.correo,
             "id": usuario.id,
-        })
+        }, tenant_id=datos.tenant_id)
     except Exception as e:
         sentry_sdk.capture_exception(e)
         logging.getLogger("uvicorn.alumnos").warning(

@@ -9,6 +9,7 @@ from app.models.reserva import Reserva
 from app.db.database import get_db
 from typing import List, Optional
 from sqlalchemy import func, update
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 """
@@ -69,12 +70,22 @@ def crear_reserva(
     # UPDATE condicional: solo incrementa si hay cupo (WHERE asistentes < cupo).
     # Elimina la race condition check-then-use: si la clase se llenó entre la
     # lectura del objeto y este UPDATE, rowcount=0 -> 400 (sin overbooking).
-    result = db.execute(
-        update(Clase)
-        .where(Clase.id == clase.id)
-        .where(Clase.asistentes_confirmados < Clase.cupo_maximo)
-        .values(asistentes_confirmados=Clase.asistentes_confirmados + 1)
-    )
+    # ── FIX cierre (test de esfuerzo): wrapper de errores de BD ──
+    # Bajo contención extrema el UPDATE condicional puede fallar con deadlock
+    # o timeout; se devuelve 503 "Alta demanda" en vez de un 500 genérico.
+    try:
+        result = db.execute(
+            update(Clase)
+            .where(Clase.id == clase.id)
+            .where(Clase.asistentes_confirmados < Clase.cupo_maximo)
+            .values(asistentes_confirmados=Clase.asistentes_confirmados + 1)
+        )
+    except DBAPIError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Alta demanda, intentá de nuevo",
+        )
 
     if result.rowcount == 0:
         raise HTTPException(

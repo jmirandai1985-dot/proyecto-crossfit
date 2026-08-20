@@ -3,6 +3,7 @@ Router de endpoints para gestión de Pedidos
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import update
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -106,22 +107,33 @@ def crear_pedido(
     # UPDATE condicional — solo descuenta si hay stock suficiente. Si dos
     # compras concurrentes piden el último ítem, solo una obtiene rowcount=1
     # (la otra ve rowcount=0 → 400), evitando stock negativo.
-    result = db.execute(
-        update(Producto)
-        .where(Producto.id == producto.id)
-        .where(Producto.tenant_id == pedido_data.tenant_id)
-        .where(Producto.stock >= pedido_data.cantidad)
-        .values(stock=Producto.stock - pedido_data.cantidad)
-    )
-    if result.rowcount == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Stock insuficiente. Disponible: {producto.stock}, Solicitado: {pedido_data.cantidad}"
+    # ── FIX cierre (test de esfuerzo): wrapper de errores de BD ──
+    # Bajo contención extrema el UPDATE condicional puede fallar con deadlock
+    # o timeout (visto como 500 transitorio en el Escenario D). Se captura y
+    # devuelve 503 "Alta demanda" en vez de un 500 genérico.
+    try:
+        result = db.execute(
+            update(Producto)
+            .where(Producto.id == producto.id)
+            .where(Producto.tenant_id == pedido_data.tenant_id)
+            .where(Producto.stock >= pedido_data.cantidad)
+            .values(stock=Producto.stock - pedido_data.cantidad)
         )
+        if result.rowcount == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Stock insuficiente. Disponible: {producto.stock}, Solicitado: {pedido_data.cantidad}"
+            )
 
-    db.add(db_pedido)
-    db.commit()
-    db.refresh(db_pedido)
+        db.add(db_pedido)
+        db.commit()
+        db.refresh(db_pedido)
+    except DBAPIError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Alta demanda, intentá de nuevo",
+        )
 
     return db_pedido
 
