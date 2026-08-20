@@ -117,13 +117,13 @@ async def root():
 async def debug_db_url():
     """Endpoint de seguridad: usado por conftest.py para verificar que el servidor
     NO estÃ© apuntando a producciÃ³n.
-    - En TEST (lingering-shape): devuelve {"is_safe": true}
+    - En TEST (small-butterfly): devuelve {"is_safe": true}
     - En PRODUCCIÃ“N: devuelve 404 para no exponer informaciÃ³n de infraestructura
     Nunca expone la URL completa ni credenciales."""
     from app.core.config import settings
     url = settings.DATABASE_URL
-    if "lingering-shape" in url:
-        return {"is_safe": True, "is_test": True, "branch": "lingering-shape"}
+    if "small-butterfly" in url:
+        return {"is_safe": True, "is_test": True, "branch": "small-butterfly"}
     # En producciÃ³n o cualquier otro entorno, no revelar informaciÃ³n
     from fastapi import HTTPException
     raise HTTPException(status_code=404, detail="Not found")

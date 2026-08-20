@@ -1,5 +1,5 @@
 ﻿"""
-DiagnÃ³stico rÃ¡pido: horarios + clases en TEST (lingering-shape).
+DiagnÃ³stico rÃ¡pido: horarios + clases en TEST (small-butterfly).
 Solo consulta, no modifica.
 
 SEGURIDAD: setea ENVIRONMENT=test ANTES de importar cualquier mÃ³dulo de app.
@@ -21,8 +21,8 @@ db = importlib.import_module("app.db.database").SessionLocal()
 text = importlib.import_module("sqlalchemy").text
 
 DB_URL = settings.DATABASE_URL
-if "lingering-shape" not in DB_URL:
-    sys.exit("FATAL: no es lingering-shape")
+if "small-butterfly" not in DB_URL:
+    sys.exit("FATAL: no es small-butterfly")
 
 hoy = date.today()
 print(f"date.today() = {hoy} (weekday={hoy.weekday()})")

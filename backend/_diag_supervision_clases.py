@@ -23,7 +23,7 @@ from app.core.config import settings
 URL_TEST = settings.DATABASE_URL
 print("=" * 70)
 print("DIAGNOSTICO - Supervision de Clases '0 en el rango'")
-print(f"BD TEST: lingering-shape = {'lingering-shape' in URL_TEST}")
+print(f"BD TEST: small-butterfly = {'small-butterfly' in URL_TEST}")
 print("=" * 70)
 
 c = psycopg2.connect(URL_TEST)

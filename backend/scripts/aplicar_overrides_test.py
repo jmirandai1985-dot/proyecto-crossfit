@@ -1,4 +1,4 @@
-﻿"""Overrides desarrollo TEST (lingering-shape): activa coach jesus, asigna crossfit, clase de hoy."""
+﻿"""Overrides desarrollo TEST (small-butterfly): activa coach jesus, asigna crossfit, clase de hoy."""
 import os
 import sys
 import importlib
@@ -15,12 +15,12 @@ sys.path.insert(0, BACKEND_DIR)
 os.chdir(BACKEND_DIR)
 
 settings = importlib.import_module("app.core.config").settings
-if "lingering-shape" not in settings.DATABASE_URL:
-    print("ERROR: URL no es lingering-shape")
+if "small-butterfly" not in settings.DATABASE_URL:
+    print("ERROR: URL no es small-butterfly")
     sys.exit(1)
 SessionLocal = importlib.import_module("app.db.database").SessionLocal
 
-print("=== APLICANDO OVERRIDES TEST (lingering-shape) ===")
+print("=== APLICANDO OVERRIDES TEST (small-butterfly) ===")
 db = SessionLocal()
 try:
     r = db.execute(text("UPDATE usuarios SET activo=true WHERE id=7"))

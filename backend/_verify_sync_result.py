@@ -1,4 +1,4 @@
-"""Verificación SOLO LECTURA del resultado del sync en TEST (lingering-shape)."""
+"""Verificación SOLO LECTURA del resultado del sync en TEST (small-butterfly)."""
 import os
 import sys
 import importlib
@@ -10,7 +10,7 @@ sys.path.insert(0, BACKEND_DIR)
 settings = importlib.import_module("app.core.config").settings
 URL_TEST = settings.DATABASE_URL
 print(f"BD de TEST: {URL_TEST[:80]}...")
-print(f"lingering-shape (DIRECT): {'lingering-shape' in URL_TEST}")
+print(f"small-butterfly (DIRECT): {'small-butterfly' in URL_TEST}")
 print("=" * 60)
 
 import psycopg2

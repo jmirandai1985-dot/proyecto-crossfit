@@ -1,5 +1,5 @@
 ﻿"""
-Start uvicorn with ENVIRONMENT=test (lingering-shape BD).
+Start uvicorn with ENVIRONMENT=test (small-butterfly BD).
 Uses importlib to ensure ENV is set BEFORE any app import.
 """
 import uvicorn
@@ -15,7 +15,7 @@ os.environ["ENVIRONMENT"] = "test"
 
 config = importlib.import_module("app.core.config")
 db_url = config.settings.DATABASE_URL
-is_test = "muddy" in db_url
+is_test = "small-butterfly" in db_url
 
 print("=" * 60)
 print("  INICIANDO SERVIDOR FASTAPI - BOX CROSSFIT")
@@ -23,7 +23,7 @@ print("=" * 60)
 print()
 print("  ENVIRONMENT=test")
 if is_test:
-    print("  CONECTADO A BD de TEST (lingering-shape)")
+    print("  CONECTADO A BD de TEST (small-butterfly)")
 else:
     print("  ALERTA: BD NO es TEST")
     print(f"  URL: {db_url[:50]}...")

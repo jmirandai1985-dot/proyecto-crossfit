@@ -75,8 +75,8 @@ Documentación interactiva (Swagger): `http://localhost:8000/docs`
 
 > **¿Qué script de arranque usar?**
 > - `python start_server.py` → arranca con la configuración de **`.env`** (BD activa). **Usar para desarrollo/operación real.** Equivale a `uvicorn app.main:app --reload`.
-> - `python iniciar_servidor.py` → **SOLO para testing local**: fuerza `ENVIRONMENT=test` y carga **`.env.test`** (apunta a la BD de TEST `ep-lingering-shape`, cuyas credenciales están **rotadas/muertas**). **No usar para el ambiente real** — con este script todo el proceso (incluido el scheduler de mantenimiento) intenta conectar contra la BD muerta.
-> - `backend/.env.test` → **NO borrarlo ni apuntarlo a la BD real**: apunta a la branch TEST `ep-lingering-shape` (credenciales **rotadas/muertas**) y solo se carga con `ENVIRONMENT=test`. Los scripts de test (p. ej. `sync_test_from_prod.py`) hacen `TRUNCATE` de la base destino, por lo que apuntarlo a la BD real sería destructivo.
+> - `python iniciar_servidor.py` → **SOLO para testing local**: fuerza `ENVIRONMENT=test` y carga **`.env.test`** (apunta a la **branch TEST** de Neon (copia aislada de produccion, segura para pruebas destructivas)). **No usar para el ambiente real** — con este script todo el proceso (incluido el scheduler de mantenimiento) intenta conectar contra la BD muerta.
+> - `backend/.env.test` → **NO borrarlo ni apuntarlo a la BD real**: apunta a la **branch TEST** (copia aislada de produccion, segura para pruebas destructivas) y solo se carga con `ENVIRONMENT=test`. Los scripts de test (p. ej. `sync_test_from_prod.py`) hacen `TRUNCATE` de la base destino, por lo que apuntarlo a la BD real sería destructivo.
 
 ## 📁 Estructura del Proyecto
 

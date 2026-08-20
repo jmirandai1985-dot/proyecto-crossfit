@@ -1,5 +1,5 @@
 ﻿"""
-Reactiva la suscripciÃ³n del Alumno Demo (id=5) en TEST (lingering-shape).
+Reactiva la suscripciÃ³n del Alumno Demo (id=5) en TEST (small-butterfly).
 El Alumno Demo tiene suscripciÃ³n expirada (2026-07-31); hoy es 2026-08-01.
 Se extiende la fecha de expiraciÃ³n para poder verificar el flujo de reserva.
 
@@ -20,8 +20,8 @@ db = importlib.import_module("app.db.database").SessionLocal()
 text = importlib.import_module("sqlalchemy").text
 
 DB_URL = settings.DATABASE_URL
-if "lingering-shape" not in DB_URL:
-    sys.exit("FATAL: no es lingering-shape")
+if "small-butterfly" not in DB_URL:
+    sys.exit("FATAL: no es small-butterfly")
 
 print(f"BD: {DB_URL.split('@')[1][:40]}")
 try:

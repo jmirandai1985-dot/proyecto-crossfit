@@ -1,5 +1,5 @@
 ﻿"""
-SYNC PROD -> TEST (lingering-shape).
+SYNC PROD -> TEST (small-butterfly).
 IDEMPOTENTE: TRUNCATE + copia todos los datos desde PRODUCCIÃ“N.
 Preserva tablas custom (transacciones_financieras) mediante backup/restore.
 Incluye migraciones post-sync (requiere_coach, es_estudiante, coach_disciplinas, cobertura_emergencia).
@@ -42,7 +42,7 @@ if not URL_PROD or "postgresql://" not in URL_PROD:
 
 print("="*60)
 print(f"BD de TEST: {URL_TEST[:100]}...")
-print(f"lingering-shape (DIRECT): {'lingering-shape' in URL_TEST}")
+print(f"small-butterfly (DIRECT): {'small-butterfly' in URL_TEST}")
 print("="*60)
 
 # â”€â”€ CONECTAR â”€â”€

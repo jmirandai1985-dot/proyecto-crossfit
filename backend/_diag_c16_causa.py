@@ -1,6 +1,6 @@
 """
 VERIFICACION 1 (SOLO LECTURA): Confirma la causa real del fallo
-test_c16_sin_clases_duplicadas usando la BD TEST (lingering-shape).
+test_c16_sin_clases_duplicadas usando la BD TEST (small-butterfly).
 No modifica nada: solo consultas SELECT / conteos.
 """
 import os
@@ -19,7 +19,7 @@ from app.core.config import settings
 URL_TEST = settings.DATABASE_URL
 print("=" * 70)
 print("VERIFICACION 1 - Causa real test_c16_sin_clases_duplicadas")
-print(f"BD TEST: lingering-shape = {'lingering-shape' in URL_TEST}")
+print(f"BD TEST: small-butterfly = {'small-butterfly' in URL_TEST}")
 print("=" * 70)
 
 c = psycopg2.connect(URL_TEST)
