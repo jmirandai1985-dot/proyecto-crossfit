@@ -1,0 +1,34 @@
+# ============================================================
+# docker-compose.prod.yml — OVERRIDE PARA PRODUCCIÓN (deliberada)
+#
+# ⚠️ Este archivo NO se carga automáticamente. Solo se usa cuando se
+#    decide apuntar a la BD de PRODUCCIÓN (backend/.env), de forma
+#    explícita y conciente:
+#
+#        docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+#    Reglas de oro:
+#    1. Siempre `docker compose down` antes de cambiar de ambiente
+#       (los contenedores se crean con las variables del .env activo).
+#    2. El BASE usa backend/.env.test (TEST/small-butterfly). Para
+#       PRODUCCIÓN se agrega ESTE archivo; nunca editar el base.
+#    3. `env_file` se concatena en orden (base, luego este archivo) y
+#       las variables duplicadas las gana la ÚLTIMA → backend/.env.
+#
+# Verificación rápida de a qué BD apunta el stack levantado:
+#   GET http://localhost:8000/debug/db-url
+#     → {"is_safe": true}               = TEST (small-butterfly)
+#     → 404                             = PRODUCCIÓN (no expone nada)
+# ============================================================
+services:
+  backend:
+    env_file:
+      - ./backend/.env          # PRODUCCIÓN (ep-withered-silence)
+    environment:
+      ENVIRONMENT: production
+
+  maintenance:
+    env_file:
+      - ./backend/.env          # PRODUCCIÓN (ep-withered-silence)
+    environment:
+      ENVIRONMENT: production

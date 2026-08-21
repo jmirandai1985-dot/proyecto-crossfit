@@ -1,0 +1,25 @@
+# Contexto de build = backend/
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Secretos / entornos (nunca dentro de la imagen)
+.env
+.env.*
+!.env.example
+
+# Datos locales en runtime (volúmenes nombrados en compose, no se bakean)
+backups/
+logs/
+app/static/uploads/
+box_crossfit.db
+
+# Otros (contexto local / dev)
+node_modules/
+.git/
+_mockups/
+*.log
+*.pid
+dist/

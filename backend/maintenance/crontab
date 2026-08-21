@@ -1,0 +1,9 @@
+# Crontab del contenedor de mantenimiento (Box CrossFit Platform)
+# TZ del contenedor = America/Santiago (seteada en la imagen Docker).
+# Los horarios están escritos en CLT (Chile), no en UTC.
+#
+# Diario 02:30 CLT -> run_daily.py  (backup, vencidos, huérfanas, health, neon)
+30 2 * * * boxapp cd /app && /usr/local/bin/python -m maintenance.run_daily >> /app/logs/cron.log 2>&1
+#
+# Mensual, día 1, 03:00 CLT -> run_monthly.py (todo + integridad + reporte + rotación)
+0 3 1 * * boxapp cd /app && /usr/local/bin/python -m maintenance.run_monthly >> /app/logs/cron.log 2>&1

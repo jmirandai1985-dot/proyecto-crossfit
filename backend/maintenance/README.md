@@ -1,11 +1,37 @@
 # 🔧 Mantenimiento Urban Training Box
 
-**Carpeta de scripts automáticos ejecutados por APScheduler.**
+**Carpeta de scripts automáticos de mantenimiento.**
+
+> **A partir de Fase 1.4 se ejecutan en el contenedor de mantenimiento**
+> (`docker-compose.yml` → servicio `maintenance`, target `maintenance` del
+> Dockerfile), vía `cron`, y **ya NO los ejecuta APScheduler** en el backend
+> (los jobs de mantenimiento se eliminaron de `scheduler.py` el 21/08/2026).
 
 ## Ejecución automática
 
-- **Diario 02:30 AM** → `run_daily.py` (backup, planes vencidos, huérfanas, health, neon usage)
-- **Mensual (1º día 03:00 AM)** → `run_monthly.py` (todo + integridad + estadísticas + rotación)
+- **Diario 02:30 CLT** → `run_daily.py` (backup, planes vencidos, huérfanas, health, neon usage)
+- **Mensual (1º día 03:00 CLT)** → `run_monthly.py` (todo + integridad + estadísticas + rotación)
+
+Los horarios se definen en `maintenance/crontab` (copiado a
+`/etc/cron.d/box-maintenance` en la imagen). El contenedor usa
+`TZ=America/Santiago`, así que las horas son CLT.
+
+### En Docker (Fase 1.4)
+
+```bash
+cd <raíz del proyecto>
+docker compose up -d                     # levanta backend + maintenance + frontend
+docker compose build maintenance          # rebuild solo del contenedor de mantenimiento
+docker logs box-crossfit-maintenance-1    # logs del cron (jobs salen a /app/logs/cron.log)
+```
+
+- **Volumen `logs`** (compartido con el backend): `/app/logs` — `app.log` del
+  backend y `maintenance_*.log` de los jobs viven juntos; `cleanup_logs.py`
+  (mensual) limpia ambos.
+- **Volumen `backups`**: `/app/backups` — dumps `pg_dump` (retención 30 días).
+  El backend lo monta read-only.
+- **`BACKEND_URL=http://backend:8000`** se inyecta en el contenedor porque
+  `health_check.py` hace ping al API; en Docker el backend no es `localhost`.
 
 ## Scripts
 

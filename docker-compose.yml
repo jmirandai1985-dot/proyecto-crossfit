@@ -1,0 +1,107 @@
+# ============================================================
+# docker-compose.yml — Box CrossFit Platform (Fase 1.4)
+#
+# ⚠️ AMBIENTES — LEA ESTO ANTES DE LEVANTAR:
+#   El archivo BASE usa backend/.env.test → branch TEST de Neon
+#   (ep-small-butterfly...). Es el SAFE DEFAULT a propósito:
+#   `docker compose up` NUNCA toca producción por accidente.
+#
+#   ┌─────────────────────────────────────────────────────────────┐
+#   │  TEST (safe default)                                          │
+#   │    docker compose up -d                                       │
+#   │                                                               │
+#   │  PRODUCCIÓN (siempre deliberada)                              │
+#   │    docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   └─────────────────────────────────────────────────────────────┘
+#
+# Stack local en contenedores:
+#   backend     → FastAPI/uvicorn  (backend/Dockerfile, target prod)
+#   maintenance → cron con los scripts de mantenimiento (target maintenance)
+#   frontend    → build Vite servido por nginx con proxy /api/ → backend:8000
+#
+# La BD es EXTERNA (Neon, cloud): este stack NO incluye Postgres.
+# El frontend y el backend viven en el MISMO origen (nginx proxea /api/),
+# por lo que no hay CORS y VITE_API_URL queda vacío (path relativo).
+#
+# Volúmenes nombrados (persisten entre recreaciones de contenedores):
+#   logs      → /app/logs    COMPARTIDO backend + maintenance.
+#               Decisión de Fase 1.4: compartido. cleanup_logs.py (mensual)
+#               fue diseñado para limpiar TODOS los *.log de backend
+#               (incluido app.log) caminando /app; compartir el volumen
+#               conserva esa intención y centraliza la persistencia.
+#               Ambos procesos corren como boxapp (UID 1000) → sin
+#               conflictos de permisos.
+#   backups   → /app/backups  Escribe el contenedor de mantenimiento
+#               (pg_dump vía backup_neon.py, retención 30 días).
+#               El backend lo monta READ-ONLY (solo inspección).
+#   uploads   → /app/app/static/uploads  Vouchers subidos por el API.
+# ============================================================
+name: box-crossfit
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: prod
+    env_file:
+      # TEST/small-butterfly (SAFE DEFAULT) — ver cabecera del archivo.
+      - ./backend/.env.test
+    environment:
+      ENVIRONMENT: test
+      TZ: America/Santiago
+    volumes:
+      - logs:/app/logs
+      - backups:/app/backups:ro
+      - uploads:/app/app/static/uploads
+    expose:
+      - "8000"
+    # Puerto 8000 publicado para acceder al API directo (Swagger /docs).
+    # Opcional: quitar si se quiere solo el acceso vía nginx (puerto 80).
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  maintenance:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: maintenance
+    env_file:
+      # TEST/small-butterfly (SAFE DEFAULT) — ver cabecera del archivo.
+      - ./backend/.env.test
+    environment:
+      # health_check.py usa BACKEND_URL para el ping al API.
+      # En Docker el backend se llama 'backend' (NO localhost).
+      ENVIRONMENT: test
+      BACKEND_URL: http://backend:8000
+      TZ: America/Santiago
+    volumes:
+      - logs:/app/logs
+      - backups:/app/backups
+    # Solo orden de arranque: el contenedor de mantenimiento debe correr
+    # aunque el backend esté caído (health_check.py alerta justamente eso).
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  logs:
+  backups:
+  uploads:

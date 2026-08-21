@@ -1,8 +1,12 @@
 import axios from 'axios';
 
-// Crear instancia de axios con baseURL desde variable de entorno
-// Usar VITE_API_URL si está definida, o localhost:8000 como fallback
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Cliente axios estándar (autenticado).
+//
+// API_URL = VITE_API_URL o '' (mismo origen).
+// En Docker/producción se usa el path relativo: el navegador llama a
+// /api/v1/... en el MISMO origen y nginx proxea /api/ → backend:8000.
+// NUNCA se usa localhost por defecto (rompía dentro de contenedores).
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 const api = axios.create({
     baseURL: API_URL,

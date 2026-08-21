@@ -1,0 +1,8 @@
+# Contexto de build = frontend/
+node_modules/
+dist/
+.env
+.env.*
+.git/
+*.log
+__pycache__/
