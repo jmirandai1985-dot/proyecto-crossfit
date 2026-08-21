@@ -38,3 +38,8 @@ backend/.env.test
 
 # Backups de BD (dumps SQL sensibles)
 backups/
+
+# Runtime / generados / secretos (nunca subir a git)
+backend/server_prod.pid
+k6-tests/load_config.json
+backend/migraciones_preview.sql
