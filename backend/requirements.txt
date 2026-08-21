@@ -14,15 +14,26 @@ psycopg2-binary==2.9.9  # Driver PostgreSQL (compatible con Neon)
 # Autenticación y Seguridad
 python-jose[cryptography]==3.3.0  # JWT
 passlib[argon2]==1.7.4  # Hash de passwords con argon2
+bcrypt==4.1.2  # Dependencia real de passlib (schemes=["bcrypt"]) — pin explícito
+                # para builds reproducibles (llegaba como transitiva no declarada).
 python-multipart==0.0.6  # Para recibir form-data (vouchers)
 
 # Validación y Serialización
 pydantic==2.5.3
 pydantic-settings==2.1.0  # Para cargar variables de entorno
+email-validator==2.3.0  # Requerido por pydantic EmailStr (schemas/usuario.py, alumnos.py)
+                        # — faltaba en requirements (solo estaba en el venv local como no declarada)
+                        # y el contenedor crasheaba: ImportError: email-validator is not installed.
 
 # Utilidades
 python-dateutil==2.8.2  # Manejo de fechas y zonas horarias
 pytz==2023.3  # Zonas horarias
+requests==2.34.2  # Cliente HTTP — usado por maintenance/health_check.py y scripts
+                  # de verificación (llegaba como transitiva no declarada).
+
+# Reportes y análisis de datos
+pandas==2.2.3  # fidelizacion.py (agrupaciones DataFrame)
+openpyxl==3.1.5  # reportes_service.py (exportaciones Excel)
 
 # Programación de tareas (generación automática de clases)
 apscheduler==3.11.3

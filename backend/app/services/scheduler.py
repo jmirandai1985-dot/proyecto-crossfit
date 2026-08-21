@@ -6,8 +6,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
 import logging
-import sys
-import os
 
 logger = logging.getLogger("uvicorn.scheduler")
 
@@ -91,28 +89,11 @@ def iniciar_scheduler():
         replace_existing=True,
         misfire_grace_time=3600,
     )
-    # ── Mantenimiento automático ──
-    scheduler.add_job(
-        maintenance_daily_job,
-        CronTrigger(hour=2, minute=30, timezone=pytz.timezone("America/Santiago")),
-        id="maintenance_daily",
-        name="Mantenimiento diario (02:30)",
-        replace_existing=True,
-        misfire_grace_time=3600,
-    )
-    scheduler.add_job(
-        maintenance_monthly_job,
-        CronTrigger(day=1, hour=3, minute=0, timezone=pytz.timezone("America/Santiago")),
-        id="maintenance_monthly",
-        name="Mantenimiento mensual (1º día 03:00)",
-        replace_existing=True,
-        misfire_grace_time=3600,
-    )
     scheduler.start()
     logger.info(
         "🚀 Scheduler iniciado - generación de clases 00:05, "
-        "alertas de email 06:00 / 08:00 / 09:00, "
-        "mantenimiento diario 02:30 / mensual 1º día 03:00 CLT")
+        "alertas de email 06:00 / 08:00 / 09:00 CLT "
+        "(mantenimiento diario/mensual movido al contenedor de mantenimiento)")
 
 
 async def _ejecutar_alertas(tipo: str):
@@ -160,24 +141,4 @@ def detener_scheduler():
     if scheduler.running:
         scheduler.shutdown(wait=False)
         logger.info("🛑 Scheduler detenido")
-
-
-def maintenance_daily_job():
-    """Job de mantenimiento diario (02:30 CLT): backup, vencidos, huérfanas, health, neon."""
-    try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + '/../..')
-        from maintenance.run_daily import run
-        run()
-    except Exception as e:
-        logger.error(f"❌ [Scheduler] Error maintenance_daily: {e}", exc_info=True)
-
-
-def maintenance_monthly_job():
-    """Job de mantenimiento mensual (1º día 03:00 CLT): mantenimiento completo."""
-    try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + '/../..')
-        from maintenance.run_monthly import run
-        run()
-    except Exception as e:
-        logger.error(f"❌ [Scheduler] Error maintenance_monthly: {e}", exc_info=True)
 

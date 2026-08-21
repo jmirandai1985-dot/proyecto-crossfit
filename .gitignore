@@ -20,6 +20,7 @@ dist/
 Thumbs.db
 
 # Env files (local, no subir a git)
+.env
 .env.local
 .env.*.local
 .env.test
