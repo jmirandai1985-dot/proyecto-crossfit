@@ -19,6 +19,10 @@ class Tenant(Base):
     id = Column(Integer, primary_key=True)
     nombre = Column(String(150), nullable=False)
     subdomain = Column(String(63), nullable=False, unique=True)
+    # Identificador NO secuencial (UUID v4) para exponer el box en URLs
+    # públicas sin autenticación (pantalla TV del ranking de asistencia).
+    # Nunca usar `id` (serial adivinable) ni `subdomain` (texto corto) acá.
+    public_id = Column(String(36), nullable=False, unique=True)
     activo = Column(Boolean, nullable=False, default=True)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())

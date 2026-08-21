@@ -27,6 +27,7 @@ import CoachGestionClases from './pages/coach/GestionClases';
 import AlumnoDashboard from './pages/alumno/Dashboard';
 import AlumnoMisReservas from './pages/alumno/MisReservas';
 import AlumnoPizarraRMs from './pages/alumno/PizarraRMs';
+import RankingAsistencia from './pages/tv/RankingAsistencia';
 import AlumnoAjustes from './pages/alumno/Ajustes';
 import AlumnoSolicitarPlan from './pages/alumno/SolicitarPlan';
 import AlumnoEvolucion from './pages/alumno/Evolucion';
@@ -72,6 +73,8 @@ function App() {
 
           {/* ── /landing → Landing pública de registro (clase de prueba) ── */}
           <Route path="/landing" element={<LandingPage />} />
+          {/* ── /tv/ranking/:boxPublicId → Pantalla TV pública (sin login, sin sidebar) ── */}
+          <Route path="/tv/ranking/:boxPublicId" element={<RankingAsistencia />} />
           {/* ── "/" → redirige según rol o a /login (RootRedirect) ── */}
           <Route path="/" element={<RootRedirect />} />
 
