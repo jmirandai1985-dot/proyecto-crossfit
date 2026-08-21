@@ -18,6 +18,7 @@
 #   backend     → FastAPI/uvicorn  (backend/Dockerfile, target prod)
 #   maintenance → cron con los scripts de mantenimiento (target maintenance)
 #   frontend    → build Vite servido por nginx con proxy /api/ → backend:8000
+#   n8n         → automatización visual de flujos (imagen oficial n8nio/n8n)
 #
 # La BD es EXTERNA (Neon, cloud): este stack NO incluye Postgres.
 # El frontend y el backend viven en el MISMO origen (nginx proxea /api/),
@@ -101,7 +102,49 @@ services:
       - backend
     restart: unless-stopped
 
+  # ─────────────────────────────────────────────────────────────
+  # n8n — automatización de flujos (4º servicio).
+  #
+  # ⚠️ URL DEL BACKEND dentro de los workflows de n8n:
+  #    usar  http://host.docker.internal:8000   (¡NO backend:8000!)
+  #    Razón: la producción real HOY corre con start_server.py en el HOST
+  #    (fuera de Docker); el nombre 'backend:8000' solo resuelve dentro de
+  #    esta red de compose. host.docker.internal funciona en AMBOS casos:
+  #      · TEST Docker → el puerto 8000 publicado del backend de compose
+  #      · PROD real   → el backend del host (start_server.py)
+  #    ⚠️ Cuando producción corte a Docker por completo, se PODRÁ cambiar a
+  #       http://backend:8000 (o mantener host.docker.internal si el 8000
+  #       sigue publicado).
+  #
+  # Auth básica habilitada desde el inicio: usuario/contraseña se leen de
+  # backend/.env.test (N8N_BASIC_AUTH_USER / N8N_BASIC_AUTH_PASSWORD),
+  # NUNCA hardcodeados en este archivo.
+  # ─────────────────────────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:2.36.4   # version estable pineada (no latest: reproducible)
+    environment:
+      # ⚠️ LOGIN (verificado en v2.36.4): n8n v2 ya NO soporta N8N_BASIC_AUTH_*
+      #    (feature removida del servidor — esas vars se IGNORAN). El login es
+      #    vía USER MANAGEMENT: en el PRIMER acceso a la UI n8n muestra el
+      #    formulario para crear el OWNER (email + password, min 8 chars).
+      #    /rest/settings → authenticationMethod=email, showSetupOnFirstLoad=true.
+      # ── URL/UI en localhost ──
+      N8N_HOST: localhost
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: http
+      # Login por HTTP local: cookie no-secure (si no, no inicia sesión).
+      N8N_SECURE_COOKIE: "false"
+      # ── Zona horaria Chile (consistente con el resto del stack) ──
+      GENERIC_TIMEZONE: America/Santiago
+      TZ: America/Santiago
+    ports:
+      - "5678:5678"                    # UI: http://localhost:5678
+    volumes:
+      - n8n_data:/home/node/.n8n       # workflows + credenciales (SQLite por default)
+    restart: unless-stopped
+
 volumes:
   logs:
   backups:
   uploads:
+  n8n_data:

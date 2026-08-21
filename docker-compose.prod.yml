@@ -32,3 +32,13 @@ services:
       - ./backend/.env          # PRODUCCIÓN (ep-withered-silence)
     environment:
       ENVIRONMENT: production
+
+  n8n:
+    # Misma imagen/config/volumen que el base. El login es vía USER MANAGEMENT
+    # (owner email+password) — n8n v2 no soporta N8N_BASIC_AUTH_* (ver comentario
+    # del servicio n8n en docker-compose.yml). No necesita env_file de backend.
+    # ⚠️ Los webhooks/HTTP-Request de los workflows de n8n siguen apuntando a
+    #    http://host.docker.internal:8000 (ver comentario del servicio n8n en
+    #    docker-compose.yml): la producción real hoy corre con start_server.py
+    #    en el HOST. Solo al cortar producción a Docker se evaluará cambiarlo
+    #    a http://backend:8000.
