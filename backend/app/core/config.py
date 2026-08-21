@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     GMAIL_SMTP_USER: str = ""
     GMAIL_SMTP_APP_PASSWORD: str = ""
 
+    # n8n (Sistema de Asistencia/Hitos): API key para POST /api/v1/asistencia/n8n/evaluar-mes
+    # Se envía en el header `X-N8N-API-Key` y se compara con secrets.compare_digest.
+    N8N_API_KEY: str = ""
+
     @property
     def cors_origins_list(self) -> List[str]:
         """

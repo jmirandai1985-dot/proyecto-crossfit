@@ -72,7 +72,7 @@ def _template(titulo: str, saludo: str, cuerpo: str, boton_texto: str, boton_url
 </body></html>"""
 
 
-def _registrar_envio(alumno_id, tipo, estado, detalle_error=None):
+def _registrar_envio(alumno_id, tipo, estado, detalle_error=None, mes_referencia=None):
     """Inserta registro en notificaciones_enviadas (con tenant del alumno)."""
     try:
         from app.db.database import SessionLocal
@@ -87,7 +87,7 @@ def _registrar_envio(alumno_id, tipo, estado, detalle_error=None):
         reg = NotificacionEnviada(
             alumno_id=alumno_id, tipo=tipo, estado=estado,
             detalle_error=detalle_error, fecha_envio=datetime.utcnow(),
-            tenant_id=tenant_id)
+            tenant_id=tenant_id, mes_referencia=mes_referencia)
         db.add(reg)
         db.commit()
         db.close()
@@ -95,7 +95,7 @@ def _registrar_envio(alumno_id, tipo, estado, detalle_error=None):
         logger.warning(f"No se pudo registrar envio: {e}")
 
 
-def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, tipo: str = "") -> bool:
+def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, tipo: str = "", mes_referencia=None) -> bool:
     """Envia via Gmail SMTP (puerto 587, TLS) con logo inline + log en BD."""
     try:
         from app.core.config import settings
@@ -118,13 +118,13 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
             server.sendmail(smtp_user, destinatario, msg.as_string())
 
         logger.info(f"Correo enviado a {destinatario}: {asunto}")
-        _registrar_envio(alumno_id, tipo, "enviado") if alumno_id else None
+        _registrar_envio(alumno_id, tipo, "enviado", mes_referencia=mes_referencia) if alumno_id else None
         return True
     except Exception as e:
         global ULTIMO_ERROR_SMTP
         ULTIMO_ERROR_SMTP = str(e)
         logger.error(f"[SMTP ERROR] {destinatario}: {e}")
-        _registrar_envio(alumno_id, tipo, "fallido", str(e)) if alumno_id else None
+        _registrar_envio(alumno_id, tipo, "fallido", str(e), mes_referencia) if alumno_id else None
         return False
 
 

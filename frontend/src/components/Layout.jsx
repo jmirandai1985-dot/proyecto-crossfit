@@ -54,6 +54,7 @@ const Layout = ({ children }) => {
         { key: 'resumen', label: '📊 Resumen', path: '/coach/dashboard?tab=resumen' },
         { key: 'clases', label: '📅 Clases', path: '/coach/dashboard?tab=clases' },
         { key: 'alumnos', label: '👥 Alumnos & RMs', path: '/coach/dashboard?tab=alumnos' },
+        { key: 'asistencia', label: '📋 Asistencia', path: '/coach/dashboard?tab=asistencia' },
         { key: 'progreso', label: '📈 Progreso', path: '/coach/dashboard?tab=progreso' },
         { key: 'riesgo', label: '⚠️ Riesgo', path: '/coach/dashboard?tab=riesgo' },
     ];

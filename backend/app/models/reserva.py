@@ -23,6 +23,13 @@ class Reserva(Base):
     asistio = Column(Boolean, nullable=False, default=False)
     tokens_gastados = Column(Integer, nullable=False, default=0)
     estado = Column(String(20), nullable=False, default="reserved")
+    # ── Auditoría de marcado de asistencia (Fase 1, sistema de Asistencia) ──
+    # asistencias se soporta en reservas.asistio; estas columnas registran
+    # QUIÉN marcó, CUÁNDO y por qué vía (coach|admin|batch|n8n).
+    asistencia_marcada_por = Column(Integer, ForeignKey(
+        "usuarios.id", ondelete="SET NULL"), nullable=True)
+    asistencia_marcada_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    asistencia_via = Column(String(10), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True),

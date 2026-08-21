@@ -24,6 +24,7 @@ from app.models.reserva import Reserva
 from app.models.retencion import RetencionAlumno
 from app.models.solicitud_plan import SolicitudPlan
 from app.models.asistencia import Asistencia
+from app.models.hito_alumno import HitoAlumno
 from app.models.auditoria import Auditoria
 
 __all__ = ["Tenant", "Usuario", "RolUsuario",
@@ -32,4 +33,5 @@ __all__ = ["Tenant", "Usuario", "RolUsuario",
            "TransaccionFinanciera", "ConfiguracionNegocio",
            "Clase", "CoachDisciplina", "Disciplina", "HistorialRM",
            "HorarioBase", "Pedido", "Producto", "Reserva",
-           "RetencionAlumno", "SolicitudPlan", "Asistencia", "Auditoria"]
+           "RetencionAlumno", "SolicitudPlan", "Asistencia", "HitoAlumno",
+           "Auditoria"]

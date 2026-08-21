@@ -196,9 +196,26 @@ def marcar_asistencia(
             detail="Reserva no encontrada"
         )
 
+    # ── VENTANA DE CORRECCIÓN (Fase 1, decisión confirmada): el marcado solo
+    #    se permite el MISMO día calendario de la clase (hasta las 23:59:59
+    #    hora de Chile). Validada en el BACKEND, no solo en la UI.
+    #    Excepción: modo_emergencia (cobertura auditable) y admin/administrador.
+    rol = current_user.get("rol", "")
+    if rol == "coach" and not modo_emergencia:
+        from app.utils.santiago import hoy_santiago
+        _clase = db.query(Clase).filter(
+            Clase.id == reserva.clase_id,
+            Clase.tenant_id == tenant_id
+        ).first()
+        if _clase and _clase.fecha != hoy_santiago():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="La asistencia solo se puede marcar o corregir el mismo día de la clase "
+                       "(hasta las 23:59 hora de Chile).",
+            )
+
     # Validacion OBLIGATORIA: coach debe pertenecer a la disciplina de la clase
     coach_id = current_user["usuario_id"]
-    rol = current_user.get("rol", "")
     if rol == "coach":
         clase = db.query(Clase).filter(
             Clase.id == reserva.clase_id,
@@ -213,7 +230,12 @@ def marcar_asistencia(
             )
     # Admin: bypass
 
+    # Auditoría de marcado (Fase 1): quién, cuándo y por qué vía.
+    from app.utils.santiago import ahora_santiago
     reserva.asistio = asistio
+    reserva.asistencia_marcada_por = current_user["usuario_id"]
+    reserva.asistencia_marcada_at = ahora_santiago()
+    reserva.asistencia_via = "coach" if rol == "coach" else "admin"
     db.commit()
     db.refresh(reserva)
 

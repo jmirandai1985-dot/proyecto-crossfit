@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
+import AsistenciaClases from '../../components/coach/AsistenciaClases';
 
 const DashboardCoach = () => {
     const navigate = useNavigate();
@@ -1235,6 +1236,11 @@ const DashboardCoach = () => {
                                     </div>
                                 )}
                             </div>
+                        )}
+
+                        {/* ── TAB: ASISTENCIA ── */}
+                        {activeTab === 'asistencia' && (
+                            <AsistenciaClases />
                         )}
                     </div>
                 </div>
