@@ -38,6 +38,10 @@ class Usuario(Base):
     # ── Flujo de registro/activación de alumno nuevo ──
     estado = Column(String(20), nullable=False, default="activo")
     # 'pendiente_activacion' | 'activo' | 'rechazado'
+    # ── Reactivación (correo "sin plan") ──
+    # Opt-out específico de ESTE tipo de notificación (no de todas): si False,
+    # no se le envían correos de reactivación aunque siga sin plan.
+    acepta_correo_reactivacion = Column(Boolean, nullable=False, default=True)
     cambiar_password_al_login = Column(Boolean, nullable=False, default=False)
     peso_kg = Column(Float, nullable=True)
     estatura_cm = Column(Integer, nullable=True)

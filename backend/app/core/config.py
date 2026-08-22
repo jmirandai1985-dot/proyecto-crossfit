@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     # Se envía en el header `X-N8N-API-Key` y se compara con secrets.compare_digest.
     N8N_API_KEY: str = ""
 
+    # Reactivación (correo "sin plan"): secret para firmar tokens HMAC del opt-out.
+    # Generar con: openssl rand -hex 32
+    REACTIVACION_OPT_OUT_SECRET: str = ""
+
+    # URL base del BACKEND para links dentro de correos (p.ej. el opt-out de
+    # reactivación vive en el backend, no en el frontend).
+    BACKEND_PUBLIC_URL: str = "http://localhost:8000"
+
     @property
     def cors_origins_list(self) -> List[str]:
         """

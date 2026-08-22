@@ -1,14 +1,18 @@
 """
 Router de Notificaciones para alumnos
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timezone
 
 from app.db.database import get_db
 from app.models.notificacion import Notificacion
+from app.models.usuario import Usuario
 from app.core.dependencies import get_current_admin, get_current_user
+from app.core.rate_limit import limiter, LIMIT_CRITICO
+from app.services.asistencia_service import verificar_token_optout
 
 router = APIRouter()
 
@@ -136,3 +140,54 @@ def disparar_alertas_urgencia(
     """Email 5 - Planes que vencen HOY (send_alerta_urgencia_renovacion)."""
     from app.services.alertas_email_service import enviar_alertas_urgencia
     return enviar_alertas_urgencia(db)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# OPT-OUT de reactivación (endpoint PÚBLICO, sin JWT)
+#   GET /api/v1/notificaciones/reactivacion/optout?token=<token>
+# Token HMAC-SHA256 stateless (payload 'alumno_id:reactivacion'), verificado con
+# secrets.compare_digest (patrón del proyecto). Responde HTML simple de
+# confirmación — no requiere frontend ni login.
+# ═════════════════════════════════════════════════════════════════════════════
+def _html_optout(ok: bool) -> str:
+    if ok:
+        titulo, texto = "Preferencia registrada ✅", (
+            "Dejaste de recibir los correos de reactivación. "
+            "Podés volver a recibirlos hablando con tu coach en el box.")
+    else:
+        titulo, texto = "Link inválido o expirado ❌", (
+            "El link que usaste no es válido. Si sigue pasando, "
+            "escribinos y lo resolvemos.")
+    return f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;">
+<div style="max-width:480px;margin:40px auto;background:#ffffff;border-radius:12px;padding:32px;text-align:center;border:1px solid #e4e4e7;">
+  <h1 style="font-size:20px;color:#09090b;margin:0 0 12px;">{titulo}</h1>
+  <p style="color:#3f3f46;font-size:14px;line-height:1.6;margin:0;">{texto}</p>
+  <p style="color:#71717a;font-size:11px;margin:24px 0 0;">Urban Training Box</p>
+</div>
+</body></html>"""
+
+
+@router.get("/reactivacion/optout")
+@limiter.limit(LIMIT_CRITICO)
+def reactivacion_optout(
+    request: Request,
+    token: str = Query(..., description="Token HMAC firmado (alumno_id:reactivacion)"),
+    db: Session = Depends(get_db),
+):
+    """Desuscribe al alumno de los correos de reactivación (sin login).
+
+    Idempotente: si se reutiliza el mismo token (o ya estaba dado de baja), solo
+    vuelve a confirmar — no rompe ni duplica nada (flag booleano).
+    """
+    alumno_id = verificar_token_optout(token)
+    if alumno_id is None:
+        return HTMLResponse(_html_optout(ok=False),
+                            status_code=status.HTTP_400_BAD_REQUEST)
+    alumno = db.query(Usuario).filter(Usuario.id == alumno_id).first()
+    if not alumno:
+        return HTMLResponse(_html_optout(ok=False),
+                            status_code=status.HTTP_404_NOT_FOUND)
+    alumno.acepta_correo_reactivacion = False
+    db.commit()
+    return HTMLResponse(_html_optout(ok=True))

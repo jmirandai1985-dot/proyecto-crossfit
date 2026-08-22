@@ -140,3 +140,80 @@ def enviar_email_acompanamiento(nombre: str, correo: str, alumno_id: int,
                  tipo="acompanamiento", mes_referencia=mes_referencia)
     logger.info(f"[acompanamiento] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
+
+
+# ── Correo de reactivación (alumno sin plan) — Fase 2 ─────────────────────────
+# Copy EXACTO aprobado por el usuario (no improvisado). Solo se interpola el
+# primer nombre en "Hola [Nombre],". CTA → /alumno/solicitar-plan.
+REACTIVACION_COPY = {
+    "calido": {
+        "asunto": "La manada te extraña 🦍",
+        "titulo": "La manada te extraña 🦍",
+        "parrafos": [
+            "En Urban Training Box seguimos entrenando fuerte, pero notamos que "
+            "hace un tiempo no te vemos por acá.",
+            "La manada no es la misma sin vos. Sabemos que la vida a veces se "
+            "complica y los planes cambian — no hay drama.",
+            "Cuando quieras volver a sumarte, ahí vamos a estar. La puerta sigue abierta.",
+        ],
+        "cta": "Ver planes disponibles",
+    },
+    "motivacional": {
+        "asunto": "El progreso que dejaste en pausa, sigue esperándote 💪",
+        "titulo": "El progreso que dejaste en pausa, sigue esperándote 💪",
+        "parrafos": [
+            "Van ya varios meses desde tu última clase en Urban Training Box.",
+            "La manada sigue subiendo de nivel — nuevos récords, nuevas rachas, "
+            "gente llegando a su mejor versión. Y sabemos que vos también ibas "
+            "por ese camino.",
+            "Cada mes que pasa sin entrenar es progreso que cuesta más recuperar: "
+            "la fuerza, el hábito, la energía que habías construido. Nada de esto "
+            "se pierde para siempre, pero mientras más tiempo pase, más arranque "
+            "necesita el regreso.",
+            "Todavía estás a tiempo de retomarlo. La manada te espera con los "
+            "brazos abiertos.",
+        ],
+        "cta": "Volver a entrenar",
+    },
+}
+
+
+def enviar_email_reactivacion(nombre: str, correo: str, alumno_id: int,
+                              meses_sin_plan: int, mes_nombre: str,
+                              mes_referencia) -> bool:
+    """Correo de reactivación: tuvo plan, hoy no tiene ninguno que cubra el mes.
+
+    - Meses 1-3 sin plan → variante cálida ("La manada te extraña 🦍").
+    - Mes 4+ → variante motivacional ("El progreso que dejaste en pausa 💪").
+    CTA → /alumno/solicitar-plan. Incluye link de opt-out (token HMAC) al final.
+    """
+    if not correo:
+        return False
+    from app.services.asistencia_service import generar_token_optout
+
+    variante = "motivacional" if meses_sin_plan >= 4 else "calido"
+    copy = REACTIVACION_COPY[variante]
+    primer = nombre.split()[0]
+    asunto = copy["asunto"]
+    saludo = f"Hola {primer},"
+    cuerpo = "".join(f"<p>{p}</p>" for p in copy["parrafos"])
+    cuerpo += "<p>— El equipo de Urban Training Box</p>"
+
+    # Link de opt-out: endpoint público del backend (no requiere frontend ni login).
+    token = generar_token_optout(alumno_id)
+    optout_url = (f"{settings.BACKEND_PUBLIC_URL}"
+                  f"/api/v1/notificaciones/reactivacion/optout?token={token}")
+    cuerpo += (
+        "<p style='text-align:center;font-size:12px;color:#71717a;margin-top:24px;'>"
+        "¿No querés recibir más correos como este? "
+        f"<a href='{optout_url}' style='color:#71717a;'>"
+        "Click acá para darte de baja</a></p>"
+    )
+
+    html = _template(copy["titulo"], saludo, cuerpo, copy["cta"],
+                     f"{settings.FRONTEND_URL}/alumno/solicitar-plan")
+    ok = _enviar(correo, asunto, html, alumno_id,
+                 tipo="reactivacion", mes_referencia=mes_referencia)
+    logger.info(f"[reactivacion] {'EXITOSO' if ok else 'FALLIDO'} -> {correo} "
+                f"(meses_sin_plan={meses_sin_plan}, variante={variante})")
+    return ok

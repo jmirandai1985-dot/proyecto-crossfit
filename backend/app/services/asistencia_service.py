@@ -10,18 +10,24 @@ Reglas de negocio confirmadas (diseño Fase 1 y 2):
 - Evaluación mensual idempotente: dedupe con notificaciones_enviadas.mes_referencia.
 - Fechas "hoy"/"mes" SIEMPRE en America/Santiago (app.utils.santiago).
 """
+import base64
 import calendar
+import hashlib
+import hmac
+import secrets
 from datetime import date
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.utils.santiago import ahora_santiago, hoy_santiago
 from app.models.reserva import Reserva
 from app.models.clase import Clase
 from app.models.usuario import Usuario, RolUsuario
 from app.models.hito_alumno import HitoAlumno
 from app.models.notificacion_enviada import NotificacionEnviada
+from app.models.suscripcion import Suscripcion
 
 NIVELES_HITO = (1, 3, 6, 12)
 ESTADOS_VALIDOS = ("confirmada", "completada")
@@ -29,6 +35,12 @@ ESTADOS_VALIDOS = ("confirmada", "completada")
 # Tipos de correo registrados en notificaciones_enviadas
 TIPO_CUMPLIMIENTO = "cumplimiento"
 TIPO_ACOMPANAMIENTO = "acompanamiento"
+TIPO_REACTIVACION = "reactivacion"
+
+# Estados de suscripción que "cubren" el mes (para NO disparar reactivación).
+# Incluye 'pendiente' (a diferencia del criterio del ranking): una solicitud en
+# trámite también evita molestar con el correo de reactivación.
+ESTADOS_COBREN_REACTIVACION = ("activo", "vencido", "pendiente")
 
 
 def _mes_anterior(anio: int, mes: int):
@@ -46,6 +58,81 @@ def _mes_siguiente(anio: int, mes: int):
 def _rango_mes(anio: int, mes: int):
     ultimo = calendar.monthrange(anio, mes)[1]
     return date(anio, mes, 1), date(anio, mes, ultimo)
+
+
+# ── Reactivación ("sin plan") ─────────────────────────────────────────────────
+def _tiene_suscripciones(db: Session, alumno_id: int, tenant_id: int) -> bool:
+    """True si el alumno tuvo ALGUNA suscripción alguna vez (historial)."""
+    return db.query(Suscripcion.id).filter(
+        Suscripcion.usuario_id == alumno_id,
+        Suscripcion.tenant_id == tenant_id,
+    ).first() is not None
+
+
+def _tiene_suscripcion_que_cubre_mes(db: Session, alumno_id: int,
+                                     tenant_id: int, anio: int, mes: int) -> bool:
+    """True si el mes está cubierto por alguna suscripción (activo/vencido/pendiente)."""
+    desde, hasta = _rango_mes(anio, mes)
+    return db.query(Suscripcion.id).filter(
+        Suscripcion.tenant_id == tenant_id,
+        Suscripcion.usuario_id == alumno_id,
+        Suscripcion.estado.in_(ESTADOS_COBREN_REACTIVACION),
+        Suscripcion.fecha_inicio <= hasta,
+        Suscripcion.fecha_expiracion >= desde,
+    ).first() is not None
+
+
+def _meses_consecutivos_sin_plan(db: Session, alumno_id: int, tenant_id: int,
+                                 anio: int, mes: int) -> int:
+    """Meses consecutivos sin plan desde (anio, mes) hacia atrás.
+
+    Mismo patrón de caminata que `calcular_racha`. Tope inferior: el mes de la
+    PRIMERA suscripción del alumno (MIN fecha_inicio) — los meses anteriores a su
+    primer plan no cuentan (evita falso "sin plan" en alumnos nuevos).
+    """
+    min_fecha = db.query(func.min(Suscripcion.fecha_inicio)).filter(
+        Suscripcion.tenant_id == tenant_id,
+        Suscripcion.usuario_id == alumno_id,
+    ).scalar()
+    if min_fecha is None:
+        return 0
+    min_ym = (min_fecha.year, min_fecha.month)
+
+    meses_sin = 0
+    a, m = anio, mes
+    while (a, m) >= min_ym:
+        if _tiene_suscripcion_que_cubre_mes(db, alumno_id, tenant_id, a, m):
+            break
+        meses_sin += 1
+        a, m = _mes_anterior(a, m)
+    return meses_sin
+
+
+# ── Opt-out de reactivación: token HMAC stateless ─────────────────────────────
+def _hmac_hex(payload: str) -> str:
+    secret = settings.REACTIVACION_OPT_OUT_SECRET or ""
+    return hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+
+
+def generar_token_optout(alumno_id: int) -> str:
+    """Token firmado (HMAC-SHA256) con payload '{alumno_id}:reactivacion'."""
+    payload = f"{alumno_id}:reactivacion"
+    b64 = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+    return f"{b64}.{_hmac_hex(payload)}"
+
+
+def verificar_token_optout(token: str):
+    """Devuelve alumno_id si el token es válido; None si no (comparación constante)."""
+    try:
+        b64, sig = token.split(".", 1)
+        payload = base64.urlsafe_b64decode(b64 + "=" * (-len(b64) % 4)).decode()
+        if not payload.endswith(":reactivacion"):
+            return None
+        if not secrets.compare_digest(_hmac_hex(payload), sig):
+            return None
+        return int(payload.split(":", 1)[0])
+    except Exception:
+        return None
 
 
 def _reservas_mes(db: Session, alumno_id: int, tenant_id: int,
@@ -201,7 +288,7 @@ def evaluar_mes(db: Session, tenant_id: int, anio: int, mes: int,
     """
     from app.services.asistencia_email_service import (
         enviar_email_cumplimiento, enviar_email_acompanamiento, _enviar_racha,
-        _nombre_mes,
+        enviar_email_reactivacion, _nombre_mes,
     )
 
     alumnos = db.query(Usuario).filter(
@@ -221,11 +308,29 @@ def evaluar_mes(db: Session, tenant_id: int, anio: int, mes: int,
         "alumnos_evaluados": 0,
         "cumplimiento": 0,
         "acompanamiento": 0,
+        "reactivacion": 0,
         "hitos_generados": 0,
         "detalle_hitos": [],
     }
 
     for alumno in alumnos:
+        # ── Reactivación: sin plan que cubra el mes (independiente de reservas).
+        # Solo si tuvo alguna suscripción alguna vez y no hizo opt-out de este tipo.
+        if (alumno.acepta_correo_reactivacion
+                and _tiene_suscripciones(db, alumno.id, tenant_id)
+                and not _tiene_suscripcion_que_cubre_mes(db, alumno.id, tenant_id,
+                                                         anio, mes)):
+            meses_sin_plan = _meses_consecutivos_sin_plan(
+                db, alumno.id, tenant_id, anio, mes)
+            if (meses_sin_plan >= 1
+                    and not ya_notificado(db, alumno.id, TIPO_REACTIVACION,
+                                          mes_referencia)):
+                if enviar_correos:
+                    enviar_email_reactivacion(
+                        alumno.nombre, alumno.correo, alumno.id,
+                        meses_sin_plan, mes_nombre, mes_referencia)
+                resumen["reactivacion"] += 1
+
         calculo = calcular_asistencia_mes(db, alumno.id, tenant_id, anio, mes)
         if calculo["estado"] == "sin_actividad":
             continue
