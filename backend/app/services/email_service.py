@@ -396,7 +396,8 @@ def send_emergencia_cobertura(admin_correo: str, admin_id: int, mensaje: str,
 
 
 def send_confirmacion_renovacion_plan(nombre: str, correo: str, plan_nombre: str,
-                                      cantidad_clases: int, fecha_vigencia: str, link_app: str) -> bool:
+                                      cantidad_clases: int, fecha_vigencia: str, link_app: str,
+                                      alumno_id: int = None) -> bool:
     """Confirmación de renovación - Admin validó el comprobante y el plan se extendió."""
     if not correo:
         return False
@@ -413,7 +414,60 @@ def send_confirmacion_renovacion_plan(nombre: str, correo: str, plan_nombre: str
     )
     html = _template(titulo, saludo, cuerpo, "Ir a mi panel", link_app)
     ok = _enviar(correo, f"¡Excelente decisión, {nombre}! Tu plan ha sido renovado con éxito 🚀", html,
-                 None, tipo="confirmacion_renovacion")
+                 alumno_id, tipo="confirmacion_renovacion")
     logger.info(f"[confirmacion_renovacion] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    return ok
+
+
+def send_confirmacion_plan(nombre: str, correo: str, plan_nombre: str,
+                           cantidad_clases: int, fecha_vigencia: str, link_app: str,
+                           alumno_id: int = None) -> bool:
+    """Pago validado (PRIMERA vez) - plan activo con resumen.
+
+    Copy distinto de la renovación: el alumno no "renueva", está activando su
+    primer plan pago.
+    """
+    if not correo:
+        return False
+    titulo = f"¡{nombre}, tu plan ya está ACTIVO! 🚀"
+    saludo = (f"¡Felicidades, {nombre}! El administrador validó tu comprobante "
+              "y tu plan ya está activo.")
+    cuerpo = (
+        "<p>Aquí tienes el resumen de tu plan:</p>"
+        f"<p><strong>Plan:</strong> {plan_nombre}<br/>"
+        f"<strong>Clases disponibles:</strong> {cantidad_clases} clases al mes<br/>"
+        f"<strong>Vigencia:</strong> Hasta el {fecha_vigencia}</p>"
+        "<p>Ya podés agendar tus clases, registrar tus marcas y acceder a todas "
+        "las funciones del sistema.</p>"
+        "<p>¡Nos vemos entrenando en el box!<br/>— El equipo de Urban Training Box 🏋️‍♂️</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Ir a mi panel", link_app)
+    ok = _enviar(correo, f"¡{nombre}, tu plan ya está ACTIVO! 🚀", html,
+                 alumno_id, tipo="confirmacion_plan")
+    logger.info(f"[confirmacion_plan] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    return ok
+
+
+def send_confirmacion_pedido(nombre: str, correo: str, producto_nombre: str,
+                             cantidad: int, total: int, link_app: str,
+                             alumno_id: int = None) -> bool:
+    """Confirmación de compra en el Bazar (pedido creado, estado 'pendiente')."""
+    if not correo:
+        return False
+    titulo = "¡Compra confirmada! 🛍️"
+    saludo = f"Hola {nombre.split()[0]}, recibimos tu pedido del Bazar."
+    cuerpo = (
+        f"<p><strong>Producto:</strong> {producto_nombre}<br/>"
+        f"<strong>Cantidad:</strong> {cantidad}<br/>"
+        f"<strong>Total:</strong> ${total:,} CLP</p>"
+        "<p>El administrador va a validar tu pedido y te avisará cuando esté "
+        "listo para retirar.</p>"
+        "<p>¡Gracias por comprar en Urban Training Box!<br/>"
+        "— El equipo de Urban Training Box 🏋️‍♂️</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Ver mis pedidos", link_app)
+    ok = _enviar(correo, "¡Compra confirmada! 🛍️", html,
+                 alumno_id, tipo="confirmacion_pedido")
+    logger.info(f"[confirmacion_pedido] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
 

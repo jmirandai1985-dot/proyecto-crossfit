@@ -20,6 +20,7 @@ from app.models.transaccion_financiera import TransaccionFinanciera
 from app.schemas.solicitud import SolicitudPlanCreate
 from app.core.dependencies import get_current_admin, get_current_user
 from app.core.rate_limit import limiter, LIMIT_CRITICO
+from app.core.config import settings
 from app.services.auditoria_service import registrar_auditoria
 from datetime import timedelta
 
@@ -339,6 +340,36 @@ def aprobar_solicitud(
             "voucher_url": solicitud.voucher_url,
         },
     )
+
+    # ── Correo al alumno: confirmación del plan aprobado (no bloqueante) ──
+    # Primera vez vs renovación (mismo criterio que activar_alumno).
+    try:
+        alumno_obj = db.query(Usuario).filter(
+            Usuario.id == solicitud.alumno_id).first()
+        if alumno_obj and alumno_obj.correo:
+            from app.services.email_service import (
+                send_confirmacion_plan, send_confirmacion_renovacion_plan,
+                formatear_fecha_es)
+            # Renovación si existía ≥1 suscripción previa (excluye la recién creada).
+            es_renovacion = db.query(Suscripcion).filter(
+                Suscripcion.usuario_id == solicitud.alumno_id,
+                Suscripcion.tenant_id == solicitud.tenant_id,
+                Suscripcion.id != suscripcion.id,
+            ).count() > 0
+            fecha_vigencia = (formatear_fecha_es(suscripcion.fecha_expiracion)
+                              if suscripcion.fecha_expiracion else "")
+            link_app = f"{settings.FRONTEND_URL}/alumno/dashboard"
+            cant = plan.creditos if plan and plan.creditos else 0
+            if es_renovacion:
+                send_confirmacion_renovacion_plan(
+                    alumno_obj.nombre, alumno_obj.correo, plan.nombre,
+                    cant, fecha_vigencia, link_app, alumno_obj.id)
+            else:
+                send_confirmacion_plan(
+                    alumno_obj.nombre, alumno_obj.correo, plan.nombre,
+                    cant, fecha_vigencia, link_app, alumno_obj.id)
+    except Exception as e:
+        logger.warning(f"No se pudo enviar correo de confirmación de plan: {e}")
 
     return {"status": "approved", "message": "Plan activado exitosamente"}
 

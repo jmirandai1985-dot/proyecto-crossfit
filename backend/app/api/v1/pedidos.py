@@ -1,6 +1,7 @@
 """
 Router de endpoints para gestión de Pedidos
 """
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import update
 from sqlalchemy.exc import DBAPIError
@@ -15,6 +16,9 @@ from app.schemas.pedido import (
     PedidoCreate, PedidoUpdate, PedidoResponse, PedidoListItem
 )
 from app.core.dependencies import get_current_admin, get_current_user, require_full_access
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 # FIX 1: alumnos con plan de prueba NO pueden ver/comprar en el Bazar.
 # FIX 2: el POST de pedidos pasa a get_current_user (alumno con acceso completo).
@@ -134,6 +138,25 @@ def crear_pedido(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Alta demanda, intentá de nuevo",
         )
+
+    # ── Correo al alumno: confirmación de compra en el Bazar (no bloqueante) ──
+    try:
+        from app.services.email_service import send_confirmacion_pedido
+        if current_user.get("rol") not in ("coach", "admin", "administrador"):
+            # Alumno comprando para sí mismo: current_user trae nombre/correo (BD).
+            destino_nombre = current_user.get("nombre", "Atleta")
+            destino_correo = current_user.get("correo", "")
+        else:
+            # Staff creando a nombre de un alumno del box.
+            destino_nombre = alumno.nombre if alumno else "Atleta"
+            destino_correo = alumno.correo if alumno else ""
+        send_confirmacion_pedido(
+            destino_nombre, destino_correo,
+            producto.nombre, pedido_data.cantidad, total,
+            f"{settings.FRONTEND_URL}/alumno/mis-pedidos",
+            current_user.get("usuario_id") if current_user.get("rol") not in ("coach", "admin", "administrador") else (alumno.id if alumno else None))
+    except Exception as e:
+        logger.warning(f"No se pudo enviar correo de confirmación de pedido: {e}")
 
     return db_pedido
 
