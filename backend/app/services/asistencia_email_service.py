@@ -15,11 +15,14 @@ Tipos de correo:
 """
 import logging
 
+from app.core.config import settings
 from app.services.email_service import _template, _enviar
 
 logger = logging.getLogger("uvicorn.email")
 
-FRONTEND_URL = "https://app.urbantrainingbox.cl"
+# NOTA: la URL base del frontend sale de settings.FRONTEND_URL (.env/.env.test).
+# En dev apunta a http://localhost:5173; el dominio real de producción se
+# definirá en el despliegue a VPS (ver comentario en backend/.env.example).
 
 NOMBRES_MES = [
     "", "enero", "febrero", "marzo", "abril", "mayo", "junio",
@@ -85,7 +88,7 @@ def _enviar_racha(nombre: str, correo: str, alumno_id: int, nivel: int,
     saludo = f"Hola {nombre.split()[0]}, queremos celebrarte hoy."
     cuerpo = copy["cuerpo"].format(nombre=nombre.split()[0], mes=mes_nombre)
     html = _template(copy["titulo"], saludo, cuerpo,
-                     "Ver mi progreso", f"{FRONTEND_URL}/alumno/dashboard")
+                     "Ver mi progreso", f"{settings.FRONTEND_URL}/alumno/dashboard")
     ok = _enviar(correo, asunto, html, alumno_id,
                  tipo=f"hito_racha_{nivel}", mes_referencia=mes_referencia)
     logger.info(f"[hito_racha_{nivel}] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
@@ -108,7 +111,7 @@ def enviar_email_cumplimiento(nombre: str, correo: str, alumno_id: int,
         "<p>¡Nos vemos en el box!</p>"
     )
     html = _template("¡Mes perfecto! 🔥", saludo, cuerpo,
-                     "Ver mi progreso", f"{FRONTEND_URL}/alumno/dashboard")
+                     "Ver mi progreso", f"{settings.FRONTEND_URL}/alumno/dashboard")
     ok = _enviar(correo, asunto, html, alumno_id,
                  tipo="cumplimiento", mes_referencia=mes_referencia)
     logger.info(f"[cumplimiento] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
@@ -132,7 +135,7 @@ def enviar_email_acompanamiento(nombre: str, correo: str, alumno_id: int,
         "<p>Te esperamos en el box 💪</p>"
     )
     html = _template("Te acompañamos", saludo, cuerpo,
-                     "Ver mis clases", f"{FRONTEND_URL}/reservas")
+                     "Ver mis clases", f"{settings.FRONTEND_URL}/alumno/mis-reservas")
     ok = _enviar(correo, asunto, html, alumno_id,
                  tipo="acompanamiento", mes_referencia=mes_referencia)
     logger.info(f"[acompanamiento] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
