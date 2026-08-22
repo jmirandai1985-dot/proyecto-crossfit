@@ -88,7 +88,7 @@ def _enviar_racha(nombre: str, correo: str, alumno_id: int, nivel: int,
     saludo = f"Hola {nombre.split()[0]}, queremos celebrarte hoy."
     cuerpo = copy["cuerpo"].format(nombre=nombre.split()[0], mes=mes_nombre)
     html = _template(copy["titulo"], saludo, cuerpo,
-                     "Ver mi progreso", f"{settings.FRONTEND_URL}/alumno/dashboard")
+                     "Ver mi progreso", f"{settings.FRONTEND_URL}/alumno/mi-progreso")
     ok = _enviar(correo, asunto, html, alumno_id,
                  tipo=f"hito_racha_{nivel}", mes_referencia=mes_referencia)
     logger.info(f"[hito_racha_{nivel}] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
@@ -111,7 +111,7 @@ def enviar_email_cumplimiento(nombre: str, correo: str, alumno_id: int,
         "<p>¡Nos vemos en el box!</p>"
     )
     html = _template("¡Mes perfecto! 🔥", saludo, cuerpo,
-                     "Ver mi progreso", f"{settings.FRONTEND_URL}/alumno/dashboard")
+                     "Ver mi progreso", f"{settings.FRONTEND_URL}/alumno/mi-progreso")
     ok = _enviar(correo, asunto, html, alumno_id,
                  tipo="cumplimiento", mes_referencia=mes_referencia)
     logger.info(f"[cumplimiento] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
