@@ -57,6 +57,10 @@ class ProductoListItem(BaseModel):
     precio: float
     stock: int
     stock_minimo: Optional[int] = None
+    # Flag de "ya se avisó en este ciclo de stock bajo". Se resetea a False en
+    # PUT /productos/{id} al reponer por encima del umbral. Lo consume el panel
+    # admin Bazar para mostrar el estado de alerta en la tabla.
+    alerta_stock_enviada: bool = False
     activo: bool
 
     model_config = ConfigDict(from_attributes=True)
