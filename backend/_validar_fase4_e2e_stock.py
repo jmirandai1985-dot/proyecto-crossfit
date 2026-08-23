@@ -85,6 +85,8 @@ def cleanup():
         ("productos", f"DELETE FROM productos WHERE tenant_id IN {tids}"),
         ("suscripciones", f"DELETE FROM suscripciones WHERE tenant_id IN {tids}"),
         ("planes", f"DELETE FROM planes WHERE tenant_id IN {tids}"),
+        ("notificaciones_enviadas", f"DELETE FROM notificaciones_enviadas WHERE alumno_id IN (SELECT id FROM usuarios WHERE tenant_id IN {tids})"),
+        ("notificaciones", f"DELETE FROM notificaciones WHERE alumno_id IN (SELECT id FROM usuarios WHERE tenant_id IN {tids})"),
         ("usuarios", f"DELETE FROM usuarios WHERE tenant_id IN {tids}"),
         ("tenants", f"DELETE FROM tenants WHERE id IN {tids}"),
     ]
