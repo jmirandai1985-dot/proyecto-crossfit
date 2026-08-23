@@ -7,6 +7,7 @@ import { DASHBOARD_MAP, ROLES_ADMIN, ROLES_COACH, ROLES_ALUMNO } from './config/
 // ─── Pages ──────────────────────────────────────────────────────────────
 import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
+import ResetPassword from './pages/ResetPassword';
 import AdminDashboard from './pages/admin/Dashboard';
 import AdminAlumnos from './pages/admin/Alumnos';
 import AdminCoaches from './pages/admin/Coaches';
@@ -88,6 +89,9 @@ function App() {
               </PublicRoute>
             }
           />
+
+          {/* ── /reset-password → nueva contraseña con token de un solo uso ── */}
+          <Route path="/reset-password" element={<ResetPassword />} />
 
           {/* ── Rutas de Administrador ──────────────────────────── */}
           <Route path="/admin/*" element={<ProtectedRoute roles={ROLES_ADMIN} />}>

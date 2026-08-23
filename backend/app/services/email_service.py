@@ -395,6 +395,30 @@ def send_emergencia_cobertura(admin_correo: str, admin_id: int, mensaje: str,
         html, admin_id, tipo="emergencia_cobertura")
 
 
+def send_reset_password(nombre: str, correo: str, link: str) -> bool:
+    """Restablecimiento de contraseña — email con link de un solo uso (1 hora).
+
+    El token llega en la URL del link; el backend solo guarda su hash sha256.
+    """
+    if not correo:
+        return False
+    nombre_corto = (nombre or "").strip().split()[0] or "atleta"
+    titulo = "Restablece tu contraseña 🔑"
+    saludo = (f"¡Hola, {nombre_corto}! Recibimos una solicitud para restablecer "
+              "la contraseña de tu cuenta en Urban Training Box.")
+    cuerpo = (
+        "<p>Haz clic en el botón para crear una nueva contraseña. El link es "
+        "<strong>válido por 1 hora</strong> y solo puede usarse <strong>una vez</strong>.</p>"
+        "<p>Si no solicitaste este cambio, ignora este correo: tu contraseña "
+        "seguirá siendo la misma.</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Restablecer mi contraseña", link)
+    ok = _enviar(correo, "Restablece tu contraseña 🔑", html, None,
+                 tipo="reset_password")
+    logger.info(f"[reset_password] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    return ok
+
+
 def send_confirmacion_renovacion_plan(nombre: str, correo: str, plan_nombre: str,
                                       cantidad_clases: int, fecha_vigencia: str, link_app: str,
                                       alumno_id: int = None) -> bool:

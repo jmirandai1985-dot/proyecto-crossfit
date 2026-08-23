@@ -10,6 +10,18 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, description="Contraseña")
 
 
+class ResetPasswordRequest(BaseModel):
+    """Solicitud de link de restablecimiento de contraseña (anti user-enumeration)."""
+    correo: str = Field(..., min_length=1, description="Correo del usuario")
+
+
+class ResetPasswordConfirm(BaseModel):
+    """Confirmación de restablecimiento con token de un solo uso."""
+    token: str = Field(..., min_length=1, description="Token de un solo uso recibido por correo")
+    nueva_password: str = Field(
+        ..., min_length=8, max_length=128, description="Nueva contraseña")
+
+
 class TokenResponse(BaseModel):
     """Esquema para respuesta de token JWT"""
     access_token: str = Field(..., description="JWT access token")

@@ -1,14 +1,26 @@
 """
 Router de autenticación - Login y generación de JWT
 """
+import hashlib
+import secrets
+import logging
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.db.database import get_db
-from app.schemas.auth import LoginRequest, TokenResponse
-from app.core.security import verify_password, create_access_token
-from app.core.rate_limit import limiter, LIMIT_LOGIN
+from app.schemas.auth import (LoginRequest, TokenResponse,
+                              ResetPasswordRequest, ResetPasswordConfirm)
+from app.core.security import verify_password, create_access_token, get_password_hash
+from app.core.rate_limit import limiter, LIMIT_LOGIN, LIMIT_REGISTRO, LIMIT_CRITICO
+from app.core.config import settings
+from app.models.usuario import Usuario
+from app.models.password_reset_token import PasswordResetToken
+from app.services.email_service import send_reset_password
+
+logger = logging.getLogger("uvicorn.auth")
 
 router = APIRouter()
 
@@ -95,3 +107,92 @@ def login(
         tenant_id=usuario.tenant_id,
         nombre=usuario.nombre
     )
+
+
+@router.post("/reset-password-request", status_code=status.HTTP_200_OK)
+@limiter.limit(LIMIT_REGISTRO)
+def reset_password_request(
+    request: Request,
+    body: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    """Solicita link de restablecimiento de contraseña.
+
+    🔒 SIEMPRE responde el mismo mensaje genérico (anti user-enumeration):
+    la respuesta es idéntica exista o no el correo. Si el usuario existe:
+    - invalida cualquier token previo sin usar (uso único del más reciente),
+    - genera un token aleatorio y guarda SOLO su hash sha256 (nunca el token
+      en texto plano), con expiración de 1 hora,
+    - envía el correo con el link.
+    """
+    correo = body.correo.strip().lower()
+    usuario = db.query(Usuario).filter(
+        Usuario.correo == correo,
+        Usuario.activo == True,  # noqa: E712
+    ).first()
+
+    if usuario:
+        now = datetime.now(timezone.utc)
+        # Invalida tokens previos sin usar del mismo usuario.
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.usuario_id == usuario.id,
+            PasswordResetToken.used_at.is_(None),
+        ).update({"used_at": now})
+
+        token = secrets.token_urlsafe(32)
+        db.add(PasswordResetToken(
+            usuario_id=usuario.id,
+            token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+            expires_at=now + timedelta(hours=1),
+        ))
+        db.commit()
+
+        link = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+        try:
+            send_reset_password(usuario.nombre, usuario.correo, link)
+        except Exception as e:  # noqa: BLE001 — no romper la respuesta genérica
+            logger.warning(f"[reset-password-request] fallo al enviar email: {e}")
+
+    # Respuesta genérica SIEMPRE (exista o no el correo).
+    return {"mensaje": "Si el correo existe, enviaremos un link para restablecer tu contraseña."}
+
+
+@router.post("/reset-password-confirm", status_code=status.HTTP_200_OK)
+@limiter.limit(LIMIT_CRITICO)
+def reset_password_confirm(
+    request: Request,
+    body: ResetPasswordConfirm,
+    db: Session = Depends(get_db),
+):
+    """Confirma el restablecimiento con el token de un solo uso.
+
+    Valida hash sha256 + no expirado + no usado. En cualquier fallo responde
+    el mismo error genérico (no revela el estado del token). Al éxito marca
+    used_at (invalida el token) y re-hashea la contraseña con bcrypt.
+    """
+    token_hash = hashlib.sha256(body.token.encode("utf-8")).hexdigest()
+    reg = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token_hash == token_hash
+    ).first()
+
+    if (not reg
+            or reg.used_at is not None
+            or reg.expires_at < datetime.now(timezone.utc)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El link de restablecimiento es inválido o expiró. Solicita uno nuevo.",
+        )
+
+    usuario = db.query(Usuario).filter(Usuario.id == reg.usuario_id).first()
+    if not usuario:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El link de restablecimiento es inválido o expiró. Solicita uno nuevo.",
+        )
+
+    # Token de un solo uso: se consume aquí.
+    reg.used_at = datetime.now(timezone.utc)
+    usuario.password_hash = get_password_hash(body.nueva_password)
+    db.commit()
+
+    return {"mensaje": "Contraseña actualizada correctamente."}
