@@ -8,6 +8,7 @@ Requisito: backend/.env con DATABASE_URL válida.
 import os
 import sys
 import random
+import uuid
 import asyncio
 from datetime import datetime, timezone, timedelta
 
@@ -72,13 +73,15 @@ def seed():
     hace48 = now - timedelta(hours=48)
     with engine.begin() as conn:
         conn.execute(sa_text(
-            "INSERT INTO tenants (id, nombre, subdomain, activo, created_at) "
-            "VALUES (:id, :nom, :sub, TRUE, :ca)"),
-            {"id": TENANT_ID, "nom": "TEST_VALIDACION Tenant A (Fase1)", "sub": SUBDOMAIN, "ca": fmt(now)})
+            "INSERT INTO tenants (id, nombre, subdomain, public_id, activo, created_at) "
+            "VALUES (:id, :nom, :sub, :pid, TRUE, :ca)"),
+            {"id": TENANT_ID, "nom": "TEST_VALIDACION Tenant A (Fase1)", "sub": SUBDOMAIN,
+             "pid": str(uuid.uuid4()), "ca": fmt(now)})
         conn.execute(sa_text(
-            "INSERT INTO tenants (id, nombre, subdomain, activo, created_at) "
-            "VALUES (:id, :nom, :sub, TRUE, :ca)"),
-            {"id": TENANT2_ID, "nom": "TEST_VALIDACION Tenant B (Fase1)", "sub": SUBDOMAIN2, "ca": fmt(now)})
+            "INSERT INTO tenants (id, nombre, subdomain, public_id, activo, created_at) "
+            "VALUES (:id, :nom, :sub, :pid, TRUE, :ca)"),
+            {"id": TENANT2_ID, "nom": "TEST_VALIDACION Tenant B (Fase1)", "sub": SUBDOMAIN2,
+             "pid": str(uuid.uuid4()), "ca": fmt(now)})
         conn.execute(sa_text(
             "INSERT INTO usuarios (id, tenant_id, rut, nombre, correo, password_hash, rol, activo, estado) "
             "VALUES (:id, :tid, :rut, :nom, :mail, 'x', :rol, TRUE, 'activo')"),

@@ -9,6 +9,13 @@ from alembic import context
 # access to the values within the .ini file in use.
 config = context.config
 
+# URL real de la BD desde la config de la app (settings):
+#   ENVIRONMENT no definido → .env      (BD activa / producción)
+#   ENVIRONMENT=test        → .env.test (branch TEST aislada)
+# El alembic.ini trae un placeholder; sin esto alembic no conecta a la BD real.
+from app.core.config import settings  # noqa: E402
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
 if config.config_file_name is not None:
