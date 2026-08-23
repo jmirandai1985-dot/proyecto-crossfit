@@ -167,7 +167,7 @@ const AdminDashboard = () => {
                         </button>
                         <button onClick={() => setFidelizacionModal('membresias')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-green-600 hover:shadow-md hover:border-green-700 transition-all cursor-pointer text-left">
                             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Membresías Mensuales</p>
-                            <p className="text-3xl font-bold text-green-700 mt-1">{stats.membresiasMensuales || 0}</p>
+                            <p className="text-3xl font-bold text-green-700 mt-1">{stats.totalSuscripcionesMes || 0}</p>
                             <div className="flex items-center gap-1 mt-1">
                                 <span className={`text-xs font-bold ${(stats.crecimientoMensual || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                     {stats.crecimientoMensual > 0 ? '📈' : '📉'} {Math.abs(stats.crecimientoMensual || 0)}%

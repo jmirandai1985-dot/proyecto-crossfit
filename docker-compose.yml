@@ -57,10 +57,12 @@ services:
       - uploads:/app/app/static/uploads
     expose:
       - "8000"
-    # Puerto 8000 publicado para acceder al API directo (Swagger /docs).
-    # Opcional: quitar si se quiere solo el acceso vía nginx (puerto 80).
+    # Puerto 8001 publicado en el HOST para acceder al API directo (Swagger /docs).
+    # El host :8000 está reservado para PRODUCCIÓN (start_server.py). El puerto
+    # INTERNO del contenedor sigue siendo 8000 — nginx (frontend) se comunica vía
+    # la red docker con backend:8000, sin cambios.
     ports:
-      - "8000:8000"
+      - "8001:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
       interval: 30s
