@@ -158,6 +158,27 @@ def crear_pedido(
     except Exception as e:
         logger.warning(f"No se pudo enviar correo de confirmación de pedido: {e}")
 
+    # ── Alerta de stock bajo al admin (Bazar, no bloqueante) ──────────────
+    # Si el producto tiene `stock_minimo` configurado (no NULL), tras el
+    # descuento atómico quedó en/bajo el umbral, y aún no se avisó en este
+    # ciclo (alerta_stock_enviada=False), se envía el correo al admin del box.
+    # Si el envío es exitoso se marca el flag para no repetir el aviso hasta que
+    # el admin reponga por encima del umbral (PUT /productos/{id} lo resetea).
+    try:
+        db.refresh(producto)  # stock real post-descuento atómico
+        if (producto.stock_minimo is not None
+                and producto.stock <= producto.stock_minimo
+                and not producto.alerta_stock_enviada):
+            from app.services.email_service import send_alerta_stock_bajo
+            enviado = send_alerta_stock_bajo(
+                producto.nombre, producto.stock, producto.stock_minimo,
+                tenant_id)
+            if enviado:
+                producto.alerta_stock_enviada = True
+                db.commit()
+    except Exception as e:
+        logger.warning(f"No se pudo procesar alerta de stock bajo: {e}")
+
     return db_pedido
 
 

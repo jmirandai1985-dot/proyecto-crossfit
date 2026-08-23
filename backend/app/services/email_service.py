@@ -471,3 +471,53 @@ def send_confirmacion_pedido(nombre: str, correo: str, producto_nombre: str,
     logger.info(f"[confirmacion_pedido] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
 
+
+def send_alerta_stock_bajo(producto_nombre: str, stock_actual: int,
+                           stock_minimo: int, tenant_id: int) -> bool:
+    """Alerta al admin del box cuando un producto del Bazar queda bajo su umbral.
+
+    Destinatario: primer admin ACTIVO del tenant (mismo patrón que
+    `enviar_email_solicitud_admin`). No se registra en `notificaciones_enviadas`
+    (esa tabla exige `alumno_id` NOT NULL y aquí el destinatario es el admin):
+    la dedupe del ciclo la hace el flag `productos.alerta_stock_enviada`
+    (ver `crear_pedido` en pedidos.py y el reset en PUT /productos/{id}).
+    """
+    if not tenant_id:
+        return False
+    correo_admin = None
+    try:
+        from app.db.database import SessionLocal
+        from app.models.usuario import Usuario, RolUsuario
+        db = SessionLocal()
+        admin = db.query(Usuario).filter(
+            Usuario.tenant_id == tenant_id,
+            Usuario.rol == RolUsuario.administrador,
+            Usuario.activo == True,
+        ).order_by(Usuario.id).first()
+        correo_admin = admin.correo if admin else None
+        db.close()
+    except Exception as e:
+        logger.warning(f"No se pudo obtener admin para alerta de stock: {e}")
+    if not correo_admin:
+        logger.warning(
+            f"No hay admin con correo para alerta de stock bajo (tenant={tenant_id})")
+        return False
+
+    titulo = "🚨 Stock bajo en el Bazar"
+    saludo = "Uno de tus productos del Bazar quedó bajo su stock mínimo."
+    cuerpo = (
+        f"<p><strong>Producto:</strong> {producto_nombre}<br/>"
+        f"<strong>Stock actual:</strong> {stock_actual}<br/>"
+        f"<strong>Stock mínimo:</strong> {stock_minimo}</p>"
+        "<p>Reponé stock o ajustá el umbral del producto para desactivar esta alerta.</p>"
+    )
+    from app.core.config import settings
+    url = f"{settings.FRONTEND_URL}/admin/bazar"
+    html = _template(titulo, saludo, cuerpo, "Ir al Bazar", url)
+    ok = _enviar(correo_admin, "🚨 Stock bajo en el Bazar", html,
+                 None, tipo="alerta_stock_bajo")
+    logger.info(
+        f"[alerta_stock_bajo] {'EXITOSO' if ok else 'FALLIDO'} -> "
+        f"{correo_admin} ({producto_nombre}, stock={stock_actual})")
+    return ok
+

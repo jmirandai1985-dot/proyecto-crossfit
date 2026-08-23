@@ -14,6 +14,11 @@ class ProductoBase(BaseModel):
         None, max_length=500, description="Descripción del producto")
     precio: float = Field(..., gt=0, description="Precio del producto")
     stock: int = Field(0, ge=0, description="Stock disponible")
+    # Umbral de alerta de stock bajo del Bazar. NULL → alerta desactivada para
+    # este producto. Se avisa al admin una vez por ciclo (alerta_stock_enviada)
+    # y el flag se resetea en PUT /productos/{id} al reponer por encima del umbral.
+    stock_minimo: Optional[int] = Field(
+        None, ge=0, description="Umbral de stock bajo (NULL = alerta desactivada)")
     # imagen_url removido - columna no existe en la base de datos PostgreSQL
     activo: bool = Field(True, description="Indica si el producto está activo")
 
@@ -29,6 +34,8 @@ class ProductoUpdate(BaseModel):
     descripcion: Optional[str] = Field(None, max_length=500)
     precio: Optional[float] = Field(None, gt=0)
     stock: Optional[int] = Field(None, ge=0)
+    stock_minimo: Optional[int] = Field(
+        None, ge=0, description="Umbral de stock bajo (NULL = alerta desactivada)")
     activo: Optional[bool] = None
 
 
@@ -49,6 +56,7 @@ class ProductoListItem(BaseModel):
     descripcion: Optional[str]
     precio: float
     stock: int
+    stock_minimo: Optional[int] = None
     activo: bool
 
     model_config = ConfigDict(from_attributes=True)

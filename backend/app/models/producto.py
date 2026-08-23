@@ -22,6 +22,13 @@ class Producto(Base):
     descripcion = Column(String(500), nullable=True)
     precio = Column(Float, nullable=False)
     stock = Column(Integer, nullable=False, default=0)
+    # ── Alerta de stock bajo (Bazar): umbral opcional por producto ──
+    # stock_minimo: si es NULL, la alerta queda desactivada para este producto.
+    # alerta_stock_enviada: flag de "ya se avisó en este ciclo de stock bajo".
+    # Se resetea a False en PUT /productos/{id} cuando el admin repone por
+    # encima del umbral (para que la próxima bajada vuelva a alertar).
+    stock_minimo = Column(Integer, nullable=True)
+    alerta_stock_enviada = Column(Boolean, nullable=False, default=False)
     # imagen_url removido - columna no existe en la base de datos PostgreSQL
     activo = Column(Boolean, nullable=False, default=True)
     created_at = Column(TIMESTAMP(timezone=True),

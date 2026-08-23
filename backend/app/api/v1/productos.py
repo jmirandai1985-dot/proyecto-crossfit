@@ -36,6 +36,7 @@ async def crear_producto(
     stock: int = Form(...),
     tenant_id: Optional[int] = Form(None),
     descripcion: Optional[str] = Form(None),
+    stock_minimo: Optional[int] = Form(None),
     activo: bool = Form(True),
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
@@ -92,6 +93,7 @@ async def crear_producto(
         descripcion=descripcion or None,
         precio=precio,
         stock=stock,
+        stock_minimo=stock_minimo,
         activo=activo,
     )
 
@@ -176,6 +178,12 @@ def actualizar_producto(
 
     for field, value in update_data.items():
         setattr(producto, field, value)
+
+    # ── Alerta de stock bajo: si el producto quedó por ENCIMA del umbral
+    #    (el admin repuso stock o subió/desactivó el umbral), se rearma el
+    #    ciclo para que la próxima bajada vuelva a alertar al admin.
+    if producto.stock_minimo is not None and producto.stock > producto.stock_minimo:
+        producto.alerta_stock_enviada = False
 
     db.commit()
     db.refresh(producto)

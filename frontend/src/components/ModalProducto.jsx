@@ -8,6 +8,7 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
         descripcion: '',
         precio: '',
         stock: '',
+        stock_minimo: '',
         activo: true,
     });
     const [imagenArchivo, setImagenArchivo] = useState(null);
@@ -25,6 +26,8 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                     descripcion: productoEditar.descripcion || '',
                     precio: productoEditar.precio ? String(productoEditar.precio) : '',
                     stock: productoEditar.stock !== undefined ? String(productoEditar.stock) : '',
+                    stock_minimo: (productoEditar.stock_minimo !== undefined && productoEditar.stock_minimo !== null)
+                        ? String(productoEditar.stock_minimo) : '',
                     activo: productoEditar.activo !== undefined ? productoEditar.activo : true,
                 });
             } else {
@@ -34,6 +37,7 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                     descripcion: '',
                     precio: '',
                     stock: '',
+                    stock_minimo: '',
                     activo: true,
                 });
             }
@@ -65,6 +69,8 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
         if (formData.precio && parseFloat(formData.precio) <= 0) newErrors.precio = 'Precio debe ser mayor a 0';
         if (formData.stock === '' || formData.stock === undefined) newErrors.stock = 'Stock requerido';
         if (formData.stock !== '' && parseInt(formData.stock) < 0) newErrors.stock = 'Stock no puede ser negativo';
+        if (formData.stock_minimo !== '' && formData.stock_minimo !== undefined
+            && parseInt(formData.stock_minimo) < 0) newErrors.stock_minimo = 'El stock mínimo no puede ser negativo';
 
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
@@ -84,6 +90,8 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                     descripcion: formData.descripcion || null,
                     precio: parseFloat(formData.precio),
                     stock: parseInt(formData.stock),
+                    stock_minimo: (formData.stock_minimo === '' || formData.stock_minimo === undefined)
+                        ? null : parseInt(formData.stock_minimo),
                     activo: formData.activo,
                 };
                 await api.put(`/api/v1/productos/${productoEditar.id}`, payload);
@@ -94,6 +102,9 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                 data.append('descripcion', formData.descripcion || '');
                 data.append('precio', parseFloat(formData.precio));
                 data.append('stock', parseInt(formData.stock));
+                if (formData.stock_minimo !== '' && formData.stock_minimo !== undefined) {
+                    data.append('stock_minimo', parseInt(formData.stock_minimo));
+                }
                 data.append('activo', formData.activo);
                 if (imagenArchivo) {
                     data.append('file', imagenArchivo);
@@ -108,6 +119,7 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                 descripcion: '',
                 precio: '',
                 stock: '',
+                stock_minimo: '',
                 activo: true,
             });
             setImagenArchivo(null);
@@ -186,6 +198,24 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                             />
                             {errors.stock && <p className="text-xs text-red-600 mt-1">{errors.stock}</p>}
                         </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Stock mínimo para alerta
+                        </label>
+                        <input
+                            type="number"
+                            value={formData.stock_minimo}
+                            onChange={(e) => setFormData({ ...formData, stock_minimo: e.target.value })}
+                            className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 ${errors.stock_minimo ? 'border-red-500' : 'border-gray-300'}`}
+                            min="0"
+                            placeholder="Opcional"
+                        />
+                        {errors.stock_minimo && <p className="text-xs text-red-600 mt-1">{errors.stock_minimo}</p>}
+                        <p className="text-xs text-gray-500 mt-1">
+                            Recibirás un correo automático cuando el stock baje a este valor. Vacío = alerta desactivada.
+                        </p>
                     </div>
 
                     <div>
