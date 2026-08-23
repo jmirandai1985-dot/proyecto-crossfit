@@ -6,9 +6,13 @@ Deduplicación: cada envío se marca en `notificaciones_enviadas` para no repeti
 import logging
 from datetime import date, datetime, timedelta
 
+from app.core.config import settings
+
 logger = logging.getLogger("uvicorn.email")
 
-LINK_RENOVAR = "https://app.urbantrainingbox.cl/planes"
+# CTA "Renovar mi plan" → solicitud de plan del alumno (mismo patrón que las
+# demás URLs de correos: settings.FRONTEND_URL, nunca dominios hardcodeados).
+LINK_RENOVAR = f"{settings.FRONTEND_URL}/alumno/solicitar-plan"
 
 
 def _formatear_fecha_es(fecha) -> str:

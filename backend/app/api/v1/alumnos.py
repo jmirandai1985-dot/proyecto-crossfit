@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.db.database import get_db
+from app.core.config import settings
 from app.core.rate_limit import limiter, LIMIT_REGISTRO
 from app.models.usuario import Usuario, RolUsuario
 from app.models.plan import Plan
@@ -165,7 +166,7 @@ def registrar_alumno_nuevo(
             usuario.nombre,
             usuario.correo,
             password_tmp,
-            "https://app.urbantrainingbox.cl/login",
+            f"{settings.FRONTEND_URL}/login",
         )
     except Exception as e:
         sentry_sdk.capture_exception(e)
@@ -286,7 +287,7 @@ def activar_alumno(
                 plan_nombre,
                 cantidad_clases,
                 fecha_vigencia,
-                "https://app.urbantrainingbox.cl/dashboard",
+                f"{settings.FRONTEND_URL}/alumno/dashboard",
             )
         else:
             # PRIMERA ACTIVACIÓN → Email 2: bienvenida con credenciales + resumen
@@ -297,7 +298,7 @@ def activar_alumno(
                 plan_nombre,
                 cantidad_clases,
                 fecha_vigencia,
-                "https://app.urbantrainingbox.cl/login",
+                f"{settings.FRONTEND_URL}/login",
             )
     except Exception:
         pass
