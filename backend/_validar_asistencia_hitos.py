@@ -1,7 +1,7 @@
 """
 Validación dirigida de las Fases 1 y 2: Sistema de Asistencia + Hitos (n8n).
 
-Corre contra la BD de TEST (small-butterfly, ENVIRONMENT=test). Crea un tenant
+Corre contra la BD de TEST (polished-term, ENVIRONMENT=test). Crea un tenant
 aislado con prefijo TEST_ASISTENCIA, ejecuta los casos y limpia al final.
 
 Casos cubiertos:
@@ -726,7 +726,7 @@ def main():
     import asyncio
     print("=" * 72)
     print("VALIDACIÓN Fases 1 y 2 — Asistencia + Hitos (n8n)")
-    print("Marcador:", PREFIX, "| base:", BASE, "| BD:", "TEST (small-butterfly)")
+    print("Marcador:", PREFIX, "| base:", BASE, "| BD:", "TEST (polished-term)")
     print("=" * 72)
     print("[setup] Limpieza previa de posibles leftovers...")
     cleanup()

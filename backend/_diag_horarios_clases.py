@@ -1,5 +1,5 @@
 ﻿"""
-DiagnÃ³stico rÃ¡pido: horarios + clases en TEST (small-butterfly).
+DiagnÃ³stico rÃ¡pido: horarios + clases en TEST (polished-term).
 Solo consulta, no modifica.
 
 SEGURIDAD: setea ENVIRONMENT=test ANTES de importar cualquier mÃ³dulo de app.
@@ -21,8 +21,8 @@ db = importlib.import_module("app.db.database").SessionLocal()
 text = importlib.import_module("sqlalchemy").text
 
 DB_URL = settings.DATABASE_URL
-if "small-butterfly" not in DB_URL:
-    sys.exit("FATAL: no es small-butterfly")
+if "polished-term" not in DB_URL:
+    sys.exit("FATAL: no es polished-term")
 
 hoy = date.today()
 print(f"date.today() = {hoy} (weekday={hoy.weekday()})")

@@ -1,4 +1,4 @@
-"""Harness dirigido — flujo de restablecimiento de contraseña (TEST, small-butterfly).
+"""Harness dirigido — flujo de restablecimiento de contraseña (TEST, polished-term).
 
 Cubre:
 - Solicitud con email existente vs inexistente → respuesta genérica IDÉNTICA.
@@ -24,7 +24,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 from app.core.config import settings  # noqa: E402
 
-if "small-butterfly" not in settings.DATABASE_URL:
+if "polished-term" not in settings.DATABASE_URL:
     raise SystemExit("ABORT: no es TEST")
 
 # ── Spy sobre send_reset_password (captura el link/token, no envía correo) ──

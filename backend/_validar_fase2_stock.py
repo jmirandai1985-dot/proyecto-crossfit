@@ -18,7 +18,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 from app.core.config import settings  # noqa: E402
 
-if "small-butterfly" not in settings.DATABASE_URL:
+if "polished-term" not in settings.DATABASE_URL:
     raise SystemExit("ABORT: no es TEST")
 
 import app.services.email_service as ems  # noqa: E402

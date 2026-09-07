@@ -10,7 +10,7 @@ from sqlalchemy import text
 from app.core.config import settings
 from app.db.database import SessionLocal
 
-if "small-butterfly" not in settings.DATABASE_URL:
+if "polished-term" not in settings.DATABASE_URL:
     raise SystemExit("ABORT: no es TEST")
 
 BASE = "http://localhost:8000"

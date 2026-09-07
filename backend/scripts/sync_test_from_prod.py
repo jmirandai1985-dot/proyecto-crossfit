@@ -1,5 +1,5 @@
 ﻿"""
-SYNC PROD -> TEST (small-butterfly).
+SYNC PROD -> TEST (polished-term).
 IDEMPOTENTE: TRUNCATE + copia todos los datos desde PRODUCCIÃ“N.
 Preserva tablas custom (transacciones_financieras) mediante backup/restore.
 Incluye migraciones post-sync (requiere_coach, es_estudiante, coach_disciplinas, cobertura_emergencia).
@@ -42,7 +42,7 @@ if not URL_PROD or "postgresql://" not in URL_PROD:
 
 print("="*60)
 print(f"BD de TEST: {URL_TEST[:100]}...")
-print(f"small-butterfly (DIRECT): {'small-butterfly' in URL_TEST}")
+print(f"polished-term (DIRECT): {'polished-term' in URL_TEST}")
 print("="*60)
 
 # â”€â”€ CONECTAR â”€â”€

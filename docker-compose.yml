@@ -3,7 +3,7 @@
 #
 # ⚠️ AMBIENTES — LEA ESTO ANTES DE LEVANTAR:
 #   El archivo BASE usa backend/.env.test → branch TEST de Neon
-#   (ep-small-butterfly...). Es el SAFE DEFAULT a propósito:
+#   (ep-polished-term...). Es el SAFE DEFAULT a propósito:
 #   `docker compose up` NUNCA toca producción por accidente.
 #
 #   ┌─────────────────────────────────────────────────────────────┐
@@ -46,7 +46,7 @@ services:
       dockerfile: Dockerfile
       target: prod
     env_file:
-      # TEST/small-butterfly (SAFE DEFAULT) — ver cabecera del archivo.
+      # TEST/polished-term (SAFE DEFAULT) — ver cabecera del archivo.
       - ./backend/.env.test
     environment:
       ENVIRONMENT: test
@@ -77,7 +77,7 @@ services:
       dockerfile: Dockerfile
       target: maintenance
     env_file:
-      # TEST/small-butterfly (SAFE DEFAULT) — ver cabecera del archivo.
+      # TEST/polished-term (SAFE DEFAULT) — ver cabecera del archivo.
       - ./backend/.env.test
     environment:
       # health_check.py usa BACKEND_URL para el ping al API.

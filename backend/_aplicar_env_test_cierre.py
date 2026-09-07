@@ -1,6 +1,6 @@
 """Cierre del ambiente de test:
 
-1) Reemplaza el identificador 'lingering-shape' -> 'small-butterfly' (nueva
+1) Reemplaza el identificador 'lingering-shape' -> 'polished-term' (nueva
    branch de test) en TODOS los scripts con guard, y el 'muddy' obsoleto de
    iniciar_servidor.py.
 2) Actualiza el header de advertencia de .env.test (SOLO comentarios; la
@@ -52,12 +52,12 @@ def _reemplazar(rel, old, new, min_esperados=1):
     print(f"[{rel}] reemplazos '{old[:30]}...': {n}")
 
 
-# ── 1) guards: lingering-shape -> small-butterfly ──
+# ── 1) guards: lingering-shape -> polished-term ──
 for rel in GUARD_FILES:
-    _reemplazar(rel, "lingering-shape", "small-butterfly")
+    _reemplazar(rel, "lingering-shape", "polished-term")
 
 # iniciar_servidor.py ademas tenia el identificador 'muddy' obsoleto
-_reemplazar("iniciar_servidor.py", '"muddy"', '"small-butterfly"')
+_reemplazar("iniciar_servidor.py", '"muddy"', '"polished-term"')
 
 print("\n--- guards actualizados ---")
 

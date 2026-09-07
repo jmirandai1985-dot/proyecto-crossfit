@@ -28,8 +28,8 @@ from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
 from app.models.usuario import Usuario, RolUsuario
 
-if "small-butterfly" not in settings.DATABASE_URL:
-    print("ABORT: la BD no es small-butterfly")
+if "polished-term" not in settings.DATABASE_URL:
+    print("ABORT: la BD no es polished-term")
     raise SystemExit(1)
 
 TENANT_ID = 1

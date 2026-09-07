@@ -10,14 +10,14 @@
 #    Reglas de oro:
 #    1. Siempre `docker compose down` antes de cambiar de ambiente
 #       (los contenedores se crean con las variables del .env activo).
-#    2. El BASE usa backend/.env.test (TEST/small-butterfly). Para
+#    2. El BASE usa backend/.env.test (TEST/polished-term). Para
 #       PRODUCCIÓN se agrega ESTE archivo; nunca editar el base.
 #    3. `env_file` se concatena en orden (base, luego este archivo) y
 #       las variables duplicadas las gana la ÚLTIMA → backend/.env.
 #
 # Verificación rápida de a qué BD apunta el stack levantado:
 #   GET http://localhost:8000/debug/db-url
-#     → {"is_safe": true}               = TEST (small-butterfly)
+#     → {"is_safe": true}               = TEST (polished-term)
 #     → 404                             = PRODUCCIÓN (no expone nada)
 # ============================================================
 services:

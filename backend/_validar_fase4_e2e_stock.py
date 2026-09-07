@@ -1,7 +1,7 @@
 """Harness E2E FASE 4 — Alerta de stock bajo con ENVÍO REAL a jmirandai1985@gmail.com.
 
 Requisitos:
-- BD TEST (small-butterfly) vía ENVIRONMENT=test.
+- BD TEST (polished-term) vía ENVIRONMENT=test.
 - SMTP real configurado en .env.test (urban.training.box.2026@gmail.com).
 
 Flujo:
@@ -26,7 +26,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 from app.core.config import settings  # noqa: E402
 
-if "small-butterfly" not in settings.DATABASE_URL:
+if "polished-term" not in settings.DATABASE_URL:
     raise SystemExit("ABORT: no es TEST")
 
 from sqlalchemy import text  # noqa: E402

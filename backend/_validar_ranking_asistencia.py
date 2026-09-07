@@ -3,7 +3,7 @@ Harness de validación FASE 1 — Ranking de Asistencia por Plan (endpoint públ
 
 Misma estrategia que _fase1_validation_pg.py:
 - SEED aislado con prefijo inconfundible (subdomain 'test-ranking-*') sobre la
-  base TEST (branch small-butterfly), verificado vía /debug/db-url antes de
+  base TEST (branch polished-term), verificado vía /debug/db-url antes de
   tocar cualquier dato.
 - 20 checks contra GET /api/v1/ranking/asistencia/{public_id}.
 - CLEANUP al final (borra todo lo creado con el prefijo; re-ejecutable).
@@ -408,7 +408,7 @@ def cleanup(tenant_id):
 
 
 def main():
-    # Seguridad: verificar que el servidor apunte a TEST (branch small-butterfly).
+    # Seguridad: verificar que el servidor apunte a TEST (branch polished-term).
     try:
         r = requests.get("http://localhost:8000/debug/db-url", timeout=5)
         if r.status_code != 200 or not r.json().get("is_safe"):

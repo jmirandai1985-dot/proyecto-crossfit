@@ -15,7 +15,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 from app.core.config import settings  # noqa: E402
 
-if "small-butterfly" not in settings.DATABASE_URL:
+if "polished-term" not in settings.DATABASE_URL:
     raise SystemExit("ABORT: no es TEST")
 
 from app.api.v1.productos import crear_producto, actualizar_producto  # noqa: E402
