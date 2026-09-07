@@ -22,6 +22,7 @@ import AdminPlanes from './pages/admin/Planes';
 import AdminAlumnosPendientes from './pages/admin/AdminAlumnosPendientes';
 import AdminDisciplinas from './pages/admin/Disciplinas';
 import AdminAsistencia from './pages/admin/Asistencia';
+import AdminMiQr from './pages/admin/MiQr';
 import CoachDashboard from './pages/coach/DashboardCoach';
 import CoachPizarra from './pages/coach/Pizarra';
 import CoachGenerarClases from './pages/coach/GenerarClases';
@@ -30,6 +31,7 @@ import AlumnoDashboard from './pages/alumno/Dashboard';
 import AlumnoMisReservas from './pages/alumno/MisReservas';
 import AlumnoPizarraRMs from './pages/alumno/PizarraRMs';
 import RankingAsistencia from './pages/tv/RankingAsistencia';
+import AsistenciaQr from './pages/AsistenciaQr';
 import AlumnoAjustes from './pages/alumno/Ajustes';
 import AlumnoSolicitarPlan from './pages/alumno/SolicitarPlan';
 import AlumnoEvolucion from './pages/alumno/Evolucion';
@@ -78,6 +80,8 @@ function App() {
           <Route path="/landing" element={<LandingPage />} />
           {/* ── /tv/ranking/:boxPublicId → Pantalla TV pública (sin login, sin sidebar) ── */}
           <Route path="/tv/ranking/:boxPublicId" element={<RankingAsistencia />} />
+          {/* ── /asistencia/qr/:publicId → check-in del alumno escaneando el QR del box ── */}
+          <Route path="/asistencia/qr/:publicId" element={<AsistenciaQr />} />
           {/* ── "/" → redirige según rol o a /login (RootRedirect) ── */}
           <Route path="/" element={<RootRedirect />} />
 
@@ -103,6 +107,7 @@ function App() {
             <Route path="clases" element={<AdminClases />} />
             <Route path="supervision-clases" element={<AdminSupervisionClases />} />
             <Route path="asistencia" element={<AdminAsistencia />} />
+            <Route path="mi-qr" element={<AdminMiQr />} />
             <Route path="planes" element={<AdminPlanes />} />
             <Route path="disciplinas" element={<AdminDisciplinas />} />
             <Route path="bazar" element={<AdminBazar />} />

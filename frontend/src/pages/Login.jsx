@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import RegistroAlumnoNuevo from '../components/RegistroAlumnoNuevo';
 import ResetContrasena from '../components/ResetContrasena';
@@ -13,6 +13,7 @@ const Login = () => {
     const [showReset, setShowReset] = useState(false);
     const { login } = useAuth();
     const navigate = useNavigate();
+    const location = useLocation();
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -22,13 +23,21 @@ const Login = () => {
         const result = await login(correo, password);
 
         if (result.success) {
-            // Redirigir según rol
-            const dashboardMap = {
-                administrador: '/admin/dashboard',
-                coach: '/coach/dashboard',
-                alumno: '/alumno/dashboard',
-            };
-            navigate(dashboardMap[result.rol]);
+            // Si venía de una pantalla pública (p. ej. el QR de asistencia),
+            // volver a esa ruta tras loguear. Si no, dashboard según rol.
+            const from = location.state?.from
+                || new URLSearchParams(location.search).get('redirect');
+            if (from && from.startsWith('/')) {
+                navigate(from, { replace: true });
+            } else {
+                // Redirigir según rol
+                const dashboardMap = {
+                    administrador: '/admin/dashboard',
+                    coach: '/coach/dashboard',
+                    alumno: '/alumno/dashboard',
+                };
+                navigate(dashboardMap[result.rol]);
+            }
         } else {
             setError(result.error);
         }

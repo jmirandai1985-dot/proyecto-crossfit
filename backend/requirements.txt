@@ -54,3 +54,7 @@ httpx==0.26.0  # Cliente HTTP para tests
 
 # Envío de correos transaccionales (Resend)
 resend==2.35.0
+
+# QR de asistencia (autoescaneo del alumno) — generación de la imagen del QR
+# del box. Pura Python, sin dependencias extra (SVG/PNG nativos).
+segno==1.6.1

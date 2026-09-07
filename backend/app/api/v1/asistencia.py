@@ -16,23 +16,26 @@ n8n (webhook mensual, API key dedicada):
 Seguridad: tenant_id SIEMPRE del token JWT (patrón del resto de la API).
 """
 import secrets
+from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.core.config import settings
+from app.core.rate_limit import limiter
 from app.core.dependencies import (
     get_current_user, get_current_coach, verificar_coach_disciplina,
 )
 from app.models.clase import Clase
 from app.models.reserva import Reserva
+from app.models.tenant import Tenant
 from app.models.usuario import Usuario, RolUsuario
 from app.models.coach_disciplina import CoachDisciplina
 from app.models.disciplina import Disciplina
-from app.utils.santiago import ahora_santiago, hoy_santiago
+from app.utils.santiago import ahora_santiago, hoy_santiago, SANTIAGO
 from app.schemas.asistencia import ConfirmarAsistenciaRequest
 from app.services import asistencia_service as svc
 
@@ -339,5 +342,118 @@ def evaluar_mes_n8n(
         "tenants_evaluados": len(resultados),
         "hitos_generados_total": total_hitos,
         "tenants": resultados,
+    }
+
+
+# ── Alumno: check-in por QR (autoescaneo) ────────────────────────────────────
+# Ventana confirmada: el alumno puede marcar desde 60 MINUTOS ANTES del inicio
+# de su clase hasta que esta termina (America/Santiago). No se crea reserva de
+# emergencia si no tiene una en curso; coach/admin siguen como respaldo.
+QR_VENTANA_PREVIA_MIN = 60
+RESERVA_ESTADOS_CHECKIN = ("confirmada", "completada")
+
+
+@router.post("/qr/{public_id}/check-in")
+@limiter.limit("30/minute")
+def qr_checkin_alumno(
+    request: Request,
+    public_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Auto check-in del alumno escaneando el QR fijo del box.
+
+    - Requiere JWT con rol 'alumno'. El public_id debe pertenecer al tenant
+      del token (403 si es de otro box). public_id inexistente → 404 genérico.
+    - Busca la reserva EN CURSO del alumno (hora_inicio - 60 min <= ahora
+      < hora_fin, America/Santiago).
+        * Exactamente 1 sin marcar → marca con asistencia_via='qr_alumno'.
+        * Más de 1 en curso → 'ambiguo' (no marca; hablar con el coach).
+        * 1 ya marcada     → 'ya_marcado' (idempotente, no re-escribe).
+        * 0 en curso       → 'sin_reserva' (NO crea reserva de emergencia).
+    - NO toca créditos (el token ya se descontó al reservar).
+    """
+    rol = current_user.get("rol", "")
+    if rol != "alumno":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="El check-in por QR es solo para alumnos",
+        )
+
+    tenant = db.query(Tenant).filter(Tenant.public_id == public_id).first()
+    if not tenant:
+        # 404 genérico: no revelar si el ID "casi" existe (mismo patrón que ranking).
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No encontrado",
+        )
+    if tenant.id != current_user.get("tenant_id"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="El QR pertenece a otro box",
+        )
+
+    ahora = ahora_santiago()
+    hoy = ahora.date()
+    # La ventana de -60 min puede caer en el día calendario anterior a la clase,
+    # así que se buscan clases del alumno desde ayer hasta mañana.
+    desde = hoy - timedelta(days=1)
+    hasta = hoy + timedelta(days=1)
+
+    filas = (
+        db.query(Reserva, Clase)
+        .join(Clase, Reserva.clase_id == Clase.id)
+        .filter(
+            Reserva.tenant_id == tenant.id,
+            Reserva.alumno_id == current_user["usuario_id"],
+            Reserva.estado.in_(RESERVA_ESTADOS_CHECKIN),
+            Clase.cancelada == False,  # noqa: E712
+            Clase.fecha >= desde,
+            Clase.fecha <= hasta,
+        )
+        .all()
+    )
+
+    def _en_ventana(r: Reserva, c: Clase) -> bool:
+        ini = (datetime.combine(c.fecha, c.hora_inicio, SANTIAGO)
+               - timedelta(minutes=QR_VENTANA_PREVIA_MIN))
+        fin = datetime.combine(c.fecha, c.hora_fin, SANTIAGO)
+        return ini <= ahora < fin
+
+    en_curso = [(r, c) for r, c in filas if _en_ventana(r, c)]
+
+    if len(en_curso) > 1:
+        return {
+            "estado": "ambiguo",
+            "mensaje": "Tenés más de una clase en curso ahora. "
+                       "Hablá con tu coach para registrar la correcta.",
+            "reserva_ids": [r.id for r, _ in en_curso],
+        }
+
+    if len(en_curso) == 1:
+        r, c = en_curso[0]
+        if r.asistencia_marcada_at is not None:
+            return {
+                "estado": "ya_marcado",
+                "mensaje": "Ya registramos tu asistencia a esta clase.",
+                "reserva_id": r.id,
+                "disciplina": c.disciplina_id,
+            }
+        # Marcar asistencia con la misma auditoría que coach/admin/batch.
+        r.asistio = True
+        r.asistencia_marcada_por = current_user["usuario_id"]
+        r.asistencia_marcada_at = ahora
+        r.asistencia_via = "qr_alumno"
+        db.commit()
+        return {
+            "estado": "ok",
+            "mensaje": "✅ Asistencia registrada. ¡Buen entrenamiento!",
+            "reserva_id": r.id,
+            "disciplina": c.disciplina_id,
+        }
+
+    return {
+        "estado": "sin_reserva",
+        "mensaje": "No tenés reserva para este horario, hablá con tu coach.",
     }
 
