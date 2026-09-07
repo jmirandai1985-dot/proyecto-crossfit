@@ -78,6 +78,13 @@ const Alumnos = () => {
         return suscripciones.find(s => s.usuario_id === alumnoId) || null;
     };
 
+    // Formato de fecha es-CL usado en toda la tabla (created_at viene del API).
+    const fmtFecha = (v) => {
+        if (!v) return '—';
+        const d = new Date(v);
+        return isNaN(d.getTime()) ? v : d.toLocaleDateString('es-CL');
+    };
+
     const openModal = (alumno = null, rolFijo = 'alumno') => {
         if (alumno) {
             setEditingAlumno(alumno);
@@ -120,7 +127,7 @@ const Alumnos = () => {
                     nombre: formData.nombre,
                     correo: formData.correo,
                     telefono: formData.telefono,
-                    estado: formData.estado,
+                    activo: formData.estado === 'activo',
                 });
                 await fetchAlumnos();
                 closeModal();
@@ -237,7 +244,7 @@ const Alumnos = () => {
                                                     {alumno.activo ? 'activo' : 'inactivo'}
                                                 </span>
                                             </td>
-                                            <td className="px-6 py-4 text-sm text-zinc-400">{alumno.fechaRegistro}</td>
+                                            <td className="px-6 py-4 text-sm text-zinc-400">{fmtFecha(alumno.created_at)}</td>
                                             <td className="px-6 py-4 text-sm text-zinc-400">
                                                 {(() => {
                                                     const sus = getSuscripcionAlumno(alumno.id);
@@ -359,7 +366,7 @@ const Alumnos = () => {
                                         <div><p className="text-xs text-zinc-400">Nombre</p><p className="text-sm font-medium text-zinc-100">{selectedAlumnoVoucher.nombre}</p></div>
                                         <div><p className="text-xs text-zinc-400">Correo</p><p className="text-sm font-medium text-zinc-100">{selectedAlumnoVoucher.correo}</p></div>
                                         <div><p className="text-xs text-zinc-400">Teléfono</p><p className="text-sm font-medium text-zinc-100">{selectedAlumnoVoucher.telefono}</p></div>
-                                        <div><p className="text-xs text-zinc-400">Fecha Registro</p><p className="text-sm font-medium text-zinc-100">{selectedAlumnoVoucher.fechaRegistro}</p></div>
+                                        <div><p className="text-xs text-zinc-400">Fecha Registro</p><p className="text-sm font-medium text-zinc-100">{fmtFecha(selectedAlumnoVoucher.created_at)}</p></div>
                                     </div>
                                 </div>
                                 <div className="border-2 border-dashed border-zinc-700 rounded-lg p-8 text-center bg-zinc-800/50">

@@ -49,6 +49,11 @@ class UsuarioUpdate(BaseModel):
     fecha_nacimiento: Optional[str] = Field(
         None, description="Fecha de nacimiento YYYY-MM-DD")
 
+    # Endurecimiento: si el cliente manda una clave desconocida (p. ej. la
+    # antigua "estado" de la UI), que falle ruidosamente con 422 en vez de
+    # ignorarse en silencio (Pydantic default extra='ignore').
+    model_config = ConfigDict(extra='forbid')
+
 
 # Schema para respuesta (lo que devuelve la API)
 class UsuarioResponse(UsuarioBase):
