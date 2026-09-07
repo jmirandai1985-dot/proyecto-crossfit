@@ -4,10 +4,10 @@ import string
 import secrets
 import logging
 import sentry_sdk
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from pydantic import BaseModel, EmailStr, Field, AliasChoices
+from pydantic import BaseModel, EmailStr, Field, AliasChoices, ConfigDict
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -27,6 +27,43 @@ from app.services.email_service import (
 )
 
 router = APIRouter()
+
+
+class ActualizarMiPerfil(BaseModel):
+    """Campos editables por el ALUMNO sobre su propio perfil (Ajustes).
+
+    NO permite cambiar rol/activo/estado/password (eso es admin o flujo
+    dedicado). `extra='forbid'`: una clave desconocida falla con 422 en vez
+    de ignorarse.
+    """
+    nombre: Optional[str] = Field(None, min_length=2, max_length=150)
+    correo: Optional[EmailStr] = None
+    telefono: Optional[str] = Field(None, max_length=20)
+    peso_kg: Optional[float] = Field(None, gt=0, le=400)
+    estatura_cm: Optional[int] = Field(None, ge=50, le=250)
+    genero: Optional[str] = Field(None, max_length=10)
+    fecha_nacimiento: Optional[date] = None
+
+    model_config = ConfigDict(extra='forbid')
+
+
+def _serializar_mi_perfil(usuario):
+    return {
+        "id": usuario.id,
+        "nombre": usuario.nombre,
+        "correo": usuario.correo,
+        "telefono": usuario.telefono,
+        "rut": usuario.rut,
+        "rol": usuario.rol,
+        "estado": usuario.estado,
+        "activo": usuario.activo,
+        "cambiar_password_al_login": usuario.cambiar_password_al_login,
+        "peso_kg": usuario.peso_kg,
+        "estatura_cm": usuario.estatura_cm,
+        "genero": usuario.genero,
+        "fecha_nacimiento": usuario.fecha_nacimiento,
+    }
+
 
 
 def validar_rut(rut: str) -> bool:
@@ -352,22 +389,58 @@ def obtener_mi_perfil(
 ):
     """Perfil del usuario autenticado (requiere token JWT)."""
     uid = current_user.get("usuario_id")
-    usuario = db.query(Usuario).filter(Usuario.id == uid).first()
+    usuario = db.query(Usuario).filter(
+        Usuario.id == uid,
+        Usuario.tenant_id == current_user.get("tenant_id"),
+    ).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    return {
-        "id": usuario.id,
-        "nombre": usuario.nombre,
-        "correo": usuario.correo,
-        "rut": usuario.rut,
-        "rol": usuario.rol,
-        "estado": usuario.estado,
-        "activo": usuario.activo,
-        "cambiar_password_al_login": usuario.cambiar_password_al_login,
-        "peso_kg": usuario.peso_kg,
-        "estatura_cm": usuario.estatura_cm,
-        "genero": usuario.genero,
-    }
+    return _serializar_mi_perfil(usuario)
+
+
+# ─── PUT /me (alumno edita su PROPIO perfil) ───
+# Endpoint correcto para Ajustes del alumno: el CRUD /usuarios/{id} es
+# admin-only por diseño. Acá el alumno solo puede editar campos de perfil
+# (nombre/correo/telefono/peso/estatura/genero/fecha_nacimiento); NO puede
+# tocar rol/activo/estado ni su propia password.
+@router.put("/me")
+def actualizar_mi_perfil(
+    datos: ActualizarMiPerfil,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Actualiza el perfil del usuario autenticado (solo campos seguros)."""
+    uid = current_user.get("usuario_id")
+    tenant_id = current_user.get("tenant_id")
+    usuario = db.query(Usuario).filter(
+        Usuario.id == uid,
+        Usuario.tenant_id == tenant_id,
+    ).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    update_data = datos.model_dump(exclude_unset=True)
+
+    # Correo: único dentro del tenant (mismo criterio que el CRUD admin).
+    nuevo_correo = update_data.get("correo")
+    if nuevo_correo is not None and nuevo_correo != usuario.correo:
+        duplicado = db.query(Usuario).filter(
+            Usuario.tenant_id == tenant_id,
+            Usuario.correo == nuevo_correo,
+            Usuario.id != uid,
+        ).first()
+        if duplicado:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ya existe otro usuario con el correo {nuevo_correo} en este box",
+            )
+
+    for field, value in update_data.items():
+        setattr(usuario, field, value)
+
+    db.commit()
+    db.refresh(usuario)
+    return _serializar_mi_perfil(usuario)
 
 
 # ─── GET /me/es-prueba (alumno autenticado) ───

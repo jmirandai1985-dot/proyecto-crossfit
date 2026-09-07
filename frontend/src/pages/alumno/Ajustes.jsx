@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 
 const Ajustes = () => {
-    const { usuario_id, token } = useAuth();
+    const { usuario_id } = useAuth();
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -32,7 +32,7 @@ const Ajustes = () => {
         const fetchPerfil = async () => {
             setLoading(true);
             try {
-                const res = await api.get(`/api/v1/usuarios/${usuario_id}`);
+                const res = await api.get('/api/v1/alumnos/me');
                 const data = res.data;
                 setFormData({
                     nombre: data.nombre || '',
@@ -76,7 +76,7 @@ const Ajustes = () => {
             if (formData.genero) payload.genero = formData.genero;
             if (formData.fecha_nacimiento) payload.fecha_nacimiento = formData.fecha_nacimiento;
 
-            await api.put(`/api/v1/usuarios/${usuario_id}`, payload);
+            await api.put('/api/v1/alumnos/me', payload);
             setMensaje({ tipo: 'exito', texto: 'Datos actualizados exitosamente' });
         } catch (err) {
             const detalle = err.response?.data?.detail || 'Error al actualizar';

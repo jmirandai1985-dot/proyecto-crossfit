@@ -46,7 +46,7 @@ const SolicitarPlan = () => {
             setLoading(true);
             setError('');
             try {
-                const perfilRes = await api.get(`/api/v1/usuarios/${usuario_id}`);
+                const perfilRes = await api.get(`/api/v1/alumnos/me`);
                 const perfil = perfilRes.data;
                 const sexo = perfil?.genero || null;
                 setSexoAlumno(sexo);
