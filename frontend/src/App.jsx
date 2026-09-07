@@ -21,6 +21,7 @@ import AdminFidelizacion from './pages/admin/Fidelizacion';
 import AdminPlanes from './pages/admin/Planes';
 import AdminAlumnosPendientes from './pages/admin/AdminAlumnosPendientes';
 import AdminDisciplinas from './pages/admin/Disciplinas';
+import AdminAsistencia from './pages/admin/Asistencia';
 import CoachDashboard from './pages/coach/DashboardCoach';
 import CoachPizarra from './pages/coach/Pizarra';
 import CoachGenerarClases from './pages/coach/GenerarClases';
@@ -101,6 +102,7 @@ function App() {
             <Route path="coaches" element={<AdminCoaches />} />
             <Route path="clases" element={<AdminClases />} />
             <Route path="supervision-clases" element={<AdminSupervisionClases />} />
+            <Route path="asistencia" element={<AdminAsistencia />} />
             <Route path="planes" element={<AdminPlanes />} />
             <Route path="disciplinas" element={<AdminDisciplinas />} />
             <Route path="bazar" element={<AdminBazar />} />

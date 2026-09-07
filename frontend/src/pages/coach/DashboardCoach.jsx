@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
-import AsistenciaClases from '../../components/coach/AsistenciaClases';
+import AsistenciaClases from '../../components/AsistenciaClases';
 
 const DashboardCoach = () => {
     const navigate = useNavigate();
