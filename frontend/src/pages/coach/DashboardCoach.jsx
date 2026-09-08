@@ -139,9 +139,8 @@ const DashboardCoach = () => {
     const fetchAllData = useCallback(async () => {
         setLoading(true);
         try {
-            const [clasesRes, alumnosRes, wodsRes, riesgoRes, movRes, coachDiscRes] = await Promise.all([
+            const [clasesRes, wodsRes, riesgoRes, movRes, coachDiscRes] = await Promise.all([
                 api.get(`/api/v1/clases?coach_id=${usuario_id}`),
-                api.get(`/api/v1/usuarios?rol=alumno&activo=true`),
                 api.get(`/api/v1/wods`),
                 api.get(`/api/v1/fidelizacion/coach/${usuario_id}/en-riesgo`),
                 api.get(`/api/v1/movimientos`),
@@ -156,7 +155,18 @@ const DashboardCoach = () => {
             setCoachDisciplinas(discIds);
 
             const clasesData = clasesRes.data || [];
-            const alumnosData = alumnosRes.data || [];
+            // Los alumnos del coach se piden a un endpoint scoped por coach
+            // (GET /fidelizacion/coach/{id}/alumnos) — el viejo
+            // /usuarios?rol=alumno era admin-only (403 para coach). Se mantiene
+            // aislado en su propio try/catch para que un fallo acá NO bloquee
+            // clases/wods/riesgo/movimientos/coach-disciplinas.
+            let alumnosData = [];
+            try {
+                const alumnosRes = await api.get(`/api/v1/fidelizacion/coach/${usuario_id}/alumnos`);
+                alumnosData = alumnosRes.data?.alumnos || [];
+            } catch (err) {
+                console.error('Error cargando alumnos (no bloquea el dashboard):', err);
+            }
             const wodsData = wodsRes.data || [];
             const riesgoData = riesgoRes.data?.alumnos_alerta || [];
             const movimientosData = movRes.data || [];

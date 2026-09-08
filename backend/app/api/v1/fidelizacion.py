@@ -4,7 +4,7 @@ Analiza asistencias y detecta alumnos en riesgo de abandono
 """
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
-from sqlalchemy import func, distinct
+from sqlalchemy import func, distinct, or_
 from datetime import datetime, date
 from typing import List, Optional
 import pandas as pd
@@ -15,6 +15,7 @@ from app.models.usuario import Usuario, RolUsuario
 from app.models.asistencia import Asistencia
 from app.models.reserva import Reserva
 from app.models.clase import Clase
+from app.models.coach_disciplina import CoachDisciplina
 from app.core.dependencies import get_current_admin, get_current_coach
 
 router = APIRouter()
@@ -305,6 +306,81 @@ def alumnos_coach_en_riesgo(
         "total_alumnos": len(alumnos),
         "total_alerta": len(df_alerta),
         "alumnos_alerta": df_alerta.to_dict(orient="records")
+    }
+
+
+# ─────────────────────────────────────────
+# ENDPOINT 4b: Alumnos de un coach (dashboard coach)
+# Un alumno "es del coach" si tiene al menos una reserva ACTIVA (no cancelada)
+# en una clase donde el coach es el asignado (clases.coach_id) O en una clase
+# de alguna de las disciplinas que tiene asignadas (coach_disciplinas activo).
+# Esto sigue el mismo enfoque "por disciplina" de la grilla del coach (las
+# clases pueden no tener coach_id explícito y aun así pertenecer al coach por
+# disciplina). Coach solo su propio id; admin puede consultar cualquiera.
+# ─────────────────────────────────────────
+@router.get("/coach/{coach_id}/alumnos")
+def alumnos_de_coach(
+    coach_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
+):
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+    if rol == "coach" and current_user["usuario_id"] != coach_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo puedes consultar los alumnos de tus propias clases/disciplinas",
+        )
+
+    disc_ids = [
+        r[0] for r in db.query(CoachDisciplina.disciplina_id).filter(
+            CoachDisciplina.tenant_id == tenant_id,
+            CoachDisciplina.coach_id == coach_id,
+            CoachDisciplina.activo == True,
+        ).all()
+    ]
+
+    filtro_clase = [Clase.tenant_id == tenant_id]
+    if disc_ids:
+        filtro_clase.append(or_(
+            Clase.coach_id == coach_id,
+            Clase.disciplina_id.in_(disc_ids),
+        ))
+    else:
+        filtro_clase.append(Clase.coach_id == coach_id)
+
+    filas = db.query(distinct(Reserva.alumno_id)).join(
+        Clase, Reserva.clase_id == Clase.id
+    ).filter(
+        Reserva.estado != "cancelled",
+        *filtro_clase,
+    ).all()
+
+    alumno_ids = [r[0] for r in filas]
+
+    if not alumno_ids:
+        return {"coach_id": coach_id, "total_alumnos": 0, "alumnos": []}
+
+    alumnos = db.query(Usuario).filter(
+        Usuario.id.in_(alumno_ids),
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == RolUsuario.alumno,
+        Usuario.activo == True,
+    ).order_by(Usuario.nombre.asc()).all()
+
+    return {
+        "coach_id": coach_id,
+        "total_alumnos": len(alumnos),
+        "alumnos": [
+            {
+                "id": a.id,
+                "nombre": a.nombre,
+                "correo": a.correo,
+                "telefono": a.telefono,
+                "genero": a.genero,
+            }
+            for a in alumnos
+        ],
     }
 
 
