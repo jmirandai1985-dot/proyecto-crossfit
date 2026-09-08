@@ -1,0 +1,42 @@
+# ============================================================
+# render.yaml — Blueprint para desplegar en Render (free tier).
+# Un ÚNICO Web Service Docker (imagen combinada: nginx + uvicorn).
+# La BD es externa (Neon) → NO se declara database en este archivo.
+# n8n y el cron de mantenimiento quedan FUERA de este blueprint.
+# ============================================================
+services:
+  - type: web
+    name: box-crossfit
+    runtime: docker
+    plan: free
+    dockerfilePath: Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      # ── Valores fijos (NO secretos) ──
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+      # ── Secretos / config por entorno: Render los pide manualmente en el
+      #    dashboard (sync: false) para no exponerlos en el archivo de git ──
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: BACKEND_PUBLIC_URL
+        sync: false
+      - key: GMAIL_SMTP_USER
+        sync: false
+      - key: GMAIL_SMTP_APP_PASSWORD
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: REACTIVACION_OPT_OUT_SECRET
+        sync: false
