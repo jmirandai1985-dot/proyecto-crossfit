@@ -50,6 +50,57 @@ for disc_id in (1, 6):  # crossfit + Clase Intensiva Sabado
         db.rollback()
         print(f"[ERROR] coach_disciplinas disc {disc_id}: {e}")
 
+# ── Overrides 2026-09-07 (se pierden al correr sync_test_from_prod desde PROD) ──
+
+# a) Disciplina 6 -> 'Crossfit Extendido' (PROD todavia la trae como ' Clase Intensiva Sabado')
+try:
+    row = db.execute(text(
+        "SELECT nombre FROM disciplinas WHERE tenant_id=1 AND id=6"
+    )).first()
+    if row and (row[0] or "").strip() == "Crossfit Extendido":
+        print("[OK] disciplinas id=6 ya es 'Crossfit Extendido' (sin update)")
+    else:
+        r = db.execute(text(
+            "UPDATE disciplinas SET nombre='Crossfit Extendido', activo=true "
+            "WHERE tenant_id=1 AND id=6"
+        ))
+        db.commit()
+        print(f"[OK] disciplinas id=6 -> 'Crossfit Extendido' (filas: {r.rowcount})")
+except Exception as e:
+    db.rollback()
+    print(f"[ERROR] disciplinas id=6: {e}")
+
+# b) Horario id=205 (sabado 10:00-12:00) -> cupo_maximo=20 (PROD trae 16)
+try:
+    r = db.execute(text(
+        "UPDATE horarios SET cupo_maximo=20 WHERE tenant_id=1 AND id=205"
+    ))
+    db.commit()
+    print(f"[OK] horarios id=205 cupo_maximo=20 (filas: {r.rowcount})")
+except Exception as e:
+    db.rollback()
+    print(f"[ERROR] horarios id=205: {e}")
+
+# c) coach_disciplinas coach 10 (sebastiana medina) -> disciplina 6 activo
+try:
+    ex = db.execute(text(
+        "SELECT id FROM coach_disciplinas WHERE tenant_id=1 AND coach_id=10 AND disciplina_id=6"
+    )).first()
+    if ex:
+        db.execute(
+            text("UPDATE coach_disciplinas SET activo=true WHERE id=:i"), {"i": ex[0]})
+        db.commit()
+        print(f"[OK] coach_disciplinas reactivada id={ex[0]} (10->6)")
+    else:
+        db.execute(text(
+            "INSERT INTO coach_disciplinas (tenant_id,coach_id,disciplina_id,activo) VALUES (1,10,6,true)"
+        ))
+        db.commit()
+        print("[OK] coach_disciplinas creada (10->6)")
+except Exception as e:
+    db.rollback()
+    print(f"[ERROR] coach_disciplinas (10->6): {e}")
+
 try:
     # Auto-generar clases [hoy, hoy+28] (misma funcion que GET /clases, 4 semanas)
     from app.services.generar_clases import DIAS_ANTICIPACION, generar_clases_para_rango
