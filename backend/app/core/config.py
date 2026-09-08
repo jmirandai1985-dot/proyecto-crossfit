@@ -19,7 +19,10 @@ class Settings(BaseSettings):
     # Información de la aplicación
     APP_NAME: str = "Box CrossFit Platform"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
+    # DEBUG: default SEGURO en código (False). En desarrollo se sobrescribe
+    # explícitamente a True en backend/.env y .env.test. NUNCA dejarlo True en
+    # un entorno de producción real.
+    DEBUG: bool = False
 
     # Base de datos PostgreSQL (Neon)
     DATABASE_URL: str = "postgresql://user:pass@localhost/dbname"
@@ -40,12 +43,16 @@ class Settings(BaseSettings):
     SECRET_KEY: str = ""
 
     # CORS / Frontend
+    # ⚠️ PRODUCCIÓN REAL: FRONTEND_URL, BACKEND_PUBLIC_URL y CORS_ORIGINS se
+    #    inyectan como variables de entorno de la plataforma (Render/Railway/Fly)
+    #    con los dominios públicos reales. Pydantic BaseSettings da prioridad a
+    #    las env vars del SO, así que acá solo viven defaults de desarrollo.
     FRONTEND_URL: str = "http://localhost:5173"
 
     # Monitoreo de errores (Sentry) — DSN opcional. Si está vacío, no se envía.
     SENTRY_DSN: str = ""
 
-    # CORS - Dominios permitidos
+    # CORS - Dominios permitidos (env var de la plataforma en producción).
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
 
     # Configuración de archivos (vouchers)
@@ -69,6 +76,8 @@ class Settings(BaseSettings):
 
     # URL base del BACKEND para links dentro de correos (p.ej. el opt-out de
     # reactivación vive en el backend, no en el frontend).
+    # ⚠️ En producción real este valor se inyecta como env var de la plataforma
+    #    (URL pública del API); el default localhost es solo para desarrollo.
     BACKEND_PUBLIC_URL: str = "http://localhost:8000"
 
     @property
