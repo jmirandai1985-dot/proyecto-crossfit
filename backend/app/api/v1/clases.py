@@ -43,6 +43,7 @@ def listar_clases(
     #    se generan automáticamente desde horarios_base ──
     try:
         from datetime import timedelta
+        from app.services.generar_clases import DIAS_ANTICIPACION
         hoy = date.today()
         # ¿Qué rango se está consultando?
         rango_desde = fecha_desde if fecha_desde is not None else (
@@ -52,7 +53,7 @@ def listar_clases(
 
         # Determinar si debemos auto-generar:
         #  - Si el rango consultado es futuro (rango_desde > hoy), generar para ESE rango.
-        #  - Si el rango incluye hoy o días cercanos, generar hasta hoy+6 (vista 7 días).
+        #  - Si el rango incluye hoy o días cercanos, generar hasta hoy+28 (4 semanas).
         debe_generar = False
         gen_desde = None
         gen_hasta = None
@@ -64,13 +65,13 @@ def listar_clases(
             gen_hasta = fecha
         elif rango_desde is not None and rango_hasta is not None:
             # Consulta de rango: generamos SIEMPRE el rango consultado
-            # (no solo [hoy, hoy+6]) para que navegar a semanas futuras funcione.
+            # (no solo [hoy, hoy+28]) para que navegar a semanas futuras funcione.
             debe_generar = True
             gen_desde = rango_desde
             gen_hasta = rango_hasta
-            # Si el rango empieza antes/igual que hoy, aseguramos también hasta hoy+6
+            # Si el rango empieza antes/igual que hoy, aseguramos también hasta hoy+28
             if gen_desde <= hoy:
-                gen_hasta = max(gen_hasta, hoy + timedelta(days=6))
+                gen_hasta = max(gen_hasta, hoy + timedelta(days=DIAS_ANTICIPACION))
 
         if debe_generar and gen_desde is not None and gen_hasta is not None:
             from app.services.generar_clases import generar_clases_para_rango

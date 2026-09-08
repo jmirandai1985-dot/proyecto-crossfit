@@ -8,6 +8,13 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger("uvicorn.generar_clases")
 
+# ── Ventana de generación automática de clases ──────────────────────────────
+# Cuántos días hacia adelante se generan/garantizan clases.
+# Antes: 6 (hoy+6 = 7 días). Ahora: 28 (4 semanas).
+# Centralizado acá para que scheduler (00:05), startup de main.py, el fallback
+# de GET /clases y los overrides TEST compartan SIEMPRE el mismo valor.
+DIAS_ANTICIPACION = 28
+
 
 def generar_clases_para_fecha(
     db: Session,

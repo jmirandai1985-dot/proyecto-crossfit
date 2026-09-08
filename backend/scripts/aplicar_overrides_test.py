@@ -51,10 +51,10 @@ for disc_id in (1, 6):  # crossfit + Clase Intensiva Sabado
         print(f"[ERROR] coach_disciplinas disc {disc_id}: {e}")
 
 try:
-    # Auto-generar clases [hoy, hoy+6] (misma funcion que GET /clases)
-    from app.services.generar_clases import generar_clases_para_rango
+    # Auto-generar clases [hoy, hoy+28] (misma funcion que GET /clases, 4 semanas)
+    from app.services.generar_clases import DIAS_ANTICIPACION, generar_clases_para_rango
     hoy = date.today()
-    resultado = generar_clases_para_rango(db, 1, hoy, hoy + timedelta(days=6))
+    resultado = generar_clases_para_rango(db, 1, hoy, hoy + timedelta(days=DIAS_ANTICIPACION))
     print(f"[OK] clases auto-generadas: {resultado.get('creadas', 0)} creadas")
     # Buscar clase crossfit hoy mas cercana a 19:00 y asignar coach 7
     f = db.execute(text("""

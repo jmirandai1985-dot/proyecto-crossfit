@@ -230,13 +230,14 @@ async def startup_event():
         from app.services.scheduler import iniciar_scheduler, set_generar_clases_callback
 
         async def callback_generar_clases():
-            """Callback async que genera clases para HOY + 6 dÃ­as (7 dÃ­as en total)"""
+            """Callback async que genera clases para HOY + 28 dÃ­as (4 semanas)"""
             from datetime import date, timedelta
             from app.db.database import SessionLocal
-            from app.services.generar_clases import generar_clases_para_rango
+            from app.services.generar_clases import (
+                DIAS_ANTICIPACION, generar_clases_para_rango)
 
             hoy = date.today()
-            fecha_hasta = hoy + timedelta(days=6)
+            fecha_hasta = hoy + timedelta(days=DIAS_ANTICIPACION)
             db = SessionLocal()
             try:
                 # Generar para tenant_id=1 (principal) en rango de 7 dÃ­as
@@ -259,10 +260,11 @@ async def startup_event():
     try:
         from datetime import date, timedelta
         from app.db.database import SessionLocal
-        from app.services.generar_clases import generar_clases_para_rango
+        from app.services.generar_clases import (
+            DIAS_ANTICIPACION, generar_clases_para_rango)
 
         hoy = date.today()
-        fecha_hasta = hoy + timedelta(days=6)
+        fecha_hasta = hoy + timedelta(days=DIAS_ANTICIPACION)
         db = SessionLocal()
         try:
             from app.models.clase import Clase
@@ -270,7 +272,7 @@ async def startup_event():
 
             # Verificar si ALGUNA fecha del rango [hoy, hoy+6] estÃ¡ incompleta
             faltan_clases = False
-            for i in range(7):
+            for i in range(DIAS_ANTICIPACION + 1):
                 f = hoy + timedelta(days=i)
                 if f.weekday() == 6:  # domingo, skip
                     continue
@@ -294,7 +296,7 @@ async def startup_event():
                 resultado = generar_clases_para_rango(
                     db, tenant_id=1, fecha_desde=hoy, fecha_hasta=fecha_hasta)
                 logger.info(
-                    f"ðŸ”„ [Startup] Se generaron {resultado['creadas']} clases faltantes para HOY + 6 dÃ­as (7 dÃ­as total)")
+                    f"ðŸ”„ [Startup] Se generaron {resultado['creadas']} clases faltantes para HOY + 28 dÃ­as (4 semanas)")
             else:
                 logger.info(
                     f"âœ… [Startup] Rango completo, no es necesario generar clases")

@@ -7,6 +7,8 @@ from apscheduler.triggers.cron import CronTrigger
 import pytz
 import logging
 
+from app.services.generar_clases import DIAS_ANTICIPACION
+
 logger = logging.getLogger("uvicorn.scheduler")
 
 scheduler = AsyncIOScheduler(timezone=pytz.timezone("America/Santiago"))
@@ -23,11 +25,11 @@ def set_generar_clases_callback(callback):
 
 
 async def job_generar_clases_diarias():
-    """Job que se ejecuta a las 00:05 CLT y genera clases para HOY + 6 días (7 días total)"""
+    """Job que se ejecuta a las 00:05 CLT y genera clases para HOY + 28 días (4 semanas)."""
     from datetime import date, timedelta
 
     hoy = date.today()
-    fecha_hasta = hoy + timedelta(days=6)
+    fecha_hasta = hoy + timedelta(days=DIAS_ANTICIPACION)
     fecha_str = hoy.strftime("%Y-%m-%d")
 
     logger.info(
