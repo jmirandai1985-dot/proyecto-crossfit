@@ -35,7 +35,10 @@ const Planes = () => {
             genero: tarjeta.genero,
             activo: true,
             es_estudiante: tarjeta.soloEstudiante,
-            requiere_certificado_estudiante: false,
+            // Al dar "Añadir" en una tarjeta de estudiante, el plan nuevo se crea
+            // como estudiantil (requiere certificado) de una — consistente con el
+            // criterio real de filtrado.
+            requiere_certificado_estudiante: tarjeta.soloEstudiante,
         });
         setShowForm(true);
     };
@@ -47,7 +50,7 @@ const Planes = () => {
             duracion_dias: p.duracion_dias,
             genero: p.genero || 'masculino',
             activo: p.activo ?? true,
-            es_estudiante: p.es_estudiante || false,
+            es_estudiante: p.es_estudiante || p.requiere_certificado_estudiante || false,
             requiere_certificado_estudiante: p.requiere_certificado_estudiante || false,
         });
         setShowForm(true);
@@ -76,9 +79,14 @@ const Planes = () => {
         } catch (e) { alert('Error: ' + (e.response?.data?.detail || e.message)); }
     };
 
+    const esPlanEstudiante = (p) => (p.requiere_certificado_estudiante || false) === true;
+
+    // Regla de negocio (igual que la vista del alumno): un plan es
+    // "estudiantil" si requiere_certificado_estudiante === true (NO
+    // es_estudiante, que en los 6 planes con certificado quedó en False).
     const planesPorTarjeta = (tarjeta) => planes.filter(p =>
         p.genero === tarjeta.genero
-        && (p.es_estudiante || false) === tarjeta.soloEstudiante
+        && esPlanEstudiante(p) === tarjeta.soloEstudiante
         && p.activo !== false
     );
 
