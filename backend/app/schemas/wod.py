@@ -91,6 +91,16 @@ class WodCreate(BaseModel):
     fases: List[FaseWodCreate] = []
 
 
+class WodBatchCreateRequest(BaseModel):
+    """Body del endpoint POST /wods/batch-create.
+
+    `wods` es una lista de WodCreate (una por fecha). Cada WodCreate ya incluye
+    su propia `fecha`; disciplina_id y modo_emergencia se pasan como query
+    params (igual que POST /wods).
+    """
+    wods: List[WodCreate]
+
+
 class WodUpdate(BaseModel):
     titulo: Optional[str] = None
     descripcion: Optional[str] = None

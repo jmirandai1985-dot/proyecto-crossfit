@@ -272,40 +272,47 @@ export default function GestionClases() {
             const params = { disciplina_id: disciplinaActiva };
             if (esEmergencia) params.modo_emergencia = true;
             let wodRes;
+            const batchCreados = [];
             if (wod && wod.id) {
                 // Modo edición: solo actualiza el WOD existente del día
                 const r = await api.put(`${API_BASE}/wods/${wod.id}`, { ...wodForm, fecha: fechaPlanif, coach_id }, { params });
                 wodRes = r.data; setMsg({ tipo: 'exito', texto: 'WOD actualizado' + (esEmergencia ? ' (modo emergencia)' : '') });
             } else {
-                // TAREA 4: crear un WOD INDEPENDIENTE por cada día marcado
+                // Crear TODOS los días en UNA sola llamada: POST /wods/batch-create.
+                // El backend crea un WOD por fecha y vincula sus clases en una
+                // transacción atómica (antes eran 2 requests por día en serie).
                 const diasMarcados = [...diasSeleccionados].sort();
                 if (diasMarcados.length === 0) throw new Error('Selecciona al menos un día');
-                let creados = 0;
-                for (const fechaDia of diasMarcados) {
-                    const r = await api.post(`${API_BASE}/wods/`, { ...wodForm, fecha: fechaDia, coach_id }, { params });
-                    wodRes = r.data;
-                    creados++;
-                    // Vincular el WOD a las clases de ESE día (mismo horario+disciplina)
-                    const clasesDelDia = (clasesPorFecha[fechaDia] || []);
-                    const claseIds = clasesDelDia
-                        .filter(c => c.disciplina_id === disciplinaActiva)
-                        .map(c => c.id);
-                    if (claseIds.length > 0) {
-                        const batchBody = { wod_id: wodRes.id, clase_ids: claseIds };
-                        if (esEmergencia) batchBody.modo_emergencia = true;
-                        await api.post(`${API_BASE}/wods/batch`, batchBody);
-                    }
+                const r = await api.post(
+                    `${API_BASE}/wods/batch-create`,
+                    { wods: diasMarcados.map(fechaDia => ({ ...wodForm, fecha: fechaDia, coach_id })) },
+                    { params }
+                );
+                const batch = r.data || {};
+                const wodsCreados = batch.wods || [];
+                if (wodsCreados.length !== diasMarcados.length) {
+                    throw new Error(batch.mensaje || 'La operación no se completó íntegramente');
                 }
-                setMsg({ tipo: 'exito', texto: `✅ ${creados} WOD(s) creado(s) y publicado(s)` + (esEmergencia ? ' (modo emergencia)' : '') });
+                batchCreados.push(...wodsCreados);
+                wodRes = wodsCreados[wodsCreados.length - 1]?.wod || null;
+                setMsg({ tipo: 'exito', texto: `✅ ${wodsCreados.length} WOD(s) creado(s) y publicado(s) en una sola operación (${batch.clases_vinculadas ?? 0} clase(s) vinculadas)` + (esEmergencia ? ' (modo emergencia)' : '') });
             }
             setWod(wodRes); setModoEdicion(false);
             // Si se abrió desde ?clase=ID, asegurar el vínculo a ESA clase específica
             if (claseDestino && claseDestino.id) {
-                const body = { wod_id: wodRes.id, clase_ids: [claseDestino.id] };
-                if (esEmergencia) body.modo_emergencia = true;
-                const res = await api.post(`${API_BASE}/wods/batch`, body);
-                setMsg({ tipo: 'exito', texto: `WOD creado y asignado a la clase #${claseDestino.id}` + (esEmergencia ? ' (modo emergencia)' : '') });
-                setTimeout(() => navigate('/coach?tab=clases'), 1200);
+                let wodObjetivo = wodRes;
+                if (batchCreados.length > 0) {
+                    const fDest = typeof claseDestino.fecha === 'string' ? claseDestino.fecha.split('T')[0] : claseDestino.fecha;
+                    const match = batchCreados.find(w => String(w.wod.fecha).slice(0, 10) === fDest);
+                    wodObjetivo = (match && match.wod) ? match.wod : wodRes;
+                }
+                if (wodObjetivo && wodObjetivo.id) {
+                    const body = { wod_id: wodObjetivo.id, clase_ids: [claseDestino.id] };
+                    if (esEmergencia) body.modo_emergencia = true;
+                    const res = await api.post(`${API_BASE}/wods/batch`, body);
+                    setMsg({ tipo: 'exito', texto: `WOD creado y asignado a la clase #${claseDestino.id}` + (esEmergencia ? ' (modo emergencia)' : '') });
+                    setTimeout(() => navigate('/coach?tab=clases'), 1200);
+                }
             }
             setConfirmarEmergencia(null);
             cargarClases(fechaPlanif).then(setClasesDelDia);

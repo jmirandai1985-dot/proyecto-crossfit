@@ -651,6 +651,67 @@ def parsear_wod(
     )
 
 
+def _crear_wod_obj(db: Session, tenant_id: int, wod_data: schemas.WodCreate) -> Wod:
+    """Crea (add + flush) un Wod con sus movimientos SIN commitear.
+
+    Extraído de POST /wods para que /wods/batch-create reutilice EXACTAMENTE
+    la misma construcción/validación (una fila Wod por fecha). El commit queda
+    a cargo del caller, permitiendo transacción atómica multi-WOD.
+    """
+    estado_valor = wod_data.estado if wod_data.estado else "draft"
+    nueva_wod = Wod(
+        tenant_id=tenant_id,
+        fecha=wod_data.fecha,
+        hora_inicio=wod_data.hora_inicio,
+        hora_fin=wod_data.hora_fin,
+        titulo=wod_data.titulo,
+        descripcion=wod_data.descripcion,
+        calentamiento=wod_data.calentamiento,
+        fuerza_habilidad=wod_data.fuerza_habilidad,
+        wod_principal=wod_data.wod_principal,
+        tipo_metcon=wod_data.tipo_metcon,
+        coach_id=wod_data.coach_id,
+        estado=EstadoWod[estado_valor]
+    )
+    db.add(nueva_wod)
+    db.flush()
+
+    # Procesar movimientos: si viene fases[], aplanar a movimientos[] con campo fase
+    if wod_data.fases:
+        # Formato con fases agrupadas (del parser)
+        orden = 1
+        for fase in wod_data.fases:
+            for mov in fase.movimientos:
+                db.add(WodMovimiento(
+                    wod_id=nueva_wod.id,
+                    movimiento_id=mov.movimiento_id,
+                    orden=orden,
+                    series=mov.series,
+                    repeticiones=mov.repeticiones,
+                    peso=mov.peso,
+                    tiempo=mov.tiempo,
+                    notas=mov.notas,
+                    fase=fase.nombre  # Guardar nombre de fase
+                ))
+                orden += 1
+    else:
+        # Formato tradicional plano (puede o no tener fase en cada movimiento)
+        for i, mov_data in enumerate(wod_data.movimientos, start=1):
+            db.add(WodMovimiento(
+                wod_id=nueva_wod.id,
+                movimiento_id=mov_data.movimiento_id,
+                orden=mov_data.orden or i,
+                series=mov_data.series,
+                repeticiones=mov_data.repeticiones,
+                peso=mov_data.peso,
+                tiempo=mov_data.tiempo,
+                notas=mov_data.notas,
+                fase=mov_data.fase or None
+            ))
+
+    return nueva_wod
+
+
 @router.post("/", response_model=schemas.WodResponse)
 def crear_wod(
     wod_data: schemas.WodCreate,
@@ -695,58 +756,7 @@ def crear_wod(
         )
     # Admin: sin restricciones (bypass)
 
-    estado_valor = wod_data.estado if wod_data.estado else "draft"
-    nueva_wod = Wod(
-        tenant_id=tenant_id,
-        fecha=wod_data.fecha,
-        hora_inicio=wod_data.hora_inicio,
-        hora_fin=wod_data.hora_fin,
-        titulo=wod_data.titulo,
-        descripcion=wod_data.descripcion,
-        calentamiento=wod_data.calentamiento,
-        fuerza_habilidad=wod_data.fuerza_habilidad,
-        wod_principal=wod_data.wod_principal,
-        tipo_metcon=wod_data.tipo_metcon,
-        coach_id=wod_data.coach_id,
-        estado=EstadoWod[estado_valor]
-    )
-    db.add(nueva_wod)
-    db.flush()
-
-    # Procesar movimientos: si viene fases[], aplanar a movimientos[] con campo fase
-    if wod_data.fases:
-        # Formato con fases agrupadas (del parser)
-        orden = 1
-        for fase in wod_data.fases:
-            for mov in fase.movimientos:
-                wod_mov = WodMovimiento(
-                    wod_id=nueva_wod.id,
-                    movimiento_id=mov.movimiento_id,
-                    orden=orden,
-                    series=mov.series,
-                    repeticiones=mov.repeticiones,
-                    peso=mov.peso,
-                    tiempo=mov.tiempo,
-                    notas=mov.notas,
-                    fase=fase.nombre  # Guardar nombre de fase
-                )
-                db.add(wod_mov)
-                orden += 1
-    else:
-        # Formato tradicional plano (puede o no tener fase en cada movimiento)
-        for i, mov_data in enumerate(wod_data.movimientos, start=1):
-            wod_mov = WodMovimiento(
-                wod_id=nueva_wod.id,
-                movimiento_id=mov_data.movimiento_id,
-                orden=mov_data.orden or i,
-                series=mov_data.series,
-                repeticiones=mov_data.repeticiones,
-                peso=mov_data.peso,
-                tiempo=mov_data.tiempo,
-                notas=mov_data.notas,
-                fase=mov_data.fase or None
-            )
-            db.add(wod_mov)
+    nueva_wod = _crear_wod_obj(db, tenant_id, wod_data)
 
     db.commit()
     db.refresh(nueva_wod)
@@ -1145,4 +1155,100 @@ def asignar_wod_batch(
         "wod_id": wod_id,
         "actualizadas": len(clases_a_asignar),
         "wod_titulo": wod.titulo
+    }
+
+
+@router.post("/batch-create")
+def crear_wods_batch(
+    body: schemas.WodBatchCreateRequest,
+    tenant_id: int = Query(None),
+    current_user: dict = Depends(get_current_coach),
+    disciplina_id: int = Query(
+        None, description="ID de la disciplina para validar permisos del coach (OBLIGATORIO para coaches)"),
+    modo_emergencia: bool = Query(
+        False, description="Modo cobertura de emergencia"),
+    db: Session = Depends(get_db)
+):
+    """
+    Crea VARIOS WODs (uno por fecha) y los vincula a las clases de su fecha +
+    disciplina activa, TODO en una sola transacción atómica.
+
+    Body: { "wods": [ {fecha, titulo, calentamiento, fuerza_habilidad,
+                        wod_principal, tipo_metcon, estado, coach_id, ...}, ... ] }
+    (mismo shape que POST /wods, una entrada por día).
+
+    - Si algo falla a mitad de tanda (ej. día 3 de 5) => rollback completo:
+      NO quedan WODs parciales.
+    - Reutiliza la validación de crear_wod (verificar_coach_disciplina) y el
+      vínculo clase<->WOD del POST /wods/batch (misma disciplina + fecha).
+    """
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
+    coach_id = current_user["usuario_id"]
+    rol = current_user.get("rol", "")
+
+    if not body.wods:
+        raise HTTPException(
+            status_code=400, detail="Debes enviar al menos 1 WOD (wods[])")
+
+    fechas = [w.fecha for w in body.wods]
+    if len(set(fechas)) != len(fechas):
+        raise HTTPException(
+            status_code=400,
+            detail="Fechas duplicadas en la tanda: cada WOD debe ser de una fecha distinta")
+
+    # Para coaches: validación OBLIGATORIA de pertenencia a la disciplina
+    # (igual que POST /wods — misma validación, no reinventar).
+    if rol == "coach":
+        if not disciplina_id:
+            raise HTTPException(
+                status_code=400, detail="disciplina_id es obligatorio para coaches")
+        verificar_coach_disciplina(
+            coach_id, disciplina_id, db,
+            modo_emergencia=modo_emergencia,
+            accion="crear_wod", tenant_id=tenant_id)
+
+    creados = []
+    clases_total = 0
+    try:
+        for wd in body.wods:
+            if wd.coach_id and wd.coach_id != coach_id:
+                raise HTTPException(
+                    status_code=403, detail="No puedes crear WODs en nombre de otro coach")
+
+            # Crear el WOD de esta fecha (misma lógica que POST /wods)
+            nueva_wod = _crear_wod_obj(db, tenant_id, wd)
+
+            # Vincular las clases de ESA fecha + disciplina activa
+            # (equivalente al POST /wods/batch que hoy hace el frontend por día)
+            clases_dia = db.query(Clase).filter(
+                Clase.tenant_id == tenant_id,
+                Clase.fecha == wd.fecha,
+                Clase.disciplina_id == disciplina_id,
+            ).all()
+            clase_ids = []
+            for clase in clases_dia:
+                clase.wod_id = nueva_wod.id
+                # Auto-asignar coach si la clase no tiene coach_id (misma regla que /wods/batch)
+                if clase.coach_id is None:
+                    clase.coach_id = coach_id
+                clase_ids.append(clase.id)
+            clases_total += len(clase_ids)
+
+            creados.append({
+                "wod": schemas.WodResponse.from_orm_with_names(nueva_wod),
+                "clase_ids": clase_ids,
+            })
+
+        db.commit()
+    except Exception:
+        # Si falla cualquier WOD de la tanda => rollback completo (sin estado parcial)
+        db.rollback()
+        raise
+
+    return {
+        "mensaje": f"{len(creados)} WOD(s) creados y vinculados a {clases_total} clase(s)",
+        "creados": len(creados),
+        "clases_vinculadas": clases_total,
+        "wods": creados,
     }
