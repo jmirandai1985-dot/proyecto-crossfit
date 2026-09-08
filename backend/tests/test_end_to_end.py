@@ -9,7 +9,7 @@ import requests
 import psycopg2
 from datetime import date, timedelta, datetime, timezone
 
-from tests.conftest import BASE, TENANT_ID
+from tests.conftest import BASE, TENANT_ID, get_admin_token, get_coach_token
 
 # â”€â”€ Datos del alumno dedicado para este test â”€â”€
 E2E_ALUMNO_ID = 8888
@@ -101,7 +101,7 @@ def test_e2e_01_admin_crea_alumno():
         "correo": E2E_CORREO,
         "password": E2E_PASSWORD,
         "rol": "alumno"
-    })
+    }, headers={"Authorization": f"Bearer {get_admin_token()}"})
     assert r.status_code == 201, f"Crear alumno fallÃ³: {r.status_code} - {r.text[:200]}"
     data = r.json()
     assert data.get("id") is not None, "No se devolviÃ³ id del alumno"
@@ -143,7 +143,8 @@ def test_e2e_02_alumno_login_y_elige_plan():
     print(f"  âœ… Login exitoso, token JWT generado")
 
     # 2b. Obtener lista de planes (verificar que existe plan_id=1)
-    r = requests.get(f"{BASE}/planes", params={"tenant_id": TENANT_ID})
+    r = requests.get(f"{BASE}/planes", params={"tenant_id": TENANT_ID},
+                     headers={"Authorization": f"Bearer {SharedE2E.token_alumno}"})
     assert r.status_code == 200, f"Listar planes fallÃ³: {r.status_code}"
     planes = r.json()
     plan_crossfit = None
@@ -163,7 +164,7 @@ def test_e2e_02_alumno_login_y_elige_plan():
         "plan_id": SharedE2E.plan_id,
         "voucher_url": None,
         "certificado_estudiante_url": None
-    })
+    }, headers={"Authorization": f"Bearer {SharedE2E.token_alumno}"})
     assert r.status_code == 201, f"Crear solicitud fallÃ³: {r.status_code} - {r.text[:200]}"
     solicitud_data = r.json()
     assert solicitud_data.get(
@@ -195,7 +196,8 @@ def test_e2e_03_alumno_carga_voucher():
     # Creamos un pequeÃ±o JPEG simulado (1x1 pixel)
     fake_jpeg = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ", # \x1c\x1c(7),014\x1c\x1c\x1c\x1c\x1c\x1c\x1c\x1c\x1c\x1c\x1c\x1c\x1c\x1c\x1c\x1c\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xc4\x00\xb5\x10\x00\x02\x01\x03\x03\x02\x04\x03\x05\x05\x04\x04\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x11\x04\x12!1A\x06\x13Qa\x07"q\x142\x81\x91\xa1\x08#B\xb1\xc1\x15R\xd1\xf0$3br\x82\t\n\x16\x17\x18\x19\x1a%&\'()*456789:CDEFGHIJSTUVWXYZcdefghijstuvwxyz\x83\x84\x85\x86\x87\x88\x89\x8a\x92\x93\x94\x95\x96\x97\x98\x99\x9a\xa2\xa3\xa4\xa5\xa6\xa7\xa8\xa9\xaa\xb2\xb3\xb4\xb5\xb6\xb7\xb8\xb9\xba\xc2\xc3\xc4\xc5\xc6\xc7\xc8\xc9\xca\xd2\xd3\xd4\xd5\xd6\xd7\xd8\xd9\xda\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xf1\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xff\xc4\x00\x1f\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xc4\x00\xb5\x11\x00\x02\x01\x02\x04\x04\x03\x04\x07\x05\x04\x04\x00\x01\x02\x77\x00\x01\x02\x03\x11\x04\x05!1\x06\x12AQ\x07aq\x13"2\x81\x08\x14B\x91\xa1\xb1\xc1\t#3R\x15\xf0\x16$br\x82\n\x17\x18\x19\x1a%&\'()*456789:CDEFGHIJSTUVWXYZcdefghijstuvwxyz\x82\x83\x84\x85\x86\x87\x88\x89\x8a\x92\x93\x94\x95\x96\x97\x98\x99\x9a\xa2\xa3\xa4\xa5\xa6\xa7\xa8\xa9\xaa\xb2\xb3\xb4\xb5\xb6\xb7\xb8\xb9\xba\xc2\xc3\xc4\xc5\xc6\xc7\xc8\xc9\xca\xd2\xd3\xd4\xd5\xd6\xd7\xd8\xd9\xda\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xff\xda\x00\x08\x01\x01\x00\x00?\x00~\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xd9'
     r = requests.post(f"{BASE}/upload/voucher",
-                      files={"file": ("voucher_test.jpg", fake_jpeg, "image/jpeg")})
+                      files={"file": ("voucher_test.jpg", fake_jpeg, "image/jpeg")},
+                      headers={"Authorization": f"Bearer {SharedE2E.token_alumno}"})
     assert r.status_code == 201, f"Subir voucher fallÃ³: {r.status_code} - {r.text[:200]}"
     data = r.json()
     assert data.get("url") is not None, "No se devolviÃ³ URL del voucher"
@@ -230,7 +232,8 @@ def test_e2e_04_admin_activa_plan():
 
     # 4a. Admin lista solicitudes pendientes
     r = requests.get(f"{BASE}/solicitudes/pendientes",
-                     params={"tenant_id": TENANT_ID})
+                     params={"tenant_id": TENANT_ID},
+                     headers={"Authorization": f"Bearer {get_admin_token()}"})
     assert r.status_code == 200, f"Listar pendientes fallÃ³: {r.status_code}"
     pendientes = r.json()
     ids_pendientes = [s["id"] for s in pendientes]
@@ -241,7 +244,8 @@ def test_e2e_04_admin_activa_plan():
     # 4b. Admin aprueba la solicitud
     r = requests.put(
         f"{BASE}/solicitudes/{SharedE2E.solicitud_id}/aprobar",
-        params={"admin_id": ADMIN_ID}
+        params={"admin_id": ADMIN_ID},
+        headers={"Authorization": f"Bearer {get_admin_token()}"}
     )
     assert r.status_code == 200, f"Aprobar solicitud fallÃ³: {r.status_code} - {r.text[:200]}"
     data = r.json()
@@ -274,7 +278,8 @@ def test_e2e_04_admin_activa_plan():
 
     # 4d. Verificar que la solicitud ya no aparece como pendiente
     r = requests.get(f"{BASE}/solicitudes/pendientes",
-                     params={"tenant_id": TENANT_ID})
+                     params={"tenant_id": TENANT_ID},
+                     headers={"Authorization": f"Bearer {get_admin_token()}"})
     assert r.status_code == 200
     pendientes = r.json()
     assert SharedE2E.solicitud_id not in [s["id"] for s in pendientes], \
@@ -289,7 +294,8 @@ def test_e2e_05_alumno_agenda_clase():
 
     # 5a. Buscar una clase disponible para HOY o maÃ±ana (CrossFit = disciplina_id=3 o similar)
     # Primero obtener disciplinas para saber id de CrossFit
-    r = requests.get(f"{BASE}/disciplinas", params={"tenant_id": TENANT_ID})
+    r = requests.get(f"{BASE}/disciplinas", params={"tenant_id": TENANT_ID},
+                     headers={"Authorization": f"Bearer {SharedE2E.token_alumno}"})
     assert r.status_code == 200, f"Listar disciplinas fallÃ³: {r.status_code}"
     disciplinas = r.json()
     # Buscar CrossFit
@@ -313,7 +319,7 @@ def test_e2e_05_alumno_agenda_clase():
         "fecha": str(hoy),
         "solo_con_cupo": True,
         "limit": 5
-    })
+    }, headers={"Authorization": f"Bearer {SharedE2E.token_alumno}"})
     assert r.status_code == 200, f"Buscar clases fallÃ³: {r.status_code}"
     clases = r.json()
     # Si no hay clases hoy, buscar maÃ±ana
@@ -325,7 +331,7 @@ def test_e2e_05_alumno_agenda_clase():
             "fecha": str(manana),
             "solo_con_cupo": True,
             "limit": 5
-        })
+        }, headers={"Authorization": f"Bearer {SharedE2E.token_alumno}"})
         assert r.status_code == 200
         clases = r.json()
         if clases:
@@ -342,7 +348,7 @@ def test_e2e_05_alumno_agenda_clase():
         "clase_id": SharedE2E.clase_id,
         "alumno_id": SharedE2E.alumno_id,
         "estado": "confirmada"
-    })
+    }, headers={"Authorization": f"Bearer {SharedE2E.token_alumno}"})
     assert r.status_code == 201, f"Crear reserva fallÃ³: {r.status_code} - {r.text[:200]}"
     reserva = r.json()
     assert reserva.get("id") is not None, "No se devolviÃ³ id de reserva"
@@ -389,7 +395,8 @@ def test_e2e_06_coach_genera_wod():
     from tests.conftest import get_coach_token
 
     # 6a. Obtener movimientos disponibles
-    r = requests.get(f"{BASE}/movimientos", params={"tenant_id": TENANT_ID})
+    r = requests.get(f"{BASE}/movimientos", params={"tenant_id": TENANT_ID},
+                     headers={"Authorization": f"Bearer {get_coach_token()}"})
     assert r.status_code == 200, f"Listar movimientos fallÃ³: {r.status_code}"
     movimientos = r.json()
     assert len(movimientos) > 0, "No hay movimientos en la BD"
@@ -399,7 +406,8 @@ def test_e2e_06_coach_genera_wod():
 
     # 6b. Obtener la clase para saber fecha, hora
     r = requests.get(f"{BASE}/clases/{SharedE2E.clase_id}",
-                     params={"tenant_id": TENANT_ID})
+                     params={"tenant_id": TENANT_ID},
+                     headers={"Authorization": f"Bearer {get_coach_token()}"})
     assert r.status_code == 200, f"Obtener clase fallÃ³: {r.status_code}"
     clase = r.json()
     print(f"  âœ… Datos de clase: fecha={clase['fecha']}, "
@@ -491,16 +499,19 @@ def test_e2e_07_alumno_consulta_wod_hoy():
     # 7b. Consultar WOD de hoy
     r = requests.get(
         f"{BASE}/wods/hoy",
-        params={"tenant_id": TENANT_ID, "alumno_id": SharedE2E.alumno_id}
+        params={"tenant_id": TENANT_ID, "alumno_id": SharedE2E.alumno_id},
+        headers={"Authorization": f"Bearer {SharedE2E.token_alumno}"}
     )
     assert r.status_code == 200, f"Consultar WOD hoy fallÃ³: {r.status_code} - {r.text[:200]}"
     wod_hoy = r.json()
 
     # El WOD puede devolver None si la clase no es hoy
     if wod_hoy is None:
-        # Buscar en la clase reservada
+        # Buscar en la clase reservada (GET por-clase es de coach; el coach
+        # 1000 esta asignado a la disciplina de la clase reservada)
         r = requests.get(f"{BASE}/reservas/por-clase/{SharedE2E.clase_id}",
-                         params={"tenant_id": TENANT_ID})
+                         params={"tenant_id": TENANT_ID},
+                         headers={"Authorization": f"Bearer {get_coach_token()}"})
         assert r.status_code == 200
         reservas = r.json()
         reserva_alumno = None
@@ -515,7 +526,8 @@ def test_e2e_07_alumno_consulta_wod_hoy():
         # Consultar WOD directamente
         r = requests.get(
             f"{BASE}/wods/{SharedE2E.wod_id}",
-            params={"tenant_id": TENANT_ID}
+            params={"tenant_id": TENANT_ID},
+            headers={"Authorization": f"Bearer {SharedE2E.token_alumno}"}
         )
         assert r.status_code == 200
         wod_hoy = r.json()
@@ -561,7 +573,7 @@ def test_e2e_08_alumno_registra_rm_y_consulta_evolucion():
         "tipo_rm": "peso",
         "fecha": str(date.today()),
         "notas": "RM E2E Test"
-    })
+    }, headers={"Authorization": f"Bearer {SharedE2E.token_alumno}"})
     assert r.status_code == 201, \
         f"Registrar RM fallÃ³: {r.status_code} - {r.text[:200]}"
     rm_data = r.json()
@@ -581,7 +593,7 @@ def test_e2e_08_alumno_registra_rm_y_consulta_evolucion():
         "tipo_rm": "peso",
         "fecha": str(date.today() + timedelta(days=7)),
         "notas": "RM E2E Test v2"
-    })
+    }, headers={"Authorization": f"Bearer {SharedE2E.token_alumno}"})
     assert r2.status_code == 201, \
         f"Registrar segundo RM fallÃ³: {r2.status_code} - {r2.text[:200]}"
     rm2_data = r2.json()
@@ -590,7 +602,8 @@ def test_e2e_08_alumno_registra_rm_y_consulta_evolucion():
     # 8c. Consultar evoluciÃ³n del movimiento
     r = requests.get(
         f"{BASE}/historial-rm/alumnos/{SharedE2E.alumno_id}/movimiento/{SharedE2E.movimiento_id}",
-        params={"tenant_id": TENANT_ID}
+        params={"tenant_id": TENANT_ID},
+        headers={"Authorization": f"Bearer {SharedE2E.token_alumno}"}
     )
     assert r.status_code == 200, \
         f"Consultar evoluciÃ³n fallÃ³: {r.status_code} - {r.text[:200]}"
@@ -612,7 +625,8 @@ def test_e2e_08_alumno_registra_rm_y_consulta_evolucion():
     # 8d. Consultar RMs del alumno
     r = requests.get(
         f"{BASE}/historial-rm/alumnos/{SharedE2E.alumno_id}/rms",
-        params={"tenant_id": TENANT_ID}
+        params={"tenant_id": TENANT_ID},
+        headers={"Authorization": f"Bearer {SharedE2E.token_alumno}"}
     )
     assert r.status_code == 200, \
         f"Consultar RMs alumno fallÃ³: {r.status_code} - {r.text[:200]}"

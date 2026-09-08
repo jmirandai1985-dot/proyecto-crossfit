@@ -122,3 +122,55 @@ def health_check():
             "   O manual: py -3.12 -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
         )
     return True
+
+def get_alumno_token(alumno_id=999, tenant_id=1):
+    """Generate a valid JWT for an alumno (for tests that need auth)."""
+    return create_access_token({
+        "usuario_id": alumno_id,
+        "tenant_id": tenant_id,
+        "rol": "alumno",
+        "correo": f"alumno{alumno_id}@test.com"
+    })
+
+
+# ── Inyección automática de Authorization por módulo de tests ────────────────
+# La API exige Bearer en casi todas las rutas (migración de seguridad: 147/150).
+# Varios tests de integración se escribieron antes y no enviaban token. Para no
+# tocar decenas de llamadas, cada módulo con persona FIJA inyecta su token por
+# defecto. Los tests que necesitan OTRA persona (o un alumno distinto) envían
+# headers explícitos: el wrapper solo inyecta si NO viene "Authorization".
+_PERSONA = {
+    "test_cupos": "admin",
+    "test_panel_admin": "admin",
+    "test_panel_alumno": "alumno",
+    "test_panel_coach": "coach",
+}
+
+
+@pytest.fixture(autouse=True)
+def _inyectar_auth_por_modulo(request, monkeypatch):
+    modulo = request.module.__name__.rsplit(".", 1)[-1]
+    persona = _PERSONA.get(modulo)
+    if persona is None:
+        yield
+        return
+    if persona == "admin":
+        token = get_admin_token()
+    elif persona == "alumno":
+        token = get_alumno_token(ALUMNO_ID)
+    else:
+        token = get_coach_token(1000)
+
+    def _wrap(func):
+        def _call(*args, **kwargs):
+            headers = dict(kwargs.get("headers") or {})
+            if "Authorization" not in headers:
+                headers["Authorization"] = f"Bearer {token}"
+            kwargs["headers"] = headers
+            return func(*args, **kwargs)
+        return _call
+
+    for _m in ("get", "post", "put", "patch", "delete"):
+        monkeypatch.setattr(requests, _m, _wrap(getattr(requests, _m)))
+    yield
+

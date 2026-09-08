@@ -13,7 +13,7 @@ import requests
 import json
 from datetime import date, timedelta
 
-from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, HOY_STR, get_coach_token
+from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, HOY_STR, get_coach_token, get_admin_token
 
 
 # ── Estado compartido entre tests (se llena en orden) ──
@@ -372,9 +372,10 @@ def test_14_planes_filtro_genero():
 
 def test_15_actualizar_peso_alumno():
     """[15] PUT /usuarios/{id} - Actualizar peso y restaurar."""
-    # Obtener usuario actual
+    # Obtener usuario actual (endpoint admin-only; el test actúa como staff)
     r = requests.get(f"{BASE}/usuarios/{ALUMNO_ID}",
-                     params={"tenant_id": TENANT_ID})
+                     params={"tenant_id": TENANT_ID},
+                     headers={"Authorization": f"Bearer {get_admin_token()}"})
     if r.status_code != 200:
         pytest.skip(f"No se pudo obtener usuario: status {r.status_code}")
     usuario = r.json()
@@ -384,7 +385,8 @@ def test_15_actualizar_peso_alumno():
     nuevo_peso = (peso_original or 70) + 5
     r = requests.put(f"{BASE}/usuarios/{ALUMNO_ID}",
                      params={"tenant_id": TENANT_ID},
-                     json={"peso_kg": nuevo_peso})
+                     json={"peso_kg": nuevo_peso},
+                     headers={"Authorization": f"Bearer {get_admin_token()}"})
     assert r.status_code < 300, f"Status {r.status_code}: {r.text[:200]}"
     assert r.json().get("peso_kg") == nuevo_peso, (
         f"peso_kg no actualizado: esperado={nuevo_peso}, real={r.json().get('peso_kg')}"
@@ -403,7 +405,8 @@ def test_15_actualizar_peso_alumno():
     if peso_original is not None:
         requests.put(f"{BASE}/usuarios/{ALUMNO_ID}",
                      params={"tenant_id": TENANT_ID},
-                     json={"peso_kg": peso_original})
+                     json={"peso_kg": peso_original},
+                     headers={"Authorization": f"Bearer {get_admin_token()}"})
 
 
 # ===================================================================
@@ -470,8 +473,10 @@ def test_cleanup():
     # Eliminar WOD de prueba
     if Shared.wod_creado_id:
         try:
+            token = get_coach_token(coach_id=1000)
             requests.delete(f"{BASE}/wods/{Shared.wod_creado_id}",
-                            params={"tenant_id": TENANT_ID})
+                            params={"tenant_id": TENANT_ID},
+                            headers={"Authorization": f"Bearer {token}"})
         except Exception:
             pass
 

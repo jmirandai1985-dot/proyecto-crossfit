@@ -10,7 +10,7 @@ import pytest
 import requests
 from datetime import date, timedelta
 
-from tests.conftest import BASE, TENANT_ID
+from tests.conftest import BASE, TENANT_ID, get_coach_token
 
 # Dedicado solo para tests admin (no contaminar alumno 999)
 ALUMNO_ADMIN_ID = 1010
@@ -63,8 +63,10 @@ def test_c16_sin_clases_duplicadas():
 
 def test_a01_aprobar_solicitud_con_usuario_invalido():
     """[1] Verificar que un coach NO puede aprobar solicitudes (seguridad)."""
-    r = requests.put(f"{BASE}/solicitudes/99999/aprobar",
-                     params={"admin_id": COACH_ID})
+    r = requests.put(
+        f"{BASE}/solicitudes/99999/aprobar",
+        params={"admin_id": COACH_ID},
+        headers={"Authorization": f"Bearer {get_coach_token(coach_id=COACH_ID)}"})
     assert r.status_code == 403, \
         f"Coach no debe poder aprobar: status {r.status_code}"
     data = r.json()
@@ -107,7 +109,8 @@ def test_a03_admin_puede_aprobar():
 def test_a04_rechazar_con_coach_devuelve_403():
     """[4] Verificar que rechazar con coach tambien da 403."""
     r = requests.put(f"{BASE}/solicitudes/1/rechazar",
-                     params={"admin_id": COACH_ID, "motivo": "test"})
+                     params={"admin_id": COACH_ID, "motivo": "test"},
+                     headers={"Authorization": f"Bearer {get_coach_token(coach_id=COACH_ID)}"})
     assert r.status_code == 403, \
         f"Coach no debe poder rechazar: {r.status_code}"
     print(f"  [OK] Coach rechazado al rechazar (403)")

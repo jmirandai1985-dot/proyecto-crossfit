@@ -11,7 +11,7 @@ import requests
 import json
 from datetime import date, timedelta
 
-from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, HOY_STR, DIA_REF, DIA_REF_STR, get_coach_token
+from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, HOY_STR, DIA_REF, DIA_REF_STR, get_coach_token, get_alumno_token
 
 COACH_ID = 1000
 
@@ -196,7 +196,8 @@ def test_c06b_wod_hoy_con_alumno_id():
     assert Shared.clase_asignada_id is not None, "test_c06 debe ejecutarse antes"
     # Crear reserva del alumno en la clase que tiene WOD asignado
     r_res = requests.post(f"{BASE}/reservas/",
-                          json={"tenant_id": TENANT_ID, "alumno_id": ALUMNO_ID, "clase_id": Shared.clase_asignada_id})
+                          json={"tenant_id": TENANT_ID, "alumno_id": ALUMNO_ID, "clase_id": Shared.clase_asignada_id},
+                          headers={"Authorization": f"Bearer {get_alumno_token(ALUMNO_ID)}"})
     if r_res.status_code not in (200, 201):
         r_get = requests.get(f"{BASE}/reservas/por-clase/{Shared.clase_asignada_id}",
                              params={"tenant_id": TENANT_ID})
@@ -230,7 +231,8 @@ def test_c07_marcar_asistencia():
                           "tenant_id": TENANT_ID,
                           "alumno_id": ALUMNO_ID,
                           "clase_id": Shared.clase_asignada_id
-    })
+    },
+        headers={"Authorization": f"Bearer {get_alumno_token(ALUMNO_ID)}"})
     # Si no se puede crear (ya existe), intentamos listar reservas de la clase
     if r.status_code not in (200, 201):
         print(f"  POST reservas fallÃ³: {r.status_code} {r.text[:200]}")
@@ -248,7 +250,8 @@ def test_c07_marcar_asistencia():
     assert Shared.reserva_id is not None, "Debe tener un id de reserva"
     # Verificar creditos antes de marcar asistencia
     r_cred = requests.get(f"{BASE}/planes/membresia-activa",
-                          params={"tenant_id": TENANT_ID, "alumno_id": ALUMNO_ID})
+                          params={"tenant_id": TENANT_ID, "alumno_id": ALUMNO_ID},
+                          headers={"Authorization": f"Bearer {get_alumno_token(ALUMNO_ID)}"})
     if r_cred.status_code == 200:
         Shared.creditos_antes = r_cred.json().get("clases_disponibles")
 
@@ -288,7 +291,8 @@ def test_c08_asistencia_false_no_devuelve_credito():
     assert Shared.reserva_id is not None, "Primero debe tener una reserva"
     # Verificar creditos despues de asistencia=false
     r_cred = requests.get(f"{BASE}/planes/membresia-activa",
-                          params={"tenant_id": TENANT_ID, "alumno_id": ALUMNO_ID})
+                          params={"tenant_id": TENANT_ID, "alumno_id": ALUMNO_ID},
+                          headers={"Authorization": f"Bearer {get_alumno_token(ALUMNO_ID)}"})
     if r_cred.status_code == 200:
         Shared.creditos_despues = r_cred.json().get("clases_disponibles")
         if Shared.creditos_antes is not None and Shared.creditos_despues is not None:
@@ -340,7 +344,8 @@ def test_c10_seguridad_coach_no_puede_operar_otra_disciplina():
     # â”€â”€ Intentar marcar asistencia en reserva de OTRA disciplina â†’ 403 â”€â”€
     # Crear una reserva en la clase de Lev. OlÃ­mpico para tener un ID vÃ¡lido
     r_res = requests.post(f"{BASE}/reservas/",
-                          json={"tenant_id": TENANT_ID, "alumno_id": ALUMNO_ID, "clase_id": clase_otra_disc["id"]})
+                          json={"tenant_id": TENANT_ID, "alumno_id": ALUMNO_ID, "clase_id": clase_otra_disc["id"]},
+                          headers={"Authorization": f"Bearer {get_alumno_token(ALUMNO_ID)}"})
     reserva_id_otra = None
     if r_res.status_code in (200, 201):
         reserva_id_otra = r_res.json().get("id")
@@ -514,7 +519,8 @@ def test_c15_cleanup():
     if Shared.reserva_id:
         try:
             r = requests.delete(f"{BASE}/reservas/{Shared.reserva_id}",
-                                params={"tenant_id": TENANT_ID})
+                                params={"tenant_id": TENANT_ID},
+                                headers={"Authorization": f"Bearer {get_alumno_token(ALUMNO_ID)}"})
             if r.status_code in (200, 204):
                 print(f"  Reserva {Shared.reserva_id} eliminada")
         except Exception as e:
