@@ -1,0 +1,31 @@
+# ============================================================
+# .dockerignore — contexto raíz para Dockerfile.render (imagen combinada).
+# Excluye lo que NO debe entrar al daemon/nitapas de build:
+#   - secretos de entorno (backend/.env*, nunca en la imagen)
+#   - node_modules / dist (el build de Vite se hace dentro del stage)
+#   - artefactos de datos/test locales
+# ============================================================
+.git
+.gitignore
+**/node_modules
+**/dist
+**/.pytest_cache
+**/__pycache__
+**/*.py[cod]
+*.log
+backend/.env
+backend/.env.*
+backend/backups
+backend/logs
+backend/app/box_crossfit.db
+backend/box_crossfit.db
+# Data de runtime (vouchers subidos) — NO debe quemarse en la imagen;
+# el Dockerfile crea /app/app/static/uploads vacío.
+backend/app/static/uploads
+backups
+k6-tests
+logo
+sql
+_notas-desarrollo
+_tests_run*
+_commit*
