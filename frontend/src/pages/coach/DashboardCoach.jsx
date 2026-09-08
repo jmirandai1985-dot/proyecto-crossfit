@@ -140,7 +140,7 @@ const DashboardCoach = () => {
         setLoading(true);
         try {
             const [clasesRes, wodsRes, riesgoRes, movRes, coachDiscRes] = await Promise.all([
-                api.get(`/api/v1/clases?coach_id=${usuario_id}`),
+                api.get(`/api/v1/clases?coach_id=${usuario_id}&fecha_desde=${weekRange.start}&fecha_hasta=${weekRange.end}`),
                 api.get(`/api/v1/wods`),
                 api.get(`/api/v1/fidelizacion/coach/${usuario_id}/en-riesgo`),
                 api.get(`/api/v1/movimientos`),
