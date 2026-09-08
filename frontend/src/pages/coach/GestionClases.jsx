@@ -134,6 +134,7 @@ export default function GestionClases() {
     // Clases de Hoy — si la URL trae ?fecha=, usar esa fecha exacta
     const [fechaClases, setFechaClases] = useState(urlFecha || hoyStr());
     const [clasesConWod, setClasesConWod] = useState([]);
+    const [clasesDiaVista, setClasesDiaVista] = useState([]);
     const [claseEnCurso, setClaseEnCurso] = useState(null);
 
     // Filtrar disciplinas según modo
@@ -177,21 +178,23 @@ export default function GestionClases() {
         setHorariosSel({}); setWod(null); setModoEdicion(false);
     }, [fechaPlanif, cargarClases]);
 
+    const recargarVistaDia = useCallback(async (f) => {
+        const cls = await cargarClases(f);
+        setClasesDiaVista(cls);
+        setClasesConWod(cls.filter(c => c.wod_id));
+        if (f === hoyStr()) {
+            const ahora = new Date(); const minActual = ahora.getHours() * 60 + ahora.getMinutes();
+            const ec = cls.find(c => {
+                const hi = parseHora(c.hora_inicio), hf = parseHora(c.hora_fin);
+                return minActual >= hi * 60 && minActual <= hf * 60;
+            });
+            setClaseEnCurso(ec?.id || null);
+        } else setClaseEnCurso(null);
+    }, [cargarClases]);
+
     useEffect(() => {
-        const load = async () => {
-            const cls = await cargarClases(fechaClases);
-            setClasesConWod(cls.filter(c => c.wod_id));
-            if (fechaClases === hoyStr()) {
-                const ahora = new Date(); const minActual = ahora.getHours() * 60 + ahora.getMinutes();
-                const ec = cls.find(c => {
-                    const hi = parseHora(c.hora_inicio), hf = parseHora(c.hora_fin);
-                    return minActual >= hi * 60 && minActual <= hf * 60;
-                });
-                setClaseEnCurso(ec?.id || null);
-            } else setClaseEnCurso(null);
-        };
-        load();
-    }, [fechaClases, cargarClases]);
+        recargarVistaDia(fechaClases);
+    }, [fechaClases, recargarVistaDia]);
 
     const seleccionarTurno = (tId) => {
         setTurnoActivo(tId); setDisciplinaActiva(null);
@@ -298,8 +301,8 @@ export default function GestionClases() {
                 setMsg({ tipo: 'exito', texto: `✅ ${wodsCreados.length} WOD(s) creado(s) y publicado(s) en una sola operación (${batch.clases_vinculadas ?? 0} clase(s) vinculadas)` + (esEmergencia ? ' (modo emergencia)' : '') });
             }
             setWod(wodRes); setModoEdicion(false);
-            // Si se abrió desde ?clase=ID, asegurar el vínculo a ESA clase específica
-            if (claseDestino && claseDestino.id) {
+            // Si se abrió desde ?clase=ID (URL), asegurar el vínculo a ESA clase específica
+            if (claseDestino && claseDestino.id && urlClaseId) {
                 let wodObjetivo = wodRes;
                 if (batchCreados.length > 0) {
                     const fDest = typeof claseDestino.fecha === 'string' ? claseDestino.fecha.split('T')[0] : claseDestino.fecha;
@@ -313,9 +316,16 @@ export default function GestionClases() {
                     setMsg({ tipo: 'exito', texto: `WOD creado y asignado a la clase #${claseDestino.id}` + (esEmergencia ? ' (modo emergencia)' : '') });
                     setTimeout(() => navigate('/coach?tab=clases'), 1200);
                 }
+            } else if (claseDestino && claseDestino.id && !urlClaseId) {
+                // Origen CTA "Publicar WOD" desde la pestaña Clases de Hoy (sin ?clase=):
+                // cerrar el formulario y volver al listado del día (ya recargado abajo).
+                setClaseDestino(null);
+                setWod(null);
+                setModoEdicion(false);
             }
             setConfirmarEmergencia(null);
             cargarClases(fechaPlanif).then(setClasesDelDia);
+            recargarVistaDia(fechaClases);
             // Recargar WODs de la semana para actualizar el calendario
             if (disciplinaActiva) seleccionarDisciplina(disciplinaActiva);
         } catch (e) {
@@ -341,8 +351,28 @@ export default function GestionClases() {
 
     const marcarTodos = async (valor) => { for (const a of asistencia) await toggleAsistencia(a.reserva_id, valor); };
 
+    // Abre el formulario de publicar WOD pre-cargando la clase seleccionada,
+    // tal como si se hubiera llegado con ?clase=ID (reutiliza el bloque claseDestino).
+    const abrirFormularioClase = (clase) => {
+        const fechaStr = typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha;
+        setClaseDestino(clase);
+        setDisciplinaActiva(clase.disciplina_id || null);
+        setFechaPlanif(fechaStr);
+        setFechaClases(fechaStr);
+        setModoEmergencia(false);
+        setDiasSeleccionados(new Set([fechaStr]));
+        setWod(null);
+        setModoEdicion(false);
+        setWodForm({ titulo: '', calentamiento: '', fuerza_habilidad: '', wod_principal: '', tipo_metcon: '', estado: 'publicado' });
+        setClaseAsistencia(null);
+        setAsistencia([]);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
     const hoy = hoyStr();
     const turnoLabel = TURNOS.find(t => t.id === turnoActivo);
+    // Clases del día SIN WOD publicado aún (para ofrecer el CTA "Publicar WOD")
+    const clasesSinWod = (clasesDiaVista || []).filter(c => !c.wod_id);
 
     // Si la URL trae ?clase= pero la clase aún NO se cargó (o falló),
     // NO mostrar la vista vieja "Clases de Hoy" — mostrar loading/error en su lugar.
@@ -515,30 +545,59 @@ export default function GestionClases() {
                                     <input type="date" value={fechaClases} min={hoy} onChange={e => { setFechaClases(e.target.value); setClaseAsistencia(null); }} className="border rounded px-3 py-1" />
                                     {fechaClases === hoy && <span className="text-emerald-600 text-sm font-medium">• Hoy</span>}
                                 </div>
-                                {clasesConWod.length === 0 ? (
+                                {clasesDiaVista.length === 0 ? (
                                     <div className="text-center py-12 text-gray-400">
-                                        <div className="text-4xl mb-3">📋</div>
-                                        <p className="text-lg">Aún no hay WOD publicado para {new Date(fechaClases + 'T12:00:00').toLocaleDateString('es-CL')}</p>
+                                        <div className="text-4xl mb-3">📅</div>
+                                        <p className="text-lg">No hay clases programadas para {new Date(fechaClases + 'T12:00:00').toLocaleDateString('es-CL')}</p>
                                     </div>
                                 ) : (
-                                    <div className="space-y-4">
-                                        {[...clasesConWod].sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || '')).map(c => {
-                                            const enCurso = claseEnCurso === c.id;
-                                            return (
-                                                <div key={c.id} className={`border rounded-lg p-4 ${enCurso ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' : 'bg-white border-gray-200'}`}>
-                                                    <div className="flex items-center justify-between mb-2">
-                                                        <div className="flex items-center gap-3">
-                                                            <span className="font-bold text-lg">{c.hora_inicio?.slice(0, 5)}</span>
-                                                            <span className="text-gray-500">{c.disciplina_nombre || '-'}</span>
-                                                            {enCurso && <span className="px-2 py-0.5 bg-emerald-500 text-white text-xs rounded-full font-bold animate-pulse">EN CURSO</span>}
+                                    <div>
+                                        {clasesSinWod.length > 0 && (
+                                            <div className="mb-6">
+                                                <h3 className="font-bold text-gray-700 mb-3">📝 Horarios sin WOD publicado</h3>
+                                                <div className="space-y-3">
+                                                    {[...clasesSinWod].sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || '')).map(c => (
+                                                        <div key={c.id} className="flex flex-wrap items-center justify-between gap-3 border border-dashed border-gray-300 bg-white rounded-lg p-4">
+                                                            <div className="flex items-center gap-3">
+                                                                <span className="font-bold text-lg">{c.hora_inicio?.slice(0, 5)}</span>
+                                                                <span className="text-gray-500">{c.disciplina_nombre || '-'}</span>
+                                                                <span className="text-sm text-gray-400">{(c.asistentes_confirmados || 0)}/{c.cupo_maximo || '?'}</span>
+                                                            </div>
+                                                            <button
+                                                                onClick={() => abrirFormularioClase(c)}
+                                                                className="px-3 py-1.5 bg-emerald-600 text-white rounded text-sm font-medium hover:bg-emerald-700 transition-colors"
+                                                            >
+                                                                📝 Publicar WOD
+                                                            </button>
                                                         </div>
-                                                        <div className="text-sm text-gray-500">{(c.asistentes_confirmados || 0)}/{c.cupo_maximo || '?'}</div>
-                                                    </div>
-                                                    <div className="text-sm text-gray-700 mb-2">{c.wod_titulo || `WOD #${c.wod_id}`}</div>
-                                                    <button onClick={() => cargarAsistencia(c.id)} className="px-3 py-1.5 bg-blue-500 text-white rounded text-sm hover:bg-blue-600">Tomar Asistencia</button>
+                                                    ))}
                                                 </div>
-                                            );
-                                        })}
+                                            </div>
+                                        )}
+
+                                        {clasesConWod.length === 0 ? (
+                                            <p className="text-sm text-gray-400 italic">Aún no hay clases con WOD publicado este día.</p>
+                                        ) : (
+                                            <div className="space-y-4">
+                                                {[...clasesConWod].sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || '')).map(c => {
+                                                    const enCurso = claseEnCurso === c.id;
+                                                    return (
+                                                        <div key={c.id} className={`border rounded-lg p-4 ${enCurso ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' : 'bg-white border-gray-200'}`}>
+                                                            <div className="flex items-center justify-between mb-2">
+                                                                <div className="flex items-center gap-3">
+                                                                    <span className="font-bold text-lg">{c.hora_inicio?.slice(0, 5)}</span>
+                                                                    <span className="text-gray-500">{c.disciplina_nombre || '-'}</span>
+                                                                    {enCurso && <span className="px-2 py-0.5 bg-emerald-500 text-white text-xs rounded-full font-bold animate-pulse">EN CURSO</span>}
+                                                                </div>
+                                                                <div className="text-sm text-gray-500">{(c.asistentes_confirmados || 0)}/{c.cupo_maximo || '?'}</div>
+                                                            </div>
+                                                            <div className="text-sm text-gray-700 mb-2">{c.wod_titulo || `WOD #${c.wod_id}`}</div>
+                                                            <button onClick={() => cargarAsistencia(c.id)} className="px-3 py-1.5 bg-blue-500 text-white rounded text-sm hover:bg-blue-600">Tomar Asistencia</button>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                                 {claseAsistencia && (
