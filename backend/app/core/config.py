@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # Base de datos PostgreSQL (Neon)
     DATABASE_URL: str = "postgresql://user:pass@localhost/dbname"
 
+    # URL SIN pooler (host directo, sin "-pooler"): SOLO para comandos de
+    # migración Alembic (necesita conexión directa para DDL/Alter). El runtime
+    # (FastAPI + n8n) usa DATABASE_URL (pooler). Se deriva de DATABASE_URL.
+    DIRECT_URL: str = ""
+
     # Seguridad JWT
     # La clave se lee del entorno (.env): JWT_SECRET_KEY o SECRET_KEY (legacy).
     # Nunca usar placeholders hardcodeados (ver normalización abajo).

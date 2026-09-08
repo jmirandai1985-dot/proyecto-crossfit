@@ -13,8 +13,11 @@ config = context.config
 #   ENVIRONMENT no definido → .env      (BD activa / producción)
 #   ENVIRONMENT=test        → .env.test (branch TEST aislada)
 # El alembic.ini trae un placeholder; sin esto alembic no conecta a la BD real.
+# MIGRACIONES: usar SIEMPRE la conexión DIRECTA (DIRECT_URL, sin pooler) para
+# que el DDL/Alter no choque con el pooler de Neon. Fallback a DATABASE_URL.
 from app.core.config import settings  # noqa: E402
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+_alembic_url = settings.DIRECT_URL or settings.DATABASE_URL
+config.set_main_option("sqlalchemy.url", _alembic_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -68,6 +71,7 @@ def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args={"connect_timeout": 15},
     )
 
     with connectable.connect() as connection:

@@ -18,6 +18,10 @@ from app.core.config import settings
 #     que bajo saturación (500 logins) colgaba los checkouts (TimeoutError).
 #     Con pre_ping activo la suite a veces se cuelga => se desactiva.
 #   - pool_timeout=10 (antes 60): acota la espera de checkout para no colgar 60s.
+#   - connect_timeout=15 (vía connect_args): limita a 15s la espera de la conexión
+#     TCP inicial ante un cold-start/autosuspend de Neon. DISTINTO de pool_timeout
+#     (que espera un checkout del pool ya establecido). Evita que un cold-start
+#     cuelgue el proceso sin generar error.
 engine = create_engine(
     settings.DATABASE_URL,
     poolclass=QueuePool,
@@ -26,6 +30,7 @@ engine = create_engine(
     pool_timeout=10,
     pool_pre_ping=False,
     pool_recycle=300,
+    connect_args={"connect_timeout": 15},
     echo=False,
 )
 
