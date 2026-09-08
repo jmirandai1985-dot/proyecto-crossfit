@@ -4,6 +4,7 @@ Siempre limpia los datos de prueba anteriores y los recrea con fechas DINAMICAS.
 Cada corrida empieza desde cero, sin importar cuando se ejecute.
 """
 from datetime import datetime, timedelta, timezone, date, time
+import uuid
 import importlib
 import os
 import sys
@@ -147,34 +148,40 @@ try:
     hoy = date.today()
     print(f"\n   Fecha actual: {hoy}")
 
+    # Password REAL de los usuarios de prueba (mismo mecanismo que el registro
+    # real de coaches/alumnos en usuarios.py -> get_password_hash / bcrypt).
+    _HASH = importlib.import_module("app.core.security").get_password_hash("Test1234!")
+    print("   Password hash bcrypt generado para usuarios seed ('Test1234!')")
+
     # â”€â”€ 3. TENANT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    db.add(Tenant(id=1, nombre="Box Test", subdomain="test-box"))
+    db.add(Tenant(id=1, nombre="Box Test", subdomain="test-box",
+                  public_id=str(uuid.uuid4())))
     db.flush()
     print("   Tenant 1")
 
     # â”€â”€ 4. USUARIOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     db.add(Usuario(id=999, tenant_id=1, rut="99.999.999-9",
                    nombre="Alumno Test",
-                   correo="at@t.com", password_hash="x", rol="alumno",
+                   correo="at@t.com", password_hash=_HASH, rol="alumno",
                    peso_kg=70, genero="masculino", activo=True))
     db.flush()
     print("   Alumno 999")
 
     db.add(Usuario(id=1000, tenant_id=1, rut="11.111.111-1",
                    nombre="Coach Test",
-                   correo="ct@t.com", password_hash="x", rol="coach", activo=True))
+                   correo="ct@t.com", password_hash=_HASH, rol="coach", activo=True))
     db.flush()
     print("   Coach 1000")
 
     db.add(Usuario(id=1001, tenant_id=1, rut="11.111.111-2",
                    nombre="Admin Test",
-                   correo="admin@test.com", password_hash="x", rol="administrador", activo=True))
+                   correo="admin@test.com", password_hash=_HASH, rol="administrador", activo=True))
     db.flush()
     print("   Admin 1001")
 
     db.add(Usuario(id=1010, tenant_id=1, rut="11.111.111-3",
                    nombre="Alumno Admin Test",
-                   correo="alumno_admin@test.com", password_hash="x", rol="alumno",
+                   correo="alumno_admin@test.com", password_hash=_HASH, rol="alumno",
                    peso_kg=75, genero="masculino", activo=True))
     db.flush()
     print("   Alumno Admin 1010")
@@ -323,6 +330,34 @@ try:
                            creditos_disponibles=50, estado='activo'))
         db.flush()
         print("   [SAFETY] Suscripcion recreada forzosamente")
+
+    # ── RESYNC DE SECUENCIAS SERIAL ──────────────────────────────────────────
+    # El seed inserta IDs explicitos (tenant 1, users 999/1000/1001/1010,
+    # plan 1, disciplinas 1-5...) pero deja las secuencias en 1. Si luego la app
+    # inserta una fila autoincremental (ej. crear_usuario crea el plan "Prueba"),
+    # choca con UniqueViolation (id=1 ya existe). Resincronizar a MAX(id)+1.
+    _RESYNC = {
+        "tenants": "tenants_id_seq",
+        "usuarios": "usuarios_id_seq",
+        "movimientos": "movimientos_id_seq",
+        "disciplinas": "disciplinas_id_seq",
+        "planes": "planes_id_seq",
+        "horarios": "horarios_id_seq",
+        "suscripciones": "suscripciones_id_seq",
+        "clases": "clases_id_seq",
+        "reservas": "reservas_id_seq",
+        "historial_rm": "historial_rm_id_seq",
+        "wods": "wods_id_seq",
+        "wod_movimientos": "wod_movimientos_id_seq",
+        "coach_disciplinas": "coach_disciplinas_id_seq",
+    }
+    for _tabla, _seq in _RESYNC.items():
+        db.execute(text(f"""
+            SELECT setval('{_seq}',
+              COALESCE((SELECT MAX(id)+1 FROM {_tabla}), 1), false)
+        """))
+    db.flush()
+    print("   [OK] Secuencias resincronizadas (MAX(id)+1)")
 
     db.commit()
     count_verify = db.execute(text(

@@ -75,8 +75,11 @@ cur_test.execute("""
 """)
 print("TEST limpia")
 
-cur_test.execute("ALTER TABLE disciplinas DROP COLUMN IF EXISTS requiere_coach")
-cur_test.execute("ALTER TABLE planes DROP COLUMN IF EXISTS es_estudiante")
+# Parche 2026-09-07: NO dropear columnas que PROD ya incluye al copiar *.
+# El schema de TEST lo reconstruye run_setup_test_db.py desde los modelos actuales,
+# asi que basta con alinear TEST a PROD (ADD IF NOT EXISTS, idempotente).
+cur_test.execute("ALTER TABLE disciplinas ADD COLUMN IF NOT EXISTS requiere_coach BOOLEAN NOT NULL DEFAULT true")
+cur_test.execute("ALTER TABLE planes ADD COLUMN IF NOT EXISTS es_estudiante BOOLEAN NOT NULL DEFAULT false")
 cur_test.execute("ALTER TABLE planes ADD COLUMN IF NOT EXISTS requiere_certificado_estudiante BOOLEAN NOT NULL DEFAULT false")
 
 # â”€â”€ 3. COPIAR PRODâ†’TEST (tablas estÃ¡ndar) â”€â”€
@@ -199,7 +202,7 @@ cur_test.execute("""
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
 """)
-cur_test.execute("INSERT INTO coach_disciplinas (tenant_id, coach_id, disciplina_id) SELECT 1, id, 1 FROM usuarios WHERE rol='coach' AND tenant_id=1 AND activo=true AND NOT EXISTS (SELECT 1 FROM coach_disciplinas cd WHERE cd.coach_id=usuarios.id AND cd.disciplina_id=1)")
+cur_test.execute("INSERT INTO coach_disciplinas (tenant_id, coach_id, disciplina_id, activo) SELECT 1, id, 1, true FROM usuarios WHERE rol='coach' AND tenant_id=1 AND activo=true AND NOT EXISTS (SELECT 1 FROM coach_disciplinas cd WHERE cd.coach_id=usuarios.id AND cd.disciplina_id=1)")
 print("[OK] coach_disciplinas table + inserts")
 
 # 5d. cobertura_emergencia table
