@@ -11,15 +11,21 @@ from app.core.config import settings
 # Motor de base de datos
 # Pool amplio para soportar carga concurrente (tests k6 / producción):
 # pool_size=50 + max_overflow=100 => hasta 150 conexiones activas.
-# NOTA: pool_pre_ping desactivado — cada checkout hacia un SELECT 1 al pooler de
-# Neon que bajo saturación colgaba los checkouts (TimeoutError con 500 logins).
+# DECISIÓN FINAL: pool_pre_ping=False + pool_recycle=300.
+#   - pool_recycle=300 (5 min) recicla conexiones que Neon serverless cierra
+#     por idle => mitiga "server closed the connection unexpectedly".
+#   - pool_pre_ping vuelve a False: cada checkout hacía un SELECT 1 al pooler
+#     que bajo saturación (500 logins) colgaba los checkouts (TimeoutError).
+#     Con pre_ping activo la suite a veces se cuelga => se desactiva.
+#   - pool_timeout=10 (antes 60): acota la espera de checkout para no colgar 60s.
 engine = create_engine(
     settings.DATABASE_URL,
     poolclass=QueuePool,
     pool_size=50,
     max_overflow=100,
-    pool_timeout=60,
+    pool_timeout=10,
     pool_pre_ping=False,
+    pool_recycle=300,
     echo=False,
 )
 
