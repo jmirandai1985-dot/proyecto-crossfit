@@ -19,4 +19,7 @@ nginx -g "daemon off;" &
 
 # uvicorn en primer plano → se convierte en PID 1 del contenedor.
 # (host 127.0.0.1: nginx lo alcanza en el mismo contenedor; no se expone 8000.)
-exec uvicorn app.main:app --host 127.0.0.1 --port 8000
+# --proxy-headers + --forwarded-allow-ips="*": el backend confía en X-Forwarded-*
+# de nginx (uvicorn está en 127.0.0.1, solo nginx lo alcanza), así los redirects
+# de FastAPI (redirect_slashes) respetan X-Forwarded-Proto https y no salen http.
+exec uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips="*"
