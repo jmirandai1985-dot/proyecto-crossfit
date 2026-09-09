@@ -111,13 +111,16 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
         remitente = (remitente or "").replace("\n", "").replace("\r", "")
 
         # ── ENVIAR VÍA RESEND ──
+        # SDK resend v2.x: send(params: Emails.SendParams, ...). No acepta kwargs
+        # (from_= falla; from= es SyntaxError por ser keyword). Se pasa un dict
+        # con la clave "from" (que el SDK mapea a SendParams).
         resend.api_key = settings.RESEND_API_KEY
-        resend.Emails.send(
-            from_=remitente,
-            to=destinatario,
-            subject=asunto,
-            html=html,
-        )
+        resend.Emails.send({
+            "from": remitente,
+            "to": destinatario,
+            "subject": asunto,
+            "html": html,
+        })
 
         logger.info(f"Correo enviado a {destinatario}: {asunto}")
         _registrar_envio(alumno_id, tipo, "enviado", mes_referencia=mes_referencia) if alumno_id else None
