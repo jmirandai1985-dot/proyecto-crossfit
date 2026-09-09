@@ -2,9 +2,10 @@
 import os
 import base64
 import logging
-import smtplib
-from email.message import EmailMessage
+# import smtplib  # migrado a Resend (ya no se usa)
+# from email.message import EmailMessage  # migrado a Resend (ya no se usa)
 from datetime import datetime, date
+import resend
 
 logger = logging.getLogger("uvicorn.email")
 
@@ -96,34 +97,27 @@ def _registrar_envio(alumno_id, tipo, estado, detalle_error=None, mes_referencia
 
 
 def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, tipo: str = "", mes_referencia=None) -> bool:
-    """Envia via Gmail SMTP (puerto 587, TLS) con logo inline + log en BD."""
+    """Envía via Resend (API) con log en BD."""
     try:
         from app.core.config import settings
-        smtp_user = os.environ.get("GMAIL_SMTP_USER", settings.GMAIL_SMTP_USER)
-        smtp_pass = os.environ.get("GMAIL_SMTP_APP_PASSWORD", settings.GMAIL_SMTP_APP_PASSWORD)
-        remitente = f'"Urban Training Box" <{smtp_user}>'
+        remitente = FROM_EMAIL
 
         # ── SANITIZAR HEADERS (evita "Header values may not contain linefeed...") ──
         # Los headers no pueden contener \n ni \r. Si un campo dinámico lo trae
         # (p. ej. el correo del usuario en "To", o un "Subject" armado con datos),
-        # smtplib/email lanza ese error. Se limpian TODOS los headers dinámicos.
+        # Resend lanza ese error. Se limpian TODOS los headers dinámicos.
         destinatario = (destinatario or "").replace("\n", "").replace("\r", "").strip()
         asunto = (asunto or "").replace("\n", "").replace("\r", "")
         remitente = (remitente or "").replace("\n", "").replace("\r", "")
 
-        msg = EmailMessage()
-        msg["From"] = remitente
-        msg["To"] = destinatario
-        msg["Subject"] = asunto
-        msg.set_content("Correo de Urban Training Box. Si no ves el contenido HTML, abre este correo en tu navegador.")
-        msg.add_alternative(html, subtype="html")
-        # NOTA: el logo se sirve desde la URL pública (LOGO_URL) embebida en el HTML.
-        # No se adjunta ningún archivo -> bandeja sin "datos adjuntos".
-
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_pass)
-            server.sendmail(smtp_user, destinatario, msg.as_string())
+        # ── ENVIAR VÍA RESEND ──
+        resend.api_key = settings.RESEND_API_KEY
+        resend.Emails.send(
+            from_=remitente,
+            to=destinatario,
+            subject=asunto,
+            html=html,
+        )
 
         logger.info(f"Correo enviado a {destinatario}: {asunto}")
         _registrar_envio(alumno_id, tipo, "enviado", mes_referencia=mes_referencia) if alumno_id else None
@@ -131,7 +125,7 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
     except Exception as e:
         global ULTIMO_ERROR_SMTP
         ULTIMO_ERROR_SMTP = str(e)
-        logger.error(f"[SMTP ERROR] {destinatario}: {e}")
+        logger.error(f"[RESEND ERROR] {destinatario}: {e}")
         _registrar_envio(alumno_id, tipo, "fallido", str(e), mes_referencia) if alumno_id else None
         return False
 
