@@ -103,6 +103,14 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
         smtp_pass = os.environ.get("GMAIL_SMTP_APP_PASSWORD", settings.GMAIL_SMTP_APP_PASSWORD)
         remitente = f'"Urban Training Box" <{smtp_user}>'
 
+        # ── SANITIZAR HEADERS (evita "Header values may not contain linefeed...") ──
+        # Los headers no pueden contener \n ni \r. Si un campo dinámico lo trae
+        # (p. ej. el correo del usuario en "To", o un "Subject" armado con datos),
+        # smtplib/email lanza ese error. Se limpian TODOS los headers dinámicos.
+        destinatario = (destinatario or "").replace("\n", "").replace("\r", "").strip()
+        asunto = (asunto or "").replace("\n", "").replace("\r", "")
+        remitente = (remitente or "").replace("\n", "").replace("\r", "")
+
         msg = EmailMessage()
         msg["From"] = remitente
         msg["To"] = destinatario
