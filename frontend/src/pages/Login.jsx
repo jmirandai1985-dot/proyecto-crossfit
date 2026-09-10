@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import RegistroAlumnoNuevo from '../components/RegistroAlumnoNuevo';
 import ResetContrasena from '../components/ResetContrasena';
+import CambiarPasswordInicial from '../components/CambiarPasswordInicial';
 
 const Login = () => {
     const [correo, setCorreo] = useState('');
@@ -11,9 +12,28 @@ const Login = () => {
     const [loading, setLoading] = useState(false);
     const [showRegistro, setShowRegistro] = useState(false);
     const [showReset, setShowReset] = useState(false);
+    // Cambio forzado de contraseña temporal (alumno nuevo)
+    const [showCambioPassword, setShowCambioPassword] = useState(false);
+    const [accessTokenTemporal, setAccessTokenTemporal] = useState(null);
     const { login } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
+
+    // Navega al destino correcto tras autenticar (respeta ?redirect= o state.from).
+    const redirigir = (rolUsuario) => {
+        const from = location.state?.from
+            || new URLSearchParams(location.search).get('redirect');
+        if (from && from.startsWith('/')) {
+            navigate(from, { replace: true });
+            return;
+        }
+        const dashboardMap = {
+            administrador: '/admin/dashboard',
+            coach: '/coach/dashboard',
+            alumno: '/alumno/dashboard',
+        };
+        navigate(dashboardMap[rolUsuario] || '/login');
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -23,26 +43,35 @@ const Login = () => {
         const result = await login(correo, password);
 
         if (result.success) {
-            // Si venía de una pantalla pública (p. ej. el QR de asistencia),
-            // volver a esa ruta tras loguear. Si no, dashboard según rol.
-            const from = location.state?.from
-                || new URLSearchParams(location.search).get('redirect');
-            if (from && from.startsWith('/')) {
-                navigate(from, { replace: true });
-            } else {
-                // Redirigir según rol
-                const dashboardMap = {
-                    administrador: '/admin/dashboard',
-                    coach: '/coach/dashboard',
-                    alumno: '/alumno/dashboard',
-                };
-                navigate(dashboardMap[result.rol]);
+            if (result.requiereCambioPassword) {
+                // Alumno nuevo con contraseña temporal: abrimos el modal forzado
+                // sin persistir la sesión todavía.
+                setAccessTokenTemporal(result.accessToken);
+                setShowCambioPassword(true);
+                setLoading(false);
+                return;
             }
+            redirigir(result.rol);
         } else {
             setError(result.error);
         }
 
         setLoading(false);
+    };
+
+    // Tras cambiar la contraseña temporal, autenticamos con la nueva (el flag ya
+    // estará en false), persistimos la sesión y redirigimos al dashboard.
+    const handleCambioExitoso = async (nuevaPassword) => {
+        setShowCambioPassword(false);
+        setError('');
+        setLoading(true);
+        const result = await login(correo, nuevaPassword);
+        setLoading(false);
+        if (result.success) {
+            redirigir(result.rol);
+        } else {
+            setError(result.error || 'No se pudo iniciar sesión. Intenta de nuevo.');
+        }
     };
 
     return (
@@ -153,6 +182,13 @@ const Login = () => {
 
             {showRegistro && <RegistroAlumnoNuevo onClose={() => setShowRegistro(false)} />}
             {showReset && <ResetContrasena onClose={() => setShowReset(false)} />}
+            {showCambioPassword && (
+                <CambiarPasswordInicial
+                    accessToken={accessTokenTemporal}
+                    passwordTemporal={password}
+                    onSuccess={handleCambioExitoso}
+                />
+            )}
         </div>
     );
 };

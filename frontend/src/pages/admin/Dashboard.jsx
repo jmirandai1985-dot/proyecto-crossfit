@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
+import AdminTarjetaAlumnosPrueba from '../../components/AdminTarjetaAlumnosPrueba';
 
 const AdminDashboard = () => {
     const navigate = useNavigate();
@@ -150,6 +151,9 @@ const AdminDashboard = () => {
                         🔄 Recargar
                     </button>
                 </div>
+
+                {/* Tarjeta "Alumnos de Prueba Hoy" (solo panel admin) */}
+                <AdminTarjetaAlumnosPrueba />
 
                 {msg && (
                     <div className={`p-4 rounded-lg font-bold shadow-lg transition-all ${msg.includes('✅') ? 'bg-green-100 text-green-800' : msg.includes('❌') ? 'bg-red-100 text-red-800' : 'bg-blue-500/20 text-blue-300'}`}>

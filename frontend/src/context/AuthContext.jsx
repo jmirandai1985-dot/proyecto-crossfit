@@ -32,6 +32,22 @@ export const AuthProvider = ({ children }) => {
         setLoading(false);
     }, []);
 
+    // Persiste la sesión (localStorage + state) tras un login válido.
+    const persistirSesion = ({ access_token, usuario_id, rol: userRol, tenant_id: userTenant, nombre }) => {
+        localStorage.setItem('access_token', access_token);
+        localStorage.setItem('usuario', nombre);
+        localStorage.setItem('usuario_id', usuario_id);
+        localStorage.setItem('rol', userRol);
+        localStorage.setItem('tenant_id', userTenant);
+
+        setToken(access_token);
+        setUsuario(nombre);
+        setRol(userRol);
+        setTenant_id(userTenant);
+        setUsuario_id(usuario_id);
+        setIsAuthenticated(true);
+    };
+
     const login = async (correo, password) => {
         try {
             const response = await api.post('/api/v1/auth/login', {
@@ -39,24 +55,24 @@ export const AuthProvider = ({ children }) => {
                 password,
             });
 
-            const { access_token, usuario_id, rol: userRol, tenant_id: userTenant, nombre } = response.data;
+            const data = response.data;
+            const userRol = data.rol;
 
-            // Guardar en localStorage
-            localStorage.setItem('access_token', access_token);
-            localStorage.setItem('usuario', nombre);
-            localStorage.setItem('usuario_id', usuario_id);
-            localStorage.setItem('rol', userRol);
-            localStorage.setItem('tenant_id', userTenant);
+            // Alumno nuevo con contraseña temporal: NO iniciamos sesión todavía.
+            // El Login mostrará el modal de cambio forzado y, al terminar, repetirá
+            // el login con la contraseña nueva (ya sin el flag).
+            if (data.cambiar_password_al_login) {
+                return {
+                    success: true,
+                    requiereCambioPassword: true,
+                    accessToken: data.access_token,
+                    rol: userRol,
+                };
+            }
 
-            // Actualizar state
-            setToken(access_token);
-            setUsuario(nombre);
-            setRol(userRol);
-            setTenant_id(userTenant);
-            setUsuario_id(usuario_id);
-            setIsAuthenticated(true);
+            persistirSesion(data);
 
-            return { success: true, rol: userRol };
+            return { success: true, rol: userRol, requiereCambioPassword: false };
         } catch (error) {
             const detail = error.response?.data?.detail;
             let errorMessage = 'Correo o contraseña incorrectos';

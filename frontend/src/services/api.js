@@ -15,11 +15,14 @@ const api = axios.create({
     },
 });
 
-// Interceptor de request: agregar token JWT
+// Interceptor de request: agregar token JWT.
+// NO pisa un Authorization ya provisto explícitamente (p. ej. el cambio de
+// contraseña inicial usa el token del login temporal aunque todavía no se haya
+// persistido en localStorage, y no debe ser sobrescrito por un token viejo).
 api.interceptors.request.use(
     (config) => {
         const token = localStorage.getItem('access_token');
-        if (token) {
+        if (token && !config.headers.Authorization) {
             config.headers.Authorization = `Bearer ${token}`;
         }
         return config;

@@ -59,14 +59,14 @@ const RegistroAlumnoNuevo = ({ onClose }) => {
                     <img src="/imgs/logo.png" alt="Urban Training Box" className="h-[48px] w-auto object-contain mx-auto mb-3" />
                     <h2 className="text-white font-bold text-[18px]">Registro Alumno Nuevo</h2>
                     <p className="text-gray-400 text-[13px] mt-1">
-                        Completa tus datos y el admin revisará tu solicitud
+                        Completa tus datos y comienza tu clase de prueba hoy
                     </p>
                 </div>
 
                 {success ? (
                     <div className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 px-4 py-4 rounded-lg text-sm text-center">
-                        ✅ <strong>¡Registro exitoso!</strong>
-                        <p className="mt-1 text-emerald-200/80">El admin revisará tu solicitud y recibirás tus credenciales por correo. Redirigiendo al login...</p>
+                        ✅ <strong>¡Perfecto!</strong>
+                        <p className="mt-1 text-emerald-200/80">Revisa tu correo para la contraseña temporal. Ya tienes acceso a tu clase de prueba. Redirigiendo al login...</p>
                     </div>
                 ) : (
                     <form onSubmit={handleSubmit} className="space-y-4">
@@ -112,11 +112,11 @@ const RegistroAlumnoNuevo = ({ onClose }) => {
                             disabled={loading}
                             className="w-full bg-[#ff8c00] hover:bg-[#ff9e2e] disabled:opacity-50 text-white font-bold py-3 rounded-md shadow-[0_0_18px_rgba(255,140,0,0.5)] transition-all duration-200"
                         >
-                            {loading ? 'Enviando...' : 'Enviar solicitud'}
+                            {loading ? 'Creando tu cuenta...' : 'Crear mi cuenta y empezar'}
                         </button>
 
                         <p className="text-center text-gray-500 text-[11px]">
-                            Tu solicitud será revisada por el administrador del box.
+                            Enviaremos tu contraseña temporal al correo (revisa también SPAM).
                         </p>
                     </form>
                 )}
