@@ -44,3 +44,4 @@ backups/
 backend/server_prod.pid
 k6-tests/load_config.json
 backend/migraciones_preview.sql
+backend/scripts/crear_usuarios_test.py
