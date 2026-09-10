@@ -44,6 +44,13 @@ const AdminTarjetaAlumnosPrueba = () => {
         }
     };
 
+    // Fecha 'YYYY-MM-DD' -> 'DD-MM-YYYY' (sin depender de la zona horaria).
+    const fmtFecha = (iso) => {
+        if (!iso) return '—';
+        const [y, m, d] = String(iso).split('-');
+        return (y && m && d) ? `${d}-${m}-${y}` : iso;
+    };
+
     const colorEstado = (estado) => {
         switch (estado) {
             case 'activo': return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
@@ -122,17 +129,33 @@ const AdminTarjetaAlumnosPrueba = () => {
 
                     <ul className="space-y-2">
                         {aMostrar.map((a) => (
-                            <li key={a.id} className="flex items-center justify-between gap-3 bg-zinc-800/60 rounded-lg px-4 py-2.5">
-                                <div className="min-w-0">
-                                    <p className="text-sm font-semibold text-zinc-100 truncate">{a.nombre}</p>
-                                    <p className="text-xs text-zinc-400 truncate">{a.correo}</p>
+                            <li key={a.id} className="bg-zinc-800/60 rounded-lg px-4 py-2.5">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <p className="text-sm font-semibold text-zinc-100 truncate">{a.nombre}</p>
+                                        <p className="text-xs text-zinc-400 truncate">{a.correo}</p>
+                                    </div>
+                                    <div className="flex items-center gap-3 shrink-0">
+                                        <span className="text-xs text-zinc-400">{horaRegistro(a.hora_registro)}</span>
+                                        <span className={`text-[10px] font-semibold uppercase px-2 py-1 rounded-full border ${colorEstado(a.estado_suscripcion)}`}>
+                                            {a.estado_suscripcion || '—'}
+                                        </span>
+                                    </div>
                                 </div>
-                                <div className="flex items-center gap-3 shrink-0">
-                                    <span className="text-xs text-zinc-400">{horaRegistro(a.hora_registro)}</span>
-                                    <span className={`text-[10px] font-semibold uppercase px-2 py-1 rounded-full border ${colorEstado(a.estado_suscripcion)}`}>
-                                        {a.estado_suscripcion || '—'}
-                                    </span>
-                                </div>
+
+                                {a.clase_tomada ? (
+                                    <div className="mt-2 pt-2 border-t border-zinc-700/60 text-xs text-zinc-300">
+                                        <p>
+                                            ✅ <span className="font-semibold">Clase tomada:</span>{' '}
+                                            {a.clase_tomada.disciplina} a las {a.clase_tomada.horario} del {fmtFecha(a.clase_tomada.fecha)}
+                                        </p>
+                                        <p className="text-zinc-400 mt-0.5">Coach: {a.clase_tomada.coach}</p>
+                                    </div>
+                                ) : (
+                                    <p className="mt-2 pt-2 border-t border-zinc-700/60 text-xs text-zinc-500 italic">
+                                        Sin clase tomada aún
+                                    </p>
+                                )}
                             </li>
                         ))}
                     </ul>
