@@ -3,6 +3,7 @@
 Usado por el scheduler (jobs diarios) y por endpoints admin de disparo manual.
 Deduplicación: cada envío se marca en `notificaciones_enviadas` para no repetirlo.
 """
+import calendar
 import logging
 from datetime import date, datetime, timedelta
 
@@ -135,4 +136,92 @@ def enviar_alertas_urgencia(db, tenant_id: int = 1) -> dict:
     db.commit()
     logger.info(f"[alertas] urgencia: {len(enviados)} enviados, {len(fallidos)} fallidos")
     return {"tipo": "urgencia_renovacion", "enviados": len(enviados), "fallidos": len(fallidos),
+            "detalle_enviados": enviados, "detalle_fallidos": fallidos}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ALERTAS DE CRÉDITOS (fidelización) — últimas 2
+# ═════════════════════════════════════════════════════════════════════════════
+def _dias_restantes_mes() -> int:
+    """Días que faltan hasta el último día del mes actual (0 si hoy es el último)."""
+    hoy = date.today()
+    ultimo_dia = calendar.monthrange(hoy.year, hoy.month)[1]
+    return ultimo_dia - hoy.day
+
+
+def enviar_alertas_ultimo_credito(db, tenant_id: int = 1) -> dict:
+    """EMAIL (último crédito): alumnos con EXACTAMENTE 1 crédito y días restantes
+    del mes > 0. Dedupe 7 días. Tipo registrado: 'ultimo_credito'."""
+    from sqlalchemy import text
+    from app.services.email_service import send_alerta_ultimo_credito
+
+    dias_restantes = _dias_restantes_mes()
+    if dias_restantes <= 0:
+        return {"tipo": "ultimo_credito", "enviados": 0, "fallidos": 0,
+                "detalle_enviados": [], "detalle_fallidos": [],
+                "motivo": "Es el último día del mes (días_restantes=0)"}
+
+    rows = db.execute(text("""
+        SELECT DISTINCT ON (u.id) u.id, u.nombre, u.correo, s.creditos_disponibles
+        FROM suscripciones s
+        JOIN usuarios u ON u.id = s.usuario_id
+        WHERE s.tenant_id = :tid
+          AND s.estado = 'activo'
+          AND u.activo = true
+          AND u.rol = 'alumno'
+          AND s.creditos_disponibles = 1
+          AND s.fecha_expiracion > now()
+        ORDER BY u.id
+    """), {"tid": tenant_id}).fetchall()
+
+    enviados, fallidos = [], []
+    for r in rows:
+        if _ya_enviado(db, r.id, "ultimo_credito", dias=7):
+            continue
+        ok = send_alerta_ultimo_credito(r.nombre, r.correo,
+                                        r.creditos_disponibles, dias_restantes)
+        if ok:
+            _marcar_enviado(db, r.id, "ultimo_credito")
+            enviados.append(r.correo)
+        else:
+            fallidos.append(r.correo)
+    db.commit()
+    logger.info(f"[alertas] ultimo_credito: {len(enviados)} enviados, {len(fallidos)} fallidos")
+    return {"tipo": "ultimo_credito", "enviados": len(enviados), "fallidos": len(fallidos),
+            "dias_restantes_mes": dias_restantes,
+            "detalle_enviados": enviados, "detalle_fallidos": fallidos}
+
+
+def enviar_alertas_sin_creditos(db, tenant_id: int = 1) -> dict:
+    """EMAIL (sin créditos): alumnos con 0 créditos disponibles y suscripción
+    activa. Dedupe 7 días. Tipo registrado: 'sin_creditos'."""
+    from sqlalchemy import text
+    from app.services.email_service import send_alerta_sin_creditos
+
+    rows = db.execute(text("""
+        SELECT DISTINCT ON (u.id) u.id, u.nombre, u.correo
+        FROM suscripciones s
+        JOIN usuarios u ON u.id = s.usuario_id
+        WHERE s.tenant_id = :tid
+          AND s.estado = 'activo'
+          AND u.activo = true
+          AND u.rol = 'alumno'
+          AND s.creditos_disponibles = 0
+          AND s.fecha_expiracion > now()
+        ORDER BY u.id
+    """), {"tid": tenant_id}).fetchall()
+
+    enviados, fallidos = [], []
+    for r in rows:
+        if _ya_enviado(db, r.id, "sin_creditos", dias=7):
+            continue
+        ok = send_alerta_sin_creditos(r.nombre, r.correo)
+        if ok:
+            _marcar_enviado(db, r.id, "sin_creditos")
+            enviados.append(r.correo)
+        else:
+            fallidos.append(r.correo)
+    db.commit()
+    logger.info(f"[alertas] sin_creditos: {len(enviados)} enviados, {len(fallidos)} fallidos")
+    return {"tipo": "sin_creditos", "enviados": len(enviados), "fallidos": len(fallidos),
             "detalle_enviados": enviados, "detalle_fallidos": fallidos}

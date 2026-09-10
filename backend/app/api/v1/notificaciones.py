@@ -142,6 +142,26 @@ def disparar_alertas_urgencia(
     return enviar_alertas_urgencia(db)
 
 
+@router.post("/enviar-alertas-ultimo-credito")
+def disparar_alertas_ultimo_credito(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Alerta de ÚLTIMO crédito: alumnos con 1 crédito y días restantes del mes."""
+    from app.services.alertas_email_service import enviar_alertas_ultimo_credito
+    return enviar_alertas_ultimo_credito(db)
+
+
+@router.post("/enviar-alertas-sin-creditos")
+def disparar_alertas_sin_creditos(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Alerta de SIN créditos: alumnos con 0 créditos y suscripción activa."""
+    from app.services.alertas_email_service import enviar_alertas_sin_creditos
+    return enviar_alertas_sin_creditos(db)
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # OPT-OUT de reactivación (endpoint PÚBLICO, sin JWT)
 #   GET /api/v1/notificaciones/reactivacion/optout?token=<token>

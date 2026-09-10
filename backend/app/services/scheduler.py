@@ -91,10 +91,26 @@ def iniciar_scheduler():
         replace_existing=True,
         misfire_grace_time=3600,
     )
+    scheduler.add_job(
+        job_alerta_ultimo_credito,
+        CronTrigger(hour=7, minute=0, timezone=pytz.timezone("America/Santiago")),
+        id="alerta_ultimo_credito",
+        name="Alerta último crédito: 1 crédito y días restantes del mes",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        job_alerta_sin_creditos,
+        CronTrigger(hour=10, minute=0, timezone=pytz.timezone("America/Santiago")),
+        id="alerta_sin_creditos",
+        name="Alerta sin créditos: 0 créditos disponibles",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
     scheduler.start()
     logger.info(
         "🚀 Scheduler iniciado - generación de clases 00:05, "
-        "alertas de email 06:00 / 08:00 / 09:00 CLT "
+        "alertas de email 06:00 / 07:00 / 08:00 / 09:00 / 10:00 CLT "
         "(mantenimiento diario/mensual movido al contenedor de mantenimiento)")
 
 
@@ -112,6 +128,12 @@ async def _ejecutar_alertas(tipo: str):
         elif tipo == "urgencia":
             from app.services.alertas_email_service import enviar_alertas_urgencia
             res = enviar_alertas_urgencia(db)
+        elif tipo == "ultimo_credito":
+            from app.services.alertas_email_service import enviar_alertas_ultimo_credito
+            res = enviar_alertas_ultimo_credito(db)
+        elif tipo == "sin_creditos":
+            from app.services.alertas_email_service import enviar_alertas_sin_creditos
+            res = enviar_alertas_sin_creditos(db)
         else:
             return
         logger.info(
@@ -136,6 +158,16 @@ async def job_alerta_inactividad():
 async def job_alerta_urgencia_renovacion():
     """Diario 06:00 CLT - planes que vencen HOY (Email 5)."""
     await _ejecutar_alertas("urgencia")
+
+
+async def job_alerta_ultimo_credito():
+    """Diario 07:00 CLT - alumnos con 1 crédito y días restantes del mes."""
+    await _ejecutar_alertas("ultimo_credito")
+
+
+async def job_alerta_sin_creditos():
+    """Diario 10:00 CLT - alumnos con 0 créditos disponibles."""
+    await _ejecutar_alertas("sin_creditos")
 
 
 def detener_scheduler():

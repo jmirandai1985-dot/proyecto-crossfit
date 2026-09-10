@@ -379,6 +379,54 @@ def send_alerta_urgencia_renovacion(nombre: str, correo: str) -> bool:
     return ok
 
 
+def send_alerta_ultimo_credito(nombre: str, correo: str, creditos: int, dias_restantes: int) -> bool:
+    """Último crédito: al alumno le queda 1 crédito y aún hay días del mes.
+
+    Disparador (orquestador): `enviar_alertas_ultimo_credito`
+    (créditos_disponibles == 1 AND días restantes del mes > 0).
+    """
+    if not correo:
+        return False
+    titulo = "⚠️ Te queda 1 crédito — ¡Aprovéchalo!"
+    saludo = f"¡Hola, {nombre}!"
+    cuerpo = (
+        f"<p>Te queda solo <strong>{creditos} crédito</strong> y aún quedan "
+        f"<strong>{dias_restantes} día(s)</strong> del mes.</p>"
+        "<p>No esperes más: reserva tu clase y aprovecha tu crédito antes de que "
+        "el mes termine. Tu lugar en el box te está esperando.</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Reservar mi clase",
+                     f"{settings.FRONTEND_URL}/alumno/mis-reservas")
+    ok = _enviar(correo, "⚠️ Te queda 1 crédito — ¡No pierdas esta oportunidad!", html,
+                 None, tipo="ultimo_credito")
+    logger.info(f"[ultimo_credito] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    return ok
+
+
+def send_alerta_sin_creditos(nombre: str, correo: str) -> bool:
+    """Sin créditos: el alumno tiene 0 créditos disponibles (no puede reservar).
+
+    Disparador (orquestador): `enviar_alertas_sin_creditos`
+    (créditos_disponibles == 0 y suscripción activa).
+    """
+    if not correo:
+        return False
+    titulo = "❌ Sin créditos — No puedes reservar"
+    saludo = f"¡Hola, {nombre}!"
+    cuerpo = (
+        "<p>Actualmente <strong>no tienes créditos disponibles</strong>, por lo que "
+        "no podrás agendar nuevas clases.</p>"
+        "<p>Para volver a entrenar, renueva tu plan: ingresa a la plataforma, elige "
+        "tu plan, realiza el pago y envía tu comprobante al administrador.</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Renovar mi plan",
+                     f"{settings.FRONTEND_URL}/alumno/solicitar-plan")
+    ok = _enviar(correo, "❌ Sin créditos — Renueva tu plan y sigue entrenando", html,
+                 None, tipo="sin_creditos")
+    logger.info(f"[sin_creditos] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    return ok
+
+
 def send_emergencia_cobertura(admin_correo: str, admin_id: int, mensaje: str,
                               coach_nombre: str, disciplina_nombre: str) -> bool:
     """Alerta al admin cuando un coach cubre una clase en modo emergencia.
