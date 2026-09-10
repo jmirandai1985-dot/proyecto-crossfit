@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import api from '../services/api';
 
 /**
@@ -18,7 +19,8 @@ import api from '../services/api';
 const CambiarPasswordInicial = ({ accessToken, passwordTemporal, onSuccess }) => {
     const [nueva, setNueva] = useState('');
     const [confirmar, setConfirmar] = useState('');
-    const [mostrar, setMostrar] = useState(false);
+    const [showNueva, setShowNueva] = useState(false);      // toggle "ojito" Nueva contraseña
+    const [showConfirmar, setShowConfirmar] = useState(false);  // toggle "ojito" Confirmar contraseña
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
 
@@ -66,7 +68,7 @@ const CambiarPasswordInicial = ({ accessToken, passwordTemporal, onSuccess }) =>
         }
     };
 
-    const inputClass = 'w-full px-4 py-2.5 rounded-md bg-white/10 border border-white/15 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#ff8c00]/60 transition-all';
+    const inputClass = 'w-full pl-4 pr-11 py-2.5 rounded-md bg-white/10 border border-white/15 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#ff8c00]/60 transition-all';
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
@@ -82,32 +84,49 @@ const CambiarPasswordInicial = ({ accessToken, passwordTemporal, onSuccess }) =>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
                         <label className="block text-sm font-medium text-gray-300 mb-1.5">Nueva contraseña</label>
-                        <input
-                            type={mostrar ? 'text' : 'password'}
-                            value={nueva}
-                            onChange={(e) => setNueva(e.target.value)}
-                            placeholder="Mínimo 8 caracteres"
-                            className={inputClass}
-                            autoFocus
-                            required
-                        />
+                        <div className="relative">
+                            <input
+                                type={showNueva ? 'text' : 'password'}
+                                value={nueva}
+                                onChange={(e) => setNueva(e.target.value)}
+                                placeholder="Mínimo 8 caracteres"
+                                className={inputClass}
+                                autoFocus
+                                required
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowNueva((v) => !v)}
+                                aria-label={showNueva ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                                title={showNueva ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200 transition-colors"
+                            >
+                                {showNueva ? <EyeOff size={20} /> : <Eye size={20} />}
+                            </button>
+                        </div>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirmar contraseña</label>
-                        <input
-                            type={mostrar ? 'text' : 'password'}
-                            value={confirmar}
-                            onChange={(e) => setConfirmar(e.target.value)}
-                            placeholder="Repite la nueva contraseña"
-                            className={inputClass}
-                            required
-                        />
+                        <div className="relative">
+                            <input
+                                type={showConfirmar ? 'text' : 'password'}
+                                value={confirmar}
+                                onChange={(e) => setConfirmar(e.target.value)}
+                                placeholder="Repite la nueva contraseña"
+                                className={inputClass}
+                                required
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowConfirmar((v) => !v)}
+                                aria-label={showConfirmar ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                                title={showConfirmar ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200 transition-colors"
+                            >
+                                {showConfirmar ? <EyeOff size={20} /> : <Eye size={20} />}
+                            </button>
+                        </div>
                     </div>
-
-                    <label className="flex items-center gap-2 text-gray-400 text-[13px] cursor-pointer select-none">
-                        <input type="checkbox" checked={mostrar} onChange={(e) => setMostrar(e.target.checked)} />
-                        Mostrar contraseñas
-                    </label>
 
                     {error && (
                         <div className="bg-red-500/15 border border-red-500/30 text-red-300 px-4 py-3 rounded-lg text-sm">

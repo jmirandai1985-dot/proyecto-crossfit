@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import RegistroAlumnoNuevo from '../components/RegistroAlumnoNuevo';
 import ResetContrasena from '../components/ResetContrasena';
 import CambiarPasswordInicial from '../components/CambiarPasswordInicial';
+import { Eye, EyeOff } from 'lucide-react';
 
 const Login = () => {
     const [correo, setCorreo] = useState('');
@@ -12,6 +13,7 @@ const Login = () => {
     const [loading, setLoading] = useState(false);
     const [showRegistro, setShowRegistro] = useState(false);
     const [showReset, setShowReset] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);  // toggle "ojito" del campo Contraseña
     // Cambio forzado de contraseña temporal (alumno nuevo)
     const [showCambioPassword, setShowCambioPassword] = useState(false);
     const [accessTokenTemporal, setAccessTokenTemporal] = useState(null);
@@ -125,15 +127,26 @@ const Login = () => {
                             <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-2">
                                 Contraseña
                             </label>
-                            <input
-                                id="password"
-                                type="password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                placeholder="••••••••"
-                                className="login-input w-full px-4 py-2.5 transition-all"
-                                required
-                            />
+                            <div className="relative">
+                                <input
+                                    id="password"
+                                    type={showPassword ? 'text' : 'password'}
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    placeholder="••••••••"
+                                    className="login-input w-full pl-4 pr-11 py-2.5 transition-all"
+                                    required
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPassword((v) => !v)}
+                                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                                    title={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200 transition-colors"
+                                >
+                                    {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                                </button>
+                            </div>
                         </div>
 
                         {/* Error Message */}
