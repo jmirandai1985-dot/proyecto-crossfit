@@ -12,9 +12,11 @@ from sqlalchemy import text
 
 from app.db.database import get_db
 from app.schemas.auth import (LoginRequest, TokenResponse,
-                              ResetPasswordRequest, ResetPasswordConfirm)
+                              ResetPasswordRequest, ResetPasswordConfirm,
+                              CambiarPasswordInicial)
 from app.core.security import verify_password, create_access_token, get_password_hash
 from app.core.rate_limit import limiter, LIMIT_LOGIN, LIMIT_REGISTRO, LIMIT_CRITICO
+from app.core.dependencies import get_current_user
 from app.core.config import settings
 from app.models.usuario import Usuario
 from app.models.password_reset_token import PasswordResetToken
@@ -54,7 +56,8 @@ def login(
     # "bloquee" el login de un admin que comparte correo).
     # NOTA: el valor es 'administrador' (enum rol_usuario no acepta 'admin').
     query = text("""
-        SELECT id, tenant_id, nombre, correo, password_hash, rol, activo
+        SELECT id, tenant_id, nombre, correo, password_hash, rol, activo,
+               cambiar_password_al_login
         FROM usuarios
         WHERE correo = :correo
         ORDER BY activo DESC,
@@ -105,7 +108,8 @@ def login(
         usuario_id=usuario.id,
         rol=usuario.rol,
         tenant_id=usuario.tenant_id,
-        nombre=usuario.nombre
+        nombre=usuario.nombre,
+        cambiar_password_al_login=bool(usuario.cambiar_password_al_login),
     )
 
 
@@ -196,3 +200,48 @@ def reset_password_confirm(
     db.commit()
 
     return {"mensaje": "Contraseña actualizada correctamente."}
+
+
+# ─── POST /cambiar-password-inicial (alumno nuevo, 1er login) ───
+# Alias ASCII + path acentuado (mismo handler) para tolerar ambas formas.
+@router.post("/cambiar-contraseña-inicial", status_code=status.HTTP_200_OK)
+@router.post("/cambiar-password-inicial", status_code=status.HTTP_200_OK,
+             include_in_schema=False)
+@limiter.limit(LIMIT_CRITICO)
+def cambiar_password_inicial(
+    request: Request,
+    body: CambiarPasswordInicial,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Cambia la contraseña TEMPORAL en el primer login (alumno autoservicio).
+
+    Requiere que el usuario tenga `cambiar_password_al_login=True` (flag que se
+    activa en el registro público). Al éxito re-hashea con bcrypt y baja el flag;
+    la sesión (JWT) sigue vigente. El cuerpo acepta `nueva_password`
+    (o sus alias `nueva_contraseña` / `nueva_contrasena`).
+    """
+    usuario = db.query(Usuario).filter(
+        Usuario.id == current_user["usuario_id"],
+        Usuario.tenant_id == current_user["tenant_id"],
+    ).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    if not usuario.cambiar_password_al_login:
+        raise HTTPException(
+            status_code=400,
+            detail="No es necesario cambiar la contraseña")
+
+    # El schema ya exige min_length=8; se re-valida por defensa en profundidad.
+    nueva_password = (body.nueva_password or "").strip()
+    if len(nueva_password) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="La contraseña debe tener al menos 8 caracteres")
+
+    usuario.password_hash = get_password_hash(nueva_password)
+    usuario.cambiar_password_al_login = False
+    db.commit()
+
+    return {"mensaje": "Contraseña actualizada. Acceso habilitado."}

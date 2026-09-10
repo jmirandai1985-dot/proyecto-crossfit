@@ -115,8 +115,9 @@ def registrar_alumno_nuevo(
     datos: RegistroAlumnoNuevo,
     db: Session = Depends(get_db)
 ):
-    """Registro público: valida correo/RUT únicos, crea el usuario en estado
-    pendiente_activacion y una suscripción de prueba."""
+    """Registro público (autoservicio): valida correo/RUT únicos, crea el
+    usuario ACTIVO con contraseña temporal (cambio forzado en el 1er login) y
+    una suscripción de prueba activa (plan "Prueba", 1 crédito, 7 días)."""
     if db.query(Usuario).filter(
         Usuario.correo == datos.correo.lower(),
         Usuario.tenant_id == datos.tenant_id
@@ -154,6 +155,10 @@ def registrar_alumno_nuevo(
         db.add(plan_prueba)
         db.flush()
 
+    # ── AUTOSERVICIO (Bloque 1) ──────────────────────────────────────────
+    # El alumno nuevo nace ACTIVO de inmediato (ya no queda "pendiente_activacion")
+    # para que pueda ingresar con la contraseña temporal recibida por correo.
+    # cambiar_password_al_login=True lo fuerza a cambiar la temporal en el 1er login.
     password_tmp = generar_password_provisional(10)
     usuario = Usuario(
         tenant_id=datos.tenant_id,
@@ -163,8 +168,8 @@ def registrar_alumno_nuevo(
         correo=datos.correo.lower(),
         password_hash=hash_password(password_tmp),
         rol=RolUsuario.alumno,
-        activo=False,
-        estado="pendiente_activacion",
+        activo=True,
+        estado="activo",
         cambiar_password_al_login=True,
         peso_kg=datos.peso,
         estatura_cm=int(datos.estatura) if datos.estatura else None,
@@ -173,11 +178,14 @@ def registrar_alumno_nuevo(
     db.add(usuario)
     db.flush()
 
+    # La suscripción "Prueba" nace ACTIVA (no "pendiente"): el crédito de prueba
+    # queda usable de inmediato y el gate de acceso limitado (require_full_access)
+    # empieza a aplicar sin intervención del admin.
     suscripcion = Suscripcion(
         tenant_id=datos.tenant_id,
         usuario_id=usuario.id,
         plan_id=plan_prueba.id,
-        estado="pendiente",
+        estado="activo",
         creditos_totales=1,
         creditos_disponibles=1,
         fecha_expiracion=datetime.utcnow() + timedelta(days=7),
@@ -186,7 +194,7 @@ def registrar_alumno_nuevo(
     db.commit()
 
     try:
-        # Notifica al admin que hay un nuevo alumno pendiente de activación
+        # Notifica al admin que ingresó un alumno de prueba hoy (tarjeta informativa)
         enviar_email_solicitud_admin({
             "nombre": usuario.nombre,
             "correo": usuario.correo,
@@ -210,7 +218,7 @@ def registrar_alumno_nuevo(
         logging.getLogger("uvicorn.alumnos").warning(
             "Fallo al enviar email de clase de prueba")
 
-    return {"mensaje": "Registro exitoso, admin revisará"}
+    return {"mensaje": "Registro exitoso. Revisa tu correo para obtener tu contraseña temporal."}
 
 
 # ─── GET /pendientes-activacion (admin only) ───

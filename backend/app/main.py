@@ -1,5 +1,5 @@
 ﻿from app.api.v1 import (
-    usuarios, tenants, dashboard, fidelizacion,
+    usuarios, tenants, dashboard, fidelizacion, admin,
     disciplinas, planes, horarios, clases, reservas,
     coach_disciplinas, movimientos, historial_rm,
     retencion, productos, pedidos, reportes, auditoria, auth,
@@ -215,6 +215,8 @@ app.include_router(asistencia.router, prefix="/api/v1/asistencia",
                    tags=["Asistencia y Hitos"])
 app.include_router(ranking.router, prefix="/api/v1/ranking",
                    tags=["Ranking de Asistencia"])
+app.include_router(admin.router, prefix="/api/v1/admin",
+                   tags=["Admin"])
 
 
 @app.on_event("startup")
