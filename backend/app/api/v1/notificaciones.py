@@ -1,7 +1,9 @@
 """
 Router de Notificaciones para alumnos
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
+import secrets
+
+from fastapi import APIRouter, Depends, Header, HTTPException, status, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -11,6 +13,7 @@ from app.db.database import get_db
 from app.models.notificacion import Notificacion
 from app.models.usuario import Usuario
 from app.core.dependencies import get_current_admin, get_current_user
+from app.core.config import settings
 from app.core.rate_limit import limiter, LIMIT_CRITICO
 from app.services.asistencia_service import verificar_token_optout
 
@@ -211,3 +214,72 @@ def reactivacion_optout(
     alumno.acepta_correo_reactivacion = False
     db.commit()
     return HTMLResponse(_html_optout(ok=True))
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ALERTAS AUTOMÁTICAS — disparo n8n (header X-N8N-API-Key, SIN JWT)
+# Misma lógica que los endpoints admin y los jobs del scheduler, pero pensado
+# para que n8n las dispare con una API key estática (los JWT expiran).
+# Los endpoints admin /enviar-alertas-* (Bearer JWT) siguen intactos.
+# ═════════════════════════════════════════════════════════════════════════════
+def _verificar_api_key_n8n(
+    x_n8n_api_key: str = Header(default="", alias="X-N8N-API-Key"),
+):
+    """Dependencia n8n: valida `X-N8N-API-Key` contra settings.N8N_API_KEY."""
+    esperada = settings.N8N_API_KEY
+    if not esperada or not secrets.compare_digest(esperada, x_n8n_api_key):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API key inválida para el endpoint de n8n",
+        )
+    return True
+
+
+@router.post("/n8n/enviar-alertas-urgencia")
+def n8n_enviar_alertas_urgencia(
+    db: Session = Depends(get_db),
+    _auth: bool = Depends(_verificar_api_key_n8n),
+):
+    """n8n — planes que vencen HOY (send_alerta_urgencia_renovacion)."""
+    from app.services.alertas_email_service import enviar_alertas_urgencia
+    return {"status": "ok", "resultado": enviar_alertas_urgencia(db, tenant_id=1)}
+
+
+@router.post("/n8n/enviar-alertas-renovacion")
+def n8n_enviar_alertas_renovacion(
+    db: Session = Depends(get_db),
+    _auth: bool = Depends(_verificar_api_key_n8n),
+):
+    """n8n — planes que vencen en 3 días (send_renovacion_plan)."""
+    from app.services.alertas_email_service import enviar_alertas_renovacion
+    return {"status": "ok", "resultado": enviar_alertas_renovacion(db, tenant_id=1)}
+
+
+@router.post("/n8n/enviar-alertas-inactividad")
+def n8n_enviar_alertas_inactividad(
+    db: Session = Depends(get_db),
+    _auth: bool = Depends(_verificar_api_key_n8n),
+):
+    """n8n — 7+ días sin asistencia (send_alerta_inactividad)."""
+    from app.services.alertas_email_service import enviar_alertas_inactividad
+    return {"status": "ok", "resultado": enviar_alertas_inactividad(db, tenant_id=1)}
+
+
+@router.post("/n8n/enviar-alertas-ultimo-credito")
+def n8n_enviar_alertas_ultimo_credito(
+    db: Session = Depends(get_db),
+    _auth: bool = Depends(_verificar_api_key_n8n),
+):
+    """n8n — 1 crédito y días restantes del mes (send_alerta_ultimo_credito)."""
+    from app.services.alertas_email_service import enviar_alertas_ultimo_credito
+    return {"status": "ok", "resultado": enviar_alertas_ultimo_credito(db, tenant_id=1)}
+
+
+@router.post("/n8n/enviar-alertas-sin-creditos")
+def n8n_enviar_alertas_sin_creditos(
+    db: Session = Depends(get_db),
+    _auth: bool = Depends(_verificar_api_key_n8n),
+):
+    """n8n — 0 créditos disponibles (send_alerta_sin_creditos)."""
+    from app.services.alertas_email_service import enviar_alertas_sin_creditos
+    return {"status": "ok", "resultado": enviar_alertas_sin_creditos(db, tenant_id=1)}
