@@ -36,6 +36,8 @@ services:
         sync: false
       - key: GMAIL_SMTP_APP_PASSWORD
         sync: false
+      - key: RESEND_API_KEY
+        sync: false
       - key: SENTRY_DSN
         sync: false
       - key: REACTIVACION_OPT_OUT_SECRET
