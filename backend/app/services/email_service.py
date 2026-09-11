@@ -7,6 +7,8 @@ import logging
 from datetime import datetime, date
 import resend
 
+from app.core.config import settings
+
 logger = logging.getLogger("uvicorn.email")
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
