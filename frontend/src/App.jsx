@@ -18,6 +18,7 @@ import AdminSupervisionClases from './pages/admin/SupervisionClases';
 import AdminConfiguracion from './pages/admin/Configuracion';
 import AdminNotificaciones from './pages/admin/Notificaciones';
 import AdminFidelizacion from './pages/admin/Fidelizacion';
+import AdminKpis from './pages/admin/Kpis';
 import AdminPlanes from './pages/admin/Planes';
 import AdminAlumnosPendientes from './pages/admin/AdminAlumnosPendientes';
 import AdminDisciplinas from './pages/admin/Disciplinas';
@@ -115,6 +116,7 @@ function App() {
             <Route path="configuracion" element={<AdminConfiguracion />} />
             <Route path="notificaciones" element={<AdminNotificaciones />} />
             <Route path="fidelizacion" element={<AdminFidelizacion />} />
+            <Route path="kpis" element={<AdminKpis />} />
             <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
           </Route>
 

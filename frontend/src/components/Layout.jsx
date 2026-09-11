@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import {
+    ChartColumn, Users, Clock, Eye, SquareCheck, QrCode, CreditCard,
+    Dumbbell, ShoppingCart, Heart, TrendingUp, FileText, Bell, Settings,
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 
@@ -102,20 +106,30 @@ const Layout = ({ children }) => {
             ];
         } else if (rol === 'administrador' || rol === 'admin') {
             return [
-                { label: 'Dashboard', path: '/admin/dashboard', icon: icons.home },
-                { label: 'Alumnos', path: '/admin/alumnos', icon: icons.calendar },
-                { label: 'Pendientes', path: '/admin/alumnos-pendientes', icon: icons.calendar },
-                { label: 'Coaches', path: '/admin/coaches', icon: icons.settings },
-                { label: 'Supervisión', path: '/admin/supervision-clases', icon: icons.calendar },
-                { label: 'Asistencia', path: '/admin/asistencia', icon: icons.asistencia },
-                { label: 'Mi QR', path: '/admin/mi-qr', icon: icons.qr },
-                { label: 'Planes', path: '/admin/planes', icon: icons.settings },
-                { label: 'Disciplinas', path: '/admin/disciplinas', icon: icons.dumbbell },
-                { label: 'Bazar', path: '/admin/bazar', icon: icons.settings },
-                { label: 'Fidelización', path: '/admin/fidelizacion', icon: icons.dumbbell },
-                { label: 'Notificaciones', path: '/admin/notificaciones', icon: icons.settings },
-                { label: 'Reportes', path: '/admin/reportes', icon: icons.dumbbell },
-                { label: 'Configuración', path: '/admin/configuracion', icon: icons.settings },
+                { label: 'Dashboard', path: '/admin/dashboard', icon: <ChartColumn className="w-5 h-5" /> },
+                { label: 'Alumnos', path: '/admin/alumnos', icon: <Users className="w-5 h-5" /> },
+                { label: 'Pendientes', path: '/admin/alumnos-pendientes', icon: <Clock className="w-5 h-5" /> },
+                { label: 'Coaches', path: '/admin/coaches', icon: <Users className="w-5 h-5" /> },
+                { label: 'Supervisión', path: '/admin/supervision-clases', icon: <Eye className="w-5 h-5" /> },
+                { label: 'Asistencia', path: '/admin/asistencia', icon: <SquareCheck className="w-5 h-5" /> },
+                { label: 'Mi QR', path: '/admin/mi-qr', icon: <QrCode className="w-5 h-5" /> },
+
+                // ── CATÁLOGO ──
+                { type: 'section', label: 'CATÁLOGO' },
+                { label: 'Planes', path: '/admin/planes', icon: <CreditCard className="w-5 h-5" /> },
+                { label: 'Disciplinas', path: '/admin/disciplinas', icon: <Dumbbell className="w-5 h-5" /> },
+                { label: 'Bazar', path: '/admin/bazar', icon: <ShoppingCart className="w-5 h-5" /> },
+
+                // ── ANÁLISIS ──
+                { type: 'section', label: 'ANÁLISIS' },
+                { label: 'Fidelización', path: '/admin/fidelizacion', icon: <Heart className="w-5 h-5" /> },
+                { label: 'KPIs', path: '/admin/kpis', icon: <TrendingUp className="w-5 h-5" /> },
+                { label: 'Reportes', path: '/admin/reportes', icon: <FileText className="w-5 h-5" /> },
+
+                // ── SISTEMA ──
+                { type: 'section', label: 'SISTEMA' },
+                { label: 'Notificaciones', path: '/admin/notificaciones', icon: <Bell className="w-5 h-5" /> },
+                { label: 'Configuración', path: '/admin/configuracion', icon: <Settings className="w-5 h-5" /> },
             ];
         }
         return [];
@@ -146,7 +160,18 @@ const Layout = ({ children }) => {
 
                 {/* Menu Items */}
                 <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-                    {menuItems.map((item) => (
+                    {menuItems.map((item) =>
+                        item.type === 'section' ? (
+                            /* ── Encabezado de sección (no clickeable) ── */
+                            <div
+                                key={`section-${item.label}`}
+                                className={sidebarOpen ? 'pt-4 pb-1 px-3' : 'pt-5 pb-1 px-2'}
+                            >
+                                {sidebarOpen
+                                    ? <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">{item.label}</span>
+                                    : <div className="border-t border-zinc-800" />}
+                            </div>
+                        ) : (
                         <div key={item.label}>
                             <Link
                                 to={item.path}
@@ -195,7 +220,8 @@ const Layout = ({ children }) => {
                                 </div>
                             )}
                         </div>
-                    ))}
+                        )
+                    )}
                 </nav>
 
                 {/* User & Logout */}
