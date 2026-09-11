@@ -1,0 +1,82 @@
+{
+  "id": "w3yg0bKz630RNXJ9",
+  "name": "Populate Monthly KPIs [PROD]",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 3 1 * *"
+            }
+          ]
+        }
+      },
+      "id": "b1a2c3d4-0002-4a02-9002-000000000001",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://box-crossfit.onrender.com/api/v1/kpis/populate/monthly",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-API-Key",
+              "value": "dzDDmUm2DPSo7jXVCECuSvb7DKUrYFMp5TnrJUOOiyM"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1a2c3d4-0002-4a02-9002-000000000002",
+      "name": "POST populate/monthly",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [224, 0]
+    },
+    {
+      "parameters": {},
+      "id": "b1a2c3d4-0002-4a02-9002-000000000003",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 160]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "POST populate/monthly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "POST populate/monthly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}
