@@ -6,7 +6,8 @@
     suscripciones, wods, solicitudes_planes, upload, membresias,
     notificaciones, notificaciones_enviadas, migracion,
     comprar_emergencia, fix_fechas, supervision,
-    finanzas, configuracion, alumnos, asistencia, ranking, mantenimiento, kpis
+    finanzas, configuracion, alumnos, asistencia, ranking, mantenimiento, kpis,
+    kpis_populate
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -219,6 +220,7 @@ app.include_router(admin.router, prefix="/api/v1/admin",
                    tags=["Admin"])
 app.include_router(mantenimiento.router, tags=["Mantenimiento"])
 app.include_router(kpis.router, tags=["KPIs"])
+app.include_router(kpis_populate.router, tags=["KPIs - Populate"])
 
 
 @app.on_event("startup")

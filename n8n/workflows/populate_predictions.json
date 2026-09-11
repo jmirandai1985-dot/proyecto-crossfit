@@ -1,0 +1,82 @@
+{
+  "id": "mMwE0XBUyqjdWrgx",
+  "name": "Populate Predictions",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "45 3 1 * *"
+            }
+          ]
+        }
+      },
+      "id": "d41f7a10-3333-4a03-9003-000000000001",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8001/api/v1/kpis/populate/predictions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-API-Key",
+              "value": "iUmstSHy4SCMIDPIJzIy_qfuurSJ2mQKxvBiadHXyr4"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d41f7a10-3333-4a03-9003-000000000002",
+      "name": "POST populate/predictions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [224, 0]
+    },
+    {
+      "parameters": {},
+      "id": "d41f7a10-3333-4a03-9003-000000000003",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 160]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "POST populate/predictions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "POST populate/predictions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {}
+}

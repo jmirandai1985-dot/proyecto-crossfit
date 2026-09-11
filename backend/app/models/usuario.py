@@ -47,6 +47,8 @@ class Usuario(Base):
     estatura_cm = Column(Integer, nullable=True)
     genero = Column(String(10), nullable=True)
     fecha_nacimiento = Column(Date, nullable=True)
+    # ── Churn / KPIs: fecha en que el alumno se dio de baja (NULL = activo) ──
+    fecha_baja = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())
 

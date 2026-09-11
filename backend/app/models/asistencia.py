@@ -1,7 +1,7 @@
 ﻿"""
 Modelo SQLAlchemy para registro de asistencias
 """
-from sqlalchemy import Column, Integer, ForeignKey, Date, String
+from sqlalchemy import Column, Integer, ForeignKey, Date, String, Boolean
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.sql import func
 
@@ -18,6 +18,10 @@ class Asistencia(Base):
         "usuarios.id", ondelete="CASCADE"), nullable=False)
     fecha = Column(Date, nullable=False)
     clase = Column(String(100), nullable=True, default="WOD")
+    # ── KPI tracking: FK opcional a la clase + flag de presente ──
+    # (se poblarán desde `reservas` en una limpieza futura; nullable por huérfanos)
+    clase_id = Column(Integer, ForeignKey("clases.id"), nullable=True)
+    presente = Column(Boolean, nullable=False, default=False)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())
 
