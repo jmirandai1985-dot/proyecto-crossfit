@@ -12,6 +12,14 @@ services:
     dockerfilePath: Dockerfile.render
     dockerContext: .
     healthCheckPath: /health
+    # ── Migraciones ANTES de activar el código nuevo ──
+    # ⚠️ El comando NO puede ser "cd backend && alembic upgrade head": la imagen
+    #    (Dockerfile.render) copia backend/alembic/ → /app/alembic/ y
+    #    backend/alembic.ini → /app/alembic.ini (WORKDIR /app). Dentro del
+    #    contenedor NO existe una carpeta backend/.
+    # ⚠️ Si el preDeploy falla, Render ABORTA el deploy y deja la versión
+    #    anterior corriendo (no hay outage).
+    preDeployCommand: "alembic upgrade head"
     envVars:
       # ── Valores fijos (NO secretos) ──
       - key: ENVIRONMENT
