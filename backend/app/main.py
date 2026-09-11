@@ -6,7 +6,7 @@
     suscripciones, wods, solicitudes_planes, upload, membresias,
     notificaciones, notificaciones_enviadas, migracion,
     comprar_emergencia, fix_fechas, supervision,
-    finanzas, configuracion, alumnos, asistencia, ranking
+    finanzas, configuracion, alumnos, asistencia, ranking, mantenimiento
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -217,6 +217,7 @@ app.include_router(ranking.router, prefix="/api/v1/ranking",
                    tags=["Ranking de Asistencia"])
 app.include_router(admin.router, prefix="/api/v1/admin",
                    tags=["Admin"])
+app.include_router(mantenimiento.router, tags=["Mantenimiento"])
 
 
 @app.on_event("startup")
