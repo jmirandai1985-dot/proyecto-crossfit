@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { QrCode } from 'lucide-react';
 import Layout from '../../components/Layout';
 import api from '../../services/api';
 
@@ -73,6 +75,21 @@ const MisReservas = () => {
     const [error, setError] = useState('');
     const [cancelando, setCancelando] = useState(null);
     const [mensaje, setMensaje] = useState(null);
+    const navigate = useNavigate();
+    const [boxPublicId, setBoxPublicId] = useState(null);
+
+    // public_id del box para el botón "Escanear QR" (endpoint accesible a
+    // cualquier usuario logueado, incluido el alumno).
+    useEffect(() => {
+        api.get('/api/v1/tenants/me/public-id')
+            .then((r) => setBoxPublicId(r.data?.public_id || null))
+            .catch(() => setBoxPublicId(null));
+    }, []);
+
+    const irAEscanearQr = () => {
+        if (!boxPublicId) return;
+        navigate(`/asistencia/qr/${boxPublicId}`);
+    };
 
     const fetchReservas = useCallback(async () => {
         setLoading(true);
@@ -150,6 +167,31 @@ const MisReservas = () => {
                 <div>
                     <h1 className="text-3xl font-bold text-gray-900">📋 Mis Reservas</h1>
                     <p className="text-gray-600 mt-1">Consulta y administra tus clases reservadas</p>
+                </div>
+
+                {/* Tarjeta destacada: escanear QR para marcar asistencia */}
+                <div className="rounded-xl border border-orange-200 bg-gradient-to-r from-orange-50 to-amber-50 p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                        <div className="shrink-0 w-11 h-11 rounded-lg bg-orange-500 text-white flex items-center justify-center">
+                            <QrCode size={24} />
+                        </div>
+                        <div>
+                            <p className="font-bold text-gray-900">Marcá tu asistencia con el QR del box</p>
+                            <p className="text-sm text-gray-600 mt-0.5">
+                                Escaneá el código en recepción para registrar tu ingreso a la clase en curso.
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={irAEscanearQr}
+                        disabled={!boxPublicId}
+                        title={!boxPublicId ? 'No se pudo obtener el QR del box' : 'Abrir escáner de asistencia'}
+                        className="w-full sm:w-auto shrink-0 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm shadow-md hover:shadow-lg transition-all"
+                    >
+                        <QrCode size={18} />
+                        Escanear QR para Marcar Asistencia
+                    </button>
                 </div>
 
                 {/* Mensajes */}

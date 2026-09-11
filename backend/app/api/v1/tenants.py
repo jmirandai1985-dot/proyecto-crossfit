@@ -11,7 +11,7 @@ from app.db.database import get_db
 from app.core.config import settings
 from app.models.tenant import Tenant
 from app.schemas.tenant import TenantCreate, TenantResponse
-from app.core.dependencies import get_current_admin
+from app.core.dependencies import get_current_admin, get_current_user
 from app.core.rate_limit import limiter
 
 router = APIRouter()
@@ -74,6 +74,25 @@ def mi_tenant(
         "subdomain": tenant.subdomain,
         "public_id": tenant.public_id,
     }
+
+
+# ── /me/public-id: public_id del box para CUALQUIER usuario logueado ─────────
+# A diferencia de /me (admin-only), este permite al ALUMNO abrir
+# /asistencia/qr/{public_id} desde el frontend (botón "Escanear QR").
+@router.get("/me/public-id")
+def mi_tenant_public_id(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Devuelve el `public_id` del tenant del token (cualquier rol autenticado).
+
+    Solo expone el identificador público (NO secuencial) del propio box del
+    usuario; no revela otra infraestructura.
+    """
+    tenant = db.query(Tenant).filter(Tenant.id == current_user["tenant_id"]).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    return {"public_id": tenant.public_id}
 
 
 # ── QR del box (público, rate-limited): el QR en sí no es secreto ────────────
