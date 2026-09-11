@@ -347,10 +347,14 @@ def populate_predictions(
     tenant_id = TENANT_ID
     hoy = date.today()
 
+    # Alumnos "vigentes" del box: se filtra por `estado` (string de negocio) en
+    # lugar de `activo` (bool). En datos reales de PROD los alumnos vigentes
+    # tienen activo=false pero estado='activo', lo que dejaba este loop vacío y
+    # por consecuencia predictions_churn y student_segments sin filas.
     alumnos = db.query(Usuario).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
-        Usuario.activo == True,  # noqa: E712
+        Usuario.estado == "activo",
     ).all()
 
     # ── 3.1) CHURN ──
