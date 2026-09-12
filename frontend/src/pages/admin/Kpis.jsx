@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import {
     TrendingUp, Users, UserPlus, Activity, DollarSign, Percent,
-    CalendarDays, TriangleAlert, Award, Banknote, ShoppingCart, Gauge, Target,
+    CalendarDays, TriangleAlert, Banknote, ShoppingCart, Gauge, Target,
 } from 'lucide-react';
 import Layout from '../../components/Layout';
 import api from '../../services/api';
@@ -61,7 +61,6 @@ const AdminKpis = () => {
     const [serieMensual, setSerieMensual] = useState([]);
     const [churn, setChurn] = useState(null);
     const [forecast, setForecast] = useState([]);
-    const [segmentos, setSegmentos] = useState(null);
     const [mrrBi, setMrrBi] = useState(null);
 
     // ─── DIARIO: últimos 7 días ──────────────────────────────────────────
@@ -115,19 +114,17 @@ const AdminKpis = () => {
         setLoading(false);
     }, []);
 
-    // ─── BI: churn + forecast + segmentos (+ MRR del mes) ────────────────
+    // ─── BI: churn + forecast (+ MRR del mes) ────────────────────────────
     const cargarBi = useCallback(async () => {
         setLoading(true); setError(null); setSinDatos(false);
         const hoy = new Date();
         try {
-            const [churnRes, forecastRes, segRes] = await Promise.all([
+            const [churnRes, forecastRes] = await Promise.all([
                 api.get('/api/v1/kpis/churn'),
                 api.get('/api/v1/kpis/forecast', { params: { meses: 3 } }),
-                api.get('/api/v1/kpis/segments'),
             ]);
             setChurn(churnRes.data);
             setForecast(forecastRes.data?.proyecciones || []);
-            setSegmentos(segRes.data);
 
             // MRR: mes actual y, si no hay fila aún, el mes anterior.
             const mesActual = { year: hoy.getFullYear(), month: hoy.getMonth() + 1 };
@@ -319,18 +316,10 @@ const AdminKpis = () => {
                             <KpiCard label="Churn crítico" value={churn?.criticos ?? 0} icon={TriangleAlert} color="border-red-500" />
                             <KpiCard label="Riesgo alto" value={churn?.altos ?? 0} icon={TriangleAlert} color="border-orange-500" />
                             <KpiCard label="En riesgo (total)" value={churn?.total ?? 0} icon={Users} color="border-yellow-500" />
-                            <KpiCard
-                                label="Listos para upgrade"
-                                value={(segmentos?.segmentos || []).filter((s) => s.ready_for_upgrade).length}
-                                icon={Award}
-                                color="border-emerald-500"
-                            />
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                             <KpiCard label="MRR" value={mrrBi === null ? null : Number(mrrBi)} unit="CLP" icon={Banknote} color="border-emerald-500" />
-                            <KpiCard label="Alumnos segmentados" value={segmentos?.segmentos?.length ?? 0} icon={Users} color="border-sky-500" />
-                            <KpiCard label="Nivel avanzado" value={segmentos?.totales?.avanzado ?? 0} icon={Award} color="border-purple-500" />
                             <KpiCard
                                 label="Proyección mes 1"
                                 value={forecast.length ? Number(forecast[0].ingresos_predicho) : null}
@@ -350,22 +339,6 @@ const AdminKpis = () => {
                                     <Line type="monotone" dataKey="ingresos_predicho" name="Ingresos proyectados" stroke="#f97316" strokeWidth={2} dot={{ r: 4 }} />
                                 </LineChart>
                             </ChartCard>
-
-                            <ChartCard title="Segmentación de atletas por nivel">
-                                <BarChart
-                                    data={[
-                                        { nivel: 'Básico', cantidad: segmentos?.totales?.basico ?? 0 },
-                                        { nivel: 'Intermedio', cantidad: segmentos?.totales?.intermedio ?? 0 },
-                                        { nivel: 'Avanzado', cantidad: segmentos?.totales?.avanzado ?? 0 },
-                                    ]}
-                                >
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
-                                    <XAxis dataKey="nivel" stroke="#a1a1aa" fontSize={12} />
-                                    <YAxis stroke="#a1a1aa" fontSize={12} allowDecimals={false} />
-                                    <Tooltip {...TOOLTIP_STYLE} />
-                                    <Bar dataKey="cantidad" name="Atletas" fill="#a855f7" radius={[4, 4, 0, 0]} />
-                                </BarChart>
-                            </ChartCard>
                         </div>
 
                         <h2 className="text-lg font-semibold text-white pt-2">
@@ -381,22 +354,6 @@ const AdminKpis = () => {
                                 { key: 'fecha_proxima_renovacion', label: 'Próx. renovación', render: (v) => v || '—' },
                             ]}
                             data={churn?.predicciones || []}
-                        />
-
-                        <h2 className="text-lg font-semibold text-white pt-2">
-                            Segmentación de atletas ({(segmentos?.segmentos || []).length})
-                        </h2>
-                        <DataTable
-                            columns={[
-                                { key: 'usuario_id', label: 'Alumno (ID)' },
-                                { key: 'nivel', label: 'Nivel' },
-                                { key: 'fuerza_score', label: 'Fuerza', render: (v) => Number(v).toFixed(1) },
-                                { key: 'gymnastica_score', label: 'Gimnasia', render: (v) => Number(v).toFixed(1) },
-                                { key: 'asistencia_score', label: 'Asistencia', render: (v) => Number(v).toFixed(1) },
-                                { key: 'retention_score', label: 'Retención', render: (v) => Number(v).toFixed(1) },
-                                { key: 'ready_for_upgrade', label: 'Upgrade', render: (v) => (v ? '✅' : '—') },
-                            ]}
-                            data={segmentos?.segmentos || []}
                         />
                     </div>
                 )}

@@ -1,7 +1,7 @@
 """Endpoints de KPIs / Data Marts (BI) para el panel admin.
 
 Consumen las tablas analíticas:
-  daily_kpis, monthly_kpis, predictions_churn, predictions_forecast, student_segments.
+  daily_kpis, monthly_kpis, predictions_churn, predictions_forecast.
 Todos filtran por `tenant_id` del token JWT (nunca por query/body).
 """
 from datetime import date
@@ -15,7 +15,6 @@ from app.models.daily_kpis import DailyKpi
 from app.models.monthly_kpis import MonthlyKpi
 from app.models.predictions_churn import PredictionsChurn
 from app.models.predictions_forecast import PredictionsForecast
-from app.models.student_segments import StudentSegment
 
 router = APIRouter(prefix="/api/v1/kpis", tags=["KPIs"])
 
@@ -153,45 +152,4 @@ def get_predictions_forecast(
             }
             for p in proyecciones
         ]
-    }
-
-
-# ── 5) GET /api/v1/kpis/segments (BI - SEGMENTACIÓN) ─────────────────────────
-@router.get("/segments")
-def get_student_segments(
-    ready_for_upgrade: bool = Query(False, description="Solo listos para upgrade"),
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """Segmentación de atletas (+ totales por nivel)."""
-    tenant_id = current_user["tenant_id"]
-
-    query = db.query(StudentSegment).filter(StudentSegment.tenant_id == tenant_id)
-    if ready_for_upgrade:
-        query = query.filter(StudentSegment.ready_for_upgrade == True)  # noqa: E712
-
-    segmentos = query.all()
-
-    basico = sum(1 for s in segmentos if s.nivel == "BASICO")
-    intermedio = sum(1 for s in segmentos if s.nivel == "INTERMEDIO")
-    avanzado = sum(1 for s in segmentos if s.nivel == "AVANZADO")
-
-    return {
-        "segmentos": [
-            {
-                "usuario_id": s.usuario_id,
-                "nivel": s.nivel,
-                "fuerza_score": float(s.fuerza_score),
-                "gymnastica_score": float(s.gymnastica_score),
-                "asistencia_score": float(s.asistencia_score),
-                "retention_score": float(s.retention_score),
-                "ready_for_upgrade": s.ready_for_upgrade,
-            }
-            for s in segmentos
-        ],
-        "totales": {
-            "basico": basico,
-            "intermedio": intermedio,
-            "avanzado": avanzado,
-        },
     }

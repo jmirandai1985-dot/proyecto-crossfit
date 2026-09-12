@@ -4,7 +4,7 @@ Protegidos con header `X-N8N-API-Key` (= settings.N8N_API_KEY). Calculan y
 persisten desde las tablas transaccionales:
   - POST /populate/daily        -> daily_kpis            (día anterior, o ?fecha=)
   - POST /populate/monthly      -> monthly_kpis          (mes anterior, o ?year=&month=)
-  - POST /populate/predictions  -> predictions_churn + predictions_forecast + student_segments
+  - POST /populate/predictions  -> predictions_churn + predictions_forecast
 
 NOTA: `tenant_id` fijo en 1 (hoy hay un solo box). Parametrizable luego.
 NOTA 2: la consigna venía truncada; los cálculos se completaron con el esquema real.
@@ -23,7 +23,6 @@ from app.models.daily_kpis import DailyKpi
 from app.models.monthly_kpis import MonthlyKpi
 from app.models.predictions_churn import PredictionsChurn
 from app.models.predictions_forecast import PredictionsForecast
-from app.models.student_segments import StudentSegment
 from app.models.usuario import Usuario, RolUsuario
 from app.models.suscripcion import Suscripcion
 from app.models.reserva import Reserva
@@ -31,16 +30,12 @@ from app.models.clase import Clase
 from app.models.plan import Plan
 from app.models.asistencia import Asistencia
 from app.models.transaccion_financiera import TransaccionFinanciera
-from app.models.historial_rm import HistorialRM
-from app.models.movimiento import Movimiento
 
 router = APIRouter(prefix="/api/v1/kpis", tags=["KPIs - Populate"])
 
 TENANT_ID = 1
 ESTADOS_CANCELADA = ("cancelled", "cancelada")
 PLAN_PRUEBA = "Prueba"
-# Categorías de movimiento consideradas "gimnásticas" (se toleran variantes).
-CATEGORIAS_GIMNASTICA = ("gimnastica", "gimnástica", "gimnastico", "gimnasia")
 
 
 def _verificar_api_key_n8n(
@@ -362,14 +357,14 @@ def populate_predictions(
     db: Session = Depends(get_db),
     _auth: bool = Depends(_verificar_api_key_n8n),
 ):
-    """Recalcula (full refresh) churn + forecast + segmentos de alumnos."""
+    """Recalcula (full refresh) churn de alumnos + forecast de ingresos."""
     tenant_id = TENANT_ID
     hoy = date.today()
 
     # Alumnos "vigentes" del box: se filtra por `estado` (string de negocio) en
     # lugar de `activo` (bool). En datos reales de PROD los alumnos vigentes
     # tienen activo=false pero estado='activo', lo que dejaba este loop vacío y
-    # por consecuencia predictions_churn y student_segments sin filas.
+    # por consecuencia predictions_churn sin filas.
     alumnos = db.query(Usuario).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
@@ -469,76 +464,11 @@ def populate_predictions(
         ))
     db.commit()
 
-    # ── 3.3) SEGMENTOS DE ALUMNOS ──
-    db.query(StudentSegment).filter(
-        StudentSegment.tenant_id == tenant_id).delete()
-
-    hace_30 = hoy - timedelta(days=30)
-    hace_90 = hoy - timedelta(days=90)
-    totales = {"BASICO": 0, "INTERMEDIO": 0, "AVANZADO": 0}
-    listos_upgrade = 0
-
-    for alumno in alumnos:
-        asistencias_30 = db.query(func.count(Asistencia.id)).filter(
-            Asistencia.tenant_id == tenant_id,
-            Asistencia.usuario_id == alumno.id,
-            Asistencia.fecha >= hace_30, Asistencia.fecha <= hoy,
-        ).scalar() or 0
-
-        rm_fuerza = db.query(func.count(HistorialRM.id)).join(
-            Movimiento, HistorialRM.movimiento_id == Movimiento.id
-        ).filter(
-            HistorialRM.tenant_id == tenant_id,
-            HistorialRM.alumno_id == alumno.id,
-            HistorialRM.fecha >= hace_90,
-            Movimiento.categoria == "fuerza",
-        ).scalar() or 0
-
-        rm_gimn = db.query(func.count(HistorialRM.id)).join(
-            Movimiento, HistorialRM.movimiento_id == Movimiento.id
-        ).filter(
-            HistorialRM.tenant_id == tenant_id,
-            HistorialRM.alumno_id == alumno.id,
-            HistorialRM.fecha >= hace_90,
-            Movimiento.categoria.in_(CATEGORIAS_GIMNASTICA),
-        ).scalar() or 0
-
-        asistencia_score = min(round(asistencias_30 / 12 * 100, 2), 100)
-        fuerza_score = min(round(rm_fuerza / 20 * 100, 2), 100)
-        gymnastica_score = min(round(rm_gimn / 10 * 100, 2), 100)
-        meses_antiguedad = max(
-            0, (hoy - alumno.created_at.date()).days) / 30.0 if alumno.created_at else 0
-        retention_score = min(round(meses_antiguedad * 10, 2), 100)
-
-        promedio = (fuerza_score + gymnastica_score + asistencia_score) / 3
-        if promedio >= 70:
-            nivel = "AVANZADO"
-        elif promedio >= 40:
-            nivel = "INTERMEDIO"
-        else:
-            nivel = "BASICO"
-
-        ready = asistencia_score >= 70 and nivel != "AVANZADO"
-        if ready:
-            listos_upgrade += 1
-        totales[nivel] += 1
-
-        db.add(StudentSegment(
-            tenant_id=tenant_id, usuario_id=alumno.id, nivel=nivel,
-            fuerza_score=fuerza_score, gymnastica_score=gymnastica_score,
-            asistencia_score=asistencia_score, retention_score=retention_score,
-            ready_for_upgrade=ready,
-        ))
-    db.commit()
-
     return {
         "status": "ok", "tenant_id": tenant_id,
-        "accion": ("predictions_churn + predictions_forecast + "
-                   "student_segments (full refresh)"),
+        "accion": "predictions_churn + predictions_forecast (full refresh)",
         "churn": {"total": len(alumnos), "criticos": criticos,
                   "altos": altos, "medios": medios},
         "forecast": {"meses": meses_forecast, "base_mensual": round(base),
                      "crecimiento_mensual_pct": round(g * 100, 2)},
-        "segmentos": {"total": len(alumnos), "por_nivel": totales,
-                      "listos_para_upgrade": listos_upgrade},
     }
