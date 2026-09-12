@@ -7,7 +7,7 @@
     notificaciones, notificaciones_enviadas, migracion,
     comprar_emergencia, fix_fechas, supervision,
     finanzas, configuracion, alumnos, asistencia, ranking, mantenimiento, kpis,
-    kpis_populate
+    kpis_populate, ml
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -221,6 +221,7 @@ app.include_router(admin.router, prefix="/api/v1/admin",
 app.include_router(mantenimiento.router, tags=["Mantenimiento"])
 app.include_router(kpis.router, tags=["KPIs"])
 app.include_router(kpis_populate.router, tags=["KPIs - Populate"])
+app.include_router(ml.router, tags=["ML"])
 
 
 @app.on_event("startup")

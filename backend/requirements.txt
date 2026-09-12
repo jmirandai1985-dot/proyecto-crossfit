@@ -35,6 +35,15 @@ requests==2.34.2  # Cliente HTTP — usado por maintenance/health_check.py y scr
 pandas==2.2.3  # fidelizacion.py (agrupaciones DataFrame)
 openpyxl==3.1.5  # reportes_service.py (exportaciones Excel)
 
+# Machine Learning (backend/ml: churn + forecast de ingresos)
+scikit-learn==1.5.2  # RandomForestClassifier (churn) + LinearRegression (forecast)
+                     # Wheels cp312 compatibles con numpy 2.x (no fuerza upgrade).
+numpy==2.1.2  # Dependencia DIRECTA desde backend/ml (seno/coseno estacional).
+              # Antes llegaba sólo transitiva vía pandas -> pin explícito para
+              # builds reproducibles (compatible con pandas 2.2.3 / scipy 1.15.3).
+              # scipy / joblib / threadpoolctl siguen llegando como transitivas
+              # de scikit-learn (resueltas por pip en el build del contenedor).
+
 # Programación de tareas (generación automática de clases)
 apscheduler==3.11.3
 
