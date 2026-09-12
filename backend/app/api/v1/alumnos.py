@@ -288,16 +288,17 @@ def activar_alumno(
     usuario.cambiar_password_al_login = True
     db.flush()
 
-    # Detectar si es RENOVACIÓN: el alumno tenía al menos 1 suscripción ACTIVA
-    # a un plan PAGO. Se EXCLUYE el plan "Prueba" del conteo: con el flujo de
-    # autoservicio un alumno recién registrado ya nace con una suscripción
-    # ACTIVA al plan "Prueba" (ver registrar_alumno_nuevo), por lo que sin este
-    # filtro el conteo daba >0 y su PRIMERA activación se trataba como
-    # renovación (se enviaba el email equivocado).
+    # Detectar si es RENOVACIÓN: el alumno ya tenía al menos 1 suscripción a un
+    # plan PAGO. Se cuentan las ACTIVAS y también las VENCIDAS, porque el caso
+    # normal de renovación es que el plan pago anterior ya haya expirado.
+    # Se EXCLUYE el plan "Prueba" del conteo: con el flujo de autoservicio un
+    # alumno recién registrado ya nace con una suscripción ACTIVA a ese plan
+    # (ver registrar_alumno_nuevo), por lo que sin este filtro el conteo daba
+    # >0 y su PRIMERA activación se trataba como renovación (email equivocado).
     es_renovacion = db.query(Suscripcion).join(Plan, Suscripcion.plan_id == Plan.id).filter(
         Suscripcion.usuario_id == alumno_id,
         Suscripcion.tenant_id == tenant_id,
-        Suscripcion.estado == "activo",
+        Suscripcion.estado.in_(("activo", "vencido")),
         Plan.nombre != "Prueba",
     ).count() > 0
 
