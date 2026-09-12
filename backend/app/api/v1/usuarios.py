@@ -7,8 +7,11 @@ from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import logging
+import sentry_sdk
 
 from app.db.database import get_db
+from app.core.config import settings
 from app.models.usuario import Usuario, RolUsuario
 from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
@@ -16,6 +19,7 @@ from app.schemas.usuario import UsuarioCreate, UsuarioUpdate, UsuarioResponse, U
 from app.core.dependencies import get_current_user, get_current_admin
 from app.core.rate_limit import limiter, LIMIT_CRITICO
 from app.services.auditoria_service import registrar_auditoria
+from app.services.email_service import send_solicitud_prueba_clase
 
 router = APIRouter()
 
@@ -144,7 +148,8 @@ def crear_usuario(
         correo=usuario_data.correo,
         password_hash=hash_password(usuario_data.password),
         rol=usuario_data.rol,
-        activo=True
+        activo=True,
+        cambiar_password_al_login=True,
     )
 
     db.add(db_usuario)
@@ -182,6 +187,22 @@ def crear_usuario(
 
     db.commit()
     db.refresh(db_usuario)
+
+    # ── Email con las credenciales temporales (solo alumnos) ──
+    # Va DESPUÉS del commit: si el alta falla, no se envía el correo.
+    # Coaches/administradores no lo reciben.
+    if usuario_data.rol == RolUsuario.alumno:
+        try:
+            send_solicitud_prueba_clase(
+                db_usuario.nombre,
+                db_usuario.correo,
+                usuario_data.password,
+                f"{settings.FRONTEND_URL}/login",
+            )
+        except Exception as e:
+            sentry_sdk.capture_exception(e)
+            logging.getLogger("uvicorn.usuarios").warning(
+                "Fallo al enviar email de credenciales al alumno")
 
     # ── Auditoría interna: alta de usuario (posible cambio de rol) ──
     registrar_auditoria(
