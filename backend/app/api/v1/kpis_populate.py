@@ -87,6 +87,25 @@ def _ultima_asistencia(db, tenant_id, usuario_id):
     ).scalar()
 
 
+def _dias_inactividad(hoy, ultima, created_at):
+    """
+    Días de inactividad de un alumno, para el cálculo de churn.
+
+    BUGFIX (999 días): antes se devolvía el valor fijo 999 cuando `ultima` era
+    None, lo que marcaba como CRITICO a un alumno recién inscrito que todavía no
+    tomó ninguna clase, igual que a alguien que abandonó hace meses. Son casos
+    distintos, así que si no hay asistencias se mide desde la fecha de registro
+    del alumno. Equivale a COALESCE(max(asistencias.fecha), usuarios.created_at).
+
+    - Con asistencias  -> días desde la última asistencia real (como antes).
+    - Sin asistencias  -> días desde `created_at` (riesgo bajo/normal si es nuevo).
+    """
+    referencia = ultima or (created_at.date() if created_at else None)
+    if referencia is None:
+        return 0
+    return max(0, (hoy - referencia).days)
+
+
 # ── 1) POST /api/v1/kpis/populate/daily ──────────────────────────────────────
 @router.post("/populate/daily")
 def populate_daily_kpis(
@@ -364,7 +383,9 @@ def populate_predictions(
     criticos = altos = medios = 0
     for alumno in alumnos:
         ultima = _ultima_asistencia(db, tenant_id, alumno.id)
-        dias_inactivo = (hoy - ultima).days if ultima else 999
+        # BUGFIX 999: sin asistencias se mide desde la fecha de registro del
+        # alumno (antes un 999 fijo lo marcaba CRITICO aunque fuera nuevo).
+        dias_inactivo = _dias_inactividad(hoy, ultima, alumno.created_at)
 
         proxima = db.query(func.max(Suscripcion.fecha_expiracion)).filter(
             Suscripcion.tenant_id == tenant_id,
