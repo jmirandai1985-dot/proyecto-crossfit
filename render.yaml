@@ -8,7 +8,7 @@ services:
   - type: web
     name: box-crossfit
     runtime: docker
-    plan: free
+    plan: starter
     dockerfilePath: Dockerfile.render
     dockerContext: .
     healthCheckPath: /health
