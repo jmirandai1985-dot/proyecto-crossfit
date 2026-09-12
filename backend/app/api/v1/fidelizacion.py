@@ -64,19 +64,37 @@ def analizar_fidelizacion(
     data = []
     for alumno in alumnos:
         ultima = mapa_asistencias.get(alumno.id)
-        dias = (hoy - ultima).days if ultima else 999
+        # BUGFIX 999: antes, un alumno que nunca asistió quedaba con dias=999 y
+        # entraba a la alerta (y a la campaña de email) como si llevara 999 días
+        # sin entrenar. Se replica el patrón de /coach/{id}/en-riesgo y
+        # /tenant/{id}/en-riesgo: sin historial -> dias=None, tiene_historial=False.
+        if ultima:
+            dias = (hoy - ultima).days
+            tiene_historial = True
+            ultima_str = str(ultima)
+        else:
+            dias = None  # Nunca ha asistido
+            tiene_historial = False
+            ultima_str = "Nunca"
         data.append({
             "id": alumno.id,
             "nombre": alumno.nombre,
             "correo": alumno.correo,
             "telefono": alumno.telefono,
-            "ultima_asistencia": str(ultima) if ultima else "Nunca",
-            "dias_ausente": dias
+            "ultima_asistencia": ultima_str,
+            "dias_ausente": dias,
+            "tiene_historial": tiene_historial
         })
 
     df = pd.DataFrame(data)
-    df_alerta = df[df["dias_ausente"] >= umbral_dias].copy()
-    df_ok = df[df["dias_ausente"] < umbral_dias].copy()
+    # Un alumno sin historial NO es un ausente (nunca empezó a entrenar): va a su
+    # propio bucket en vez de entrar a la alerta por inactividad.
+    df_con_historial = df[df["tiene_historial"] == True].copy()
+    df_sin_historial = df[df["tiene_historial"] == False].copy()
+    df_alerta = df_con_historial[
+        df_con_historial["dias_ausente"] >= umbral_dias].copy()
+    df_ok = df_con_historial[
+        df_con_historial["dias_ausente"] < umbral_dias].copy()
     df_alerta = df_alerta.sort_values("dias_ausente", ascending=False)
 
     return {
@@ -86,8 +104,10 @@ def analizar_fidelizacion(
         "total_alumnos": len(df),
         "total_activos": len(df_ok),
         "total_alerta": len(df_alerta),
+        "total_sin_historial": len(df_sin_historial),
         "alumnos_alerta": df_alerta.to_dict(orient="records"),
-        "alumnos_activos": df_ok.to_dict(orient="records")
+        "alumnos_activos": df_ok.to_dict(orient="records"),
+        "alumnos_sin_historial": df_sin_historial.to_dict(orient="records")
     }
 
 
@@ -179,8 +199,15 @@ def enviar_campana_email(
 
     enviados = []
     fallidos = []
+    omitidos = []
 
     for alumno in alumnos_alerta:
+        # Guard defensivo: a un alumno sin historial (nunca asistió) no se le puede
+        # decir "llevas N días sin entrenar" -> no recibe el email de ausencia.
+        if not alumno.get("tiene_historial") or alumno.get("dias_ausente") is None:
+            omitidos.append(alumno["correo"])
+            continue
+
         exito = enviar_email_fidelizacion(
             nombre=alumno["nombre"],
             correo=alumno["correo"],
@@ -195,6 +222,7 @@ def enviar_campana_email(
         "status": "success",
         "emails_enviados": len(enviados),
         "emails_fallidos": len(fallidos),
+        "omitidos_sin_historial": omitidos,
         "detalle_enviados": enviados,
         "detalle_fallidos": fallidos
     }
