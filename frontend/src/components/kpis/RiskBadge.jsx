@@ -7,11 +7,19 @@ const riskColors = {
     BAJO: 'bg-green-900 text-green-200',
 };
 
+/** Etiqueta legible por nivel. El valor que llega del backend NO se modifica. */
+const riskLabels = {
+    CRITICO: 'Crítico',
+    ALTO: 'Alto',
+    MEDIO: 'Medio',
+    BAJO: 'Bajo',
+};
+
 /** Pastilla de nivel de riesgo de churn (CRITICO | ALTO | MEDIO | BAJO). */
 export const RiskBadge = ({ nivel }) => {
     return (
         <span className={`px-3 py-1 rounded-full text-xs font-bold ${riskColors[nivel] || 'bg-gray-700 text-gray-300'}`}>
-            {nivel}
+            {riskLabels[nivel] || nivel}
         </span>
     );
 };

@@ -272,7 +272,7 @@ const Reportes = () => {
                         <span className="text-4xl">📉</span>
                     </div>
                     <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-purple-500">
-                        <p className="text-zinc-400 text-sm font-medium">MRR (Ingresos Recurrentes)</p>
+                        <p className="text-zinc-400 text-sm font-medium">Ingresos Recurrentes Mensuales (MRR)</p>
                         <p className="text-3xl font-bold text-zinc-100 mt-2">{formatCompact(reportData?.mrr || 0)}</p>
                         <p className="text-xs text-zinc-400 mt-2">ARPU: {formatCompact(reportData?.arpu || 0)}/alumno</p>
                     </div>

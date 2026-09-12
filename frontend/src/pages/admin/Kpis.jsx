@@ -162,7 +162,7 @@ const AdminKpis = () => {
                     <div>
                         <h1 className="text-3xl font-bold text-white">KPIs</h1>
                         <p className="text-sm text-gray-400">
-                            Indicadores desde los data marts (poblados por los workflows de n8n)
+                            Indicadores actualizados automáticamente
                         </p>
                     </div>
                 </div>
@@ -186,8 +186,7 @@ const AdminKpis = () => {
                     <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-8 text-center">
                         <p className="text-gray-300 font-medium">Sin datos para el período.</p>
                         <p className="text-sm text-gray-500 mt-2">
-                            Los data marts se llenan con los workflows de n8n
-                            (Populate Daily KPIs, Populate Monthly KPIs y Populate Predictions).
+                            Los datos se están generando, intentá de nuevo en unos minutos
                         </p>
                     </div>
                 )}
@@ -250,8 +249,8 @@ const AdminKpis = () => {
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                             <KpiCard label="Conversión prueba→plan" value={Number(mes.conversion_rate)} unit="%" icon={TrendingUp} color="border-green-500" />
-                            <KpiCard label="Churn rate" value={Number(mes.churn_rate)} unit="%" icon={TriangleAlert} color="border-red-500" />
-                            <KpiCard label="MRR" value={Number(mes.mrr)} unit="CLP" icon={Banknote} color="border-emerald-500" />
+                            <KpiCard label="Riesgo de Abandono" value={Number(mes.churn_rate)} unit="%" icon={TriangleAlert} color="border-red-500" />
+                            <KpiCard label="Ingresos Recurrentes Mensuales (MRR)" value={Number(mes.mrr)} unit="CLP" icon={Banknote} color="border-emerald-500" />
                             <KpiCard label="Ingresos del mes" value={Number(mes.ingresos_total)} unit="CLP" icon={DollarSign} color="border-blue-500" />
                         </div>
 
@@ -264,13 +263,13 @@ const AdminKpis = () => {
 
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             <div className="lg:col-span-2">
-                                <ChartCard title="Últimos 6 meses · MRR e ingresos (CLP)">
+                                <ChartCard title="Últimos 6 meses · Ingresos recurrentes e ingresos totales (CLP)">
                                     <AreaChart data={serieMensual}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
                                         <XAxis dataKey="month" tickFormatter={(mm) => MESES[Number(mm) - 1]} stroke="#a1a1aa" fontSize={12} />
                                         <YAxis stroke="#a1a1aa" fontSize={12} />
                                         <Tooltip {...TOOLTIP_STYLE} formatter={(v) => fmtCLP(v)} />
-                                        <Area type="monotone" dataKey="mrr" name="MRR" stroke="#f97316" fill="#f97316" fillOpacity={0.25} />
+                                        <Area type="monotone" dataKey="mrr" name="Ingresos recurrentes" stroke="#f97316" fill="#f97316" fillOpacity={0.25} />
                                         <Area type="monotone" dataKey="ingresos_total" name="Ingresos" stroke="#10b981" fill="#10b981" fillOpacity={0.2} />
                                     </AreaChart>
                                 </ChartCard>
@@ -278,7 +277,7 @@ const AdminKpis = () => {
 
                             {/* Embudo prueba → plan (card simple, no es gráfico recharts) */}
                             <div className="bg-zinc-900 rounded-lg shadow p-6">
-                                <h3 className="text-lg font-semibold text-white mb-4">Embudo prueba → plan</h3>
+                                <h3 className="text-lg font-semibold text-white mb-4">Proceso de Conversión de Nuevos Clientes</h3>
                                 <div className="space-y-4">
                                     {[
                                         { label: 'Alumnos en prueba', valor: mes.alumnos_prueba, color: 'bg-zinc-500' },
@@ -313,13 +312,13 @@ const AdminKpis = () => {
                 {!loading && !error && !sinDatos && activeTab === 'bi' && (
                     <div className="space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                            <KpiCard label="Churn crítico" value={churn?.criticos ?? 0} icon={TriangleAlert} color="border-red-500" />
+                            <KpiCard label="Abandono Crítico" value={churn?.criticos ?? 0} icon={TriangleAlert} color="border-red-500" />
                             <KpiCard label="Riesgo alto" value={churn?.altos ?? 0} icon={TriangleAlert} color="border-orange-500" />
                             <KpiCard label="En riesgo (total)" value={churn?.total ?? 0} icon={Users} color="border-yellow-500" />
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                            <KpiCard label="MRR" value={mrrBi === null ? null : Number(mrrBi)} unit="CLP" icon={Banknote} color="border-emerald-500" />
+                            <KpiCard label="Ingresos Recurrentes Mensuales" value={mrrBi === null ? null : Number(mrrBi)} unit="CLP" icon={Banknote} color="border-emerald-500" />
                             <KpiCard
                                 label="Proyección mes 1"
                                 value={forecast.length ? Number(forecast[0].ingresos_predicho) : null}
@@ -342,12 +341,12 @@ const AdminKpis = () => {
                         </div>
 
                         <h2 className="text-lg font-semibold text-white pt-2">
-                            Predicción de churn ({churn?.total ?? 0})
+                            Predicción de Riesgo de Abandono ({churn?.total ?? 0})
                         </h2>
                         <DataTable
                             columns={[
                                 { key: 'usuario_id', label: 'Alumno (ID)' },
-                                { key: 'probabilidad_churn', label: 'Probabilidad', render: (v) => `${Number(v).toFixed(1)}%` },
+                                { key: 'probabilidad_churn', label: 'Probabilidad de Abandono', render: (v) => `${Number(v).toFixed(1)}%` },
                                 { key: 'riesgo_nivel', label: 'Riesgo', render: (v) => <RiskBadge nivel={v} /> },
                                 { key: 'motivo', label: 'Motivo' },
                                 { key: 'estado_gestion', label: 'Gestión' },
