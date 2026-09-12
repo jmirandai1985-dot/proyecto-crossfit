@@ -45,3 +45,7 @@ backend/server_prod.pid
 k6-tests/load_config.json
 backend/migraciones_preview.sql
 backend/scripts/crear_usuarios_test.py
+backend/scripts/borrar_usuarios_prueba.py
+backend/test_altas_alumnos.py
+backend/test_altas_alumnos3.py
+backend/test_altas_alumnos4.py
