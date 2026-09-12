@@ -1,11 +1,11 @@
-"""Servicio de envio de correos via Resend (3 funciones)."""
+"""Servicio de envio de correos via Gmail SMTP (18 funciones)."""
 import os
 import base64
 import logging
-# import smtplib  # migrado a Resend (ya no se usa)
-# from email.message import EmailMessage  # migrado a Resend (ya no se usa)
+import smtplib
+from email.message import EmailMessage
 from datetime import datetime, date
-import resend
+# import resend  # migrado a Gmail SMTP (se conserva para rollback rápido)
 
 from app.core.config import settings
 
@@ -16,7 +16,7 @@ BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__
 LOGO_PATH = os.path.join(os.path.dirname(BACKEND_DIR), "logo", "logo.png")
 # Logo servido desde repo público de assets (GitHub raw) para usar URL en vez de adjunto
 LOGO_URL = "https://raw.githubusercontent.com/jmirandai1985-dot/urban-box-assets/main/logo.png"
-FROM_EMAIL = "Urban Training Box <onboarding@resend.dev>"
+# FROM_EMAIL = "Urban Training Box <onboarding@resend.dev>"  # migrado a Gmail SMTP (rollback)
 
 # Último error SMTP (para exponer detalle útil al admin en el Dashboard)
 ULTIMO_ERROR_SMTP = None
@@ -99,30 +99,23 @@ def _registrar_envio(alumno_id, tipo, estado, detalle_error=None, mes_referencia
 
 
 def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, tipo: str = "", mes_referencia=None) -> bool:
-    """Envía via Resend (API) con log en BD."""
+    """Envía via Gmail SMTP con log en BD."""
     try:
         from app.core.config import settings
-        remitente = FROM_EMAIL
 
-        # ── SANITIZAR HEADERS (evita "Header values may not contain linefeed...") ──
-        # Los headers no pueden contener \n ni \r. Si un campo dinámico lo trae
-        # (p. ej. el correo del usuario en "To", o un "Subject" armado con datos),
-        # Resend lanza ese error. Se limpian TODOS los headers dinámicos.
         destinatario = (destinatario or "").replace("\n", "").replace("\r", "").strip()
         asunto = (asunto or "").replace("\n", "").replace("\r", "")
-        remitente = (remitente or "").replace("\n", "").replace("\r", "")
 
-        # ── ENVIAR VÍA RESEND ──
-        # SDK resend v2.x: send(params: Emails.SendParams, ...). No acepta kwargs
-        # (from_= falla; from= es SyntaxError por ser keyword). Se pasa un dict
-        # con la clave "from" (que el SDK mapea a SendParams).
-        resend.api_key = settings.RESEND_API_KEY
-        resend.Emails.send({
-            "from": remitente,
-            "to": destinatario,
-            "subject": asunto,
-            "html": html,
-        })
+        msg = EmailMessage()
+        msg["From"] = f"Urban Training Box <{settings.GMAIL_SMTP_USER}>"
+        msg["To"] = destinatario
+        msg["Subject"] = asunto
+        msg.set_content("Este correo requiere un cliente que soporte HTML.")
+        msg.add_alternative(html, subtype="html")
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(settings.GMAIL_SMTP_USER, settings.GMAIL_SMTP_APP_PASSWORD)
+            server.send_message(msg)
 
         logger.info(f"Correo enviado a {destinatario}: {asunto}")
         _registrar_envio(alumno_id, tipo, "enviado", mes_referencia=mes_referencia) if alumno_id else None
@@ -130,7 +123,7 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
     except Exception as e:
         global ULTIMO_ERROR_SMTP
         ULTIMO_ERROR_SMTP = str(e)
-        logger.error(f"[RESEND ERROR] {destinatario}: {e}")
+        logger.error(f"[SMTP ERROR] {destinatario}: {e}")
         _registrar_envio(alumno_id, tipo, "fallido", str(e), mes_referencia) if alumno_id else None
         return False
 
