@@ -423,12 +423,12 @@ const AdminKpis = () => {
                 {/* ══ TAB BI (Inteligencia de Negocio) ══ */}
                 {!loading && !error && !sinDatos && activeTab === 'bi' && (
                     <div className="space-y-6">
-                        {/* ── Insights automáticos (resumen ejecutivo del backend) ── */}
+                        {/* ── Alertas operativas (resumen ejecutivo del backend) ── */}
                         {churn?.insight?.mensajes?.length > 0 && (
                             <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-5">
                                 <div className="flex items-center gap-2 mb-3">
                                     <Sparkles className="w-5 h-5 text-orange-500" />
-                                    <h2 className="font-semibold text-white">Insights automáticos</h2>
+                                    <h2 className="font-semibold text-white">Alertas Operativas</h2>
                                 </div>
                                 <ul className="space-y-2">
                                     {churn.insight.mensajes.map((m, i) => (
