@@ -52,6 +52,7 @@ COPY --from=deps /usr/local/bin /usr/local/bin
 
 # Código del backend (sin .env: las env vars se inyectan en runtime).
 COPY backend/app/ app/
+COPY backend/ml/ ml/
 COPY backend/alembic/ alembic/
 COPY backend/alembic.ini ./
 COPY backend/requirements.txt ./

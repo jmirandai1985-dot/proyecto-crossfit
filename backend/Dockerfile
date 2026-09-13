@@ -48,8 +48,9 @@ WORKDIR /app
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=deps /usr/local/bin /usr/local/bin
 
-# Código de la app + migraciones + scripts de mantenimiento (importan app.*).
+# Código de la app + modelos de ML + migraciones + scripts de mantenimiento.
 COPY app/ app/
+COPY ml/ ml/
 COPY alembic/ alembic/
 COPY alembic.ini ./
 COPY requirements.txt ./
