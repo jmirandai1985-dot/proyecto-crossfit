@@ -1,6 +1,8 @@
 # Contexto de build = backend/
 # Python
-__pycache__/
+# `**/` para que matchee también los subdirectorios (app/**/__pycache__,
+# ml/__pycache__): sin el `**` solo excluía el __pycache__ de la raíz.
+**/__pycache__/
 *.py[cod]
 *.pyo
 .pytest_cache/
