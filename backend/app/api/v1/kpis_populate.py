@@ -104,6 +104,11 @@ def _dias_inactividad(hoy, ultima, created_at):
     return max(0, (hoy - referencia).days)
 
 
+def _plural_dias(n) -> str:
+    """'día' si n == 1, 'días' en cualquier otro caso (motivos legibles)."""
+    return "día" if n == 1 else "días"
+
+
 # ── 1) POST /api/v1/kpis/populate/daily ──────────────────────────────────────
 @router.post("/populate/daily")
 def populate_daily_kpis(
@@ -452,12 +457,14 @@ def populate_predictions(
             dias_para_vencer = ctx.get("dias_para_vencer_plan")
             if dias_para_vencer is None:
                 proxima_date = None
-                motivo = f"{dias_inactivo} días sin asistir · sin plan vigente"
+                motivo = (f"{dias_inactivo} {_plural_dias(dias_inactivo)} sin "
+                          f"asistir · sin plan vigente")
             else:
                 dias_para_vencer = int(dias_para_vencer)
                 proxima_date = hoy + timedelta(days=dias_para_vencer)
-                motivo = (f"{dias_inactivo} días sin asistir · plan vence en "
-                          f"{dias_para_vencer} días")
+                motivo = (f"{dias_inactivo} {_plural_dias(dias_inactivo)} sin "
+                          f"asistir · plan vence en "
+                          f"{dias_para_vencer} {_plural_dias(dias_para_vencer)}")
         else:
             # ── Fallback: heurística original (no hay modelo entrenado) ──
             ultima = _ultima_asistencia(db, tenant_id, alumno.id)
@@ -477,14 +484,15 @@ def populate_predictions(
             prob = min(dias_inactivo, 60) / 60 * 70
             if dias_para_vencer is None:
                 prob += 20
-                motivo = (f"Sin suscripción activa · {dias_inactivo} días "
-                          f"sin asistir")
+                motivo = (f"Sin suscripción activa · {dias_inactivo} "
+                          f"{_plural_dias(dias_inactivo)} sin asistir")
             elif dias_para_vencer <= 7:
                 prob += 10
-                motivo = (f"{dias_inactivo} días sin asistir · "
-                          f"plan vence en {dias_para_vencer} días")
+                motivo = (f"{dias_inactivo} {_plural_dias(dias_inactivo)} sin "
+                          f"asistir · plan vence en {dias_para_vencer} "
+                          f"{_plural_dias(dias_para_vencer)}")
             else:
-                motivo = f"{dias_inactivo} días sin asistir"
+                motivo = f"{dias_inactivo} {_plural_dias(dias_inactivo)} sin asistir"
             prob = round(min(prob, 100), 2)
 
         # ── Mapeo común de nivel de riesgo (mismos umbrales en ambos métodos) ──
