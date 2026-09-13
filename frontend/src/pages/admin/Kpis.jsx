@@ -74,6 +74,36 @@ const fmtUltimoContacto = (v) => (
     v ? `${etiquetaContacto(v.tipo)} · ${fmtHace(v.hace_dias)}` : null
 );
 
+// Filtros de la tabla de churn: se aplican en el propio panel con los datos que
+// ya vienen en cada fila (sin endpoint nuevo). Los activan las tarjetas de KPI y
+// el botón "Ver alumnos" de las alertas operativas.
+const FILTROS_CHURN = {
+    critico: {
+        etiqueta: 'Abandono crítico',
+        test: (f) => f.riesgo_nivel === 'CRITICO',
+    },
+    alto: {
+        etiqueta: 'Riesgo alto',
+        test: (f) => f.riesgo_nivel === 'ALTO',
+    },
+    total: {
+        etiqueta: 'En riesgo (todos)',
+        test: () => true,
+    },
+    plan_urgente: {
+        // Misma condición que la Regla B del backend: riesgo ALTO/CRÍTICO con
+        // plan vigente que vence en ≤7 días.
+        etiqueta: 'Riesgo alto/crítico con plan que vence en ≤7 días',
+        test: (f) => {
+            if (!['ALTO', 'CRITICO'].includes(f.riesgo_nivel)) return false;
+            if (!f.fecha_proxima_renovacion) return false;
+            const limite = new Date();
+            limite.setDate(limite.getDate() + 7);
+            return String(f.fecha_proxima_renovacion).slice(0, 10) <= toISO(limite);
+        },
+    },
+};
+
 // Los estilos/etiquetas por código de recomendación viven en
 // components/kpis/recoEstilo.js (los comparte el modal de detalle).
 
@@ -121,6 +151,8 @@ const AdminKpis = () => {
     const toastTimer = useRef(null);
     // Fila cuyo detalle de recomendación se muestra en el modal (null = cerrado).
     const [detalleReco, setDetalleReco] = useState(null);
+    // Clave del filtro activo sobre la tabla de churn (null = sin filtro).
+    const [filtroChurn, setFiltroChurn] = useState(null);
 
     // Toast breve auto-ocultable. El proyecto NO usa librería de toasts
     // (el resto de páginas recurre a `alert()`), así que acá va uno propio
@@ -264,6 +296,12 @@ const AdminKpis = () => {
 
     const dia = serieDiaria.length ? serieDiaria[serieDiaria.length - 1] : null;
     const mes = serieMensual.length ? serieMensual[serieMensual.length - 1] : null;
+
+    // Lista de churn con el filtro activo aplicado (client-side).
+    const prediccionesChurn = churn?.predicciones || [];
+    const prediccionesFiltradas = filtroChurn
+        ? prediccionesChurn.filter(FILTROS_CHURN[filtroChurn].test)
+        : prediccionesChurn;
 
     return (
         <Layout>
@@ -434,7 +472,24 @@ const AdminKpis = () => {
                                     {churn.insight.mensajes.map((m, i) => (
                                         <li key={i} className="flex gap-2 text-sm text-zinc-200">
                                             <span className="text-orange-500 shrink-0">•</span>
-                                            <span>{m}</span>
+                                            <span>
+                                                {m}
+                                                {/* La alerta de "riesgo con plan" trae el acceso
+                                                    directo a los alumnos que la originan. */}
+                                                {churn.insight.reglas?.[i] === 'riesgo_con_plan' && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setFiltroChurn((prev) => (
+                                                            prev === 'plan_urgente' ? null : 'plan_urgente'))}
+                                                        aria-label={filtroChurn === 'plan_urgente'
+                                                            ? 'Quitar filtro de la alerta'
+                                                            : 'Ver alumnos de la alerta'}
+                                                        className="ml-2 rounded border border-zinc-600 px-2 py-0.5 text-xs font-medium text-orange-300 hover:bg-zinc-700/60 hover:text-orange-200"
+                                                    >
+                                                        {filtroChurn === 'plan_urgente' ? 'Quitar filtro' : 'Ver alumnos'}
+                                                    </button>
+                                                )}
+                                            </span>
                                         </li>
                                     ))}
                                 </ul>
@@ -473,6 +528,26 @@ const AdminKpis = () => {
                         <h2 className="text-lg font-semibold text-white pt-2">
                             Predicción de Riesgo de Abandono ({churn?.total ?? 0})
                         </h2>
+
+                        {/* Indicador del filtro activo + forma de quitarlo */}
+                        {filtroChurn && (
+                            <div className="flex flex-wrap items-center gap-2 -mt-3 text-xs">
+                                <span className="rounded bg-zinc-800 px-2 py-0.5 text-orange-300">
+                                    Filtro: {FILTROS_CHURN[filtroChurn].etiqueta}
+                                </span>
+                                <span className="text-zinc-500">
+                                    {prediccionesFiltradas.length} de {prediccionesChurn.length} alumnos
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => setFiltroChurn(null)}
+                                    className="text-zinc-300 underline hover:text-orange-300"
+                                >
+                                    Ver todos
+                                </button>
+                            </div>
+                        )}
+
                         <DataTable
                             columns={[
                                 {
@@ -551,7 +626,7 @@ const AdminKpis = () => {
                                 },
                                 { key: 'fecha_proxima_renovacion', label: 'Próx. renovación', render: (v) => v || '—' },
                             ]}
-                            data={churn?.predicciones || []}
+                            data={prediccionesFiltradas}
                         />
                     </div>
                 )}
