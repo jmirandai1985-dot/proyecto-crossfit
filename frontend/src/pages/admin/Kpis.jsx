@@ -497,9 +497,29 @@ const AdminKpis = () => {
                         )}
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                            <KpiCard label="Abandono Crítico" value={churn?.criticos ?? 0} icon={TriangleAlert} color="border-red-500" />
-                            <KpiCard label="Riesgo alto" value={churn?.altos ?? 0} icon={TriangleAlert} color="border-orange-500" />
-                            <KpiCard label="En riesgo (total)" value={churn?.total ?? 0} icon={Users} color="border-yellow-500" />
+                            {/* Tarjetas clickeables: filtran la tabla de abajo por nivel de
+                                riesgo. Click de nuevo (o "Ver todos") quita el filtro. */}
+                            {[
+                                { clave: 'critico', label: 'Abandono Crítico', valor: churn?.criticos ?? 0, icon: TriangleAlert, color: 'border-red-500' },
+                                { clave: 'alto', label: 'Riesgo alto', valor: churn?.altos ?? 0, icon: TriangleAlert, color: 'border-orange-500' },
+                                { clave: 'total', label: 'En riesgo (total)', valor: churn?.total ?? 0, icon: Users, color: 'border-yellow-500' },
+                            ].map(({ clave, label, valor, icon, color }) => (
+                                <button
+                                    key={clave}
+                                    type="button"
+                                    onClick={() => setFiltroChurn((prev) => (prev === clave ? null : clave))}
+                                    aria-pressed={filtroChurn === clave}
+                                    aria-label={`Filtrar la tabla por: ${FILTROS_CHURN[clave].etiqueta}`}
+                                    title={filtroChurn === clave
+                                        ? 'Quitar este filtro'
+                                        : 'Filtrar la tabla por este grupo'}
+                                    className={`w-full text-left rounded-lg transition ${filtroChurn === clave
+                                        ? 'ring-2 ring-orange-500'
+                                        : 'hover:ring-1 hover:ring-zinc-600'}`}
+                                >
+                                    <KpiCard label={label} value={valor} icon={icon} color={color} />
+                                </button>
+                            ))}
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
