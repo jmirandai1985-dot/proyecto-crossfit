@@ -129,14 +129,25 @@ RECO_CAIDA_RECIENTE = (
     "para un mensaje cercano preguntando cómo está y si el horario le sigue "
     "acomodando —a veces alcanza con ajustar la rutina."
 )
+RECO_ALTO_SIN_CAUSA = (
+    "El modelo detecta un riesgo alto para este alumno, aunque no hay una señal "
+    "específica clara (como caída de asistencia o vencimiento próximo). Vale la "
+    "pena un chequeo preventivo: preguntale cómo va todo, por las dudas."
+)
 RECO_RENOVACION_PROXIMA = (
     "Su plan vence pronto y sigue entrenando con normalidad. Es buen momento "
     "para mandarle el recordatorio de renovación antes de que se le pase la fecha."
 )
+RECO_MEDIO_SIN_SENALES = (
+    "El modelo marca un riesgo medio para este alumno, sin una señal puntual "
+    "(ni caída de asistencia ni vencimiento próximo). No es urgente, pero "
+    "conviene un seguimiento amable: preguntale cómo va y si necesita algo."
+)
 RECO_SIN_ACCION = "Todo en orden, sin acción necesaria."
 
 RECO_CODIGOS = ("sin_plan", "critico_con_plan", "caida_reciente",
-                "renovacion_proxima", "sin_accion")
+                "alto_sin_causa_clara", "renovacion_proxima",
+                "medio_sin_senales", "sin_accion")
 
 
 def _recomendacion_churn(nivel, tiene_suscripcion, dias_para_vencer,
@@ -146,19 +157,26 @@ def _recomendacion_churn(nivel, tiene_suscripcion, dias_para_vencer,
       1. CRITICO/ALTO/MEDIO sin plan vigente -> contacto personal (posible tema económico)
       2. CRITICO con plan vigente            -> contacto prioritario (plan activo, señales fuertes)
       3. ALTO/MEDIO con plan y caída fuerte  -> mensaje cercano (revisar rutina/horario)
-      4. Vence en <=7 días y BAJO/MEDIO      -> recordatorio de renovación
-      5. Resto                               -> "Todo en orden..."
+      4. ALTO con plan, sin señales claras   -> chequeo preventivo (nunca "todo en orden")
+      5. Vence en <=7 días y BAJO/MEDIO      -> recordatorio de renovación
+      6. MEDIO con plan, sin señales claras  -> seguimiento amable (no urgente)
+      7. Resto                               -> "Todo en orden..." (sólo BAJO)
 
     "Caída fuerte" = asistencias 30d < asistencias 90d / 3 (ritmo reciente por
     debajo de un tercio del histórico trimestral). Proxy explícito, sin queries.
 
-    La #1 cubre CUALQUIER nivel no-BAJO sin plan vigente: así ningún alumno "en
-    riesgo y sin plan" queda con la recomendación neutra de la #5 (antes un
-    MEDIO sin plan caía en "Todo en orden", que era engañoso).
+    Orden de prioridad: las reglas con señal accionable concreta van primero
+    (#3 caída, #5 vencimiento próximo) y recién después los "sin señal clara"
+    (#4 ALTO, #6 MEDIO): así un MEDIO que vence en 7 días recibe el recordatorio
+    de renovación y no el mensaje genérico.
+
+    Cobertura: la #1 agarra a TODO no-BAJO sin plan vigente, la #2/#4 a todo
+    ALTO/CRITICO con plan y la #6 a todo MEDIO con plan -> la #7 ("Todo en
+    orden") sólo puede contener alumnos BAJO.
 
     ⚠️ BORDE CONOCIDO (regla literal a propósito, ver consigna):
       - Con asistencias_90d == 0 el proxy de la #3 da `0 < 0` = False -> no la
-        dispara (un ALTO/MEDIO con plan y 90d en cero cae a la #5).
+        dispara: un ALTO con plan cae a la #4 y un MEDIO con plan a la #6.
     """
     if nivel in ("CRITICO", "ALTO", "MEDIO") and not tiene_suscripcion:
         return RECO_SIN_PLAN, "sin_plan"
@@ -170,9 +188,22 @@ def _recomendacion_churn(nivel, tiene_suscripcion, dias_para_vencer,
     if nivel in ("ALTO", "MEDIO") and tiene_suscripcion and caida_reciente:
         return RECO_CAIDA_RECIENTE, "caida_reciente"
 
+    # Un ALTO con plan activo nunca debe leerse como "todo en orden": si no hubo
+    # caída de asistencia (#3) ni vencimiento próximo, se recomienda chequeo
+    # preventivo. "Sin causa clara" es explícito: lo detecta el modelo, no una
+    # señal accionable puntual.
+    if nivel == "ALTO" and tiene_suscripcion:
+        return RECO_ALTO_SIN_CAUSA, "alto_sin_causa_clara"
+
     if (dias_para_vencer is not None and dias_para_vencer <= 7
             and nivel in ("BAJO", "MEDIO")):
         return RECO_RENOVACION_PROXIMA, "renovacion_proxima"
+
+    # Un MEDIO con plan activo, sin caída (#3) ni vencimiento próximo (#5) -las
+    # señales accionables ya se evaluaron- tampoco es "todo en orden": toca un
+    # seguimiento amable, sin urgencia.
+    if nivel == "MEDIO" and tiene_suscripcion:
+        return RECO_MEDIO_SIN_SENALES, "medio_sin_senales"
 
     return RECO_SIN_ACCION, "sin_accion"
 

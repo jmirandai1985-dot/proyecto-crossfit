@@ -66,12 +66,15 @@ const fmtHace = (dias) => {
 };
 
 // Color + etiqueta por código de recomendación (los emite el backend:
-// sin_plan | critico_con_plan | caida_reciente | renovacion_proxima | sin_accion).
+// sin_plan | critico_con_plan | caida_reciente | alto_sin_causa_clara |
+// renovacion_proxima | medio_sin_senales | sin_accion).
 const RECO_ESTILO = {
     sin_plan: { borde: 'border-red-500', texto: 'text-red-200', etiqueta: 'Contacto personal' },
     critico_con_plan: { borde: 'border-rose-500', texto: 'text-rose-200', etiqueta: 'Crítico con plan' },
     caida_reciente: { borde: 'border-amber-500', texto: 'text-amber-200', etiqueta: 'Caída reciente' },
+    alto_sin_causa_clara: { borde: 'border-orange-500', texto: 'text-orange-200', etiqueta: 'Chequeo preventivo' },
     renovacion_proxima: { borde: 'border-sky-500', texto: 'text-sky-200', etiqueta: 'Renovación' },
+    medio_sin_senales: { borde: 'border-yellow-500', texto: 'text-yellow-200', etiqueta: 'Seguimiento sugerido' },
     sin_accion: { borde: 'border-emerald-600', texto: 'text-zinc-400', etiqueta: 'Sin acción' },
 };
 

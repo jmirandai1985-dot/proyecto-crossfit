@@ -24,7 +24,7 @@ class PredictionsChurn(Base):
     # Recomendación de acción empática/accionable (texto largo: >250 caracteres
     # en el caso "sin plan vigente" -> Text, no varchar corto) + código estable
     # para la UI (sin_plan | critico_con_plan | caida_reciente |
-    # renovacion_proxima | sin_accion).
+    # alto_sin_causa_clara | renovacion_proxima | medio_sin_senales | sin_accion).
     # NULL en filas históricas: se llenan en la próxima corrida del populate.
     recomendacion = Column(Text, nullable=True)
     recomendacion_codigo = Column(String(30), nullable=True)
