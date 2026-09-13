@@ -1,6 +1,6 @@
 """Modelo SQLAlchemy para la tabla analítica `predictions_churn` (riesgo de baja por alumno)."""
 from sqlalchemy import (
-    Column, Integer, String, Numeric, Date, ForeignKey, Index,
+    Column, Integer, String, Text, Numeric, Date, ForeignKey, Index,
 )
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.sql import func
@@ -21,6 +21,13 @@ class PredictionsChurn(Base):
     # CRITICO | ALTO | MEDIO | BAJO
     riesgo_nivel = Column(String(10), nullable=False, default="BAJO")
     motivo = Column(String(255), nullable=True)
+    # Recomendación de acción empática/accionable (texto largo: >250 caracteres
+    # en el caso "sin plan vigente" -> Text, no varchar corto) + código estable
+    # para la UI (sin_plan | critico_con_plan | caida_reciente |
+    # renovacion_proxima | sin_accion).
+    # NULL en filas históricas: se llenan en la próxima corrida del populate.
+    recomendacion = Column(Text, nullable=True)
+    recomendacion_codigo = Column(String(30), nullable=True)
     # ⚠️ `estado_gestion` se movió a la tabla propia `churn_gestion` (migración
     # 024): esta es una data mart con full refresh y el estado de gestión es
     # dato de negocio. Ver app/models/churn_gestion.py.

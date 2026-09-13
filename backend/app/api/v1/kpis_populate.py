@@ -109,6 +109,92 @@ def _plural_dias(n) -> str:
     return "día" if n == 1 else "días"
 
 
+# ── Recomendación de acción (texto empático + código para la UI) ─────────────
+# Los textos viven acá (un solo lugar) y el código es estable para que el
+# frontend pueda colorear/filtrar sin parsear el texto.
+RECO_SIN_PLAN = (
+    "Alumno sin actividad y sin plan vigente. Te recomendamos contactarlo "
+    "personalmente para indagar qué está pasando —podría ser tiempo, motivación "
+    "o un tema económico. Si es económico, considerá ofrecerle una alternativa "
+    "(clase de cortesía, descuento temporal) para facilitar que vuelva."
+)
+RECO_CRITICO_CON_PLAN = (
+    "Su plan está activo pero las señales de riesgo son críticas. Contactalo con "
+    "prioridad: no lo trates como un recordatorio más —preguntale cómo está de "
+    "verdad y si algo del box (horario, clima, precio, lesión) le está jugando "
+    "en contra."
+)
+RECO_CAIDA_RECIENTE = (
+    "Su asistencia bajó fuerte aunque su plan sigue activo. Es un buen momento "
+    "para un mensaje cercano preguntando cómo está y si el horario le sigue "
+    "acomodando —a veces alcanza con ajustar la rutina."
+)
+RECO_RENOVACION_PROXIMA = (
+    "Su plan vence pronto y sigue entrenando con normalidad. Es buen momento "
+    "para mandarle el recordatorio de renovación antes de que se le pase la fecha."
+)
+RECO_SIN_ACCION = "Todo en orden, sin acción necesaria."
+
+RECO_CODIGOS = ("sin_plan", "critico_con_plan", "caida_reciente",
+                "renovacion_proxima", "sin_accion")
+
+
+def _recomendacion_churn(nivel, tiene_suscripcion, dias_para_vencer,
+                         asis_30, asis_90) -> tuple:
+    """(texto, código) de la recomendación (gana la PRIMERA regla que aplica).
+
+      1. CRITICO/ALTO/MEDIO sin plan vigente -> contacto personal (posible tema económico)
+      2. CRITICO con plan vigente            -> contacto prioritario (plan activo, señales fuertes)
+      3. ALTO/MEDIO con plan y caída fuerte  -> mensaje cercano (revisar rutina/horario)
+      4. Vence en <=7 días y BAJO/MEDIO      -> recordatorio de renovación
+      5. Resto                               -> "Todo en orden..."
+
+    "Caída fuerte" = asistencias 30d < asistencias 90d / 3 (ritmo reciente por
+    debajo de un tercio del histórico trimestral). Proxy explícito, sin queries.
+
+    La #1 cubre CUALQUIER nivel no-BAJO sin plan vigente: así ningún alumno "en
+    riesgo y sin plan" queda con la recomendación neutra de la #5 (antes un
+    MEDIO sin plan caía en "Todo en orden", que era engañoso).
+
+    ⚠️ BORDE CONOCIDO (regla literal a propósito, ver consigna):
+      - Con asistencias_90d == 0 el proxy de la #3 da `0 < 0` = False -> no la
+        dispara (un ALTO/MEDIO con plan y 90d en cero cae a la #5).
+    """
+    if nivel in ("CRITICO", "ALTO", "MEDIO") and not tiene_suscripcion:
+        return RECO_SIN_PLAN, "sin_plan"
+
+    if nivel == "CRITICO" and tiene_suscripcion:
+        return RECO_CRITICO_CON_PLAN, "critico_con_plan"
+
+    caida_reciente = asis_30 < (asis_90 / 3)
+    if nivel in ("ALTO", "MEDIO") and tiene_suscripcion and caida_reciente:
+        return RECO_CAIDA_RECIENTE, "caida_reciente"
+
+    if (dias_para_vencer is not None and dias_para_vencer <= 7
+            and nivel in ("BAJO", "MEDIO")):
+        return RECO_RENOVACION_PROXIMA, "renovacion_proxima"
+
+    return RECO_SIN_ACCION, "sin_accion"
+
+
+def _conteos_asistencias(db, tenant_id, ids, dias, fecha_ref) -> dict:
+    """{usuario_id: n_asistencias} en la ventana [fecha_ref - dias, fecha_ref].
+
+    Una sola query agregada (mismo criterio que `ml.features.build_features`).
+    La necesita la rama heurística, que no calcula las ventanas de asistencia.
+    """
+    if not ids:
+        return {}
+    return dict(db.query(
+        Asistencia.usuario_id, func.count(Asistencia.id)
+    ).filter(
+        Asistencia.tenant_id == tenant_id,
+        Asistencia.usuario_id.in_(ids),
+        Asistencia.fecha >= fecha_ref - timedelta(days=dias),
+        Asistencia.fecha <= fecha_ref,
+    ).group_by(Asistencia.usuario_id).all())
+
+
 # ── 1) POST /api/v1/kpis/populate/daily ──────────────────────────────────────
 @router.post("/populate/daily")
 def populate_daily_kpis(
@@ -423,6 +509,7 @@ def populate_predictions(
         PredictionsChurn.tenant_id == tenant_id).delete()
 
     criticos = altos = medios = 0
+    recos = {codigo: 0 for codigo in RECO_CODIGOS}
 
     # Con modelo ML se calculan las features de TODOS los alumnos de una vez
     # (`build_features` = 5 queries agregadas; `features_alumno` sería ~6 por
@@ -448,6 +535,15 @@ def populate_predictions(
         probs_ml = dict(zip(df_ml["usuario_id"],
                             modelo_churn.predict_proba(X_ml)[:, 1]))
 
+    # Ventanas de asistencia para la recomendación en la rama heurística: la
+    # rama ML ya las trae gratis en `contexto_ml` (build_features las calcula),
+    # pero la heurística no. Son 2 queries agregadas CONSTANTES (no por alumno).
+    conteos_30 = conteos_90 = {}
+    if probs_ml is None and alumnos:
+        ids_alumnos = [a.id for a in alumnos]
+        conteos_30 = _conteos_asistencias(db, tenant_id, ids_alumnos, 30, hoy)
+        conteos_90 = _conteos_asistencias(db, tenant_id, ids_alumnos, 90, hoy)
+
     for alumno in alumnos:
         if probs_ml is not None:
             # ── Método ML: probabilidad de abandono del Random Forest ──
@@ -455,6 +551,10 @@ def populate_predictions(
             ctx = contexto_ml.get(alumno.id, {})
             dias_inactivo = int(ctx.get("dias_desde_ultima_asistencia", 0))
             dias_para_vencer = ctx.get("dias_para_vencer_plan")
+            # Ventanas de asistencia: ya vienen en `contexto_ml` (features), sin
+            # query extra. Habilitan la regla #2 de la recomendación.
+            asis_30 = int(ctx.get("asistencias_ultimos_30_dias", 0) or 0)
+            asis_90 = int(ctx.get("asistencias_ultimos_90_dias", 0) or 0)
             if dias_para_vencer is None:
                 proxima_date = None
                 motivo = (f"{dias_inactivo} {_plural_dias(dias_inactivo)} sin "
@@ -476,7 +576,7 @@ def populate_predictions(
             # que populate_daily_kpis): un plan con estado='activo' pero YA
             # VENCIDO no es un plan vigente. Sin este filtro daba un
             # `dias_para_vencer` negativo y contaba como "tiene plan vigente"
-            # (motivo y probabilidad equivocados).
+            # (motivo, probabilidad y recomendación equivocados).
             proxima = db.query(func.max(Suscripcion.fecha_expiracion)).filter(
                 Suscripcion.tenant_id == tenant_id,
                 Suscripcion.usuario_id == alumno.id,
@@ -485,6 +585,9 @@ def populate_predictions(
             ).scalar()
             proxima_date = proxima.date() if proxima else None
             dias_para_vencer = (proxima_date - hoy).days if proxima_date else None
+            # Ventanas de asistencia (rama heurística: se calculan pre-loop).
+            asis_30 = conteos_30.get(alumno.id, 0)
+            asis_90 = conteos_90.get(alumno.id, 0)
 
             # Heurística simple (0-100): inactividad + ausencia de plan vigente
             prob = min(dias_inactivo, 60) / 60 * 70
@@ -511,9 +614,18 @@ def populate_predictions(
         else:
             nivel = "BAJO"
 
+        # Recomendación empática/accionable: MISMA lógica en ambas ramas.
+        # `tiene_suscripcion_activa` == `dias_para_vencer is not None`
+        # (en ml/features.py: "tiene_suscripcion_activa": vence_date is not None).
+        recomendacion, reco_codigo = _recomendacion_churn(
+            nivel, dias_para_vencer is not None, dias_para_vencer,
+            asis_30, asis_90)
+        recos[reco_codigo] += 1
+
         db.add(PredictionsChurn(
             tenant_id=tenant_id, usuario_id=alumno.id,
             probabilidad_churn=prob, riesgo_nivel=nivel, motivo=motivo,
+            recomendacion=recomendacion, recomendacion_codigo=reco_codigo,
             # `estado_gestion` YA NO vive acá: es de-negocio y está en la tabla
             # propia `churn_gestion` (migración 024), que este full refresh NO
             # toca -> la gestión del admin sobrevive a cada re-poblado.
@@ -619,5 +731,7 @@ def populate_predictions(
         },
         "churn": {"total": len(alumnos), "criticos": criticos,
                   "altos": altos, "medios": medios},
+        # Desglose auditable de la recomendación emitida (1 por alumno, por código).
+        "recomendaciones": recos,
         "forecast": forecast_resp,
     }

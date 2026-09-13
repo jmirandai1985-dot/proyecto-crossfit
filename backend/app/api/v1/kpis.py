@@ -97,6 +97,8 @@ def _fila_churn(p, nombre, correo, estado_gestion, ultimo_contacto) -> dict:
         "probabilidad_churn": float(p.probabilidad_churn),
         "riesgo_nivel": p.riesgo_nivel,
         "motivo": p.motivo,
+        "recomendacion": p.recomendacion,
+        "recomendacion_codigo": p.recomendacion_codigo,
         "estado_gestion": estado_gestion,
         "fecha_proxima_renovacion": p.fecha_proxima_renovacion,
         "ultimo_contacto_automatico": ultimo_contacto,

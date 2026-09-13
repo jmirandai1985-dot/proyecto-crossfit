@@ -65,6 +65,16 @@ const fmtHace = (dias) => {
     return `hace ${n} día${n === 1 ? '' : 's'}`;
 };
 
+// Color + etiqueta por código de recomendación (los emite el backend:
+// sin_plan | critico_con_plan | caida_reciente | renovacion_proxima | sin_accion).
+const RECO_ESTILO = {
+    sin_plan: { borde: 'border-red-500', texto: 'text-red-200', etiqueta: 'Contacto personal' },
+    critico_con_plan: { borde: 'border-rose-500', texto: 'text-rose-200', etiqueta: 'Crítico con plan' },
+    caida_reciente: { borde: 'border-amber-500', texto: 'text-amber-200', etiqueta: 'Caída reciente' },
+    renovacion_proxima: { borde: 'border-sky-500', texto: 'text-sky-200', etiqueta: 'Renovación' },
+    sin_accion: { borde: 'border-emerald-600', texto: 'text-zinc-400', etiqueta: 'Sin acción' },
+};
+
 // ─── Helpers de fecha (hora local del navegador) ──────────────────────────
 const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -457,6 +467,21 @@ const AdminKpis = () => {
                                 { key: 'probabilidad_churn', label: 'Probabilidad de Abandono', render: (v) => `${Number(v).toFixed(1)}%` },
                                 { key: 'riesgo_nivel', label: 'Riesgo', render: (v) => <RiskBadge nivel={v} /> },
                                 { key: 'motivo', label: 'Motivo' },
+                                {
+                                    key: 'recomendacion', label: 'Recomendación',
+                                    render: (v, row) => {
+                                        if (!v) return <span className="text-zinc-500">—</span>;
+                                        const e = RECO_ESTILO[row.recomendacion_codigo] || RECO_ESTILO.sin_accion;
+                                        return (
+                                            <div className={`max-w-xs border-l-2 pl-2 ${e.borde}`} title={v}>
+                                                <div className={`text-[10px] font-semibold uppercase tracking-wide ${e.texto}`}>
+                                                    {e.etiqueta}
+                                                </div>
+                                                <div className="text-xs leading-snug text-zinc-300 line-clamp-2">{v}</div>
+                                            </div>
+                                        );
+                                    },
+                                },
                                 {
                                     key: 'ultimo_contacto_automatico', label: 'Último contacto',
                                     render: (v) => (v ? (
