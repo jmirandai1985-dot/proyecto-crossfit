@@ -68,6 +68,12 @@ const fmtHace = (dias) => {
     return `hace ${n} día${n === 1 ? '' : 's'}`;
 };
 
+// Texto del último contacto automático ("Inactividad · hace 3 días") o null.
+// Lo comparten la columna "Último contacto" y el modal de detalle (contactoTxt).
+const fmtUltimoContacto = (v) => (
+    v ? `${etiquetaContacto(v.tipo)} · ${fmtHace(v.hace_dias)}` : null
+);
+
 // Los estilos/etiquetas por código de recomendación viven en
 // components/kpis/recoEstilo.js (los comparte el modal de detalle).
 
@@ -516,7 +522,7 @@ const AdminKpis = () => {
                                             className="text-zinc-300"
                                             title={v.fecha ? `Enviado el ${fmtFechaCorta(v.fecha)}` : undefined}
                                         >
-                                            {etiquetaContacto(v.tipo)} · {fmtHace(v.hace_dias)}
+                                            {fmtUltimoContacto(v)}
                                         </span>
                                     ) : (
                                         <span className="text-zinc-500">Sin contacto previo</span>
