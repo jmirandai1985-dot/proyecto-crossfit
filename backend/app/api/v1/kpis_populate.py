@@ -472,10 +472,16 @@ def populate_predictions(
             # alumno (antes un 999 fijo lo marcaba CRITICO aunque fuera nuevo).
             dias_inactivo = _dias_inactividad(hoy, ultima, alumno.created_at)
 
+            # `fecha_expiracion >= hoy` (igual que ml/features.build_features y
+            # que populate_daily_kpis): un plan con estado='activo' pero YA
+            # VENCIDO no es un plan vigente. Sin este filtro daba un
+            # `dias_para_vencer` negativo y contaba como "tiene plan vigente"
+            # (motivo y probabilidad equivocados).
             proxima = db.query(func.max(Suscripcion.fecha_expiracion)).filter(
                 Suscripcion.tenant_id == tenant_id,
                 Suscripcion.usuario_id == alumno.id,
                 Suscripcion.estado == "activo",
+                func.date(Suscripcion.fecha_expiracion) >= hoy,
             ).scalar()
             proxima_date = proxima.date() if proxima else None
             dias_para_vencer = (proxima_date - hoy).days if proxima_date else None
