@@ -452,13 +452,11 @@ def populate_predictions(
             dias_para_vencer = ctx.get("dias_para_vencer_plan")
             if dias_para_vencer is None:
                 proxima_date = None
-                motivo = (f"Modelo ML (Random Forest) · {dias_inactivo} días "
-                          f"sin asistir · sin plan vigente")
+                motivo = f"{dias_inactivo} días sin asistir · sin plan vigente"
             else:
                 dias_para_vencer = int(dias_para_vencer)
                 proxima_date = hoy + timedelta(days=dias_para_vencer)
-                motivo = (f"Modelo ML (Random Forest) · {dias_inactivo} días "
-                          f"sin asistir · plan vence en "
+                motivo = (f"{dias_inactivo} días sin asistir · plan vence en "
                           f"{dias_para_vencer} días")
         else:
             # ── Fallback: heurística original (no hay modelo entrenado) ──
@@ -534,9 +532,7 @@ def populate_predictions(
                 intervalo_confianza=95,
                 alumnos_predicho=max(0, round(alumnos_activos_hoy * factor)),
                 tasa_crecimiento=round((factor - 1) * 100, 2),
-                notas=(f"Modelo ML (LinearRegression: tendencia + "
-                       f"estacionalidad) · último mes observado "
-                       f"{ultimo_mes} CLP"),
+                notas=f"Último mes observado: {ultimo_mes} CLP",
             ))
         db.commit()
         forecast_resp = {

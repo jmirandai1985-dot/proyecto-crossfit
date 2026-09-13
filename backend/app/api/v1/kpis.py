@@ -15,6 +15,7 @@ from app.models.daily_kpis import DailyKpi
 from app.models.monthly_kpis import MonthlyKpi
 from app.models.predictions_churn import PredictionsChurn
 from app.models.predictions_forecast import PredictionsForecast
+from app.models.usuario import Usuario
 
 router = APIRouter(prefix="/api/v1/kpis", tags=["KPIs"])
 
@@ -96,30 +97,43 @@ def get_predictions_churn(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """Predicciones de CHURN del box (array + conteos por nivel)."""
+    """Predicciones de CHURN del box (array + conteos por nivel).
+
+    Cada fila trae el NOMBRE del alumno (join con `usuarios`) para que el panel
+    admin no tenga que mostrar el `usuario_id` crudo;
+    `alumno_nombre`/`alumno_correo` son `None` si el alumno ya no existe.
+    """
     tenant_id = current_user["tenant_id"]
 
-    predicciones = db.query(PredictionsChurn).filter(
-        PredictionsChurn.tenant_id == tenant_id
+    # outerjoin: si el alumno fue borrado, la predicción igual se devuelve
+    # (con nombre None) en vez de desaparecer de la lista.
+    filas = db.query(
+        PredictionsChurn, Usuario.nombre, Usuario.correo,
+    ).outerjoin(
+        Usuario, Usuario.id == PredictionsChurn.usuario_id,
+    ).filter(
+        PredictionsChurn.tenant_id == tenant_id,
     ).all()
 
-    criticos = sum(1 for p in predicciones if p.riesgo_nivel == "CRITICO")
-    altos = sum(1 for p in predicciones if p.riesgo_nivel == "ALTO")
-    medios = sum(1 for p in predicciones if p.riesgo_nivel == "MEDIO")
+    criticos = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "CRITICO")
+    altos = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "ALTO")
+    medios = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "MEDIO")
 
     return {
         "predicciones": [
             {
                 "usuario_id": p.usuario_id,
+                "alumno_nombre": nombre,
+                "alumno_correo": correo,
                 "probabilidad_churn": float(p.probabilidad_churn),
                 "riesgo_nivel": p.riesgo_nivel,
                 "motivo": p.motivo,
                 "estado_gestion": p.estado_gestion,
                 "fecha_proxima_renovacion": p.fecha_proxima_renovacion,
             }
-            for p in predicciones
+            for p, nombre, correo in filas
         ],
-        "total": len(predicciones),
+        "total": len(filas),
         "criticos": criticos,
         "altos": altos,
         "medios": medios,

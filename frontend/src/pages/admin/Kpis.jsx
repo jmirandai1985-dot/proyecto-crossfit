@@ -345,7 +345,17 @@ const AdminKpis = () => {
                         </h2>
                         <DataTable
                             columns={[
-                                { key: 'usuario_id', label: 'Alumno (ID)' },
+                                {
+                                    key: 'alumno_nombre', label: 'Alumno',
+                                    render: (v, row) => (
+                                        <div className="leading-tight">
+                                            <div className="text-white">{v || `Alumno #${row.usuario_id}`}</div>
+                                            <div className="text-[10px] text-zinc-500">
+                                                #{row.usuario_id}{row.alumno_correo ? ` · ${row.alumno_correo}` : ''}
+                                            </div>
+                                        </div>
+                                    ),
+                                },
                                 { key: 'probabilidad_churn', label: 'Probabilidad de Abandono', render: (v) => `${Number(v).toFixed(1)}%` },
                                 { key: 'riesgo_nivel', label: 'Riesgo', render: (v) => <RiskBadge nivel={v} /> },
                                 { key: 'motivo', label: 'Motivo' },
