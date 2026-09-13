@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
     BarChart, Bar, AreaChart, Area, LineChart, Line,
@@ -24,6 +24,46 @@ const TABS = [
 
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
     'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+// ─── Gestión prescriptiva del riesgo de abandono (pestaña BI) ─────────────
+// Estados aceptados por PUT /api/v1/kpis/churn/{usuario_id}/estado.
+const ESTADOS_GESTION = ['PENDIENTE', 'CONTACTADO', 'RECUPERADO'];
+
+// Etiquetas legibles para el `tipo` del último correo automático
+// (`ultimo_contacto_automatico.tipo`, tal como se guarda en notificaciones_enviadas).
+const ETIQUETA_CONTACTO = {
+    inactividad: 'Inactividad',
+    renovacion_plan: 'Renovación de plan',
+    vencimiento: 'Plan por vencer',
+    vencimiento_inminente: 'Plan por vencer',
+    ultimo_credito: 'Último crédito',
+    sin_creditos: 'Sin créditos',
+    reactivacion: 'Reactivación',
+    cumplimiento: 'Cumplimiento',
+    acompanamiento: 'Acompañamiento',
+    bienvenida: 'Bienvenida',
+    activacion: 'Activación',
+    bienvenida_activacion: 'Bienvenida y activación',
+    confirmacion_renovacion: 'Confirmación de renovación',
+    confirmacion_plan: 'Confirmación de plan',
+    confirmacion_pedido: 'Confirmación de pedido',
+};
+
+const etiquetaContacto = (tipo) => {
+    const t = String(tipo || '');
+    if (!t) return 'Contacto';
+    if (ETIQUETA_CONTACTO[t]) return ETIQUETA_CONTACTO[t];
+    if (t.startsWith('hito_racha')) return 'Hito de racha';
+    // Fallback: snake_case → "Texto legible"
+    return t.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+};
+
+// "hoy" / "hace 1 día" / "hace 3 días"
+const fmtHace = (dias) => {
+    const n = Number(dias);
+    if (!Number.isFinite(n) || n <= 0) return 'hoy';
+    return `hace ${n} día${n === 1 ? '' : 's'}`;
+};
 
 // ─── Helpers de fecha (hora local del navegador) ──────────────────────────
 const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -62,6 +102,23 @@ const AdminKpis = () => {
     const [churn, setChurn] = useState(null);
     const [forecast, setForecast] = useState([]);
     const [mrrBi, setMrrBi] = useState(null);
+
+    // ─── BI: gestión por fila (dropdown) + toast ─────────────────────────
+    const [gestionando, setGestionando] = useState(null); // usuario_id en curso
+    const [toast, setToast] = useState(null);             // { mensaje, tipo }
+    const toastTimer = useRef(null);
+
+    // Toast breve auto-ocultable. El proyecto NO usa librería de toasts
+    // (el resto de páginas recurre a `alert()`), así que acá va uno propio
+    // y no bloqueante. Si algún día se agrega react-hot-toast, se reemplaza
+    // sólo esta función y el bloque de render del toast.
+    const mostrarToast = (mensaje, tipo = 'ok') => {
+        setToast({ mensaje, tipo });
+        clearTimeout(toastTimer.current);
+        toastTimer.current = setTimeout(() => setToast(null), 3500);
+    };
+
+    useEffect(() => () => clearTimeout(toastTimer.current), []);
 
     // ─── DIARIO: últimos 7 días ──────────────────────────────────────────
     // El job n8n puebla el DÍA ANTERIOR (02:30), por eso la serie termina ayer.
@@ -149,6 +206,47 @@ const AdminKpis = () => {
         else if (activeTab === 'mensual') cargarMensual();
         else cargarBi();
     }, [activeTab, cargarDiario, cargarMensual, cargarBi]);
+
+    /**
+     * PUT /api/v1/kpis/churn/{usuario_id}/estado — cambia la gestión de UNA fila.
+     *
+     * El <select> es controlado y su `value` sale del estado `churn`: si la
+     * llamada falla NO tocamos el estado, React re-renderiza con el valor viejo
+     * y el select vuelve solo al estado anterior (no hace falta revertir a mano).
+     * El token del admin lo agrega el interceptor de `services/api`.
+     */
+    const cambiarGestion = async (row, nuevoEstado) => {
+        const anterior = row.estado_gestion || 'PENDIENTE';
+        if (nuevoEstado === anterior) return;
+
+        setGestionando(row.usuario_id);
+        try {
+            const { data } = await api.put(
+                `/api/v1/kpis/churn/${row.usuario_id}/estado`,
+                { estado_gestion: nuevoEstado },
+            );
+            // El PUT devuelve la MISMA forma de fila que el GET (+ estado_anterior):
+            // se actualiza sólo esa fila, sin recargar toda la tabla.
+            const { estado_anterior, ...fila } = data;
+            setChurn((prev) => (prev ? {
+                ...prev,
+                predicciones: (prev.predicciones || []).map(
+                    (p) => (p.usuario_id === row.usuario_id ? { ...p, ...fila } : p),
+                ),
+            } : prev));
+            mostrarToast(
+                `${fila.alumno_nombre || `Alumno #${row.usuario_id}`}: `
+                + `${estado_anterior || anterior} → ${fila.estado_gestion}`,
+            );
+        } catch (err) {
+            mostrarToast(
+                err.response?.data?.detail || 'No se pudo guardar la gestión. Reintentá.',
+                'error',
+            );
+        } finally {
+            setGestionando(null);
+        }
+    };
 
     const dia = serieDiaria.length ? serieDiaria[serieDiaria.length - 1] : null;
     const mes = serieMensual.length ? serieMensual[serieMensual.length - 1] : null;
@@ -359,7 +457,40 @@ const AdminKpis = () => {
                                 { key: 'probabilidad_churn', label: 'Probabilidad de Abandono', render: (v) => `${Number(v).toFixed(1)}%` },
                                 { key: 'riesgo_nivel', label: 'Riesgo', render: (v) => <RiskBadge nivel={v} /> },
                                 { key: 'motivo', label: 'Motivo' },
-                                { key: 'estado_gestion', label: 'Gestión' },
+                                {
+                                    key: 'ultimo_contacto_automatico', label: 'Último contacto',
+                                    render: (v) => (v ? (
+                                        <span
+                                            className="text-zinc-300"
+                                            title={v.fecha ? `Enviado el ${fmtFechaCorta(v.fecha)}` : undefined}
+                                        >
+                                            {etiquetaContacto(v.tipo)} · {fmtHace(v.hace_dias)}
+                                        </span>
+                                    ) : (
+                                        <span className="text-zinc-500">Sin contacto previo</span>
+                                    )),
+                                },
+                                {
+                                    key: 'estado_gestion', label: 'Gestión',
+                                    render: (v, row) => (
+                                        <div className="flex items-center gap-2">
+                                            <select
+                                                value={v || 'PENDIENTE'}
+                                                disabled={gestionando === row.usuario_id}
+                                                onChange={(e) => cambiarGestion(row, e.target.value)}
+                                                aria-label={`Estado de gestión de ${row.alumno_nombre || `alumno #${row.usuario_id}`}`}
+                                                className="bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-white disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:border-orange-500"
+                                            >
+                                                {ESTADOS_GESTION.map((op) => (
+                                                    <option key={op} value={op}>{op}</option>
+                                                ))}
+                                            </select>
+                                            {gestionando === row.usuario_id && (
+                                                <span className="text-[10px] text-zinc-400 animate-pulse">guardando…</span>
+                                            )}
+                                        </div>
+                                    ),
+                                },
                                 { key: 'fecha_proxima_renovacion', label: 'Próx. renovación', render: (v) => v || '—' },
                             ]}
                             data={churn?.predicciones || []}
@@ -367,6 +498,21 @@ const AdminKpis = () => {
                     </div>
                 )}
             </div>
+
+            {/* Toast breve de confirmación / error (no bloqueante) */}
+            {toast && (
+                <div
+                    role="status"
+                    aria-live="polite"
+                    className={`fixed bottom-4 right-4 z-50 max-w-sm rounded-lg border px-4 py-3 text-sm font-medium shadow-lg ${
+                        toast.tipo === 'error'
+                            ? 'bg-red-950 border-red-600 text-red-200'
+                            : 'bg-emerald-950 border-emerald-600 text-emerald-200'
+                    }`}
+                >
+                    {toast.mensaje}
+                </div>
+            )}
         </Layout>
     );
 };
