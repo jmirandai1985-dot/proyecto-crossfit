@@ -387,14 +387,26 @@ def populate_predictions(
     except ImportError as e:
         logger.warning("ml/ no disponible (%s): se usa la heurística", e)
     else:
+        # Carga INDEPENDIENTE por modelo (mismo criterio de independencia que
+        # POST /api/v1/ml/reentrenar): si falla la deserialización del churn
+        # (pickle incompatible, tabla ausente, etc.) el modelo de forecast se
+        # sigue usando, y viceversa.
         try:
             modelo_churn, meta_churn = cargar_modelo(db, tenant_id, "churn")
+        except Exception as e:   # pickle incompatible, tabla ausente, etc.
+            db.rollback()   # por si el error dejó la sesión a medio usar
+            logger.warning("no se pudo cargar el modelo de churn (%s): "
+                           "se usa la heurística", e)
+            modelo_churn, meta_churn = None, {}
+
+        try:
             modelo_forecast, meta_forecast = cargar_modelo(
                 db, tenant_id, "forecast")
-        except Exception as e:   # pickle incompatible, tabla ausente, etc.
-            logger.warning("no se pudieron cargar los modelos ML (%s): "
+        except Exception as e:
+            db.rollback()
+            logger.warning("no se pudo cargar el modelo de forecast (%s): "
                            "se usa la heurística", e)
-            modelo_churn = modelo_forecast = None
+            modelo_forecast, meta_forecast = None, {}
 
     metodo_churn = "ml" if modelo_churn is not None else "heuristica"
     metodo_forecast = "ml" if modelo_forecast is not None else "heuristica"
