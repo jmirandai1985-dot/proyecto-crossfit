@@ -4,7 +4,7 @@ from typing import Optional
 from datetime import datetime, timezone
 from pydantic import BaseModel
 from app.db.database import get_db
-from app.models.suscripcion import Suscripcion
+from app.models.suscripcion import EstadoSuscripcion, Suscripcion
 from app.models.transaccion_financiera import TransaccionFinanciera
 from app.core.dependencies import get_current_admin
 from app.core.rate_limit import limiter, LIMIT_CRITICO
@@ -17,7 +17,10 @@ class SuscripcionCreate(BaseModel):
     tenant_id: int
     usuario_id: int
     plan_id: int
-    estado: str = "activo"
+    # Tipado con el ENUM (no `str`): un label inválido da 422 en el borde, en vez
+    # de llegar a la BD y explotar con un 500. Los strings válidos ("activo", ...)
+    # se coercionan al miembro del enum.
+    estado: EstadoSuscripcion = EstadoSuscripcion.activo
     creditos_totales: Optional[int] = None
     creditos_disponibles: Optional[int] = None
     fecha_inicio: Optional[str] = None
