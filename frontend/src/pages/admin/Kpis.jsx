@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import {
     TrendingUp, Users, UserPlus, Activity, DollarSign, Percent,
-    CalendarDays, TriangleAlert, Banknote, ShoppingCart, Gauge, Target,
+    CalendarDays, TriangleAlert, Banknote, ShoppingCart, Gauge, Target, Eye,
 } from 'lucide-react';
 import Layout from '../../components/Layout';
 import api from '../../services/api';
@@ -15,6 +15,8 @@ import { KpiCard } from '../../components/kpis/KpiCard';
 import { ChartCard } from '../../components/kpis/ChartCard';
 import { DataTable } from '../../components/kpis/DataTable';
 import { RiskBadge } from '../../components/kpis/RiskBadge';
+import { RecomendacionModal } from '../../components/kpis/RecomendacionModal';
+import { estiloReco } from '../../components/kpis/recoEstilo';
 
 const TABS = [
     { id: 'diario', label: 'Diario' },
@@ -65,18 +67,8 @@ const fmtHace = (dias) => {
     return `hace ${n} día${n === 1 ? '' : 's'}`;
 };
 
-// Color + etiqueta por código de recomendación (los emite el backend:
-// sin_plan | critico_con_plan | caida_reciente | alto_sin_causa_clara |
-// renovacion_proxima | medio_sin_senales | sin_accion).
-const RECO_ESTILO = {
-    sin_plan: { borde: 'border-red-500', texto: 'text-red-200', etiqueta: 'Contacto personal' },
-    critico_con_plan: { borde: 'border-rose-500', texto: 'text-rose-200', etiqueta: 'Crítico con plan' },
-    caida_reciente: { borde: 'border-amber-500', texto: 'text-amber-200', etiqueta: 'Caída reciente' },
-    alto_sin_causa_clara: { borde: 'border-orange-500', texto: 'text-orange-200', etiqueta: 'Chequeo preventivo' },
-    renovacion_proxima: { borde: 'border-sky-500', texto: 'text-sky-200', etiqueta: 'Renovación' },
-    medio_sin_senales: { borde: 'border-yellow-500', texto: 'text-yellow-200', etiqueta: 'Seguimiento sugerido' },
-    sin_accion: { borde: 'border-emerald-600', texto: 'text-zinc-400', etiqueta: 'Sin acción' },
-};
+// Los estilos/etiquetas por código de recomendación viven en
+// components/kpis/recoEstilo.js (los comparte el modal de detalle).
 
 // ─── Helpers de fecha (hora local del navegador) ──────────────────────────
 const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -120,6 +112,8 @@ const AdminKpis = () => {
     const [gestionando, setGestionando] = useState(null); // usuario_id en curso
     const [toast, setToast] = useState(null);             // { mensaje, tipo }
     const toastTimer = useRef(null);
+    // Fila cuyo detalle de recomendación se muestra en el modal (null = cerrado).
+    const [detalleReco, setDetalleReco] = useState(null);
 
     // Toast breve auto-ocultable. El proyecto NO usa librería de toasts
     // (el resto de páginas recurre a `alert()`), así que acá va uno propio
@@ -474,11 +468,22 @@ const AdminKpis = () => {
                                     key: 'recomendacion', label: 'Recomendación',
                                     render: (v, row) => {
                                         if (!v) return <span className="text-zinc-500">—</span>;
-                                        const e = RECO_ESTILO[row.recomendacion_codigo] || RECO_ESTILO.sin_accion;
+                                        const e = estiloReco(row.recomendacion_codigo);
                                         return (
                                             <div className={`max-w-xs border-l-2 pl-2 ${e.borde}`} title={v}>
-                                                <div className={`text-[10px] font-semibold uppercase tracking-wide ${e.texto}`}>
-                                                    {e.etiqueta}
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <div className={`text-[10px] font-semibold uppercase tracking-wide ${e.texto}`}>
+                                                        {e.etiqueta}
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setDetalleReco(row)}
+                                                        title="Ver recomendación completa"
+                                                        aria-label={`Ver recomendación completa de ${row.alumno_nombre || `alumno #${row.usuario_id}`}`}
+                                                        className="shrink-0 rounded p-0.5 text-zinc-400 hover:bg-zinc-700/60 hover:text-orange-400"
+                                                    >
+                                                        <Eye className="h-3.5 w-3.5" />
+                                                    </button>
                                                 </div>
                                                 <div className="text-xs leading-snug text-zinc-300 line-clamp-2">{v}</div>
                                             </div>
@@ -526,6 +531,17 @@ const AdminKpis = () => {
                     </div>
                 )}
             </div>
+
+            {/* Modal con el detalle completo de la recomendación (icono 👁 de la fila) */}
+            {detalleReco && (
+                <RecomendacionModal
+                    fila={detalleReco}
+                    onClose={() => setDetalleReco(null)}
+                    contactoTxt={fmtUltimoContacto(detalleReco.ultimo_contacto_automatico)}
+                    renovacionTxt={detalleReco.fecha_proxima_renovacion
+                        ? fmtFechaCorta(detalleReco.fecha_proxima_renovacion) : null}
+                />
+            )}
 
             {/* Toast breve de confirmación / error (no bloqueante) */}
             {toast && (
