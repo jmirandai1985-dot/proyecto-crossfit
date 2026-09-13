@@ -7,6 +7,7 @@ import {
 import {
     TrendingUp, Users, UserPlus, Activity, DollarSign, Percent,
     CalendarDays, TriangleAlert, Banknote, ShoppingCart, Gauge, Target, Eye,
+    Sparkles,
 } from 'lucide-react';
 import Layout from '../../components/Layout';
 import api from '../../services/api';
@@ -416,6 +417,24 @@ const AdminKpis = () => {
                 {/* ══ TAB BI (Inteligencia de Negocio) ══ */}
                 {!loading && !error && !sinDatos && activeTab === 'bi' && (
                     <div className="space-y-6">
+                        {/* ── Insights automáticos (resumen ejecutivo del backend) ── */}
+                        {churn?.insight?.mensajes?.length > 0 && (
+                            <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-5">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Sparkles className="w-5 h-5 text-orange-500" />
+                                    <h2 className="font-semibold text-white">Insights automáticos</h2>
+                                </div>
+                                <ul className="space-y-2">
+                                    {churn.insight.mensajes.map((m, i) => (
+                                        <li key={i} className="flex gap-2 text-sm text-zinc-200">
+                                            <span className="text-orange-500 shrink-0">•</span>
+                                            <span>{m}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                             <KpiCard label="Abandono Crítico" value={churn?.criticos ?? 0} icon={TriangleAlert} color="border-red-500" />
                             <KpiCard label="Riesgo alto" value={churn?.altos ?? 0} icon={TriangleAlert} color="border-orange-500" />

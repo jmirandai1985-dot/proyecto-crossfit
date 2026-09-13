@@ -6,16 +6,18 @@ vive en tabla propia para que el full refresh de la data mart no la borre).
 
 Todos filtran por `tenant_id` del token JWT (nunca por query/body).
 """
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.core.dependencies import get_current_admin, get_current_user
+from app.models.asistencia import Asistencia
 from app.models.churn_gestion import ChurnGestion
 from app.models.daily_kpis import DailyKpi
 from app.models.monthly_kpis import MonthlyKpi
@@ -103,6 +105,128 @@ def _fila_churn(p, nombre, correo, estado_gestion, ultimo_contacto) -> dict:
         "fecha_proxima_renovacion": p.fecha_proxima_renovacion,
         "ultimo_contacto_automatico": ultimo_contacto,
     }
+
+
+# ── Insights automáticos (resumen ejecutivo del churn) ───────────────────────
+# Pool fijo de reglas DETERMINISTAS (sin NLP ni modelos nuevos): agrupan datos
+# que el data mart ya tiene y devuelven 1-2 frases accionables. Se incluyen las
+# métricas que originan cada frase (auditable) y, si nada supera las guardas,
+# un mensaje neutral.
+INSIGHT_NEUTRAL = "Sin alertas relevantes esta semana."
+
+# Buckets de inactividad (días sin asistir) para la concentración del crítico.
+INSIGHT_BUCKETS = (
+    (0, 30, "0-30", "hasta 1 mes"),
+    (31, 60, "31-60", "entre 1 y 2 meses"),
+    (61, 90, "61-90", "entre 2 y 3 meses"),
+    (91, None, "+90", "más de 3 meses"),
+)
+# Guardas: sin estos mínimos el dato no es representativo (evita "insights"
+# construidos sobre 1-2 alumnos).
+INSIGHT_MIN_CRITICOS = 3
+INSIGHT_MIN_PCT = 40
+
+
+def _dias_inactividad_por_alumno(db: Session, tenant_id: int, ids: list) -> dict:
+    """{usuario_id: días sin asistir} con UNA query agregada (sin N+1).
+
+    Misma fórmula que `kpis_populate._dias_inactividad` y `ml.features`:
+    días desde la última asistencia y, si nunca asistió, desde el registro.
+    """
+    if not ids:
+        return {}
+    referencia = func.coalesce(
+        func.max(Asistencia.fecha), func.date(Usuario.created_at))
+    filas = db.query(Usuario.id, referencia).outerjoin(
+        Asistencia,
+        (Asistencia.usuario_id == Usuario.id)
+        & (Asistencia.tenant_id == Usuario.tenant_id),
+    ).filter(
+        Usuario.tenant_id == tenant_id,
+        Usuario.id.in_(ids),
+    ).group_by(Usuario.id, Usuario.created_at).all()
+
+    hoy = date.today()
+    return {uid: max(0, (hoy - ref).days) for uid, ref in filas if ref}
+
+
+def _generar_insight(filas: list, dias_por_alumno: dict) -> dict:
+    """Resumen ejecutivo (1-2 frases) con reglas deterministas.
+
+    `filas`: filas ya armadas por `_fila_churn` (usa riesgo_nivel y
+    fecha_proxima_renovacion). `dias_por_alumno`: ver _dias_inactividad_por_alumno.
+
+    Reglas (en orden; se agrega la frase sólo si pasa su guarda):
+      A. concentracion_critico: dónde se concentra el riesgo CRITICO por rango de
+         inactividad (requiere >= 3 críticos con dato y un bucket top >= 40%).
+      B. riesgo_con_plan: cuántos ALTO/CRITICO tienen plan vigente y cuántos
+         vencen en <= 7 días (basta con 1).
+    Sin reglas activas -> mensaje neutral.
+    """
+    mensajes, reglas = [], []
+    criticos = [f for f in filas if f.get("riesgo_nivel") == "CRITICO"]
+
+    # ── Métricas base (siempre, para que el payload sea auditable) ──
+    buckets = {clave: 0 for _lo, _hi, clave, _txt in INSIGHT_BUCKETS}
+    conocidos = 0
+    for f in criticos:
+        dias = dias_por_alumno.get(f["usuario_id"])
+        if dias is None:
+            continue
+        conocidos += 1
+        for lo, hi, clave, _txt in INSIGHT_BUCKETS:
+            if dias >= lo and (hi is None or dias <= hi):
+                buckets[clave] += 1
+                break
+
+    con_plan = [f for f in filas
+                if f.get("riesgo_nivel") in ("ALTO", "CRITICO")
+                and f.get("fecha_proxima_renovacion")]
+    limite = date.today() + timedelta(days=7)
+    vencen = [f for f in con_plan if f["fecha_proxima_renovacion"] <= limite]
+
+    metricas = {
+        "criticos": len(criticos),
+        "criticos_con_dato": conocidos,
+        "buckets": buckets,
+        "alto_critico_con_plan": len(con_plan),
+        "vencen_7d": len(vencen),
+    }
+
+    # ── A) Concentración del riesgo crítico por inactividad ──
+    if conocidos >= INSIGHT_MIN_CRITICOS:
+        # Desempate determinista: más alumnos y, si empatan, el rango mayor.
+        orden = [b[2] for b in INSIGHT_BUCKETS]
+        top_clave, top_n = max(
+            buckets.items(), key=lambda kv: (kv[1], orden.index(kv[0])))
+        pct = round(top_n / conocidos * 100)
+        metricas["top_bucket"] = top_clave
+        metricas["top_pct"] = pct
+        if top_n > 0 and pct >= INSIGHT_MIN_PCT:
+            rango_txt = next(t for _lo, _hi, c, t in INSIGHT_BUCKETS
+                             if c == top_clave)
+            mensajes.append(
+                f"El {pct}% del riesgo crítico ({top_n} de {conocidos}) "
+                f"lleva {rango_txt} sin asistir.")
+            reglas.append("concentracion_critico")
+
+    # ── B) Riesgo alto/crítico con plan vigente ──
+    if con_plan:
+        n, m = len(con_plan), len(vencen)
+        texto = (f"Hay {n} {'alumno' if n == 1 else 'alumnos'} con plan activo "
+                 f"y riesgo alto o crítico")
+        if vencen:
+            texto += (f": {m} {'vence' if m == 1 else 'vencen'} en 7 días o "
+                      f"menos — conviene revisarlos antes de que venza el plan.")
+        else:
+            texto += " — conviene revisarlos antes de que venza su plan."
+        mensajes.append(texto)
+        reglas.append("riesgo_con_plan")
+
+    if not mensajes:
+        mensajes = [INSIGHT_NEUTRAL]
+
+    return {"mensajes": mensajes, "reglas": reglas, "metricas": metricas}
 
 
 # ── 1) GET /api/v1/kpis/diario (pestaña DIARIA) ──────────────────────────────
@@ -206,24 +330,29 @@ def get_predictions_churn(
     ids = [p.usuario_id for p, _n, _c in filas]
     gestion = _gestion_por_alumno(db, tenant_id, ids)
     contactos = _ultimo_contacto_por_alumno(db, tenant_id, ids)
+    dias_inactivo = _dias_inactividad_por_alumno(db, tenant_id, ids)
 
     criticos = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "CRITICO")
     altos = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "ALTO")
     medios = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "MEDIO")
 
+    predicciones = [
+        _fila_churn(
+            p, nombre, correo,
+            gestion.get(p.usuario_id, ESTADO_GESTION_DEFAULT),
+            contactos.get(p.usuario_id),
+        )
+        for p, nombre, correo in filas
+    ]
+
     return {
-        "predicciones": [
-            _fila_churn(
-                p, nombre, correo,
-                gestion.get(p.usuario_id, ESTADO_GESTION_DEFAULT),
-                contactos.get(p.usuario_id),
-            )
-            for p, nombre, correo in filas
-        ],
+        "predicciones": predicciones,
         "total": len(filas),
         "criticos": criticos,
         "altos": altos,
         "medios": medios,
+        # Resumen ejecutivo (1-2 frases + métricas que lo originan).
+        "insight": _generar_insight(predicciones, dias_inactivo),
     }
 
 
