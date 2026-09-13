@@ -10,6 +10,7 @@ NOTA: `tenant_id` fijo en 1 (hoy hay un solo box). Parametrizable luego.
 NOTA 2: la consigna venía truncada; los cálculos se completaron con el esquema real.
 """
 import calendar
+import logging
 import secrets
 from datetime import date, timedelta
 
@@ -32,6 +33,8 @@ from app.models.asistencia import Asistencia
 from app.models.transaccion_financiera import TransaccionFinanciera
 
 router = APIRouter(prefix="/api/v1/kpis", tags=["KPIs - Populate"])
+
+logger = logging.getLogger(__name__)
 
 TENANT_ID = 1
 ESTADOS_CANCELADA = ("cancelled", "cancelada")
@@ -371,38 +374,110 @@ def populate_predictions(
         Usuario.estado == "activo",
     ).all()
 
+    # ── Modelos ML entrenados (opcionales) ───────────────────────────────────
+    # IMPORT PEREZOSO a propósito: si el paquete `ml/` no está disponible (p.ej.
+    # no se instaló scikit-learn), el endpoint NO se rompe: cae a la heurística.
+    modelo_churn = modelo_forecast = None
+    meta_churn, meta_forecast = {}, {}
+    ml_features = ml_entrenar = None
+    try:
+        from ml import entrenar as ml_entrenar
+        from ml import features as ml_features
+        from ml.persistencia import cargar_modelo
+    except ImportError as e:
+        logger.warning("ml/ no disponible (%s): se usa la heurística", e)
+    else:
+        try:
+            modelo_churn, meta_churn = cargar_modelo(db, tenant_id, "churn")
+            modelo_forecast, meta_forecast = cargar_modelo(
+                db, tenant_id, "forecast")
+        except Exception as e:   # pickle incompatible, tabla ausente, etc.
+            logger.warning("no se pudieron cargar los modelos ML (%s): "
+                           "se usa la heurística", e)
+            modelo_churn = modelo_forecast = None
+
+    metodo_churn = "ml" if modelo_churn is not None else "heuristica"
+    metodo_forecast = "ml" if modelo_forecast is not None else "heuristica"
+    logger.info("populate/predictions: metodo_churn=%s metodo_forecast=%s",
+                metodo_churn, metodo_forecast)
+
     # ── 3.1) CHURN ──
     db.query(PredictionsChurn).filter(
         PredictionsChurn.tenant_id == tenant_id).delete()
 
     criticos = altos = medios = 0
+
+    # Con modelo ML se calculan las features de TODOS los alumnos de una vez
+    # (`build_features` = 5 queries agregadas; `features_alumno` sería ~6 por
+    # alumno) y se predice en lote. Mismas columnas/criterio que el entreno.
+    probs_ml = contexto_ml = None
+    if modelo_churn is not None:
+        df_ml = ml_features.build_features(db, tenant_id, hoy)
+        # pandas convierte los nulos de la columna a NaN (float); se normaliza
+        # a None para que la rama "sin plan vigente" sea inequívoca.
+        contexto_ml = {}
+        for r in df_ml.to_dict(orient="records"):
+            dpv = r["dias_para_vencer_plan"]
+            if isinstance(dpv, float) and dpv != dpv:   # NaN != NaN
+                r["dias_para_vencer_plan"] = None
+            contexto_ml[r["usuario_id"]] = r
+        X_ml = df_ml[ml_features.FEATURE_COLS].copy()
+        # Mismas transformaciones que en el entrenamiento:
+        # `-1` = no tiene plan vigente (RandomForest no acepta NaN).
+        X_ml["dias_para_vencer_plan"] = (
+            X_ml["dias_para_vencer_plan"].fillna(-1).astype(int))
+        X_ml["tiene_suscripcion_activa"] = (
+            X_ml["tiene_suscripcion_activa"].astype(int))
+        probs_ml = dict(zip(df_ml["usuario_id"],
+                            modelo_churn.predict_proba(X_ml)[:, 1]))
+
     for alumno in alumnos:
-        ultima = _ultima_asistencia(db, tenant_id, alumno.id)
-        # BUGFIX 999: sin asistencias se mide desde la fecha de registro del
-        # alumno (antes un 999 fijo lo marcaba CRITICO aunque fuera nuevo).
-        dias_inactivo = _dias_inactividad(hoy, ultima, alumno.created_at)
-
-        proxima = db.query(func.max(Suscripcion.fecha_expiracion)).filter(
-            Suscripcion.tenant_id == tenant_id,
-            Suscripcion.usuario_id == alumno.id,
-            Suscripcion.estado == "activo",
-        ).scalar()
-        proxima_date = proxima.date() if proxima else None
-        dias_para_vencer = (proxima_date - hoy).days if proxima_date else None
-
-        # Heurística simple (0-100): inactividad + ausencia de plan vigente
-        prob = min(dias_inactivo, 60) / 60 * 70
-        if dias_para_vencer is None:
-            prob += 20
-            motivo = f"Sin suscripción activa · {dias_inactivo} días sin asistir"
-        elif dias_para_vencer <= 7:
-            prob += 10
-            motivo = (f"{dias_inactivo} días sin asistir · "
-                      f"plan vence en {dias_para_vencer} días")
+        if probs_ml is not None:
+            # ── Método ML: probabilidad de abandono del Random Forest ──
+            prob = round(float(probs_ml.get(alumno.id, 0.0)) * 100, 2)
+            ctx = contexto_ml.get(alumno.id, {})
+            dias_inactivo = int(ctx.get("dias_desde_ultima_asistencia", 0))
+            dias_para_vencer = ctx.get("dias_para_vencer_plan")
+            if dias_para_vencer is None:
+                proxima_date = None
+                motivo = (f"Modelo ML (Random Forest) · {dias_inactivo} días "
+                          f"sin asistir · sin plan vigente")
+            else:
+                dias_para_vencer = int(dias_para_vencer)
+                proxima_date = hoy + timedelta(days=dias_para_vencer)
+                motivo = (f"Modelo ML (Random Forest) · {dias_inactivo} días "
+                          f"sin asistir · plan vence en "
+                          f"{dias_para_vencer} días")
         else:
-            motivo = f"{dias_inactivo} días sin asistir"
-        prob = round(min(prob, 100), 2)
+            # ── Fallback: heurística original (no hay modelo entrenado) ──
+            ultima = _ultima_asistencia(db, tenant_id, alumno.id)
+            # BUGFIX 999: sin asistencias se mide desde la fecha de registro del
+            # alumno (antes un 999 fijo lo marcaba CRITICO aunque fuera nuevo).
+            dias_inactivo = _dias_inactividad(hoy, ultima, alumno.created_at)
 
+            proxima = db.query(func.max(Suscripcion.fecha_expiracion)).filter(
+                Suscripcion.tenant_id == tenant_id,
+                Suscripcion.usuario_id == alumno.id,
+                Suscripcion.estado == "activo",
+            ).scalar()
+            proxima_date = proxima.date() if proxima else None
+            dias_para_vencer = (proxima_date - hoy).days if proxima_date else None
+
+            # Heurística simple (0-100): inactividad + ausencia de plan vigente
+            prob = min(dias_inactivo, 60) / 60 * 70
+            if dias_para_vencer is None:
+                prob += 20
+                motivo = (f"Sin suscripción activa · {dias_inactivo} días "
+                          f"sin asistir")
+            elif dias_para_vencer <= 7:
+                prob += 10
+                motivo = (f"{dias_inactivo} días sin asistir · "
+                          f"plan vence en {dias_para_vencer} días")
+            else:
+                motivo = f"{dias_inactivo} días sin asistir"
+            prob = round(min(prob, 100), 2)
+
+        # ── Mapeo común de nivel de riesgo (mismos umbrales en ambos métodos) ──
         if prob >= 70:
             nivel, criticos = "CRITICO", criticos + 1
         elif prob >= 50:
@@ -419,26 +494,9 @@ def populate_predictions(
         ))
     db.commit()
 
-    # ── 3.2) FORECAST (proyección lineal simple de ingresos netos) ──
+    # ── 3.2) FORECAST de ingresos netos ──
     db.query(PredictionsForecast).filter(
         PredictionsForecast.tenant_id == tenant_id).delete()
-
-    mes_actual = hoy.replace(day=1)
-    historico = []
-    for i in range(6, 0, -1):
-        y, m = _mes_desplazado(mes_actual.year, mes_actual.month, -i)
-        ini = date(y, m, 1)
-        f = date(y, m, calendar.monthrange(y, m)[1])
-        neto = _sum_ingresos(db, tenant_id, ini, f) - _sum_egresos(
-            db, tenant_id, ini, f)
-        historico.append(neto)
-
-    con_datos = [n for n in historico if n > 0]
-    base = (sum(con_datos) / len(con_datos)) if con_datos else 0.0
-
-    crecimientos = [(b - a) / a for a, b in zip(con_datos, con_datos[1:]) if a > 0]
-    g = (sum(crecimientos) / len(crecimientos)) if crecimientos else 0.0
-    g = max(min(g, 0.5), -0.5)  # acotar a ±50% mensual
 
     alumnos_activos_hoy = db.query(
         func.count(func.distinct(Suscripcion.usuario_id))
@@ -448,27 +506,93 @@ def populate_predictions(
         Suscripcion.fecha_expiracion >= hoy,
     ).scalar() or 0
 
-    notas = (f"Proyección lineal: base {round(base)} CLP "
-             f"({len(con_datos)}/{len(historico)} meses con datos), "
-             f"crecimiento {round(g * 100, 2)}%/mes")
+    if modelo_forecast is not None:
+        # ── Método ML: regresión lineal (tendencia t + sin/cos del mes) ──
+        serie = ml_entrenar.serie_mensual(db, tenant_id)
+        proyeccion = ml_entrenar.proyectar(modelo_forecast, serie,
+                                           meses_forecast)
+        ultimo_mes = round(float(serie[-1][2])) if serie else 0
+        for p in proyeccion:
+            ingresos = max(0, round(float(p["ingreso_predicho"])))
+            factor = (ingresos / ultimo_mes) if ultimo_mes > 0 else 1.0
+            db.add(PredictionsForecast(
+                tenant_id=tenant_id,
+                mes_prediccion=date(int(p["anio"]), int(p["mes"]), 1),
+                ingresos_predicho=ingresos,
+                intervalo_confianza=95,
+                alumnos_predicho=max(0, round(alumnos_activos_hoy * factor)),
+                tasa_crecimiento=round((factor - 1) * 100, 2),
+                notas=(f"Modelo ML (LinearRegression: tendencia + "
+                       f"estacionalidad) · último mes observado "
+                       f"{ultimo_mes} CLP"),
+            ))
+        db.commit()
+        forecast_resp = {
+            "meses": meses_forecast, "metodo": metodo_forecast,
+            "modelo": meta_forecast.get("modelo"),
+            "ultimo_mes_observado_clp": ultimo_mes,
+            "r2_train": meta_forecast.get("metricas_train", {}).get("r2"),
+        }
+    else:
+        # ── Fallback: proyección lineal simple (promedio + crecimiento) ──
+        mes_actual = hoy.replace(day=1)
+        historico = []
+        for i in range(6, 0, -1):
+            y, m = _mes_desplazado(mes_actual.year, mes_actual.month, -i)
+            ini = date(y, m, 1)
+            f = date(y, m, calendar.monthrange(y, m)[1])
+            neto = _sum_ingresos(db, tenant_id, ini, f) - _sum_egresos(
+                db, tenant_id, ini, f)
+            historico.append(neto)
 
-    for k in range(1, meses_forecast + 1):
-        y, m = _mes_desplazado(mes_actual.year, mes_actual.month, k)
-        factor = (1 + g) ** k
-        db.add(PredictionsForecast(
-            tenant_id=tenant_id, mes_prediccion=date(y, m, 1),
-            ingresos_predicho=max(0, round(base * factor)),
-            intervalo_confianza=95,
-            alumnos_predicho=max(0, round(alumnos_activos_hoy * factor)),
-            tasa_crecimiento=round(g * 100, 2), notas=notas,
-        ))
-    db.commit()
+        con_datos = [n for n in historico if n > 0]
+        base = (sum(con_datos) / len(con_datos)) if con_datos else 0.0
+
+        crecimientos = [(b - a) / a for a, b in zip(con_datos, con_datos[1:])
+                        if a > 0]
+        g = (sum(crecimientos) / len(crecimientos)) if crecimientos else 0.0
+        g = max(min(g, 0.5), -0.5)  # acotar a ±50% mensual
+
+        notas = (f"Proyección lineal: base {round(base)} CLP "
+                 f"({len(con_datos)}/{len(historico)} meses con datos), "
+                 f"crecimiento {round(g * 100, 2)}%/mes")
+
+        for k in range(1, meses_forecast + 1):
+            y, m = _mes_desplazado(mes_actual.year, mes_actual.month, k)
+            factor = (1 + g) ** k
+            db.add(PredictionsForecast(
+                tenant_id=tenant_id, mes_prediccion=date(y, m, 1),
+                ingresos_predicho=max(0, round(base * factor)),
+                intervalo_confianza=95,
+                alumnos_predicho=max(0, round(alumnos_activos_hoy * factor)),
+                tasa_crecimiento=round(g * 100, 2), notas=notas,
+            ))
+        db.commit()
+        forecast_resp = {
+            "meses": meses_forecast, "metodo": metodo_forecast,
+            "base_mensual": round(base),
+            "crecimiento_mensual_pct": round(g * 100, 2),
+        }
 
     return {
         "status": "ok", "tenant_id": tenant_id,
         "accion": "predictions_churn + predictions_forecast (full refresh)",
+        # Auditable: qué método generó cada bloque (ml | heuristica)
+        "metodo_churn": metodo_churn,
+        "metodo_forecast": metodo_forecast,
+        "modelos_ml": {
+            "churn": ({"modelo": meta_churn.get("modelo"),
+                       "entrenado": meta_churn.get("fecha_entrenamiento"),
+                       "accuracy_cv": meta_churn.get("cross_validation", {})
+                       .get("accuracy", {}).get("media")}
+                      if meta_churn else None),
+            "forecast": ({"modelo": meta_forecast.get("modelo"),
+                          "entrenado": meta_forecast.get("fecha_entrenamiento"),
+                          "r2": meta_forecast.get("metricas_train", {})
+                          .get("r2")}
+                         if meta_forecast else None),
+        },
         "churn": {"total": len(alumnos), "criticos": criticos,
                   "altos": altos, "medios": medios},
-        "forecast": {"meses": meses_forecast, "base_mensual": round(base),
-                     "crecimiento_mensual_pct": round(g * 100, 2)},
+        "forecast": forecast_resp,
     }
