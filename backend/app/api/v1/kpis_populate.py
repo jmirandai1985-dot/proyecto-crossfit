@@ -508,7 +508,10 @@ def populate_predictions(
         db.add(PredictionsChurn(
             tenant_id=tenant_id, usuario_id=alumno.id,
             probabilidad_churn=prob, riesgo_nivel=nivel, motivo=motivo,
-            estado_gestion="PENDIENTE", fecha_proxima_renovacion=proxima_date,
+            # `estado_gestion` YA NO vive acá: es de-negocio y está en la tabla
+            # propia `churn_gestion` (migración 024), que este full refresh NO
+            # toca -> la gestión del admin sobrevive a cada re-poblado.
+            fecha_proxima_renovacion=proxima_date,
         ))
     db.commit()
 

@@ -21,7 +21,9 @@ class PredictionsChurn(Base):
     # CRITICO | ALTO | MEDIO | BAJO
     riesgo_nivel = Column(String(10), nullable=False, default="BAJO")
     motivo = Column(String(255), nullable=True)
-    estado_gestion = Column(String(20), nullable=False, default="PENDIENTE")
+    # ⚠️ `estado_gestion` se movió a la tabla propia `churn_gestion` (migración
+    # 024): esta es una data mart con full refresh y el estado de gestión es
+    # dato de negocio. Ver app/models/churn_gestion.py.
     fecha_proxima_renovacion = Column(Date, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())
