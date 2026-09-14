@@ -303,6 +303,17 @@ const AdminKpis = () => {
         ? prediccionesChurn.filter(FILTROS_CHURN[filtroChurn].test)
         : prediccionesChurn;
 
+    // Desglose mes a mes del pronóstico. La variación % vs mes anterior se
+    // calcula acá (el backend expone `tasa_crecimiento`, que es otra métrica).
+    const forecastDetalle = forecast.map((f, i) => {
+        const previo = i > 0 ? Number(forecast[i - 1].ingresos_predicho) : null;
+        const actual = Number(f.ingresos_predicho);
+        return {
+            ...f,
+            variacion: previo ? ((actual - previo) / previo) * 100 : null,
+        };
+    });
+
     return (
         <Layout>
             <div className="max-w-7xl mx-auto">
@@ -543,6 +554,31 @@ const AdminKpis = () => {
                                     <Line type="monotone" dataKey="ingresos_predicho" name="Ingresos proyectados" stroke="#f97316" strokeWidth={2} dot={{ r: 4 }} />
                                 </LineChart>
                             </ChartCard>
+                        </div>
+
+                        {/* Desglose mes a mes del pronóstico. "Alumnos proyectados" sólo
+                            se muestra si el campo viene en la respuesta (hoy viene). */}
+                        <div>
+                            <h3 className="text-lg font-semibold text-white mb-3">Detalle del pronóstico (mes a mes)</h3>
+                            <DataTable
+                                columns={[
+                                    { key: 'mes_prediccion', label: 'Mes', render: (v) => fmtMesCorto(v) },
+                                    { key: 'ingresos_predicho', label: 'Ingresos proyectados (CLP)', render: (v) => fmtCLP(v) },
+                                    {
+                                        key: 'variacion', label: 'Variación vs mes anterior',
+                                        render: (v) => (v === null
+                                            ? '—'
+                                            : `${v > 0 ? '+' : ''}${v.toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`),
+                                    },
+                                    ...(forecast.some((f) => f.alumnos_predicho != null)
+                                        ? [{
+                                            key: 'alumnos_predicho', label: 'Alumnos proyectados',
+                                            render: (v) => (v ?? '—'),
+                                        }]
+                                        : []),
+                                ]}
+                                data={forecastDetalle}
+                            />
                         </div>
 
                         <h2 className="text-lg font-semibold text-white pt-2">
