@@ -16,6 +16,7 @@ import { KpiCard } from '../../components/kpis/KpiCard';
 import { ChartCard } from '../../components/kpis/ChartCard';
 import { DataTable } from '../../components/kpis/DataTable';
 import { RiskBadge } from '../../components/kpis/RiskBadge';
+import { ArquetipoBadge } from '../../components/kpis/ArquetipoBadge';
 import { RecomendacionModal } from '../../components/kpis/RecomendacionModal';
 import { estiloReco } from '../../components/kpis/recoEstilo';
 
@@ -619,6 +620,7 @@ const AdminKpis = () => {
                                 },
                                 { key: 'probabilidad_churn', label: 'Probabilidad de Abandono', render: (v) => `${Number(v).toFixed(1)}%` },
                                 { key: 'riesgo_nivel', label: 'Riesgo', render: (v) => <RiskBadge nivel={v} /> },
+                                { key: 'arquetipo', label: 'Arquetipo', render: (v) => <ArquetipoBadge arquetipo={v} /> },
                                 { key: 'motivo', label: 'Motivo' },
                                 {
                                     key: 'recomendacion', label: 'Recomendación',
