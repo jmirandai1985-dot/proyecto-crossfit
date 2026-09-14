@@ -3,30 +3,36 @@ import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import AlumnoFichaModal from '../../components/AlumnoFichaModal';
+import { RiskBadge } from '../../components/kpis/RiskBadge';
+import RecomendacionModal from '../../components/kpis/RecomendacionModal';
+import { estiloReco } from '../../components/kpis/recoEstilo';
+import { Eye } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+
+/** ISO local (YYYY-MM-DD) para comparar contra fecha_proxima_renovacion. */
+const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 const Fidelizacion = () => {
     const { tenant_id } = useAuth();
-    const [alumnosRiesgo, setAlumnosRiesgo] = useState([]);
-    const [vencimientos, setVencimientos] = useState([]);
+    // Datos del BI (GET /kpis/churn): score, motivo, recomendación, gestión.
+    const [churn, setChurn] = useState(null);
     const [loading, setLoading] = useState(true);
     const [menuAccion, setMenuAccion] = useState(null);
     const [enviandoCorreo, setEnviandoCorreo] = useState(null);
     const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
+    const [detalleReco, setDetalleReco] = useState(null);
     const [msg, setMsg] = useState('');
 
     const cargarFidelizacion = async () => {
         setLoading(true);
         try {
-            const [riesgoRes, vencRes] = await Promise.all([
-                api.get(`/api/v1/fidelizacion/tenant/${tenant_id}/en-riesgo`),
-                api.get(`/api/v1/fidelizacion/tenant/${tenant_id}/vencimientos`)
-            ]);
-            setAlumnosRiesgo(riesgoRes.data?.alumnos_alerta || []);
-            setVencimientos(vencRes.data?.alumnos || []);
-        } catch {
-            setAlumnosRiesgo([]);
-            setVencimientos([]);
+            // Una sola fuente: el BI (score ML + motivo + recomendación + gestión).
+            const res = await api.get('/api/v1/kpis/churn');
+            setChurn(res.data);
+            setMsg('');
+        } catch (err) {
+            setChurn(null);
+            setMsg('❌ ' + (err.response?.data?.detail || err.message || 'No se pudo cargar el panel'));
         }
         setLoading(false);
     };
@@ -41,25 +47,24 @@ const Fidelizacion = () => {
 
     const enviarCorreoManual = async (alumno, tipo) => {
         setMenuAccion(null);
-        setEnviandoCorreo(alumno.id);
+        setEnviandoCorreo(alumno.usuario_id);
         setMsg('');
         try {
-            // tipo_alerta: 'riesgo' → 'inactividad' | 'vencimiento' → 'vencimiento'
             const tipoEnvio = tipo === 'riesgo' ? 'inactividad' : 'vencimiento';
             const res = await api.post(`/api/v1/notificaciones-enviadas/enviar-manual`, null, {
-                params: { alumno_id: alumno.id, tipo: tipoEnvio }
+                params: { alumno_id: alumno.usuario_id, tipo: tipoEnvio }
             });
             if (res.data?.exito) {
-                setMsg(`✅ Correo de ${tipoEnvio === 'inactividad' ? 'recuperación' : 'renovación'} enviado a ${alumno.nombre}`);
+                setMsg(`✅ Correo de ${tipoEnvio === 'inactividad' ? 'recuperación' : 'renovación'} enviado a ${alumno.alumno_nombre}`);
             } else {
                 const detalle = res.data?.detalle_error || 'No se pudo enviar el correo via Gmail SMTP (revisar credenciales o destinatario).';
-                setMsg(`❌ Error al enviar correo a ${alumno.nombre}: ${detalle}`);
+                setMsg(`❌ Error al enviar correo a ${alumno.alumno_nombre}: ${detalle}`);
             }
         } catch (err) {
             setMsg('❌ ' + (err.response?.data?.detail || err.message));
         }
         setEnviandoCorreo(null);
-        setTimeout(() => setMsg(''), 5000);
+        setTimeout(() => setMsg(''), 6000);
     };
 
     const verDetalleAlumno = (id) => {
@@ -67,28 +72,25 @@ const Fidelizacion = () => {
         setFichaAlumnoId(id);
     };
 
-    // Combinar alertas para la tabla de acción (máximo 10)
-    const alertsCombinadas = [
-        ...alumnosRiesgo.map(a => ({
-            ...a,
-            tipo_alerta: 'riesgo',
-            label: a.tiene_historial === false
-                ? 'Sin actividad registrada'
-                : `Inactivo hace ${a.dias_ausente} días`
-        })),
-        ...vencimientos.map(v => ({
-            id: v.usuario_id,
-            nombre: v.nombre,
-            correo: v.correo,
-            tipo_alerta: 'vencimiento',
-            label: `Vence en ${v.dias_restantes} días`,
-            plan_nombre: v.plan_nombre
-        }))
-    ].slice(0, 10);
+    // ── Derivados del BI (los mismos criterios que las 2 tarjetas de siempre) ──
+    // En riesgo: riesgo ALTO/CRÍTICO del modelo. Próximos a vencer: plan que
+    // expira en <= 5 días (el campo es de la fila: no hay endpoint nuevo).
+    const predicciones = churn?.predicciones || [];
+    const hoyISO = toISO(new Date());
+    const limite5ISO = (() => { const d = new Date(); d.setDate(d.getDate() + 5); return toISO(d); })();
+    const venceISO = (p) => (p.fecha_proxima_renovacion ? String(p.fecha_proxima_renovacion).slice(0, 10) : null);
+    const enRiesgo = predicciones.filter((p) => ['ALTO', 'CRITICO'].includes(p.riesgo_nivel));
+    const porVencer = predicciones.filter((p) => {
+        const f = venceISO(p);
+        return f && f >= hoyISO && f <= limite5ISO;
+    });
+    const idsPorVencer = new Set(porVencer.map((p) => p.usuario_id));
+    // Tipo de correo manual: renovación si el plan vence en ≤5 días; si no, recuperación.
+    const tipoEnvioDe = (p) => (idsPorVencer.has(p.usuario_id) ? 'vencimiento' : 'inactividad');
 
     const chartData = [
-        { name: 'En riesgo', total: alumnosRiesgo.length },
-        { name: 'Vencimiento próximo', total: vencimientos.length },
+        { name: 'Riesgo alto/crítico', total: enRiesgo.length },
+        { name: 'Vencen en ≤5 días', total: porVencer.length },
     ];
 
     return (
@@ -120,21 +122,21 @@ const Fidelizacion = () => {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-red-600">
                                 <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos en Riesgo</p>
-                                <p className="text-3xl font-bold text-red-700 mt-1">{alumnosRiesgo.length}</p>
-                                <p className="text-xs text-zinc-500 mt-1">Sin actividad {'>'} 7 días</p>
+                                <p className="text-3xl font-bold text-red-700 mt-1">{enRiesgo.length}</p>
+                                <p className="text-xs text-zinc-500 mt-1">Riesgo alto o crítico (score del modelo)</p>
                             </div>
                             <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-orange-600">
                                 <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Vencimientos Inminentes</p>
-                                <p className="text-3xl font-bold text-orange-700 mt-1">{vencimientos.length}</p>
-                                <p className="text-xs text-zinc-500 mt-1">Próximos 5 días</p>
+                                <p className="text-3xl font-bold text-orange-700 mt-1">{porVencer.length}</p>
+                                <p className="text-xs text-zinc-500 mt-1">Plan que vence en ≤ 5 días</p>
                             </div>
                         </div>
 
                         {/* Gráfico de barras: desglose alertas */}
                         <div className="bg-zinc-900 rounded-lg shadow p-5">
                             <h2 className="text-lg font-bold text-zinc-100 mb-2">📊 Desglose de alertas</h2>
-                            <p className="text-xs text-zinc-400 mb-4">Alumnos "en riesgo" vs "vencimiento próximo"</p>
-                            {alertsCombinadas.length === 0 ? (
+                            <p className="text-xs text-zinc-400 mb-4">Riesgo alto/crítico del modelo vs planes que vencen en ≤5 días</p>
+                            {predicciones.length === 0 ? (
                                 <div className="py-8 text-center text-zinc-500 text-sm">Sin alertas activas 🎉</div>
                             ) : (
                                 <ResponsiveContainer width="100%" height={220}>
@@ -145,7 +147,7 @@ const Fidelizacion = () => {
                                         <Tooltip cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
                                         <Bar dataKey="total" name="Alumnos" radius={[6, 6, 0, 0]}>
                                             {chartData.map((d, idx) => (
-                                                <Cell key={idx} fill={d.name === 'En riesgo' ? '#dc2626' : '#f97316'} />
+                                                <Cell key={idx} fill={d.name === 'Riesgo alto/crítico' ? '#dc2626' : '#f97316'} />
                                             ))}
                                         </Bar>
                                     </BarChart>
@@ -158,54 +160,82 @@ const Fidelizacion = () => {
                         <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
                             <div className="px-6 py-4 border-b border-zinc-800">
                                 <h2 className="text-lg font-bold text-zinc-100">
-                                    🎯 Panel de Acción y Fidelización ({alertsCombinadas.length} alertas)
+                                    🎯 Panel de Acción y Fidelización ({predicciones.length} alumnos)
                                 </h2>
                             </div>
                             <div className="overflow-x-auto">
                                 <table className="w-full">
                                     <thead className="bg-amber-800 text-white">
                                         <tr>
-                                            <th className="px-6 py-3 text-left text-sm font-medium">Nombre</th>
-                                            <th className="px-6 py-3 text-left text-sm font-medium">Correo</th>
-                                            <th className="px-6 py-3 text-left text-sm font-medium">Estado de Alerta</th>
+                                            <th className="px-6 py-3 text-left text-sm font-medium">Alumno</th>
+                                            <th className="px-6 py-3 text-left text-sm font-medium">Riesgo</th>
+                                            <th className="px-6 py-3 text-left text-sm font-medium">Motivo</th>
+                                            <th className="px-6 py-3 text-left text-sm font-medium">Recomendación</th>
+                                            <th className="px-6 py-3 text-left text-sm font-medium">Gestión</th>
                                             <th className="px-6 py-3 text-left text-sm font-medium">Acción</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-zinc-800">
-                                        {alertsCombinadas.map((a, idx) => (
-                                            <tr key={`${a.tipo_alerta}-${a.id}`} className={idx % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
+                                        {predicciones.map((p, idx) => (
+                                            <tr key={p.usuario_id} className={idx % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
                                                 <td className="px-6 py-4">
-                                                    <p className="text-sm font-bold text-zinc-100">{a.nombre}</p>
+                                                    <p className="text-sm font-bold text-zinc-100">{p.alumno_nombre || `Alumno #${p.usuario_id}`}</p>
+                                                    <p className="text-xs text-zinc-500">#{p.usuario_id}{p.alumno_correo ? ` · ${p.alumno_correo}` : ''}</p>
                                                 </td>
-                                                <td className="px-6 py-4 text-sm text-zinc-400">{a.correo}</td>
                                                 <td className="px-6 py-4">
-                                                    <span className={`inline-block px-2 py-1 text-xs font-bold rounded-full ${a.tipo_alerta === 'riesgo'
-                                                        ? 'bg-red-100 text-red-800'
-                                                        : 'bg-orange-100 text-orange-800'
-                                                        }`}>
-                                                        {a.label}
+                                                    <RiskBadge nivel={p.riesgo_nivel} />
+                                                    <p className="text-xs text-zinc-500 mt-1">{Number(p.probabilidad_churn || 0).toFixed(1)}%</p>
+                                                </td>
+                                                <td className="px-6 py-4 text-sm text-zinc-400">{p.motivo || '—'}</td>
+                                                <td className="px-6 py-4">
+                                                    {p.recomendacion ? (
+                                                        <div className={`max-w-xs border-l-2 pl-2 ${estiloReco(p.recomendacion_codigo).borde}`} title={p.recomendacion}>
+                                                            <div className="flex items-start justify-between gap-2">
+                                                                <span className={`text-[10px] font-semibold uppercase tracking-wide ${estiloReco(p.recomendacion_codigo).texto}`}>
+                                                                    {estiloReco(p.recomendacion_codigo).etiqueta}
+                                                                </span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setDetalleReco(p)}
+                                                                    title="Ver recomendación completa"
+                                                                    aria-label={`Ver recomendación completa de ${p.alumno_nombre || `alumno #${p.usuario_id}`}`}
+                                                                    className="shrink-0 rounded p-0.5 text-zinc-400 hover:bg-zinc-700/60 hover:text-orange-400"
+                                                                >
+                                                                    <Eye className="h-3.5 w-3.5" />
+                                                                </button>
+                                                            </div>
+                                                            <div className="text-xs leading-snug text-zinc-300 line-clamp-2">{p.recomendacion}</div>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-zinc-500">—</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-4 text-xs">
+                                                    <span className="inline-block px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300">
+                                                        {p.estado_gestion || 'PENDIENTE'}
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4">
                                                     <div className="relative inline-block">
                                                         <button
-                                                            onClick={() => toggleMenuAccion(a.id)}
-                                                            disabled={enviandoCorreo === a.id}
+                                                            onClick={() => toggleMenuAccion(p.usuario_id)}
+                                                            disabled={enviandoCorreo === p.usuario_id}
+                                                            aria-label={`Acciones para ${p.alumno_nombre || `alumno #${p.usuario_id}`}`}
                                                             className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 disabled:opacity-50"
                                                         >
-                                                            {enviandoCorreo === a.id ? '⏳ Enviando...' : '⚡ Acción Rápida'}
+                                                            {enviandoCorreo === p.usuario_id ? '⏳ Enviando...' : '⚡ Acción Rápida'}
                                                         </button>
-                                                        {menuAccion === a.id && (
+                                                        {menuAccion === p.usuario_id && (
                                                             <div className="absolute right-0 mt-1 w-44 bg-zinc-900 rounded-lg shadow-xl border border-zinc-700 z-20 overflow-hidden">
                                                                 <button
-                                                                    onClick={() => enviarCorreoManual(a, a.tipo_alerta)}
-                                                                    disabled={enviandoCorreo === a.id}
+                                                                    onClick={() => enviarCorreoManual(p, tipoEnvioDe(p))}
+                                                                    disabled={enviandoCorreo === p.usuario_id}
                                                                     className="w-full px-4 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
                                                                 >
                                                                     ✉️ Enviar correo
                                                                 </button>
                                                                 <button
-                                                                    onClick={() => verDetalleAlumno(a.id)}
+                                                                    onClick={() => verDetalleAlumno(p.usuario_id)}
                                                                     className="w-full px-4 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-800 border-t border-zinc-700"
                                                                 >
                                                                     👤 Ver detalle
@@ -230,6 +260,14 @@ const Fidelizacion = () => {
                     alumnoId={fichaAlumnoId}
                     tenantId={tenant_id}
                     onClose={() => setFichaAlumnoId(null)}
+                />
+            )}
+
+            {/* MODAL RECOMENDACIÓN (mismo componente que usa la pestaña BI) */}
+            {detalleReco && (
+                <RecomendacionModal
+                    fila={detalleReco}
+                    onClose={() => setDetalleReco(null)}
                 />
             )}
         </Layout>

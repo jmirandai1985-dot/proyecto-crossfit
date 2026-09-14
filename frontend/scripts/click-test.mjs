@@ -27,6 +27,10 @@ import { tmpdir } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 const BASE = process.env.BASE_URL || 'http://localhost';
+const PAGE = process.env.TEST_URL || '/admin/kpis?tab=bi';
+const WAIT_SEL = process.env.WAIT_SELECTOR || 'button[aria-label^="Ver recomendación completa"]';
+const CLICK_SEL = process.env.CLICK_SELECTOR || 'button[aria-label^="Ver recomendación completa"]';
+const EXPECT_SEL = process.env.EXPECT_SELECTOR || '[role="dialog"]';
 const API = process.env.API_URL || 'http://localhost:8001/api/v1';
 const CORREO = process.env.ADMIN_CORREO || 'admin@test.com';
 const PASSWORD = process.env.ADMIN_PASSWORD || 'Test1234!';
@@ -131,14 +135,13 @@ await evalJs(`
 `);
 
 // 2) tab BI + esperar la tabla
-await send('Page.navigate', { url: `${BASE}/admin/kpis?tab=bi` }, sessionId);
+await send('Page.navigate', { url: `${BASE}${PAGE}` }, sessionId);
 let hayBoton = false;
 for (let i = 0; i < 40 && !hayBoton; i++) {
-    hayBoton = await evalJs(
-        `!!document.querySelector('button[aria-label^="Ver recomendación completa"]')`);
+    hayBoton = await evalJs(`!!document.querySelector(${JSON.stringify(WAIT_SEL)})`);
     if (!hayBoton) await sleep(1000);
 }
-console.log('botón del ojo presente:', hayBoton);
+console.log(`botón presente (${WAIT_SEL}):`, hayBoton);
 if (!hayBoton) {
     console.error('\nRESULTADO: FALLA (no apareció el botón — ¿hay datos de churn?)');
     edge.kill('SIGKILL');
@@ -146,16 +149,21 @@ if (!hayBoton) {
 }
 
 // 3) CLICK REAL en el ícono
-await evalJs(
-    `document.querySelector('button[aria-label^="Ver recomendación completa"]').click(); 'ok'`);
+const clicked = await evalJs(`(() => {
+  const el = document.querySelector(${JSON.stringify(CLICK_SEL)});
+  if (!el) return false;
+  el.click();
+  return true;
+})()`);
+console.log('click ejecutado:', clicked);
 await sleep(1500);
 
-// 4) ¿abrió el modal? ¿hubo errores?
+// 4) ¿apareció el elemento esperado? ¿hubo errores?
 const modal = await evalJs(`(() => {
-  const d = document.querySelector('[role="dialog"]');
+  const d = document.querySelector(${JSON.stringify(EXPECT_SEL)});
   return d ? d.innerText.replace(/\\s+/g, ' ').slice(0, 220) : null;
 })()`);
-console.log('modal abierto:', !!modal);
+console.log('elemento esperado presente:', !!modal);
 if (modal) console.log('contenido:', modal);
 
 const refErr = errores.filter((e) => /ReferenceError|is not defined/.test(e));
