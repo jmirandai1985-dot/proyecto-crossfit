@@ -56,6 +56,24 @@ const Fidelizacion = () => {
             });
             if (res.data?.exito) {
                 setMsg(`✅ Correo de ${tipoEnvio === 'inactividad' ? 'recuperación' : 'renovación'} enviado a ${alumno.alumno_nombre}`);
+                // Marca la gestión como CONTACTADO en el BI (mismo PUT probado que
+                // usa la pestaña de KPIs: no se creó endpoint nuevo). Si el PUT
+                // falla, el correo YA salió: se avisa y no se rompe el flujo.
+                try {
+                    const { data } = await api.put(
+                        `/api/v1/kpis/churn/${alumno.usuario_id}/estado`,
+                        { estado_gestion: 'CONTACTADO' },
+                    );
+                    const { estado_anterior, ...fila } = data;
+                    setChurn((prev) => (prev ? {
+                        ...prev,
+                        predicciones: (prev.predicciones || []).map(
+                            (p) => (p.usuario_id === alumno.usuario_id ? { ...p, ...fila } : p)),
+                    } : prev));
+                    setMsg(`✅ Correo enviado a ${alumno.alumno_nombre} · gestión marcada como CONTACTADO (antes ${estado_anterior || 'PENDIENTE'})`);
+                } catch (errPut) {
+                    setMsg(`✅ Correo enviado a ${alumno.alumno_nombre}. ⚠️ No se pudo marcar la gestión como CONTACTADO: ${errPut.response?.data?.detail || errPut.message}`);
+                }
             } else {
                 const detalle = res.data?.detalle_error || 'No se pudo enviar el correo via Gmail SMTP (revisar credenciales o destinatario).';
                 setMsg(`❌ Error al enviar correo a ${alumno.alumno_nombre}: ${detalle}`);
