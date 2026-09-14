@@ -6,6 +6,7 @@ vive en tabla propia para que el full refresh de la data mart no la borre).
 
 Todos filtran por `tenant_id` del token JWT (nunca por query/body).
 """
+import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
@@ -24,6 +25,7 @@ from app.models.monthly_kpis import MonthlyKpi
 from app.models.notificacion_enviada import NotificacionEnviada
 from app.models.predictions_churn import PredictionsChurn
 from app.models.predictions_forecast import PredictionsForecast
+from app.models.segmentacion_alumno import SegmentacionAlumno
 from app.models.usuario import Usuario
 from app.services.auditoria_service import registrar_auditoria
 
@@ -90,7 +92,41 @@ def _ultimo_contacto_por_alumno(db: Session, tenant_id: int, ids: list) -> dict:
     }
 
 
-def _fila_churn(p, nombre, correo, estado_gestion, ultimo_contacto) -> dict:
+def _arquetipo_por_alumno(db: Session, tenant_id: int, ids: list) -> dict:
+    """{usuario_id: {arquetipo, cluster_id, perfil, modelo_fecha}} de la segmentación.
+
+    Una sola query (sin N+1), mismo patrón que `_ultimo_contacto_por_alumno`.
+    `segmentacion_alumnos` es un full refresh: un alumno tiene 1 fila o NINGUNA
+    (si el reentrenamiento todavía no corrió) -> .get() devuelve None y el panel
+    lo muestra como "Sin segmentar". Un `perfil_json` corrupto no rompe la fila:
+    la etiqueta es lo importante.
+    """
+    if not ids:
+        return {}
+    filas = db.query(SegmentacionAlumno).filter(
+        SegmentacionAlumno.tenant_id == tenant_id,
+        SegmentacionAlumno.usuario_id.in_(ids),
+    ).all()
+    salida = {}
+    for f in filas:
+        perfil = None
+        if f.perfil_json:
+            try:
+                perfil = json.loads(f.perfil_json)
+            except (TypeError, ValueError):
+                perfil = None
+        salida[f.usuario_id] = {
+            "arquetipo": f.arquetipo,
+            "cluster_id": f.cluster_id,
+            "perfil": perfil,
+            "modelo_fecha": (f.modelo_fecha.isoformat()
+                             if f.modelo_fecha else None),
+        }
+    return salida
+
+
+def _fila_churn(p, nombre, correo, estado_gestion, ultimo_contacto,
+                arquetipo=None) -> dict:
     """Formato de fila que consume el frontend (GET y PUT responden igual)."""
     return {
         "usuario_id": p.usuario_id,
@@ -102,6 +138,7 @@ def _fila_churn(p, nombre, correo, estado_gestion, ultimo_contacto) -> dict:
         "recomendacion": p.recomendacion,
         "recomendacion_codigo": p.recomendacion_codigo,
         "estado_gestion": estado_gestion,
+        "arquetipo": arquetipo,
         "fecha_proxima_renovacion": p.fecha_proxima_renovacion,
         "ultimo_contacto_automatico": ultimo_contacto,
     }
@@ -314,6 +351,8 @@ def get_predictions_churn(
       (dato de negocio que el refresh del data mart NO toca). Si el alumno
       todavía no tiene fila, se devuelve 'PENDIENTE' sin crearla.
     - `ultimo_contacto_automatico`: último correo automático ENVIADO (o None).
+    - `arquetipo`: segmentación vigente del alumno (tabla
+      `segmentacion_alumnos`), o None si el reentrenamiento no corrió.
     """
     tenant_id = current_user["tenant_id"]
 
@@ -331,6 +370,7 @@ def get_predictions_churn(
     gestion = _gestion_por_alumno(db, tenant_id, ids)
     contactos = _ultimo_contacto_por_alumno(db, tenant_id, ids)
     dias_inactivo = _dias_inactividad_por_alumno(db, tenant_id, ids)
+    arquetipos = _arquetipo_por_alumno(db, tenant_id, ids)
 
     criticos = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "CRITICO")
     altos = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "ALTO")
@@ -341,6 +381,7 @@ def get_predictions_churn(
             p, nombre, correo,
             gestion.get(p.usuario_id, ESTADO_GESTION_DEFAULT),
             contactos.get(p.usuario_id),
+            arquetipos.get(p.usuario_id),
         )
         for p, nombre, correo in filas
     ]
@@ -436,8 +477,10 @@ def actualizar_estado_gestion_churn(
         )
 
     contactos = _ultimo_contacto_por_alumno(db, tenant_id, [usuario_id])
+    arquetipos = _arquetipo_por_alumno(db, tenant_id, [usuario_id])
     fila = _fila_churn(p, nombre, correo, data.estado_gestion,
-                       contactos.get(usuario_id))
+                       contactos.get(usuario_id),
+                       arquetipos.get(usuario_id))
     fila["estado_anterior"] = estado_anterior
     return fila
 
