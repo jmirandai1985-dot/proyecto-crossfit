@@ -16,7 +16,10 @@ from sqlalchemy.sql import func
 from app.db.database import Base
 
 # Tipos de modelo soportados (coinciden con el CHECK implícito del endpoint).
-TIPOS_MODELO = ("churn", "forecast")
+#   churn        -> RandomForestClassifier  (abandono de alumnos)
+#   forecast     -> LinearRegression        (ingresos netos mensuales)
+#   segmentacion -> Pipeline(StandardScaler + KMeans(K=5)) (arquetipos)
+TIPOS_MODELO = ("churn", "forecast", "segmentacion")
 
 
 class MlModelo(Base):

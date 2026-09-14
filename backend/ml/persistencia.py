@@ -83,3 +83,57 @@ def info_modelos(db, tenant_id) -> list:
         }
         for f in filas
     ]
+
+
+def guardar_etiquetas_segmentacion(db, tenant_id, etiquetas, modelo_fecha) -> dict:
+    """FULL REFRESH de `segmentacion_alumnos` del tenant (DELETE + INSERT).
+
+    Mismo patrón que `predictions_churn` en `kpis_populate`: es una data mart
+    DERIVADA, así que se borra y se reescribe completa en la MISMA transacción
+    (el `db.commit()` lo hace el llamador, igual que en `guardar_modelo`).
+
+    `etiquetas` = salida de `ml.segmentacion.entrenar_segmentacion`:
+    `[{usuario_id, cluster_id, arquetipo, perfil_json}]`.
+
+    Validaciones fail-fast ANTES de escribir: arquetipo perteneciente a
+    `ml.segmentacion.ARQUETIPOS` y sin `usuario_id` repetidos (el UNIQUE de la
+    tabla los rechazaría igual, pero así el error es claro).
+
+    Devuelve `{"filas", "arquetipos", "modelo_fecha"}`.
+    """
+    # Import perezoso: no cargar pandas/sklearn al importar este módulo.
+    from app.models.segmentacion_alumno import SegmentacionAlumno
+    from ml.segmentacion import ARQUETIPOS
+
+    vistos = set()
+    conteos = {a: 0 for a in ARQUETIPOS}
+    for e in etiquetas:
+        arq = e["arquetipo"]
+        if arq not in ARQUETIPOS:
+            raise ValueError(f"arquetipo inválido: {arq!r} "
+                             f"(esperado uno de {ARQUETIPOS})")
+        if e["usuario_id"] in vistos:
+            raise ValueError(f"usuario_id repetido: {e['usuario_id']}")
+        vistos.add(e["usuario_id"])
+        conteos[arq] += 1
+
+    db.query(SegmentacionAlumno).filter(
+        SegmentacionAlumno.tenant_id == tenant_id).delete()
+
+    if etiquetas:
+        db.add_all([
+            SegmentacionAlumno(
+                tenant_id=tenant_id,
+                usuario_id=e["usuario_id"],
+                cluster_id=e["cluster_id"],
+                arquetipo=e["arquetipo"],
+                perfil_json=json.dumps(e["perfil_json"], ensure_ascii=False),
+                modelo_fecha=modelo_fecha,
+            )
+            for e in etiquetas
+        ])
+    return {
+        "filas": len(etiquetas),
+        "arquetipos": conteos,
+        "modelo_fecha": modelo_fecha.isoformat(),
+    }
