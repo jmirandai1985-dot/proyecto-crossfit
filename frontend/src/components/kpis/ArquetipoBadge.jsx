@@ -1,28 +1,9 @@
 import React from 'react';
+import { estiloArquetipo } from './arquetipoEstilo';
 
-/**
- * Colores por arquetipo de retención (K-Means K=5, tabla `segmentacion_alumnos`).
- * El orden va de "perdido" a "fiel" (rojo -> verde) para leer la tabla de un
- * vistazo.
- */
-const arquetipoColors = {
-    ABANDONADO_PERDIDO: 'bg-red-900 text-red-200',
-    ABANDONADO_RECUPERABLE: 'bg-orange-900 text-orange-200',
-    EN_RIESGO: 'bg-yellow-900 text-yellow-200',
-    ACTIVO_EN_DECLIVE: 'bg-amber-900 text-amber-200',
-    NUEVO: 'bg-sky-900 text-sky-200',
-    ACTIVO_FIEL: 'bg-green-900 text-green-200',
-};
-
-/** Etiquetas legibles. El valor que llega del backend NO se modifica. */
-const arquetipoLabels = {
-    ABANDONADO_PERDIDO: 'Abandonado (perdido)',
-    ABANDONADO_RECUPERABLE: 'Recuperable',
-    EN_RIESGO: 'En riesgo',
-    ACTIVO_EN_DECLIVE: 'Activo en declive',
-    NUEVO: 'Nuevo',
-    ACTIVO_FIEL: 'Activo fiel',
-};
+// Los colores y las etiquetas por arquetipo viven en
+// components/kpis/arquetipoEstilo.js (fuente única: los comparten este badge, el
+// dropdown de filtro y el resumen por arquetipos de la pestaña BI).
 
 /**
  * Pastilla del arquetipo de segmentación.
@@ -51,10 +32,10 @@ export const ArquetipoBadge = ({ arquetipo }) => {
         : undefined;
     return (
         <span
-            className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${arquetipoColors[valor] || 'bg-gray-700 text-gray-300'}`}
+            className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${estiloArquetipo(valor).badge}`}
             title={title}
         >
-            {arquetipoLabels[valor] || valor}
+            {estiloArquetipo(valor).label}
         </span>
     );
 };

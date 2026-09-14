@@ -29,7 +29,13 @@ import { setTimeout as sleep } from 'node:timers/promises';
 const BASE = process.env.BASE_URL || 'http://localhost';
 const PAGE = process.env.TEST_URL || '/admin/kpis?tab=bi';
 const WAIT_SEL = process.env.WAIT_SELECTOR || 'button[aria-label^="Ver recomendación completa"]';
-const CLICK_SEL = process.env.CLICK_SELECTOR || 'button[aria-label^="Ver recomendación completa"]';
+// '' desactiva el click (para tests que sólo necesitan ASSERT_JS).
+const CLICK_SEL = process.env.CLICK_SELECTOR ?? 'button[aria-label^="Ver recomendación completa"]';
+// Hooks opcionales para aserciones propias:
+//   PRE_CLICK_JS  JS que se evalúa ANTES del click (ej. setear un <select>)
+//   ASSERT_JS     JS que debe devolver un valor "truthy" al final del test
+const PRE_CLICK_JS = process.env.PRE_CLICK_JS || '';
+const ASSERT_JS = process.env.ASSERT_JS || '';
 const EXPECT_SEL = process.env.EXPECT_SELECTOR || '[role="dialog"]';
 const API = process.env.API_URL || 'http://localhost:8001/api/v1';
 const CORREO = process.env.ADMIN_CORREO || 'admin@test.com';
@@ -148,15 +154,26 @@ if (!hayBoton) {
     process.exit(1);
 }
 
-// 3) CLICK REAL en el ícono
-const clicked = await evalJs(`(() => {
+// 2b) Hook opcional ANTES del click (ej. setear un <select> + change)
+if (PRE_CLICK_JS) {
+    console.log('PRE_CLICK_JS:', await evalJs(PRE_CLICK_JS));
+    await sleep(1200);
+}
+
+// 3) CLICK REAL en el ícono (si CLICK_SELECTOR='' se omite)
+let clicked = null;
+if (CLICK_SEL) {
+    clicked = await evalJs(`(() => {
   const el = document.querySelector(${JSON.stringify(CLICK_SEL)});
   if (!el) return false;
   el.click();
   return true;
 })()`);
-console.log('click ejecutado:', clicked);
-await sleep(1500);
+    console.log('click ejecutado:', clicked);
+    await sleep(1500);
+} else {
+    console.log('click omitido (CLICK_SELECTOR vacío)');
+}
 
 // 4) ¿apareció el elemento esperado? ¿hubo errores?
 const modal = await evalJs(`(() => {
@@ -170,10 +187,20 @@ const refErr = errores.filter((e) => /ReferenceError|is not defined/.test(e));
 console.log('errores capturados:', errores.length);
 errores.slice(0, 5).forEach((e) => console.log('  -', String(e).split('\n')[0]));
 
-const ok = !!modal && refErr.length === 0;
+// 5) Hook opcional de aserción propia: ASSERT_JS debe devolver algo truthy.
+let assertOk = true;
+let assertVal = null;
+if (ASSERT_JS) {
+    assertVal = await evalJs(ASSERT_JS);
+    assertOk = !!assertVal;
+    console.log('ASSERT_JS:', JSON.stringify(assertVal));
+}
+
+const ok = !!modal && assertOk && refErr.length === 0;
 console.log('\nRESULTADO:', ok
-    ? 'CLICK OK — el modal abre y no hubo ReferenceError'
-    : `FALLA — ${refErr.length ? refErr[0].split('\n')[0] : 'el modal no abrió'}`);
+    ? 'CLICK OK — sin ReferenceError y con la aserción esperada'
+    : `FALLA — ${refErr.length ? refErr[0].split('\n')[0]
+        : (!assertOk ? `ASSERT_JS devolvió ${JSON.stringify(assertVal)}` : 'el modal no abrió')}`);
 edge.kill('SIGKILL');
 process.exit(ok ? 0 : 1);
 

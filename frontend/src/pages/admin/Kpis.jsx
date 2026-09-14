@@ -17,6 +17,7 @@ import { ChartCard } from '../../components/kpis/ChartCard';
 import { DataTable } from '../../components/kpis/DataTable';
 import { RiskBadge } from '../../components/kpis/RiskBadge';
 import { ArquetipoBadge } from '../../components/kpis/ArquetipoBadge';
+import { ARQUETIPOS_UI, estiloArquetipo, arquetipoDe } from '../../components/kpis/arquetipoEstilo';
 import { RecomendacionModal } from '../../components/kpis/RecomendacionModal';
 import { estiloReco } from '../../components/kpis/recoEstilo';
 
@@ -104,6 +105,21 @@ const FILTROS_CHURN = {
         },
     },
 };
+
+// Los 6 arquetipos son TAMBIÉN claves de filtro del MISMO estado `filtroChurn`:
+// elegir un arquetipo reemplaza al filtro de riesgo y viceversa (no se acumulan).
+// Los alimentan el dropdown de filtros y las tarjetas del resumen por arquetipos.
+const FILTROS_ARQUETIPO = ARQUETIPOS_UI.reduce((acc, codigo) => {
+    acc[codigo] = {
+        etiqueta: `Arquetipo: ${estiloArquetipo(codigo).label}`,
+        test: (f) => arquetipoDe(f) === codigo,
+    };
+    return acc;
+}, {});
+
+// Catálogo completo (riesgo + arquetipo): resuelve etiqueta y test por clave.
+const FILTROS_CHURN_TODOS = { ...FILTROS_CHURN, ...FILTROS_ARQUETIPO };
+const filtroChurnDef = (clave) => FILTROS_CHURN_TODOS[clave];
 
 // Los estilos/etiquetas por código de recomendación viven en
 // components/kpis/recoEstilo.js (los comparte el modal de detalle).
@@ -301,8 +317,12 @@ const AdminKpis = () => {
     // Lista de churn con el filtro activo aplicado (client-side).
     const prediccionesChurn = churn?.predicciones || [];
     const prediccionesFiltradas = filtroChurn
-        ? prediccionesChurn.filter(FILTROS_CHURN[filtroChurn].test)
+        ? prediccionesChurn.filter(filtroChurnDef(filtroChurn).test)
         : prediccionesChurn;
+
+    // Valor del dropdown de arquetipo: deriva del filtro COMPARTIDO ('' = todos),
+    // así también refleja lo que se elige desde las tarjetas de arquetipo.
+    const filtroArquetipo = ARQUETIPOS_UI.includes(filtroChurn) ? filtroChurn : '';
 
     // Desglose mes a mes del pronóstico. La variación % vs mes anterior se
     // calcula acá (el backend expone `tasa_crecimiento`, que es otra métrica).
@@ -521,7 +541,7 @@ const AdminKpis = () => {
                                     type="button"
                                     onClick={() => setFiltroChurn((prev) => (prev === clave ? null : clave))}
                                     aria-pressed={filtroChurn === clave}
-                                    aria-label={`Filtrar la tabla por: ${FILTROS_CHURN[clave].etiqueta}`}
+                                    aria-label={`Filtrar la tabla por: ${filtroChurnDef(clave).etiqueta}`}
                                     title={filtroChurn === clave
                                         ? 'Quitar este filtro'
                                         : 'Filtrar la tabla por este grupo'}
@@ -582,15 +602,35 @@ const AdminKpis = () => {
                             />
                         </div>
 
-                        <h2 className="text-lg font-semibold text-white pt-2">
-                            Predicción de Riesgo de Abandono ({churn?.total ?? 0})
-                        </h2>
+                        <div className="flex flex-wrap items-end justify-between gap-3 pt-2">
+                            <h2 className="text-lg font-semibold text-white">
+                                Predicción de Riesgo de Abandono ({churn?.total ?? 0})
+                            </h2>
+                            {/* Filtro por arquetipo: comparte el estado `filtroChurn` con
+                                las tarjetas de riesgo y con las de arquetipo. */}
+                            <label className="flex items-center gap-2 text-xs text-zinc-400">
+                                Arquetipo
+                                <select
+                                    value={filtroArquetipo}
+                                    onChange={(e) => setFiltroChurn(e.target.value || null)}
+                                    aria-label="Filtrar la tabla por arquetipo de segmentación"
+                                    className="bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-orange-500"
+                                >
+                                    <option value="">Todos</option>
+                                    {ARQUETIPOS_UI.map((codigo) => (
+                                        <option key={codigo} value={codigo}>
+                                            {estiloArquetipo(codigo).label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                        </div>
 
                         {/* Indicador del filtro activo + forma de quitarlo */}
                         {filtroChurn && (
                             <div className="flex flex-wrap items-center gap-2 -mt-3 text-xs">
                                 <span className="rounded bg-zinc-800 px-2 py-0.5 text-orange-300">
-                                    Filtro: {FILTROS_CHURN[filtroChurn].etiqueta}
+                                    Filtro: {filtroChurnDef(filtroChurn).etiqueta}
                                 </span>
                                 <span className="text-zinc-500">
                                     {prediccionesFiltradas.length} de {prediccionesChurn.length} alumnos
