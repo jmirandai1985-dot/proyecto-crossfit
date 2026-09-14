@@ -4,7 +4,7 @@ Revision ID: 018_estudiante_columns
 Revises: 017_add_password_reset_tokens
 Create Date: 2026-09-08
 
-Migración formal/idempotente para que TEST (polished-term) y PROD converjan en
+Migración formal/idempotente para que TEST (billowing-violet-acdqud44) y PROD converjan en
 las 3 columnas de dominio "estudiante/certificado" que hoy existen de forma
 despareja (TEST: requiere_coach + es_estudiante; PROD: requiere_certificado_estudiante).
 Se usa ADD COLUMN IF NOT EXISTS (PostgreSQL) para que sea segura en BOTH lados,

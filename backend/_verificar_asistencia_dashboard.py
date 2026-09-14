@@ -1,5 +1,5 @@
 ﻿"""
-VERIFICACIÃ“N TEMPORAL: Flujo de asistencia del Dashboard Coach (TEST polished-term).
+VERIFICACIÃ“N TEMPORAL: Flujo de asistencia del Dashboard Coach (TEST billowing-violet-acdqud44).
 
 Simula EXACTAMENTE el flujo del nuevo botÃ³n del Dashboard Coach:
   1. GET  /api/v1/reservas/por-clase/{claseId}   (cargarAsistenciaClase)
@@ -55,7 +55,7 @@ def make_token():
 
 def main():
     log("=" * 70)
-    log(" VERIFICACION: Flujo de Asistencia Dashboard Coach (TEST polished-term)")
+    log(" VERIFICACION: Flujo de Asistencia Dashboard Coach (TEST billowing-violet-acdqud44)")
     log("=" * 70)
 
     # â”€â”€ 0. Confirmar servidor TEST â”€â”€

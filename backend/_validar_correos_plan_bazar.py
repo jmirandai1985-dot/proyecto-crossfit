@@ -22,8 +22,8 @@ from app.models.tenant import Tenant
 from app.models.usuario import Usuario, RolUsuario
 
 BASE = "http://localhost:8000"
-if "polished-term" not in settings.DATABASE_URL:
-    print("ABORT: la BD no es polished-term")
+if "billowing-violet-acdqud44" not in settings.DATABASE_URL:
+    print("ABORT: la BD no es billowing-violet-acdqud44")
     raise SystemExit(1)
 
 resultados = []

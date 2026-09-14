@@ -1,4 +1,4 @@
-﻿"""Overrides desarrollo TEST (polished-term): activa coach jesus, asigna crossfit, clase de hoy."""
+﻿"""Overrides desarrollo TEST (billowing-violet-acdqud44): activa coach jesus, asigna crossfit, clase de hoy."""
 import os
 import sys
 import importlib
@@ -15,12 +15,12 @@ sys.path.insert(0, BACKEND_DIR)
 os.chdir(BACKEND_DIR)
 
 settings = importlib.import_module("app.core.config").settings
-if "polished-term" not in settings.DATABASE_URL:
-    print("ERROR: URL no es polished-term")
+if "billowing-violet-acdqud44" not in settings.DATABASE_URL:
+    print("ERROR: URL no es billowing-violet-acdqud44")
     sys.exit(1)
 SessionLocal = importlib.import_module("app.db.database").SessionLocal
 
-print("=== APLICANDO OVERRIDES TEST (polished-term) ===")
+print("=== APLICANDO OVERRIDES TEST (billowing-violet-acdqud44) ===")
 db = SessionLocal()
 try:
     r = db.execute(text("UPDATE usuarios SET activo=true WHERE id=7"))

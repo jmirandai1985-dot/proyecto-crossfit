@@ -1,5 +1,5 @@
 ﻿"""
-VERIFICACIÃ“N END-TO-END (TEST / polished-term)
+VERIFICACIÃ“N END-TO-END (TEST / billowing-violet-acdqud44)
 Flujo: Admin â†’ Coach (jesus id=7) â†’ Alumno Demo (id=5)
 
 Ejecutar SOLO con ENVIRONMENT=test (lo setea este script antes de importar app).
@@ -20,11 +20,11 @@ BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BACKEND_DIR)
 sys.path.insert(0, BACKEND_DIR)
 
-# Verificar que la URL apunta a polished-term (nunca prod)
+# Verificar que la URL apunta a billowing-violet-acdqud44 (nunca prod)
 settings = importlib.import_module("app.core.config").settings
 DB_URL = settings.DATABASE_URL
-if "polished-term" not in DB_URL:
-    sys.exit("FATAL: La URL NO es polished-term (test). Abortando para proteger datos.")
+if "billowing-violet-acdqud44" not in DB_URL:
+    sys.exit("FATAL: La URL NO es billowing-violet-acdqud44 (test). Abortando para proteger datos.")
 
 
 BASE = "http://localhost:8000/api/v1"

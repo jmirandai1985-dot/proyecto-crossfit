@@ -8,7 +8,7 @@ en `ml/persistencia.py` — las mismas que usa el endpoint
 ⚠️ Ya NO escribe en `ml/artifacts/`: el modelo se persiste como pickle en la
    tabla `ml_modelos` (BD) para sobrevivir a los reinicios/redeploys de Render.
 
-- Guard de seguridad: ENVIRONMENT=test + DATABASE_URL con 'polished-term'.
+- Guard de seguridad: ENVIRONMENT=test + DATABASE_URL con 'billowing-violet-acdqud44'.
 
 Uso (PowerShell, desde backend/):
     $env:ENVIRONMENT="test"; python3.12 ml\\train_forecast.py
@@ -30,10 +30,10 @@ BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BACKEND_DIR)
 os.chdir(BACKEND_DIR)
 
-# ── GUARD 2: la URL debe ser la de TEST (polished-term) ──
+# ── GUARD 2: la URL debe ser la de TEST (billowing-violet-acdqud44) ──
 settings = importlib.import_module("app.core.config").settings
-if "polished-term" not in settings.DATABASE_URL:
-    print("ERROR: URL no es polished-term")
+if "billowing-violet-acdqud44" not in settings.DATABASE_URL:
+    print("ERROR: URL no es billowing-violet-acdqud44")
     sys.exit(1)
 
 import ml.entrenar as entrenar  # noqa: E402

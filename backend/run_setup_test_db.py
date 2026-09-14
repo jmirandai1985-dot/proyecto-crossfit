@@ -54,10 +54,10 @@ DB_URL = settings.DATABASE_URL
 
 print("="*60)
 print(f"BD de TEST: {DB_URL[:70]}...")
-print(f"polished-term (DIRECT): {'polished-term' in DB_URL}")
+print(f"billowing-violet-acdqud44 (DIRECT): {'billowing-violet-acdqud44' in DB_URL}")
 print("="*60)
-if 'polished-term' not in DB_URL:
-    sys.exit("FATAL: Not test branch (polished-term/test-nuevo)")
+if 'billowing-violet-acdqud44' not in DB_URL:
+    sys.exit("FATAL: Not test branch (billowing-violet-acdqud44/test-nuevo)")
 
 # La branch TEST nueva clona a PROD con tablas/FKs/índices que el mapeo de modelos
 # no conoce exactamente. La solución estructural es resetear TODO el schema public

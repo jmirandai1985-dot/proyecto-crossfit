@@ -28,8 +28,8 @@ from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
 from app.models.usuario import Usuario, RolUsuario
 
-if "polished-term" not in settings.DATABASE_URL:
-    print("ABORT: la BD no es polished-term")
+if "billowing-violet-acdqud44" not in settings.DATABASE_URL:
+    print("ABORT: la BD no es billowing-violet-acdqud44")
     raise SystemExit(1)
 
 TENANT_ID = 1

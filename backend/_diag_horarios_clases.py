@@ -1,5 +1,5 @@
 ﻿"""
-DiagnÃ³stico rÃ¡pido: horarios + clases en TEST (polished-term).
+DiagnÃ³stico rÃ¡pido: horarios + clases en TEST (billowing-violet-acdqud44).
 Solo consulta, no modifica.
 
 SEGURIDAD: setea ENVIRONMENT=test ANTES de importar cualquier mÃ³dulo de app.
@@ -21,8 +21,8 @@ db = importlib.import_module("app.db.database").SessionLocal()
 text = importlib.import_module("sqlalchemy").text
 
 DB_URL = settings.DATABASE_URL
-if "polished-term" not in DB_URL:
-    sys.exit("FATAL: no es polished-term")
+if "billowing-violet-acdqud44" not in DB_URL:
+    sys.exit("FATAL: no es billowing-violet-acdqud44")
 
 hoy = date.today()
 print(f"date.today() = {hoy} (weekday={hoy.weekday()})")

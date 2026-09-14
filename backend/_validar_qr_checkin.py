@@ -36,8 +36,8 @@ from app.utils.santiago import ahora_santiago  # noqa: E402
 
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 
-if "polished-term" not in settings.DATABASE_URL:
-    print("FATAL: settings.DATABASE_URL NO apunta a la branch TEST (polished-term).")
+if "billowing-violet-acdqud44" not in settings.DATABASE_URL:
+    print("FATAL: settings.DATABASE_URL NO apunta a la branch TEST (billowing-violet-acdqud44).")
     sys.exit(2)
 print("BD_TEST:", settings.DATABASE_URL.split("@")[-1].split("/")[0])
 
