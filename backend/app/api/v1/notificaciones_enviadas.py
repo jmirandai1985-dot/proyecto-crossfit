@@ -1,7 +1,8 @@
 """Endpoints para registrar y reenviar correos enviados (log de notificaciones)."""
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import date, datetime
 from app.db.database import get_db
 from app.models.notificacion_enviada import NotificacionEnviada
 from app.models.usuario import Usuario
@@ -130,7 +131,18 @@ def enviar_manual(
     exito = False
     try:
         if tipo == "inactividad":
-            exito = enviar_email_fidelizacion(alumno.nombre, alumno.correo, 7)
+            # Días REALES de inactividad (antes: 7 fijo, mentía en el correo).
+            # Mismo criterio que el resto del proyecto: última asistencia y, si
+            # nunca asistió, la fecha de alta. Mínimo 1 para no decir "0 días".
+            from app.models.asistencia import Asistencia
+            ultima = db.query(func.max(Asistencia.fecha)).filter(
+                Asistencia.tenant_id == alumno.tenant_id,
+                Asistencia.usuario_id == alumno.id,
+            ).scalar()
+            referencia = ultima or (
+                alumno.created_at.date() if alumno.created_at else None)
+            dias = max(1, (date.today() - referencia).days) if referencia else 1
+            exito = enviar_email_fidelizacion(alumno.nombre, alumno.correo, dias)
         elif tipo == "vencimiento":
             from app.models.suscripcion import Suscripcion
             sus = db.query(Suscripcion).filter(

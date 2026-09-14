@@ -23,6 +23,29 @@ router = APIRouter()
 UMBRAL_ALERTA_DIAS = 7  # Días sin asistir para considerar alumno en riesgo
 
 
+def _registros_json(df):
+    """DataFrame -> lista de dicts JSON-safe (arregla el 500 por NaN).
+
+    pandas convierte a NaN los `None` numéricos (p.ej. `dias_ausente` de un
+    alumno sin historial) y el serializador de FastAPI rechaza NaN con
+    "Out of range float values are not JSON compliant" -> el endpoint devolvía
+    500 y el frontend lo mostraba como 0 en silencio. Acá se normaliza a None
+    (JSON `null`) y se convierten los escalares de numpy a tipos nativos.
+    """
+    registros = df.to_dict(orient="records")
+    for reg in registros:
+        for clave, valor in reg.items():
+            if hasattr(valor, "item"):       # escalar de numpy -> python
+                valor = valor.item()
+            try:
+                if pd.isna(valor):           # NaN / NaT -> None
+                    valor = None
+            except (TypeError, ValueError):  # listas/dicts: pd.isna no aplica
+                pass
+            reg[clave] = valor
+    return registros
+
+
 # ─────────────────────────────────────────
 # ENDPOINT 1: Analizar asistencias
 # ─────────────────────────────────────────
@@ -105,9 +128,9 @@ def analizar_fidelizacion(
         "total_activos": len(df_ok),
         "total_alerta": len(df_alerta),
         "total_sin_historial": len(df_sin_historial),
-        "alumnos_alerta": df_alerta.to_dict(orient="records"),
-        "alumnos_activos": df_ok.to_dict(orient="records"),
-        "alumnos_sin_historial": df_sin_historial.to_dict(orient="records")
+        "alumnos_alerta": _registros_json(df_alerta),
+        "alumnos_activos": _registros_json(df_ok),
+        "alumnos_sin_historial": _registros_json(df_sin_historial)
     }
 
 
@@ -333,7 +356,7 @@ def alumnos_coach_en_riesgo(
         "coach_id": coach_id,
         "total_alumnos": len(alumnos),
         "total_alerta": len(df_alerta),
-        "alumnos_alerta": df_alerta.to_dict(orient="records")
+        "alumnos_alerta": _registros_json(df_alerta)
     }
 
 
@@ -485,7 +508,7 @@ def alumnos_tenant_en_riesgo(
         "status": "success",
         "total_alumnos": len(alumnos),
         "total_alerta": len(df_alerta),
-        "alumnos_alerta": df_alerta.to_dict(orient="records")
+        "alumnos_alerta": _registros_json(df_alerta)
     }
 
 
