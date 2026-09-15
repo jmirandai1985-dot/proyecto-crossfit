@@ -139,6 +139,16 @@ const fmtMesCorto = (iso) => {
 
 const fmtCLP = (n) => `$${Number(n || 0).toLocaleString('es-CL')}`;
 
+// "14 sep 23:27" (hora local del navegador) para la fecha del modelo de
+// segmentación (`modelo_fecha` de GET /api/v1/segmentacion).
+const fmtFechaHora = (iso) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso).slice(0, 10);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${d.getDate()} ${MESES[d.getMonth()]} ${hh}:${mm}`;
+};
+
 const TOOLTIP_STYLE = {
     contentStyle: { backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: '0.5rem' },
     labelStyle: { color: '#e4e4e7' },
@@ -170,6 +180,8 @@ const AdminKpis = () => {
     const [detalleReco, setDetalleReco] = useState(null);
     // Clave del filtro activo sobre la tabla de churn (null = sin filtro).
     const [filtroChurn, setFiltroChurn] = useState(null);
+    // Resumen de segmentación (GET /api/v1/segmentacion): conteos por arquetipo.
+    const [segmentacion, setSegmentacion] = useState(null);
 
     // Toast breve auto-ocultable. El proyecto NO usa librería de toasts
     // (el resto de páginas recurre a `alert()`), así que acá va uno propio
@@ -258,6 +270,12 @@ const AdminKpis = () => {
                 mrr = rPrev?.data?.mrr ?? null;
             }
             setMrrBi(mrr);
+
+            // Segmentación por arquetipos: endpoint APARTE y opcional. Si falla o
+            // todavía no se reentrenó, el bloque de resumen no se muestra (el resto
+            // de la pestaña BI sigue funcionando igual).
+            const rSeg = await api.get('/api/v1/segmentacion').catch(() => null);
+            setSegmentacion(rSeg?.data || null);
         } catch (err) {
             setError(err.response?.data?.detail || err.message);
         }
@@ -323,6 +341,14 @@ const AdminKpis = () => {
     // Valor del dropdown de arquetipo: deriva del filtro COMPARTIDO ('' = todos),
     // así también refleja lo que se elige desde las tarjetas de arquetipo.
     const filtroArquetipo = ARQUETIPOS_UI.includes(filtroChurn) ? filtroChurn : '';
+
+    // Las 6 tarjetas del resumen, en el orden de ARQUETIPOS_UI (el backend manda
+    // su propio orden y puede no traer los que quedaron en 0 -> default 0).
+    const arquetiposSegmentacion = ARQUETIPOS_UI.map((codigo) => {
+        const item = (segmentacion?.arquetipos || [])
+            .find((a) => a.arquetipo === codigo);
+        return { codigo, ...(item || { n: 0, pct: 0, descripcion: '' }) };
+    });
 
     // Desglose mes a mes del pronóstico. La variación % vs mes anterior se
     // calcula acá (el backend expone `tasa_crecimiento`, que es otra métrica).
@@ -601,6 +627,59 @@ const AdminKpis = () => {
                                 data={forecastDetalle}
                             />
                         </div>
+
+                        {/* ── Resumen por arquetipos (GET /api/v1/segmentacion) ──
+                            Tarjetas clickeables: filtran la MISMA tabla, con el mismo
+                            estado de filtro compartido que las tarjetas de riesgo. */}
+                        {segmentacion?.total > 0 && (
+                            <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-5">
+                                <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+                                    <div className="flex items-center gap-2">
+                                        <Sparkles className="w-5 h-5 text-sky-400" />
+                                        <h2 className="font-semibold text-white">Segmentación de alumnos</h2>
+                                    </div>
+                                    <p className="text-xs text-zinc-500">
+                                        {segmentacion.total} alumnos segmentados
+                                        {segmentacion.modelo_fecha
+                                            ? ` · modelo del ${fmtFechaHora(segmentacion.modelo_fecha)}`
+                                            : ''}
+                                    </p>
+                                </div>
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                                    {arquetiposSegmentacion.map(({ codigo, n, pct, descripcion }) => {
+                                        const estilo = estiloArquetipo(codigo);
+                                        const activo = filtroChurn === codigo;
+                                        return (
+                                            <button
+                                                key={codigo}
+                                                type="button"
+                                                onClick={() => setFiltroChurn((prev) => (prev === codigo ? null : codigo))}
+                                                aria-pressed={activo}
+                                                aria-label={`Filtrar la tabla por arquetipo: ${estilo.label}`}
+                                                title={descripcion
+                                                    ? `${descripcion} Click para filtrar la tabla.`
+                                                    : 'Click para filtrar la tabla.'}
+                                                className={`rounded-lg border-l-4 ${estilo.borde} bg-zinc-800/60 p-3 text-left transition ${activo
+                                                    ? 'ring-2 ring-orange-500'
+                                                    : 'hover:ring-1 hover:ring-zinc-600'}`}
+                                            >
+                                                <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+                                                    {estilo.label}
+                                                </p>
+                                                <p className="mt-1 text-2xl font-bold text-white">{n}</p>
+                                                <p className="text-[11px] text-zinc-500">{pct}% del total</p>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                        {!segmentacion?.total && (
+                            <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-4 text-xs text-zinc-500">
+                                Sin segmentación calculada todavía (se genera con
+                                <span className="text-zinc-400"> POST /api/v1/segmentacion/reentrenar</span>).
+                            </div>
+                        )}
 
                         <div className="flex flex-wrap items-end justify-between gap-3 pt-2">
                             <h2 className="text-lg font-semibold text-white">
