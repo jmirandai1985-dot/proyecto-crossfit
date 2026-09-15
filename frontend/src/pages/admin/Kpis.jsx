@@ -317,7 +317,9 @@ const AdminKpis = () => {
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                             <KpiCard label="Conversión prueba→plan" value={Number(mes.conversion_rate)} unit="%" icon={TrendingUp} color="border-green-500" />
-                            <KpiCard label="Riesgo de Abandono" value={Number(mes.churn_rate)} unit="%" icon={TriangleAlert} color="border-red-500" />
+                            <KpiCard label="Riesgo de Abandono"
+                                        value={mes.churn_rate === null ? null : Number(mes.churn_rate)}
+                                        unit="%" icon={TriangleAlert} color="border-red-500" />
                             <KpiCard label="Ingresos Recurrentes Mensuales (MRR)" value={Number(mes.mrr)} unit="CLP" icon={Banknote} color="border-emerald-500" />
                             <KpiCard label="Ingresos del mes" value={Number(mes.ingresos_total)} unit="CLP" icon={DollarSign} color="border-blue-500" />
                         </div>

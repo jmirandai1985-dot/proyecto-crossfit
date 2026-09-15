@@ -24,7 +24,9 @@ class MonthlyKpi(Base):
     # Actividad / churn
     alumnos_activos_inicio = Column(Integer, nullable=False, default=0)
     alumnos_baja = Column(Integer, nullable=False, default=0)
-    churn_rate = Column(Numeric(5, 2), nullable=False, default=0)
+    # Nullable a proposito: None = cohorte sin base suficiente (mismo criterio
+    # que retencion_cohorte); 0 = 0% de churn real. Ver migracion 027.
+    churn_rate = Column(Numeric(5, 2), nullable=True)
     # Finanzas
     mrr = Column(Numeric(12, 0), nullable=False, default=0)
     ingresos_total = Column(Numeric(12, 0), nullable=False, default=0)

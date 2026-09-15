@@ -388,11 +388,9 @@ def populate_monthly_kpis(
     # una definicion distinta a la que mostraba Reportes para el mismo concepto.
     retencion_pct, base_retencion = metricas.retencion_cohorte(
         db, tenant_id, inicio, fin)
+    # None cuando la cohorte no tiene base suficiente (la columna es nullable
+    # desde la migracion 027), asi no se confunde con un 0% real de churn.
     churn_rate = metricas.churn_desde_retencion(retencion_pct)
-    if churn_rate is None:
-        # monthly_kpis.churn_rate es NOT NULL: sin base suficiente queda en 0
-        # (pendiente: hacerla nullable para poder distinguir "sin dato").
-        churn_rate = 0
 
     # ── Finanzas ──
     # MRR e ingresos: definicion COMPARTIDA con Reportes (metricas_service), asi
