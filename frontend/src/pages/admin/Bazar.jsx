@@ -24,6 +24,7 @@ const Bazar = () => {
     const { tenant_id } = useAuth();
     const [productos, setProductos] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
     const [showModal, setShowModal] = useState(false);
     const [productoEditar, setProductoEditar] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
@@ -31,11 +32,13 @@ const Bazar = () => {
 
     const fetchProductos = async () => {
         try {
+            setError('');
             const response = await api.get(`/api/v1/productos`);
             setProductos(response.data || []);
         } catch (error) {
             console.error('Error fetching productos:', error);
             setProductos([]);
+            setError(error.response?.data?.detail || 'No se pudieron cargar los productos del bazar.');
         } finally {
             setLoading(false);
         }
@@ -342,15 +345,15 @@ const Bazar = () => {
                                         <td colSpan={5} className="px-4 py-10 text-center">
                                             <p className="text-zinc-500 text-sm">
                                                 {productos.length === 0
-                                                    ? 'No hay productos en el inventario'
+                                                    ? error || 'No hay productos en el inventario'
                                                     : 'No hay productos que coincidan con la búsqueda/filtro'}
                                             </p>
                                             {productos.length === 0 && (
                                                 <button
-                                                    onClick={handleNuevoProducto}
+                                                    onClick={error ? fetchProductos : handleNuevoProducto}
                                                     className="mt-3 px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-bold"
                                                 >
-                                                    + Agregar primer producto
+                                                    {error ? 'Reintentar' : '+ Agregar primer producto'}
                                                 </button>
                                             )}
                                         </td>
