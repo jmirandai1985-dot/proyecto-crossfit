@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
     BarChart, Bar, AreaChart, Area, LineChart, Line,
     XAxis, YAxis, CartesianGrid, Tooltip,
 } from 'recharts';
 import {
     TrendingUp, Users, UserPlus, Activity, DollarSign, Percent,
-    CalendarDays, TriangleAlert, Banknote, ShoppingCart, Gauge, Target, Eye,
+    CalendarDays, TriangleAlert, Banknote, ShoppingCart, Gauge, Target,
     Sparkles,
 } from 'lucide-react';
 import Layout from '../../components/Layout';
@@ -15,11 +15,7 @@ import { TabBar } from '../../components/kpis/TabBar';
 import { KpiCard } from '../../components/kpis/KpiCard';
 import { ChartCard } from '../../components/kpis/ChartCard';
 import { DataTable } from '../../components/kpis/DataTable';
-import { RiskBadge } from '../../components/kpis/RiskBadge';
-import { ArquetipoBadge } from '../../components/kpis/ArquetipoBadge';
-import { ARQUETIPOS_UI, estiloArquetipo, arquetipoDe } from '../../components/kpis/arquetipoEstilo';
-import { RecomendacionModal } from '../../components/kpis/RecomendacionModal';
-import { estiloReco } from '../../components/kpis/recoEstilo';
+import { ARQUETIPOS_UI, estiloArquetipo } from '../../components/kpis/arquetipoEstilo';
 
 const TABS = [
     { id: 'diario', label: 'Diario' },
@@ -30,99 +26,6 @@ const TABS = [
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
     'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
-// ─── Gestión prescriptiva del riesgo de abandono (pestaña BI) ─────────────
-// Estados aceptados por PUT /api/v1/kpis/churn/{usuario_id}/estado.
-const ESTADOS_GESTION = ['PENDIENTE', 'CONTACTADO', 'RECUPERADO'];
-
-// Etiquetas legibles para el `tipo` del último correo automático
-// (`ultimo_contacto_automatico.tipo`, tal como se guarda en notificaciones_enviadas).
-const ETIQUETA_CONTACTO = {
-    inactividad: 'Inactividad',
-    renovacion_plan: 'Renovación de plan',
-    vencimiento: 'Plan por vencer',
-    vencimiento_inminente: 'Plan por vencer',
-    ultimo_credito: 'Último crédito',
-    sin_creditos: 'Sin créditos',
-    reactivacion: 'Reactivación',
-    cumplimiento: 'Cumplimiento',
-    acompanamiento: 'Acompañamiento',
-    bienvenida: 'Bienvenida',
-    activacion: 'Activación',
-    bienvenida_activacion: 'Bienvenida y activación',
-    confirmacion_renovacion: 'Confirmación de renovación',
-    confirmacion_plan: 'Confirmación de plan',
-    confirmacion_pedido: 'Confirmación de pedido',
-};
-
-const etiquetaContacto = (tipo) => {
-    const t = String(tipo || '');
-    if (!t) return 'Contacto';
-    if (ETIQUETA_CONTACTO[t]) return ETIQUETA_CONTACTO[t];
-    if (t.startsWith('hito_racha')) return 'Hito de racha';
-    // Fallback: snake_case → "Texto legible"
-    return t.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
-};
-
-// "hoy" / "hace 1 día" / "hace 3 días"
-const fmtHace = (dias) => {
-    const n = Number(dias);
-    if (!Number.isFinite(n) || n <= 0) return 'hoy';
-    return `hace ${n} día${n === 1 ? '' : 's'}`;
-};
-
-// Texto del último contacto automático ("Inactividad · hace 3 días") o null.
-// Lo comparten la columna "Último contacto" y el modal de detalle (contactoTxt).
-const fmtUltimoContacto = (v) => (
-    v ? `${etiquetaContacto(v.tipo)} · ${fmtHace(v.hace_dias)}` : null
-);
-
-// Filtros de la tabla de churn: se aplican en el propio panel con los datos que
-// ya vienen en cada fila (sin endpoint nuevo). Los activan las tarjetas de KPI y
-// el botón "Ver alumnos" de las alertas operativas.
-const FILTROS_CHURN = {
-    critico: {
-        etiqueta: 'Abandono crítico',
-        test: (f) => f.riesgo_nivel === 'CRITICO',
-    },
-    alto: {
-        etiqueta: 'Riesgo alto',
-        test: (f) => f.riesgo_nivel === 'ALTO',
-    },
-    total: {
-        etiqueta: 'En riesgo (todos)',
-        test: () => true,
-    },
-    plan_urgente: {
-        // Misma condición que la Regla B del backend: riesgo ALTO/CRÍTICO con
-        // plan vigente que vence en ≤7 días.
-        etiqueta: 'Riesgo alto/crítico con plan que vence en ≤7 días',
-        test: (f) => {
-            if (!['ALTO', 'CRITICO'].includes(f.riesgo_nivel)) return false;
-            if (!f.fecha_proxima_renovacion) return false;
-            const limite = new Date();
-            limite.setDate(limite.getDate() + 7);
-            return String(f.fecha_proxima_renovacion).slice(0, 10) <= toISO(limite);
-        },
-    },
-};
-
-// Los 6 arquetipos son TAMBIÉN claves de filtro del MISMO estado `filtroChurn`:
-// elegir un arquetipo reemplaza al filtro de riesgo y viceversa (no se acumulan).
-// Los alimentan el dropdown de filtros y las tarjetas del resumen por arquetipos.
-const FILTROS_ARQUETIPO = ARQUETIPOS_UI.reduce((acc, codigo) => {
-    acc[codigo] = {
-        etiqueta: `Arquetipo: ${estiloArquetipo(codigo).label}`,
-        test: (f) => arquetipoDe(f) === codigo,
-    };
-    return acc;
-}, {});
-
-// Catálogo completo (riesgo + arquetipo): resuelve etiqueta y test por clave.
-const FILTROS_CHURN_TODOS = { ...FILTROS_CHURN, ...FILTROS_ARQUETIPO };
-const filtroChurnDef = (clave) => FILTROS_CHURN_TODOS[clave];
-
-// Los estilos/etiquetas por código de recomendación viven en
-// components/kpis/recoEstilo.js (los comparte el modal de detalle).
 
 // ─── Helpers de fecha (hora local del navegador) ──────────────────────────
 const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -160,6 +63,7 @@ const TOOLTIP_STYLE = {
  */
 const AdminKpis = () => {
     const [searchParams] = useSearchParams();
+    const navigate = useNavigate();
     const activeTab = searchParams.get('tab') || 'diario';
 
     const [loading, setLoading] = useState(true);
@@ -172,28 +76,11 @@ const AdminKpis = () => {
     const [forecast, setForecast] = useState([]);
     const [mrrBi, setMrrBi] = useState(null);
 
-    // ─── BI: gestión por fila (dropdown) + toast ─────────────────────────
-    const [gestionando, setGestionando] = useState(null); // usuario_id en curso
-    const [toast, setToast] = useState(null);             // { mensaje, tipo }
-    const toastTimer = useRef(null);
-    // Fila cuyo detalle de recomendación se muestra en el modal (null = cerrado).
-    const [detalleReco, setDetalleReco] = useState(null);
-    // Clave del filtro activo sobre la tabla de churn (null = sin filtro).
-    const [filtroChurn, setFiltroChurn] = useState(null);
+    // ─── BI: SOLO LECTURA ────────────────────────────────────────────────
+    // La gestión individual de alumnos vive en /admin/fidelizacion: acá las
+    // tarjetas y las alertas NAVEGAN a esa pantalla con un query param.
     // Resumen de segmentación (GET /api/v1/segmentacion): conteos por arquetipo.
     const [segmentacion, setSegmentacion] = useState(null);
-
-    // Toast breve auto-ocultable. El proyecto NO usa librería de toasts
-    // (el resto de páginas recurre a `alert()`), así que acá va uno propio
-    // y no bloqueante. Si algún día se agrega react-hot-toast, se reemplaza
-    // sólo esta función y el bloque de render del toast.
-    const mostrarToast = (mensaje, tipo = 'ok') => {
-        setToast({ mensaje, tipo });
-        clearTimeout(toastTimer.current);
-        toastTimer.current = setTimeout(() => setToast(null), 3500);
-    };
-
-    useEffect(() => () => clearTimeout(toastTimer.current), []);
 
     // ─── DIARIO: últimos 7 días ──────────────────────────────────────────
     // El job n8n puebla el DÍA ANTERIOR (02:30), por eso la serie termina ayer.
@@ -288,59 +175,8 @@ const AdminKpis = () => {
         else cargarBi();
     }, [activeTab, cargarDiario, cargarMensual, cargarBi]);
 
-    /**
-     * PUT /api/v1/kpis/churn/{usuario_id}/estado — cambia la gestión de UNA fila.
-     *
-     * El <select> es controlado y su `value` sale del estado `churn`: si la
-     * llamada falla NO tocamos el estado, React re-renderiza con el valor viejo
-     * y el select vuelve solo al estado anterior (no hace falta revertir a mano).
-     * El token del admin lo agrega el interceptor de `services/api`.
-     */
-    const cambiarGestion = async (row, nuevoEstado) => {
-        const anterior = row.estado_gestion || 'PENDIENTE';
-        if (nuevoEstado === anterior) return;
-
-        setGestionando(row.usuario_id);
-        try {
-            const { data } = await api.put(
-                `/api/v1/kpis/churn/${row.usuario_id}/estado`,
-                { estado_gestion: nuevoEstado },
-            );
-            // El PUT devuelve la MISMA forma de fila que el GET (+ estado_anterior):
-            // se actualiza sólo esa fila, sin recargar toda la tabla.
-            const { estado_anterior, ...fila } = data;
-            setChurn((prev) => (prev ? {
-                ...prev,
-                predicciones: (prev.predicciones || []).map(
-                    (p) => (p.usuario_id === row.usuario_id ? { ...p, ...fila } : p),
-                ),
-            } : prev));
-            mostrarToast(
-                `${fila.alumno_nombre || `Alumno #${row.usuario_id}`}: `
-                + `${estado_anterior || anterior} → ${fila.estado_gestion}`,
-            );
-        } catch (err) {
-            mostrarToast(
-                err.response?.data?.detail || 'No se pudo guardar la gestión. Reintentá.',
-                'error',
-            );
-        } finally {
-            setGestionando(null);
-        }
-    };
-
     const dia = serieDiaria.length ? serieDiaria[serieDiaria.length - 1] : null;
     const mes = serieMensual.length ? serieMensual[serieMensual.length - 1] : null;
-
-    // Lista de churn con el filtro activo aplicado (client-side).
-    const prediccionesChurn = churn?.predicciones || [];
-    const prediccionesFiltradas = filtroChurn
-        ? prediccionesChurn.filter(filtroChurnDef(filtroChurn).test)
-        : prediccionesChurn;
-
-    // Valor del dropdown de arquetipo: deriva del filtro COMPARTIDO ('' = todos),
-    // así también refleja lo que se elige desde las tarjetas de arquetipo.
-    const filtroArquetipo = ARQUETIPOS_UI.includes(filtroChurn) ? filtroChurn : '';
 
     // Las 6 tarjetas del resumen, en el orden de ARQUETIPOS_UI (el backend manda
     // su propio orden y puede no traer los que quedaron en 0 -> default 0).
@@ -532,19 +368,17 @@ const AdminKpis = () => {
                                             <span className="text-orange-500 shrink-0">•</span>
                                             <span>
                                                 {m}
-                                                {/* La alerta de "riesgo con plan" trae el acceso
-                                                    directo a los alumnos que la originan. */}
+                                                {/* La alerta de "riesgo con plan" da acceso directo a
+                                                    los alumnos que la originan: NAVEGA a Fidelización
+                                                    (la gestión individual vive en esa pantalla). */}
                                                 {churn.insight.reglas?.[i] === 'riesgo_con_plan' && (
                                                     <button
                                                         type="button"
-                                                        onClick={() => setFiltroChurn((prev) => (
-                                                            prev === 'plan_urgente' ? null : 'plan_urgente'))}
-                                                        aria-label={filtroChurn === 'plan_urgente'
-                                                            ? 'Quitar filtro de la alerta'
-                                                            : 'Ver alumnos de la alerta'}
+                                                        onClick={() => navigate('/admin/fidelizacion?filtro=plan_urgente')}
+                                                        aria-label="Ver en Fidelizacion los alumnos de esta alerta"
                                                         className="ml-2 rounded border border-zinc-600 px-2 py-0.5 text-xs font-medium text-orange-300 hover:bg-zinc-700/60 hover:text-orange-200"
                                                     >
-                                                        {filtroChurn === 'plan_urgente' ? 'Quitar filtro' : 'Ver alumnos'}
+                                                        Ver alumnos
                                                     </button>
                                                 )}
                                             </span>
@@ -555,8 +389,8 @@ const AdminKpis = () => {
                         )}
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                            {/* Tarjetas clickeables: filtran la tabla de abajo por nivel de
-                                riesgo. Click de nuevo (o "Ver todos") quita el filtro. */}
+                            {/* Tarjetas de conteo: al hacer click NAVEGAN a Fidelización, que es
+                                la pantalla donde se gestiona cada alumno. */}
                             {[
                                 { clave: 'critico', label: 'Abandono Crítico', valor: churn?.criticos ?? 0, icon: TriangleAlert, color: 'border-red-500' },
                                 { clave: 'alto', label: 'Riesgo alto', valor: churn?.altos ?? 0, icon: TriangleAlert, color: 'border-orange-500' },
@@ -565,15 +399,10 @@ const AdminKpis = () => {
                                 <button
                                     key={clave}
                                     type="button"
-                                    onClick={() => setFiltroChurn((prev) => (prev === clave ? null : clave))}
-                                    aria-pressed={filtroChurn === clave}
-                                    aria-label={`Filtrar la tabla por: ${filtroChurnDef(clave).etiqueta}`}
-                                    title={filtroChurn === clave
-                                        ? 'Quitar este filtro'
-                                        : 'Filtrar la tabla por este grupo'}
-                                    className={`w-full text-left rounded-lg transition ${filtroChurn === clave
-                                        ? 'ring-2 ring-orange-500'
-                                        : 'hover:ring-1 hover:ring-zinc-600'}`}
+                                    onClick={() => navigate(`/admin/fidelizacion?filtro=${clave}`)}
+                                    aria-label={`Ver en Fidelizacion los alumnos de: ${label}`}
+                                    title="Ver estos alumnos en Fidelización"
+                                    className="w-full text-left rounded-lg transition hover:ring-1 hover:ring-zinc-600"
                                 >
                                     <KpiCard label={label} value={valor} icon={icon} color={color} />
                                 </button>
@@ -629,8 +458,8 @@ const AdminKpis = () => {
                         </div>
 
                         {/* ── Resumen por arquetipos (GET /api/v1/segmentacion) ──
-                            Tarjetas clickeables: filtran la MISMA tabla, con el mismo
-                            estado de filtro compartido que las tarjetas de riesgo. */}
+                            Tarjetas de conteo: al hacer click NAVEGAN a Fidelización con
+                            ?arquetipo=<código> (ahí se ve y se gestiona la lista). */}
                         {segmentacion?.total > 0 && (
                             <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-5">
                                 <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
@@ -648,20 +477,16 @@ const AdminKpis = () => {
                                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                                     {arquetiposSegmentacion.map(({ codigo, n, pct, descripcion }) => {
                                         const estilo = estiloArquetipo(codigo);
-                                        const activo = filtroChurn === codigo;
                                         return (
                                             <button
                                                 key={codigo}
                                                 type="button"
-                                                onClick={() => setFiltroChurn((prev) => (prev === codigo ? null : codigo))}
-                                                aria-pressed={activo}
-                                                aria-label={`Filtrar la tabla por arquetipo: ${estilo.label}`}
+                                                onClick={() => navigate(`/admin/fidelizacion?arquetipo=${codigo}`)}
+                                                aria-label={`Ver en Fidelizacion los alumnos del arquetipo: ${estilo.label}`}
                                                 title={descripcion
-                                                    ? `${descripcion} Click para filtrar la tabla.`
-                                                    : 'Click para filtrar la tabla.'}
-                                                className={`rounded-lg border-l-4 ${estilo.borde} bg-zinc-800/60 p-3 text-left transition ${activo
-                                                    ? 'ring-2 ring-orange-500'
-                                                    : 'hover:ring-1 hover:ring-zinc-600'}`}
+                                                    ? `${descripcion} Click para verlos en Fidelización.`
+                                                    : 'Click para verlos en Fidelización.'}
+                                                className={`rounded-lg border-l-4 ${estilo.borde} bg-zinc-800/60 p-3 text-left transition hover:ring-1 hover:ring-zinc-600`}
                                             >
                                                 <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
                                                     {estilo.label}
@@ -681,150 +506,10 @@ const AdminKpis = () => {
                             </div>
                         )}
 
-                        <div className="flex flex-wrap items-end justify-between gap-3 pt-2">
-                            <h2 className="text-lg font-semibold text-white">
-                                Predicción de Riesgo de Abandono ({churn?.total ?? 0})
-                            </h2>
-                            {/* Filtro por arquetipo: comparte el estado `filtroChurn` con
-                                las tarjetas de riesgo y con las de arquetipo. */}
-                            <label className="flex items-center gap-2 text-xs text-zinc-400">
-                                Arquetipo
-                                <select
-                                    value={filtroArquetipo}
-                                    onChange={(e) => setFiltroChurn(e.target.value || null)}
-                                    aria-label="Filtrar la tabla por arquetipo de segmentación"
-                                    className="bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-orange-500"
-                                >
-                                    <option value="">Todos</option>
-                                    {ARQUETIPOS_UI.map((codigo) => (
-                                        <option key={codigo} value={codigo}>
-                                            {estiloArquetipo(codigo).label}
-                                        </option>
-                                    ))}
-                                </select>
-                            </label>
-                        </div>
-
-                        {/* Indicador del filtro activo + forma de quitarlo */}
-                        {filtroChurn && (
-                            <div className="flex flex-wrap items-center gap-2 -mt-3 text-xs">
-                                <span className="rounded bg-zinc-800 px-2 py-0.5 text-orange-300">
-                                    Filtro: {filtroChurnDef(filtroChurn).etiqueta}
-                                </span>
-                                <span className="text-zinc-500">
-                                    {prediccionesFiltradas.length} de {prediccionesChurn.length} alumnos
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={() => setFiltroChurn(null)}
-                                    className="text-zinc-300 underline hover:text-orange-300"
-                                >
-                                    Ver todos
-                                </button>
-                            </div>
-                        )}
-
-                        {/* Tabla de churn: 7 columnas. "Último contacto" y "Próx. renovación" se
-                            movieron al modal de detalle (RecomendacionModal) para que entre sin
-                            scroll horizontal. OJO: dentro del array de columnas NO se pueden
-                            poner comentarios con llaves (se parsean como objeto vacio y
-                            aparece una columna fantasma): los comentarios van acá afuera. */}
-                        <DataTable
-                            columns={[
-                                {
-                                    key: 'alumno_nombre', label: 'Alumno',
-                                    render: (v, row) => (
-                                        <div className="leading-tight">
-                                            <div className="text-white">{v || `Alumno #${row.usuario_id}`}</div>
-                                            <div className="text-[10px] text-zinc-500">
-                                                #{row.usuario_id}{row.alumno_correo ? ` · ${row.alumno_correo}` : ''}
-                                            </div>
-                                        </div>
-                                    ),
-                                },
-                                { key: 'probabilidad_churn', label: 'Probabilidad de Abandono', render: (v) => `${Number(v).toFixed(1)}%` },
-                                { key: 'riesgo_nivel', label: 'Riesgo', render: (v) => <RiskBadge nivel={v} /> },
-                                { key: 'arquetipo', label: 'Arquetipo', render: (v) => <ArquetipoBadge arquetipo={v} /> },
-                                { key: 'motivo', label: 'Motivo' },
-                                {
-                                    key: 'recomendacion', label: 'Recomendación',
-                                    render: (v, row) => {
-                                        if (!v) return <span className="text-zinc-500">—</span>;
-                                        const e = estiloReco(row.recomendacion_codigo);
-                                        return (
-                                            <div className={`max-w-xs border-l-2 pl-2 ${e.borde}`} title={v}>
-                                                <div className="flex items-start justify-between gap-2">
-                                                    <div className={`text-[10px] font-semibold uppercase tracking-wide ${e.texto}`}>
-                                                        {e.etiqueta}
-                                                    </div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setDetalleReco(row)}
-                                                        title="Ver recomendación completa"
-                                                        aria-label={`Ver recomendación completa de ${row.alumno_nombre || `alumno #${row.usuario_id}`}`}
-                                                        className="shrink-0 rounded p-0.5 text-zinc-400 hover:bg-zinc-700/60 hover:text-orange-400"
-                                                    >
-                                                        <Eye className="h-3.5 w-3.5" />
-                                                    </button>
-                                                </div>
-                                                <div className="text-xs leading-snug text-zinc-300 line-clamp-2">{v}</div>
-                                            </div>
-                                        );
-                                    },
-                                },
-                                {
-                                    key: 'estado_gestion', label: 'Gestión',
-                                    render: (v, row) => (
-                                        <div className="flex items-center gap-2">
-                                            <select
-                                                value={v || 'PENDIENTE'}
-                                                disabled={gestionando === row.usuario_id}
-                                                onChange={(e) => cambiarGestion(row, e.target.value)}
-                                                aria-label={`Estado de gestión de ${row.alumno_nombre || `alumno #${row.usuario_id}`}`}
-                                                className="bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-white disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:border-orange-500"
-                                            >
-                                                {ESTADOS_GESTION.map((op) => (
-                                                    <option key={op} value={op}>{op}</option>
-                                                ))}
-                                            </select>
-                                            {gestionando === row.usuario_id && (
-                                                <span className="text-[10px] text-zinc-400 animate-pulse">guardando…</span>
-                                            )}
-                                        </div>
-                                    ),
-                                },
-                            ]}
-                            data={prediccionesFiltradas}
-                        />
                     </div>
                 )}
             </div>
 
-            {/* Modal con el detalle completo de la recomendación (icono 👁 de la fila) */}
-            {detalleReco && (
-                <RecomendacionModal
-                    fila={detalleReco}
-                    onClose={() => setDetalleReco(null)}
-                    contactoTxt={fmtUltimoContacto(detalleReco.ultimo_contacto_automatico)}
-                    renovacionTxt={detalleReco.fecha_proxima_renovacion
-                        ? fmtFechaCorta(detalleReco.fecha_proxima_renovacion) : null}
-                />
-            )}
-
-            {/* Toast breve de confirmación / error (no bloqueante) */}
-            {toast && (
-                <div
-                    role="status"
-                    aria-live="polite"
-                    className={`fixed bottom-4 right-4 z-50 max-w-sm rounded-lg border px-4 py-3 text-sm font-medium shadow-lg ${
-                        toast.tipo === 'error'
-                            ? 'bg-red-950 border-red-600 text-red-200'
-                            : 'bg-emerald-950 border-emerald-600 text-emerald-200'
-                    }`}
-                >
-                    {toast.mensaje}
-                </div>
-            )}
         </Layout>
     );
 };
