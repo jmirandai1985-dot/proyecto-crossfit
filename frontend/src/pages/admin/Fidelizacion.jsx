@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
@@ -6,14 +7,49 @@ import AlumnoFichaModal from '../../components/AlumnoFichaModal';
 import { RiskBadge } from '../../components/kpis/RiskBadge';
 import RecomendacionModal from '../../components/kpis/RecomendacionModal';
 import { estiloReco } from '../../components/kpis/recoEstilo';
+import { estiloArquetipo, arquetipoDe } from '../../components/kpis/arquetipoEstilo';
 import { Eye } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 /** ISO local (YYYY-MM-DD) para comparar contra fecha_proxima_renovacion. */
 const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
+// ── Filtros de la tabla ────────────────────────────────────────────────
+// Los activa la pestaña BI por query param (KPIs es solo lectura y manda
+// acá la lista ya enfocada): ?filtro=critico|alto|total|plan_urgente y/o
+// ?arquetipo=CODE. Es el MISMO panel (GET /kpis/churn), filtrado client-side
+// con los datos que la fila ya trae: no hay endpoint nuevo.
+const FILTROS = {
+    critico: {
+        etiqueta: 'Abandono crítico',
+        test: (p) => p.riesgo_nivel === 'CRITICO',
+    },
+    alto: {
+        etiqueta: 'Riesgo alto',
+        test: (p) => p.riesgo_nivel === 'ALTO',
+    },
+    total: {
+        etiqueta: 'En riesgo (todos)',
+        test: (p) => ['ALTO', 'CRITICO'].includes(p.riesgo_nivel),
+    },
+    plan_urgente: {
+        // Misma Regla B del backend/BI: riesgo ALTO/CRÍTICO con plan vigente
+        // que vence en ≤7 días.
+        etiqueta: 'Riesgo alto/crítico con plan que vence en ≤7 días',
+        test: (p) => {
+            if (!['ALTO', 'CRITICO'].includes(p.riesgo_nivel)) return false;
+            if (!p.fecha_proxima_renovacion) return false;
+            const limite = new Date();
+            limite.setDate(limite.getDate() + 7);
+            return String(p.fecha_proxima_renovacion).slice(0, 10) <= toISO(limite);
+        },
+    },
+};
+
 const Fidelizacion = () => {
     const { tenant_id } = useAuth();
+    // Filtros que llegan desde la pestaña BI (?filtro=... y/o ?arquetipo=...).
+    const [searchParams, setSearchParams] = useSearchParams();
     // Datos del BI (GET /kpis/churn): score, motivo, recomendación, gestión.
     const [churn, setChurn] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -106,6 +142,20 @@ const Fidelizacion = () => {
     // Tipo de correo manual: renovación si el plan vence en ≤5 días; si no, recuperación.
     const tipoEnvioDe = (p) => (idsPorVencer.has(p.usuario_id) ? 'vencimiento' : 'inactividad');
 
+    // ── Filtro activo (query params) ─────────────────────────────────────
+    const claveFiltro = searchParams.get('filtro') || null;
+    const filtroArquetipo = searchParams.get('arquetipo') || null;
+    const filtroDef = claveFiltro ? FILTROS[claveFiltro] : null;
+    const prediccionesFiltradas = predicciones.filter((p) => {
+        const okRiesgo = filtroDef ? filtroDef.test(p) : true;
+        const okArquetipo = filtroArquetipo ? arquetipoDe(p) === filtroArquetipo : true;
+        return okRiesgo && okArquetipo;
+    });
+    const quitarFiltros = () => setSearchParams({});
+    const etiquetaFiltro = filtroArquetipo
+        ? `Arquetipo: ${estiloArquetipo(filtroArquetipo).label}`
+        : (filtroDef?.etiqueta || null);
+
     const chartData = [
         { name: 'Riesgo alto/crítico', total: enRiesgo.length },
         { name: 'Vencen en ≤5 días', total: porVencer.length },
@@ -178,9 +228,28 @@ const Fidelizacion = () => {
                         <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
                             <div className="px-6 py-4 border-b border-zinc-800">
                                 <h2 className="text-lg font-bold text-zinc-100">
-                                    🎯 Panel de Acción y Fidelización ({predicciones.length} alumnos)
+                                    🎯 Panel de Acción y Fidelización ({prediccionesFiltradas.length} alumnos)
                                 </h2>
                             </div>
+
+                            {/* Indicador del filtro que llegó desde KPIs (o se activó acá) */}
+                            {etiquetaFiltro && (
+                                <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-6 py-3 text-xs">
+                                    <span className="rounded bg-zinc-800 px-2 py-0.5 text-orange-300">
+                                        Filtro: {etiquetaFiltro}
+                                    </span>
+                                    <span className="text-zinc-500">
+                                        {prediccionesFiltradas.length} de {predicciones.length} alumnos
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={quitarFiltros}
+                                        className="text-zinc-300 underline hover:text-orange-300"
+                                    >
+                                        Ver todos
+                                    </button>
+                                </div>
+                            )}
                             <div className="overflow-x-auto">
                                 <table className="w-full">
                                     <thead className="bg-amber-800 text-white">
@@ -194,7 +263,14 @@ const Fidelizacion = () => {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-zinc-800">
-                                        {predicciones.map((p, idx) => (
+                                        {prediccionesFiltradas.length === 0 && (
+                                            <tr>
+                                                <td colSpan={6} className="px-6 py-8 text-center text-sm text-zinc-500">
+                                                    No hay alumnos que cumplan este filtro.
+                                                </td>
+                                            </tr>
+                                        )}
+                                        {prediccionesFiltradas.map((p, idx) => (
                                             <tr key={p.usuario_id} className={idx % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
                                                 <td className="px-6 py-4">
                                                     <p className="text-sm font-bold text-zinc-100">{p.alumno_nombre || `Alumno #${p.usuario_id}`}</p>
