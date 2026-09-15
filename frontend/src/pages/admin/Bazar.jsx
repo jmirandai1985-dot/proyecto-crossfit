@@ -331,7 +331,7 @@ const Bazar = () => {
                                                     </button>
                                                     <button
                                                         onClick={() => handleEliminarProducto(p.id)}
-                                                        title="Eliminar"
+                                                        title="Desactivar" aria-label="Desactivar producto"
                                                         className="w-8 h-8 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-zinc-400 hover:border-red-500 hover:text-red-500 transition-colors"
                                                     >
                                                         🗑
