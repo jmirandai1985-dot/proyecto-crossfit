@@ -168,9 +168,11 @@ const Reportes = () => {
                     <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-orange-500">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-zinc-400 text-sm font-medium">Asistencia Promedio</p>
+                                <p className="text-zinc-400 text-sm font-medium"
+                                    title="Ocupacion: clases.asistentes_confirmados / clases.cupo_maximo (lugares reservados sobre cupo ofrecido). NO mide asistencia real. Puede verse 0% porque las asistencias todavia no estan vinculadas a su clase (asistencias.clase_id es NULL en toda la base).">Ocupación promedio</p>
                                 <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.asistenciaPromedio || 0}%</p>
-                                <p className="text-xs text-zinc-400 mt-2">Tasa de asistencia</p>
+                                <p className="text-xs text-zinc-400 mt-2"
+                                    title="Ocupacion: clases.asistentes_confirmados / clases.cupo_maximo (lugares reservados sobre cupo ofrecido). NO mide asistencia real. Puede verse 0% porque las asistencias todavia no estan vinculadas a su clase (asistencias.clase_id es NULL en toda la base).">Ocupación (reservas vs cupo), no asistencia real</p>
                             </div>
                             <span className="text-4xl">📊</span>
                         </div>
