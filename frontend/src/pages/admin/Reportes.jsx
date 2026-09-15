@@ -5,6 +5,7 @@ import {
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
+import { DetalleModal } from '../../components/kpis/DetalleModal';
 
 // Tooltip personalizado con Tailwind
 const CustomTooltip = ({ active, payload, label, formatter }) => {
@@ -36,6 +37,8 @@ const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'O
 const Reportes = () => {
     const { tenant_id } = useAuth();
     const [reportData, setReportData] = useState(null);
+    // Gráfico histórico abierto en el modal de detalle (null = ninguno).
+    const [detalleGrafico, setDetalleGrafico] = useState(null);
     const [loading, setLoading] = useState(true);
     const [showMovModal, setShowMovModal] = useState(false);
     const [movForm, setMovForm] = useState({ tipo: 'egreso', categoria: '', monto: '', descripcion: '', fecha: new Date().toISOString().split('T')[0], tenant_id: tenant_id });
@@ -115,6 +118,52 @@ const Reportes = () => {
             </Layout>
         );
     }
+
+    // Gráfico histórico: misma definición para la tarjeta y el modal.
+    const chartMembresias = (alto) => (
+<ResponsiveContainer width="100%" height={alto}>
+                            <AreaChart data={membresiaData} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
+                                <defs>{degradeMembresias}</defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                <XAxis dataKey="mes" tick={{ fill: '#6b7280', fontSize: 12 }} />
+                                <YAxis tick={{ fill: '#6b7280', fontSize: 12 }} />
+                                <Tooltip content={<CustomTooltip formatter={(v) => `${v} membresías`} />} />
+                                <Area
+                                    type="monotone"
+                                    dataKey="membresias"
+                                    stroke="#FF6B35"
+                                    strokeWidth={3}
+                                    fill="url(#colorMembresias)"
+                                    dot={{ fill: '#FF6B35', strokeWidth: 2, r: 4 }}
+                                    activeDot={{ r: 6, fill: '#FF6B35' }}
+                                />
+                            </AreaChart>
+                        </ResponsiveContainer>
+    );
+
+    const chartIngresos = (alto) => (
+<ResponsiveContainer width="100%" height={alto}>
+                            <AreaChart data={ingresosData} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
+                                <defs>{degradeIngresos}</defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                <XAxis dataKey="mes" tick={{ fill: '#6b7280', fontSize: 12 }} />
+                                <YAxis
+                                    tick={{ fill: '#6b7280', fontSize: 12 }}
+                                    tickFormatter={(v) => formatCompact(v)}
+                                />
+                                <Tooltip content={<CustomTooltip formatter={(v) => formatCLP(v)} />} />
+                                <Area
+                                    type="monotone"
+                                    dataKey="ingresos"
+                                    stroke="#1F4E78"
+                                    strokeWidth={3}
+                                    fill="url(#colorIngresos)"
+                                    dot={{ fill: '#1F4E78', strokeWidth: 2, r: 4 }}
+                                    activeDot={{ r: 6, fill: '#1F4E78' }}
+                                />
+                            </AreaChart>
+                        </ResponsiveContainer>
+    );
 
     return (
         <Layout>
@@ -214,51 +263,40 @@ const Reportes = () => {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {/* Crecimiento de Membresías - AreaChart con degradado */}
                     <div className="bg-zinc-900 rounded-lg shadow p-6">
-                        <h3 className="text-lg font-bold text-zinc-100 mb-4">Crecimiento de Membresías</h3>
-                        <ResponsiveContainer width="100%" height={250}>
-                            <AreaChart data={membresiaData} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
-                                <defs>{degradeMembresias}</defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                                <XAxis dataKey="mes" tick={{ fill: '#6b7280', fontSize: 12 }} />
-                                <YAxis tick={{ fill: '#6b7280', fontSize: 12 }} />
-                                <Tooltip content={<CustomTooltip formatter={(v) => `${v} membresías`} />} />
-                                <Area
-                                    type="monotone"
-                                    dataKey="membresias"
-                                    stroke="#FF6B35"
-                                    strokeWidth={3}
-                                    fill="url(#colorMembresias)"
-                                    dot={{ fill: '#FF6B35', strokeWidth: 2, r: 4 }}
-                                    activeDot={{ r: 6, fill: '#FF6B35' }}
-                                />
-                            </AreaChart>
-                        </ResponsiveContainer>
+                        <div className="mb-4 flex items-start justify-between gap-3">
+                        <h3 className="text-lg font-bold text-zinc-100">Crecimiento de Membresías</h3>
+                        <button
+                            type="button"
+                            onClick={() => setDetalleGrafico('membresias')}
+                            aria-label="Ampliar: Crecimiento de Membresias"
+                            className="shrink-0 rounded border border-zinc-600 px-2 py-0.5 text-xs font-medium text-zinc-300 transition hover:bg-zinc-700/60 hover:text-white"
+                        >
+                            Ampliar
+                        </button>
+                    </div>
+                    <div className="cursor-zoom-in" onClick={() => setDetalleGrafico('membresias')}
+                        title="Ver el detalle ampliado">
+                        {chartMembresias(250)}
+                    </div>
                     </div>
 
                     {/* Ingresos Mensuales - AreaChart con formato compacto */}
                     <div className="bg-zinc-900 rounded-lg shadow p-6">
-                        <h3 className="text-lg font-bold text-zinc-100 mb-4">Ingresos Mensuales</h3>
-                        <ResponsiveContainer width="100%" height={250}>
-                            <AreaChart data={ingresosData} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
-                                <defs>{degradeIngresos}</defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                                <XAxis dataKey="mes" tick={{ fill: '#6b7280', fontSize: 12 }} />
-                                <YAxis
-                                    tick={{ fill: '#6b7280', fontSize: 12 }}
-                                    tickFormatter={(v) => formatCompact(v)}
-                                />
-                                <Tooltip content={<CustomTooltip formatter={(v) => formatCLP(v)} />} />
-                                <Area
-                                    type="monotone"
-                                    dataKey="ingresos"
-                                    stroke="#1F4E78"
-                                    strokeWidth={3}
-                                    fill="url(#colorIngresos)"
-                                    dot={{ fill: '#1F4E78', strokeWidth: 2, r: 4 }}
-                                    activeDot={{ r: 6, fill: '#1F4E78' }}
-                                />
-                            </AreaChart>
-                        </ResponsiveContainer>
+                        <div className="mb-4 flex items-start justify-between gap-3">
+                        <h3 className="text-lg font-bold text-zinc-100">Ingresos Mensuales</h3>
+                        <button
+                            type="button"
+                            onClick={() => setDetalleGrafico('ingresos')}
+                            aria-label="Ampliar: Ingresos Mensuales"
+                            className="shrink-0 rounded border border-zinc-600 px-2 py-0.5 text-xs font-medium text-zinc-300 transition hover:bg-zinc-700/60 hover:text-white"
+                        >
+                            Ampliar
+                        </button>
+                    </div>
+                    <div className="cursor-zoom-in" onClick={() => setDetalleGrafico('ingresos')}
+                        title="Ver el detalle ampliado">
+                        {chartIngresos(250)}
+                    </div>
                     </div>
                 </div>
 
@@ -555,6 +593,44 @@ const Reportes = () => {
                     </button>
                 </div>
             </div>
+            {/* ── Detalle ampliado: histórico de membresías e ingresos ── */}
+            {detalleGrafico === 'membresias' && (
+                <DetalleModal
+                    titulo="Crecimiento de Membresías"
+                    subtitulo="Altas por mes en los últimos 6 meses"
+                    onCerrar={() => setDetalleGrafico(null)}
+                    explicacion={(
+                        <>
+                            Cuenta cuántas suscripciones NUEVAS se iniciaron en cada mes
+                            (suscripciones con fecha_inicio dentro del mes), para los últimos 6 meses.
+                            Son altas, no miembros activos: no descuenta los planes que vencieron en el
+                            mismo mes ni las renovaciones de un mismo alumno, así que un mes con muchas
+                            altas y muchas bajas se ve igual de alto que uno estable.
+                        </>
+                    )}
+                >
+                    {chartMembresias(400)}
+                </DetalleModal>
+            )}
+
+            {detalleGrafico === 'ingresos' && (
+                <DetalleModal
+                    titulo="Ingresos Mensuales"
+                    subtitulo="Ingresos netos por mes (ingresos − egresos) de los últimos 6 meses"
+                    onCerrar={() => setDetalleGrafico(null)}
+                    explicacion={(
+                        <>
+                            Ingreso NETO de cada mes: ingresos menos egresos de
+                            transacciones_financieras, para los últimos 6 meses. Es el MISMO cálculo que
+                            usa el resto del sistema (metricas_service.ingresos_netos), el que reusan el
+                            bloque Financiero de Inteligencia de Negocio y el populate de KPIs, así que
+                            el número coincide con esas pantallas para el mismo mes.
+                        </>
+                    )}
+                >
+                    {chartIngresos(400)}
+                </DetalleModal>
+            )}
         </Layout>
     );
 };
