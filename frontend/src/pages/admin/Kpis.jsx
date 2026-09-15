@@ -81,6 +81,8 @@ const AdminKpis = () => {
     // REUSADO de GET /reportes/ (misma fuente que muestra Reportes.jsx).
     const [financiero, setFinanciero] = useState(null);
     const [arpu, setArpu] = useState(null);
+    // Bloques horarios (pico vs valle): oferta y asistencia por turno.
+    const [bloques, setBloques] = useState(null);
 
     // ─── BI: SOLO LECTURA ────────────────────────────────────────────────
     // La gestión individual de alumnos vive en /admin/fidelizacion: acá las
@@ -179,6 +181,11 @@ const AdminKpis = () => {
                 ? await api.get(`/api/v1/reportes/?tenant_id=${tenant_id}`).catch(() => null)
                 : null;
             setArpu(rRep?.data?.arpu ?? null);
+
+            // Bloques horarios (pico vs valle): opcional, mismo criterio.
+            const rBlo = await api.get('/api/v1/kpis/bloques-horarios')
+                .catch(() => null);
+            setBloques(rBlo?.data || null);
         } catch (err) {
             setError(err.response?.data?.detail || err.message);
         }
@@ -198,6 +205,14 @@ const AdminKpis = () => {
     // (La fórmula y sus límites los documenta el backend en `financiero`.)
     const ltvEstimado = (arpu != null && financiero?.vida?.vida_promedio_meses)
         ? Math.round(arpu * financiero.vida.vida_promedio_meses)
+        : null;
+
+    // Pico vs valle: ordenado por cantidad de clases (dato real de la oferta).
+    const bloquesOrdenados = [...(bloques?.bloques || [])]
+        .sort((a, b) => b.clases - a.clases);
+    const bloquePico = bloquesOrdenados[0] || null;
+    const bloqueValle = bloquesOrdenados.length > 1
+        ? bloquesOrdenados[bloquesOrdenados.length - 1]
         : null;
 
     // Las 6 tarjetas del resumen, en el orden de ARQUETIPOS_UI (el backend manda
@@ -528,6 +543,39 @@ const AdminKpis = () => {
                                     <Line type="monotone" dataKey="ingresos_predicho" name="Ingresos proyectados" stroke="#f97316" strokeWidth={2} dot={{ r: 4 }} />
                                 </LineChart>
                             </ChartCard>
+
+                            {/* Pico vs valle: oferta real por turno (clases y cupo) y, cuando
+                                el join asistencias->clase tenga datos, la asistencia promedio
+                                por clase. ChartCard admite UN solo gráfico -> las notas van
+                                como caption hermano. */}
+                            <div>
+                                <ChartCard title="Concurrencia por bloque horario (pico vs valle)">
+                                    <BarChart data={bloques?.bloques || []}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
+                                        <XAxis dataKey="bloque" stroke="#a1a1aa" fontSize={11} />
+                                        <YAxis stroke="#a1a1aa" fontSize={12} />
+                                        <Tooltip {...TOOLTIP_STYLE} />
+                                        <Bar dataKey="clases" name="Clases" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+                                        <Bar dataKey="asistencias_por_clase" name="Asistencias por clase" fill="#f97316" radius={[4, 4, 0, 0]} />
+                                    </BarChart>
+                                </ChartCard>
+                                <div className="mt-2 space-y-1 text-[11px] leading-relaxed text-zinc-500">
+                                    {bloquePico && (
+                                        <p>
+                                            Pico: <span className="text-zinc-300">{bloquePico.bloque}</span>
+                                            {' '}({bloquePico.clases} clases · cupo prom. {bloquePico.cupo_promedio})
+                                            {' · '}Valle: <span className="text-zinc-300">{bloqueValle?.bloque}</span>
+                                            {bloqueValle ? ` (${bloqueValle.clases} clases)` : ''}
+                                        </p>
+                                    )}
+                                    {bloques?.cobertura && (
+                                        <p>
+                                            Asistencias asociadas a su clase: {bloques.cobertura.con_clase} de {bloques.cobertura.asistencias_total} ({bloques.cobertura.pct}%).
+                                            {' '}{bloques.cobertura.nota}
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
                         </div>
 
                         {/* Desglose mes a mes del pronóstico. "Alumnos proyectados" sólo
