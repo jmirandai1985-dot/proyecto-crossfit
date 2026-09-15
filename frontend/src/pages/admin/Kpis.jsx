@@ -256,7 +256,10 @@ const AdminKpis = () => {
         </LineChart>
     );
 
-    const tablaPronostico = (
+    // Función (no valor) a propósito: `forecastDetalle` se declara más abajo,
+    // así el cuerpo se evalúa recién al renderizar y no en la declaración
+    // (evita el ReferenceError de zona muerta temporal).
+    const tablaPronostico = () => (
         <div>
             <h3 className="text-lg font-semibold text-white mb-3">Detalle del pronóstico (mes a mes)</h3>
             <DataTable
@@ -611,7 +614,7 @@ const AdminKpis = () => {
 
                         {/* Desglose mes a mes del pronóstico. "Alumnos proyectados" sólo
                             se muestra si el campo viene en la respuesta (hoy viene). */}
-                        {tablaPronostico}
+                        {tablaPronostico()}
 
                         {/* ── Cohortes de retención por mes de alta ──
                             "n/d" = la cohorte todavía no cumple ese horizonte (no se
@@ -660,7 +663,7 @@ const AdminKpis = () => {
                     <ChartCard title="Pronóstico de ingresos (CLP)" height="h-96">
                         {chartForecast}
                     </ChartCard>
-                    <div className="mt-4">{tablaPronostico}</div>
+                    <div className="mt-4">{tablaPronostico()}</div>
                 </DetalleModal>
             )}
 
