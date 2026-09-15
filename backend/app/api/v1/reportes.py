@@ -11,6 +11,7 @@ from typing import Optional
 
 from app.db.database import get_db
 from app.core.dependencies import get_current_admin
+from app.services import metricas_service as metricas
 
 router = APIRouter()
 
@@ -205,43 +206,18 @@ def obtener_reportes_analytics(
             retencion = None
 
         # --- 5. MRR (INGRESOS MENSUALES RECURRENTES) ---
-        # Suma de precio de planes con suscripción activa vigente
-        mrr = db.execute(sql_text("""
-            SELECT COALESCE(SUM(p.precio_clp), 0)
-            FROM suscripciones s
-            JOIN planes p ON s.plan_id = p.id
-            WHERE s.tenant_id = :tid
-              AND s.estado = 'activo'
-              AND s.fecha_expiracion >= CURRENT_DATE
-        """), {"tid": tenant_id}).scalar() or 0
-        mrr = float(mrr)
+        # Definicion COMPARTIDA con el BI: metricas_service.mrr (precio de lista
+        # de los planes con suscripcion activa vigente en la fecha).
+        mrr = metricas.mrr(db, tenant_id, ahora.date())
 
-        # --- 6. INGRESOS TOTALES DEL MES (desde transacciones_financieras reales) ---
-        # Suma de ingresos - egresos del mes actual
-        ing_mes = db.execute(sql_text("""
-            SELECT COALESCE(SUM(CASE WHEN tipo='ingreso' THEN monto ELSE 0 END), 0)
-            FROM transacciones_financieras
-            WHERE tenant_id = :tid AND fecha >= :inicio_d AND fecha <= :fin_d
-        """), {"tid": tenant_id, "inicio_d": inicio_mes.date(), "fin_d": fin_mes.date()}).scalar() or 0
-        eg_mes = db.execute(sql_text("""
-            SELECT COALESCE(SUM(CASE WHEN tipo='egreso' THEN monto ELSE 0 END), 0)
-            FROM transacciones_financieras
-            WHERE tenant_id = :tid AND fecha >= :inicio_d AND fecha <= :fin_d
-        """), {"tid": tenant_id, "inicio_d": inicio_mes.date(), "fin_d": fin_mes.date()}).scalar() or 0
-        ingresos_mes = float(ing_mes) - float(eg_mes)
+        # --- 6. INGRESOS DEL MES (neto) ---
+        # Definicion COMPARTIDA con el BI: metricas_service.ingresos_netos.
+        ingresos_mes = metricas.ingresos_netos(
+            db, tenant_id, inicio_mes.date(), fin_mes.date())
 
-        # Mes anterior
-        ing_mes_ant = db.execute(sql_text("""
-            SELECT COALESCE(SUM(CASE WHEN tipo='ingreso' THEN monto ELSE 0 END), 0)
-            FROM transacciones_financieras
-            WHERE tenant_id = :tid AND fecha >= :ini_ant AND fecha <= :fin_a
-        """), {"tid": tenant_id, "ini_ant": inicio_mes_ant.date(), "fin_a": fin_mes_ant.date()}).scalar() or 0
-        eg_mes_ant = db.execute(sql_text("""
-            SELECT COALESCE(SUM(CASE WHEN tipo='egreso' THEN monto ELSE 0 END), 0)
-            FROM transacciones_financieras
-            WHERE tenant_id = :tid AND fecha >= :ini_ant AND fecha <= :fin_a
-        """), {"tid": tenant_id, "ini_ant": inicio_mes_ant.date(), "fin_a": fin_mes_ant.date()}).scalar() or 0
-        ingresos_mes_ant = float(ing_mes_ant) - float(eg_mes_ant)
+        # Mes anterior (misma funcion, otro periodo)
+        ingresos_mes_ant = metricas.ingresos_netos(
+            db, tenant_id, inicio_mes_ant.date(), fin_mes_ant.date())
 
         # --- 7. ARPU (Ingresos del mes / alumnos activos) ---
         arpu = round(ingresos_mes / alumnos_activos,
@@ -265,20 +241,10 @@ def obtener_reportes_analytics(
               AND fecha <= :fin_d
         """), {"tid": tenant_id, "inicio_d": inicio_mes.date(), "fin_d": fin_mes.date()}).scalar() or 0
 
-        # --- 10. OCUPACION PROMEDIO REAL ---
-        ocupacion = db.execute(sql_text("""
-            SELECT
-                COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0)), 0),
-                COALESCE(SUM(COALESCE(c.cupo_maximo, 1)), 0)
-            FROM clases c
-            WHERE c.tenant_id = :tid
-              AND c.fecha >= :inicio_d
-              AND c.fecha <= :fin_d
-        """), {"tid": tenant_id, "inicio_d": inicio_mes.date(), "fin_d": fin_mes.date()}).first()
-        total_asistentes = ocupacion[0] or 0
-        total_cupo = ocupacion[1] or 0
-        ocupacion_promedio = round(
-            total_asistentes / total_cupo * 100) if total_cupo > 0 else 0
+        # --- 10. OCUPACION PROMEDIO ---
+        # Definicion COMPARTIDA con el BI (monthly_kpis.ocupacion_promedio).
+        ocupacion_promedio = metricas.ocupacion_promedio(
+            db, tenant_id, inicio_mes.date(), fin_mes.date())
 
         # --- 11. OCUPACION POR DISCIPLINA ---
         ocupacion_por_disciplina = []
@@ -403,19 +369,10 @@ def obtener_reportes_analytics(
         for i in range(5, -1, -1):
             ini_h, fin_h = _inicio_fin_mes(-i)
             label_h = f"{MESES[ini_h.month - 1]} {ini_h.year}"
-            ing_h = db.execute(sql_text("""
-                SELECT COALESCE(SUM(CASE WHEN tipo='ingreso' THEN monto ELSE 0 END), 0)
-                FROM transacciones_financieras
-                WHERE tenant_id = :tid AND fecha >= :ini_d AND fecha <= :fin_d
-            """), {"tid": tenant_id, "ini_d": ini_h.date(), "fin_d": fin_h.date()}).scalar() or 0
-            eg_h = db.execute(sql_text("""
-                SELECT COALESCE(SUM(CASE WHEN tipo='egreso' THEN monto ELSE 0 END), 0)
-                FROM transacciones_financieras
-                WHERE tenant_id = :tid AND fecha >= :ini_d AND fecha <= :fin_d
-            """), {"tid": tenant_id, "ini_d": ini_h.date(), "fin_d": fin_h.date()}).scalar() or 0
             historico_ingresos.append({
                 "mes": label_h,
-                "ingresos": float(ing_h) - float(eg_h),
+                "ingresos": metricas.ingresos_netos(
+                    db, tenant_id, ini_h.date(), fin_h.date()),
             })
 
         # --- RESPUESTA COMPLETA ---

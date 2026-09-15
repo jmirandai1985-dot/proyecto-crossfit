@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.database import get_db
+from app.services import metricas_service as metricas
 from app.models.daily_kpis import DailyKpi
 from app.models.monthly_kpis import MonthlyKpi
 from app.models.predictions_churn import PredictionsChurn
@@ -385,29 +386,16 @@ def populate_monthly_kpis(
         alumnos_baja / alumnos_activos_inicio * 100, 2) if alumnos_activos_inicio else 0
 
     # ── Finanzas ──
-    # MRR: mismo criterio que /reportes (planes con suscripción vigente al fin del mes)
-    mrr = db.query(func.coalesce(func.sum(Plan.precio_clp), 0)).join(
-        Suscripcion, Suscripcion.plan_id == Plan.id
-    ).filter(
-        Suscripcion.tenant_id == tenant_id,
-        Suscripcion.estado == "activo",
-        func.date(Suscripcion.fecha_inicio) <= fin,
-        func.date(Suscripcion.fecha_expiracion) >= fin,
-    ).scalar() or 0
-
-    # Ingresos netos del mes (ingreso - egreso), igual que /reportes
-    ingresos_total = _sum_ingresos(db, tenant_id, inicio, fin) - _sum_egresos(
-        db, tenant_id, inicio, fin)
+    # MRR e ingresos: definicion COMPARTIDA con Reportes (metricas_service), asi
+    # no hay dos versiones del mismo numero. El periodo si es distinto: aca se
+    # calcula el mes cerrado que se persiste en monthly_kpis.
+    mrr = metricas.mrr(db, tenant_id, fin)
+    ingresos_total = metricas.ingresos_netos(db, tenant_id, inicio, fin)
 
     # ── Asistencia ──
     asistentes_mes = db.query(
         func.coalesce(func.sum(Clase.asistentes_confirmados), 0)
     ).filter(
-        Clase.tenant_id == tenant_id,
-        Clase.fecha >= inicio, Clase.fecha <= fin,
-    ).scalar() or 0
-
-    cupo_mes = db.query(func.coalesce(func.sum(Clase.cupo_maximo), 0)).filter(
         Clase.tenant_id == tenant_id,
         Clase.fecha >= inicio, Clase.fecha <= fin,
     ).scalar() or 0
@@ -420,7 +408,8 @@ def populate_monthly_kpis(
         Reserva.estado == "confirmada",
     ).scalar() or 0
 
-    ocupacion_promedio = round(asistentes_mes / cupo_mes * 100, 2) if cupo_mes else 0
+    # Definicion COMPARTIDA con Reportes (metricas_service.ocupacion_promedio).
+    ocupacion_promedio = metricas.ocupacion_promedio(db, tenant_id, inicio, fin)
     asistencia_promedio = round(
         asistentes_mes / reservas_mes * 100, 2) if reservas_mes else 0
 
