@@ -81,39 +81,6 @@ def descargar_reporte_ventas_mensual(
             status_code=500, detail=f"Error al generar reporte: {str(e)} | {tb[:500]}")
 
 
-@router.get("/dashboard")
-def descargar_reporte_dashboard(
-    tenant_id: int,
-    mes: int = None,
-    anio: int = None,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_admin),
-):
-    """Genera un reporte de Dashboard Negocio. Solo admin (su tenant)."""
-    # 🔒 El admin solo puede descargar reportes de su propio tenant
-    if current_user.get("tenant_id") != tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="No tienes acceso a este tenant",
-        )
-    from app.services.reportes_service import crear_reporte_ventas_mensual_bytes
-    if mes is None or anio is None:
-        ahora = datetime.now()
-        mes = mes or ahora.month
-        anio = anio or ahora.year
-    try:
-        excel_bytes = crear_reporte_ventas_mensual_bytes(
-            db=db, tenant_id=tenant_id, mes=mes, anio=anio)
-        filename = f"dashboard_{mes:02d}_{anio}.xlsx"
-        return StreamingResponse(
-            io.BytesIO(excel_bytes),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error al generar dashboard: {str(e)}")
-
 
 @router.get("/")
 def obtener_reportes_analytics(
