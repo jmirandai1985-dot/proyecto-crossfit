@@ -16,6 +16,7 @@ import { TabBar } from '../../components/kpis/TabBar';
 import { KpiCard } from '../../components/kpis/KpiCard';
 import { ChartCard } from '../../components/kpis/ChartCard';
 import { DataTable } from '../../components/kpis/DataTable';
+import { DetalleModal } from '../../components/kpis/DetalleModal';
 
 const TABS = [
     { id: 'diario', label: 'Diario' },
@@ -81,6 +82,8 @@ const AdminKpis = () => {
     const [bloques, setBloques] = useState(null);
     // Cohortes de retención por mes de alta.
     const [cohortes, setCohortes] = useState(null);
+    // Bloque abierto en el modal de detalle ampliado (null = ninguno).
+    const [detalle, setDetalle] = useState(null);
 
     // ─── BI: SOLO LECTURA ────────────────────────────────────────────────
     // La gestión individual de alumnos vive en /admin/fidelizacion: acá las
@@ -206,6 +209,43 @@ const AdminKpis = () => {
     const bloquesOrdenados = [...(bloques?.bloques || [])]
         .sort((a, b) => b.clases - a.clases);
     const bloquePico = bloquesOrdenados[0] || null;
+
+    // Gráfico y tabla del pronóstico: se definen una vez y los usan TANTO la
+    // tarjeta de la página como el modal de detalle (evita duplicar el JSX).
+    const chartForecast = (
+        <LineChart data={forecast}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
+            <XAxis dataKey="mes_prediccion" tickFormatter={fmtMesCorto} stroke="#a1a1aa" fontSize={12} />
+            <YAxis stroke="#a1a1aa" fontSize={12} />
+            <Tooltip {...TOOLTIP_STYLE} formatter={(v) => fmtCLP(v)} />
+            <Line type="monotone" dataKey="ingresos_predicho" name="Ingresos proyectados" stroke="#f97316" strokeWidth={2} dot={{ r: 4 }} />
+        </LineChart>
+    );
+
+    const tablaPronostico = (
+        <div>
+            <h3 className="text-lg font-semibold text-white mb-3">Detalle del pronóstico (mes a mes)</h3>
+            <DataTable
+                columns={[
+                    { key: 'mes_prediccion', label: 'Mes', render: (v) => fmtMesCorto(v) },
+                    { key: 'ingresos_predicho', label: 'Ingresos proyectados (CLP)', render: (v) => fmtCLP(v) },
+                    {
+                        key: 'variacion', label: 'Variación vs mes anterior',
+                        render: (v) => (v === null
+                            ? '\u2014'
+                            : `${v > 0 ? '+' : ''}${v.toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`),
+                    },
+                    ...(forecast.some((f) => f.alumnos_predicho != null)
+                        ? [{
+                            key: 'alumnos_predicho', label: 'Alumnos proyectados',
+                            render: (v) => (v ?? '\u2014'),
+                        }]
+                        : []),
+                ]}
+                data={forecastDetalle}
+            />
+        </div>
+    );
     const bloqueValle = bloquesOrdenados.length > 1
         ? bloquesOrdenados[bloquesOrdenados.length - 1]
         : null;
@@ -502,14 +542,9 @@ const AdminKpis = () => {
                         </div>
 
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            <ChartCard title="Pronóstico de ingresos (CLP)">
-                                <LineChart data={forecast}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
-                                    <XAxis dataKey="mes_prediccion" tickFormatter={fmtMesCorto} stroke="#a1a1aa" fontSize={12} />
-                                    <YAxis stroke="#a1a1aa" fontSize={12} />
-                                    <Tooltip {...TOOLTIP_STYLE} formatter={(v) => fmtCLP(v)} />
-                                    <Line type="monotone" dataKey="ingresos_predicho" name="Ingresos proyectados" stroke="#f97316" strokeWidth={2} dot={{ r: 4 }} />
-                                </LineChart>
+                            <ChartCard title="Pronóstico de ingresos (CLP)"
+                                onAmpliar={() => setDetalle('forecast')}>
+                                {chartForecast}
                             </ChartCard>
 
                             {/* Pico vs valle: oferta real por turno (clases y cupo) y, cuando
@@ -548,28 +583,7 @@ const AdminKpis = () => {
 
                         {/* Desglose mes a mes del pronóstico. "Alumnos proyectados" sólo
                             se muestra si el campo viene en la respuesta (hoy viene). */}
-                        <div>
-                            <h3 className="text-lg font-semibold text-white mb-3">Detalle del pronóstico (mes a mes)</h3>
-                            <DataTable
-                                columns={[
-                                    { key: 'mes_prediccion', label: 'Mes', render: (v) => fmtMesCorto(v) },
-                                    { key: 'ingresos_predicho', label: 'Ingresos proyectados (CLP)', render: (v) => fmtCLP(v) },
-                                    {
-                                        key: 'variacion', label: 'Variación vs mes anterior',
-                                        render: (v) => (v === null
-                                            ? '—'
-                                            : `${v > 0 ? '+' : ''}${v.toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`),
-                                    },
-                                    ...(forecast.some((f) => f.alumnos_predicho != null)
-                                        ? [{
-                                            key: 'alumnos_predicho', label: 'Alumnos proyectados',
-                                            render: (v) => (v ?? '—'),
-                                        }]
-                                        : []),
-                                ]}
-                                data={forecastDetalle}
-                            />
-                        </div>
+                        {tablaPronostico}
 
                         {/* ── Cohortes de retención por mes de alta ──
                             "n/d" = la cohorte todavía no cumple ese horizonte (no se
@@ -603,6 +617,29 @@ const AdminKpis = () => {
                 )}
             </div>
 
+            {/* ── Detalle ampliado: pronóstico (gráfico + tabla de desglose) ── */}
+            {detalle === 'forecast' && (
+                <DetalleModal
+                    titulo="Pronóstico de ingresos (CLP)"
+                    subtitulo="Proyección mes a mes y su desglose, en grande"
+                    onCerrar={() => setDetalle(null)}
+                    explicacion={(
+                        <>
+                            Proyección de ingresos del box mes a mes, calculada por el modelo de pronóstico
+                            (GET /kpis/forecast) sobre los ingresos históricos (transacciones_financieras,
+                            netos: ingresos − egresos) agrupados por mes. Cada punto es el ingreso proyectado
+                            de ese mes; la tabla de abajo muestra además la variación % contra el mes anterior
+                            y los alumnos proyectados cuando el modelo los estima. Si un mes no tiene mes
+                            anterior comparable, la variación aparece como guion en vez de un 0% inventado.
+                        </>
+                    )}
+                >
+                    <ChartCard title="Pronóstico de ingresos (CLP)" height="h-96">
+                        {chartForecast}
+                    </ChartCard>
+                    <div className="mt-4">{tablaPronostico}</div>
+                </DetalleModal>
+            )}
         </Layout>
     );
 };
