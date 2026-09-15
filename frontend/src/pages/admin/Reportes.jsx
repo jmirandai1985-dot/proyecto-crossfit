@@ -197,8 +197,8 @@ const Reportes = () => {
                                     </>
                                 ) : (
                                     <>
-                                        <p className="text-2xl font-bold text-zinc-500 mt-2">Sin datos</p>
-                                        <p className="text-xs text-yellow-600 mt-2">⚠️ Historial insuficiente</p>
+                                        <p className="text-2xl font-bold text-zinc-500 mt-2">Datos insuficientes</p>
+                                        <p className="text-xs text-yellow-600 mt-2">⚠️ Base de {reportData?.alumnosActivosHace30 ?? 0} de {reportData?.retencionBaseMinima ?? 5} alumnos con plan vigente hace 30 días (mínimo para calcular retención)</p>
                                     </>
                                 )}
                             </div>

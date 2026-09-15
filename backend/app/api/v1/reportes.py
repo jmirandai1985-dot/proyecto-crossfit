@@ -14,6 +14,14 @@ from app.core.dependencies import get_current_admin
 
 router = APIRouter()
 
+# Umbral minimo de base para publicar la retencion mensual.
+# La metrica es activos_hoy / activos_hace_30 * 100: con bases chicas el
+# cociente explota (1 alumno vigente hace 30 dias -> 76 hoy = 7600%) y no mide
+# retencion sino crecimiento sobre una muestra irrelevante. Mismo criterio que
+# /kpis/cohortes, que devuelve null cuando el horizonte no maduro: preferimos
+# "sin dato" antes que un porcentaje que no significa nada.
+MIN_BASE_RETENCION = 5
+
 
 def _inicio_fin_mes(offset_meses=0):
     """Retorna (inicio_mes, fin_mes) para el mes actual + offset_meses.
@@ -189,10 +197,12 @@ def obtener_reportes_analytics(
               AND s.fecha_expiracion >= :hace30
         """), {"tid": tenant_id, "hace30": hace_30_dias}).scalar() or 0
 
-        if alumnos_activos_hace_30 > 0:
+        # Guarda de datos minimos: si la base de hace 30 dias no llega al
+        # umbral se devuelve None (la UI muestra "Datos insuficientes").
+        if alumnos_activos_hace_30 >= MIN_BASE_RETENCION:
             retencion = int((alumnos_activos / alumnos_activos_hace_30) * 100)
         else:
-            retencion = None  # "Sin datos suficientes"
+            retencion = None
 
         # --- 5. MRR (INGRESOS MENSUALES RECURRENTES) ---
         # Suma de precio de planes con suscripción activa vigente
@@ -414,8 +424,11 @@ def obtener_reportes_analytics(
             "alumnosActivos": alumnos_activos,
             "nuevosAlumnosMes": nuevos_alumnos_mes,
             "cancelacionesMes": cancelaciones_mes,
-            "retencion": retencion,  # None si no hay datos
+            "retencion": retencion,  # None si la base no alcanza el minimo
             "tieneDatosRetencion": retencion is not None,
+            # Transparencia: base usada y umbral, para explicar el "sin dato".
+            "alumnosActivosHace30": alumnos_activos_hace_30,
+            "retencionBaseMinima": MIN_BASE_RETENCION,
 
             # Ingresos
             "mrr": mrr,
