@@ -12,7 +12,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, text as sql_text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -30,6 +30,11 @@ from app.models.usuario import Usuario
 from app.services.auditoria_service import registrar_auditoria
 
 router = APIRouter(prefix="/api/v1/kpis", tags=["KPIs"])
+
+# ── Bloques de la pestaña BI ─────────────────────────────────────────────────
+# Días por mes promedio (365.25 / 12): base para pasar días a meses en la vida
+# promedio de un alumno (insumo del LTV).
+DIAS_POR_MES = 30.44
 
 # ── Gestión del riesgo de abandono (dato de negocio en `churn_gestion`) ──────
 # Un alumno SIN fila en churn_gestion se considera PENDIENTE (no se crea fila
@@ -511,4 +516,112 @@ def get_predictions_forecast(
             }
             for p in proyecciones
         ]
+    }
+
+
+
+# ── 6) GET /api/v1/kpis/financiero (BI - bloque financiero) ──────────────────
+# ⚠️ ARPU NO se calcula acá A PROPÓSITO: ya existe en `GET /api/v1/reportes/`
+# (ingresos netos del mes / alumnos activos; la misma definición que muestra
+# Reportes.jsx) y se reusa desde el frontend, que compone el LTV:
+#     LTV = ARPU × vida_promedio_meses
+@router.get("/financiero")
+def get_financiero(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Bloque financiero del BI: ticket promedio por plan + vida promedio.
+
+    - `ticket_promedio`: avg(monto) de las transacciones REALES de membresía
+      (`transacciones_financieras`: tipo=ingreso, categoria=membresia,
+      referencia_tipo=suscripcion) agrupadas por el plan de la suscripción, más
+      el global. Se usan las transacciones y no el precio de lista para capturar
+      descuentos/compras de emergencia si algún día existen.
+    - `vida`: promedio de (fecha_baja o hoy - created_at) de los alumnos del
+      tenant, en días y en meses -> insumo del LTV.
+    - NO se calcula CAC: la base no tiene costo de adquisición (no se inventa).
+    """
+    tenant_id = current_user["tenant_id"]
+
+    planes = db.execute(sql_text("""
+        SELECT p.nombre,
+               p.precio_clp,
+               COUNT(DISTINCT s.id) AS suscripciones,
+               COUNT(t.id) AS n_transacciones,
+               COALESCE(ROUND(AVG(t.monto)), 0) AS ticket,
+               COALESCE(SUM(t.monto), 0) AS ingreso_total
+        FROM planes p
+        LEFT JOIN suscripciones s
+               ON s.plan_id = p.id AND s.tenant_id = :tid
+        LEFT JOIN transacciones_financieras t
+               ON t.referencia_id = s.id
+              AND t.referencia_tipo = 'suscripcion'
+              AND t.categoria = 'membresia'
+              AND t.tipo = 'ingreso'
+              AND t.tenant_id = :tid
+        WHERE p.tenant_id = :tid
+        GROUP BY p.id, p.nombre, p.precio_clp
+        ORDER BY ingreso_total DESC, suscripciones DESC
+    """), {"tid": tenant_id}).fetchall()
+
+    global_tx = db.execute(sql_text("""
+        SELECT COUNT(*),
+               COALESCE(ROUND(AVG(monto)), 0),
+               COALESCE(SUM(monto), 0)
+        FROM transacciones_financieras
+        WHERE tenant_id = :tid AND tipo = 'ingreso' AND categoria = 'membresia'
+    """), {"tid": tenant_id}).first()
+
+    # Vida del alumno: fecha_baja si está dado de baja; si no, hoy (censura a la
+    # derecha, documentada en `limitaciones`).
+    vida = db.execute(sql_text("""
+        SELECT COUNT(*) AS n_alumnos,
+               COUNT(*) FILTER (WHERE fecha_baja IS NOT NULL) AS n_con_baja,
+               COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (
+                   COALESCE(fecha_baja::timestamptz, NOW()) - created_at
+               )) / 86400.0)), 0) AS vida_dias
+        FROM usuarios
+        WHERE tenant_id = :tid AND rol = 'alumno'
+    """), {"tid": tenant_id}).first()
+
+    vida_dias = int(vida[2] or 0)
+    return {
+        "moneda": "CLP",
+        "ticket_promedio": {
+            "global": float(global_tx[1] or 0),
+            "n_transacciones": int(global_tx[0] or 0),
+            "ingreso_total": float(global_tx[2] or 0),
+            "criterio": (
+                "avg(monto) de transacciones_financieras (tipo=ingreso, "
+                "categoria=membresia, referencia_tipo=suscripcion) agrupado por "
+                "el plan de la suscripción"),
+            "por_plan": [
+                {
+                    "plan": r[0],
+                    "precio_lista": int(r[1] or 0),
+                    "suscripciones": int(r[2] or 0),
+                    "n_transacciones": int(r[3] or 0),
+                    "ticket_promedio": float(r[4] or 0),
+                    "ingreso_total": float(r[5] or 0),
+                }
+                for r in planes
+            ],
+        },
+        "vida": {
+            "vida_promedio_dias": vida_dias,
+            "vida_promedio_meses": round(vida_dias / DIAS_POR_MES, 2),
+            "n_alumnos": int(vida[0] or 0),
+            "n_con_baja": int(vida[1] or 0),
+            "formula": (
+                "promedio de (fecha_baja o hoy - created_at) de los alumnos del "
+                f"tenant, en días / {DIAS_POR_MES}"),
+            "limitaciones": (
+                "censura a la derecha: los alumnos activos aportan su antigüedad "
+                "actual, así que la vida real de quien dure más queda subestimada"),
+        },
+        "ltv_formula": (
+            "LTV = ARPU mensual (GET /api/v1/reportes/) × vida_promedio_meses"),
+        "nota_cac": (
+            "No se calcula CAC: la base no tiene costo de adquisición. Sin CAC no "
+            "hay payback ni ratio LTV/CAC."),
     }
