@@ -67,6 +67,7 @@ const Fidelizacion = () => {
     const [churn, setChurn] = useState(null);
     // Segmentación (conteos por arquetipo) para las 6 tarjetas de abajo.
     const [segmentacion, setSegmentacion] = useState(null);
+    const [segError, setSegError] = useState(false);
     const [loading, setLoading] = useState(true);
     const [menuAccion, setMenuAccion] = useState(null);
     const [enviandoCorreo, setEnviandoCorreo] = useState(null);
@@ -83,8 +84,18 @@ const Fidelizacion = () => {
             setMsg('');
             // Segmentación: opcional (si falla o no se entrenó, las tarjetas de
             // arquetipo no se muestran y el resto del panel sigue igual).
-            const rSeg = await api.get('/api/v1/segmentacion').catch(() => null);
-            setSegmentacion(rSeg?.data || null);
+            // La segmentación se pide aparte y ahora se distingue "falló el fetch"
+            // (error) de "respondió bien pero todavía no hay nada generado" (total 0):
+            // antes un .catch(() => null) dejaba los dos casos idénticos y el bloque
+            // de las 6 tarjetas se ocultaba sin ningún aviso.
+            try {
+                const rSeg = await api.get('/api/v1/segmentacion');
+                setSegmentacion(rSeg?.data || null);
+                setSegError(false);
+            } catch {
+                setSegmentacion(null);
+                setSegError(true);
+            }
         } catch (err) {
             setChurn(null);
             setMsg('❌ ' + (err.response?.data?.detail || err.message || 'No se pudo cargar el panel'));
@@ -278,6 +289,33 @@ const Fidelizacion = () => {
 
                         {/* ── Tarjetas de arquetipos (MOVIDAS desde la BI) ──
                             Igual que las de riesgo: filtran la tabla de abajo in-place. */}
+                        {segError && (
+                            <div className="bg-red-500/10 border-l-4 border-red-500 rounded-lg p-4">
+                                <p className="text-sm text-red-300">
+                                    No se pudo cargar la segmentación de alumnos.
+                                </p>
+                                <button
+                                    onClick={cargarFidelizacion}
+                                    className="mt-3 px-4 py-2 bg-red-500 text-white rounded-lg text-sm font-bold hover:bg-red-600 transition-colors"
+                                >
+                                    Reintentar
+                                </button>
+                            </div>
+                        )}
+
+                        {!segError && segmentacion && segmentacion.total === 0 && (
+                            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                                <p className="text-sm text-zinc-300">
+                                    Todavía no hay segmentación generada para este box.
+                                </p>
+                                <p className="text-xs text-zinc-500 mt-1">
+                                    Se genera al correr el reentrenamiento del modelo
+                                    (POST /api/v1/segmentacion/reentrenar); recargar esta
+                                    página no la crea.
+                                </p>
+                            </div>
+                        )}
+
                         {segmentacion?.total > 0 && (
                             <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-5">
                                 <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
