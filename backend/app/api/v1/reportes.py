@@ -164,6 +164,9 @@ def obtener_reportes_analytics(
 
         # --- 3. CANCELACIONES ESTE MES ---
         # Suscripciones que expiraron o se cancelaron este mes
+        # OJO con el nombre: esto cuenta VENCIMIENTOS (estado='vencido' con
+        # fecha_expiracion dentro del mes), no cancelaciones explicitas (ese
+        # estado no existe en la base). La UI lo rotula "Planes Vencidos (Mes)".
         cancelaciones_mes = db.execute(sql_text("""
             SELECT COUNT(*) FROM suscripciones
             WHERE tenant_id = :tid
