@@ -16,6 +16,17 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 /** ISO local (YYYY-MM-DD) para comparar contra fecha_proxima_renovacion. */
 const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
+// "14 sep 23:27" (hora local) para la fecha del modelo de segmentación.
+const MESES_HORA = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
+    'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const fmtFechaHora = (iso) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso).slice(0, 10);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${d.getDate()} ${MESES_HORA[d.getMonth()]} ${hh}:${mm}`;
+};
+
 // ── Filtros de la tabla ────────────────────────────────────────────────
 // Los activa la pestaña BI por query param (KPIs es solo lectura y manda
 // acá la lista ya enfocada): ?filtro=critico|alto|total|plan_urgente y/o
@@ -173,6 +184,14 @@ const Fidelizacion = () => {
         setSearchParams(next);
     };
     const alternarFiltro = (clave) => ponerFiltro(claveFiltro === clave ? null : clave);
+    const ponerArquetipo = (codigo) => {
+        const next = new URLSearchParams(searchParams);
+        if (codigo) next.set('arquetipo', codigo);
+        else next.delete('arquetipo');
+        setSearchParams(next);
+    };
+    const alternarArquetipo = (codigo) => (
+        ponerArquetipo(filtroArquetipo === codigo ? null : codigo));
 
     // Las 6 tarjetas de arquetipo, en el orden de ARQUETIPOS_UI (el backend manda
     // su propio orden y puede no traer los que quedaron en 0).
@@ -247,26 +266,86 @@ const Fidelizacion = () => {
                             </div>
                         </div>
 
-                        {/* Gráfico de barras: desglose alertas */}
-                        <div className="bg-zinc-900 rounded-lg shadow p-5">
-                            <h2 className="text-lg font-bold text-zinc-100 mb-2">📊 Desglose de alertas</h2>
-                            <p className="text-xs text-zinc-400 mb-4">Riesgo alto/crítico del modelo vs planes que vencen en ≤5 días</p>
-                            {predicciones.length === 0 ? (
-                                <div className="py-8 text-center text-zinc-500 text-sm">Sin alertas activas 🎉</div>
-                            ) : (
-                                <ResponsiveContainer width="100%" height={220}>
-                                    <BarChart data={chartData} barSize={70}>
-                                        <CartesianGrid strokeDasharray="3 3" />
-                                        <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                                        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                                        <Tooltip cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
-                                        <Bar dataKey="total" name="Alumnos" radius={[6, 6, 0, 0]}>
-                                            {chartData.map((d, idx) => (
-                                                <Cell key={idx} fill={d.name === 'Riesgo alto/crítico' ? '#dc2626' : '#f97316'} />
-                                            ))}
-                                        </Bar>
-                                    </BarChart>
-                                </ResponsiveContainer>
+                        {/* ── Tarjetas de arquetipos (MOVIDAS desde la BI) ──
+                            Igual que las de riesgo: filtran la tabla de abajo in-place. */}
+                        {segmentacion?.total > 0 && (
+                            <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-5">
+                                <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+                                    <div className="flex items-center gap-2">
+                                        <Sparkles className="w-5 h-5 text-sky-400" />
+                                        <h2 className="font-semibold text-white">Segmentación de alumnos</h2>
+                                    </div>
+                                    <p className="text-xs text-zinc-500">
+                                        {segmentacion.total} alumnos segmentados
+                                        {segmentacion.modelo_fecha
+                                            ? ` · modelo del ${fmtFechaHora(segmentacion.modelo_fecha)}`
+                                            : ''}
+                                    </p>
+                                </div>
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                                    {arquetiposSegmentacion.map(({ codigo, n, pct, descripcion }) => {
+                                        const estilo = estiloArquetipo(codigo);
+                                        const activo = filtroArquetipo === codigo;
+                                        return (
+                                            <button
+                                                key={codigo}
+                                                type="button"
+                                                onClick={() => alternarArquetipo(codigo)}
+                                                aria-pressed={activo}
+                                                aria-label={`Filtrar la tabla por arquetipo: ${estilo.label}`}
+                                                title={descripcion
+                                                    ? `${descripcion} Click para filtrar la tabla.`
+                                                    : 'Click para filtrar la tabla.'}
+                                                className={`rounded-lg border-l-4 ${estilo.borde} bg-zinc-800/60 p-3 text-left transition ${activo
+                                                    ? 'ring-2 ring-orange-500'
+                                                    : 'hover:ring-1 hover:ring-zinc-600'}`}
+                                            >
+                                                <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+                                                    {estilo.label}
+                                                </p>
+                                                <p className="mt-1 text-2xl font-bold text-white">{n}</p>
+                                                <p className="text-[11px] text-zinc-500">{pct}% del total</p>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ── Filtros de la tabla (mismo estado que en KPIs) ── */}
+                        <div className="flex flex-wrap items-center gap-3">
+                            <label className="flex items-center gap-2 text-xs text-zinc-400">
+                                Arquetipo
+                                <select
+                                    value={filtroArquetipo || ''}
+                                    onChange={(e) => ponerArquetipo(e.target.value || null)}
+                                    aria-label="Filtrar la tabla por arquetipo de segmentación"
+                                    className="bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-orange-500"
+                                >
+                                    <option value="">Todos</option>
+                                    {ARQUETIPOS_UI.map((codigo) => (
+                                        <option key={codigo} value={codigo}>
+                                            {estiloArquetipo(codigo).label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                            {etiquetaFiltro && (
+                                <span className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-orange-300">
+                                    Filtro: {etiquetaFiltro}
+                                </span>
+                            )}
+                            <span className="text-xs text-zinc-500">
+                                {prediccionesFiltradas.length} de {predicciones.length} alumnos
+                            </span>
+                            {etiquetaFiltro && (
+                                <button
+                                    type="button"
+                                    onClick={quitarFiltros}
+                                    className="text-xs text-zinc-300 underline hover:text-orange-300"
+                                >
+                                    Ver todos
+                                </button>
                             )}
                         </div>
 
@@ -279,24 +358,6 @@ const Fidelizacion = () => {
                                 </h2>
                             </div>
 
-                            {/* Indicador del filtro que llegó desde KPIs (o se activó acá) */}
-                            {etiquetaFiltro && (
-                                <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-6 py-3 text-xs">
-                                    <span className="rounded bg-zinc-800 px-2 py-0.5 text-orange-300">
-                                        Filtro: {etiquetaFiltro}
-                                    </span>
-                                    <span className="text-zinc-500">
-                                        {prediccionesFiltradas.length} de {predicciones.length} alumnos
-                                    </span>
-                                    <button
-                                        type="button"
-                                        onClick={quitarFiltros}
-                                        className="text-zinc-300 underline hover:text-orange-300"
-                                    >
-                                        Ver todos
-                                    </button>
-                                </div>
-                            )}
                             <div className="overflow-x-auto">
                                 <table className="w-full">
                                     <thead className="bg-amber-800 text-white">
@@ -395,6 +456,29 @@ const Fidelizacion = () => {
                                 </table>
                             </div>
                         </div>
+                        {/* Gráfico de barras: desglose de alertas (al final, para que arriba de la tabla queden las tarjetas de conteo y los filtros) */}
+                        <div className="bg-zinc-900 rounded-lg shadow p-5">
+                            <h2 className="text-lg font-bold text-zinc-100 mb-2">📊 Desglose de alertas</h2>
+                            <p className="text-xs text-zinc-400 mb-4">Riesgo alto/crítico del modelo vs planes que vencen en ≤5 días</p>
+                            {predicciones.length === 0 ? (
+                                <div className="py-8 text-center text-zinc-500 text-sm">Sin alertas activas 🎉</div>
+                            ) : (
+                                <ResponsiveContainer width="100%" height={220}>
+                                    <BarChart data={chartData} barSize={70}>
+                                        <CartesianGrid strokeDasharray="3 3" />
+                                        <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                                        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                                        <Tooltip cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
+                                        <Bar dataKey="total" name="Alumnos" radius={[6, 6, 0, 0]}>
+                                            {chartData.map((d, idx) => (
+                                                <Cell key={idx} fill={d.name === 'Riesgo alto/crítico' ? '#dc2626' : '#f97316'} />
+                                            ))}
+                                        </Bar>
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            )}
+                        </div>
+
                     </>
                 )}
             </div>
