@@ -520,6 +520,16 @@ def get_predictions_forecast(
 
 
 
+# ── 6.b) Bloques horarios (pico vs valle) ────────────────────────────────────
+# Los turnos los define el HORARIO REAL del box (07-10, 11-15, 16-21); se evita
+# inventar franjas que el box no usa.
+BLOQUES_HORARIOS = (
+    ("Mañana (07:00-10:59)", 7, 10),
+    ("Mediodía (11:00-15:59)", 11, 15),
+    ("Tarde-noche (16:00-21:59)", 16, 21),
+)
+
+
 # ── 6) GET /api/v1/kpis/financiero (BI - bloque financiero) ──────────────────
 # ⚠️ ARPU NO se calcula acá A PROPÓSITO: ya existe en `GET /api/v1/reportes/`
 # (ingresos netos del mes / alumnos activos; la misma definición que muestra
@@ -624,4 +634,93 @@ def get_financiero(
         "nota_cac": (
             "No se calcula CAC: la base no tiene costo de adquisición. Sin CAC no "
             "hay payback ni ratio LTV/CAC."),
+    }
+
+
+
+# ── 7) GET /api/v1/kpis/bloques-horarios (BI - pico vs valle) ────────────────
+@router.get("/bloques-horarios")
+def get_bloques_horarios(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Oferta y asistencia por bloque horario (pico vs valle).
+
+    - `clases` y `cupo_promedio` son REALES (tabla `clases`).
+    - `asistencias` / `asistencias_por_clase` salen del join REAL
+      `asistencias.clase_id -> clases.hora_inicio`.
+      ⚠️ Hoy `asistencias.clase_id` es NULL en el 100% de las filas (el propio
+      modelo lo documenta: "se poblarán desde reservas en una limpieza futura"),
+      así que dan 0. `cobertura` expone el alcance para que la UI distinga
+      "0 asistencias" de "sin datos": cuando el backfill corra, el promedio se
+      activa solo, sin tocar código.
+    """
+    tenant_id = current_user["tenant_id"]
+
+    filas = db.execute(sql_text("""
+        SELECT EXTRACT(HOUR FROM c.hora_inicio)::int AS hora,
+               COUNT(DISTINCT c.id) AS clases,
+               ROUND(AVG(c.cupo_maximo), 1) AS cupo_promedio,
+               COUNT(a.id) AS asistencias
+        FROM clases c
+        LEFT JOIN asistencias a
+               ON a.clase_id = c.id
+              AND a.tenant_id = c.tenant_id
+              AND a.presente = true
+        WHERE c.tenant_id = :tid AND c.cancelada = false
+        GROUP BY 1 ORDER BY 1
+    """), {"tid": tenant_id}).fetchall()
+
+    cobertura = db.execute(sql_text("""
+        SELECT COUNT(*) AS total, COUNT(clase_id) AS con_clase
+        FROM asistencias WHERE tenant_id = :tid
+    """), {"tid": tenant_id}).first()
+
+    por_hora = [
+        {
+            "hora": int(r[0]),
+            "clases": int(r[1] or 0),
+            "cupo_promedio": float(r[2] or 0),
+            "asistencias": int(r[3] or 0),
+            "asistencias_por_clase": round((r[3] or 0) / r[1], 2) if r[1] else 0.0,
+        }
+        for r in filas
+    ]
+
+    bloques = []
+    for nombre, desde, hasta in BLOQUES_HORARIOS:
+        horas = [h for h in por_hora if desde <= h["hora"] <= hasta]
+        clases = sum(h["clases"] for h in horas)
+        asis = sum(h["asistencias"] for h in horas)
+        cupo = (round(sum(h["cupo_promedio"] * h["clases"] for h in horas) / clases, 1)
+                if clases else 0.0)
+        bloques.append({
+            "bloque": nombre,
+            "horas": [h["hora"] for h in horas],
+            "clases": clases,
+            "cupo_promedio": float(cupo or 0),
+            "asistencias": asis,
+            "asistencias_por_clase": round(asis / clases, 2) if clases else 0.0,
+            "ocupacion_pct": round(asis / (cupo * clases) * 100, 1)
+                             if (clases and cupo) else 0.0,
+        })
+
+    total_asis = int(cobertura[0] or 0)
+    con_clase = int(cobertura[1] or 0)
+    return {
+        "criterio": (
+            "clases/cupo reales de `clases` (no canceladas); asistencias por el "
+            "join `asistencias.clase_id -> clases.hora_inicio`"),
+        "cobertura": {
+            "asistencias_total": total_asis,
+            "con_clase": con_clase,
+            "pct": round(con_clase / total_asis * 100, 1) if total_asis else 0.0,
+            "nota": (
+                "Las asistencias todavía no están asociadas a su clase "
+                "(`asistencias.clase_id` nulo): el promedio por bloque se activa "
+                "cuando se corra el backfill desde reservas. Mientras tanto se "
+                "muestra la oferta real (clases y cupo)."),
+        },
+        "bloques": bloques,
+        "por_hora": por_hora,
     }
