@@ -382,8 +382,17 @@ def populate_monthly_kpis(
         func.date(Usuario.fecha_baja) <= fin,
     ).scalar() or 0
 
-    churn_rate = round(
-        alumnos_baja / alumnos_activos_inicio * 100, 2) if alumnos_activos_inicio else 0
+    # Retencion/churn: definicion COMPARTIDA con Reportes y con el criterio
+    # cohorte de /kpis/cohortes (de los vigentes al inicio del mes, cuantos
+    # siguen vigentes al cierre). Antes era alumnos_baja / alumnos_activos_inicio,
+    # una definicion distinta a la que mostraba Reportes para el mismo concepto.
+    retencion_pct, base_retencion = metricas.retencion_cohorte(
+        db, tenant_id, inicio, fin)
+    churn_rate = metricas.churn_desde_retencion(retencion_pct)
+    if churn_rate is None:
+        # monthly_kpis.churn_rate es NOT NULL: sin base suficiente queda en 0
+        # (pendiente: hacerla nullable para poder distinguir "sin dato").
+        churn_rate = 0
 
     # ── Finanzas ──
     # MRR e ingresos: definicion COMPARTIDA con Reportes (metricas_service), asi
@@ -450,6 +459,7 @@ def populate_monthly_kpis(
             "conversion_rate": conversion_rate,
             "alumnos_activos_inicio": alumnos_activos_inicio,
             "alumnos_baja": alumnos_baja, "churn_rate": churn_rate,
+            "retencion_pct": retencion_pct, "retencion_base": base_retencion,
             "mrr": float(mrr), "ingresos_total": ingresos_total,
             "asistencia_promedio": asistencia_promedio,
             "frecuencia_semanal": frecuencia_semanal,

@@ -15,15 +15,6 @@ from app.services import metricas_service as metricas
 
 router = APIRouter()
 
-# Umbral minimo de base para publicar la retencion mensual.
-# La metrica es activos_hoy / activos_hace_30 * 100: con bases chicas el
-# cociente explota (1 alumno vigente hace 30 dias -> 76 hoy = 7600%) y no mide
-# retencion sino crecimiento sobre una muestra irrelevante. Mismo criterio que
-# /kpis/cohortes, que devuelve null cuando el horizonte no maduro: preferimos
-# "sin dato" antes que un porcentaje que no significa nada.
-MIN_BASE_RETENCION = 5
-
-
 def _inicio_fin_mes(offset_meses=0):
     """Retorna (inicio_mes, fin_mes) para el mes actual + offset_meses.
 
@@ -149,8 +140,6 @@ def obtener_reportes_analytics(
         # --- PERIODOS ---
         inicio_mes, fin_mes = _inicio_fin_mes(0)
         inicio_mes_ant, fin_mes_ant = _inicio_fin_mes(-1)
-        hace_30_dias = ahora - timedelta(days=30)
-
         # --- 1. ALUMNOS ACTIVOS ---
         # Alumnos con rol='alumno' Y suscripcion activa vigente (fecha_expiracion >= hoy)
         alumnos_activos = db.execute(sql_text("""
@@ -183,27 +172,14 @@ def obtener_reportes_analytics(
               AND fecha_expiracion <= :fin
         """), {"tid": tenant_id, "inicio": inicio_mes, "fin": fin_mes}).scalar() or 0
 
-        # --- 4. RETENCION ---
-        # Alumnos activos hace 30 días que siguen activos hoy
-        # DEFINICIÓN: alumnos con suscripción activa hace 30 días / alumnos con suscripción activa hoy
-        alumnos_activos_hace_30 = db.execute(sql_text("""
-            SELECT COUNT(DISTINCT u.id)
-            FROM usuarios u
-            JOIN suscripciones s ON u.id = s.usuario_id
-            WHERE u.tenant_id = :tid
-              AND u.rol = 'alumno'
-              AND u.activo = true
-              AND s.estado = 'activo'
-              AND s.fecha_inicio <= :hace30
-              AND s.fecha_expiracion >= :hace30
-        """), {"tid": tenant_id, "hace30": hace_30_dias}).scalar() or 0
-
-        # Guarda de datos minimos: si la base de hace 30 dias no llega al
-        # umbral se devuelve None (la UI muestra "Datos insuficientes").
-        if alumnos_activos_hace_30 >= MIN_BASE_RETENCION:
-            retencion = int((alumnos_activos / alumnos_activos_hace_30) * 100)
-        else:
-            retencion = None
+        # --- 4. RETENCION (cohorte) ---
+        # Definicion COMPARTIDA con el BI (metricas_service.retencion_cohorte):
+        # de los alumnos VIGENTES hace 30 dias, cuantos siguen vigentes hoy.
+        # Antes se dividia "activos de hoy / activos hace 30 dias", que no es
+        # retencion (el numerador incluia a los alumnos nuevos) y por eso un box
+        # que crece daba mas de 100%: el caso reportado del 7600%.
+        retencion, base_retencion = metricas.retencion_ultimos_30_dias(
+            db, tenant_id, ahora.date())
 
         # --- 5. MRR (INGRESOS MENSUALES RECURRENTES) ---
         # Definicion COMPARTIDA con el BI: metricas_service.mrr (precio de lista
@@ -387,8 +363,8 @@ def obtener_reportes_analytics(
             "retencion": retencion,  # None si la base no alcanza el minimo
             "tieneDatosRetencion": retencion is not None,
             # Transparencia: base usada y umbral, para explicar el "sin dato".
-            "alumnosActivosHace30": alumnos_activos_hace_30,
-            "retencionBaseMinima": MIN_BASE_RETENCION,
+            "alumnosActivosHace30": base_retencion,
+            "retencionBaseMinima": metricas.MIN_BASE_RETENCION,
 
             # Ingresos
             "mrr": mrr,
