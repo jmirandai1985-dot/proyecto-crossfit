@@ -172,12 +172,7 @@ const AdminDashboard = () => {
                         <button onClick={() => setFidelizacionModal('membresias')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-green-600 hover:shadow-md hover:border-green-700 transition-all cursor-pointer text-left">
                             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Membresías Mensuales</p>
                             <p className="text-3xl font-bold text-green-700 mt-1">{stats.totalSuscripcionesMes || 0}</p>
-                            <div className="flex items-center gap-1 mt-1">
-                                <span className={`text-xs font-bold ${(stats.crecimientoMensual || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                    {stats.crecimientoMensual > 0 ? '📈' : '📉'} {Math.abs(stats.crecimientoMensual || 0)}%
-                                </span>
-                                <span className="text-xs text-zinc-500">vs mes anterior — Clic para ver detalle</span>
-                            </div>
+                            <p className="text-xs text-zinc-500 mt-1">Suscripciones iniciadas este mes — Clic para ver detalle</p>
                         </button>
                         <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-amber-600">
                             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Ingreso Mensual</p>
@@ -185,6 +180,19 @@ const AdminDashboard = () => {
                                 ${(stats.ingresoMensual || 0).toLocaleString('es-CL')}
                             </p>
                             <p className="text-xs text-zinc-500 mt-1">Ingresos del mes actual</p>
+                            {/* El MoM es de INGRESOS: antes estaba mal ubicado en la tarjeta
+                                de membresias, donde se leia como crecimiento de suscripciones. */}
+                            {stats.crecimientoMensual === null ? (
+                                <p className="text-xs font-bold text-zinc-500 mt-1"
+                                    title="Sin mes anterior comparable: el ingreso neto del mes pasado fue <= 0.">
+                                    s/d vs mes anterior (sin base comparable)
+                                </p>
+                            ) : (
+                                <p className={`text-xs font-bold mt-1 ${stats.crecimientoMensual > 0 ? 'text-green-600' : stats.crecimientoMensual < 0 ? 'text-red-600' : 'text-zinc-500'}`}>
+                                    {stats.crecimientoMensual > 0 ? '📈' : stats.crecimientoMensual < 0 ? '📉' : '='}{' '}
+                                    {Math.abs(stats.crecimientoMensual ?? 0)}% vs mes anterior
+                                </p>
+                            )}
                         </div>
                         <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-purple-600">
                             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Asistencia Promedio</p>
