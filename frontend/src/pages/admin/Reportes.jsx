@@ -132,6 +132,8 @@ const Reportes = () => {
                             <div>
                                 <p className="text-zinc-400 text-sm font-medium">Alumnos Activos</p>
                                 <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.alumnosActivos || 0}</p>
+                                {/* Mismo criterio que el endpoint: alumno con suscripcion vigente hoy. */}
+                                <p className="text-xs text-zinc-400 mt-2">Con suscripción vigente</p>
                                 <p className="text-xs text-green-600 mt-2">
                                     ↑ {reportData?.crecimientoMensual || 0}% MoM
                                 </p>
@@ -175,18 +177,7 @@ const Reportes = () => {
                         </div>
                     </div>
 
-                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-red-500">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-zinc-400 text-sm font-medium">Alumnos Activos</p>
-                                <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.alumnosActivos || 0}</p>
-                                <p className="text-xs text-zinc-400 mt-2">Usuarios registrados</p>
-                            </div>
-                            <span className="text-4xl">🏋️</span>
-                        </div>
-                    </div>
-
-                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-indigo-500">
+                                        <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-indigo-500">
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-zinc-400 text-sm font-medium">Retención Mensual</p>
