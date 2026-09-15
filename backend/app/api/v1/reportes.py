@@ -263,9 +263,7 @@ def obtener_reportes_analytics(
               AND created_at <= :fin
         """), {"tid": tenant_id, "inicio": inicio_mes, "fin": fin_mes}).scalar() or 0
 
-        # --- 14. PLANES VENDIDOS ESTE MES ---
-        planes_vendidos = []
-        # --- 14b. SUSCRIPCIONES DEL MES (detalle por alumno/plan/fecha) ---
+        # --- 14. SUSCRIPCIONES DEL MES (detalle por alumno/plan/fecha) ---
         suscripciones_mes = []
         sub_rows = db.execute(sql_text("""
             SELECT u.nombre AS alumno_nombre, p.nombre AS plan_nombre, s.fecha_inicio
@@ -283,23 +281,6 @@ def obtener_reportes_analytics(
                 "plan_nombre": r.plan_nombre,
                 "fecha_inicio": str(r.fecha_inicio)[:10] if r.fecha_inicio else None,
             })
-        plan_rows = db.execute(sql_text("""
-            SELECT p.id, p.nombre, COUNT(s.id) as total
-            FROM suscripciones s
-            JOIN planes p ON s.plan_id = p.id
-            WHERE s.tenant_id = :tid
-              AND s.fecha_inicio >= :inicio
-              AND s.fecha_inicio <= :fin
-            GROUP BY p.id, p.nombre
-            ORDER BY total DESC
-        """), {"tid": tenant_id, "inicio": inicio_mes, "fin": fin_mes}).fetchall()
-        for r in plan_rows:
-            planes_vendidos.append({
-                "id": r.id,
-                "nombre": r.nombre,
-                "vendidos": r.total
-            })
-
         # --- 15. HISTORICO 6 MESES (suscripciones nuevas por mes) ---
         historico_membresias = []
         for i in range(5, -1, -1):
@@ -359,7 +340,6 @@ def obtener_reportes_analytics(
             "coberturasEmergencia": coberturas_mes,
 
             # Planes
-            "planesVendidos": planes_vendidos,
 
             # Histórico para gráficos
             "historicoMembresias": historico_membresias,
