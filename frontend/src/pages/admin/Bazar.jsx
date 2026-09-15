@@ -47,7 +47,28 @@ const Bazar = () => {
 
     // Producto en alerta de stock bajo: tiene umbral configurado y el stock
     // quedó en/bajo ese umbral (misma definición que usa el backend para alertar).
-    const enAlerta = (p) => p.stock_minimo != null && p.stock <= p.stock_minimo;
+    // Criterio unico de stock: fila, filtro y KPI usan la MISMA funcion.
+    // stock_minimo NULL = alerta desactivada (contrato del backend).
+    const TONOS = {
+        agotado: "bg-red-100 text-red-800",
+        bajo: "bg-red-100 text-red-800",
+        cerca: "bg-yellow-100 text-yellow-800",
+        sin_umbral: "bg-zinc-800 text-zinc-400",
+        ok: "bg-green-100 text-green-800",
+    };
+
+    const estadoStock = (p) => {
+        const stock = p.stock ?? 0;
+        const min = p.stock_minimo;
+        if (stock <= 0) return { key: "agotado", label: "Agotado" };
+        if (min == null) return { key: "sin_umbral", label: "Sin umbral" };
+        if (stock <= min) return { key: "bajo", label: "Bajo (mín. " + min + ")" };
+        if (stock <= min * 1.5) return { key: "cerca", label: "Cerca del mínimo" };
+        return { key: "ok", label: "OK" };
+    };
+
+    // En alerta = agotado o en/bajo su propio umbral (igual criterio que el KPI).
+    const enAlerta = (p) => ["agotado", "bajo"].includes(estadoStock(p).key);
 
     const stats = useMemo(() => {
         const total = productos.length;
@@ -273,9 +294,9 @@ const Bazar = () => {
                                             </td>
                                             <td className="px-4 py-3.5 text-[13.5px] text-zinc-100">{formatPrecio(p.precio)}</td>
                                             <td className="px-4 py-3.5">
-                                                <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${getStockColor(p.stock || 0)}`}>
+                                                <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${TONOS[estadoStock(p).key]}`}>
                                                     <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
-                                                    {p.stock || 0} uds. · {getStockLabel(p.stock || 0)}
+                                                    {p.stock || 0} uds. · {estadoStock(p).label}
                                                 </span>
                                                 {p.stock_minimo != null ? (
                                                     p.alerta_stock_enviada ? (
