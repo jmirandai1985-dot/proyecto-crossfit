@@ -32,11 +32,26 @@ def _ya_enviado(db, alumno_id: int, tipo: str, dias: int = 7) -> bool:
     ).first() is not None
 
 
-def _marcar_enviado(db, alumno_id: int, tipo: str):
+def _marcar_enviado(db, alumno_id: int, tipo: str, tenant_id: int = None):
+    """Registra el envío en `notificaciones_enviadas` CON el tenant del alumno.
+
+    Antes insertaba sin `tenant_id`, así que esas filas quedaban invisibles para
+    GET /notificaciones-enviadas, que filtra por el tenant del token del admin
+    (medido: 33/35 de inactividad, 3/3 de renovacion_plan y 1/1 de
+    vencimiento_inminente quedaron con tenant_id NULL).
+
+    Mismo patrón que `email_service._registrar_envio`: el llamador puede pasar
+    `tenant_id` (lo tiene, porque filtra por tenant) y si no, se resuelve desde
+    el alumno.
+    """
     from app.models.notificacion_enviada import NotificacionEnviada
+    from app.models.usuario import Usuario
+    if tenant_id is None and alumno_id:
+        alumno = db.query(Usuario).filter(Usuario.id == alumno_id).first()
+        tenant_id = alumno.tenant_id if alumno else None
     db.add(NotificacionEnviada(
         alumno_id=alumno_id, tipo=tipo, estado="enviado",
-        fecha_envio=datetime.utcnow(),
+        fecha_envio=datetime.utcnow(), tenant_id=tenant_id,
     ))
 
 
@@ -62,7 +77,7 @@ def enviar_alertas_renovacion(db, tenant_id: int = 1, dias_aviso: int = 3) -> di
         fecha_es = _formatear_fecha_es(r.fecha_expiracion)
         ok = send_renovacion_plan(r.nombre, r.correo, fecha_es, LINK_RENOVAR)
         if ok:
-            _marcar_enviado(db, r.id, "renovacion_plan")
+            _marcar_enviado(db, r.id, "renovacion_plan", tenant_id=tenant_id)
             enviados.append(r.correo)
         else:
             fallidos.append(r.correo)
@@ -98,7 +113,7 @@ def enviar_alertas_inactividad(db, tenant_id: int = 1, umbral_dias: int = 7) -> 
             continue
         ok = send_alerta_inactividad(r.nombre, r.correo)
         if ok:
-            _marcar_enviado(db, r.id, "inactividad")
+            _marcar_enviado(db, r.id, "inactividad", tenant_id=tenant_id)
             enviados.append(r.correo)
         else:
             fallidos.append(r.correo)
@@ -129,7 +144,7 @@ def enviar_alertas_urgencia(db, tenant_id: int = 1) -> dict:
             continue
         ok = send_alerta_urgencia_renovacion(r.nombre, r.correo)
         if ok:
-            _marcar_enviado(db, r.id, "vencimiento_inminente")
+            _marcar_enviado(db, r.id, "vencimiento_inminente", tenant_id=tenant_id)
             enviados.append(r.correo)
         else:
             fallidos.append(r.correo)
@@ -181,7 +196,7 @@ def enviar_alertas_ultimo_credito(db, tenant_id: int = 1) -> dict:
         ok = send_alerta_ultimo_credito(r.nombre, r.correo,
                                         r.creditos_disponibles, dias_restantes)
         if ok:
-            _marcar_enviado(db, r.id, "ultimo_credito")
+            _marcar_enviado(db, r.id, "ultimo_credito", tenant_id=tenant_id)
             enviados.append(r.correo)
         else:
             fallidos.append(r.correo)
@@ -217,7 +232,7 @@ def enviar_alertas_sin_creditos(db, tenant_id: int = 1) -> dict:
             continue
         ok = send_alerta_sin_creditos(r.nombre, r.correo)
         if ok:
-            _marcar_enviado(db, r.id, "sin_creditos")
+            _marcar_enviado(db, r.id, "sin_creditos", tenant_id=tenant_id)
             enviados.append(r.correo)
         else:
             fallidos.append(r.correo)
