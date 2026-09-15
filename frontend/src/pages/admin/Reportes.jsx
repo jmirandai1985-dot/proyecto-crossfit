@@ -134,10 +134,7 @@ const Reportes = () => {
                                 <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.alumnosActivos || 0}</p>
                                 {/* Mismo criterio que el endpoint: alumno con suscripcion vigente hoy. */}
                                 <p className="text-xs text-zinc-400 mt-2">Con suscripción vigente</p>
-                                <p className="text-xs text-green-600 mt-2">
-                                    ↑ {reportData?.crecimientoMensual || 0}% MoM
-                                </p>
-                            </div>
+                                                            </div>
                             <span className="text-4xl">👥</span>
                         </div>
                     </div>
@@ -150,6 +147,19 @@ const Reportes = () => {
                                     {formatCompact(reportData?.ingresoMensual || 0)}
                                 </p>
                                 <p className="text-xs text-zinc-400 mt-2">Ingresos - Egresos del mes</p>
+                                {/* MoM de INGRESOS (antes estaba mal ubicado bajo Alumnos Activos). */}
+                                {reportData?.crecimientoMensual === null ? (
+                                    <p className="text-xs text-zinc-500 mt-2"
+                                        title="Sin mes anterior comparable: el ingreso neto del mes pasado fue <= 0 (sin movimientos o mas egresos que ingresos).">
+                                        s/d vs mes anterior (sin base comparable)
+                                    </p>
+                                ) : (
+                                    <p className={`text-xs mt-2 ${reportData?.crecimientoMensual > 0 ? 'text-green-600' : reportData?.crecimientoMensual < 0 ? 'text-red-500' : 'text-zinc-400'}`}
+                                        title={`Ingreso neto del mes anterior: ${formatCLP(reportData?.ingresoMesAnterior ?? 0)}`}>
+                                        {reportData?.crecimientoMensual > 0 ? '↑' : reportData?.crecimientoMensual < 0 ? '↓' : '='}{' '}
+                                        {Math.abs(reportData?.crecimientoMensual ?? 0)}% vs mes anterior
+                                    </p>
+                                )}
                             </div>
                             <span className="text-4xl">💰</span>
                         </div>

@@ -248,11 +248,14 @@ def obtener_reportes_analytics(
                      0) if alumnos_activos > 0 else 0
 
         # --- 8. COMPARACION MoM ---
+        # Si el mes anterior no es comparable (neto <= 0: sin movimientos o mas
+        # egresos que ingresos) NO se devuelve 0% (que se lee como "no crecio"):
+        # se devuelve None y la UI muestra "s/d".
         if ingresos_mes_ant > 0:
             crecimiento_mom = int(
                 ((ingresos_mes - ingresos_mes_ant) / ingresos_mes_ant) * 100)
         else:
-            crecimiento_mom = 0
+            crecimiento_mom = None
 
         # --- 9. CLASES IMPARTIDAS ESTE MES ---
         clases_impartidas = db.execute(sql_text("""
@@ -435,7 +438,7 @@ def obtener_reportes_analytics(
             "ingresoMensual": ingresos_mes,
             "ingresoMesAnterior": ingresos_mes_ant,
             "arpu": arpu,
-            "crecimientoMensual": crecimiento_mom,
+            "crecimientoMensual": crecimiento_mom,  # None si no hay base comparable
 
             # Ocupación
             "clasesImpartidas": clases_impartidas,
