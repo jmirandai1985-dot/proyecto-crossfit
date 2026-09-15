@@ -8,6 +8,41 @@ import { estiloReco } from './recoEstilo';
 const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
     'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
+// Etiquetas legibles del `tipo` del último correo automático (mismo mapa que
+// usaba la tabla de KPIs: acá vive el único consumidor que queda, este modal).
+const ETIQUETA_CONTACTO = {
+    inactividad: 'Inactividad',
+    renovacion_plan: 'Renovación de plan',
+    vencimiento: 'Plan por vencer',
+    vencimiento_inminente: 'Plan por vencer',
+    ultimo_credito: 'Último crédito',
+    sin_creditos: 'Sin créditos',
+    reactivacion: 'Reactivación',
+    cumplimiento: 'Cumplimiento',
+    acompanamiento: 'Acompañamiento',
+    bienvenida: 'Bienvenida',
+    activacion: 'Activación',
+    bienvenida_activacion: 'Bienvenida y activación',
+    confirmacion_renovacion: 'Confirmación de renovación',
+    confirmacion_plan: 'Confirmación de plan',
+    confirmacion_pedido: 'Confirmación de pedido',
+};
+
+const etiquetaContacto = (tipo) => {
+    const t = String(tipo || '');
+    if (!t) return 'Contacto';
+    if (ETIQUETA_CONTACTO[t]) return ETIQUETA_CONTACTO[t];
+    if (t.startsWith('hito_racha')) return 'Hito de racha';
+    return t.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+};
+
+// "hoy" / "hace 1 día" / "hace 3 días"
+const fmtHace = (dias) => {
+    const n = Number(dias);
+    if (!Number.isFinite(n) || n <= 0) return 'hoy';
+    return `hace ${n} día${n === 1 ? '' : 's'}`;
+};
+
 /**
  * Modal con el detalle completo de la recomendación de un alumno (pestaña BI).
  *
@@ -21,10 +56,11 @@ const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
  * Props:
  *   - fila:           fila de GET /kpis/churn (incluye motivo y recomendación)
  *   - onClose:        callback al cerrar
- *   - contactoTxt:    texto ya formateado del último contacto automático (si falta
- *                     se muestra "Sin contacto previo": el dato ya no está en la tabla)
- *   - renovacionTxt:  fecha ya formateada de la próxima renovación (si falta se
- *                     muestra "Sin plan vigente")
+ *   - contactoTxt:    texto ya formateado del último contacto automático. Si no
+ *                     viene, se deriva de `fila.ultimo_contacto_automatico` (el
+ *                     modal es autosuficiente: Fidelización lo usa sin props).
+ *   - renovacionTxt:  fecha ya formateada de la próxima renovación. Si no
+ *                     viene, se deriva de `fila.fecha_proxima_renovacion`.
  */
 export const RecomendacionModal = ({ fila, onClose, contactoTxt, renovacionTxt }) => {
     useEffect(() => {
@@ -54,6 +90,19 @@ export const RecomendacionModal = ({ fila, onClose, contactoTxt, renovacionTxt }
             .slice(0, 10).split('-');
         return (y && m && d) ? `${Number(d)} ${MESES_CORTOS[Number(m) - 1]}` : null;
     })();
+
+    // Textos de contexto: si el padre NO los formateó, se derivan de la fila. Así
+    // el modal es AUTOSUFICIENTE (Fidelización lo usa sin props) y muestra los
+    // datos reales en vez de los fallbacks cuando la fila los trae.
+    const fechaCorta = (iso) => {
+        const [y, m, d] = String(iso || '').slice(0, 10).split('-');
+        return (y && m && d) ? `${Number(d)} ${MESES_CORTOS[Number(m) - 1]}` : null;
+    };
+    const renovacion = renovacionTxt ?? fechaCorta(fila.fecha_proxima_renovacion);
+    const contacto = contactoTxt ?? (fila.ultimo_contacto_automatico
+        ? `${etiquetaContacto(fila.ultimo_contacto_automatico.tipo)} · `
+          + `${fmtHace(fila.ultimo_contacto_automatico.hace_dias)}`
+        : null);
 
     return (
         <div
@@ -119,7 +168,7 @@ export const RecomendacionModal = ({ fila, onClose, contactoTxt, renovacionTxt }
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                         <div>
                             <p className="text-xs text-zinc-500">Próxima renovación</p>
-                            <p className="text-zinc-200">{renovacionTxt || 'Sin plan vigente'}</p>
+                            <p className="text-zinc-200">{renovacion || 'Sin plan vigente'}</p>
                             {diasParaVencer !== null && (
                                 <p className={`text-xs ${diasParaVencer <= 7 ? 'font-semibold text-orange-300' : 'text-zinc-500'}`}>
                                     {diasParaVencer < 0
@@ -130,7 +179,7 @@ export const RecomendacionModal = ({ fila, onClose, contactoTxt, renovacionTxt }
                         </div>
                         <div>
                             <p className="text-xs text-zinc-500">Último contacto automático</p>
-                            <p className="text-zinc-200">{contactoTxt || 'Sin contacto previo'}</p>
+                            <p className="text-zinc-200">{contacto || 'Sin contacto previo'}</p>
                             {fechaContacto && (
                                 <p className="text-xs text-zinc-500">enviado el {fechaContacto}</p>
                             )}

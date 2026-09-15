@@ -8,6 +8,7 @@ import { RiskBadge } from '../../components/kpis/RiskBadge';
 import RecomendacionModal from '../../components/kpis/RecomendacionModal';
 import { estiloReco } from '../../components/kpis/recoEstilo';
 import { estiloArquetipo, arquetipoDe } from '../../components/kpis/arquetipoEstilo';
+import { ArquetipoBadge } from '../../components/kpis/ArquetipoBadge';
 import { Eye } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
@@ -256,6 +257,7 @@ const Fidelizacion = () => {
                                         <tr>
                                             <th className="px-6 py-3 text-left text-sm font-medium">Alumno</th>
                                             <th className="px-6 py-3 text-left text-sm font-medium">Riesgo</th>
+                                            <th className="px-6 py-3 text-left text-sm font-medium">Arquetipo</th>
                                             <th className="px-6 py-3 text-left text-sm font-medium">Motivo</th>
                                             <th className="px-6 py-3 text-left text-sm font-medium">Recomendación</th>
                                             <th className="px-6 py-3 text-left text-sm font-medium">Gestión</th>
@@ -265,7 +267,7 @@ const Fidelizacion = () => {
                                     <tbody className="divide-y divide-zinc-800">
                                         {prediccionesFiltradas.length === 0 && (
                                             <tr>
-                                                <td colSpan={6} className="px-6 py-8 text-center text-sm text-zinc-500">
+                                                <td colSpan={7} className="px-6 py-8 text-center text-sm text-zinc-500">
                                                     No hay alumnos que cumplan este filtro.
                                                 </td>
                                             </tr>
@@ -279,6 +281,9 @@ const Fidelizacion = () => {
                                                 <td className="px-6 py-4">
                                                     <RiskBadge nivel={p.riesgo_nivel} />
                                                     <p className="text-xs text-zinc-500 mt-1">{Number(p.probabilidad_churn || 0).toFixed(1)}%</p>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <ArquetipoBadge arquetipo={p.arquetipo} />
                                                 </td>
                                                 <td className="px-6 py-4 text-sm text-zinc-400">{p.motivo || '—'}</td>
                                                 <td className="px-6 py-4">
