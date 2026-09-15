@@ -45,9 +45,31 @@ const Bazar = () => {
         fetchProductos();
     }, [tenant_id]);
 
-    // Producto en alerta de stock bajo: tiene umbral configurado y el stock
-    // quedó en/bajo ese umbral (misma definición que usa el backend para alertar).
-    const enAlerta = (p) => p.stock_minimo != null && p.stock <= p.stock_minimo;
+    // Criterio UNICO de stock: misma fuente para fila, filtro y KPI.
+    // Depende solo de stock y stock_minimo del producto; stock_minimo NULL
+    // = alerta desactivada (contrato del backend: schemas/producto.py).
+    // Antes la fila usaba umbrales fijos (5/15) y el KPI usaba stock_minimo,
+    // asi que el mismo producto salia Bajo en la fila y 0 en las tarjetas.
+    const TONOS = {
+        agotado: 'bg-red-100 text-red-800',
+        bajo: 'bg-red-100 text-red-800',
+        cerca: 'bg-yellow-100 text-yellow-800',
+        sin_umbral: 'bg-zinc-800 text-zinc-400',
+        ok: 'bg-green-100 text-green-800',
+    };
+
+    const estadoStock = (p) => {
+        const stock = p.stock ?? 0;
+        const min = p.stock_minimo;
+        if (stock <= 0) return { key: 'agotado', label: 'Agotado' };
+        if (min == null) return { key: 'sin_umbral', label: 'Sin umbral' };
+        if (stock <= min) return { key: 'bajo', label: 'Bajo (mín. ' + min + ')' };
+        if (stock <= min * 1.5) return { key: 'cerca', label: 'Cerca del minimo' };
+        return { key: 'ok', label: 'OK' };
+    };
+
+    // En alerta = agotado o en/bajo su propio umbral.
+    const enAlerta = (p) => ['agotado', 'bajo'].includes(estadoStock(p).key);
 
     const stats = useMemo(() => {
         const total = productos.length;
@@ -79,19 +101,6 @@ const Bazar = () => {
         if (key === 'inactivos') return stats.inactivos;
         if (key === 'stock_bajo') return stats.alertas;
         return 0;
-    };
-    // Badge de nivel de stock (mismo criterio que tenía el panel): bajo <=5,
-    // medio <=15, alto >15.
-    const getStockColor = (stock) => {
-        if (stock <= 5) return 'bg-red-100 text-red-800';
-        if (stock <= 15) return 'bg-yellow-100 text-yellow-800';
-        return 'bg-green-100 text-green-800';
-    };
-
-    const getStockLabel = (stock) => {
-        if (stock <= 5) return 'bajo';
-        if (stock <= 15) return 'medio';
-        return 'alto';
     };
 
     const getProductoEmoji = (nombre) => {
@@ -273,9 +282,9 @@ const Bazar = () => {
                                             </td>
                                             <td className="px-4 py-3.5 text-[13.5px] text-zinc-100">{formatPrecio(p.precio)}</td>
                                             <td className="px-4 py-3.5">
-                                                <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${getStockColor(p.stock || 0)}`}>
+                                                <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${TONOS[estadoStock(p).key]}`}>
                                                     <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
-                                                    {p.stock || 0} uds. · {getStockLabel(p.stock || 0)}
+                                                    {p.stock || 0} uds. · {estadoStock(p).label}
                                                 </span>
                                                 {p.stock_minimo != null ? (
                                                     p.alerta_stock_enviada ? (
