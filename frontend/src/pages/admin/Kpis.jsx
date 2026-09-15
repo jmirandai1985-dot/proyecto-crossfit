@@ -43,6 +43,13 @@ const fmtMesCorto = (iso) => {
 
 const fmtCLP = (n) => `$${Number(n || 0).toLocaleString('es-CL')}`;
 
+// Celda de retención de una cohorte: "activos/evaluables (P%)" o "n/d" si el
+// horizonte todavía no maduró (el backend manda `retencion_pct: null`).
+const fmtCohorte = (h) => {
+    if (!h || h.retencion_pct === null || h.retencion_pct === undefined) return 'n/d';
+    return `${h.activos}/${h.evaluables} (${h.retencion_pct}%)`;
+};
+
 // "14 sep 23:27" (hora local del navegador) para la fecha del modelo de
 // segmentación (`modelo_fecha` de GET /api/v1/segmentacion).
 const fmtFechaHora = (iso) => {
@@ -83,6 +90,8 @@ const AdminKpis = () => {
     const [arpu, setArpu] = useState(null);
     // Bloques horarios (pico vs valle): oferta y asistencia por turno.
     const [bloques, setBloques] = useState(null);
+    // Cohortes de retención por mes de alta.
+    const [cohortes, setCohortes] = useState(null);
 
     // ─── BI: SOLO LECTURA ────────────────────────────────────────────────
     // La gestión individual de alumnos vive en /admin/fidelizacion: acá las
@@ -186,6 +195,11 @@ const AdminKpis = () => {
             const rBlo = await api.get('/api/v1/kpis/bloques-horarios')
                 .catch(() => null);
             setBloques(rBlo?.data || null);
+
+            // Cohortes de retención: opcional, mismo criterio.
+            const rCoh = await api.get('/api/v1/kpis/cohortes')
+                .catch(() => null);
+            setCohortes(rCoh?.data || null);
         } catch (err) {
             setError(err.response?.data?.detail || err.message);
         }
@@ -602,6 +616,33 @@ const AdminKpis = () => {
                                 data={forecastDetalle}
                             />
                         </div>
+
+                        {/* ── Cohortes de retención por mes de alta ──
+                            "n/d" = la cohorte todavía no cumple ese horizonte (no se
+                            inventa un 0%): lo resuelve el backend con `evaluables`. */}
+                        {cohortes?.cohortes?.length > 0 && (
+                            <div>
+                                <h3 className="text-lg font-semibold text-white mb-3">
+                                    Cohortes de retención por mes de alta
+                                </h3>
+                                <DataTable
+                                    columns={[
+                                        { key: 'cohorte', label: 'Cohorte (alta)' },
+                                        { key: 'n_alumnos', label: 'Alumnos' },
+                                        { key: 'h30', label: 'Activos a 30 días', render: (h) => fmtCohorte(h) },
+                                        { key: 'h60', label: 'Activos a 60 días', render: (h) => fmtCohorte(h) },
+                                        { key: 'h90', label: 'Activos a 90 días', render: (h) => fmtCohorte(h) },
+                                    ]}
+                                    data={cohortes.cohortes}
+                                />
+                                <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+                                    {cohortes.definicion}
+                                    {' '}Global: a 30 días {fmtCohorte(cohortes.global?.h30)},
+                                    {' '}a 60 días {fmtCohorte(cohortes.global?.h60)},
+                                    {' '}a 90 días {fmtCohorte(cohortes.global?.h90)}.
+                                </p>
+                            </div>
+                        )}
 
                         {/* ── Resumen por arquetipos (GET /api/v1/segmentacion) ──
                             Tarjetas de conteo: al hacer click NAVEGAN a Fidelización con
