@@ -45,20 +45,31 @@ const AdminDashboard = () => {
         try {
             const res = await api.get(`/api/v1/reportes/?tenant_id=${tenant_id}`);
             setStats(res.data);
-        } catch { setStats(null); }
+        } catch (e) {
+            console.error('Error cargando estadisticas del dashboard', e);
+            setStats(null);
+        }
     };
 
     const cargarSolicitudes = async () => {
-        try {
-            const [sols, statsRes] = await Promise.all([
-                api.get(`/api/v1/solicitudes/pendientes`),
-                api.get(`/api/v1/reportes/?tenant_id=${tenant_id}`)
-            ]);
-            setSolicitudes(sols.data || []);
-            setStats(statsRes.data);
-        } catch {
+        // Fetch INDEPENDIENTES (antes un Promise.all): si /solicitudes/pendientes
+        // fallaba, el catch dejaba stats=null y NO se dibujaba ninguna tarjeta.
+        // Con allSettled un fallo parcial no tumba el resto de la pantalla.
+        const [sols, statsRes] = await Promise.allSettled([
+            api.get(`/api/v1/solicitudes/pendientes`),
+            api.get(`/api/v1/reportes/?tenant_id=${tenant_id}`)
+        ]);
+        if (sols.status === 'fulfilled') {
+            setSolicitudes(sols.value.data || []);
+        } else {
+            console.error('Error cargando solicitudes pendientes', sols.reason);
             setSolicitudes([]);
-            setStats(null);
+        }
+        if (statsRes.status === 'fulfilled') {
+            setStats(statsRes.value.data);
+        } else {
+            // No se pisa un stats ya cargado por cargarStats().
+            console.error('Error cargando estadisticas del dashboard', statsRes.reason);
         }
         setLoading(false);
     };
