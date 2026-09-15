@@ -16,7 +16,6 @@ import { TabBar } from '../../components/kpis/TabBar';
 import { KpiCard } from '../../components/kpis/KpiCard';
 import { ChartCard } from '../../components/kpis/ChartCard';
 import { DataTable } from '../../components/kpis/DataTable';
-import { ARQUETIPOS_UI, estiloArquetipo } from '../../components/kpis/arquetipoEstilo';
 
 const TABS = [
     { id: 'diario', label: 'Diario' },
@@ -48,16 +47,6 @@ const fmtCLP = (n) => `$${Number(n || 0).toLocaleString('es-CL')}`;
 const fmtCohorte = (h) => {
     if (!h || h.retencion_pct === null || h.retencion_pct === undefined) return 'n/d';
     return `${h.activos}/${h.evaluables} (${h.retencion_pct}%)`;
-};
-
-// "14 sep 23:27" (hora local del navegador) para la fecha del modelo de
-// segmentación (`modelo_fecha` de GET /api/v1/segmentacion).
-const fmtFechaHora = (iso) => {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return String(iso).slice(0, 10);
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mm = String(d.getMinutes()).padStart(2, '0');
-    return `${d.getDate()} ${MESES[d.getMonth()]} ${hh}:${mm}`;
 };
 
 const TOOLTIP_STYLE = {
@@ -96,8 +85,6 @@ const AdminKpis = () => {
     // ─── BI: SOLO LECTURA ────────────────────────────────────────────────
     // La gestión individual de alumnos vive en /admin/fidelizacion: acá las
     // tarjetas y las alertas NAVEGAN a esa pantalla con un query param.
-    // Resumen de segmentación (GET /api/v1/segmentacion): conteos por arquetipo.
-    const [segmentacion, setSegmentacion] = useState(null);
 
     // ─── DIARIO: últimos 7 días ──────────────────────────────────────────
     // El job n8n puebla el DÍA ANTERIOR (02:30), por eso la serie termina ayer.
@@ -175,12 +162,6 @@ const AdminKpis = () => {
             }
             setMrrBi(mrr);
 
-            // Segmentación por arquetipos: endpoint APARTE y opcional. Si falla o
-            // todavía no se reentrenó, el bloque de resumen no se muestra (el resto
-            // de la pestaña BI sigue funcionando igual).
-            const rSeg = await api.get('/api/v1/segmentacion').catch(() => null);
-            setSegmentacion(rSeg?.data || null);
-
             // Bloque financiero (opcional, mismo criterio): el ticket y la vida
             // salen del endpoint nuevo; el ARPU se REUSA de /reportes/ (la misma
             // definición de Reportes.jsx: ingresos netos del mes / alumnos activos).
@@ -228,14 +209,6 @@ const AdminKpis = () => {
     const bloqueValle = bloquesOrdenados.length > 1
         ? bloquesOrdenados[bloquesOrdenados.length - 1]
         : null;
-
-    // Las 6 tarjetas del resumen, en el orden de ARQUETIPOS_UI (el backend manda
-    // su propio orden y puede no traer los que quedaron en 0 -> default 0).
-    const arquetiposSegmentacion = ARQUETIPOS_UI.map((codigo) => {
-        const item = (segmentacion?.arquetipos || [])
-            .find((a) => a.arquetipo === codigo);
-        return { codigo, ...(item || { n: 0, pct: 0, descripcion: '' }) };
-    });
 
     // Desglose mes a mes del pronóstico. La variación % vs mes anterior se
     // calcula acá (el backend expone `tasa_crecimiento`, que es otra métrica).
@@ -440,27 +413,6 @@ const AdminKpis = () => {
                         )}
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                            {/* Tarjetas de conteo: al hacer click NAVEGAN a Fidelización, que es
-                                la pantalla donde se gestiona cada alumno. */}
-                            {[
-                                { clave: 'critico', label: 'Abandono Crítico', valor: churn?.criticos ?? 0, icon: TriangleAlert, color: 'border-red-500' },
-                                { clave: 'alto', label: 'Riesgo alto', valor: churn?.altos ?? 0, icon: TriangleAlert, color: 'border-orange-500' },
-                                { clave: 'total', label: 'En riesgo (total)', valor: churn?.total ?? 0, icon: Users, color: 'border-yellow-500' },
-                            ].map(({ clave, label, valor, icon, color }) => (
-                                <button
-                                    key={clave}
-                                    type="button"
-                                    onClick={() => navigate(`/admin/fidelizacion?filtro=${clave}`)}
-                                    aria-label={`Ver en Fidelizacion los alumnos de: ${label}`}
-                                    title="Ver estos alumnos en Fidelización"
-                                    className="w-full text-left rounded-lg transition hover:ring-1 hover:ring-zinc-600"
-                                >
-                                    <KpiCard label={label} value={valor} icon={icon} color={color} />
-                                </button>
-                            ))}
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                             <KpiCard label="Ingresos Recurrentes Mensuales" value={mrrBi === null ? null : Number(mrrBi)} unit="CLP" icon={Banknote} color="border-emerald-500" />
                             <KpiCard
                                 label="Proyección mes 1"
@@ -644,54 +596,6 @@ const AdminKpis = () => {
                             </div>
                         )}
 
-                        {/* ── Resumen por arquetipos (GET /api/v1/segmentacion) ──
-                            Tarjetas de conteo: al hacer click NAVEGAN a Fidelización con
-                            ?arquetipo=<código> (ahí se ve y se gestiona la lista). */}
-                        {segmentacion?.total > 0 && (
-                            <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-5">
-                                <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-                                    <div className="flex items-center gap-2">
-                                        <Sparkles className="w-5 h-5 text-sky-400" />
-                                        <h2 className="font-semibold text-white">Segmentación de alumnos</h2>
-                                    </div>
-                                    <p className="text-xs text-zinc-500">
-                                        {segmentacion.total} alumnos segmentados
-                                        {segmentacion.modelo_fecha
-                                            ? ` · modelo del ${fmtFechaHora(segmentacion.modelo_fecha)}`
-                                            : ''}
-                                    </p>
-                                </div>
-                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                                    {arquetiposSegmentacion.map(({ codigo, n, pct, descripcion }) => {
-                                        const estilo = estiloArquetipo(codigo);
-                                        return (
-                                            <button
-                                                key={codigo}
-                                                type="button"
-                                                onClick={() => navigate(`/admin/fidelizacion?arquetipo=${codigo}`)}
-                                                aria-label={`Ver en Fidelizacion los alumnos del arquetipo: ${estilo.label}`}
-                                                title={descripcion
-                                                    ? `${descripcion} Click para verlos en Fidelización.`
-                                                    : 'Click para verlos en Fidelización.'}
-                                                className={`rounded-lg border-l-4 ${estilo.borde} bg-zinc-800/60 p-3 text-left transition hover:ring-1 hover:ring-zinc-600`}
-                                            >
-                                                <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
-                                                    {estilo.label}
-                                                </p>
-                                                <p className="mt-1 text-2xl font-bold text-white">{n}</p>
-                                                <p className="text-[11px] text-zinc-500">{pct}% del total</p>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
-                        {!segmentacion?.total && (
-                            <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-4 text-xs text-zinc-500">
-                                Sin segmentación calculada todavía (se genera con
-                                <span className="text-zinc-400"> POST /api/v1/segmentacion/reentrenar</span>).
-                            </div>
-                        )}
 
                     </div>
                 )}
