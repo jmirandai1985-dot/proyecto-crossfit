@@ -3,6 +3,7 @@ import os
 import base64
 import logging
 import smtplib
+import sys
 from email.message import EmailMessage
 from datetime import datetime, date
 # import resend  # migrado a Gmail SMTP (se conserva para rollback rápido)
@@ -98,13 +99,46 @@ def _registrar_envio(alumno_id, tipo, estado, detalle_error=None, mes_referencia
         logger.warning(f"No se pudo registrar envio: {e}")
 
 
+def _limpiar_header(valor) -> str:
+    """Deja `valor` en UNA sola línea (criterio idéntico al de `email.policy`).
+
+    `email.policy.header_store_parse` rechaza un valor de header cuando
+    `len(valor.splitlines()) > 1`, pero su mensaje sólo menciona linefeed/CR
+    (CPython issue 22233): U+2028, U+2029, NEL U+0085, VT 0x0b, FF 0x0c y
+    FS/GS/RS 0x1c-0x1e también disparan ese mismo error. Se usa el join de
+    splitlines (la inversa exacta de ese chequeo) en vez de un replace de los
+    separadores LF y CR, que dejaba pasar a los otros ocho cuando venían en el
+    medio del valor: el correo fallaba al armar msg["To"] / msg["Subject"].
+    """
+    return "".join(str(valor if valor is not None else "").splitlines())
+
+
+def _log_seguro(mensaje: str, nivel: str = "error") -> None:
+    """Loguea sin poder romper nunca (ni por encoding ni por un handler roto).
+
+    El mensaje se fuerza a ASCII y la llamada va envuelta en su propio try: un
+    carácter raro no puede hacer explotar el logging ni enmascarar el error.
+    """
+    try:
+        seguro = mensaje.encode("ascii", "backslashreplace").decode("ascii")
+    except Exception:
+        seguro = "<mensaje no representable>"
+    try:
+        getattr(logger, nivel, logger.error)(seguro)
+    except Exception:
+        try:
+            print(seguro, file=sys.stderr)
+        except Exception:
+            pass
+
+
 def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, tipo: str = "", mes_referencia=None) -> bool:
     """Envía via Gmail SMTP con log en BD."""
     try:
         from app.core.config import settings
 
-        destinatario = (destinatario or "").replace("\n", "").replace("\r", "").strip()
-        asunto = (asunto or "").replace("\n", "").replace("\r", "")
+        destinatario = _limpiar_header(destinatario).strip()
+        asunto = _limpiar_header(asunto)
 
         msg = EmailMessage()
         msg["From"] = f"Urban Training Box <{settings.GMAIL_SMTP_USER}>"
@@ -117,14 +151,20 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
             server.login(settings.GMAIL_SMTP_USER, settings.GMAIL_SMTP_APP_PASSWORD)
             server.send_message(msg)
 
-        logger.info(f"Correo enviado a {destinatario}: {asunto}")
+        _log_seguro(f"Correo enviado a {destinatario!r}: {asunto!r}", "info")
         _registrar_envio(alumno_id, tipo, "enviado", mes_referencia=mes_referencia) if alumno_id else None
         return True
     except Exception as e:
         global ULTIMO_ERROR_SMTP
         ULTIMO_ERROR_SMTP = str(e)
-        logger.error(f"[SMTP ERROR] {destinatario}: {e}")
-        _registrar_envio(alumno_id, tipo, "fallido", str(e), mes_referencia) if alumno_id else None
+        # El registro en BD va PRIMERO y en su propio try: antes, si el logging
+        # reventaba (carácter raro en el destinatario), la fila se perdía.
+        try:
+            if alumno_id:
+                _registrar_envio(alumno_id, tipo, "fallido", str(e), mes_referencia)
+        except Exception as err_registro:
+            _log_seguro(f"[SMTP ERROR] no se pudo registrar el fallo: {err_registro!r}")
+        _log_seguro(f"[SMTP ERROR] destinatario={destinatario!r}: {e!r}")
         return False
 
 
