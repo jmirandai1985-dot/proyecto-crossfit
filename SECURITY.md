@@ -330,6 +330,30 @@ Convención: **P0** = corregir de inmediato · **P1** = antes del próximo deplo
   4. Regenerar el backup con `python _backup_full.py` (el dump actual quedó con la password vieja).
 - Hasta rotar, la BD activa debe considerarse potencialmente comprometida.
 
+---
+
+## 7. ✅ RESUELTO — Rotación de `N8N_API_KEY` expuesta (14/09/2026)
+
+- **Qué pasó:** los 6 archivos `n8n/workflows/*.json` (versionados) contenían el header
+  `X-N8N-API-Key` con la clave en **texto plano** (3 con la de TEST, 3 con la de **PROD**) y el
+  repo de GitHub es **público** → esa clave permitía invocar en PROD los endpoints protegidos
+  para n8n: `/kpis/populate/{daily,monthly,predictions}`, `/ml/reentrenar`,
+  `/mantenimiento/n8n/ejecutar-*`, `/notificaciones/n8n/*`, `/asistencia/n8n/evaluar-mes`.
+- **Mitigación aplicada = rotación** (no reescritura de historia):
+  1. Claves nuevas y distintas para TEST y PROD (`secrets.token_urlsafe(32)`) escritas en
+     `backend/.env.test` y `backend/.env` (gitignored; no se imprimen en ningún log).
+  2. `N8N_API_KEY` actualizada en los **18 nodos HTTP de la instancia n8n** (13 TEST + 5 PROD),
+     workflows republicados (`n8n publish:workflow`) y `docker restart` de n8n.
+  3. Los 6 JSON del repo quedaron con `REPLACE_WITH_YOUR_KEY` (procedimiento en `n8n/README.md`).
+  4. **Verificado:** clave nueva → HTTP 200 · clave vieja → HTTP 401 · sin clave → HTTP 401.
+- **⚠️ ACCIÓN MANUAL PENDIENTE (usuario):** actualizar la env var **`N8N_API_KEY`** del servicio
+  **backend en Render** (PROD) con el valor de `backend/.env`. Hasta hacerlo, los workflows
+  `[PROD]` reciben 401 (la clave en la instancia ya es la nueva).
+- **Riesgo residual aceptado:** la clave vieja sigue visible en el historial de git. La rotación
+  la inutiliza; reescribir la historia (filter-repo/BFG) se descartó por riesgo sobre el repo.
+- **Bug encontrado de paso:** el nodo de `Mantenimiento Diario` usaba una **tercera** clave
+  (44 chars, distinta de la de TEST) → llevaba tiempo devolviendo 401; la rotación lo corrigió.
+
 *Fin de SECURITY.md.*
 
 
