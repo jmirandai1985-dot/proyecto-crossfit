@@ -164,6 +164,16 @@ const Fidelizacion = () => {
     // ── Filtro activo (query params) ─────────────────────────────────────
     const claveFiltro = searchParams.get('filtro') || null;
     const filtroArquetipo = searchParams.get('arquetipo') || null;
+
+    // ?alumno_id=<id>: deep-link desde Notificaciones -> abre la ficha de ESE
+    // alumno. AlumnoFichaModal se auto-carga por API, asi que no depende de que
+    // el alumno este en la lista. Al cerrar se limpia el param (si no, un cambio
+    // de filtro lo volveria a abrir).
+    useEffect(() => {
+        const id = Number(searchParams.get('alumno_id'));
+        if (Number.isFinite(id) && id > 0) setFichaAlumnoId(id);
+    }, [searchParams]);
+
     const filtroDef = claveFiltro ? FILTROS[claveFiltro] : null;
     const prediccionesFiltradas = predicciones.filter((p) => {
         const okRiesgo = filtroDef ? filtroDef.test(p) : true;
@@ -488,7 +498,13 @@ const Fidelizacion = () => {
                 <AlumnoFichaModal
                     alumnoId={fichaAlumnoId}
                     tenantId={tenant_id}
-                    onClose={() => setFichaAlumnoId(null)}
+                    onClose={() => {
+                        setFichaAlumnoId(null);
+                        // Limpia el deep-link para no re-abrir la ficha.
+                        const next = new URLSearchParams(searchParams);
+                        next.delete('alumno_id');
+                        setSearchParams(next);
+                    }}
                 />
             )}
 
