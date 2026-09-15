@@ -210,6 +210,40 @@ const AdminKpis = () => {
         .sort((a, b) => b.clases - a.clases);
     const bloquePico = bloquesOrdenados[0] || null;
 
+    // Gráfico de bloques horarios y tabla de cohortes: mismo criterio que el
+    // pronóstico (una sola definición, usada por la página y por el modal).
+    const chartBloques = (
+        <BarChart data={bloques?.bloques || []}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
+            <XAxis dataKey="bloque" stroke="#a1a1aa" fontSize={11} />
+            <YAxis stroke="#a1a1aa" fontSize={12} />
+            <Tooltip {...TOOLTIP_STYLE} />
+            <Bar dataKey="clases" name="Clases" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="asistencias_por_clase" name="Asistencias por clase" fill="#f97316" radius={[4, 4, 0, 0]} />
+        </BarChart>
+    );
+
+    const tablaCohortes = cohortes?.cohortes?.length > 0 ? (
+        <>
+            <DataTable
+                columns={[
+                    { key: 'cohorte', label: 'Cohorte (alta)' },
+                    { key: 'n_alumnos', label: 'Alumnos' },
+                    { key: 'h30', label: 'Activos a 30 d\u00edas', render: (h) => fmtCohorte(h) },
+                    { key: 'h60', label: 'Activos a 60 d\u00edas', render: (h) => fmtCohorte(h) },
+                    { key: 'h90', label: 'Activos a 90 d\u00edas', render: (h) => fmtCohorte(h) },
+                ]}
+                data={cohortes.cohortes}
+            />
+            <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+                {cohortes.definicion}
+                {' '}Global: a 30 d\u00edas {fmtCohorte(cohortes.global?.h30)},
+                {' '}a 60 d\u00edas {fmtCohorte(cohortes.global?.h60)},
+                {' '}a 90 d\u00edas {fmtCohorte(cohortes.global?.h90)}.
+            </p>
+        </>
+    ) : null;
+
     // Gráfico y tabla del pronóstico: se definen una vez y los usan TANTO la
     // tarjeta de la página como el modal de detalle (evita duplicar el JSX).
     const chartForecast = (
@@ -552,15 +586,9 @@ const AdminKpis = () => {
                                 por clase. ChartCard admite UN solo gráfico -> las notas van
                                 como caption hermano. */}
                             <div>
-                                <ChartCard title="Concurrencia por bloque horario (pico vs valle)">
-                                    <BarChart data={bloques?.bloques || []}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
-                                        <XAxis dataKey="bloque" stroke="#a1a1aa" fontSize={11} />
-                                        <YAxis stroke="#a1a1aa" fontSize={12} />
-                                        <Tooltip {...TOOLTIP_STYLE} />
-                                        <Bar dataKey="clases" name="Clases" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
-                                        <Bar dataKey="asistencias_por_clase" name="Asistencias por clase" fill="#f97316" radius={[4, 4, 0, 0]} />
-                                    </BarChart>
+                                <ChartCard title="Concurrencia por bloque horario (pico vs valle)"
+                                    onAmpliar={() => setDetalle('bloques')}>
+                                    {chartBloques}
                                 </ChartCard>
                                 <div className="mt-2 space-y-1 text-[11px] leading-relaxed text-zinc-500">
                                     {bloquePico && (
@@ -589,27 +617,22 @@ const AdminKpis = () => {
                             "n/d" = la cohorte todavía no cumple ese horizonte (no se
                             inventa un 0%): lo resuelve el backend con `evaluables`. */}
                         {cohortes?.cohortes?.length > 0 && (
-                            <div>
-                                <h3 className="text-lg font-semibold text-white mb-3">
+                            <>
+                            <div className="mb-3 flex items-start justify-between gap-3">
+                                <h3 className="text-lg font-semibold text-white">
                                     Cohortes de retención por mes de alta
                                 </h3>
-                                <DataTable
-                                    columns={[
-                                        { key: 'cohorte', label: 'Cohorte (alta)' },
-                                        { key: 'n_alumnos', label: 'Alumnos' },
-                                        { key: 'h30', label: 'Activos a 30 días', render: (h) => fmtCohorte(h) },
-                                        { key: 'h60', label: 'Activos a 60 días', render: (h) => fmtCohorte(h) },
-                                        { key: 'h90', label: 'Activos a 90 días', render: (h) => fmtCohorte(h) },
-                                    ]}
-                                    data={cohortes.cohortes}
-                                />
-                                <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
-                                    {cohortes.definicion}
-                                    {' '}Global: a 30 días {fmtCohorte(cohortes.global?.h30)},
-                                    {' '}a 60 días {fmtCohorte(cohortes.global?.h60)},
-                                    {' '}a 90 días {fmtCohorte(cohortes.global?.h90)}.
-                                </p>
+                                <button
+                                    type="button"
+                                    onClick={() => setDetalle('cohortes')}
+                                    aria-label="Ampliar: Cohortes de retención"
+                                    className="shrink-0 rounded border border-zinc-600 px-2 py-0.5 text-xs font-medium text-zinc-300 transition hover:bg-zinc-700/60 hover:text-white"
+                                >
+                                    Ampliar
+                                </button>
                             </div>
+                            {tablaCohortes}
+                            </>
                         )}
 
 
@@ -638,6 +661,68 @@ const AdminKpis = () => {
                         {chartForecast}
                     </ChartCard>
                     <div className="mt-4">{tablaPronostico}</div>
+                </DetalleModal>
+            )}
+
+            {/* ── Detalle ampliado: pico vs valle por bloque horario ── */}
+            {detalle === 'bloques' && (
+                <DetalleModal
+                    titulo="Concurrencia por bloque horario (pico vs valle)"
+                    subtitulo="Oferta real por turno y, cuando hay datos, asistencia por clase"
+                    onCerrar={() => setDetalle(null)}
+                    explicacion={(
+                        <>
+                            Mide la OFERTA de clases por franja horaria: cuántas clases se dictan en cada
+                            bloque y el cupo promedio ofrecido. La barra naranja (asistencias por clase) es
+                            el promedio de asistentes confirmados por clase del bloque, que es el dato que
+                            permite comparar pico vs valle. Sirve para decidir dónde falta oferta y dónde
+                            sobra cupo. Hoy la asistencia por clase puede verse en 0 porque las asistencias
+                            todavía no están vinculadas a su clase (asistencias.clase_id es NULL en toda la
+                            base): el dato siempre confiable de este gráfico es la oferta (clases y cupo).
+                        </>
+                    )}
+                >
+                    <ChartCard title="Concurrencia por bloque horario (pico vs valle)" height="h-96">
+                        {chartBloques}
+                    </ChartCard>
+                    <div className="mt-4 space-y-1 text-xs leading-relaxed text-zinc-400">
+                        {bloquePico && (
+                            <p>
+                                Pico: <span className="text-zinc-200">{bloquePico.bloque}</span>
+                                {' '}({bloquePico.clases} clases · cupo prom. {bloquePico.cupo_promedio})
+                                {' · '}Valle: <span className="text-zinc-200">{bloqueValle?.bloque}</span>
+                                {bloqueValle ? ` (${bloqueValle.clases} clases)` : ''}
+                            </p>
+                        )}
+                        {bloques?.cobertura && (
+                            <p>
+                                Asistencias asociadas a su clase: {bloques.cobertura.con_clase} de{' '}
+                                {bloques.cobertura.asistencias_total} ({bloques.cobertura.pct}%).{' '}
+                                {bloques.cobertura.nota}
+                            </p>
+                        )}
+                    </div>
+                </DetalleModal>
+            )}
+
+            {/* ── Detalle ampliado: cohortes de retención ── */}
+            {detalle === 'cohortes' && (
+                <DetalleModal
+                    titulo="Cohortes de retención por mes de alta"
+                    subtitulo="Retención a 30, 60 y 90 días por cohorte (mes de alta del alumno)"
+                    onCerrar={() => setDetalle(null)}
+                    explicacion={(
+                        <>
+                            Cohorte = mes de alta del alumno (usuarios.created_at). "Activo a los N días"
+                            significa que el alumno tiene al menos una asistencia en la ventana
+                            [alta, alta + N días]: es la señal de retención disponible hoy, porque las
+                            asistencias todavía no están asociadas a su clase. Solo se promedian los
+                            alumnos EVALUABLES, es decir los que ya cumplieron ese horizonte; si la cohorte
+                            es más joven, la celda muestra n/d en vez de un 0% inventado.
+                        </>
+                    )}
+                >
+                    {tablaCohortes}
                 </DetalleModal>
             )}
         </Layout>
