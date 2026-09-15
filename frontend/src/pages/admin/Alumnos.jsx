@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
+import { useSearchParams } from 'react-router-dom';
 import AlumnoFichaModal from '../../components/AlumnoFichaModal';
 
 const Alumnos = () => {
@@ -19,6 +20,17 @@ const Alumnos = () => {
     const [suscripciones, setSuscripciones] = useState([]);
     const [editingAlumno, setEditingAlumno] = useState(null);
     const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
+    const [searchParams, setSearchParams] = useSearchParams();
+
+    // ?alumno_id=<id>: deep-link desde Notificaciones -> abre la ficha de ESE
+    // alumno. AlumnoFichaModal se auto-carga por API, asi que no depende de que
+    // el alumno este en la lista. Al cerrar se limpia el param (si no, un cambio
+    // de filtro lo volveria a abrir).
+    useEffect(() => {
+        const id = Number(searchParams.get('alumno_id'));
+        if (Number.isFinite(id) && id > 0) setFichaAlumnoId(id);
+    }, [searchParams]);
+
     const [formData, setFormData] = useState({
         nombre: '',
         correo: '',
@@ -449,7 +461,13 @@ const Alumnos = () => {
                 <AlumnoFichaModal
                     alumnoId={fichaAlumnoId}
                     tenantId={tenant_id}
-                    onClose={() => setFichaAlumnoId(null)}
+                    onClose={() => {
+                        setFichaAlumnoId(null);
+                        // Limpia el deep-link para no re-abrir la ficha.
+                        const next = new URLSearchParams(searchParams);
+                        next.delete('alumno_id');
+                        setSearchParams(next);
+                    }}
                 />
             )}
         </Layout>
