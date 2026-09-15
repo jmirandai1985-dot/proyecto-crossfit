@@ -24,7 +24,6 @@ const Bazar = () => {
     const { tenant_id } = useAuth();
     const [productos, setProductos] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
     const [showModal, setShowModal] = useState(false);
     const [productoEditar, setProductoEditar] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
@@ -32,12 +31,10 @@ const Bazar = () => {
 
     const fetchProductos = async () => {
         try {
-            setError('');
             const response = await api.get(`/api/v1/productos`);
             setProductos(response.data || []);
         } catch (error) {
-            console.error('Error fetching productos:', e);
-            setError(e.response?.data?.detail || 'No se pudieron cargar los productos del bazar.');
+            console.error('Error fetching productos:', error);
             setProductos([]);
         } finally {
             setLoading(false);
@@ -48,31 +45,9 @@ const Bazar = () => {
         fetchProductos();
     }, [tenant_id]);
 
-    // Criterio UNICO de stock: misma fuente para fila, filtro y KPI.
-    // Depende solo de stock y stock_minimo del producto; stock_minimo NULL
-    // = alerta desactivada (contrato del backend: schemas/producto.py).
-    // Antes la fila usaba umbrales fijos (5/15) y el KPI usaba stock_minimo,
-    // asi que el mismo producto salia Bajo en la fila y 0 en las tarjetas.
-    const TONOS = {
-        agotado: 'bg-red-100 text-red-800',
-        bajo: 'bg-red-100 text-red-800',
-        cerca: 'bg-yellow-100 text-yellow-800',
-        sin_umbral: 'bg-zinc-800 text-zinc-400',
-        ok: 'bg-green-100 text-green-800',
-    };
-
-    const estadoStock = (p) => {
-        const stock = p.stock ?? 0;
-        const min = p.stock_minimo;
-        if (stock <= 0) return { key: 'agotado', label: 'Agotado' };
-        if (min == null) return { key: 'sin_umbral', label: 'Sin umbral' };
-        if (stock <= min) return { key: 'bajo', label: 'Bajo (mín. ' + min + ')' };
-        if (stock <= min * 1.5) return { key: 'cerca', label: 'Cerca del minimo' };
-        return { key: 'ok', label: 'OK' };
-    };
-
-    // En alerta = agotado o en/bajo su propio umbral.
-    const enAlerta = (p) => ['agotado', 'bajo'].includes(estadoStock(p).key);
+    // Producto en alerta de stock bajo: tiene umbral configurado y el stock
+    // quedó en/bajo ese umbral (misma definición que usa el backend para alertar).
+    const enAlerta = (p) => p.stock_minimo != null && p.stock <= p.stock_minimo;
 
     const stats = useMemo(() => {
         const total = productos.length;
@@ -104,6 +79,19 @@ const Bazar = () => {
         if (key === 'inactivos') return stats.inactivos;
         if (key === 'stock_bajo') return stats.alertas;
         return 0;
+    };
+    // Badge de nivel de stock (mismo criterio que tenía el panel): bajo <=5,
+    // medio <=15, alto >15.
+    const getStockColor = (stock) => {
+        if (stock <= 5) return 'bg-red-100 text-red-800';
+        if (stock <= 15) return 'bg-yellow-100 text-yellow-800';
+        return 'bg-green-100 text-green-800';
+    };
+
+    const getStockLabel = (stock) => {
+        if (stock <= 5) return 'bajo';
+        if (stock <= 15) return 'medio';
+        return 'alto';
     };
 
     const getProductoEmoji = (nombre) => {
@@ -141,7 +129,7 @@ const Bazar = () => {
         setShowModal(true);
     };
 
-    const handleDesactivarProducto = async (id) => {
+    const handleEliminarProducto = async (id) => {
         if (!window.confirm('¿Estás seguro de desactivar este producto?')) return;
         try {
             await api.delete(`/api/v1/productos/${id}`);
@@ -285,9 +273,9 @@ const Bazar = () => {
                                             </td>
                                             <td className="px-4 py-3.5 text-[13.5px] text-zinc-100">{formatPrecio(p.precio)}</td>
                                             <td className="px-4 py-3.5">
-                                                <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${TONOS[estadoStock(p).key]}`}>
+                                                <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${getStockColor(p.stock || 0)}`}>
                                                     <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
-                                                    {p.stock || 0} uds. · {estadoStock(p).label}
+                                                    {p.stock || 0} uds. · {getStockLabel(p.stock || 0)}
                                                 </span>
                                                 {p.stock_minimo != null ? (
                                                     p.alerta_stock_enviada ? (
@@ -318,11 +306,11 @@ const Bazar = () => {
                                                         ✎
                                                     </button>
                                                     <button
-                                                        onClick={() => handleDesactivarProducto(p.id)}
-                                                        title="Desactivar" aria-label="Desactivar producto"
+                                                        onClick={() => handleEliminarProducto(p.id)}
+                                                        title="Eliminar"
                                                         className="w-8 h-8 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-zinc-400 hover:border-red-500 hover:text-red-500 transition-colors"
                                                     >
-                                                        🚫
+                                                        🗑
                                                     </button>
                                                 </div>
                                             </td>
@@ -332,11 +320,11 @@ const Bazar = () => {
                                     <tr>
                                         <td colSpan={5} className="px-4 py-10 text-center">
                                             <p className="text-zinc-500 text-sm">
-                                                {error ? error : productos.length === 0
+                                                {productos.length === 0
                                                     ? 'No hay productos en el inventario'
                                                     : 'No hay productos que coincidan con la búsqueda/filtro'}
                                             </p>
-                                            {!error && productos.length === 0 && (
+                                            {productos.length === 0 && (
                                                 <button
                                                     onClick={handleNuevoProducto}
                                                     className="mt-3 px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-bold"
@@ -364,13 +352,5 @@ const Bazar = () => {
         </Layout>
     );
 };
-                                            {error && (
-                                                <button
-                                                    onClick={fetchProductos}
-                                                    className="mt-3 px-6 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-bold"
-                                                >
-                                                    Reintentar
-                                                </button>
-                                            )}
 
 export default Bazar;
