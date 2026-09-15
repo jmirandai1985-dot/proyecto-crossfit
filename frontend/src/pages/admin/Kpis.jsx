@@ -645,6 +645,11 @@ const AdminKpis = () => {
                             </div>
                         )}
 
+                        {/* Tabla de churn: 7 columnas. "Último contacto" y "Próx. renovación" se
+                            movieron al modal de detalle (RecomendacionModal) para que entre sin
+                            scroll horizontal. OJO: dentro del array de columnas NO se pueden
+                            poner comentarios con llaves (se parsean como objeto vacio y
+                            aparece una columna fantasma): los comentarios van acá afuera. */}
                         <DataTable
                             columns={[
                                 {
@@ -689,19 +694,6 @@ const AdminKpis = () => {
                                     },
                                 },
                                 {
-                                    key: 'ultimo_contacto_automatico', label: 'Último contacto',
-                                    render: (v) => (v ? (
-                                        <span
-                                            className="text-zinc-300"
-                                            title={v.fecha ? `Enviado el ${fmtFechaCorta(v.fecha)}` : undefined}
-                                        >
-                                            {fmtUltimoContacto(v)}
-                                        </span>
-                                    ) : (
-                                        <span className="text-zinc-500">Sin contacto previo</span>
-                                    )),
-                                },
-                                {
                                     key: 'estado_gestion', label: 'Gestión',
                                     render: (v, row) => (
                                         <div className="flex items-center gap-2">
@@ -722,7 +714,6 @@ const AdminKpis = () => {
                                         </div>
                                     ),
                                 },
-                                { key: 'fecha_proxima_renovacion', label: 'Próx. renovación', render: (v) => v || '—' },
                             ]}
                             data={prediccionesFiltradas}
                         />

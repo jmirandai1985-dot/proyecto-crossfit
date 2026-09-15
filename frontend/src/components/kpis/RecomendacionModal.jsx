@@ -3,6 +3,11 @@ import { X } from 'lucide-react';
 import { RiskBadge } from './RiskBadge';
 import { estiloReco } from './recoEstilo';
 
+// Meses abreviados para la fecha exacta del último contacto (mismo formato que
+// `fmtFechaCorta` de la tabla: "12 sep").
+const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
+    'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
 /**
  * Modal con el detalle completo de la recomendación de un alumno (pestaña BI).
  *
@@ -16,8 +21,10 @@ import { estiloReco } from './recoEstilo';
  * Props:
  *   - fila:           fila de GET /kpis/churn (incluye motivo y recomendación)
  *   - onClose:        callback al cerrar
- *   - contactoTxt:    texto ya formateado del último contacto automático (opcional)
- *   - renovacionTxt:  fecha ya formateada de la próxima renovación (opcional)
+ *   - contactoTxt:    texto ya formateado del último contacto automático (si falta
+ *                     se muestra "Sin contacto previo": el dato ya no está en la tabla)
+ *   - renovacionTxt:  fecha ya formateada de la próxima renovación (si falta se
+ *                     muestra "Sin plan vigente")
  */
 export const RecomendacionModal = ({ fila, onClose, contactoTxt, renovacionTxt }) => {
     useEffect(() => {
@@ -30,6 +37,23 @@ export const RecomendacionModal = ({ fila, onClose, contactoTxt, renovacionTxt }
 
     const nombre = fila.alumno_nombre || `Alumno #${fila.usuario_id}`;
     const estilo = estiloReco(fila.recomendacion_codigo);
+
+    // Días hasta la próxima renovación (negativo = ya venció). null si no hay plan.
+    const diasParaVencer = (() => {
+        const [y, m, d] = String(fila.fecha_proxima_renovacion || '')
+            .slice(0, 10).split('-').map(Number);
+        if (!y || !m || !d) return null;
+        const hoy = new Date();
+        const ref = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+        return Math.round((new Date(y, m - 1, d) - ref) / 86400000);
+    })();
+
+    // Fecha exacta del último contacto ("12 sep"), si el backend la mandó.
+    const fechaContacto = (() => {
+        const [y, m, d] = String(fila.ultimo_contacto_automatico?.fecha || '')
+            .slice(0, 10).split('-');
+        return (y && m && d) ? `${Number(d)} ${MESES_CORTOS[Number(m) - 1]}` : null;
+    })();
 
     return (
         <div
@@ -88,23 +112,30 @@ export const RecomendacionModal = ({ fila, onClose, contactoTxt, renovacionTxt }
                         </p>
                     </div>
 
-                    {/* Contexto de la fila (si el padre lo formateó) */}
-                    {(renovacionTxt || contactoTxt) && (
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                            {renovacionTxt && (
-                                <div>
-                                    <p className="text-xs text-zinc-500">Próxima renovación</p>
-                                    <p className="text-zinc-200">{renovacionTxt}</p>
-                                </div>
-                            )}
-                            {contactoTxt && (
-                                <div>
-                                    <p className="text-xs text-zinc-500">Último contacto automático</p>
-                                    <p className="text-zinc-200">{contactoTxt}</p>
-                                </div>
+                    {/* Contexto de la fila: estos 2 datos YA NO están en la tabla
+                        principal (así entra sin scroll horizontal), por eso el modal los
+                        muestra SIEMPRE, con fallback y con el detalle extra que antes no
+                        se veía (días para vencer / fecha exacta del envío). */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                        <div>
+                            <p className="text-xs text-zinc-500">Próxima renovación</p>
+                            <p className="text-zinc-200">{renovacionTxt || 'Sin plan vigente'}</p>
+                            {diasParaVencer !== null && (
+                                <p className={`text-xs ${diasParaVencer <= 7 ? 'font-semibold text-orange-300' : 'text-zinc-500'}`}>
+                                    {diasParaVencer < 0
+                                        ? `venció hace ${Math.abs(diasParaVencer)} día${Math.abs(diasParaVencer) === 1 ? '' : 's'}`
+                                        : `vence en ${diasParaVencer} día${diasParaVencer === 1 ? '' : 's'}`}
+                                </p>
                             )}
                         </div>
-                    )}
+                        <div>
+                            <p className="text-xs text-zinc-500">Último contacto automático</p>
+                            <p className="text-zinc-200">{contactoTxt || 'Sin contacto previo'}</p>
+                            {fechaContacto && (
+                                <p className="text-xs text-zinc-500">enviado el {fechaContacto}</p>
+                            )}
+                        </div>
+                    </div>
                 </div>
 
                 {/* Footer */}
