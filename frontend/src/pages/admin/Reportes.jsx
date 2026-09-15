@@ -275,7 +275,18 @@ const Reportes = () => {
                     <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-purple-500">
                         <p className="text-zinc-400 text-sm font-medium">Ingresos Recurrentes Mensuales (MRR)</p>
                         <p className="text-3xl font-bold text-zinc-100 mt-2">{formatCompact(reportData?.mrr || 0)}</p>
-                        <p className="text-xs text-zinc-400 mt-2">ARPU: {formatCompact(reportData?.arpu || 0)}/alumno</p>
+                        <p className="text-xs text-zinc-400 mt-2"
+                            title="ARPU = ingreso NETO del mes (ingresos - egresos) dividido por los alumnos activos. No es bruto: los egresos del mes lo reducen.">
+                            ARPU (neto): {formatCompact(reportData?.arpu || 0)}/alumno
+                        </p>
+                        {/* Definición explícita: el LTV del BI reusa ESTE mismo número. */}
+                        <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+                            <span className="text-zinc-400">ARPU = ingreso neto del mes ÷ alumnos activos</span>
+                            {' '}(neto = ingresos − egresos), no bruto: los egresos del mes lo bajan.
+                            {' '}Es el mismo ARPU que reusa el <span className="text-zinc-400">LTV de Inteligencia de Negocio</span>
+                            {' '}(LTV = ARPU × vida promedio), así que un mes con muchos egresos también baja ese LTV.
+                            {' '}El MRR, en cambio, es el precio de lista de los planes con suscripción activa vigente.
+                        </p>
                     </div>
                 </div>
 
