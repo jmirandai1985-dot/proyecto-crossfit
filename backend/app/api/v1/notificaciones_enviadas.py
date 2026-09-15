@@ -84,14 +84,24 @@ def listar_notificaciones_enviadas(
     # ── FIX S5 (seguridad): scoping por tenant del admin ──
     # La columna tenant_id se agrega por migración 011 (backfill desde usuarios).
     tenant_id = current_user["tenant_id"]
-    q = db.query(NotificacionEnviada).filter(
+    # Base con los filtros "de contenido" (tenant + tipo + alumno). El resumen
+    # por estado se calcula sobre ESTA base (ignora el filtro `estado`): si no,
+    # al filtrar por fallidos la tarjeta de enviados quedaria en 0.
+    base = db.query(NotificacionEnviada).filter(
         NotificacionEnviada.tenant_id == tenant_id)
     if tipo:
-        q = q.filter(NotificacionEnviada.tipo == tipo)
+        base = base.filter(NotificacionEnviada.tipo == tipo)
+    if alumno_id:
+        base = base.filter(NotificacionEnviada.alumno_id == alumno_id)
+
+    resumen = {
+        "enviado": base.filter(NotificacionEnviada.estado == "enviado").count(),
+        "fallido": base.filter(NotificacionEnviada.estado == "fallido").count(),
+    }
+
+    q = base
     if estado:
         q = q.filter(NotificacionEnviada.estado == estado)
-    if alumno_id:
-        q = q.filter(NotificacionEnviada.alumno_id == alumno_id)
     total = q.count()
     rows = q.order_by(NotificacionEnviada.fecha_envio.desc()).offset(skip).limit(limit).all()
     result = []
@@ -106,7 +116,8 @@ def listar_notificaciones_enviadas(
             "estado": r.estado,
             "detalle_error": r.detalle_error,
         })
-    return {"total": total, "items": result, "skip": skip, "limit": limit}
+    return {"total": total, "items": result, "skip": skip, "limit": limit,
+            "resumen": resumen}
 
 
 @router.post("/enviar-manual")
