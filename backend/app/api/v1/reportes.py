@@ -9,9 +9,13 @@ from datetime import datetime, timezone, timedelta
 import io
 from typing import Optional
 
+import logging
+
 from app.db.database import get_db
 from app.core.dependencies import get_current_admin
 from app.services import metricas_service as metricas
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -74,11 +78,13 @@ def descargar_reporte_ventas_mensual(
             }
         )
     except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        print(f"ERROR REPORT: {tb}")
+        # El detalle tecnico va SOLO al log del servidor: nunca en la respuesta
+        # HTTP (el traceback exponia rutas, SQL y estructura interna).
+        logger.error("reportes/monthly-sales tenant=%s %s-%s: %s",
+                     tenant_id, mes, anio, e, exc_info=True)
         raise HTTPException(
-            status_code=500, detail=f"Error al generar reporte: {str(e)} | {tb[:500]}")
+            status_code=500,
+            detail="Error al generar el reporte. El detalle quedo en los logs del servidor.")
 
 
 
@@ -362,10 +368,11 @@ def obtener_reportes_analytics(
         return result
 
     except Exception as e:
-        import traceback
+        # Igual que en /monthly-sales: traceback al log, mensaje generico al cliente.
+        logger.error("reportes/ tenant=%s: %s", tenant_id, e, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Error al obtener KPIs: {str(e)} | {traceback.format_exc()}"
+            detail="Error al calcular los KPIs. El detalle quedo en los logs del servidor."
         )
 
 
