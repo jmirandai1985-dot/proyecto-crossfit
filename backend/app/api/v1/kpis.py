@@ -724,3 +724,87 @@ def get_bloques_horarios(
         "bloques": bloques,
         "por_hora": por_hora,
     }
+
+
+# ── 8) GET /api/v1/kpis/cohortes (BI - retención por cohorte) ────────────────
+@router.get("/cohortes")
+def get_cohortes(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Cohortes de retención por MES DE ALTA del alumno (`usuarios.created_at`).
+
+    Definición (documentada a propósito):
+      - "Activo a los N días" = el alumno tiene >= 1 ASISTENCIA en la ventana
+        [alta, alta + N días]. Es la señal de retención disponible hoy (las
+        asistencias todavía no están asociadas a clase, ver /bloques-horarios).
+      - Sólo se promedian los alumnos EVALUABLES: los que ya cumplieron el
+        horizonte (alta + N <= hoy). Si la cohorte es más joven,
+        `retencion_pct` viene en `null` -> NO se inventa un 0% por falta de
+        historia.
+    """
+    tenant_id = current_user["tenant_id"]
+
+    filas = db.execute(sql_text("""
+        WITH altas AS (
+            SELECT id, tenant_id, created_at::date AS alta
+            FROM usuarios
+            WHERE tenant_id = :tid AND rol = 'alumno'
+        )
+        SELECT to_char(date_trunc('month', alta), 'YYYY-MM') AS cohorte,
+               COUNT(*) AS n_alumnos,
+               COUNT(*) FILTER (WHERE alta + 30 <= CURRENT_DATE) AS eval_30,
+               COUNT(*) FILTER (WHERE alta + 30 <= CURRENT_DATE AND EXISTS (
+                   SELECT 1 FROM asistencias a
+                   WHERE a.usuario_id = altas.id AND a.tenant_id = altas.tenant_id
+                     AND a.fecha BETWEEN altas.alta AND altas.alta + 30)) AS act_30,
+               COUNT(*) FILTER (WHERE alta + 60 <= CURRENT_DATE) AS eval_60,
+               COUNT(*) FILTER (WHERE alta + 60 <= CURRENT_DATE AND EXISTS (
+                   SELECT 1 FROM asistencias a
+                   WHERE a.usuario_id = altas.id AND a.tenant_id = altas.tenant_id
+                     AND a.fecha BETWEEN altas.alta AND altas.alta + 60)) AS act_60,
+               COUNT(*) FILTER (WHERE alta + 90 <= CURRENT_DATE) AS eval_90,
+               COUNT(*) FILTER (WHERE alta + 90 <= CURRENT_DATE AND EXISTS (
+                   SELECT 1 FROM asistencias a
+                   WHERE a.usuario_id = altas.id AND a.tenant_id = altas.tenant_id
+                     AND a.fecha BETWEEN altas.alta AND altas.alta + 90)) AS act_90
+        FROM altas
+        GROUP BY 1 ORDER BY 1
+    """), {"tid": tenant_id}).fetchall()
+
+    def _h(evaluables, activos):
+        evaluables, activos = int(evaluables or 0), int(activos or 0)
+        return {
+            "evaluables": evaluables,
+            "activos": activos,
+            "retencion_pct": (round(activos / evaluables * 100, 1)
+                              if evaluables else None),
+        }
+
+    cohortes = [
+        {
+            "cohorte": r[0],
+            "n_alumnos": int(r[1] or 0),
+            "h30": _h(r[2], r[3]),
+            "h60": _h(r[4], r[5]),
+            "h90": _h(r[6], r[7]),
+        }
+        for r in filas
+    ]
+
+    globales = {}
+    for clave, (i_eval, i_act) in (("h30", (2, 3)), ("h60", (4, 5)),
+                                   ("h90", (6, 7))):
+        globales[clave] = _h(sum(int(r[i_eval] or 0) for r in filas),
+                             sum(int(r[i_act] or 0) for r in filas))
+
+    return {
+        "hoy": str(date.today()),
+        "definicion": (
+            "Cohorte = mes de alta del alumno. Activo a los N días = al menos 1 "
+            "asistencia en [alta, alta + N días]; sólo se promedian los alumnos "
+            "evaluables (alta + N ya cumplido) -> null si la cohorte no maduró"),
+        "horizontes_dias": [30, 60, 90],
+        "cohortes": cohortes,
+        "global": globales,
+    }
