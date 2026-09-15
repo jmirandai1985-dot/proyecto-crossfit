@@ -10,6 +10,7 @@ import {
     Sparkles,
 } from 'lucide-react';
 import Layout from '../../components/Layout';
+import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { TabBar } from '../../components/kpis/TabBar';
 import { KpiCard } from '../../components/kpis/KpiCard';
@@ -64,6 +65,7 @@ const TOOLTIP_STYLE = {
 const AdminKpis = () => {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
+    const { tenant_id } = useAuth();
     const activeTab = searchParams.get('tab') || 'diario';
 
     const [loading, setLoading] = useState(true);
@@ -75,6 +77,10 @@ const AdminKpis = () => {
     const [churn, setChurn] = useState(null);
     const [forecast, setForecast] = useState([]);
     const [mrrBi, setMrrBi] = useState(null);
+    // Bloque financiero: ticket promedio + vida (GET /kpis/financiero) y ARPU
+    // REUSADO de GET /reportes/ (misma fuente que muestra Reportes.jsx).
+    const [financiero, setFinanciero] = useState(null);
+    const [arpu, setArpu] = useState(null);
 
     // ─── BI: SOLO LECTURA ────────────────────────────────────────────────
     // La gestión individual de alumnos vive en /admin/fidelizacion: acá las
@@ -163,6 +169,16 @@ const AdminKpis = () => {
             // de la pestaña BI sigue funcionando igual).
             const rSeg = await api.get('/api/v1/segmentacion').catch(() => null);
             setSegmentacion(rSeg?.data || null);
+
+            // Bloque financiero (opcional, mismo criterio): el ticket y la vida
+            // salen del endpoint nuevo; el ARPU se REUSA de /reportes/ (la misma
+            // definición de Reportes.jsx: ingresos netos del mes / alumnos activos).
+            const rFin = await api.get('/api/v1/kpis/financiero').catch(() => null);
+            setFinanciero(rFin?.data || null);
+            const rRep = tenant_id
+                ? await api.get(`/api/v1/reportes/?tenant_id=${tenant_id}`).catch(() => null)
+                : null;
+            setArpu(rRep?.data?.arpu ?? null);
         } catch (err) {
             setError(err.response?.data?.detail || err.message);
         }
@@ -177,6 +193,12 @@ const AdminKpis = () => {
 
     const dia = serieDiaria.length ? serieDiaria[serieDiaria.length - 1] : null;
     const mes = serieMensual.length ? serieMensual[serieMensual.length - 1] : null;
+
+    // LTV estimado = ARPU mensual × vida promedio del alumno en meses.
+    // (La fórmula y sus límites los documenta el backend en `financiero`.)
+    const ltvEstimado = (arpu != null && financiero?.vida?.vida_promedio_meses)
+        ? Math.round(arpu * financiero.vida.vida_promedio_meses)
+        : null;
 
     // Las 6 tarjetas del resumen, en el orden de ARQUETIPOS_UI (el backend manda
     // su propio orden y puede no traer los que quedaron en 0 -> default 0).
@@ -418,6 +440,82 @@ const AdminKpis = () => {
                                 icon={TrendingUp}
                                 color="border-orange-500"
                             />
+                        </div>
+
+                        {/* ── Bloque financiero: ticket promedio por plan + LTV ──
+                            El ticket y la vida salen de GET /kpis/financiero; el ARPU se
+                            REUSA de GET /reportes/ (misma definición que Reportes.jsx). */}
+                        <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-5">
+                            <div className="mb-4 flex items-center gap-2">
+                                <Banknote className="w-5 h-5 text-emerald-500" />
+                                <h2 className="font-semibold text-white">Financiero</h2>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <KpiCard
+                                        label="Ticket promedio"
+                                        value={financiero?.ticket_promedio?.global ?? null}
+                                        unit="CLP"
+                                        icon={Banknote}
+                                        color="border-emerald-500"
+                                    />
+                                    <p className="mt-1 text-[11px] text-zinc-500">
+                                        Membresías ({financiero?.ticket_promedio?.n_transacciones ?? 0} transacciones)
+                                    </p>
+                                </div>
+                                <div>
+                                    <KpiCard
+                                        label="LTV estimado"
+                                        value={ltvEstimado}
+                                        unit="CLP"
+                                        icon={TrendingUp}
+                                        color="border-sky-500"
+                                    />
+                                    <p className="mt-1 text-[11px] text-zinc-500">
+                                        ARPU {arpu != null ? fmtCLP(arpu) : '—'} × {financiero?.vida?.vida_promedio_meses ?? '—'} meses
+                                    </p>
+                                </div>
+                                <div>
+                                    <KpiCard
+                                        label="Vida promedio del alumno"
+                                        value={financiero?.vida?.vida_promedio_meses ?? null}
+                                        unit="meses"
+                                        icon={Users}
+                                        color="border-purple-500"
+                                    />
+                                    <p className="mt-1 text-[11px] text-zinc-500">
+                                        {financiero?.vida?.vida_promedio_dias ?? 0} días · {financiero?.vida?.n_con_baja ?? 0} de {financiero?.vida?.n_alumnos ?? 0} con baja
+                                    </p>
+                                </div>
+                            </div>
+
+                            {financiero?.ticket_promedio?.por_plan?.length > 0 && (
+                                <div className="mt-5">
+                                    <h3 className="mb-2 text-sm font-semibold text-zinc-300">
+                                        Ticket promedio por plan (top 8 por ingreso)
+                                    </h3>
+                                    <DataTable
+                                        columns={[
+                                            { key: 'plan', label: 'Plan' },
+                                            { key: 'precio_lista', label: 'Precio de lista', render: (v) => fmtCLP(v) },
+                                            { key: 'ticket_promedio', label: 'Ticket promedio', render: (v) => fmtCLP(v) },
+                                            { key: 'suscripciones', label: 'Suscripciones' },
+                                            { key: 'n_transacciones', label: 'Transacciones' },
+                                            { key: 'ingreso_total', label: 'Ingreso total', render: (v) => fmtCLP(v) },
+                                        ]}
+                                        data={financiero.ticket_promedio.por_plan.slice(0, 8)}
+                                    />
+                                </div>
+                            )}
+
+                            <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
+                                <span className="text-zinc-400">LTV = ARPU mensual × vida promedio (meses).</span>
+                                {' '}El ARPU se toma de GET /api/v1/reportes/ (ingresos netos del mes / alumnos
+                                activos: la misma definición que muestra Reportes), así no hay dos versiones del
+                                mismo número. Vida promedio: {financiero?.vida?.formula ?? '—'}.
+                                {financiero?.vida?.limitaciones ? ` (${financiero.vida.limitaciones})` : ''}
+                                {' '}No se calcula CAC: {financiero?.nota_cac ?? 'no hay dato de costo de adquisición.'}
+                            </p>
                         </div>
 
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
