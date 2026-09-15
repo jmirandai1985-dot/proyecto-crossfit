@@ -262,8 +262,8 @@ const Reportes = () => {
                     </div>
                 </div>
 
-                {/* Nuevos Alumnos / Cancelaciones */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {/* Nuevos Alumnos / Planes Vencidos / MRR / Churn */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-emerald-500">
                         <p className="text-zinc-400 text-sm font-medium">Nuevos Alumnos (Mes)</p>
                         <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.nuevosAlumnosMes || 0}</p>
@@ -290,6 +290,28 @@ const Reportes = () => {
                             {' '}(LTV = ARPU × vida promedio), así que un mes con muchos egresos también baja ese LTV.
                             {' '}El MRR, en cambio, es el precio de lista de los planes con suscripción activa vigente.
                         </p>
+                    </div>
+                    {/* 4ta tarjeta: cierra la fila simétrica con las 3 anteriores.
+                        Mismo criterio que la tarjeta de Retención para el sin dato. */}
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-rose-500">
+                        <p className="text-zinc-400 text-sm font-medium"
+                            title="Churn de cohorte de los últimos 30 días = 100 − retención (metricas_service.churn_desde_retencion): de los alumnos vigentes hace 30 días, cuántos dejaron de estarlo. Si la base no alcanza el mínimo, no se calcula.">
+                            Tasa de Churn Mensual
+                        </p>
+                        {reportData?.churnMensual === null || reportData?.churnMensual === undefined ? (
+                            <>
+                                <p className="text-2xl font-bold text-zinc-500 mt-2">Datos insuficientes</p>
+                                <p className="text-xs text-yellow-600 mt-2">
+                                    ⚠️ Base de {reportData?.alumnosActivosHace30 ?? 0} de {reportData?.retencionBaseMinima ?? 5} alumnos con plan vigente hace 30 días
+                                </p>
+                            </>
+                        ) : (
+                            <>
+                                <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData.churnMensual}%</p>
+                                <p className="text-xs text-zinc-400 mt-2">100% − retención de cohorte (30 días)</p>
+                            </>
+                        )}
+                        <span className="text-4xl">🚪</span>
                     </div>
                 </div>
 

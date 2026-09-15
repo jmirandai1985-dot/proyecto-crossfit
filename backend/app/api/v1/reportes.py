@@ -322,6 +322,9 @@ def obtener_reportes_analytics(
             # Transparencia: base usada y umbral, para explicar el "sin dato".
             "alumnosActivosHace30": base_retencion,
             "retencionBaseMinima": metricas.MIN_BASE_RETENCION,
+            # Churn = 100 - retencion (misma cohorte/periodo, metricas_service).
+            # None si la base no alcanza el minimo (no se inventa un numero).
+            "churnMensual": metricas.churn_desde_retencion(retencion),
 
             # Ingresos
             "mrr": mrr,
