@@ -7,9 +7,10 @@ import AlumnoFichaModal from '../../components/AlumnoFichaModal';
 import { RiskBadge } from '../../components/kpis/RiskBadge';
 import RecomendacionModal from '../../components/kpis/RecomendacionModal';
 import { estiloReco } from '../../components/kpis/recoEstilo';
-import { estiloArquetipo, arquetipoDe } from '../../components/kpis/arquetipoEstilo';
+import { ARQUETIPOS_UI, estiloArquetipo, arquetipoDe } from '../../components/kpis/arquetipoEstilo';
+import { KpiCard } from '../../components/kpis/KpiCard';
 import { ArquetipoBadge } from '../../components/kpis/ArquetipoBadge';
-import { Eye } from 'lucide-react';
+import { Eye, TriangleAlert, Users, Sparkles } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 /** ISO local (YYYY-MM-DD) para comparar contra fecha_proxima_renovacion. */
@@ -53,6 +54,8 @@ const Fidelizacion = () => {
     const [searchParams, setSearchParams] = useSearchParams();
     // Datos del BI (GET /kpis/churn): score, motivo, recomendación, gestión.
     const [churn, setChurn] = useState(null);
+    // Segmentación (conteos por arquetipo) para las 6 tarjetas de abajo.
+    const [segmentacion, setSegmentacion] = useState(null);
     const [loading, setLoading] = useState(true);
     const [menuAccion, setMenuAccion] = useState(null);
     const [enviandoCorreo, setEnviandoCorreo] = useState(null);
@@ -67,6 +70,10 @@ const Fidelizacion = () => {
             const res = await api.get('/api/v1/kpis/churn');
             setChurn(res.data);
             setMsg('');
+            // Segmentación: opcional (si falla o no se entrenó, las tarjetas de
+            // arquetipo no se muestran y el resto del panel sigue igual).
+            const rSeg = await api.get('/api/v1/segmentacion').catch(() => null);
+            setSegmentacion(rSeg?.data || null);
         } catch (err) {
             setChurn(null);
             setMsg('❌ ' + (err.response?.data?.detail || err.message || 'No se pudo cargar el panel'));
@@ -157,6 +164,24 @@ const Fidelizacion = () => {
         ? `Arquetipo: ${estiloArquetipo(filtroArquetipo).label}`
         : (filtroDef?.etiqueta || null);
 
+    // Los filtros viven en la URL (query params): los setean las tarjetas y el
+    // dropdown de ESTA pantalla, y el link que llega desde KPIs ya los trae.
+    const ponerFiltro = (clave) => {
+        const next = new URLSearchParams(searchParams);
+        if (clave) next.set('filtro', clave);
+        else next.delete('filtro');
+        setSearchParams(next);
+    };
+    const alternarFiltro = (clave) => ponerFiltro(claveFiltro === clave ? null : clave);
+
+    // Las 6 tarjetas de arquetipo, en el orden de ARQUETIPOS_UI (el backend manda
+    // su propio orden y puede no traer los que quedaron en 0).
+    const arquetiposSegmentacion = ARQUETIPOS_UI.map((codigo) => {
+        const item = (segmentacion?.arquetipos || [])
+            .find((a) => a.arquetipo === codigo);
+        return { codigo, ...(item || { n: 0, pct: 0, descripcion: '' }) };
+    });
+
     const chartData = [
         { name: 'Riesgo alto/crítico', total: enRiesgo.length },
         { name: 'Vencen en ≤5 días', total: porVencer.length },
@@ -187,17 +212,38 @@ const Fidelizacion = () => {
                     </div>
                 ) : (
                     <>
-                        {/* Tarjetas resumen */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-red-600">
-                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos en Riesgo</p>
-                                <p className="text-3xl font-bold text-red-700 mt-1">{enRiesgo.length}</p>
-                                <p className="text-xs text-zinc-500 mt-1">Riesgo alto o crítico (score del modelo)</p>
-                            </div>
-                            <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-orange-600">
-                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Vencimientos Inminentes</p>
-                                <p className="text-3xl font-bold text-orange-700 mt-1">{porVencer.length}</p>
-                                <p className="text-xs text-zinc-500 mt-1">Plan que vence en ≤ 5 días</p>
+                        {/* ── Tarjetas de riesgo (MOVIDAS desde la BI) ──
+                            Acá NO navegan: filtran la tabla de abajo en el acto (el
+                            filtro vive en la URL, igual que el link que llega de KPIs).
+                            La ex "Alumnos en Riesgo" se reemplaza por la de riesgo
+                            total: era el mismo número. */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                            {[
+                                { clave: 'critico', label: 'Abandono Crítico', valor: churn?.criticos ?? 0, icon: TriangleAlert, color: 'border-red-500' },
+                                { clave: 'alto', label: 'Riesgo alto', valor: churn?.altos ?? 0, icon: TriangleAlert, color: 'border-orange-500' },
+                                { clave: 'total', label: 'En riesgo (total)', valor: churn?.total ?? 0, icon: Users, color: 'border-yellow-500' },
+                            ].map(({ clave, label, valor, icon, color }) => (
+                                <button
+                                    key={clave}
+                                    type="button"
+                                    onClick={() => alternarFiltro(clave)}
+                                    aria-pressed={claveFiltro === clave}
+                                    aria-label={`Filtrar la tabla por: ${label}`}
+                                    title={claveFiltro === clave
+                                        ? 'Quitar este filtro'
+                                        : 'Filtrar la tabla por este grupo'}
+                                    className={`w-full text-left rounded-lg transition ${claveFiltro === clave
+                                        ? 'ring-2 ring-orange-500'
+                                        : 'hover:ring-1 hover:ring-zinc-600'}`}
+                                >
+                                    <KpiCard label={label} value={valor} icon={icon} color={color} />
+                                </button>
+                            ))}
+                            {/* Informativa (no filtra): define el tipo de correo de la Acción Rápida. */}
+                            <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-orange-600">
+                                <p className="text-sm text-gray-400 uppercase tracking-wide">Vencimientos Inminentes</p>
+                                <p className="text-3xl font-bold text-white mt-2">{porVencer.length}</p>
+                                <p className="text-sm mt-2 text-zinc-500">Plan que vence en ≤ 5 días</p>
                             </div>
                         </div>
 
