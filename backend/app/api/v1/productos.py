@@ -46,6 +46,11 @@ async def crear_producto(
     # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT (el Form se ignora).
     tenant_id = current_user["tenant_id"]
 
+    # Normalización: el Form llega crudo (quedó "poleras " con espacio final
+    # en la BD). Mismo criterio que alumnos.py: strip al guardar.
+    nombre = (nombre or "").strip()
+    descripcion = (descripcion or "").strip() or None
+
     imagen_url = None
 
     # Procesar imagen si se adjuntó
@@ -175,6 +180,11 @@ def actualizar_producto(
         )
 
     update_data = producto_data.model_dump(exclude_unset=True)
+
+    # Normalización: sin espacios sobrantes al guardar (nombre/descripción).
+    for _campo in ("nombre", "descripcion"):
+        if isinstance(update_data.get(_campo), str):
+            update_data[_campo] = update_data[_campo].strip()
 
     for field, value in update_data.items():
         setattr(producto, field, value)
