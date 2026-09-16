@@ -66,10 +66,10 @@ const AsistenciaClases = ({ variant = 'light' } = {}) => {
             setReservas(res);
             setMarcada(!!data.marcada);
             // Checks por defecto: si la clase ya fue marcada, muestro lo
-            // guardado; si no, todos pre-marcados como asistieron.
+            // guardado; si no, NINGUNO pre-marcado (evita confirmar la clase entera por accidente).
             const inicial = {};
             res.forEach((a) => {
-                inicial[a.reserva_id] = data.marcada ? a.asistio : true;
+                inicial[a.reserva_id] = data.marcada ? a.asistio : false;
             });
             setAsistencias(inicial);
         } catch (e) {
@@ -111,7 +111,7 @@ const AsistenciaClases = ({ variant = 'light' } = {}) => {
                 `/api/v1/asistencia/clases/${claseSeleccionada.id}/confirmar`,
                 payload
             );
-            const confirmados = r.data?.confirmados || ids.length;
+            const confirmados = r.data?.confirmados ?? ids.length;
             setMensaje({ tipo: 'exito', texto: `✅ Asistencia guardada (${confirmados} alumno(s))` });
             setClasesMarcadas((prev) => ({ ...prev, [claseSeleccionada.id]: true }));
             cerrarClase();
@@ -127,7 +127,7 @@ const AsistenciaClases = ({ variant = 'light' } = {}) => {
             <div>
                 <h2 className={`text-2xl font-bold ${osc ? 'text-zinc-100' : 'text-gray-900'}`}>📋 Asistencia de Hoy</h2>
                 <p className={`mt-1 ${osc ? 'text-zinc-400' : 'text-gray-600'}`}>
-                    Clases del día (hora de Chile) desde el horario actual. Confirmá la
+                    Clases del día (hora de Chile) desde el horario actual. Confirma la
                     asistencia de cada clase con un clic.
                 </p>
             </div>
@@ -147,7 +147,7 @@ const AsistenciaClases = ({ variant = 'light' } = {}) => {
                     <p className="text-5xl mb-4">📭</p>
                     <p className={`text-xl font-bold ${osc ? 'text-zinc-200' : 'text-gray-700'}`}>Sin clases pendientes</p>
                     <p className={`text-sm mt-2 ${osc ? 'text-zinc-500' : 'text-gray-500'}`}>
-                        No tenés clases de hoy desde este horario en tus disciplinas.
+                        No hay clases de hoy desde este horario en tus disciplinas.
                     </p>
                 </div>
             ) : (
@@ -161,7 +161,7 @@ const AsistenciaClases = ({ variant = 'light' } = {}) => {
                                         🕐 {formatearHora(clase.hora_inicio)} - {formatearHora(clase.hora_fin)}
                                     </p>
                                     <p className={`text-sm ${osc ? 'text-zinc-400' : 'text-gray-600'}`}>
-                                        👥 {clase.reservas_count || 0} reservas
+                                        👥 {clase.reservas_count || 0} reservas · 🎟️ {clase.asistentes_confirmados || 0}/{clase.cupo_maximo || '—'} confirmados
                                     </p>
                                 </div>
                                 <span
