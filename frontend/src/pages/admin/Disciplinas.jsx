@@ -7,9 +7,10 @@ const Disciplinas = () => {
     const { tenant_id } = useAuth();
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [formData, setFormData] = useState({ nombre: '', requiere_coach: true, activo: true });
+    const [formData, setFormData] = useState({ nombre: '', requiere_coach: true, es_open_box: false, activo: true });
     const [editingId, setEditingId] = useState(null);
     const [showForm, setShowForm] = useState(false);
+    const [msgError, setMsgError] = useState('');
 
     const fetch = async () => {
         try {
@@ -21,8 +22,8 @@ const Disciplinas = () => {
 
     useEffect(() => { fetch(); }, [tenant_id]);
 
-    const openNew = () => { setEditingId(null); setFormData({ nombre: '', requiere_coach: true, activo: true }); setShowForm(true); };
-    const openEdit = (d) => { setEditingId(d.id); setFormData({ nombre: d.nombre, requiere_coach: d.requiere_coach ?? true, activo: d.activo ?? true }); setShowForm(true); };
+    const openNew = () => { setMsgError(''); setEditingId(null); setFormData({ nombre: '', requiere_coach: true, es_open_box: false, activo: true }); setShowForm(true); };
+    const openEdit = (d) => { setEditingId(d.id); setFormData({ nombre: d.nombre, requiere_coach: d.requiere_coach ?? true, es_open_box: d.es_open_box ?? false, activo: d.activo ?? true }); setShowForm(true); };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -32,10 +33,11 @@ const Disciplinas = () => {
             } else {
                 await api.post('/api/v1/disciplinas', { ...formData, tenant_id });
             }
+            setMsgError('');
             setShowForm(false);
             fetch();
         } catch (error) {
-            alert('Error: ' + (error.response?.data?.detail || error.message));
+            setMsgError(error.response?.data?.detail || error.message || 'No se pudo guardar la disciplina');
         }
     };
 
@@ -44,11 +46,11 @@ const Disciplinas = () => {
         try {
             await api.delete(`/api/v1/disciplinas/${id}`);
             fetch();
-        } catch (e) { alert('Error: ' + (e.response?.data?.detail || e.message)); }
+        } catch (e) { setMsgError(e.response?.data?.detail || e.message || 'No se pudo eliminar la disciplina'); }
     };
 
     if (loading) {
-        return (<Layout><div className="flex items-center justify-center h-96"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900"></div></div></Layout>);
+        return (<Layout><div className="flex items-center justify-center h-96"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div></div></Layout>);
     }
 
     return (
@@ -58,6 +60,13 @@ const Disciplinas = () => {
                     <div><h1 className="text-3xl font-bold text-zinc-100">Disciplinas</h1><p className="text-zinc-400 mt-1">Administra las disciplinas del box</p></div>
                     <button onClick={openNew} className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium text-sm">+ Nueva Disciplina</button>
                 </div>
+
+                {msgError && (
+                    <div className="bg-red-500/10 border-l-4 border-red-500 rounded-lg p-4 flex items-start justify-between gap-3">
+                        <p className="text-sm text-red-300">{msgError}</p>
+                        <button onClick={() => setMsgError('')} className="text-red-300 hover:text-red-100 text-sm font-bold">✕</button>
+                    </div>
+                )}
 
                 <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
                     <div className="overflow-x-auto">
@@ -78,7 +87,7 @@ const Disciplinas = () => {
                                         <td className="px-6 py-4 text-sm font-medium text-zinc-100">{d.nombre}</td>
                                         <td className="px-6 py-4 text-sm">
                                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${d.requiere_coach ? 'bg-blue-500/20 text-blue-300' : 'bg-zinc-800 text-zinc-400'}`}>
-                                                {d.requiere_coach ? '🤼 Requiere coach' : '🏠 Self-service'}
+                                                {d.requiere_coach ? '🤼 Requiere coach' : '🏠 Self-service'}{d.es_open_box ? ' · 🔓 Open box' : ''}
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 text-sm">
@@ -107,6 +116,10 @@ const Disciplinas = () => {
                                 <div className="flex items-center gap-2">
                                     <input type="checkbox" checked={formData.requiere_coach} onChange={e => setFormData({ ...formData, requiere_coach: e.target.checked })} id="requiere_coach" />
                                     <label htmlFor="requiere_coach" className="text-sm text-zinc-300">🤼 Requiere Coach</label>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <input type="checkbox" checked={formData.es_open_box} onChange={e => setFormData({ ...formData, es_open_box: e.target.checked })} id="es_open_box" />
+                                    <label htmlFor="es_open_box" className="text-sm text-zinc-300">🔓 Open box (acceso libre, sin reserva)</label>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <input type="checkbox" checked={formData.activo} onChange={e => setFormData({ ...formData, activo: e.target.checked })} id="activo" />
