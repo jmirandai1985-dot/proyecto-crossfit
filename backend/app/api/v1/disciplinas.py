@@ -37,8 +37,8 @@ def crear_disciplina(
 
     db_disciplina = Disciplina(
         tenant_id=tenant_id,
-        nombre=nombre,
-        descripcion=descripcion,
+        nombre=(nombre or "").strip(),
+        descripcion=(descripcion or "").strip() or None,
         es_open_box=es_open_box,
         requiere_coach=requiere_coach,
         activo=True
@@ -110,9 +110,9 @@ def actualizar_disciplina(
             detail=f"Disciplina {disciplina_id} no encontrada"
         )
     if nombre is not None:
-        disciplina.nombre = nombre
+        disciplina.nombre = nombre.strip()
     if descripcion is not None:
-        disciplina.descripcion = descripcion
+        disciplina.descripcion = descripcion.strip() or None
     if es_open_box is not None:
         disciplina.es_open_box = es_open_box
     if requiere_coach is not None:
