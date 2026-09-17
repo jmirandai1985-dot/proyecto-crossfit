@@ -51,6 +51,11 @@ export default function SupervisionClases() {
     const [loadingHorariosDisc, setLoadingHorariosDisc] = useState(false);
     const [coachSelector, setCoachSelector] = useState(null); // { claseId, disciplinaId }
     const [coachesDisponibles, setCoachesDisponibles] = useState([]);
+    const [errorCupos, setErrorCupos] = useState('');
+    const [errorDisciplinas, setErrorDisciplinas] = useState('');
+    const [errorHorarios, setErrorHorarios] = useState({});
+    const [errorCoaches, setErrorCoaches] = useState('');
+    const [msgAsignacion, setMsgAsignacion] = useState(null);
     const [emergenciaConfirm, setEmergenciaConfirm] = useState(null); // { coach, claseId, discId }
     const [showModalClase, setShowModalClase] = useState(false); // modal "+ Agregar Clase"
     const [modalReservasHorario, setModalReservasHorario] = useState(null); // { horario, cargando, data } self-service
@@ -88,7 +93,10 @@ export default function SupervisionClases() {
         try {
             const r = await api.get(`${API_BASE}/supervision/cupos-disciplinas`);
             setCuposData(r.data || []);
-        } catch (e) { console.error('Error cupos', e); }
+    } catch (e) {
+        console.error('Error cupos', e);
+        setErrorCupos('No se pudieron cargar los cupos.');
+    }
         setCuposLoading(false);
     }, [tenant_id]);
 
@@ -98,7 +106,10 @@ export default function SupervisionClases() {
             try {
                 const r = await api.get(`${API_BASE}/disciplinas`);
                 setDisciplinas(r.data || []);
-            } catch (e) { console.error('Error cargando disciplinas', e); }
+    } catch (e) {
+        console.error('Error cargando disciplinas', e);
+        setErrorDisciplinas('No se pudieron cargar las disciplinas.');
+    }
         };
         fetchDisciplinas();
     }, [tenant_id]);
@@ -123,7 +134,10 @@ export default function SupervisionClases() {
                 params: { disciplina_id: discId }
             });
             setHorariosDisc(prev => ({ ...prev, [discId]: (r.data?.horarios || []) }));
-        } catch { setHorariosDisc(prev => ({ ...prev, [discId]: [] })); }
+    } catch (e) {
+        console.error(e);
+        setErrorHorarios(prev => ({ ...prev, [discId]: 'No se pudieron cargar los horarios de esta disciplina.' }));
+    }
         setLoadingHorariosDisc(false);
     }, [tenant_id]);
 
@@ -143,7 +157,10 @@ export default function SupervisionClases() {
             const r = await api.get(`${API_BASE}/disciplinas`);
             lista = r.data || [];
             setDisciplinas(lista);
-        } catch (e) { console.error('Error recargando disciplinas', e); }
+    } catch (e) {
+        console.error('Error recargando disciplinas', e);
+        setErrorDisciplinas('No se pudieron cargar las disciplinas.');
+    }
         fetchCupos();
         const activas = lista.filter(d => d.activo !== false);
         await Promise.all(activas.map(d => cargarHorariosDisc(d.id)));
@@ -171,7 +188,10 @@ export default function SupervisionClases() {
             });
             setCoachesDisponibles(r.data || []);
             setCoachSelector({ claseId, disciplinaId });
-        } catch { setCoachesDisponibles([]); }
+        } catch (e) {
+            console.error(e);
+            setErrorCoaches('No se pudieron cargar los coaches disponibles.');
+        }
     };
 
     const asignarCoach = async (claseId, coachId, pertenece) => {
@@ -179,9 +199,13 @@ export default function SupervisionClases() {
             // Coach pertenece a la disciplina → asignación normal
             try {
                 await api.put(`${API_BASE}/clases/${claseId}`, { coach_id: coachId });
+            setMsgAsignacion({ tipo: 'exito', texto: 'Coach asignado' });
                 setCoachSelector(null);
                 if (discExpandida) cargarHorariosDisc(discExpandida);
-            } catch (e) { console.error('Error asignando coach', e); }
+        } catch (e) {
+            console.error('Error asignando coach', e);
+            setMsgAsignacion({ tipo: 'error', texto: error.response?.data?.detail || 'No se pudo asignar el coach' });
+        }
         } else {
             // Coach NO pertenece → mostrar confirmación de emergencia
             setEmergenciaConfirm({ coachId, claseId });
@@ -199,7 +223,10 @@ export default function SupervisionClases() {
             setEmergenciaConfirm(null);
             setCoachSelector(null);
             if (discExpandida) cargarHorariosDisc(discExpandida);
-        } catch (e) { console.error('Error asignando coach emergencia', e); }
+        } catch (e) {
+            console.error('Error asignando coach emergencia', e);
+            setMsgAsignacion({ tipo: 'error', texto: error.response?.data?.detail || 'No se pudo asignar el coach de emergencia' });
+        }
     };
 
     const cargarGridSemanal = useCallback(async (fechaRef) => {
@@ -376,8 +403,14 @@ export default function SupervisionClases() {
                     >
                         + Agregar Clase
                     </button>
-                    <button
-                        onClick={() => { setShowCupos(!showCupos); if (!showCupos) fetchCupos(); }}
+                                        {errorDisciplinas && (
+                    <div className="border-l-4 rounded-lg p-3 text-xs bg-amber-500/10 border-amber-500 text-amber-300 flex items-center justify-between gap-3">
+                        <span>{errorDisciplinas}</span>
+                        <button onClick={fetchDisciplinas} className="px-2 py-1 bg-amber-600 text-white rounded text-xs font-medium hover:bg-amber-700">Reintentar</button>
+                    </div>
+                )}
+                <button
+                    onClick={() => { setShowCupos(!showCupos); if (!showCupos) fetchCupos(); }}
                         className={`px-3 py-1 rounded text-sm font-medium ${showCupos ? 'bg-purple-700 text-white' : 'bg-purple-100 text-purple-800'}`}
                     >
                         📊 Gestión de Cupos
@@ -389,6 +422,12 @@ export default function SupervisionClases() {
                         {cuposMsg && (
                             <div className={`mb-3 px-3 py-2 rounded text-xs border-l-4 ${cuposMsg.tipo === "error" ? "bg-red-500/10 border-red-500 text-red-300" : "bg-green-500/10 border-green-500 text-green-300"}`}>
                                 {cuposMsg.texto}
+                            </div>
+                        )}
+                        {errorCupos && (
+                            <div className="border-l-4 rounded-lg p-3 mb-3 text-xs bg-red-500/10 border-red-500 text-red-300 flex items-center justify-between gap-3">
+                                <span>{errorCupos}</span>
+                                <button onClick={fetchCupos} className="px-2 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">Reintentar</button>
                             </div>
                         )}
                         {cuposLoading ? (
@@ -449,7 +488,7 @@ export default function SupervisionClases() {
                                 </div>
                                 <div className="space-y-1 text-sm text-zinc-400">
                                     {r.total === 0 ? (
-                                        <div className="text-zinc-500 text-xs">Sin horarios base asignados</div>
+                                        errorHorarios[discExpandida] ? null : (<div className="text-zinc-500 text-xs">Sin horarios base asignados</div>)
                                     ) : (
                                         <>
                                             <div>📅 {r.total} horario(s) semanal(es)</div>
@@ -498,6 +537,12 @@ export default function SupervisionClases() {
                                 Horarios base fijos que se repiten cada semana (independiente del filtro de fechas)
                             </p>
                         </div>
+                        {errorHorarios[discExpandida] && (
+                            <div className="border-l-4 rounded-lg p-3 m-4 text-xs bg-orange-500/10 border-orange-500 text-orange-300 flex items-center justify-between gap-3">
+                                <span>{errorHorarios[discExpandida]}</span>
+                                <button onClick={() => cargarHorariosDisc(discExpandida)} className="px-2 py-1 bg-orange-500 text-white rounded text-xs font-medium hover:bg-orange-600">Reintentar</button>
+                            </div>
+                        )}
                         {loadingHorariosDisc ? (
                             <div className="flex items-center justify-center py-12">
                                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-900"></div>
@@ -564,6 +609,17 @@ export default function SupervisionClases() {
                 )}
 
                 {/* Modal selector de coach (con cobertura de emergencia) */}
+                                        {errorCoaches && (
+                            <div className="border-l-4 rounded-lg p-3 mb-3 text-xs bg-red-500/10 border-red-500 text-red-300 flex items-center justify-between gap-3">
+                                <span>{errorCoaches}</span>
+                                <button onClick={() => abrirSelectorCoach(coachSelector.claseId, coachSelector.disciplinaId)} className="px-2 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">Reintentar</button>
+                            </div>
+                        )}
+                        {msgAsignacion && (
+                            <div className={`border-l-4 rounded-lg p-3 mb-3 text-xs ${msgAsignacion.tipo === "exito" ? "bg-green-500/10 border-green-500 text-green-300" : "bg-red-500/10 border-red-500 text-red-300"}`}>
+                                {msgAsignacion.texto}
+                            </div>
+                        )}
                 {coachSelector && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => setCoachSelector(null)}>
                         <div className="bg-zinc-900 rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full" onClick={(e) => e.stopPropagation()}>
