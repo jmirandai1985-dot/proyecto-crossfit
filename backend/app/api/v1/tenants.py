@@ -42,7 +42,7 @@ def crear_tenant(
 
     # Crear el nuevo tenant
     db_tenant = Tenant(
-        nombre=tenant_data.nombre,
+        nombre=tenant_data.nombre.strip(),
         subdomain=tenant_data.subdomain,
         activo=True
     )
