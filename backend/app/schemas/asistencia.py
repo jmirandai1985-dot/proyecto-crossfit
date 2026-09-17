@@ -2,7 +2,7 @@
 Esquemas Pydantic para el módulo de Asistencia + Hitos (Fase 1 y 2).
 """
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 
 
 class AsistenciaItem(BaseModel):
