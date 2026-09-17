@@ -34,4 +34,5 @@ class ClaseAsistenciaResponse(BaseModel):
     disciplina_nombre: str
     cupo_maximo: int
     asistentes_confirmados: int
+    cupo_original: Optional[int] = None
     reservas_count: int

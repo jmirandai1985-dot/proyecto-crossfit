@@ -1,4 +1,4 @@
-﻿"""
+"""
 Modelo SQLAlchemy para la tabla clases
 """
 from sqlalchemy import Column, Integer, Boolean, ForeignKey, Index, Date, Time
@@ -29,6 +29,7 @@ class Clase(Base):
     hora_inicio = Column(Time, nullable=False)
     hora_fin = Column(Time, nullable=False)
     cupo_maximo = Column(Integer, nullable=False, default=20)
+    cupo_original = Column(Integer, nullable=True)  # snapshot al generar; techo = cupo_original + 10
     asistentes_confirmados = Column(Integer, nullable=False, default=0)
     cancelada = Column(Boolean, nullable=False, default=False)
     # WOD asociado a esta clase (FK â†’ wods.id)

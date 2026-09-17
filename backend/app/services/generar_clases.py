@@ -70,6 +70,7 @@ def generar_clases_para_fecha(
             hora_inicio=h.hora_inicio,
             hora_fin=h.hora_fin,
             cupo_maximo=h.cupo_maximo,
+            cupo_original=h.cupo_maximo,
             asistentes_confirmados=0,
             cancelada=False,
         )
