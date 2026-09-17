@@ -61,6 +61,8 @@ export default function SupervisionClases() {
     const [modalReservasHorario, setModalReservasHorario] = useState(null); // { horario, cargando, data } self-service
     const [showCupos, setShowCupos] = useState(false);
     const [cuposMsg, setCuposMsg] = useState(null);
+    const [clasesHoy, setClasesHoy] = useState([]);
+    const [cargandoClasesHoy, setCargandoClasesHoy] = useState(false);
 
     // Un solo camino para el +/- de cupos por disciplina (antes: dos handlers gemelos).
     const cupoBloqueado = (d) => !d.activo || (d.horarios_count ?? 0) === 0;
