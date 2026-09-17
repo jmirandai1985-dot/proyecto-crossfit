@@ -7,6 +7,8 @@ from datetime import datetime, date, time, timedelta
 
 from app.db.database import get_db
 from app.models.clase import Clase
+from app.models.coach_disciplina import CoachDisciplina
+from app.services.auditoria_service import registrar_auditoria
 from app.schemas import clase as schemas
 from app.core.dependencies import (
     verificar_coach_disciplina, get_current_coach, get_current_user,
@@ -358,3 +360,93 @@ def eliminar_clase(
     db.commit()
 
     return {"mensaje": "Clase eliminada"}
+
+
+@router.post("/{clase_id}/ampliar-cupo")
+def ampliar_cupo_clase(
+    clase_id: int,
+    body: schemas.AmpliarCupoRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
+):
+    """Amplia el cupo de UNA clase puntual (max +10 sobre el cupo original).
+
+    Coach: solo sus clases asignadas (coach_id == usuario_id) o de sus disciplinas
+    asignadas. Admin/administrador: cualquier clase de su tenant.
+    No toca horarios (config general) ni el PUT /clases/{id}.
+    """
+    # SEGURIDAD: tenant_id SIEMPRE del token JWT.
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+    es_admin = rol in ("admin", "administrador")
+
+    clase = db.query(Clase).filter(
+        Clase.id == clase_id,
+        Clase.tenant_id == tenant_id,
+    ).first()
+    if not clase:
+        raise HTTPException(status_code=404, detail="Clase no encontrada")
+
+    if not es_admin:
+        es_suya = clase.coach_id == current_user["usuario_id"]
+        if not es_suya and clase.disciplina_id:
+            es_suya = db.query(CoachDisciplina).filter(
+                CoachDisciplina.coach_id == current_user["usuario_id"],
+                CoachDisciplina.disciplina_id == clase.disciplina_id,
+                CoachDisciplina.tenant_id == tenant_id,
+                CoachDisciplina.activo == True,  # noqa: E712
+            ).first() is not None
+        if not es_suya:
+            raise HTTPException(
+                status_code=403,
+                detail="Solo podes ampliar el cupo de tus clases o de tus disciplinas asignadas",
+            )
+
+    original = clase.cupo_original or clase.cupo_maximo
+    tope = original + 10
+    if clase.cupo_maximo + body.cupos_extra > tope:
+        raise HTTPException(
+            status_code=409,
+            detail="Tope alcanzado: cupo original %s, maximo permitido %s" % (original, tope),
+        )
+
+    cupo_antes = clase.cupo_maximo
+    # UPDATE atomico (evita perder una ampliacion si dos coinciden).
+    result = db.execute(
+        text(
+            "UPDATE clases SET cupo_maximo = cupo_maximo + :n, updated_at = now() "
+            "WHERE id = :cid AND tenant_id = :tid AND cupo_maximo + :n <= :tope"
+        ),
+        {"n": body.cupos_extra, "cid": clase_id, "tid": tenant_id, "tope": tope},
+    )
+    if result.rowcount == 0:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="No se pudo ampliar: tope alcanzado")
+
+    db.commit()
+    db.refresh(clase)
+
+    # Auditoria DESPUES del commit del UPDATE: si el UPDATE fallo, no queda fila falsa.
+    registrar_auditoria(
+        db=db,
+        tenant_id=tenant_id,
+        usuario_id=current_user["usuario_id"],
+        accion="ampliar_cupo_clase",
+        entidad="clase",
+        entidad_id=clase_id,
+        detalle={
+            "cupos_extra": body.cupos_extra,
+            "cupo_antes": cupo_antes,
+            "cupo_despues": clase.cupo_maximo,
+            "cupo_original": original,
+            "rol": rol or "desconocido",
+        },
+    )
+    return {
+        "ok": True,
+        "clase_id": clase.id,
+        "cupo_maximo": clase.cupo_maximo,
+        "cupo_original": original,
+        "tope": tope,
+        "extra_disponible": tope - clase.cupo_maximo,
+    }

@@ -62,3 +62,8 @@ class ClaseListItem(BaseModel):
     disciplina_nombre: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AmpliarCupoRequest(BaseModel):
+    """Body de POST /clases/{id}/ampliar-cupo (1 a 10 cupos extra)."""
+    cupos_extra: int = Field(..., ge=1, le=10, description="Cupos extra a habilitar (1-10)")
