@@ -50,8 +50,9 @@ const Planes = () => {
             duracion_dias: p.duracion_dias,
             genero: p.genero || 'masculino',
             activo: p.activo ?? true,
-            es_estudiante: p.es_estudiante || p.requiere_certificado_estudiante || false,
-            requiere_certificado_estudiante: p.requiere_certificado_estudiante || false,
+            es_estudiante: p.es_estudiante ?? false,
+            // Derivado: un plan de estudiante SIEMPRE pide certificado (fuente unica).
+            requiere_certificado_estudiante: p.es_estudiante ?? false,
         });
         setShowForm(true);
     };
@@ -60,9 +61,9 @@ const Planes = () => {
         e.preventDefault();
         try {
             if (editingId) {
-                await api.put(`/api/v1/planes/${editingId}`, formData);
+                await api.put(`/api/v1/planes/${editingId}`, { ...formData, requiere_certificado_estudiante: formData.es_estudiante });
             } else {
-                await api.post('/api/v1/planes', { ...formData, tenant_id });
+                await api.post('/api/v1/planes', { ...formData, tenant_id, requiere_certificado_estudiante: formData.es_estudiante });
             }
             setShowForm(false);
             fetchPlanes();
@@ -168,9 +169,9 @@ const Planes = () => {
                                             <span className="inline-block px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded text-xs font-medium">🎓 Creando/Editando plan estudiante</span>
                                         </div>
                                         <div className="flex items-center gap-2">
-                                            <input type="checkbox" checked={formData.requiere_certificado_estudiante || false}
-                                                onChange={e => setFormData({ ...formData, requiere_certificado_estudiante: e.target.checked })} id="req_cert" />
-                                            <label htmlFor="req_cert" className="text-sm text-zinc-300">🎓 Requiere certificado de estudiante</label>
+                                            <input type="checkbox" checked={!!formData.es_estudiante} disabled readOnly
+                                                className="w-4 h-4 text-orange-500 rounded opacity-70" id="req_cert" />
+                                            <label htmlFor="req_cert" className="text-sm text-zinc-400">🎓 Requiere certificado de estudiante (automático: lo define "es plan de estudiante")</label>
                                         </div>
                                     </>
                                 )}
