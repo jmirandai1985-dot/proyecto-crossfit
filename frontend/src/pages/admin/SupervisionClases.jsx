@@ -399,7 +399,7 @@ export default function SupervisionClases() {
                     </button>
                     <button
                         onClick={() => setShowModalClase(true)}
-                        className="px-3 py-1 bg-blue-900 text-white rounded text-sm font-medium hover:bg-blue-800"
+                        className="px-3 py-1 bg-orange-500 text-white rounded text-sm font-medium hover:bg-orange-600"
                     >
                         + Agregar Clase
                     </button>
@@ -417,8 +417,8 @@ export default function SupervisionClases() {
                     </button>
                 </div>
                 {showCupos && (
-                    <div className="bg-zinc-900 rounded-xl border-2 border-purple-200 p-5 mb-6">
-                        <h3 className="font-bold text-lg text-purple-900 mb-4">📊 Cupo máximo configurado por disciplina</h3>
+                    <div className="bg-zinc-900 rounded-xl border-2 border-purple-500/40 p-5 mb-6">
+                        <h3 className="font-bold text-lg text-zinc-100 mb-4">📊 Cupo máximo configurado por disciplina</h3>
                         {cuposMsg && (
                             <div className={`mb-3 px-3 py-2 rounded text-xs border-l-4 ${cuposMsg.tipo === "error" ? "bg-red-500/10 border-red-500 text-red-300" : "bg-green-500/10 border-green-500 text-green-300"}`}>
                                 {cuposMsg.texto}
