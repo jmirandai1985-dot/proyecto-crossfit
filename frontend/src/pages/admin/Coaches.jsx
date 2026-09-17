@@ -99,7 +99,7 @@ const Coaches = () => {
                     correo: formData.correo,
                     password: formData.password,
                     rol: 'coach',
-                    rut: '12.345.678-0',
+                    rut: 'TEMP-' + Date.now().toString().slice(-7), // PLACEHOLDER temporal: RUT unico por coach (backend exige rut 7-12 chars, no lo pide el form todavia)
                     tenant_id: tenant_id,
                 });
                 coachId = res.data.id;
