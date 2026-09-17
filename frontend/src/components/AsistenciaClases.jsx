@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import AsistenciaGrupoDisciplina from './AsistenciaGrupoDisciplina';
 import api from '../services/api';
 
 /**
@@ -122,6 +123,24 @@ const AsistenciaClases = ({ variant = 'light' } = {}) => {
         setConfirmando(false);
     };
 
+    // Fase 2: agrupacion por disciplina respetando el orden del backend (dentro de
+    // cada grupo tambien). El acordeon arranca abierto y el estado es local, no
+    // persistido: al recargar vuelven a estar todos abiertos.
+    const [cerradas, setCerradas] = useState({});
+    const estaAbierta = (disciplina) => !cerradas[disciplina];
+    const toggleGrupo = (disciplina) =>
+        setCerradas((prev) => ({ ...prev, [disciplina]: !prev[disciplina] }));
+
+    const grupos = useMemo(() => {
+        const m = new Map();
+        for (const c of clases) {
+            const k = c.disciplina_nombre || 'Sin disciplina';
+            if (!m.has(k)) m.set(k, []);
+            m.get(k).push(c);
+        }
+        return [...m.entries()].map(([disciplina, items]) => ({ disciplina, clases: items }));
+    }, [clases]);
+
     return (
         <div className="space-y-6">
             <div>
@@ -151,36 +170,17 @@ const AsistenciaClases = ({ variant = 'light' } = {}) => {
                     </p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {clases.map((clase) => (
-                        <div key={clase.id} className={`rounded-xl shadow-sm border p-5 ${osc ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-gray-100'}`}>
-                            <div className="flex items-start justify-between">
-                                <div>
-                                    <p className={`font-semibold ${osc ? 'text-zinc-100' : 'text-gray-900'}`}>{clase.disciplina_nombre}</p>
-                                    <p className={`text-sm mt-0.5 ${osc ? 'text-zinc-400' : 'text-gray-600'}`}>
-                                        🕐 {formatearHora(clase.hora_inicio)} - {formatearHora(clase.hora_fin)}
-                                    </p>
-                                    <p className={`text-sm ${osc ? 'text-zinc-400' : 'text-gray-600'}`}>
-                                        👥 {clase.reservas_count || 0} reservas · 🎟️ {clase.asistentes_confirmados || 0}/{clase.cupo_maximo || '—'} confirmados
-                                    </p>
-                                </div>
-                                <span
-                                    className={`inline-flex items-center px-2 py-1 text-xs font-medium rounded-full ${
-                                        clasesMarcadas[clase.id]
-                                            ? (osc ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700')
-                                            : (osc ? 'bg-orange-500/20 text-orange-400' : 'bg-orange-100 text-orange-700')
-                                    }`}
-                                >
-                                    {clasesMarcadas[clase.id] ? '✓ Confirmada' : 'Pendiente'}
-                                </span>
-                            </div>
-                            <button
-                                onClick={() => abrirClase(clase)}
-                                className="mt-4 w-full px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600 transition-colors"
-                            >
-                                Marcar Asistencia
-                            </button>
-                        </div>
+                <div className="space-y-4">
+                    {grupos.map((grupo) => (
+                        <AsistenciaGrupoDisciplina
+                            key={grupo.disciplina}
+                            grupo={grupo}
+                            osc={osc}
+                            abierta={estaAbierta(grupo.disciplina)}
+                            onToggle={() => toggleGrupo(grupo.disciplina)}
+                            onAbrir={abrirClase}
+                            formatearHora={formatearHora}
+                        />
                     ))}
                 </div>
             )}
