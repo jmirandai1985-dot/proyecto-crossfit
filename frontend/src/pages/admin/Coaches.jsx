@@ -326,6 +326,7 @@ const Coaches = () => {
                                         ))}
                                     </div>
                                 </div>
+                                {editingCoach && (
                                 <div>
                                     <label className="block text-sm font-medium text-zinc-300 mb-1">Estado</label>
                                     <select value={formData.estado} onChange={e => setFormData({ ...formData, estado: e.target.value })} className="w-full px-3 py-2 border border-zinc-700 rounded-lg">
@@ -333,6 +334,10 @@ const Coaches = () => {
                                         <option value="inactivo">Inactivo</option>
                                     </select>
                                 </div>
+                                )}
+                                {!editingCoach && (
+                                    <p className="text-xs text-zinc-500">Al crear, el coach queda activo. El estado se edita despues.</p>
+                                )}
                                 <div className="flex gap-3 pt-4">
                                     <button type="button" onClick={closeModal} className="flex-1 px-4 py-2 border border-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-800/50 font-medium">Cancelar</button>
                                     <button type="submit" disabled={!asignacionesListas} className="flex-1 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium">{editingCoach ? 'Actualizar' : 'Crear'}</button>
