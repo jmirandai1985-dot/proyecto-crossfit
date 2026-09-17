@@ -365,7 +365,8 @@ def listar_cupos_disciplinas(
             COALESCE(
                 (SELECT h.cupo_maximo FROM horarios h WHERE h.disciplina_id = d.id AND h.tenant_id = :tid ORDER BY h.id DESC LIMIT 1),
                 16
-            ) AS cupo_actual
+            ) AS cupo_actual,
+            (SELECT COUNT(*) FROM horarios h2 WHERE h2.disciplina_id = d.id AND h2.tenant_id = :tid) AS horarios_count
         FROM disciplinas d
         WHERE d.tenant_id = :tid
         ORDER BY d.id
@@ -376,7 +377,8 @@ def listar_cupos_disciplinas(
             "id": r.id,
             "nombre": r.nombre.strip() if r.nombre else r.nombre,
             "activo": r.activo,
-            "cupo_actual": r.cupo_actual
+            "cupo_actual": r.cupo_actual,
+            "horarios_count": r.horarios_count
         }
         for r in rows
     ]
