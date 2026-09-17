@@ -141,6 +141,12 @@ const AsistenciaClases = ({ variant = 'light' } = {}) => {
         return [...m.entries()].map(([disciplina, items]) => ({ disciplina, clases: items }));
     }, [clases]);
 
+    // Ampliar cupo de UNA clase puntual (el backend valida permisos y el tope +10).
+    const ampliarCupo = async (clase, extra) => {
+        const r = await api.post(`/api/v1/clases/${clase.id}/ampliar-cupo`, { cupos_extra: extra });
+        return r.data; // { cupo_maximo, cupo_original, tope, extra_disponible }
+    };
+
     return (
         <div className="space-y-6">
             <div>
@@ -180,6 +186,7 @@ const AsistenciaClases = ({ variant = 'light' } = {}) => {
                             onToggle={() => toggleGrupo(grupo.disciplina)}
                             onAbrir={abrirClase}
                             formatearHora={formatearHora}
+                            onAmpliarCupo={ampliarCupo}
                         />
                     ))}
                 </div>

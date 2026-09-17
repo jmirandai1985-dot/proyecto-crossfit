@@ -125,6 +125,7 @@ def clases_hoy(
             "disciplina_id": c.disciplina_id,
             "disciplina_nombre": disc_map.get(c.disciplina_id, "Clase"),
             "cupo_maximo": c.cupo_maximo,
+            "cupo_original": c.cupo_original,
             "asistentes_confirmados": c.asistentes_confirmados,
             "reservas_count": counts.get(c.id, 0),
             "marcada": c.id in marcadas,
