@@ -51,6 +51,7 @@ export default function SupervisionClases() {
     const [showModalClase, setShowModalClase] = useState(false); // modal "+ Agregar Clase"
     const [modalReservasHorario, setModalReservasHorario] = useState(null); // { horario, cargando, data } self-service
     const [showCupos, setShowCupos] = useState(false);
+    const [cuposMsg, setCuposMsg] = useState(null);
     const [cuposData, setCuposData] = useState([]);
     const [cuposLoading, setCuposLoading] = useState(false);
     // ── POLLING (TAREA 5) ──
@@ -360,7 +361,12 @@ export default function SupervisionClases() {
                 </div>
                 {showCupos && (
                     <div className="bg-zinc-900 rounded-xl border-2 border-purple-200 p-5 mb-6">
-                        <h3 className="font-bold text-lg text-purple-900 mb-4">📊 Gestión de Cupos por Disciplina</h3>
+                        <h3 className="font-bold text-lg text-purple-900 mb-4">📊 Cupo máximo configurado por disciplina</h3>
+                        {cuposMsg && (
+                            <div className={`mb-3 px-3 py-2 rounded text-xs border-l-4 ${cuposMsg.tipo === "error" ? "bg-red-500/10 border-red-500 text-red-300" : "bg-green-500/10 border-green-500 text-green-300"}`}>
+                                {cuposMsg.texto}
+                            </div>
+                        )}
                         {cuposLoading ? (
                             <div className="text-zinc-500 text-center py-8">Cargando cupos...</div>
                         ) : cuposData.length === 0 ? (
@@ -380,13 +386,16 @@ export default function SupervisionClases() {
                                                     if (nuevo === d.cupo_actual) return;
                                                     try {
                                                         const r = await api.patch(`/api/v1/supervision/cupo-disciplina`, null, { params: { disciplina_id: d.id, cupo_maximo: nuevo } });
-                                                        if (r.data?.ok) {
-                                                            setCuposData(prev => prev.map(x => x.id === d.id ? { ...x, cupo_actual: nuevo } : x));
-                                                        }
+        if (r.data?.ok && (r.data?.horarios_actualizados ?? 0) > 0) {
+            setCuposMsg(null);
+            setCuposData(prev => prev.map(x => x.id === d.id ? { ...x, cupo_actual: nuevo } : x));
+        } else {
+            setCuposMsg({ tipo: "error", texto: "Esta disciplina no tiene horarios configurados: el cambio no se guardo." });
+        }
                                                     } catch (e) { console.error(e); }
                                                 }}
-                                                disabled={d.cupo_actual <= 1}
-                                                className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${d.cupo_actual <= 1 ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed' : 'bg-red-100 text-red-600 hover:bg-red-200'}`}
+                                                disabled={d.cupo_actual <= 1 || !d.activo || (d.horarios_count ?? 0) === 0}
+                                                className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${(d.cupo_actual <= 1 || !d.activo || (d.horarios_count ?? 0) === 0) ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed' : 'bg-red-100 text-red-600 hover:bg-red-200'}`}
                                             >−</button>
                                             <span className="w-12 text-center text-xl font-bold text-zinc-100">{d.cupo_actual}</span>
                                             <button
@@ -395,13 +404,16 @@ export default function SupervisionClases() {
                                                     if (nuevo === d.cupo_actual) return;
                                                     try {
                                                         const r = await api.patch(`/api/v1/supervision/cupo-disciplina`, null, { params: { disciplina_id: d.id, cupo_maximo: nuevo } });
-                                                        if (r.data?.ok) {
-                                                            setCuposData(prev => prev.map(x => x.id === d.id ? { ...x, cupo_actual: nuevo } : x));
-                                                        }
+        if (r.data?.ok && (r.data?.horarios_actualizados ?? 0) > 0) {
+            setCuposMsg(null);
+            setCuposData(prev => prev.map(x => x.id === d.id ? { ...x, cupo_actual: nuevo } : x));
+        } else {
+            setCuposMsg({ tipo: "error", texto: "Esta disciplina no tiene horarios configurados: el cambio no se guardo." });
+        }
                                                     } catch (e) { console.error(e); }
                                                 }}
-                                                disabled={d.cupo_actual >= 200}
-                                                className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${d.cupo_actual >= 200 ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed' : 'bg-green-100 text-green-600 hover:bg-green-200'}`}
+                                                disabled={d.cupo_actual >= 200 || !d.activo || (d.horarios_count ?? 0) === 0}
+                                                className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${(d.cupo_actual >= 200 || !d.activo || (d.horarios_count ?? 0) === 0) ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed' : 'bg-green-100 text-green-600 hover:bg-green-200'}`}
                                             >+</button>
                                         </div>
                                     </div>
