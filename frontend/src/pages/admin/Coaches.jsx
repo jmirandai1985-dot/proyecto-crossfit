@@ -10,6 +10,12 @@ const Coaches = () => {
     const [showModal, setShowModal] = useState(false);
     const [editingCoach, setEditingCoach] = useState(null);
     const [disciplinas, setDisciplinas] = useState([]);
+    const [errorCoaches, setErrorCoaches] = useState('');
+    const [errorDisciplinas, setErrorDisciplinas] = useState('');
+    const [errorAsignaciones, setErrorAsignaciones] = useState('');
+    const [asignacionesListas, setAsignacionesListas] = useState(false);
+    const [msgOperacion, setMsgOperacion] = useState(null);
+    const [confirmarEliminar, setConfirmarEliminar] = useState(null);
     const [coachDisciplinasMap, setCoachDisciplinasMap] = useState({});
     const [formData, setFormData] = useState({
         nombre: '',
@@ -24,7 +30,7 @@ const Coaches = () => {
             const response = await api.get('/api/v1/usuarios', { params: { rol: 'coach' } });
             setCoaches(response.data || []);
         } catch (error) {
-            console.error('Error fetching coaches:', error);
+            console.error('Error fetching coaches:', error); setErrorCoaches('No se pudieron cargar los coaches. Reintenta.');
             setCoaches([]);
         } finally {
             setLoading(false);
@@ -35,7 +41,7 @@ const Coaches = () => {
         try {
             const r = await api.get('/api/v1/disciplinas');
             setDisciplinas(r.data?.filter(d => d.activo !== false) || []);
-        } catch (e) { console.error(e); }
+        } catch (e) { console.error(e); setErrorDisciplinas('No se pudieron cargar las disciplinas.'); }
     };
 
     const fetchCoachDisciplinas = async () => {
@@ -50,7 +56,9 @@ const Coaches = () => {
                 }
             });
             setCoachDisciplinasMap(map);
-        } catch (e) { console.error(e); }
+        setAsignacionesListas(true);
+        setErrorAsignaciones('');
+        } catch (e) { console.error(e); setErrorAsignaciones('No se pudieron cargar las asignaciones del coach.'); setAsignacionesListas(false); }
     };
 
     useEffect(() => {
@@ -60,6 +68,7 @@ const Coaches = () => {
     }, [tenant_id]);
 
     const openModal = (coach = null) => {
+        if (coach && !asignacionesListas) { setErrorAsignaciones('No se pudieron cargar las asignaciones del coach: la edicion esta bloqueada hasta que carguen. Reintenta.'); return; }
         if (coach) {
             setEditingCoach(coach);
             setFormData({
@@ -84,6 +93,8 @@ const Coaches = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (!asignacionesListas) { setErrorAsignaciones('No se pudieron cargar las asignaciones actuales del coach. Para no borrar sus disciplinas, no se guarda. Reintenta la carga.'); return; }
+        setMsgOperacion(null);
         try {
             let coachId;
             if (editingCoach) {
@@ -114,11 +125,11 @@ const Coaches = () => {
                 });
             }
 
-            closeModal();
+            setMsgOperacion({ tipo: 'exito', texto: 'Coach guardado' });
             fetchCoaches();
             fetchCoachDisciplinas();
         } catch (error) {
-            alert('Error: ' + (error.response?.data?.detail || error.message));
+            setMsgOperacion({ tipo: 'error', texto: error.response?.data?.detail || error.message });
         }
     };
 
@@ -128,7 +139,7 @@ const Coaches = () => {
             await api.delete(`/api/v1/usuarios/${coach.id}`);
             setCoaches(coaches.filter((c) => c.id !== coach.id));
         } catch (error) {
-            alert('Error al eliminar: ' + (error.response?.data?.detail || 'Intenta nuevamente'));
+            setMsgOperacion({ tipo: 'error', texto: error.response?.data?.detail || 'No se pudo desactivar' });
         }
     };
 
@@ -159,6 +170,19 @@ const Coaches = () => {
         );
     }
 
+    // Desactivacion (soft delete en el backend): la confirmacion vive en el modal propio.
+    const desactivarConfirmado = async () => {
+        const coach = confirmarEliminar;
+        setConfirmarEliminar(null);
+        try {
+            await api.delete(`/api/v1/usuarios/${coach.id}`);
+            setCoaches(coaches.filter((c) => c.id !== coach.id));
+            setMsgOperacion({ tipo: 'exito', texto: 'Coach desactivado' });
+        } catch (error) {
+            setMsgOperacion({ tipo: 'error', texto: error.response?.data?.detail || 'No se pudo desactivar el coach' });
+        }
+    };
+
     return (
         <Layout>
             <div className="space-y-6">
@@ -166,6 +190,30 @@ const Coaches = () => {
                     <div><h1 className="text-3xl font-bold text-zinc-100">Gestión de Coaches</h1><p className="text-zinc-400 mt-1">Administra los entrenadores de tu box</p></div>
                     <button onClick={() => openModal()} className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium text-sm">+ Agregar Coach</button>
                 </div>
+
+                {errorCoaches && (
+                    <div className="border-l-4 rounded-lg p-4 text-sm bg-red-500/10 border-red-500 text-red-300 flex items-center justify-between gap-3">
+                        <span>{errorCoaches}</span>
+                        <button onClick={fetchCoaches} className="px-3 py-1.5 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">Reintentar</button>
+                    </div>
+                )}
+                {errorAsignaciones && (
+                    <div className="border-l-4 rounded-lg p-4 text-sm bg-orange-500/10 border-orange-500 text-orange-300 flex items-center justify-between gap-3">
+                        <span>{errorAsignaciones} Mientras no carguen, la edicion de coaches esta bloqueada.</span>
+                        <button onClick={fetchCoachDisciplinas} className="px-3 py-1.5 bg-orange-500 text-white rounded text-xs font-medium hover:bg-orange-600">Reintentar</button>
+                    </div>
+                )}
+                {errorDisciplinas && (
+                    <div className="border-l-4 rounded-lg p-4 text-sm bg-amber-500/10 border-amber-500 text-amber-300 flex items-center justify-between gap-3">
+                        <span>{errorDisciplinas}</span>
+                        <button onClick={fetchDisciplinas} className="px-3 py-1.5 bg-amber-600 text-white rounded text-xs font-medium hover:bg-amber-700">Reintentar</button>
+                    </div>
+                )}
+                {msgOperacion && (
+                    <div className={`border-l-4 rounded-lg p-4 text-sm ${msgOperacion.tipo === 'exito' ? 'bg-green-500/10 border-green-500 text-green-300' : 'bg-red-500/10 border-red-500 text-red-300'}`}>
+                        {msgOperacion.texto}
+                    </div>
+                )}
 
                 {/* Estadísticas */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -227,8 +275,8 @@ const Coaches = () => {
                                         </div>
                                     </div>
                                     <div className="px-6 py-4 bg-zinc-800/50 border-t border-zinc-800 flex gap-2">
-                                        <button onClick={() => openModal(coach)} className="flex-1 px-3 py-2 text-blue-400 hover:bg-zinc-800 rounded text-sm font-medium">Editar</button>
-                                        <button onClick={() => handleDelete(coach)} className="flex-1 px-3 py-2 text-red-600 hover:bg-red-50 rounded text-sm font-medium">Eliminar</button>
+                                        <button onClick={() => openModal(coach)} disabled={!asignacionesListas} className="flex-1 px-3 py-2 text-blue-400 hover:bg-zinc-800 rounded text-sm font-medium">Editar</button>
+                                        <button onClick={() => setConfirmarEliminar(coach)} className="flex-1 px-3 py-2 text-red-600 hover:bg-red-50 rounded text-sm font-medium">Desactivar</button>
                                     </div>
                                 </div>
                             );
@@ -287,13 +335,25 @@ const Coaches = () => {
                                 </div>
                                 <div className="flex gap-3 pt-4">
                                     <button type="button" onClick={closeModal} className="flex-1 px-4 py-2 border border-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-800/50 font-medium">Cancelar</button>
-                                    <button type="submit" className="flex-1 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium">{editingCoach ? 'Actualizar' : 'Crear'}</button>
+                                    <button type="submit" disabled={!asignacionesListas} className="flex-1 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium">{editingCoach ? 'Actualizar' : 'Crear'}</button>
                                 </div>
                             </form>
                         </div>
                     </div>
                 )}
             </div>
+                {confirmarEliminar && (
+                    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+                        <div className="bg-zinc-900 rounded-lg shadow-xl max-w-md w-full p-6">
+                            <h2 className="text-xl font-bold text-zinc-100 mb-3">Desactivar coach</h2>
+                            <p className="text-sm text-zinc-300 mb-5">Confirma desactivar a {confirmarEliminar.nombre}? Dejara de aparecer como activo (no se borra su historial).</p>
+                            <div className="flex gap-3">
+                                <button onClick={() => setConfirmarEliminar(null)} className="flex-1 px-4 py-2 border border-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-800/50 font-medium">Cancelar</button>
+                                <button onClick={desactivarConfirmado} className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium">Desactivar</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
         </Layout>
     );
 };
