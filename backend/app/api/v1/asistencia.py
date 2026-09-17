@@ -83,18 +83,29 @@ def clases_hoy(
     else:
         counts = {}
 
-    # "marcada" = el coach/admin ya cerró la clase con Confirmar. Fuente de
-    # verdad: reservas.asistencia_marcada_at (mismo criterio que
-    # GET /clases/{id}/alumnos). Una clase marcada con 0 asistentes reales
-    # también cuenta como marcada.
+    # "marcada" = TODAS las reservas vigentes (confirmada/completada) ya tienen su
+    # registro de asistencia. La marca la escribe el Confirmar del panel (batch)
+    # y también el check-in por QR del alumno: ambos setean
+    # reservas.asistencia_marcada_at (asistencia_via distingue la vía).
+    # Se exige al menos una reserva vigente para que una clase vacía NO cuente
+    # como marcada por vacuidad (0 reservas = "no aplica", lo resuelve el front).
+    ESTADOS_VIGENTES = ("confirmada", "completada")
     marcadas = set()
     if ids:
-        marcadas = {
+        con_reservas = {
             cid for (cid,) in db.query(Reserva.clase_id).filter(
                 Reserva.clase_id.in_(ids),
-                Reserva.asistencia_marcada_at.isnot(None),
+                Reserva.estado.in_(ESTADOS_VIGENTES),
             ).distinct().all()
         }
+        con_pendientes = {
+            cid for (cid,) in db.query(Reserva.clase_id).filter(
+                Reserva.clase_id.in_(ids),
+                Reserva.estado.in_(ESTADOS_VIGENTES),
+                Reserva.asistencia_marcada_at.is_(None),
+            ).distinct().all()
+        }
+        marcadas = con_reservas - con_pendientes
 
     disc_ids_set = {c.disciplina_id for c in clases}
     disc_map = {}
