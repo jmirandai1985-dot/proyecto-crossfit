@@ -48,8 +48,8 @@ def clases_hoy(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_coach),
 ):
-    """Clases del día actual (America/Santiago) con hora_inicio >= ahora,
-    solo de las disciplinas asignadas al coach. Admin/administrador: todas."""
+    """Clases del día actual (America/Santiago) para coach solo desde la hora actual y sus disciplinas asignadas;
+    admin/administrador: el dia completo (corrige que antes el admin no veia las clases del dia ya pasadas)."""
     tenant_id = current_user["tenant_id"]
     rol = current_user.get("rol", "")
     hoy = hoy_santiago()
@@ -59,10 +59,13 @@ def clases_hoy(
         Clase.tenant_id == tenant_id,
         Clase.fecha == hoy,
         Clase.cancelada == False,
-        Clase.hora_inicio >= ahora,
     )
 
     if rol == "coach":
+        # El coach ve solo lo que resta del dia (desde ahora). Admin/administrador
+        # ven el dia completo: necesitan ver las clases de la manana para revisar
+        # quien marco QR, aunque la hora ya haya pasado.
+        query = query.filter(Clase.hora_inicio >= ahora)
         disc_ids = [r[0] for r in db.query(CoachDisciplina.disciplina_id).filter(
             CoachDisciplina.coach_id == current_user["usuario_id"],
             CoachDisciplina.tenant_id == tenant_id,
