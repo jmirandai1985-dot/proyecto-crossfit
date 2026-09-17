@@ -146,7 +146,7 @@ def listar_clases(
     query = text(f"""
         SELECT c.id, c.fecha, c.hora_inicio, c.hora_fin, c.disciplina_id, c.coach_id,
                c.wod_id,
-               c.cupo_maximo, c.asistentes_confirmados, c.cancelada,
+               c.cupo_maximo, c.cupo_original, c.asistentes_confirmados, c.cancelada,
                c.horario_base_id, c.tenant_id, c.created_at, c.updated_at,
                d.nombre AS disciplina_nombre,
                u.nombre AS coach_nombre,
@@ -205,6 +205,7 @@ def listar_clases(
             "coach_id": row.coach_id,
             "wod_id": row.wod_id,
             "cupo_maximo": row.cupo_maximo,
+            "cupo_original": row.cupo_original,
             "asistentes_confirmados": row.asistentes_confirmados,
             "cancelada": row.cancelada,
             "disciplina_nombre": row.disciplina_nombre,

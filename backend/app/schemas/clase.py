@@ -56,6 +56,7 @@ class ClaseListItem(BaseModel):
     coach_id: Optional[int]
     wod_id: Optional[int] = None
     cupo_maximo: int
+    cupo_original: Optional[int] = None
     asistentes_confirmados: int
     cancelada: bool
     coach_nombre: Optional[str] = None
