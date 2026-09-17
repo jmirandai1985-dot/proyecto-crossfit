@@ -14,6 +14,10 @@ const TURNOS = [
     { id: 'pm', label: '🌆 Turno Tarde/Noche', desde: 18, hasta: 23, horas: '18:00+' },
 ];
 
+// Limites del cupo por disciplina: los mismos que valida el backend (Query ge=1, le=200).
+const CUPO_MIN = 1;
+const CUPO_MAX = 200;
+
 function parseHora(h) {
     if (!h) return -1;
     const partes = h.split(':');
@@ -52,6 +56,26 @@ export default function SupervisionClases() {
     const [modalReservasHorario, setModalReservasHorario] = useState(null); // { horario, cargando, data } self-service
     const [showCupos, setShowCupos] = useState(false);
     const [cuposMsg, setCuposMsg] = useState(null);
+
+    // Un solo camino para el +/- de cupos por disciplina (antes: dos handlers gemelos).
+    const cupoBloqueado = (d) => !d.activo || (d.horarios_count ?? 0) === 0;
+
+    const ajustarCupo = async (d, delta) => {
+        const nuevo = Math.min(CUPO_MAX, Math.max(CUPO_MIN, d.cupo_actual + delta));
+        if (nuevo === d.cupo_actual) return;
+        setCuposMsg(null);
+        try {
+            const r = await api.patch(`/api/v1/supervision/cupo-disciplina`, null, { params: { disciplina_id: d.id, cupo_maximo: nuevo } });
+            if (r.data?.ok && (r.data?.horarios_actualizados ?? 0) > 0) {
+                setCuposData(prev => prev.map(x => x.id === d.id ? { ...x, cupo_actual: nuevo } : x));
+            } else {
+                setCuposMsg({ tipo: "error", texto: "Esta disciplina no tiene horarios configurados: el cambio no se guardo." });
+            }
+        } catch (e) {
+            console.error(e);
+            setCuposMsg({ tipo: "error", texto: "No se pudo actualizar el cupo. Reintenta." });
+        }
+    };
     const [cuposData, setCuposData] = useState([]);
     const [cuposLoading, setCuposLoading] = useState(false);
     // ── POLLING (TAREA 5) ──
@@ -381,39 +405,17 @@ export default function SupervisionClases() {
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <button
-                                                onClick={async () => {
-                                                    const nuevo = Math.max(1, d.cupo_actual - 1);
-                                                    if (nuevo === d.cupo_actual) return;
-                                                    try {
-                                                        const r = await api.patch(`/api/v1/supervision/cupo-disciplina`, null, { params: { disciplina_id: d.id, cupo_maximo: nuevo } });
-        if (r.data?.ok && (r.data?.horarios_actualizados ?? 0) > 0) {
-            setCuposMsg(null);
-            setCuposData(prev => prev.map(x => x.id === d.id ? { ...x, cupo_actual: nuevo } : x));
-        } else {
-            setCuposMsg({ tipo: "error", texto: "Esta disciplina no tiene horarios configurados: el cambio no se guardo." });
-        }
-                                                    } catch (e) { console.error(e); }
-                                                }}
-                                                disabled={d.cupo_actual <= 1 || !d.activo || (d.horarios_count ?? 0) === 0}
-                                                className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${(d.cupo_actual <= 1 || !d.activo || (d.horarios_count ?? 0) === 0) ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed' : 'bg-red-100 text-red-600 hover:bg-red-200'}`}
+                                                onClick={() => ajustarCupo(d, -1)}
+                                                disabled={d.cupo_actual <= CUPO_MIN || cupoBloqueado(d)}
+                                                title={cupoBloqueado(d) ? (!d.activo ? "Disciplina inactiva" : "Sin horarios configurados") : "Bajar el cupo maximo"}
+                                                className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${(d.cupo_actual <= CUPO_MIN || cupoBloqueado(d)) ? "bg-zinc-700 text-zinc-500 cursor-not-allowed" : "bg-red-100 text-red-600 hover:bg-red-200"}`}
                                             >−</button>
                                             <span className="w-12 text-center text-xl font-bold text-zinc-100">{d.cupo_actual}</span>
                                             <button
-                                                onClick={async () => {
-                                                    const nuevo = Math.min(200, d.cupo_actual + 1);
-                                                    if (nuevo === d.cupo_actual) return;
-                                                    try {
-                                                        const r = await api.patch(`/api/v1/supervision/cupo-disciplina`, null, { params: { disciplina_id: d.id, cupo_maximo: nuevo } });
-        if (r.data?.ok && (r.data?.horarios_actualizados ?? 0) > 0) {
-            setCuposMsg(null);
-            setCuposData(prev => prev.map(x => x.id === d.id ? { ...x, cupo_actual: nuevo } : x));
-        } else {
-            setCuposMsg({ tipo: "error", texto: "Esta disciplina no tiene horarios configurados: el cambio no se guardo." });
-        }
-                                                    } catch (e) { console.error(e); }
-                                                }}
-                                                disabled={d.cupo_actual >= 200 || !d.activo || (d.horarios_count ?? 0) === 0}
-                                                className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${(d.cupo_actual >= 200 || !d.activo || (d.horarios_count ?? 0) === 0) ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed' : 'bg-green-100 text-green-600 hover:bg-green-200'}`}
+                                                onClick={() => ajustarCupo(d, 1)}
+                                                disabled={d.cupo_actual >= CUPO_MAX || cupoBloqueado(d)}
+                                                title={cupoBloqueado(d) ? (!d.activo ? "Disciplina inactiva" : "Sin horarios configurados") : "Subir el cupo maximo"}
+                                                className={`w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold ${(d.cupo_actual >= CUPO_MAX || cupoBloqueado(d)) ? "bg-zinc-700 text-zinc-500 cursor-not-allowed" : "bg-green-100 text-green-600 hover:bg-green-200"}`}
                                             >+</button>
                                         </div>
                                     </div>
