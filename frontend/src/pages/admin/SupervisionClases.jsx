@@ -293,6 +293,27 @@ export default function SupervisionClases() {
         return c ? c.nombre : `Coach #${coachId}`;
     };
 
+    // Clases del dia de una disciplina (dia completo, incluidas las pasadas).
+    const cargarClasesHoy = async (discId) => {
+        setCargandoClasesHoy(true);
+        try {
+            const r = await api.get('/api/v1/clases/', { params: { fecha: fecha, disciplina_id: discId } });
+            setClasesHoy(r.data || []);
+        } catch (e) {
+            console.error('Error clases del dia', e);
+            setClasesHoy([]);
+        }
+        setCargandoClasesHoy(false);
+    };
+
+    // Ampliar cupo de UNA clase puntual (el backend valida permisos y el tope +10).
+    const ampliarCupo = async (clase, extra) => {
+        const r = await api.post(`/api/v1/clases/${clase.id}/ampliar-cupo`, { cupos_extra: extra });
+        setClasesHoy((prev) => prev.map((c) => (c.id === clase.id ? { ...c, cupo_maximo: r.cupo_maximo } : c)));
+        if (discExpandida) cargarClasesHoy(discExpandida);
+        return r.data; // { cupo_maximo, cupo_original, tope, extra_disponible }
+    };
+
     return (
         <Layout>
             <div className="p-6 max-w-7xl mx-auto">
@@ -430,6 +451,28 @@ export default function SupervisionClases() {
                 </div>
 
                 {/* Calendario semanal de la disciplina seleccionada */}
+                {discExpandida && (
+                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 shadow-sm mt-4">
+                        <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-800/50">
+                            <h2 className="text-lg font-bold text-zinc-100">Clases de hoy (dia completo)</h2>
+                            <p className="text-xs text-zinc-400 mt-1">Cada fila amplia el cupo de ESA clase puntual (hasta +10 sobre su cupo original)</p>
+                        </div>
+                        <div className="p-4">
+                            {cargandoClasesHoy ? (
+                                <div className="flex justify-center py-8">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
+                                </div>
+                            ) : clasesHoy.length === 0 ? (
+                                <p className="text-zinc-500 text-sm text-center py-6">Sin clases generadas para esa fecha</p>
+                            ) : (
+                                clasesHoy.map((c) => (
+                                    <SupervisionClaseRow key={c.id} clase={c} onAmpliarCupo={ampliarCupo} />
+                                ))
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 {discExpandida && (
                     <div className="bg-zinc-900 rounded-xl border border-zinc-800 shadow-sm overflow-hidden mt-4">
                         <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-800/50">
