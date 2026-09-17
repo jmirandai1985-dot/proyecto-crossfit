@@ -83,6 +83,19 @@ def clases_hoy(
     else:
         counts = {}
 
+    # "marcada" = el coach/admin ya cerró la clase con Confirmar. Fuente de
+    # verdad: reservas.asistencia_marcada_at (mismo criterio que
+    # GET /clases/{id}/alumnos). Una clase marcada con 0 asistentes reales
+    # también cuenta como marcada.
+    marcadas = set()
+    if ids:
+        marcadas = {
+            cid for (cid,) in db.query(Reserva.clase_id).filter(
+                Reserva.clase_id.in_(ids),
+                Reserva.asistencia_marcada_at.isnot(None),
+            ).distinct().all()
+        }
+
     disc_ids_set = {c.disciplina_id for c in clases}
     disc_map = {}
     if disc_ids_set:
@@ -100,6 +113,7 @@ def clases_hoy(
             "cupo_maximo": c.cupo_maximo,
             "asistentes_confirmados": c.asistentes_confirmados,
             "reservas_count": counts.get(c.id, 0),
+            "marcada": c.id in marcadas,
         }
         for c in clases
     ]
