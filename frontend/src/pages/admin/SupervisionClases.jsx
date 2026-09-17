@@ -21,7 +21,8 @@ function parseHora(h) {
 }
 
 function hoyStr() {
-    return new Date().toISOString().split('T')[0];
+    // Fecha de HOY en horario de Chile (no UTC): con toISOString(), entre las 20:00 y 23:59 CLT el panel creia que ya era manana.
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
 }
 
 export default function SupervisionClases() {
