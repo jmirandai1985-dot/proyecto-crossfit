@@ -29,7 +29,8 @@ if ENV != "test":
 # MUST be set before any app import (redundante pero explÃ­cito)
 os.environ["ENVIRONMENT"] = "test"
 
-settings = importlib.import_module("app.core.config").settings
+_config = importlib.import_module("app.core.config")
+settings = _config.settings
 engine = importlib.import_module("app.db.database").engine
 Base = importlib.import_module("app.db.database").Base
 DB = importlib.import_module("app.db.database").SessionLocal
@@ -53,11 +54,11 @@ Reserva = importlib.import_module("app.models.reserva").Reserva
 DB_URL = settings.DATABASE_URL
 
 print("="*60)
-print(f"BD de TEST: {DB_URL[:70]}...")
-print(f"billowing-violet-acdqud44 (DIRECT): {'billowing-violet-acdqud44' in DB_URL}")
+# SEGURIDAD: imprimir SOLO el host (nunca la URL con credenciales).
+print(f"BD de TEST: host={DB_URL.split('@')[-1].split('/')[0]}...")
 print("="*60)
-if 'billowing-violet-acdqud44' not in DB_URL:
-    sys.exit("FATAL: Not test branch (billowing-violet-acdqud44/test-nuevo)")
+if not _config.is_test_db_url(DB_URL):
+    sys.exit("FATAL: Not test branch (ver TEST_BRANCH_IDS en app/core/config.py)")
 
 # La branch TEST nueva clona a PROD con tablas/FKs/índices que el mapeo de modelos
 # no conoce exactamente. La solución estructural es resetear TODO el schema public

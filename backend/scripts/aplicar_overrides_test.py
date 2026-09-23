@@ -1,4 +1,4 @@
-﻿"""Overrides desarrollo TEST (billowing-violet-acdqud44): activa coach jesus, asigna crossfit, clase de hoy."""
+﻿"""Overrides desarrollo TEST (endpoint TEST de Neon): activa coach jesus, asigna crossfit, clase de hoy."""
 import os
 import sys
 import importlib
@@ -14,13 +14,14 @@ BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BACKEND_DIR)
 os.chdir(BACKEND_DIR)
 
-settings = importlib.import_module("app.core.config").settings
-if "billowing-violet-acdqud44" not in settings.DATABASE_URL:
-    print("ERROR: URL no es billowing-violet-acdqud44")
+_config = importlib.import_module("app.core.config")
+settings = _config.settings
+if not _config.is_test_db_url(settings.DATABASE_URL):
+    print("ERROR: settings.DATABASE_URL no apunta a un endpoint TEST conocido")
     sys.exit(1)
 SessionLocal = importlib.import_module("app.db.database").SessionLocal
 
-print("=== APLICANDO OVERRIDES TEST (billowing-violet-acdqud44) ===")
+print("=== APLICANDO OVERRIDES TEST (endpoint TEST de Neon) ===")
 db = SessionLocal()
 try:
     r = db.execute(text("UPDATE usuarios SET activo=true WHERE id=7"))

@@ -118,13 +118,14 @@ async def root():
 async def debug_db_url():
     """Endpoint de seguridad: usado por conftest.py para verificar que el servidor
     NO estÃ© apuntando a producciÃ³n.
-    - En TEST (billowing-violet-acdqud44): devuelve {"is_safe": true}
+    - En TEST: devuelve {"is_safe": true, "branch": <id del endpoint TEST>}
     - En PRODUCCIÃ“N: devuelve 404 para no exponer informaciÃ³n de infraestructura
     Nunca expone la URL completa ni credenciales."""
-    from app.core.config import settings
+    from app.core.config import TEST_BRANCH_IDS, settings
     url = settings.DATABASE_URL
-    if "billowing-violet-acdqud44" in url:
-        return {"is_safe": True, "is_test": True, "branch": "billowing-violet-acdqud44"}
+    for test_branch in TEST_BRANCH_IDS:
+        if test_branch in url:
+            return {"is_safe": True, "is_test": True, "branch": test_branch}
     # En producciÃ³n o cualquier otro entorno, no revelar informaciÃ³n
     from fastapi import HTTPException
     raise HTTPException(status_code=404, detail="Not found")

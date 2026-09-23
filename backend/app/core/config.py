@@ -111,3 +111,28 @@ settings = Settings()
 # Si ninguna está definida, security.py lanza error al firmar (sin secretos hardcodeados).
 if not settings.JWT_SECRET_KEY:
     settings.JWT_SECRET_KEY = settings.SECRET_KEY
+
+
+# ── Guardas de seguridad TEST vs PROD ────────────────────────────────────────
+# IDs de los endpoints de la rama TEST de Neon. Los endpoints de Neon son
+# efímeros: cuando la rama se cierra/expira, hay que crear una nueva y cambia
+# el id (ep-xxxxx-xxxxx).
+#
+# ⚠️ ÚNICO lugar a actualizar cuando cambie la rama TEST de Neon. Lo consumen:
+#   - app/main.py  → GET /debug/db-url (conftest.py aborta los tests si da 404)
+#   - run_setup_test_db.py, scripts/aplicar_overrides_test.py, ml/train_*.py
+#     (abortan si la BD no es TEST, para no escribir sobre datos reales)
+#
+# Es una WHITELIST de TEST: el endpoint de PROD no se hardcodea acá a propósito,
+# así que cualquier host que no esté en la lista se rechaza (fail-safe).
+TEST_BRANCH_IDS = (
+    "ep-odd-smoke-b6f31576",          # TEST actual (proyecto Neon nuevo, 2026-09-23)
+    "ep-long-salad-ac1uza9z",         # TEST anterior (agotó la cuota de Neon)
+    "ep-billowing-violet-acdqud44",   # TEST anterior (cerrada)
+    "ep-purple-cherry-acck4v5a",      # TEST histórico
+)
+
+
+def is_test_db_url(url: str) -> bool:
+    """True SOLO si `url` apunta a un endpoint TEST conocido (fail-safe: False ante duda)."""
+    return any(branch in (url or "") for branch in TEST_BRANCH_IDS)
