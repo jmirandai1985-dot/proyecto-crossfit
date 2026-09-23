@@ -14,7 +14,13 @@ const AdminDashboard = () => {
     const [loading, setLoading] = useState(true);
     const [processingId, setProcessingId] = useState(null);
     const [msg, setMsg] = useState('');
-    const [voucherModal, setVoucherModal] = useState({ open: false, url: '', solicitud_id: null });
+    const [voucherModal, setVoucherModal] = useState({ open: false, url: '', solicitud_id: null, tipo: 'voucher' });
+    // Voucher AUTENTICADO: la vista previa y la descarga van por el endpoint
+    // protegido GET /solicitudes/{id}/voucher (con Bearer) y se materializan como
+    // blob. Así no se depende de la URL pública /static/uploads/... (que se sirve
+    // sin autenticación por StaticFiles).
+    const [voucherPreview, setVoucherPreview] = useState({ loading: false, blobUrl: '', error: '', mime: '' });
+    const [descargandoVoucher, setDescargandoVoucher] = useState(false);
     const [rechazoModal, setRechazoModal] = useState({ open: false, solicitud_id: null, motivo: '' });
     // Fidelización state
     const [alumnosRiesgo, setAlumnosRiesgo] = useState([]);
@@ -130,12 +136,79 @@ const AdminDashboard = () => {
         setProcessingId(null);
     };
 
+    // Extrae el mensaje de error de una respuesta blob: con responseType 'blob'
+    // axios NO parsea el JSON del error, viene como Blob.
+    const detalleDeErrorBlob = async (err) => {
+        const d = err?.response?.data;
+        if (d instanceof Blob) {
+            try {
+                return JSON.parse(await d.text())?.detail || 'Error al procesar el archivo';
+            } catch {
+                // el cuerpo no era JSON
+            }
+        }
+        return d?.detail || err?.message || 'Error al procesar el archivo';
+    };
+
+    // Vista previa del voucher: se pide el archivo con el token y se muestra el blob.
+    // Si el modal muestra un CERTIFICADO se sigue usando la URL pública (no hay
+    // endpoint autenticado de certificados), para no ampliar el alcance de este fix.
+    useEffect(() => {
+        if (!voucherModal.open || voucherModal.tipo !== 'voucher' || !voucherModal.solicitud_id) {
+            setVoucherPreview({ loading: false, blobUrl: '', error: '', mime: '' });
+            return;
+        }
+        let cancelado = false;
+        let objectUrl = '';
+        (async () => {
+            setVoucherPreview({ loading: true, blobUrl: '', error: '', mime: '' });
+            try {
+                const res = await api.get(
+                    `/api/v1/solicitudes/${voucherModal.solicitud_id}/voucher?inline=1`,
+                    { responseType: 'blob' }
+                );
+                if (cancelado) return;
+                objectUrl = URL.createObjectURL(res.data);
+                setVoucherPreview({ loading: false, blobUrl: objectUrl, error: '', mime: res.data.type || '' });
+            } catch (err) {
+                if (cancelado) return;
+                setVoucherPreview({ loading: false, blobUrl: '', error: await detalleDeErrorBlob(err), mime: '' });
+            }
+        })();
+        return () => {
+            cancelado = true;
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+        };
+    }, [voucherModal.open, voucherModal.tipo, voucherModal.solicitud_id]);
+
     const handleDescargarVoucher = async (solicitud_id) => {
+        if (!solicitud_id) return;
+        setDescargandoVoucher(true);
+        setMsg('');
         try {
-            window.location.href = `/api/v1/solicitudes/${solicitud_id}/voucher`;
-        } catch (err) {
-            setMsg('❌ Error al descargar voucher');
+            const res = await api.get(
+                `/api/v1/solicitudes/${solicitud_id}/voucher`,
+                { responseType: 'blob' }
+            );
+            const cd = res.headers?.['content-disposition'] || '';
+            const coincide = cd.match(/filename="?([^";]+)"?/i);
+            const nombre = coincide ? coincide[1] : `voucher_${solicitud_id}`;
+            const objectUrl = URL.createObjectURL(res.data);
+            const a = document.createElement('a');
+            a.href = objectUrl;
+            a.download = nombre;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            // El revoke inmediato puede abortar la descarga en algunos navegadores.
+            setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+            setMsg('✅ Voucher descargado.');
             setTimeout(() => setMsg(''), 4000);
+        } catch (err) {
+            setMsg('❌ ' + await detalleDeErrorBlob(err));
+            setTimeout(() => setMsg(''), 4000);
+        } finally {
+            setDescargandoVoucher(false);
         }
     };
 
@@ -321,7 +394,7 @@ const AdminDashboard = () => {
                                             </td>
                                             <td className="px-6 py-4">
                                                 {s.voucher_url ? (
-                                                    <button onClick={() => setVoucherModal({ open: true, url: s.voucher_url, solicitud_id: s.id })}
+                                                    <button onClick={() => setVoucherModal({ open: true, url: s.voucher_url, solicitud_id: s.id, tipo: 'voucher' })}
                                                         className="text-blue-400 underline text-xs hover:text-blue-300">
                                                         📎 Ver Voucher
                                                     </button>
@@ -331,7 +404,7 @@ const AdminDashboard = () => {
                                             </td>
                                             <td className="px-6 py-4">
                                                 {s.certificado_estudiante_url ? (
-                                                    <button onClick={() => setVoucherModal({ open: true, url: s.certificado_estudiante_url, solicitud_id: s.id })}
+                                                    <button onClick={() => setVoucherModal({ open: true, url: s.certificado_estudiante_url, solicitud_id: s.id, tipo: 'certificado' })}
                                                         className="text-amber-600 underline text-xs hover:text-amber-800">
                                                         🎓 Ver Certificado
                                                     </button>
@@ -366,29 +439,53 @@ const AdminDashboard = () => {
 
             </div>
 
-            {/* MODAL VOUCHER */}
+            {/* MODAL VOUCHER / CERTIFICADO */}
             {voucherModal.open && (
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
-                    onClick={() => setVoucherModal({ open: false, url: '', solicitud_id: null })}>
+                    onClick={() => setVoucherModal({ open: false, url: '', solicitud_id: null, tipo: 'voucher' })}>
                     <div className="bg-zinc-900 rounded-xl max-w-2xl max-h-[90vh] overflow-auto shadow-2xl"
                         onClick={e => e.stopPropagation()}>
                         <div className="p-4 border-b flex justify-between items-center">
-                            <h3 className="font-bold text-zinc-100">📎 Voucher de Pago</h3>
-                            <button onClick={() => setVoucherModal({ open: false, url: '', solicitud_id: null })}
+                            <h3 className="font-bold text-zinc-100">
+                                {voucherModal.tipo === 'certificado' ? '🎓 Certificado de Estudiante' : '📎 Voucher de Pago'}
+                            </h3>
+                            <button onClick={() => setVoucherModal({ open: false, url: '', solicitud_id: null, tipo: 'voucher' })}
                                 className="text-zinc-400 hover:text-zinc-300 text-xl font-bold">✕</button>
                         </div>
-                        <div className="p-4">
-                            {voucherModal.url.match(/\.(pdf)$/i) ? (
-                                <iframe src={voucherModal.url} className="w-full h-96" title="Voucher PDF" />
+                        <div className="p-4 min-h-[12rem] flex items-center justify-center">
+                            {voucherModal.tipo === 'certificado' ? (
+                                voucherModal.url.match(/\.(pdf)$/i) ? (
+                                    <iframe src={voucherModal.url} className="w-full h-96" title="Certificado PDF" />
+                                ) : (
+                                    <img src={voucherModal.url} alt="Certificado" className="w-full rounded-lg" />
+                                )
+                            ) : voucherPreview.loading ? (
+                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500" />
+                            ) : voucherPreview.error ? (
+                                <p className="text-center text-red-400 text-sm py-6">{voucherPreview.error}</p>
+                            ) : voucherPreview.blobUrl ? (
+                                voucherPreview.mime.includes('pdf') ? (
+                                    <iframe src={voucherPreview.blobUrl} className="w-full h-96" title="Voucher PDF" />
+                                ) : (
+                                    <img src={voucherPreview.blobUrl} alt="Voucher" className="w-full rounded-lg" />
+                                )
                             ) : (
-                                <img src={voucherModal.url} alt="Voucher" className="w-full rounded-lg" />
+                                <p className="text-center text-zinc-500 text-sm py-6">Sin previsualización disponible</p>
                             )}
                         </div>
                         <div className="p-4 border-t flex justify-end gap-2">
-                            <button onClick={() => handleDescargarVoucher(voucherModal.solicitud_id)}
-                                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-bold">
-                                📥 Descargar
-                            </button>
+                            {voucherModal.tipo === 'certificado' ? (
+                                <a href={voucherModal.url} download
+                                    className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-bold">
+                                    📥 Descargar
+                                </a>
+                            ) : (
+                                <button onClick={() => handleDescargarVoucher(voucherModal.solicitud_id)}
+                                    disabled={descargandoVoucher}
+                                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed">
+                                    {descargandoVoucher ? 'Descargando...' : '📥 Descargar'}
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>

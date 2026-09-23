@@ -3,6 +3,7 @@ Router de endpoints para Solicitudes de Planes (flujo admin)
 """
 import os
 import logging
+import mimetypes
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import FileResponse
 from sqlalchemy import update
@@ -139,12 +140,19 @@ def listar_solicitudes_pendientes(
 @router.get("/{solicitud_id}/voucher")
 def descargar_voucher(
     solicitud_id: int,
+    inline: bool = False,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Descarga el voucher de pago de una solicitud (usuario autenticado).
-    Retorna el archivo como attachment (descarga forzada).
+    Devuelve el voucher de pago de una solicitud (usuario autenticado).
+
+    - Por defecto: descarga forzada (Content-Disposition: attachment).
+    - ?inline=1: se sirve para previsualizar (Content-Disposition: inline).
+
+    El panel admin consume SIEMPRE este endpoint (con responseType='blob') para
+    vista previa y descarga, en vez de la URL pública /static/uploads/... (que
+    StaticFiles sirve SIN autenticación).
     """
     solicitud = db.query(SolicitudPlan).filter(
         SolicitudPlan.id == solicitud_id).first()
@@ -192,11 +200,20 @@ def descargar_voucher(
     # Obtener nombre del archivo para el filename
     voucher_filename = os.path.basename(voucher_path)
 
-    # Devolver como attachment para forzar descarga
+    # El media_type real depende de la extensión: los vouchers pueden ser
+    # JPG/PNG/GIF/WEBP o PDF (ver upload.py: ALLOWED_EXTENSIONS). Antes se
+    # forzaba "image/jpeg", así que un voucher PDF se servía con el tipo
+    # equivocado (y el <iframe> del panel no lo renderizaba bien).
+    media_type = mimetypes.guess_type(
+        voucher_filename)[0] or "application/octet-stream"
+    disposicion = "inline" if inline else "attachment"
+
+    # attachment = descarga forzada; inline = previsualización en el panel admin
     return FileResponse(
         path=voucher_path,
-        media_type="image/jpeg",
-        headers={"Content-Disposition": f"attachment; filename={voucher_filename}"}
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f"{disposicion}; filename={voucher_filename}"}
     )
 
 
