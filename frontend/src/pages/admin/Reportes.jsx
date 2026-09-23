@@ -6,6 +6,7 @@ import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { DetalleModal } from '../../components/kpis/DetalleModal';
+import { hoyChileStr } from '../../utils/fecha';
 
 // Tooltip personalizado con Tailwind
 const CustomTooltip = ({ active, payload, label, formatter }) => {
@@ -41,7 +42,7 @@ const Reportes = () => {
     const [detalleGrafico, setDetalleGrafico] = useState(null);
     const [loading, setLoading] = useState(true);
     const [showMovModal, setShowMovModal] = useState(false);
-    const [movForm, setMovForm] = useState({ tipo: 'egreso', categoria: '', monto: '', descripcion: '', fecha: new Date().toISOString().split('T')[0], tenant_id: tenant_id });
+    const [movForm, setMovForm] = useState({ tipo: 'egreso', categoria: '', monto: '', descripcion: '', fecha: hoyChileStr(), tenant_id: tenant_id });
     const [savingMov, setSavingMov] = useState(false);
     const [movimientosList, setMovimientosList] = useState([]);
     const [loadingMovs, setLoadingMovs] = useState(false);
@@ -509,7 +510,7 @@ const Reportes = () => {
                                             tenant_id: tenant_id || 1,
                                         });
                                         setShowMovModal(false);
-                                        setMovForm({ tipo: 'egreso', categoria: '', monto: '', descripcion: '', fecha: new Date().toISOString().split('T')[0], tenant_id: tenant_id || 1 });
+                                        setMovForm({ tipo: 'egreso', categoria: '', monto: '', descripcion: '', fecha: hoyChileStr(), tenant_id: tenant_id || 1 });
                                         // Recargar KPIs
                                         const resp = await api.get(`/api/v1/reportes/?tenant_id=${tenant_id || 1}`);
                                         setReportData(resp.data || null);

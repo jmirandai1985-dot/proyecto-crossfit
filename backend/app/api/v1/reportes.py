@@ -123,7 +123,7 @@ def obtener_reportes_analytics(
               AND u.rol = 'alumno'
               AND u.activo = true
               AND s.estado = 'activo'
-              AND s.fecha_expiracion >= CURRENT_DATE
+              AND s.fecha_expiracion >= (now() AT TIME ZONE 'America/Santiago')::date
         """), {"tid": tenant_id}).scalar() or 0
 
         # --- 2. NUEVOS ALUMNOS ESTE MES ---

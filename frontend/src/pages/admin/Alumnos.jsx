@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { useSearchParams } from 'react-router-dom';
 import AlumnoFichaModal from '../../components/AlumnoFichaModal';
+import { fmtFechaChile, sumarDiasInstante } from '../../utils/fecha';
 
 const Alumnos = () => {
     const { tenant_id } = useAuth();
@@ -93,8 +94,8 @@ const Alumnos = () => {
     // Formato de fecha es-CL usado en toda la tabla (created_at viene del API).
     const fmtFecha = (v) => {
         if (!v) return '—';
-        const d = new Date(v);
-        return isNaN(d.getTime()) ? v : d.toLocaleDateString('es-CL');
+        // Fecha del calendario CHILENO (no la del navegador).
+        return fmtFechaChile(v) || v;
     };
 
     const openModal = (alumno = null, rolFijo = 'alumno') => {
@@ -390,7 +391,7 @@ const Alumnos = () => {
                                         <p className="text-2xl font-bold text-green-600">$49.990</p>
                                         <p className="text-xs text-zinc-400 mt-2">Membresía Mensual</p>
                                     </div>
-                                    <p className="text-xs text-zinc-400">Fecha de Pago: {new Date().toLocaleDateString('es-CL')}</p>
+                                    <p className="text-xs text-zinc-400">Fecha de Pago: {fmtFechaChile(new Date())}</p>
                                 </div>
                                 <div className="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-lg">
                                     <span className="text-2xl">✓</span>
@@ -423,9 +424,10 @@ const Alumnos = () => {
                                             setMensajeAprobacion('');
                                             try {
                                                 const plan = planes.find((p) => p.id === parseInt(planSeleccionado));
+                                                // Duracion exacta desde el instante del alta: el vencimiento cae el mismo
+                                                // dia chileno N dias despues (sin aritmetica de calendario del navegador).
                                                 const fechaInicio = new Date();
-                                                const fechaExpiracion = new Date();
-                                                fechaExpiracion.setDate(fechaInicio.getDate() + (plan?.duracion_dias || 30));
+                                                const fechaExpiracion = sumarDiasInstante(fechaInicio, plan?.duracion_dias || 30);
                                                 await api.post('/api/v1/suscripciones', {
                                                     tenant_id: tenant_id,
                                                     usuario_id: selectedAlumnoVoucher.id,

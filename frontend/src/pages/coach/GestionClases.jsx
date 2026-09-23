@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import Layout from '../../components/Layout';
 import api from '../../services/api';
+import { hoyChileStr as hoyStr, toChileFechaStr as toLocalFechaStr } from '../../utils/fecha';
 
 const API_BASE = '/api/v1';
 const TURNOS = [
@@ -11,16 +12,10 @@ const TURNOS = [
     { id: 'pm', label: '🌆 Turno Tarde/Noche', desde: 18, hasta: 23, horas: '18:00+' },
 ];
 
-function hoyStr() {
-    return new Date().toISOString().split('T')[0];
-}
-
-function toLocalFechaStr(d) {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-}
+// hoyStr() y toLocalFechaStr() se importan de src/utils/fecha.js (calendario
+// chileno), NO se redefinen acá. Antes hoyStr() usaba toISOString().split('T')[0],
+// que entre las 20:00 y 23:59 CLT devolvía la fecha de MAÑANA: el panel abría con
+// el día equivocado (mismo bug ya documentado y corregido en Supervisión).
 
 const NOMBRES_DIAS_LARGO = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
