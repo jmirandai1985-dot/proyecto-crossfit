@@ -58,7 +58,7 @@ COPY maintenance/ maintenance/
 
 # Directorios de datos en runtime (los volúmenes se declaran en compose,
 # no se bakean en la imagen).
-RUN mkdir -p /app/app/static/uploads /app/logs
+RUN mkdir -p /app/app/static/uploads /app/app/private_uploads /app/logs
 
 # Usuario no-root (buena práctica).
 RUN useradd --create-home --uid 1000 boxapp \

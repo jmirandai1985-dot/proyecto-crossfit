@@ -105,12 +105,16 @@ const SolicitarPlan = () => {
             // 1. Subir voucher
             const formDataVoucher = new FormData();
             formDataVoucher.append('file', archivoVoucher);
-            const uploadVoucherRes = await api.post('/api/v1/upload/voucher', formDataVoucher, {
+            // privado=1: el comprobante va a la carpeta privada; solo lo sirve el
+            // endpoint autenticado GET /solicitudes/{id}/voucher.
+            const uploadVoucherRes = await api.post('/api/v1/upload/voucher?privado=1', formDataVoucher, {
                 headers: { 'Content-Type': 'multipart/form-data' },
             });
             const voucherUrl = uploadVoucherRes.data?.url || uploadVoucherRes.data?.voucher_url || '';
 
-            // 2. Subir certificado (si es necesario)
+            // 2. Subir certificado (si es necesario). OJO: el certificado sigue siendo
+            // publico (no hay endpoint autenticado de certificados todavia): no lleva
+            // privado=1 a proposito.
             let certificadoUrl = '';
             if (planSeleccionado?.requiere_certificado_estudiante && archivoCertificado) {
                 const formDataCert = new FormData();

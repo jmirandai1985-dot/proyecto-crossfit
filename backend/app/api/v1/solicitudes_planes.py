@@ -181,15 +181,27 @@ def descargar_voucher(
         raise HTTPException(status_code=404, detail="Sin voucher disponible")
 
     # ── SEGURIDAD: prevenir path traversal ──
-    # La URL guardada es como "/static/uploads/voucher_xxx.jpg".
-    # Se resuelve contra el directorio estático y se valida que el archivo
-    # resultante quede DENTRO de static/ (evita '../../../etc/passwd').
-    static_dir = os.path.realpath(os.path.join(
-        os.path.dirname(__file__), "..", "..", "static"))
-    rel = solicitud.voucher_url.replace("/static/", "").lstrip("/")
-    voucher_path = os.path.realpath(os.path.join(static_dir, rel))
+    # Dos ubicaciones posibles:
+    #   /static/uploads/...   -> vouchers HISTORICOS (carpeta publica)
+    #   /privado/vouchers/... -> vouchers NUEVOS (carpeta privada, fuera de static/,
+    #                            NO servida por StaticFiles: solo este endpoint)
+    # El archivo resuelto debe quedar DENTRO de su carpeta base
+    # (evita '../../../etc/passwd').
+    base_app = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    if solicitud.voucher_url.startswith("/privado/"):
+        base_dir = os.path.join(base_app, "private_uploads")
+        rel = solicitud.voucher_url.replace("/privado/vouchers/", "")
+    elif solicitud.voucher_url.startswith("/static/"):
+        base_dir = os.path.join(base_app, "static")
+        rel = solicitud.voucher_url.replace("/static/", "")
+    else:
+        raise HTTPException(
+            status_code=400, detail="Origen de voucher no soportado")
 
-    if not voucher_path.startswith(static_dir + os.sep):
+    base_dir = os.path.realpath(base_dir)
+    voucher_path = os.path.realpath(os.path.join(base_dir, rel.lstrip("/")))
+
+    if not voucher_path.startswith(base_dir + os.sep):
         raise HTTPException(
             status_code=403, detail="Acceso denegado")
 

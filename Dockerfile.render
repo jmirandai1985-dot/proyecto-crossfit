@@ -73,7 +73,7 @@ RUN chmod +x /entrypoint.render.sh \
     && sed -i 's/\r$//' /entrypoint.render.sh
 
 # Directorios de datos en runtime (volúmenes en compose; no se bakean).
-RUN mkdir -p /app/app/static/uploads /app/logs
+RUN mkdir -p /app/app/static/uploads /app/app/private_uploads /app/logs
 
 # Usuario no-root para el backend.
 RUN useradd --create-home --uid 1000 boxapp \

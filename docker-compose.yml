@@ -55,6 +55,9 @@ services:
       - logs:/app/logs
       - backups:/app/backups:ro
       - uploads:/app/app/static/uploads
+      # Vouchers nuevos: fuera de static/ (solo se sirven por el endpoint autenticado).
+      # Volumen propio para que sobrevivan a la recreacion del contenedor.
+      - private_uploads:/app/app/private_uploads
     expose:
       - "8000"
     # Puerto 8001 publicado en el HOST para acceder al API directo (Swagger /docs).
@@ -149,4 +152,5 @@ volumes:
   logs:
   backups:
   uploads:
+  private_uploads:
   n8n_data:

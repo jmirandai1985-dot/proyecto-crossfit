@@ -3,7 +3,7 @@ Router para subida de archivos (vouchers, imágenes)
 """
 import os
 import uuid
-from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends, Request
+from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends, Request, Query
 from fastapi.responses import JSONResponse
 from app.core.dependencies import get_current_user
 from app.core.file_validation import validar_archivo
@@ -16,6 +16,16 @@ UPLOAD_DIR = os.path.join(os.path.dirname(
     __file__), "..", "..", "static", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# VOUCHERS PRIVADOS: carpeta FUERA de static/ a proposito. Lo que vive bajo static/
+# lo sirve StaticFiles SIN autenticacion (y nginx proxea /static/). Los comprobantes
+# de pago nuevos se guardan aca y solo se leen por el endpoint autenticado
+# GET /solicitudes/{id}/voucher (ver solicitudes_planes.py).
+# Los vouchers viejos en /static/uploads quedan como estan (mitigado por el UUID).
+PRIVATE_DIR = os.path.join(os.path.dirname(
+    __file__), "..", "..", "private_uploads")
+PRIVATE_URL_PREFIX = "/privado/vouchers/"
+os.makedirs(PRIVATE_DIR, exist_ok=True)
+
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.pdf', '.webp'}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 
@@ -25,10 +35,21 @@ MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 async def upload_voucher(
     request: Request,
     file: UploadFile = File(...),
+    privado: bool = Query(
+        False,
+        description="true = comprobante de pago -> carpeta privada (solo se sirve "
+                    "por el endpoint autenticado de la solicitud)"),
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Sube un archivo de voucher y devuelve la URL pública.
+    Sube un archivo y devuelve la URL.
+
+    - privado=true (comprobantes de pago): se guarda en app/private_uploads/ (fuera
+      de static/) y solo se puede leer por el endpoint autenticado
+      GET /solicitudes/{id}/voucher. Devuelve /privado/vouchers/<archivo>.
+    - privado=false (default, comportamiento historico: imagenes de productos,
+      certificados): se guarda en app/static/uploads/ y se sirve publico.
+
     Requiere usuario autenticado.
     """
     # Validar extensión
@@ -56,13 +77,15 @@ async def upload_voucher(
 
     # Generar nombre único
     unique_name = f"voucher_{uuid.uuid4().hex}{ext}"
-    file_path = os.path.join(UPLOAD_DIR, unique_name)
+    destino = PRIVATE_DIR if privado else UPLOAD_DIR
+    file_path = os.path.join(destino, unique_name)
 
     # Guardar archivo
     with open(file_path, "wb") as f:
         f.write(content)
 
-    # Devolver URL pública
-    public_url = f"/static/uploads/{unique_name}"
-    return {"url": public_url, "filename": unique_name}
+    # URL privada (solo por endpoint autenticado) o publica (static)
+    url = (f"{PRIVATE_URL_PREFIX}{unique_name}" if privado
+           else f"/static/uploads/{unique_name}")
+    return {"url": url, "filename": unique_name, "privado": privado}
 

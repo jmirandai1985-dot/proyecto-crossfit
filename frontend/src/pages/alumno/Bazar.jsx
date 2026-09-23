@@ -50,7 +50,8 @@ const Bazar = () => {
         try {
             const formData = new FormData();
             formData.append('file', archivoVoucher);
-            const uploadRes = await api.post('/api/v1/upload/voucher', formData, {
+            // privado=1: el comprobante del pedido va a la carpeta privada
+            const uploadRes = await api.post('/api/v1/upload/voucher?privado=1', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },
             });
             const voucherUrl = uploadRes.data?.url || '';
