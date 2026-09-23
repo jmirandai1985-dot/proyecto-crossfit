@@ -247,3 +247,16 @@ Brocoli / Diddy Kong / Donkey Kong, con el badge azul "🎓 Estudiantil".
   asi que la UI no puede volver a desincronizarlos.
 - Los endpoints de planes requieren token, por eso la verificacion se hizo contra la BD de PROD + su API
   local; el `JWT_SECRET_KEY` de Render NO es el del `.env` local (por eso un token generado aca da 401 alla).
+
+### Re-seed de TEST despues del reset del seed de la suite (2026-09-23)
+El seed de la suite (`backend/run_setup_test_db.py`, paso 1 de `run_tests.bat`) hace
+`DROP SCHEMA public CASCADE` + `create_all` + un dataset minimo: **cada corrida de la suite borra TODO
+el contenido de TEST** (quedo con 2 planes, 5 usuarios, 4 horarios, 0 asistencias y sin `alembic_version`).
+Los **17 planes reales** se re-semebraron desde `backups/neon_backup_full_20260923_191921.sql`:
+`UPDATE` in place de los ids 1 y 2 (ocupados por los planes del seed) + `INSERT` de los 15 restantes
+(ids 3-16 y 23, que estaban libres) + `setval('planes_id_seq', 23)`, y se verifico campo por campo
+contra el dump (13 columnas x 17 filas identicas). Las tarjetas de `/admin/planes` quedan iguales a PROD:
+Masculino 5, Femenino 5, Estudiante Masculino 3, Estudiante Femenino 3 (el plan `Prueba` tiene `genero`
+NULL y por eso no cae en ninguna tarjeta, igual que en el codigo de `Planes.jsx`).
+
+**Ojo:** si se vuelve a correr la suite, TEST se resetea otra vez y hay que repetir este re-seed.
