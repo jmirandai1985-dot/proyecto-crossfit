@@ -6,8 +6,11 @@ Conexión: settings.DIRECT_URL (host SIN "-pooler"; Neon recomienda la conexión
 directa para operaciones masivas). Fallback: settings.DATABASE_URL.
 
 ⚠️ SEGURIDAD (por qué es seguro correrlo)
-  - Aborta si la BD activa NO es un endpoint TEST conocido (`is_test_db_url`):
-    es IMPOSIBLE que toque PROD por accidente.
+  - MODO TEST (por defecto): aborta si la BD activa NO es un endpoint TEST conocido
+    (`is_test_db_url`): es IMPOSIBLE que toque PROD por accidente.
+  - MODO PROD (--prod --confirmo-host=<host>): para migrar PROD a un proyecto Neon nuevo.
+    Exige ENVIRONMENT=production, que el destino NO sea un endpoint TEST y que el host
+    se confirme a mano en la línea de comandos.
   - Aborta si el esquema `public` de destino NO está vacío: el dump trae
     `DROP TABLE IF EXISTS` (pg_dump --clean), y no queremos pisar datos vivos.
   - Credenciales por variables de entorno de psql (PGHOST/PGPASSWORD/...),
@@ -50,19 +53,42 @@ def psql_cmd():
 
 
 def main():
-    dump = sys.argv[1] if len(sys.argv) > 1 else DUMP_DEFAULT
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    flags = [a for a in sys.argv[1:] if a.startswith("--")]
+    dump = args[0] if args else DUMP_DEFAULT
+    destino_prod = "--prod" in flags
+    confirmo = next((f.split("=", 1)[1] for f in flags
+                     if f.startswith("--confirmo-host=")), "")
+
     url = settings.DIRECT_URL or settings.DATABASE_URL
     host = url.split("@")[-1].split("/")[0]
 
     print("=" * 70)
     print(f"BD destino (host): {host}")
     print(f"Dump a restaurar : {dump}")
+    print(f"Modo             : {'PROD (explícito)' if destino_prod else 'TEST (por defecto)'}")
 
-    if not is_test_db_url(settings.DATABASE_URL):
-        sys.exit("FATAL: la BD activa NO es un endpoint TEST conocido. Abortando (PROD intocable).")
     if not os.path.exists(dump):
         sys.exit(f"FATAL: no existe el dump {dump}")
-    print("Guard OK: endpoint TEST conocido + dump presente.")
+
+    if destino_prod:
+        # Modo PROD: exige intención explícita. Tres condiciones JUNTAS:
+        #   1) ENVIRONMENT=production (o sea: se cargó backend/.env, no .env.test)
+        #   2) el destino NO es un endpoint TEST conocido
+        #   3) --confirmo-host=<host> coincide EXACTO con el host de DIRECT_URL
+        if os.getenv("ENVIRONMENT") != "production":
+            sys.exit("FATAL modo PROD: definí ENVIRONMENT=production (backend/.env).")
+        if is_test_db_url(settings.DATABASE_URL):
+            sys.exit("FATAL modo PROD: el destino es un endpoint TEST. Usá el modo por defecto.")
+        if confirmo != host:
+            sys.exit(f"FATAL modo PROD: agregá --confirmo-host={host} para confirmar el destino.")
+        print("Guard PROD OK: ENVIRONMENT=production + host confirmado a mano.")
+    else:
+        # Modo por defecto (TEST): sólo endpoints TEST conocidos.
+        if not is_test_db_url(settings.DATABASE_URL):
+            sys.exit("FATAL: la BD activa NO es un endpoint TEST conocido. "
+                     "Para restaurar PROD usá --prod --confirmo-host=<host>.")
+        print("Guard TEST OK: endpoint TEST conocido.")
     print("=" * 70)
 
     # ── Pre-check: el destino debe estar VACÍO (el dump hace DROP TABLE) ──────
