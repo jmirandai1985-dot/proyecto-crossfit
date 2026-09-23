@@ -10,6 +10,9 @@ const Alumnos = () => {
     const { tenant_id } = useAuth();
     const [alumnos, setAlumnos] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
+    // El endpoint /usuarios devuelve como maximo `limit` (100 por defecto) y NO informa
+    // el total: si no, la pantalla dice "Total de alumnos: 100" aunque haya mas.
+    const [totalAlumnos, setTotalAlumnos] = useState(null);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [showVoucherModal, setShowVoucherModal] = useState(false);
@@ -45,7 +48,21 @@ const Alumnos = () => {
     const fetchAlumnos = async () => {
         try {
             const response = await api.get(`/api/v1/usuarios?rol=alumno`);
-            setAlumnos(response.data || []);
+            const lista = response.data || [];
+            setAlumnos(lista);
+            // Si la lista vino llena (== limit) se pide el total con un limite mayor
+            // SOLO para el aviso: no cambia lo que se lista ni implementa paginacion.
+            if (lista.length === 100) {
+                try {
+                    const todos = await api.get(`/api/v1/usuarios?rol=alumno&limit=1000`);
+                    setTotalAlumnos((todos.data || []).length);
+                } catch (e) {
+                    console.error('No se pudo obtener el total de alumnos', e);
+                    setTotalAlumnos(null);
+                }
+            } else {
+                setTotalAlumnos(lista.length);
+            }
         } catch (error) {
             console.error('Error fetching alumnos:', error);
             setAlumnos([]);
@@ -229,6 +246,12 @@ const Alumnos = () => {
                             onChange={(e) => setSearchTerm(e.target.value)}
                             className="w-full px-4 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                         />
+                        {totalAlumnos !== null && totalAlumnos > alumnos.length && (
+                            <p className="text-xs text-amber-400 mt-2">
+                                ⚠️ Mostrando {alumnos.length} de {totalAlumnos}{totalAlumnos >= 1000 ? '+' : ''} alumnos:
+                                el endpoint corta en 100 y falta la paginación de esta lista.
+                            </p>
+                        )}
                     </div>
 
                     <div className="overflow-x-auto">
@@ -315,7 +338,10 @@ const Alumnos = () => {
 
                     <div className="px-6 py-4 bg-zinc-800/50 border-t border-zinc-800">
                         <p className="text-sm text-zinc-400">
-                            Total de alumnos: <span className="font-bold text-zinc-100">{filteredAlumnos.length}</span>
+                            {searchTerm ? 'Resultados: ' : 'Alumnos cargados: '}<span className="font-bold text-zinc-100">{filteredAlumnos.length}</span>
+                            {!searchTerm && totalAlumnos !== null && totalAlumnos > alumnos.length && (
+                                <span className="text-amber-400"> (de {totalAlumnos}{totalAlumnos >= 1000 ? '+' : ''} en la base)</span>
+                            )}
                         </p>
                     </div>
                 </div>
