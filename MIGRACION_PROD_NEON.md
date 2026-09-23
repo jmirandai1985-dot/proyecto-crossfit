@@ -187,3 +187,63 @@ Cambios de codigo que la acompañan (mismo commit):
 - `PUT /usuarios/{id}`: acepta `estado` y deriva `activo` (o al reves si llega `activo`), asi la API no puede
   romper el CHECK. Soft delete (`DELETE /usuarios/{id}`) setea **ambos**: `estado='baja'` + `activo=false`.
 - `POST /usuarios` y los modales de Alumnos/Coaches: mandan `estado` y los badges de las listas usan `estado`.
+
+## PASO 5 - Correccion de DATOS: los 6 planes de estudiante (2026-09-23)
+
+**Estado: APLICADO a PROD** (solo datos; no hay cambio de codigo).
+
+### Causa
+El backup de PROD usado en el restore es `neon_backup_prod_20260917_060659.sql` (**17/09 06:07**) y el fix
+`5915b94` ("es_estudiante como fuente unica de requiere_certificado_estudiante") es de las **06:37** del mismo
+dia: el dump es 30 minutos ANTERIOR al fix, asi que el restore devolvio los valores viejos.
+
+En la nueva PROD los 6 planes quedaron con **ambos flags en `false`** -> la pantalla `/admin/planes`
+(tarjetas "Estudiante Masculino/Femenino" y badges "Certif. estudiante") los mostraba como planes normales.
+Verificado tambien en el propio dump del 17/09: `es_estudiante=f, requiere_certificado_estudiante=f` para
+`id` 5, 6, 7, 13, 14 y 15.
+
+### Que se hizo
+1. **Backup previo** de PROD: `backend/backups/neon_backup_full_20260923_195655.sql` (1.451.958 bytes).
+2. **UPDATE dirigido** (aditivo, solo esas 6 filas por `id`, con guarda de host = `ep-nameless-sound-b6km6wyi`
+   y de `rowcount == 6`):
+
+```sql
+UPDATE planes SET es_estudiante = true, requiere_certificado_estudiante = true
+WHERE id = ANY(ARRAY[5, 6, 7, 13, 14, 15]);   -- Girly, Aesthetic, Influencer, Brocoli, Diddy Kong, Donkey Kong
+```
+
+3. Verificado despues: 6/16 planes con `es_estudiante = true`, 0 inconsistencias
+   (`es_estudiante <> requiere_certificado_estudiante`).
+
+### Verificacion contra TEST
+La referencia de TEST es el backup `neon_backup_full_20260923_191921.sql` (19:19, **previo** al reset que hace
+el seed de la suite con `DROP SCHEMA public CASCADE` + `create_all`, que dejo TEST con solo 2 planes).
+Comparados los 17 planes de TEST contra los 16 de PROD: **los 6 planes de estudiante coinciden (`true/true`)**
+y no hay ninguna otra diferencia de valores; el unico plan que existe solo en TEST se llama `prueba`.
+Nota: la verificacion de la 034 tambien se hizo antes de ese reset; despues de correr la suite, TEST queda con
+el esquema creado por los modelos (sin `alembic_version` y sin la constraint), que es su estado normal.
+
+### Verificacion de la categorizacion (por API, con el mismo codigo de `Planes.jsx`)
+`GET /api/v1/planes?activo=true` contra la base de PROD devuelve:
+
+| Tarjeta | Planes |
+|---|---|
+| 💪 Masculino (5) | Baby Chimp, Simio, Gorila, Alpha, King Kong |
+| 🌸 Femenino (5) | Princesa, Vikinga, Super Woman, Diosa Griega, Bichota |
+| 🎓 Estudiante Masculino (3) | Brocoli, Diddy Kong, Donkey Kong |
+| 🎓 Estudiante Femenino (3) | Girly, Aesthetic, Influencer |
+
+Los 6 quedan con el badge "Certif. estudiante", no se duplican en las tarjetas normales y coinciden con TEST.
+
+### Para confirmar en el navegador (30 segundos)
+Entrar a `https://box-crossfit.onrender.com/admin/planes` con un admin del box y ver las 4 tarjetas:
+"Estudiante Femenino" debe listar Girly / Aesthetic / Influencer y "Estudiante Masculino" a
+Brocoli / Diddy Kong / Donkey Kong, con el badge azul "🎓 Estudiantil".
+
+### Ojo para el futuro
+- El fix es de **datos**: si algun dia se restaura OTRA VEZ un dump anterior al 17/09 06:37, hay que
+  reaplicar el UPDATE (queda documentado aca).
+- El formulario de Planes ya deriva `requiere_certificado_estudiante` de `es_estudiante` (commit `5915b94`),
+  asi que la UI no puede volver a desincronizarlos.
+- Los endpoints de planes requieren token, por eso la verificacion se hizo contra la BD de PROD + su API
+  local; el `JWT_SECRET_KEY` de Render NO es el del `.env` local (por eso un token generado aca da 401 alla).
