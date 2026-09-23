@@ -29,6 +29,10 @@ class UsuarioCreate(UsuarioBase):
                            description="ID del tenant (box) al que pertenece")
     password: str = Field(..., min_length=1, max_length=100,
                           description="Contraseña del usuario")
+    # `estado` es la fuente de verdad; el endpoint deriva `activo` (CHECK de la 034).
+    estado: Optional[str] = Field(
+        None, pattern="^(activo|pendiente_activacion|rechazado|baja)$",
+        description="activo | pendiente_activacion | rechazado | baja")
 
 
 # Schema para actualizar un usuario (todos los campos opcionales)
@@ -40,6 +44,12 @@ class UsuarioUpdate(BaseModel):
     password: Optional[str] = Field(None, min_length=1, max_length=100)
     rol: Optional[RolUsuario] = None
     activo: Optional[bool] = None
+    # Ciclo de vida del registro: `estado` es la FUENTE DE VERDAD y `activo` su
+    # derivado. Si llega `estado`, el endpoint calcula `activo` (y viceversa), así
+    # que el CHECK de la migración 034 nunca puede romperse desde la API.
+    estado: Optional[str] = Field(
+        None, pattern="^(activo|pendiente_activacion|rechazado|baja)$",
+        description="activo | pendiente_activacion | rechazado | baja")
     peso_kg: Optional[float] = Field(
         None, gt=0, description="Peso corporal en kg")
     estatura_cm: Optional[int] = Field(
@@ -84,6 +94,9 @@ class UsuarioListItem(BaseModel):
     telefono: Optional[str] = None
     rol: RolUsuario
     activo: bool
+    # Estado real del registro (para que la lista muestre Pendiente/Rechazado/Baja
+    # y no un badge inventado a partir de `activo`).
+    estado: Optional[str] = None
     fechaRegistro: Optional[datetime] = Field(None, alias="created_at")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True, serialize_by_alias=True)

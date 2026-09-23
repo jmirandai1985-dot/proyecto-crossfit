@@ -141,6 +141,8 @@ def crear_usuario(
         )
 
     # Crear el nuevo usuario
+    # ── `estado` es la fuente de verdad; `activo` se deriva (CHECK de la 034) ──
+    estado_nuevo = (usuario_data.estado or "activo")
     db_usuario = Usuario(
         tenant_id=usuario_data.tenant_id,
         rut=usuario_data.rut,
@@ -149,7 +151,7 @@ def crear_usuario(
         correo=usuario_data.correo,
         password_hash=hash_password(usuario_data.password),
         rol=usuario_data.rol,
-        activo=True,
+        activo=(estado_nuevo == "activo"), estado=estado_nuevo,
         cambiar_password_al_login=True,
     )
 
@@ -253,6 +255,9 @@ def listar_usuarios(
     rol: str = None,
     buscar: Optional[str] = Query(
         None, description="Filtra por nombre o correo (ILIKE, server-side)"),
+    estado: Optional[str] = Query(
+        None, description="Filtra por estado: activo | pendiente_activacion | "
+                          "rechazado | baja"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
@@ -270,8 +275,12 @@ def listar_usuarios(
     tenant_id = current_user["tenant_id"]
     query = db.query(Usuario).filter(Usuario.tenant_id == tenant_id)
 
-    if activo is not None:
-        query = query.filter(Usuario.activo == activo)
+    if estado:
+        query = query.filter(Usuario.estado == estado)
+    elif activo is not None:
+        # `activo` (contrato viejo) se traduce a `estado`, que es la fuente de verdad.
+        query = query.filter(
+            Usuario.estado == "activo" if activo else Usuario.estado != "activo")
 
     if rol is not None:
         query = query.filter(Usuario.rol == rol)
@@ -313,6 +322,14 @@ def actualizar_usuario(
     rol_anterior = usuario.rol.value if hasattr(usuario.rol, "value") else str(usuario.rol)
 
     update_data = usuario_data.model_dump(exclude_unset=True)
+
+    # ── Sincronizar activo <-> estado (FUENTE DE VERDAD: estado) ──
+    # La BD tiene un CHECK (migración 034) que exige activo == (estado == 'activo'):
+    # si el cliente manda uno solo de los dos, se deriva el otro.
+    if "estado" in update_data:
+        update_data["activo"] = (update_data["estado"] == "activo")
+    elif "activo" in update_data:
+        update_data["estado"] = "activo" if update_data["activo"] else "baja"
 
     # Si se proporciona nueva contraseña, hashearla
     if "password" in update_data:
@@ -379,6 +396,9 @@ def eliminar_usuario(
             detail=f"Usuario con ID {usuario_id} no encontrado"
         )
 
+    # Soft delete: se sincronizan AMBOS campos. `estado` es la fuente de verdad y el
+    # CHECK de la migración 034 exige activo == (estado == 'activo').
+    usuario.estado = "baja"
     usuario.activo = False
     db.commit()
 

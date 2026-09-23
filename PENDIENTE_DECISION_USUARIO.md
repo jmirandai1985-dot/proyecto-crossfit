@@ -35,6 +35,11 @@ Confirmado: backend hace soft delete (activo=false).
 El frontend NO llama al backend al "eliminar" - solo modifica estado local.
 Se corrige en Tarea 1.
 
+> **Actualizado 2026-09-23 (migración 034):** el soft delete ahora setea **los dos campos**:
+> `estado='baja'` (fuente de verdad) + `activo=false` (derivado), y la BD lo garantiza con el CHECK
+> `ck_usuarios_activo_estado` (`activo = (estado = 'activo')`). El frontend sí llama al backend
+> (`DELETE /usuarios/{id}` y el selector "Inactivo" de los modales de Alumnos/Coaches manda `estado`).
+
 ## Duda 3: Filtro por activo en GET usuarios
 El endpoint GET /api/v1/usuarios no filtra por defecto activo=true.
 Se decide que el frontend pase activo=true explicitamente.

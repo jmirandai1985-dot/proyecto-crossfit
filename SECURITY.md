@@ -296,8 +296,11 @@ Convención: **P0** = corregir de inmediato · **P1** = antes del próximo deplo
 ### PR-07 · P1 · Invalidación de sesión por cambio de password — ⛔ REQUIERE CONFIRMACIÓN (schema: columna `token_version` en `usuarios`)
 - Alembic `008_add_token_version`. `create_access_token` incluye `ver`; `get_current_user` compara con BD; `cambiar-password` incrementa `ver`.
 
-### PR-08 · P1 · Hardening de uploads — ✅ SEGURO (ya aplicado el punto 1)
-- Aplicado: magic bytes. Pendiente (no aplicado por impacto): mover de `static/uploads` a carpeta fuera del webroot con `FileResponse` y `Content-Disposition: attachment` (breaking de URLs). Opción corta: agregar a `SecurityHeadersMiddleware` `X-Content-Type-Options: nosniff` (ya presente).
+### PR-08 · P1 · Hardening de uploads — ✅ APLICADO
+- Magic bytes: aplicado.
+- **Carpeta privada para comprobantes: aplicado (2026-09-23).** `POST /upload/voucher?privado=1` guarda en `app/private_uploads/` (fuera de `static/`, no servida por StaticFiles ni por nginx) y devuelve `/privado/vouchers/<archivo>`; sólo se puede leer por el endpoint autenticado `GET /solicitudes/{id}/voucher` (con `Content-Disposition: attachment`). Alumno: `SolicitarPlan.jsx` y `Bazar.jsx` suben el voucher con `privado=1`. La carpeta se persiste con el volumen `private_uploads` de `docker-compose.yml` y se crea con owner `boxapp` en `backend/Dockerfile` y `Dockerfile.render` (un volumen nuevo hereda ese owner; un `chown` dentro del contenedor NO está permitido).
+- Pendiente: los vouchers HISTÓRICOS ya subidos a `/static/uploads` siguen siendo públicos (mitigado por el UUID del nombre); no se migraron para no romper URLs guardadas. El certificado de estudiante también sigue público (no hay endpoint autenticado de certificados todavía).
+- `X-Content-Type-Options: nosniff` en `SecurityHeadersMiddleware` (ya presente).
 
 ### PR-09 · P2 · RLS en PostgreSQL — ⛔ REQUIERE CONFIRMACIÓN (schema/operación)
 - `CREATE POLICY` por tabla con `USING (tenant_id = current_setting('app.tenant_id')::int)`, `SET app.tenant_id` en cada conexión (evento de sesión SQLAlchemy). Capa adicional a la lógica de aplicación.

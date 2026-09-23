@@ -56,11 +56,11 @@ def login(
     # "bloquee" el login de un admin que comparte correo).
     # NOTA: el valor es 'administrador' (enum rol_usuario no acepta 'admin').
     query = text("""
-        SELECT id, tenant_id, nombre, correo, password_hash, rol, activo,
+        SELECT id, tenant_id, nombre, correo, password_hash, rol, activo, estado,
                cambiar_password_al_login
         FROM usuarios
         WHERE correo = :correo
-        ORDER BY activo DESC,
+        ORDER BY (estado = 'activo') DESC,
                  CASE WHEN rol = 'administrador' THEN 0 ELSE 1 END
         LIMIT 1
     """)
@@ -77,11 +77,18 @@ def login(
             detail="Email o contraseña incorrectos"
         )
 
-    # Verificar que el usuario está activo
-    if not usuario.activo:
+    # Verificar que el usuario está habilitado. La fuente de verdad es `estado`
+    # (activo es derivado; el CHECK de la migración 034 los mantiene sincronizados),
+    # así el mensaje puede ser específico según el caso.
+    if usuario.estado != "activo":
+        detalle = {
+            "pendiente_activacion": "Tu cuenta está pendiente de activación por el box.",
+            "rechazado": "Tu solicitud fue rechazada. Contactá al box.",
+            "baja": "Tu cuenta está dada de baja. Contactá al box.",
+        }.get(usuario.estado, "Usuario inactivo")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Usuario inactivo"
+            detail=detalle
         )
 
     # Verificar contraseña

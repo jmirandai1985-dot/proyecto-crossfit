@@ -113,6 +113,19 @@ const Alumnos = () => {
     const desde = totalAlumnos === 0 ? 0 : (pagina - 1) * POR_PAGINA + 1;
     const hasta = (pagina - 1) * POR_PAGINA + alumnos.length;
 
+    // Badge del estado REAL del registro. `estado` es la fuente de verdad (el flag
+    // `activo` es derivado y el backend garantiza que no se desincronicen).
+    const badgeEstado = (u) => {
+        const est = u.estado || (u.activo ? 'activo' : 'baja');
+        return {
+            texto: est === 'pendiente_activacion' ? 'pendiente' : est,
+            clase: est === 'activo' ? 'bg-green-100 text-green-800'
+                : est === 'pendiente_activacion' ? 'bg-amber-100 text-amber-800'
+                    : est === 'rechazado' ? 'bg-red-100 text-red-800'
+                        : 'bg-zinc-700 text-zinc-300',
+        };
+    };
+
     const getSuscripcionAlumno = (alumnoId) => {
         return suscripciones.find(s => s.usuario_id === alumnoId) || null;
     };
@@ -131,7 +144,7 @@ const Alumnos = () => {
                 nombre: alumno.nombre,
                 correo: alumno.correo,
                 telefono: alumno.telefono,
-                estado: alumno.activo ? 'activo' : 'inactivo',
+                estado: (alumno.estado === 'activo' || (!alumno.estado && alumno.activo)) ? 'activo' : 'inactivo',
             });
         } else {
             setEditingAlumno(null);
@@ -166,7 +179,8 @@ const Alumnos = () => {
                     nombre: formData.nombre,
                     correo: formData.correo,
                     telefono: formData.telefono,
-                    activo: formData.estado === 'activo',
+                    // `estado` es la fuente de verdad: se manda él y el backend deriva `activo`.
+                    estado: formData.estado === 'activo' ? 'activo' : 'baja',
                 });
                 await fetchAlumnos();
                 closeModal();
@@ -279,8 +293,8 @@ const Alumnos = () => {
                                             <td className="px-6 py-4 text-sm text-zinc-400">{alumno.correo}</td>
                                             <td className="px-6 py-4 text-sm text-zinc-400">{alumno.telefono}</td>
                                             <td className="px-6 py-4 text-sm">
-                                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${alumno.activo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                                    {alumno.activo ? 'activo' : 'inactivo'}
+                                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${badgeEstado(alumno).clase}`}>
+                                                    {badgeEstado(alumno).texto}
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4 text-sm text-zinc-400">{fmtFecha(alumno.created_at)}</td>

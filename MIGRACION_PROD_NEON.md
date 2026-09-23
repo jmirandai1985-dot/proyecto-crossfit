@@ -141,3 +141,49 @@ Servicio **`box-crossfit`** -> *Environment* -> editar **solo estas dos**:
 Despues: **Manual Deploy -> Deploy latest commit**. Render corre `alembic upgrade head` (no-op) y levanta la
 app; verificar con `GET https://<servicio>.onrender.com/health` -> `{"status":"healthy","database":"connected"}`.
 Las demas variables (`ENVIRONMENT=production`, `DEBUG=false`, JWT, CORS, SMTP, etc.) NO cambian.
+
+## PASO 4 - Migracion 034 (`activo` vs `estado`) en PROD
+
+**Estado: NO aplicada a PROD todavia** (probada y verificada en TEST el 2026-09-23).
+
+Que hace la migracion `034_activo_estado_check`:
+
+1. **Backfill**: `UPDATE usuarios SET activo = (estado = 'activo') WHERE activo IS DISTINCT FROM (estado = 'activo')`.
+   `estado` es la fuente de verdad del ciclo de vida (`pendiente_activacion | activo | rechazado | baja`);
+   `activo` queda como flag derivado/legacy. Es idempotente: si no hay filas desincronizadas, no hace nada.
+2. **Invariante en la BD**: `CHECK (activo = (estado = 'activo'))` (constraint `ck_usuarios_activo_estado`),
+   para que no puedan volver a desincronizarse.
+
+Como se aplica (automatico, sin paso manual extra):
+
+- El `preDeployCommand: alembic upgrade head` de Render la ejecuta al hacer el deploy del commit que la incluye.
+- No requiere ventana de mantenimiento: el backfill es instantaneo y el `ADD CONSTRAINT` valida la tabla
+  (~110 filas en PROD).
+
+> **Impacto real en PROD (verificado 2026-09-23, solo lectura):** la base nueva tiene **los mismos 7 conflictos**
+> que TEST (`id` 2, 3, 4, 5, 6, 8 y 9: `activo=false` con `estado='activo'`). Como `get_current_user` filtraba
+> `activo = true`, **esos 7 usuarios reales no pueden usar la app hoy** (el login funciona pero todos los
+> endpoints devuelven 404 `Usuario no encontrado o inactivo`). El backfill de la 034 les devuelve el acceso sin
+> tocar `estado`, que es lo que el admin ve en la UI (`Activo`).
+
+Verificacion posterior (SQL de solo lectura):
+
+```sql
+-- 1) la constraint existe
+SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint
+WHERE conrelid = 'usuarios'::regclass AND conname = 'ck_usuarios_activo_estado';
+-- esperado: CHECK ((activo = ((estado)::text = 'activo'::text)))
+
+-- 2) cero conflictos
+SELECT count(*) FROM usuarios WHERE activo IS DISTINCT FROM (estado = 'activo');
+-- esperado: 0
+```
+
+Cambios de codigo que la acompañan (mismo commit):
+
+- `get_current_user`: filtra por `estado = 'activo'` (antes `activo = true`) y devuelve `estado` en el dict.
+- `auth.py` (login): 403 con mensaje especifico segun el estado (`Tu cuenta esta pendiente de activacion...`,
+  `Tu solicitud fue rechazada...`, `Tu cuenta esta dada de baja...`) en vez del generico `Usuario inactivo`.
+- `PUT /usuarios/{id}`: acepta `estado` y deriva `activo` (o al reves si llega `activo`), asi la API no puede
+  romper el CHECK. Soft delete (`DELETE /usuarios/{id}`) setea **ambos**: `estado='baja'` + `activo=false`.
+- `POST /usuarios` y los modales de Alumnos/Coaches: mandan `estado` y los badges de las listas usan `estado`.

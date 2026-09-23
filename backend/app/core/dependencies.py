@@ -70,11 +70,14 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Obtener usuario de BD
+    # Obtener usuario de BD.
+    # 🔒 AUTORIZACIÓN: la fuente de verdad del ciclo de vida es `estado` (el flag
+    # `activo` es derivado; el CHECK de la migración 034 garantiza que no se
+    # desincronicen). Un usuario pendiente/rechazado/dado de baja NO pasa de acá.
     query = text("""
-        SELECT id, tenant_id, nombre, correo, rol, activo
+        SELECT id, tenant_id, nombre, correo, rol, activo, estado
         FROM usuarios
-        WHERE id = :usuario_id AND tenant_id = :tenant_id AND activo = true
+        WHERE id = :usuario_id AND tenant_id = :tenant_id AND estado = 'activo'
     """)
 
     usuario = db.execute(
@@ -94,7 +97,8 @@ async def get_current_user(
         "nombre": usuario.nombre,
         "correo": usuario.correo,
         "rol": usuario.rol,
-        "activo": usuario.activo
+        "activo": usuario.activo,
+        "estado": usuario.estado
     }
 
 

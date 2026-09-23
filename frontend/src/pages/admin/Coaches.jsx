@@ -76,7 +76,7 @@ const Coaches = () => {
                 correo: coach.correo,
                 password: '',
                 disciplina_ids: coachDisciplinasMap[coach.id] || [],
-                estado: coach.activo ? 'activo' : 'inactivo',
+                estado: (coach.estado === 'activo' || (!coach.estado && coach.activo)) ? 'activo' : 'inactivo',
             });
         } else {
             setEditingCoach(null);
@@ -101,7 +101,7 @@ const Coaches = () => {
                 await api.put(`/api/v1/usuarios/${editingCoach.id}`, {
                     nombre: formData.nombre,
                     correo: formData.correo,
-                    activo: formData.estado === 'activo',
+                    estado: formData.estado === 'activo' ? 'activo' : 'baja',
                 });
                 coachId = editingCoach.id;
             } else {
@@ -223,7 +223,7 @@ const Coaches = () => {
                     </div>
                     <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-green-500">
                         <p className="text-zinc-400 text-sm font-medium">Coaches Activos</p>
-                        <p className="text-3xl font-bold text-zinc-100 mt-2">{coaches.filter((c) => c.activo !== false).length}</p>
+                        <p className="text-3xl font-bold text-zinc-100 mt-2">{coaches.filter((c) => (c.estado || (c.activo === false ? 'baja' : 'activo')) === 'activo').length}</p>
                     </div>
                     <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-orange-500">
                         <p className="text-zinc-400 text-sm font-medium">Disciplinas Asignadas</p>
@@ -269,8 +269,8 @@ const Coaches = () => {
                                             </div>
                                         )}
                                         <div className="pt-2 border-t border-zinc-800">
-                                            <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${coach.activo !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                                {coach.activo !== false ? '✓ Activo' : '✗ Inactivo'}
+                                            <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${(coach.estado || (coach.activo === false ? 'baja' : 'activo')) === 'activo' ? 'bg-green-100 text-green-800' : coach.estado === 'pendiente_activacion' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'}`}>
+                                                {coach.estado === 'pendiente_activacion' ? '⏳ Pendiente' : coach.estado === 'rechazado' ? '✗ Rechazado' : coach.estado === 'baja' ? '✗ Baja' : (coach.estado || (coach.activo === false ? 'baja' : 'activo')) === 'activo' ? '✓ Activo' : '✗ Inactivo'}
                                             </span>
                                         </div>
                                     </div>
