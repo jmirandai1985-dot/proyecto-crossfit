@@ -26,6 +26,10 @@ const AdminDashboard = () => {
     const [alumnosRiesgo, setAlumnosRiesgo] = useState([]);
     const [vencimientos, setVencimientos] = useState([]);
     const [fidelizacionLoading, setFidelizacionLoading] = useState(true);
+    // Error POR TARJETA de fidelización: antes un Promise.all + catch mudo dejaba
+    // ambas listas vacías y las tarjetas mostraban "0" como si no hubiera nadie en
+    // riesgo (dato falso en un panel de churn).
+    const [fidelizacionError, setFidelizacionError] = useState({ riesgo: '', vencimientos: '' });
     const [ocupacionHoy, setOcupacionHoy] = useState([]);
     const [ocupacionLoading, setOcupacionLoading] = useState(true);
     // Fidelización — modal membresías del mes
@@ -90,17 +94,39 @@ const AdminDashboard = () => {
     };
 
     const cargarFidelizacion = async () => {
+        // Promise.allSettled (antes Promise.all + catch mudo): si un endpoint falla,
+        // el otro se sigue mostrando y la tarjeta afectada indica el error en vez de
+        // mostrar "0" como si todo estuviera bien. Mismo patrón que cargarSolicitudes().
         setFidelizacionLoading(true);
-        try {
-            const [riesgoRes, vencRes] = await Promise.all([
-                api.get(`/api/v1/fidelizacion/tenant/${tenant_id}/en-riesgo`),
-                api.get(`/api/v1/fidelizacion/tenant/${tenant_id}/vencimientos`)
-            ]);
-            setAlumnosRiesgo(riesgoRes.data?.alumnos_alerta || []);
-            setVencimientos(vencRes.data?.alumnos || []);
-        } catch {
+        const [riesgoRes, vencRes] = await Promise.allSettled([
+            api.get(`/api/v1/fidelizacion/tenant/${tenant_id}/en-riesgo`),
+            api.get(`/api/v1/fidelizacion/tenant/${tenant_id}/vencimientos`)
+        ]);
+        if (riesgoRes.status === 'fulfilled') {
+            setAlumnosRiesgo(riesgoRes.value.data?.alumnos_alerta || []);
+            setFidelizacionError(prev => ({ ...prev, riesgo: '' }));
+        } else {
+            console.error('Error cargando alumnos en riesgo', riesgoRes.reason);
             setAlumnosRiesgo([]);
+            setFidelizacionError(prev => ({
+                ...prev,
+                riesgo: riesgoRes.reason?.response?.data?.detail
+                    || riesgoRes.reason?.message
+                    || 'No se pudo cargar el dato',
+            }));
+        }
+        if (vencRes.status === 'fulfilled') {
+            setVencimientos(vencRes.value.data?.alumnos || []);
+            setFidelizacionError(prev => ({ ...prev, vencimientos: '' }));
+        } else {
+            console.error('Error cargando vencimientos', vencRes.reason);
             setVencimientos([]);
+            setFidelizacionError(prev => ({
+                ...prev,
+                vencimientos: vencRes.reason?.response?.data?.detail
+                    || vencRes.reason?.message
+                    || 'No se pudo cargar el dato',
+            }));
         }
         setFidelizacionLoading(false);
     };
@@ -338,7 +364,11 @@ const AdminDashboard = () => {
                             <div className="flex items-center justify-between">
                                 <div>
                                     <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos en Riesgo</p>
-                                    <p className="text-3xl font-bold text-red-700 mt-1">{alumnosRiesgo.length}</p>
+                                    {fidelizacionError.riesgo ? (
+                                        <p className="text-sm font-bold text-red-400 mt-2">⚠️ {fidelizacionError.riesgo}</p>
+                                    ) : (
+                                        <p className="text-3xl font-bold text-red-700 mt-1">{alumnosRiesgo.length}</p>
+                                    )}
                                     <p className="text-xs text-zinc-500 mt-1">Sin actividad {'>'} 7 días — Clic para ir a Fidelización</p>
                                 </div>
                                 <span className="text-4xl">⚠️</span>
@@ -349,7 +379,11 @@ const AdminDashboard = () => {
                             <div className="flex items-center justify-between">
                                 <div>
                                     <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Vencimientos Inminentes</p>
-                                    <p className="text-3xl font-bold text-orange-700 mt-1">{vencimientos.length}</p>
+                                    {fidelizacionError.vencimientos ? (
+                                        <p className="text-sm font-bold text-orange-400 mt-2">⚠️ {fidelizacionError.vencimientos}</p>
+                                    ) : (
+                                        <p className="text-3xl font-bold text-orange-700 mt-1">{vencimientos.length}</p>
+                                    )}
                                     <p className="text-xs text-zinc-500 mt-1">Próximos 5 días — Clic para ir a Fidelización</p>
                                 </div>
                                 <span className="text-4xl">⏰</span>
