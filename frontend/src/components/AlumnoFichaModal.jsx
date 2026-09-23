@@ -15,31 +15,50 @@ const AlumnoFichaModal = ({ alumnoId, tenantId, onClose }) => {
     const [suscripcion, setSuscripcion] = useState(null);
     const [planes, setPlanes] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
+    // Error POR BLOQUE: antes un Promise.all hacia que el fallo de UN fetch (p. ej.
+    // /planes) dejara la ficha entera en blanco con un unico mensaje. Ahora cada
+    // bloque se resuelve por separado (Promise.allSettled) y muestra su propio error.
+    const [errores, setErrores] = useState({ usuario: '', suscripcion: '', planes: '' });
 
     useEffect(() => {
         if (!alumnoId) return;
         setLoading(true);
-        setError('');
+        setErrores({ usuario: '', suscripcion: '', planes: '' });
         const carga = async () => {
-            try {
-                const [usrRes, susRes, planesRes] = await Promise.all([
-                    api.get(`/api/v1/usuarios/${alumnoId}`),
-                    api.get('/api/v1/suscripciones', {
-                        params: { usuario_id: alumnoId, estado: 'activo' }
-                    }),
-                    api.get('/api/v1/planes', {
-                        params: { activo: true }
-                    })
-                ]);
-                setData(usrRes.data || {});
-                setSuscripcion((susRes.data || [])[0] || null);
-                setPlanes(Array.isArray(planesRes.data) ? planesRes.data : []);
-            } catch (e) {
-                setError(e.response?.data?.detail || e.message || 'Error al cargar el alumno');
-            } finally {
-                setLoading(false);
+            const [usrRes, susRes, planesRes] = await Promise.allSettled([
+                api.get(`/api/v1/usuarios/${alumnoId}`),
+                api.get('/api/v1/suscripciones', {
+                    params: { usuario_id: alumnoId, estado: 'activo' }
+                }),
+                api.get('/api/v1/planes', {
+                    params: { activo: true }
+                })
+            ]);
+            const detalle = (r) => r.reason?.response?.data?.detail
+                || r.reason?.message || 'No se pudo cargar';
+
+            if (usrRes.status === 'fulfilled') {
+                setData(usrRes.value.data || {});
+            } else {
+                console.error('Ficha alumno: fallo /usuarios', usrRes.reason);
+                setData(null);
+                setErrores(prev => ({ ...prev, usuario: detalle(usrRes) }));
             }
+            if (susRes.status === 'fulfilled') {
+                setSuscripcion((susRes.value.data || [])[0] || null);
+            } else {
+                console.error('Ficha alumno: fallo /suscripciones', susRes.reason);
+                setSuscripcion(null);
+                setErrores(prev => ({ ...prev, suscripcion: detalle(susRes) }));
+            }
+            if (planesRes.status === 'fulfilled') {
+                setPlanes(Array.isArray(planesRes.value.data) ? planesRes.value.data : []);
+            } else {
+                console.error('Ficha alumno: fallo /planes', planesRes.reason);
+                setPlanes([]);
+                setErrores(prev => ({ ...prev, planes: detalle(planesRes) }));
+            }
+            setLoading(false);
         };
         carga();
     }, [alumnoId, tenantId]);
@@ -53,7 +72,28 @@ const AlumnoFichaModal = ({ alumnoId, tenantId, onClose }) => {
         return d.toLocaleDateString('es-CL');
     };
 
+    // Estado del registro: la fuente de verdad es usuarios.estado
+    // ('pendiente_activacion' | 'activo' | 'rechazado'); `activo` es el flag
+    // heredado. Si se contradicen se muestra el conflicto, no un badge verde.
+    const etiquetaEstado = (d) => {
+        const est = String(d.estado || '').toLowerCase();
+        if (est === 'pendiente_activacion') {
+            return { texto: 'Pendiente de activación', clase: 'bg-amber-100 text-amber-800' };
+        }
+        if (est === 'rechazado') {
+            return { texto: 'Rechazado', clase: 'bg-red-100 text-red-800' };
+        }
+        if (est === 'activo' && !d.activo) {
+            return { texto: 'Inactivo (estado: activo)', clase: 'bg-red-100 text-red-800' };
+        }
+        if (est === 'activo' || d.activo) {
+            return { texto: 'Activo', clase: 'bg-green-100 text-green-800' };
+        }
+        return { texto: 'Inactivo', clase: 'bg-red-100 text-red-800' };
+    };
+
     const planActivo = planes.find(p => p.id === suscripcion?.plan_id);
+    const estadoBadge = data ? etiquetaEstado(data) : null;
 
     return (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
@@ -72,8 +112,8 @@ const AlumnoFichaModal = ({ alumnoId, tenantId, onClose }) => {
                         <div className="flex justify-center py-10">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500" />
                         </div>
-                    ) : error ? (
-                        <p className="text-center text-red-400 py-6 text-sm">{error}</p>
+                    ) : errores.usuario && !data ? (
+                        <p className="text-center text-red-400 py-6 text-sm">⚠️ {errores.usuario}</p>
                     ) : data ? (
                         <>
                             {/* Nombre + estado */}
@@ -82,8 +122,8 @@ const AlumnoFichaModal = ({ alumnoId, tenantId, onClose }) => {
                                     <p className="text-xl font-bold text-zinc-100">{data.nombre || '—'}</p>
                                     <p className="text-sm text-zinc-400">{data.correo || '—'}</p>
                                 </div>
-                                <span className={`px-3 py-1 rounded-full text-xs font-bold ${data.activo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                    {data.activo ? 'Activo' : 'Inactivo'}
+                                <span className={`px-3 py-1 rounded-full text-xs font-bold ${estadoBadge?.clase}`}>
+                                    {estadoBadge?.texto}
                                 </span>
                             </div>
 
@@ -129,7 +169,9 @@ const AlumnoFichaModal = ({ alumnoId, tenantId, onClose }) => {
                             {/* Membresía activa */}
                             <div className="bg-zinc-800/50 rounded-lg p-4 space-y-2">
                                 <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Membresía activa</p>
-                                {!suscripcion ? (
+                                {errores.suscripcion ? (
+                                    <p className="text-sm text-red-400">⚠️ {errores.suscripcion}</p>
+                                ) : !suscripcion ? (
                                     <p className="text-sm text-zinc-500">Sin plan activo</p>
                                 ) : (
                                     <div className="grid grid-cols-2 gap-3 text-sm">

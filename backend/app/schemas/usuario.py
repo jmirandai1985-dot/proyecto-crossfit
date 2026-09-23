@@ -61,6 +61,10 @@ class UsuarioResponse(UsuarioBase):
     id: int
     tenant_id: int
     activo: bool
+    # Ciclo de vida del registro: 'pendiente_activacion' | 'activo' | 'rechazado'.
+    # Se expone (aditivo) para que el panel muestre el estado REAL y no un derivado
+    # de `activo`, que es un flag heredado y puede contradecirlo.
+    estado: Optional[str] = None
     peso_kg: Optional[float] = None
     estatura_cm: Optional[int] = None
     genero: Optional[str] = None
