@@ -1,10 +1,11 @@
 """
 Router de endpoints para gestión de Usuarios
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request, Response
 import bcrypt
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
@@ -244,15 +245,27 @@ def obtener_usuario(
 
 @router.get("/", response_model=List[UsuarioListItem])
 def listar_usuarios(
+    response: Response,
     tenant_id: Optional[int] = None,
     skip: int = 0,
-    limit: int = 100,
+    limit: int = Query(100, ge=1, le=1000),
     activo: Optional[bool] = Query(None),
     rol: str = None,
+    buscar: Optional[str] = Query(
+        None, description="Filtra por nombre o correo (ILIKE, server-side)"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Lista usuarios del tenant (derivado del token) con paginación. Solo admin."""
+    """Lista usuarios del tenant (derivado del token) con paginación REAL. Solo admin.
+
+    Paginación: `skip` (offset) + `limit`. El total de filas que matchean el filtro,
+    SIN paginar, va en el header `X-Total-Count` -> el frontend puede mostrar
+    "Página X de Y" sin una segunda llamada y sin cambiar el contrato (la respuesta
+    sigue siendo la lista de usuarios).
+
+    `buscar` es server-side a propósito: con paginación real, filtrar en el cliente
+    sólo alcanzaría a la página actual.
+    """
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
     query = db.query(Usuario).filter(Usuario.tenant_id == tenant_id)
@@ -263,7 +276,15 @@ def listar_usuarios(
     if rol is not None:
         query = query.filter(Usuario.rol == rol)
 
-    usuarios = query.offset(skip).limit(limit).all()
+    if buscar:
+        patron = f"%{buscar.strip()}%"
+        query = query.filter(or_(Usuario.nombre.ilike(patron),
+                                 Usuario.correo.ilike(patron)))
+
+    total = query.count()
+    # order_by(id): sin un orden estable, la paginación puede repetir/saltear filas.
+    usuarios = query.order_by(Usuario.id).offset(skip).limit(limit).all()
+    response.headers["X-Total-Count"] = str(total)
 
     return usuarios
 

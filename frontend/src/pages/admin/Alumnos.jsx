@@ -10,9 +10,12 @@ const Alumnos = () => {
     const { tenant_id } = useAuth();
     const [alumnos, setAlumnos] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
-    // El endpoint /usuarios devuelve como maximo `limit` (100 por defecto) y NO informa
-    // el total: si no, la pantalla dice "Total de alumnos: 100" aunque haya mas.
-    const [totalAlumnos, setTotalAlumnos] = useState(null);
+    // PAGINACION REAL: el endpoint acepta limit/skip y devuelve el total (sin paginar)
+    // en el header X-Total-Count. La busqueda tambien es server-side (`buscar`) porque
+    // con paginacion, filtrar en el cliente solo alcanzaria la pagina actual.
+    const POR_PAGINA = 25;
+    const [pagina, setPagina] = useState(1);
+    const [totalAlumnos, setTotalAlumnos] = useState(0);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [showVoucherModal, setShowVoucherModal] = useState(false);
@@ -47,33 +50,39 @@ const Alumnos = () => {
 
     const fetchAlumnos = async () => {
         try {
-            const response = await api.get(`/api/v1/usuarios?rol=alumno`);
+            const response = await api.get('/api/v1/usuarios', {
+                params: {
+                    rol: 'alumno',
+                    limit: POR_PAGINA,
+                    skip: (pagina - 1) * POR_PAGINA,
+                    buscar: searchTerm.trim() || undefined,
+                },
+            });
             const lista = response.data || [];
-            setAlumnos(lista);
-            // Si la lista vino llena (== limit) se pide el total con un limite mayor
-            // SOLO para el aviso: no cambia lo que se lista ni implementa paginacion.
-            if (lista.length === 100) {
-                try {
-                    const todos = await api.get(`/api/v1/usuarios?rol=alumno&limit=1000`);
-                    setTotalAlumnos((todos.data || []).length);
-                } catch (e) {
-                    console.error('No se pudo obtener el total de alumnos', e);
-                    setTotalAlumnos(null);
-                }
-            } else {
-                setTotalAlumnos(lista.length);
+            const total = Number(response.headers?.['x-total-count'] ?? 0);
+            // Si la pagina quedo vacia (p. ej. borraste el ultimo de la ultima pagina)
+            // se retrocede una en vez de mostrar una tabla vacia.
+            if (lista.length === 0 && pagina > 1 && total > 0) {
+                setPagina(pagina - 1);
+                return;
             }
+            setAlumnos(lista);
+            setTotalAlumnos(total);
         } catch (error) {
             console.error('Error fetching alumnos:', error);
             setAlumnos([]);
+            setTotalAlumnos(0);
         } finally {
             setLoading(false);
         }
     };
 
+    // Refetch al cambiar de pagina o al buscar (debounce de 350ms en la busqueda
+    // para no disparar una request por tecla).
     useEffect(() => {
-        fetchAlumnos();
-    }, [tenant_id]);
+        const timer = setTimeout(fetchAlumnos, searchTerm ? 350 : 0);
+        return () => clearTimeout(timer);
+    }, [tenant_id, pagina, searchTerm]);
 
     useEffect(() => {
         const fetchSuscripciones = async () => {
@@ -99,10 +108,10 @@ const Alumnos = () => {
         fetchPlanes();
     }, [tenant_id]);
 
-    const filteredAlumnos = alumnos.filter((alumno) =>
-        (alumno.nombre || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (alumno.correo || '').toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    // La busqueda y el total los resuelve el backend (server-side).
+    const totalPaginas = Math.max(1, Math.ceil(totalAlumnos / POR_PAGINA));
+    const desde = totalAlumnos === 0 ? 0 : (pagina - 1) * POR_PAGINA + 1;
+    const hasta = (pagina - 1) * POR_PAGINA + alumnos.length;
 
     const getSuscripcionAlumno = (alumnoId) => {
         return suscripciones.find(s => s.usuario_id === alumnoId) || null;
@@ -243,15 +252,9 @@ const Alumnos = () => {
                             type="text"
                             placeholder="Buscar por nombre o correo..."
                             value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
+                            onChange={(e) => { setSearchTerm(e.target.value); setPagina(1); }}
                             className="w-full px-4 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                         />
-                        {totalAlumnos !== null && totalAlumnos > alumnos.length && (
-                            <p className="text-xs text-amber-400 mt-2">
-                                ⚠️ Mostrando {alumnos.length} de {totalAlumnos}{totalAlumnos >= 1000 ? '+' : ''} alumnos:
-                                el endpoint corta en 100 y falta la paginación de esta lista.
-                            </p>
-                        )}
                     </div>
 
                     <div className="overflow-x-auto">
@@ -269,8 +272,8 @@ const Alumnos = () => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-zinc-800">
-                                {filteredAlumnos.length > 0 ? (
-                                    filteredAlumnos.map((alumno, index) => (
+                                {alumnos.length > 0 ? (
+                                    alumnos.map((alumno, index) => (
                                         <tr key={alumno.id} className={index % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
                                             <td className="px-6 py-4 text-sm font-medium text-zinc-100">{alumno.nombre}</td>
                                             <td className="px-6 py-4 text-sm text-zinc-400">{alumno.correo}</td>
@@ -336,13 +339,27 @@ const Alumnos = () => {
                         </table>
                     </div>
 
-                    <div className="px-6 py-4 bg-zinc-800/50 border-t border-zinc-800">
-                        <p className="text-sm text-zinc-400">
-                            {searchTerm ? 'Resultados: ' : 'Alumnos cargados: '}<span className="font-bold text-zinc-100">{filteredAlumnos.length}</span>
-                            {!searchTerm && totalAlumnos !== null && totalAlumnos > alumnos.length && (
-                                <span className="text-amber-400"> (de {totalAlumnos}{totalAlumnos >= 1000 ? '+' : ''} en la base)</span>
-                            )}
+                    <div className="px-6 py-4 bg-zinc-800/50 border-t border-zinc-800 flex items-center justify-between gap-4 flex-wrap">
+                        <p className="text-sm text-zinc-400" data-testid="rango-alumnos">
+                            {totalAlumnos === 0
+                                ? 'Sin resultados'
+                                : <>Mostrando <span className="font-bold text-zinc-100">{desde}-{hasta}</span> de <span className="font-bold text-zinc-100">{totalAlumnos}</span>{searchTerm ? ' (búsqueda)' : ' alumnos'}</>}
                         </p>
+                        <div className="flex items-center gap-2">
+                            <button
+                                data-testid="pagina-anterior"
+                                onClick={() => setPagina(p => Math.max(1, p - 1))}
+                                disabled={pagina <= 1}
+                                className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                            >◀ Anterior</button>
+                            <span className="text-sm text-zinc-400">Página <span className="font-bold text-zinc-100">{pagina}</span> de {totalPaginas}</span>
+                            <button
+                                data-testid="pagina-siguiente"
+                                onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))}
+                                disabled={pagina >= totalPaginas}
+                                className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                            >Siguiente ▶</button>
+                        </div>
                     </div>
                 </div>
 

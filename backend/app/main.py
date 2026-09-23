@@ -80,6 +80,9 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Sin esto, en dev (frontend en otro puerto) el navegador no deja LEER el total
+    # paginado que viaja en X-Total-Count (en prod es mismo origen: no aplica).
+    expose_headers=["X-Total-Count"],
 )
 
 # ---- HEADERS DE SEGURIDAD (X-Frame-Options, CSP, HSTS, etc.) ----
