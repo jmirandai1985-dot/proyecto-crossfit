@@ -753,18 +753,18 @@ def get_cohortes(
         )
         SELECT to_char(date_trunc('month', alta), 'YYYY-MM') AS cohorte,
                COUNT(*) AS n_alumnos,
-               COUNT(*) FILTER (WHERE alta + 30 <= CURRENT_DATE) AS eval_30,
-               COUNT(*) FILTER (WHERE alta + 30 <= CURRENT_DATE AND EXISTS (
+               COUNT(*) FILTER (WHERE alta + 30 <= (now() AT TIME ZONE 'America/Santiago')::date) AS eval_30,
+               COUNT(*) FILTER (WHERE alta + 30 <= (now() AT TIME ZONE 'America/Santiago')::date AND EXISTS (
                    SELECT 1 FROM asistencias a
                    WHERE a.usuario_id = altas.id AND a.tenant_id = altas.tenant_id
                      AND a.fecha BETWEEN altas.alta AND altas.alta + 30)) AS act_30,
-               COUNT(*) FILTER (WHERE alta + 60 <= CURRENT_DATE) AS eval_60,
-               COUNT(*) FILTER (WHERE alta + 60 <= CURRENT_DATE AND EXISTS (
+               COUNT(*) FILTER (WHERE alta + 60 <= (now() AT TIME ZONE 'America/Santiago')::date) AS eval_60,
+               COUNT(*) FILTER (WHERE alta + 60 <= (now() AT TIME ZONE 'America/Santiago')::date AND EXISTS (
                    SELECT 1 FROM asistencias a
                    WHERE a.usuario_id = altas.id AND a.tenant_id = altas.tenant_id
                      AND a.fecha BETWEEN altas.alta AND altas.alta + 60)) AS act_60,
-               COUNT(*) FILTER (WHERE alta + 90 <= CURRENT_DATE) AS eval_90,
-               COUNT(*) FILTER (WHERE alta + 90 <= CURRENT_DATE AND EXISTS (
+               COUNT(*) FILTER (WHERE alta + 90 <= (now() AT TIME ZONE 'America/Santiago')::date) AS eval_90,
+               COUNT(*) FILTER (WHERE alta + 90 <= (now() AT TIME ZONE 'America/Santiago')::date AND EXISTS (
                    SELECT 1 FROM asistencias a
                    WHERE a.usuario_id = altas.id AND a.tenant_id = altas.tenant_id
                      AND a.fecha BETWEEN altas.alta AND altas.alta + 90)) AS act_90

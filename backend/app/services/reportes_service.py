@@ -407,7 +407,7 @@ def crear_reporte_ventas_mensual_bytes(
         SELECT COUNT(DISTINCT u.id) FROM usuarios u
         JOIN suscripciones s ON u.id = s.usuario_id
         WHERE u.tenant_id = :tid AND u.rol = 'alumno' AND u.activo = true
-          AND s.estado = 'activo' AND s.fecha_expiracion >= CURRENT_DATE
+          AND s.estado = 'activo' AND s.fecha_expiracion >= (now() AT TIME ZONE 'America/Santiago')::date
     """), {"tid": tenant_id}).scalar() or 0
 
     # Nuevos alumnos
@@ -421,7 +421,7 @@ def crear_reporte_ventas_mensual_bytes(
     mrr_val = db.execute(text("""
         SELECT COALESCE(SUM(p.precio_clp), 0) FROM suscripciones s
         JOIN planes p ON s.plan_id = p.id
-        WHERE s.tenant_id = :tid AND s.estado = 'activo' AND s.fecha_expiracion >= CURRENT_DATE
+        WHERE s.tenant_id = :tid AND s.estado = 'activo' AND s.fecha_expiracion >= (now() AT TIME ZONE 'America/Santiago')::date
     """), {"tid": tenant_id}).scalar() or 0
     mrr_val_f = float(mrr_val)
 
