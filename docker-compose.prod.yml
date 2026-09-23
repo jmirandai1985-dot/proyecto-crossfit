@@ -23,13 +23,13 @@
 services:
   backend:
     env_file:
-      - ./backend/.env          # PRODUCCIÓN (ep-withered-silence)
+      - ./backend/.env          # PRODUCCIÓN (ep-nameless-sound-b6km6wyi)
     environment:
       ENVIRONMENT: production
 
   maintenance:
     env_file:
-      - ./backend/.env          # PRODUCCIÓN (ep-withered-silence)
+      - ./backend/.env          # PRODUCCIÓN (ep-nameless-sound-b6km6wyi)
     environment:
       ENVIRONMENT: production
 

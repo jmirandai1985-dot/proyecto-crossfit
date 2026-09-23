@@ -23,6 +23,7 @@ Uso (Windows):
     set ENVIRONMENT=test && python scripts/restaurar_backup.py [ruta\\al\\dump.sql]
 """
 import os
+import pathlib
 import subprocess
 import sys
 from urllib.parse import urlparse
@@ -50,6 +51,39 @@ def psql_cmd():
     if os.path.exists(PSQL_DEFAULT):
         return PSQL_DEFAULT
     return "psql"   # debe estar en el PATH
+
+
+def sanitizar_dump(dump: str) -> str:
+    """Devuelve una copia del dump SIN las sentencias de ACL/owner.
+
+    Los dumps hechos sin --no-owner/--no-privileges (p. ej. el cron
+    maintenance/backup_neon.py) traen ALTER DEFAULT PRIVILEGES y ALTER ... OWNER TO
+    de roles INTERNOS de Neon (cloud_admin / neon_superuser) que neondb_owner no
+    puede ejecutar: con ON_ERROR_STOP abortarian el restore completo.
+    """
+    origen = pathlib.Path(dump)
+    destino = origen.with_name(origen.name + ".sanitizado.sql")
+    saltando = False
+    n = 0
+    with open(origen, encoding="utf-8", newline="") as fin,          open(destino, "w", encoding="utf-8", newline="") as fout:
+        for ln in fin:
+            if saltando:
+                if ln.rstrip("\r\n").rstrip().endswith(";"):
+                    saltando = False
+                continue
+            t = ln.lstrip()
+            omitir = (t.startswith("ALTER DEFAULT PRIVILEGES")
+                      or t.startswith("GRANT ")
+                      or t.startswith("REVOKE ")
+                      or (t.startswith("ALTER ") and " OWNER TO " in t))
+            if omitir:
+                n += 1
+                if not t.rstrip("\r\n").rstrip().endswith(";"):
+                    saltando = True
+                continue
+            fout.write(ln)
+    print(f"[sanitizar] sentencias de ACL/owner omitidas: {n} -> {destino.name}")
+    return str(destino)
 
 
 def main():
@@ -115,7 +149,11 @@ def main():
         "PGDATABASE": p.path.lstrip("/"),
         "PGSSLMODE": "require",
     })
-    cmd = [psql_cmd(), "-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", dump]
+    # Los dumps sin --no-owner/--no-privileges traen ACL de roles internos de Neon
+    # (cloud_admin/neon_superuser) que neondb_owner no puede aplicar: se omiten.
+    dump_saneado = sanitizar_dump(dump)
+
+    cmd = [psql_cmd(), "-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", dump_saneado]
     print("\nEjecutando psql (ON_ERROR_STOP=1, single transaction)...")
     res = subprocess.run(cmd, env=env, capture_output=True, text=True)
     print(f"returncode={res.returncode}")
@@ -125,6 +163,11 @@ def main():
         print("[stderr]", res.stderr.strip()[-1500:])
     if res.returncode != 0:
         sys.exit("FATAL: el restore falló (ver stderr). NO se aplicó nada (single transaction).")
+    try:
+        os.remove(dump_saneado)
+        print(f"[sanitizar] copia temporal eliminada: {os.path.basename(dump_saneado)}")
+    except OSError:
+        pass
 
     # ── Verificación post-restore ────────────────────────────────────────────
     with psycopg2.connect(url, connect_timeout=15) as conn:

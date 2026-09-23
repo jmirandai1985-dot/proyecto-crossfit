@@ -1,6 +1,6 @@
 # MIGRACIÓN DE PROD A UN PROYECTO NEON NUEVO
 
-**Estado:** ⏸ **BLOQUEADO en el PASO 1 — lo tiene que hacer Jebbus** (crear el proyecto en el dashboard de Neon).
+**Estado:** ✅ **PROD migrado al proyecto nuevo "produccion2.0"** (2026-09-23). Falta solo el PASO 3 de Render (lo hace Jebbus).
 Última actualización: 2026-09-23.
 
 ## Contexto
@@ -107,3 +107,37 @@ Candados del modo PROD (probados):
   en el rebuild de hoy (sólo `backend` y `frontend`): su código es de hace 4 semanas. No afecta a
   esta migración (sus cron usan `settings.DATABASE_URL` del `.env.test` y no se tocó su código), pero
   conviene un `docker compose build` completo algún día.
+
+---
+
+## HECHO (2026-09-23) - resultado de la migracion
+
+| Paso | Resultado |
+|---|---|
+| 1. Proyecto Neon nuevo | OK: `produccion2.0` - project_id `lively-breeze-53844834` - branch `br-late-scene-b6muci2n` - endpoint `ep-nameless-sound-b6km6wyi` (PostgreSQL 18.6) |
+| 2. `backend/.env` (PROD) | OK: `DATABASE_URL` (pooler) + `DIRECT_URL` (directa). Las credenciales viejas quedaron como comentario historico. |
+| 3. Restore | OK: 36 tablas. El dump traia ACL de roles internos de Neon (`ALTER DEFAULT PRIVILEGES` x2 + `ALTER ... OWNER TO` x75) que `neondb_owner` no puede ejecutar: se agrego **sanitizacion automatica** al script (77 sentencias omitidas) y el restore entro limpio. |
+| 4. `alembic upgrade head` | OK: `031_trim_disciplinas` -> **033_trim_tenants (head)** |
+| 5. Conteos | OK: **36/36** contra el baseline del dump (clases 1377, asistencias 4101, transacciones 476, usuarios 110, suscripciones 105, planes 16, ...) |
+| 6. `/health` local | OK: `200 {"status":"healthy","database":"connected"}` contra la base nueva (uvicorn en :8002 con `--lifespan off`, para no disparar las escrituras del startup). Los conteos quedaron identicos tras el chequeo: cero escrituras. |
+
+Notas operativas:
+
+- `uvicorn` **con** lifespan (el arranque normal, tambien en Render) genera las clases faltantes del rango `HOY + DIAS_ANTICIPACION` (en el dump faltan las posteriores al 15/10) y arranca el scheduler. Es el comportamiento normal de PROD: al primer arranque en Render se completaran esas clases.
+- El `preDeployCommand: alembic upgrade head` de Render sera **no-op** (ya estamos en head).
+
+## PASO 3 - VALORES EXACTOS PARA RENDER (los pega Jebbus)
+
+> El repo es publico: las URLs con credenciales NO se escriben en este archivo. Los valores completos
+> son los de `backend/.env` (PROD): `DATABASE_URL` y `DIRECT_URL`.
+
+Servicio **`box-crossfit`** -> *Environment* -> editar **solo estas dos**:
+
+| Variable | Que valor poner |
+|---|---|
+| `DATABASE_URL` | el de `backend/.env`: **pooler** del proyecto nuevo (`...@ep-nameless-sound-b6km6wyi-pooler.c-2.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require`) |
+| `DIRECT_URL` | el de `backend/.env`: el mismo host **sin** `-pooler` (`...@ep-nameless-sound-b6km6wyi.c-2.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require`) |
+
+Despues: **Manual Deploy -> Deploy latest commit**. Render corre `alembic upgrade head` (no-op) y levanta la
+app; verificar con `GET https://<servicio>.onrender.com/health` -> `{"status":"healthy","database":"connected"}`.
+Las demas variables (`ENVIRONMENT=production`, `DEBUG=false`, JWT, CORS, SMTP, etc.) NO cambian.
