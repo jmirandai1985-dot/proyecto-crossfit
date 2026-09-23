@@ -8,17 +8,23 @@ const AdminAlumnosPendientes = () => {
     const [actionId, setActionId] = useState(null);
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
+    // Contraseña provisional para mostrar al admin cuando el correo NO se pudo
+    // enviar (antes se decía "credenciales enviadas" aunque el envío fallara).
+    const [credenciales, setCredenciales] = useState(null);
+    const [confirmarRechazo, setConfirmarRechazo] = useState(null);
 
-    const cargarPendientes = async () => {
+    const cargarPendientes = async ({ silencioso = false } = {}) => {
         try {
-            setLoading(true);
+            // En el refresco automático NO se activa el spinner de pantalla completa:
+            // la lista queda visible mientras se actualiza en segundo plano.
+            if (!silencioso) setLoading(true);
             const { data } = await api.get('/api/v1/alumnos/pendientes-activacion');
             setPendientes(data || []);
             setError('');
         } catch (err) {
             setError(err.response?.data?.detail || 'No se pudieron cargar las solicitudes');
         } finally {
-            setLoading(false);
+            if (!silencioso) setLoading(false);
         }
     };
 
@@ -26,16 +32,37 @@ const AdminAlumnosPendientes = () => {
         cargarPendientes();
     }, []);
 
+    // AUTO-REFRESH (30s): pueden entrar solicitudes mientras el admin tiene la
+    // pantalla abierta. Silencioso para no parpadear el spinner ni perder el foco.
+    useEffect(() => {
+        const id = setInterval(() => cargarPendientes({ silencioso: true }), 30000);
+        return () => clearInterval(id);
+    }, []);
+
     const handleAccion = async (alumnoId, accion) => {
         setActionId(alumnoId);
         setMessage('');
         setError('');
         try {
-            await api.put(`/api/v1/alumnos/${alumnoId}/${accion}`);
-            setMessage(accion === 'activar'
-                ? 'Alumno activado y credenciales enviadas por correo'
-                : 'Solicitud rechazada');
-            cargarPendientes();
+            const { data } = await api.put(`/api/v1/alumnos/${alumnoId}/${accion}`);
+            if (accion === 'activar') {
+                if (data?.email_enviado) {
+                    setMessage('Alumno activado y credenciales enviadas por correo');
+                    setCredenciales(null);
+                } else {
+                    // El correo NO salió: hay que mostrarle la contraseña provisional
+                    // al admin para que se la pase al alumno (el backend la genera igual).
+                    setMessage('');
+                    setCredenciales({
+                        password: data?.password_provisional || '',
+                        error: data?.email_error || 'no se pudo enviar el correo',
+                    });
+                }
+            } else {
+                setMessage('Solicitud rechazada');
+                setCredenciales(null);
+            }
+            cargarPendientes({ silencioso: true });
         } catch (err) {
             setError(err.response?.data?.detail || 'Ocurrió un error al procesar la solicitud');
         } finally {
@@ -69,6 +96,26 @@ const AdminAlumnosPendientes = () => {
                 {error && (
                     <div className="mb-4 bg-red-500/15 border border-red-500/30 text-red-300 px-4 py-3 rounded-lg text-sm">
                         {error}
+                    </div>
+                )}
+                {credenciales && (
+                    <div className="mb-4 bg-amber-500/15 border border-amber-500/40 text-amber-200 px-4 py-3 rounded-lg text-sm space-y-2">
+                        <p className="font-semibold">
+                            ⚠️ El alumno quedó activo, pero el correo de credenciales NO se pudo enviar
+                            ({credenciales.error}).
+                        </p>
+                        <p>Pasale esta contraseña provisional y pedile que la cambie al entrar:</p>
+                        <div className="flex items-center gap-2">
+                            <code className="bg-zinc-900/70 border border-amber-500/30 rounded px-3 py-1 font-mono text-base text-amber-100">
+                                {credenciales.password}
+                            </code>
+                            <button
+                                onClick={() => navigator.clipboard?.writeText(credenciales.password)
+                                    .then(() => setMessage('Contraseña copiada al portapapeles'))
+                                    .catch(() => {})}
+                                className="px-3 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-xs font-semibold"
+                            >Copiar</button>
+                        </div>
                     </div>
                 )}
 
@@ -134,7 +181,7 @@ const AdminAlumnosPendientes = () => {
                                         {actionId === p.id ? 'Procesando...' : '✓ Activar'}
                                     </button>
                                     <button
-                                        onClick={() => handleAccion(p.id, 'rechazar')}
+                                        onClick={() => setConfirmarRechazo(p)}
                                         disabled={actionId === p.id}
                                         className="flex-1 px-4 py-2 rounded-lg bg-zinc-800 hover:bg-red-500/20 border border-zinc-700 hover:border-red-500/40 text-zinc-300 hover:text-red-300 text-sm font-semibold transition-colors"
                                     >
@@ -146,6 +193,28 @@ const AdminAlumnosPendientes = () => {
                     </div>
                 )}
             </div>
+                {confirmarRechazo && (
+                    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+                        <div className="bg-zinc-900 rounded-lg shadow-xl max-w-md w-full p-6">
+                            <h2 className="text-xl font-bold text-zinc-100 mb-3">Rechazar solicitud</h2>
+                            <p className="text-sm text-zinc-300 mb-5">
+                                Confirma rechazar la solicitud de {confirmarRechazo.nombre} ({confirmarRechazo.correo})?
+                                El alumno quedará con estado "rechazado" y sin acceso (no se borra su registro).
+                            </p>
+                            <div className="flex gap-3">
+                                <button onClick={() => setConfirmarRechazo(null)} className="flex-1 px-4 py-2 border border-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-800/50 font-medium">
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={() => { const pend = confirmarRechazo; setConfirmarRechazo(null); handleAccion(pend.id, 'rechazar'); }}
+                                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
+                                >
+                                    Rechazar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
         </Layout>
     );
 };

@@ -329,9 +329,11 @@ def activar_alumno(
         detalle={"alumno_id": usuario.id, "estado": "activo", "es_renovacion": es_renovacion},
     )
 
+    email_enviado = False
+    email_error = ""
     try:
         if es_renovacion:
-            # RENOVACIÓN → Email 6: confirmación de renovación
+            # RENOVACION -> Email 6: confirmacion de renovacion
             send_confirmacion_renovacion_plan(
                 usuario.nombre,
                 usuario.correo,
@@ -341,7 +343,7 @@ def activar_alumno(
                 f"{settings.FRONTEND_URL}/alumno/dashboard",
             )
         else:
-            # PRIMERA ACTIVACIÓN → Email 2: bienvenida con credenciales + resumen
+            # PRIMERA ACTIVACION -> Email 2: bienvenida con credenciales + resumen
             send_bienvenida_activacion(
                 usuario.nombre,
                 usuario.correo,
@@ -351,15 +353,23 @@ def activar_alumno(
                 fecha_vigencia,
                 f"{settings.FRONTEND_URL}/login",
             )
-    except Exception:
-        pass
+        email_enviado = True
+    except Exception as e:
+        # No se silencia: la UI necesita el dato para mostrarle la contrasena
+        # provisional al admin (si el correo no sale, el alumno queda activo sin
+        # credenciales y nadie se enteraba).
+        email_error = str(e)[:200]
+        logging.getLogger("uvicorn.alumnos").warning(
+            "Fallo al enviar email de activacion (alumno %s): %s", usuario.id, e)
 
     return {
         "ok": True,
-        "mensaje": "Alumno activado y credenciales enviadas",
+        "mensaje": "Alumno activado",
         "password_provisional": password_provisional,
         "es_renovacion": es_renovacion,
         "plan_nombre": plan_nombre,
+        "email_enviado": email_enviado,
+        "email_error": email_error,
     }
 
 
