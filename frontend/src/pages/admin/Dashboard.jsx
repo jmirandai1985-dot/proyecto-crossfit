@@ -7,7 +7,7 @@ import AdminTarjetaAlumnosPrueba from '../../components/AdminTarjetaAlumnosPrueb
 
 const AdminDashboard = () => {
     const navigate = useNavigate();
-    const { tenant_id, usuario_id } = useAuth();
+    const { tenant_id } = useAuth();
     const [solicitudes, setSolicitudes] = useState([]);
     const [countPendientes, setCountPendientes] = useState(0);
     const [stats, setStats] = useState(null);
@@ -135,7 +135,7 @@ const AdminDashboard = () => {
         setProcessingId(id);
         setMsg('');
         try {
-            await api.put(`/api/v1/solicitudes/${id}/aprobar?admin_id=${usuario_id || 1}`);
+            await api.put(`/api/v1/solicitudes/${id}/aprobar`);
             setMsg(`✅ Solicitud #${id} aprobada. Tokens asignados.`);
             setTimeout(() => setMsg(''), 4000);
             cargarSolicitudes();
@@ -151,7 +151,7 @@ const AdminDashboard = () => {
         setProcessingId(id);
         setMsg('');
         try {
-            await api.put(`/api/v1/solicitudes/${id}/rechazar?admin_id=${usuario_id || 1}&motivo=${encodeURIComponent(motivo)}`);
+            await api.put(`/api/v1/solicitudes/${id}/rechazar?motivo=${encodeURIComponent(motivo)}`);
             setMsg(`✅ Solicitud #${id} rechazada.`);
             setTimeout(() => setMsg(''), 4000);
             cargarSolicitudes();
