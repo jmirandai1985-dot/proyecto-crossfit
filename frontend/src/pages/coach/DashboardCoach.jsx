@@ -85,6 +85,8 @@ const DashboardCoach = () => {
     // Contacto por correo de los alumnos en riesgo (estado por alumno).
     const [enviandoCorreoId, setEnviandoCorreoId] = useState(null);
     const [msgContacto, setMsgContacto] = useState(null); // { id, tipo, texto }
+    // Filtro por nivel en el tab Progreso (100% frontend).
+    const [filtroProgreso, setFiltroProgreso] = useState('todos');
     const irSemanaAnterior = () => {
         const start = new Date(weekRange.start + 'T12:00:00');
         start.setDate(start.getDate() - 7);
@@ -480,6 +482,10 @@ const DashboardCoach = () => {
             alert('Error al publicar el WOD');
         }
     };
+
+    const progresoFiltrado = filtroProgreso === 'todos'
+        ? progresoAlumnos
+        : progresoAlumnos.filter(a => a.estado === filtroProgreso);
 
     const filteredAlumnos = alumnos.filter((alumno) =>
         alumno.nombre.toLowerCase().includes(searchTerm.toLowerCase())
@@ -1186,11 +1192,41 @@ const DashboardCoach = () => {
                                     <h2 className="text-xl font-bold text-gray-900">📈 Progreso de Alumnos</h2>
                                     <p className="text-sm text-gray-600 mt-1">Estado actual de RMs y actividad de cada alumno</p>
                                 </div>
-                                <div className="flex gap-4 text-sm">
-                                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-green-500"></span> Progresando (5+ RMs)</span>
-                                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-orange-500"></span> Iniciando (1-4 RMs)</span>
-                                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-gray-400"></span> Sin datos</span>
+                                {/* Filtro por nivel, clickeable (100% frontend): la lista viene completa
+                                    de GET /fidelizacion/coach/{id}/alumnos; el cap de 50 es del enriquecimiento
+                                    de RMs (una consulta por alumno), no del endpoint. */}
+                                <div className="flex flex-wrap gap-2">
+                                    {[
+                                        { key: 'todos', label: 'Todos', dot: 'bg-zinc-300' },
+                                        { key: 'activo', label: 'Progresando', dot: 'bg-green-500' },
+                                        { key: 'iniciando', label: 'Iniciando', dot: 'bg-orange-500' },
+                                        { key: 'sin_datos', label: 'Sin datos', dot: 'bg-gray-400' },
+                                    ].map((op) => {
+                                        const cuenta = op.key === 'todos'
+                                            ? progresoAlumnos.length
+                                            : progresoAlumnos.filter(a => a.estado === op.key).length;
+                                        const activo = filtroProgreso === op.key;
+                                        return (
+                                            <button
+                                                key={op.key}
+                                                data-testid={`filtro-progreso-${op.key}`}
+                                                onClick={() => setFiltroProgreso(op.key)}
+                                                aria-pressed={activo}
+                                                className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm transition-colors ${activo ? 'border-zinc-900 bg-zinc-900 text-white font-semibold' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'}`}
+                                            >
+                                                <span className={`w-3 h-3 rounded-full ${op.dot}`}></span>
+                                                {op.label}
+                                                <span className={`text-xs ${activo ? 'text-white/80' : 'text-gray-400'}`}>({cuenta})</span>
+                                            </button>
+                                        );
+                                    })}
                                 </div>
+                                {alumnos.length > progresoAlumnos.length && (
+                                    <p className="text-xs text-gray-500">
+                                        Se enriquecen los primeros {progresoAlumnos.length} de {alumnos.length} alumnos
+                                        (una consulta de RMs por alumno); el resto queda para la paginación pendiente.
+                                    </p>
+                                )}
                                 <div className="overflow-x-auto">
                                     <table className="w-full">
                                         <thead className="bg-gray-800 text-white">
@@ -1204,7 +1240,7 @@ const DashboardCoach = () => {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-200">
-                                            {progresoAlumnos.map((alumno, index) => {
+                                            {progresoFiltrado.map((alumno, index) => {
                                                 const topRM = alumno.rms?.reduce((max, r) => (r.peso_kg > (max?.peso_kg || 0) ? r : max), null);
                                                 return (
                                                     <tr key={alumno.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
@@ -1247,8 +1283,12 @@ const DashboardCoach = () => {
                                         </tbody>
                                     </table>
                                 </div>
-                                {progresoAlumnos.length === 0 && (
-                                    <p className="text-gray-500 text-center py-8">No hay datos de progreso disponibles</p>
+                                {progresoFiltrado.length === 0 && (
+                                    <p className="text-gray-500 text-center py-8" data-testid="progreso-vacio">
+                                        {progresoAlumnos.length === 0
+                                            ? 'No hay datos de progreso disponibles'
+                                            : 'Ningún alumno en este nivel'}
+                                    </p>
                                 )}
                             </div>
                         )}
