@@ -14,6 +14,8 @@ import React, { useEffect } from 'react';
  *  - clase: {id, fecha, hora_inicio, hora_fin, disciplina_nombre} de la tarjeta
  *  - loading / error: estado de la carga
  *  - onClose: cierra el modal
+ *  - accion: { etiqueta, onClick } opcional para ofrecer un paso siguiente
+ *    (p. ej. "Abrir en Gestión de Clases")
  */
 
 // Sin `new Date()`: evita el corrimiento de día por zona horaria (UTC vs Chile).
@@ -34,7 +36,7 @@ const Seccion = ({ titulo, children }) => (
     </div>
 );
 
-const WodDetalleModal = ({ wod, clase, loading = false, error = '', onClose }) => {
+const WodDetalleModal = ({ wod, clase, loading = false, error = '', onClose, accion }) => {
     useEffect(() => {
         const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
         window.addEventListener('keydown', onKey);
@@ -155,9 +157,21 @@ const WodDetalleModal = ({ wod, clase, loading = false, error = '', onClose }) =
                                 </div>
                             )}
 
-                            <p className="text-[11px] text-gray-400 pt-1">
-                                Vista de solo lectura. Para corregir el WOD usa la tarjeta de la clase.
-                            </p>
+                            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                                <p className="text-[11px] text-gray-400">
+                                    Vista de solo lectura.
+                                </p>
+                                {accion?.onClick && (
+                                    <button
+                                        type="button"
+                                        data-testid="wod-detalle-accion"
+                                        onClick={accion.onClick}
+                                        className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition-colors"
+                                    >
+                                        {accion.etiqueta || 'Abrir'}
+                                    </button>
+                                )}
+                            </div>
                         </>
                     )}
                 </div>

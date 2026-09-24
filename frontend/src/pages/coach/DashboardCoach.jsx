@@ -6,6 +6,7 @@ import api from '../../services/api';
 import AsistenciaClases from '../../components/AsistenciaClases';
 import AlumnoFichaCoach from '../../components/AlumnoFichaCoach';
 import PreviewEmailModal from '../../components/PreviewEmailModal';
+import WodDetalleModal from '../../components/WodDetalleModal';
 
 const DashboardCoach = () => {
     const navigate = useNavigate();
@@ -39,6 +40,26 @@ const DashboardCoach = () => {
     const [asistenciaPorClase, setAsistenciaPorClase] = useState({});
     const [cargandoAsistencia, setCargandoAsistencia] = useState(false);
     const [msgAsistencia, setMsgAsistencia] = useState(null); // { claseId, texto, tipo }
+    // Detalle completo del WOD de una tarjeta (grilla semanal / lista del día):
+    // esas tarjetas NAVEGABAN a Gestión de Clases; ahora abren el detalle acá.
+    const [wodDetalle, setWodDetalle] = useState(null);       // { wod, clase }
+
+    // ── Detalle del WOD (solo lectura) ───────────────────────────────────────
+    // El objeto `wod` ya viene completo en la carga del dashboard
+    // (GET /wods/?fecha= → WodResponse: titulo, calentamiento,
+    // fuerza_habilidad, wod_principal, tipo_metcon, estado y fases), así que el
+    // modal abre al instante sin otro request.
+    const fechaISOde = (clase) => (clase?.fecha
+        ? (typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha)
+        : '');
+    const abrirDetalleWod = (clase, wod) => {
+        if (!clase || !wod) return;
+        setWodDetalle({ wod, clase });
+    };
+    const irAGestionClases = (clase) => {
+        if (!clase) return;
+        navigate(`/coach/gestion-clases?fecha=${fechaISOde(clase)}&clase=${clase.id}`);
+    };
 
     // ---- Terminología dinámica por disciplina ----
     const TERMINO_POR_DISCIPLINA = {
@@ -939,10 +960,11 @@ const DashboardCoach = () => {
                                                             return (
                                                                 <button
                                                                     key={clase.id}
-                                                                    onClick={() => {
-                                                                        const fechaISO = clase.fecha ? (typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha) : date;
-                                                                        navigate(`/coach/gestion-clases?fecha=${fechaISO}&clase=${clase.id}`);
-                                                                    }}
+                                                                    data-testid={wod ? 'ver-wod-lista' : 'publicar-wod-lista'}
+                                                                    title={wod ? 'Ver el WOD completo' : 'Publicar WOD para esta clase'}
+                                                                    onClick={() => (wod
+                                                                        ? abrirDetalleWod({ ...clase, fecha: clase.fecha || date }, wod)
+                                                                        : irAGestionClases({ ...clase, fecha: clase.fecha || date }))}
                                                                     className={`w-full px-4 py-3 flex items-center gap-3 text-left transition-colors ${wod
                                                                         ? 'bg-green-50/50 hover:bg-green-100'
                                                                         : 'bg-yellow-50/50 hover:bg-yellow-100'
@@ -1042,10 +1064,9 @@ const DashboardCoach = () => {
                                                                     wodDeClase ? (
                                                                         // Celda con WOD publicado — fondo naranja translúcido sobre dark + ícono ✅
                                                                         <button
-                                                                            onClick={() => {
-                                                                                const fechaISO = clase.fecha ? (typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha) : date;
-                                                                                navigate(`/coach/gestion-clases?fecha=${fechaISO}&clase=${clase.id}`);
-                                                                            }}
+                                                                            data-testid="ver-wod-celda"
+                                                                            title="Ver el WOD completo"
+                                                                            onClick={() => abrirDetalleWod({ ...clase, fecha: clase.fecha || date }, wodDeClase)}
                                                                             className="w-full h-full min-h-[64px] flex flex-col items-center justify-center gap-1 rounded-lg transition-all cursor-pointer bg-orange-500/20 border-2 border-orange-500 hover:bg-orange-500/30"
                                                                         >
                                                                             <div className="text-base font-bold text-orange-200 leading-tight capitalize">
@@ -1391,6 +1412,23 @@ const DashboardCoach = () => {
                         alumnoId={fichaAlumnoId}
                         coachId={usuario_id}
                         onClose={() => setFichaAlumnoId(null)}
+                    />
+                )}
+
+                {/* Detalle completo del WOD (solo lectura) desde la grilla/lista */}
+                {wodDetalle && (
+                    <WodDetalleModal
+                        wod={wodDetalle.wod}
+                        clase={wodDetalle.clase}
+                        onClose={() => setWodDetalle(null)}
+                        accion={{
+                            etiqueta: '✏️ Abrir en Gestión de Clases',
+                            onClick: () => {
+                                const c = wodDetalle.clase;
+                                setWodDetalle(null);
+                                irAGestionClases(c);
+                            },
+                        }}
                     />
                 )}
             </div>
