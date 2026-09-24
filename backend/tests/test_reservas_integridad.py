@@ -13,6 +13,7 @@ Reproducido en TEST el 2026-09-24, ANTES del fix:
 
 Corre contra la API real en localhost:8000 (requiere ENVIRONMENT=test).
 """
+import os
 from datetime import timedelta
 
 import pytest
@@ -148,3 +149,84 @@ def test_p02_delete_de_reserva_es_idempotente():
     if creditos_1 is not None and creditos_2 is not None:
         assert creditos_1 == creditos_2, (
             f"doble devolución de crédito: {creditos_1} -> {creditos_2}")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# P0-3 — hora de corte en horario de Chile + reembolso en el response
+# ═══════════════════════════════════════════════════════════════════
+
+def test_p03_delete_reserva_reporta_el_reembolso():
+    """El DELETE devuelve 200 con `reembolsado` (antes: 204 sin body, así que el
+    front prometía la devolución sin saber si el backend la había hecho)."""
+    reserva = _reserva_para_tests()
+    if not reserva:
+        pytest.skip("no se pudo crear la reserva de prueba")
+    r = requests.delete(f"{BASE}/reservas/{reserva['id']}", headers=_h(), timeout=20)
+    assert r.status_code == 200, f"status {r.status_code}: {r.text[:200]}"
+    d = r.json()
+    assert "reembolsado" in d, f"el response no informa el reembolso: {d}"
+    assert isinstance(d["reembolsado"], bool)
+    assert d.get("mensaje")
+
+
+def test_p03_ventana_de_6h_usa_la_hora_chilena():
+    """Regresión del bug de timezone: una clase mañana a las 01:00 CLT está a
+    ~7h reales (>6 => el crédito DEBE volver). Con el bug (tzinfo=UTC encima de
+    la hora local chilena) se veían ~4h y el crédito no volvía."""
+    if os.getenv("ENVIRONMENT") != "test":
+        pytest.skip("inserta una clase de prueba: solo con ENVIRONMENT=test")
+
+    from datetime import datetime
+
+    from sqlalchemy import text as _text
+
+    from app.db.database import SessionLocal
+    from app.utils.santiago import SANTIAGO, ahora_santiago, hoy_santiago
+
+    db = SessionLocal()
+    clase_id = None
+    try:
+        horario_id = db.execute(
+            _text("SELECT id FROM horarios ORDER BY id LIMIT 1")).scalar()
+        if not horario_id:
+            pytest.skip("TEST no tiene horarios base para anclar la clase")
+        manana = hoy_santiago() + timedelta(days=1)
+        clase_id = db.execute(
+            _text("""INSERT INTO clases (tenant_id, horario_base_id, disciplina_id,
+                        fecha, hora_inicio, hora_fin, cupo_maximo, cupo_original,
+                        asistentes_confirmados, cancelada)
+                     VALUES (:t, :h, 1, :f, '01:00', '02:00', 16, 16, 0, false)
+                     RETURNING id"""),
+            {"t": TENANT_ID, "h": horario_id, "f": manana}).scalar()
+        db.commit()
+    finally:
+        db.close()
+
+    horas_reales = (
+        datetime.combine(manana, datetime.min.time().replace(hour=1), tzinfo=SANTIAGO)
+        - ahora_santiago()).total_seconds() / 3600
+    try:
+        r = _post_reserva(clase_id)
+        if r.status_code != 201:
+            pytest.skip(f"no se pudo reservar la clase de prueba: {r.status_code}")
+        rid = r.json()["id"]
+        creditos_antes = _creditos()
+        rd = requests.delete(f"{BASE}/reservas/{rid}", headers=_h(), timeout=20)
+        assert rd.status_code == 200, f"DELETE: {rd.status_code} {rd.text[:200]}"
+        d = rd.json()
+        assert d["horas_restantes"] >= 6, (
+            f"la ventana de 6h no usa la hora chilena: calculó "
+            f"{d['horas_restantes']}h para una clase a {horas_reales:.2f}h reales")
+        assert d["reembolsado"] is True, "no devolvió el crédito con más de 6h de margen"
+        creditos_despues = _creditos()
+        if creditos_antes is not None and creditos_despues is not None:
+            assert creditos_despues == creditos_antes + 1, (
+                f"no devolvió exactamente 1 crédito: {creditos_antes} -> {creditos_despues}")
+    finally:
+        if clase_id:
+            db = SessionLocal()
+            try:
+                db.execute(_text("DELETE FROM clases WHERE id = :c"), {"c": clase_id})
+                db.commit()
+            finally:
+                db.close()

@@ -674,7 +674,7 @@ def actualizar_reserva(
     return reserva
 
 
-@router.delete("/{reserva_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{reserva_id}")
 def eliminar_reserva(
     reserva_id: int,
     tenant_id: Optional[int] = None,
@@ -743,16 +743,22 @@ def eliminar_reserva(
     if clase and clase.asistentes_confirmados > 0:
         clase.asistentes_confirmados -= 1
 
-    # Calcular horas restantes hasta la clase
-    ahora = datetime.now(timezone.utc)
+    # ── P0-3 (auditoría Alumno, R-01): la hora de corte va en horario de CHILE ──
+    # Antes se armaba `datetime(..., tzinfo=timezone.utc)` con la hora LOCAL
+    # chilena de la clase: comparada contra `datetime.now(timezone.utc)` restaba
+    # ~3-4h del margen real (reproducido en TEST: una clase a 7.05h reales se veía
+    # como 4.05h -> no devolvía el crédito que sí correspondía).
+    from app.utils.santiago import SANTIAGO, ahora_santiago
+    ahora = ahora_santiago()
     hora_inicio = clase.hora_inicio
     inicio_clase = datetime(
         clase.fecha.year, clase.fecha.month, clase.fecha.day,
-        hora_inicio.hour, hora_inicio.minute, tzinfo=timezone.utc
+        hora_inicio.hour, hora_inicio.minute, tzinfo=SANTIAGO,
     )
     horas_restantes = (inicio_clase - ahora).total_seconds() / 3600
 
     # Buscar membresía activa para devolver el crédito si aplica
+    reembolsado = False
     if horas_restantes >= 6:
         membresia = db.query(Suscripcion).filter(
             Suscripcion.tenant_id == tenant_id,
@@ -765,7 +771,26 @@ def eliminar_reserva(
         ).first()
         if membresia and membresia.creditos_disponibles is not None:
             membresia.creditos_disponibles += 1
+            reembolsado = True
 
     db.commit()
 
-    return None
+    # ── P0-3: el response DICE si hubo reembolso ──
+    # Antes devolvía 204 (sin body) y el front mostraba siempre "Reserva
+    # cancelada exitosamente", incluso cuando el crédito NO volvía.
+    if reembolsado:
+        mensaje = "Reserva cancelada y crédito devuelto."
+    elif horas_restantes < 6:
+        mensaje = ("Reserva cancelada. Faltaban menos de 6 horas para la clase, "
+                   "así que el crédito NO se devuelve.")
+    else:
+        mensaje = ("Reserva cancelada. Tu plan es ilimitado: no había crédito "
+                   "que devolver.")
+
+    return {
+        "ok": True,
+        "reserva_id": reserva_id,
+        "reembolsado": reembolsado,
+        "horas_restantes": round(horas_restantes, 2),
+        "mensaje": mensaje,
+    }

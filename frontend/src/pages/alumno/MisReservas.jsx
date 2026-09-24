@@ -147,8 +147,15 @@ const MisReservas = () => {
         setCancelando(reservaId);
         setMensaje(null);
         try {
-            await api.delete(`/api/v1/reservas/${reservaId}`);
-            setMensaje({ tipo: 'exito', texto: 'Reserva cancelada exitosamente' });
+            // P0-3: el backend responde si hubo o no reembolso (antes devolvía
+            // 204 sin body y el front siempre decía "cancelada exitosamente",
+            // incluso cuando el crédito NO volvía).
+            const resp = await api.delete(`/api/v1/reservas/${reservaId}`);
+            const d = resp.data || {};
+            setMensaje({
+                tipo: 'exito',
+                texto: d.mensaje || 'Reserva cancelada.',
+            });
             fetchReservas();
         } catch (err) {
             setMensaje({ tipo: 'error', texto: err.response?.data?.detail || 'Error al cancelar reserva' });
