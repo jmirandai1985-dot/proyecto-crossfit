@@ -78,6 +78,8 @@ const DashboardCoach = () => {
     };
 
     const [weekRange, setWeekRange] = useState(getWeekRange);
+    // Secciones que fallaron en la última carga (banner + Reintentar, patrón de Admin).
+    const [erroresBloque, setErroresBloque] = useState([]);
     const irSemanaAnterior = () => {
         const start = new Date(weekRange.start + 'T12:00:00');
         start.setDate(start.getDate() - 7);
@@ -138,81 +140,114 @@ const DashboardCoach = () => {
     // ---- Cargar datos ----
     const fetchAllData = useCallback(async () => {
         setLoading(true);
-        try {
-            const [clasesRes, wodsRes, riesgoRes, movRes, coachDiscRes] = await Promise.all([
-                api.get(`/api/v1/clases?coach_id=${usuario_id}&fecha_desde=${weekRange.start}&fecha_hasta=${weekRange.end}`),
-                api.get(`/api/v1/wods`),
-                api.get(`/api/v1/fidelizacion/coach/${usuario_id}/en-riesgo`),
-                api.get(`/api/v1/movimientos`),
-                api.get(`/api/v1/coach-disciplinas`)
-            ]);
+        // Promise.allSettled (antes Promise.all + catch mudo): si un endpoint falla,
+        // el resto del dashboard se sigue mostrando y la sección caída se lista en un
+        // banner con Reintentar. Mismo patrón que cargarSolicitudes()/cargarFidelizacion()
+        // del panel Admin.
+        const [clasesRes, wodsRes, riesgoRes, movRes, coachDiscRes] = await Promise.allSettled([
+            api.get(`/api/v1/clases?coach_id=${usuario_id}&fecha_desde=${weekRange.start}&fecha_hasta=${weekRange.end}`),
+            api.get(`/api/v1/wods`),
+            api.get(`/api/v1/fidelizacion/coach/${usuario_id}/en-riesgo`),
+            api.get(`/api/v1/movimientos`),
+            api.get(`/api/v1/coach-disciplinas`)
+        ]);
+        const fallaron = [];
+        const detalle = (r) => r.reason?.response?.data?.detail
+            || r.reason?.message || 'No se pudo cargar';
 
-            // Disciplinas asignadas al coach (activo=True)
-            const coachDiscData = coachDiscRes.data || [];
+        // Disciplinas asignadas al coach (activo=True)
+        if (coachDiscRes.status === 'fulfilled') {
+            const coachDiscData = coachDiscRes.value.data || [];
             const discIds = coachDiscData
                 .filter(cd => cd.activo && cd.coach_id === usuario_id)
                 .map(cd => cd.disciplina_id);
             setCoachDisciplinas(discIds);
+        } else {
+            console.error('Error cargando disciplinas del coach', coachDiscRes.reason);
+            setCoachDisciplinas([]);
+            fallaron.push(`Disciplinas del coach — ${detalle(coachDiscRes)}`);
+        }
 
-            const clasesData = clasesRes.data || [];
-            // Los alumnos del coach se piden a un endpoint scoped por coach
-            // (GET /fidelizacion/coach/{id}/alumnos) — el viejo
-            // /usuarios?rol=alumno era admin-only (403 para coach). Se mantiene
-            // aislado en su propio try/catch para que un fallo acá NO bloquee
-            // clases/wods/riesgo/movimientos/coach-disciplinas.
-            let alumnosData = [];
-            try {
-                const alumnosRes = await api.get(`/api/v1/fidelizacion/coach/${usuario_id}/alumnos`);
-                alumnosData = alumnosRes.data?.alumnos || [];
-            } catch (err) {
-                console.error('Error cargando alumnos (no bloquea el dashboard):', err);
-            }
-            const wodsData = wodsRes.data || [];
-            const riesgoData = riesgoRes.data?.alumnos_alerta || [];
-            const movimientosData = movRes.data || [];
+        // Los alumnos del coach se piden a un endpoint scoped por coach
+        // (GET /fidelizacion/coach/{id}/alumnos) — el viejo /usuarios?rol=alumno era
+        // admin-only (403 para coach). Va aislado para que un fallo acá NO bloquee al resto.
+        let alumnosData = [];
+        try {
+            const alumnosRes = await api.get(`/api/v1/fidelizacion/coach/${usuario_id}/alumnos`);
+            alumnosData = alumnosRes.data?.alumnos || [];
+        } catch (err) {
+            console.error('Error cargando alumnos (no bloquea el dashboard):', err);
+            fallaron.push(`Alumnos del coach — ${detalle({ reason: err })}`);
+        }
 
-            setAlumnos(alumnosData);
-            setAlumnosEnRiesgo(riesgoData);
-            setWods(wodsData);
-            setMovimientos(movimientosData);
+        const clasesData = clasesRes.status === 'fulfilled' ? (clasesRes.value.data || []) : [];
+        if (clasesRes.status !== 'fulfilled') {
+            console.error('Error cargando clases', clasesRes.reason);
+            fallaron.push(`Clases de la semana — ${detalle(clasesRes)}`);
+        }
+        const wodsData = wodsRes.status === 'fulfilled' ? (wodsRes.value.data || []) : [];
+        if (wodsRes.status !== 'fulfilled') {
+            console.error('Error cargando WODs', wodsRes.reason);
+            fallaron.push(`WODs — ${detalle(wodsRes)}`);
+        }
+        const riesgoData = riesgoRes.status === 'fulfilled' ? (riesgoRes.value.data?.alumnos_alerta || []) : [];
+        if (riesgoRes.status !== 'fulfilled') {
+            console.error('Error cargando alumnos en riesgo', riesgoRes.reason);
+            fallaron.push(`Alumnos en riesgo — ${detalle(riesgoRes)}`);
+        }
+        const movimientosData = movRes.status === 'fulfilled' ? (movRes.value.data || []) : [];
+        if (movRes.status !== 'fulfilled') {
+            console.error('Error cargando movimientos', movRes.reason);
+            fallaron.push(`Movimientos — ${detalle(movRes)}`);
+        }
 
-            // Filtrar SOLO las disciplinas asignadas al coach (tabla coach_disciplinas activo=True)
-            const clasesFiltradas = coachDisciplinas.length > 0
-                ? clasesData.filter(c => coachDisciplinas.includes(c.disciplina_id))
-                : clasesData;
+        setAlumnos(alumnosData);
+        setAlumnosEnRiesgo(riesgoData);
+        setWods(wodsData);
+        setMovimientos(movimientosData);
 
-            // Filter today's classes
-            const hoyClases = clasesFiltradas.filter(c => {
-                const fechaStr = c.fecha ? (typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha) : '';
-                return fechaStr === today;
-            });
-            setClasesHoy(hoyClases);
+        // Filtrar SOLO las disciplinas asignadas al coach (tabla coach_disciplinas activo=True)
+        const clasesFiltradas = coachDisciplinas.length > 0
+            ? clasesData.filter(c => coachDisciplinas.includes(c.disciplina_id))
+            : clasesData;
 
-            // Filter week classes
-            const semanaClases = clasesFiltradas.filter(c => {
-                const fechaStr = c.fecha ? (typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha) : '';
-                return fechaStr >= weekRange.start && fechaStr <= weekRange.end;
-            });
-            semanaClases.sort((a, b) => {
-                if (a.fecha < b.fecha) return -1;
-                if (a.fecha > b.fecha) return 1;
-                return (a.hora_inicio || '').localeCompare(b.hora_inicio || '');
-            });
-            setClasesSemana(semanaClases);
+        // Filter today's classes
+        const hoyClases = clasesFiltradas.filter(c => {
+            const fechaStr = c.fecha ? (typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha) : '';
+            return fechaStr === today;
+        });
+        setClasesHoy(hoyClases);
 
-            // WOD of today
-            const wodActual = wodsData.find(w => {
-                const fechaWod = w.fecha ? (typeof w.fecha === 'string' ? w.fecha.split('T')[0] : w.fecha) : '';
-                return fechaWod === today && w.activo !== false;
-            });
-            setWodHoy(wodActual || null);
+        // Filter week classes
+        const semanaClases = clasesFiltradas.filter(c => {
+            const fechaStr = c.fecha ? (typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha) : '';
+            return fechaStr >= weekRange.start && fechaStr <= weekRange.end;
+        });
+        semanaClases.sort((a, b) => {
+            if (a.fecha < b.fecha) return -1;
+            if (a.fecha > b.fecha) return 1;
+            return (a.hora_inicio || '').localeCompare(b.hora_inicio || '');
+        });
+        setClasesSemana(semanaClases);
 
+        // WOD of today
+        const wodActual = wodsData.find(w => {
+            const fechaWod = w.fecha ? (typeof w.fecha === 'string' ? w.fecha.split('T')[0] : w.fecha) : '';
+            return fechaWod === today && w.activo !== false;
+        });
+        setWodHoy(wodActual || null);
+
+        try {
             await calcularProgresoAlumnos(alumnosData, wodsData);
             await fetchRegistrosRecientes(wodsData);
         } catch (error) {
-            console.error('Error fetching dashboard data:', error);
+            // Un fallo acá NO debe dejar la pantalla en el spinner ni ocultar el resto.
+            console.error('Error calculando progreso/registros', error);
+            fallaron.push(`Progreso/registros — ${error?.message || 'error inesperado'}`);
+        } finally {
+            setErroresBloque(fallaron);
+            setLoading(false);
         }
-        setLoading(false);
     }, [usuario_id, tenant_id, today, weekRange.start, weekRange.end]);
 
     const calcularProgresoAlumnos = async (alumnosData, wodsData) => {
@@ -568,8 +603,28 @@ const DashboardCoach = () => {
                     </button>
                 </div>
 
+                {erroresBloque.length > 0 && (
+                    <div className="bg-red-50 border-l-4 border-red-500 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center gap-3" data-testid="banner-error-dashboard">
+                        <span className="text-2xl">⚠️</span>
+                        <div className="flex-1">
+                            <p className="font-bold text-gray-900">Algunos datos no se pudieron cargar</p>
+                            <ul className="text-sm text-gray-700 mt-1 list-disc list-inside">
+                                {erroresBloque.map((e) => <li key={e}>{e}</li>)}
+                            </ul>
+                            <p className="text-xs text-gray-500 mt-1">El resto del dashboard sí está actualizado.</p>
+                        </div>
+                        <button
+                            onClick={fetchAllData}
+                            data-testid="banner-error-reintentar"
+                            className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
+                        >
+                            Reintentar
+                        </button>
+                    </div>
+                )}
+
                 {/* ─── CONTENIDO BASADO EN URL (sin pestañas internas duplicadas) ─── */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" data-testid="coach-dashboard-content">
                     <div className="p-6">
                         {/* ─── TAB: RESUMEN ─── */}
                         {activeTab === 'resumen' && (

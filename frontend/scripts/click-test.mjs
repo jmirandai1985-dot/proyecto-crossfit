@@ -78,7 +78,7 @@ console.log(`frontend: ${BASE}   ·   token: ${TOKEN.slice(0, 12)}…`);
 
 const edge = spawn(EDGE, [
     '--headless=new', `--remote-debugging-port=${PORT}`,
-    `--user-data-dir=${join(tmpdir(), 'edge-cdp-click-test')}`,
+    `--user-data-dir=${join(tmpdir(), `edge-cdp-click-test-${process.pid}`)}`,
     '--no-first-run', '--no-default-browser-check', '--disable-gpu',
     'about:blank',
 ], { stdio: 'ignore' });
@@ -145,15 +145,24 @@ const evalJs = async (expression) => {
 };
 
 // 1) "login" por token: la app lee access_token/rol/usuario de localStorage
-const usuario = JSON.stringify({ id: 1, nombre: 'Admin Test', rol: 'administrador', correo: CORREO });
+// Identidad inyectada: por defecto admin local de TEST; overridable con
+// TEST_ROL / TEST_USUARIO_ID / TEST_NOMBRE para auditar otros paneles (ej. coach).
+const ROL = process.env.TEST_ROL || 'administrador';
+const USUARIO_ID = String(process.env.TEST_USUARIO_ID || '1');
+const usuario = JSON.stringify({
+    id: Number(USUARIO_ID),
+    nombre: process.env.TEST_NOMBRE || 'Admin Test',
+    rol: ROL,
+    correo: CORREO,
+});
 log('navegando a /login');
 await send('Page.navigate', { url: `${BASE}/login` }, sessionId);
 log('navegacion /login enviada');
 await sleep(2500);
 await evalJs(`
   localStorage.setItem('access_token', ${JSON.stringify(TOKEN)});
-  localStorage.setItem('rol', 'administrador');
-  localStorage.setItem('usuario_id', '1');
+  localStorage.setItem('rol', ${JSON.stringify(ROL)});
+  localStorage.setItem('usuario_id', ${JSON.stringify(USUARIO_ID)});
   localStorage.setItem('tenant_id', '1');
   localStorage.setItem('usuario', ${JSON.stringify(usuario)});
   'ok'
