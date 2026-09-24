@@ -832,7 +832,7 @@ const DashboardCoach = () => {
                                             <span className="text-2xl">⚠️</span>
                                             <div>
                                                 <p className="font-bold text-gray-900">{alumnosEnRiesgo.length} alumno(s) en riesgo de abandono</p>
-                                                <p className="text-sm text-gray-600 mt-1">Llevan más de {umbralRiesgo} días sin entrenar (umbral que define el backend). Revisa la pestaña de Riesgo para contactarlos.</p>
+                                                <p className="text-sm text-gray-600 mt-1">Llevan más de {umbralRiesgo} días sin entrenar. Revisa la pestaña de Riesgo para contactarlos.</p>
                                             </div>
                                         </div>
                                     </div>
