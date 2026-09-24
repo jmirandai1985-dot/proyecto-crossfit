@@ -17,6 +17,7 @@ from app.models.reserva import Reserva
 from app.models.clase import Clase
 from app.models.coach_disciplina import CoachDisciplina
 from app.core.dependencies import get_current_admin, get_current_coach
+from app.services.auditoria_service import registrar_auditoria
 
 router = APIRouter()
 
@@ -433,6 +434,118 @@ def alumnos_de_coach(
             }
             for a in alumnos
         ],
+    }
+
+
+# ─────────────────────────────────────────
+# ENDPOINT 4c: Contactar por correo a un alumno (panel coach)
+# Mismo patron que POST /notificaciones-enviadas/enviar-manual (admin), pero
+# coach-scoped: el coach solo puede contactar alumnos de su propio box y usando
+# su propio coach_id. Reusa el template de inactividad (enviar_email_fidelizacion).
+#
+# IMPORTANTE (comportamiento deseado): el envio se registra en
+# notificaciones_enviadas con tipo='inactividad', igual que el envio manual del
+# admin. Eso hace que la alerta automatica de inactividad NO vuelva a escribirle
+# a ese alumno por los proximos 7 dias (dedupe de alertas_email_service), que es
+# justo lo que se busca cuando un coach ya lo contacto a mano.
+# ─────────────────────────────────────────
+def _registrar_notificacion(db: Session, alumno: Usuario, tipo: str,
+                            estado: str, detalle_error: str = None) -> None:
+    """Registra el envio en notificaciones_enviadas (mismo shape que el admin)."""
+    from app.models.notificacion_enviada import NotificacionEnviada
+    db.add(NotificacionEnviada(
+        alumno_id=alumno.id,
+        tenant_id=alumno.tenant_id,
+        tipo=tipo,
+        estado=estado,
+        detalle_error=detalle_error,
+        fecha_envio=datetime.utcnow(),
+    ))
+    db.commit()
+
+
+@router.post("/coach/{coach_id}/contactar/{alumno_id}")
+def contactar_alumno_por_email(
+    coach_id: int,
+    alumno_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
+):
+    """Envia el correo de inactividad a un alumno del box desde el panel coach.
+
+    - Coach: solo su propio `coach_id` (mismo criterio que los otros /coach/...).
+    - El alumno debe ser del box del token y tener rol alumno.
+    - Sin correo registrado -> 400 con detalle claro (no falla en silencio).
+    - Calcula los dias REALES de inactividad (ultima asistencia; si nunca asistio,
+      la fecha de alta; minimo 1) y registra el envio con su estado.
+    """
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+    if rol == "coach" and current_user["usuario_id"] != coach_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo puedes contactar alumnos desde tu propio panel",
+        )
+
+    alumno = db.query(Usuario).filter(
+        Usuario.id == alumno_id,
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == RolUsuario.alumno,
+    ).first()
+    if not alumno:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alumno no encontrado en este box",
+        )
+    if not alumno.correo:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El alumno no tiene correo registrado",
+        )
+
+    ultima = db.query(func.max(Asistencia.fecha)).filter(
+        Asistencia.tenant_id == tenant_id,
+        Asistencia.usuario_id == alumno.id,
+    ).scalar()
+    referencia = ultima or (alumno.created_at.date() if alumno.created_at else None)
+    dias = max(1, (date.today() - referencia).days) if referencia else 1
+
+    exito = False
+    detalle_error = None
+    try:
+        exito = enviar_email_fidelizacion(alumno.nombre, alumno.correo, dias)
+    except Exception as e:  # noqa: BLE001 - se reporta al panel, no se traga
+        detalle_error = str(e)
+
+    if not exito and not detalle_error:
+        try:
+            from app.services import email_service
+            detalle_error = email_service.ULTIMO_ERROR_SMTP or (
+                "No se pudo enviar el correo via Gmail SMTP (revisar credenciales o destinatario).")
+        except Exception:
+            detalle_error = "No se pudo enviar el correo via Gmail SMTP."
+
+    _registrar_notificacion(
+        db, alumno, "inactividad",
+        "enviado" if exito else "fallido",
+        None if exito else detalle_error)
+
+    registrar_auditoria(
+        db,
+        tenant_id=tenant_id,
+        usuario_id=current_user["usuario_id"],
+        accion="EMAIL_MANUAL",
+        entidad="usuario",
+        entidad_id=alumno.id,
+        detalle={"tipo": "inactividad", "dias_inactividad": dias,
+                 "exito": exito, "origen": "panel_coach"},
+    )
+
+    return {
+        "exito": exito,
+        "estado": "enviado" if exito else "fallido",
+        "detalle_error": None if exito else detalle_error,
+        "dias_inactividad": dias,
     }
 
 

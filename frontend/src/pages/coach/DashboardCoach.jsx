@@ -82,6 +82,9 @@ const DashboardCoach = () => {
     const [erroresBloque, setErroresBloque] = useState([]);
     // Umbral de dias sin asistir que usa el backend para marcar "en riesgo" (UMBRAL_ALERTA_DIAS).
     const [umbralRiesgo, setUmbralRiesgo] = useState(7);
+    // Contacto por correo de los alumnos en riesgo (estado por alumno).
+    const [enviandoCorreoId, setEnviandoCorreoId] = useState(null);
+    const [msgContacto, setMsgContacto] = useState(null); // { id, tipo, texto }
     const irSemanaAnterior = () => {
         const start = new Date(weekRange.start + 'T12:00:00');
         start.setDate(start.getDate() - 7);
@@ -423,15 +426,38 @@ const DashboardCoach = () => {
         }
     };
 
-    const handleContactar = (alumno) => {
-        if (alumno.telefono) {
-            const telefonoLimpio = alumno.telefono.replace(/\D/g, '');
-            const telefonoConCodigo = telefonoLimpio.startsWith('56') ? telefonoLimpio : `56${telefonoLimpio}`;
-            window.open(`https://wa.me/${telefonoConCodigo}`, '_blank');
-        } else if (alumno.correo) {
-            window.location.href = `mailto:${alumno.correo}`;
-        } else {
-            alert('Este alumno no tiene teléfono ni correo registrado.');
+    // Contacto por CORREO (reemplaza el viejo WhatsApp/wa.me: decision confirmada).
+    // POST /fidelizacion/coach/{id}/contactar/{alumno_id} -> manda el correo de
+    // inactividad con los dias reales y lo registra en notificaciones_enviadas.
+    const enviarCorreo = async (alumno) => {
+        if (!alumno.correo) {
+            setMsgContacto({
+                id: alumno.id,
+                tipo: 'error',
+                texto: `${alumno.nombre} no tiene correo registrado. Cargalo desde Admin y reintentá.`,
+            });
+            return;
+        }
+        setEnviandoCorreoId(alumno.id);
+        setMsgContacto(null);
+        try {
+            const r = await api.post(`/api/v1/fidelizacion/coach/${usuario_id}/contactar/${alumno.id}`);
+            const d = r.data || {};
+            setMsgContacto({
+                id: alumno.id,
+                tipo: d.exito ? 'exito' : 'error',
+                texto: d.exito
+                    ? `✉️ Correo enviado a ${alumno.nombre} (${d.dias_inactividad} días sin entrenar).`
+                    : (d.detalle_error || 'No se pudo enviar el correo.'),
+            });
+        } catch (e) {
+            setMsgContacto({
+                id: alumno.id,
+                tipo: 'error',
+                texto: e.response?.data?.detail || 'No se pudo enviar el correo.',
+            });
+        } finally {
+            setEnviandoCorreoId(null);
         }
     };
 
@@ -1252,12 +1278,19 @@ const DashboardCoach = () => {
                                                     </div>
                                                     <span className="text-2xl">⚠️</span>
                                                 </div>
+                                                {msgContacto?.id === alumno.id && (
+                                                    <div className={`mt-3 px-3 py-2 rounded text-sm font-medium ${msgContacto.tipo === 'exito' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`} data-testid="contacto-msg">
+                                                        {msgContacto.texto}
+                                                    </div>
+                                                )}
                                                 <div className="mt-3 flex gap-2">
                                                     <button
-                                                        onClick={() => handleContactar(alumno)}
+                                                        data-testid="btn-contactar"
+                                                        onClick={() => enviarCorreo(alumno)}
+                                                        disabled={enviandoCorreoId === alumno.id}
                                                         className="flex-1 px-3 py-2 bg-red-500 text-white rounded text-sm font-medium hover:bg-red-600 transition-colors"
                                                     >
-                                                        📞 Contactar
+                                                            {enviandoCorreoId === alumno.id ? 'Enviando correo...' : 'Enviar correo'}
                                                     </button>
                                                     <button
                                                         onClick={() => setSelectedAlumno(alumno)}
