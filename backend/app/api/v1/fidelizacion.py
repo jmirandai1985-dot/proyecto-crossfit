@@ -354,6 +354,7 @@ def alumnos_coach_en_riesgo(
     return {
         "status": "success",
         "coach_id": coach_id,
+        "umbral_dias": umbral_dias,  # para que el copy del panel no lo tenga hardcodeado
         "total_alumnos": len(alumnos),
         "total_alerta": len(df_alerta),
         "alumnos_alerta": _registros_json(df_alerta)

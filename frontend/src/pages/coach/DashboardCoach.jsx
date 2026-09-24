@@ -80,6 +80,8 @@ const DashboardCoach = () => {
     const [weekRange, setWeekRange] = useState(getWeekRange);
     // Secciones que fallaron en la última carga (banner + Reintentar, patrón de Admin).
     const [erroresBloque, setErroresBloque] = useState([]);
+    // Umbral de dias sin asistir que usa el backend para marcar "en riesgo" (UMBRAL_ALERTA_DIAS).
+    const [umbralRiesgo, setUmbralRiesgo] = useState(7);
     const irSemanaAnterior = () => {
         const start = new Date(weekRange.start + 'T12:00:00');
         start.setDate(start.getDate() - 7);
@@ -203,6 +205,7 @@ const DashboardCoach = () => {
 
         setAlumnos(alumnosData);
         setAlumnosEnRiesgo(riesgoData);
+        setUmbralRiesgo(riesgoRes.status === 'fulfilled' ? (riesgoRes.value.data?.umbral_dias ?? 7) : 7);
         setWods(wodsData);
         setMovimientos(movimientosData);
 
@@ -740,7 +743,7 @@ const DashboardCoach = () => {
                                                 <tr>
                                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Alumno</th>
                                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">RMs</th>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Progreso</th>
                                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Acción</th>
                                                 </tr>
                                             </thead>
@@ -809,7 +812,7 @@ const DashboardCoach = () => {
                                             <span className="text-2xl">⚠️</span>
                                             <div>
                                                 <p className="font-bold text-gray-900">{alumnosEnRiesgo.length} alumno(s) en riesgo de abandono</p>
-                                                <p className="text-sm text-gray-600 mt-1">Llevan más de 7 días sin entrenar. Revisa la pestaña de Riesgo para contactarlos.</p>
+                                                <p className="text-sm text-gray-600 mt-1">Llevan más de {umbralRiesgo} días sin entrenar (umbral que define el backend). Revisa la pestaña de Riesgo para contactarlos.</p>
                                             </div>
                                         </div>
                                     </div>
@@ -1196,8 +1199,8 @@ const DashboardCoach = () => {
                                             <tr>
                                                 <th className="px-6 py-3 text-left text-sm font-medium">Alumno</th>
                                                 <th className="px-6 py-3 text-left text-sm font-medium">Total RMs</th>
+                                                <th className="px-6 py-3 text-left text-sm font-medium">Avance</th>
                                                 <th className="px-6 py-3 text-left text-sm font-medium">Progreso</th>
-                                                <th className="px-6 py-3 text-left text-sm font-medium">Estado</th>
                                                 <th className="px-6 py-3 text-left text-sm font-medium">Top RM</th>
                                                 <th className="px-6 py-3 text-left text-sm font-medium">Acción</th>
                                             </tr>
@@ -1297,7 +1300,7 @@ const DashboardCoach = () => {
                                 ) : (
                                     <div className="text-center py-12 bg-green-50 rounded-lg border border-green-200">
                                         <p className="text-5xl mb-4">🎉</p>
-                                        <p className="text-xl font-bold text-green-700">¡Excelente! Todos tus alumnos están activos</p>
+                                        <p className="text-xl font-bold text-green-700">¡Excelente! Ningún alumno está en riesgo</p>
                                         <p className="text-sm text-green-600 mt-2">No hay alumnos en riesgo de abandono</p>
                                     </div>
                                 )}

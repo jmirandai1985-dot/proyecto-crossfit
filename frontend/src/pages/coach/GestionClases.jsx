@@ -119,7 +119,7 @@ export default function GestionClases() {
                                 estado: wodData.estado || 'publicado'
                             });
                         })
-                        .catch(() => setMsg({ tipo: 'error', texto: 'La clase tiene un WOD pero no se pudo cargar its datos' }));
+                        .catch(() => setMsg({ tipo: 'error', texto: 'La clase tiene un WOD pero no se pudo cargar sus datos' }));
                 }
             })
             .catch(() => setMsg({ tipo: 'error', texto: 'No se pudo cargar la clase indicada en la URL' }))
@@ -309,7 +309,7 @@ export default function GestionClases() {
                     if (esEmergencia) body.modo_emergencia = true;
                     const res = await api.post(`${API_BASE}/wods/batch`, body);
                     setMsg({ tipo: 'exito', texto: `WOD creado y asignado a la clase #${claseDestino.id}` + (esEmergencia ? ' (modo emergencia)' : '') });
-                    setTimeout(() => navigate('/coach?tab=clases'), 1200);
+                    setTimeout(() => navigate('/coach/dashboard?tab=clases'), 1200);
                 }
             } else if (claseDestino && claseDestino.id && !urlClaseId) {
                 // Origen CTA "Publicar WOD" desde la pestaña Clases de Hoy (sin ?clase=):
