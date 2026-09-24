@@ -93,10 +93,38 @@ def test_p02_post_reservas_ignora_estado_y_asistio_del_body():
 
 def test_p02_no_permite_reservar_clase_pasada():
     """POST /reservas sobre una clase de fecha pasada -> 400 (antes: 201)."""
-    pasadas = _clases_pasadas()
-    if not pasadas:
-        pytest.skip("TEST no tiene clases pasadas para probar")
-    r = _post_reserva(pasadas[0]["id"])
+    clase_id = None
+    if os.getenv("ENVIRONMENT") == "test":
+        # Se CREA la clase pasada: el seed resetea las clases de TEST, así que no
+        # se puede depender de que exista una en el rango.
+        from sqlalchemy import text as _text
+        from app.db.database import SessionLocal
+        from app.utils.santiago import hoy_santiago
+
+        db = SessionLocal()
+        try:
+            horario_id = db.execute(
+                _text("SELECT id FROM horarios ORDER BY id LIMIT 1")).scalar()
+            if horario_id:
+                ayer = hoy_santiago() - timedelta(days=1)
+                clase_id = db.execute(
+                    _text("""INSERT INTO clases (tenant_id, horario_base_id, disciplina_id,
+                                fecha, hora_inicio, hora_fin, cupo_maximo, cupo_original,
+                                asistentes_confirmados, cancelada)
+                             VALUES (:t, :h, 1, :f, '03:00', '04:00', 16, 16, 0, false)
+                             RETURNING id"""),
+                    {"t": TENANT_ID, "h": horario_id, "f": ayer}).scalar()
+                db.commit()
+        finally:
+            db.close()
+
+    if clase_id is None:
+        pasadas = _clases_pasadas()
+        if not pasadas:
+            pytest.skip("no se pudo preparar una clase pasada")
+        clase_id = pasadas[0]["id"]
+
+    r = _post_reserva(clase_id)
     assert r.status_code == 400, f"status {r.status_code}: {r.text[:200]}"
     assert "pasada" in (r.json().get("detail") or "").lower()
 

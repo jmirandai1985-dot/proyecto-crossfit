@@ -18,22 +18,16 @@ import os
 import pytest
 import requests
 
-from tests.conftest import BASE, TENANT_ID, get_admin_token
+from tests.conftest import ALUMNO_ID, BASE, TENANT_ID, get_admin_token
 
-ALUMNO_PEDIDO = 2  # alumno real de TEST sin solicitudes pendientes
+# Alumno creado por el seed de la suite (999). El seed resetea TEST, así que no
+# se puede usar un id fijo arbitrario: el path de staff exige que el alumno
+# destino pertenezca al box.
+ALUMNO_PEDIDO = ALUMNO_ID
 
 
 def _h_admin():
     return {"Authorization": f"Bearer {get_admin_token()}"}
-
-
-def _productos(activo):
-    r = requests.get(f"{BASE}/productos",
-                     params={"activo": str(activo).lower(), "limit": 50},
-                     headers=_h_admin(), timeout=20)
-    if r.status_code != 200:
-        return []
-    return r.json() or []
 
 
 def _pedido(producto_id, **extra):
@@ -43,17 +37,42 @@ def _pedido(producto_id, **extra):
     return requests.post(f"{BASE}/pedidos", headers=_h_admin(), json=body, timeout=20)
 
 
+def _crear_producto(nombre, activo=True, stock=5, precio=1000):
+    """Crea su propio producto (no depende del seed) y devuelve su id."""
+    r = requests.post(
+        f"{BASE}/productos", headers=_h_admin(),
+        data={"nombre": nombre, "precio": precio, "stock": stock,
+              "activo": str(activo).lower()},
+        timeout=20)
+    if r.status_code != 201:
+        pytest.skip(f"no se pudo crear el producto de prueba: {r.status_code} {r.text[:120]}")
+    pid = r.json()["id"]
+    # Limpieza: lo desactivamos al terminar (el catálogo del Bazar es compartido).
+    return pid
+
+
+def _desactivar_producto(pid):
+    try:
+        requests.delete(f"{BASE}/productos/{pid}", headers=_h_admin(), timeout=20)
+    except Exception:
+        pass
+
+
 # ═══════════════════════════════════════════════════════════════════
 # B-03 — el comprobante es obligatorio
 # ═══════════════════════════════════════════════════════════════════
 
 def test_p04_pedido_sin_voucher_es_rechazado():
     """Sin `voucher_url` el POST debe ser 422 (antes: 201 con voucher_url=null)."""
-    disponibles = [p for p in _productos(True) if (p.get("stock") or 0) > 0]
-    if not disponibles:
-        pytest.skip("TEST no tiene productos activos con stock")
-    r = _pedido(disponibles[0]["id"])
-    assert r.status_code == 422, f"status {r.status_code}: {r.text[:200]}"
+    pid = _crear_producto("TEST P04 B03", activo=True)
+    try:
+        r = _pedido(pid)
+        assert r.status_code == 422, f"status {r.status_code}: {r.text[:200]}"
+        # Control: con voucher el pedido sí se crea (no rompimos el flujo normal)
+        r2 = _pedido(pid, voucher_url="/privado/vouchers/test.png")
+        assert r2.status_code == 201, f"con voucher: {r2.status_code} {r2.text[:200]}"
+    finally:
+        _desactivar_producto(pid)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -62,12 +81,13 @@ def test_p04_pedido_sin_voucher_es_rechazado():
 
 def test_p04_no_se_puede_comprar_producto_inactivo():
     """Un producto con activo=false debe dar 400 (antes: 201)."""
-    inactivos = [p for p in _productos(False) if (p.get("stock") or 0) > 0]
-    if not inactivos:
-        pytest.skip("TEST no tiene productos inactivos con stock")
-    r = _pedido(inactivos[0]["id"], voucher_url="/privado/vouchers/test.png")
-    assert r.status_code == 400, f"status {r.status_code}: {r.text[:200]}"
-    assert "no está disponible" in (r.json().get("detail") or "")
+    pid = _crear_producto("TEST P04 B02", activo=False)
+    try:
+        r = _pedido(pid, voucher_url="/privado/vouchers/test.png")
+        assert r.status_code == 400, f"status {r.status_code}: {r.text[:200]}"
+        assert "no está disponible" in (r.json().get("detail") or "")
+    finally:
+        _desactivar_producto(pid)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -85,17 +105,25 @@ def test_p04_aprobacion_registra_el_precio_de_la_solicitud():
     db = SessionLocal()
     try:
         plan = db.execute(_text(
-            "SELECT id, precio_clp FROM planes WHERE activo = true AND precio_clp > 0 "
-            "ORDER BY id LIMIT 1")).first()
+            "SELECT id, precio_clp FROM planes ORDER BY id LIMIT 1")).first()
         if not plan:
-            pytest.skip("TEST no tiene planes pagos")
+            pytest.skip("TEST no tiene planes")
         plan_id, precio_original = plan[0], plan[1]
-        alumno_id = db.execute(_text(
-            "SELECT id FROM usuarios WHERE rol='alumno' AND id NOT IN "
-            "(SELECT alumno_id FROM solicitudes_planes WHERE estado='pending') "
-            "ORDER BY id LIMIT 1")).scalar()
-        if not alumno_id:
-            pytest.skip("no hay alumno sin solicitud pendiente")
+        # El seed de la suite deja los planes a precio 0: se le asigna un precio
+        # para poder probar el snapshot (se restaura al final del test).
+        precio_esperado = precio_original or 44000
+        if precio_esperado != precio_original:
+            db.execute(_text("UPDATE planes SET precio_clp = :p WHERE id = :i"),
+                       {"p": precio_esperado, "i": plan_id})
+            db.commit()
+        # Alumno del fixture de la suite (999, con membresía). Se limpian sus
+        # solicitudes PENDIENTES para que POST /solicitar no choque con el
+        # "ya tienes una solicitud pendiente" (limpieza TEST-only, documentada).
+        alumno_id = 999
+        db.execute(_text(
+            "DELETE FROM solicitudes_planes WHERE alumno_id = :u AND estado = 'pending'"),
+            {"u": alumno_id})
+        db.commit()
     finally:
         db.close()
 
@@ -114,11 +142,11 @@ def test_p04_aprobacion_registra_el_precio_de_la_solicitud():
             snapshot = db.execute(_text(
                 "SELECT precio_clp_snapshot FROM solicitudes_planes WHERE id=:i"),
                 {"i": solicitud_id}).scalar()
-            assert snapshot == precio_original, (
-                f"la solicitud no guardó el snapshot: {snapshot} != {precio_original}")
+            assert snapshot == precio_esperado, (
+                f"la solicitud no guardó el snapshot: {snapshot} != {precio_esperado}")
             # El admin sube el precio DESPUÉS de la solicitud
             db.execute(_text("UPDATE planes SET precio_clp = :p WHERE id = :i"),
-                       {"p": precio_original + 50000, "i": plan_id})
+                       {"p": precio_esperado + 50000, "i": plan_id})
             db.commit()
         finally:
             db.close()
@@ -137,9 +165,9 @@ def test_p04_aprobacion_registra_el_precio_de_la_solicitud():
                 "WHERE referencia_tipo='suscripcion' AND referencia_id=:r"),
                 {"r": sus}).scalar()
             assert monto is not None, "no se registró la transacción del plan aprobado"
-            assert int(monto) == precio_original, (
+            assert int(monto) == precio_esperado, (
                 f"el ingreso quedó con el precio de la APROBACIÓN ({monto}) en vez "
-                f"del de la SOLICITUD ({precio_original})")
+                f"del de la SOLICITUD ({precio_esperado})")
         finally:
             db.close()
     finally:
