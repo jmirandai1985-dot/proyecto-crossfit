@@ -158,9 +158,12 @@ const DashboardCoach = () => {
             || r.reason?.message || 'No se pudo cargar';
 
         // Disciplinas asignadas al coach (activo=True)
+        // H-12: se usa discIds (valor recien calculado), no el state coachDisciplinas,
+        // que en la 1ra carga todavia esta vacio y hacia que el filtro se saltee.
+        let discIds = [];
         if (coachDiscRes.status === 'fulfilled') {
             const coachDiscData = coachDiscRes.value.data || [];
-            const discIds = coachDiscData
+            discIds = coachDiscData
                 .filter(cd => cd.activo && cd.coach_id === usuario_id)
                 .map(cd => cd.disciplina_id);
             setCoachDisciplinas(discIds);
@@ -210,8 +213,8 @@ const DashboardCoach = () => {
         setMovimientos(movimientosData);
 
         // Filtrar SOLO las disciplinas asignadas al coach (tabla coach_disciplinas activo=True)
-        const clasesFiltradas = coachDisciplinas.length > 0
-            ? clasesData.filter(c => coachDisciplinas.includes(c.disciplina_id))
+        const clasesFiltradas = discIds.length > 0
+            ? clasesData.filter(c => discIds.includes(c.disciplina_id))
             : clasesData;
 
         // Filter today's classes
@@ -485,6 +488,10 @@ const DashboardCoach = () => {
         }
     ];
 
+    // H-08: X/Y publicados debe contar los WODs realmente publicados (no los borradores)
+    const wodsPublicados = new Set((wods || []).filter(w => w.estado === 'publicado').map(w => w.id));
+    const clasesConWodPublicado = clasesSemana.filter(c => c.wod_id && wodsPublicados.has(c.wod_id)).length;
+
     const formatFecha = (fechaStr) => {
         if (!fechaStr) return '';
         const d = new Date(fechaStr + 'T12:00:00');
@@ -599,7 +606,7 @@ const DashboardCoach = () => {
                         <div className="flex items-start justify-between">
                             <div>
                                 <p className="text-sm font-medium text-gray-500">WODs esta semana</p>
-                                <p className="text-2xl font-bold text-gray-900 mt-1">{clasesSemana.filter(c => c.wod_id != null).length}/{clasesSemana.length} publicados</p>
+                                <p className="text-2xl font-bold text-gray-900 mt-1">{clasesConWodPublicado}/{clasesSemana.length} con WOD publicado</p>
                                 <p className="text-xs text-gray-500 mt-1">Clic para ver Clases y WODs</p>
                             </div>
                             <div className="bg-orange-500 w-12 h-12 rounded-lg flex items-center justify-center text-xl">💪</div>
