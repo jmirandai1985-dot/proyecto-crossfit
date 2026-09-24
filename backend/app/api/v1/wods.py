@@ -11,6 +11,7 @@ from app.core.dependencies import get_current_user, get_current_coach, verificar
 from app.models.wod_movimiento import WodMovimiento
 from app.models.movimiento import Movimiento
 from app.models.clase import Clase
+from app.models.coach_disciplina import CoachDisciplina
 from app.schemas import wod as schemas
 from app.schemas.wod_parse import WodParseRequest, WodParseResponse, MovimientoParseado, DebugInfo, FaseInfo, FaseMovimiento
 from datetime import date
@@ -998,6 +999,8 @@ def actualizar_wod(
 def eliminar_wod(
     wod_id: int,
     tenant_id: int = Query(None),
+    disciplina_id: int = Query(
+        None, description="Disciplina del WOD (opcional; para coaches, igual que el PUT)"),
     current_user: dict = Depends(get_current_coach),
     db: Session = Depends(get_db)
 ):
@@ -1007,6 +1010,37 @@ def eliminar_wod(
         Wod.id == wod_id, Wod.tenant_id == tenant_id).first()
     if not wod:
         raise HTTPException(status_code=404, detail="WOD no encontrado")
+
+    # ── H-03: un coach solo borra WODs PROPIOS o de una disciplina que tenga asignada ──
+    # Antes cualquier coach del box podia borrar el WOD de otra disciplina/coach.
+    # Los WODs no tienen disciplina_id propio: se vinculan por sus clases
+    # (clases.wod_id + clases.disciplina_id). Mismo criterio que POST /clases/{id}/ampliar-cupo.
+    rol = current_user.get("rol", "")
+    if rol not in ("admin", "administrador"):
+        uid = current_user["usuario_id"]
+        if wod.coach_id != uid:
+            disc_de_clases = [
+                r[0] for r in db.query(Clase.disciplina_id).filter(
+                    Clase.wod_id == wod.id,
+                    Clase.tenant_id == tenant_id,
+                    Clase.disciplina_id.isnot(None),
+                ).distinct().all()
+            ]
+            if disciplina_id:
+                disc_de_clases.append(disciplina_id)
+            mis_disc = {
+                r[0] for r in db.query(CoachDisciplina.disciplina_id).filter(
+                    CoachDisciplina.coach_id == uid,
+                    CoachDisciplina.tenant_id == tenant_id,
+                    CoachDisciplina.activo == True,  # noqa: E712
+                ).all()
+            }
+            if not (set(disc_de_clases) & mis_disc):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Solo puedes eliminar WODs propios o de una disciplina que tengas asignada",
+                )
+
     db.delete(wod)
     db.commit()
     return {"detail": "WOD eliminado"}

@@ -245,11 +245,25 @@ def crear_clase(
 ):
     # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
     tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+    es_admin = rol in ("admin", "administrador")
+
+    # ── H-02: un coach solo crea clases de SUS disciplinas y a SU nombre ──
+    # Antes se aceptaban tal cual el disciplina_id y el coach_id del body: un coach
+    # podia crear clases de otra disciplina y asignarlas a otro coach.
+    if not es_admin:
+        if clase.disciplina_id:
+            verificar_coach_disciplina(
+                current_user["usuario_id"], clase.disciplina_id, db,
+                accion="crear_clase", tenant_id=tenant_id)
+        coach_id = current_user["usuario_id"]
+    else:
+        coach_id = clase.coach_id or current_user["usuario_id"]
 
     nueva_clase = Clase(
         tenant_id=tenant_id,
         horario_base_id=clase.horario_base_id,
-        coach_id=clase.coach_id,
+        coach_id=coach_id,
         disciplina_id=clase.disciplina_id,
         fecha=clase.fecha,
         hora_inicio=clase.hora_inicio,
