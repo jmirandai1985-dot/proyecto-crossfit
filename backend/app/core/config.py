@@ -114,25 +114,39 @@ if not settings.JWT_SECRET_KEY:
 
 
 # ── Guardas de seguridad TEST vs PROD ────────────────────────────────────────
-# IDs de los endpoints de la rama TEST de Neon. Los endpoints de Neon son
-# efímeros: cuando la rama se cierra/expira, hay que crear una nueva y cambia
+# IDs de endpoints de Neon. Los endpoints son efímeros: al recrear una rama cambia
 # el id (ep-xxxxx-xxxxx).
 #
-# ⚠️ ÚNICO lugar a actualizar cuando cambie la rama TEST de Neon. Lo consumen:
+# TOPOLOGÍA ACTUAL (2026-09-24): TEST y PROD son DOS RAMAS del MISMO proyecto de
+# Neon ("box-crossfit", antes "produccion2.0"):
+#   - PROD = rama principal      → PROD_BRANCH_ID
+#   - TEST = rama de desarrollo  → TEST_BRANCH_IDS
+# Por eso comparten la cuota de cómputo del proyecto (decisión consciente del
+# negocio: si TEST se agota la cuota, PROD también se cae).
+#
+# ⚠️ ÚNICO lugar a actualizar cuando cambie de rama. Lo consumen:
 #   - app/main.py  → GET /debug/db-url (conftest.py aborta los tests si da 404)
 #   - run_setup_test_db.py, scripts/aplicar_overrides_test.py, ml/train_*.py
 #     (abortan si la BD no es TEST, para no escribir sobre datos reales)
-#
-# Es una WHITELIST de TEST: el endpoint de PROD no se hardcodea acá a propósito,
-# así que cualquier host que no esté en la lista se rechaza (fail-safe).
+#   - scripts/sync_test_from_prod.py y scripts/restaurar_backup.py (origen/destino)
 TEST_BRANCH_IDS = (
-    "ep-odd-smoke-b6f31576",          # TEST actual (proyecto Neon nuevo, 2026-09-23)
-    "ep-long-salad-ac1uza9z",         # TEST anterior (agotó la cuota de Neon)
-    "ep-billowing-violet-acdqud44",   # TEST anterior (cerrada)
-    "ep-purple-cherry-acck4v5a",      # TEST histórico
+    "ep-jolly-butterfly-b6ty2z89",    # TEST actual: rama de box-crossfit (2026-09-24)
 )
+
+# Endpoint de PROD (rama principal del mismo proyecto). Se usa como DENYLIST:
+# una URL que apunte a PROD NUNCA se clasifica como TEST, ni aunque contenga un id
+# de TEST (copy/paste cruzado) ni si alguien agrega el id de PROD a la whitelist.
+# Con TEST y PROD en el MISMO proyecto, esto evita que un guard mal configurado
+# habilite escrituras sobre producción (restaurar_backup, seeders, sync, etc.).
+PROD_BRANCH_ID = "ep-nameless-sound-b6km6wyi"
 
 
 def is_test_db_url(url: str) -> bool:
-    """True SOLO si `url` apunta a un endpoint TEST conocido (fail-safe: False ante duda)."""
-    return any(branch in (url or "") for branch in TEST_BRANCH_IDS)
+    """True SOLO si `url` apunta a un endpoint TEST conocido y NO a PROD.
+
+    Fail-safe: False ante duda (URL vacía, desconocida, o que contenga PROD).
+    """
+    u = url or ""
+    if PROD_BRANCH_ID in u:
+        return False
+    return any(branch in u for branch in TEST_BRANCH_IDS)

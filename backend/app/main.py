@@ -124,11 +124,14 @@ async def debug_db_url():
     - En TEST: devuelve {"is_safe": true, "branch": <id del endpoint TEST>}
     - En PRODUCCIÃ“N: devuelve 404 para no exponer informaciÃ³n de infraestructura
     Nunca expone la URL completa ni credenciales."""
-    from app.core.config import TEST_BRANCH_IDS, settings
+    # Criterio ÚNICO con el resto de los guards: `is_test_db_url` aplica además el
+    # DENYLIST de PROD (PROD_BRANCH_ID), así este endpoint no podría "mentir" si el
+    # id de PROD terminara en la whitelist por error.
+    from app.core.config import TEST_BRANCH_IDS, is_test_db_url, settings
     url = settings.DATABASE_URL
-    for test_branch in TEST_BRANCH_IDS:
-        if test_branch in url:
-            return {"is_safe": True, "is_test": True, "branch": test_branch}
+    if is_test_db_url(url):
+        branch = next((b for b in TEST_BRANCH_IDS if b in url), None)
+        return {"is_safe": True, "is_test": True, "branch": branch}
     # En producciÃ³n o cualquier otro entorno, no revelar informaciÃ³n
     from fastapi import HTTPException
     raise HTTPException(status_code=404, detail="Not found")
