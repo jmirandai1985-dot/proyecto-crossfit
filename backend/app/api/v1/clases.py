@@ -34,6 +34,11 @@ def listar_clases(
         None, description="Filtrar hasta fecha (YYYY-MM-DD)"),
     solo_con_cupo: Optional[bool] = Query(
         None, description="Solo clases con cupos disponibles"),
+    generar: bool = Query(
+        False,
+        description="Generar las clases faltantes del rango desde horarios_base. "
+                    "OPT-IN (default false): un GET no debe escribir. Para forzar la "
+                    "generacion usar POST /horarios/generar-clases-dia."),
     skip: int = Query(0),
     limit: int = Query(100),
     current_user: dict = Depends(get_current_user),
@@ -44,80 +49,81 @@ def listar_clases(
     # ── RESPALDO AUTOMÁTICO: Si se consulta un rango y faltan clases,
     #    se generan automáticamente desde horarios_base ──
     try:
-        from datetime import timedelta
-        from app.services.generar_clases import DIAS_ANTICIPACION
-        hoy = date.today()
-        # ¿Qué rango se está consultando?
-        rango_desde = fecha_desde if fecha_desde is not None else (
-            fecha if fecha is not None else hoy)
-        rango_hasta = fecha_hasta if fecha_hasta is not None else (
-            fecha if fecha is not None else hoy)
+        if generar:
+            from datetime import timedelta
+            from app.services.generar_clases import DIAS_ANTICIPACION
+            hoy = date.today()
+            # ¿Qué rango se está consultando?
+            rango_desde = fecha_desde if fecha_desde is not None else (
+                fecha if fecha is not None else hoy)
+            rango_hasta = fecha_hasta if fecha_hasta is not None else (
+                fecha if fecha is not None else hoy)
 
-        # Determinar si debemos auto-generar:
-        #  - Si el rango consultado es futuro (rango_desde > hoy), generar para ESE rango.
-        #  - Si el rango incluye hoy o días cercanos, generar hasta hoy+28 (4 semanas).
-        debe_generar = False
-        gen_desde = None
-        gen_hasta = None
+            # Determinar si debemos auto-generar:
+            #  - Si el rango consultado es futuro (rango_desde > hoy), generar para ESE rango.
+            #  - Si el rango incluye hoy o días cercanos, generar hasta hoy+28 (4 semanas).
+            debe_generar = False
+            gen_desde = None
+            gen_hasta = None
 
-        if fecha is not None:
-            # Consulta de un solo día: generar solo ese día si faltan clases
-            debe_generar = True
-            gen_desde = fecha
-            gen_hasta = fecha
-        elif rango_desde is not None and rango_hasta is not None:
-            # Consulta de rango: generamos SIEMPRE el rango consultado
-            # (no solo [hoy, hoy+28]) para que navegar a semanas futuras funcione.
-            debe_generar = True
-            gen_desde = rango_desde
-            gen_hasta = rango_hasta
-            # Si el rango empieza antes/igual que hoy, aseguramos también hasta hoy+28
-            if gen_desde <= hoy:
-                gen_hasta = max(gen_hasta, hoy + timedelta(days=DIAS_ANTICIPACION))
+            if fecha is not None:
+                # Consulta de un solo día: generar solo ese día si faltan clases
+                debe_generar = True
+                gen_desde = fecha
+                gen_hasta = fecha
+            elif rango_desde is not None and rango_hasta is not None:
+                # Consulta de rango: generamos SIEMPRE el rango consultado
+                # (no solo [hoy, hoy+28]) para que navegar a semanas futuras funcione.
+                debe_generar = True
+                gen_desde = rango_desde
+                gen_hasta = rango_hasta
+                # Si el rango empieza antes/igual que hoy, aseguramos también hasta hoy+28
+                if gen_desde <= hoy:
+                    gen_hasta = max(gen_hasta, hoy + timedelta(days=DIAS_ANTICIPACION))
 
-        if debe_generar and gen_desde is not None and gen_hasta is not None:
-            from app.services.generar_clases import generar_clases_para_rango
+            if debe_generar and gen_desde is not None and gen_hasta is not None:
+                from app.services.generar_clases import generar_clases_para_rango
 
-            # Verificar si ALGUNA fecha del rango [gen_desde, gen_hasta] está incompleta
-            faltan_clases = False
-            f = gen_desde
-            while f <= gen_hasta:
-                if f.weekday() == 6:  # domingo, skip
+                # Verificar si ALGUNA fecha del rango [gen_desde, gen_hasta] está incompleta
+                faltan_clases = False
+                f = gen_desde
+                while f <= gen_hasta:
+                    if f.weekday() == 6:  # domingo, skip
+                        f += timedelta(days=1)
+                        continue
+                    # Contar clases existentes para esta fecha
+                    count_clases = db.execute(
+                        text(
+                            "SELECT COUNT(*) FROM clases WHERE tenant_id = :tenant_id AND fecha = :fecha"),
+                        {"tenant_id": tenant_id, "fecha": f}
+                    ).scalar()
+                    # Contar horarios_base activos para este día de semana
+                    count_horarios = db.execute(
+                        text(
+                            "SELECT COUNT(*) FROM horarios WHERE tenant_id = :tenant_id AND dia_semana = :ds AND activo = true"),
+                        {"tenant_id": tenant_id, "ds": f.weekday()}
+                    ).scalar()
+                    if count_clases < count_horarios:
+                        faltan_clases = True
+                        logger.info(
+                            f"🔍 [Auto-generación] {f} tiene {count_clases}/{count_horarios} clases (faltan {count_horarios - count_clases})")
+                        break
                     f += timedelta(days=1)
-                    continue
-                # Contar clases existentes para esta fecha
-                count_clases = db.execute(
-                    text(
-                        "SELECT COUNT(*) FROM clases WHERE tenant_id = :tenant_id AND fecha = :fecha"),
-                    {"tenant_id": tenant_id, "fecha": f}
-                ).scalar()
-                # Contar horarios_base activos para este día de semana
-                count_horarios = db.execute(
-                    text(
-                        "SELECT COUNT(*) FROM horarios WHERE tenant_id = :tenant_id AND dia_semana = :ds AND activo = true"),
-                    {"tenant_id": tenant_id, "ds": f.weekday()}
-                ).scalar()
-                if count_clases < count_horarios:
-                    faltan_clases = True
-                    logger.info(
-                        f"🔍 [Auto-generación] {f} tiene {count_clases}/{count_horarios} clases (faltan {count_horarios - count_clases})")
-                    break
-                f += timedelta(days=1)
 
-            if faltan_clases:
-                logger.info(
-                    f"🔄 [Auto-generación] Faltan clases en el rango [{gen_desde} -> {gen_hasta}], generando desde horarios_base...")
-                resultado = generar_clases_para_rango(
-                    db, tenant_id, fecha_desde=gen_desde, fecha_hasta=gen_hasta)
-                if resultado["creadas"] > 0:
+                if faltan_clases:
                     logger.info(
-                        f"✅ [Auto-generación] Creadas {resultado['creadas']} clases (tenant={tenant_id})")
+                        f"🔄 [Auto-generación] Faltan clases en el rango [{gen_desde} -> {gen_hasta}], generando desde horarios_base...")
+                    resultado = generar_clases_para_rango(
+                        db, tenant_id, fecha_desde=gen_desde, fecha_hasta=gen_hasta)
+                    if resultado["creadas"] > 0:
+                        logger.info(
+                            f"✅ [Auto-generación] Creadas {resultado['creadas']} clases (tenant={tenant_id})")
+                    else:
+                        logger.info(
+                            f"ℹ️ [Auto-generación] {resultado['message']}")
                 else:
                     logger.info(
-                        f"ℹ️ [Auto-generación] {resultado['message']}")
-            else:
-                logger.info(
-                    f"✅ [Auto-generación] Rango completo, no es necesario generar")
+                        f"✅ [Auto-generación] Rango completo, no es necesario generar")
     except Exception as e:
         logger.error(
             f"❌ [Auto-generación] Error al generar clases automáticamente: {e}", exc_info=True)
