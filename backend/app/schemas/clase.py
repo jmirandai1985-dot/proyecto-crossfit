@@ -55,6 +55,10 @@ class ClaseListItem(BaseModel):
     disciplina_id: int
     coach_id: Optional[int]
     wod_id: Optional[int] = None
+    # Título del WOD publicado en la clase: la tarjeta del panel Coach lo usa
+    # para mostrar el nombre real en vez de "WOD #<id>". Sin declararlo acá, el
+    # response_model lo descarta (mismo caso que cupo_original).
+    wod_titulo: Optional[str] = None
     cupo_maximo: int
     cupo_original: Optional[int] = None
     asistentes_confirmados: int

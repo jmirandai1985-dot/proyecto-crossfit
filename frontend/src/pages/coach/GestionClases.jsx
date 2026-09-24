@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import Layout from '../../components/Layout';
+import WodDetalleModal from '../../components/WodDetalleModal';
 import api from '../../services/api';
 import { hoyChileStr as hoyStr, toChileFechaStr as toLocalFechaStr } from '../../utils/fecha';
 
@@ -69,6 +70,9 @@ export default function GestionClases() {
     const [clasesDelDia, setClasesDelDia] = useState([]);
     const [wod, setWod] = useState(null);
     const [modoEdicion, setModoEdicion] = useState(false);
+    // Punto 1 (panel Coach): detalle completo del WOD de una tarjeta (solo lectura)
+    const [wodDetalle, setWodDetalle] = useState(null);   // { wod, clase, error } | null
+    const [cargandoWodDetalle, setCargandoWodDetalle] = useState(false);
     const [wodForm, setWodForm] = useState({ titulo: '', calentamiento: '', fuerza_habilidad: '', wod_principal: '', tipo_metcon: '', estado: 'publicado' });
     const [asistencia, setAsistencia] = useState([]);
     const [claseAsistencia, setClaseAsistencia] = useState(null);
@@ -396,6 +400,27 @@ export default function GestionClases() {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
+    // Punto 1 (panel Coach): al hacer clic en una tarjeta con WOD publicado se
+    // abre el detalle completo. Reutiliza GET /wods/{id} (el mismo que ya se usa
+    // para precargar el formulario con ?clase=) SOLO para leer.
+    const verDetalleWod = async (clase) => {
+        if (!clase?.wod_id) return;
+        setWodDetalle({ wod: null, clase, error: '' });
+        setCargandoWodDetalle(true);
+        try {
+            const r = await api.get(`${API_BASE}/wods/${clase.wod_id}`);
+            setWodDetalle({ wod: r.data, clase, error: '' });
+        } catch (e) {
+            setWodDetalle({
+                wod: null,
+                clase,
+                error: e.response?.data?.detail || 'No se pudo cargar el WOD publicado',
+            });
+        } finally {
+            setCargandoWodDetalle(false);
+        }
+    };
+
     const hoy = hoyStr();
     const turnoLabel = TURNOS.find(t => t.id === turnoActivo);
     // Clases del día SIN WOD publicado aún (para ofrecer el CTA "Publicar WOD")
@@ -616,7 +641,19 @@ export default function GestionClases() {
                                                 {[...clasesConWod].sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || '')).map(c => {
                                                     const enCurso = claseEnCurso === c.id;
                                                     return (
-                                                        <div key={c.id} className={`border rounded-lg p-4 ${enCurso ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' : 'bg-white border-gray-200'}`}>
+                                                        <div key={c.id}
+                                                            role="button"
+                                                            tabIndex={0}
+                                                            title="Ver el WOD completo"
+                                                            data-testid="clase-card"
+                                                            onClick={() => verDetalleWod(c)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                                    e.preventDefault();
+                                                                    verDetalleWod(c);
+                                                                }
+                                                            }}
+                                                            className={`border rounded-lg p-4 cursor-pointer hover:border-emerald-400 hover:shadow-sm transition-all ${enCurso ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' : 'bg-white border-gray-200'}`}>
                                                             <div className="flex items-center justify-between mb-2">
                                                                 <div className="flex items-center gap-3">
                                                                     <span className="font-bold text-lg">{c.hora_inicio?.slice(0, 5)}</span>
@@ -625,8 +662,16 @@ export default function GestionClases() {
                                                                 </div>
                                                                 <div className="text-sm text-gray-500">{(c.asistentes_confirmados || 0)}/{c.cupo_maximo || '?'}</div>
                                                             </div>
-                                                            <div className="text-sm text-gray-700 mb-2">{c.wod_titulo || `WOD #${c.wod_id}`}</div>
-                                                            <button onClick={() => cargarAsistencia(c.id)} className="px-3 py-1.5 bg-blue-500 text-white rounded text-sm hover:bg-blue-600">Tomar Asistencia</button>
+                                                            <button
+                                                                type="button"
+                                                                data-testid="ver-wod"
+                                                                onClick={(e) => { e.stopPropagation(); verDetalleWod(c); }}
+                                                                className="text-sm text-left text-emerald-700 font-medium hover:underline mb-2 block"
+                                                            >
+                                                                🏋️ {c.wod_titulo || `WOD #${c.wod_id}`}
+                                                                <span className="text-emerald-600 font-bold"> — Ver WOD completo →</span>
+                                                            </button>
+                                                            <button onClick={(e) => { e.stopPropagation(); cargarAsistencia(c.id); }} className="px-3 py-1.5 bg-blue-500 text-white rounded text-sm hover:bg-blue-600">Tomar Asistencia</button>
                                                         </div>
                                                     );
                                                 })}
@@ -652,6 +697,17 @@ export default function GestionClases() {
                             </div>
                         )}
                     </div>
+                )}
+
+                {/* Punto 1: detalle completo del WOD (solo lectura) */}
+                {wodDetalle && (
+                    <WodDetalleModal
+                        wod={wodDetalle.wod}
+                        clase={wodDetalle.clase}
+                        loading={cargandoWodDetalle}
+                        error={wodDetalle.error}
+                        onClose={() => setWodDetalle(null)}
+                    />
                 )}
             </div>
         </Layout>

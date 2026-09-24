@@ -152,6 +152,7 @@ def listar_clases(
     query = text(f"""
         SELECT c.id, c.fecha, c.hora_inicio, c.hora_fin, c.disciplina_id, c.coach_id,
                c.wod_id,
+               COALESCE(w.titulo, '') AS wod_titulo,
                c.cupo_maximo, c.cupo_original, c.asistentes_confirmados, c.cancelada,
                c.horario_base_id, c.tenant_id, c.created_at, c.updated_at,
                d.nombre AS disciplina_nombre,
@@ -163,6 +164,7 @@ def listar_clases(
         FROM clases c
         LEFT JOIN disciplinas d ON c.disciplina_id = d.id
         LEFT JOIN usuarios u ON c.coach_id = u.id
+        LEFT JOIN wods w ON c.wod_id = w.id
         {where_clause}
         ORDER BY c.fecha DESC, c.hora_inicio ASC
         LIMIT :limit OFFSET :skip
@@ -210,6 +212,9 @@ def listar_clases(
             "disciplina_id": row.disciplina_id,
             "coach_id": row.coach_id,
             "wod_id": row.wod_id,
+            # Título del WOD publicado ('' si no tiene): la tarjeta del panel Coach
+            # lo usa para mostrar el nombre real en vez de "WOD #<id>".
+            "wod_titulo": row.wod_titulo,
             "cupo_maximo": row.cupo_maximo,
             "cupo_original": row.cupo_original,
             "asistentes_confirmados": row.asistentes_confirmados,
