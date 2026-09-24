@@ -1,5 +1,5 @@
 ﻿"""
-SYNC PROD -> TEST (billowing-violet-acdqud44).
+SYNC PROD -> TEST (TEST y PROD en proyectos Neon separados desde 2026-09-23).
 IDEMPOTENTE: TRUNCATE + copia todos los datos desde PRODUCCIÃ“N.
 Preserva tablas custom (transacciones_financieras) mediante backup/restore.
 Incluye migraciones post-sync (requiere_coach, es_estudiante, coach_disciplinas, cobertura_emergencia).
@@ -14,6 +14,10 @@ BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(BACKEND_DIR)
 sys.path.insert(0, BACKEND_DIR)
 
+# OJO: el TRUNCATE de este script borra TODA la tabla usuarios, asi que los
+# usuarios de prueba del seed de la suite (999/1000/1001/1010) NO sobreviven:
+# despues del sync, TEST es una copia de PROD (usuarios reales incluidos).
+
 # â”€â”€ SEGURIDAD: Verificar ENVIRONMENT â”€â”€
 ENV = os.environ.get("ENVIRONMENT", "")
 if ENV != "test":
@@ -27,22 +31,55 @@ os.environ["ENVIRONMENT"] = "test"
 
 # â”€â”€ URLs â”€â”€
 # TEST: se obtiene de settings (carga .env.test)
-settings = importlib.import_module("app.core.config").settings
+_config_mod = importlib.import_module("app.core.config")
+settings = _config_mod.settings
 URL_TEST = settings.DATABASE_URL
 
-# PROD: se obtiene del entorno (NUNCA hardcodear credenciales en el repo).
-# Definir DATABASE_URL_PROD en backend/.env (fuera de git).
+# PROD: NUNCA hardcodear credenciales en el repo. Orden de resolucion:
+#   1) DATABASE_URL_PROD en el entorno (override explicito, fuera de git)
+#   2) DATABASE_URL de backend/.env -> desde la migracion 2026-09-23 TEST y PROD
+#      viven en proyectos Neon SEPARADOS: .env.test apunta a TEST y .env apunta
+#      al PROD activo, asi que ya no comparten endpoint ni sufijo de branch.
 URL_PROD = os.getenv("DATABASE_URL_PROD")
+if not URL_PROD:
+    try:
+        from dotenv import dotenv_values
+        _env_prod = dotenv_values(os.path.join(BACKEND_DIR, ".env"))
+        URL_PROD = (_env_prod.get("DATABASE_URL") or "").strip()
+        if URL_PROD:
+            print("[INFO] DATABASE_URL_PROD no estaba en el entorno: uso DATABASE_URL de backend/.env")
+    except Exception as _e:
+        print(f"[WARN] no se pudo leer backend/.env: {_e}")
+
 if not URL_PROD or "postgresql://" not in URL_PROD:
     print("=" * 60)
-    print("  FATAL: Define DATABASE_URL_PROD en backend/.env para poder sincronizar desde PRODUCCION")
+    print("  FATAL: no encontre la URL de PRODUCCION.")
+    print("  Define DATABASE_URL_PROD en el entorno o DATABASE_URL en backend/.env")
     print("=" * 60)
     sys.exit(1)
 
+# ── SEGURIDAD: TEST tiene que ser TEST y PROD no puede ser TEST ──
+# (con la config nueva, un .env mal apuntado haria que este script copiara
+#  TEST sobre si mismo o, peor, tomara TEST como origen de produccion)
+if not _config_mod.is_test_db_url(URL_TEST):
+    print("FATAL: settings.DATABASE_URL no apunta a un endpoint TEST conocido. Abortando.")
+    sys.exit(1)
+if _config_mod.is_test_db_url(URL_PROD):
+    print("FATAL: la URL de PRODUCCION apunta a un endpoint de TEST. Abortando.")
+    sys.exit(1)
+if URL_PROD == URL_TEST:
+    print("FATAL: la URL de PRODUCCION es igual a la de TEST. Abortando.")
+    sys.exit(1)
+
+
+def _solo_host(url: str) -> str:
+    """Host de la URL, sin usuario ni password (nunca imprimir credenciales)."""
+    return url.split("@")[-1].split("/")[0] if "@" in url else url[:40]
+
 
 print("="*60)
-print(f"BD de TEST: {URL_TEST[:100]}...")
-print(f"billowing-violet-acdqud44 (DIRECT): {'billowing-violet-acdqud44' in URL_TEST}")
+print(f"BD de TEST : {_solo_host(URL_TEST)}")
+print(f"BD de PROD : {_solo_host(URL_PROD)}")
 print("="*60)
 
 # â”€â”€ CONECTAR â”€â”€
