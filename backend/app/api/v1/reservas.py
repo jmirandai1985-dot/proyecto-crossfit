@@ -8,7 +8,7 @@ from app.models.clase import Clase
 from app.models.reserva import Reserva
 from app.db.database import get_db
 from typing import List, Optional
-from sqlalchemy import func, update
+from sqlalchemy import func, text, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
@@ -64,6 +64,28 @@ def crear_reserva(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Clase no encontrada"
+        )
+
+    # ── P0-2 (auditoría Alumno, D-03): el CLIENTE no decide estado ni asistencia ──
+    # Antes `estado` y `asistio` se guardaban tal cual venían del body: un alumno
+    # podía auto-marcarse presente (`asistio=true`) al reservar una clase futura y
+    # escribir cualquier `estado` (rompía los filtros del panel, el % de
+    # asistencia y la racha). Ahora se FUERZAN server-side; si el front sigue
+    # mandándolos, se ignoran.
+    reserva_data.estado = "confirmada"
+    reserva_data.asistio = False
+
+    # ── P0-2: tampoco se reservan clases de fechas pasadas ni canceladas ──
+    from app.utils.santiago import hoy_santiago
+    if clase.fecha < hoy_santiago():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No puedes reservar una clase de una fecha pasada",
+        )
+    if clase.cancelada:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La clase fue cancelada por el box",
         )
 
     # ARREGLO 1+3: Validación de aforo + incremento ATÓMICOS.
@@ -629,6 +651,18 @@ def actualizar_reserva(
             detail="No puedes modificar reservas de otro usuario",
         )
 
+    # ── P0-2 (auditoría Alumno, R-02): el alumno NO puede reescribir su reserva ──
+    # Con el body de este PUT podía cambiar `estado` (string libre), `asistio`
+    # (auto-marcarse presente) y `tokens_gastados` (reproducido en TEST).
+    # Ninguna pantalla lo usa: el alumno cancela con DELETE /reservas/{id} y la
+    # asistencia la marca el staff con PUT /reservas/{id}/asistencia.
+    if rol not in ("coach", "admin", "administrador"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=("No puedes modificar tus reservas. Para cancelar usa "
+                    "DELETE /reservas/{id}; la asistencia la marca tu coach."),
+        )
+
     update_data = reserva_data.model_dump(exclude_unset=True)
 
     for field, value in update_data.items():
@@ -681,6 +715,28 @@ def eliminar_reserva(
             detail="No puedes cancelar reservas de otro usuario",
         )
 
+    # ── P0-2 (auditoría Alumno, R-03): idempotencia de la cancelación ──
+    # Un DELETE repetido volvía a decrementar el aforo y a DEVOLVER EL CRÉDITO
+    # otra vez (reproducido en TEST: 3 DELETE seguidos = +3 créditos sobre una
+    # reserva ya cancelada). El UPDATE condicional garantiza que solo la PRIMERA
+    # cancelación hace la transición de estado; las siguientes reciben 409 y no
+    # tocan ni el aforo ni los créditos.
+    cambio = db.execute(
+        text(
+            "UPDATE reservas SET estado = 'cancelled', updated_at = now() "
+            "WHERE id = :rid AND tenant_id = :tid AND estado <> 'cancelled'"
+        ),
+        {"rid": reserva_id, "tid": tenant_id},
+    ).rowcount
+    if cambio == 0:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=("La reserva ya estaba cancelada: no se devuelve el crédito "
+                    "dos veces"),
+        )
+    db.expire(reserva)
+
     # ARREGLO 1: Obtener la clase y decrementar asistentes_confirmados
     clase = db.query(Clase).filter(Clase.id == reserva.clase_id).first()
 
@@ -710,7 +766,6 @@ def eliminar_reserva(
         if membresia and membresia.creditos_disponibles is not None:
             membresia.creditos_disponibles += 1
 
-    reserva.estado = "cancelled"
     db.commit()
 
     return None
