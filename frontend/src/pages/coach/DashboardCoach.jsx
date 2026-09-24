@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import AsistenciaClases from '../../components/AsistenciaClases';
 import AlumnoFichaCoach from '../../components/AlumnoFichaCoach';
+import PreviewEmailModal from '../../components/PreviewEmailModal';
 
 const DashboardCoach = () => {
     const navigate = useNavigate();
@@ -91,6 +92,8 @@ const DashboardCoach = () => {
     // P2: ficha del alumno (modal coach-scoped). No reusa `selectedAlumno`
     // porque ese state gobierna el panel de RMs del tab Alumnos.
     const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
+    // P1: alumno cuyo correo se está previsualizando (modal de preview).
+    const [previewAlumno, setPreviewAlumno] = useState(null);
     const irSemanaAnterior = () => {
         const start = new Date(weekRange.start + 'T12:00:00');
         start.setDate(start.getDate() - 7);
@@ -433,9 +436,9 @@ const DashboardCoach = () => {
     };
 
     // Contacto por CORREO (reemplaza el viejo WhatsApp/wa.me: decision confirmada).
-    // POST /fidelizacion/coach/{id}/contactar/{alumno_id} -> manda el correo de
-    // inactividad con los dias reales y lo registra en notificaciones_enviadas.
-    const enviarCorreo = async (alumno) => {
+    // P1: el boton NO envia directo -> abre el PREVIEW del correo (asunto + cuerpo
+    // reales, renderizados por el backend). El envio sale desde "Confirmar envío".
+    const enviarCorreo = (alumno) => {
         if (!alumno.correo) {
             setMsgContacto({
                 id: alumno.id,
@@ -444,8 +447,14 @@ const DashboardCoach = () => {
             });
             return;
         }
-        setEnviandoCorreoId(alumno.id);
         setMsgContacto(null);
+        setPreviewAlumno(alumno);
+    };
+
+    // Confirmado el preview: POST real (mismo endpoint de siempre). Se registra en
+    // notificaciones_enviadas y en auditoria (EMAIL_MANUAL, origen panel_coach).
+    const confirmarEnvioCorreo = async (alumno) => {
+        setEnviandoCorreoId(alumno.id);
         try {
             const r = await api.post(`/api/v1/fidelizacion/coach/${usuario_id}/contactar/${alumno.id}`);
             const d = r.data || {};
@@ -464,6 +473,7 @@ const DashboardCoach = () => {
             });
         } finally {
             setEnviandoCorreoId(null);
+            setPreviewAlumno(null);
         }
     };
 
@@ -1363,6 +1373,17 @@ const DashboardCoach = () => {
                         )}
                     </div>
                 </div>
+
+                {/* P1: preview del correo antes de enviarlo */}
+                {previewAlumno && (
+                    <PreviewEmailModal
+                        alumnoId={previewAlumno.id}
+                        coachId={usuario_id}
+                        enviando={enviandoCorreoId === previewAlumno.id}
+                        onClose={() => setPreviewAlumno(null)}
+                        onConfirmar={() => confirmarEnvioCorreo(previewAlumno)}
+                    />
+                )}
 
                 {/* P2: ficha acotada del alumno (modal coach-scoped) */}
                 {fichaAlumnoId && (

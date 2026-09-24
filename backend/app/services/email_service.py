@@ -210,6 +210,24 @@ def enviar_email_vencimiento_plan(alumno: dict, fecha_vencimiento) -> bool:
                    alumno.get("id"), tipo="vencimiento")
 
 
+def render_email_fidelizacion(nombre: str, dias_ausente: int) -> tuple:
+    """Renderiza (asunto, html) del correo de inactividad.
+
+    Fuente UNICA de verdad: la usan el envio real (`enviar_email_fidelizacion`)
+    y el preview del panel coach, para que el mensaje que el coach ve antes de
+    confirmar sea EXACTAMENTE el que se envia.
+    """
+    titulo = "Tu box te está esperando"
+    saludo = f"Hola {nombre.split()[0]}, notamos que llevas <strong>{dias_ausente} d&iacute;as</strong> sin entrenar."
+    cuerpo = ("El descanso es parte del proceso, pero el impulso tambi&eacute;n se entrena. "
+              "Tu lugar en Urban Training Box sigue esper&aacute;ndote: la comunidad, el coach y tu propia mejora "
+              "est&aacute;n listos para que vuelvas. Retom&aacute; donde lo dejaste, cada sesi&oacute;n cuenta.")
+    url = f"{settings.FRONTEND_URL}/alumno/mis-reservas"
+    html = _template(titulo, saludo, cuerpo, "Volver a entrenar", url)
+    asunto = f"¡Te extrañamos en el box, {nombre.split()[0]}! 💪"
+    return asunto, html
+
+
 def enviar_email_fidelizacion(nombre: str, correo: str, dias_ausente: int) -> bool:
     """Correo de inactividad (SMTP centralizado via _enviar/settings GMAIL).
 
@@ -218,15 +236,8 @@ def enviar_email_fidelizacion(nombre: str, correo: str, dias_ausente: int) -> bo
     en el endpoint campana-email).
     """
     alumno = {"nombre": nombre, "correo": correo}
-    titulo = "Tu box te está esperando"
-    saludo = f"Hola {nombre.split()[0]}, notamos que llevas <strong>{dias_ausente} d&iacute;as</strong> sin entrenar."
-    cuerpo = ("El descanso es parte del proceso, pero el impulso tambi&eacute;n se entrena. "
-              "Tu lugar en Urban Training Box sigue esper&aacute;ndote: la comunidad, el coach y tu propia mejora "
-              "est&aacute;n listos para que vuelvas. Retom&aacute; donde lo dejaste, cada sesi&oacute;n cuenta.")
-    url = f"{settings.FRONTEND_URL}/alumno/mis-reservas"
-    html = _template(titulo, saludo, cuerpo, "Volver a entrenar", url)
-    return _enviar(correo, f"¡Te extrañamos en el box, {nombre.split()[0]}! 💪", html,
-                   alumno.get("id"), tipo="inactividad")
+    asunto, html = render_email_fidelizacion(nombre, dias_ausente)
+    return _enviar(correo, asunto, html, alumno.get("id"), tipo="inactividad")
 
 
 def enviar_email_solicitud_admin(alumno: dict, tenant_id: int) -> bool:

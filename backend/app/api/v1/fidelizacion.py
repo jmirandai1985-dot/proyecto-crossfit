@@ -464,20 +464,13 @@ def _registrar_notificacion(db: Session, alumno: Usuario, tipo: str,
     db.commit()
 
 
-@router.post("/coach/{coach_id}/contactar/{alumno_id}")
-def contactar_alumno_por_email(
-    coach_id: int,
-    alumno_id: int,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_coach),
-):
-    """Envia el correo de inactividad a un alumno del box desde el panel coach.
+def _alumno_para_contacto(db: Session, current_user: dict, coach_id: int,
+                          alumno_id: int) -> Usuario:
+    """Guardas comunes de los endpoints de contacto/preview del panel coach.
 
-    - Coach: solo su propio `coach_id` (mismo criterio que los otros /coach/...).
-    - El alumno debe ser del box del token y tener rol alumno.
+    - Coach: solo su propio `coach_id` (403).
+    - El alumno debe ser del box del token y tener rol alumno (404).
     - Sin correo registrado -> 400 con detalle claro (no falla en silencio).
-    - Calcula los dias REALES de inactividad (ultima asistencia; si nunca asistio,
-      la fecha de alta; minimo 1) y registra el envio con su estado.
     """
     tenant_id = current_user["tenant_id"]
     rol = current_user.get("rol", "")
@@ -502,13 +495,67 @@ def contactar_alumno_por_email(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="El alumno no tiene correo registrado",
         )
+    return alumno
 
+
+def _dias_inactividad_alumno(db: Session, tenant_id: int, alumno: Usuario) -> int:
+    """Dias REALES de inactividad: ultima asistencia; si nunca asistio, la fecha
+    de alta; minimo 1. Lo usan el preview y el envio, para que el numero que ve
+    el coach sea el mismo que sale en el correo."""
     ultima = db.query(func.max(Asistencia.fecha)).filter(
         Asistencia.tenant_id == tenant_id,
         Asistencia.usuario_id == alumno.id,
     ).scalar()
     referencia = ultima or (alumno.created_at.date() if alumno.created_at else None)
-    dias = max(1, (date.today() - referencia).days) if referencia else 1
+    return max(1, (date.today() - referencia).days) if referencia else 1
+
+
+@router.get("/coach/{coach_id}/contactar/{alumno_id}/preview")
+def preview_correo_contacto(
+    coach_id: int,
+    alumno_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
+):
+    """Preview del correo de inactividad ANTES de enviarlo (panel coach).
+
+    Es un GET sin efectos secundarios: NO registra nada ni manda nada. Devuelve
+    el asunto y el HTML EXACTOS que enviaria el POST de contacto (mismo render y
+    mismos dias), para que el coach confirme sobre el mensaje real.
+    """
+    alumno = _alumno_para_contacto(db, current_user, coach_id, alumno_id)
+    dias = _dias_inactividad_alumno(db, current_user["tenant_id"], alumno)
+
+    from app.services.email_service import render_email_fidelizacion
+    asunto, html = render_email_fidelizacion(alumno.nombre, dias)
+
+    return {
+        "destinatario": alumno.correo,
+        "nombre": alumno.nombre,
+        "asunto": asunto,
+        "html": html,
+        "dias_inactividad": dias,
+    }
+
+
+@router.post("/coach/{coach_id}/contactar/{alumno_id}")
+def contactar_alumno_por_email(
+    coach_id: int,
+    alumno_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
+):
+    """Envia el correo de inactividad a un alumno del box desde el panel coach.
+
+    - Coach: solo su propio `coach_id` (mismo criterio que los otros /coach/...).
+    - El alumno debe ser del box del token y tener rol alumno.
+    - Sin correo registrado -> 400 con detalle claro (no falla en silencio).
+    - Calcula los dias REALES de inactividad (ultima asistencia; si nunca asistio,
+      la fecha de alta; minimo 1) y registra el envio con su estado.
+    """
+    tenant_id = current_user["tenant_id"]
+    alumno = _alumno_para_contacto(db, current_user, coach_id, alumno_id)
+    dias = _dias_inactividad_alumno(db, tenant_id, alumno)
 
     exito = False
     detalle_error = None
