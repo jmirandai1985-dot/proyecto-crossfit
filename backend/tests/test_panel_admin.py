@@ -183,7 +183,9 @@ def test_a08_comprar_2_unidades_stock_baja_a_3():
         "alumno_id": ALUMNO_ADMIN_ID,
         "producto_id": Shared.producto_id,
         "cantidad": 2,
-        "estado": "pendiente"
+        "estado": "pendiente",
+        # P0-4 (B-03): el comprobante es obligatorio en el backend.
+        "voucher_url": "/privado/vouchers/test_panel_admin.png"
     }
     r = requests.post(f"{BASE}/pedidos", json=pedido)
     assert r.status_code in (
@@ -213,7 +215,9 @@ def test_a09_compra_excede_stock_rechazada():
         "alumno_id": ALUMNO_ADMIN_ID,
         "producto_id": Shared.producto_id,
         "cantidad": 10,
-        "estado": "pendiente"
+        "estado": "pendiente",
+        # P0-4 (B-03): el comprobante es obligatorio (si no, el 422 taparía el 400 de stock).
+        "voucher_url": "/privado/vouchers/test_panel_admin.png"
     }
     r = requests.post(f"{BASE}/pedidos", json=pedido)
     assert r.status_code == 400, \

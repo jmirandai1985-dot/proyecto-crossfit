@@ -17,6 +17,10 @@ class SolicitudPlan(Base):
     estado = Column(String(20), default="pending", nullable=False)
     voucher_url = Column(Text, nullable=True)
     certificado_estudiante_url = Column(Text, nullable=True)
+    # ── P0-4 (S-01): precio del plan AL MOMENTO DE SOLICITAR ──
+    # Snapshot para que la aprobación/ingreso no dependa del precio vigente al
+    # aprobar (migración 035). NULL en solicitudes históricas.
+    precio_clp_snapshot = Column(Integer, nullable=True)
     comentario_admin = Column(String(500), nullable=True)
     aprobado_por = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -36,6 +36,8 @@ export default function () {
       cantidad: 1,
       alumno_id: a.alumno_id,
       tenant_id: TENANT_ID,
+      // P0-4 (B-03): el backend exige comprobante de pago.
+      voucher_url: '/privado/vouchers/k6-test.png',
     }),
     {
       headers: {

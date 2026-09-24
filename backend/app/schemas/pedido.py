@@ -15,10 +15,17 @@ class PedidoBase(BaseModel):
 
 
 class PedidoCreate(PedidoBase):
-    """Esquema para crear un Pedido"""
+    """Esquema para crear un Pedido.
+
+    `voucher_url` es OBLIGATORIO (P0-4 / B-03): el comprobante de pago es la
+    prueba de la transferencia en el Bazar. La UI ya lo exigía, pero el backend
+    aceptaba pedidos sin comprobante (reproducido en TEST: 201 con
+    `voucher_url: null`).
+    """
     tenant_id: int = Field(..., gt=0, description="ID del tenant")
-    voucher_url: Optional[str] = Field(
-        None, description="URL del comprobante de pago")
+    voucher_url: str = Field(
+        ..., min_length=1, max_length=500,
+        description="URL del comprobante de pago (obligatorio)")
 
 
 class PedidoUpdate(BaseModel):

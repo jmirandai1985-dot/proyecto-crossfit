@@ -86,6 +86,16 @@ def crear_pedido(
             detail="Producto no encontrado"
         )
 
+    # ── P0-4 (B-02): no se compran productos DESACTIVADOS ──
+    # El catálogo los oculta (`GET /productos?activo=true`), pero el POST los
+    # aceptaba igual: con el id a mano se podía comprar un producto retirado
+    # (reproducido en TEST: 201 sobre `poleras` con activo=false).
+    if not producto.activo:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El producto no está disponible en el Bazar",
+        )
+
     # Validar stock
     if producto.stock < pedido_data.cantidad:
         raise HTTPException(

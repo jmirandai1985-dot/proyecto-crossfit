@@ -95,7 +95,10 @@ def solicitar_plan(
         plan_id=data.plan_id,
         estado="pending",
         voucher_url=data.voucher_url,
-        certificado_estudiante_url=data.certificado_estudiante_url
+        certificado_estudiante_url=data.certificado_estudiante_url,
+        # ── P0-4 (S-01): snapshot del precio vigente AL SOLICITAR ──
+        # La aprobación/ingreso NO debe depender de cambios de precio posteriores.
+        precio_clp_snapshot=plan.precio_clp,
     )
     db.add(solicitud)
     db.commit()
@@ -128,7 +131,9 @@ def listar_solicitudes_pendientes(
             "alumno_nombre": alumno.nombre if alumno else "Desconocido",
             "alumno_email": alumno.correo if alumno else "",
             "plan_nombre": plan.nombre if plan else "Desconocido",
-            "plan_precio": plan.precio_clp if plan else 0,
+            "plan_precio": (s.precio_clp_snapshot
+                            if s.precio_clp_snapshot is not None
+                            else (plan.precio_clp if plan else 0)),
             "voucher_url": s.voucher_url,
             "certificado_estudiante_url": s.certificado_estudiante_url,
             "estado": s.estado,
@@ -336,11 +341,20 @@ def aprobar_solicitud(
     # consistencia. No debe impedir la aprobación si falla.
     try:
         from datetime import date
+        # ── P0-4 (S-01): el ingreso usa el precio VIGENTE AL SOLICITAR ──
+        # (snapshot guardado al crear la solicitud). Antes se usaba
+        # `plan.precio_clp` del momento de APROBAR: si el admin cambiaba el
+        # precio entre medio, la transacción quedaba por el precio nuevo
+        # (reproducido en TEST: 44.000 al solicitar -> ingreso de 99.000).
+        # Fallback para solicitudes históricas sin snapshot.
+        monto_facturado = (solicitud.precio_clp_snapshot
+                           if solicitud.precio_clp_snapshot is not None
+                           else (plan.precio_clp or 0))
         tx = TransaccionFinanciera(
             tenant_id=suscripcion.tenant_id,
             tipo="ingreso",
             categoria="membresia",
-            monto=plan.precio_clp if plan.precio_clp else 0,
+            monto=monto_facturado,
             descripcion=(
                 f"Suscripcion plan {plan.nombre} (usuario #{solicitud.alumno_id})"
             ),

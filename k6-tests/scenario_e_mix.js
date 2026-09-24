@@ -69,7 +69,7 @@ export function bazarFn() {
   if (__ITER > 0) return;
   const a = tokens[((__VU - 1) + 40) % N_ALUMNOS];
   const res = http.post(`${BASE_URL}/api/v1/pedidos`,
-    JSON.stringify({ producto_id: PRODUCT_ID, cantidad: 1, alumno_id: a.alumno_id, tenant_id: TENANT_ID }),
+    JSON.stringify({ producto_id: PRODUCT_ID, cantidad: 1, alumno_id: a.alumno_id, tenant_id: TENANT_ID, voucher_url: '/privado/vouchers/k6-test.png' }),
     { headers: { Authorization: `Bearer ${a.token}`, 'Content-Type': 'application/json' } });
   cuenta(res, 201, 400, cBazar201, cBazar400);
   check(res, { 'bazar 201/400': (r) => r.status === 201 || r.status === 400, 'sin 5xx': (r) => r.status < 500 });
