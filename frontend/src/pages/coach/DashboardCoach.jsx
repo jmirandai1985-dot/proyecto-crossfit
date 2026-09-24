@@ -565,6 +565,7 @@ const DashboardCoach = () => {
                         <div className="flex items-start justify-between">
                             <div>
                                 <p className="text-sm font-medium text-gray-500">Alumnos Activos</p>
+                                {/* Depende de GET /fidelizacion/coach/{id}/alumnos, que ahora filtra por estado='activo' (H-05). */}
                                 <p className="text-2xl font-bold text-gray-900 mt-1">{alumnos.length}</p>
                                 <p className="text-xs text-gray-500 mt-1">{progresoAlumnos.filter(a => a.total_rms > 0).length} con RMs — Clic para ver</p>
                             </div>

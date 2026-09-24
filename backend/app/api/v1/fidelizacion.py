@@ -65,7 +65,7 @@ def analizar_fidelizacion(
     alumnos = db.query(Usuario).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
-        Usuario.activo == True
+        Usuario.estado == "activo"
     ).all()
 
     if not alumnos:
@@ -152,7 +152,7 @@ def registrar_asistencia(
     usuario = db.query(Usuario).filter(
         Usuario.id == usuario_id,
         Usuario.tenant_id == tenant_id,
-        Usuario.activo == True
+        Usuario.estado == "activo"
     ).first()
 
     if not usuario:
@@ -300,7 +300,7 @@ def alumnos_coach_en_riesgo(
         Usuario.id.in_(alumno_ids),
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
-        Usuario.activo == True
+        Usuario.estado == "activo"
     ).all()
 
     if not alumnos:
@@ -416,7 +416,7 @@ def alumnos_de_coach(
         Usuario.id.in_(alumno_ids),
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
-        Usuario.activo == True,
+        Usuario.estado == "activo",
     ).order_by(Usuario.nombre.asc()).all()
 
     return {
@@ -454,7 +454,7 @@ def alumnos_tenant_en_riesgo(
     alumnos = db.query(Usuario).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
-        Usuario.activo == True
+        Usuario.estado == "activo"
     ).all()
 
     if not alumnos:
