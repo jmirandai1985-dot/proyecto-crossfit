@@ -4,6 +4,7 @@ import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import AsistenciaClases from '../../components/AsistenciaClases';
+import AlumnoFichaCoach from '../../components/AlumnoFichaCoach';
 
 const DashboardCoach = () => {
     const navigate = useNavigate();
@@ -87,6 +88,9 @@ const DashboardCoach = () => {
     const [msgContacto, setMsgContacto] = useState(null); // { id, tipo, texto }
     // Filtro por nivel en el tab Progreso (100% frontend).
     const [filtroProgreso, setFiltroProgreso] = useState('todos');
+    // P2: ficha del alumno (modal coach-scoped). No reusa `selectedAlumno`
+    // porque ese state gobierna el panel de RMs del tab Alumnos.
+    const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
     const irSemanaAnterior = () => {
         const start = new Date(weekRange.start + 'T12:00:00');
         start.setDate(start.getDate() - 7);
@@ -1333,7 +1337,8 @@ const DashboardCoach = () => {
                                                             {enviandoCorreoId === alumno.id ? 'Enviando correo...' : 'Enviar correo'}
                                                     </button>
                                                     <button
-                                                        onClick={() => setSelectedAlumno(alumno)}
+                                                        data-testid="btn-ver-perfil"
+                                                        onClick={() => setFichaAlumnoId(alumno.id)}
                                                         className="px-3 py-2 bg-white border border-red-300 text-red-600 rounded text-sm font-medium hover:bg-red-50 transition-colors"
                                                     >
                                                         Ver Perfil
@@ -1358,6 +1363,15 @@ const DashboardCoach = () => {
                         )}
                     </div>
                 </div>
+
+                {/* P2: ficha acotada del alumno (modal coach-scoped) */}
+                {fichaAlumnoId && (
+                    <AlumnoFichaCoach
+                        alumnoId={fichaAlumnoId}
+                        coachId={usuario_id}
+                        onClose={() => setFichaAlumnoId(null)}
+                    />
+                )}
             </div>
         </Layout>
     );

@@ -550,6 +550,85 @@ def contactar_alumno_por_email(
 
 
 # ─────────────────────────────────────────
+# ENDPOINT 4d: Ficha del alumno para el panel coach (P2)
+# Datos EXACTOS (pedido confirmado): telefono, antiguedad, plan actual y
+# creditos/vencimiento reales. Los endpoints admin (GET /usuarios/{id} y
+# GET /suscripciones) son admin-only, asi que el coach necesita esta version
+# acotada: no expone datos financieros ni el listado completo de suscripciones.
+# ─────────────────────────────────────────
+@router.get("/coach/{coach_id}/alumno/{alumno_id}/ficha")
+def ficha_alumno_coach(
+    coach_id: int,
+    alumno_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
+):
+    """Ficha acotada de un alumno del box para el panel coach.
+
+    - Coach: solo su propio `coach_id` (mismo criterio que los otros /coach/...).
+    - El alumno debe ser del box del token y tener rol alumno.
+    - Devuelve telefono + fecha de alta (+ antiguedad en dias) y el plan activo
+      con sus creditos disponibles y fecha de vencimiento EXACTAS. Si no tiene
+      suscripcion activa, `plan` viene en null (el front muestra Sin plan activo).
+    """
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+    if rol == "coach" and current_user["usuario_id"] != coach_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo puedes ver la ficha de alumnos de tu propio panel",
+        )
+
+    alumno = db.query(Usuario).filter(
+        Usuario.id == alumno_id,
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == RolUsuario.alumno,
+    ).first()
+    if not alumno:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alumno no encontrado en este box",
+        )
+
+    from app.models.suscripcion import Suscripcion
+    from app.models.plan import Plan
+
+    suscripcion = db.query(Suscripcion).filter(
+        Suscripcion.usuario_id == alumno.id,
+        Suscripcion.tenant_id == tenant_id,
+        Suscripcion.estado == "activo",
+    ).order_by(Suscripcion.fecha_expiracion.desc()).first()
+
+    plan_data = None
+    if suscripcion:
+        plan = db.query(Plan).filter(
+            Plan.id == suscripcion.plan_id,
+            Plan.tenant_id == tenant_id,
+        ).first()
+        plan_data = {
+            "plan_id": suscripcion.plan_id,
+            "nombre": plan.nombre if plan else None,
+            "creditos_disponibles": suscripcion.creditos_disponibles,
+            "creditos_totales": suscripcion.creditos_totales,
+            "es_ilimitado": bool(plan.es_ilimitado) if plan else None,
+            "fecha_expiracion": (suscripcion.fecha_expiracion.isoformat()
+                                 if suscripcion.fecha_expiracion else None),
+            "estado": suscripcion.estado,
+        }
+
+    alta = alumno.created_at.date() if alumno.created_at else None
+    return {
+        "id": alumno.id,
+        "nombre": alumno.nombre,
+        "correo": alumno.correo,
+        "telefono": alumno.telefono,
+        "created_at": alumno.created_at.isoformat() if alumno.created_at else None,
+        "antiguedad_dias": (date.today() - alta).days if alta else None,
+        "plan": plan_data,
+    }
+
+
+# ─────────────────────────────────────────
 # ENDPOINT 5: Alumnos en riesgo del tenant (para admin, sin filtrar por coach)
 # ─────────────────────────────────────────
 @router.get("/tenant/{tenant_id}/en-riesgo")
