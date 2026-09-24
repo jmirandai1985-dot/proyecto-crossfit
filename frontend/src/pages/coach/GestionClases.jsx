@@ -156,7 +156,13 @@ export default function GestionClases() {
                 const ids = (r.data || []).filter(cd => cd.activo).map(cd => cd.disciplina_id);
                 setCoachDisciplinas(ids);
             })
-            .catch(() => setCoachDisciplinas([]));
+            .catch((e) => {
+                // H-10: antes era mudo (solo vaciaba la lista) y el coach no sabia que el
+                // modo emergencia quedaba deshabilitado.
+                console.error('Error disciplinas del coach', e);
+                setCoachDisciplinas([]);
+                setMsg({ tipo: 'error', texto: 'No se pudieron cargar tus disciplinas asignadas (el modo emergencia queda deshabilitado).', retry: () => window.location.reload() });
+            });
     }, [tenant_id, coach_id]);
 
     const cargarClases = useCallback(async (f) => {
@@ -228,13 +234,22 @@ export default function GestionClases() {
 
             // Cargar WODs de la semana (GET /wods/?fecha= acepta fecha arbitraria)
             const wodsSemana = {};
+            const wodsFallidos = [];  // H-10: dias cuyo GET /wods/?fecha fallo
             await Promise.all(semanaActual.map(async (f) => {
                 try {
                     const wr = await api.get(`${API_BASE}/wods/`, { params: { fecha: f } });
                     wodsSemana[f] = wr.data || [];
-                } catch { wodsSemana[f] = []; }
+                } catch (e) {
+                    // H-10: antes mudo; el calendario mostraba el dia como si no tuviera WOD.
+                    console.error('Error cargando WODs del dia', f, e);
+                    wodsSemana[f] = [];
+                    wodsFallidos.push(f);
+                }
             }));
             setWodsPorFecha(wodsSemana);
+            if (wodsFallidos.length > 0) {
+                setMsg({ tipo: 'error', texto: `No se pudieron cargar los WODs de ${wodsFallidos.length} dia(s): ${wodsFallidos.join(', ')}.`, retry: () => seleccionarDisciplina(disciplinaActiva) });
+            }
         } catch (e) { console.error('Error horarios', e); }
     };
 
@@ -341,10 +356,27 @@ export default function GestionClases() {
         try {
             await api.put(`${API_BASE}/reservas/${reservaId}/asistencia`, { asistio: valor });
             setAsistencia(prev => prev.map(a => a.reserva_id === reservaId ? { ...a, asistio: valor } : a));
-        } catch (e) { console.error(e); }
+        } catch (e) {
+            // H-10: antes solo iba a la consola y el coach no sabia que no se guardo.
+            console.error('Error guardando asistencia', e);
+            setMsg({ tipo: 'error', texto: e.response?.data?.detail || 'No se pudo guardar la asistencia. Reintenta.' });
+        }
     };
 
-    const marcarTodos = async (valor) => { for (const a of asistencia) await toggleAsistencia(a.reserva_id, valor); };
+    // H-11: un solo request atomico (mismo endpoint que el tab Asistencia), no N PUTs en serie.
+    const marcarTodos = async (valor) => {
+        if (!claseAsistencia || asistencia.length === 0) return;
+        try {
+            await api.post(`${API_BASE}/asistencia/clases/${claseAsistencia}/confirmar`, {
+                asistencias: asistencia.map(a => ({ reserva_id: a.reserva_id, asistio: valor })),
+            });
+            setAsistencia(prev => prev.map(a => ({ ...a, asistio: valor })));
+            setMsg({ tipo: 'exito', texto: 'Asistencia guardada para toda la clase' });
+        } catch (e) {
+            console.error('Error marcando asistencia (batch)', e);
+            setMsg({ tipo: 'error', texto: e.response?.data?.detail || 'No se pudo marcar la asistencia en lote' });
+        }
+    };
 
     // Abre el formulario de publicar WOD pre-cargando la clase seleccionada,
     // tal como si se hubiera llegado con ?clase=ID (reutiliza el bloque claseDestino).
@@ -378,7 +410,14 @@ export default function GestionClases() {
             <div className="p-6 max-w-6xl mx-auto">
                 <h1 className="text-2xl font-bold mb-4">Gestión de Clases</h1>
                 {msg.texto && (
-                    <div className={`mb-4 p-3 rounded ${msg.tipo === 'error' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>{msg.texto}</div>
+                    <div className={`mb-4 p-3 rounded flex items-center justify-between gap-3 ${msg.tipo === 'error' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
+                        <span>{msg.texto}</span>
+                        {msg.retry && (
+                            <button onClick={msg.retry} className="px-3 py-1 bg-white/70 rounded text-sm font-medium hover:bg-white">
+                                Reintentar
+                            </button>
+                        )}
+                    </div>
                 )}
 
                 {urlClasePendiente && (

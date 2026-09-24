@@ -398,26 +398,29 @@ const DashboardCoach = () => {
     const marcarTodosAsistencia = async (claseId, valor) => {
         const reservas = asistenciaPorClase[claseId] || [];
         if (reservas.length === 0) return;
-        let errores = 0;
-        for (const a of reservas) {
-            try {
-                await api.put(`/api/v1/reservas/${a.reserva_id}/asistencia`, { asistio: valor });
-                setAsistenciaPorClase(prev => ({
-                    ...prev,
-                    [claseId]: (prev[claseId] || []).map(r => r.reserva_id === a.reserva_id ? { ...r, asistio: valor } : r)
-                }));
-            } catch (e) {
-                console.error(`Error marcando reserva ${a.reserva_id}:`, e);
-                errores++;
-            }
+        try {
+            // H-11: un solo request ATOMICO (mismo endpoint que usa el tab Asistencia),
+            // en vez de N PUT /reservas/{id}/asistencia en serie.
+            await api.post(`/api/v1/asistencia/clases/${claseId}/confirmar`, {
+                asistencias: reservas.map(a => ({ reserva_id: a.reserva_id, asistio: valor })),
+            });
+            setAsistenciaPorClase(prev => ({
+                ...prev,
+                [claseId]: (prev[claseId] || []).map(a => ({ ...a, asistio: valor }))
+            }));
+            setMsgAsistencia({
+                claseId,
+                texto: valor ? '✅ Todos marcados como ASISTIERON' : '❌ Todos marcados como NO ASISTIERON',
+                tipo: 'exito'
+            });
+        } catch (e) {
+            console.error('Error marcando asistencia (batch)', e);
+            setMsgAsistencia({
+                claseId,
+                texto: e.response?.data?.detail || 'Error al marcar la asistencia en lote',
+                tipo: 'error'
+            });
         }
-        setMsgAsistencia({
-            claseId,
-            texto: errores === 0
-                ? (valor ? '✅ Todos marcados como ASISTIERON' : '❌ Todos marcados como NO ASISTIERON')
-                : `⚠️ ${errores} error(es) al marcar`,
-            tipo: errores === 0 ? 'exito' : 'error'
-        });
     };
 
     const handleContactar = (alumno) => {
