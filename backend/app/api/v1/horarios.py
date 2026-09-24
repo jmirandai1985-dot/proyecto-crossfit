@@ -4,6 +4,7 @@ Router de endpoints para gestión de Horarios
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import Optional
+from datetime import date
 
 from app.db.database import get_db
 from app.models.horario_base import HorarioBase
@@ -94,20 +95,22 @@ def grid_semanal(
 @router.post("/generar-clases-dia")
 def generar_clases_dia_route(
     tenant_id: Optional[int] = None,
-    fecha: str = None,
+    fecha: Optional[date] = None,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_coach),
+    current_user: dict = Depends(get_current_admin),
 ):
-    """Genera clases desde horarios_base para una fecha. Coach/admin (tenant del token)."""
-    from datetime import datetime
+    """Genera clases desde horarios_base para una fecha. SOLO admin (tenant del token).
+
+    H-15: antes lo podia llamar cualquier coach para cualquier fecha del box (escritura
+    global, y `fecha` llegaba como string sin validar). La generacion normal ya corre
+    por el startup y el scheduler diario; esta ruta queda como el boton explicito de Admin.
+    """
     from app.services.generar_clases import generar_clases_para_fecha
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
-    try:
-        fecha_date = datetime.strptime(fecha, "%Y-%m-%d").date()
-    except ValueError:
-        raise HTTPException(
-            status_code=400, detail="Formato de fecha invalido. Use YYYY-MM-DD")
+    # `fecha` llega ya validada como date (FastAPI responde 422 si el formato es invalido);
+    # sin fecha se usa hoy (el contenedor corre con TZ America/Santiago).
+    fecha_date = fecha or date.today()
     resultado = generar_clases_para_fecha(db, tenant_id, fecha_date)
     return resultado
 

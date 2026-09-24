@@ -460,36 +460,6 @@ const DashboardCoach = () => {
     );
 
     // ---- Stats ----
-    const statsCards = [
-        {
-            titulo: 'Clases Hoy',
-            valor: clasesHoy.length,
-            icono: '📅',
-            color: 'bg-blue-500',
-            descripcion: `${clasesHoy.reduce((sum, c) => sum + (c.asistentes_confirmados || 0), 0)} asistentes totales`
-        },
-        {
-            titulo: 'Alumnos Activos',
-            valor: alumnos.length,
-            icono: '👥',
-            color: 'bg-green-500',
-            descripcion: `${progresoAlumnos.filter(a => a.total_rms > 0).length} con RMs registrados`
-        },
-        {
-            titulo: 'WOD del Día',
-            valor: wodHoy ? (wodHoy.estado === 'publicado' ? 'Publicado' : 'Borrador') : 'Sin WOD',
-            icono: '💪',
-            color: wodHoy?.estado === 'publicado' ? 'bg-orange-500' : 'bg-gray-500',
-            descripcion: wodHoy?.titulo || 'Crea el WOD de hoy'
-        },
-        {
-            titulo: 'Alumnos en Riesgo',
-            valor: alumnosEnRiesgo.length,
-            icono: '⚠️',
-            color: alumnosEnRiesgo.length > 0 ? 'bg-red-500' : 'bg-emerald-500',
-            descripcion: alumnosEnRiesgo.length > 0 ? 'Requieren atención' : 'Todos activos'
-        }
-    ];
 
     // H-08: X/Y publicados debe contar los WODs realmente publicados (no los borradores)
     const wodsPublicados = new Set((wods || []).filter(w => w.estado === 'publicado').map(w => w.id));
@@ -501,12 +471,6 @@ const DashboardCoach = () => {
         const dias = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
         const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
         return `${dias[d.getDay()]} ${d.getDate()} ${meses[d.getMonth()]}`;
-    };
-
-    const getEstadoColor = (estado) => {
-        if (estado === 'publicado') return 'bg-green-100 text-green-800';
-        if (estado === 'draft') return 'bg-yellow-100 text-yellow-800';
-        return 'bg-gray-100 text-gray-800';
     };
 
     const getProgresoColor = (estado) => {
@@ -830,10 +794,8 @@ const DashboardCoach = () => {
                             </div>
                         )}
 
-                        {/* ─── TAB: CLASES (Fusión Fase 2: Clases + Mis WODs con toggle) ───
-                            NOTA: activeTab === 'wods' se conserva como alias de compatibilidad
-                            (URLs viejas ?tab=wods ahora muestran la vista fusionada). */}
-                        {(activeTab === 'clases' || activeTab === 'wods') && (
+                        {/* ─── TAB: CLASES (Fusión Fase 2: Clases + Mis WODs con toggle) ─── */}
+                        {activeTab === 'clases' && (
                             <div className="space-y-6">
                                 <div className="flex items-center justify-between flex-wrap gap-3">
                                     <div>

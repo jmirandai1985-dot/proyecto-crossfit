@@ -73,8 +73,11 @@ async function token() {
     return (await r.json()).access_token;
 }
 
-const TOKEN = await token();
-console.log(`frontend: ${BASE}   ·   token: ${TOKEN.slice(0, 12)}…`);
+// TEST_SKIP_INJECT=1: no pido token ni toco localStorage -> permite probar el login
+// REAL por el formulario (con token inyectado la app redirige y no muestra el form).
+const SKIP_INJECT = process.env.TEST_SKIP_INJECT === '1';
+const TOKEN = SKIP_INJECT ? '' : await token();
+console.log(`frontend: ${BASE}   ·   token: ${TOKEN ? TOKEN.slice(0, 12) + '…' : '(sin inyectar)'}`);
 
 const edge = spawn(EDGE, [
     '--headless=new', `--remote-debugging-port=${PORT}`,
@@ -155,11 +158,14 @@ const usuario = JSON.stringify({
     rol: ROL,
     correo: CORREO,
 });
-log('navegando a /login');
-await send('Page.navigate', { url: `${BASE}/login` }, sessionId);
-log('navegacion /login enviada');
-await sleep(2500);
-await evalJs(`
+if (SKIP_INJECT) {
+    log('TEST_SKIP_INJECT=1: sin inyeccion de localStorage (login real por formulario)');
+} else {
+    log('navegando a /login');
+    await send('Page.navigate', { url: `${BASE}/login` }, sessionId);
+    log('navegacion /login enviada');
+    await sleep(2500);
+    await evalJs(`
   localStorage.setItem('access_token', ${JSON.stringify(TOKEN)});
   localStorage.setItem('rol', ${JSON.stringify(ROL)});
   localStorage.setItem('usuario_id', ${JSON.stringify(USUARIO_ID)});
@@ -167,6 +173,7 @@ await evalJs(`
   localStorage.setItem('usuario', ${JSON.stringify(usuario)});
   'ok'
 `);
+}
 
 // 2) tab BI + esperar la tabla
 log('navegando a', `${BASE}${PAGE}`);

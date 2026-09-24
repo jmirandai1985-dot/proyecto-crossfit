@@ -1,3 +1,8 @@
+/* DEPRECATED (2026-09-24) - Pantalla huerfana: no esta en el sidebar del coach.
+   Ademas esta ROTA para coaches: guarda el WOD con POST /api/v1/wods sin enviar
+   disciplina_id, y el backend lo exige para el rol coach (responde 400).
+   Usar /coach/gestion-clases (publica el WOD de la clase, multi-dia y con disciplina).
+   Se deja el archivo y la ruta por si se retoma; si no, borrar ambos. */
 import React, { useState, useEffect, useMemo } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
