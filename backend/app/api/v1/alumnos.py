@@ -205,20 +205,43 @@ def registrar_alumno_nuevo(
         logging.getLogger("uvicorn.alumnos").warning(
             "Fallo al notificar al admin (email solicitud)")
 
+    # RG-04: ⚠️ el servicio de correo NO levanta excepción cuando falla: devuelve False
+    # (y guarda el detalle en ULTIMO_ERROR_SMTP). Antes el endpoint ignoraba el valor y
+    # respondía siempre "revisá tu correo", incluso si el alumno nunca iba a recibir la
+    # contraseña temporal. Ahora se usa el valor devuelto (y también se cubre una
+    # eventual excepción) y, si falló, se devuelve la contraseña provisional + aviso.
+    email_enviado = False
     try:
         # Confirma al LEAD con sus credenciales temporales para agendar la clase de prueba
-        send_solicitud_prueba_clase(
+        email_enviado = bool(send_solicitud_prueba_clase(
             usuario.nombre,
             usuario.correo,
             password_tmp,
             f"{settings.FRONTEND_URL}/login",
-        )
+        ))
     except Exception as e:
         sentry_sdk.capture_exception(e)
         logging.getLogger("uvicorn.alumnos").warning(
-            "Fallo al enviar email de clase de prueba")
+            "Excepcion al enviar email de clase de prueba: %s", e)
 
-    return {"mensaje": "Registro exitoso. Revisa tu correo para obtener tu contraseña temporal."}
+    if not email_enviado:
+        logging.getLogger("uvicorn.alumnos").warning(
+            "Email de clase de prueba NO enviado a %s: se devuelve la contrasena provisional",
+            usuario.correo)
+        return {
+            "mensaje": ("Tu registro quedó creado, pero NO pudimos enviarte el correo con "
+                        "la contraseña temporal. Usá la contraseña de abajo para ingresar "
+                        "y cambiala desde Ajustes."),
+            "email_enviado": False,
+            "password_provisional": password_tmp,
+            "aviso": ("El envío del correo falló; si no podés ingresar, contactá al box "
+                      "para que te ayuden a restablecerla."),
+        }
+
+    return {
+        "mensaje": "Registro exitoso. Revisa tu correo para obtener tu contraseña temporal.",
+        "email_enviado": True,
+    }
 
 
 # ─── GET /pendientes-activacion (admin only) ───

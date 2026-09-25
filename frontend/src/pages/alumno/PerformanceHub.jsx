@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import Layout from '../../components/Layout';
+import AvisoCarga from '../../components/AvisoCarga';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 
@@ -44,59 +45,74 @@ const PerformanceHub = () => {
     const [rms, setRms] = useState([]);
     const [catsData, setCatsData] = useState({});
     const [chartDataCat, setChartDataCat] = useState({});
+    // P1: secciones que fallaron (banner con Reintentar en vez de la pantalla
+    // "Registra tu primer RM", que aparecía aunque la API hubiera fallado).
+    const [erroresCarga, setErroresCarga] = useState([]);
 
-    useEffect(() => {
-        const fetchData = async () => {
-            try {
-                const rmsRes = await api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/rms`);
-                const rmsData = (rmsRes.data || []).map(rm => ({ ...rm, categoria: inferirCategoria(rm) }));
-                setRms(rmsData);
+    const cargarTodo = useCallback(async () => {
+        setLoading(true);
+        const fallaron = [];
+        const [rmsRes, allRes] = await Promise.allSettled([
+            api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/rms`),
+            api.get(`/api/v1/historial-rm?limit=500`),
+        ]);
 
-                const allRes = await api.get(`/api/v1/historial-rm?limit=500`);
-                const allRms = (allRes.data || []).map(rm => ({ ...rm, categoria: inferirCategoria(rm) }));
+        const rmsData = rmsRes.status === 'fulfilled'
+            ? (rmsRes.value.data || []).map(rm => ({ ...rm, categoria: inferirCategoria(rm) }))
+            : [];
+        if (rmsRes.status === 'fulfilled') setRms(rmsData);
+        else { console.error('Error cargando mis RMs:', rmsRes.reason); fallaron.push('mis RMs'); }
 
-                const cats = { fuerza: [], gimnastico: [], cardio: [], metabolico: [] };
-                rmsData.forEach(rm => {
-                    const c = inferirCategoria(rm);
-                    if (cats[c]) cats[c].push(getValorNumerico(rm));
-                });
-                const catsRes = {};
-                Object.keys(cats).forEach(c => {
-                    const arr = cats[c];
-                    catsRes[c] = { valor: arr.length > 0 ? Math.max(...arr) : 0, count: arr.length };
-                });
-                setCatsData(catsRes);
+        const allRms = allRes.status === 'fulfilled'
+            ? (allRes.value.data || []).map(rm => ({ ...rm, categoria: inferirCategoria(rm) }))
+            : [];
+        if (allRes.status !== 'fulfilled') {
+            console.error('Error cargando el historial del box:', allRes.reason);
+            fallaron.push('historial del box');
+        }
 
-                const byCat = { fuerza: [], gimnastico: [], cardio: [], metabolico: [] };
-                allRms.forEach(rm => {
-                    const c = inferirCategoria(rm);
-                    if (byCat[c] && rm.fecha) {
-                        try { byCat[c].push({ fecha: new Date(rm.fecha), valor: getValorNumerico(rm), nombre: rm.movimiento_nombre }); }
-                        catch (e) { }
-                    }
-                });
+        const cats = { fuerza: [], gimnastico: [], cardio: [], metabolico: [] };
+        rmsData.forEach(rm => {
+            const c = inferirCategoria(rm);
+            if (cats[c]) cats[c].push(getValorNumerico(rm));
+        });
+        const catsRes = {};
+        Object.keys(cats).forEach(c => {
+            const arr = cats[c];
+            catsRes[c] = { valor: arr.length > 0 ? Math.max(...arr) : 0, count: arr.length };
+        });
+        setCatsData(catsRes);
 
-                const chartRes = {};
-                Object.keys(byCat).forEach(c => {
-                    const items = byCat[c].sort((a, b) => a.fecha - b.fecha);
-                    if (items.length < 2) { chartRes[c] = []; return; }
-                    const weekMap = {};
-                    items.forEach(item => {
-                        const d = item.fecha, wk = getWeekKey(d);
-                        if (!weekMap[wk] || item.valor > weekMap[wk].valor) weekMap[wk] = { valor: item.valor, nombre: item.nombre };
-                    });
-                    chartRes[c] = Object.entries(weekMap).sort(([a], [b]) => a.localeCompare(b)).map(([wk, v]) => ({ semana: wk, max: v.valor }));
-                });
-                setChartDataCat(chartRes);
-            } catch (err) { console.error('Error:', err); }
-            finally { setLoading(false); }
-        };
-        fetchData();
+        const byCat = { fuerza: [], gimnastico: [], cardio: [], metabolico: [] };
+        allRms.forEach(rm => {
+            const c = inferirCategoria(rm);
+            if (byCat[c] && rm.fecha) {
+                try { byCat[c].push({ fecha: new Date(rm.fecha), valor: getValorNumerico(rm), nombre: rm.movimiento_nombre }); }
+                catch (e) { }
+            }
+        });
+
+        const chartRes = {};
+        Object.keys(byCat).forEach(c => {
+            const items = byCat[c].sort((a, b) => a.fecha - b.fecha);
+            if (items.length < 2) { chartRes[c] = []; return; }
+            const weekMap = {};
+            items.forEach(item => {
+                const d = item.fecha, wk = getWeekKey(d);
+                if (!weekMap[wk] || item.valor > weekMap[wk].valor) weekMap[wk] = { valor: item.valor, nombre: item.nombre };
+            });
+            chartRes[c] = Object.entries(weekMap).sort(([a], [b]) => a.localeCompare(b)).map(([wk, v]) => ({ semana: wk, max: v.valor }));
+        });
+        setChartDataCat(chartRes);
+        setErroresCarga(fallaron);
+        setLoading(false);
     }, [usuario_id]);
+
+    useEffect(() => { cargarTodo(); }, [cargarTodo]);
 
     if (loading) return (<Layout><div className="flex items-center justify-center h-96"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500" /></div></Layout>);
 
-    if (rms.length === 0) return (
+    if (rms.length === 0 && erroresCarga.length === 0) return (
         <Layout><div className="max-w-6xl mx-auto text-center py-16">
             <span className="text-7xl block mb-6">📊</span>
             <h2 className="text-xl font-bold text-gray-800 mb-3">Registra tu primer RM</h2>
@@ -140,6 +156,8 @@ const PerformanceHub = () => {
     return (
         <Layout>
             <div className="max-w-6xl mx-auto">
+                <AvisoCarga secciones={erroresCarga} onReintentar={cargarTodo} />
+
                 <div className="flex items-center gap-3 mb-6">
                     <span className="text-3xl">🏆</span>
                     <div><h1 className="text-2xl font-bold text-gray-800">Performance Hub</h1><p className="text-sm text-gray-500">Perfil completo de atleta basado en tus RMs</p></div>

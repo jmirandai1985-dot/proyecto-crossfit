@@ -32,7 +32,15 @@ export default function LandingPage() {
         estatura_cm: parseInt(formData.estatura_cm)
       });
 
-      setMensaje('✅ ¡Solicitud recibida! Revisa tu correo (incluyendo SPAM).');
+      // RG-04: si el envío del correo con la contraseña temporal falló, el backend
+      // la devuelve en la respuesta. Hay que mostrarla: si no, el alumno no tiene
+      // forma de ingresar y el "revisá tu correo" le mentiría.
+      const d = res.data || {};
+      if (d.email_enviado === false && d.password_provisional) {
+        setMensaje(`⚠️ Registro creado, pero no pudimos enviarte el correo. Tu contraseña temporal es: ${d.password_provisional} — entrá y cambiala en Ajustes.`);
+      } else {
+        setMensaje('✅ ¡Solicitud recibida! Revisa tu correo (incluyendo SPAM).');
+      }
       setFormData({ nombre: '', rut: '', correo: '', genero: '', peso_kg: '', estatura_cm: '' });
     } catch (error) {
       setMensaje('❌ Error: ' + (error.response?.data?.detail || 'Intenta de nuevo'));

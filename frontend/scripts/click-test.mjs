@@ -139,6 +139,15 @@ const { result: { sessionId } } = await send('Target.attachToTarget', { targetId
 log('sesion adjunta al target', targetId);
 await send('Page.enable', {}, sessionId);
 await send('Runtime.enable', {}, sessionId);
+
+// 0b) JS inyectado ANTES de que cargue la app (opcional).
+//     Sirve para FORZAR fallos reales de red y verificar los avisos de error de la UI
+//     (ej. reescribir /api/* a un puerto que rechaza conexiones => axios "Network Error").
+const INJECT_JS_BEFORE_LOAD = process.env.INJECT_JS_BEFORE_LOAD || '';
+if (INJECT_JS_BEFORE_LOAD) {
+    await send('Page.addScriptToEvaluateOnNewDocument', { source: INJECT_JS_BEFORE_LOAD }, sessionId);
+    console.log('INJECT_JS_BEFORE_LOAD aplicado (fallos forzados)');
+}
 log('Page/Runtime habilitados');
 
 const evalJs = async (expression) => {

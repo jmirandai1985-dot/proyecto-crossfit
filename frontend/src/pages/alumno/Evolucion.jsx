@@ -1,13 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
+import AvisoCarga from '../../components/AvisoCarga';
 import api from '../../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 
 const Evolucion = () => {
-    const { usuario } = useAuth();
-    const alumnoId = localStorage.getItem('usuario_id') || 5;
-    const tenantId = localStorage.getItem('tenant_id') || 1;
+    // E-01: acá había `localStorage.getItem('usuario_id') || 5` y `|| 1`. Si la sesión
+    // no estaba hidratada, la pantalla pedía los datos del alumno 5 (inexistente) y
+    // mostraba gráficos vacíos sin avisar. Ahora la identidad sale del AuthContext y
+    // NO se consulta nada hasta tenerla.
+    const { usuario, usuario_id: authUsuarioId, tenant_id: authTenantId } = useAuth();
+    const alumnoId = authUsuarioId || usuario?.id || null;
+    const tenantId = authTenantId || usuario?.tenant_id || null;
+
+    // P1: secciones que fallaron al cargar (banner con Reintentar en vez de "vacío").
+    const [erroresCarga, setErroresCarga] = useState([]);
 
     // ── Estado para RM ──
     const [movimientos, setMovimientos] = useState([]);
@@ -21,27 +29,45 @@ const Evolucion = () => {
     const [asistenciaSemanal, setAsistenciaSemanal] = useState([]);
     const [loadingAsistencia, setLoadingAsistencia] = useState(false);
 
-    // ── Cargar movimientos disponibles ──
-    useEffect(() => {
-        api.get(`/api/v1/movimientos`)
-            .then(res => {
-                if (Array.isArray(res.data)) {
-                    setMovimientos(res.data);
-                }
-            })
-            .catch(err => console.error('Error cargando movimientos:', err));
-    }, [tenantId]);
-
-    // ── Cargar progreso destacado + ids con marcas ──
-    useEffect(() => {
-        api.get(`/api/v1/historial-rm/alumnos/${alumnoId}/progreso-destacado`)
-            .then(res => {
-                const data = res.data || {};
-                setIdsConMarcas(data.ids_con_marcas || []);
-                setTopMejoras(data.top_mejoras || []);
-            })
-            .catch(err => console.error('Error cargando progreso destacado:', err));
+    // ── P1: carga única con Promise.allSettled ──────────────────────────────
+    // Antes cada fetch tenía su propio `.catch(console.error)` y dejaba la lista
+    // vacía: si la API fallaba, la pantalla mostraba "sin datos" como si el alumno
+    // no tuviera historial. Ahora el fallo se acumula y se muestra en el banner.
+    const cargarTodo = useCallback(async () => {
+        if (!alumnoId) return;   // E-01: sin identidad no se consulta nada
+        const fallaron = [];
+        const [movRes, progRes, asisRes] = await Promise.allSettled([
+            api.get(`/api/v1/movimientos`),
+            api.get(`/api/v1/historial-rm/alumnos/${alumnoId}/progreso-destacado`),
+            api.get(`/api/v1/reservas/asistencia-semanal`),
+        ]);
+        if (movRes.status === 'fulfilled') {
+            setMovimientos(Array.isArray(movRes.value.data) ? movRes.value.data : []);
+        } else {
+            console.error('Error cargando movimientos:', movRes.reason);
+            fallaron.push('movimientos');
+        }
+        if (progRes.status === 'fulfilled') {
+            const data = progRes.value.data || {};
+            setIdsConMarcas(data.ids_con_marcas || []);
+            setTopMejoras(data.top_mejoras || []);
+        } else {
+            console.error('Error cargando progreso destacado:', progRes.reason);
+            fallaron.push('progreso destacado');
+        }
+        if (asisRes.status === 'fulfilled') {
+            setAsistenciaSemanal(Array.isArray(asisRes.value.data) ? asisRes.value.data : []);
+        } else {
+            console.error('Error cargando asistencia semanal:', asisRes.reason);
+            fallaron.push('asistencia semanal');
+        }
+        setErroresCarga(fallaron);
     }, [alumnoId, tenantId]);
+
+    useEffect(() => {
+        setLoadingAsistencia(true);
+        cargarTodo().finally(() => setLoadingAsistencia(false));
+    }, [cargarTodo]);
 
     // ── Movimientos ordenados: con marcas primero ──
     const movimientosOrdenados = React.useMemo(() => {
@@ -68,28 +94,16 @@ const Evolucion = () => {
             .then(res => {
                 const data = Array.isArray(res.data) ? res.data : [];
                 setHistorialRM(data);
+                setErroresCarga(prev => prev.filter(x => x !== 'historial del movimiento'));
             })
             .catch(err => {
                 console.error('Error cargando historial RM:', err);
                 setHistorialRM([]);
+                setErroresCarga(prev => prev.includes('historial del movimiento')
+                    ? prev : [...prev, 'historial del movimiento']);
             })
             .finally(() => setLoadingRM(false));
     }, [movimientoSeleccionado, alumnoId, tenantId]);
-
-    // ── Cargar asistencia semanal ──
-    useEffect(() => {
-        setLoadingAsistencia(true);
-        api.get(`/api/v1/reservas/asistencia-semanal`)
-            .then(res => {
-                const data = Array.isArray(res.data) ? res.data : [];
-                setAsistenciaSemanal(data);
-            })
-            .catch(err => {
-                console.error('Error cargando asistencia semanal:', err);
-                setAsistenciaSemanal([]);
-            })
-            .finally(() => setLoadingAsistencia(false));
-    }, [alumnoId, tenantId]);
 
     // ── Determinar valor Y para el gráfico según categoría ──
     const getChartData = () => {
@@ -157,6 +171,9 @@ const Evolucion = () => {
     return (
         <Layout>
             <div className="space-y-8">
+                {/* P1: si la API falló, banner con Reintentar (antes se veía "vacío") */}
+                <AvisoCarga secciones={erroresCarga} onReintentar={cargarTodo} />
+
                 <div>
                     <h1 className="text-2xl font-bold text-gray-800">📈 Evolución</h1>
                     <p className="text-gray-500 mt-1">Sigue tu progreso en el tiempo</p>

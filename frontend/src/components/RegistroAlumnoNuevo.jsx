@@ -10,6 +10,9 @@ const RegistroAlumnoNuevo = ({ onClose }) => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState(false);
+    // RG-04: cuando el correo con la contraseña temporal NO sale, el backend la
+    // devuelve en la respuesta (email_enviado=false) y hay que mostrarla acá.
+    const [avisoCorreo, setAvisoCorreo] = useState(null);
 
     const handleChange = (e) => {
         setForm({ ...form, [e.target.name]: e.target.value });
@@ -20,7 +23,7 @@ const RegistroAlumnoNuevo = ({ onClose }) => {
         setError('');
         setLoading(true);
         try {
-            await api.post('/api/v1/alumnos/registro/alumno-nuevo', {
+            const r = await api.post('/api/v1/alumnos/registro/alumno-nuevo', {
                 nombre: form.nombre,
                 correo: form.correo,
                 rut: form.rut,
@@ -28,11 +31,19 @@ const RegistroAlumnoNuevo = ({ onClose }) => {
                 peso: form.peso ? parseFloat(form.peso) : null,
                 estatura: form.estatura ? parseFloat(form.estatura) : null,
             });
+            const d = r.data || {};
+            setAvisoCorreo(d.email_enviado === false && d.password_provisional
+                ? { password: d.password_provisional, mensaje: d.mensaje || d.aviso }
+                : null);
             setSuccess(true);
-            setTimeout(() => {
-                onClose();
-                navigate('/login');
-            }, 3000);
+            // Si el correo falló NO redirigimos: el alumno tiene que copiar la
+            // contraseña que le mostramos.
+            if (d.email_enviado !== false) {
+                setTimeout(() => {
+                    onClose();
+                    navigate('/login');
+                }, 3000);
+            }
         } catch (err) {
             const detail = err.response?.data?.detail;
             setError(Array.isArray(detail) ? detail[0]?.msg || 'Error de validación' : (detail || 'Ocurrió un error al registrarte'));
@@ -64,10 +75,20 @@ const RegistroAlumnoNuevo = ({ onClose }) => {
                 </div>
 
                 {success ? (
+                    avisoCorreo ? (
+                        <div data-testid="aviso-password-provisional" className="bg-amber-500/15 border border-amber-500/40 text-amber-200 px-4 py-4 rounded-lg text-sm text-center">
+                            ⚠️ <strong>Registro creado, pero no pudimos enviarte el correo.</strong>
+                            <p className="mt-2 text-amber-100/90">{avisoCorreo.mensaje}</p>
+                            <p className="mt-3 text-xs uppercase tracking-wide text-amber-200/70">Contraseña temporal</p>
+                            <p data-testid="password-provisional" className="mt-1 font-mono text-lg font-bold text-white break-all">{avisoCorreo.password}</p>
+                            <p className="mt-2 text-amber-200/80">Ingresá con esta contraseña y cambiala en Ajustes.</p>
+                        </div>
+                    ) : (
                     <div className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 px-4 py-4 rounded-lg text-sm text-center">
                         ✅ <strong>¡Perfecto!</strong>
                         <p className="mt-1 text-emerald-200/80">Revisa tu correo para la contraseña temporal. Ya tienes acceso a tu clase de prueba. Redirigiendo al login...</p>
                     </div>
+                    )
                 ) : (
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>

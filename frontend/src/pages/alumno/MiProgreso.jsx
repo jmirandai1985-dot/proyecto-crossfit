@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Layout from '../../components/Layout';
+import AvisoCarga from '../../components/AvisoCarga';
 import api from '../../services/api';
 
 // ─── Niveles de hito (1/3/6/12 meses consecutivos) ───────────────────────────
@@ -24,23 +25,34 @@ const MiProgreso = () => {
     const [resumen, setResumen] = useState(null);
     const [hitos, setHitos] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
+    // P1: secciones que fallaron (banner con Reintentar; antes había un mensaje
+    // genérico sin forma de reintentar).
+    const [erroresCarga, setErroresCarga] = useState([]);
 
-    useEffect(() => {
-        Promise.all([
+    const cargarTodo = useCallback(async () => {
+        setLoading(true);
+        const fallaron = [];
+        const [rResumen, rHitos] = await Promise.allSettled([
             api.get('/api/v1/asistencia/mi-resumen'),
             api.get('/api/v1/asistencia/mis-hitos'),
-        ])
-            .then(([rResumen, rHitos]) => {
-                setResumen(rResumen.data);
-                setHitos(rHitos.data?.hitos || []);
-            })
-            .catch((err) => {
-                console.error('Error cargando mi progreso:', err);
-                setError('No se pudo cargar tu progreso. Intentalo de nuevo más tarde.');
-            })
-            .finally(() => setLoading(false));
+        ]);
+        if (rResumen.status === 'fulfilled') {
+            setResumen(rResumen.value.data);
+        } else {
+            console.error('Error cargando mi resumen:', rResumen.reason);
+            fallaron.push('mi resumen');
+        }
+        if (rHitos.status === 'fulfilled') {
+            setHitos(rHitos.value.data?.hitos || []);
+        } else {
+            console.error('Error cargando mis hitos:', rHitos.reason);
+            fallaron.push('mis hitos');
+        }
+        setErroresCarga(fallaron);
+        setLoading(false);
     }, []);
+
+    useEffect(() => { cargarTodo(); }, [cargarTodo]);
 
     if (loading) {
         return (<Layout><div className="flex items-center justify-center h-96"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500" /></div></Layout>);
@@ -62,9 +74,7 @@ const MiProgreso = () => {
                     </div>
                 </div>
 
-                {error && (
-                    <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 mb-6">{error}</div>
-                )}
+                <AvisoCarga secciones={erroresCarga} onReintentar={cargarTodo} />
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                     {/* Racha actual */}

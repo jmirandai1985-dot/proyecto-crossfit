@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
+import AvisoCarga from '../../components/AvisoCarga';
 import api from '../../services/api';
 
 const Bazar = () => {
@@ -14,24 +15,35 @@ const Bazar = () => {
     const [archivoVoucher, setArchivoVoucher] = useState(null);
     const [subiendo, setSubiendo] = useState(false);
     const [mensaje, setMensaje] = useState({ type: '', text: '' });
+    // P1: si falla la carga, se avisa con banner + Reintentar (antes quedaba
+    // "📦 No hay productos disponibles" como si el catálogo estuviera vacío).
+    const [erroresCarga, setErroresCarga] = useState([]);
+
+    const cargarTodo = useCallback(async () => {
+        const fallaron = [];
+        const [prodRes, configRes] = await Promise.allSettled([
+            api.get(`/api/v1/productos?activo=true`),
+            api.get(`/api/v1/configuracion?tenant_id=${tenant_id}`),
+        ]);
+        if (prodRes.status === 'fulfilled') {
+            setProductos(prodRes.value.data || []);
+        } else {
+            console.error('Error cargando productos del bazar:', prodRes.reason);
+            fallaron.push('productos');
+        }
+        if (configRes.status === 'fulfilled') {
+            if (configRes.value.data?.configurado) setConfigBancaria(configRes.value.data);
+        } else {
+            console.error('Error cargando los datos de transferencia:', configRes.reason);
+            fallaron.push('datos de transferencia');
+        }
+        setErroresCarga(fallaron);
+    }, [tenant_id]);
 
     useEffect(() => {
-        const fetchData = async () => {
-            try {
-                const [prodRes, configRes] = await Promise.all([
-                    api.get(`/api/v1/productos?activo=true`),
-                    api.get(`/api/v1/configuracion?tenant_id=${tenant_id}`)
-                ]);
-                setProductos(prodRes.data || []);
-                if (configRes.data.configurado) setConfigBancaria(configRes.data);
-            } catch (err) {
-                console.error('Error cargando bazar:', err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchData();
-    }, [tenant_id]);
+        setLoading(true);
+        cargarTodo().finally(() => setLoading(false));
+    }, [cargarTodo]);
 
     const handleComprar = (producto) => {
         setProductoSeleccionado(producto);
@@ -89,9 +101,11 @@ const Bazar = () => {
                     </div>
                 </div>
 
+                <AvisoCarga secciones={erroresCarga} onReintentar={cargarTodo} />
+
                 {paso === 1 && (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                        {productos.length === 0 ? (
+                        {productos.length === 0 && erroresCarga.length === 0 ? (
                             <div className="col-span-full text-center py-12">
                                 <p className="text-gray-400 text-lg">📦 No hay productos disponibles</p>
                             </div>

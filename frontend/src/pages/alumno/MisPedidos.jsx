@@ -1,31 +1,43 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Layout from '../../components/Layout';
+import AvisoCarga from '../../components/AvisoCarga';
 import api from '../../services/api';
 
 const MisPedidos = () => {
     const [pedidos, setPedidos] = useState([]);
     const [loading, setLoading] = useState(true);
     const [productosMap, setProductosMap] = useState({});
+    // P1: aviso visible si la carga falla (antes quedaba "No has realizado pedidos
+    // aún" aunque la API hubiera fallado).
+    const [erroresCarga, setErroresCarga] = useState([]);
+
+    const cargarTodo = useCallback(async () => {
+        const fallaron = [];
+        const [pedRes, prodRes] = await Promise.allSettled([
+            api.get(`/api/v1/pedidos`),
+            api.get(`/api/v1/productos`),
+        ]);
+        if (prodRes.status === 'fulfilled') {
+            const prodMap = {};
+            (prodRes.value.data || []).forEach(p => { prodMap[p.id] = p.nombre; });
+            setProductosMap(prodMap);
+        } else {
+            console.error('Error cargando nombres de productos:', prodRes.reason);
+            fallaron.push('nombres de productos');
+        }
+        if (pedRes.status === 'fulfilled') {
+            setPedidos(pedRes.value.data || []);
+        } else {
+            console.error('Error cargando pedidos:', pedRes.reason);
+            fallaron.push('mis pedidos');
+        }
+        setErroresCarga(fallaron);
+    }, []);
 
     useEffect(() => {
-        const fetchData = async () => {
-            try {
-                const [pedRes, prodRes] = await Promise.all([
-                    api.get(`/api/v1/pedidos`),
-                    api.get(`/api/v1/productos`)
-                ]);
-                const prodMap = {};
-                (prodRes.data || []).forEach(p => { prodMap[p.id] = p.nombre; });
-                setProductosMap(prodMap);
-                setPedidos(pedRes.data || []);
-            } catch (err) {
-                console.error('Error cargando pedidos:', err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchData();
-    }, []);
+        setLoading(true);
+        cargarTodo().finally(() => setLoading(false));
+    }, [cargarTodo]);
 
     const getEstadoStyle = (estado) => {
         if (estado === 'pendiente') return 'bg-yellow-100 text-yellow-800';
@@ -56,7 +68,9 @@ const MisPedidos = () => {
                     </div>
                 </div>
 
-                {pedidos.length === 0 ? (
+                <AvisoCarga secciones={erroresCarga} onReintentar={cargarTodo} />
+
+                {pedidos.length === 0 && erroresCarga.length === 0 ? (
                     <div className="text-center py-12">
                         <p className="text-gray-400 text-lg mb-4">📦 No has realizado pedidos aún</p>
                         <a href="/alumno/bazar" className="inline-block px-6 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm">
