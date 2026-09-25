@@ -3,7 +3,7 @@
 #
 # ⚠️ AMBIENTES — LEA ESTO ANTES DE LEVANTAR:
 #   El archivo BASE usa backend/.env.test → branch TEST de Neon
-#   (ep-long-salad-ac1uza9z...). Es el SAFE DEFAULT a propósito:
+#   (ep-jolly-butterfly-b6ty2z89...). Es el SAFE DEFAULT a propósito:
 #   `docker compose up` NUNCA toca producción por accidente.
 #
 #   ┌─────────────────────────────────────────────────────────────┐
@@ -46,7 +46,7 @@ services:
       dockerfile: Dockerfile
       target: prod
     env_file:
-      # TEST/ep-long-salad-ac1uza9z (SAFE DEFAULT) — ver cabecera del archivo.
+      # TEST/ep-jolly-butterfly-b6ty2z89 (SAFE DEFAULT) — ver cabecera del archivo.
       - ./backend/.env.test
     environment:
       ENVIRONMENT: test
@@ -80,7 +80,7 @@ services:
       dockerfile: Dockerfile
       target: maintenance
     env_file:
-      # TEST/ep-long-salad-ac1uza9z (SAFE DEFAULT) — ver cabecera del archivo.
+      # TEST/ep-jolly-butterfly-b6ty2z89 (SAFE DEFAULT) — ver cabecera del archivo.
       - ./backend/.env.test
     environment:
       # health_check.py usa BACKEND_URL para el ping al API.

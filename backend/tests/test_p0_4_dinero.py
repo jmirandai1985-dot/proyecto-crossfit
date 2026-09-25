@@ -25,6 +25,15 @@ from tests.conftest import ALUMNO_ID, BASE, TENANT_ID, get_admin_token
 # destino pertenezca al box.
 ALUMNO_PEDIDO = ALUMNO_ID
 
+# Alumno DEDICADO (lo crea el seed) para el test que APRUEBA un plan: aprobar
+# crea una suscripción ACTIVA, y si se usara el 999 quedaría con 2 activas.
+# Con 2 activas, GET /planes/membresia-activa y POST /reservas eligen la fila por
+# "más créditos y vence más tarde": al descontar un crédito en una, la lectura
+# cambia a la otra y el saldo pareciera no bajar → rompía
+# test_panel_alumno::test_07 ("Crédito no se descontó: 50 -> 50").
+# Ver LOG_AISLAMIENTO_TESTS.md (mismo criterio que el 1010 de los tests de admin).
+ALUMNO_PLAN = 1012
+
 
 def _h_admin():
     return {"Authorization": f"Bearer {get_admin_token()}"}
@@ -116,10 +125,10 @@ def test_p04_aprobacion_registra_el_precio_de_la_solicitud():
             db.execute(_text("UPDATE planes SET precio_clp = :p WHERE id = :i"),
                        {"p": precio_esperado, "i": plan_id})
             db.commit()
-        # Alumno del fixture de la suite (999, con membresía). Se limpian sus
-        # solicitudes PENDIENTES para que POST /solicitar no choque con el
-        # "ya tienes una solicitud pendiente" (limpieza TEST-only, documentada).
-        alumno_id = 999
+        # Alumno DEDICADO (1012, con membresía propia solo en este test). Se
+        # limpian sus solicitudes PENDIENTES para que POST /solicitar no choque
+        # con el "ya tienes una solicitud pendiente" (limpieza TEST-only).
+        alumno_id = ALUMNO_PLAN
         db.execute(_text(
             "DELETE FROM solicitudes_planes WHERE alumno_id = :u AND estado = 'pending'"),
             {"u": alumno_id})

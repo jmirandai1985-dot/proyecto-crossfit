@@ -66,8 +66,13 @@ if not _config.is_test_db_url(DB_URL):
 # Para evitar el caché del pooler de Neon entre el DROP y el CREATE, esta operación
 # usa la conexión DIRECTA (sin "-pooler") con un engine NUEVO dedicado al setup.
 from sqlalchemy import create_engine
-_setup_url = settings.DATABASE_URL
-_setup_url = _setup_url.replace("-pooler.sa-east-1", ".sa-east-1")
+# Conexión DIRECTA (sin "-pooler") para el DDL.
+# ⚠️ El replace viejo ("-pooler.sa-east-1" -> ".sa-east-1") YA NO matcheaba: Neon
+#    cambió el formato del host a `ep-XXXX-pooler.c-2.sa-east-1.aws.neon.tech`, así
+#    que el DROP SCHEMA/CREATE viajaba por el pooler (con su caché de catálogo).
+#    Se prioriza DIRECT_URL (la misma que usan alembic y el restore) y, si no
+#    estuviera definida, un replace robusto que sirve para los dos formatos.
+_setup_url = settings.DIRECT_URL or settings.DATABASE_URL.replace("-pooler.", ".")
 setup_engine = create_engine(_setup_url, pool_pre_ping=True)
 
 with setup_engine.connect() as reset_conn:
@@ -186,6 +191,20 @@ try:
                    peso_kg=75, genero="masculino", activo=True))
     db.flush()
     print("   Alumno Admin 1010")
+
+    # Alumno DEDICADO a los tests de dinero (test_p0_4_dinero.py): aprobar una
+    # solicitud crea una suscripción ACTIVA, y si se usara el 999 quedaría con 2
+    # activas → GET /planes/membresia-activa y POST /reservas eligen la suscripción
+    # por "más créditos y vence más tarde", así que al descontar un crédito la
+    # lectura cambia de fila y el saldo parece no bajar (rompía test_07 de
+    # test_panel_alumno: "Crédito no se descontó: 50 -> 50").
+    # Mismo criterio que el 1010 de los tests de admin (LOG_AISLAMIENTO_TESTS.md).
+    db.add(Usuario(id=1012, tenant_id=1, rut="11.111.111-4",
+                   nombre="Alumno Dinero Test",
+                   correo="alumno_dinero@test.com", password_hash=_HASH, rol="alumno",
+                   peso_kg=80, genero="masculino", activo=True))
+    db.flush()
+    print("   Alumno Dinero 1012")
 
     # â”€â”€ 5. MOVIMIENTOS (con categorÃ­as) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     mov_data = [

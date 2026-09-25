@@ -13,10 +13,12 @@
    YA NO matchea: el `DROP SCHEMA public CASCADE` / `create_all` viajaría por el pooler en vez
    de la conexión directa. Fix sugerido (NO aplicado): `replace("-pooler.", ".")` o leer
    directamente `settings.DIRECT_URL`.
-   No bloquea nada hoy: el restore usa `scripts/restaurar_backup.py` (toma `DIRECT_URL`) y los
-   seeds aditivos usan las URLs de `.env.test`. Endpoint TEST actual: `ep-odd-smoke-b6f31576`
-   (proyecto Neon nuevo del 2026-09-23; los anteriores: ep-long-salad → ep-billowing-violet →
-   ep-purple-cherry).
+   ✅ APLICADO (2026-09-24): `run_setup_test_db.py` ahora prioriza `settings.DIRECT_URL` (con
+   fallback `replace("-pooler.", ".")`, que sirve para los dos formatos de host) para el
+   `DROP SCHEMA`/`create_all`. Antes el replace viejo no matcheaba y el DDL viajaba por el pooler.
+   Endpoint TEST **actual**: `ep-jolly-butterfly-b6ty2z89` (rama del MISMO proyecto Neon que PROD,
+   desde el 2026-09-24). Histórico: ep-odd-smoke (2026-09-23) → ep-long-salad → ep-billowing-violet
+   → ep-purple-cherry.
 
 ## Notas
 - Los 2 "bugs" reportados inicialmente eran errores del script de prueba,

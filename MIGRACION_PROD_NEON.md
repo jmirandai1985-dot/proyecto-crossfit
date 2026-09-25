@@ -6,7 +6,8 @@
 ## Contexto
 
 - PROD vive hoy en el proyecto **viejo** (`ep-withered-silence-acly7gq5`, cuenta Neon vieja): ese proyecto **agotó la cuota** y la base está inaccesible.
-- TEST ya está migrado a la cuenta nueva y **sano** (verificado 2026-09-23): `ep-odd-smoke-b6f31576`, 36 tablas, `alembic 033_trim_tenants`, clases 1480 / asistencias 4101 / transacciones 478 / usuarios 115.
+- TEST se migró el **2026-09-23** a la cuenta nueva: `ep-odd-smoke-b6f31576` (36 tablas, `alembic 033_trim_tenants`, clases 1480 / asistencias 4101 / transacciones 478 / usuarios 115).
+- ⚠️ **ACTUALIZADO 2026-09-24 — TEST ya NO usa ese proyecto.** Ahora TEST es la rama **`ep-jolly-butterfly-b6ty2z89`** del **MISMO proyecto Neon que PROD** (ver `backend/.env.test` y la denylist `TEST_BRANCH_IDS` / `PROD_BRANCH_ID` de `backend/app/core/config.py`). El proyecto viejo `ep-odd-smoke-b6f31576` queda **pendiente de borrado** (checklist de 5 puntos antes de eliminarlo).
 - El backup de PROD más reciente disponible es **`backend/backups/neon_backup_prod_20260917_060659.sql`** (17/09/2026 06:07, 1.42 MB, 36 tablas con datos, dump completo).
   ⚠️ **Se pierde la actividad de PROD entre el 17/09 y la caída** (la base no responde, no se puede hacer un `pg_dump` fresco). No hay otra copia más nueva.
 - Ese dump está en la migración **031_trim_disciplinas** → después del restore hay que correr `alembic upgrade head` (aplica **032_cupo_original_clases** y **033_trim_tenants**).
