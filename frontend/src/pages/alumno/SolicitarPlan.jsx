@@ -430,6 +430,7 @@ const SolicitarPlan = () => {
                                 ← Volver
                             </button>
                             <button type="button"
+                                data-testid="enviar-solicitud"
                                 onClick={handleEnviarSolicitud}
                                 disabled={subiendo || !archivoVoucher || (planSeleccionado.requiere_certificado_estudiante && !archivoCertificado)}
                                 className="flex-1 px-6 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">

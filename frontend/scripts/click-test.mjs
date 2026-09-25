@@ -197,6 +197,30 @@ if (PRE_CLICK_JS) {
     await sleep(1200);
 }
 
+// 2c) Inyección de archivo en un <input type="file"> (opcional).
+//     Imprescindible para verificar SUBIDAS de verdad: el navegador adjunta un
+//     archivo REAL del disco (no un Blob sintético) al input del formulario, y
+//     después el CLICK_SELECTOR dispara el submit normal de la pantalla.
+//   FILE_INPUT_SELECTOR  selector CSS del input[type=file]
+//   FILE_PATH            ruta absoluta del archivo a adjuntar
+const FILE_SEL = process.env.FILE_INPUT_SELECTOR || '';
+const FILE_PATH = process.env.FILE_PATH || '';
+if (FILE_SEL && FILE_PATH) {
+    await send('DOM.enable', {}, sessionId);
+    const doc = await send('DOM.getDocument', { depth: -1 }, sessionId);
+    const rootId = doc.result?.root?.nodeId;
+    const q = await send('DOM.querySelector', { nodeId: rootId, selector: FILE_SEL }, sessionId);
+    const nodeId = q.result?.nodeId;
+    if (!nodeId) {
+        console.error(`\nRESULTADO: FALLA (no encontré el input de archivo: ${FILE_SEL})`);
+        edge.kill('SIGKILL');
+        process.exit(1);
+    }
+    await send('DOM.setFileInputFiles', { files: [FILE_PATH], nodeId }, sessionId);
+    console.log('archivo inyectado en', FILE_SEL, '->', FILE_PATH);
+    await sleep(1200);
+}
+
 // 3) CLICK REAL en el ícono (si CLICK_SELECTOR='' se omite)
 let clicked = null;
 if (CLICK_SEL) {
