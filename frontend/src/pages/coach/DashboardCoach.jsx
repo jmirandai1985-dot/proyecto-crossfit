@@ -1087,6 +1087,9 @@ const DashboardCoach = () => {
                                                                     ) : (
                                                                         // Celda con clase sin WOD — fondo zinc-800 oscuro + texto claro legible
                                                                         <button
+                                                                            data-testid="publicar-wod-celda"
+                                                                            data-fecha={date}
+                                                                            title="Publicar el WOD de esta clase"
                                                                             onClick={() => {
                                                                                 const fechaISO = clase.fecha ? (typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha) : date;
                                                                                 navigate(`/coach/gestion-clases?fecha=${fechaISO}&clase=${clase.id}`);

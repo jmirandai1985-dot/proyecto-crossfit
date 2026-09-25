@@ -213,10 +213,16 @@ if (CLICK_SEL) {
 }
 
 // 4) ¿apareció el elemento esperado? ¿hubo errores?
-const modal = await evalJs(`(() => {
+//    Se ESPERA hasta 20s: cuando el click NAVEGA a otra pantalla, esa pantalla
+//    carga sus datos por API y el selector objetivo puede tardar en montarse.
+let modal = null;
+for (let i = 0; i < 20 && !modal; i++) {
+    modal = await evalJs(`(() => {
   const d = document.querySelector(${JSON.stringify(EXPECT_SEL)});
   return d ? d.innerText.replace(/\\s+/g, ' ').slice(0, 220) : null;
 })()`);
+    if (!modal) await sleep(1000);
+}
 console.log('elemento esperado presente:', !!modal);
 if (modal) console.log('contenido:', modal);
 

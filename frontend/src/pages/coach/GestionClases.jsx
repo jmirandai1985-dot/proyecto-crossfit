@@ -86,6 +86,16 @@ export default function GestionClases() {
     const [clasesPorFecha, setClasesPorFecha] = useState({}); // { fechaStr: [clases] }
     const [wodsPorFecha, setWodsPorFecha] = useState({}); // { fechaStr: [wods] }
 
+    // ── Punto 2: ALCANCE al publicar (a qué clases se vincula el WOD) ──
+    // 'hora' = solo la clase elegida (DEFAULT al entrar desde una tarjeta, 5a)
+    // 'dia'  = todas las clases de esa fecha + disciplina (comportamiento viejo)
+    const [alcance, setAlcance] = useState('hora');
+    // Clases por día, SOLO para mostrar cuántas se ven afectadas por cada opción.
+    // No se reutiliza clasesPorFecha: esa carga depende del selector de
+    // turno/disciplina y al entrar con ?clase=ID puede no haberse ejecutado.
+    const [clasesAlcance, setClasesAlcance] = useState({}); // { fechaStr: [clases] | null }
+    const [cargandoAlcance, setCargandoAlcance] = useState(false);
+
     // Clase abierta desde DashboardCoach (?clase=ID) — formulario WOD pre-vinculado
     const [claseDestino, setClaseDestino] = useState(null);
     const [cargandoClase, setCargandoClase] = useState(false);
@@ -103,8 +113,15 @@ export default function GestionClases() {
                     const fechaStr = typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha;
                     setFechaPlanif(fechaStr);
                     setFechaClases(fechaStr);
+                    // El día de la tarjeta queda marcado en el calendario. Sin
+                    // esto, entrando con ?clase= de OTRA fecha el alcance "solo
+                    // esta hora" apuntaba a la clase de HOY y podía pisar un WOD
+                    // real (y la franja "Días donde publicar" mostraba hoy).
+                    setDiasSeleccionados(new Set([fechaStr]));
                 }
                 setModoEmergencia(false);
+                // 5a: se entra desde una tarjeta con hora concreta => "solo esta hora"
+                setAlcance('hora');
 
                 // Si la clase YA tiene un WOD publicado (clase.wod_id), cargar
                 // ese WOD y PRE-CARGAR el formulario en modo edición.
@@ -179,9 +196,15 @@ export default function GestionClases() {
 
     useEffect(() => {
         cargarClases(fechaPlanif).then(setClasesDelDia);
+        // NO resetear la selección cuando se llegó con una clase destino
+        // (?clase=ID desde una tarjeta del dashboard, o el botón "Publicar WOD"
+        // de una clase): ese flujo YA fija disciplina + fecha, y este reset los
+        // pisaba (carrera de efectos: el coach veía 400 "disciplina_id es
+        // obligatorio para coaches" y el WOD pre-cargado desaparecía).
+        if (claseDestino) return;
         setTurnoActivo(null); setDisciplinaActiva(null); setHorariosTurno([]);
         setHorariosSel({}); setWod(null); setModoEdicion(false);
-    }, [fechaPlanif, cargarClases]);
+    }, [fechaPlanif, cargarClases, claseDestino]);
 
     const recargarVistaDia = useCallback(async (f) => {
         const cls = await cargarClases(f);
@@ -289,7 +312,6 @@ export default function GestionClases() {
             const params = { disciplina_id: disciplinaActiva };
             if (esEmergencia) params.modo_emergencia = true;
             let wodRes;
-            const batchCreados = [];
             if (wod && wod.id) {
                 // Modo edición: solo actualiza el WOD existente del día
                 const r = await api.put(`${API_BASE}/wods/${wod.id}`, { ...wodForm, fecha: fechaPlanif, coach_id }, { params });
@@ -300,42 +322,61 @@ export default function GestionClases() {
                 // transacción atómica (antes eran 2 requests por día en serie).
                 const diasMarcados = [...diasSeleccionados].sort();
                 if (diasMarcados.length === 0) throw new Error('Selecciona al menos un día');
-                const r = await api.post(
-                    `${API_BASE}/wods/batch-create`,
-                    { wods: diasMarcados.map(fechaDia => ({ ...wodForm, fecha: fechaDia, coach_id })) },
-                    { params }
-                );
+                // PUNTO 2 — ALCANCE:
+                //  'hora' → se crea el WOD y se vincula SOLO a la clase elegida
+                //           (1 por día marcado, siempre a la misma hora).
+                //  'dia'  → se mandan los días sin clase_ids y el backend vincula
+                //           TODAS las clases de esa fecha + disciplina (histórico).
+                let diasPayload = diasMarcados;
+                let claseIdsAlcance = null;
+                if (alcance === 'hora') {
+                    if (!horaDestino) {
+                        throw new Error('Esta clase no tiene hora cargada: elegí "todas las horas" para publicar');
+                    }
+                    diasPayload = diasConClaseHora;
+                    claseIdsAlcance = diasPayload.map(f => alcanceHoraPorDia[f].id);
+                    if (diasPayload.length === 0) {
+                        throw new Error(`No hay ninguna clase a las ${horaDestino} en los días marcados`);
+                    }
+                }
+                const body = { wods: diasPayload.map(fechaDia => ({ ...wodForm, fecha: fechaDia, coach_id })) };
+                // Se OMITE la clave cuando el alcance es "todas las horas":
+                // así el endpoint mantiene su comportamiento histórico.
+                if (claseIdsAlcance && claseIdsAlcance.length > 0) body.clase_ids = claseIdsAlcance;
+                const r = await api.post(`${API_BASE}/wods/batch-create`, body, { params });
                 const batch = r.data || {};
                 const wodsCreados = batch.wods || [];
-                if (wodsCreados.length !== diasMarcados.length) {
+                if (wodsCreados.length !== diasPayload.length) {
                     throw new Error(batch.mensaje || 'La operación no se completó íntegramente');
                 }
-                batchCreados.push(...wodsCreados);
                 wodRes = wodsCreados[wodsCreados.length - 1]?.wod || null;
-                setMsg({ tipo: 'exito', texto: `✅ ${wodsCreados.length} WOD(s) creado(s) y publicado(s) en una sola operación (${batch.clases_vinculadas ?? 0} clase(s) vinculadas)` + (esEmergencia ? ' (modo emergencia)' : '') });
+                // Mensaje HONESTO: el número de clases sale del backend
+                // (clases_vinculadas = lo que realmente se escribió), no de lo
+                // que creíamos que iba a pasar.
+                const nClases = batch.clases_vinculadas ?? 0;
+                const etiquetaAlcance = alcance === 'hora'
+                    ? horaDestino + (diasPayload.length > 1 ? ` · ${diasPayload.length} días` : '')
+                    : (diasPayload.length === 1 ? `todas las de ${nombreDiaDe(diasPayload[0])}` : 'todos los días marcados');
+                setMsg({
+                    tipo: 'exito',
+                    texto: `${wodsCreados.length > 1 ? `${wodsCreados.length} WODs creados · ` : ''}✅ publicado en ${nClases} clase(s) (${etiquetaAlcance})` + (esEmergencia ? ' (modo emergencia)' : ''),
+                });
             }
             setWod(wodRes); setModoEdicion(false);
-            // Si se abrió desde ?clase=ID (URL), asegurar el vínculo a ESA clase específica
-            if (claseDestino && claseDestino.id && urlClaseId) {
-                let wodObjetivo = wodRes;
-                if (batchCreados.length > 0) {
-                    const fDest = typeof claseDestino.fecha === 'string' ? claseDestino.fecha.split('T')[0] : claseDestino.fecha;
-                    const match = batchCreados.find(w => String(w.wod.fecha).slice(0, 10) === fDest);
-                    wodObjetivo = (match && match.wod) ? match.wod : wodRes;
-                }
-                if (wodObjetivo && wodObjetivo.id) {
-                    const body = { wod_id: wodObjetivo.id, clase_ids: [claseDestino.id] };
-                    if (esEmergencia) body.modo_emergencia = true;
-                    const res = await api.post(`${API_BASE}/wods/batch`, body);
-                    setMsg({ tipo: 'exito', texto: `WOD creado y asignado a la clase #${claseDestino.id}` + (esEmergencia ? ' (modo emergencia)' : '') });
-                    setTimeout(() => navigate('/coach/dashboard?tab=clases'), 1200);
-                }
-            } else if (claseDestino && claseDestino.id && !urlClaseId) {
-                // Origen CTA "Publicar WOD" desde la pestaña Clases de Hoy (sin ?clase=):
-                // cerrar el formulario y volver al listado del día (ya recargado abajo).
+            // El vínculo a la clase elegida YA lo hizo el backend en la misma
+            // transacción (alcance "solo esta hora" manda `clase_ids`). Antes se
+            // repetía con un POST /wods/batch que además podía vincular la clase
+            // a un WOD de OTRA fecha (el último de la tanda) y tapaba el mensaje
+            // real con "asignado a la clase #X". Ahora solo se cierra el
+            // formulario; si se entró con ?clase= se saca ese parámetro de la URL
+            // (si no, la pantalla mostraría "no se pudo cargar la clase") y se
+            // deja visible el mensaje de éxito con el número real de clases.
+            if (claseDestino && claseDestino.id) {
+                const fechaDestino = fechaCortaDe(claseDestino) || fechaPlanif;
                 setClaseDestino(null);
                 setWod(null);
                 setModoEdicion(false);
+                if (urlClaseId) navigate(`/coach/gestion-clases?fecha=${fechaDestino}`, { replace: true });
             }
             setConfirmarEmergencia(null);
             cargarClases(fechaPlanif).then(setClasesDelDia);
@@ -391,6 +432,7 @@ export default function GestionClases() {
         setFechaPlanif(fechaStr);
         setFechaClases(fechaStr);
         setModoEmergencia(false);
+        setAlcance('hora'); // 5a: siempre viene de una tarjeta con hora concreta
         setDiasSeleccionados(new Set([fechaStr]));
         setWod(null);
         setModoEdicion(false);
@@ -421,6 +463,38 @@ export default function GestionClases() {
         }
     };
 
+    // ── Punto 2: conteo de clases por día para el selector de alcance ──
+    // 1 request liviano por día marcado (GET /clases acepta disciplina_id +
+    // rango). Sirve SOLO para mostrar el impacto: el backend valida igual.
+    useEffect(() => {
+        const dias = [...diasSeleccionados].sort();
+        if (!claseDestino || !disciplinaActiva || dias.length === 0) {
+            setClasesAlcance({});
+            setCargandoAlcance(false);   // si no, la UI queda en "verificando…"
+            return;
+        }
+        let cancelado = false;
+        setCargandoAlcance(true);
+        (async () => {
+            const res = {};
+            await Promise.all(dias.map(async (f) => {
+                try {
+                    const r = await api.get(`${API_BASE}/clases`, {
+                        params: { disciplina_id: disciplinaActiva, fecha_desde: f, fecha_hasta: f, limit: 200 },
+                    });
+                    const data = r.data || [];
+                    res[f] = Array.isArray(data) ? data : (data.clases || []);
+                } catch (e) {
+                    // Sin dato no se bloquea nada: se avisa en la UI.
+                    console.error('Error contando clases para el alcance', f, e);
+                    res[f] = null;
+                }
+            }));
+            if (!cancelado) { setClasesAlcance(res); setCargandoAlcance(false); }
+        })();
+        return () => { cancelado = true; };
+    }, [claseDestino, disciplinaActiva, diasSeleccionados]);
+
     const hoy = hoyStr();
     const turnoLabel = TURNOS.find(t => t.id === turnoActivo);
     // Clases del día SIN WOD publicado aún (para ofrecer el CTA "Publicar WOD")
@@ -429,6 +503,33 @@ export default function GestionClases() {
     // Si la URL trae ?clase= pero la clase aún NO se cargó (o falló),
     // NO mostrar la vista vieja "Clases de Hoy" — mostrar loading/error en su lugar.
     const urlClasePendiente = urlClaseId !== null && !claseDestino;
+
+    // ── Punto 2: alcance efectivo (QUÉ clases se van a vincular) ──
+    const horaCorta = (h) => (h ? String(h).substring(0, 5) : '');
+    const fechaCortaDe = (c) => (c?.fecha ? (typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha) : '');
+    const horaDestino = horaCorta(claseDestino?.hora_inicio);
+    const nombreDiaDe = (fechaStr) => {
+        if (!fechaStr) return '';
+        const d = new Date(fechaStr + 'T12:00:00');
+        return `${NOMBRES_DIAS_LARGO[d.getDay()].slice(0, 3)} ${d.getDate()}`;
+    };
+    // Por cada día marcado: la clase de ESA misma hora. La clase destino manda
+    // en su día; null = no hay clase a esa hora; undefined = sin verificar.
+    const alcanceHoraPorDia = React.useMemo(() => {
+        const m = {};
+        if (!claseDestino || !horaDestino) return m;
+        [...diasSeleccionados].sort().forEach((f) => {
+            if (fechaCortaDe(claseDestino) === f && claseDestino.id) { m[f] = claseDestino; return; }
+            const cs = clasesAlcance[f];
+            if (!cs) { m[f] = undefined; return; }
+            m[f] = cs.find(c => horaCorta(c.hora_inicio) === horaDestino) || null;
+        });
+        return m;
+    }, [claseDestino, diasSeleccionados, clasesAlcance, horaDestino]);
+    const diasConClaseHora = Object.keys(alcanceHoraPorDia).filter(f => alcanceHoraPorDia[f]).sort();
+    const diasSinClaseHora = [...diasSeleccionados].sort().filter(f => alcanceHoraPorDia[f] === null);
+    const diasSinVerificarHora = [...diasSeleccionados].sort().filter(f => alcanceHoraPorDia[f] === undefined);
+    const clasesAlcanceDia = [...diasSeleccionados].sort().flatMap(f => clasesAlcance[f] || []);
 
     return (
         <Layout>
@@ -559,6 +660,70 @@ export default function GestionClases() {
                             </p>
                         </div>
 
+                        {/* ── PUNTO 2: ALCANCE — a qué clases se publica este WOD ── */}
+                        {modoEdicion ? (
+                            <div className="mb-4 p-3 rounded-lg border border-amber-300 bg-amber-50 text-xs text-amber-900">
+                                ⚠️ Esta clase ya tiene un WOD publicado: al actualizarlo se actualiza
+                                <strong> para todas las clases que lo comparten</strong>. El alcance solo se
+                                elige cuando el WOD es nuevo.
+                            </div>
+                        ) : (
+                            <div className="mb-4" data-testid="selector-alcance">
+                                <p className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">
+                                    🎯 ¿A qué horarios se publica?
+                                </p>
+                                <div className="grid sm:grid-cols-2 gap-2">
+                                    <button
+                                        type="button"
+                                        data-testid="alcance-hora"
+                                        data-cargando={cargandoAlcance ? '1' : '0'}
+                                        onClick={() => setAlcance('hora')}
+                                        className={`text-left p-3 rounded-lg border-2 transition-all bg-white ${alcance === 'hora' ? 'border-emerald-600 ring-2 ring-emerald-200' : 'border-gray-200 hover:border-emerald-300'}`}
+                                    >
+                                        <span className="block text-sm font-bold text-gray-900">
+                                            🔵 Solo esta hora ({horaDestino || 'sin hora'})
+                                        </span>
+                                        <span className="block text-xs text-gray-600 mt-0.5">
+                                            {cargandoAlcance
+                                                ? '⏳ verificando…'
+                                                : `${diasConClaseHora.length} clase(s)${diasConClaseHora.length ? ` · ${diasConClaseHora.map(nombreDiaDe).join(', ')}` : ''}`}
+                                        </span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        data-testid="alcance-dia"
+                                        data-cargando={cargandoAlcance ? '1' : '0'}
+                                        onClick={() => setAlcance('dia')}
+                                        className={`text-left p-3 rounded-lg border-2 transition-all bg-white ${alcance === 'dia' ? 'border-orange-500 ring-2 ring-orange-200' : 'border-gray-200 hover:border-orange-300'}`}
+                                    >
+                                        <span className="block text-sm font-bold text-gray-900">
+                                            🟠 Todas las horas del día
+                                        </span>
+                                        <span className="block text-xs text-gray-600 mt-0.5">
+                                            {cargandoAlcance
+                                                ? '⏳ verificando…'
+                                                : `${clasesAlcanceDia.length} clase(s) en ${diasSeleccionados.size} día(s)`}
+                                        </span>
+                                    </button>
+                                </div>
+                                {alcance === 'hora' && diasSinClaseHora.length > 0 && (
+                                    <p className="text-[11px] text-amber-700 mt-1">
+                                        ⚠️ {diasSinClaseHora.map(nombreDiaDe).join(', ')}: no hay clase a las {horaDestino} — ese día no se publica (no se crea WOD).
+                                    </p>
+                                )}
+                                {alcance === 'hora' && diasSinVerificarHora.length > 0 && (
+                                    <p className="text-[11px] text-gray-500 mt-1">
+                                        ⏳ Sin verificar todavía: {diasSinVerificarHora.map(nombreDiaDe).join(', ')}.
+                                    </p>
+                                )}
+                                {alcance === 'dia' && (
+                                    <p className="text-[11px] text-amber-700 mt-1">
+                                        ⚠️ El MISMO entrenamiento se publica en TODAS las clases de esa disciplina: {clasesAlcanceDia.length} clase(s).
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
                         <div className="space-y-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Título</label>
@@ -581,6 +746,7 @@ export default function GestionClases() {
                                 <input type="text" value={wodForm.tipo_metcon} onChange={e => setWodForm({ ...wodForm, tipo_metcon: e.target.value })} className="w-full px-3 py-2 border rounded-lg" placeholder="AMRAP, EMOM, RFT..." />
                             </div>
                             <button onClick={guardarWod} disabled={loading || !wodForm.wod_principal.trim()}
+                                data-testid="guardar-wod"
                                 className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-50">
                                 {loading ? 'Guardando...' : (modoEdicion ? '💾 Actualizar WOD' : '💾 Guardar y Publicar WOD')}
                             </button>

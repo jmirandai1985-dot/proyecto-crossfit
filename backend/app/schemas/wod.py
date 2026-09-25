@@ -97,8 +97,16 @@ class WodBatchCreateRequest(BaseModel):
     `wods` es una lista de WodCreate (una por fecha). Cada WodCreate ya incluye
     su propia `fecha`; disciplina_id y modo_emergencia se pasan como query
     params (igual que POST /wods).
+
+    `clase_ids` (OPCIONAL, retrocompatible) define el ALCANCE del vínculo:
+      - None (default) → comportamiento histórico: el WOD de cada fecha se
+        vincula a TODAS las clases de esa fecha + disciplina.
+      - [ids] → se vincula SOLO a esas clases (ej. "publicar únicamente en la
+        clase de las 19:00"). Cada id se valida contra el tenant del token, y
+        por cada WOD solo se vinculan las clases de SU fecha y SU disciplina.
     """
     wods: List[WodCreate]
+    clase_ids: Optional[List[int]] = None
 
 
 class WodUpdate(BaseModel):

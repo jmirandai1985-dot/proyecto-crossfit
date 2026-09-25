@@ -1208,13 +1208,18 @@ def crear_wods_batch(
     disciplina activa, TODO en una sola transacción atómica.
 
     Body: { "wods": [ {fecha, titulo, calentamiento, fuerza_habilidad,
-                        wod_principal, tipo_metcon, estado, coach_id, ...}, ... ] }
+                        wod_principal, tipo_metcon, estado, coach_id, ...}, ... ],
+            "clase_ids": [int, ...]  # OPCIONAL: alcance del vínculo }
     (mismo shape que POST /wods, una entrada por día).
 
     - Si algo falla a mitad de tanda (ej. día 3 de 5) => rollback completo:
       NO quedan WODs parciales.
     - Reutiliza la validación de crear_wod (verificar_coach_disciplina) y el
       vínculo clase<->WOD del POST /wods/batch (misma disciplina + fecha).
+    - ALCANCE: sin `clase_ids` se vinculan TODAS las clases de la fecha +
+      disciplina (histórico). Con `clase_ids` se vinculan SOLO esas clases,
+      validadas contra el tenant del token (una clase de otro gimnasio nunca
+      se vincula) y filtradas por fecha + disciplina de cada WOD.
     """
     # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
     tenant_id = current_user["tenant_id"]
@@ -1230,6 +1235,34 @@ def crear_wods_batch(
         raise HTTPException(
             status_code=400,
             detail="Fechas duplicadas en la tanda: cada WOD debe ser de una fecha distinta")
+
+    # ── ALCANCE del vínculo (punto 2: "todas las horas" vs "solo esta hora") ──
+    # clase_ids=None  → TODAS las clases de la fecha + disciplina (histórico).
+    # clase_ids=[...] → SOLO esas clases. Toda la validación ocurre ANTES de
+    # crear nada: si algo no cuadra, no se escribe nada en la base.
+    alcance = "seleccion" if body.clase_ids is not None else "dia_completo"
+    clases_alcance = []
+    if body.clase_ids is not None:
+        ids_pedidos = list(dict.fromkeys(int(i) for i in body.clase_ids))
+        if not ids_pedidos:
+            raise HTTPException(
+                status_code=400,
+                detail="clase_ids no puede ser una lista vacía: omitilo para publicar en todas las horas del día")
+        if len(ids_pedidos) > 200:
+            raise HTTPException(
+                status_code=400, detail="clase_ids excede el máximo de 200 clases")
+        # 🔒 SEGURIDAD: el filtro por tenant sale SIEMPRE del token JWT. Una
+        # clase de otro gimnasio NO se encuentra => no se vincula jamás.
+        clases_alcance = db.query(Clase).filter(
+            Clase.tenant_id == tenant_id,
+            Clase.id.in_(ids_pedidos),
+        ).all()
+        ids_encontrados = {c.id for c in clases_alcance}
+        ids_ajenos = [i for i in ids_pedidos if i not in ids_encontrados]
+        if ids_ajenos:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Clase(s) no encontrada(s) en tu gimnasio: {ids_ajenos}")
 
     # Para coaches: validación OBLIGATORIA de pertenencia a la disciplina
     # (igual que POST /wods — misma validación, no reinventar).
@@ -1255,11 +1288,28 @@ def crear_wods_batch(
 
             # Vincular las clases de ESA fecha + disciplina activa
             # (equivalente al POST /wods/batch que hoy hace el frontend por día)
-            clases_dia = db.query(Clase).filter(
-                Clase.tenant_id == tenant_id,
-                Clase.fecha == wd.fecha,
-                Clase.disciplina_id == disciplina_id,
-            ).all()
+            if alcance == "seleccion":
+                # "Solo esta hora": únicamente las clases elegidas que son de
+                # ESA fecha y ESA disciplina (el filtro por disciplina ya viene
+                # validado arriba con verificar_coach_disciplina).
+                clases_dia = [
+                    c for c in clases_alcance
+                    if c.fecha == wd.fecha and c.disciplina_id == disciplina_id
+                ]
+                if not clases_dia:
+                    # Honestidad: mejor fallar de frente (y sin escribir nada)
+                    # que crear un WOD que no queda publicado en ninguna clase.
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(f"Ninguna de las clases seleccionadas es del {wd.fecha} "
+                                f"en esa disciplina: no se publicó nada. Elegí otra clase "
+                                f"o el alcance 'todas las horas'."))
+            else:
+                clases_dia = db.query(Clase).filter(
+                    Clase.tenant_id == tenant_id,
+                    Clase.fecha == wd.fecha,
+                    Clase.disciplina_id == disciplina_id,
+                ).all()
             clase_ids = []
             for clase in clases_dia:
                 clase.wod_id = nueva_wod.id
@@ -1280,9 +1330,16 @@ def crear_wods_batch(
         db.rollback()
         raise
 
+    if alcance == "seleccion":
+        mensaje = (f"{len(creados)} WOD(s) creados y publicados en {clases_total} "
+                   f"clase(s) seleccionada(s)")
+    else:
+        mensaje = f"{len(creados)} WOD(s) creados y vinculados a {clases_total} clase(s)"
     return {
-        "mensaje": f"{len(creados)} WOD(s) creados y vinculados a {clases_total} clase(s)",
+        "mensaje": mensaje,
         "creados": len(creados),
         "clases_vinculadas": clases_total,
+        # "seleccion" = solo las clases pedidas · "dia_completo" = todas las del día
+        "alcance": alcance,
         "wods": creados,
     }
