@@ -718,6 +718,11 @@ const AlumnoDashboard = () => {
                 {showReservaModal && claseSeleccionada && (() => {
                     const fechaClase = claseSeleccionada.fecha || claseSeleccionada.fecha_clase;
                     const disciplina = claseSeleccionada.disciplina_nombre;
+                    // D-02: cupos REALES de la clase (antes el modal decía siempre
+                    // "Cupos disponibles", incluso con la clase llena).
+                    const cupoMax = Number(claseSeleccionada.cupo_maximo || 0);
+                    const asistentes = Number(claseSeleccionada.asistentes_confirmados || 0);
+                    const cuposModal = Math.max(0, cupoMax - asistentes);
                     const tieneDuplicado = disciplina && fechaClase && misReservas.some(r =>
                         r.disciplina_nombre === disciplina &&
                         (r.clase_fecha === fechaClase || r.fecha === fechaClase)
@@ -749,8 +754,10 @@ const AlumnoDashboard = () => {
                                             <p className="text-gray-600">🕐 {claseSeleccionada.hora_inicio} - {claseSeleccionada.hora_fin}</p>
                                             <p className="text-gray-600">👨‍🏫 {claseSeleccionada.coach_nombre || '—'}</p>
                                             <p className="text-gray-600">📅 {fechaClase}</p>
-                                            <p className="text-green-600 font-medium">
-                                                ✅ Cupos disponibles
+                                            <p className={cuposModal > 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                                                {cuposModal > 0
+                                                    ? `✅ ${cuposModal}/${cupoMax} cupos disponibles`
+                                                    : `⛔ Sin cupos (${asistentes}/${cupoMax})`}
                                             </p>
                                         </div>
                                     </div>
