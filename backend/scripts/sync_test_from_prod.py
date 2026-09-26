@@ -89,6 +89,70 @@ c_test.autocommit = True
 cur_prod = c_prod.cursor()
 cur_test = c_test.cursor()
 
+
+# ── 0. GUARDRAIL: comparar la revisión de Alembic de TEST vs PROD ───────────
+# El sync copia DATOS, no esquema, y nunca toca `alembic_version`. Pero si TEST
+# quedó con una revisión incompatible respecto de PROD, cualquier `alembic upgrade`
+# posterior se comporta raro (pasó el 2026-09-26: TEST con esquema 036 y stamp 035).
+# Se compara ANTES de truncar nada usando el grafo de migraciones (ScriptDirectory),
+# porque no toda diferencia es un problema: TEST ADELANTE de PROD es el flujo normal
+# mientras se desarrolla una migración.
+def _alembic_version(cur, etiqueta):
+    """Revisión de alembic_version (None si el SELECT falla o la tabla está vacía)."""
+    try:
+        cur.execute("SELECT version_num FROM alembic_version")
+        fila = cur.fetchone()
+        return fila[0] if fila else None
+    except Exception as e:  # noqa: BLE001
+        print(f"[WARN] no se pudo leer alembic_version en {etiqueta}: {type(e).__name__}")
+        return None
+
+
+def _comparar_versiones_alembic(ver_test, ver_prod):
+    """(estado, detalle) = igual | adelante | atras | distintas. Función pura aparte."""
+    try:
+        from alembic.config import Config as _AlembicConfig
+        from alembic.script import ScriptDirectory
+
+        from app.core.alembic_orden import comparar_revisiones
+
+        _cfg = _AlembicConfig(os.path.join(BACKEND_DIR, "alembic.ini"))
+        _cfg.set_main_option("script_location", os.path.join(BACKEND_DIR, "alembic"))
+        _script_dir = ScriptDirectory.from_config(_cfg)  # sólo lee alembic/versions
+    except Exception as e:  # noqa: BLE001
+        return "distintas", f"no se pudo leer el script directory de Alembic: {type(e).__name__}"
+    return comparar_revisiones(_script_dir, ver_test, ver_prod)
+
+
+ver_test = _alembic_version(cur_test, "TEST")
+ver_prod = _alembic_version(cur_prod, "PROD")
+estado, detalle = _comparar_versiones_alembic(ver_test, ver_prod)
+print(f"Version Alembic  TEST: {ver_test}")
+print(f"Version Alembic  PROD: {ver_prod}")
+print(f"Comparacion Alembic: {estado} -> {detalle}")
+
+if estado == "igual":
+    print("[OK] TEST y PROD están en la misma revisión de Alembic")
+elif estado == "adelante":
+    # Flujo normal: se está desarrollando una migración en TEST antes de aplicarla
+    # a PROD. Sólo se avisa (no bloquea el sync, que copia datos, no esquema).
+    print("[WARN] TEST va ADELANTE de PROD en Alembic (normal mientras se desarrolla")
+    print("       una migración sin aplicar a PROD). Se continúa con el sync.")
+else:
+    print("=" * 60)
+    print(f"  ABORTADO: revisión de Alembic incompatible ({estado})")
+    print(f"    TEST: {ver_test}")
+    print(f"    PROD: {ver_prod}")
+    print(f"    {detalle}")
+    print("  TEST no puede quedar ATRÁS de PROD ni en otra rama de migraciones.")
+    print("  Cómo resolverlo:")
+    print("    1) python run_setup_test_db.py   (reconstruye el esquema y hace")
+    print("       'alembic stamp head' automáticamente), o")
+    print("    2) ENVIRONMENT=test python -m alembic stamp <revision de PROD>")
+    print("       (sólo si el esquema de TEST ya está al día)")
+    print("=" * 60)
+    sys.exit(1)
+
 # â”€â”€ 1. RESPALDAR tablas custom â”€â”€
 print("\n[BACKUP] Respaldo transacciones_financieras...")
 try:

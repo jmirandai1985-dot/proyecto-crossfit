@@ -126,6 +126,34 @@ with engine.connect() as conn:
     conn.commit()
 print("[OK] Migraciones post-create aplicadas (requiere_coach, es_estudiante, coach_disciplinas, cobertura_emergencia, pedidos.voucher_url)")
 
+# ── Alembic: alinear el stamp con el esquema recién construido ──────────────
+# `create_all()` construye el esquema desde los MODELOS (incluye las migraciones
+# ya fusionadas) pero NO toca `alembic_version`: TEST quedaba con el esquema al día
+# y el número viejo. Desfase real detectado el 2026-09-26: TEST con esquema de la
+# 036 pero `alembic_version = 035_precio_snapshot_solicitudes` (mientras PROD ya
+# estaba en 036), lo que hacía que un `alembic upgrade head` contra TEST intentara
+# re-aplicar la 036 sobre un esquema que ya la tenía.
+# Con este stamp programático la versión de TEST siempre refleja lo que
+# `create_all()` acaba de crear. Se hace acá (fin del bloque de DDL) y no al final
+# del script, para que quede claro que es parte de la construcción del esquema.
+try:
+    from alembic import command as _alembic_command
+    from alembic.config import Config as _AlembicConfig
+
+    _backend_dir = os.path.dirname(os.path.abspath(__file__))
+    _alembic_cfg = _AlembicConfig(os.path.join(_backend_dir, "alembic.ini"))
+    # script_location absoluto: no dependemos del cwd desde el que se ejecute el seed.
+    _alembic_cfg.set_main_option("script_location", os.path.join(_backend_dir, "alembic"))
+    # env.py toma la URL de settings.DIRECT_URL (TEST, forzado arriba).
+    _alembic_command.stamp(_alembic_cfg, "head")
+    print("[OK] alembic stamp head (la versión de TEST ahora coincide con los modelos)")
+except Exception as _e:  # noqa: BLE001
+    # No se aborta el seed por esto (romperíamos toda la suite), pero se avisa
+    # fuerte: si esto falla, TEST queda con el desfase de versión.
+    print(f"[WARN] no se pudo hacer 'alembic stamp head' en TEST: "
+          f"{type(_e).__name__}: {_e}")
+    print("[WARN] TEST puede quedar con alembic_version desfasado respecto del esquema")
+
 db = DB()
 try:
     # â”€â”€ 1. LIMPIAR TODO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
