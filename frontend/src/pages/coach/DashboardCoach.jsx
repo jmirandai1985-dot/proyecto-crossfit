@@ -145,9 +145,12 @@ const DashboardCoach = () => {
     const dayDates = getDayDates();
 
     // Fixed schedule times
+    // 14:00 agregado (Ronda 4): es una franja REAL del box — en TEST hay 15 franjas
+    // de `horarios` y 60 clases en las próximas 4 semanas a las 14:00, pero la grilla
+    // no podía mostrarlas porque no estaba en esta lista (12:00 y 13:00 no existen).
     const SCHEDULE_HOURS = [
         '06:00', '07:00', '08:00', '09:00', '10:00', '11:00',
-        '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'
+        '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'
     ];
 
     // -- Build week grid data --
