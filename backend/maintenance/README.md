@@ -146,3 +146,62 @@ Este contenedor corre **en la máquina de desarrollo**. Los logs diarios que exi
 
 Los backups que sí se generan son válidos (se verificó la integridad del de hoy).
 
+
+## Backup de PROD en la nube — Cron Job de Render + Cloudflare R2 (Fase 2, 2026-09-26)
+
+Motivo: el backup vivía en **este** contenedor, así que solo corría los días que la PC estaba
+encendida a las 02:30 (logs del 22/08, 11/09, 24/09 y 25/09) y, por default, contra la rama de
+**TEST**. Ahora el backup de PROD corre en la nube, todos los días, sin depender de la PC.
+
+| Pieza | Qué es |
+|---|---|
+| Runner | **Cron Job** de Render (`Dockerfile.cron`: imagen mínima con `pg_dump` 18 + `boto3`) |
+| Origen | `PROD_DB_DIRECT_URL` → rol **`backup_ro`** de Neon (solo lectura, `GRANT pg_read_all_data`), conexión **directa** (sin `-pooler`) |
+| Destino | **Cloudflare R2**, bucket privado `box-crossfit-backups`, prefijo `daily/`, retención **90 días** |
+| Secretos | Environment Group de Render **`backups-prod`** (cero credenciales en el repo) |
+| Script | `maintenance/backup_cloud.py` (dump + asserts + subida verificada) |
+
+### Comportamiento
+- `DRY_RUN=1` (default de la imagen): dump + asserts + **lista** el bucket y termina **sin subir
+  nada**.
+- `DRY_RUN=0`: sube, **verifica con `head_object`** que el objeto pesa igual que el archivo
+  local, purga lo que tenga más de `RETENTION_DAYS` y **re-lista** para confirmar la subida.
+- **Falla de verdad**: exit `2` config (falta variable / `-pooler` / major distinta), `3` dump,
+  `4` asserts de contenido, `5` R2 ⇒ Render marca el run como fallido. Nunca dice "OK" en falso
+  (el bug del 26/09 fue un "✅ Backup completado" con el dump fallando).
+- Asserts de contenido: tamaño ≥ 200 KB, `CREATE TABLE` ≥ 30, footer
+  `PostgreSQL database dump complete`, `COPY public.alembic_version` presente.
+
+### Verificación local (sin R2; usa TEST y es solo lectura)
+```bash
+# construir la imagen (el contexto es backend/)
+docker build -f backend/Dockerfile.cron backend -t box-crossfit-backup-cron:local
+
+# guardas: versión del cliente, sin variables y con URL del pooler (estas últimas: exit 2)
+docker run --rm --entrypoint pg_dump box-crossfit-backup-cron:local --version
+docker run --rm box-crossfit-backup-cron:local
+docker run --rm -e PROD_DB_DIRECT_URL='postgresql://u:p@ep-fake-pooler.c-2...neon.tech/neondb' \
+  -e R2_ENDPOINT=x -e R2_BUCKET=x -e R2_ACCESS_KEY_ID=x -e R2_SECRET_ACCESS_KEY=x \
+  box-crossfit-backup-cron:local
+```
+Registrado el 2026-09-26: `pg_dump 18.6` · sin variables ⇒ lista las 5 que faltan (exit 2) ·
+URL `-pooler` ⇒ rechazada (exit 2) · dump+asserts contra TEST ⇒
+`dump 1429.8 KB → gz 144.5 KB | 36 CREATE TABLE | 36 COPY | footer OK |
+alembic=035_precio_snapshot_solicitudes | VEREDICTO: OK`.
+
+### Crear el Cron Job en Render
+1. Dashboard → **New → Cron Job** → repo + rama (`main`).
+2. Runtime **Docker**: *Dockerfile Path* = `backend/Dockerfile.cron`;
+   *Docker Build Context Directory* = `backend`.
+3. **Environment**: *Link Environment Group* → **`backups-prod`** (entran las 10 variables).
+   Confirmá `DRY_RUN=1` para el primer disparo.
+4. Schedule (UTC): `0 6 * * *` = **03:00 CLT** diario.
+5. Región: la misma que el resto de los servicios (us-east-2) si el plan lo permite.
+6. Crear → **Runs → Trigger Run** (no hace falta esperar a las 03:00) y revisar el log.
+7. Con el log en verde: `DRY_RUN=0`, disparar de nuevo a mano y verificar que el objeto aparece
+   en R2 (`daily/AAAA-MM-DD_HHMM_neon_backup.sql.gz`).
+
+> Costo: los Cron Jobs no existen en el plan free; el mínimo es **US$1/mes** por servicio.
+> Para versionarlo se puede declarar en `render.yaml` (`type: cron`), pero recién después de
+> validarlo a mano, así un sync del blueprint no crea algo a medio probar.
+
