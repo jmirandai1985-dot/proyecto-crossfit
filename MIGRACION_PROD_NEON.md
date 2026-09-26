@@ -132,6 +132,49 @@ Notas operativas:
 > El repo es publico: las URLs con credenciales NO se escriben en este archivo. Los valores completos
 > son los de `backend/.env` (PROD): `DATABASE_URL` y `DIRECT_URL`.
 
+---
+
+## R-4 — Rotación de la credencial de TEST (rama `br-divine-dew-b6ye63xy`)
+
+**Motivo**: la password del rol `neondb_owner` de la rama TEST de Neon quedó expuesta en
+**texto plano en un mensaje de chat** durante la sesión de migración (2026-09-24). Hay que
+rotarla. La rama TEST hoy es `br-divine-dew-b6ye63xy` (endpoint `ep-jolly-butterfly-b6ty2z89`)
+del proyecto `produccion2.0`.
+
+**Punto clave (verificado en la doc oficial de Neon)**: *"In Neon, roles belong to a branch...
+When you create a child branch, roles in the parent branch are duplicated in the child
+branch"* y *"Postgres roles in Neon are branch-scoped"*. ⇒ **Resetear la password en la rama
+TEST NO afecta a la rama de PROD** (`br-late-scene-b6muci2n` / `ep-nameless-sound-b6km6wyi`),
+que tiene su propia copia del rol.
+
+### Pasos exactos (Jebbus, en el dashboard de Neon)
+1. Entrar a <https://console.neon.tech> y abrir el proyecto **`produccion2.0`**
+   (project_id `lively-breeze-53844834`).
+2. En el panel izquierdo: **Branches**.
+3. Seleccionar la rama de TEST (`br-divine-dew-b6ye63xy`; su endpoint es
+   `ep-jolly-butterfly-b6ty2z89`). **Verificar que NO sea la de PROD**.
+4. Ir a la pestaña/sección **Roles** de esa rama (en el menú lateral: **Roles**, con el
+   selector de rama apuntando a la de TEST).
+5. En la fila del rol **`neondb_owner`**, abrir el menú de los tres puntos (**⋮**) del extremo
+   derecho y elegir **Reset password**.
+6. Neon muestra la **password nueva una sola vez**: copiarla (o usar el botón de **Connect**,
+   que entrega la connection string completa de esa rama). Cerrar el diálogo.
+7. **No pegarla en el chat.** Entregarla por una de estas dos vías locales:
+   - **(preferida)** abrir `backend\.env.test` y reemplazar el valor de la password en
+     `DATABASE_URL` y `DIRECT_URL` (el archivo está en `.gitignore`, nunca se commiteará); o
+   - guardarla en `backend\backups\pw_test_nueva.txt` (carpeta gitignoreada) y avisarme:
+     yo actualizo `.env.test`, **borro ese archivo temporal** y no imprimo el valor.
+8. Avisar "listo" (sin pegar la password) y yo corro la verificación.
+
+### Verificación posterior (la hago yo)
+1. Conectividad con la credencial nueva: `SELECT version(), current_database()` contra TEST.
+2. `GET http://localhost:8001/health` → `{"database":"connected","environment":"test"}`.
+3. Suite completa de TEST (`run_tests.bat`) — que la rotación no rompió nada.
+4. **PROD intacto** (la rotación es branch-scoped): `GET https://box-crossfit.onrender.com/health`
+   → `database: connected` y un `/health` local con `backend\.env` (PROD) → `connected`.
+5. Registrar acá la fecha de rotación (sin el valor).
+
+
 Servicio **`box-crossfit`** -> *Environment* -> editar **solo estas dos**:
 
 | Variable | Que valor poner |
