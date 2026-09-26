@@ -159,9 +159,9 @@ const PizarraRMs = () => {
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between">
                     <div>
                         <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                            💪 Pizarra de RMs y Leaderboard Comunitario
+                            💪 Pizarra de RMs
                         </h1>
-                        <p className="text-gray-500 mt-1">Tus récords personales y rankings</p>
+                        <p className="text-gray-500 mt-1">Tus récords personales por movimiento</p>
                     </div>
                     <button
                         onClick={() => { resetForm(); setShowRMModal(true); }}
