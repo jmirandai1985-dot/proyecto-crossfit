@@ -152,22 +152,38 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
 
     `alumno_id=None` + `destinatario_rol` (admin/lead) también se registra: son correos
     reales del sistema que antes quedaban invisibles en /admin/notificaciones.
+
+    ── FIX (2026-09-26): el `From` NO se saneaba ──
+    `To` y `Subject` pasaban por `_limpiar_header`, pero el `From` se armaba con
+    `settings.GMAIL_SMTP_USER` crudo. Con un salto de línea o espacio pegado en la env
+    var (dashboard de Render), `msg["From"] = ...` lanza
+    "Header values may not contain linefeed or carriage return characters" ANTES de
+    conectarse a Gmail, así que el 100% de los correos de ese entorno fallaba (107 filas
+    `fallido` en PROD el 26/09). Ahora se sanea acá y también en el login SMTP.
     """
     try:
         from app.core.config import settings
 
         destinatario = _limpiar_header(destinatario).strip()
         asunto = _limpiar_header(asunto)
+        # Env vars que se pegan a mano en un dashboard: hay que sanearlas siempre.
+        remitente = _limpiar_header(settings.GMAIL_SMTP_USER or "").strip()
+        usuario_smtp = remitente
+        clave_smtp = (settings.GMAIL_SMTP_APP_PASSWORD or "").strip()
+        if not usuario_smtp or not clave_smtp:
+            raise RuntimeError(
+                "Configuración SMTP incompleta: GMAIL_SMTP_USER y/o "
+                "GMAIL_SMTP_APP_PASSWORD vacíos (o sólo espacios)")
 
         msg = EmailMessage()
-        msg["From"] = f"Urban Training Box <{settings.GMAIL_SMTP_USER}>"
+        msg["From"] = f"Urban Training Box <{remitente}>"
         msg["To"] = destinatario
         msg["Subject"] = asunto
         msg.set_content("Este correo requiere un cliente que soporte HTML.")
         msg.add_alternative(html, subtype="html")
 
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(settings.GMAIL_SMTP_USER, settings.GMAIL_SMTP_APP_PASSWORD)
+            server.login(usuario_smtp, clave_smtp)
             server.send_message(msg)
 
         _log_seguro(f"Correo enviado a {destinatario!r}: {asunto!r}", "info")
