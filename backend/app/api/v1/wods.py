@@ -809,6 +809,9 @@ def obtener_wod_hoy(
     from datetime import date
     from app.models.reserva import Reserva
     from app.models.clase import Clase
+    # TZ Chile: con date.today() (UTC en el contenedor) entre 20:00 y 23:59 CLT ya
+    # era "mañana" y el alumno no veía el WOD de su clase de hoy.
+    from app.utils.santiago import hoy_santiago
 
     tenant_id = current_user["tenant_id"]
     rol = current_user.get("rol", "")
@@ -821,7 +824,7 @@ def obtener_wod_hoy(
                 detail="No puedes consultar el WOD de otro alumno",
             )
 
-    hoy = date.today()
+    hoy = hoy_santiago()
 
     # Si se especifica alumno, buscar el WOD de su clase reservada hoy
     if alumno_id:

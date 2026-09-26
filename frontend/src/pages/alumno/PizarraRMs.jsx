@@ -4,6 +4,8 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 // H-03: categoría/valor/formato de un RM desde la fuente única (utils/rm.js).
 import { formatResultadoRM, normalizarCategoria } from '../../utils/rm';
+// TZ Chile: default del formulario = día chileno (no el del navegador).
+import { hoyChileStr } from '../../utils/fecha';
 
 const CATEGORIA_META = {
     fuerza: { label: 'FUERZA', icon: '🏋️', color: 'emerald', bgClass: 'bg-emerald-50', textClass: 'text-emerald-700', borderClass: 'border-emerald-200' },
@@ -19,8 +21,7 @@ const formatResultado = (rm, categoria) => formatResultadoRM(rm, categoria);
 
 const PizarraRMs = () => {
     const { usuario_id, tenant_id } = useAuth();
-    const d = new Date();
-    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const today = hoyChileStr();
 
     const [loading, setLoading] = useState(true);
     const [movimientos, setMovimientos] = useState([]);

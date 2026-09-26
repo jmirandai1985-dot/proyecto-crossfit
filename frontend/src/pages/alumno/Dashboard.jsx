@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
+// TZ Chile: "hoy" y el calendario de la semana salen de utils/fecha.js (el navegador
+// puede estar en otra zona: con la fecha local, entre 20:00 y 23:59 CLT ya era mañana).
+import { hoyChileStr, fechaSolaAInstante } from '../../utils/fecha';
 
 // Helper: group classes by unique (disciplina, hora_inicio, hora_fin)
 const AGRUPAR_CLASES = (clases) => {
@@ -36,22 +39,23 @@ const SEPARAR_CLASES = (clases) => {
     return { manana, tarde };
 };
 
-const d = new Date();
-const TODAY = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// TZ Chile: día de HOY en el calendario chileno (no el del navegador/UTC).
+const TODAY = hoyChileStr();
 
-// Calcular próximos 7 días (HOY + 6)
+// Calcular próximos 7 días (HOY + 6) sobre la fecha chilena, anclada a mediodía UTC
+// para que sumar días no se corra por la zona horaria del navegador.
 const getProximosDias = () => {
     const dias = [];
     const nombres = ['DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO'];
+    const base = fechaSolaAInstante(TODAY);
     for (let i = 0; i < 7; i++) {
-        const fecha = new Date(d);
-        fecha.setDate(fecha.getDate() + i);
-        const fechaStr = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}-${String(fecha.getDate()).padStart(2, '0')}`;
+        const fecha = new Date(base.getTime() + i * 24 * 60 * 60 * 1000);
+        const fechaStr = fecha.toISOString().slice(0, 10);
         dias.push({
             fecha: fechaStr,
-            nombreDia: nombres[fecha.getDay()],
-            diaNum: fecha.getDate(),
-            mes: fecha.getMonth() + 1,
+            nombreDia: nombres[fecha.getUTCDay()],
+            diaNum: fecha.getUTCDate(),
+            mes: fecha.getUTCMonth() + 1,
         });
     }
     return dias;

@@ -12,6 +12,8 @@ import {
     valorRM as getValorNumerico,
     unidadRM as getUnidad,
 } from '../../utils/rm';
+// TZ Chile: fechas de los RMs en el calendario chileno.
+import { fmtFechaCortaChile } from '../../utils/fecha';
 
 const CAT_CONFIG = {
     fuerza: { label: 'Fuerza Máxima', color: '#3B82F6', icon: '💪' },
@@ -193,9 +195,10 @@ function getWeekKey(d) {
     return `S${Math.ceil((diff + start.getDay() + 1) / 7)}`;
 }
 
+// TZ Chile: las fechas de los RMs llegan como 'YYYY-MM-DD'; se formatean en el
+// calendario chileno (con new Date(f) a medianoche UTC la fecha se corría un día).
 function formatFecha(f) {
-    try { const d = new Date(f); return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
-    catch (e) { return f ? f.slice(5, 10) : '—'; }
+    return fmtFechaCortaChile(f) || '—';
 }
 
 export default PerformanceHub;

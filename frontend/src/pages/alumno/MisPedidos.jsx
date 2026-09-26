@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Layout from '../../components/Layout';
 import AvisoCarga from '../../components/AvisoCarga';
 import api from '../../services/api';
+// TZ Chile: la fecha del pedido (instante) se muestra en horario chileno.
+import { fmtFechaChile } from '../../utils/fecha';
 
 const MisPedidos = () => {
     const [pedidos, setPedidos] = useState([]);
@@ -85,7 +87,7 @@ const MisPedidos = () => {
                                     <div>
                                         <h3 className="font-bold text-gray-800">{productosMap[p.producto_id] || `Producto #${p.producto_id}`}</h3>
                                         <p className="text-sm text-gray-500">Cantidad: {p.cantidad} | Total: <span className="font-semibold text-emerald-600">${(p.total || 0).toLocaleString('es-CL')}</span></p>
-                                        <p className="text-xs text-gray-400 mt-1">Pedido #{p.id} — {new Date(p.fecha_pedido).toLocaleDateString('es-CL')}</p>
+                                        <p className="text-xs text-gray-400 mt-1">Pedido #{p.id} — {fmtFechaChile(p.fecha_pedido)}</p>
                                     </div>
                                     <span className={`px-3 py-1.5 rounded-full text-xs font-medium ${getEstadoStyle(p.estado)}`}>
                                         {getEstadoIcon(p.estado)} {p.estado.charAt(0).toUpperCase() + p.estado.slice(1)}

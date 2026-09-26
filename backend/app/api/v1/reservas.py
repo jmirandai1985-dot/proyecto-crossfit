@@ -364,7 +364,9 @@ def obtener_asistencia_semanal(
     else:
         usuario_id = current_user["usuario_id"]
 
-    hoy = date.today()
+    # TZ Chile: el mes en curso del alumno es el de su calendario, no el UTC.
+    from app.utils.santiago import hoy_santiago
+    hoy = hoy_santiago()
     hace_3_meses = date(hoy.year, hoy.month, 1) - timedelta(days=90)
 
     reservas = db.query(
@@ -435,7 +437,9 @@ def obtener_asistencia_mes(
     else:
         usuario_id = current_user["usuario_id"]
 
-    hoy = date.today()
+    # TZ Chile: el mes en curso se calcula con el calendario chileno.
+    from app.utils.santiago import hoy_santiago
+    hoy = hoy_santiago()
     primer_dia_mes = date(hoy.year, hoy.month, 1)
 
     # Total de reservas del alumno en el mes actual
