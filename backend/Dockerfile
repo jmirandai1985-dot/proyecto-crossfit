@@ -74,10 +74,27 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 # ---- Stage 4: contenedor de mantenimiento (cron) ----
 FROM base AS maintenance
 USER root
-# pg_dump real (cliente PostgreSQL de Debian) + cron.
+# cron + cliente PostgreSQL de la MISMA major que el servidor de Neon.
+# Neon corre PostgreSQL 18.x y `pg_dump` ABORTA si el cliente es de una major menor
+# ("pg_dump: error: aborting because of server version mismatch / server version: 18.6;
+# pg_dump version: 17.11"), que es exactamente por lo que los backups no se generaban.
+# Debian 13 (trixie) trae el cliente 17, y Neon corre PostgreSQL 18.6, así que se instala
+# el cliente 18 desde el repo oficial de PGDG (`trixie-pgdg`) y se VERIFICA en el build:
+# si algún día la base cambia de codename o PGDG de major, el build falla acá en vez de
+# fallar en silencio en el cron de las 02:30 (que es lo que venía pasando desde el 24/09).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-client cron \
+    && apt-get install -y --no-install-recommends ca-certificates curl cron \
+    && grep -q '^VERSION_CODENAME=trixie' /etc/os-release \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-18 \
     && rm -rf /var/lib/apt/lists/* \
+    && pg_dump --version \
+    && pg_dump --version | grep -q " 18\." \
     && mkdir -p /app/backups \
     && chown -R boxapp:boxapp /app
 COPY maintenance/crontab /etc/cron.d/box-maintenance

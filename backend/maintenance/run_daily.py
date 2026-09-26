@@ -28,8 +28,13 @@ def run():
         # 1. Backup
         logger.info("1/5 Ejecutando backup_neon...")
         from maintenance.backup_neon import ejecutar_backup
-        ejecutar_backup()
-        logger.info("✅ Backup completado")
+        if ejecutar_backup():
+            logger.info("✅ Backup completado")
+        else:
+            # Antes se logueaba "✅ Backup completado" aunque fallara (el error quedaba
+            # sólo en el logger de backup_neon). El resultado real importa: es el único
+            # respaldo de PROD.
+            logger.error("❌ Backup NO se generó (ver el detalle arriba; pg_dump/server)")
     except Exception as e:
         logger.error(f"❌ Backup falló: {e}")
 
