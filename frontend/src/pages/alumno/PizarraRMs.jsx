@@ -109,7 +109,16 @@ const PizarraRMs = () => {
                 tenant_id,
                 alumno_id: usuario_id,
                 movimiento_id: Number(rmForm.movimiento_id),
-                peso_kg: cat === 'fuerza' ? (parseFloat(rmForm.peso_kg) || 1) : 1,
+                // RM-01: `peso_kg` es el "valor" del RM (kg / reps / min / km según la
+                // categoría, ver HistorialRMBase), así que NO se manda un 1 fijo: para
+                // gimnástico va el nº de repeticiones y para cardio/metabólico la métrica
+                // cargada. Antes, con 1 fijo, el nivel gimnástico daba siempre Principiante.
+                peso_kg: cat === 'fuerza'
+                    ? (parseFloat(rmForm.peso_kg) || 1)
+                    : cat === 'gimnastico'
+                        ? (parseInt(rmForm.repeticiones) || 1)
+                        : (parseInt(rmForm.minutos) || parseFloat(rmForm.km)
+                           || parseInt(rmForm.vueltas) || parseInt(rmForm.calorias) || 1),
                 fecha: rmForm.fecha || today,
                 notas: rmForm.notas || null,
                 repeticiones: rmForm.repeticiones ? parseInt(rmForm.repeticiones) : null,

@@ -163,7 +163,10 @@ def crear_historial_rm(
             Usuario.tenant_id == historial_data.tenant_id
         ).first()
         genero = getattr(alumno, "genero", None) if alumno else None
-        valor_para_nivel = historial_data.peso_kg
+        # RM-01: el "valor" del nivel gimnástico son las REPETICIONES (reps, metros…),
+        # no el peso. Antes se usaba peso_kg y el frontend lo mandaba fijo en 1, así que
+        # el nivel gimnástico se calculaba siempre con 1 => todos "Principiante".
+        valor_para_nivel = historial_data.repeticiones or historial_data.peso_kg
         # Para ciertos movimientos gimnásticos, el valor se pasa directo
         result = obtener_nivel_gimnastico(
             movimiento_nombre=movimiento_nombre,
@@ -844,9 +847,12 @@ def obtener_nivel_gimnastico_alumno(
     # por los que estan en CROSSFIT_HABILIDADES (que excluye variantes
     # como Strict Pull-up, Kipping Pull-up).
     top_rms = []
+    # RM-01: para gimnástico el valor son las repeticiones (el peso guardado es el
+    # "valor" genérico del RM y puede venir de un movimiento distinto).
+    valor_gim = func.coalesce(HistorialRM.repeticiones, HistorialRM.peso_kg)
     rms_gimnasticos = db.query(
         Movimiento.nombre,
-        func.max(HistorialRM.peso_kg).label('max_valor')
+        func.max(valor_gim).label('max_valor')
     ).join(
         HistorialRM, Movimiento.id == HistorialRM.movimiento_id
     ).filter(
