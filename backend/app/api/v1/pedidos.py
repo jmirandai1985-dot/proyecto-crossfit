@@ -2,6 +2,7 @@
 Router de endpoints para gestión de Pedidos
 """
 import logging
+from app.core.urls import url_frontend  # B.2
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import update
 from sqlalchemy.exc import DBAPIError
@@ -163,7 +164,7 @@ def crear_pedido(
         send_confirmacion_pedido(
             destino_nombre, destino_correo,
             producto.nombre, pedido_data.cantidad, total,
-            f"{settings.FRONTEND_URL}/alumno/mis-pedidos",
+            url_frontend("/alumno/mis-pedidos"),
             current_user.get("usuario_id") if current_user.get("rol") not in ("coach", "admin", "administrador") else (alumno.id if alumno else None))
     except Exception as e:
         logger.warning(f"No se pudo enviar correo de confirmación de pedido: {e}")

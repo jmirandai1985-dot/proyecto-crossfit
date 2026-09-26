@@ -14,6 +14,7 @@ Tipos de correo:
   6. hito_racha_12    — 12 meses de racha (🏆, nivel máximo)
 """
 import logging
+from app.core.urls import url_frontend, url_backend  # B.2
 
 from app.core.config import settings
 from app.services.email_service import _template, _enviar
@@ -88,7 +89,7 @@ def _enviar_racha(nombre: str, correo: str, alumno_id: int, nivel: int,
     saludo = f"Hola {nombre.split()[0]}, queremos celebrarte hoy."
     cuerpo = copy["cuerpo"].format(nombre=nombre.split()[0], mes=mes_nombre)
     html = _template(copy["titulo"], saludo, cuerpo,
-                     "Ver mi progreso", f"{settings.FRONTEND_URL}/alumno/mi-progreso")
+                     "Ver mi progreso", url_frontend("/alumno/mi-progreso"))
     ok = _enviar(correo, asunto, html, alumno_id,
                  tipo=f"hito_racha_{nivel}", mes_referencia=mes_referencia)
     logger.info(f"[hito_racha_{nivel}] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
@@ -111,7 +112,7 @@ def enviar_email_cumplimiento(nombre: str, correo: str, alumno_id: int,
         "<p>¡Nos vemos en el box!</p>"
     )
     html = _template("¡Mes perfecto! 🔥", saludo, cuerpo,
-                     "Ver mi progreso", f"{settings.FRONTEND_URL}/alumno/mi-progreso")
+                     "Ver mi progreso", url_frontend("/alumno/mi-progreso"))
     ok = _enviar(correo, asunto, html, alumno_id,
                  tipo="cumplimiento", mes_referencia=mes_referencia)
     logger.info(f"[cumplimiento] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
@@ -135,7 +136,7 @@ def enviar_email_acompanamiento(nombre: str, correo: str, alumno_id: int,
         "<p>Te esperamos en el box 💪</p>"
     )
     html = _template("Te acompañamos", saludo, cuerpo,
-                     "Ver mis clases", f"{settings.FRONTEND_URL}/alumno/mis-reservas")
+                     "Ver mis clases", url_frontend("/alumno/mis-reservas"))
     ok = _enviar(correo, asunto, html, alumno_id,
                  tipo="acompanamiento", mes_referencia=mes_referencia)
     logger.info(f"[acompanamiento] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
@@ -201,7 +202,7 @@ def enviar_email_reactivacion(nombre: str, correo: str, alumno_id: int,
 
     # Link de opt-out: endpoint público del backend (no requiere frontend ni login).
     token = generar_token_optout(alumno_id)
-    optout_url = (f"{settings.BACKEND_PUBLIC_URL}"
+    optout_url = (f"{url_backend()}"
                   f"/api/v1/notificaciones/reactivacion/optout?token={token}")
     cuerpo += (
         "<p style='text-align:center;font-size:12px;color:#71717a;margin-top:24px;'>"
@@ -211,7 +212,7 @@ def enviar_email_reactivacion(nombre: str, correo: str, alumno_id: int,
     )
 
     html = _template(copy["titulo"], saludo, cuerpo, copy["cta"],
-                     f"{settings.FRONTEND_URL}/alumno/solicitar-plan")
+                     url_frontend("/alumno/solicitar-plan"))
     ok = _enviar(correo, asunto, html, alumno_id,
                  tipo="reactivacion", mes_referencia=mes_referencia)
     logger.info(f"[reactivacion] {'EXITOSO' if ok else 'FALLIDO'} -> {correo} "

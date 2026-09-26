@@ -1,5 +1,6 @@
 """Servicio de envio de correos via Gmail SMTP (18 funciones)."""
 import os
+from app.core.urls import url_frontend  # B.2: URLs de correo saneadas
 import base64
 import logging
 import smtplib
@@ -221,7 +222,7 @@ def enviar_email_bienvenida(alumno: dict, token_onboarding: str) -> bool:
     cuerpo = ("En Urban Training Box no solo entrenamos el cuerpo: forjamos disciplina, constancia y car&aacute;cter. "
               "Tu primera sesi&oacute;n es el primer paso de una transformaci&oacute;n que vas a disfrutar cada d&iacute;a. "
               "El equipo te va a acompa&ntilde;ar, la comunidad te va a impulsar, y t&uacute; vas a descubrir de lo que eres capaz.")
-    url = f"{settings.FRONTEND_URL}/login"
+    url = url_frontend("/login")
     html = _template(titulo, saludo, cuerpo, "Comenzar mi camino", url)
     return _enviar(correo, f"¡Bienvenido a Urban Training Box, {nombre.split()[0]}! 🏋️", html,
                    alumno.get("id"), tipo="bienvenida")
@@ -246,7 +247,7 @@ def enviar_email_vencimiento_plan(alumno: dict, fecha_vencimiento) -> bool:
     cuerpo = ("Cada sesi&oacute;n suma. Cada d&iacute;a de entrenamiento construye h&aacute;bitos que te sostienen "
               "cuando la motivaci&oacute;n baja. No dejes que el esfuerzo de estas semanas se detenga ahora: "
               "renueva tu plan y segu&iacute; avanzando con nosotros.")
-    url = f"{settings.FRONTEND_URL}/alumno/solicitar-plan"
+    url = url_frontend("/alumno/solicitar-plan")
     html = _template(titulo, saludo, cuerpo, "Renovar mi plan", url)
     return _enviar(correo, f"Tu plan {plan} est&aacute; por vencer, {nombre.split()[0]} ⏳", html,
                    alumno.get("id"), tipo="vencimiento")
@@ -264,7 +265,7 @@ def render_email_fidelizacion(nombre: str, dias_ausente: int) -> tuple:
     cuerpo = ("El descanso es parte del proceso, pero el impulso tambi&eacute;n se entrena. "
               "Tu lugar en Urban Training Box sigue esper&aacute;ndote: la comunidad, el coach y tu propia mejora "
               "est&aacute;n listos para que vuelvas. Retom&aacute; donde lo dejaste, cada sesi&oacute;n cuenta.")
-    url = f"{settings.FRONTEND_URL}/alumno/mis-reservas"
+    url = url_frontend("/alumno/mis-reservas")
     html = _template(titulo, saludo, cuerpo, "Volver a entrenar", url)
     asunto = f"¡Te extrañamos en el box, {nombre.split()[0]}! 💪"
     return asunto, html
@@ -315,7 +316,7 @@ def enviar_email_solicitud_admin(alumno: dict, tenant_id: int) -> bool:
     saludo = "Un nuevo alumno solicitó su ingreso al box y está esperando tu revisión."
     cuerpo = (f"<strong>{nombre}</strong> (<em>{correo_alumno}</em>) está pendiente de activación. "
               "Ingresá al panel de administración para aprobar o rechazar la solicitud.")
-    url = f"{settings.FRONTEND_URL}/admin/alumnos-pendientes"
+    url = url_frontend("/admin/alumnos-pendientes")
     html = _template(titulo, saludo, cuerpo, "Revisar solicitudes", url)
     # destinatario = el ADMIN del box (no un alumno): se registra con destinatario_rol.
     return _enviar(correo_admin, "📋 Nueva solicitud de registro en el box", html,
@@ -335,7 +336,7 @@ def enviar_email_activacion_alumno(alumno: dict, password: str) -> bool:
     cuerpo = ("Estas son tus credenciales de acceso. Recordá que deberás cambiarlas en tu primer ingreso.<br/><br/>"
               f"<strong>Correo:</strong> {correo}<br/>"
               f"<strong>Contrase&ntilde;a provisional:</strong> {password}")
-    url = f"{settings.FRONTEND_URL}/login"
+    url = url_frontend("/login")
     html = _template(titulo, saludo, cuerpo, "Ingresar a mi cuenta", url)
     return _enviar(correo, f"¡Bienvenido a Urban Training Box, {nombre.split()[0]}! 🔑", html,
                    alumno.get("id"), tipo="activacion")
@@ -450,7 +451,7 @@ def send_alerta_inactividad(nombre: str, correo: str) -> bool:
         "<p>Entra ahora mismo a la plataforma, revisa la programación y agenda tu próxima clase. ¡La manada te espera "
         "para darle con todo!</p>"
     )
-    html = _template(titulo, saludo, cuerpo, "Agendar mi próxima clase", f"{settings.FRONTEND_URL}/alumno/mis-reservas")
+    html = _template(titulo, saludo, cuerpo, "Agendar mi próxima clase", url_frontend("/alumno/mis-reservas"))
     ok = _enviar(correo, f"¡Te echamos de menos en la manada, {nombre}! ¿Cuándo vuelves? 👀🏋️‍♂️", html,
                  None, tipo="inactividad")
     logger.info(f"[alerta_inactividad] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
@@ -471,7 +472,7 @@ def send_alerta_urgencia_renovacion(nombre: str, correo: str) -> bool:
         "para habilitar tu cuenta de inmediato.</p>"
         "<p>¡No te quedes fuera del box! Te esperamos para seguir sumando.</p>"
     )
-    html = _template(titulo, saludo, cuerpo, "Activar mi plan", f"{settings.FRONTEND_URL}/alumno/solicitar-plan")
+    html = _template(titulo, saludo, cuerpo, "Activar mi plan", url_frontend("/alumno/solicitar-plan"))
     ok = _enviar(correo, f"¡{nombre}, tu plan ha expirado! Renueva y vuelve al ruedo 🚨", html,
                  None, tipo="vencimiento_inminente")
     logger.info(f"[alerta_urgencia_renovacion] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
@@ -495,7 +496,7 @@ def send_alerta_ultimo_credito(nombre: str, correo: str, creditos: int, dias_res
         "el mes termine. Tu lugar en el box te está esperando.</p>"
     )
     html = _template(titulo, saludo, cuerpo, "Reservar mi clase",
-                     f"{settings.FRONTEND_URL}/alumno/mis-reservas")
+                     url_frontend("/alumno/mis-reservas"))
     ok = _enviar(correo, "⚠️ Te queda 1 crédito — ¡No pierdas esta oportunidad!", html,
                  None, tipo="ultimo_credito")
     logger.info(f"[ultimo_credito] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
@@ -519,7 +520,7 @@ def send_alerta_sin_creditos(nombre: str, correo: str) -> bool:
         "tu plan, realiza el pago y envía tu comprobante al administrador.</p>"
     )
     html = _template(titulo, saludo, cuerpo, "Renovar mi plan",
-                     f"{settings.FRONTEND_URL}/alumno/solicitar-plan")
+                     url_frontend("/alumno/solicitar-plan"))
     ok = _enviar(correo, "❌ Sin créditos — Renueva tu plan y sigue entrenando", html,
                  None, tipo="sin_creditos")
     logger.info(f"[sin_creditos] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
@@ -540,7 +541,7 @@ def send_emergencia_cobertura(admin_correo: str, admin_id: int, mensaje: str,
     titulo = "🚨 Cobertura de emergencia registrada"
     saludo = "Un coach activó la cobertura de emergencia en una clase."
     cuerpo = f"<p>{mensaje}</p><p>Revisá el panel de Supervisión para ver el detalle.</p>"
-    url = f"{settings.FRONTEND_URL}/admin/supervision-clases"
+    url = url_frontend("/admin/supervision-clases")
     html = _template(titulo, saludo, cuerpo, "Ver supervisión", url)
     # destinatario = el ADMIN (no el alumno): se registra con alumno_id=None y
     # destinatario_rol para que aparezca en /admin/notificaciones como alerta al admin.
@@ -695,7 +696,7 @@ def send_alerta_stock_bajo(producto_nombre: str, stock_actual: int,
         "<p>Reponé stock o ajustá el umbral del producto para desactivar esta alerta.</p>"
     )
     from app.core.config import settings
-    url = f"{settings.FRONTEND_URL}/admin/bazar"
+    url = url_frontend("/admin/bazar")
     html = _template(titulo, saludo, cuerpo, "Ir al Bazar", url)
     ok = _enviar(correo_admin, "🚨 Stock bajo en el Bazar", html,
                  None, tipo="alerta_stock_bajo",

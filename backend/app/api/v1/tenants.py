@@ -6,6 +6,8 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
+# B.2: base de URLs pública saneada (antes: settings.FRONTEND_URL crudo).
+from app.core.urls import url_frontend
 
 from app.db.database import get_db
 from app.core.config import settings
@@ -117,7 +119,7 @@ def qr_tenant_svg(
     if not tenant:
         raise HTTPException(status_code=404, detail="No encontrado")
 
-    base = (front or "").strip().rstrip("/") or settings.FRONTEND_URL.rstrip("/")
+    base = (front or "").strip().rstrip("/") or url_frontend()
     if not base.startswith(("http://", "https://")):
         raise HTTPException(
             status_code=400, detail="front debe ser una URL http(s) válida")

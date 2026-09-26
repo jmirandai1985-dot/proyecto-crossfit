@@ -4,6 +4,7 @@ Usado por el scheduler (jobs diarios) y por endpoints admin de disparo manual.
 Deduplicación: cada envío se marca en `notificaciones_enviadas` para no repetirlo.
 """
 import calendar
+from app.core.urls import url_frontend  # B.2
 import logging
 from datetime import date, datetime, timedelta
 
@@ -13,7 +14,7 @@ logger = logging.getLogger("uvicorn.email")
 
 # CTA "Renovar mi plan" → solicitud de plan del alumno (mismo patrón que las
 # demás URLs de correos: settings.FRONTEND_URL, nunca dominios hardcodeados).
-LINK_RENOVAR = f"{settings.FRONTEND_URL}/alumno/solicitar-plan"
+LINK_RENOVAR = url_frontend("/alumno/solicitar-plan")
 
 
 def _formatear_fecha_es(fecha) -> str:

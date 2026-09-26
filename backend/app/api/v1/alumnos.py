@@ -1,5 +1,6 @@
 """Router de endpoints para el flujo de registro/activación de alumnos."""
 import re
+from app.core.urls import url_frontend  # B.2
 import string
 import secrets
 import logging
@@ -217,7 +218,7 @@ def registrar_alumno_nuevo(
             usuario.nombre,
             usuario.correo,
             password_tmp,
-            f"{settings.FRONTEND_URL}/login",
+            url_frontend("/login"),
             tenant_id=datos.tenant_id,
         ))
     except Exception as e:
@@ -364,7 +365,7 @@ def activar_alumno(
                 plan_nombre,
                 cantidad_clases,
                 fecha_vigencia,
-                f"{settings.FRONTEND_URL}/alumno/dashboard",
+                url_frontend("/alumno/dashboard"),
             )
         else:
             # PRIMERA ACTIVACION -> Email 2: bienvenida con credenciales + resumen
@@ -375,7 +376,7 @@ def activar_alumno(
                 plan_nombre,
                 cantidad_clases,
                 fecha_vigencia,
-                f"{settings.FRONTEND_URL}/login",
+                url_frontend("/login"),
             )
         email_enviado = True
     except Exception as e:

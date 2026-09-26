@@ -2,6 +2,7 @@
 Router de endpoints para gestión de Usuarios
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request, Response
+from app.core.urls import url_frontend  # B.2
 import bcrypt
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel, Field
@@ -201,7 +202,7 @@ def crear_usuario(
                 db_usuario.nombre,
                 db_usuario.correo,
                 usuario_data.password,
-                f"{settings.FRONTEND_URL}/login",
+                url_frontend("/login"),
                 tenant_id=db_usuario.tenant_id,
             )
         except Exception as e:

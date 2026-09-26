@@ -2,6 +2,7 @@
 Router de autenticación - Login y generación de JWT
 """
 import hashlib
+from app.core.urls import url_frontend  # B.2
 import secrets
 import logging
 from datetime import datetime, timedelta, timezone
@@ -159,7 +160,7 @@ def reset_password_request(
         ))
         db.commit()
 
-        link = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+        link = url_frontend(f"/reset-password?token={token}")
         try:
             send_reset_password(usuario.nombre, usuario.correo, link)
         except Exception as e:  # noqa: BLE001 — no romper la respuesta genérica

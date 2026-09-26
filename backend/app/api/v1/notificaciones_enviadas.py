@@ -1,5 +1,6 @@
 """Endpoints para registrar y reenviar correos enviados (log de notificaciones)."""
 import hashlib
+from app.core.urls import url_frontend  # B.2
 import secrets
 from datetime import date, datetime, timedelta, timezone
 
@@ -362,12 +363,12 @@ def _reenviar_por_tipo(db: Session, reg, alumno) -> bool:
     )
 
     tipo = reg.tipo or ""
-    frontend = settings.FRONTEND_URL
+    frontend = url_frontend()
     sus = _suscripcion_activa(db, alumno.id)
     plan_nombre, creditos, fecha_vigencia = _resumen_plan(db, sus)
     alumno_dict = {"id": alumno.id, "nombre": alumno.nombre, "correo": alumno.correo,
                    "plan_nombre": plan_nombre}
-    link_panel = f"{frontend}/alumno/dashboard"
+    link_panel = url_frontend("/alumno/dashboard")
 
     if tipo == "bienvenida":
         return enviar_email_bienvenida(alumno_dict, token_onboarding="")
@@ -384,10 +385,10 @@ def _reenviar_por_tipo(db: Session, reg, alumno) -> bool:
         pwd = _password_provisional(db, alumno)
         return send_bienvenida_activacion(alumno.nombre, alumno.correo, pwd,
                                           plan_nombre, creditos, fecha_vigencia,
-                                          f"{frontend}/login")
+                                          url_frontend("/login"))
     if tipo == "renovacion_plan":
         return send_renovacion_plan(alumno.nombre, alumno.correo, fecha_vigencia,
-                                    f"{frontend}/alumno/solicitar-plan")
+                                    url_frontend("/alumno/solicitar-plan"))
     if tipo == "vencimiento_inminente":
         return send_alerta_urgencia_renovacion(alumno.nombre, alumno.correo)
     if tipo == "ultimo_credito":
@@ -399,7 +400,7 @@ def _reenviar_por_tipo(db: Session, reg, alumno) -> bool:
     if tipo == "sin_creditos":
         return send_alerta_sin_creditos(alumno.nombre, alumno.correo)
     if tipo == "reset_password":
-        link = f"{frontend}/reset-password?token={_token_reset(db, alumno)}"
+        link = url_frontend(f"/reset-password?token={_token_reset(db, alumno)}")
         return send_reset_password(alumno.nombre, alumno.correo, link)
     if tipo == "confirmacion_renovacion":
         return send_confirmacion_renovacion_plan(alumno.nombre, alumno.correo,
@@ -415,7 +416,7 @@ def _reenviar_por_tipo(db: Session, reg, alumno) -> bool:
                 400, "El alumno no tiene pedidos: no se puede reconstruir la confirmación")
         return send_confirmacion_pedido(alumno.nombre, alumno.correo, ped["producto"],
                                         ped["cantidad"], ped["total"],
-                                        f"{frontend}/alumno/mis-pedidos", alumno.id)
+                                        url_frontend("/alumno/mis-pedidos"), alumno.id)
     if (tipo in ("cumplimiento", "acompanamiento", "reactivacion")
             or tipo.startswith("hito_racha")):
         return _reenviar_asistencia(db, reg, alumno)

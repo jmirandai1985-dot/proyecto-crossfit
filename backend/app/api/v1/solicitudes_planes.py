@@ -2,6 +2,7 @@
 Router de endpoints para Solicitudes de Planes (flujo admin)
 """
 import os
+from app.core.urls import url_frontend  # B.2
 import logging
 import mimetypes
 from fastapi import APIRouter, Depends, HTTPException, status, Request
@@ -401,7 +402,7 @@ def aprobar_solicitud(
             ).count() > 0
             fecha_vigencia = (formatear_fecha_es(suscripcion.fecha_expiracion)
                               if suscripcion.fecha_expiracion else "")
-            link_app = f"{settings.FRONTEND_URL}/alumno/dashboard"
+            link_app = url_frontend("/alumno/dashboard")
             cant = plan.creditos if plan and plan.creditos else 0
             if es_renovacion:
                 send_confirmacion_renovacion_plan(

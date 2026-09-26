@@ -22,6 +22,8 @@ import sentry_sdk
 from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.core.logging import setup_logger
+# B.2: helper único de URLs públicas (saneadas y validadas por entorno).
+from app.core.urls import url_frontend, problemas_de_config, config_email_ok
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.middleware.tenant_audit import TenantAuditMiddleware
 
@@ -71,8 +73,10 @@ def _expand_threadpool():
 # ---- CONFIGURACIÃ“N DE CORS - SOLO ORÃGENES CONFIGURADOS (no "*") ----
 # Los orÃ­genes permitidos vienen de .env (CORS_ORIGINS / FRONTEND_URL).
 _cors_origins = settings.cors_origins_list
-if settings.FRONTEND_URL and settings.FRONTEND_URL not in _cors_origins:
-    _cors_origins.append(settings.FRONTEND_URL)
+# B.2: se agrega FRONTEND_URL saneada (una env var con espacios/salto rompía el origin).
+_frontend_saneado = url_frontend()
+if _frontend_saneado and _frontend_saneado not in _cors_origins:
+    _cors_origins.append(_frontend_saneado)
 
 app.add_middleware(
     CORSMiddleware,
