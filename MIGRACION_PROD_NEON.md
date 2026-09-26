@@ -97,9 +97,16 @@ Candados del modo PROD (probados):
 
 - `backend/.env` → `DATABASE_URL` + `DIRECT_URL` *(crítico)*
 - `docker-compose.prod.yml` → 2 comentarios (`# PRODUCCIÓN (ep-withered-silence)`)
-- `backend/scripts/seed_ml_data_prod.py` (6 refs), `_diag_planes_prod.py`, `_aplicar_env_test_cierre.py`,
-  `_validar_segmentacion.py`, `_kmeans_*.py` (scripts one-off con guard) → quedan en la lista de
-  pendientes de "actualizar guards", no bloquean la migración.
+- `backend/scripts/seed_ml_data_prod.py` (6 refs) → tiene guard propio (aborta si
+  `ENVIRONMENT=test`). Revisión del 2026-09-26: **ningún script del repo tiene ya hosts de Neon
+  viejos hardcodeados**; `_diag_planes_prod.py` y `_validar_segmentacion.py` siguen en pie
+  (funcionan contra `settings.DATABASE_URL` / `DATABASE_URL_PROD`, sin nada embebido) y
+  `_aplicar_env_test_cierre.py` —el único que los nombraba, escribiendo un `.env` apuntando a
+  ramas muertas— fue **eliminado** junto con otros 34 one-offs sin uso. Los guards que
+  importan siguen vigentes: `sync_test_from_prod.py` y `run_setup_test_db.py` exigen
+  `--prod --confirmo-host=<host>`, `_diag_planes_prod.py` aborta con
+  `FATAL: Define DATABASE_URL_PROD en backend/.env`, y `seed_ml_data_prod.py` aborta si
+  `ENVIRONMENT=test`.
 - Docs: `DIAGNOSTICO_URGENTE_PROD_TEST.md`, `SECURITY.md`, `REPORTE_FINAL_SESION_AUTONOMA.md`.
 
 ## Pendiente menor detectado
