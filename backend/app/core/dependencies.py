@@ -256,7 +256,8 @@ def _notificar_emergencia(db: Session, tenant_id: int, coach_id: int,
         for ad in admins:
             try:
                 send_emergencia_cobertura(ad.correo, ad.id, mensaje,
-                                          coach_nombre, disc_nombre)
+                                          coach_nombre, disc_nombre,
+                                          admin_nombre=ad.nombre, tenant_id=tenant_id)
             except Exception as e:
                 logger.warning(f"No se pudo notificar por email al admin {ad.id}: {e}")
     except Exception as e:

@@ -11,7 +11,16 @@ class NotificacionEnviada(Base):
     __tablename__ = "notificaciones_enviadas"
 
     id = Column(Integer, primary_key=True)
-    alumno_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    # FIX cobertura (26/09/2026): hay correos del sistema cuyo destinatario NO es un
+    # alumno (el admin del box, o un lead sin cuenta). Antes la fila no se registraba
+    # (alumno_id NOT NULL) y esos envíos quedaban invisibles en /admin/notificaciones.
+    # Ahora alumno_id es NULL-able y el destinatario se guarda en las columnas
+    # destinatario_*.
+    alumno_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    destinatario_correo = Column(String(255), nullable=True, index=True)
+    destinatario_nombre = Column(String(200), nullable=True)
+    # 'administrador' | 'lead'  (NULL = el destinatario es un alumno)
+    destinatario_rol = Column(String(30), nullable=True)
     # FIX S5: tenant del alumno destinatario (log scoped por box). NULL solo si
     # el alumno ya no existe (no backfilleable); esos registros no se listan.
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True, index=True)

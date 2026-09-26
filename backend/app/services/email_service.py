@@ -76,22 +76,35 @@ def _template(titulo: str, saludo: str, cuerpo: str, boton_texto: str, boton_url
 </body></html>"""
 
 
-def _registrar_envio(alumno_id, tipo, estado, detalle_error=None, mes_referencia=None):
-    """Inserta registro en notificaciones_enviadas (con tenant del alumno)."""
+def _registrar_envio(alumno_id, tipo, estado, detalle_error=None, mes_referencia=None,
+                     destinatario_correo=None, destinatario_nombre=None,
+                     destinatario_rol=None, tenant_id=None):
+    """Inserta registro en notificaciones_enviadas.
+
+    `alumno_id` puede ser None (correos al admin/lead): en ese caso el tenant y el
+    destinatario salen de los parámetros `tenant_id` / `destinatario_*`.
+    """
     try:
         from app.db.database import SessionLocal
         from app.models.notificacion_enviada import NotificacionEnviada
         from app.models.usuario import Usuario
         from datetime import datetime
         db = SessionLocal()
-        tenant_id = None
         if alumno_id:
             alumno = db.query(Usuario).filter(Usuario.id == alumno_id).first()
-            tenant_id = alumno.tenant_id if alumno else None
+            if alumno:
+                tenant_id = alumno.tenant_id
+                destinatario_correo = destinatario_correo or alumno.correo
+                destinatario_nombre = destinatario_nombre or alumno.nombre
+        # Sin alumno y sin tenant no se puede scopear en la pantalla: se registra igual
+        # (queda con tenant NULL y no se lista, como el resto de filas huérfanas).
         reg = NotificacionEnviada(
             alumno_id=alumno_id, tipo=tipo, estado=estado,
             detalle_error=detalle_error, fecha_envio=datetime.utcnow(),
-            tenant_id=tenant_id, mes_referencia=mes_referencia)
+            tenant_id=tenant_id, mes_referencia=mes_referencia,
+            destinatario_correo=destinatario_correo,
+            destinatario_nombre=destinatario_nombre,
+            destinatario_rol=destinatario_rol)
         db.add(reg)
         db.commit()
         db.close()
@@ -132,8 +145,14 @@ def _log_seguro(mensaje: str, nivel: str = "error") -> None:
             pass
 
 
-def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, tipo: str = "", mes_referencia=None) -> bool:
-    """Envía via Gmail SMTP con log en BD."""
+def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, tipo: str = "",
+            mes_referencia=None, destinatario_nombre: str = None,
+            destinatario_rol: str = None, tenant_id: int = None) -> bool:
+    """Envía via Gmail SMTP con log en BD.
+
+    `alumno_id=None` + `destinatario_rol` (admin/lead) también se registra: son correos
+    reales del sistema que antes quedaban invisibles en /admin/notificaciones.
+    """
     try:
         from app.core.config import settings
 
@@ -152,7 +171,11 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
             server.send_message(msg)
 
         _log_seguro(f"Correo enviado a {destinatario!r}: {asunto!r}", "info")
-        _registrar_envio(alumno_id, tipo, "enviado", mes_referencia=mes_referencia) if alumno_id else None
+        if alumno_id or tipo:
+            _registrar_envio(alumno_id, tipo, "enviado", mes_referencia=mes_referencia,
+                             destinatario_correo=destinatario,
+                             destinatario_nombre=destinatario_nombre,
+                             destinatario_rol=destinatario_rol, tenant_id=tenant_id)
         return True
     except Exception as e:
         global ULTIMO_ERROR_SMTP
@@ -160,8 +183,11 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
         # El registro en BD va PRIMERO y en su propio try: antes, si el logging
         # reventaba (carácter raro en el destinatario), la fila se perdía.
         try:
-            if alumno_id:
-                _registrar_envio(alumno_id, tipo, "fallido", str(e), mes_referencia)
+            if alumno_id or tipo:
+                _registrar_envio(alumno_id, tipo, "fallido", str(e), mes_referencia,
+                                 destinatario_correo=destinatario,
+                                 destinatario_nombre=destinatario_nombre,
+                                 destinatario_rol=destinatario_rol, tenant_id=tenant_id)
         except Exception as err_registro:
             _log_seguro(f"[SMTP ERROR] no se pudo registrar el fallo: {err_registro!r}")
         _log_seguro(f"[SMTP ERROR] destinatario={destinatario!r}: {e!r}")
@@ -251,6 +277,7 @@ def enviar_email_solicitud_admin(alumno: dict, tenant_id: int) -> bool:
     nombre = alumno.get("nombre", "Alumno nuevo")
     correo_alumno = alumno.get("correo", "")
     correo_admin = None
+    admin_nombre = None
     try:
         from app.db.database import SessionLocal
         from app.models.usuario import Usuario, RolUsuario
@@ -261,6 +288,7 @@ def enviar_email_solicitud_admin(alumno: dict, tenant_id: int) -> bool:
             Usuario.activo == True,
         ).order_by(Usuario.id).first()
         correo_admin = admin.correo if admin else None
+        admin_nombre = admin.nombre if admin else None
         db.close()
     except Exception as e:
         logger.warning(f"No se pudo obtener admin: {e}")
@@ -273,8 +301,11 @@ def enviar_email_solicitud_admin(alumno: dict, tenant_id: int) -> bool:
               "Ingresá al panel de administración para aprobar o rechazar la solicitud.")
     url = f"{settings.FRONTEND_URL}/admin/alumnos-pendientes"
     html = _template(titulo, saludo, cuerpo, "Revisar solicitudes", url)
+    # destinatario = el ADMIN del box (no un alumno): se registra con destinatario_rol.
     return _enviar(correo_admin, "📋 Nueva solicitud de registro en el box", html,
-                   None, tipo="solicitud_registro")
+                   None, tipo="solicitud_registro",
+                   destinatario_nombre=admin_nombre,
+                   destinatario_rol="administrador", tenant_id=tenant_id)
 
 
 def enviar_email_activacion_alumno(alumno: dict, password: str) -> bool:
@@ -313,8 +344,13 @@ def formatear_fecha_es(fecha) -> str:
         return str(fecha)[:10]
 
 
-def send_solicitud_prueba_clase(nombre: str, correo: str, password_temporal: str, link_app: str) -> bool:
-    """Lead nuevo - Bienvenida con credenciales temporales para agendar la clase de prueba."""
+def send_solicitud_prueba_clase(nombre: str, correo: str, password_temporal: str,
+                                link_app: str, tenant_id: int = None) -> bool:
+    """Lead nuevo - Bienvenida con credenciales temporales para agendar la clase de prueba.
+
+    `tenant_id` (opcional) permite que la fila quede scopeada al box y se vea en
+    /admin/notificaciones (el destinatario es un lead, no un alumno).
+    """
     if not correo:
         return False
     titulo = "¡Felicidades! Has tomado la mejor decisión de tu vida 🔥"
@@ -335,7 +371,8 @@ def send_solicitud_prueba_clase(nombre: str, correo: str, password_temporal: str
     )
     html = _template(titulo, saludo, cuerpo, "Ingresar a mi cuenta", link_app)
     ok = _enviar(correo, "¡Felicidades! Has tomado la mejor decisión de tu vida 🔥", html,
-                 None, tipo="solicitud_prueba_clase")
+                 None, tipo="solicitud_prueba_clase",
+                 destinatario_nombre=nombre, destinatario_rol="lead", tenant_id=tenant_id)
     logger.info(f"[solicitud_prueba_clase] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
 
@@ -474,7 +511,8 @@ def send_alerta_sin_creditos(nombre: str, correo: str) -> bool:
 
 
 def send_emergencia_cobertura(admin_correo: str, admin_id: int, mensaje: str,
-                              coach_nombre: str, disciplina_nombre: str) -> bool:
+                              coach_nombre: str, disciplina_nombre: str,
+                              admin_nombre: str = None, tenant_id: int = None) -> bool:
     """Alerta al admin cuando un coach cubre una clase en modo emergencia.
 
     Decisión (19/08/2026): el canal real de alerta al admin es EMAIL (mismo
@@ -488,10 +526,14 @@ def send_emergencia_cobertura(admin_correo: str, admin_id: int, mensaje: str,
     cuerpo = f"<p>{mensaje}</p><p>Revisá el panel de Supervisión para ver el detalle.</p>"
     url = f"{settings.FRONTEND_URL}/admin/supervision-clases"
     html = _template(titulo, saludo, cuerpo, "Ver supervisión", url)
+    # destinatario = el ADMIN (no el alumno): se registra con alumno_id=None y
+    # destinatario_rol para que aparezca en /admin/notificaciones como alerta al admin.
     return _enviar(
         admin_correo,
         f"🚨 Cobertura de emergencia: {coach_nombre} cubrió {disciplina_nombre}",
-        html, admin_id, tipo="emergencia_cobertura")
+        html, None, tipo="emergencia_cobertura",
+        destinatario_nombre=admin_nombre, destinatario_rol="administrador",
+        tenant_id=tenant_id)
 
 
 def send_reset_password(nombre: str, correo: str, link: str) -> bool:
@@ -608,6 +650,7 @@ def send_alerta_stock_bajo(producto_nombre: str, stock_actual: int,
     if not tenant_id:
         return False
     correo_admin = None
+    admin_nombre = None
     try:
         from app.db.database import SessionLocal
         from app.models.usuario import Usuario, RolUsuario
@@ -618,6 +661,7 @@ def send_alerta_stock_bajo(producto_nombre: str, stock_actual: int,
             Usuario.activo == True,
         ).order_by(Usuario.id).first()
         correo_admin = admin.correo if admin else None
+        admin_nombre = admin.nombre if admin else None
         db.close()
     except Exception as e:
         logger.warning(f"No se pudo obtener admin para alerta de stock: {e}")
@@ -638,7 +682,9 @@ def send_alerta_stock_bajo(producto_nombre: str, stock_actual: int,
     url = f"{settings.FRONTEND_URL}/admin/bazar"
     html = _template(titulo, saludo, cuerpo, "Ir al Bazar", url)
     ok = _enviar(correo_admin, "🚨 Stock bajo en el Bazar", html,
-                 None, tipo="alerta_stock_bajo")
+                 None, tipo="alerta_stock_bajo",
+                 destinatario_nombre=admin_nombre, destinatario_rol="administrador",
+                 tenant_id=tenant_id)
     logger.info(
         f"[alerta_stock_bajo] {'EXITOSO' if ok else 'FALLIDO'} -> "
         f"{correo_admin} ({producto_nombre}, stock={stock_actual})")

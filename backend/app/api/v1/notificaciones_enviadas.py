@@ -109,11 +109,25 @@ def listar_notificaciones_enviadas(
     rows = q.order_by(NotificacionEnviada.fecha_envio.desc()).offset(skip).limit(limit).all()
     result = []
     for r in rows:
-        alumno = db.query(Usuario).filter(Usuario.id == r.alumno_id).first()
+        alumno = (db.query(Usuario).filter(Usuario.id == r.alumno_id).first()
+                  if r.alumno_id else None)
+        # FIX cobertura: hay filas cuyo destinatario es el admin del box o un lead
+        # (alumno_id NULL). Se muestra el destinatario real en vez de "Alumno #None".
+        if alumno:
+            nombre = alumno.nombre
+        elif r.destinatario_nombre or r.destinatario_correo:
+            nombre = r.destinatario_nombre or r.destinatario_correo
+        elif r.alumno_id:
+            nombre = f"Alumno #{r.alumno_id}"
+        else:
+            nombre = "(sin destinatario)"
         result.append({
             "id": r.id,
             "alumno_id": r.alumno_id,
-            "alumno_nombre": alumno.nombre if alumno else f"Alumno #{r.alumno_id}",
+            "alumno_nombre": nombre,
+            "destinatario_correo": r.destinatario_correo,
+            "destinatario_nombre": r.destinatario_nombre,
+            "destinatario_rol": r.destinatario_rol,
             "tipo": r.tipo,
             "fecha_envio": str(r.fecha_envio),
             "estado": r.estado,

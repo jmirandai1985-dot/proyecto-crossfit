@@ -201,6 +201,7 @@ def crear_usuario(
                 db_usuario.correo,
                 usuario_data.password,
                 f"{settings.FRONTEND_URL}/login",
+                tenant_id=db_usuario.tenant_id,
             )
         except Exception as e:
             sentry_sdk.capture_exception(e)

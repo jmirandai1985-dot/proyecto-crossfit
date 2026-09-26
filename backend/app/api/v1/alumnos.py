@@ -218,6 +218,7 @@ def registrar_alumno_nuevo(
             usuario.correo,
             password_tmp,
             f"{settings.FRONTEND_URL}/login",
+            tenant_id=datos.tenant_id,
         ))
     except Exception as e:
         sentry_sdk.capture_exception(e)

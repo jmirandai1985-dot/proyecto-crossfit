@@ -63,8 +63,28 @@ const Notificaciones = () => {
     // ancla para los tests) y la fila entera tambien navega (onRowClick).
     const columnas = [
         {
-            key: 'alumno_nombre', label: 'Alumno',
+            key: 'alumno_nombre', label: 'Destinatario',
             render: (v, row) => {
+                // FIX cobertura: los correos al admin del box o a un lead no tienen
+                // alumno. Se muestran igual, con el rol y sin link a la ficha.
+                if (!row.alumno_id) {
+                    const rol = row.destinatario_rol === 'administrador' ? 'Admin'
+                        : row.destinatario_rol === 'lead' ? 'Lead' : null;
+                    const badge = rol ? (
+                        <span className="ml-2 rounded bg-zinc-700 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-zinc-300">
+                            {rol}
+                        </span>
+                    ) : null;
+                    return (
+                        <span className="font-medium text-zinc-100">
+                            {v}
+                            {row.destinatario_correo && row.destinatario_correo !== v && (
+                                <span className="ml-2 text-[11px] text-zinc-500">{row.destinatario_correo}</span>
+                            )}
+                            {badge}
+                        </span>
+                    );
+                }
                 const url = urlDestino(row.tipo, row.alumno_id);
                 const d = destinoDe(row.tipo);
                 if (!url) return <span className="font-medium text-zinc-100">{v}</span>;

@@ -22,7 +22,9 @@ export const DESTINOS = {
     solicitud_prueba_clase: { path: '/admin/alumnos-pendientes', label: 'Pendientes' },
     // Bazar
     confirmacion_pedido: { path: '/admin/bazar', label: 'Bazar' },
-    stock_bajo: { path: '/admin/bazar', label: 'Bazar' },
+    // El slug REAL que emite email_service es `alerta_stock_bajo` (antes acá decía
+    // `stock_bajo`, que no existe => opción muerta en el filtro de tipo).
+    alerta_stock_bajo: { path: '/admin/bazar', label: 'Bazar' },
     // Alumnos (ficha del alumno)
     confirmacion_renovacion: { path: '/admin/alumnos', conAlumno: true, label: 'Alumnos' },
     bienvenida: { path: '/admin/alumnos', conAlumno: true, label: 'Alumnos' },
@@ -49,7 +51,7 @@ export const ETIQUETAS = {
     solicitud_registro: 'Solicitud de registro',
     solicitud_prueba_clase: 'Solicitud de clase de prueba',
     confirmacion_pedido: 'Confirmación de pedido (bazar)',
-    stock_bajo: 'Alerta de stock bajo',
+    alerta_stock_bajo: 'Alerta de stock bajo (admin)',
     confirmacion_renovacion: 'Confirmación de renovación',
     confirmacion_plan: 'Confirmación de plan',
     bienvenida: 'Bienvenida',
@@ -57,8 +59,15 @@ export const ETIQUETAS = {
     bienvenida_activacion: 'Bienvenida y activación',
     cumplimiento: 'Hito de cumplimiento',
     acompanamiento: 'Acompañamiento',
-    emergencia_cobertura: 'Cobertura de emergencia',
+    emergencia_cobertura: 'Cobertura de emergencia (admin)',
     reset_password: 'Restablecer contraseña',
+    // Hitos de racha: el tipo real que registra el cierre mensual es hito_racha_1/3/6/12.
+    // Se listan para que se puedan filtrar desde la pantalla (antes sólo se veían en la
+    // tabla, sin opción en el filtro).
+    hito_racha_1: 'Hito de racha (1 mes)',
+    hito_racha_3: 'Hito de racha (3 meses)',
+    hito_racha_6: 'Hito de racha (6 meses)',
+    hito_racha_12: 'Hito de racha (12 meses)',
 };
 
 /** "hito_racha_N" -> "Hito de racha (N)"; el resto, fallback al slug. */
