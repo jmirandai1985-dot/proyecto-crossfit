@@ -20,6 +20,8 @@ from app.schemas.historial_rm import (
 from app.services.nivel_service import (
     obtener_nivel_fuerza, obtener_nivel_gimnastico, calcular_nivel_general
 )
+# H-03: criterio único de categorización de movimientos (BD -> normalización -> nombre).
+from app.services.movimiento_categoria import categoria_de
 from app.db.crossfit_ratios import CROSSFIT_RATIOS
 from app.db.crossfit_habilidades import CROSSFIT_HABILIDADES
 from app.services.nivel_service import NIVELES
@@ -769,7 +771,8 @@ def obtener_progreso_destacado(
         if not movimiento:
             continue
 
-        cat = movimiento.categoria
+        # H-03: categoría vía la fuente única (normaliza alias y cae al nombre si falta).
+        cat = categoria_de(movimiento)
         val_primero = primero.peso_kg or 0
         val_ultimo = ultimo.peso_kg or 0
 

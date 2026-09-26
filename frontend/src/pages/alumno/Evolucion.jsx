@@ -3,6 +3,8 @@ import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import AvisoCarga from '../../components/AvisoCarga';
 import api from '../../services/api';
+// H-03: valor/etiqueta de cada RM desde la fuente única (utils/rm.js).
+import { valorRM, etiquetaValorRM } from '../../utils/rm';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 
 const Evolucion = () => {
@@ -108,28 +110,14 @@ const Evolucion = () => {
     // ── Determinar valor Y para el gráfico según categoría ──
     const getChartData = () => {
         if (!historialRM.length) return [];
-        const categoria = historialRM[0]?.categoria || 'fuerza';
         return historialRM.map((r, idx) => {
-            let valor = r.peso_kg || 0;
-            let label = 'Peso (kg)';
-            if (categoria === 'gimnastico') {
-                valor = r.repeticiones || r.peso_kg || 0;
-                label = 'Repeticiones';
-            } else if (categoria === 'cardio') {
-                valor = r.minutos || r.km || r.vueltas || 0;
-                label = r.minutos ? 'Minutos' : r.km ? 'Km' : 'Vueltas';
-            } else if (categoria === 'metabolico') {
-                valor = r.calorias || r.km || r.vueltas || 0;
-                label = r.calorias ? 'Calorías' : r.km ? 'Km' : 'Vueltas';
-            }
-            // Trend: compare with previous
+            // H-03: el valor y su etiqueta salen de la fuente única (utils/rm.js)
+            const valor = valorRM(r);
+            const label = etiquetaValorRM(r);
+            // Trend: compare with previous (mismo criterio de valor)
             let trend = 'neutral';
             if (idx > 0) {
-                const prev = historialRM[idx - 1];
-                let prevValor = prev.peso_kg || 0;
-                if (categoria === 'gimnastico') prevValor = prev.repeticiones || prev.peso_kg || 0;
-                else if (categoria === 'cardio') prevValor = prev.minutos || prev.km || prev.vueltas || 0;
-                else if (categoria === 'metabolico') prevValor = prev.calorias || prev.km || prev.vueltas || 0;
+                const prevValor = valorRM(historialRM[idx - 1]);
                 trend = valor > prevValor ? 'up' : valor < prevValor ? 'down' : 'neutral';
             }
             return {

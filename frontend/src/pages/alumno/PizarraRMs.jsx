@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
+// H-03: categoría/valor/formato de un RM desde la fuente única (utils/rm.js).
+import { formatResultadoRM, normalizarCategoria } from '../../utils/rm';
 
 const CATEGORIA_META = {
     fuerza: { label: 'FUERZA', icon: '🏋️', color: 'emerald', bgClass: 'bg-emerald-50', textClass: 'text-emerald-700', borderClass: 'border-emerald-200' },
@@ -13,33 +15,7 @@ const CATEGORIA_META = {
 const getCategoriaMeta = (cat) => CATEGORIA_META[cat] || CATEGORIA_META.fuerza;
 
 // ─── Formatear resultado según categoría y campos disponibles ───────
-const formatResultado = (rm, categoria) => {
-    const partes = [];
-    if (categoria === 'fuerza') {
-        if (rm.peso_kg) partes.push(`${rm.peso_kg} kg`);
-        if (rm.repeticiones) partes.push(`${rm.repeticiones} reps`);
-        if (rm.series) partes.push(`${rm.series} series`);
-        return partes.length > 0 ? partes.join(' x ') : `${rm.peso_kg || '?'} kg`;
-    }
-    if (categoria === 'gimnastico') {
-        if (rm.repeticiones) partes.push(`${rm.repeticiones} reps`);
-        if (rm.series) partes.push(`${rm.series} series`);
-        return partes.length > 0 ? partes.join(' x ') : `${rm.peso_kg || '?'} reps`;
-    }
-    if (categoria === 'cardio') {
-        if (rm.km) partes.push(`${rm.km} km`);
-        if (rm.minutos) partes.push(`${rm.minutos} min`);
-        if (rm.vueltas) partes.push(`${rm.vueltas} vueltas`);
-        return partes.length > 0 ? partes.join(', ') : `${rm.peso_kg || '?'}`;
-    }
-    if (categoria === 'metabolico') {
-        if (rm.calorias) partes.push(`${rm.calorias} cal`);
-        if (rm.km) partes.push(`${rm.km} km`);
-        if (rm.vueltas) partes.push(`${rm.vueltas} vueltas`);
-        return partes.length > 0 ? partes.join(', ') : `${rm.peso_kg || '?'}`;
-    }
-    return `${rm.peso_kg || '?'}`;
-};
+const formatResultado = (rm, categoria) => formatResultadoRM(rm, categoria);
 
 const PizarraRMs = () => {
     const { usuario_id, tenant_id } = useAuth();
@@ -94,7 +70,8 @@ const PizarraRMs = () => {
 
     const getCategoriaMovimiento = (movimientoId) => {
         const mov = movimientos.find(m => m.id === movimientoId);
-        return mov?.categoria || 'fuerza';
+        // H-03: misma normalización que el resto de las pantallas (utils/rm.js).
+        return normalizarCategoria(mov?.categoria) || 'fuerza';
     };
 
     // ─── Determinar qué campos mostrar según la categoría del movimiento seleccionado ──

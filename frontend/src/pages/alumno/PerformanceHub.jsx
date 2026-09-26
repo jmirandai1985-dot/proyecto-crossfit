@@ -5,6 +5,13 @@ import Layout from '../../components/Layout';
 import AvisoCarga from '../../components/AvisoCarga';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
+// H-03: la categoría/valor de un RM salen de una única fuente (utils/rm.js).
+// Antes estas 3 funciones vivían acá y había otra copia en Evolución y otra en la Pizarra.
+import {
+    inferirCategoriaRM as inferirCategoria,
+    valorRM as getValorNumerico,
+    unidadRM as getUnidad,
+} from '../../utils/rm';
 
 const CAT_CONFIG = {
     fuerza: { label: 'Fuerza Máxima', color: '#3B82F6', icon: '💪' },
@@ -13,30 +20,6 @@ const CAT_CONFIG = {
     metabolico: { label: 'Metabólico', color: '#8B5CF6', icon: '⚡' },
 };
 
-function inferirCategoria(rm) {
-    if (rm.categoria && rm.categoria !== '') return rm.categoria;
-    const n = (rm.movimiento_nombre || '').toLowerCase();
-    // Keywords por categoria (orden: mas especifico primero)
-    if (/sled|air.?runner|sandbag|farmer|carry/.test(n)) return 'metabolico';
-    if (/run|row|ski.?erg|bike|assault/.test(n)) return 'cardio';
-    if (/clean|snatch|jerk|deadlift|squat|press|thruster|dumbbell|kettlebell/.test(n)) return 'fuerza';
-    if (/pull.?up|push.?up|burpee|muscle.?up|toes?.?to?.?bar|t2b|chest?.?to?.?bar|c2b|handstand|hspu|rope.?climb|pistol|doble.?under|double.?under|box.?jump|wall.?ball|bear.?crawl|kip|strict|ring|walk/.test(n)) return 'gimnastico';
-    return rm.tipo_rm === 'cardio' ? 'cardio' : rm.tipo_rm === 'metabolico' ? 'metabolico' : 'fuerza';
-}
-
-function getValorNumerico(rm) {
-    const cat = inferirCategoria(rm);
-    if (cat === 'gimnastico') return Number(rm.repeticiones || rm.peso_kg || 0);
-    if (cat === 'cardio' || cat === 'metabolico') return Number(rm.peso_kg || rm.calorias || rm.km || rm.minutos || 0);
-    return Number(rm.peso_kg || 0);
-}
-
-function getUnidad(rm) {
-    const cat = inferirCategoria(rm);
-    if (cat === 'gimnastico') return 'reps';
-    if (cat === 'cardio' || cat === 'metabolico') return '';
-    return 'kg';
-}
 
 const PerformanceHub = () => {
     const { usuario_id } = useAuth();
