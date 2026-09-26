@@ -1,0 +1,112 @@
+{
+  "updatedAt": "2026-09-26T09:27:48.000Z",
+  "createdAt": "2026-09-10T21:02:52.234Z",
+  "id": "AsJX2VtUJFNMH6Ji",
+  "name": "fidelizacion y retencion",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 5 0 1 * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "4c1ae839-25b5-449f-8784-8b2f00157706",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://box-crossfit.onrender.com/api/v1/asistencia/n8n/evaluar-mes",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-API-Key",
+              "value": "REPLACE_WITH_YOUR_KEY"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        224,
+        0
+      ],
+      "id": "75ab1afd-5fb0-4a19-8619-f949a2ab5b73",
+      "name": "HTTP Request"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": {},
+  "activeVersionId": "bd28f011-9814-4bfc-ac34-be3b500f008f",
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-09-10T21:02:52.248Z",
+      "createdAt": "2026-09-10T21:02:52.248Z",
+      "role": "workflow:owner",
+      "workflowId": "AsJX2VtUJFNMH6Ji",
+      "projectId": "p7fG4p43cy00uFI8",
+      "project": {
+        "updatedAt": "2026-08-22T17:05:15.222Z",
+        "createdAt": "2026-08-21T23:22:44.559Z",
+        "id": "p7fG4p43cy00uFI8",
+        "name": "Anibal Miranda <jmirandai1985@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "dbc4859d-2cde-47f7-a59c-55632a50d7f0"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": "fidelizacion y retencion",
+    "description": null
+  }
+}
