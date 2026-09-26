@@ -395,7 +395,8 @@ def send_solicitud_prueba_clase(nombre: str, correo: str, password_temporal: str
 
 
 def send_bienvenida_activacion(nombre: str, correo: str, password: str, plan_nombre: str,
-                               cantidad_clases: int, fecha_vigencia: str, link_app: str) -> bool:
+                               cantidad_clases: int, fecha_vigencia: str, link_app: str,
+                               tenant_id: int = None) -> bool:
     """Pago validado (primera activación) - Cuenta activa con resumen del plan."""
     if not correo:
         return False
@@ -413,7 +414,9 @@ def send_bienvenida_activacion(nombre: str, correo: str, password: str, plan_nom
     )
     html = _template(titulo, saludo, cuerpo, "Ir a mi panel", link_app)
     ok = _enviar(correo, "¡Bienvenido a la manada! Tu cuenta en Urban Training Box ya está activa 🔥", html,
-                 None, tipo="bienvenida_activacion")
+                 None, tipo="bienvenida_activacion",
+                 destinatario_nombre=nombre, destinatario_rol="alumno",
+                 tenant_id=tenant_id)
     logger.info(f"[bienvenida_activacion] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
 
@@ -553,10 +556,14 @@ def send_emergencia_cobertura(admin_correo: str, admin_id: int, mensaje: str,
         tenant_id=tenant_id)
 
 
-def send_reset_password(nombre: str, correo: str, link: str) -> bool:
+def send_reset_password(nombre: str, correo: str, link: str, tenant_id: int = None) -> bool:
     """Restablecimiento de contraseña — email con link de un solo uso (1 hora).
 
     El token llega en la URL del link; el backend solo guarda su hash sha256.
+
+    `tenant_id` (B.4): este correo no tiene alumno destinatario, así que sin el tenant
+    la fila de `notificaciones_enviadas` quedaba con tenant_id NULL y NO aparecía en
+    /admin/notificaciones. El llamador (auth / reenvío) lo conoce y lo pasa.
     """
     if not correo:
         return False
@@ -572,7 +579,8 @@ def send_reset_password(nombre: str, correo: str, link: str) -> bool:
     )
     html = _template(titulo, saludo, cuerpo, "Restablecer mi contraseña", link)
     ok = _enviar(correo, "Restablece tu contraseña 🔑", html, None,
-                 tipo="reset_password")
+                 tipo="reset_password",
+                 destinatario_nombre=nombre_corto, tenant_id=tenant_id)
     logger.info(f"[reset_password] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
 

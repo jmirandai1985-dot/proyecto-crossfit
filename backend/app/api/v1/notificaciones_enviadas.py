@@ -385,7 +385,8 @@ def _reenviar_por_tipo(db: Session, reg, alumno) -> bool:
         pwd = _password_provisional(db, alumno)
         return send_bienvenida_activacion(alumno.nombre, alumno.correo, pwd,
                                           plan_nombre, creditos, fecha_vigencia,
-                                          url_frontend("/login"))
+                                          url_frontend("/login"),
+                                          tenant_id=alumno.tenant_id)
     if tipo == "renovacion_plan":
         return send_renovacion_plan(alumno.nombre, alumno.correo, fecha_vigencia,
                                     url_frontend("/alumno/solicitar-plan"))
@@ -401,7 +402,8 @@ def _reenviar_por_tipo(db: Session, reg, alumno) -> bool:
         return send_alerta_sin_creditos(alumno.nombre, alumno.correo)
     if tipo == "reset_password":
         link = url_frontend(f"/reset-password?token={_token_reset(db, alumno)}")
-        return send_reset_password(alumno.nombre, alumno.correo, link)
+        return send_reset_password(alumno.nombre, alumno.correo, link,
+                                   tenant_id=alumno.tenant_id)
     if tipo == "confirmacion_renovacion":
         return send_confirmacion_renovacion_plan(alumno.nombre, alumno.correo,
                                                  plan_nombre, creditos, fecha_vigencia,

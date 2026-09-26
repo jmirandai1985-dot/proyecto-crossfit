@@ -162,7 +162,8 @@ def reset_password_request(
 
         link = url_frontend(f"/reset-password?token={token}")
         try:
-            send_reset_password(usuario.nombre, usuario.correo, link)
+            send_reset_password(usuario.nombre, usuario.correo, link,
+                                tenant_id=usuario.tenant_id)
         except Exception as e:  # noqa: BLE001 — no romper la respuesta genérica
             logger.warning(f"[reset-password-request] fallo al enviar email: {e}")
 

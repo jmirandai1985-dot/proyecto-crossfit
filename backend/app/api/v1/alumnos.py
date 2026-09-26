@@ -377,6 +377,7 @@ def activar_alumno(
                 cantidad_clases,
                 fecha_vigencia,
                 url_frontend("/login"),
+                tenant_id=usuario.tenant_id,
             )
         email_enviado = True
     except Exception as e:
