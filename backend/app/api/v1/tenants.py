@@ -106,7 +106,7 @@ def qr_tenant_svg(
     front: Optional[str] = Query(
         None,
         description="Base URL opcional para el contenido del QR "
-                    "(default: settings.FRONTEND_URL). Sirve para pruebas en LAN.",
+                    "(default: la URL publica del frontend). Sirve para pruebas en LAN.",
     ),
     db: Session = Depends(get_db),
 ):
