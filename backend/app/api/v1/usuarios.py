@@ -67,7 +67,8 @@ def cambiar_password(
     # Obtener el usuario con su password_hash actual
     usuario = db.query(Usuario).filter(
         Usuario.id == usuario_id,
-        Usuario.activo == True
+        # A-01: `estado` es la fuente de verdad (columna `activo` se deriva, CHECK 034).
+        Usuario.estado == "activo",
     ).first()
 
     if not usuario:

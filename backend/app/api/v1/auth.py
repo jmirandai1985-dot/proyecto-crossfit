@@ -139,7 +139,8 @@ def reset_password_request(
     correo = body.correo.strip().lower()
     usuario = db.query(Usuario).filter(
         Usuario.correo == correo,
-        Usuario.activo == True,  # noqa: E712
+        # A-01: `estado` es la fuente de verdad (no `activo`, que se deriva).
+        Usuario.estado == "activo",  # noqa: E712
     ).first()
 
     if usuario:
