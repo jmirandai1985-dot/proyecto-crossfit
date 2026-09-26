@@ -151,7 +151,20 @@ async def health_check():
         db_status = "connected"
     except Exception as e:
         db_status = f"error: {str(e)}"
-    return {"status": "healthy", "database": db_status}
+
+    # ── B.3: guard de configuración de correo/URLs ───────────────────────────
+    # No aborta el arranque (preferimos que el servicio siga arriba y se vea
+    # claro acá) pero deja el estado a la vista: en producción, una env var con
+    # espacios/saltos o una URL sin https/localhost marca config_ok=false con el
+    # detalle, en vez de fallar en silencio al enviar correos (bug del 26/09).
+    problemas = problemas_de_config()
+    return {
+        "status": "healthy",
+        "database": db_status,
+        "environment": os.getenv("ENVIRONMENT", "development"),
+        "config_ok": config_email_ok(),
+        "config_problemas": problemas,
+    }
 
 
 @app.get("/sentry-debug")
@@ -244,7 +257,16 @@ async def startup_event():
     logger.info("ðŸš€ Iniciando Box CrossFit Platform API...")
     logger.info("ðŸ“– DocumentaciÃ³n disponible en: http://localhost:8000/docs")
 
-    # â”€â”€ 1. Inicializar scheduler de generaciÃ³n diaria de clases â”€â”€
+    # ── B.3: aviso de configuración de correo/URLs (no aborta el arranque) ────
+    _problemas_cfg = problemas_de_config()
+    if _problemas_cfg:
+        logger.error("[config] Problemas de configuracion de correo/URLs: %s",
+                     "; ".join(_problemas_cfg))
+        logger.error("[config] config_ok=false - el detalle se ve en GET /health")
+    else:
+        logger.info("[config] URLs publicas y credenciales SMTP sin problemas detectados")
+
+    # ── 1. Inicializar scheduler de generación diaria de clases ──
     try:
         from app.services.scheduler import iniciar_scheduler, set_generar_clases_callback
 
