@@ -6,7 +6,19 @@ from pydantic_settings import BaseSettings
 from typing import List
 
 
+import logging
 import os
+
+# ── Entorno: FAIL-SAFE ──────────────────────────────────────────────────────
+# `.env` (PROD) SOLO con ENVIRONMENT=production EXPLÍCITO. Cualquier otro valor
+# (o ninguno) carga `.env.test`.
+# Motivo: antes el default era `.env`, así que un proceso que no declaraba su
+# entorno terminaba operando sobre PRODUCCIÓN sin quererlo (incidente 2026-09-26:
+# un script de diagnóstico consultó PROD sólo por no tener ENVIRONMENT definido).
+# Los caminos de PROD declaran su entorno explícitamente: render.yaml
+# (ENVIRONMENT=production) y docker-compose.prod.yml; los de TEST también
+# (docker-compose.yml, _run_tests_orchestrator.py, run_setup_test_db.py).
+_ENVIRONMENT = (os.getenv("ENVIRONMENT") or "").strip().lower()
 
 
 class Settings(BaseSettings):
@@ -90,15 +102,23 @@ class Settings(BaseSettings):
     class Config:
         """
         Configuración de Pydantic Settings
-        Si ENVIRONMENT=test, carga .env.test; si no, carga .env
+        FAIL-SAFE: `.env` (PROD) sólo con ENVIRONMENT=production; si no, `.env.test`.
         extra='ignore': tolera variables del .env que no están declaradas
         (p.ej. DATABASE_URL_PROD) sin romper la carga de settings.
         """
-        env_file = ".env.test" if os.getenv(
-            "ENVIRONMENT") == "test" else ".env"
+        env_file = ".env" if _ENVIRONMENT == "production" else ".env.test"
         env_file_encoding = "utf-8"
         case_sensitive = True
         extra = "ignore"
+
+
+if _ENVIRONMENT not in ("production", "test"):
+    # Aviso fuerte y visible (no aborta: preferimos un default seguro + warning
+    # antes que romper el arranque). Sin ENVIRONMENT definido ⇒ se asume TEST.
+    logging.getLogger("app.core.config").warning(
+        "[config] ENVIRONMENT=%r no reconocido: se asume TEST (se carga .env.test). "
+        "Para trabajar contra producción definí ENVIRONMENT=production explícitamente.",
+        os.getenv("ENVIRONMENT"))
 
 
 # Instancia global de configuración
