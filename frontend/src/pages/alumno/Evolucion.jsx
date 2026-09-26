@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import AvisoCarga from '../../components/AvisoCarga';
@@ -70,6 +71,18 @@ const Evolucion = () => {
         setLoadingAsistencia(true);
         cargarTodo().finally(() => setLoadingAsistencia(false));
     }, [cargarTodo]);
+
+    // E-03: deep-link desde Performance Hub → /alumno/evolucion?movimiento=<id>.
+    // Antes el link existía pero la pantalla no leía el parámetro: se abría sin
+    // movimiento seleccionado (y el gráfico quedaba vacío).
+    const [searchParams] = useSearchParams();
+    useEffect(() => {
+        const mid = Number(searchParams.get('movimiento'));
+        if (!mid || !movimientos.length) return;
+        if (movimientos.some(m => Number(m.id) === mid)) {
+            setMovimientoSeleccionado(String(mid));
+        }
+    }, [searchParams, movimientos]);
 
     // ── Movimientos ordenados: con marcas primero ──
     const movimientosOrdenados = React.useMemo(() => {
