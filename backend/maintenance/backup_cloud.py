@@ -43,9 +43,16 @@ import re
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
+
+# Salida UTF-8 explícita: en Windows (cp1252) los ✅/❌ de los mensajes rompen el
+# print cuando la salida se redirige a un archivo. En Linux/Render es no-op.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:  # noqa: BLE001
+    pass
 
 # ── Códigos de salida (Render marca fallido el run si != 0) ──
 EXIT_OK = 0
@@ -83,25 +90,83 @@ class S3Error(RuntimeError):
 
 
 def log(msg: str) -> None:
-    print(f"[backup] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {msg}", flush=True)
+    # flush=True: sin esto la salida queda bufferizada y en Render el log se ve
+    # desordenado ("Cron job run finished successfully" antes que las líneas del dump).
+    # sanear(): red de seguridad final para que ninguna credencial llegue al log.
+    print(f"[backup] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {sanear(msg)}", flush=True)
+
+
+def sanear(texto) -> str:
+    """ÚNICO punto de saneo de credenciales para todo lo que se imprime.
+
+    Por qué existe: en Render el log filtró dos veces la contraseña de `backup_ro`.
+    Cuando el connection string llega con un espacio/salto/BOM, psql y pg_dump
+    devuelven en stderr la URI completa (con password) y boto3 puede incluir la URL
+    firmada en el error. Todo texto que venga de afuera pasa por acá antes de salir.
+    """
+    t = texto if isinstance(texto, str) else str(texto)
+    t = re.sub(r"://[^@\s]*@", "://***@", t)
+    return re.sub(r"password=[^\s&]+", "password=***", t)
+
+
+def limpiar_valor(valor: str) -> str:
+    """strip() + BOM/CR/LF fuera: lo que se cuela al pegar un secreto en un panel."""
+    return (valor or "").strip().lstrip("\ufeff").strip()
 
 
 def host_de(url: str) -> str:
-    """Host + base, SIN credenciales (lo único que se loguea de la URL)."""
+    """hostname + dbname, SIN credenciales (lo único que se loguea de la URL)."""
     try:
         p = urlsplit(url)
-        return f"{p.hostname or '?'}{p.path or ''}"
     except Exception:  # noqa: BLE001
-        return "(URL inválida)"
+        return "<URL inválida>"
+    if not p.hostname:
+        return "<URL inválida>"
+    return f"{p.hostname}{p.path or ''}"
 
 
 def es_directa(url: str) -> bool:
     """False si la URL pasa por el pooler de Neon (host con `-pooler.`)."""
-    return "-pooler." not in (urlsplit(url).hostname or "")
+    try:
+        return "-pooler." not in (urlsplit(url).hostname or "")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def usuario_de(url: str) -> str:
+    try:
+        return urlsplit(url).username or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def validar_url(url: str) -> str:
+    """Valida PROD_DB_DIRECT_URL. Devuelve el MOTIVO del rechazo ('' = OK).
+
+    El motivo describe la regla incumplida, nunca el valor del secreto.
+    """
+    if not url:
+        return "está vacía"
+    if not url.startswith("postgresql://"):
+        return "no empieza con postgresql://"
+    if url.count("@") != 1:
+        return "no tiene exactamente un '@'"
+    try:
+        p = urlsplit(url)
+        host, usuario = p.hostname, p.username
+    except Exception:  # noqa: BLE001
+        return "no se pudo parsear la URL"
+    if not host:
+        return "no se pudo parsear el host"
+    if "-pooler." in host:
+        return "incluye '-pooler' (se exige la conexión DIRECTA)"
+    if usuario != "backup_ro":
+        return "el usuario no es backup_ro"
+    return ""
 
 
 def faltantes() -> list:
-    return [v for v in VARS_OBLIGATORIAS if not (os.getenv(v) or "").strip()]
+    return [v for v in VARS_OBLIGATORIAS if not limpiar_valor(os.getenv(v) or "")]
 
 
 def correr(cmd: list) -> subprocess.CompletedProcess:
@@ -121,7 +186,9 @@ def pg_dump_version() -> str:
 def psql(url: str, sql: str) -> str:
     r = correr(["psql", url, "-tAc", sql])
     if r.returncode != 0:
-        raise ConfigError(f"psql falló: {(r.stderr or '').strip()[:300]}")
+        # sanear() acá y no sólo en log(): psql devuelve la URI COMPLETA (con
+        # password) en el stderr cuando el connection string es inválido.
+        raise ConfigError(f"psql falló: {sanear(r.stderr or '')[:300]}")
     return (r.stdout or "").strip()
 
 
@@ -136,7 +203,9 @@ def hacer_dump(url: str, destino: Path) -> None:
            "-f", str(destino), url]
     r = correr(cmd)
     if r.returncode != 0:
-        raise DumpError(f"pg_dump rc={r.returncode}: {(r.stderr or '').strip()[:600]}")
+        # sanear(): pg_dump también echoa la URI completa en stderr si el
+        # connection string viene malformado (espacio/salto/BOM).
+        raise DumpError(f"pg_dump rc={r.returncode}: {sanear(r.stderr or '')[:600]}")
     if not destino.exists() or destino.stat().st_size == 0:
         raise DumpError("pg_dump terminó con rc=0 pero el archivo quedó vacío")
 
@@ -205,16 +274,15 @@ def subir_y_verificar(cli, clave: str, archivo: Path) -> None:
         raise S3Error(f"el objeto en R2 pesa {cab['ContentLength']} bytes y el local {local}")
 
 
-def purgar(cli, prefijo: str) -> int:
-    """Borra objetos propios más viejos que RETENCION_DIAS (además de la regla
-    de lifecycle del bucket: doble red de seguridad para la retención)."""
-    limite = datetime.now(timezone.utc) - timedelta(days=RETENCION_DIAS)
-    viejos = [o["Key"] for o in listar(cli, prefijo) if o["LastModified"] < limite]
-    for i in range(0, len(viejos), 1000):
-        lote = viejos[i:i + 1000]
-        cli.delete_objects(Bucket=os.environ["R2_BUCKET"],
-                           Delete={"Objects": [{"Key": k} for k in lote]})
-    return len(viejos)
+def _retencion_es_informativa() -> str:
+    """La retención la aplica R2, no este runner.
+
+    Antes había un `purgar()` que borraba objetos > RETENCION_DIAS. Se eliminó a
+    propósito (2026-09-26): el bucket ya tiene la regla de lifecycle
+    `borrar-90-dias` y así el runner queda **sin ninguna operación destructiva**
+    (sólo lista, sube y verifica). RETENCION_DIAS queda como dato informativo.
+    """
+    return f"retención {RETENCION_DIAS} días (la aplica el lifecycle del bucket en R2)"
 
 
 # ── Flujo principal ────────────────────────────────────────────────────────
@@ -228,12 +296,17 @@ def main() -> int:
         log(f"FATAL: faltan variables de entorno: {', '.join(falta)}")
         return EXIT_CONFIG
 
-    url = os.environ["PROD_DB_DIRECT_URL"]
-    log(f"Origen: {host_de(url)}")
-    if not es_directa(url):
-        log("FATAL: la URL incluye '-pooler'. Neon desaconseja pg_dump por el pooler: "
-            "usá la conexión DIRECTA del rol backup_ro.")
+    # El secreto puede traer espacios, \r, \n o BOM al pegarse en un panel: se
+    # normaliza y se VALIDA antes de usarlo (y antes de que psql/pg_dump lo vean,
+    # que es cuando lo devolvían crudo en el stderr y se filtraba al log).
+    url = limpiar_valor(os.environ["PROD_DB_DIRECT_URL"])
+    motivo = validar_url(url)
+    if motivo:
+        log("FATAL (config): PROD_DB_DIRECT_URL inválida")
+        log(f"  motivo (sin mostrar el valor): {motivo}")
         return EXIT_CONFIG
+    os.environ["PROD_DB_DIRECT_URL"] = url  # normalizado, para psql/pg_dump
+    log(f"Origen: {host_de(url)}")
 
     v_dump, v_server = pg_dump_version(), server_version(url)
     log(f"pg_dump: {v_dump} | servidor: {v_server}")
@@ -269,7 +342,7 @@ def main() -> int:
         log(f"Bucket: 0 objetos con prefijo {PREFIJO!r}")
 
     if DRY_RUN:
-        log(f"DRY_RUN=1 ⇒ NO se sube nada. Objeto que se subiría: {clave}")
+        log(f"DRY_RUN=1 -> NO se sube nada. Objeto que se subiría: {clave}")
         log(f"RESULTADO: OK (dry-run) | dump={crudo.stat().st_size/1024:.1f} KB | "
             f"gz={gz.stat().st_size/1024:.1f} KB | tablas={info['tablas']} | "
             f"alembic={info['alembic']}")
@@ -277,9 +350,7 @@ def main() -> int:
 
     subir_y_verificar(cli, clave, gz)
     log(f"Subido y verificado (head_object): s3://{os.environ['R2_BUCKET']}/{clave}")
-    borrados = purgar(cli, PREFIJO)
-    if borrados:
-        log(f"Retención: {borrados} objeto(s) con más de {RETENCION_DIAS} días eliminados")
+    log(f"Retención: {_retencion_es_informativa()}")
     finales = listar(cli, PREFIJO)
     if not any(o["Key"] == clave for o in finales):
         log("FATAL: el objeto recién subido no aparece al listar el bucket")
