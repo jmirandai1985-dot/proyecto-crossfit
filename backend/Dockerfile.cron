@@ -2,10 +2,11 @@
 # ============================================================
 # Dockerfile.cron — imagen MÍNIMA para el Cron Job de Render.
 #
-# La usan los 3 Cron Jobs de mantenimiento, todos con `python -m maintenance.<script>`:
-#   * `backup_cloud`     → backup diario de la base REAL de PROD (pg_dump) a Cloudflare R2
-#   * `watchdog_backups` → vigila la frescura de ese backup (solo lee R2) y avisa por mail
-#   * `restore_drill`    → drill mensual de restore en una rama temporal de Neon
+# La usan los 4 Cron Jobs de mantenimiento, todos con `python -m maintenance.<script>`:
+#   * `mantenimiento_cloud` → mantenimiento de datos de PROD los días 1 y 15 (rol `maint_rw`)
+#   * `backup_cloud`        → backup diario de la base REAL de PROD (pg_dump) a Cloudflare R2
+#   * `watchdog_backups`    → vigila la frescura de ese backup (solo lee R2) y avisa por mail
+#   * `restore_drill`       → drill mensual de restore en una rama temporal de Neon
 # No toca el web service ni `Dockerfile.render` / `backend/Dockerfile` (esos siguen igual).
 #
 # Por qué una imagen aparte:
@@ -52,13 +53,16 @@ WORKDIR /app
 # importa FastAPI/SQLAlchemy). `__init__.py` es obligatorio para que resuelva
 # `python -m maintenance.<script>`.
 # ⚠️ Al agregar un Cron Job hay que agregar ACÁ su módulo y sus dependencias internas:
-#    `watchdog_backups` y `restore_drill` importan `alertas`, y `alertas` importa
-#    `backup_cloud` (si falta uno, el job muere con "No module named maintenance.<x>").
+#    `watchdog_backups`, `restore_drill` y `mantenimiento_cloud` importan `alertas`, y
+#    `alertas` importa `backup_cloud` (si falta uno, el job muere con "No module named
+#    maintenance.<x>"). `mantenimiento_cloud` no necesita nada más: habla con la base por
+#    `psql`, así que no arrastra SQLAlchemy ni la app (y por eso tampoco hay pip nuevo).
 COPY maintenance/__init__.py ./maintenance/__init__.py
 COPY maintenance/backup_cloud.py ./maintenance/backup_cloud.py
 COPY maintenance/alertas.py ./maintenance/alertas.py
 COPY maintenance/watchdog_backups.py ./maintenance/watchdog_backups.py
 COPY maintenance/restore_drill.py ./maintenance/restore_drill.py
+COPY maintenance/mantenimiento_cloud.py ./maintenance/mantenimiento_cloud.py
 
 # Usuario no-root (OJO: en Debian ya existe un usuario de sistema `backup`
 # con UID 34 ⇒ `useradd backup` falla con "username already in use").
@@ -67,7 +71,8 @@ RUN useradd --create-home --uid 1000 boxapp \
 USER boxapp
 
 # CMD por defecto = el backup (es el Cron Job que YA corre así en Render: no se cambia).
-# Los otros 2 jobs fijan su propio Command en el dashboard:
-#   watchdog → python -m maintenance.watchdog_backups
-#   drill    → python -m maintenance.restore_drill
+# Los otros 3 jobs fijan su propio Command en el dashboard:
+#   mantenimiento → python -m maintenance.mantenimiento_cloud
+#   watchdog      → python -m maintenance.watchdog_backups
+#   drill         → python -m maintenance.restore_drill
 CMD ["python", "-m", "maintenance.backup_cloud"]
