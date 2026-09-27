@@ -21,9 +21,10 @@
 3. **Panel de Acción y Fidelización** - Tabla debajo de solicitudes con:
    - Nombre del alumno
    - Estado de alerta ("Inactivo hace X días" o "Vence en X días")
-   - Botón "Acción Rápida" (STUB - muestra mensaje de pendiente configuración Resend)
+   - Botón "Acción Rápida" (STUB - muestra mensaje de pendiente configuración de correo)
 4. Carga asíncrona de datos de fidelización junto con solicitudes
 
 ### Nota
 - El envío real de email está marcado como STUB (handleAccionRapida)
-- Falta configurar cuenta de Resend para envío real
+- Falta configurar la cuenta de correo saliente (Gmail SMTP: `GMAIL_SMTP_USER` +
+  `GMAIL_SMTP_APP_PASSWORD`) para envío real

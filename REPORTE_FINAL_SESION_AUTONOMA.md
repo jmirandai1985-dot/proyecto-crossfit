@@ -24,11 +24,11 @@
 ## DETALLE POR TAREA
 
 ### TAREA 1 — Mensaje de error envío de correo (admin Dashboard)
-**Problema encontrado:** Cuando fallaba el envío mostraba mensaje genérico "❌ Error al enviar correo a X" sin detalle, y el backend registraba "Error de Resend" (texto obsoleto, ya se usa Gmail SMTP).
+**Problema encontrado:** Cuando fallaba el envío mostraba mensaje genérico "❌ Error al enviar correo a X" sin detalle, y el backend registraba un texto obsoleto que nombraba al proveedor de correo anterior al actual (hoy se usa Gmail SMTP).
 
 **Archivos editados (incremental):**
 - `backend/app/services/email_service.py`: agregada variable global `ULTIMO_ERROR_SMTP` que captura el error real de `smtplib`.
-- `backend/app/api/v1/notificaciones_enviadas.py`: cuando `exito=False` devuelve `detalle_error` con el error SMTP real (o fallback informativo "No se pudo enviar el correo via Gmail SMTP (revisar credenciales o destinatario)"). Se eliminó el texto obsoleto "Error de Resend".
+- `backend/app/api/v1/notificaciones_enviadas.py`: cuando `exito=False` devuelve `detalle_error` con el error SMTP real (o fallback informativo "No se pudo enviar el correo via Gmail SMTP (revisar credenciales o destinatario)"). Se eliminó el texto obsoleto que nombraba al proveedor anterior.
 - `frontend/src/pages/admin/Dashboard.jsx`: muestra `❌ Error al enviar correo a X: <detalle>` con el detalle real.
 
 **Tests:** run_tests.bat → 54 passed / 1 failed (test_c16 pre-existente). sync_test_from_prod.py → OK.

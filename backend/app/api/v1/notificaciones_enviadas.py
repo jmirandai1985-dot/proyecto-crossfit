@@ -189,7 +189,7 @@ def enviar_manual(
         return {"exito": False, "estado": "fallido", "detalle_error": detalle}
     detalle_fallo = None
     if not exito:
-        # Gmail SMTP ya no usa Resend: exponer el error SMTP real si existe
+        # Exponer el error SMTP real del intento de envío si existe
         try:
             from app.services import email_service
             detalle_fallo = email_service.ULTIMO_ERROR_SMTP or "No se pudo enviar el correo via Gmail SMTP (revisar credenciales o destinatario)."
@@ -470,7 +470,7 @@ def reenviar_notificacion(
         error = str(e)
 
     if not exito and not error:
-        # Gmail SMTP no usa Resend: exponer el error real del envío.
+        # Exponer el error real del envío.
         try:
             from app.services import email_service
             error = (email_service.ULTIMO_ERROR_SMTP

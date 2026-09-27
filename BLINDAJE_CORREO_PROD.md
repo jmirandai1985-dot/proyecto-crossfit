@@ -10,8 +10,8 @@ independientes, **ambas en variables del dashboard de Render**:
 | `GMAIL_SMTP_USER` | tenía un espacio/salto de línea pegado | `email_service._enviar` armaba `msg["From"]` con el valor **crudo** ⇒ `Header values may not contain linefeed or carriage return characters` **antes** de conectar con Gmail ⇒ fallaban TODOS los correos |
 | `FRONTEND_URL` | no empezaba con `http(s)://` | los ~25 links de correo y el endpoint del QR quedaban inválidos (QR → `400 "front debe ser una URL http(s) válida"`) |
 
-Resend no participa: el proveedor es **Gmail SMTP directo** (`smtp.gmail.com:465`);
-`RESEND_API_KEY` ya no se usa.
+El proveedor es **Gmail SMTP directo** (`smtp.gmail.com:465`); no participa ningún otro
+proveedor de correo y no hay ninguna API key de terceros en juego.
 
 ## Qué se blindó en el código (5 commits)
 | Bloque | Cambio |

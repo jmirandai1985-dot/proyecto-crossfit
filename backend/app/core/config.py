@@ -71,9 +71,6 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "./uploads/vouchers"
     MAX_UPLOAD_SIZE_MB: int = 5
 
-    # Resend (ya no se usa para envio, compatibilidad)
-    RESEND_API_KEY: str = ""
-
     # Gmail SMTP (correos reales)
     GMAIL_SMTP_USER: str = ""
     GMAIL_SMTP_APP_PASSWORD: str = ""

@@ -7,7 +7,6 @@ import smtplib
 import sys
 from email.message import EmailMessage
 from datetime import datetime, date
-# import resend  # migrado a Gmail SMTP (se conserva para rollback rápido)
 
 from app.core.config import settings
 
@@ -18,7 +17,6 @@ BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__
 LOGO_PATH = os.path.join(os.path.dirname(BACKEND_DIR), "logo", "logo.png")
 # Logo servido desde repo público de assets (GitHub raw) para usar URL en vez de adjunto
 LOGO_URL = "https://raw.githubusercontent.com/jmirandai1985-dot/urban-box-assets/main/logo.png"
-# FROM_EMAIL = "Urban Training Box <onboarding@resend.dev>"  # migrado a Gmail SMTP (rollback)
 
 # Último error SMTP (para exponer detalle útil al admin en el Dashboard)
 ULTIMO_ERROR_SMTP = None
