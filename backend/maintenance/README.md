@@ -189,14 +189,15 @@ URL `-pooler` ⇒ rechazada (exit 2) · dump+asserts contra TEST ⇒
 `dump 1429.8 KB → gz 144.5 KB | 36 CREATE TABLE | 36 COPY | footer OK |
 alembic=035_precio_snapshot_solicitudes | VEREDICTO: OK`.
 
-### Crear el Cron Job en Render
-1. Dashboard → **New → Cron Job** → repo + rama (`main`).
+### El Cron Job de backup en Render (ya existe: se llama `proyecto-crossfit`)
+1. Dashboard → **New → Cron Job** → **nombre `proyecto-crossfit`** (así se llama el job que ya
+   corre el backup) + repo + rama (`main`).
 2. Runtime **Docker**: *Dockerfile Path* = `backend/Dockerfile.cron`;
    *Docker Build Context Directory* = `backend`.
 3. **Environment**: *Link Environment Group* → **`backups-prod`** (entran las 10 variables).
    Confirmá `DRY_RUN=1` para el primer disparo.
 4. Schedule (UTC): `0 6 * * *` = **03:00 CLT** diario.
-5. Región: la misma que el resto de los servicios (us-east-2) si el plan lo permite.
+5. Región: **Oregon (us-west-2)**, la misma del Web Service `box-crossfit` (ya probada).
 6. Crear → **Runs → Trigger Run** (no hace falta esperar a las 03:00) y revisar el log.
 7. Con el log en verde: `DRY_RUN=0`, disparar de nuevo a mano y verificar que el objeto aparece
    en R2 (`daily/AAAA-MM-DD_HHMM_neon_backup.sql.gz`).
@@ -204,4 +205,276 @@ alembic=035_precio_snapshot_solicitudes | VEREDICTO: OK`.
 > Costo: los Cron Jobs no existen en el plan free; el mínimo es **US$1/mes** por servicio.
 > Para versionarlo se puede declarar en `render.yaml` (`type: cron`), pero recién después de
 > validarlo a mano, así un sync del blueprint no crea algo a medio probar.
+
+## Watchdog de frescura del backup — Fase 3 (2026-09-27)
+
+Motivo: el 26/09 el backup de la nube estuvo días sin correr y **nadie se enteró** (el job
+local logueaba "✅ Backup completado" con el dump fallando). El watchdog es un Cron Job
+**independiente** del de backup: si el backup no corre, el watchdog avisa igual.
+
+| Pieza | Qué es |
+|---|---|
+| Script | `maintenance/watchdog_backups.py` |
+| Alcance | **sólo lee R2** (token de solo lectura, env group `r2-lectura`). No necesita `PROD_DB_DIRECT_URL` |
+| Alertas | `maintenance/alertas.py` → **Gmail SMTP** (`smtp.gmail.com:465` + `SMTP_SSL` con App Password): el mismo camino de correo que ya usa la app |
+| Reglas | sin objetos en `daily/` ⇒ alerta · el más nuevo con más de `MAX_EDAD_HORAS` (36 h) ⇒ alerta · el más nuevo con menos de `MIN_BYTES` (50 KB) ⇒ alerta |
+| Sin alerta | una línea de log y exit 0, **sin email** (no se spamea) |
+
+### Los Cron Jobs: 1 ya existe y quedan **2 por crear** (Render va en UTC; CLT = UTC-3)
+
+| Job | ¿Existe? | Schedule (UTC) | Hora CLT | Dockerfile / comando | Env group | Exit ≠ 0 |
+|---|---|---|---|---|---|---|
+| **`proyecto-crossfit`** (backup) | **sí, ya corriendo** | `0 6 * * *` | 03:00 diario | `backend/Dockerfile.cron` · `python -m maintenance.backup_cloud` | `backups-prod` | 2/3/4/5 |
+| `box-crossfit-watchdog` | **hay que crearlo** | `0 12 * * *` | 09:00 diario | `backend/Dockerfile.cron` · `python -m maintenance.watchdog_backups` | `r2-lectura` + `alertas` | 2/6/7 |
+| `box-crossfit-restore-drill` | **hay que crearlo** | `0 13 1 * *` | 10:00 el día 1 | `backend/Dockerfile.cron` · `python -m maintenance.restore_drill` | `backups-prod` + `neon-api` + `alertas` | 2/8/9/10/11/12 |
+
+> Resumen de lo que falta hacer a mano: **3 env groups nuevos** (`alertas`, `neon-api`,
+> `r2-lectura`; el job de backup ya tiene los suyos) y **2 Cron Jobs nuevos** (watchdog + drill).
+> El de backup ya existe con el nombre `proyecto-crossfit` y **no hay que tocarlo**.
+>
+> El watchdog corre **6 h después** del backup para dar margen a un reintento manual antes
+> de que el email de alerta salga.
+
+### Exit codes (todos los jobs: exit ≠ 0 ⇒ run **rojo** en Render)
+
+| Job | Código | Significado |
+|---|---|---|
+| backup | 0 / 2 / 3 / 4 / 5 | OK / config / pg_dump / asserts de contenido / R2 |
+| watchdog | 0 / 2 / 6 / 7 | OK (sin email) / config (falta variable o R2 inaccesible) / **hay algo que avisar** / inesperado |
+| drill | 0 / 2 / 8 / 9 / 10 / 11 / 12 | OK / config (falta variable o cupo de ramas lleno) / descarga-dump ilegible / API Neon / restore o verificación / **la prueba negativa no falló (crítico)** / inesperado |
+
+### Env groups (cero credenciales en el repo)
+
+| Env group | Variables | Lo usan |
+|---|---|---|
+| `backups-prod` | `PROD_DB_DIRECT_URL`, `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `DRY_RUN`, `RETENTION_DAYS`, `MIN_BYTES`, `MIN_TABLAS`, `BACKUP_PREFIX` | backup, drill |
+| `alertas` | `GMAIL_SMTP_USER`, `GMAIL_SMTP_APP_PASSWORD`, `ALERT_EMAIL` | watchdog, drill |
+| `neon-api` | `NEON_API_KEY`, `NEON_PROJECT_ID` | drill |
+| `r2-lectura` | `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (token **solo lectura**) | watchdog |
+
+### Las credenciales: cómo se crean (una sola vez) y a qué grupo van
+
+Se generan en cada proveedor y se pegan **sólo** en Render (*Env Groups*). Ninguna entra al repo
+ni a los `.env` locales.
+
+1. **Cloudflare R2 → `backups-prod` (lectura y escritura)**: R2 → *Manage R2 API Tokens* → token
+   con *Object Read & Write* limitado al bucket de respaldos. Van al grupo `R2_ENDPOINT`
+   (`https://<account-id>.r2.cloudflarestorage.com`), `R2_BUCKET`, `R2_ACCESS_KEY_ID` y
+   `R2_SECRET_ACCESS_KEY`. En el mismo grupo, `PROD_DB_DIRECT_URL` = cadena **directa** (host sin
+   `-pooler`) del rol de backup `backup_ro` de Neon: el runner rechaza el pooler con exit 2 porque
+   `pg_dump` contra PgBouncer se corta.
+2. **Cloudflare R2 → `r2-lectura` (sólo lectura)**: **otro** token, mismo bucket, permiso *Object
+   Read only*. Es el que usa el watchdog: aunque se filtre, no puede subir ni borrar nada.
+3. **Neon → `neon-api`**: Console de Neon → *Account settings → API keys* → crear la key
+   (`NEON_API_KEY`) y copiar el `NEON_PROJECT_ID` (*Project → Settings*). Es lo único que permite
+   que el drill cree y borre la rama temporal; sin esas 2 variables sale exit 2 **sin tocar nada**.
+4. **Gmail → `alertas`**: en la casilla del box (Gmail) → *Seguridad → Verificación en 2 pasos →
+   Contraseñas de aplicaciones* → generar una **App Password de 16 caracteres**. Al grupo `alertas`
+   van `GMAIL_SMTP_USER` (la casilla, ej. `urban.training.box.2026@gmail.com`),
+   `GMAIL_SMTP_APP_PASSWORD` (esa App Password — **no** la password de la cuenta) y `ALERT_EMAIL`
+   (la casilla que uno lee). Es el **mismo Gmail que ya usa la app**, así que si el Web Service ya
+   tiene esas 2 variables se copian los mismos valores: no hay nada nuevo que crear ni dominio que
+   verificar.
+
+En Render: *Env Groups → New Environment Group* con el **nombre exacto** de la tabla de arriba
+(`backups-prod`, `alertas`, `neon-api`, `r2-lectura`) y después, en cada Cron Job,
+*Environment → Link Environment Group*. Verificación rápida: los valores se ven como `•••` en
+el dashboard, y en el log/email de un run sólo pueden aparecer saneados (`://***@`) — nunca la
+password del rol ni la key.
+
+
+### Cómo se entera uno de un problema (3 vías, ninguna depende del log local)
+1. **Email** por Gmail SMTP: el drill lo manda **siempre** (OK o FALLA + motivo); el watchdog
+   sólo cuando hay alerta.
+2. **Run rojo** en Render → *Cron Job → Runs* (exit ≠ 0).
+3. **Log del run**: todo lo impreso pasa por `log()`, que sanea (`://***@`) cualquier
+   credencial (por eso ni el email ni el log pueden filtrar la password del rol).
+
+### Tests (sin R2, sin Neon, sin red y sin credenciales)
+```bash
+cd backend
+py -3.12 -m pytest tests/test_watchdog_backups.py tests/test_restore_drill.py tests/test_email_config_prod.py -q --noconftest
+```
+Registrado el 2026-09-27: **23 passed** (8 del watchdog + 7 del drill + 8 de la config de email).
+Neon, R2, `psql` y `smtplib` están mockeados: no se usa red ni credenciales y **no se manda ningún
+correo real**. Ojo con el intérprete: usar `py -3.12` — el `python` del PATH (3.13) no tiene
+`pytest` instalado.
+
+## Drill de restore automático — Fase 4 (2026-09-27)
+
+Un backup que nunca se restauró **no es un backup**. Este Cron Job mensual baja el último
+dump de R2, lo restaura en una rama temporal de Neon, verifica que lo restaurado coincida
+con lo que el dump dice y comprueba que el rol de backup siga siendo de solo lectura.
+
+| Pieza | Qué es |
+|---|---|
+| Script | `maintenance/restore_drill.py` |
+| Cuándo | día 1 de cada mes, 10:00 CLT (`0 13 1 * *` UTC) |
+| Reporte | email por Gmail SMTP **siempre** (OK con números o FALLA con el motivo) |
+| Rama temporal | `drill-YYYYMMDD-HHMM`, creada con `init_source="parent-schema"` y borrada en el `finally` |
+
+### Los 8 pasos y sus guardas
+
+| # | Paso | Guarda que aborta antes de tocar nada |
+|---|---|---|
+| 0 | `contar_ramas()` contra la API | el plan Free permite **10 ramas/proyecto** (`MAX_RAMAS`): si está lleno ⇒ exit 2, **no se crea nada** |
+| 1 | Bajar el objeto más nuevo de `daily/` en R2 | sin objetos ⇒ exit 8 · error de red/permiso ⇒ exit 8 |
+| 2 | `descomprimir()` + `verificar_dump()` + `esperar_del_dump()` | dump truncado o sin footer `-- PostgreSQL database dump complete` ⇒ exit 8 |
+| 3 | Crear la rama temporal (hija del branch por defecto) | error de API ⇒ exit 9 · **si algo falla después, la rama se borra igual** |
+| 4 | Crear la base `drill_restore` (`DRILL_DB_NAME`) **nueva y vacía** en esa rama | `contar_tablas() != 0` ⇒ exit 10 **sin restaurar** |
+| 5 | `psql_restore()` del dump (una sola transacción) | `returncode != 0` ⇒ exit 10 (con `psql_error` saneado en el email) |
+| 6 | `verificar_restore()`: nº de tablas, usuarios y `alembic_version` **contra lo que dice el dump** | lo restaurado no coincide ⇒ exit 10 |
+| 7 | `probar_solo_lectura_prod()`: `CREATE TABLE` en PROD **debe** fallar | si **no** falla ⇒ exit 11 + email marcado **CRÍTICO** |
+
+### Decisiones que importan (y por qué)
+
+- **Base nueva y vacía, nunca `neondb`:** una rama de Neon trae el schema del padre copiado,
+  así que restaurar sobre `neondb` daría `already exists` en cada `CREATE TABLE` de un dump
+  que no usa `--clean`. Por eso el drill crea `drill_restore` y verifica que esté en 0 tablas.
+- **`init_source="parent-schema"`:** copia el *schema* del padre (no los datos) y **no cuenta**
+  contra el límite de 3 raíces del plan Free (`schema-only` sí crearía una raíz) — y así la
+  rama se puede borrar sin arrastrar nada. Textual de la API: `parent-schema` *"copies schema
+  only from the parent branch"* y `schema-only` *"creates a new root branch containing schema
+  only"* (`BranchCreateRequest.init_source`, verificado en el OpenAPI
+  <https://neon.com/api_spec/release/v2.json> y en
+  <https://neon.com/docs/reference/api/branches/create-project-branch.md>). Ojo: `parent-data`
+  es el **default**, así que el campo se manda explícito; `init_source` no está detrás de
+  Early Access (eso es sólo `expires_at`).
+- **Nada de umbrales hardcodeados:** en vez de "deberían haber ~35 tablas", se leen el nº de
+  `CREATE TABLE` y el `alembic_version` **del propio dump** (`esperar_del_dump`). El drill no
+  se rompe cuando se agrega una migración.
+- **Prueba negativa obligatoria:** el drill vale por lo que verifica *además* del restore: que
+  la credencial de backup no pueda escribir en la base de producción.
+- **Limpieza garantizada:** la rama y el directorio temporal se borran en el `finally`, pase lo
+  que pase. Si el `DELETE` de la rama falla, el email lo dice y hay que borrarla a mano.
+
+### Restauración manual de emergencia (runbook)
+
+Neon guarda historial propio (PITR), pero un dump en R2 es el último recurso si se pierde el
+proyecto. Con las variables de `backups-prod` exportadas (o desde el shell del Cron Job):
+
+```bash
+# 0. NUNCA pisar PROD: restaurar en una rama temporal y recién ahí decidir.
+neonctl branches create --project-id "$NEON_PROJECT_ID" --name rescate \
+  --parent "$(neonctl branches list --project-id "$NEON_PROJECT_ID" -o json | jq -r '.[]|select(.default)|.id')"
+neonctl databases create --project-id "$NEON_PROJECT_ID" --branch rescate --name rescate_db
+```
+
+```bash
+# 1. Bajar y descomprimir el último dump (aws cli s3api con las credenciales de R2).
+aws s3api list-objects-v2 --endpoint-url "$R2_ENDPOINT" --bucket "$R2_BUCKET" \
+  --prefix daily/ --query 'Contents[?ends_with(Key,`sql.gz`)]|sort_by(@,&LastModified)[-1].Key'
+aws s3 cp "s3://$R2_BUCKET/daily/<objeto>.sql.gz" . --endpoint-url "$R2_ENDPOINT"
+gzip -dk <objeto>.sql.gz
+```
+
+```bash
+# 2. Restaurar en UNA transacción (atómico: o entra todo o no entra nada).
+psql "<uri de la rama rescate>/rescate_db?sslmode=require" \
+  -v ON_ERROR_STOP=1 --single-transaction -f <objeto>.sql
+```
+
+```bash
+# 3. Verificar ANTES de apuntar la app: el dump ya dice cuántas tablas y qué alembic trae.
+grep -c '^CREATE TABLE' <objeto>.sql          # esperado del propio dump
+psql "<uri>" -tAc 'SELECT count(*) FROM information_schema.tables WHERE table_schema='"'"'public'"'"';'
+psql "<uri>" -tAc 'SELECT version_num FROM alembic_version;'
+psql "<uri>" -tAc 'SELECT count(*) FROM usuarios;'   # sanity de datos reales
+```
+
+```bash
+# 4. Recién si los 4 números cuadran: apuntar la app y borrar la rama temporal.
+neonctl branches delete rescate --project-id "$NEON_PROJECT_ID"
+```
+
+> Todo lo de arriba sale **saneado** en logs y emails: `log()` y `sanear()` reemplazan
+> `usuario:password@` por `***`, así que pegar la salida del run en un issue es seguro.
+
+## Cómo dejar los 2 Cron Jobs nuevos corriendo en Render
+
+Mismo patrón que el job de backup que **ya existe** (`proyecto-crossfit`): el Dockerfile ya está
+en el repo, no hay que construir nada.
+
+1. Render → **New → Cron Job** → repo `proyecto-crossfit`, branch `main`.
+2. **Nombre**: `box-crossfit-watchdog` y `box-crossfit-restore-drill` (los 2 que faltan).
+3. **Dockerfile Path**: `backend/Dockerfile.cron` · **Docker Context**: `backend`.
+4. **Command**: el de la tabla de arriba (`python -m maintenance.<script>`).
+5. **Schedule**: el de la tabla (`0 12 * * *`, `0 13 1 * *` — en UTC).
+6. **Environment Group(s)**: los de la tabla (`r2-lectura` + `alertas`; `backups-prod` +
+   `neon-api` + `alertas`).
+7. **Region**: **Oregon (us-west-2)**, la misma del Web Service `box-crossfit`.
+8. Guardar y usar **Trigger Run** una vez; el mail del drill tiene que llegar en < 1 min.
+
+> Los horarios se cargan a mano en el dashboard a propósito: así un sync del blueprint no
+> crea un job a medio configurar con credenciales incompletas.
+
+## Fase 5 — propuesta: red de seguridad de TEST (SÓLO texto: sin código y sin aplicar)
+
+> **Decisión del 2026-09-27:** el diseño anterior (script `copia_test.py` + un 4º Cron Job en
+> Render con bucket y credenciales propias) queda **descartado**, y **no se implementa**. No hay
+> ningún archivo creado para eso (verificado con `git status`: no existe `copia_test.py` en el
+> repo). Lo de abajo es una propuesta a decidir más adelante: **hoy no se toca nada**.
+
+### Qué hay hoy (y no se cambia)
+El contenedor **local** de mantenimiento es el que respalda **TEST** en la laptop:
+`docker-compose.yml` → servicio `maintenance` (target `maintenance` del Dockerfile, cron
+`/etc/cron.d/box-maintenance`, `TZ=America/Santiago`, `env_file=backend/.env.test`), que corre
+`run_daily.py` y adentro `backup_neon.py` (`pg_dump` de la branch TEST de Neon → `.sql` al volumen
+`backups`). **Sigue como está.**
+
+Y sigue sin credenciales propias en local: en `.env.test` **no** hay ninguna `R2_*` ni
+`ALERT_EMAIL`; lo único de correo que aparece ahí es la configuración de la **app**, que es otra
+cosa y queda fuera de esta propuesta. R2 y alertas viven **sólo** en Render
+(`backups-prod`, `alertas`, `neon-api`, `r2-lectura`).
+
+### Los 2 cambios propuestos (en texto, sin aplicar)
+| # | Qué | Hoy | Propuesta | Dónde se aplicaría |
+|---|---|---|---|---|
+| 1 | Horario del job diario local | 02:30 CLT (`30 2 * * *`) | **04:30 CLT** (`30 4 * * *`) | `backend/maintenance/crontab` (la línea del `run_daily.py`) |
+| 2 | Retención de los dumps locales | 30 días fijos (`timedelta(days=30)` dentro de `backup_neon.py`) | **7 días** | `backup_neon.py`: leer `RETENTION_DAYS` con default `7`, igual que `backup_cloud.py` |
+
+Detalles que importan **si algún día** se aplica:
+- El cron del contenedor corre con `TZ=America/Santiago`, así que el horario se escribe **en CLT**
+  (`30 4 * * *`) y **no** se convierte a UTC como en los Cron Jobs de Render. Después hay que
+  reconstruir el contenedor (`docker compose build maintenance` +
+  `docker compose up -d --force-recreate --no-deps maintenance`), porque el `crontab` va copiado
+  dentro de la imagen.
+- Bajar la retención no borra nada de golpe: `backup_neon.py` purga por `mtime` durante el propio
+  dump, así que los `.sql` viejos se van yendo en las corridas siguientes (quedan ≤ ~8 archivos).
+  No toca ningún respaldo de PROD: ésos viven en R2 y la retención la aplica el lifecycle del bucket.
+- Lo que esta propuesta **no** hace: no agrega scripts, no agrega jobs ni env groups en Render, no
+  crea bucket ni prefijo nuevos, no le da credenciales de R2 a la laptop y no automatiza ninguna
+  restauración. El drill de Fase 4 sigue siendo la única prueba de restore, y corre en Render.
+
+## Estado y limitaciones (2026-09-27, sin commit)
+
+- **Verificado (cerrado el pendiente):** `init_source="parent-schema"` **existe** en la API; no
+  es un valor inventado. Textual en el OpenAPI v2 (`BranchCreateRequest.init_source` y el propio
+  objeto `Branch`) y en la doc
+  <https://neon.com/docs/reference/api/branches/create-project-branch.md>: *"`parent-data` copies
+  schema and data from the parent branch. `parent-schema` copies schema only from the parent
+  branch. `schema-only` creates a new root branch containing schema only…"*. Como `parent-data`
+  es el **default**, el campo se manda explícito; y `schema-only` es el que crearía raíz, así que
+  la elección del drill queda confirmada.
+- **Verificado:** `py -3.12 -m py_compile maintenance/restore_drill.py maintenance/watchdog_backups.py
+  maintenance/alertas.py` ⇒ rc 0, y `py -3.12 -m pytest tests/test_watchdog_backups.py
+  tests/test_restore_drill.py tests/test_email_config_prod.py -q --noconftest` ⇒ **23 passed**
+  (8 + 7 + 8, con Neon/R2/psql/smtplib mockeados: no se usó red ni credenciales).
+  ⚠️ Usar `py -3.12`: el `python` del PATH (3.13) **no** tiene pytest.
+- **Verificado (smoke sin credenciales):** con el entorno vacío, `restore_drill` sale con
+  exit 2 ("faltan variables") y el watchdog también — sin mandar ningún mail.
+- **NO verificado todavía:** el drill **nunca corrió contra Neon real**. En esta máquina no hay
+  `NEON_API_KEY`, así que los pasos 0/3/4 (API de ramas y bases) sólo están cubiertos por los
+  mocks. Primer `Trigger Run` en Render = la prueba real; mirar el email y la lista de ramas.
+- **Fase 5:** queda **sólo como propuesta escrita** (sección "Fase 5" de arriba). No se escribió
+  `copia_test.py` ni ningún script/job nuevo, y el contenedor local de mantenimiento quedó igual.
+  Los 2 cambios propuestos (04:30 CLT y retención de 7 días) **no** se aplicaron.
+- **Regla permanente (2026-09-27): todo envío de correo va exclusivamente por Gmail SMTP; está
+  prohibido cualquier otro proveedor.** `maintenance/alertas.py` manda por `smtp.gmail.com:465` +
+  `SMTP_SSL` con `GMAIL_SMTP_USER`/`GMAIL_SMTP_APP_PASSWORD` (env group `alertas`, los mismos
+  valores que ya usa el Web Service) y **no importa ni toca** `app/services/email_service.py`, que
+  usa el mismo host y puerto. No hay segundo proveedor, ni librería de terceros, ni API key
+  externa, ni dominio que verificar.
+- **Sin tocar:** nada de `carpeta_respaldo_box`, ni `.env`/`.env.test`, ni PROD (el único acceso
+  a PROD es el `CREATE TABLE` que **debe** fallar), ni `git` (todo sigue sin commit/push).
 
