@@ -1,20 +1,41 @@
 """Endpoints n8n para disparar el mantenimiento (diario / mensual).
 
-Protegidos con el header `X-N8N-API-Key` (= settings.N8N_API_KEY). Pensados para
-que n8n dispare por HTTP los jobs que normalmente corre el contenedor
-`maintenance` vía cron (`maintenance/run_daily.py` y `maintenance/run_monthly.py`).
+Protegidos con el header `X-N8N-API-Key` (= settings.N8N_API_KEY) **y** por una guarda de
+entorno: fuera de TEST la ruta no existe (404). Pensados para que n8n dispare por HTTP los
+jobs que normalmente corre el contenedor `maintenance` vía cron
+(`maintenance/run_daily.py` y `maintenance/run_monthly.py`).
 
 Nota: los imports de `maintenance.*` son PEREZOSOS (dentro del handler) para no
 arrastrar sus efectos colaterales (configuración de logging / sys.path) al
 importar la app.
 """
+import os
 import secrets
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from app.core.config import settings
 
-router = APIRouter(prefix="/api/v1/mantenimiento", tags=["Mantenimiento"])
+# ── Guarda de entorno (H4) ───────────────────────────────────────────────────
+# En PROD la imagen del web service (`Dockerfile.render`) NO copia `maintenance/`, así que
+# estos endpoints morían con un 500 al no poder importar el módulo. La guarda lo adelanta y
+# lo hace explícito: fuera de TEST se responde 404 —como si la ruta no existiera— ANTES de
+# mirar la API key (no se filtra que el endpoint existe) y sin ejecutar nada. Es una
+# dependencia de ROUTER a propósito: cubre los 2 endpoints actuales y cualquier endpoint
+# nuevo que se agregue abajo (fail-closed).
+# Mismo criterio de lectura/normalización que `app/core/config.py` (`_ENVIRONMENT`): sin
+# `ENVIRONMENT` definido NO se asume TEST, se niega.
+_ENTORNO = (os.getenv("ENVIRONMENT") or "").strip().lower()
+
+
+def _solo_test() -> None:
+    """Permite el paso sólo con ENVIRONMENT=test; si no, 404."""
+    if _ENTORNO != "test":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
+
+router = APIRouter(prefix="/api/v1/mantenimiento", tags=["Mantenimiento"],
+                   dependencies=[Depends(_solo_test)])
 
 
 def _verificar_api_key_n8n(
