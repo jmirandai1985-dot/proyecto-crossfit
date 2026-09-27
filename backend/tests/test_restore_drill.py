@@ -104,6 +104,14 @@ def reportes(monkeypatch):
     return capturados
 
 
+def _alerta(reportes) -> tuple:
+    """La ÚNICA alerta del run: exige que el correo haya salido y con el formato `[ALERTA]`."""
+    assert len(reportes) == 1, f"se esperaba UNA alerta, hubo {len(reportes)}"
+    asunto, html = reportes[0]
+    assert asunto.startswith("[ALERTA] Drill de restore PROD: "), asunto
+    return asunto, html
+
+
 def _secuencia(valores):
     it = iter(valores)
     return lambda *_: next(it)
@@ -204,15 +212,19 @@ def _fake_operaciones(monkeypatch, estados, fallos_423=0):
     return llamadas
 
 
-def test_a_drill_ok_borra_la_rama_y_avisa(monkeypatch, reportes, capsys):
+def test_a_drill_ok_borra_la_rama_y_no_avisa(monkeypatch, reportes, capsys):
+    """Camino feliz: un drill verde deja SÓLO log (la regla es 'correo = algo que revisar')."""
     rastro = _mocks(monkeypatch, tablas=(0, 2))
     assert rd.main() == rd.EXIT_OK
     assert rastro["creadas"] and rastro["creadas"][0][1] == "br-padre-123"
     assert rastro["borrados"] == [RAMA]            # la rama temporal se borra SIEMPRE
     assert rastro["restores"] and "drill_restore" in rastro["restores"][0][0]
-    assert len(reportes) == 1 and "OK" in reportes[0][0]
+    assert reportes == []                          # ni un correo
     cap = capsys.readouterr()
-    assert CLAVE_FALSA not in (cap.out + cap.err)  # ni la password del rol en el log
+    salida = cap.out + cap.err
+    assert "restore verificado" in salida          # todo el resultado va al log del run
+    assert "MAIL: no se envía" in salida
+    assert CLAVE_FALSA not in salida               # ni la password del rol en el log
 
 
 def test_b_prueba_negativa_no_falla_es_critico(monkeypatch, reportes):
@@ -220,16 +232,17 @@ def test_b_prueba_negativa_no_falla_es_critico(monkeypatch, reportes):
     rastro = _mocks(monkeypatch, tablas=(0, 2), prod_rc=0, prod_err="")
     assert rd.main() == rd.EXIT_PERMISOS
     assert rastro["borrados"] == [RAMA]
-    assert "FALLA" in reportes[0][0]
-    assert "CRÍTICO" in reportes[0][1]
-    assert "PUDO CREAR UNA TABLA EN PROD" in reportes[0][1]
+    asunto, html = _alerta(reportes)
+    assert "CRÍTICO" in asunto
+    assert "PUDO CREAR UNA TABLA EN PROD" in html
 
 
 def test_c_restore_falla_exit_10_y_salida_saneada(monkeypatch, reportes, capsys):
     rastro = _mocks(monkeypatch, tablas=(0,), restore_rc=1)
     assert rd.main() == rd.EXIT_RESTORE
     assert rastro["borrados"] == [RAMA]
-    assert "FALLA" in reportes[0][0]
+    asunto, _ = _alerta(reportes)
+    assert "el restore falló" in asunto
     cap = capsys.readouterr()
     salida = cap.out + cap.err
     assert "://***@" in salida                 # la URI con password sale SANEADA
@@ -242,7 +255,8 @@ def test_d_base_destino_no_vacia_aborta_sin_restaurar(monkeypatch, reportes):
     assert rd.main() == rd.EXIT_RESTORE
     assert rastro["restores"] == []        # no se restauró NADA: no hay DROP ni pisada
     assert rastro["borrados"] == [RAMA]    # y la rama temporal se borra igual
-    assert "FALLA" in reportes[0][0] and "NO está vacía" in reportes[0][1]
+    _, html = _alerta(reportes)
+    assert "NO está vacía" in html
 
 
 def test_e_cupo_de_ramas_agotado_no_crea_nada(monkeypatch, reportes):
@@ -251,7 +265,8 @@ def test_e_cupo_de_ramas_agotado_no_crea_nada(monkeypatch, reportes):
     monkeypatch.setattr(rd, "contar_ramas", lambda: rd.MAX_RAMAS)
     assert rd.main() == rd.EXIT_CONFIG
     assert rastro["creadas"] == [] and rastro["borrados"] == []
-    assert "ramas" in reportes[0][1]
+    _, html = _alerta(reportes)
+    assert "ramas" in html
 
 
 def test_f_dump_ilegible_no_crea_rama(monkeypatch, reportes):
@@ -259,16 +274,19 @@ def test_f_dump_ilegible_no_crea_rama(monkeypatch, reportes):
     monkeypatch.setattr(rd, "cliente_s3", lambda: FakeS3([_objeto()], texto="CREATE TABLE x;"))
     assert rd.main() == rd.EXIT_DESCARGA
     assert rastro["creadas"] == [] and rastro["borrados"] == []   # no se llegó a crear nada
-    assert "FALLA" in reportes[0][0]
+    asunto, _ = _alerta(reportes)
+    assert "el dump no sirve" in asunto
 
 
-def test_g_sin_neon_api_key_exit_2(monkeypatch, reportes):
-    """Sin credenciales de Neon no se toca la API: exit 2 y no hay rama que borrar."""
+def test_g_sin_neon_api_key_exit_2_y_alerta(monkeypatch, reportes):
+    """Sin credenciales de Neon no se toca la API: exit 2 y no hay rama que borrar. La config
+    incompleta ES algo que revisar, así que sale alerta (no hay credential de Gmail faltante)."""
     monkeypatch.delenv("NEON_API_KEY", raising=False)
     rastro = _mocks(monkeypatch, tablas=(0, 2))
     assert rd.main() == rd.EXIT_CONFIG
     assert rastro["creadas"] == [] and rastro["borrados"] == []
-    assert reportes == []     # sin config no se puede avisar por email
+    _, html = _alerta(reportes)
+    assert "NEON_API_KEY" in html
 
 
 def test_h_423_dos_veces_reintenta_con_backoff_y_termina_ok(monkeypatch, reportes):
@@ -281,7 +299,7 @@ def test_h_423_dos_veces_reintenta_con_backoff_y_termina_ok(monkeypatch, reporte
     assert rastro["borrados"] == [RAMA]
     assert len(llamadas) == 4          # 2 rechazos 423 + 1 ok (rama) + 1 ok (base)
     assert dormidas == [2.0, 4.0]      # backoff 2 s y 4 s: el 423 no es un error nuestro
-    assert "OK" in reportes[0][0]
+    assert reportes == []              # terminó OK: sin correo
 
 
 def test_i_operacion_failed_exit_9_y_borra_la_rama(monkeypatch, reportes):
@@ -293,9 +311,9 @@ def test_i_operacion_failed_exit_9_y_borra_la_rama(monkeypatch, reportes):
     assert rd.main() == rd.EXIT_API
     assert rastro["borrados"] == [RAMA]     # la rama temporal se borra igual
     assert rastro["restores"] == []         # y NO se restauró nada
-    assert "FALLA" in reportes[0][0]
-    assert "no pude esperar la creación de la rama" in reportes[0][1]
-    assert "failed" in reportes[0][1]
+    asunto, html = _alerta(reportes)
+    assert "no pude esperar la creación de la rama" in asunto
+    assert "failed" in html
 
 
 def test_j_timeout_de_operaciones_falla_y_borra_la_rama(monkeypatch, reportes):
@@ -309,4 +327,37 @@ def test_j_timeout_de_operaciones_falla_y_borra_la_rama(monkeypatch, reportes):
     assert rd.main() == rd.EXIT_API
     assert rastro["borrados"] == [RAMA]
     assert llamadas, "el drill tiene que consultar la operación"
-    assert "timeout" in reportes[0][1] and OP_RAMA in reportes[0][1]
+    _, html = _alerta(reportes)
+    assert "timeout" in html and OP_RAMA in html
+
+
+# ── Rama temporal que queda viva (la regla nueva: una rama viva es una falla) ─
+def _no_borra(rastro):
+    """`borrar_rama` que falla: la rama temporal queda viva (consume cupo del plan Free)."""
+    def fake(bid):
+        rastro["borrados"].append(bid)
+        return False
+    return fake
+
+
+def test_k_rama_viva_no_queda_verde_avisa_y_exit_13(monkeypatch, reportes):
+    """Drill OK pero la rama no se pudo borrar: alerta con `[ALERTA]` y exit 13 (nunca 0)."""
+    rastro = _mocks(monkeypatch, tablas=(0, 2))
+    monkeypatch.setattr(rd, "borrar_rama", _no_borra(rastro))
+
+    assert rd.main() == rd.EXIT_RAMA_VIVA
+    assert rastro["borrados"] == [RAMA]
+    asunto, html = _alerta(reportes)     # venía verde ⇒ la única alerta es la de la rama viva
+    assert "quedó viva" in asunto and RAMA in asunto
+    assert "quedó viva" in html
+
+
+def test_l_rama_viva_con_drill_rojo_no_duplica_la_alerta(monkeypatch, reportes, capsys):
+    """Drill rojo + rama viva: UNA sola alerta (la del fallo) y el exit code NO se tapa."""
+    rastro = _mocks(monkeypatch, tablas=(0,), restore_rc=1)
+    monkeypatch.setattr(rd, "borrar_rama", _no_borra(rastro))
+
+    assert rd.main() == rd.EXIT_RESTORE       # conserva el motivo original (no 13)
+    asunto, _ = _alerta(reportes)
+    assert "el restore falló" in asunto       # una sola alerta: no se repite por la rama
+    assert "quedó viva" in capsys.readouterr().out     # pero el log del run sí lo dice

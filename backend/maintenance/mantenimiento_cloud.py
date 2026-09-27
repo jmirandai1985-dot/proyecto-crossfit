@@ -24,7 +24,7 @@ Principios
 4. **DRY_RUN=1 por defecto** (igual que `backup_cloud`): la transacción completa se ejecuta
    y termina en `ROLLBACK`, así el mail dice **exactamente** qué filas habrían cambiado
    (no una estimación). Se apaga (`DRY_RUN=0`) recién cuando el log da verde.
-5. **Guarda de volumen**: si la corrida afecta más de `MAX_CAMBIOS` filas (default 20, rango
+5. **Guarda de volumen**: si la corrida afecta más de `MAX_CAMBIOS` filas (default 40, rango
    1..1000), el mantenimiento **no se aplica**. En REAL la guarda aborta la transacción
    *desde el SQL* (`DO $$ … RAISE EXCEPTION … $$`), así que no depende del código Python; en
    DRY-RUN no aborta: informa (con la lista completa) y el run queda rojo (exit 6).
@@ -33,8 +33,12 @@ Principios
    (no se aplicó nada).
 7. **Todo sale saneado**: ninguna credencial puede quedar impresa. La URL sólo se muestra
    como `host_de(url)` y todo texto externo pasa por `sanear()` (`://***@`).
-8. **Avisa siempre**: el email sale por Gmail SMTP (`maintenance/alertas.py`, el mismo camino
-   del watchdog y del drill) pase lo que pase, incluso si no hay nada que hacer.
+8. **Avisa sólo si hay algo que revisar**: el email sale por Gmail SMTP (`maintenance/alertas.py`,
+   el mismo camino del watchdog y del drill) **sólo** si el run quedó rojo (exit ≠ 0: config,
+   lectura, escritura, verificación, guarda de volumen o integridad) **o** si Neon pasó el umbral
+   de espacio (`NEON_UMBRAL_PCT`). Un día normal —"APLICADO n cambios" verificado en 0— deja
+   **sólo el log** en Render: el mail es una alerta, no un informe. El asunto arranca con
+   `[ALERTA]` y dice qué job corrió y qué pasó.
 
 Qué NO hace (a propósito)
 -------------------------
@@ -47,7 +51,7 @@ Variables de entorno (env group `mantenimiento-prod` + `alertas` de Render)
 --------------------------------------------------------------------------
   * `MAINT_DB_URL`  — conexión **directa** (host sin `-pooler`) del rol `maint_rw` de PROD
   * `ENVIRONMENT`   — tiene que ser `production` (guarda dura: el job escribe en PROD)
-  * `MAX_CAMBIOS`   — guarda de volumen (default 20)
+  * `MAX_CAMBIOS`   — guarda de volumen (default 40: en 15 días pueden vencer 15-25 planes)
   * `DIAS_PENDIENTE`— antigüedad de las huérfanas (default 7)
   * `NEON_LIMITE_MB`— límite del free tier de Neon (default 512 = 0,5 GB por proyecto)
   * `NEON_UMBRAL_PCT`— alerta de uso (default 80 %)
@@ -93,6 +97,18 @@ EXIT_GUARDA = 6        # se superó MAX_CAMBIOS ⇒ no se aplica nada
 EXIT_ESCRITURA = 7     # la transacción de escritura falló (nada aplicado)
 EXIT_VERIFICACION = 8  # la verificación posterior no cuadró
 
+# Qué pasó, para el ASUNTO del correo (el detalle va en el cuerpo). El asunto arranca con
+# `[ALERTA]` + el nombre del job: la notificación del teléfono ya dice qué pasó sin abrir el
+# correo. Se usa `datos["estado"]` cuando la rama sabe más (números de la guarda, integridad).
+TITULOS_EXIT = {
+    EXIT_CONFIG: "configuración inválida",
+    EXIT_LECTURA: "no se pudo leer la base",
+    EXIT_INTEGRIDAD: "problemas de integridad",
+    EXIT_GUARDA: "excede MAX_CAMBIOS",
+    EXIT_ESCRITURA: "falló la transacción de escritura",
+    EXIT_VERIFICACION: "la verificación posterior no cuadró",
+}
+
 VARS_OBLIGATORIAS = (
     "MAINT_DB_URL",
     "ENVIRONMENT",
@@ -102,7 +118,7 @@ VARS_OBLIGATORIAS = (
 USUARIO_ROL = "maint_rw"           # el único rol con UPDATE sobre estas columnas
 ENTORNO_ESPERADO = "production"    # guarda dura: este job escribe en PROD
 TZ_CLT = "America/Santiago"        # mismo huso que el contenedor (Dockerfile.cron)
-MAX_CAMBIOS_DEFECTO = 20
+MAX_CAMBIOS_DEFECTO = 40
 MAX_CAMBIOS_RANGO = (1, 1000)      # el único camino por el que un número llega al SQL
 DIAS_PENDIENTE_DEFECTO = 7
 NEON_LIMITE_MB_DEFECTO = 512       # free tier de Neon: 0,5 GB por proyecto
@@ -543,9 +559,10 @@ def script_cambios(max_cambios: int, dias_pendiente: int, dry_run: bool) -> str:
     """Script de UNA transacción con los 4 UPDATE del mantenimiento.
 
     `DRY_RUN=1` ⇒ termina en `ROLLBACK` y **no** lleva la guarda de volumen: el objetivo es
-    que el mail muestre la lista completa de lo que habría cambiado (el "excede" lo decide
-    Python y lo informa, no aborta). `DRY_RUN=0` ⇒ termina en `COMMIT` y la guarda va antes
-    del cierre: si se pasa del tope la transacción aborta y no se aplica NADA.
+    medir exactamente lo que cambiaría y que la alerta (si hay que darla) muestre la lista
+    completa (el "excede" lo decide Python y lo informa, no aborta). `DRY_RUN=0` ⇒ termina en
+    `COMMIT` y la guarda va antes del cierre: si se pasa del tope la transacción aborta y no se
+    aplica NADA.
     """
     dias = int(dias_pendiente)
     cierre = "ROLLBACK;" if dry_run else "COMMIT;"
@@ -644,8 +661,10 @@ def _lista_html(titulo: str, pares) -> str:
     return f"<p style='margin:10px 0 2px'><b>{_e(titulo)}</b></p><ul>{items or '<li>(sin datos)</li>'}</ul>"
 
 
-def construir_html(datos: dict, inicio: datetime, segundos: float) -> str:
-    """HTML del mail: estado, listas COMPLETAS, integridad, Neon, reporte y verificación."""
+def construir_html(datos: dict, inicio: datetime, segundos: float, titulo: str = "") -> str:
+    """HTML de la alerta: qué pasó (repetido del asunto), listas COMPLETAS, integridad, Neon,
+    reporte y verificación: todo lo que hace falta para decidir sin abrir el dashboard.
+    """
     listas = datos.get("listas") or []
     bloques = "".join(
         f"<h4 style='margin:16px 0 4px'>{_e(c['titulo'])} — {c['n']} fila(s) → "
@@ -664,7 +683,9 @@ def construir_html(datos: dict, inicio: datetime, segundos: float) -> str:
     neon_html = (f"<p><b>Tamaño:</b> {_e(neon.get('mb'))} MB de {_e(neon.get('limite_mb'))} MB "
                  f"({_e(neon.get('pct'))}%) {alerta}</p>")
 
+    alerta_html = f"<b>Alerta:</b> {_e(titulo)}<br>" if titulo else ""
     pasos = (f"<p><b>Resultado:</b> {'OK ✅' if datos.get('ok', True) else 'FALLA ❌'}<br>"
+             f"{alerta_html}"
              f"<b>Motivo:</b> {_e(datos.get('motivo'))}<br>"
              f"<b>Modo:</b> {_e(datos.get('modo'))}<br>"
              f"<b>Base:</b> {_e(datos.get('base'))} · <b>ENVIRONMENT:</b> "
@@ -698,27 +719,64 @@ def construir_html(datos: dict, inicio: datetime, segundos: float) -> str:
     )
 
 
-def enviar_reporte(ok: bool, motivo: str, datos: dict, inicio: datetime) -> bool:
-    """Email SIEMPRE (OK, EXCEDE o FALLA + motivo). Nada de credenciales: todo pasa por log."""
+def _motivo_corto(motivo: str, tope: int = 140) -> str:
+    """El motivo en UNA línea y sin pasarse: entra en el asunto y se lee en el teléfono."""
+    texto = " ".join((motivo or "").split())
+    return texto if len(texto) <= tope else texto[:tope - 1].rstrip() + "…"
+
+
+def titulo_alerta(code: int, datos: dict) -> str:
+    """Qué pasó, en corto: encabeza el asunto y queda repetido en el cuerpo de la alerta."""
+    neon = datos.get("neon") or {}
+    if code == EXIT_OK and neon.get("alerta"):
+        return (f"Neon al {neon.get('pct')}% del free tier "
+                f"({neon.get('mb')} MB de {neon.get('limite_mb')} MB)")
+    return datos.get("estado") or TITULOS_EXIT.get(code) or "falla"
+
+
+def hay_que_avisar(code: int, datos: dict) -> bool:
+    """Regla del proyecto: **correo = algo que revisar**. Si no, sólo log.
+
+    Es rojo (exit ≠ 0: config, lectura, escritura, verificación, guarda de volumen, integridad)
+    o el free tier de Neon pasó `NEON_UMBRAL_PCT`. Una corrida normal —con los cambios aplicados
+    y verificados— no manda nada: el mail no es un informe, es una alerta.
+    """
+    if code != EXIT_OK:
+        return True
+    return bool((datos.get("neon") or {}).get("alerta"))
+
+
+def enviar_reporte(code: int, motivo: str, datos: dict, inicio: datetime) -> bool:
+    """Alerta por Gmail SMTP. Se llama SÓLO cuando hay algo que revisar (`hay_que_avisar`).
+
+    Asunto: `[ALERTA] Mantenimiento PROD: <qué pasó> — <motivo>`. Nada de credenciales: todo
+    pasa por `log()`/`sanear()`.
+    """
     segundos = (datetime.now(timezone.utc) - inicio).total_seconds()
-    estado = datos.get("estado") or ("OK" if ok else "FALLA")
-    asunto = f"[Mantenimiento PROD] {estado} — {motivo}"
-    return enviar_email(asunto, construir_html(datos, inicio, segundos))
+    titulo = titulo_alerta(code, datos)
+    asunto = f"[ALERTA] Mantenimiento PROD: {titulo}"
+    if corto := _motivo_corto(motivo):
+        asunto += f" — {corto}"
+    return enviar_email(asunto, construir_html(datos, inicio, segundos, titulo))
 
 
 def reportar(ok: bool, motivo: str, datos: dict, resumen: dict, inicio: datetime, code: int) -> int:
-    """Único punto de salida de main(): log + email SIEMPRE + exit code.
+    """Único punto de salida de main(): log + alerta SÓLO si hay algo que revisar + exit code.
 
     `datos` arma el HTML (listas completas incluidas, por eso no se loguea) y `resumen` son
-    los escalares que sí van al log del run.
+    los escalares que sí van al log del run. El correo no cambia el exit code: que el mail no
+    salga (o que salga de más) no altera el resultado del run en Render.
     """
     datos["ok"] = ok
     datos["motivo"] = motivo
     log(("OK: " if ok else "FALLA: ") + motivo)
     for k, v in sorted((resumen or {}).items()):
         log(f"  {k}: {v}")
-    if not enviar_reporte(ok, motivo, datos, inicio):
-        log("AVISO: el reporte no salió por Gmail; el exit code no cambia")
+    if not hay_que_avisar(code, datos):
+        log("MAIL: no se envía (todo OK: la regla es 'correo sólo si hay algo que revisar')")
+        return code
+    if not enviar_reporte(code, motivo, datos, inicio):
+        log("AVISO: la alerta no salió por Gmail; el exit code no cambia")
     return code
 
 
@@ -791,9 +849,9 @@ def main() -> int:
         error = sanear(r.stderr or "")[:600]
         datos["psql_error"] = error
         if MARCA_GUARDA in (r.stderr or ""):
-            motivo = (f"guarda de volumen: {total or cambios} > MAX_CAMBIOS="
-                      f"{cfg['max_cambios']} ⇒ la transacción abortó y NO se aplicó nada")
-            log(f"ABORTADO ({motivo})")
+            datos["estado"] = f"excede MAX_CAMBIOS ({total or cambios} > {cfg['max_cambios']})"
+            motivo = "la transacción abortó por la guarda de volumen y NO se aplicó nada"
+            log(f"ABORTADO ({datos['estado']}: {motivo})")
             return reportar(False, motivo, datos, resumen, inicio, EXIT_GUARDA)
         log(f"FATAL (escritura): psql rc={r.returncode}: {error}")
         return reportar(False, f"escritura rc={r.returncode}: {error}", datos, resumen,
@@ -823,20 +881,18 @@ def main() -> int:
 
     # ── 4) Guarda de volumen en DRY-RUN: informa (con la lista completa), no aborta ──
     if dry and total > cfg["max_cambios"]:
-        datos["estado"] = (f"EXCEDE MAX_CAMBIOS ({total} > {cfg['max_cambios']}): "
-                           "no se aplicaría")
-        return reportar(False, f"{datos['estado']} — revisar la lista del mail", datos,
-                        resumen, inicio, EXIT_GUARDA)
+        datos["estado"] = f"excede MAX_CAMBIOS ({total} > {cfg['max_cambios']})"
+        return reportar(False, "la guarda de volumen no aborta en DRY-RUN: no se aplicaría nada "
+                               "(revisar la lista de este mail antes de decidir si se sube el "
+                               "tope)", datos, resumen, inicio, EXIT_GUARDA)
 
     # ── 5) Integridad: run rojo, sin abortar el mantenimiento ──
     if datos["integridad"]:
-        motivo = (f"integridad: {len(datos['integridad'])} problema(s) en PROD "
-                  "(los datos se actualizaron igual: la integridad no aborta)")
-        log(f"ROJO ({motivo})")
+        datos["estado"] = f"integridad con {len(datos['integridad'])} problema(s)"
+        motivo = ("los datos se actualizaron igual: la integridad no aborta el mantenimiento")
+        log(f"ROJO ({datos['estado']}: {motivo})")
         return reportar(False, motivo, datos, resumen, inicio, EXIT_INTEGRIDAD)
 
-    datos["estado"] = (f"OK (DRY-RUN: {total} cambio(s))" if dry
-                       else f"APLICADO ({total} cambio(s))")
     return reportar(True, f"{total} cambio(s) {'simulados' if dry else 'aplicados'} y "
                           "verificados", datos, resumen, inicio, EXIT_OK)
 

@@ -12,6 +12,10 @@ un dominio que verificar.
 otro proveedor. Acá no se importa ninguna librería de terceros para mandar correo, no
 se usa ninguna API key externa y no hace falta verificar dominios.
 
+⚠️ **Y acá no se decide *cuándo* avisar**: cada job decide con su propia regla
+(**correo = algo que revisar**: sólo si hay un problema). `enviar_email()` es el único
+punto de envío; que devuelva `False` **nunca** cambia el exit code del run.
+
 Credenciales (env group `alertas` de Render; nunca en el repo)
 -------------------------------------------------------------
   * `GMAIL_SMTP_USER`         — la casilla del box (ej. `urban.training.box.2026@gmail.com`)

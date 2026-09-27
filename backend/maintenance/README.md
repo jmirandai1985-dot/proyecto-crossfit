@@ -206,6 +206,38 @@ alembic=035_precio_snapshot_solicitudes | VEREDICTO: OK`.
 > Para versionarlo se puede declarar en `render.yaml` (`type: cron`), pero recién después de
 > validarlo a mano, así un sync del blueprint no crea algo a medio probar.
 
+## Alertas por correo: la regla es "correo = algo que revisar" (2026-09-27)
+
+Los 4 Cron Jobs comparten **un solo camino de correo** (`maintenance/alertas.py` → Gmail SMTP) y
+**una sola regla**: el mail sale **sólo si hay algo que revisar**. Un run normal (verde) deja
+**únicamente el log** en Render. El correo es una **alerta, no un informe**: un buzón que recibe
+"todo OK" todos los días termina ignorándose, y entonces la alerta de verdad tampoco se lee.
+
+| Job | ¿Cuándo manda correo? | Exit |
+|---|---|---|
+| `backup_cloud` (job `proyecto-crossfit`) | **nunca**: no manda correo. Si el dump falla, el run queda rojo en Render y el que avisa es el watchdog | 2/3/4/5 |
+| `watchdog_backups` | sólo si hay alerta de frescura/tamaño (asunto `[Box CrossFit] ALERTA backup PROD: …`) | 6 |
+| `restore_drill` | sólo si el run falla (exit ≠ 0) o si la rama temporal quedó viva | 13 |
+| `mantenimiento_cloud` | sólo si el run falla (exit ≠ 0: config, lectura, escritura, verificación, guarda de volumen, integridad) o si Neon pasó `NEON_UMBRAL_PCT` | ≠ 0 |
+
+Todos los asuntos empiezan con **`[ALERTA]`** + el job + **qué pasó**, así la notificación del
+teléfono ya dice de qué se trata sin abrir el correo (el motivo detallado va en el cuerpo, junto
+con las listas completas):
+
+```
+[ALERTA] Mantenimiento PROD: excede MAX_CAMBIOS (41 > 40) — la guarda de volumen no aborta en DRY-RUN: …
+[ALERTA] Mantenimiento PROD: Neon al 83.98% del free tier (430.0 MB de 512 MB)
+[ALERTA] Mantenimiento PROD: integridad con 2 problema(s) — los datos se actualizaron igual: …
+[ALERTA] Drill de restore PROD: CRÍTICO: EL ROL DE BACKUP PUDO CREAR UNA TABLA EN PROD …
+[ALERTA] Drill de restore PROD: la rama temporal br-drill-20261001-1000 quedó viva …
+```
+
+> El **watchdog** (Fase 3, ya en producción) usa el asunto `[Box CrossFit] ALERTA backup PROD: …`
+> y el job de **backup no manda correo** (sus fallas se ven como run rojo en Render; el watchdog es
+> el que avisa). Ninguno de los dos archivos se tocó en este cambio: su comportamiento "sólo si hay
+> problema" ya era el correcto. Si se quiere el mismo prefijo `[ALERTA]` también ahí, es un cambio
+> aparte.
+
 ## Watchdog de frescura del backup — Fase 3 (2026-09-27)
 
 Motivo: el 26/09 el backup de la nube estuvo días sin correr y **nadie se enteró** (el job
@@ -226,7 +258,7 @@ local logueaba "✅ Backup completado" con el dump fallando). El watchdog es un 
 |---|---|---|---|---|---|---|
 | **`proyecto-crossfit`** (backup) | **sí, ya corriendo** | `0 6 * * *` | 03:00 diario | `backend/Dockerfile.cron` · `python -m maintenance.backup_cloud` | `backups-prod` | 2/3/4/5 |
 | `box-crossfit-watchdog` | **hay que crearlo** | `0 12 * * *` | 09:00 diario | `backend/Dockerfile.cron` · `python -m maintenance.watchdog_backups` | `r2-lectura` + `alertas` | 2/6/7 |
-| `box-crossfit-restore-drill` | **hay que crearlo** | `0 13 1 * *` | 10:00 el día 1 | `backend/Dockerfile.cron` · `python -m maintenance.restore_drill` | `backups-prod` + `neon-api` + `alertas` | 2/8/9/10/11/12 |
+| `box-crossfit-restore-drill` | **hay que crearlo** | `0 13 1 * *` | 10:00 el día 1 | `backend/Dockerfile.cron` · `python -m maintenance.restore_drill` | `backups-prod` + `neon-api` + `alertas` | 2/8/9/10/11/12/13 |
 
 > Resumen de lo que falta hacer a mano: **3 env groups nuevos** (`alertas`, `neon-api`,
 > `r2-lectura`; el job de backup ya tiene los suyos) y **2 Cron Jobs nuevos** (watchdog + drill).
@@ -241,14 +273,15 @@ local logueaba "✅ Backup completado" con el dump fallando). El watchdog es un 
 |---|---|---|
 | backup | 0 / 2 / 3 / 4 / 5 | OK / config / pg_dump / asserts de contenido / R2 |
 | watchdog | 0 / 2 / 6 / 7 | OK (sin email) / config (falta variable o R2 inaccesible) / **hay algo que avisar** / inesperado |
-| drill | 0 / 2 / 8 / 9 / 10 / 11 / 12 | OK / config (falta variable o cupo de ramas lleno) / descarga-dump ilegible / API Neon / restore o verificación / **la prueba negativa no falló (crítico)** / inesperado |
+| drill | 0 / 2 / 8 / 9 / 10 / 11 / 12 / 13 | OK (sin email) / config (falta variable o cupo de ramas lleno) / descarga-dump ilegible / API Neon / restore o verificación / **la prueba negativa no falló (crítico)** / inesperado / **la rama temporal quedó viva** (con el resto del drill OK) |
+| mantenimiento | 0 / 2 / 3 / 4 / 6 / 7 / 8 | OK (sin email, salvo que Neon pase el umbral) / config / lectura / integridad / guarda de volumen / escritura / verificación |
 
 ### Env groups (cero credenciales en el repo)
 
 | Env group | Variables | Lo usan |
 |---|---|---|
 | `backups-prod` | `PROD_DB_DIRECT_URL`, `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `DRY_RUN`, `RETENTION_DAYS`, `MIN_BYTES`, `MIN_TABLAS`, `BACKUP_PREFIX` | backup, drill |
-| `alertas` | `GMAIL_SMTP_USER`, `GMAIL_SMTP_APP_PASSWORD`, `ALERT_EMAIL` | watchdog, drill |
+| `alertas` | `GMAIL_SMTP_USER`, `GMAIL_SMTP_APP_PASSWORD`, `ALERT_EMAIL` | watchdog, drill, mantenimiento |
 | `neon-api` | `NEON_API_KEY`, `NEON_PROJECT_ID` | drill |
 | `r2-lectura` | `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (token **solo lectura**) | watchdog |
 
@@ -284,8 +317,9 @@ password del rol ni la key.
 
 
 ### Cómo se entera uno de un problema (3 vías, ninguna depende del log local)
-1. **Email** por Gmail SMTP: el drill lo manda **siempre** (OK o FALLA + motivo); el watchdog
-   sólo cuando hay alerta.
+1. **Email** por Gmail SMTP, con la regla "correo = algo que revisar": el drill avisa **sólo si
+   falla** (o si la rama quedó viva) y el watchdog **sólo cuando hay alerta**. Si todo sale bien no
+   hay correo (ni tampoco en el día 1 del drill, que es lo normal).
 2. **Run rojo** en Render → *Cron Job → Runs* (exit ≠ 0).
 3. **Log del run**: todo lo impreso pasa por `log()`, que sanea (`://***@`) cualquier
    credencial (por eso ni el email ni el log pueden filtrar la password del rol).
@@ -295,7 +329,7 @@ password del rol ni la key.
 cd backend
 py -3.12 -m pytest tests/test_watchdog_backups.py tests/test_restore_drill.py tests/test_email_config_prod.py -q --noconftest
 ```
-Registrado el 2026-09-27: **26 passed** (8 del watchdog + 10 del drill + 8 de la config de email).
+Registrado el 2026-09-27: **28 passed** (8 del watchdog + 12 del drill + 8 de la config de email).
 Neon, R2, `psql` y `smtplib` están mockeados: no se usa red ni credenciales y **no se manda ningún
 correo real**. Ojo con el intérprete: usar `py -3.12` — el `python` del PATH (3.13) no tiene
 `pytest` instalado.
@@ -310,7 +344,7 @@ con lo que el dump dice y comprueba que el rol de backup siga siendo de solo lec
 |---|---|
 | Script | `maintenance/restore_drill.py` |
 | Cuándo | día 1 de cada mes, 10:00 CLT (`0 13 1 * *` UTC) |
-| Reporte | email por Gmail SMTP **siempre** (OK con números o FALLA con el motivo) |
+| Reporte | email por Gmail SMTP **sólo si hay algo que revisar** (exit ≠ 0 o rama viva; asunto `[ALERTA] Drill de restore PROD: <motivo>`). Un drill verde deja **sólo log** |
 | Rama temporal | `drill-YYYYMMDD-HHMM`, creada con `init_source="parent-schema"` y borrada en el `finally` |
 
 ### Los 8 pasos y sus guardas
@@ -357,7 +391,9 @@ con lo que el dump dice y comprueba que el rol de backup siga siendo de solo lec
   cupo del plan Free). Estos 4 `DRILL_*` son opcionales: tienen default.
 
 - **Limpieza garantizada:** la rama y el directorio temporal se borran en el `finally`, pase lo
-  que pase. Si el `DELETE` de la rama falla, el email lo dice y hay que borrarla a mano.
+  que pase. Si el `DELETE` de la rama falla, **el run no puede quedar verde**: sale exit **13** y
+  se manda la alerta `[ALERTA] Drill de restore PROD: la rama temporal … quedó viva` (si el drill
+  ya venía rojo conserva su exit code y el log lo dice). Igual hay que borrarla a mano.
 
 ### Restauración manual de emergencia (runbook)
 
@@ -416,7 +452,9 @@ en el repo, no hay que construir nada.
 6. **Environment Group(s)**: los de la tabla (`r2-lectura` + `alertas`; `backups-prod` +
    `neon-api` + `alertas`; y `mantenimiento-prod` + `alertas` para el de la Fase 6).
 7. **Region**: **Oregon (us-west-2)**, la misma del Web Service `box-crossfit`.
-8. Guardar y usar **Trigger Run** una vez; el mail del drill tiene que llegar en < 1 min.
+8. Guardar y usar **Trigger Run** una vez. ⚠️ Con la regla "correo = algo que revisar", un drill
+   **verde NO manda correo**: hay que mirar el log del run (`Restored OK…`) y que el run quede
+   verde. Si algo falla, ahí sí llega el `[ALERTA] Drill de restore PROD: …`.
 
 > Los horarios se cargan a mano en el dashboard a propósito: así un sync del blueprint no
 > crea un job a medio configurar con credenciales incompletas.
@@ -471,7 +509,7 @@ locales y sin darle a PROD un usuario con más permisos de los necesarios.
 | Script | `maintenance/mantenimiento_cloud.py` |
 | Cuándo | días **1 y 15**, `0 8 1,15 * *` **UTC** = 05:00 CLT (04:00 en invierno: el schedule es UTC fijo) |
 | Rol de la base | `maint_rw`: `SELECT` en 6 tablas (`alembic_version` incluida) + `UPDATE` **a nivel de columna** en 3 |
-| Reporte | email por Gmail SMTP **siempre** (OK / EXCEDE MAX_CAMBIOS / FALLA + motivo) |
+| Reporte | email por Gmail SMTP **sólo si hay algo que revisar**: exit ≠ 0 (config, lectura, escritura, verificación, guarda de volumen, integridad) o Neon pasado del umbral de espacio. Asunto `[ALERTA] Mantenimiento PROD: <qué pasó> — <motivo>`. Un día normal (aplicar y verificar) deja **sólo log** |
 | Escritura | los 4 `UPDATE` de los scripts locales, en **UNA sola transacción** |
 | Env grupos | `mantenimiento-prod` + `alertas` (no usa R2 ni la API de Neon) |
 | Exit codes | 0 OK · 2 config · 3 lectura · 4 integridad · 6 guarda de volumen · 7 escritura · 8 verificación |
@@ -492,7 +530,8 @@ dejó `marcar_plan_vencido` sin funcionar en TEST).
 Y lo que **sólo informa** (no escribe nada): los 5 chequeos de `verificar_integridad.py`
 (RUT/correos duplicados, FKs rotas, fechas inválidas), el tamaño de la base contra el free tier
 de Neon y el reporte del mes (`reporte_estadisticas.py`). El reporte ya no escribe el JSON local
-de antes: en un Cron Job el filesystem es efímero, así que el "reporte" es el mail.
+de antes: en un Cron Job el filesystem es efímero, y desde la regla "correo = algo que revisar" el
+reporte viaja **dentro de la alerta** (o queda sólo en el log si el run está verde).
 
 ### Por qué `psql` directo y no importar la app (decisión D1)
 
@@ -522,34 +561,42 @@ de antes: en un Cron Job el filesystem es efímero, así que el "reporte" es el 
 ### `DRY_RUN` (default `1`, también en la imagen)
 
 Con `DRY_RUN=1` la transacción se ejecuta **completa** y termina en `ROLLBACK`. No es una
-estimación: el mail trae exactamente las filas que el `UPDATE` tocó (la tabla temporal
-`_maint_cambios` cuenta lo real, no lo que se leyó antes). Además:
+estimación: el log (y la alerta, cuando la hay) trae exactamente las filas que el `UPDATE` tocó
+(la tabla temporal `_maint_cambios` cuenta lo real, no lo que se leyó antes). Además:
 
-- En DRY-RUN la guarda de volumen **no aborta**: informa. Si se pasa del tope, el asunto y el
-  cuerpo dicen `EXCEDE MAX_CAMBIOS (n > N): no se aplicaría` y el mail lleva la **lista
-  completa** de esas filas. El run queda rojo (exit 6) a propósito, para que no se pierda de
-  vista entre los verdes.
-- En REAL la guarda **aborta**: no se aplica nada y el mail dice `guarda de volumen: n > N ⇒ la
-  transacción abortó y NO se aplicó nada`.
+- En DRY-RUN la guarda de volumen **no aborta**: informa. Si se pasa del tope, el asunto es
+  `[ALERTA] Mantenimiento PROD: excede MAX_CAMBIOS (n > N)` y el cuerpo dice "no se aplicaría
+  nada" + lleva la **lista completa** de esas filas. El run queda rojo (exit 6) a propósito,
+  para que no se pierda de vista entre los verdes.
+- En REAL la guarda **aborta**: no se aplica nada y el asunto es el mismo
+  `[ALERTA] Mantenimiento PROD: excede MAX_CAMBIOS (n > N)` con el motivo "la transacción
+  abortó por la guarda de volumen y NO se aplicó nada" (más el `GUARDA DE VOLUMEN` de psql
+  saneado en el cuerpo).
 
 ### La primera aplicación real (procedimiento, en orden)
 
-1. **`DRY_RUN=1` + `MAX_CAMBIOS=20`** (como queda al crear el env group) → *Trigger Run*.
-2. Leer el mail: la lista completa de lo que se aplicaría. Si el run salió rojo por
-   `EXCEDE MAX_CAMBIOS (25 > 20)`, revisar la lista: si esas 25 filas son correctas, se sube
-   `MAX_CAMBIOS` al número revisado (**25**), no más.
-3. **`DRY_RUN=0` + `MAX_CAMBIOS=25`** → *Trigger Run* **a mano** (no esperar al día 1). El mail
-   tiene que decir `APLICADO (25 cambio(s))` y la verificación `n → 0 (esperado 0)`.
-4. Bajar `MAX_CAMBIOS` a **20** y dejar `DRY_RUN=0`. Desde ahí corre solo los días 1 y 15.
-5. Comparar `planes_vencidos_mes` del reporte del mail con la cantidad de filas que el job
-   marcó como vencidas ese día: tienen que ser coherentes (si no, algo del criterio cambió).
+1. **`DRY_RUN=1`** (como queda al crear el env group, con `MAX_CAMBIOS=40` por defecto) →
+   *Trigger Run*. Si el run queda **verde, no llega ningún correo**: eso es lo normal (mirar el
+   log del run). Sólo si la corrida pasa de 40 cambios llega la alerta `excede MAX_CAMBIOS`.
+2. Si llegó esa alerta: leer la lista completa (`Alumno`, plan, fecha) y decidir el tope. Con
+   planes mensuales en un box de 30-50 alumnos, **15-25 vencimientos en 15 días son normales**:
+   por eso el default es 40. Sólo se sube el tope si la lista es correcta y **más grande** que el
+   default (y no más de lo revisado).
+3. **`DRY_RUN=0`** → *Trigger Run* **a mano** (no esperar al día 1). Ahí se aplican los cambios:
+   si todo cuadra, el log dice `Transacción aplicada y verificada: n cambio(s)` y **no hay correo**
+   (la verificación debe dar `n → 0 (esperado 0)`).
+4. Dejar `DRY_RUN=0` y `MAX_CAMBIOS=40`. Desde ahí corre solo los días 1 y 15.
+5. Comparar `planes_vencidos_mes` del log con la cantidad de filas que el job marcó como vencidas
+   ese día: tienen que ser coherentes (si no, algo del criterio cambió).
 
-> Si en una corrida normal aparecen de golpe más de `MAX_CAMBIOS` cambios, la guarda aborta y el
-> mail lo dice: eso es una señal para mirar (¿un bug? ¿una importación?), no para subir el tope.
+> Si en una corrida normal aparecen de golpe más de `MAX_CAMBIOS` cambios, la guarda aborta y la
+> alerta lo dice: eso es una señal para mirar (¿un bug? ¿una importación?), no para subir el tope.
 
 ### Enterarse de un problema (3 vías, ninguna depende de la laptop)
 
-1. **Email** (siempre, verde o rojo): asunto `[Mantenimiento PROD] <estado> — <motivo>`.
+1. **Email**: sólo cuando hay algo que revisar (exit ≠ 0 o Neon pasado del umbral). Asunto
+   `[ALERTA] Mantenimiento PROD: <qué pasó> — <motivo>`; el cuerpo trae el motivo, las listas
+   completas, la integridad, Neon y el reporte del mes. **Un run verde no manda correo.**
 2. **Run rojo** en Render → *Cron Job `box-crossfit-mantenimiento-prod` → Runs* (exit ≠ 0).
 3. **Log del run**: todo pasa por `log()` → `sanear()`, así que pegar el log en un issue es
    seguro (la URL sale como `://***@`). El JSON del reporte mensual ya no se escribe a disco.
@@ -577,7 +624,7 @@ GRANT CONNECT ON DATABASE neondb TO maint_rw;
 GRANT USAGE   ON SCHEMA   public TO maint_rw;
 
 -- 2) Lectura: sólo las 6 tablas que el job consulta = las 5 del mantenimiento +
---    `alembic_version` (se lee para el encabezado del mail).
+--    `alembic_version` (se lee para el encabezado del log/alerta).
 --    OJO: `solicitudes_planes` necesita SELECT para el UPDATE … WHERE estado/created_at y
 --    para el RETURNING (sin eso falla con "permission denied for table solicitudes_planes").
 GRANT SELECT ON public.usuarios, public.planes, public.suscripciones,
@@ -671,7 +718,7 @@ rol). El chequeo final es `SELECT rolname FROM pg_roles WHERE rolname = 'maint_r
 |---|---|
 | `MAINT_DB_URL` | `postgresql://maint_rw:<password>@ep-<endpoint>.us-west-2.aws.neon.tech/neondb?sslmode=require` (**directa**, sin `-pooler`) |
 | `ENVIRONMENT` | `production` |
-| `MAX_CAMBIOS` | `20` (ver el procedimiento de la primera aplicación real) |
+| `MAX_CAMBIOS` | `40` (planes mensuales: en 15 días vencen 15-25 de forma normal; la alerta `excede MAX_CAMBIOS` avisa si algún día pasa eso) |
 | `DIAS_PENDIENTE` | `7` |
 | `NEON_LIMITE_MB` | `512` (free tier de Neon: **0,5 GB por proyecto**; la alerta se calcula contra esto, no contra los 3 GB que decía `neon_usage_alerts.py`) |
 | `NEON_UMBRAL_PCT` | `80` |
@@ -696,8 +743,9 @@ mismos valores del Web Service). **No** se enlaza `backups-prod` (este job no to
 | Plan | Starter (el mismo de los otros 3 Cron Jobs) |
 
 Pasos: **New → Cron Job** → completar la tabla → **Guardar** → **Trigger Run** una vez y mirar el
-mail (con `DRY_RUN=1` no aplica nada). El Dockerfile ya está en el repo: la única línea nueva es
-`COPY maintenance/mantenimiento_cloud.py`, y no hace falta ningún `pip install` nuevo porque el
+log (con `DRY_RUN=1` no aplica nada y, si el run queda verde, **no llega ningún correo**: la
+alerta sólo sale si hay algo que revisar). El Dockerfile ya está en el repo: la única línea nueva
+es `COPY maintenance/mantenimiento_cloud.py`, y no hace falta ningún `pip install` nuevo porque el
 job no importa la app ni boto3.
 
 ### Qué NO hace (a propósito)
@@ -721,7 +769,7 @@ job no importa la app ni boto3.
 cd backend
 py -3.12 -m pytest tests/test_mantenimiento_cloud.py tests/test_mantenimiento_pasos.py -q --noconftest
 ```
-Registrado el 2026-09-27: **26 passed** (22 de `mantenimiento_cloud` + 4 del fix H1 de
+Registrado el 2026-09-27: **37 passed** (33 de `mantenimiento_cloud` + 4 del fix H1 de
 `run_daily`/`run_monthly`). `psql` y `smtplib` están mockeados: no se usa red ni credenciales y
 **no se manda ningún correo real**. ⚠️ Usar `py -3.12`: el `python` del PATH (3.13) no tiene
 `pytest`.
@@ -741,20 +789,35 @@ Registrado el 2026-09-27: **26 passed** (22 de `mantenimiento_cloud` + 4 del fix
   la elección del drill queda confirmada.
 - **Verificado:** `py -3.12 -m py_compile maintenance/restore_drill.py maintenance/watchdog_backups.py
   maintenance/alertas.py` ⇒ rc 0, y `py -3.12 -m pytest tests/test_watchdog_backups.py
-  tests/test_restore_drill.py tests/test_email_config_prod.py -q --noconftest` ⇒ **26 passed**
-  (8 + 10 + 8, con Neon/R2/psql/smtplib mockeados: no se usó red ni credenciales).
+  tests/test_restore_drill.py tests/test_email_config_prod.py -q --noconftest` ⇒ **28 passed**
+  (8 + 12 + 8, con Neon/R2/psql/smtplib mockeados: no se usó red ni credenciales). Y con la regla
+  nueva "correo = algo que revisar": `tests/test_mantenimiento_cloud.py` +
+  `tests/test_restore_drill.py` + `tests/test_watchdog_backups.py` +
+  `tests/test_email_config_prod.py` ⇒ **61 passed** (33 + 12 + 8 + 8): los casos verdes comprueban
+  que NO se llama a `enviar_email` y los rojos que el asunto empieza con `[ALERTA]`.
   ⚠️ Usar `py -3.12`: el `python` del PATH (3.13) **no** tiene pytest.
 - **Verificado (smoke sin credenciales):** con el entorno vacío, `restore_drill` sale con
-  exit 2 ("faltan variables") y el watchdog también — sin mandar ningún mail.
+  exit 2 ("faltan variables") y el watchdog también. El correo no sale: sin
+  `GMAIL_SMTP_USER`/`GMAIL_SMTP_APP_PASSWORD`/`ALERT_EMAIL`, `enviar_email()` sólo loguea
+  `FATAL (config)` y devuelve `False` (el exit code no cambia).
 - **Verificado en Render (run real del 2026-09-27):** el drill corrió contra Neon real: la rama
   temporal se creó y se **borró** bien en el `finally`, pero murió con
   `HTTP 423 "project already has running conflicting operations..."` (exit 9) en la llamada
   siguiente ⇒ fix de arriba (esperar `operations` + reintentar 423), cubierto por los tests
   h/i/j (mocks, sin red). **Falta el `Trigger Run` verde de punta a punta** (restore real +
-  prueba negativa contra PROD): mirar el email y la lista de ramas de Neon.
+  prueba negativa contra PROD): mirar el **log** del run (si sale verde **no** habrá correo: la
+  alerta sólo llega cuando falla) y la lista de ramas de Neon.
 - **Fase 5:** queda **sólo como propuesta escrita** (sección "Fase 5" de arriba). No se escribió
   `copia_test.py` ni ningún script/job nuevo, y el contenedor local de mantenimiento quedó igual.
   Los 2 cambios propuestos (04:30 CLT y retención de 7 días) **no** se aplicaron.
+- **Regla permanente (2026-09-27): "correo = algo que revisar".** Ningún Cron Job manda correo
+  informativo: si el run está verde (incluido "aplicado y verificado") sólo queda el **log** en
+  Render. Se avisa cuando el run falla (exit ≠ 0), cuando la guarda de volumen se excede, cuando
+  la integridad encuentra hallazgos, cuando Neon pasa `NEON_UMBRAL_PCT` o cuando el drill deja la
+  rama temporal viva. Todos los asuntos arrancan con `[ALERTA]` + el job + qué pasó (el detalle va
+  en el cuerpo). (El prefijo `[ALERTA]` del `watchdog_backups` —que hoy usa
+  `[Box CrossFit] ALERTA …`— queda como cambio aparte: el watchdog y `backup_cloud` no se
+  tocaron.)
 - **Regla permanente (2026-09-27): todo envío de correo va exclusivamente por Gmail SMTP; está
   prohibido cualquier otro proveedor.** `maintenance/alertas.py` manda por `smtp.gmail.com:465` +
   `SMTP_SSL` con `GMAIL_SMTP_USER`/`GMAIL_SMTP_APP_PASSWORD` (env group `alertas`, los mismos
@@ -773,16 +836,20 @@ Registrado el 2026-09-27: **26 passed** (22 de `mantenimiento_cloud` + 4 del fix
   maintenance/run_daily.py maintenance/run_monthly.py` ⇒ rc 0. Smoke sin variables:
   `py -3.12 -m maintenance.mantenimiento_cloud` ⇒ **exit 2** ("faltan variables de entorno:
   MAINT_DB_URL, ENVIRONMENT, GMAIL_SMTP_USER, GMAIL_SMTP_APP_PASSWORD, ALERT_EMAIL"), sin red y
-  sin credenciales. Tests: `tests/test_mantenimiento_cloud.py` (22) +
-  `tests/test_mantenimiento_pasos.py` (4) ⇒ **26 passed**, y los 4 archivos de tests que ya
-  existían siguen verdes (26 passed, 1 skipped).
+  sin credenciales. Tests: `tests/test_mantenimiento_cloud.py` (33) +
+  `tests/test_mantenimiento_pasos.py` (4) ⇒ **37 passed**, y los otros archivos de tests de
+  mantenimiento/correo siguen verdes: `test_watchdog_backups.py` + `test_restore_drill.py` +
+  `test_email_config_prod.py` ⇒ 28 passed; `test_email_header_saneo.py` ⇒ 48 passed; y
+  `test_mantenimiento_vencidos.py` ⇒ **1 skipped** (sólo corre con `ENVIRONMENT=test`: ejecuta el
+  job, que escribe). (Con la regla nueva "correo = algo que revisar": los casos verdes comprueban
+  que NO se llama a `enviar_email` y los rojos que el asunto empieza con `[ALERTA]`.)
 - **Verificado (H4, con `TestClient`):** con `ENVIRONMENT=production` los 2 endpoints n8n
   responden **404** (sin llegar a mirar la API key); con `ENVIRONMENT=test` y una key inválida
   responden **401** ⇒ la guarda no rompió el chequeo de la key ni el camino de TEST.
 - **Pendiente (necesita OK del dueño, nada de esto se tocó):** crear el rol `maint_rw` en Neon
   (SQL del README + verificación + prueba negativa), crear el env group `mantenimiento-prod`,
-  crear el 4º Cron Job en Render y hacer la puesta en marcha por fases (`DRY_RUN=1` → leer el mail
-  → `DRY_RUN=0` con `MAX_CAMBIOS` revisado → bajarlo a 20).
+  crear el 4º Cron Job en Render y hacer la puesta en marcha por fases (`DRY_RUN=1` → leer el log o
+  la alerta → `DRY_RUN=0` a mano → dejar `DRY_RUN=0` con `MAX_CAMBIOS=40`).
 - **Menor, sigue pendiente:** volcar/desactivar los workflows de n8n "Mantenimiento %" (H2/H5):
   los desactiva Jebbus en la UI de n8n (el job nuevo no depende de n8n).
 

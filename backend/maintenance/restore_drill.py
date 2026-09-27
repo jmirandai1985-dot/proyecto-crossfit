@@ -34,9 +34,11 @@ Flujo
    `BEGIN; CREATE TABLE _drill_no_debe_poder (i int); ROLLBACK;` con ON_ERROR_STOP.
    Debe fallar con "permission denied" (la transacción aborta sola; el ROLLBACK no
    deja nada). Si NO falla: alerta CRÍTICA y abort — no se intenta "arreglar" nada.
-8. Borra la rama temporal en `finally` (pase lo que pase) y manda el resultado por
-   Gmail SMTP **siempre** (OK o FALLA + motivo), usando `maintenance/alertas.py` (el
-   mismo helper del watchdog: nada de duplicar el envío ni otro proveedor de correo).
+8. Borra la rama temporal en `finally` (pase lo que pase). El mail sale por Gmail SMTP
+   (`maintenance/alertas.py`, el mismo helper del watchdog: nada de duplicar el envío ni otro
+   proveedor) **sólo si hay algo que revisar**: exit ≠ 0 (config, descarga, API, restore,
+   permisos, inesperado) o una rama que quedó viva (exit 13). Un drill verde deja **sólo el
+   log** en Render. El asunto arranca con `[ALERTA]` y lleva el motivo.
 
 Guardas
 -------
@@ -66,7 +68,12 @@ Exit codes
 ----------
 0 OK · 2 config (falta variable o cupo de ramas agotado) · 8 descarga/dump ilegible ·
 9 API Neon (crear rama/base) · 10 restore/verificación (incluye "base destino no vacía") ·
-11 la prueba negativa NO falló (crítico) · 12 inesperado.
+11 la prueba negativa NO falló (crítico) · 12 inesperado · 13 la rama temporal quedó viva con
+el resto del drill OK (no se pudo borrar: hay que hacerlo a mano en Neon; si el drill ya venía
+rojo conserva SU código y el log dice que la rama quedó viva).
+
+**El correo es una alerta, no un informe**: sale SÓLO con exit ≠ 0 (o 13), y el asunto siempre
+arranca con `[ALERTA]`. Un drill verde deja únicamente el log del run.
 """
 from __future__ import annotations
 
@@ -100,6 +107,7 @@ EXIT_API = 9
 EXIT_RESTORE = 10
 EXIT_PERMISOS = 11
 EXIT_INESPERADO = 12
+EXIT_RAMA_VIVA = 13   # la rama temporal no se pudo borrar: hay que borrarla a mano
 
 VARS_REQUERIDAS = (
     "R2_ENDPOINT", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
@@ -422,16 +430,29 @@ def probar_solo_lectura_prod() -> tuple:
     return False, f"rc={r.returncode} sin 'permission denied': {sanear(r.stderr or '')[:200]}"
 
 
-# ── Reporte por email (compartido con el watchdog: maintenance/alertas.py) ──
-def enviar_reporte(ok: bool, motivo: str, detalle: dict, inicio: datetime) -> bool:
-    """Email SIEMPRE (OK o FALLA + motivo). Nada de credenciales: todo pasa por log/sanear."""
+# ── Alerta por email (compartido con el watchdog: maintenance/alertas.py) ──
+def _motivo_corto(motivo: str, tope: int = 140) -> str:
+    """El motivo en UNA línea y sin pasarse: entra en el asunto y se lee en el teléfono."""
+    texto = " ".join((motivo or "").split())
+    return texto if len(texto) <= tope else texto[:tope - 1].rstrip() + "…"
+
+
+def enviar_reporte(motivo: str, detalle: dict, inicio: datetime) -> bool:
+    """Alerta por Gmail SMTP. Se llama SÓLO cuando hay algo que revisar (exit ≠ 0 o rama viva).
+
+    El drill es un canario: si sale bien no hay nada que mirar, así que un drill verde deja
+    únicamente el log (regla del proyecto: **correo = algo que revisar**). El asunto arranca con
+    `[ALERTA]` y lleva el motivo, para que se entienda en la notificación del teléfono sin abrir
+    el correo. Nada de credenciales: todo pasa por `log()`/`sanear()`.
+    """
     segundos = (datetime.now(timezone.utc) - inicio).total_seconds()
-    asunto = f"[Box CrossFit] drill de restore PROD — {'OK' if ok else 'FALLA'}: {motivo}"
-    filas = "".join(f"<li><b>{k}</b>: {v}</li>" for k, v in sorted((detalle or {}).items())
-                    if v not in (None, ""))
+    asunto = f"[ALERTA] Drill de restore PROD: {_motivo_corto(motivo)}"
+    filas = "".join(f"<li><b>{k}</b>: {v}</li>"
+                    for k, v in sorted((detalle or {}).items())
+                    if v not in (None, "") and not k.startswith("_"))
     html = (
         "<h3>Drill de restore (backup de R2 → rama temporal de Neon)</h3>"
-        f"<p><b>Resultado:</b> {'OK ✅' if ok else 'FALLA ❌'}<br>"
+        "<p><b>Resultado:</b> FALLA ❌<br>"
         f"<b>Motivo:</b> {motivo}<br>"
         f"<b>Duración:</b> {segundos:.0f} s · <b>Inicio (UTC):</b> "
         f"{inicio.strftime('%Y-%m-%d %H:%M')}</p>"
@@ -444,12 +465,23 @@ def enviar_reporte(ok: bool, motivo: str, detalle: dict, inicio: datetime) -> bo
 
 
 def reportar(ok: bool, motivo: str, detalle: dict, inicio: datetime, code: int) -> int:
-    """Único punto de salida de main(): log + email SIEMPRE + exit code."""
+    """Único punto de salida de main(): log + alerta SÓLO si hay algo que revisar + exit code.
+
+    Deja `detalle["_alerta_enviada"]` (¿ya se avisó?) y `detalle["_code"]` (el exit code) para
+    que el `finally` no repita la alerta y no tape el motivo original si la rama quedó viva. Las
+    claves con `_` no van ni al log ni al correo.
+    """
     log(("OK: " if ok else "FALLA: ") + motivo)
     for k, v in sorted((detalle or {}).items()):
-        log(f"  {k}: {v}")
-    if not enviar_reporte(ok, motivo, detalle, inicio):
-        log("AVISO: el reporte no salió por Gmail; el exit code no cambia")
+        if not k.startswith("_"):
+            log(f"  {k}: {v}")
+    detalle["_code"] = code
+    if code == EXIT_OK:
+        log("MAIL: no se envía (drill OK: la regla es 'correo sólo si hay algo que revisar')")
+        return code
+    detalle["_alerta_enviada"] = True
+    if not enviar_reporte(motivo, detalle, inicio):
+        log("AVISO: la alerta no salió por Gmail; el exit code no cambia")
     return code
 
 
@@ -460,7 +492,13 @@ def main() -> int:
 
     falta = faltantes()
     if falta:
-        log(f"FATAL (config): faltan variables de entorno: {', '.join(falta)}")
+        motivo = f"config: faltan variables de entorno: {', '.join(falta)}"
+        log(f"FATAL (config): {motivo}")
+        # Una config incompleta es algo que revisar: se avisa igual que el mantenimiento. Si
+        # justamente falta una credencial de Gmail, `enviar_email` sólo loguea (y el run sale
+        # rojo igual: el correo nunca cambia el exit code).
+        if not enviar_reporte(motivo, {}, inicio):
+            log("AVISO: la alerta no salió por Gmail; el exit code no cambia")
         return EXIT_CONFIG
 
     detalle = {}
@@ -600,6 +638,7 @@ def main() -> int:
     finally:
         # Nada de la rama temporal puede quedar vivo: se borra pase lo que pase.
         shutil.rmtree(tmp, ignore_errors=True)
+        rama_viva = None    # motivo de la rama que no se pudo borrar (None = se borró bien)
         if rama_id:
             # Antes del DELETE: si quedó alguna operación corriendo, la API contesta 423 y la
             # rama seguiría viva (consume cupo del plan Free y deja basura en Neon). El timeout
@@ -618,6 +657,20 @@ def main() -> int:
                 log(f"FATAL: la rama temporal {rama_id} quedó viva"
                     + (f" ({error_borrado})" if error_borrado else "")
                     + ": BORRARLA A MANO en la consola de Neon (consume cupo del plan Free)")
+                rama_viva = (f"la rama temporal {rama_id} quedó viva"
+                             + (f": {error_borrado}" if error_borrado else "")
+                             + " (borrarla a mano en la consola de Neon)")
+
+        # Una rama viva es una falla más (consume cupo del plan Free). Si el drill ya mandó su
+        # alerta no se repite —el log de arriba lo dice—, y si venía verde se avisa acá. El
+        # `return` desde el `finally` PISA el exit code que ya decidió el `try`, así que sólo se
+        # pisa cuando el run venía OK: un run rojo conserva su motivo original (11 CRÍTICO, 10…).
+        if rama_viva:
+            if not detalle.get("_alerta_enviada"):
+                if not enviar_reporte(rama_viva, detalle, inicio):
+                    log("AVISO: la alerta de la rama viva no salió por Gmail")
+            if detalle.get("_code", EXIT_OK) == EXIT_OK:
+                return EXIT_RAMA_VIVA
 
 
 if __name__ == "__main__":
