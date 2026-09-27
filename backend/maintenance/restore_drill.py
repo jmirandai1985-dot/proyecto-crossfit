@@ -52,6 +52,15 @@ Guardas
   `BranchCreateRequest.init_source`).
 * La base destino se comprueba vacía ANTES de restaurar; si no lo está, se aborta sin
   hacer ningún DROP (no se toca nada existente).
+* **Neon es asíncrono:** cada `POST` de rama/base devuelve `operations` que siguen corriendo y,
+  si se encadena otra llamada, la API contesta `HTTP 423 "project already has running
+  conflicting operations, scheduling of new ones is prohibited"` (bug visto en el run real del
+  2026-09-27: la rama se creaba OK y el drill moría con exit 9 en la llamada siguiente). Por eso,
+  tras crear la rama y tras crear la base se consulta `GET /projects/{id}/operations/{op_id}`
+  (polling cada `DRILL_POLL_S`, timeout `DRILL_OPS_TIMEOUT_S`) hasta que TODAS queden en
+  `finished`; `failed`/`error`/`cancelled` ⇒ exit 9 con el motivo. Además TODA llamada a la API
+  reintenta el 423 con backoff (2, 4, 8 s; hasta `DRILL_INTENTOS_423` intentos) y el DELETE del
+  `finally` espera lo pendiente (`DRILL_BORRADO_TIMEOUT_S`) para no dejar la rama viva.
 
 Exit codes
 ----------
@@ -68,6 +77,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -109,6 +119,21 @@ MAX_RAMAS = int(os.getenv("MAX_RAMAS") or "10")
 # SMTP_HOST/SMTP_PORT y el armado del mail viven en maintenance/alertas.py (compartido).
 USER_AGENT = "urban-box-restore-drill/1.0"
 
+# ── Concurrencia de Neon (HTTP 423) ────────────────────────────────────────────────────
+# Neon ejecuta las operaciones de rama/base de forma ASÍNCRONA. Si se encadena otra llamada
+# mientras una sigue corriendo, la API contesta HTTP 423 "project already has running
+# conflicting operations, scheduling of new ones is prohibited" (bug del run real del
+# 2026-09-27: la rama se creó y el drill murió con exit 9 en la llamada siguiente).
+# 1) Después de cada POST se esperan las `operations` de la respuesta hasta `finished`.
+# 2) Además, toda llamada a la API reintenta el 423 con backoff (red de seguridad).
+POLL_OPS = float(os.getenv("DRILL_POLL_S") or "2")                  # polling cada 2 s
+TIMEOUT_OPS = float(os.getenv("DRILL_OPS_TIMEOUT_S") or "120")      # 120 s por operación
+TIMEOUT_BORRADO = float(os.getenv("DRILL_BORRADO_TIMEOUT_S") or "60")   # espera antes del DELETE
+INTENTOS_423 = int(os.getenv("DRILL_INTENTOS_423") or "5")          # máx. 5 intentos
+ESPERAS_423 = (2.0, 4.0, 8.0)     # el resto de los intentos repite la última (8 s)
+ESTADOS_OK = ("finished", "skipped")              # terminó (skipped: no había nada que hacer)
+ESTADOS_MALOS = ("failed", "error", "cancelled")  # falló: el drill corta con ese motivo
+
 
 def faltantes() -> list:
     return [v for v in VARS_REQUERIDAS if not limpiar_valor(os.getenv(v) or "")]
@@ -137,10 +162,95 @@ def _neon_headers() -> dict:
     return {"Authorization": f"Bearer {limpiar_valor(os.environ['NEON_API_KEY'])}"}
 
 
+def neon_json(method: str, url: str, body: dict = None, headers: dict = None) -> tuple:
+    """`http_json` + reintentos con backoff ante HTTP 423.
+
+    423 = "project already has running conflicting operations, scheduling of new ones is
+    prohibited": Neon NO ejecutó nada (por eso reintentar es seguro: no duplica ramas ni
+    bases), sólo avisa que hay operaciones corriendo. Se reintenta 2, 4, 8, 8… s hasta
+    `INTENTOS_423` intentos; si sigue en 423 se devuelve el último resultado tal cual para
+    que el llamador lo reporte con su propio exit code. Todo log sale por `log()` (ya
+    aplica `sanear`).
+    """
+    for intento in range(1, INTENTOS_423 + 1):
+        status, data = http_json(method, url, body=body, headers=headers)
+        if status != 423:
+            if intento > 1:
+                log(f"{method} {url}: OK en el intento {intento} (venía de HTTP 423)")
+            return status, data
+        if intento >= INTENTOS_423:
+            log(f"AVISO: {method} {url} sigue en HTTP 423 tras {intento} intentos")
+            return status, data
+        espera = ESPERAS_423[min(intento - 1, len(ESPERAS_423) - 1)]
+        log(f"{method} {url}: HTTP 423 (operaciones en curso en el proyecto) -> "
+            f"reintento {intento + 1}/{INTENTOS_423} en {espera:.0f} s")
+        time.sleep(espera)
+    return 423, {"error": "sin respuesta de la API de Neon"}   # inalcanzable
+
+
+def operaciones_de(data: dict) -> list:
+    """ids de las `operations` (asíncronas) que devuelve una respuesta de la API."""
+    ops = (data or {}).get("operations") or []
+    return [op.get("id") for op in ops if isinstance(op, dict) and op.get("id")]
+
+
+def _esperar_una_operacion(op_id: str, que: str, timeout: float = None) -> str:
+    """Polling de `GET /projects/{id}/operations/{op_id}` hasta que la operación termine.
+
+    Devuelve el estado final. Lanza RuntimeError si queda en failed/error/cancelled o si no
+    termina dentro de `timeout` (por defecto `TIMEOUT_OPS`). HTTP 404 ⇒ Neon ya no la lista
+    (las purga): se toma como terminada, con el backoff del 423 como red de seguridad.
+    """
+    pid = limpiar_valor(os.environ["NEON_PROJECT_ID"])
+    total = TIMEOUT_OPS if timeout is None else timeout
+    limite = time.monotonic() + total
+    while True:
+        status, data = neon_json("GET", f"{NEON_API}/projects/{pid}/operations/{op_id}",
+                                 headers=_neon_headers())
+        if status == 404:
+            log(f"  operación {op_id} ({que}): HTTP 404 (Neon ya no la lista) -> terminada")
+            return "finished"
+        if status != 200:
+            raise RuntimeError(f"no pude consultar la operación {op_id} ({que}): "
+                               f"HTTP {status} {data.get('error')}")
+        op = (data or {}).get("operation") or {}
+        estado = str(op.get("status") or "").lower()
+        if estado in ESTADOS_OK:
+            return estado
+        if estado in ESTADOS_MALOS:
+            raise RuntimeError(f"la operación {op_id} ({que}) quedó en estado '{estado}'"
+                               + (f" [{op.get('action')}]" if op.get("action") else ""))
+        if time.monotonic() >= limite:
+            raise RuntimeError(f"timeout: la operación {op_id} ({que}) sigue en "
+                               f"'{estado or 'desconocido'}' después de {total:.0f} s")
+        time.sleep(POLL_OPS)
+
+
+def esperar_operaciones(data: dict, que: str, pendientes: dict = None) -> int:
+    """Espera a que TODAS las `operations` de la respuesta estén terminadas (lo pide Neon).
+
+    Devuelve cuántas esperó (0 si la respuesta no traía `operations`). Si se pasa
+    `pendientes` (dict op_id -> qué es), cada operación se anota ahí y se desanota al
+    terminar: el `finally` usa eso para esperar lo que quedó vivo antes del DELETE.
+    """
+    ids = operaciones_de(data)
+    if not ids:
+        return 0
+    log(f"esperando {len(ids)} operación(es) de Neon ({que})")
+    for op_id in ids:
+        if pendientes is not None:
+            pendientes[op_id] = que
+        estado = _esperar_una_operacion(op_id, que)
+        if pendientes is not None:
+            pendientes.pop(op_id, None)
+        log(f"  operación {op_id} ({que}): {estado}")
+    return len(ids)
+
+
 def branch_default() -> str:
     """branch_id de la rama por defecto del proyecto (la de PROD)."""
     pid = limpiar_valor(os.environ["NEON_PROJECT_ID"])
-    status, data = http_json("GET", f"{NEON_API}/projects/{pid}/branches", headers=_neon_headers())
+    status, data = neon_json("GET", f"{NEON_API}/projects/{pid}/branches", headers=_neon_headers())
     if status != 200:
         raise RuntimeError(f"list branches HTTP {status}: {data.get('error')}")
     ramas = data.get("branches", [])
@@ -166,7 +276,7 @@ def crear_rama(nombre: str, parent_id: str) -> dict:
             "autoscaling_limit_max_cu": 0.25,
         }],
     }
-    status, data = http_json("POST", f"{NEON_API}/projects/{pid}/branches",
+    status, data = neon_json("POST", f"{NEON_API}/projects/{pid}/branches",
                              body=body, headers=_neon_headers())
     if status not in (200, 201):
         raise RuntimeError(f"create branch HTTP {status}: {data.get('error')}")
@@ -175,7 +285,7 @@ def crear_rama(nombre: str, parent_id: str) -> dict:
 
 def crear_base(branch_id: str, nombre: str, owner: str) -> dict:
     pid = limpiar_valor(os.environ["NEON_PROJECT_ID"])
-    status, data = http_json(
+    status, data = neon_json(
         "POST", f"{NEON_API}/projects/{pid}/branches/{branch_id}/databases",
         body={"database": {"name": nombre, "owner_name": owner}}, headers=_neon_headers())
     if status not in (200, 201):
@@ -184,8 +294,9 @@ def crear_base(branch_id: str, nombre: str, owner: str) -> dict:
 
 
 def borrar_rama(branch_id: str) -> bool:
+    """DELETE de la rama. `neon_json` reintenta 423 (si quedó algo corriendo)."""
     pid = limpiar_valor(os.environ["NEON_PROJECT_ID"])
-    status, data = http_json("DELETE", f"{NEON_API}/projects/{pid}/branches/{branch_id}",
+    status, data = neon_json("DELETE", f"{NEON_API}/projects/{pid}/branches/{branch_id}",
                              headers=_neon_headers())
     ok = status in (200, 202, 204)
     log(f"borrar rama {branch_id}: HTTP {status}" + ("" if ok else f" -> {data.get('error')}"))
@@ -223,7 +334,7 @@ def contar_ramas() -> int:
     project" (https://neon.com/docs/introduction/plans).
     """
     pid = limpiar_valor(os.environ["NEON_PROJECT_ID"])
-    status, data = http_json("GET", f"{NEON_API}/projects/{pid}/branches", headers=_neon_headers())
+    status, data = neon_json("GET", f"{NEON_API}/projects/{pid}/branches", headers=_neon_headers())
     if status != 200:
         raise RuntimeError(f"list branches HTTP {status}: {data.get('error')}")
     return len(data.get("branches") or [])
@@ -354,6 +465,7 @@ def main() -> int:
 
     detalle = {}
     rama_id = None
+    pendientes = {}      # op_id -> qué operación es (lo que quedó corriendo: ver el finally)
     tmp = Path(tempfile.mkdtemp(prefix="drill_"))
     gz, sql = tmp / "backup.sql.gz", tmp / "backup.sql"
     try:
@@ -404,14 +516,36 @@ def main() -> int:
         detalle["rama"] = rama_id
         log(f"rama temporal: {rama_id} (se borra en el finally)")
 
+        # 3b. Neon es asíncrono: el POST devolvió `operations` que siguen corriendo. Si se
+        #     encadena el POST de la base sin esperarlas, la API contesta 423 "project
+        #     already has running conflicting operations, scheduling of new ones is
+        #     prohibited" (bug del run real del 2026-09-27: la rama se creaba OK y el drill
+        #     moría con exit 9 en la llamada siguiente). Se espera hasta `finished`.
+        try:
+            esperadas = esperar_operaciones(data_rama, "la rama temporal", pendientes)
+        except Exception as e:  # noqa: BLE001
+            return reportar(False, f"no pude esperar la creación de la rama: {sanear(e)[:300]}",
+                            detalle, inicio, EXIT_API)
+
         # 4. Base NUEVA Y VACÍA en esa rama: restaurar sobre `neondb` daría "already exists"
         #    en cada CREATE TABLE (esa base ya trae el schema copiado del padre).
         try:
-            crear_base(rama_id, DB_DESTINO, rol_de_la_rama(data_rama))
+            data_base = crear_base(rama_id, DB_DESTINO, rol_de_la_rama(data_rama))
             uri = uri_para(data_rama, DB_DESTINO)
         except Exception as e:  # noqa: BLE001
             return reportar(False, f"no pude preparar la base {DB_DESTINO}: {sanear(e)[:300]}",
                             detalle, inicio, EXIT_API)
+
+        # 4b. Igual que en 3b, ahora con la base: el DELETE final también responde 423 si algo
+        #     sigue corriendo, así que se espera acá (y no en el finally, que es el último
+        #     recurso).
+        try:
+            esperadas += esperar_operaciones(data_base, f"la base {DB_DESTINO}", pendientes)
+        except Exception as e:  # noqa: BLE001
+            return reportar(False, f"no pude esperar la creación de la base {DB_DESTINO}: "
+                                   f"{sanear(e)[:300]}", detalle, inicio, EXIT_API)
+        if esperadas:
+            detalle["operaciones_esperadas"] = esperadas
 
         try:
             tablas_antes = contar_tablas(uri)
@@ -467,11 +601,23 @@ def main() -> int:
         # Nada de la rama temporal puede quedar vivo: se borra pase lo que pase.
         shutil.rmtree(tmp, ignore_errors=True)
         if rama_id:
+            # Antes del DELETE: si quedó alguna operación corriendo, la API contesta 423 y la
+            # rama seguiría viva (consume cupo del plan Free y deja basura en Neon). El timeout
+            # acá es corto: el DELETE ya reintenta 423 por su cuenta.
+            for op_id, que in list(pendientes.items()):
+                try:
+                    _esperar_una_operacion(op_id, f"{que}, antes del DELETE", TIMEOUT_BORRADO)
+                except Exception as e:  # noqa: BLE001
+                    log(f"AVISO: no pude confirmar la operación {op_id} antes de borrar la "
+                        f"rama: {sanear(e)[:200]}")
             try:
-                borrar_rama(rama_id)
+                borrada, error_borrado = borrar_rama(rama_id), None
             except Exception as e:  # noqa: BLE001
-                log(f"FATAL: no pude borrar la rama {rama_id}: {sanear(e)[:200]} "
-                    "— BORRARLA A MANO en la consola de Neon")
+                borrada, error_borrado = False, sanear(e)[:200]
+            if not borrada:
+                log(f"FATAL: la rama temporal {rama_id} quedó viva"
+                    + (f" ({error_borrado})" if error_borrado else "")
+                    + ": BORRARLA A MANO en la consola de Neon (consume cupo del plan Free)")
 
 
 if __name__ == "__main__":

@@ -295,7 +295,7 @@ password del rol ni la key.
 cd backend
 py -3.12 -m pytest tests/test_watchdog_backups.py tests/test_restore_drill.py tests/test_email_config_prod.py -q --noconftest
 ```
-Registrado el 2026-09-27: **23 passed** (8 del watchdog + 7 del drill + 8 de la config de email).
+Registrado el 2026-09-27: **26 passed** (8 del watchdog + 10 del drill + 8 de la config de email).
 Neon, R2, `psql` y `smtplib` están mockeados: no se usa red ni credenciales y **no se manda ningún
 correo real**. Ojo con el intérprete: usar `py -3.12` — el `python` del PATH (3.13) no tiene
 `pytest` instalado.
@@ -345,6 +345,17 @@ con lo que el dump dice y comprueba que el rol de backup siga siendo de solo lec
   se rompe cuando se agrega una migración.
 - **Prueba negativa obligatoria:** el drill vale por lo que verifica *además* del restore: que
   la credencial de backup no pueda escribir en la base de producción.
+- **Neon es asíncrono (fix del 423, run real del 2026-09-27):** crear la rama y crear la base
+  devuelven `operations` que siguen corriendo; la llamada siguiente contestaba `HTTP 423 "project
+  already has running conflicting operations, scheduling of new ones is prohibited"` (la rama se
+  creaba OK y el drill moría con exit 9 enseguida). Ahora, tras cada `POST`, se hace polling de
+  `GET /projects/{id}/operations/{op_id}` (cada `DRILL_POLL_S`, timeout `DRILL_OPS_TIMEOUT_S`)
+  hasta que TODAS queden en `finished`; `failed`/`error`/`cancelled` ⇒ exit 9 con el motivo. Y
+  **toda** llamada a la API reintenta el 423 con backoff 2/4/8 s (hasta `DRILL_INTENTOS_423`):
+  el 423 no ejecuta nada, así que reintentar no duplica ramas ni bases. El `DELETE` del `finally`
+  espera lo que quedó pendiente (`DRILL_BORRADO_TIMEOUT_S`) para no dejar la rama viva (consume
+  cupo del plan Free). Estos 4 `DRILL_*` son opcionales: tienen default.
+
 - **Limpieza garantizada:** la rama y el directorio temporal se borran en el `finally`, pase lo
   que pase. Si el `DELETE` de la rama falla, el email lo dice y hay que borrarla a mano.
 
@@ -458,14 +469,17 @@ Detalles que importan **si algún día** se aplica:
   la elección del drill queda confirmada.
 - **Verificado:** `py -3.12 -m py_compile maintenance/restore_drill.py maintenance/watchdog_backups.py
   maintenance/alertas.py` ⇒ rc 0, y `py -3.12 -m pytest tests/test_watchdog_backups.py
-  tests/test_restore_drill.py tests/test_email_config_prod.py -q --noconftest` ⇒ **23 passed**
-  (8 + 7 + 8, con Neon/R2/psql/smtplib mockeados: no se usó red ni credenciales).
+  tests/test_restore_drill.py tests/test_email_config_prod.py -q --noconftest` ⇒ **26 passed**
+  (8 + 10 + 8, con Neon/R2/psql/smtplib mockeados: no se usó red ni credenciales).
   ⚠️ Usar `py -3.12`: el `python` del PATH (3.13) **no** tiene pytest.
 - **Verificado (smoke sin credenciales):** con el entorno vacío, `restore_drill` sale con
   exit 2 ("faltan variables") y el watchdog también — sin mandar ningún mail.
-- **NO verificado todavía:** el drill **nunca corrió contra Neon real**. En esta máquina no hay
-  `NEON_API_KEY`, así que los pasos 0/3/4 (API de ramas y bases) sólo están cubiertos por los
-  mocks. Primer `Trigger Run` en Render = la prueba real; mirar el email y la lista de ramas.
+- **Verificado en Render (run real del 2026-09-27):** el drill corrió contra Neon real: la rama
+  temporal se creó y se **borró** bien en el `finally`, pero murió con
+  `HTTP 423 "project already has running conflicting operations..."` (exit 9) en la llamada
+  siguiente ⇒ fix de arriba (esperar `operations` + reintentar 423), cubierto por los tests
+  h/i/j (mocks, sin red). **Falta el `Trigger Run` verde de punta a punta** (restore real +
+  prueba negativa contra PROD): mirar el email y la lista de ramas de Neon.
 - **Fase 5:** queda **sólo como propuesta escrita** (sección "Fase 5" de arriba). No se escribió
   `copia_test.py` ni ningún script/job nuevo, y el contenedor local de mantenimiento quedó igual.
   Los 2 cambios propuestos (04:30 CLT y retención de 7 días) **no** se aplicaron.

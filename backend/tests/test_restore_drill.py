@@ -3,7 +3,9 @@
 Sin Neon real, sin R2, sin red, sin credenciales y sin mandar correos. Verifican lo que
 importa del drill: que la rama temporal se borre SIEMPRE, que no se cree nada si el cupo
 de ramas está lleno, que la prueba negativa de PROD sea obligatoria y que el log/email
-nunca filtren la password del rol.
+nunca filtren la password del rol. Y desde el fix del 423: que el drill espere las
+`operations` de Neon tras crear la rama y la base, que corte si alguna queda en `failed`
+o nunca termina (timeout) y que reintente 423 con backoff sin morir.
 
 Se corre con:
     py -3.12 -m pytest tests/test_restore_drill.py -q --noconftest
@@ -39,6 +41,8 @@ DUMP = (
 URI_RAMA = ("postgresql://neondb_owner:" + CLAVE_FALSA
             + "@ep-drill-1234.us-east-2.aws.neon.tech/neondb?sslmode=require")
 RAMA = "br-drill-999"
+OP_RAMA = "op-rama-1"       # operaciones que devuelve Neon en el POST de la rama (asíncrono)
+OP_BASE = "op-base-1"       # idem al crear la base drill_restore
 
 
 class _Paginator:
@@ -106,7 +110,7 @@ def _secuencia(valores):
 
 
 def _mocks(monkeypatch, tablas=(0, 2), restore_rc=0, prod_rc=1,
-           prod_err="ERROR:  permission denied for database neondb"):
+           prod_err="ERROR:  permission denied for database neondb", con_operaciones=False):
     """Mockea todo lo que sale del proceso: R2, API de Neon, psql y el DELETE de la rama.
 
     `tablas` es la secuencia que devuelve contar_tablas: primero la comprobación de que
@@ -119,15 +123,24 @@ def _mocks(monkeypatch, tablas=(0, 2), restore_rc=0, prod_rc=1,
 
     def fake_crear_rama(nombre, parent):
         rastro["creadas"].append((nombre, parent))
-        return {
+        data = {
             "branch": {"id": RAMA, "name": nombre},
             "roles": [{"name": "neondb_owner", "authentication_method": "password"}],
             "connection_uris": [{"connection_uri": URI_RAMA}],
         }
+        if con_operaciones:      # Neon es asíncrono: el drill ESPERA estas `operations`
+            data["operations"] = [{"id": OP_RAMA, "status": "running"}]
+        return data
 
     monkeypatch.setattr(rd, "crear_rama", fake_crear_rama)
-    monkeypatch.setattr(rd, "crear_base",
-                        lambda bid, nombre, owner: {"database": {"name": nombre}})
+
+    def fake_crear_base(bid, nombre, owner):
+        data = {"database": {"name": nombre}}
+        if con_operaciones:
+            data["operations"] = [{"id": OP_BASE, "status": "running"}]
+        return data
+
+    monkeypatch.setattr(rd, "crear_base", fake_crear_base)
     monkeypatch.setattr(rd, "contar_tablas", _secuencia(tablas))
     monkeypatch.setattr(rd, "borrar_rama",
                         lambda bid: rastro["borrados"].append(bid) or True)
@@ -149,7 +162,46 @@ def _mocks(monkeypatch, tablas=(0, 2), restore_rc=0, prod_rc=1,
         return subprocess.CompletedProcess(["psql"], 0, "0\n", "")
 
     monkeypatch.setattr(rd, "psql_sql", fake_psql)
+    # Red de seguridad: sin esto, un descuido del mock llamaría de verdad a console.neon.tech.
+    monkeypatch.setattr(rd, "http_json", lambda *a, **k: pytest.fail(
+        "estos tests no tocan la red: http_json tiene que estar mockeado (ver _fake_operaciones)"))
     return rastro
+
+
+def _repetido(valores):
+    """Generador que repite el último valor para siempre (para simular un 'running' eterno)."""
+    ultimo = valores[-1]
+    for v in valores:
+        yield v
+    while True:
+        yield ultimo
+
+
+def _sin_dormir(monkeypatch):
+    """Sin sleeps reales (ni polling ni backoff): se registran para poder verificarlos."""
+    dormidas = []
+    monkeypatch.setattr(rd.time, "sleep", lambda s: dormidas.append(s))
+    return dormidas
+
+
+def _fake_operaciones(monkeypatch, estados, fallos_423=0):
+    """`http_json` falso para el polling de `GET /projects/{id}/operations/{op_id}`.
+
+    `estados`: estados que devuelve la operación (el último se repite indefinidamente).
+    `fallos_423`: cuántos intentos iniciales responden HTTP 423 (Neon con operaciones vivas).
+    """
+    llamadas = []
+    estados_it = _repetido(estados)
+
+    def fake(method, url, body=None, headers=None):
+        llamadas.append((method, url))
+        if len(llamadas) <= fallos_423:
+            return 423, {"error": "project already has running conflicting operations, "
+                                  "scheduling of new ones is prohibited"}
+        return 200, {"operation": {"id": "op-fake", "status": next(estados_it)}}
+
+    monkeypatch.setattr(rd, "http_json", fake)
+    return llamadas
 
 
 def test_a_drill_ok_borra_la_rama_y_avisa(monkeypatch, reportes, capsys):
@@ -217,3 +269,44 @@ def test_g_sin_neon_api_key_exit_2(monkeypatch, reportes):
     assert rd.main() == rd.EXIT_CONFIG
     assert rastro["creadas"] == [] and rastro["borrados"] == []
     assert reportes == []     # sin config no se puede avisar por email
+
+
+def test_h_423_dos_veces_reintenta_con_backoff_y_termina_ok(monkeypatch, reportes):
+    """Neon contesta 423 (operaciones en curso) 2 veces: el drill reintenta y termina OK."""
+    rastro = _mocks(monkeypatch, tablas=(0, 2), con_operaciones=True)
+    dormidas = _sin_dormir(monkeypatch)
+    llamadas = _fake_operaciones(monkeypatch, ["finished"], fallos_423=2)
+
+    assert rd.main() == rd.EXIT_OK
+    assert rastro["borrados"] == [RAMA]
+    assert len(llamadas) == 4          # 2 rechazos 423 + 1 ok (rama) + 1 ok (base)
+    assert dormidas == [2.0, 4.0]      # backoff 2 s y 4 s: el 423 no es un error nuestro
+    assert "OK" in reportes[0][0]
+
+
+def test_i_operacion_failed_exit_9_y_borra_la_rama(monkeypatch, reportes):
+    """Si una operación de Neon queda en 'failed', el drill FALLA (exit 9) y borra la rama."""
+    rastro = _mocks(monkeypatch, tablas=(0, 2), con_operaciones=True)
+    _sin_dormir(monkeypatch)
+    _fake_operaciones(monkeypatch, ["failed"])
+
+    assert rd.main() == rd.EXIT_API
+    assert rastro["borrados"] == [RAMA]     # la rama temporal se borra igual
+    assert rastro["restores"] == []         # y NO se restauró nada
+    assert "FALLA" in reportes[0][0]
+    assert "no pude esperar la creación de la rama" in reportes[0][1]
+    assert "failed" in reportes[0][1]
+
+
+def test_j_timeout_de_operaciones_falla_y_borra_la_rama(monkeypatch, reportes):
+    """Si la operación nunca queda en 'finished', el drill FALLA por timeout y borra la rama."""
+    rastro = _mocks(monkeypatch, tablas=(0, 2), con_operaciones=True)
+    _sin_dormir(monkeypatch)
+    monkeypatch.setattr(rd, "TIMEOUT_OPS", 0.0)        # sin esperar 120 s de verdad
+    monkeypatch.setattr(rd, "TIMEOUT_BORRADO", 0.0)    # ni 60 s en el finally
+    llamadas = _fake_operaciones(monkeypatch, ["running"])
+
+    assert rd.main() == rd.EXIT_API
+    assert rastro["borrados"] == [RAMA]
+    assert llamadas, "el drill tiene que consultar la operación"
+    assert "timeout" in reportes[0][1] and OP_RAMA in reportes[0][1]
