@@ -64,10 +64,12 @@ def _strings(arbol: ast.Module) -> list:
             if isinstance(n, ast.Constant) and isinstance(n.value, str)]
 
 
-def test_a_la_constante_se_define_solo_en_shared_estados():
+def test_a_las_constantes_se_definen_solo_en_shared_estados():
     """Una sola definición en todo el backend: si alguien vuelve a escribir la tupla (en la app o
-    en el mantenimiento), el test falla y dice en qué archivo."""
-    nombres = ("ESTADOS_CANCELADA", "ESTADO_CANCELADO")
+    en el mantenimiento), el test falla y dice en qué archivo. Las dos familias van acá: la de
+    "reserva cancelada" y la de `suscripciones` ("nunca estuvo vigente" + los que sí)."""
+    nombres = ("ESTADOS_CANCELADA", "ESTADO_CANCELADO",
+               "ESTADOS_SUSCRIPCION_NUNCA_VIGENTES", "ESTADOS_SUSCRIPCION_VIGENTES")
     definiciones = {}
     for rel, fuente in _fuentes((APP, MANTENIMIENTO, RAIZ / "ml", COMPARTIDO)):
         hallados = _asignados(ast.parse(fuente), nombres)
@@ -181,3 +183,52 @@ def test_f_las_tres_imagenes_docker_copian_shared():
     assert "COPY shared/__init__.py" in cron and "COPY shared/estados.py" in cron
     assert "COPY backend/shared/ shared/" in render
     assert "COPY app/" not in cron          # invariante: la imagen del job no lleva la app
+
+
+def _labels_del_enum_suscripcion(rel: str) -> set:
+    """Labels de `EstadoSuscripcion` leídos del MODELO con `ast`: este test corre sin base y sin
+    entorno, así que no se importa la app (y el archivo tiene que leerse con `utf-8-sig`, hay BOM)."""
+    fuente = (RAIZ / rel).read_text(encoding="utf-8-sig")
+    valores = set()
+    for nodo in ast.walk(ast.parse(fuente)):
+        if not (isinstance(nodo, ast.ClassDef) and nodo.name == "EstadoSuscripcion"):
+            continue
+        valores |= {linea.value.value for linea in nodo.body
+                    if isinstance(linea, ast.Assign)
+                    and isinstance(linea.value, ast.Constant)
+                    and isinstance(linea.value.value, str)}
+
+    assert valores, f"{rel}: no se pudo leer EstadoSuscripcion"
+    return valores
+
+
+def test_g_el_predicado_de_vigencia_por_fecha_parte_el_enum_en_dos():
+    """Predicado de las métricas HISTÓRICAS (MRR del mes anterior, cohorte de retención/churn de 30
+    días): "vigente EN ESA FECHA" se decide con las fechas, y el estado sólo descarta lo que NUNCA
+    estuvo vigente.
+
+    Antes se filtraba por `estado = 'activo'` (el estado de HOY): vencida una suscripción hoy,
+    desaparecía de los meses en los que sí estuvo vigente, así que la variación de MRR y el churn se
+    reescribían solos (fix 2026-09-27). Como el filtro se invirtió, la lista de "nunca vigentes"
+    tiene que estar cerrada y ser exacta: `pendiente` y `rechazado` NUNCA suman (aunque sus fechas
+    caigan en la ventana) y una `vencido` SÍ suma para los meses en que lo estuvo.
+
+    El enum nativo `estado_suscripcion` (migración 023) se parte en dos sin solapamiento ni huecos:
+    un estado nuevo no puede quedar clasificado en silencio (sumaría MRR por error), y este test lo
+    frena antes.
+    """
+    nunca = set(estados.ESTADOS_SUSCRIPCION_NUNCA_VIGENTES)
+    vigentes = set(estados.ESTADOS_SUSCRIPCION_VIGENTES)
+
+    assert nunca == {"pendiente", "rechazado"}
+    assert vigentes == {"activo", "vencido"}
+    assert nunca & vigentes == set()
+    assert nunca | vigentes == _labels_del_enum_suscripcion("app/models/suscripcion.py"), (
+        "hay un estado del enum sin clasificar en shared/estados.py")
+
+    assert estados.sql_suscripcion_vigente() == (
+        "s.estado NOT IN (" + estados.lista_sql(estados.ESTADOS_SUSCRIPCION_NUNCA_VIGENTES) + ")"
+        " AND s.fecha_inicio::date <= current_date"
+        " AND s.fecha_expiracion::date >= current_date")
+    assert "estado = 'activo'" not in estados.sql_suscripcion_vigente()
+

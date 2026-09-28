@@ -872,20 +872,23 @@ job no importa la app ni boto3.
 
 ```bash
 cd backend
-py -3.12 -m pytest tests/test_mantenimiento_cloud.py tests/test_mantenimiento_pasos.py tests/test_mantenimiento_vencidos.py tests/test_email_config_prod.py tests/test_watchdog_backups.py tests/test_restore_drill.py tests/test_email_header_saneo.py tests/test_estados_compartido.py -q
+py -3.12 -m pytest tests/test_mantenimiento_cloud.py tests/test_mantenimiento_pasos.py tests/test_mantenimiento_vencidos.py tests/test_email_config_prod.py tests/test_watchdog_backups.py tests/test_restore_drill.py tests/test_email_header_saneo.py tests/test_estados_compartido.py tests/test_mrr_historico.py -q
 ```
 Registrado el 2026-09-27, con la Fase 7, las **guardas por regla**, los ajustes de A.5, el **conteo
-real** de las listas (integridad, A.3 y paso 9) y la **lista compartida de "cancelada"** ya
-adentro: **216 passed, 1 skipped** — 125 de
+real** de las listas (integridad, A.3 y paso 9), la **lista compartida de "cancelada"** y el **MRR y
+churn por fecha** ya adentro: **223 passed, 1 skipped** — 127 de
 `mantenimiento_cloud` (los 33 de la Fase 6 + 47 de la Fase 7 + **22 de los límites por regla**:
 evaluación pura, borde del %, huérfanas por lista, tope global, config inválida, las guardas en el
 SQL y el prefijo `[maint]` del correo, + **17 de A.5** (`requiere_coach`, complementariedad de
 (a)/(b), conteo real vs tope, `A5_NOTA_HASTA` y el log/motivo según el modo) + **6 del
-tope-conteo y A.6**: integridad con `LIMITE_DUP`, A.3 con `LIMITE_A3`, el paso 9 con
-`LIMITE_LISTA` y una variante de cancelación desconocida),
-11 de `estados_compartido` (la constante se define en un solo lugar, `shared/` no importa nada, los
-helpers son exactos, la app no compara contra el literal, el predicado ORM == el del job y las TRES
-imágenes copian `shared/`), 4 de
+tope-conteo y A.6** (integridad con `LIMITE_DUP`, A.3 con `LIMITE_A3`, el paso 9 con
+`LIMITE_LISTA` y una variante de cancelación desconocida) + **2 del bloque E por fecha**
+(`test_cr` y `test_cs`: el SQL del mes anterior y de la cohorte)),
+12 de `estados_compartido` (la constante se define en un solo lugar, `shared/` no importa nada, los
+helpers son exactos, la app no compara contra el literal, el predicado ORM == el del job, las TRES
+imágenes copian `shared/` y el predicado de vigencia por fecha parte el enum en dos), **4 de
+`mrr_historico`** (vencer hoy no cambia el MRR del pasado, una rechazada no suma nunca, el churn de
+la cohorte es histórico y el MRR del pasado y el de hoy son la MISMA consulta), 4 de
 `mantenimiento_pasos`,
 1 de `mantenimiento_vencidos` y 76 de los tests de correo/drill/watchdog (el skip es el drill
 cuando falta una variable del env group). `psql`, `smtplib` y la API de Neon (`urllib`) están
@@ -1120,11 +1123,17 @@ Además de lo que ya traía la Fase 6, el correo agrega `mrr`, `mrr_mes_anterior
 fórmulas son las MISMAS de `app/services/metricas_service.py` (una sola definición por métrica en el
 proyecto), copiadas a SQL porque el job no importa `app.*`:
 
-- **MRR**: `SUM(planes.precio_clp)` de las suscripciones `activo` vigentes hoy (precio de lista, no
-  caja cobrada). El de referencia es el del **último día del mes anterior**.
+- **MRR**: `SUM(planes.precio_clp)` de las suscripciones VIGENTES EN LA FECHA (precio de lista, no
+  caja cobrada). El de referencia es el del **último día del mes anterior**. "Vigente en la fecha" =
+  `fecha_inicio <= fecha <= fecha_expiracion` y estado ≠ `pendiente`/`rechazado`
+  (`shared.estados.sql_suscripcion_vigente()`, el MISMO predicado que `metricas_service.mrr`): una
+  suscripción VENCIDA sigue contando para los meses en los que estuvo vigente y una rechazada no
+  suma nunca. **No** se filtra por `estado = 'activo'`: ese es el estado de hoy y reescribía el
+  pasado (fix del 2026-09-27).
 - **Retención 30 días**: de los alumnos vigentes hace 30 días, cuántos siguen vigentes hoy;
-  **churn** = 100 − retención. Con base < `MIN_BASE_RETENCION` (5, el mismo umbral del BI) se
-  publica "sin dato" en vez de un porcentaje que no representa al box (el bug del 7600 %).
+  **churn** = 100 − retención. Misma definición de vigencia por fecha (la base de hace 30 días no se
+  encoge porque hoy venció una suscripción). Con base < `MIN_BASE_RETENCION` (5, el mismo umbral del
+  BI) se publica "sin dato" en vez de un porcentaje que no representa al box (el bug del 7600 %).
 
 ### Exit codes con la Fase 7
 
@@ -1304,6 +1313,35 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
   `ModuleNotFoundError` (control negativo).
 - **Sin tocar:** nada de `carpeta_respaldo_box`, ni `.env`/`.env.test`, ni PROD (el único acceso
   a PROD es el `CREATE TABLE` que **debe** fallar).
+- **MRR y churn HISTÓRICOS: la vigencia por FECHA, no por el estado de hoy (2026-09-27, mismo día).**
+  Las 5 consultas del bloque E definían "vigente" con `s.estado = 'activo'`, que es el estado de
+  **hoy**: vencida una suscripción hoy (el paso 1 la pasa a `vencido`), desaparecía también de las
+  fechas PASADAS en las que sí estuvo vigente ⇒ el MRR de referencia (último día del mes anterior)
+  bajaba y `variacion_mrr_pct` / `churn_30d_pct` cambiaban solos sin que hubiera pasado nada en el
+  negocio. Ahora la definición es `shared.estados.sql_suscripcion_vigente()`, el MISMO texto de SQL
+  en la app y en el job: `fecha_inicio::date <= fecha AND fecha_expiracion::date >= fecha` + estado
+  ≠ `pendiente`/`rechazado`. Es el criterio que `ml/features.py` ya tenía documentado desde antes
+  (el estado es un snapshot mutable, el pasado se reconstruye con las fechas); la app
+  (`metricas_service.mrr`, `_vigente_sql`, `retencion_cohorte`) quedó igual que el job porque la
+  definición es una sola.
+  La exclusión de lo que NUNCA estuvo vigente es **explícita y no implícita**: al invertir el filtro,
+  una `pendiente`/`rechazada` con fechas dentro de la ventana se colaría en el MRR, así que la lista
+  es cerrada (`ESTADOS_SUSCRIPCION_NUNCA_VIGENTES` = `pendiente`, `rechazado`) y parte el enum nativo
+  `estado_suscripcion` (migración 023) en dos sin huecos: `activo`/`vencido` son los que pueden haber
+  estado vigentes (una `vencido` SÍ suma para los meses en que lo estuvo) y `test_g` verifica la
+  partición contra el modelo, para que un estado nuevo no se clasifique en silencio.
+  **Verificado:** `tests/test_mrr_historico.py` (nuevo) ⇒ **4 passed** con los dos casos del pedido
+  (vencer una suscripción hoy no cambia el MRR de los meses pasados; una rechazada no suma nunca) y
+  la **contraprueba** del control negativo: con el SQL viejo `test_b`/`test_d` (app) y `test_cr`
+  (job) **fallan**. `tests/test_mantenimiento_cloud.py` ⇒ **127 passed**,
+  `tests/test_estados_compartido.py` ⇒ **12 passed** y el comando completo del README ⇒ **223
+  passed, 1 skipped**. Sin red, sin base y sin PROD (el SQL del lado app se captura con una sesión
+  doble).
+- **Pendiente (mismo bug, fuera de este commit):** `app/services/reportes_service.py` (el Excel
+  histórico de `/reportes/export`) tiene su propia copia del MRR por mes
+  (`s.estado = 'activo' AND s.fecha_expiracion >= :fin`, sin `fecha_inicio`) y la columna "Alumnos
+  activos fin de mes" con el mismo filtro: los meses ya cerrados del Excel se recalculan con el
+  estado de hoy. No se tocó acá para no mezclar el fix del correo con el del Excel.
 - **Fase 6 (entrega 2, 2026-09-27):** se escribió `maintenance/mantenimiento_cloud.py`, se agregó
   su `COPY` en `Dockerfile.cron` (sin `pip install` nuevo), se aplicó el **fix H1** en
   `run_daily.py`/`run_monthly.py` (el `_paso()` nuevo mira el valor de retorno real: un `False` se

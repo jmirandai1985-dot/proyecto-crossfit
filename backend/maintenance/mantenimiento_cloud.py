@@ -158,7 +158,7 @@ from maintenance.backup_cloud import (  # helpers existentes: no se duplican
 )
 # Paquete neutral (sin imports) compartido con la app: la lista de estados "cancelada" es UNA.
 # `app/` sigue sin importarse: `shared/estados.py` no arrastra nada (lo copia Dockerfile.cron).
-from shared.estados import lista_sql
+from shared.estados import lista_sql, sql_suscripcion_vigente
 
 # ── Códigos de salida (Render marca fallido el run si != 0) ──
 EXIT_OK = 0
@@ -1053,30 +1053,34 @@ SQL_REPORTE = {
     ),
     # ── Fase 7 (E): MRR, retención/churn de la cohorte de 30 días y bajas del mes ──
     # Las MISMAS definiciones de `app/services/metricas_service.py` (una sola fórmula por
-    # métrica): MRR = precio de lista de los planes con suscripción vigente en la fecha;
+    # métrica): MRR = precio de lista de los planes con suscripción vigente EN LA FECHA;
     # retención = de los vigentes hace 30 días, cuántos siguen vigentes hoy (churn = 100 −
-    # retención). El filtro `fecha_inicio::date <=` evita contar suscripciones futuras.
+    # retención). El predicado de vigencia es `shared.estados.sql_suscripcion_vigente()` (el mismo
+    # que usa la app): la vigencia la deciden las FECHAS, no `estado = 'activo'`.
+    #
+    # Fix 2026-09-27: antes estas 5 consultas filtraban por `estado = 'activo'`, que es el estado
+    # de HOY. Vencida una suscripción hoy, el MRR del mes anterior y la cohorte de hace 30 días
+    # perdían esa suscripción aunque estuviera vigente en esa fecha: la variación de MRR y el churn
+    # del correo cambiaban solos con cada vencimiento. El estado ahora sólo descarta lo que NUNCA
+    # estuvo vigente (`pendiente`/`rechazado`): una `vencido` SÍ cuenta para los meses en los que
+    # estuvo vigente y una rechazada no suma nunca.
     # El alias de cada consulta (`AS mrr_hoy`, …) es el marcador que el doble de psql usa en
     # los tests para responderle a cada una: no se toca sin tocar el test.
     "mrr": (
         "SELECT COALESCE(sum(p.precio_clp), 0)::text AS mrr_hoy "
         "FROM suscripciones s JOIN planes p ON p.id = s.plan_id "
-        "WHERE s.tenant_id = {tid} AND s.estado = 'activo' "
-        "AND s.fecha_inicio::date <= current_date AND s.fecha_expiracion::date >= current_date"
+        "WHERE s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "current_date")
     ),
     "mrr_mes_anterior": (
         "SELECT COALESCE(sum(p.precio_clp), 0)::text AS mrr_mes_anterior "
         "FROM suscripciones s JOIN planes p ON p.id = s.plan_id "
-        "WHERE s.tenant_id = {tid} AND s.estado = 'activo' "
-        "AND s.fecha_inicio::date <= '{fin_ant}'::date "
-        "AND s.fecha_expiracion::date >= '{fin_ant}'::date"
+        "WHERE s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "'{fin_ant}'::date")
     ),
     "alumnos_vigentes": (
         "SELECT count(*)::text AS alumnos_vigentes FROM usuarios u "
         "WHERE u.tenant_id = {tid} AND u.rol = 'alumno' AND u.activo = true "
         "AND EXISTS (SELECT 1 FROM suscripciones s WHERE s.usuario_id = u.id "
-        "  AND s.tenant_id = {tid} AND s.estado = 'activo' "
-        "  AND s.fecha_inicio::date <= current_date AND s.fecha_expiracion::date >= current_date)"
+        "  AND s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "current_date") + ")"
     ),
     "bajas_mes": (
         "SELECT count(*)::text AS bajas_mes FROM usuarios WHERE tenant_id = {tid} "
@@ -1086,21 +1090,15 @@ SQL_REPORTE = {
         "SELECT count(*)::text AS retencion_base FROM usuarios u "
         "WHERE u.tenant_id = {tid} AND u.rol = 'alumno' AND u.activo = true "
         "AND EXISTS (SELECT 1 FROM suscripciones s WHERE s.usuario_id = u.id "
-        "  AND s.tenant_id = {tid} AND s.estado = 'activo' "
-        "  AND s.fecha_inicio::date <= '{hace30}'::date "
-        "  AND s.fecha_expiracion::date >= '{hace30}'::date)"
+        "  AND s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "'{hace30}'::date") + ")"
     ),
     "retencion_siguen": (
         "SELECT count(*)::text AS retencion_siguen FROM usuarios u "
         "WHERE u.tenant_id = {tid} AND u.rol = 'alumno' AND u.activo = true "
         "AND EXISTS (SELECT 1 FROM suscripciones s WHERE s.usuario_id = u.id "
-        "  AND s.tenant_id = {tid} AND s.estado = 'activo' "
-        "  AND s.fecha_inicio::date <= '{hace30}'::date "
-        "  AND s.fecha_expiracion::date >= '{hace30}'::date) "
+        "  AND s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "'{hace30}'::date") + ") "
         "AND EXISTS (SELECT 1 FROM suscripciones s2 WHERE s2.usuario_id = u.id "
-        "  AND s2.tenant_id = {tid} AND s2.estado = 'activo' "
-        "  AND s2.fecha_inicio::date <= current_date "
-        "  AND s2.fecha_expiracion::date >= current_date)"
+        "  AND s2.tenant_id = {tid} AND " + sql_suscripcion_vigente("s2", "current_date") + ")"
     ),
 }
 

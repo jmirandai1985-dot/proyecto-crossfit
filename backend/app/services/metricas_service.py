@@ -16,6 +16,8 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from shared.estados import sql_suscripcion_vigente
+
 # Umbral minimo de base para publicar retencion/churn. Mismo criterio que
 # /kpis/cohortes (null cuando el horizonte no maduro): con una base muy chica el
 # porcentaje no representa al box (el caso reportado: 1 alumno vigente hace 30
@@ -31,6 +33,12 @@ def _vigente_sql(param_fecha):
     Definicion unica de alumno vigente, alineada con el criterio cohorte de
     /kpis/cohortes: se define sobre quienes estaban vigentes en un momento y
     luego se evalua cuantos siguen vigentes.
+
+    La vigencia en una fecha la decide `sql_suscripcion_vigente()` (la MISMA que
+    usa el SQL del mantenimiento), no el estado de hoy: filtrar por
+    `estado = 'activo'` hacia que una suscripcion vencida hoy desapareciera
+    tambien de las fechas PASADAS en las que si estuvo vigente, asi que la
+    retencion/churn historica se movia sola (fix 2026-09-27).
     """
     return (
         " u.tenant_id = :tid"
@@ -40,30 +48,33 @@ def _vigente_sql(param_fecha):
         "   SELECT 1 FROM suscripciones s"
         "   WHERE s.usuario_id = u.id"
         "     AND s.tenant_id = :tid"
-        "     AND s.estado = 'activo'"
-        "     AND s.fecha_inicio::date <= " + param_fecha +
-        "     AND s.fecha_expiracion::date >= " + param_fecha +
+        "     AND " + sql_suscripcion_vigente("s", param_fecha) +
         " )"
     )
 
 
 def mrr(db: Session, tenant_id: int, hasta: date) -> float:
-    """Precio de lista de los planes con suscripcion activa vigente en la fecha.
+    """Precio de lista de los planes con suscripcion vigente EN LA FECHA `hasta`.
 
     Es ingreso recurrente por precio de lista, no flujo cobrado: no descuenta
     egresos ni descuentos puntuales. Se comparan FECHAS (::date) porque las
     columnas son timestamptz: asi una suscripcion que empieza o vence el mismo
     dia cuenta como vigente ese dia. Se exige fecha_inicio <= hasta para no
     contar suscripciones futuras.
+
+    El estado NO es "activo" (fix 2026-09-27): la metrica es de una FECHA, asi
+    que una suscripcion vencida hoy tiene que seguir sumando para los meses en
+    los que estaba vigente (antes `mrr` a fin del mes anterior se recalculaba y
+    la variacion de MRR cambiaba sin que hubiera pasado nada en el negocio). El
+    estado solo descarta lo que NUNCA estuvo vigente (`pendiente`/`rechazado`,
+    `ESTADOS_SUSCRIPCION_NUNCA_VIGENTES` en shared/estados.py).
     """
     valor = db.execute(text("""
         SELECT COALESCE(SUM(p.precio_clp), 0)
         FROM suscripciones s
         JOIN planes p ON s.plan_id = p.id
         WHERE s.tenant_id = :tid
-          AND s.estado = 'activo'
-          AND s.fecha_inicio::date <= :hasta
-          AND s.fecha_expiracion::date >= :hasta
+          AND """ + sql_suscripcion_vigente("s", ":hasta") + """
     """), {"tid": tenant_id, "hasta": hasta}).scalar() or 0
     return float(valor)
 
@@ -132,9 +143,7 @@ def retencion_cohorte(db: Session, tenant_id: int, desde: date, hasta: date):
         "   SELECT 1 FROM suscripciones s2"
         "   WHERE s2.usuario_id = u.id"
         "     AND s2.tenant_id = :tid"
-        "     AND s2.estado = 'activo'"
-        "     AND s2.fecha_inicio::date <= :hasta"
-        "     AND s2.fecha_expiracion::date >= :hasta"
+        "     AND " + sql_suscripcion_vigente("s2", ":hasta") +
         " )"
     )
     siguen = int(db.execute(text(sql_siguen), {

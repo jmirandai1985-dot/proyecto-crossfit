@@ -36,7 +36,7 @@ sys.path.insert(0, str(BACKEND))
 
 import re  # noqa: E402
 import subprocess  # noqa: E402
-from datetime import date  # noqa: E402
+from datetime import date, timedelta  # noqa: E402
 
 import ast  # noqa: E402 (guardia de la config: los `os.getenv` viven en un solo lugar)
 import pytest  # noqa: E402
@@ -937,9 +937,49 @@ def test_bc_el_mrr_usa_el_precio_de_lista_de_los_planes_vigentes():
     sql = men.SQL_REPORTE["mrr"]
 
     assert "sum(p.precio_clp)" in sql and "JOIN planes p" in sql
-    assert "s.estado = 'activo'" in sql
-    assert "s.fecha_inicio::date <= current_date" in sql
-    assert "s.fecha_expiracion::date >= current_date" in sql
+    assert estados.sql_suscripcion_vigente("s", "current_date") in sql
+    assert "estado = 'activo'" not in sql       # el estado de HOY no define la vigencia
+
+
+def test_cr_el_mrr_del_mes_anterior_y_el_churn_son_de_fecha_no_del_estado_de_hoy():
+    """Guardia del fix del 2026-09-27 (bloque E): las 5 consultas definen "vigente" por FECHAS, con
+    el MISMO predicado que la app (`shared.estados.sql_suscripcion_vigente`), así que una suscripción
+    que vence HOY no desaparece de los meses en los que estuvo vigente (antes el MRR del mes anterior
+    y la cohorte de 30 días se reescribían solos). El estado sólo descarta lo que nunca estuvo
+    vigente (`pendiente`/`rechazado`): una rechazada no suma nunca."""
+    pred = estados.sql_suscripcion_vigente
+    nunca = estados.lista_sql(estados.ESTADOS_SUSCRIPCION_NUNCA_VIGENTES)
+
+    # El mes de referencia (mes anterior) y la cohorte (hace 30 días) usan SU fecha, no current_date.
+    assert pred("s", "'{fin_ant}'::date") in men.SQL_REPORTE["mrr_mes_anterior"]
+    assert pred("s", "'{hace30}'::date") in men.SQL_REPORTE["retencion_base"]
+    assert pred("s", "'{hace30}'::date") in men.SQL_REPORTE["retencion_siguen"]
+    # El "hoy" del reporte (MRR, vigentes y los que siguen) usa la misma definición.
+    assert pred("s2", "current_date") in men.SQL_REPORTE["retencion_siguen"]
+    assert pred("s", "current_date") in men.SQL_REPORTE["mrr"]
+    assert pred("s", "current_date") in men.SQL_REPORTE["alumnos_vigentes"]
+
+    for clave in ("mrr", "mrr_mes_anterior", "alumnos_vigentes", "retencion_base",
+                  "retencion_siguen"):
+        sql = men.SQL_REPORTE[clave]
+        assert "estado = 'activo'" not in sql, clave
+        assert nunca in sql, clave
+        assert "fecha_inicio::date <=" in sql and "fecha_expiracion::date >=" in sql, clave
+
+
+def test_cs_el_mrr_del_mes_anterior_llega_al_sql_con_el_ultimo_dia_del_mes(monkeypatch, mails):
+    """El SQL que sale al proceso corta el mes anterior en `fin_ant` (último día del mes anterior):
+    si alguien lo cambia por `current_date`, la variación de MRR se compara contra el mes en curso."""
+    rastro = _psql_falso(monkeypatch, _ctx(dup_rut=[["12345678-9", "2"]]))   # rojo para leer el mail
+
+    assert men.main() == men.EXIT_INTEGRIDAD
+    sql_ant = next(s for s in rastro["sql"] if "AS mrr_mes_anterior" in s)
+    fin_ant = date.today().replace(day=1) - timedelta(days=1)
+
+    assert f"s.fecha_inicio::date <= '{fin_ant.isoformat()}'::date" in sql_ant
+    assert f"s.fecha_expiracion::date >= '{fin_ant.isoformat()}'::date" in sql_ant
+    assert "estado = 'activo'" not in sql_ant
+    assert "{fin_ant}" not in sql_ant                       # el placeholder se resolvió
 
 
 # ── La regla del correo y el orden de los exit codes nuevos ───────────────────
