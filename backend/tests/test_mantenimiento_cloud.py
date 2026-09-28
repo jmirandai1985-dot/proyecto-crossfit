@@ -2,10 +2,11 @@
 
 Sin Neon, sin red, sin credenciales y sin mandar ningún correo. Verifican lo que importa del
 job: que sin `MAINT_DB_URL` no se toque la base, que se rechacen el pooler y cualquier rol
-que no sea `maint_rw`, que `ENVIRONMENT` tenga que ser `production`, que un `MAX_CAMBIOS`
-inválido no pueda llegar al SQL, que la transacción termine en `ROLLBACK` en DRY-RUN y en
-`COMMIT` (con la guarda de volumen adentro) en REAL, que la guarda no aborte en DRY-RUN pero
-sí informe con la lista COMPLETA, que un fallo de escritura no se cuente como éxito, que la
+que no sea `maint_rw`, que `ENVIRONMENT` tenga que ser `production`, que un `MAX_CAMBIOS` (o un
+`MAX_VENCIDOS_PCT`/`MAX_HUERFANAS`) inválido no pueda llegar al SQL, que la transacción termine en
+`ROLLBACK` en DRY-RUN y en `COMMIT` (con las guardas de volumen adentro) en REAL, que las guardas
+no aborten en DRY-RUN pero sí informen con la lista COMPLETA y con cada regla y su tope, que un
+fallo de escritura no se cuente como éxito, que la
 verificación posterior sea obligatoria, que la integridad ponga el run rojo **sin** abortar
 la escritura, y que ni el log ni el mail puedan filtrar la password del rol.
 
@@ -28,6 +29,7 @@ sys.path.insert(0, str(BACKEND))
 import re  # noqa: E402
 import subprocess  # noqa: E402
 
+import ast  # noqa: E402 (guardia de la config: los `os.getenv` viven en un solo lugar)
 import pytest  # noqa: E402
 
 from maintenance import mantenimiento_cloud as men  # noqa: E402
@@ -218,7 +220,8 @@ def entorno(monkeypatch):
                  ("ALERT_EMAIL", "alertas@example.com"),
                  ("DRY_RUN", "1")):
         monkeypatch.setenv(k, v)
-    for k in ("MAX_CAMBIOS", "DIAS_PENDIENTE", "NEON_LIMITE_MB", "NEON_UMBRAL_PCT",
+    for k in ("MAX_CAMBIOS", "MAX_VENCIDOS_PCT", "MAX_HUERFANAS",
+              "DIAS_PENDIENTE", "NEON_LIMITE_MB", "NEON_UMBRAL_PCT",
               # Fase 7: topes, retenciones, allowlist y los límites de Neon (env group
               # `neon-api`). Se borran TODOS para que ningún test dependa de la máquina.
               "MAX_CIERRE", "MAX_PURGA", "DIAS_CIERRE_RESERVAS", "DIAS_PURGA_TOKENS",
@@ -231,10 +234,14 @@ def entorno(monkeypatch):
 
 @pytest.fixture
 def mails(monkeypatch):
-    """Captura los reportes en vez de mandarlos por Gmail SMTP."""
+    """Captura los reportes en vez de mandarlos por Gmail SMTP.
+
+    Acepta el `logger=` opcional de `enviar_email()` (el mantenimiento le pasa su `log()` para
+    que los avisos del correo salgan `[maint]`): el doble lo ignora y sólo guarda el reporte.
+    """
     capturados = []
     monkeypatch.setattr(men, "enviar_email",
-                        lambda asunto, html: capturados.append((asunto, html)) or True)
+                        lambda asunto, html, *a, **kw: capturados.append((asunto, html)) or True)
     return capturados
 
 
@@ -328,8 +335,10 @@ def test_f_real_usa_commit_con_la_guarda_de_volumen(monkeypatch, mails, capsys):
 def test_g_dry_run_excede_max_cambios_informa_con_la_lista_completa(monkeypatch, mails):
     """En DRY-RUN la guarda NO aborta: run rojo (exit 6) con la lista COMPLETA en la alerta.
 
-    Se pasa de los 40 cambios por defecto: en 15 días 15-25 vencimientos son normales, 41 no.
+    Se pasa del tope global (`MAX_CAMBIOS`, acá bajado a 40): en 15 días 15-25 vencimientos son
+    normales, 41 no. El 41 de 60 suscripciones activas (68 %) no toca la regla del % (tope 48).
     """
+    monkeypatch.setenv("MAX_CAMBIOS", "40")
     filas = _n_filas(41)
     rastro = _psql_falso(monkeypatch, _ctx(vencidos=filas, script_out=script_out(vencidos=41)))
 
@@ -343,6 +352,7 @@ def test_g_dry_run_excede_max_cambios_informa_con_la_lista_completa(monkeypatch,
 
 def test_h_real_la_guarda_aborta_la_transaccion_exit_6(monkeypatch, mails):
     monkeypatch.setenv("DRY_RUN", "0")
+    monkeypatch.setenv("MAX_CAMBIOS", "40")     # el tope global, bajado para probar la guarda
     filas = _n_filas(41)
     error = ("psql:/tmp/maint_cambios_1.sql:52: ERROR:  GUARDA DE VOLUMEN: 41 cambios > "
              "MAX_CAMBIOS=40 (no se aplica nada)\n"
@@ -563,7 +573,7 @@ def test_w_las_tres_transacciones_llevan_su_guarda_y_escriben_solo_lo_suyo(monke
 
     assert men.main() == men.EXIT_OK
     a, b, c = rastro["scripts"]
-    assert a.rstrip().endswith("COMMIT;") and "MAX_CAMBIOS=40" in a
+    assert a.rstrip().endswith("COMMIT;") and "MAX_CAMBIOS=500" in a
     assert "UPDATE suscripciones" in a and "FROM reservas" not in a
     assert b.rstrip().endswith("COMMIT;") and "MAX_CIERRE=500" in b
     assert "UPDATE reservas" in b and "UPDATE clases" in b and "DELETE" not in b
@@ -760,7 +770,7 @@ def _neon_falso(monkeypatch, ramas=None, cu_segundos=None, error=None) -> list:
     """Doble de `neon_api_get`: GET /projects/{id} y GET /projects/{id}/branches."""
     llamadas = []
 
-    def fake(ruta, timeout=20):
+    def fake(cfg, ruta, timeout=20):
         llamadas.append(ruta)
         if error:
             return {"ok": False, "status": 403, "datos": {}, "error": error}
@@ -1122,4 +1132,269 @@ def test_bm_el_aforo_va_en_la_guarda_se_verifica_y_el_log_dice_cuantas_clases(mo
     html = mails[0][1]
     assert "aforo_resync 3 → 3 (esperado 0)" in html
     assert "cierre_asistencia 2 → 2 (esperado 0)" in html
+
+
+# ══ Guardas de volumen POR REGLA: % de vencidos, huérfanas por lista y tope global ═══════════
+# El freno ya no es un único `MAX_CAMBIOS`: la regla de negocio dice que todo plan vence el
+# ÚLTIMO día del mes, así que el run del día 1 marca vencidos a todos los que no renovaron y ese
+# volumen es ESPERABLE (tiene su propio tope porcentual). Las huérfanas, en cambio, son pocas por
+# definición: muchas = anomalía (`MAX_HUERFANAS`, por cada lista). `MAX_CAMBIOS` queda como tope
+# global de respaldo. La evaluación es una FUNCIÓN PURA: los primeros tests no necesitan dobles.
+CFG_REGLAS = {"max_cambios": 500, "max_vencidos_pct": 80, "max_huerfanas": 10}
+
+
+def _conteos(vencidos=0, susc=0, solic=0, users=0, activas=0, total=None) -> dict:
+    """Conteos de un run, como los arma `main()` a partir de las 4 listas + el universo previo."""
+    return {"vencidos": vencidos, "huerfanas_suscripciones": susc, "huerfanas_solicitudes": solic,
+            "huerfanas_usuarios": users, "suscripciones_activas": activas,
+            "total": vencidos + susc + solic + users if total is None else total}
+
+
+def test_bn_evaluar_limites_devuelve_todas_las_reglas_en_orden_fijo():
+    """La evaluación devuelve las 5 reglas SIEMPRE (con su conteo y su tope), aunque no se haya
+    pasado ninguna: el log y el correo tienen que poder mostrar cada una. Y es PURA: mismo input,
+    mismo output (sin base, sin reloj y sin entorno de por medio)."""
+    reglas = men.evaluar_limites(_conteos(vencidos=10, susc=1, users=2, activas=100), CFG_REGLAS)
+
+    assert [r["regla"] for r in reglas] == [
+        "MAX_HUERFANAS:huerfanas_suscripciones", "MAX_HUERFANAS:huerfanas_solicitudes",
+        "MAX_HUERFANAS:huerfanas_usuarios", "MAX_VENCIDOS_PCT", "MAX_CAMBIOS"]
+    assert [(r["conteo"], r["limite"]) for r in reglas] == [(1, 10), (0, 10), (2, 10), (10, 80),
+                                                            (13, 500)]
+    assert men.limites_excedidos(reglas) == []
+    assert men.evaluar_limites(_conteos(vencidos=10, susc=1, users=2, activas=100),
+                               CFG_REGLAS) == reglas
+    linea = men.linea_limites(reglas)
+    assert "MAX_VENCIDOS_PCT=10/80" in linea and "MAX_CAMBIOS=13/500" in linea
+    assert "EXCEDE" not in linea
+    assert men.texto_excedidos([]) == ""
+
+
+def test_bo_dia_1_vencidos_masivos_dentro_del_pct_no_corta():
+    """El caso que motivó la regla: el día 1 vencen todos los que no renovaron. Con 80 % de 100
+    suscripciones activas, 80 vencidos entran (y 81 no): el borde es exacto."""
+    dentro = men.evaluar_limites(_conteos(vencidos=80, activas=100), CFG_REGLAS)
+    assert men.limites_excedidos(dentro) == []
+    assert dentro[3]["limite"] == 80
+    assert "80 de 100 suscripción(es) activa(s) (80 %" in dentro[3]["detalle"]
+
+    fuera = men.limites_excedidos(men.evaluar_limites(_conteos(vencidos=81, activas=100),
+                                                      CFG_REGLAS))
+    assert [r["variable"] for r in fuera] == ["MAX_VENCIDOS_PCT"]
+    assert men.texto_excedidos(fuera) == "excede MAX_VENCIDOS_PCT (81 > 80)"
+
+    # 100 % = "vencen todos": los vencidos son subconjunto del universo, nunca corta
+    assert men.limites_excedidos(men.evaluar_limites(
+        _conteos(vencidos=100, activas=100), {**CFG_REGLAS, "max_vencidos_pct": 100})) == []
+    # 0 suscripciones activas: 0 vencidos no corta (nada que vencer)
+    assert men.limites_excedidos(men.evaluar_limites(_conteos(), CFG_REGLAS)) == []
+
+
+def test_bp_max_huerfanas_es_por_cada_lista_no_por_el_total():
+    """12 pendientes viejas en UNA lista cortan aunque las otras dos estén en 0 y el total (12)
+    esté muy por debajo del tope global (500): las huérfanas son pocas por definición."""
+    excedidas = men.limites_excedidos(men.evaluar_limites(
+        _conteos(susc=12, users=3, activas=0), CFG_REGLAS))
+
+    assert [(r["regla"], r["conteo"], r["limite"]) for r in excedidas] == [
+        ("MAX_HUERFANAS:huerfanas_suscripciones", 12, 10)]
+    assert men.texto_excedidos(excedidas) == "excede MAX_HUERFANAS (12 > 10)"
+    assert "12 huérfana(s) en suscripciones" in excedidas[0]["detalle"]
+
+    # el borde es exacto (10 = tope: no corta) y `MAX_HUERFANAS=0` es un tope válido ("ninguna")
+    assert men.limites_excedidos(men.evaluar_limites(
+        _conteos(susc=10, users=10, activas=0), CFG_REGLAS)) == []
+    assert [r["variable"] for r in men.limites_excedidos(men.evaluar_limites(
+        _conteos(susc=1, activas=0), {**CFG_REGLAS, "max_huerfanas": 0}))] == ["MAX_HUERFANAS"]
+
+
+def test_bq_el_asunto_nombra_cada_limite_superado_no_solo_que_se_paso_uno():
+    """Función pura que arma `datos["estado"]` (y de ahí el asunto): con varias reglas pasadas
+    las nombra a todas, con su conteo y su tope."""
+    excedidas = men.limites_excedidos(men.evaluar_limites(
+        _conteos(vencidos=90, susc=11, activas=100), {**CFG_REGLAS, "max_cambios": 50}))
+
+    assert [r["variable"] for r in excedidas] == [
+        "MAX_HUERFANAS", "MAX_VENCIDOS_PCT", "MAX_CAMBIOS"]
+    assert men.texto_excedidos(excedidas) == ("excede MAX_HUERFANAS (11 > 10) y "
+                                              "MAX_VENCIDOS_PCT (90 > 80) y "
+                                              "MAX_CAMBIOS (101 > 50)")
+
+
+@pytest.mark.parametrize("var,valor", [
+    ("MAX_VENCIDOS_PCT", "-5"), ("MAX_VENCIDOS_PCT", "0"), ("MAX_VENCIDOS_PCT", "101"),
+    ("MAX_VENCIDOS_PCT", "abc"), ("MAX_VENCIDOS_PCT", "2.5"),
+    ("MAX_VENCIDOS_PCT", "80; DROP TABLE usuarios--"),
+    ("MAX_HUERFANAS", "-1"), ("MAX_HUERFANAS", "abc"), ("MAX_HUERFANAS", "1e9"),
+    ("MAX_HUERFANAS", "10 OR 1=1")])
+def test_br_topes_nuevos_invalidos_exit_2_sin_tocar_la_base(var, valor, monkeypatch, mails):
+    """Un límite nuevo que no sea un entero en rango (o negativo) aborta ANTES de leer y de
+    escribir: ningún valor de env var puede llegar al SQL."""
+    monkeypatch.setenv(var, valor)
+    rastro = _psql_falso(monkeypatch, _ctx())
+
+    assert men.main() == men.EXIT_CONFIG
+    assert rastro["sql"] == [] and rastro["scripts"] == []
+    assert var in mails[0][0]
+
+
+def test_bs_dry_run_el_pct_de_vencidos_informa_con_la_lista_completa(monkeypatch, mails, capsys):
+    """DRY-RUN con el % pasado: la transacción igual se ejecuta y termina en ROLLBACK (no se
+    aplica nada), el run queda rojo con exit 6, el asunto nombra la regla y el cuerpo lleva la
+    lista COMPLETA más cada regla con su conteo y su tope."""
+    filas = _n_filas(50)                       # 50 de 60 activas = 83 % > 80 %
+    rastro = _psql_falso(monkeypatch, _ctx(vencidos=filas, script_out=script_out(vencidos=50)))
+
+    assert men.main() == men.EXIT_GUARDA
+    assert rastro["scripts"][0].rstrip().endswith("ROLLBACK;")
+    asunto, html = mails[0]
+    assert asunto.startswith("[ALERTA] Mantenimiento PROD: excede MAX_VENCIDOS_PCT (50 > 48)")
+    assert html.count("<tr>") == 50                       # las 50 filas, sin truncar
+    assert "Límites de volumen — se pasó: MAX_VENCIDOS_PCT" in html
+    assert "MAX_VENCIDOS_PCT</b>: 50 / 48 — 50 de 60 suscripción(es) activa(s) (83 % · tope 80 %)" \
+        in html
+    assert "MAX_HUERFANAS:huerfanas_suscripciones</b>: 0 / 10" in html
+    assert "🚨 EXCEDE" in html
+    out = capsys.readouterr().out
+    assert "MAX_VENCIDOS_PCT=50/48 EXCEDE" in out
+    assert "suscripciones_activas: 60" in out             # el denominador, en el resumen del log
+
+
+def test_bt_dry_run_huerfanas_sobre_el_tope_por_lista(monkeypatch, mails):
+    """La regla de huérfanas corta con muchas MENOS filas que el tope global: 11 pendientes viejas
+    contra `MAX_HUERFANAS=10`, con `MAX_CAMBIOS` (500) intacto."""
+    filas = _n_filas(11, estado="pendiente")
+    rastro = _psql_falso(monkeypatch, _ctx(susc_pendientes=filas, script_out=script_out(susc=11)))
+
+    assert men.main() == men.EXIT_GUARDA
+    assert rastro["scripts"][0].rstrip().endswith("ROLLBACK;")
+    asunto, html = mails[0]
+    assert asunto.startswith("[ALERTA] Mantenimiento PROD: excede MAX_HUERFANAS (11 > 10)")
+    assert "no se aplicaría nada" in asunto
+    assert "MAX_HUERFANAS:huerfanas_suscripciones</b>: 11 / 10" in html
+    assert html.count("<tr>") == 11
+
+
+def test_bu_real_la_guarda_del_pct_aborta_en_el_sql_y_dice_cual_regla(monkeypatch, mails):
+    """REAL: el % lo decide el SQL DENTRO de la transacción y ANTES del paso 1 (es el único
+    momento en el que `estado = 'activo'` sigue siendo el universo previo). Si aborta, no se
+    aplica nada, no se llega a verificar y el correo dice cuál regla cortó."""
+    monkeypatch.setenv("DRY_RUN", "0")
+    filas = _n_filas(50)
+    error = ("psql:/tmp/maint_cambios_1.sql:11: ERROR:  GUARDA DE VOLUMEN: MAX_VENCIDOS_PCT: "
+             "50 vencido(s) > 80% de 60 activa(s) (no se aplica nada)\n"
+             "CONTEXT:  PL/pgSQL function inline_code_block line 7 at RAISE\n")
+    rastro = _psql_falso(monkeypatch, _ctx(vencidos=filas, script_rc=3, script_err=error))
+
+    assert men.main() == men.EXIT_GUARDA
+    script = rastro["scripts"][0]
+    assert "IF v * 100 > a * 80 THEN" in script            # enteros: sin floats y sin texto
+    assert "MAX_VENCIDOS_PCT: % vencido(s) > 80%% de % activa(s)" in script
+    assert script.index("IF v * 100") < script.index("-- 1)")   # ANTES de tocar nada
+    assert rastro["vistas"]["vencidos"] == 1               # …y NO se llegó a verificar
+    asunto, html = mails[0]
+    assert asunto.startswith("[ALERTA] Mantenimiento PROD: excede MAX_VENCIDOS_PCT (50 > 48)")
+    assert "MAX_VENCIDOS_PCT: 50 vencido(s)" in html       # el stderr de psql, saneado
+    assert html.count("<tr>") == 50
+
+
+def test_bv_las_tres_reglas_van_dentro_de_la_transaccion_en_real(monkeypatch, mails):
+    """REAL: la transacción 1 lleva las 3 reglas adentro (el % antes del paso 1; el tope global y
+    las 3 listas de huérfanas al final, sobre lo que la transacción REALMENTE tocó) y las otras
+    dos transacciones siguen con su único tope de siempre."""
+    monkeypatch.setenv("DRY_RUN", "0")
+    monkeypatch.setenv("MAX_VENCIDOS_PCT", "70")
+    monkeypatch.setenv("MAX_HUERFANAS", "4")
+    rastro = _psql_falso(monkeypatch, _ctx(despues="vacio"))
+
+    assert men.main() == men.EXIT_OK
+    cambios, cierre, purga = rastro["scripts"]
+    assert cambios.index("IF v * 100 > a * 70 THEN") < cambios.index("-- 1)")
+    assert "n > 500 THEN" in cambios                       # tope global de respaldo
+    for paso in men.HUERFANAS:
+        assert f"WHERE paso = '{paso}';" in cambios        # una regla por cada lista
+    assert "h > 4 THEN" in cambios
+    assert cambios.count("GUARDA DE VOLUMEN") == 5         # 1 % + 1 global + 3 huérfanas
+    assert "MAX_VENCIDOS_PCT" not in cierre + purga and "h > 4" not in cierre + purga
+    assert "MAX_CIERRE=500" in cierre and "MAX_PURGA=5000" in purga
+
+
+def test_bw_en_dry_run_ninguna_regla_viaja_en_el_sql(monkeypatch, mails):
+    """DRY-RUN: ninguna guarda va en el SQL (la transacción se ejecuta para medir y termina en
+    ROLLBACK); la decisión la toma Python con `evaluar_limites()`."""
+    rastro = _psql_falso(monkeypatch, _ctx())
+
+    assert men.main() == men.EXIT_OK
+    script = rastro["scripts"][0]
+    assert "GUARDA DE VOLUMEN" not in script
+    assert "IF v * 100" not in script and "h > 10" not in script
+    assert script.rstrip().endswith("ROLLBACK;")
+    assert mails == []
+
+
+def test_bx_el_aviso_del_correo_sale_con_maint_y_el_watchdog_sigue_con_backup(monkeypatch,
+                                                                            capsys):
+    """Punto 2: el módulo de correo compartido usa el `log()` de quien llama. En el mantenimiento
+    el "Email enviado…" sale `[maint]`; sin `logger` (watchdog y drill) sigue saliendo `[backup]`."""
+    class SMTPFalso:
+        def __init__(self, *a, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def login(self, *a):
+            pass
+
+        def send_message(self, *a):
+            pass
+
+    from maintenance import alertas as al
+    monkeypatch.setattr(al.smtplib, "SMTP_SSL", SMTPFalso)
+    _psql_falso(monkeypatch, _ctx(dup_rut=[["12345678-9", "2"]]))    # run rojo ⇒ sale correo
+
+    assert men.main() == men.EXIT_INTEGRIDAD
+    out = capsys.readouterr().out
+    assert "[maint] " in out and "Email enviado por Gmail SMTP" in out
+    assert "[backup]" not in out                    # ni una línea con el prefijo del backup
+
+    assert al.enviar_email("asunto", "<p>x</p>") is True
+    assert "[backup] " in capsys.readouterr().out   # el default sigue siendo el de backups
+
+
+def test_by_leer_config_expone_las_reglas_y_sus_defaults(monkeypatch):
+    """Los 3 números de las reglas se leen en `leer_config()` (nada de defaults sueltos por el
+    código) y los defaults son los documentados: 500 / 80 % / 10."""
+    cfg = men.leer_config()
+    assert (cfg["max_cambios"], cfg["max_vencidos_pct"], cfg["max_huerfanas"]) == (500, 80, 10)
+    assert cfg["neon_api_key"] == "" and cfg["neon_project_id"] == ""   # las de Neon: opcionales
+
+    monkeypatch.setenv("MAX_VENCIDOS_PCT", "95")
+    monkeypatch.setenv("MAX_HUERFANAS", "0")
+    monkeypatch.setenv("NEON_API_KEY", "napi_fake_no_real")
+    cfg = men.leer_config()
+    assert (cfg["max_vencidos_pct"], cfg["max_huerfanas"]) == (95, 0)
+    assert cfg["neon_api_key"] == "napi_fake_no_real"
+
+
+def test_bz_la_config_se_lee_solo_en_los_lectores_de_leer_config():
+    """Punto 1 (centralizar la config, sin `os.getenv` esparcidos): fuera de los 7 lectores de
+    `leer_config()` no hay ningún `os.getenv`/`os.environ` en el módulo. Se verifica con el AST
+    del propio archivo: si mañana alguien lee una env var "por conveniencia" en medio del SQL,
+    este test lo caza."""
+    lectores = {"leer_config", "_entero", "_flotante", "_allowlist", "_url_https", "_texto",
+                "dry_run_activo"}
+    arbol = ast.parse(Path(men.__file__).read_text(encoding="utf-8"))
+    rangos = [(n.lineno, n.end_lineno) for n in ast.walk(arbol)
+              if isinstance(n, ast.FunctionDef) and n.name in lectores]
+    assert len(rangos) == len(lectores)      # los 7 siguen existiendo (no se renombró ninguno)
+
+    sueltos = [n.lineno for n in ast.walk(arbol)
+               if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
+               and n.value.id == "os" and n.attr in ("getenv", "environ")
+               and not any(ini <= n.lineno <= fin for ini, fin in rangos)]
+    assert sueltos == []
 

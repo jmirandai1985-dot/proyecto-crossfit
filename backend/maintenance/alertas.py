@@ -14,7 +14,9 @@ se usa ninguna API key externa y no hace falta verificar dominios.
 
 ⚠️ **Y acá no se decide *cuándo* avisar**: cada job decide con su propia regla
 (**correo = algo que revisar**: sólo si hay un problema). `enviar_email()` es el único
-punto de envío; que devuelva `False` **nunca** cambia el exit code del run.
+punto de envío; que devuelva `False` **nunca** cambia el exit code del run. El `log()` del
+job que llama entra por parámetro (`logger`), así cada uno conserva su prefijo
+(`[maint]`/`[backup]`) y no se mezclan en el log del Cron Job.
 
 Credenciales (env group `alertas` de Render; nunca en el repo)
 -------------------------------------------------------------
@@ -62,11 +64,18 @@ def _ocultar(texto, *secretos) -> str:
     return t
 
 
-def enviar_email(asunto: str, html: str) -> bool:
-    """Manda el email por Gmail SMTP y devuelve True/False. Nunca imprime credenciales."""
+def enviar_email(asunto: str, html: str, logger=None) -> bool:
+    """Manda el email por Gmail SMTP y devuelve True/False. Nunca imprime credenciales.
+
+    `logger` es **el `log()` del job que llama** (un callable, no un `logging.Logger`: los Cron
+    Jobs de `maintenance/` loguean con `print` + su propio prefijo, `[maint]`/`[backup]`). Si no
+    se pasa, se usa el de `backup_cloud` ⇒ el watchdog y el drill siguen logueando `[backup]`,
+    mientras que el mantenimiento pasa el suyo y sus avisos de correo salen `[maint]`.
+    """
+    logar = logger or log
     falta = [v for v in VARS_ALERTA if not limpiar_valor(os.getenv(v) or "")]
     if falta:
-        log(f"FATAL (config): no puedo enviar el email, faltan: {', '.join(falta)}")
+        logar(f"FATAL (config): no puedo enviar el email, faltan: {', '.join(falta)}")
         return False
 
     usuario = _header(limpiar_valor(os.environ["GMAIL_SMTP_USER"]))
@@ -85,9 +94,9 @@ def enviar_email(asunto: str, html: str) -> bool:
             srv.login(usuario, clave)
             srv.send_message(msg)
     except Exception as e:  # noqa: BLE001 (el mensaje se sanea al pasar por log())
-        log("FATAL: no se pudo enviar el email por Gmail SMTP: "
-            f"{type(e).__name__}: {_ocultar(e, clave, usuario)}")
+        logar("FATAL: no se pudo enviar el email por Gmail SMTP: "
+              f"{type(e).__name__}: {_ocultar(e, clave, usuario)}")
         return False
 
-    log(f"Email enviado por Gmail SMTP ({SMTP_HOST}:{SMTP_PORT}) a {destinatario}")
+    logar(f"Email enviado por Gmail SMTP ({SMTP_HOST}:{SMTP_PORT}) a {destinatario}")
     return True

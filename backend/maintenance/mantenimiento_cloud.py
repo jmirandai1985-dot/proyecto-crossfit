@@ -24,10 +24,18 @@ Principios
 4. **DRY_RUN=1 por defecto** (igual que `backup_cloud`): la transacción completa se ejecuta
    y termina en `ROLLBACK`, así el mail dice **exactamente** qué filas habrían cambiado
    (no una estimación). Se apaga (`DRY_RUN=0`) recién cuando el log da verde.
-5. **Guarda de volumen**: si la corrida afecta más de `MAX_CAMBIOS` filas (default 40, rango
-   1..1000), el mantenimiento **no se aplica**. En REAL la guarda aborta la transacción
-   *desde el SQL* (`DO $$ … RAISE EXCEPTION … $$`), así que no depende del código Python; en
-   DRY-RUN no aborta: informa (con la lista completa) y el run queda rojo (exit 6).
+5. **Guardas de volumen por regla**: no alcanza con un único tope global. La regla de negocio
+   dice que **todo plan vence el ÚLTIMO día del mes**, así que el run del día 1 marca vencidos a
+   todos los que no renovaron: ese volumen es ESPERABLE. Las huérfanas, en cambio, tienen que
+   ser pocas (si hay muchas, es una anomalía). Por eso hay tres reglas y se evalúan todas en
+   `evaluar_limites()` (función pura: conteos + config → reglas, sin base ni entorno):
+   `MAX_VENCIDOS_PCT` (% máximo de las suscripciones activas que pueden vencer en un run),
+   `MAX_HUERFANAS` (máximo **por cada** lista: suscripciones, solicitudes, usuarios) y
+   `MAX_CAMBIOS` (tope global de respaldo del run, default 500). Si CUALQUIERA se pasa, el
+   mantenimiento **no se aplica**: en REAL las guardas abortan la transacción *desde el SQL*
+   (`DO $$ … RAISE EXCEPTION … $$`), así que no dependen del código Python; en DRY-RUN no
+   abortan: informan (con la lista completa y el número de cada regla) y el run queda rojo
+   (exit 6).
 6. **El éxito se verifica**: después de la transacción se vuelven a correr las mismas
    consultas. En REAL deben dar 0 (se aplicó) y en DRY-RUN el mismo número de antes
    (no se aplicó nada).
@@ -51,7 +59,9 @@ Variables de entorno (env group `mantenimiento-prod` + `alertas` de Render)
 --------------------------------------------------------------------------
   * `MAINT_DB_URL`  — conexión **directa** (host sin `-pooler`) del rol `maint_rw` de PROD
   * `ENVIRONMENT`   — tiene que ser `production` (guarda dura: el job escribe en PROD)
-  * `MAX_CAMBIOS`   — guarda de volumen (default 40: en 15 días pueden vencer 15-25 planes)
+  * `MAX_CAMBIOS`   — tope global de respaldo del run (default 500)
+  * `MAX_VENCIDOS_PCT` — % máximo de suscripciones activas que pueden vencer (default 80)
+  * `MAX_HUERFANAS` — máximo **por cada** lista de huérfanas (default 10, `0` = ninguna)
   * `DIAS_PENDIENTE`— antigüedad de las huérfanas (default 7)
   * `NEON_LIMITE_MB`— límite del free tier de Neon (default 512 = 0,5 GB por proyecto)
   * `NEON_UMBRAL_PCT`— alerta de uso (default 80 %)
@@ -162,8 +172,17 @@ VARS_OBLIGATORIAS = (
 USUARIO_ROL = "maint_rw"           # el único rol con UPDATE sobre estas columnas
 ENTORNO_ESPERADO = "production"    # guarda dura: este job escribe en PROD
 TZ_CLT = "America/Santiago"        # mismo huso que el contenedor (Dockerfile.cron)
-MAX_CAMBIOS_DEFECTO = 40
+MAX_CAMBIOS_DEFECTO = 500           # tope GLOBAL de respaldo (las reglas finas están abajo)
 MAX_CAMBIOS_RANGO = (1, 1000)      # el único camino por el que un número llega al SQL
+# ── Guardas de volumen por regla (2026-09-27) ────────────────────────────────
+# Un único tope global bloqueaba justo el día en que el volumen es esperable: los planes vencen
+# el ÚLTIMO día del mes, así que el run del día 1 marca vencidos a TODOS los que no renovaron.
+# Las huérfanas, en cambio, son pocas por definición: muchas = anomalía. Cada regla tiene su
+# tope, `evaluar_limites()` las evalúa todas y `MAX_CAMBIOS` queda como respaldo del run.
+MAX_VENCIDOS_PCT_DEFECTO = 80      # % máximo de las suscripciones activas que pueden vencer
+MAX_VENCIDOS_PCT_RANGO = (1, 100)  # entero: la comparación se hace con enteros (sin floats)
+MAX_HUERFANAS_DEFECTO = 10         # máximo POR CADA lista de huérfanas (0 = ninguna)
+MAX_HUERFANAS_RANGO = (0, 1_000_000)
 DIAS_PENDIENTE_DEFECTO = 7
 NEON_LIMITE_MB_DEFECTO = 512       # free tier de Neon: 0,5 GB por proyecto
 NEON_UMBRAL_PCT_DEFECTO = 80.0
@@ -279,6 +298,16 @@ def _url_https(nombre: str, defecto: str) -> str:
     return crudo.rstrip("/")
 
 
+def _texto(nombre: str, defecto: str = "") -> str:
+    """Lee una env var de TEXTO que NO se interpola en el SQL (hoy: las de la API de Neon).
+
+    Mismo saneo que el resto (`limpiar_valor`): se limpian los espacios y el salto de línea
+    que se pega al copiar la variable en el dashboard. El valor nunca se imprime (los errores
+    de la API pasan por `sanear()`) y el que decide si está configurado es `neon_api_limites`.
+    """
+    return limpiar_valor(os.getenv(nombre) or "") or defecto
+
+
 def dry_run_activo() -> bool:
     """DRY_RUN=1 (o cualquier valor que no sea "0"/"false"/"no") ⇒ no se aplica nada.
 
@@ -316,7 +345,13 @@ def validar_url_maint(url: str) -> str:
 
 
 def leer_config() -> dict:
-    """Config completa y validada. Lanza ConfigError (exit 2) antes de tocar la base."""
+    """Config completa y validada. Lanza ConfigError (exit 2) antes de tocar la base.
+
+    Es el **único** lugar del módulo que lee variables de entorno (directamente o por
+    `_entero`/`_flotante`/`_allowlist`/`_url_https`/`_texto`): el resto del código recibe este
+    dict, así que un número o un texto de configuración no puede llegar al SQL sin haber pasado
+    por acá. Un valor no numérico, negativo o fuera de rango ⇒ exit 2 sin leer ni escribir nada.
+    """
     falta = [v for v in VARS_OBLIGATORIAS if not limpiar_valor(os.getenv(v) or "")]
     if falta:
         raise ConfigError(f"faltan variables de entorno: {', '.join(falta)}")
@@ -337,6 +372,9 @@ def leer_config() -> dict:
         "entorno": entorno,
         "dry_run": dry_run_activo(),
         "max_cambios": _entero("MAX_CAMBIOS", MAX_CAMBIOS_DEFECTO, *MAX_CAMBIOS_RANGO),
+        "max_vencidos_pct": _entero("MAX_VENCIDOS_PCT", MAX_VENCIDOS_PCT_DEFECTO,
+                                    *MAX_VENCIDOS_PCT_RANGO),
+        "max_huerfanas": _entero("MAX_HUERFANAS", MAX_HUERFANAS_DEFECTO, *MAX_HUERFANAS_RANGO),
         "dias_pendiente": _entero("DIAS_PENDIENTE", DIAS_PENDIENTE_DEFECTO, 1, 365),
         "neon_limite_mb": _entero("NEON_LIMITE_MB", NEON_LIMITE_MB_DEFECTO, 1, 1_000_000),
         "neon_umbral_pct": _flotante("NEON_UMBRAL_PCT", NEON_UMBRAL_PCT_DEFECTO, 1.0, 100.0),
@@ -356,6 +394,11 @@ def leer_config() -> dict:
         "neon_cu_umbral_pct": _flotante("NEON_CU_UMBRAL_PCT", NEON_CU_UMBRAL_DEFECTO, 1.0, 100.0),
         "neon_ramas_limite": _entero("NEON_RAMAS_LIMITE", NEON_RAMAS_LIMITE_DEFECTO, 1, 100),
         "neon_api_base": _url_https("NEON_API_BASE", NEON_API_BASE_DEFECTO),
+        # Credenciales de la API de Neon (env group `neon-api`, opcional: sin ellas B.6/B.7
+        # quedan "no configurados"). Entran por acá y no dentro de `neon_api_get()`: después de
+        # esta función no queda ningún `os.getenv` suelto en el módulo.
+        "neon_api_key": _texto("NEON_API_KEY"),
+        "neon_project_id": _texto("NEON_PROJECT_ID"),
     }
 
 
@@ -542,6 +585,12 @@ SQL_FECHAS_INVALIDAS = (
 # ── Consultas de Neon y del reporte mensual ──────────────────────────────────
 SQL_USUARIOS = "SELECT count(*)::text FROM usuarios"
 SQL_ALEMBIC = "SELECT version_num FROM alembic_version"
+# Universo del paso de vencidos: las suscripciones que están en el estado que el paso evalúa
+# ('activo'), ANTES de aplicarlo. Una sola definición, usada por (a) la lectura previa del job,
+# (b) el reporte del mes y (c) la guarda del SQL: así los vencidos son un subconjunto de este
+# universo y el % de MAX_VENCIDOS_PCT no puede pasar de 100.
+SUSCRIPCIONES_ACTIVAS = "suscripciones WHERE estado = 'activo'"
+SQL_SUSCRIPCIONES_ACTIVAS = f"SELECT count(*)::text FROM {SUSCRIPCIONES_ACTIVAS}"
 SQL_TAMANO = "SELECT pg_database_size(current_database())::text"
 SQL_TABLAS_TOP = (
     "SELECT relname, n_live_tup::text FROM pg_stat_user_tables "
@@ -838,7 +887,7 @@ def consultas_purga(cfg: dict) -> list:
 SQL_REPORTE = {
     "total_alumnos": "SELECT count(*)::text FROM usuarios WHERE rol = 'alumno'",
     "alumnos_activos": "SELECT count(*)::text FROM usuarios WHERE rol = 'alumno' AND activo = true",
-    "planes_activos": "SELECT count(*)::text FROM suscripciones WHERE estado = 'activo'",
+    "planes_activos": SQL_SUSCRIPCIONES_ACTIVAS,
     "planes_vencidos_mes": (
         "SELECT count(*)::text FROM suscripciones "
         "WHERE estado = 'vencido' AND updated_at >= '{ini}'::date"
@@ -1027,16 +1076,17 @@ def detecciones(url: str, cfg: dict) -> dict:
     return {"hallazgos": hallazgos, "informes": informes, "listas": listas}
 
 
-def neon_api_get(ruta: str, timeout: int = 20) -> dict:
+def neon_api_get(cfg: dict, ruta: str, timeout: int = 20) -> dict:
     """GET a la API v2 de Neon (sólo lectura, con `urllib` de la stdlib).
 
     No se importa `restore_drill`: cada Cron Job tiene que poder fallar sin arrastrar al otro
-    (el drill crea y borra ramas; este job lee dos endpoints y nada más). La API key viaja en
-    el header y no se imprime ni se devuelve: los errores pasan por `sanear()`.
+    (el drill crea y borra ramas; este job lee dos endpoints y nada más). La base y la API key
+    vienen en el `cfg` validado (nada de `os.getenv` acá) y la key no se imprime ni se devuelve:
+    los errores pasan por `sanear()`.
     Devuelve `{"ok": bool, "status": int, "datos": dict, "error": str}`.
     """
-    base = _url_https("NEON_API_BASE", NEON_API_BASE_DEFECTO)
-    api_key = limpiar_valor(os.getenv("NEON_API_KEY") or "")
+    base = cfg["neon_api_base"]
+    api_key = cfg["neon_api_key"]
     req = urllib.request.Request(
         f"{base}{ruta}", method="GET",
         headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"})
@@ -1067,8 +1117,8 @@ def neon_api_limites(cfg: dict) -> dict:
     mes ⇒ CU-horas = segundos / 3600 (1 CU-hora = 3600 s de CPU a 1 CU). Si la API no trae ese
     campo se usa `cpu_used_sec` (mismo significado, nombre viejo) en vez de informar 0.
     """
-    api_key = limpiar_valor(os.getenv("NEON_API_KEY") or "")
-    proyecto = limpiar_valor(os.getenv("NEON_PROJECT_ID") or "")
+    api_key = cfg["neon_api_key"]
+    proyecto = cfg["neon_project_id"]
     faltan = [n for n, v in (("NEON_API_KEY", api_key),
                              ("NEON_PROJECT_ID", proyecto)) if not v]
     if faltan:
@@ -1080,7 +1130,7 @@ def neon_api_limites(cfg: dict) -> dict:
 
     datos = {"configurado": True, "alerta": False, "hallazgos": [], "avisos": [],
              "proyecto": proyecto}
-    r = neon_api_get(f"/projects/{proyecto}")
+    r = neon_api_get(cfg, f"/projects/{proyecto}")
     if not r["ok"]:
         datos["alerta"] = True
         datos["hallazgos"].append(
@@ -1113,7 +1163,7 @@ def neon_api_limites(cfg: dict) -> dict:
     datos["bytes"] = {k: j.get(k) for k in
                       ("data_transfer_bytes", "written_data_bytes", "data_storage_bytes_hour")}
 
-    r = neon_api_get(f"/projects/{proyecto}/branches")
+    r = neon_api_get(cfg, f"/projects/{proyecto}/branches")
     if not r["ok"]:
         datos["alerta"] = True
         datos["hallazgos"].append(f"B.7 no se pudo listar las ramas del proyecto: {r['error']}")
@@ -1203,12 +1253,141 @@ def reporte_mes(url: str, cfg: dict) -> dict:
 MARCA_GUARDA = "GUARDA DE VOLUMEN"
 
 
+# ── Reglas de volumen: evaluación PURA (conteos + config → reglas) ────────────
+# El freno no puede ser un único tope global: el día 1 vencen los planes de todos los que no
+# renovaron (volumen ESPERABLE: todo plan vence el último día del mes) y las huérfanas tienen
+# que ser pocas (volumen ANÓMALO). Todo se decide acá, sin base, sin reloj y sin entorno, así
+# que las reglas se testean sin dobles de psql.
+HUERFANAS = ("huerfanas_suscripciones", "huerfanas_solicitudes", "huerfanas_usuarios")
+
+
+def evaluar_limites(conteos: dict, cfg: dict) -> list:
+    """TODAS las reglas de volumen, en orden fijo, con su conteo, su tope y si se pasaron.
+
+    `conteos` son los números del run:
+
+        {"vencidos": n, "huerfanas_suscripciones": n, "huerfanas_solicitudes": n,
+         "huerfanas_usuarios": n, "total": n, "suscripciones_activas": n}
+
+    `cfg` es la config YA validada de `leer_config()`: de acá sólo se leen `max_vencidos_pct`,
+    `max_huerfanas` y `max_cambios` (los números no se vuelven a leer del entorno).
+
+    Devuelve las 5 reglas SIEMPRE (no sólo las que se pasaron) porque el log y el correo tienen
+    que mostrar cada una con su conteo y su tope; las excedidas se obtienen con
+    `limites_excedidos()`. Cada regla es `{regla, variable, conteo, limite, detalle, excedido}`.
+
+    El % se compara con ENTEROS (`vencidos * 100 > activas * pct`) para no depender del redondeo
+    de un float, y el denominador es el universo del propio paso de vencidos (`suscripciones` en
+    el estado que ese paso evalúa, ANTES de aplicar) ⇒ los vencidos son un subconjunto y el
+    porcentaje nunca pasa de 100 (con `MAX_VENCIDOS_PCT=100` no hay forma de que corte).
+    """
+    activas = int(conteos.get("suscripciones_activas") or 0)
+    pct = int(cfg["max_vencidos_pct"])
+    vencidos = int(conteos.get("vencidos") or 0)
+    max_huerfanas = int(cfg["max_huerfanas"])
+    total = int(conteos.get("total") or 0)
+    max_cambios = int(cfg["max_cambios"])
+
+    reglas = []
+    for clave in HUERFANAS:
+        n = int(conteos.get(clave) or 0)
+        reglas.append({
+            "regla": f"MAX_HUERFANAS:{clave}", "variable": "MAX_HUERFANAS",
+            "conteo": n, "limite": max_huerfanas,
+            "detalle": f"{n} huérfana(s) en {clave.replace('huerfanas_', '')}",
+            "excedido": n > max_huerfanas,
+        })
+    reglas.append({
+        "regla": "MAX_VENCIDOS_PCT", "variable": "MAX_VENCIDOS_PCT",
+        "conteo": vencidos, "limite": activas * pct // 100,
+        "detalle": (f"{vencidos} de {activas} suscripción(es) activa(s) "
+                    f"({round(vencidos * 100 / activas) if activas else 0} % · tope {pct} %)"),
+        "excedido": vencidos * 100 > activas * pct,
+    })
+    reglas.append({
+        "regla": "MAX_CAMBIOS", "variable": "MAX_CAMBIOS", "conteo": total,
+        "limite": max_cambios,
+        "detalle": f"{total} cambio(s) en el run (tope global de respaldo)",
+        "excedido": total > max_cambios,
+    })
+    return reglas
+
+
+def limites_excedidos(evaluacion: list) -> list:
+    """Sólo las reglas que se pasaron del tope (filtro puro sobre `evaluar_limites()`)."""
+    return [r for r in (evaluacion or []) if r["excedido"]]
+
+
+def linea_limites(evaluacion: list) -> str:
+    """Una línea con TODAS las reglas (`conteo/tope`), marcando la que se pasó.
+
+    Es lo que va al log del run y al resumen del correo: se lee de un vistazo cuánto se movió
+    cada regla respecto de su tope y cuál fue la que cortó.
+    """
+    return " · ".join(f"{r['regla']}={r['conteo']}/{r['limite']}"
+                      + (" EXCEDE" if r["excedido"] else "") for r in (evaluacion or []))
+
+
+def texto_excedidos(excedidos: list) -> str:
+    """`excede MAX_VENCIDOS_PCT (130 > 120)` — y con más de una, las une con " y ".
+
+    Es lo que va a `datos["estado"]` (y de ahí al asunto y al cuerpo del correo): dice **cuál**
+    límite se superó, no sólo que se superó uno. Cadena vacía si no se pasó ninguno.
+    """
+    if not excedidos:
+        return ""
+    return "excede " + " y ".join(f"{r['variable']} ({r['conteo']} > {r['limite']})"
+                                  for r in excedidos)
+
+
+def guarda_vencidos(max_vencidos_pct: int) -> str:
+    """Guarda del % de vencidos: va ANTES del paso 1, cuando `estado = 'activo'` sigue siendo el
+    universo previo (después del paso 1 esa fila ya es 'vencido').
+
+    Cuenta el universo y los que el paso 1 va a tocar con EXACTAMENTE los mismos predicados de
+    `SQL_SUSCRIPCIONES_ACTIVAS` y del propio `UPDATE` (mismo `current_date`: la sesión ya fijó
+    `SET LOCAL TIME ZONE`). `max_vencidos_pct` viene validado como entero (1..100), así que no
+    hay forma de inyectar texto por esta vía. `%%` imprime un `%` literal en el RAISE.
+    """
+    pct = int(max_vencidos_pct)
+    return f"""DO $$
+DECLARE v integer; a integer;
+BEGIN
+  SELECT count(*) INTO a FROM {SUSCRIPCIONES_ACTIVAS};
+  SELECT count(*) INTO v FROM {SUSCRIPCIONES_ACTIVAS} AND fecha_expiracion < current_date;
+  IF v * 100 > a * {pct} THEN
+    RAISE EXCEPTION '{MARCA_GUARDA}: MAX_VENCIDOS_PCT: % vencido(s) > {pct}%% de % activa(s) (no se aplica nada)', v, a;
+  END IF;
+END $$;"""
+
+
+def guarda_huerfanas(max_huerfanas: int) -> str:
+    """Guarda POR CADA lista de huérfanas: suscripciones, solicitudes y usuarios, una por paso.
+
+    Cuenta `_maint_cambios` (lo que la transacción REALMENTE tocó), no lo que se leyó antes: si
+    hubiera una carrera, manda esto. Las huérfanas son pocas por definición, así que cualquiera
+    de las tres que se pase del tope es una anomalía.
+    """
+    tope = int(max_huerfanas)
+    chequeos = "\n".join(
+        f"""  SELECT count(*) INTO h FROM _maint_cambios WHERE paso = '{clave}';
+  IF h > {tope} THEN
+    RAISE EXCEPTION '{MARCA_GUARDA}: MAX_HUERFANAS: % huérfana(s) en {clave} > {tope} (no se aplica nada)', h;
+  END IF;""" for clave in HUERFANAS)
+    return f"""DO $$
+DECLARE h integer;
+BEGIN
+{chequeos}
+END $$;"""
+
+
 def guarda_volumen(maximo: int, variable: str = "MAX_CAMBIOS", tabla: str = "_maint_cambios",
                    que: str = "cambios") -> str:
-    """Guarda de volumen evaluada EN EL SQL: aborta la transacción si se pasa del tope.
+    """Guarda del tope GLOBAL de una transacción: aborta si se pasa de `maximo` filas tocadas.
 
-    Cuenta `_maint_cambios` (lo que la transacción REALMENTE tocó), no lo que se leyó antes:
-    si hubiera una carrera, manda esto. `max_cambios` ya viene validado como entero
+    Es el respaldo de las reglas finas (el % de vencidos y las huérfanas tienen la suya):
+    cuenta `_maint_cambios` (lo que la transacción REALMENTE tocó), no lo que se leyó antes:
+    si hubiera una carrera, manda esto. `maximo` ya viene validado como entero
     (1..1000), así que no hay forma de inyectar texto por esta vía.
     """
     tope = int(maximo)
@@ -1222,14 +1401,24 @@ BEGIN
 END $$;"""
 
 
-def script_cambios(max_cambios: int, dias_pendiente: int, dry_run: bool) -> str:
+def script_cambios(max_cambios: int, dias_pendiente: int, dry_run: bool,
+                   max_vencidos_pct: int = MAX_VENCIDOS_PCT_DEFECTO,
+                   max_huerfanas: int = MAX_HUERFANAS_DEFECTO) -> str:
     """Script de UNA transacción con los 4 UPDATE del mantenimiento.
 
-    `DRY_RUN=1` ⇒ termina en `ROLLBACK` y **no** lleva la guarda de volumen: el objetivo es
-    medir exactamente lo que cambiaría y que la alerta (si hay que darla) muestre la lista
-    completa (el "excede" lo decide Python y lo informa, no aborta). `DRY_RUN=0` ⇒ termina en
-    `COMMIT` y la guarda va antes del cierre: si se pasa del tope la transacción aborta y no se
-    aplica NADA.
+    `DRY_RUN=1` ⇒ termina en `ROLLBACK` y **no** lleva ninguna guarda: el objetivo es medir
+    exactamente lo que cambiaría y que la alerta (si hay que darla) muestre la lista completa
+    (el "excede" lo decide Python con `evaluar_limites()` y lo informa, no aborta). `DRY_RUN=0`
+    ⇒ termina en `COMMIT` y las tres guardas viajan adentro:
+      * `guarda_vencidos()` **antes** del paso 1 (es el único momento en el que `estado =
+        'activo'` sigue siendo el universo previo al cambio);
+      * al final, `guarda_volumen()` (tope global de respaldo) y `guarda_huerfanas()` (una por
+        cada lista de huérfanas), sobre `_maint_cambios`, o sea lo que la transacción
+        REALMENTE tocó.
+    Si se pasa cualquiera de las tres, la transacción aborta y no se aplica NADA.
+
+    `max_vencidos_pct`/`max_huerfanas` tienen como default los MISMOS valores que `leer_config()`
+    (constantes del módulo, no números sueltos): `main()` pasa siempre los ya validados.
 
     **Idempotente**: los 4 pasos filtran por estado (`activo`→`vencido`, `pendiente`→`rechazado`,
     `pending`→`rejected`, `pendiente_activacion`→`rechazado`) y por antigüedad, así que una segunda
@@ -1238,12 +1427,15 @@ def script_cambios(max_cambios: int, dias_pendiente: int, dry_run: bool) -> str:
     """
     dias = int(dias_pendiente)
     cierre = "ROLLBACK;" if dry_run else "COMMIT;"
-    guarda = "" if dry_run else "\n" + guarda_volumen(max_cambios) + "\n"
+    guarda_vencidos_tx = "" if dry_run else "\n" + guarda_vencidos(max_vencidos_pct) + "\n"
+    guarda_resto = ("" if dry_run
+                    else "\n" + guarda_volumen(max_cambios) + "\n"
+                    + guarda_huerfanas(max_huerfanas) + "\n")
     return f"""-- mantenimiento PROD: todo en UNA transacción (BEGIN … {cierre})
 BEGIN;
 SET LOCAL TIME ZONE '{TZ_CLT}';
 CREATE TEMP TABLE _maint_cambios (paso text NOT NULL, id integer NOT NULL) ON COMMIT DROP;
-
+{guarda_vencidos_tx}
 -- 1) suscripciones activas con el plan vencido → 'vencido' (antes marcar_plan_vencido.py)
 WITH up AS (
   UPDATE suscripciones AS s SET estado = 'vencido', updated_at = now()
@@ -1275,7 +1467,7 @@ WITH up AS (
   WHERE u.estado = 'pendiente_activacion' AND u.created_at < now() - interval '{dias} days'
   RETURNING u.id)
 INSERT INTO _maint_cambios SELECT 'huerfanas_usuarios', id FROM up;
-{guarda}
+{guarda_resto}
 -- resumen: la única línea con `|` que imprime el psql (-tA -F '|'); los tags de comando
 -- (BEGIN/SET/CREATE TABLE/INSERT 0 n/DO/ROLLBACK) los ignora `parsear_resumen()`
 SELECT paso, count(*) FROM _maint_cambios GROUP BY paso ORDER BY paso;
@@ -1524,9 +1716,20 @@ def construir_html(datos: dict, inicio: datetime, segundos: float, titulo: str =
              f"{_e(datos.get('entorno'))}<br>"
              f"<b>alembic:</b> {_e(datos.get('alembic'))} · <b>usuarios:</b> "
              f"{_e(datos.get('usuarios'))}<br>"
-             f"<b>MAX_CAMBIOS:</b> {_e(datos.get('max_cambios'))}<br>"
+             f"<b>límites:</b> MAX_CAMBIOS={_e(datos.get('max_cambios'))} · "
+             f"MAX_VENCIDOS_PCT={_e(datos.get('max_vencidos_pct'))}% · "
+             f"MAX_HUERFANAS={_e(datos.get('max_huerfanas'))}<br>"
              f"<b>Duración:</b> {segundos:.0f} s · <b>Inicio (UTC):</b> "
              f"{inicio.strftime('%Y-%m-%d %H:%M')}</p>")
+
+    # Reglas de volumen: cada una con su conteo y su tope, marcando la que se pasó (así el
+    # correo dice cuál límite cortó, no sólo que cortó uno).
+    limites = datos.get("limites") or []
+    excedidas = [r["variable"] for r in limites if r["excedido"]]
+    limites_html = "" if not limites else _lista_html(
+        "Límites de volumen" + (f" — se pasó: {', '.join(excedidas)}" if excedidas else ""),
+        [(r["regla"], f"{r['conteo']} / {r['limite']} — {r['detalle']}"
+                      + (" 🚨 EXCEDE" if r["excedido"] else " ✅")) for r in limites])
 
     error = datos.get("psql_error")
     error_html = f"<p><b>psql (saneado):</b> <code>{_e(error)}</code></p>" if error else ""
@@ -1534,6 +1737,7 @@ def construir_html(datos: dict, inicio: datetime, segundos: float, titulo: str =
     return (
         "<h3>Mantenimiento PROD (día 1 y 15) — 3 transacciones: cambios, consistencia y purga</h3>"
         + pasos
+        + limites_html
         + (_lista_html("Transacción (filas efectivamente tocadas por el SQL)",
                        sorted((datos.get("resumen_cambios") or {}).items()))
            + _lista_html("Verificación posterior (esperado: 0 en REAL · igual que antes en DRY-RUN)",
@@ -1599,14 +1803,15 @@ def enviar_reporte(code: int, motivo: str, datos: dict, inicio: datetime) -> boo
     """Alerta por Gmail SMTP. Se llama SÓLO cuando hay algo que revisar (`hay_que_avisar`).
 
     Asunto: `[ALERTA] Mantenimiento PROD: <qué pasó> — <motivo>`. Nada de credenciales: todo
-    pasa por `log()`/`sanear()`.
+    pasa por `log()`/`sanear()`. Se le pasa NUESTRO `log` a `enviar_email` para que los avisos
+    del correo salgan con `[maint]` y no con el `[backup]` del módulo compartido.
     """
     segundos = (datetime.now(timezone.utc) - inicio).total_seconds()
     titulo = titulo_alerta(code, datos)
     asunto = f"[ALERTA] Mantenimiento PROD: {titulo}"
     if corto := _motivo_corto(motivo):
         asunto += f" — {corto}"
-    return enviar_email(asunto, construir_html(datos, inicio, segundos, titulo))
+    return enviar_email(asunto, construir_html(datos, inicio, segundos, titulo), logger=log)
 
 
 def reportar(ok: bool, motivo: str, datos: dict, resumen: dict, inicio: datetime, code: int) -> int:
@@ -1641,8 +1846,10 @@ def main() -> int:
         return reportar(False, f"config: {e}", {}, {}, inicio, EXIT_CONFIG)
 
     dry = cfg["dry_run"]
-    log(f"DRY_RUN={'1 (no se aplica nada)' if dry else '0 (APLICA cambios)'} | "
-        f"MAX_CAMBIOS={cfg['max_cambios']} | días pendiente={cfg['dias_pendiente']} | "
+    log(f"DRY_RUN={'1 (no se aplica nada)' if dry else '0 (APLICA cambios)'} | límites: "
+        f"MAX_CAMBIOS={cfg['max_cambios']} · MAX_VENCIDOS_PCT={cfg['max_vencidos_pct']}% · "
+        f"MAX_HUERFANAS={cfg['max_huerfanas']} | "
+        f"días pendiente={cfg['dias_pendiente']} | "
         f"NEON_LIMITE_MB={cfg['neon_limite_mb']} | ENVIRONMENT={cfg['entorno']}")
     log(f"Origen: {host_de(cfg['url'])}")   # host + base, SIN credenciales
 
@@ -1650,6 +1857,9 @@ def main() -> int:
         "base": host_de(cfg["url"]),
         "entorno": cfg["entorno"],
         "max_cambios": cfg["max_cambios"],
+        "max_vencidos_pct": cfg["max_vencidos_pct"],
+        "max_huerfanas": cfg["max_huerfanas"],
+        "limites": [],          # reglas de volumen evaluadas (las carga la lectura de abajo)
         "modo": ("DRY-RUN (la transacción termina en ROLLBACK: no se aplica nada)" if dry
                  else "REAL (la transacción termina en COMMIT)"),
     }
@@ -1665,6 +1875,9 @@ def main() -> int:
     try:
         datos["usuarios"] = psql_entero(cfg["url"], SQL_USUARIOS)
         datos["alembic"] = psql_escalar(cfg["url"], SQL_ALEMBIC)
+        # Universo del paso de vencidos (misma constante que la guarda del SQL): el % de
+        # MAX_VENCIDOS_PCT se mide contra ESTO, no contra el total de usuarios.
+        datos["suscripciones_activas"] = psql_entero(cfg["url"], SQL_SUSCRIPCIONES_ACTIVAS)
         listas = leer_listas(cfg["url"], consultas_cambios)
         datos["listas"] = listas
         datos["listas_cierre"] = leer_listas(cfg["url"], consultas_cierre_fase)
@@ -1683,10 +1896,21 @@ def main() -> int:
     cambios = sum(c["n"] for c in listas)
     cierres = sum(c["n"] for c in datos["listas_cierre"])
     purga = sum(c["n"] for c in datos["listas_purga"])
+    # Reglas de volumen: PURAS (conteos + config → reglas). Se evalúan acá, antes de las
+    # transacciones, así el log y el correo dicen desde el principio cuánto se movió cada regla
+    # y cuál se pasó. En REAL las mismas reglas viajan ADENTRO del SQL (`guarda_vencidos()`/
+    # `guarda_huerfanas()`): la guarda que aborta no depende de este cálculo.
+    conteos = {c["clave"]: c["n"] for c in listas}
+    conteos["total"] = cambios
+    conteos["suscripciones_activas"] = datos["suscripciones_activas"]
+    evaluacion = evaluar_limites(conteos, cfg)
+    excedidos = limites_excedidos(evaluacion)
+    datos["limites"] = evaluacion
     resumen.update({
         "usuarios": datos["usuarios"], "alembic": datos["alembic"],
         "cambios_a_realizar": cambios, "cierres_a_realizar": cierres,
-        "purga_a_realizar": purga,
+        "purga_a_realizar": purga, "suscripciones_activas": datos["suscripciones_activas"],
+        "limites": linea_limites(evaluacion),
         "integridad_hallazgos": len(datos["integridad"]),
         "detecciones_hallazgos": len(datos["detecciones"]["hallazgos"]),
         "neon_mb": datos["neon"]["mb"], "neon_pct": datos["neon"]["pct"],
@@ -1698,6 +1922,7 @@ def main() -> int:
     log(f"Lecturas OK (Fase 7): cierres={cierres} | purga={purga} | "
         f"detecciones={len(datos['detecciones']['hallazgos'])} hallazgo(s) | "
         f"avisos Neon={len((datos['neon_api'] or {}).get('avisos') or [])}")
+    log(f"Límites: {linea_limites(evaluacion)}")
     api = datos["neon_api"] or {}
     if api.get("configurado"):
         cu, ramas = api.get("cu") or {}, api.get("ramas") or {}
@@ -1721,14 +1946,16 @@ def main() -> int:
     fases = (
         {"nombre": "cambios", "clave_tx": "cambios_tx", "tope_var": "MAX_CAMBIOS",
          "que": "cambio(s)", "antes": cambios, "tope": cfg["max_cambios"],
-         "script": script_cambios(cfg["max_cambios"], cfg["dias_pendiente"], dry),
+         "excedidos": excedidos,      # las reglas finas (vencidos % y huérfanas)
+         "script": script_cambios(cfg["max_cambios"], cfg["dias_pendiente"], dry,
+                                  cfg["max_vencidos_pct"], cfg["max_huerfanas"]),
          "consultas": consultas_cambios, "listas": listas},
         {"nombre": "consistencia", "clave_tx": "cierre_tx", "tope_var": "MAX_CIERRE",
-         "que": "cierre(s)", "antes": cierres, "tope": cfg["max_cierre"],
+         "que": "cierre(s)", "antes": cierres, "tope": cfg["max_cierre"], "excedidos": [],
          "script": script_cierre(cfg["max_cierre"], cfg["dias_cierre"], dry),
          "consultas": consultas_cierre_fase, "listas": datos["listas_cierre"]},
         {"nombre": "purga", "clave_tx": "purga_tx", "tope_var": "MAX_PURGA",
-         "que": "fila(s) purgadas", "antes": purga, "tope": cfg["max_purga"],
+         "que": "fila(s) purgadas", "antes": purga, "tope": cfg["max_purga"], "excedidos": [],
          "script": script_purga(cfg["max_purga"], cfg["dias_purga_tokens"],
                                 cfg["dias_purga_notif"], dry),
          "consultas": consultas_purga_fase, "listas": datos["listas_purga"]},
@@ -1755,8 +1982,8 @@ def main() -> int:
             error = sanear(r.stderr or "")[:600]
             datos["psql_error"] = error
             if MARCA_GUARDA in (r.stderr or ""):
-                datos["estado"] = (f"excede {fase['tope_var']} "
-                                   f"({total or fase['antes']} > {fase['tope']})")
+                datos["estado"] = texto_excedidos(fase["excedidos"]) or (
+                    f"excede {fase['tope_var']} ({total or fase['antes']} > {fase['tope']})")
                 motivo = (f"la transacción de {fase['nombre']} abortó por la guarda de volumen "
                           "y NO se aplicó nada")
                 log(f"ABORTADO ({datos['estado']}: {motivo})")
@@ -1790,9 +2017,12 @@ def main() -> int:
             log(f"Transacción aplicada y verificada: {total} {fase['que']} "
                 f"({fase['nombre']}); la lista quedó en 0")
 
-        # Guarda de volumen en DRY-RUN: informa (con la lista completa en el mail), no aborta.
-        if dry and total > fase["tope"]:
-            datos["estado"] = f"excede {fase['tope_var']} ({total} > {fase['tope']})"
+        # Guardas de volumen en DRY-RUN: informan (con la lista completa en el mail), no abortan.
+        # En `cambios` las reglas finas ya se evaluaron en Python (`fase["excedidos"]`); en las
+        # otras dos fases el único tope es el global del SQL.
+        if dry and (fase["excedidos"] or total > fase["tope"]):
+            datos["estado"] = texto_excedidos(fase["excedidos"]) or (
+                f"excede {fase['tope_var']} ({total} > {fase['tope']})")
             return reportar(False, "la guarda de volumen no aborta en DRY-RUN: no se aplicaría "
                                    "nada (revisar la lista de este mail antes de decidir si se "
                                    "sube el tope)", datos, resumen, inicio, EXIT_GUARDA)

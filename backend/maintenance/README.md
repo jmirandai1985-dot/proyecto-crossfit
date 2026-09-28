@@ -225,7 +225,9 @@ teléfono ya dice de qué se trata sin abrir el correo (el motivo detallado va e
 con las listas completas):
 
 ```
-[ALERTA] Mantenimiento PROD: excede MAX_CAMBIOS (41 > 40) — la guarda de volumen no aborta en DRY-RUN: …
+[ALERTA] Mantenimiento PROD: excede MAX_VENCIDOS_PCT (130 > 120) — la guarda de volumen no aborta en DRY-RUN: …
+[ALERTA] Mantenimiento PROD: excede MAX_HUERFANAS (13 > 10) — la guarda de volumen no aborta en DRY-RUN: …
+[ALERTA] Mantenimiento PROD: excede MAX_CAMBIOS (512 > 500) — la guarda de volumen no aborta en DRY-RUN: …
 [ALERTA] Mantenimiento PROD: Neon al 83.98% del free tier (430.0 MB de 512 MB)
 [ALERTA] Mantenimiento PROD: integridad con 2 problema(s) — los datos se actualizaron igual: …
 [ALERTA] Drill de restore PROD: CRÍTICO: EL ROL DE BACKUP PUDO CREAR UNA TABLA EN PROD …
@@ -274,7 +276,7 @@ local logueaba "✅ Backup completado" con el dump fallando). El watchdog es un 
 | backup | 0 / 2 / 3 / 4 / 5 | OK / config / pg_dump / asserts de contenido / R2 |
 | watchdog | 0 / 2 / 6 / 7 | OK (sin email) / config (falta variable o R2 inaccesible) / **hay algo que avisar** / inesperado |
 | drill | 0 / 2 / 8 / 9 / 10 / 11 / 12 / 13 | OK (sin email) / config (falta variable o cupo de ramas lleno) / descarga-dump ilegible / API Neon / restore o verificación / **la prueba negativa no falló (crítico)** / inesperado / **la rama temporal quedó viva** (con el resto del drill OK) |
-| mantenimiento | 0 / 2 / 3 / 4 / 6 / 7 / 8 / **9** | OK (sin email, salvo que Neon pase el umbral de espacio o haya un aviso de CU-horas/ramas) / config / lectura / integridad / guarda de volumen (`MAX_CAMBIOS`, `MAX_CIERRE`, `MAX_PURGA`) / escritura / verificación / **detecciones A.1–A.5 o un chequeo de Neon que no pudo correr** |
+| mantenimiento | 0 / 2 / 3 / 4 / 6 / 7 / 8 / **9** | OK (sin email, salvo que Neon pase el umbral de espacio o haya un aviso de CU-horas/ramas) / config / lectura / integridad / guarda de volumen (`MAX_VENCIDOS_PCT`, `MAX_HUERFANAS`, `MAX_CAMBIOS`, `MAX_CIERRE`, `MAX_PURGA`) / escritura / verificación / **detecciones A.1–A.5 o un chequeo de Neon que no pudo correr** |
 
 ### Env groups (cero credenciales en el repo)
 
@@ -512,7 +514,7 @@ locales y sin darle a PROD un usuario con más permisos de los necesarios.
 | Reporte | email por Gmail SMTP **sólo si hay algo que revisar**: exit ≠ 0 (config, lectura, escritura, verificación, guarda de volumen, integridad) o Neon pasado del umbral de espacio. Asunto `[ALERTA] Mantenimiento PROD: <qué pasó> — <motivo>`. Un día normal (aplicar y verificar) deja **sólo log** |
 | Escritura | los 4 `UPDATE` de los scripts locales, en **UNA sola transacción** |
 | Env grupos | `mantenimiento-prod` + `alertas` (ni R2; la API de Neon se usa SÓLO para leer CU-horas y ramas desde la Fase 7, con el env group `neon-api`) |
-| Exit codes | 0 OK · 2 config · 3 lectura · 4 integridad · 6 guarda de volumen · 7 escritura · 8 verificación · **9** (detecciones y chequeos de Neon: Fase 7) |
+| Exit codes | 0 OK · 2 config · 3 lectura · 4 integridad · 6 guarda de volumen (por regla) · 7 escritura · 8 verificación · **9** (detecciones y chequeos de Neon: Fase 7) |
 
 ### Qué aplica (4 pasos, una transacción)
 
@@ -554,10 +556,10 @@ reporte viaja **dentro de la alerta** (o queda sólo en el log si el run está v
 |---|---|---|
 | Rol dedicado | `MAINT_DB_URL` tiene que ser de `maint_rw` (no `backup_ro`, no `neondb_owner`) y con host **sin** `-pooler` | 2 |
 | Entorno | `ENVIRONMENT` tiene que ser exactamente `production` (si no, el job no corre: escribe en PROD) | 2 |
-| Config numérica | `MAX_CAMBIOS`/`DIAS_PENDIENTE`/`NEON_*` se validan como enteros en rango **antes** de armar el SQL (nunca se pega texto de una variable de entorno) | 2 |
+| Config numérica | `MAX_CAMBIOS`/`MAX_VENCIDOS_PCT`/`MAX_HUERFANAS`/`DIAS_PENDIENTE`/`NEON_*` se validan como enteros en rango **antes** de armar el SQL (nunca se pega texto de una variable de entorno) | 2 |
 | Variable faltante | falta cualquier variable obligatoria (incluidas las 3 de `alertas`) | 2 |
 | Una transacción | los 4 `UPDATE` van juntos: si cualquiera falla, `ON_ERROR_STOP` + la transacción abierta ⇒ **no se aplica nada** | 7 |
-| Guarda de volumen | `DO $$ … RAISE EXCEPTION 'GUARDA DE VOLUMEN: n > MAX_CAMBIOS' … $$` **dentro** de la transacción (en REAL aborta) | 6 |
+| Guarda de volumen | `DO $$ … RAISE EXCEPTION 'GUARDA DE VOLUMEN: …' … $$` **dentro** de la transacción (en REAL aborta): % de vencidos, `MAX_HUERFANAS` por lista y `MAX_CAMBIOS` global | 6 |
 | Verificación posterior | se vuelven a correr las MISMAS 4 consultas: en REAL tienen que dar 0 | 8 |
 | Integridad | los hallazgos ponen el run en **rojo** pero **no** abortan el mantenimiento (decisión del 2026-09-27) | 4 |
 
@@ -567,33 +569,72 @@ Con `DRY_RUN=1` la transacción se ejecuta **completa** y termina en `ROLLBACK`.
 estimación: el log (y la alerta, cuando la hay) trae exactamente las filas que el `UPDATE` tocó
 (la tabla temporal `_maint_cambios` cuenta lo real, no lo que se leyó antes). Además:
 
-- En DRY-RUN la guarda de volumen **no aborta**: informa. Si se pasa del tope, el asunto es
-  `[ALERTA] Mantenimiento PROD: excede MAX_CAMBIOS (n > N)` y el cuerpo dice "no se aplicaría
-  nada" + lleva la **lista completa** de esas filas. El run queda rojo (exit 6) a propósito,
+- En DRY-RUN las guardas **no abortan**: informan. Si se pasa **cualquier** tope, el asunto nombra
+  la regla que cortó (`… excede MAX_VENCIDOS_PCT (n > N)`, `… excede MAX_HUERFANAS (n > N)` o
+  `… excede MAX_CAMBIOS (n > N)`) y el cuerpo dice "no se aplicaría
+  nada" + lleva la **lista completa** de esas filas y **cada regla con su conteo y su tope**
+  (bloque `Límites de volumen`). El run queda rojo (exit 6) a propósito,
   para que no se pierda de vista entre los verdes.
-- En REAL la guarda **aborta**: no se aplica nada y el asunto es el mismo
-  `[ALERTA] Mantenimiento PROD: excede MAX_CAMBIOS (n > N)` con el motivo "la transacción
+- En REAL las guardas **abortan**, dentro del propio SQL: no se aplica nada y el asunto es el mismo
+  `[ALERTA] Mantenimiento PROD: excede MAX_VENCIDOS_PCT (n > N)` con el motivo "la transacción
   abortó por la guarda de volumen y NO se aplicó nada" (más el `GUARDA DE VOLUMEN` de psql
   saneado en el cuerpo).
 
+### Guardas de volumen POR REGLA (2026-09-27)
+
+Un único tope global bloqueaba justo el día en que el volumen es **esperable**: los planes vencen
+el ÚLTIMO día del mes, así que el run del día 1 marca vencidos a todos los que no renovaron (con
+`MAX_CAMBIOS=40` el job abortaba ese día). Las huérfanas, en cambio, son pocas por definición.
+Ahora hay 3 reglas, evaluadas todas por la MISMA función pura (`evaluar_limites()`: conteos +
+config → reglas, sin base, sin reloj y sin entorno):
+
+| Regla | Qué cuenta | Cuándo corta | Default |
+|---|---|---|---|
+| `MAX_VENCIDOS_PCT` | suscripciones que pasan a `vencido` vs. el universo previo | `vencidos * 100 > activas * pct` (enteros: sin floats) | `80` % |
+| `MAX_HUERFANAS` | **cada** una de las 3 listas de huérfanas (`_maint_cambios` por paso) | `n > MAX_HUERFANAS` | `10` |
+| `MAX_CAMBIOS` | total de filas del run | `n > MAX_CAMBIOS` | `500` |
+
+El denominador del % es el **mismo universo del que salen los vencidos** (`suscripciones` en el
+estado que ese paso evalúa, antes de aplicar), con **una sola constante SQL** compartida por la
+lectura previa, el reporte del mes y la guarda: así el numerador es subconjunto del denominador y
+el % nunca pasa de 100 (`MAX_VENCIDOS_PCT=100` no puede cortar nunca).
+
+Dónde se evalúa cada una:
+
+- **DRY-RUN:** Python (`evaluar_limites()`) con lo que la transacción midió más el universo leído
+  antes. Informa con la lista completa y **no** aborta.
+- **REAL:** adentro de la transacción, en el SQL: el % **antes del paso 1** (único momento en el que
+  `estado = 'activo'` sigue siendo el universo previo) y `MAX_HUERFANAS`/`MAX_CAMBIOS` al final,
+  sobre `_maint_cambios` (lo que la transacción REALMENTE tocó). Las transacciones 2 y 3 siguen con
+  su único tope (`MAX_CIERRE`, `MAX_PURGA`).
+
+El log del run trae una línea con todas las reglas (`Límites: …=conteo/tope · …`, con `EXCEDE` en
+la que cortó) y el correo un bloque `Límites de volumen` con cada regla, su conteo, su tope y 🚨 en
+la que se pasó. La configuración se lee **sólo** en `leer_config()` (los `os.getenv` del módulo
+viven ahí, y hay un test que lo verifica con el AST del archivo).
+
 ### La primera aplicación real (procedimiento, en orden)
 
-1. **`DRY_RUN=1`** (como queda al crear el env group, con `MAX_CAMBIOS=40` por defecto) →
-   *Trigger Run*. Si el run queda **verde, no llega ningún correo**: eso es lo normal (mirar el
-   log del run). Sólo si la corrida pasa de 40 cambios llega la alerta `excede MAX_CAMBIOS`.
-2. Si llegó esa alerta: leer la lista completa (`Alumno`, plan, fecha) y decidir el tope. Con
-   planes mensuales en un box de 30-50 alumnos, **15-25 vencimientos en 15 días son normales**:
-   por eso el default es 40. Sólo se sube el tope si la lista es correcta y **más grande** que el
-   default (y no más de lo revisado).
+1. **`DRY_RUN=1`** (como queda al crear el env group, con los defaults `MAX_VENCIDOS_PCT=80`,
+   `MAX_HUERFANAS=10` y `MAX_CAMBIOS=500`) → *Trigger Run*. Si el run queda **verde, no llega
+   ningún correo**: eso es lo normal (mirar el log del run). El correo sale sólo si alguna regla se
+   pasó, y el asunto dice **cuál**.
+2. Si llegó esa alerta: leer la lista completa (`Alumno`, plan, fecha) y el bloque `Límites de
+   volumen` (el número exacto de cada regla). El día 1 el volumen de vencimientos es el esperado: si
+   corta por `MAX_VENCIDOS_PCT`, la decisión es **subir el porcentaje** con ese número a la vista
+   (no sacar la regla). Si corta por `MAX_HUERFANAS` (pocas filas: anomalía) o por `MAX_CAMBIOS`,
+   primero mirar por qué.
 3. **`DRY_RUN=0`** → *Trigger Run* **a mano** (no esperar al día 1). Ahí se aplican los cambios:
    si todo cuadra, el log dice `Transacción aplicada y verificada: n cambio(s)` y **no hay correo**
    (la verificación debe dar `n → 0 (esperado 0)`).
-4. Dejar `DRY_RUN=0` y `MAX_CAMBIOS=40`. Desde ahí corre solo los días 1 y 15.
+4. Dejar `DRY_RUN=0` con los topes decididos (`MAX_VENCIDOS_PCT=80`, `MAX_HUERFANAS=10`,
+   `MAX_CAMBIOS=500`). Desde ahí corre solo los días 1 y 15.
 5. Comparar `planes_vencidos_mes` del log con la cantidad de filas que el job marcó como vencidas
    ese día: tienen que ser coherentes (si no, algo del criterio cambió).
 
-> Si en una corrida normal aparecen de golpe más de `MAX_CAMBIOS` cambios, la guarda aborta y la
-> alerta lo dice: eso es una señal para mirar (¿un bug? ¿una importación?), no para subir el tope.
+> Si en una corrida normal aparecen de golpe más huérfanas de las esperadas, o el % de vencidos se
+> dispara muy por encima de lo normal, la guarda aborta y la alerta lo dice: eso es una señal para
+> mirar (¿un bug? ¿una importación?), no para subir el tope.
 
 ### Enterarse de un problema (3 vías, ninguna depende de la laptop)
 
@@ -779,7 +820,9 @@ rol). El chequeo final es `SELECT rolname FROM pg_roles WHERE rolname = 'maint_r
 |---|---|
 | `MAINT_DB_URL` | `postgresql://maint_rw:<password>@ep-<endpoint>.us-west-2.aws.neon.tech/neondb?sslmode=require` (**directa**, sin `-pooler`) |
 | `ENVIRONMENT` | `production` |
-| `MAX_CAMBIOS` | `40` (planes mensuales: en 15 días vencen 15-25 de forma normal; la alerta `excede MAX_CAMBIOS` avisa si algún día pasa eso) |
+| `MAX_CAMBIOS` | `500` (tope **global** de respaldo: si el run toca más filas que esto, se aborta; el detalle fino lo dan las 2 reglas de abajo) |
+| `MAX_VENCIDOS_PCT` | `80` (máximo **%** de las suscripciones activas que pueden pasar a vencido en un run: el día 1 vencen los planes de todos los que no renovaron y ese volumen es **esperable**) |
+| `MAX_HUERFANAS` | `10` (**por cada** lista de huérfanas: suscripciones, solicitudes y usuarios; acá muchas filas sí son una **anomalía**; `0` = ninguna) |
 | `DIAS_PENDIENTE` | `7` |
 | `NEON_LIMITE_MB` | `512` (free tier de Neon: **0,5 GB por proyecto**; la alerta se calcula contra esto, no contra los 3 GB que decía `neon_usage_alerts.py`) |
 | `NEON_UMBRAL_PCT` | `80` |
@@ -831,10 +874,11 @@ job no importa la app ni boto3.
 cd backend
 py -3.12 -m pytest tests/test_mantenimiento_cloud.py tests/test_mantenimiento_pasos.py tests/test_mantenimiento_vencidos.py tests/test_email_config_prod.py tests/test_watchdog_backups.py tests/test_restore_drill.py tests/test_email_header_saneo.py -q
 ```
-Registrado el 2026-09-27, con la Fase 7 ya adentro: **160 passed, 1 skipped** — 80 de
-`mantenimiento_cloud` (los 33 de la Fase 6 + **47 nuevos**: detecciones A, límites de Neon B,
-las 3 transacciones C, el reporte E, el asunto del watchdog F y los 7 de la revisión previa al
-commit —predicado de cancelación de D-8/C.8, idempotencia y el aviso único de Neon—), 4 de
+Registrado el 2026-09-27, con la Fase 7 y las **guardas por regla** ya adentro: **182 passed,
+1 skipped** — 102 de
+`mantenimiento_cloud` (los 33 de la Fase 6 + 47 de la Fase 7 + **22 de los límites por regla**:
+evaluación pura, borde del %, huérfanas por lista, tope global, config inválida, las guardas en el
+SQL y el prefijo `[maint]` del correo), 4 de
 `mantenimiento_pasos`,
 1 de `mantenimiento_vencidos` y 76 de los tests de correo/drill/watchdog (el skip es el drill
 cuando falta una variable del env group). `psql`, `smtplib` y la API de Neon (`urllib`) están
@@ -861,7 +905,7 @@ revisar**).
 
 | # | Transacción | Qué hace | Tope | Exit si se pasa |
 |---|---|---|---|---|
-| 1 | `cambios` | los 4 `UPDATE` de la Fase 6 | `MAX_CAMBIOS` (40) | 6 |
+| 1 | `cambios` | los 4 `UPDATE` de la Fase 6 | `MAX_VENCIDOS_PCT` (80 %), `MAX_HUERFANAS` (10) y `MAX_CAMBIOS` (500) | 6 |
 | 2 | `consistencia` | paso 8 (asistencia) + paso 9 (aforo) | `MAX_CIERRE` (500) | 6 |
 | 3 | `purga` | paso 10 (tokens + notificaciones) | `MAX_PURGA` (5000) | 6 |
 
@@ -1009,7 +1053,7 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
 | 2 | configuración inválida: variable faltante, URL con `-pooler`, rol ≠ `maint_rw`, `ENVIRONMENT` ≠ `production`, número fuera de rango o allowlist con caracteres raros |
 | 3 | falló una lectura |
 | 4 | la integridad encontró problemas (no aborta la escritura) |
-| 6 | se pasó un tope de volumen (`MAX_CAMBIOS`, `MAX_CIERRE` o `MAX_PURGA`) |
+| 6 | se pasó un tope de volumen (`MAX_VENCIDOS_PCT`, `MAX_HUERFANAS`, `MAX_CAMBIOS`, `MAX_CIERRE` o `MAX_PURGA`) |
 | 7 | falló una transacción de escritura |
 | 8 | la verificación posterior no cuadró |
 | **9** | **nuevo**: las detecciones A.1–A.5, o un chequeo de Neon configurado que no pudo correr |
@@ -1019,6 +1063,8 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
 | Variable | Default | Para qué |
 |---|---|---|
 | `MAX_CIERRE` | `500` | tope de la transacción 2 (consistencia) |
+| `MAX_VENCIDOS_PCT` | `80` | % máximo de suscripciones activas que pueden vencer en un run (regla del día 1) |
+| `MAX_HUERFANAS` | `10` | máximo **por cada** lista de huérfanas (`0` = ninguna) |
 | `MAX_PURGA` | `5000` | tope de la transacción 3 (purga) |
 | `DIAS_CIERRE_RESERVAS` | `7` | antigüedad mínima de la clase para cerrar su asistencia |
 | `DIAS_PURGA_TOKENS` | `30` | retención de `password_reset_tokens` |
@@ -1041,7 +1087,7 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
 
 
 
-## Estado y limitaciones (2026-09-27, sin commit)
+## Estado y limitaciones (2026-09-27, commit local sin push)
 
 
 
@@ -1091,8 +1137,24 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
   valores que ya usa el Web Service) y **no importa ni toca** `app/services/email_service.py`, que
   usa el mismo host y puerto. No hay segundo proveedor, ni librería de terceros, ni API key
   externa, ni dominio que verificar.
+- **Límites por regla y logger del correo (2026-09-27, cierre de la revisión de la Fase 7):** el
+  freno único `MAX_CAMBIOS` (40) dejaba el job sin red justo el día 1, que es cuando el volumen de
+  vencimientos es **esperable** (los planes vencen el último día del mes). Ahora:
+  `MAX_VENCIDOS_PCT=80` (% de las suscripciones activas del propio universo del paso, medido con
+  enteros), `MAX_HUERFANAS=10` **por cada** lista de huérfanas y `MAX_CAMBIOS=500` como tope global
+  de respaldo; la evaluación es la función pura `evaluar_limites()` (conteos + config → reglas,
+  testeable sin dobles), el asunto/log/correo dicen **cuál** regla cortó y el bloque `Límites de
+  volumen` muestra cada una con su conteo y su tope. En REAL las 3 reglas viajan **dentro** de la
+  transacción (`guarda_vencidos()` antes del paso 1, `guarda_huerfanas()` + `guarda_volumen()` al
+  final), así que siguen abortando desde el SQL y el exit sigue siendo 6. Además, la config se lee
+  **sólo** en `leer_config()` (entraron `NEON_API_KEY`/`NEON_PROJECT_ID`, que se leían sueltas en
+  `neon_api_get`) y `alertas.enviar_email(asunto, html, logger=None)` usa el `log()` de quien llama:
+  en mantenimiento los avisos del correo salen `[maint]` y el watchdog/drill siguen con `[backup]`.
+  **Verificado:** `tests/test_mantenimiento_cloud.py` ⇒ **102 passed** (80 + 22 nuevos) y
+  `tests/test_watchdog_backups.py` ⇒ 8 passed; el comando completo del README ⇒ **182 passed,
+  1 skipped** (usa `py -3.12`). Nada de PROD: todo con `psql`/`smtplib`/API de Neon mockeados.
 - **Sin tocar:** nada de `carpeta_respaldo_box`, ni `.env`/`.env.test`, ni PROD (el único acceso
-  a PROD es el `CREATE TABLE` que **debe** fallar), ni `git` (todo sigue sin commit/push).
+  a PROD es el `CREATE TABLE` que **debe** fallar).
 - **Fase 6 (entrega 2, 2026-09-27):** se escribió `maintenance/mantenimiento_cloud.py`, se agregó
   su `COPY` en `Dockerfile.cron` (sin `pip install` nuevo), se aplicó el **fix H1** en
   `run_daily.py`/`run_monthly.py` (el `_paso()` nuevo mira el valor de retorno real: un `False` se
@@ -1116,7 +1178,8 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
 - **Pendiente (necesita OK del dueño, nada de esto se tocó):** crear el rol `maint_rw` en Neon
   (SQL del README + verificación + prueba negativa), crear el env group `mantenimiento-prod`,
   crear el 4º Cron Job en Render y hacer la puesta en marcha por fases (`DRY_RUN=1` → leer el log o
-  la alerta → `DRY_RUN=0` a mano → dejar `DRY_RUN=0` con `MAX_CAMBIOS=40`).
+  la alerta → `DRY_RUN=0` a mano → dejar `DRY_RUN=0` con `MAX_VENCIDOS_PCT=80`,
+  `MAX_HUERFANAS=10` y `MAX_CAMBIOS=500`).
 - **Menor, sigue pendiente:** volcar/desactivar los workflows de n8n "Mantenimiento %" (H2/H5):
   los desactiva Jebbus en la UI de n8n (el job nuevo no depende de n8n).
 
