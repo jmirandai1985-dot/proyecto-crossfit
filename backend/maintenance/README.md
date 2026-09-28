@@ -872,11 +872,11 @@ job no importa la app ni boto3.
 
 ```bash
 cd backend
-py -3.12 -m pytest tests/test_mantenimiento_cloud.py tests/test_mantenimiento_pasos.py tests/test_mantenimiento_vencidos.py tests/test_email_config_prod.py tests/test_watchdog_backups.py tests/test_restore_drill.py tests/test_email_header_saneo.py tests/test_estados_compartido.py tests/test_mrr_historico.py -q
+py -3.12 -m pytest tests/test_mantenimiento_cloud.py tests/test_mantenimiento_pasos.py tests/test_mantenimiento_vencidos.py tests/test_email_config_prod.py tests/test_watchdog_backups.py tests/test_restore_drill.py tests/test_email_header_saneo.py tests/test_estados_compartido.py tests/test_mrr_historico.py tests/test_reporte_historico_mensual.py -q
 ```
 Registrado el 2026-09-27, con la Fase 7, las **guardas por regla**, los ajustes de A.5, el **conteo
 real** de las listas (integridad, A.3 y paso 9), la **lista compartida de "cancelada"** y el **MRR y
-churn por fecha** ya adentro: **223 passed, 1 skipped** — 127 de
+churn por fecha** (en el correo y en el Excel) ya adentro: **230 passed, 1 skipped** — 127 de
 `mantenimiento_cloud` (los 33 de la Fase 6 + 47 de la Fase 7 + **22 de los límites por regla**:
 evaluación pura, borde del %, huérfanas por lista, tope global, config inválida, las guardas en el
 SQL y el prefijo `[maint]` del correo, + **17 de A.5** (`requiere_coach`, complementariedad de
@@ -888,7 +888,12 @@ tope-conteo y A.6** (integridad con `LIMITE_DUP`, A.3 con `LIMITE_A3`, el paso 9
 helpers son exactos, la app no compara contra el literal, el predicado ORM == el del job, las TRES
 imágenes copian `shared/` y el predicado de vigencia por fecha parte el enum en dos), **4 de
 `mrr_historico`** (vencer hoy no cambia el MRR del pasado, una rechazada no suma nunca, el churn de
-la cohorte es histórico y el MRR del pasado y el de hoy son la MISMA consulta), 4 de
+la cohorte es histórico y el MRR del pasado y el de hoy son la MISMA consulta), **7 de
+`reporte_historico_mensual`** (el .xlsx se genera y se LEE: la celda de MRR del mes pasado de la hoja
+"Historico Mensual" es la de `metricas_service.mrr` para esa fecha —la misma del dashboard y del BI—,
+vencer una suscripción hoy no la cambia, la columna de alumnos va con el predicado de fecha, la
+tarjeta KPI de MRR es la de HOY del dashboard y el export no vuelve a tener su propia copia del SQL),
+4 de
 `mantenimiento_pasos`,
 1 de `mantenimiento_vencidos` y 76 de los tests de correo/drill/watchdog (el skip es el drill
 cuando falta una variable del env group). `psql`, `smtplib` y la API de Neon (`urllib`) están
@@ -1335,13 +1340,31 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
   la **contraprueba** del control negativo: con el SQL viejo `test_b`/`test_d` (app) y `test_cr`
   (job) **fallan**. `tests/test_mantenimiento_cloud.py` ⇒ **127 passed**,
   `tests/test_estados_compartido.py` ⇒ **12 passed** y el comando completo del README ⇒ **223
-  passed, 1 skipped**. Sin red, sin base y sin PROD (el SQL del lado app se captura con una sesión
+  passed, 1 skipped** (los **7** del Excel entran con el commit aparte de acá abajo; hoy el mismo
+  comando da 230). Sin red, sin base y sin PROD (el SQL del lado app se captura con una sesión
   doble).
-- **Pendiente (mismo bug, fuera de este commit):** `app/services/reportes_service.py` (el Excel
-  histórico de `/reportes/export`) tiene su propia copia del MRR por mes
-  (`s.estado = 'activo' AND s.fecha_expiracion >= :fin`, sin `fecha_inicio`) y la columna "Alumnos
-  activos fin de mes" con el mismo filtro: los meses ya cerrados del Excel se recalculan con el
-  estado de hoy. No se tocó acá para no mezclar el fix del correo con el del Excel.
+- **El Excel de `/reportes/export`: el MRR por mes, de la MISMA función que el dashboard y el BI
+  (2026-09-27, mismo día, commit aparte).** `_build_historico_mensual` —la tabla "Historico Mensual"
+  del .xlsx— tenía su propia copia del MRR (`s.estado = 'activo' AND s.fecha_expiracion >= :fin`, sin
+  `fecha_inicio`) y la columna "Alumnos activos fin de mes" con el mismo filtro, así que los meses ya
+  cerrados se recalculaban con el estado de HOY: el mes pasado cambiaba según el día en que se
+  descargaba el archivo (una suscripción vencida hoy desaparecía de los meses en los que sí estuvo
+  vigente y una que empieza el mes que viene sumaba al mes pasado). Las dos columnas usan ahora el
+  corte del **último día de cada mes**: el MRR es `metricas_service.mrr(db, tenant_id, ultimo_dia)`
+  (la MISMA función del dashboard —`reportes.py`, en vivo— y del BI —`kpis_populate.py`, que persiste
+  el mes cerrado con el mismo `fin`—, así el número no tiene una tercera versión) y el conteo de
+  alumnos va con `shared.estados.sql_suscripcion_vigente("s", ":fin")`. La tarjeta KPI "MRR" del
+  Resumen Ejecutivo (que también tenía su copia, con la fecha del día) pasa a `metricas_service.mrr`
+  con la fecha UTC: la misma definición Y la misma fecha que el dashboard, así el Excel y la pantalla
+  no pueden mostrar números distintos. El `alumnos_activos` de esa fila de tarjetas queda como estaba
+  a propósito: es la foto de HOY y su consulta es idéntica a la del KPI del dashboard.
+  **Verificado:** `tests/test_reporte_historico_mensual.py` (nuevo) ⇒ **7 passed** con los dos casos
+  del pedido: el .xlsx se genera de verdad (sesión doble con filas de fixture que evalúa el SQL
+  capturado) y se LEE la celda de MRR del mes pasado de "Historico Mensual" y la tarjeta del KPI.
+  **Contraprueba (control negativo):** volviendo el SQL viejo fallan **los 7** —la celda del mes
+  pasado queda en 0 en vez de 75.000, el predicado desaparece del conteo de alumnos, la tarjeta deja
+  de llamar a `metricas.mrr` y el export vuelve a tener su copia del `SUM(p.precio_clp)`—. Comando
+  completo del README ⇒ **230 passed, 1 skipped**. Sin red, sin base y sin PROD.
 - **Fase 6 (entrega 2, 2026-09-27):** se escribió `maintenance/mantenimiento_cloud.py`, se agregó
   su `COPY` en `Dockerfile.cron` (sin `pip install` nuevo), se aplicó el **fix H1** en
   `run_daily.py`/`run_monthly.py` (el `_paso()` nuevo mira el valor de retorno real: un `False` se
