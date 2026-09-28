@@ -884,7 +884,7 @@ SQL y el prefijo `[maint]` del correo, + **17 de A.5** (`requiere_coach`, comple
 tope-conteo y A.6**: integridad con `LIMITE_DUP`, A.3 con `LIMITE_A3`, el paso 9 con
 `LIMITE_LISTA` y una variante de cancelación desconocida),
 11 de `estados_compartido` (la constante se define en un solo lugar, `shared/` no importa nada, los
-helpers son exactos, la app no compara contra el literal, el predicado ORM == el del job y las dos
+helpers son exactos, la app no compara contra el literal, el predicado ORM == el del job y las TRES
 imágenes copian `shared/`), 4 de
 `mantenimiento_pasos`,
 1 de `mantenimiento_vencidos` y 76 de los tests de correo/drill/watchdog (el skip es el drill
@@ -949,10 +949,17 @@ el **paso 8 le escribía `updated_at`** —el dato con el que A.3 reconstruye la
 la contaba en el aforo. La lista es **exacta a propósito** (nada de `LIKE` "por parecido") y lo que
 el `ILIKE` cubría de más ahora lo delata la detección **A.6** (rojo) contra esa misma lista.
 
-`shared/` es un paquete **neutral** (sólo importa `typing`), porque lo copian las DOS imágenes de
-Docker: `Dockerfile.cron` copia `maintenance/` **+ `shared/`** y deliberadamente **no** lleva la
-app. Si uno de los dos Dockerfile se olvida de `shared/`, el runtime muere con *No module named
-'shared'* — por eso `tests/test_estados_compartido.py` verifica que esté en los dos. En el dump de
+`shared/` es un paquete **neutral** (sólo importa `typing`), porque lo copian las **TRES** imágenes
+de Docker: `Dockerfile.cron` copia `maintenance/` **+ `shared/`** y deliberadamente **no** lleva la
+app; `Dockerfile` (web, contexto `backend/`) usa `COPY shared/ shared/`; y `Dockerfile.render` (la
+combinada nginx+uvicorn del Web Service de Render, contexto **la raíz del repo**) usa
+`COPY backend/shared/ shared/`. Si una de las tres se olvida de `shared/`, el proceso muere **al
+arrancar** con *No module named 'shared'* —no en un endpoint cualquiera: `app/main.py` importa todos
+los routers en su primera línea y varios de ellos (`wods.py`, `reservas.py`, …) pasan por
+`app.core.estados` → `shared.estados`—. Pasó de verdad el 27/09/2026: a `Dockerfile.render` le
+faltaba la línea, o sea que el Web Service de PROD no habría arrancado. Por eso
+`tests/test_estados_compartido.py` verifica **las tres** (y que `render.yaml` siga apuntando a
+`Dockerfile.render` con contexto la raíz). En el dump de
 PROD del 24/09/2026 sólo hay `'cancelled'` y `'confirmada'`, así que el cambio es equivalente: es la
 red para la otra variante.
 
@@ -1267,9 +1274,10 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
   (2) **T3 — el predicado de "cancelada" es uno solo:** `ESTADOS_CANCELADA` ya no se define en
   `kpis_populate.py` ni se adivina con `ILIKE '%cancel%'`. Se agregó el paquete **neutral**
   `backend/shared/` (`estados.py` con `ESTADO_CANCELADO`, `ESTADOS_CANCELADA`, `lista_sql()` y
-  `es_cancelada()`; sólo importa `typing`), que copian **las dos** imágenes de Docker
-  (`Dockerfile.cron` lo copia explícitamente y sigue **sin** llevar la app: por eso no puede importar
-  nada). El job arma `sql_viva()`/`sql_cancelada()` con `lista_sql()`; la app importa por
+  `es_cancelada()`; sólo importa `typing`), que copian **las tres** imágenes de Docker (`Dockerfile`
+  —web—, `Dockerfile.cron` —que lo copia explícitamente y sigue **sin** llevar la app: por eso no
+  puede importar nada— y `Dockerfile.render` —la combinada de Render—). El job arma
+  `sql_viva()`/`sql_cancelada()` con `lista_sql()`; la app importa por
   `app/core/estados.py` (re-exporta la constante y agrega `no_cancelada()` para SQLAlchemy) en **6
   módulos** —`reservas.py` (incluido el `UPDATE` crudo del `DELETE /reservas/{id}`), `asistencia.py`,
   `supervision.py` (donde `'cancelada'` se mostraba como activa: era un bug latente),
@@ -1280,6 +1288,20 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
   nuevos**, `test_cl`–`test_cq`) y `tests/test_estados_compartido.py` (nuevo) ⇒ **11 passed**; el
   comando completo del README ⇒ **216 passed, 1 skipped**. Nada de PROD ni de Render (todo con
   `psql`/`smtplib`/API de Neon mockeados; el nuevo test ni siquiera sale a la red).
+- **Fix P0 (2026-09-27, mismo día): el Web Service de Render no copiaba `shared/`.** `render.yaml`
+  usa `Dockerfile.render` (`dockerfilePath: Dockerfile.render`, `dockerContext: .`) y ese archivo
+  copiaba `backend/app/`, `backend/ml/`, `backend/alembic/`, `backend/alembic.ini` y
+  `backend/requirements.txt`, pero **no** `backend/shared/` ⇒ `uvicorn app.main:app` moría al
+  importar (`ModuleNotFoundError: No module named 'shared'` en `app/core/estados.py:7`, importado
+  desde `app/api/v1/wods.py:11`) y el contenedor no arrancaba (Render aborta el deploy y deja la
+  versión anterior). Se agregó `COPY backend/shared/ shared/` junto a `COPY backend/app/ app/` —con
+  el prefijo `backend/` porque el contexto es la raíz— y `test_f` de
+  `tests/test_estados_compartido.py` pasó a verificar **las tres** imágenes (web, job y render) más
+  la coherencia con `render.yaml`. **Verificado** sin red: layout temporal con sólo lo que copia
+  `Dockerfile.render` (`app/`, `shared/`, `ml/`, `alembic/`, `alembic.ini`, `requirements.txt`) ⇒
+  `python -c "import app.main"` **exit 0** (`Box CrossFit Platform API`, 204 rutas; `shared`
+  resuelto desde la raíz del layout) y, quitando `shared/` (el estado anterior) ⇒ **exit 1** con ese
+  `ModuleNotFoundError` (control negativo).
 - **Sin tocar:** nada de `carpeta_respaldo_box`, ni `.env`/`.env.test`, ni PROD (el único acceso
   a PROD es el `CREATE TABLE` que **debe** fallar).
 - **Fase 6 (entrega 2, 2026-09-27):** se escribió `maintenance/mantenimiento_cloud.py`, se agregó

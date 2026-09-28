@@ -52,6 +52,12 @@ COPY --from=deps /usr/local/bin /usr/local/bin
 
 # Código del backend (sin .env: las env vars se inyectan en runtime).
 COPY backend/app/ app/
+# `shared/` es el paquete neutral (sólo importa `typing`) donde vive la lista de estados
+# "cancelada" que usa la app (`app/core/estados.py`): va a la RAÍZ de /app, al lado de app/,
+# igual que en backend/Dockerfile y en backend/Dockerfile.cron. Si falta acá, el Web Service
+# de Render (render.yaml → dockerfilePath: Dockerfile.render) muere con "No module named
+# 'shared'" al importar cualquier router que la use.
+COPY backend/shared/ shared/
 COPY backend/ml/ ml/
 COPY backend/alembic/ alembic/
 COPY backend/alembic.ini ./

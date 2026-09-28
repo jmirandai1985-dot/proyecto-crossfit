@@ -144,12 +144,40 @@ def test_e_el_predicado_de_la_app_es_el_mismo_que_el_del_job():
     assert men.sql_viva("r") == f"r.estado NOT IN ({men.lista_sql()})"
 
 
-def test_f_las_dos_imagenes_docker_copian_shared():
-    """Las dos partes importan `shared`: la imagen que no lo copie muere en runtime con
-    "No module named 'shared'" (y la del job, de noche)."""
-    web = (RAIZ / "Dockerfile").read_text(encoding="utf-8")
-    cron = (RAIZ / "Dockerfile.cron").read_text(encoding="utf-8")
+def _dockerfile_render() -> str:
+    """El Dockerfile del Web Service (raíz del repo) + coherencia con render.yaml.
+
+    `Dockerfile.render` vive FUERA de `backend/`, así que el test lo busca en la raíz y además
+    verifica que render.yaml siga apuntándole: si el deploy pasa a otra imagen, la guarda de
+    `shared/` tiene que moverse con él (y este test lo avisa).
+    """
+    raiz_repo = RAIZ.parent
+    yaml = (raiz_repo / "render.yaml").read_text(encoding="utf-8-sig")
+    assert "dockerfilePath: Dockerfile.render" in yaml, "render.yaml dejó de usar Dockerfile.render"
+    assert "dockerContext: ." in yaml, "el contexto del build de Render dejó de ser la raíz"
+    return (raiz_repo / "Dockerfile.render").read_text(encoding="utf-8-sig")
+
+
+def test_f_las_tres_imagenes_docker_copian_shared():
+    """Las TRES imágenes importan `shared`: la que no lo copie muere en runtime con
+    "No module named 'shared'" (el Web Service al arrancar, el job de noche).
+
+    Las tres dejan el paquete en el MISMO lugar (`shared/` bajo el WORKDIR `/app`), pero la ruta
+    de ORIGEN depende del contexto del build:
+      * `backend/Dockerfile` y `backend/Dockerfile.cron` → contexto `backend/` (docker-compose /
+        build hook) ⇒ `COPY shared/ shared/` y `COPY shared/estados.py`.
+      * `Dockerfile.render` (raíz; el del Web Service de Render: render.yaml → `dockerfilePath:
+        Dockerfile.render`, `dockerContext: .`) ⇒ `COPY backend/shared/ shared/`.
+
+    Regresión real (2026-09-27): a Dockerfile.render le faltaba esa línea, así que el contenedor de
+    PROD no habría arrancado (uvicorn importa `app.main` al iniciar y los routers pasan por
+    `app.core.estados`).
+    """
+    web = (RAIZ / "Dockerfile").read_text(encoding="utf-8-sig")
+    cron = (RAIZ / "Dockerfile.cron").read_text(encoding="utf-8-sig")
+    render = _dockerfile_render()
 
     assert "COPY shared/ shared/" in web
     assert "COPY shared/__init__.py" in cron and "COPY shared/estados.py" in cron
+    assert "COPY backend/shared/ shared/" in render
     assert "COPY app/" not in cron          # invariante: la imagen del job no lleva la app
