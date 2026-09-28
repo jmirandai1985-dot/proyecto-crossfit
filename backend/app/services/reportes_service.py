@@ -183,14 +183,36 @@ def _add_line_chart(ws, data_rows, data_col, cat_col, title, position, color=ORA
     ws.add_chart(chart, position)
 
 
+def _corte_suscripciones(ultimo_dia: date) -> date:
+    """La fecha de corte de las columnas de suscripciones ("Alumnos" y "MRR") de un mes.
+
+    El corte de un mes ya cerrado es su ULTIMO DIA: la vigencia de una suscripcion es un intervalo
+    de fechas, asi que el numero de ese mes no puede depender del estado de HOY (una `vencido` de
+    hoy sigue contando en los meses que sus fechas cubren).
+
+    El mes EN CURSO todavia no cerro, asi que se corta a HOY (en UTC, igual que el dashboard:
+    `app/api/v1/reportes.py`); contar los dias que todavia no pasaron adelantaria al mes en curso
+    las suscripciones que empiezan mas adelante.
+
+    Es la MISMA fecha que recibe la tarjeta KPI de MRR del Resumen Ejecutivo y el parametro `hasta`
+    de `metricas_service.mrr`, para que la tarjeta y la celda de "Historico Mensual" del mismo mes
+    digan siempre lo mismo.
+    """
+    hoy = datetime.now(timezone.utc).date()
+    if (ultimo_dia.year, ultimo_dia.month) == (hoy.year, hoy.month):
+        return hoy
+    return ultimo_dia
+
+
 def _build_historico_mensual(db, tenant_id):
     """
     Construye la tabla Historico Mensual con datos reales de transacciones_financieras
     para los ultimos 6 meses.
     Retorna: list of dicts con Año, Mes, MesNum, IngresosTotales, Egresos, Neto
 
-    El corte de las dos columnas de suscripciones ("Alumnos" y "MRR") es el ULTIMO DIA de cada mes,
-    y la vigencia EN ESA FECHA la decide el predicado compartido
+    El corte de las dos columnas de suscripciones ("Alumnos" y "MRR") es el que define
+    `_corte_suscripciones` (el ULTIMO DIA de cada mes, u HOY si el mes es el en curso), y la vigencia
+    EN ESA FECHA la decide el predicado compartido
     (`shared.estados.sql_suscripcion_vigente`), no `estado = 'activo'`: ese es el estado de HOY,
     así que usarlo en un mes ya cerrado hacía que el mes pasado se recalculase al vencerse una
     suscripción (una `vencido` desaparecía de los meses en los que sí estuvo vigente y una que
@@ -200,8 +222,9 @@ def _build_historico_mensual(db, tenant_id):
     que usan el dashboard (`app/api/v1/reportes.py`) y el BI (`kpis_populate.py`, que persiste el
     mes cerrado con el mismo `fin`), para que el número no tenga dos versiones.
 
-    Ojo con el mes en curso: su corte también es el último día (los días que faltan no se
-    "descuentan"), así que se lee como el MRR al cierre del mes.
+    El mes EN CURSO se corta a HOY (el mes todavía no cerró), con el mismo `_corte_suscripciones` que
+    la tarjeta KPI de MRR del Resumen Ejecutivo: así la celda de ese mes en esta tabla y la tarjeta
+    siempre dicen lo mismo.
     """
     historico = []
     ahora = datetime.now(timezone.utc)
@@ -230,13 +253,17 @@ def _build_historico_mensual(db, tenant_id):
             WHERE tenant_id = :tid AND tipo = 'egreso' AND fecha >= :ini AND fecha <= :fin
         """), {"tid": tenant_id, "ini": inicio, "fin": fin}).scalar() or 0
 
-        # Alumnos vigentes al fin de mes (por FECHA: ver el docstring)
+        # Corte de las DOS columnas de suscripciones (no es el `fin` de las columnas financieras:
+        # ver `_corte_suscripciones`).
+        corte = _corte_suscripciones(fin)
+
+        # Alumnos vigentes al corte (por FECHA: ver el docstring)
         alumnos = db.execute(text("""
             SELECT COUNT(DISTINCT u.id) FROM usuarios u
             JOIN suscripciones s ON u.id = s.usuario_id
             WHERE u.tenant_id = :tid AND u.rol = 'alumno' AND u.activo = true
-              AND """ + sql_suscripcion_vigente("s", ":fin") + """
-        """), {"tid": tenant_id, "fin": fin}).scalar() or 0
+              AND """ + sql_suscripcion_vigente("s", ":corte") + """
+        """), {"tid": tenant_id, "corte": corte}).scalar() or 0
 
         # Nuevos alumnos del mes
         nuevos = db.execute(text("""
@@ -245,8 +272,8 @@ def _build_historico_mensual(db, tenant_id):
               AND created_at::date >= :ini AND created_at::date <= :fin
         """), {"tid": tenant_id, "ini": inicio, "fin": fin}).scalar() or 0
 
-        # MRR al fin de mes: NO una copia acá, la misma definición del dashboard y del BI
-        mrr_val = metricas.mrr(db, tenant_id, fin)
+        # MRR al corte: NO una copia acá, la misma definición del dashboard y del BI
+        mrr_val = metricas.mrr(db, tenant_id, corte)
 
         # Ventas bazar del mes
         ventas = db.execute(text("""
@@ -266,6 +293,7 @@ def _build_historico_mensual(db, tenant_id):
             "anio": y,
             "mes": label,
             "mes_num": m,
+            "corte": corte,
             "ingresos": ing_f,
             "egresos": eg_f,
             "neto": ing_f - eg_f,
@@ -432,11 +460,13 @@ def crear_reporte_ventas_mensual_bytes(
           AND created_at::date >= :ini AND created_at::date < :fin
     """), {"tid": tenant_id, "ini": fecha_inicio, "fin": fecha_fin}).scalar() or 0
 
-    # MRR de HOY: KPI en vivo (el mes elegido no entra acá, es la foto del día), con la MISMA
-    # definición Y la misma fecha que el dashboard (`app/api/v1/reportes.py`): `metricas_service.mrr`
-    # con la fecha UTC. Así el número del Excel y el de la pantalla no pueden divergir. El MRR POR MES
-    # es el de `_build_historico_mensual` (la misma función, con el último día de cada mes).
-    mrr_val_f = float(metricas.mrr(db, tenant_id, datetime.now(timezone.utc).date()))
+    # MRR al corte del MES ELEGIDO: `_corte_suscripciones` es el MISMO corte que la celda de
+    # "Historico Mensual" de ese mes (`_build_historico_mensual`) y `metricas_service.mrr` es la
+    # definición única (la del dashboard y la del BI), así que la tarjeta y la tabla del archivo no
+    # pueden decir números distintos. Si el mes elegido es el EN CURSO, el corte es HOY: lo mismo que
+    # muestra el dashboard (`app/api/v1/reportes.py`).
+    corte_mrr = _corte_suscripciones(fecha_fin - timedelta(days=1))
+    mrr_val_f = float(metricas.mrr(db, tenant_id, corte_mrr))
 
     # ARPU
     arpu_val = round(neto_mes / alumnos_activos,
@@ -487,7 +517,8 @@ def crear_reporte_ventas_mensual_bytes(
     ws1.column_dimensions['A'].width = 3
     ws1.column_dimensions['B'].width = 22
     ws1.column_dimensions['C'].width = 22
-    ws1.column_dimensions['D'].width = 22
+    # D mas ancha: la etiqueta de la tarjeta de MRR lleva la fecha de corte ("MRR al 31/08/2026")
+    ws1.column_dimensions['D'].width = 26
     ws1.column_dimensions['E'].width = 22
     ws1.column_dimensions['F'].width = 22
     ws1.column_dimensions['G'].width = 22
@@ -527,7 +558,7 @@ def crear_reporte_ventas_mensual_bytes(
                     f"${neto_mes:,.0f}", "Ingresos - Egresos", ORANGE_ACCENT, "💰")
     _apply_kpi_card(ws1, kpi_start, 3, "Alumnos Activos",
                     f"{alumnos_activos}", "Con suscripcion vigente", BLUE_KPI, "👥")
-    _apply_kpi_card(ws1, kpi_start, 4, "MRR",
+    _apply_kpi_card(ws1, kpi_start, 4, f"MRR al {corte_mrr:%d/%m/%Y}",
                     f"${mrr_val_f:,.0f}", "Ingresos recurrentes", GREEN_KPI, "📈")
     _apply_kpi_card(ws1, kpi_start, 5, "ARPU",
                     f"${arpu_val:,.0f}", "Por alumno activo", PURPLE_KPI, "🎯")

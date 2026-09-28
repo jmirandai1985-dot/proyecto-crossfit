@@ -876,7 +876,7 @@ py -3.12 -m pytest tests/test_mantenimiento_cloud.py tests/test_mantenimiento_pa
 ```
 Registrado el 2026-09-27, con la Fase 7, las **guardas por regla**, los ajustes de A.5, el **conteo
 real** de las listas (integridad, A.3 y paso 9), la **lista compartida de "cancelada"** y el **MRR y
-churn por fecha** (en el correo y en el Excel) ya adentro: **230 passed, 1 skipped** — 127 de
+churn por fecha** (en el correo y en el Excel) ya adentro: **231 passed, 1 skipped** — 127 de
 `mantenimiento_cloud` (los 33 de la Fase 6 + 47 de la Fase 7 + **22 de los límites por regla**:
 evaluación pura, borde del %, huérfanas por lista, tope global, config inválida, las guardas en el
 SQL y el prefijo `[maint]` del correo, + **17 de A.5** (`requiere_coach`, complementariedad de
@@ -888,11 +888,13 @@ tope-conteo y A.6** (integridad con `LIMITE_DUP`, A.3 con `LIMITE_A3`, el paso 9
 helpers son exactos, la app no compara contra el literal, el predicado ORM == el del job, las TRES
 imágenes copian `shared/` y el predicado de vigencia por fecha parte el enum en dos), **4 de
 `mrr_historico`** (vencer hoy no cambia el MRR del pasado, una rechazada no suma nunca, el churn de
-la cohorte es histórico y el MRR del pasado y el de hoy son la MISMA consulta), **7 de
+la cohorte es histórico y el MRR del pasado y el de hoy son la MISMA consulta), **8 de
 `reporte_historico_mensual`** (el .xlsx se genera y se LEE: la celda de MRR del mes pasado de la hoja
 "Historico Mensual" es la de `metricas_service.mrr` para esa fecha —la misma del dashboard y del BI—,
 vencer una suscripción hoy no la cambia, la columna de alumnos va con el predicado de fecha, la
-tarjeta KPI de MRR es la de HOY del dashboard y el export no vuelve a tener su propia copia del SQL),
+tarjeta KPI de MRR es el corte del MES ELEGIDO —el mismo número que la celda de "Historico Mensual" de
+ese mes, y HOY si el mes elegido es el en curso—, su etiqueta dice la fecha del corte y el export no
+vuelve a tener su propia copia del SQL del MRR ni su propia fecha),
 4 de
 `mantenimiento_pasos`,
 1 de `mantenimiento_vencidos` y 76 de los tests de correo/drill/watchdog (el skip es el drill
@@ -1340,9 +1342,9 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
   la **contraprueba** del control negativo: con el SQL viejo `test_b`/`test_d` (app) y `test_cr`
   (job) **fallan**. `tests/test_mantenimiento_cloud.py` ⇒ **127 passed**,
   `tests/test_estados_compartido.py` ⇒ **12 passed** y el comando completo del README ⇒ **223
-  passed, 1 skipped** (los **7** del Excel entran con el commit aparte de acá abajo; hoy el mismo
-  comando da 230). Sin red, sin base y sin PROD (el SQL del lado app se captura con una sesión
-  doble).
+  passed, 1 skipped** (los **7** del Excel entran con el commit aparte que sigue; con ese commit el
+  mismo comando da 230, y 231 con el de la tarjeta de MRR de más abajo). Sin red, sin base y sin PROD
+  (el SQL del lado app se captura con una sesión doble).
 - **El Excel de `/reportes/export`: el MRR por mes, de la MISMA función que el dashboard y el BI
   (2026-09-27, mismo día, commit aparte).** `_build_historico_mensual` —la tabla "Historico Mensual"
   del .xlsx— tenía su propia copia del MRR (`s.estado = 'activo' AND s.fecha_expiracion >= :fin`, sin
@@ -1356,8 +1358,9 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
   alumnos va con `shared.estados.sql_suscripcion_vigente("s", ":fin")`. La tarjeta KPI "MRR" del
   Resumen Ejecutivo (que también tenía su copia, con la fecha del día) pasa a `metricas_service.mrr`
   con la fecha UTC: la misma definición Y la misma fecha que el dashboard, así el Excel y la pantalla
-  no pueden mostrar números distintos. El `alumnos_activos` de esa fila de tarjetas queda como estaba
-  a propósito: es la foto de HOY y su consulta es idéntica a la del KPI del dashboard.
+  no pueden mostrar números distintos (la FECHA de la tarjeta la cambia el commit de abajo: pasa al
+  corte del mes elegido). El `alumnos_activos` de esa fila de tarjetas queda como estaba a propósito:
+  es la foto de HOY y su consulta es idéntica a la del KPI del dashboard.
   **Verificado:** `tests/test_reporte_historico_mensual.py` (nuevo) ⇒ **7 passed** con los dos casos
   del pedido: el .xlsx se genera de verdad (sesión doble con filas de fixture que evalúa el SQL
   capturado) y se LEE la celda de MRR del mes pasado de "Historico Mensual" y la tarjeta del KPI.
@@ -1365,6 +1368,26 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
   pasado queda en 0 en vez de 75.000, el predicado desaparece del conteo de alumnos, la tarjeta deja
   de llamar a `metricas.mrr` y el export vuelve a tener su copia del `SUM(p.precio_clp)`—. Comando
   completo del README ⇒ **230 passed, 1 skipped**. Sin red, sin base y sin PROD.
+- **La tarjeta de MRR del Excel: el corte del MES ELEGIDO, no el de hoy (2026-09-27, mismo día, commit
+  aparte).** La tarjeta KPI "MRR" del Resumen Ejecutivo mostraba el MRR de HOY aunque el reporte fuera
+  de, por ejemplo, agosto: el número no coincidía con la celda de ese mes en "Historico Mensual" y
+  cambiaba según el día en que se descargaba el archivo. La fecha de corte sale ahora de una sola
+  función, `reportes_service._corte_suscripciones(ultimo_dia_del_mes)`: el **último día** del mes
+  elegido y **HOY** si el mes elegido es el **en curso** (el mes no cerró; contar los días que faltan
+  adelantaría suscripciones que empiezan más adelante). Es el mismo corte que la celda del mismo mes de
+  la tabla —el MRR sigue siendo `metricas_service.mrr`, la función única del dashboard y del BI— y la
+  **etiqueta de la tarjeta lo dice: "MRR al 31/08/2026"** (con el mes en curso, "MRR al 28/09/2026").
+  La columna de alumnos del mes en curso usa el mismo corte (antes se cortaba al último día del mes),
+  así que la fila del mes en curso de la tabla y la tarjeta dicen siempre lo mismo; el resto de esa
+  fila (los otros KPI, ingresos/egresos/ventas/nuevos) sigue siendo lo que ya era.
+  **Verificado:** `tests/test_reporte_historico_mensual.py` ⇒ **8 passed**: el `test_f` nuevo (mes en
+  curso: la tarjeta, la celda del mes y `metricas_service.mrr(db, tenant_id, hoy)` son el mismo número,
+  y la fila de fixture que empieza mañana NO cuenta) y el `test_g` nuevo (mes pasado elegido: la
+  tarjeta es la celda de ESE mes y no la de hoy, y la etiqueta trae la fecha del corte). **Contraprueba
+  (control negativo):** volviendo `corte_mrr = datetime.now(timezone.utc).date()` fallan `test_e` y
+  `test_g`; volviendo `corte = fin` (mes en curso "al cierre") fallan `test_a`, `test_d`, `test_e`,
+  `test_f` y `test_g` (la celda del mes en curso da 170.000 contra 90.000 de hoy). Comando completo del
+  README ⇒ **231 passed, 1 skipped**. Sin red, sin base y sin PROD.
 - **Fase 6 (entrega 2, 2026-09-27):** se escribió `maintenance/mantenimiento_cloud.py`, se agregó
   su `COPY` en `Dockerfile.cron` (sin `pip install` nuevo), se aplicó el **fix H1** en
   `run_daily.py`/`run_monthly.py` (el `_paso()` nuevo mira el valor de retorno real: un `False` se

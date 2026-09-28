@@ -14,17 +14,22 @@ definen la vigencia EN UNA FECHA:
     del Excel cambiaba según el día en que se descargaba).
 
 Ahora:
-  * el MRR de cada mes es `metricas_service.mrr(db, tenant_id, ultimo_dia_del_mes)`: la MISMA
-    función del dashboard (`app/api/v1/reportes.py`) y del BI (`kpis_populate.py`, que persiste el
-    mes cerrado con el mismo `fin`), así que no hay una tercera versión del número;
-  * la columna de alumnos usa `shared.estados.sql_suscripcion_vigente("s", ":fin")`;
+  * el MRR de cada mes es `metricas_service.mrr(db, tenant_id, corte_del_mes)`: la MISMA función del
+    dashboard (`app/api/v1/reportes.py`) y del BI (`kpis_populate.py`, que persiste el mes cerrado con
+    el mismo `fin`), así que no hay una tercera versión del número; el corte lo define
+    `reportes_service._corte_suscripciones` (el último día del mes; HOY en el mes EN CURSO);
+  * la columna de alumnos usa `shared.estados.sql_suscripcion_vigente("s", ":corte")`;
   * la tarjeta KPI "MRR" del Resumen Ejecutivo (que también tenía su copia del SQL, con la fecha del
-    día) pasa a ser `metricas_service.mrr` con la fecha UTC: la misma definición Y la misma fecha
-    que el dashboard, así el Excel y la pantalla no pueden mostrar números distintos.
+    día) pasa a ser `metricas_service.mrr` con el corte del MES ELEGIDO, el MISMO corte que la celda
+    de "Historico Mensual" de ese mes, así la tarjeta y la tabla del propio archivo no pueden mostrar
+    números distintos. Si el mes elegido es el EN CURSO, el corte es HOY (como el dashboard) y la
+    etiqueta lo dice: "MRR al 28/09/2026".
 
-Los dos casos que fija este test (el pedido de la tarea):
+Los casos que fija este test (los pedidos de la tarea):
   1. el MRR de un mes pasado del export COINCIDE con `metricas_service.mrr` para la misma fecha;
-  2. vencer una suscripción HOY no lo altera.
+  2. vencer una suscripción HOY no lo altera;
+  3. la tarjeta KPI de MRR es el corte del mes elegido (el de la celda de "Historico Mensual" del
+     mismo mes) y su etiqueta dice la fecha del corte; con el mes EN CURSO, la fecha es HOY.
 
 Sin red y sin base: el .xlsx se genera DE VERDAD (con una sesión doble que guarda `(SQL, params)` y,
 para las consultas que usan el predicado compartido, evalúa el SQL capturado contra filas de fixture)
@@ -62,19 +67,40 @@ PRECIO_VIGENTE_LARGA = 30000        # sigue vigente
 PRECIO_RECHAZADA = 99000            # nunca suma, aunque sus fechas cubran el mes
 PRECIO_EMPIEZA_DESPUES = 60000      # empieza el mes que viene ⇒ no estaba vigente al corte
 PRECIO_VENCIO_ANTES = 70000         # venció antes del corte ⇒ no estaba vigente al corte
+PRECIO_EMPIEZA_MANANA = 80000       # arranca MAÑANA ⇒ no cuenta hoy (sí al "cierre" del mes en curso)
 
 MRR_MES_PASADO = PRECIO_VENCIO_AYER + PRECIO_VIGENTE_LARGA
 ALUMNOS_MES_PASADO = 2
+# HOY: la que venció en el corte del mes pasado ya no cuenta, y la que arranca este mes sí.
+MRR_HOY = PRECIO_VIGENTE_LARGA + PRECIO_EMPIEZA_DESPUES
+
+
+def _arranca_manana() -> bool:
+    """¿Mañana todavía cae dentro del mes en curso? (si hoy es el último día, no hay días que falten)."""
+    hoy = datetime.now(timezone.utc).date()
+    return (hoy + timedelta(days=1)).month == hoy.month
+
+
+def _mrr_al_cierre_del_mes_en_curso() -> float:
+    """El MRR con el corte del ÚLTIMO DÍA de este mes: distinto del de hoy por la fila que empieza
+    mañana (salvo que hoy sea el último día del mes, que es cuando "cierre" y "hoy" son lo mismo).
+
+    Es el número que saldría si el mes en curso se cortara "al cierre" —contando días que todavía no
+    pasaron, adelantando suscripciones futuras—: justo lo que el test F caza.
+    """
+    return MRR_HOY + (PRECIO_EMPIEZA_MANANA if _arranca_manana() else 0)
 
 Susc = namedtuple("Susc", "estado inicio expiracion precio")
 
 
 def _meses_esperados() -> list:
-    """Los 6 meses del Excel (año, mes, último día), con el mismo cálculo que el servicio.
+    """Los 6 meses del Excel (año, mes, corte), con el mismo cálculo que el servicio.
 
-    `_build_historico_mensual` toma los últimos 6 meses desde `datetime.now(timezone.utc)` y corta
-    en el ÚLTIMO DÍA de cada mes; el test recalcula lo mismo para poder afirmar la fecha del corte.
+    `_build_historico_mensual` toma los últimos 6 meses desde `datetime.now(timezone.utc)` y el corte
+    de cada uno es el que define `reportes_service._corte_suscripciones`: el ÚLTIMO DÍA del mes (HOY
+    en el mes EN CURSO, que todavía no cerró); el test recalcula lo mismo para poder afirmar la fecha.
     """
+    hoy = datetime.now(timezone.utc).date()
     ahora = datetime.now(timezone.utc)
     meses = []
     for i in range(5, -1, -1):
@@ -83,7 +109,10 @@ def _meses_esperados() -> list:
         while m <= 0:
             m += 12
             y -= 1
-        meses.append((y, m, date(y, m, calendar.monthrange(y, m)[1])))
+        corte = date(y, m, calendar.monthrange(y, m)[1])
+        if (y, m) == (hoy.year, hoy.month):
+            corte = hoy                     # el mes en curso se corta a HOY (todavía no cerró)
+        meses.append((y, m, corte))
     return meses
 
 
@@ -92,7 +121,11 @@ def _filas_de_ejemplo(estado_de_la_vencida: str = "vencido") -> list:
 
     `estado_de_la_vencida` es el estado de HOY de la fila que vence en el corte: `vencido` (ya se
     venció) o `activo` (todavía no). El mes pasado tiene que dar lo mismo de las dos formas.
+
+    La última fila arranca MAÑANA: hoy no cuenta, y al "cierre" del mes en curso sí (es la que separa
+    el corte de HOY del corte del último día del mes).
     """
+    hoy = datetime.now(timezone.utc).date()
     _, _, corte = _meses_esperados()[-2]
     principio = corte.replace(day=1)
     return [
@@ -102,6 +135,8 @@ def _filas_de_ejemplo(estado_de_la_vencida: str = "vencido") -> list:
         Susc("activo", corte + timedelta(days=1), date(corte.year + 1, 6, 30),
              PRECIO_EMPIEZA_DESPUES),                     # arranca DESPUÉS del corte
         Susc("vencido", principio, corte.replace(day=1), PRECIO_VENCIO_ANTES),
+        Susc("activo", hoy + timedelta(days=1), date(hoy.year + 1, 6, 30),
+             PRECIO_EMPIEZA_MANANA),                      # arranca MAÑANA ⇒ hoy no cuenta
     ]
 
 
@@ -165,7 +200,7 @@ class SesionFalsa:
 
     def scalar(self):
         sql, params = self.consultas[-1]
-        if any(estados.sql_suscripcion_vigente("s", p) in sql for p in (":fin", ":hasta")):
+        if any(estados.sql_suscripcion_vigente("s", p) in sql for p in (":corte", ":fin", ":hasta")):
             return evalua(sql, params, self.filas)
         return 0
 
@@ -184,27 +219,45 @@ def _consultas(sesion: SesionFalsa, fragmento: str) -> list:
 # "Historico Mensual": fila 1 = encabezados, filas 2..7 = los 6 meses (del más viejo al actual).
 #   A Año | B Mes | C MesNum | D Ingresos | E Alumnos Activos | F Nuevos | G MRR | H Ventas | I Egresos
 COL_ALUMNOS, COL_MRR = 5, 7
-FILA_MES_PASADO = 6
+FILA_MES_PASADO, FILA_MES_ACTUAL = 6, 7
 # Tarjeta KPI del "Resumen Ejecutivo": fila 5 = etiqueta, 6 = valor, 7 = subtítulo (col 4 = MRR).
-FILA_VALOR_KPI, COL_KPI_MRR = 6, 4
+FILA_LABEL_KPI, FILA_VALOR_KPI, COL_KPI_MRR = 5, 6, 4
 
 
 def _mes_actual() -> tuple:
-    """El mes del período que se exporta (da igual cuál: la hoja histórica es siempre la de hoy)."""
+    """El mes del período que se exporta (mes, año)."""
     ahora = datetime.now(timezone.utc)
     return ahora.month, ahora.year
 
 
-def _genera_excel(sesion: SesionFalsa):
-    """El .xlsx real en memoria: lo que devuelve `/reportes/monthly-sales`."""
-    datos = rep.crear_reporte_ventas_mensual_bytes(sesion, TENANT, *_mes_actual())
+def _genera_excel(sesion: SesionFalsa, mes: int = None, anio: int = None):
+    """El .xlsx real en memoria: lo que devuelve `/reportes/monthly-sales`.
+
+    Sin argumentos exporta el mes EN CURSO (el que elige la UI por defecto); con un mes pasado, la
+    tarjeta del KPI tiene que salir con el corte de ESE mes.
+    """
+    if mes is None or anio is None:
+        mes, anio = _mes_actual()
+    datos = rep.crear_reporte_ventas_mensual_bytes(sesion, TENANT, mes, anio)
     return load_workbook(BytesIO(datos))
 
 
+def _celda_de_la_tarjeta(libro, fila: int):
+    return libro.worksheets[0].cell(row=fila, column=COL_KPI_MRR).value
+
+
+def _numero_de_la_tarjeta(libro) -> float:
+    """El valor de la tarjeta KPI como número (la celda guarda el texto con formato moneda)."""
+    texto = _celda_de_la_tarjeta(libro, FILA_VALOR_KPI)
+    assert isinstance(texto, str) and texto.startswith("$"), texto
+    return float(texto.replace("$", "").replace(",", ""))
+
+
 # ── A. El MRR de cada mes sale de metricas_service, con el último día del mes ────────────────────
-def test_a_el_mrr_de_cada_mes_lo_calcula_metricas_service_con_el_ultimo_dia(monkeypatch):
+def test_a_el_mrr_de_cada_mes_lo_calcula_metricas_service_con_el_corte(monkeypatch):
     """El MRR del Excel no puede ser una copia propia: es `metricas_service.mrr` (la del dashboard y
-    del BI) y la fecha es el corte, el último día de cada mes."""
+    del BI) y la fecha es el corte que define `_corte_suscripciones`: el último día de cada mes (HOY
+    en el mes en curso)."""
     llamadas = []
 
     def mrr_falso(db, tenant_id, hasta):
@@ -282,10 +335,11 @@ def test_c_vencer_una_suscripcion_hoy_no_altera_el_mes_pasado(estado_de_hoy):
 
 
 # ── D. La columna de alumnos del fin de mes: el predicado por fecha ──────────────────────────────
-def test_d_la_columna_de_alumnos_del_fin_de_mes_usa_el_predicado_por_fecha():
-    """El corte es el último día de cada mes y lo decide `sql_suscripcion_vigente` (con
-    `fecha_inicio`, que era la condición que faltaba): la `rechazado`, la que arranca después del
-    corte y la que venció antes NO cuentan; la que vence en el corte SÍ."""
+def test_d_la_columna_de_alumnos_del_corte_usa_el_predicado_por_fecha():
+    """El corte lo decide `_corte_suscripciones` (el último día de cada mes; HOY en el mes en curso) y
+    la vigencia en esa fecha, `sql_suscripcion_vigente` (con `fecha_inicio`, que era la condición que
+    faltaba): la `rechazado`, la que arranca después del corte y la que venció antes NO cuentan; la
+    que vence en el corte SÍ."""
     filas = _filas_de_ejemplo()
     sesion = SesionFalsa(filas)
     historico = rep._build_historico_mensual(sesion, TENANT)
@@ -293,43 +347,94 @@ def test_d_la_columna_de_alumnos_del_fin_de_mes_usa_el_predicado_por_fecha():
     consultas = _consultas(sesion, "COUNT(DISTINCT u.id)")
     assert len(consultas) == len(_meses_esperados()) == 6
     for (sql, params), (anio, mes, corte) in zip(consultas, _meses_esperados()):
-        assert estados.sql_suscripcion_vigente("s", ":fin") in sql, (anio, mes)
+        assert estados.sql_suscripcion_vigente("s", ":corte") in sql, (anio, mes)
         assert "estado = 'activo'" not in sql, (anio, mes)
-        assert params == {"tid": TENANT, "fin": corte}, (anio, mes)
+        assert params == {"tid": TENANT, "corte": corte}, (anio, mes)
 
     assert historico[-2]["alumnos"] == ALUMNOS_MES_PASADO
     assert historico[-2]["mrr"] == float(MRR_MES_PASADO)
+    # El corte queda en el propio dato: es el que usan la celda y la tarjeta del mismo mes.
+    assert [h["corte"] for h in historico] == [c for _, _, c in _meses_esperados()]
+    assert historico[-1]["corte"] == datetime.now(timezone.utc).date(), "mes en curso = HOY"
 
 
-# ── E. La guarda: el export no vuelve a escribir su propia copia del MRR ────────────────────────
-def test_e_el_export_no_tiene_su_propia_copia_del_mrr():
+# ── E. La guarda: el export no vuelve a escribir su propia copia del MRR ni de la fecha ──────────
+def test_e_el_export_no_tiene_su_propia_copia_del_mrr_ni_de_la_fecha():
     """Si alguien re-inlinea el SQL del MRR en el Excel (estaba DOS veces: la columna del histórico y
     la tarjeta del KPI), este test lo frena ANTES de que las versiones diverjan: la definición es una
-    sola y vive en `metricas_service`."""
-    assert "SUM(p.precio_clp)" not in inspect.getsource(rep)
+    sola y vive en `metricas_service`.
+
+    Lo mismo con la FECHA del corte: la calcula `_corte_suscripciones` y la usan las dos columnas
+    históricas y la tarjeta del KPI, así que la tarjeta y la celda del mismo mes no pueden separarse
+    (si a la tarjeta le vuelven a poner la fecha de hoy escrita a mano, lo caza este test)."""
+    fuente = inspect.getsource(rep)
+    assert "SUM(p.precio_clp)" not in fuente
+    # La tabla histórica no puede volver al "estado de hoy" (now()): su corte es por fecha.
+    assert "now() AT TIME ZONE" not in inspect.getsource(rep._build_historico_mensual)
     for funcion in (rep._build_historico_mensual, rep.crear_reporte_ventas_mensual_bytes):
-        assert "metricas.mrr(" in inspect.getsource(funcion), funcion.__name__
+        codigo = inspect.getsource(funcion)
+        assert "metricas.mrr(" in codigo, funcion.__name__
+        assert "_corte_suscripciones(" in codigo, funcion.__name__
 
 
-# ── F. La tarjeta de MRR: el KPI de HOY del dashboard, con el valor en el archivo ───────────────
-def test_f_la_tarjeta_de_mrr_del_excel_es_el_kpi_del_dashboard(monkeypatch):
-    """La tarjeta "MRR" del Resumen Ejecutivo es la foto de HOY, con la misma definición Y la misma
-    fecha que el dashboard (`reportes.py`: `metricas.mrr(db, tenant_id, datetime.now(timezone.utc)
-    .date())`). Se verifica la fecha de la llamada y el valor que quedó en la celda de la tarjeta."""
+# ── F. La tarjeta con el mes EN CURSO: la celda del mismo mes, que es HOY (como el dashboard) ────
+def test_f_la_tarjeta_de_mrr_del_mes_en_curso_es_la_celda_de_ese_mes():
+    """Con el mes EN CURSO elegido, la tarjeta KPI "MRR" del Resumen Ejecutivo es la de HOY —el mes
+    todavía no cerró, así que su corte es hoy, igual que el dashboard (`reportes.py`)— y es el MISMO
+    número que la celda de "Historico Mensual" de ese mes: la tarjeta y la tabla del propio archivo no
+    pueden decir cosas distintas."""
     hoy = datetime.now(timezone.utc).date()
-    llamadas = []
-
-    def mrr_falso(db, tenant_id, hasta):
-        llamadas.append((tenant_id, hasta))
-        return 1234567.0                     # valor reconocible en la celda (formato moneda)
-
-    monkeypatch.setattr(metricas, "mrr", mrr_falso)
-
-    sesion = SesionFalsa()
+    filas = _filas_de_ejemplo()
+    sesion = SesionFalsa(filas)
     libro = _genera_excel(sesion)
 
-    assert llamadas[0] == (TENANT, hoy), "la 1ª llamada del Excel es el MRR de hoy"
-    assert llamadas[1:] == [(TENANT, corte) for _, _, corte in _meses_esperados()]
-    assert libro.worksheets[0].cell(
-        row=FILA_VALOR_KPI, column=COL_KPI_MRR).value == "$1,234,567"
+    esperado = metricas.mrr(SesionFalsa(filas), TENANT, hoy)     # la del dashboard, con hoy
+    assert esperado == float(MRR_HOY)                            # la que venció ayer ya no cuenta hoy
+    assert libro["Historico Mensual"].cell(row=FILA_MES_ACTUAL, column=COL_MRR).value == esperado
+    assert _numero_de_la_tarjeta(libro) == esperado
+
+    # La etiqueta dice la fecha del corte (hoy, porque el mes está en curso) y el subtítulo se mantiene.
+    assert f"MRR al {hoy:%d/%m/%Y}" in _celda_de_la_tarjeta(libro, FILA_LABEL_KPI)
+    assert _celda_de_la_tarjeta(libro, FILA_LABEL_KPI + 2) == "Ingresos recurrentes"
+
+    # El corte es HOY, no el "cierre" del mes en curso: la suscripción que empieza mañana todavía no
+    # cuenta (si hoy es el último día del mes, hoy y el cierre son la misma fecha y no hay qué separar).
+    if _arranca_manana():
+        assert esperado != _mrr_al_cierre_del_mes_en_curso()
+
+    # Y la consulta de la tarjeta es la MISMA que la del mes en curso de la tabla (misma fecha).
+    assert [p["hasta"] for _, p in _consultas(sesion, "SUM(p.precio_clp)")] == [hoy] + [
+        corte for _, _, corte in _meses_esperados()]
+
+
+# ── G. La tarjeta con un mes PASADO: la celda de ESE mes, no la de hoy ───────────────────────────
+def test_g_la_tarjeta_de_mrr_de_un_mes_pasado_es_la_celda_de_ese_mes():
+    """Con un mes PASADO elegido, la tarjeta usa el corte de ESE mes (su último día), no la fecha de
+    hoy: es el mismo número que la fila de ese mes de "Historico Mensual" y distinto del de hoy (en
+    las filas de fixture, la suscripción que venció en ese corte sumó al mes pasado y ya no suma hoy).
+    Antes del fix, la tarjeta mostraba el MRR del día en que se descargaba el archivo."""
+    anio, mes, corte_pasado = _meses_esperados()[-2]
+    hoy = datetime.now(timezone.utc).date()
+    assert corte_pasado < hoy, "el mes pasado tiene que estar cerrado"
+
+    filas = _filas_de_ejemplo()
+    sesion = SesionFalsa(filas)
+    libro = _genera_excel(sesion, mes=mes, anio=anio)
+
+    del_mes = metricas.mrr(SesionFalsa(filas), TENANT, corte_pasado)
+    assert del_mes == float(MRR_MES_PASADO)
+    assert libro["Historico Mensual"].cell(row=FILA_MES_PASADO, column=COL_MRR).value == del_mes
+    assert _numero_de_la_tarjeta(libro) == del_mes, "la tarjeta es la celda del mes elegido"
+
+    mrr_hoy = metricas.mrr(SesionFalsa(filas), TENANT, hoy)
+    assert mrr_hoy == float(MRR_HOY) and mrr_hoy != del_mes      # NO es la foto de hoy
+
+    # La etiqueta dice el corte del mes elegido (y no la fecha de hoy).
+    etiqueta = _celda_de_la_tarjeta(libro, FILA_LABEL_KPI)
+    assert f"MRR al {corte_pasado:%d/%m/%Y}" in etiqueta
+    assert f"{hoy:%d/%m/%Y}" not in etiqueta
+
+    # La 1ª consulta de MRR del archivo es la del mes elegido (su corte); después, los 6 de la tabla.
+    assert [p["hasta"] for _, p in _consultas(sesion, "SUM(p.precio_clp)")] == [corte_pasado] + [
+        corte for _, _, corte in _meses_esperados()]
 
