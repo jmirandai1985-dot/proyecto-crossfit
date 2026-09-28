@@ -91,7 +91,9 @@ def enviar_alerta(motivo: str, detalle: dict, ultimas: list) -> bool:
         "chico": f"el backup más nuevo pesa {detalle.get('bytes', 0)/1024:.1f} KB "
                  f"(mínimo {MIN_BYTES/1024:.0f} KB)",
     }
-    asunto = f"[Box CrossFit] ALERTA backup PROD: {titulos.get(motivo, motivo)}"
+    # Asunto con el MISMO prefijo que el mantenimiento (`[ALERTA] <job>: <qué pasó>`): la
+    # notificación del teléfono ya dice qué job falló sin abrir el correo.
+    asunto = f"[ALERTA] Watchdog backups PROD: {titulos.get(motivo, motivo)}"
     filas = "".join(
         f"<li><code>{o['Key']}</code> — {o['Size']/1024:.1f} KB — "
         f"{o['LastModified'].strftime('%Y-%m-%d %H:%M')} UTC</li>" for o in ultimas)

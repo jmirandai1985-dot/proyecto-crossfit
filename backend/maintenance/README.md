@@ -216,7 +216,7 @@ Los 4 Cron Jobs comparten **un solo camino de correo** (`maintenance/alertas.py`
 | Job | ¿Cuándo manda correo? | Exit |
 |---|---|---|
 | `backup_cloud` (job `proyecto-crossfit`) | **nunca**: no manda correo. Si el dump falla, el run queda rojo en Render y el que avisa es el watchdog | 2/3/4/5 |
-| `watchdog_backups` | sólo si hay alerta de frescura/tamaño (asunto `[Box CrossFit] ALERTA backup PROD: …`) | 6 |
+| `watchdog_backups` | sólo si hay alerta de frescura/tamaño (asunto `[ALERTA] Watchdog backups PROD: …`) | 6 |
 | `restore_drill` | sólo si el run falla (exit ≠ 0) o si la rama temporal quedó viva | 13 |
 | `mantenimiento_cloud` | sólo si el run falla (exit ≠ 0: config, lectura, escritura, verificación, guarda de volumen, integridad) o si Neon pasó `NEON_UMBRAL_PCT` | ≠ 0 |
 
@@ -232,7 +232,7 @@ con las listas completas):
 [ALERTA] Drill de restore PROD: la rama temporal br-drill-20261001-1000 quedó viva …
 ```
 
-> El **watchdog** (Fase 3, ya en producción) usa el asunto `[Box CrossFit] ALERTA backup PROD: …`
+> El **watchdog** (Fase 3, ya en producción) usa el asunto `[ALERTA] Watchdog backups PROD: …`
 > y el job de **backup no manda correo** (sus fallas se ven como run rojo en Render; el watchdog es
 > el que avisa). Ninguno de los dos archivos se tocó en este cambio: su comportamiento "sólo si hay
 > problema" ya era el correcto. Si se quiere el mismo prefijo `[ALERTA]` también ahí, es un cambio
@@ -274,7 +274,7 @@ local logueaba "✅ Backup completado" con el dump fallando). El watchdog es un 
 | backup | 0 / 2 / 3 / 4 / 5 | OK / config / pg_dump / asserts de contenido / R2 |
 | watchdog | 0 / 2 / 6 / 7 | OK (sin email) / config (falta variable o R2 inaccesible) / **hay algo que avisar** / inesperado |
 | drill | 0 / 2 / 8 / 9 / 10 / 11 / 12 / 13 | OK (sin email) / config (falta variable o cupo de ramas lleno) / descarga-dump ilegible / API Neon / restore o verificación / **la prueba negativa no falló (crítico)** / inesperado / **la rama temporal quedó viva** (con el resto del drill OK) |
-| mantenimiento | 0 / 2 / 3 / 4 / 6 / 7 / 8 | OK (sin email, salvo que Neon pase el umbral) / config / lectura / integridad / guarda de volumen / escritura / verificación |
+| mantenimiento | 0 / 2 / 3 / 4 / 6 / 7 / 8 / **9** | OK (sin email, salvo que Neon pase el umbral de espacio o haya un aviso de CU-horas/ramas) / config / lectura / integridad / guarda de volumen (`MAX_CAMBIOS`, `MAX_CIERRE`, `MAX_PURGA`) / escritura / verificación / **detecciones A.1–A.5 o un chequeo de Neon que no pudo correr** |
 
 ### Env groups (cero credenciales en el repo)
 
@@ -282,7 +282,7 @@ local logueaba "✅ Backup completado" con el dump fallando). El watchdog es un 
 |---|---|---|
 | `backups-prod` | `PROD_DB_DIRECT_URL`, `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `DRY_RUN`, `RETENTION_DAYS`, `MIN_BYTES`, `MIN_TABLAS`, `BACKUP_PREFIX` | backup, drill |
 | `alertas` | `GMAIL_SMTP_USER`, `GMAIL_SMTP_APP_PASSWORD`, `ALERT_EMAIL` | watchdog, drill, mantenimiento |
-| `neon-api` | `NEON_API_KEY`, `NEON_PROJECT_ID` | drill |
+| `neon-api` | `NEON_API_KEY`, `NEON_PROJECT_ID` | drill, mantenimiento (sólo lectura) |
 | `r2-lectura` | `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (token **solo lectura**) | watchdog |
 
 ### Las credenciales: cómo se crean (una sola vez) y a qué grupo van
@@ -508,11 +508,11 @@ locales y sin darle a PROD un usuario con más permisos de los necesarios.
 |---|---|
 | Script | `maintenance/mantenimiento_cloud.py` |
 | Cuándo | días **1 y 15**, `0 8 1,15 * *` **UTC** = 05:00 CLT (04:00 en invierno: el schedule es UTC fijo) |
-| Rol de la base | `maint_rw`: `SELECT` en 6 tablas (`alembic_version` incluida) + `UPDATE` **a nivel de columna** en 3 |
+| Rol de la base | `maint_rw`: `SELECT` en 12 tablas + `UPDATE` **a nivel de columna** en 5 + `DELETE` en 2 (sólo la purga: ver Fase 7) |
 | Reporte | email por Gmail SMTP **sólo si hay algo que revisar**: exit ≠ 0 (config, lectura, escritura, verificación, guarda de volumen, integridad) o Neon pasado del umbral de espacio. Asunto `[ALERTA] Mantenimiento PROD: <qué pasó> — <motivo>`. Un día normal (aplicar y verificar) deja **sólo log** |
 | Escritura | los 4 `UPDATE` de los scripts locales, en **UNA sola transacción** |
-| Env grupos | `mantenimiento-prod` + `alertas` (no usa R2 ni la API de Neon) |
-| Exit codes | 0 OK · 2 config · 3 lectura · 4 integridad · 6 guarda de volumen · 7 escritura · 8 verificación |
+| Env grupos | `mantenimiento-prod` + `alertas` (ni R2; la API de Neon se usa SÓLO para leer CU-horas y ramas desde la Fase 7, con el env group `neon-api`) |
+| Exit codes | 0 OK · 2 config · 3 lectura · 4 integridad · 6 guarda de volumen · 7 escritura · 8 verificación · **9** (detecciones y chequeos de Neon: Fase 7) |
 
 ### Qué aplica (4 pasos, una transacción)
 
@@ -523,6 +523,9 @@ locales y sin darle a PROD un usuario con más permisos de los necesarios.
 | 3 | `solicitudes_planes.estado` → `rejected` (+`comentario_admin`, `updated_at`) si `estado='pending'` y `created_at < now() - 7 días` | `transacciones_huerfanas.py` |
 | 4 | `usuarios.estado` → `rechazado` **y** `activo=false` si `estado='pendiente_activacion'` y `created_at < now() - 7 días` | `transacciones_huerfanas.py` |
 
+> Desde la Fase 7 estos 4 pasos son la **transacción 1 de 3** (después van la consistencia y
+> la purga): ver "Mantenimiento de PROD 2× al mes — Fase 7" más abajo.
+>
 El paso 4 setea **los dos campos juntos** a propósito: el CHECK `ck_usuarios_activo_estado` de
 la migración 034 (`activo = (estado = 'activo')`) rechaza cualquier otro par (es el bug P0-1 que
 dejó `marcar_plan_vencido` sin funcionar en TEST).
@@ -623,20 +626,39 @@ CREATE ROLE maint_rw WITH LOGIN NOINHERIT PASSWORD '<password-generada>';
 GRANT CONNECT ON DATABASE neondb TO maint_rw;
 GRANT USAGE   ON SCHEMA   public TO maint_rw;
 
--- 2) Lectura: sólo las 6 tablas que el job consulta = las 5 del mantenimiento +
---    `alembic_version` (se lee para el encabezado del log/alerta).
---    OJO: `solicitudes_planes` necesita SELECT para el UPDATE … WHERE estado/created_at y
+-- 2) Lectura: las 12 tablas que el job consulta = las 6 de la Fase 6 + las 6 que
+--    agregó la Fase 7 (`reservas`, `clases`, `disciplinas`, `coach_disciplinas`,
+--    `password_reset_tokens`, `notificaciones_enviadas`).
+--    OJO: `solicitudes_planes` necesita SELECT para el UPDATE ... WHERE estado/created_at y
 --    para el RETURNING (sin eso falla con "permission denied for table solicitudes_planes").
 GRANT SELECT ON public.usuarios, public.planes, public.suscripciones,
                 public.solicitudes_planes, public.transacciones_financieras,
-                public.alembic_version TO maint_rw;
+                public.alembic_version,
+                -- Fase 7: reservas/clases/disciplinas para A.2/A.4/A.5 y para el paso 8-9,
+                -- y las 2 tablas de la purga (necesitan SELECT para la lista del mail y para
+                -- la verificación: `DELETE ... RETURNING` también exige SELECT).
+                public.reservas, public.clases, public.disciplinas, public.coach_disciplinas,
+                public.password_reset_tokens, public.notificaciones_enviadas TO maint_rw;
 
 -- 3) Escritura: UPDATE a NIVEL DE COLUMNA (el resto del registro queda intacto).
+--    Las 3 primeras son de la Fase 6; las 2 últimas, de la consistencia (paso 8-9).
 GRANT UPDATE (estado, updated_at)                   ON public.suscripciones      TO maint_rw;
 GRANT UPDATE (estado, comentario_admin, updated_at) ON public.solicitudes_planes TO maint_rw;
 GRANT UPDATE (estado, activo)                       ON public.usuarios           TO maint_rw;
+--    Paso 8: SOLO la auditoría del cierre. `estado` no se toca (D-6: conserva los KPIs de
+--    asistencia ya publicados).
+GRANT UPDATE (asistencia_marcada_at, asistencia_via, updated_at) ON public.reservas TO maint_rw;
+--    Paso 9: el aforo publicado vuelve a ser el conteo real de reservas vivas.
+GRANT UPDATE (asistentes_confirmados, updated_at)                ON public.clases   TO maint_rw;
 
--- 4) Nada de INSERT / DELETE / TRUNCATE / DDL: no se otorga nada más (y NO hay memberships).
+-- 3b) DELETE: SÓLO en las 2 tablas de la purga (Fase 7, decisión D-7). No existe DELETE "por
+--     columna": cuando hace falta borrar filas, el GRANT es de tabla y no hay otra forma.
+--     Se eligieron esas dos porque son datos operativos (un token de reset vencido no le sirve
+--     a nadie y ya no lo puede usar nadie) y porque NO tienen FKs de entrada: borrarlas no
+--     arrastra nada. En el resto de las tablas el rol sigue sin poder borrar.
+GRANT DELETE ON public.password_reset_tokens, public.notificaciones_enviadas TO maint_rw;
+
+-- 4) Nada de INSERT / TRUNCATE / DDL en ninguna tabla (y NO hay memberships).
 ```
 
 > Si la base no se llamara `neondb`, cambiá el nombre en el `GRANT CONNECT` (o usá
@@ -650,24 +672,41 @@ SELECT has_database_privilege('maint_rw',current_database(),'CONNECT')          
        has_schema_privilege('maint_rw','public','USAGE')                            AS schema_usage,
        has_database_privilege('maint_rw',current_database(),'TEMP')                 AS db_temp;
 
--- Lectura (6 × t)
+-- Lectura (12 × t)
 SELECT has_table_privilege('maint_rw','public.usuarios','SELECT')                  AS usuarios_select,
        has_table_privilege('maint_rw','public.planes','SELECT')                    AS planes_select,
        has_table_privilege('maint_rw','public.suscripciones','SELECT')             AS suscripciones_select,
        has_table_privilege('maint_rw','public.solicitudes_planes','SELECT')        AS solicitudes_select,
        has_table_privilege('maint_rw','public.transacciones_financieras','SELECT') AS transacciones_select,
-       has_table_privilege('maint_rw','public.alembic_version','SELECT')           AS alembic_select;
+       has_table_privilege('maint_rw','public.alembic_version','SELECT')           AS alembic_select,
+       -- Fase 7
+       has_table_privilege('maint_rw','public.reservas','SELECT')                  AS reservas_select,
+       has_table_privilege('maint_rw','public.clases','SELECT')                    AS clases_select,
+       has_table_privilege('maint_rw','public.disciplinas','SELECT')               AS disciplinas_select,
+       has_table_privilege('maint_rw','public.coach_disciplinas','SELECT')         AS coach_disciplinas_select,
+       has_table_privilege('maint_rw','public.password_reset_tokens','SELECT')     AS tokens_select,
+       has_table_privilege('maint_rw','public.notificaciones_enviadas','SELECT')   AS notificaciones_select;
 
--- Escritura exacta (7 × t y nada más)
+-- Escritura exacta (12 × t y nada más: UPDATE por columna)
 SELECT has_column_privilege('maint_rw','public.suscripciones','estado','UPDATE')                AS s_estado,
        has_column_privilege('maint_rw','public.suscripciones','updated_at','UPDATE')            AS s_updated_at,
        has_column_privilege('maint_rw','public.solicitudes_planes','estado','UPDATE')           AS p_estado,
        has_column_privilege('maint_rw','public.solicitudes_planes','comentario_admin','UPDATE') AS p_comentario,
        has_column_privilege('maint_rw','public.solicitudes_planes','updated_at','UPDATE')       AS p_updated_at,
        has_column_privilege('maint_rw','public.usuarios','estado','UPDATE')                     AS u_estado,
-       has_column_privilege('maint_rw','public.usuarios','activo','UPDATE')                     AS u_activo;
+       has_column_privilege('maint_rw','public.usuarios','activo','UPDATE')                     AS u_activo,
+       -- Fase 7: paso 8 (cierre de asistencia) y paso 9 (aforo)
+       has_column_privilege('maint_rw','public.reservas','asistencia_marcada_at','UPDATE')      AS r_marcada_at,
+       has_column_privilege('maint_rw','public.reservas','asistencia_via','UPDATE')             AS r_via,
+       has_column_privilege('maint_rw','public.reservas','updated_at','UPDATE')                 AS r_updated_at,
+       has_column_privilege('maint_rw','public.clases','asistentes_confirmados','UPDATE')       AS c_asistentes,
+       has_column_privilege('maint_rw','public.clases','updated_at','UPDATE')                   AS c_updated_at;
 
--- Lo que NO puede hacer (12 × f): columnas prohibidas, INSERT/DELETE/TRUNCATE y DDL
+-- DELETE: sólo las 2 tablas de la purga (2 × t)
+SELECT has_table_privilege('maint_rw','public.password_reset_tokens','DELETE')     AS tokens_delete,
+       has_table_privilege('maint_rw','public.notificaciones_enviadas','DELETE')   AS notificaciones_delete;
+
+-- Lo que NO puede hacer (21 × f): columnas prohibidas, INSERT/DELETE/TRUNCATE y DDL
 SELECT has_column_privilege('maint_rw','public.usuarios','nombre','UPDATE')            AS u_nombre_update,
        has_column_privilege('maint_rw','public.suscripciones','plan_id','UPDATE')      AS s_plan_update,
        has_column_privilege('maint_rw','public.suscripciones','usuario_id','UPDATE')   AS s_usuario_update,
@@ -679,24 +718,46 @@ SELECT has_column_privilege('maint_rw','public.usuarios','nombre','UPDATE')     
        has_table_privilege('maint_rw','public.solicitudes_planes','DELETE')            AS p_delete,
        has_schema_privilege('maint_rw','public','CREATE')                              AS schema_create,
        has_database_privilege('maint_rw',current_database(),'CREATE')                  AS db_create,
-       has_function_privilege('maint_rw','version()','EXECUTE')                        AS fn_execute;
+       has_function_privilege('maint_rw','version()','EXECUTE')                        AS fn_execute,
+       -- Fase 7: lo que sigue PROHIBIDO (t × 9, todas tienen que dar f)
+       has_table_privilege('maint_rw','public.reservas','DELETE')                      AS r_delete,
+       has_table_privilege('maint_rw','public.clases','DELETE')                        AS c_delete,
+       has_table_privilege('maint_rw','public.reservas','INSERT')                      AS r_insert,
+       has_column_privilege('maint_rw','public.reservas','estado','UPDATE')            AS r_estado,
+       has_column_privilege('maint_rw','public.clases','cupo_maximo','UPDATE')         AS c_cupo,
+       has_column_privilege('maint_rw','public.clases','coach_id','UPDATE')            AS c_coach,
+       has_column_privilege('maint_rw','public.password_reset_tokens','expires_at','UPDATE') AS t_expira,
+       has_table_privilege('maint_rw','public.notificaciones_enviadas','UPDATE')       AS n_update,
+       has_table_privilege('maint_rw','public.notificaciones_enviadas','INSERT')       AS n_insert;
 
 -- Y que NO sea miembro de neon_superuser (es el chequeo que atrapa el rol creado por consola)
 SELECT pg_has_role('maint_rw','neon_superuser','member')                               AS es_superuser;   -- f
 
--- Ver EXACTAMENTE lo que tiene (tienen que ser 7 filas, todas de UPDATE)
+-- Ver EXACTAMENTE lo que tiene: 12 columnas con UPDATE == 12 filas
 SELECT table_name, column_name, privilege_type
 FROM information_schema.role_column_grants WHERE grantee = 'maint_rw'
 ORDER BY table_name, column_name;
+
+-- A nivel TABLA (lo único que NO se puede otorgar por columna: el DELETE de la purga)
+SELECT table_name, privilege_type FROM information_schema.role_table_grants
+WHERE grantee = 'maint_rw' AND privilege_type = 'DELETE'
+ORDER BY table_name;   -- 2 filas: password_reset_tokens y notificaciones_enviadas
 ```
 
 #### Prueba negativa (con la URL de `maint_rw`, antes de encender el job)
 
 ```bash
-# Las dos DEBEN fallar con "permission denied"; el ROLLBACK no deja nada.
+# Las NUEVE DEBEN fallar con "permission denied"; el ROLLBACK no deja nada.
 psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c 'BEGIN; CREATE TABLE _maint_no_debe_poder (i int); ROLLBACK;'
 psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c 'BEGIN; DELETE FROM usuarios WHERE false; ROLLBACK;'
 psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c "UPDATE usuarios SET nombre = nombre WHERE false;"
+# Fase 7: el DELETE está SOLO en las 2 tablas de la purga y el UPDATE, sólo en sus columnas.
+psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c 'BEGIN; DELETE FROM reservas WHERE false; ROLLBACK;'
+psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c 'BEGIN; DELETE FROM clases WHERE false; ROLLBACK;'
+psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c 'BEGIN; DELETE FROM suscripciones WHERE false; ROLLBACK;'
+psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c "UPDATE reservas SET estado = estado WHERE false;"
+psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c "UPDATE clases SET cupo_maximo = cupo_maximo WHERE false;"
+psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c "UPDATE usuarios SET correo = correo WHERE false;"
 ```
 
 #### Reversión (deshacer todo sin dejar rastro)
@@ -725,8 +786,9 @@ rol). El chequeo final es `SELECT rolname FROM pg_roles WHERE rolname = 'maint_r
 | `DRY_RUN` | `1` (arranca así; se apaga en el paso 3 de la puesta en marcha) |
 
 Más el env group `alertas` (`GMAIL_SMTP_USER`, `GMAIL_SMTP_APP_PASSWORD`, `ALERT_EMAIL`, los
-mismos valores del Web Service). **No** se enlaza `backups-prod` (este job no toca R2) ni
-`neon-api` (no crea ni borra ramas). `TZ=America/Santiago` ya viene en la imagen.
+mismos valores del Web Service). **No** se enlaza `backups-prod` (este job no toca R2).
+Desde la Fase 7 SÍ se enlaza `neon-api` (sólo para leer CU-horas y ramas: el job no crea ni
+borra nada en Neon). `TZ=America/Santiago` ya viene en la imagen.
 
 ### El Cron Job en Render
 
@@ -738,7 +800,7 @@ mismos valores del Web Service). **No** se enlaza `backups-prod` (este job no to
 | Docker Context | `backend` |
 | Command | `python -m maintenance.mantenimiento_cloud` |
 | Schedule | `0 8 1,15 * *` (UTC) = 05:00 CLT (04:00 con horario de invierno: es UTC fijo) |
-| Environment Groups | `mantenimiento-prod` + `alertas` |
+| Environment Groups | `mantenimiento-prod` + `alertas` + `neon-api` (Fase 7) |
 | Region | **Oregon (us-west-2)** (la misma del Web Service) |
 | Plan | Starter (el mismo de los otros 3 Cron Jobs) |
 
@@ -767,12 +829,217 @@ job no importa la app ni boto3.
 
 ```bash
 cd backend
-py -3.12 -m pytest tests/test_mantenimiento_cloud.py tests/test_mantenimiento_pasos.py -q --noconftest
+py -3.12 -m pytest tests/test_mantenimiento_cloud.py tests/test_mantenimiento_pasos.py tests/test_mantenimiento_vencidos.py tests/test_email_config_prod.py tests/test_watchdog_backups.py tests/test_restore_drill.py tests/test_email_header_saneo.py -q
 ```
-Registrado el 2026-09-27: **37 passed** (33 de `mantenimiento_cloud` + 4 del fix H1 de
-`run_daily`/`run_monthly`). `psql` y `smtplib` están mockeados: no se usa red ni credenciales y
-**no se manda ningún correo real**. ⚠️ Usar `py -3.12`: el `python` del PATH (3.13) no tiene
+Registrado el 2026-09-27, con la Fase 7 ya adentro: **160 passed, 1 skipped** — 80 de
+`mantenimiento_cloud` (los 33 de la Fase 6 + **47 nuevos**: detecciones A, límites de Neon B,
+las 3 transacciones C, el reporte E, el asunto del watchdog F y los 7 de la revisión previa al
+commit —predicado de cancelación de D-8/C.8, idempotencia y el aviso único de Neon—), 4 de
+`mantenimiento_pasos`,
+1 de `mantenimiento_vencidos` y 76 de los tests de correo/drill/watchdog (el skip es el drill
+cuando falta una variable del env group). `psql`, `smtplib` y la API de Neon (`urllib`) están
+mockeados: no se usa red ni credenciales, **no se manda ningún correo real ni se llama a
+Neon**. ⚠️ Usar `py -3.12`: el `python` del PATH (3.13) no tiene
 `pytest`.
+
+## Mantenimiento de PROD 2× al mes — Fase 7: detecciones, límites, consistencia y reporte (2026-09-27)
+
+La Fase 6 dejó el job corriendo (4 `UPDATE` en una transacción). La Fase 7 lo amplía **sin
+agregar scripts ni jobs**: tres bloques de trabajo nuevos y el reporte de gestión, en el mismo
+Cron Job, los mismos días (1 y 15) y con la misma regla de correo (**sólo si hay algo que
+revisar**).
+
+| Pieza | Qué agrega la Fase 7 |
+|---|---|
+| Detecciones (A) | 5 familias de chequeos de **sólo lectura** (A.1–A.5). No escriben nada: lo que encuentran viaja en el mail y pone el run rojo con **exit 9** |
+| Límites de Neon (B) | `B.6` CU-horas del mes y `B.7` cupo de ramas, leídos de la **API v2** (env group `neon-api`, opcional). Son avisos: mandan correo pero **no** cambian el exit code |
+| Consistencia (C) | `C.8–C.10` con **escritura controlada**: cierre de asistencia de las clases pasadas, resincronización del aforo y purga de tokens/notificaciones viejas |
+| Reporte (E) | MRR, variación de MRR, retención/churn de la cohorte de 30 días y bajas del mes (mismas fórmulas que el BI) |
+| Watchdog (F) | el asunto del correo del watchdog de backups pasa a `[ALERTA] Watchdog backups PROD: …` (mismo prefijo que este job) |
+
+### Las 3 transacciones (antes era 1)
+
+| # | Transacción | Qué hace | Tope | Exit si se pasa |
+|---|---|---|---|---|
+| 1 | `cambios` | los 4 `UPDATE` de la Fase 6 | `MAX_CAMBIOS` (40) | 6 |
+| 2 | `consistencia` | paso 8 (asistencia) + paso 9 (aforo) | `MAX_CIERRE` (500) | 6 |
+| 3 | `purga` | paso 10 (tokens + notificaciones) | `MAX_PURGA` (5000) | 6 |
+
+Cada una es **una transacción propia** (`BEGIN … COMMIT|ROLLBACK`) con su `CREATE TEMP TABLE` y su
+propia guarda de volumen *dentro* del SQL. Si la guarda de la 2 aborta, la 1 ya quedó aplicada y
+verificada, la 3 **no se intenta** y el correo dice exactamente dónde se cortó. Las tres se
+verifican igual: en REAL la lista tiene que quedar en 0 y en DRY-RUN en el mismo número de antes.
+
+| # | Escritura | Detalle | Antes en |
+|---|---|---|---|
+| 8 | `UPDATE reservas SET asistencia_marcada_at = now(), asistencia_via = 'cierre', updated_at = now()` | sólo las reservas **vivas** de clases terminadas hace más de `DIAS_CIERRE_RESERVAS` días sin `asistencia_marcada_at`. **No toca `estado`** (D-6): pasar la reserva a `no_asistio` reescribiría los KPIs de asistencia ya publicados | (nuevo) |
+| 9 | `UPDATE clases SET asistentes_confirmados = <reservas vivas>, updated_at = now()` | deja el aforo publicado igual al conteo real, que es lo que la app mantiene con +1/−1 al reservar y cancelar | (nuevo) |
+| 10 | `DELETE FROM password_reset_tokens` · `DELETE FROM notificaciones_enviadas` | tokens vencidos o usados hace más de `DIAS_PURGA_TOKENS` días y notificaciones de más de `DIAS_PURGA_NOTIF` días | (nuevo) |
+
+> **Única excepción de `DELETE` (D-7)**: ésas son las dos únicas tablas donde `maint_rw` puede
+> borrar. Son datos operativos (no historial del box) y no tienen FKs de entrada. En el resto de
+> las tablas el rol sigue **sin** `DELETE`, `INSERT`, `TRUNCATE` ni DDL, y la prueba negativa lo
+> verifica con cuatro sentencias que tienen que fallar.
+
+#### Qué significa "reserva viva" (y por qué no se compara contra `'cancelled'`)
+
+`reservas.estado` es un `character varying(20)` con default `'reserved'` y en los datos hay **dos
+formas de "cancelada"**: la que escribe la app (`'cancelled'`, en el `DELETE /reservas/{id}`) y la
+del enum viejo `estado_reserva` (`'cancelada'`, que `kpis_populate.py` sigue contemplando en
+`ESTADOS_CANCELADA`). Todo el SQL del job usa los predicados `sql_viva()` (`NOT ILIKE '%cancel%'`) y
+`sql_cancelada()` (`ILIKE '%cancel%'`): contra el literal, una reserva `'cancelada'` pasaría por
+viva, y entonces el **paso 8 le escribiría `updated_at`** —el dato con el que A.3 reconstruye la
+tardanza— y el paso 9 la contaría en el aforo. En el dump de PROD del 24/09/2026 sólo hay
+`'cancelled'` y `'confirmada'`, así que hoy el cambio es equivalente: es una red para la otra
+variante (y para cualquiera futura que contenga "cancel").
+
+#### Guarda, verificación e idempotencia de los pasos 8-9
+
+- Los **dos** pasos comparten la guarda `MAX_CIERRE`: cuenta `_maint_cierre`, o sea la suma de
+  asistencias cerradas **+** clases resincronizadas, y va después de los dos, dentro de la
+  transacción. Si el total se pasa del tope, aborta y **no se aplica nada** de esa transacción.
+- Los dos se **verifican** después con las mismas dos listas (`cierre_asistencia` y `aforo_resync`):
+  en REAL tienen que quedar en 0 y en DRY-RUN en el mismo número de antes.
+- El log del run imprime el resumen **paso por paso** (`consistencia: aforo_resync=3,
+  cierre_asistencia=2`), así que se ve cuántas **clases** cambió el resync y no sólo el total.
+- Las 3 transacciones son **idempotentes** y escriben tablas **disjuntas** (1: `suscripciones`,
+  `solicitudes_planes`, `usuarios` · 2: `reservas`, `clases` · 3: `password_reset_tokens`,
+  `notificaciones_enviadas`): la segunda corrida no encuentra nada que volver a tocar (los filtros
+  son por estado / `asistencia_marcada_at IS NULL` / antigüedad), no hay `INSERT` en tablas reales
+  (nada se puede duplicar) y un fallo en la 2 o la 3 no puede deshacer ni reescribir lo que la 1 ya
+  confirmó con su `COMMIT`.
+
+### Detecciones A.1–A.5 (sólo leen)
+
+| # | Chequeo | Rojo o informativo |
+|---|---|---|
+| A.1(a) | usuarios con `activo <> (estado = 'activo')` | **rojo** — el CHECK `ck_usuarios_activo_estado` de la 034 lo hace imposible: si sale ≠ 0, esa base no tiene el CHECK |
+| A.1(b) | `estado` fuera de la lista conocida (`activo`, `pendiente_activacion`, `rechazado`, `baja`) | **rojo** — la columna es un `String(20)`: la base no lo impide |
+| A.1(c) | usuarios que matchean `PROD_PERMITIDOS` | informativo — son los datos de demo de `seed_ml_data_prod.py` |
+| A.2(a) | `clases.asistentes_confirmados` ≠ reservas vivas | **rojo** — lo resincroniza el paso 9 en la misma corrida |
+| A.2(b) | reservas vivas duplicadas (mismo alumno y clase) | **rojo** — aforo inflado |
+| A.2(c) | `asistentes_confirmados > cupo_maximo` | **rojo** |
+| A.3 | descuadre de créditos por suscripción vigente | **rojo** si `\|descuadre\| > CREDITOS_DESCUADRE_TOLERANCIA` (usa `reservas.updated_at` como momento de la cancelación: ver la limitación conocida más abajo) |
+| A.4(a) | reservas de clases terminadas sin `asistencia_marcada_at` | informativo — es el insumo del paso 8 y el propio run lo cierra |
+| A.4(b) | `asistio = true` sin `asistencia_marcada_at` | **rojo** — falta la auditoría de quién marcó |
+| A.5(a) | clase futura sin `coach_id` **y** sin ningún coach activo en `coach_disciplinas` para su disciplina | **rojo** (D-2) — no hay a quién asignársela |
+| A.5(b) | clase futura sin `coach_id` pero **con** coach activo en su disciplina | informativo — falta asignarla |
+| A.5(c) | clase futura asignada a alguien que no es `coach` activo | **rojo** |
+
+Un hallazgo **no aborta** el mantenimiento (igual que la integridad): se aplica todo y el run queda
+rojo con **exit 9** (si además hay integridad, gana el 4). Las listas viajan completas en el correo;
+las de detecciones no llevan columna "→ nuevo" porque no cambian nada.
+
+#### A.3: cómo se mide el consumo de créditos (y por qué NO se usa `tokens_gastados`)
+
+`reservas.tokens_gastados` no sirve para esto: el `DELETE /reservas/{id}` de
+`app/api/v1/reservas.py` sólo escribe `estado='cancelled'` y `updated_at=now()`, así que la columna
+queda siempre en 1 (el dump de PROD tiene la reserva 1 cancelada con `tokens_gastados=1`). Lo que sí
+refleja el consumo es `suscripciones.creditos_totales - creditos_disponibles`, y la devolución se
+puede reconstruir porque `updated_at` **es** el momento de la cancelación:
+
+```
+consumo_esperado = reservas vivas de la ventana + cancelaciones TARDÍAS (< 6 h antes de la clase)
+descuadre        = (creditos_totales - creditos_disponibles) - consumo_esperado
+```
+
+Las cancelaciones con ≥ 6 h (la MISMA regla de `reservas.py`) devolvieron el crédito y no consumen:
+sin restarlas, cada cancelación legítima aparecería como descuadre. Se exige **una sola** suscripción
+vigente por alumno (con dos, el crédito pudo salir de la otra) y la tolerancia es **simétrica**,
+porque los dos sentidos pueden ser legítimos: hacia arriba, una cancelación en plazo que la app no
+pudo acreditar (plan ya vencido al cancelar); hacia abajo, una reserva cancelada que el staff editó
+y que ahora parece tardía. Con `DRY_RUN=1` se ve el número real y se decide la tolerancia.
+
+**Limitación conocida**: `updated_at` es a la vez el momento de la cancelación y el de cualquier otra
+edición de esa fila. El mantenimiento **no** puede corromperlo —el paso 8 excluye cualquier forma de
+cancelación, ver más abajo—, pero **una edición manual de una reserva ya cancelada** (por ejemplo,
+corregir el `alumno_id` desde el panel de supervisión) mueve esa marca: si la deja a menos de 6 h del
+inicio de la clase, A.3 la cuenta como tardía y el descuadre sale negativo. Por eso la tolerancia es
+simétrica y el correo muestra los dos lados con el número esperado: con el caso a la vista se decide
+si es un dato a corregir o un umbral a ajustar.
+
+> **Propuesta (NO implementada): `reservas.cancelada_at`.** Lo de fondo es dejar de usar `updated_at`
+> como proxy. Una columna `cancelada_at timestamptz` que la app escriba en el MISMO `UPDATE` que pone
+> `estado='cancelled'` —y que el mantenimiento nunca toque— hace que A.3 deje de depender de cuándo se
+> editó la fila por última vez, y de paso permite distinguir "cancelada" de "editada" en cualquier
+> auditoría futura. Requiere migración + el cambio en `app/api/v1/reservas.py` y el backfill de las
+> cancelaciones existentes (con su `updated_at` actual, que es el mejor dato disponible hoy): queda
+> fuera de esta fase a propósito, es un cambio de modelo y merece su propia revisión.
+
+### Límites del plan Free en la API de Neon (B.6 y B.7)
+
+| # | Chequeo | Cómo se lee | Aviso cuando |
+|---|---|---|---|
+| B.6 | CU-horas del mes | `GET /projects/{id}` → `compute_time_seconds` ÷ 3600 | `NEON_CU_UMBRAL_PCT` (80 %) de `NEON_CU_HORAS_LIMITE` (100 CU-horas) |
+| B.7 | ramas del proyecto | `GET /projects/{id}/branches`, contadas | llega a `NEON_RAMAS_LIMITE` (10): el drill mensual ya no puede crear la suya |
+
+- Son **opcionales**: sin `NEON_API_KEY`/`NEON_PROJECT_ID` (env group `neon-api`) el job corre
+  igual, sale con **exit 0** y deja **una sola** nota —`no configurado (faltan …)`— en el log del run
+  y en el correo, **no una por chequeo**: el mail muestra esa nota y omite el detalle de B.6/B.7. La
+  falta del env group no es un hallazgo (es una decisión de dónde corre el job); lo que sí es rojo es
+  un chequeo **configurado** que no puede correr.
+- Son **avisos**: mandan correo aunque el run quede verde y **no** cambian el exit code, igual que
+  la alerta de almacenamiento de la Fase 6.
+- Con las variables puestas y la API caída el run queda **rojo (exit 9)**: un chequeo configurado
+  que no corre tiene que verse, no callarse. El `NEON_PROJECT_ID` se valida antes de armar la URL.
+- La API de **consumo histórico** (`/consumption_history/...`) sólo existe en planes pagos (en Free
+  contesta 403): no se usa. Si la API no trae `compute_time_seconds` (campo renombrado), el módulo
+  cae a `cpu_used_sec` y lo dice en el mail en vez de informar 0.
+- `NEON_CU_HORAS_LIMITE=100` es el valor del plan Free y se confirma en **Neon → Projects → Usage**
+  (decisión D-5): si el proyecto tuviera otro autoscaling, se ajusta la variable.
+
+### Reporte del mes (E)
+
+Además de lo que ya traía la Fase 6, el correo agrega `mrr`, `mrr_mes_anterior`,
+`variacion_mrr_pct`, `retencion_30d_pct`, `churn_30d_pct`, `alumnos_vigentes` y `bajas_mes`. Las
+fórmulas son las MISMAS de `app/services/metricas_service.py` (una sola definición por métrica en el
+proyecto), copiadas a SQL porque el job no importa `app.*`:
+
+- **MRR**: `SUM(planes.precio_clp)` de las suscripciones `activo` vigentes hoy (precio de lista, no
+  caja cobrada). El de referencia es el del **último día del mes anterior**.
+- **Retención 30 días**: de los alumnos vigentes hace 30 días, cuántos siguen vigentes hoy;
+  **churn** = 100 − retención. Con base < `MIN_BASE_RETENCION` (5, el mismo umbral del BI) se
+  publica "sin dato" en vez de un porcentaje que no representa al box (el bug del 7600 %).
+
+### Exit codes con la Fase 7
+
+| Exit | Cuándo |
+|---|---|
+| 0 | todo aplicado y verificado (o simulado en DRY-RUN). Con avisos de Neon igual: el correo sale con exit 0 |
+| 2 | configuración inválida: variable faltante, URL con `-pooler`, rol ≠ `maint_rw`, `ENVIRONMENT` ≠ `production`, número fuera de rango o allowlist con caracteres raros |
+| 3 | falló una lectura |
+| 4 | la integridad encontró problemas (no aborta la escritura) |
+| 6 | se pasó un tope de volumen (`MAX_CAMBIOS`, `MAX_CIERRE` o `MAX_PURGA`) |
+| 7 | falló una transacción de escritura |
+| 8 | la verificación posterior no cuadró |
+| **9** | **nuevo**: las detecciones A.1–A.5, o un chequeo de Neon configurado que no pudo correr |
+
+### Variables de entorno nuevas (todas con default)
+
+| Variable | Default | Para qué |
+|---|---|---|
+| `MAX_CIERRE` | `500` | tope de la transacción 2 (consistencia) |
+| `MAX_PURGA` | `5000` | tope de la transacción 3 (purga) |
+| `DIAS_CIERRE_RESERVAS` | `7` | antigüedad mínima de la clase para cerrar su asistencia |
+| `DIAS_PURGA_TOKENS` | `30` | retención de `password_reset_tokens` |
+| `DIAS_PURGA_NOTIF` | `180` | retención de `notificaciones_enviadas` |
+| `CREDITOS_DESCUADRE_TOLERANCIA` | `0` | descuadre por alumno tolerado en A.3 |
+| `PROD_PERMITIDOS` | `demo.prod.%@example.com` | allowlist de correos de demo (A.1c). **Tras la defensa del 6/10/2026 se limpian esos datos y esta variable queda vacía** |
+| `TENANT_ID` | `1` | filtro de las consultas de MRR/churn (el box es uno) |
+| `MIN_BASE_RETENCION` | `5` | mismo umbral que el BI para publicar churn |
+| `NEON_CU_HORAS_LIMITE` | `100` | CU-horas del mes del plan Free (confirmar en Neon → Usage) |
+| `NEON_CU_UMBRAL_PCT` | `80` | umbral de aviso de B.6 |
+| `NEON_RAMAS_LIMITE` | `10` | ramas por proyecto del plan Free (B.7) |
+| `NEON_API_BASE` | `https://console.neon.tech/api/v2` | base de la API v2 (la misma variable que usa `restore_drill`) |
+
+> **Dato real de PROD (D-3)**: los ~104 usuarios `demo.prod.N@example.com` son **intencionales**
+> (los genera `backend/scripts/seed_ml_data_prod.py` para el modelo de ML). Por eso A.1(c) cuenta y
+> no alerta, y la allowlist los declara explícitamente en vez de silenciar el chequeo.
+
+
+
+
+
 
 ## Estado y limitaciones (2026-09-27, sin commit)
 

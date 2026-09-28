@@ -163,7 +163,7 @@ def test_f_email_real_va_por_gmail_smtp_ssl(monkeypatch, capsys, smtp_falso):
     assert str(msg["From"]) == f"Urban Training Box <{GMAIL_USER}>"
     assert "\n" not in str(msg["From"]) and "\r" not in str(msg["From"])
     assert str(msg["To"]) == "alertas@example.com"
-    assert str(msg["Subject"]).startswith("[Box CrossFit] ALERTA backup PROD: el backup")
+    assert str(msg["Subject"]).startswith("[ALERTA] Watchdog backups PROD: el backup")
     assert "Email enviado por Gmail SMTP (smtp.gmail.com:465)" in capsys.readouterr().out
 
 
