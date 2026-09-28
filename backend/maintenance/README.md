@@ -874,11 +874,12 @@ job no importa la app ni boto3.
 cd backend
 py -3.12 -m pytest tests/test_mantenimiento_cloud.py tests/test_mantenimiento_pasos.py tests/test_mantenimiento_vencidos.py tests/test_email_config_prod.py tests/test_watchdog_backups.py tests/test_restore_drill.py tests/test_email_header_saneo.py -q
 ```
-Registrado el 2026-09-27, con la Fase 7 y las **guardas por regla** ya adentro: **182 passed,
-1 skipped** — 102 de
+Registrado el 2026-09-27, con la Fase 7, las **guardas por regla** y los ajustes de A.5 ya
+adentro: **199 passed, 1 skipped** — 119 de
 `mantenimiento_cloud` (los 33 de la Fase 6 + 47 de la Fase 7 + **22 de los límites por regla**:
 evaluación pura, borde del %, huérfanas por lista, tope global, config inválida, las guardas en el
-SQL y el prefijo `[maint]` del correo), 4 de
+SQL y el prefijo `[maint]` del correo, + **17 de A.5**: `requiere_coach`, complementariedad de
+(a)/(b), conteo real vs tope, `A5_NOTA_HASTA` y el log/motivo según el modo), 4 de
 `mantenimiento_pasos`,
 1 de `mantenimiento_vencidos` y 76 de los tests de correo/drill/watchdog (el skip es el drill
 cuando falta una variable del env group). `psql`, `smtplib` y la API de Neon (`urllib`) están
@@ -966,13 +967,44 @@ variante (y para cualquiera futura que contenga "cancel").
 | A.3 | descuadre de créditos por suscripción vigente | **rojo** si `\|descuadre\| > CREDITOS_DESCUADRE_TOLERANCIA` (usa `reservas.updated_at` como momento de la cancelación: ver la limitación conocida más abajo) |
 | A.4(a) | reservas de clases terminadas sin `asistencia_marcada_at` | informativo — es el insumo del paso 8 y el propio run lo cierra |
 | A.4(b) | `asistio = true` sin `asistencia_marcada_at` | **rojo** — falta la auditoría de quién marcó |
-| A.5(a) | clase futura sin `coach_id` **y** sin ningún coach activo en `coach_disciplinas` para su disciplina | **rojo** (D-2) — no hay a quién asignársela |
-| A.5(b) | clase futura sin `coach_id` pero **con** coach activo en su disciplina | informativo — falta asignarla |
+| A.5(a) | clase futura sin `coach_id` de una disciplina que **exige** coach (`COALESCE(d.requiere_coach, true)`: las self-service quedan fuera) **y** sin ningún coach activo en `coach_disciplinas` para su disciplina | **rojo** (D-2) — no hay a quién asignársela. Con `A5_NOTA_HASTA` vigente se le agrega una nota de contexto (el run sigue rojo) |
+| A.5(b) | igual que A.5(a) pero **con** coach activo en su disciplina (`EXISTS` en vez de `NOT EXISTS`) | informativo — falta asignarla |
 | A.5(c) | clase futura asignada a alguien que no es `coach` activo | **rojo** |
 
 Un hallazgo **no aborta** el mantenimiento (igual que la integridad): se aplica todo y el run queda
 rojo con **exit 9** (si además hay integridad, gana el 4). Las listas viajan completas en el correo;
 las de detecciones no llevan columna "→ nuevo" porque no cambian nada.
+
+#### Por qué A.5(a) y A.5(b) daban "25 y 25" (y qué se corrigió)
+
+No eran dos conjuntos solapados: los dos `WHERE` son **el mismo** y sólo cambian `NOT EXISTS` ⇄
+`EXISTS` sobre el mismo subquery (`coach_disciplinas` + `usuarios.rol = 'coach' AND activo`), así
+que ninguna clase puede salir en los dos. Lo que se veía igual era el **tope de la lista**: cada
+detección de tipo lista termina en `LIMIT 25` (`LIMITE_LISTA`) y el conteo reportado era
+`len(filas)`, o sea el tope. Ahora `detecciones()` pide el total real con `count(*) OVER ()`
+(`sql_con_total()`: la ventana se calcula **antes** del `LIMIT`) ⇒ el log y el correo dicen el
+tamaño del hallazgo (`63 fila(s)`) y, cuando la lista trae menos filas, lo aclaran:
+`63 fila(s) (mostrando 25 de 63)`. El test `test_cb_…` fija que los dos predicados siguen siendo
+complementarios y `test_cc_…` que el conteo no es el tope.
+
+`disciplinas.requiere_coach` existe desde la migración **018** (`ADD COLUMN IF NOT EXISTS … DEFAULT
+true`) y se administra en la pantalla **Disciplinas** del admin (`PUT /api/v1/disciplinas/{id}`,
+`requiere_coach` en el body): "Musculación" y "Open Box" se destildan ahí. **El mantenimiento nunca
+compara por nombre** —el nombre sólo aparece en ese destildado manual— y si en PROD la bandera
+quedó en `true`, A.5(a) sigue contando esas clases (fue exactamente el caso del run en rojo).
+
+#### A5_NOTA_HASTA: la nota de contexto de A.5(a) (opcional)
+
+Mientras `hoy <= A5_NOTA_HASTA` (fecha ISO, el mismo día incluido), el log y el correo agregan
+**junto a A.5(a)** —en el `<li>` del hallazgo y en su bloque de lista— la nota:
+
+> Esperado en esta etapa: aún no hay coaches asignados a estas clases (desarrollo). Asígnalos en la
+> pantalla Coaches. Esta nota se quita sola el AAAA-MM-DD.
+
+La detección **no se silencia**: A.5(a) sigue roja, el correo sigue saliendo y el exit sigue siendo
+9. Sin la variable (o vacía) no hay nota; pasada la fecha, la nota desaparece sola y la detección
+queda exactamente como estaba. Una fecha inválida (o con otro formato) ⇒ `ConfigError` ⇒ **exit 2**
+sin tocar la base: `_fecha_iso()` exige el patrón `AAAA-MM-DD` antes de parsear.
 
 #### A.3: cómo se mide el consumo de créditos (y por qué NO se usa `tokens_gastados`)
 
@@ -1050,7 +1082,7 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
 | Exit | Cuándo |
 |---|---|
 | 0 | todo aplicado y verificado (o simulado en DRY-RUN). Con avisos de Neon igual: el correo sale con exit 0 |
-| 2 | configuración inválida: variable faltante, URL con `-pooler`, rol ≠ `maint_rw`, `ENVIRONMENT` ≠ `production`, número fuera de rango o allowlist con caracteres raros |
+| 2 | configuración inválida: variable faltante, URL con `-pooler`, rol ≠ `maint_rw`, `ENVIRONMENT` ≠ `production`, número fuera de rango, allowlist con caracteres raros o `A5_NOTA_HASTA` con formato inválido |
 | 3 | falló una lectura |
 | 4 | la integridad encontró problemas (no aborta la escritura) |
 | 6 | se pasó un tope de volumen (`MAX_VENCIDOS_PCT`, `MAX_HUERFANAS`, `MAX_CAMBIOS`, `MAX_CIERRE` o `MAX_PURGA`) |
@@ -1070,6 +1102,7 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
 | `DIAS_PURGA_TOKENS` | `30` | retención de `password_reset_tokens` |
 | `DIAS_PURGA_NOTIF` | `180` | retención de `notificaciones_enviadas` |
 | `CREDITOS_DESCUADRE_TOLERANCIA` | `0` | descuadre por alumno tolerado en A.3 |
+| `A5_NOTA_HASTA` | *(sin setear)* | fecha ISO hasta la que se muestra la nota de contexto de A.5(a) (el mismo día incluido). Sin la variable no hay nota y **la alerta no se silencia**; una fecha inválida ⇒ exit 2 |
 | `PROD_PERMITIDOS` | `demo.prod.%@example.com` | allowlist de correos de demo (A.1c). **Tras la defensa del 6/10/2026 se limpian esos datos y esta variable queda vacía** |
 | `TENANT_ID` | `1` | filtro de las consultas de MRR/churn (el box es uno) |
 | `MIN_BASE_RETENCION` | `5` | mismo umbral que el BI para publicar churn |
@@ -1150,9 +1183,33 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
   **sólo** en `leer_config()` (entraron `NEON_API_KEY`/`NEON_PROJECT_ID`, que se leían sueltas en
   `neon_api_get`) y `alertas.enviar_email(asunto, html, logger=None)` usa el `log()` de quien llama:
   en mantenimiento los avisos del correo salen `[maint]` y el watchdog/drill siguen con `[backup]`.
-  **Verificado:** `tests/test_mantenimiento_cloud.py` ⇒ **102 passed** (80 + 22 nuevos) y
-  `tests/test_watchdog_backups.py` ⇒ 8 passed; el comando completo del README ⇒ **182 passed,
+  **Verificado:** `tests/test_mantenimiento_cloud.py` ⇒ **119 passed** (102 + 22 de las reglas; ver
+  el detalle y los 17 nuevos más abajo) y
+  `tests/test_watchdog_backups.py` ⇒ 8 passed; el comando completo del README ⇒ **199 passed,
   1 skipped** (usa `py -3.12`). Nada de PROD: todo con `psql`/`smtplib`/API de Neon mockeados.
+- **A.5(a)/(b) por dato, conteo real y nota de contexto (2026-09-27, cierre del run rojo por
+  A.5(a)):** el run marcó en rojo 25 clases futuras sin coach. Tres cambios: (1) A.5(a) y A.5(b)
+  pasan a decidir por **`disciplinas.requiere_coach`** (`COALESCE(d.requiere_coach, true)`), así que
+  las disciplinas self-service —"Musculación" y "Open Box"— dejan de ser un hallazgo **por dato** y
+  no por nombre (el mantenimiento no compara nombres en ningún lado; la bandera se destilda en la
+  pantalla **Disciplinas** del admin, que ya la expone desde la migración 018 ⇒ **no hizo falta
+  migración nueva ni tocar el CRUD/schema/frontend**); (2) el "25 y 25" de A.5(a) vs A.5(b) **no**
+  era un solapamiento de predicados —son `NOT EXISTS`/`EXISTS` sobre el mismo subquery— sino el
+  `LIMIT 25` leído como conteo: `detecciones()` ahora lee el total real con `count(*) OVER ()`
+  (`sql_con_total()`, la ventana se calcula antes del `LIMIT`) y el log/correo informan
+  `63 fila(s)`, aclarando `(mostrando 25 de 63)` cuando el tope recorta la lista; (3)
+  **`A5_NOTA_HASTA`** (fecha ISO, opcional) agrega la nota "esperado en esta etapa: aún no hay
+  coaches asignados…" junto a A.5(a) en el log y en el correo mientras `hoy <= la fecha`, **sin
+  silenciar** la alerta (A.5(a) sigue roja, el correo sale y el exit sigue siendo 9); sin la
+  variable o con la fecha pasada no hay nota, y una fecha inválida ⇒ `ConfigError` ⇒ exit 2 sin
+  tocar la base (`_fecha_iso()`). Además: el **log nombra la detección** que puso el run rojo
+  (`detecciones=1 hallazgo(s) [A.5(a)]` + `ROJO (A.5(a)): <título>: 63 fila(s) — …`) y el **motivo
+  del exit 4/9 cambia según el modo** (en DRY-RUN ya no dice "el mantenimiento se aplicó igual"
+  porque no se aplicó nada). **Verificado:** `tests/test_mantenimiento_cloud.py` ⇒ **119 passed**
+  (102 + **17 nuevos**, `test_ca`–`test_ck`) y el comando completo ⇒ **199 passed, 1 skipped**.
+  Nada de PROD (los "25" salen del run real; el doble de `psql` simula 63 filas con 25 en el
+  `LIMIT`). Pendiente del usuario: destildar "Requiere coach" en **Musculación** y **Open Box**
+  (pantalla Disciplinas) y setear `A5_NOTA_HASTA` en Render si quiere la nota.
 - **Sin tocar:** nada de `carpeta_respaldo_box`, ni `.env`/`.env.test`, ni PROD (el único acceso
   a PROD es el `CREATE TABLE` que **debe** fallar).
 - **Fase 6 (entrega 2, 2026-09-27):** se escribió `maintenance/mantenimiento_cloud.py`, se agregó

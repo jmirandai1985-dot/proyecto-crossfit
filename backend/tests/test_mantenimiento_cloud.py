@@ -15,6 +15,14 @@ cambios" y verificado en 0— NO manda nada (sólo log), mientras que cualquier 
 lectura, escritura, verificación, guarda de volumen, integridad) o el free tier de Neon
 pasado del umbral SÍ mandan alerta, con el asunto arrancando en `[ALERTA] Mantenimiento PROD:`.
 
+Los ajustes del 2026-09-27 agregan: A.5(a)/(b) deciden por `disciplinas.requiere_coach` (y siguen
+siendo complementarios: `EXISTS` vs `NOT EXISTS` sobre el mismo subquery — el 25/25 de PROD era el
+tope de la lista, no un solapamiento), el conteo de cada lista es el **total real**
+(`count(*) OVER ()`, calculado antes del `LIMIT`) y el correo lo dice cuando muestra menos filas,
+`A5_NOTA_HASTA` agrega la nota de contexto junto a A.5(a) sin silenciar la alerta (y una fecha
+inválida es exit 2), el log nombra la detección que puso el run rojo (código + título + conteo) y
+el motivo del exit 4/9 cambia según el modo: en DRY-RUN no se aplicó nada.
+
 Se corre con:
     py -3.12 -m pytest tests/test_mantenimiento_cloud.py -q --noconftest
 """
@@ -28,6 +36,7 @@ sys.path.insert(0, str(BACKEND))
 
 import re  # noqa: E402
 import subprocess  # noqa: E402
+from datetime import date  # noqa: E402
 
 import ast  # noqa: E402 (guardia de la config: los `os.getenv` viven en un solo lugar)
 import pytest  # noqa: E402
@@ -45,6 +54,25 @@ ALEMBIC = "035_precio_snapshot_solicitudes"
 # ── Doble de `correr()`: psql nunca se ejecuta de verdad ──────────────────────
 def _filas(*filas) -> str:
     return "".join("|".join(str(c) for c in fila) + "\n" for fila in filas)
+
+
+# Claves de `_ctx` que son listas de DETECCIÓN A: su SELECT lleva `count(*) OVER ()` como primera
+# columna (`men.sql_con_total`), así que el doble tiene que devolver el total delante de cada fila.
+DETECCIONES = {"a1b", "a2a", "a2b", "a2c", "a4b", "a5a", "a5b", "a5c"}
+
+
+def _filas_lista(filas, total=None) -> str:
+    """Salida de una lista de detección: 1ª columna = `count(*) OVER ()` (el TOTAL real).
+
+    Por default el total es el número de filas, así los tests anteriores siguen midiendo lo mismo.
+    `total=` (clave `<clave>_total` en `_ctx`) simula el caso que importa: la consulta real tiene
+    63 filas y el `LIMIT` sólo trae 25 ⇒ el conteo reportado tiene que ser 63, no 25.
+    """
+    filas = list(filas or [])
+    if not filas:
+        return ""
+    t = str(len(filas) if total is None else total)
+    return _filas(*[[t] + list(f) for f in filas])
 
 
 def _n_filas(n: int, estado: str = "activo") -> list:
@@ -148,6 +176,8 @@ def _respuesta(sql: str, ctx: dict, vistas: dict) -> str:
             vistas[clave] = vistas.get(clave, 0) + 1
             if vistas[clave] > 1 and ctx["despues"] == "vacio":
                 return ""                       # verificación posterior: la lista quedó vacía
+            if clave in DETECCIONES:             # las detecciones llevan el total real delante
+                return _filas_lista(ctx[clave], ctx.get(f"{clave}_total"))
             return _filas(*ctx[clave])
 
     if "WHERE u.id IS NULL" in sql:
@@ -227,7 +257,10 @@ def entorno(monkeypatch):
               "MAX_CIERRE", "MAX_PURGA", "DIAS_CIERRE_RESERVAS", "DIAS_PURGA_TOKENS",
               "DIAS_PURGA_NOTIF", "CREDITOS_DESCUADRE_TOLERANCIA", "PROD_PERMITIDOS",
               "TENANT_ID", "MIN_BASE_RETENCION", "NEON_CU_HORAS_LIMITE", "NEON_CU_UMBRAL_PCT",
-              "NEON_RAMAS_LIMITE", "NEON_API_BASE", "NEON_API_KEY", "NEON_PROJECT_ID"):
+              "NEON_RAMAS_LIMITE", "NEON_API_BASE", "NEON_API_KEY", "NEON_PROJECT_ID",
+              # La nota de contexto de A.5(a): sin variable no hay nota (y los tests que la
+              # quieren la setean ellos).
+              "A5_NOTA_HASTA"):
         monkeypatch.delenv(k, raising=False)
     yield
 
@@ -1386,7 +1419,7 @@ def test_bz_la_config_se_lee_solo_en_los_lectores_de_leer_config():
     del propio archivo: si mañana alguien lee una env var "por conveniencia" en medio del SQL,
     este test lo caza."""
     lectores = {"leer_config", "_entero", "_flotante", "_allowlist", "_url_https", "_texto",
-                "dry_run_activo"}
+                "_fecha_iso", "dry_run_activo"}
     arbol = ast.parse(Path(men.__file__).read_text(encoding="utf-8"))
     rangos = [(n.lineno, n.end_lineno) for n in ast.walk(arbol)
               if isinstance(n, ast.FunctionDef) and n.name in lectores]
@@ -1397,4 +1430,171 @@ def test_bz_la_config_se_lee_solo_en_los_lectores_de_leer_config():
                and n.value.id == "os" and n.attr in ("getenv", "environ")
                and not any(ini <= n.lineno <= fin for ini, fin in rangos)]
     assert sueltos == []
+
+
+# ── A.5 con `requiere_coach`, el conteo REAL y la nota de contexto (A5_NOTA_HASTA) ────────────
+def _sql_de(clave: str) -> str:
+    """El SQL de una detección por su clave (las detecciones se declaran como datos)."""
+    return next(c["sql"] for c in men.detecciones_sql(men.leer_config()) if c["clave"] == clave)
+
+
+def test_ca_a5_decide_por_requiere_coach_y_nunca_por_nombre():
+    """Punto 1: A.5(a) y A.5(b) sacan del rojo las disciplinas self-service con el DATO
+    `disciplinas.requiere_coach`, no con una lista de nombres metida en el SQL (el nombre sólo
+    aparece en el backfill/pantalla que destilda la disciplina)."""
+    for clave in ("a5a_sin_coach_posible", "a5b_sin_coach_asignable"):
+        sql = _sql_de(clave)
+
+        assert "COALESCE(d.requiere_coach, true)" in sql
+        assert "Musculaci" not in sql and "Open Box" not in sql
+        assert sql.count("coach_disciplinas") == 1 and "u.rol::text = 'coach'" in sql
+
+
+def test_cb_a5a_y_a5b_son_complementarios_el_25_25_no_era_un_solapamiento():
+    """La causa del "25 y 25": los dos WHERE son el MISMO —`NOT EXISTS` vs `EXISTS` sobre el mismo
+    subquery—, así que ningún `clase_id` puede salir en los dos: no es un bug de predicado. Lo que
+    se veía igual era el TOPE de la lista (por eso el conteo pasó a ser el total real)."""
+    a5a, a5b = _sql_de("a5a_sin_coach_posible"), _sql_de("a5b_sin_coach_asignable")
+    cuerpo = lambda sql: sql.split("WHERE c.coach_id IS NULL", 1)[1]      # noqa: E731
+
+    assert "AND NOT EXISTS" in a5a and "AND NOT EXISTS" not in a5b
+    assert cuerpo(a5a).replace("AND NOT EXISTS", "AND EXISTS") == cuerpo(a5b)
+
+
+def test_cc_el_conteo_de_una_lista_es_el_total_real_no_el_tope_del_limit(monkeypatch, mails,
+                                                                         capsys):
+    """Con 63 clases en A.5(a) y 25 filas dentro del `LIMIT`, el log y el correo dicen **63** (y el
+    correo aclara que muestra 25). Antes `n = len(filas)` y 63 se reportaba como 25."""
+    filas = [["30", "2026-10-02", "19:00:00", "CrossFit"] for _ in range(25)]
+    _psql_falso(monkeypatch, _ctx(a5a=filas, a5a_total=63))
+
+    assert men.main() == men.EXIT_DIAGNOSTICO
+    out = capsys.readouterr().out
+    html = mails[0][1]
+
+    assert "detecciones=1 hallazgo(s) [A.5(a)]" in out
+    assert "ROJO (A.5(a)): clases futuras sin coach de una disciplina que exige coach" in out
+    assert ": 63 fila(s) —" in out
+    assert "A.5(a)" in html and "63 fila(s) (mostrando 25 de 63)" in html
+
+
+def test_cd_sql_con_total_prefija_el_conteo_sin_tocar_el_resto_de_la_consulta():
+    """`sql_con_total()` sólo agrega la columna del total: el WHERE, el ORDER BY y el LIMIT quedan
+    idénticos, y la ventana se calcula ANTES del LIMIT (de ahí que el total sea el del conjunto)."""
+    sql = _sql_de("a5a_sin_coach_posible")
+    con_total = men.sql_con_total(sql)
+
+    assert con_total.startswith("SELECT count(*) OVER ()::text, c.id::text")
+    assert con_total.replace("SELECT count(*) OVER ()::text, ", "SELECT ", 1) == sql
+    with pytest.raises(ValueError):
+        men.sql_con_total("DELETE FROM clases")
+
+
+def test_ce_a5_nota_hasta_vigente_se_agrega_al_log_y_al_correo_sin_silenciar(monkeypatch, mails,
+                                                                            capsys):
+    """Punto 2: con `A5_NOTA_HASTA` vigente la nota va JUNTO a A.5(a) en el log y en el correo, y
+    la alerta SIGUE saliendo igual (exit 9): la nota explica, no silencia."""
+    monkeypatch.setenv("A5_NOTA_HASTA", "2099-12-31")
+    _psql_falso(monkeypatch, _ctx(a5a=[["30", "2026-10-02", "19:00:00", "CrossFit"]]))
+
+    assert men.main() == men.EXIT_DIAGNOSTICO
+    out = capsys.readouterr().out
+    html = mails[0][1]
+
+    assert "NOTA A.5(a) (esperado hasta 2099-12-31): Esperado en esta etapa" in out
+    assert mails[0][0].startswith("[ALERTA] Mantenimiento PROD: los chequeos nuevos encontraron 1")
+    assert "Nota A.5(a):" in html and "Asígnalos en la pantalla Coaches" in html
+    assert "Esta nota se quita sola el 2099-12-31" in html
+    assert "🔴 rojo (exit 9)" in html                     # la detección sigue igual de roja
+
+
+@pytest.mark.parametrize("hoy,se_muestra", [("2026-10-30", True), ("2026-10-31", True),
+                                            ("2026-11-01", False)])
+def test_cf_a5_nota_el_mismo_dia_del_limite_todavia_se_muestra(hoy, se_muestra, monkeypatch):
+    """El borde es `hoy <= A5_NOTA_HASTA` (el mismo día incluido). Es PURA: la fecha de hoy entra
+    por parámetro, así que el test no depende del reloj de quien lo corre."""
+    monkeypatch.setenv("A5_NOTA_HASTA", "2026-10-31")
+    nota = men.nota_a5(men.leer_config(), date.fromisoformat(hoy))
+
+    assert bool(nota) is se_muestra
+    if se_muestra:
+        assert "2026-10-31" in nota and "desarrollo" in nota
+
+
+def test_cg_a5_nota_ausente_o_ya_vencida_no_aparece_en_el_correo(monkeypatch, mails):
+    """Sin la variable no hay nota (default `None`) y con la fecha ya pasada tampoco: la detección
+    queda exactamente como estaba (el correo sale igual, sin el texto de contexto)."""
+    assert men.leer_config()["a5_nota_hasta"] is None
+
+    monkeypatch.setenv("A5_NOTA_HASTA", "2026-01-01")
+    _psql_falso(monkeypatch, _ctx(a5a=[["30", "2026-10-02", "19:00:00", "CrossFit"]]))
+
+    assert men.main() == men.EXIT_DIAGNOSTICO
+    html = mails[0][1]
+
+    assert "Esperado en esta etapa" not in html and "Nota A.5(a)" not in html
+    assert "A.5(a)" in html                               # la alerta sigue nombrando la detección
+
+
+@pytest.mark.parametrize("valor", ["31/12/2026", "2026-13-01", "2026-10-32", "20261031", "hoy"])
+def test_ch_a5_nota_invalida_exit_2_y_ni_una_consulta(valor, monkeypatch, mails, capsys):
+    """Una fecha inválida es config inválida: `ConfigError` ⇒ exit 2 y ni una consulta a la base
+    (la config entera se valida antes de abrir psql)."""
+    monkeypatch.setenv("A5_NOTA_HASTA", valor)
+    with pytest.raises(men.ConfigError):
+        men.leer_config()
+
+    rastro = _psql_falso(monkeypatch, _ctx())
+    assert men.main() == men.EXIT_CONFIG
+    assert rastro["sql"] == [] and rastro["scripts"] == []
+    assert f"A5_NOTA_HASTA={valor!r}" in capsys.readouterr().out
+    assert mails[0][0].startswith("[ALERTA] Mantenimiento PROD: configuración inválida")
+
+
+# ── Puntos 3 y 4: el log nombra la detección y el motivo depende del modo ─────────────────────
+def test_ci_el_log_nombra_la_deteccion_que_puso_el_run_rojo(monkeypatch, mails, capsys):
+    """Punto 3: el log dice CUÁL detección puso el run en rojo (código + título + conteo), no sólo
+    "detecciones=1 hallazgo(s)"."""
+    _psql_falso(monkeypatch, _ctx(a2c=[["1", "2026-09-01", "21", "20"]]))
+
+    assert men.main() == men.EXIT_DIAGNOSTICO
+    out = capsys.readouterr().out
+
+    assert "detecciones=1 hallazgo(s) [A.2(c)]" in out
+    assert ("ROJO (A.2(c)): clases por encima del cupo: 1 fila(s) — clase(s) con más "
+            "asistentes confirmados que `cupo_maximo`") in out
+
+
+def test_cj_en_dry_run_el_motivo_dice_que_no_se_aplico_nada(monkeypatch, mails):
+    """Punto 4: en DRY-RUN no se aplicó nada, así que el motivo no puede decir "se aplicó igual";
+    en REAL sí lo dice (el mantenimiento se aplicó y lo único que no aborta es la detección)."""
+    monkeypatch.setenv("DRY_RUN", "1")
+    _psql_falso(monkeypatch, _ctx(a5a=[["30", "2026-10-02", "19:00:00", "CrossFit"]]))
+
+    assert men.main() == men.EXIT_DIAGNOSTICO
+    assert "en DRY-RUN no se aplicó nada (la transacción terminó en ROLLBACK)" in mails[0][0]
+    assert "se aplicó igual" not in mails[0][0]
+
+    monkeypatch.setenv("DRY_RUN", "0")
+    _psql_falso(monkeypatch, _ctx(a5a=[["30", "2026-10-02", "19:00:00", "CrossFit"]]))
+
+    assert men.main() == men.EXIT_DIAGNOSTICO
+    assert "el mantenimiento se aplicó igual: las detecciones A.1-A.5" in mails[1][0]
+
+
+def test_ck_en_dry_run_el_motivo_de_la_integridad_tambien_dice_que_no_se_aplico(monkeypatch,
+                                                                               mails):
+    """El otro motivo que decía "se aplicó igual" era el de la integridad (exit 4)."""
+    monkeypatch.setenv("DRY_RUN", "1")
+    _psql_falso(monkeypatch, _ctx(dup_rut=[["12345678-9", "2"]]))
+
+    assert men.main() == men.EXIT_INTEGRIDAD
+    assert ("en DRY-RUN no se aplicó nada (la transacción terminó en ROLLBACK): la integridad "
+            "no aborta el mantenimiento") in mails[0][1]
+
+    monkeypatch.setenv("DRY_RUN", "0")
+    _psql_falso(monkeypatch, _ctx(dup_rut=[["12345678-9", "2"]]))
+
+    assert men.main() == men.EXIT_INTEGRIDAD
+    assert "el mantenimiento se aplicó igual: la integridad no aborta " in mails[1][1]
 

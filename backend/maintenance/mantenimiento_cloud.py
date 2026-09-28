@@ -74,8 +74,15 @@ Sobre la base de la Fase 6, el mismo run agrega cuatro bloques, sin scripts nuev
   * **A — detecciones de sólo lectura** (A.1–A.5): `estado` de usuario desconocido, aforo de
     las clases desincronizado con sus reservas, reservas vivas duplicadas, sobrecupo,
     descuadre de créditos, reservas sin auditoría de asistencia y clases futuras sin coach.
+    A.5(a)/(b) miran **sólo** las disciplinas que exigen coach (`disciplinas.requiere_coach`:
+    "Musculación" y "Open Box" son self-service y no son un hallazgo) y **nunca** comparan por
+    nombre: el nombre sólo aparece en el backfill que destilda la disciplina (pantalla
+    Disciplinas del admin). El conteo que viaja al log y al mail es el **total real** de cada
+    consulta (`count(*) OVER ()`, la ventana se calcula antes del `LIMIT 25`), así que el mail
+    puede decir "63 fila(s)" y listar sólo 25: antes el tope se confundía con el conteo.
     Nada de esto escribe: lo que encuentra viaja en el mail y pone el run rojo (**exit 9**),
-    igual que la integridad (exit 4) — el mantenimiento se aplica igual.
+    igual que la integridad (exit 4) — el mantenimiento se aplica igual (en DRY-RUN, donde no
+    se aplicó nada, el motivo lo dice con esas palabras).
   * **B — límites del free tier de Neon** (B.6 CU-horas y B.7 ramas): se leen de la API v2
     con `NEON_API_KEY`/`NEON_PROJECT_ID` (env group `neon-api`, el mismo del drill) y son
     opcionales: sin esas variables el job corre igual y lo deja dicho en el mail.
@@ -102,6 +109,12 @@ tocar la base; los textos pasan por un charset seguro, así que no pueden cambia
 `PROD_PERMITIDOS` (`demo.prod.%@example.com`) · `TENANT_ID` (1) · `MIN_BASE_RETENCION` (5) ·
 `NEON_CU_HORAS_LIMITE` (100) · `NEON_CU_UMBRAL_PCT` (80) · `NEON_RAMAS_LIMITE` (10) ·
 `NEON_API_BASE` (misma variable que usa `restore_drill.py`).
+Además, `A5_NOTA_HASTA` (**opcional**, fecha ISO `AAAA-MM-DD`, sin default): mientras
+`hoy <= A5_NOTA_HASTA` el log y el correo agregan junto a A.5(a) la nota "esperado en esta
+etapa: aún no hay coaches asignados (desarrollo)", **sin silenciar la alerta** — el run sigue
+rojo y el correo sigue saliendo. Pasada esa fecha (o sin la variable, o con la variable vacía)
+la nota no se muestra y la detección queda exactamente como estaba. Una fecha inválida ⇒
+`ConfigError` (exit 2).
 Los dos roles siguen igual: `SELECT` de más tablas y `UPDATE`/`DELETE` **sólo** de las
 columnas/tablas que la Fase 7 necesita (el SQL exacto está en el README).
 
@@ -213,6 +226,18 @@ ESTADOS_USUARIO = ("activo", "pendiente_activacion", "rechazado", "baja")
 # Regla ESPEJO de `app/api/v1/reservas.py` (DELETE /reservas/{id}): el crédito se devuelve
 # sólo si faltan >= 6 h para la clase. Se repite acá porque el job no importa `app.*`.
 HORAS_DEVOLUCION = 6
+# ── Detecciones A: conteo REAL y nota de contexto de A.5(a) (2026-09-27) ──────
+# Tope de filas de cada `modo="lista"`. El tope NO es el conteo: `detecciones()` lee el total real
+# con `count(*) OVER ()` (la ventana se calcula después del WHERE y ANTES del LIMIT), así que el
+# mail dice "63 fila(s)" y lista las primeras 25. Sin eso, A.5(a) y A.5(b) —que son complementarios
+# por definición— se veían igual en 25/25 y no había forma de ver la magnitud real.
+LIMITE_LISTA = 25
+# A.5(a) marca en rojo las clases futuras sin coach de disciplinas que NO tienen ningún coach
+# activo. En esta etapa (desarrollo) eso es ESPERABLE, así que `A5_NOTA_HASTA` (fecha ISO,
+# opcional) agrega una nota visible al log y al correo JUNTO a A.5(a) mientras `hoy <= la fecha`.
+# La alerta NO se silencia: el run sigue rojo y el correo sigue saliendo; la nota se quita sola.
+A5_NOTA_TEXTO = ("Esperado en esta etapa: aún no hay coaches asignados a estas clases (desarrollo). "
+                 "Asígnalos en la pantalla Coaches. Esta nota se quita sola el {fecha}.")
 
 
 class ConfigError(RuntimeError):
@@ -308,6 +333,25 @@ def _texto(nombre: str, defecto: str = "") -> str:
     return limpiar_valor(os.getenv(nombre) or "") or defecto
 
 
+def _fecha_iso(nombre: str) -> date | None:
+    """Lee una env var de FECHA ISO (`AAAA-MM-DD`) **opcional**: ausente o vacía ⇒ `None`.
+
+    Es el único camino por el que una fecha de configuración llega al reporte, y es estricta a
+    propósito: `date.fromisoformat()` acepta más formas desde Python 3.11 (p. ej. `20260927`),
+    así que primero se exige el patrón `AAAA-MM-DD`. Cualquier otra cosa ⇒ `ConfigError` (exit 2)
+    antes de tocar la base.
+    """
+    crudo = limpiar_valor(os.getenv(nombre) or "")
+    if not crudo:
+        return None
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", crudo):
+        raise ConfigError(f"{nombre}={crudo!r} no es una fecha ISO (AAAA-MM-DD)")
+    try:
+        return date.fromisoformat(crudo)
+    except ValueError:
+        raise ConfigError(f"{nombre}={crudo!r} no es una fecha válida") from None
+
+
 def dry_run_activo() -> bool:
     """DRY_RUN=1 (o cualquier valor que no sea "0"/"false"/"no") ⇒ no se aplica nada.
 
@@ -386,6 +430,8 @@ def leer_config() -> dict:
         "dias_purga_notif": _entero("DIAS_PURGA_NOTIF", DIAS_PURGA_NOTIF_DEFECTO, 1, 3650),
         "creditos_tolerancia": _entero("CREDITOS_DESCUADRE_TOLERANCIA",
                                        CREDITOS_TOLERANCIA_DEFECTO, 0, 100),
+        # Nota de contexto de A.5(a) (opcional: sin la variable no hay nota ni se toca la alerta).
+        "a5_nota_hasta": _fecha_iso("A5_NOTA_HASTA"),
         "permitidos": _allowlist("PROD_PERMITIDOS", PROD_PERMITIDOS_DEFECTO),
         "tenant_id": _entero("TENANT_ID", TENANT_ID_DEFECTO, 1, 100_000),
         "min_base_retencion": _entero("MIN_BASE_RETENCION",
@@ -628,6 +674,48 @@ def sql_demo(permitidos: tuple) -> str:
     return " OR ".join(f"u.correo LIKE '{patron_like(p)}' ESCAPE '\\'" for p in permitidos)
 
 
+def sql_requiere_coach(alias: str = "d") -> str:
+    """Predicado: "la disciplina de la clase EXIGE coach asignado" ⇒ `disciplinas.requiere_coach`.
+
+    Es la columna la que decide, **nunca el nombre** de la disciplina (el nombre sólo aparece en
+    el backfill que destilda la disciplina desde la pantalla Disciplinas del admin): las que no
+    requieren coach —hoy "Musculación" y "Open Box", self-service— quedan fuera de A.5(a) y de
+    A.5(b) por dato, no por texto. El `LEFT JOIN` deja la columna en NULL cuando la clase no tiene
+    disciplina; eso se trata como "requiere" (= true), porque una clase sin disciplina tampoco
+    tiene a quién asignarle un coach.
+    """
+    return f"COALESCE({alias}.requiere_coach, true)"
+
+
+def sql_con_total(sql: str) -> str:
+    """Prefija `count(*) OVER ()::text` a una consulta de lista: el TOTAL real del conjunto.
+
+    La ventana se calcula **después del WHERE y antes del LIMIT**, así que el primer valor de la
+    primera fila es el tamaño completo del hallazgo aunque la lista del mail traiga sólo
+    `LIMITE_LISTA` filas. Sin esto, `n` era el tope (25) y dos conjuntos de 25 y de 2000 filas se
+    reportaban igual (el 25/25 de A.5(a) vs A.5(b)).
+    """
+    if not sql.lstrip().upper().startswith("SELECT "):
+        raise ValueError("sólo se puede pedir el total de un SELECT")
+    return re.sub(r"^(\s*)SELECT ", r"\1SELECT count(*) OVER ()::text, ", sql, count=1)
+
+
+def nota_a5(cfg: dict, hoy: date | None = None) -> str:
+    """Nota de contexto de A.5(a); `""` si no corresponde mostrarla.
+
+    **Pura**: sólo mira `cfg["a5_nota_hasta"]` y la fecha de hoy (inyectable para los tests). Se
+    muestra mientras `hoy <= A5_NOTA_HASTA` (el mismo día incluido); con la variable ausente o ya
+    pasada la fecha devuelve `""`, o sea la alerta queda exactamente como estaba. No silencia
+    nada: el run sigue rojo y el correo sigue saliendo.
+    """
+    hasta = cfg.get("a5_nota_hasta")
+    if not hasta:
+        return ""
+    if (hoy or date.today()) > hasta:
+        return ""
+    return A5_NOTA_TEXTO.format(fecha=hasta.isoformat())
+
+
 def detecciones_sql(cfg: dict) -> tuple:
     """A.1–A.5 declaradas como datos (para el mail) + SQL. `modo`:
       * `escalar`: un conteo ⇒ hallazgo si ≠ 0.
@@ -656,7 +744,7 @@ def detecciones_sql(cfg: dict) -> tuple:
                         f"({', '.join(ESTADOS_USUARIO)}): la columna es un String(20) y el "
                         "código sólo escribe esos cuatro valores"),
             "sql": ("SELECT id::text, COALESCE(correo, ''), estado, activo::text FROM usuarios "
-                    f"WHERE estado NOT IN ({estados}) ORDER BY id LIMIT 25"),
+                    f"WHERE estado NOT IN ({estados}) ORDER BY id LIMIT {LIMITE_LISTA}"),
         },
         {
             "clave": "a1c_demo",
@@ -680,7 +768,7 @@ def detecciones_sql(cfg: dict) -> tuple:
                     f" AND {sql_viva()})::text "
                     "FROM clases c WHERE c.asistentes_confirmados <> "
                     "(SELECT count(*) FROM reservas r WHERE r.clase_id = c.id "
-                    f" AND {sql_viva()}) ORDER BY c.fecha DESC, c.id LIMIT 25"),
+                    f" AND {sql_viva()}) ORDER BY c.fecha DESC, c.id LIMIT {LIMITE_LISTA}"),
         },
         {
             "clave": "a2b_reservas_duplicadas",
@@ -690,7 +778,7 @@ def detecciones_sql(cfg: dict) -> tuple:
             "detalle": "alumno(s) con más de una reserva viva en la misma clase (aforo inflado)",
             "sql": ("SELECT alumno_id::text, clase_id::text, count(*)::text FROM reservas r "
                     f"WHERE {sql_viva()} GROUP BY alumno_id, clase_id "
-                    "HAVING count(*) > 1 ORDER BY count(*) DESC LIMIT 25"),
+                    f"HAVING count(*) > 1 ORDER BY count(*) DESC LIMIT {LIMITE_LISTA}"),
         },
         {
             "clave": "a2c_sobrecupo",
@@ -700,7 +788,8 @@ def detecciones_sql(cfg: dict) -> tuple:
             "detalle": "clase(s) con más asistentes confirmados que `cupo_maximo`",
             "sql": ("SELECT id::text, fecha::text, asistentes_confirmados::text, "
                     "cupo_maximo::text FROM clases WHERE cancelada = false "
-                    "AND asistentes_confirmados > cupo_maximo ORDER BY fecha DESC, id LIMIT 25"),
+                    f"AND asistentes_confirmados > cupo_maximo ORDER BY fecha DESC, id "
+                    f"LIMIT {LIMITE_LISTA}"),
         },
         {
             "clave": "a4a_asistencia_pendiente",
@@ -722,41 +811,48 @@ def detecciones_sql(cfg: dict) -> tuple:
             "detalle": ("reserva(s) marcadas como asistidas sin `asistencia_marcada_at`: falta "
                         "el dato de auditoría de quién y cuándo"),
             "sql": ("SELECT id::text, clase_id::text, alumno_id::text, asistio::text FROM reservas "
-                    "WHERE asistio = true AND asistencia_marcada_at IS NULL ORDER BY id LIMIT 25"),
+                    f"WHERE asistio = true AND asistencia_marcada_at IS NULL ORDER BY id "
+                    f"LIMIT {LIMITE_LISTA}"),
         },
         {
             "clave": "a5a_sin_coach_posible",
-            "titulo": "A.5(a) clases futuras sin coach y sin NINGÚN coach activo en su disciplina",
+            "titulo": ("A.5(a) clases futuras sin coach de una disciplina que exige coach y sin "
+                       "NINGÚN coach activo en ella"),
             "sev": "rojo", "modo": "lista",
             "cabeceras": ("id", "fecha", "hora_inicio", "disciplina"),
-            "detalle": ("clase(s) futuras con `coach_id` NULL cuya disciplina no tiene ningún "
-                        "coach activo en `coach_disciplinas`: no hay a quién asignárselas"),
+            "detalle": (f"clase(s) futuras con `coach_id` NULL de una disciplina que exige coach "
+                        f"({sql_requiere_coach()}: las self-service —«Musculación», «Open Box»— "
+                        "quedan fuera por dato) y que no tiene ningún coach activo en "
+                        "`coach_disciplinas`: no hay a quién asignárselas"),
             "sql": ("SELECT c.id::text, c.fecha::text, c.hora_inicio::text, "
                     "COALESCE(d.nombre, '(sin disciplina)') FROM clases c "
                     "LEFT JOIN disciplinas d ON d.id = c.disciplina_id "
                     "WHERE c.coach_id IS NULL AND c.cancelada = false AND c.fecha >= current_date "
+                    f"AND {sql_requiere_coach()} "
                     "AND NOT EXISTS (SELECT 1 FROM coach_disciplinas cd "
                     "  JOIN usuarios u ON u.id = cd.coach_id "
                     "  WHERE cd.disciplina_id = c.disciplina_id AND cd.activo = true "
                     "    AND u.rol::text = 'coach' AND u.activo = true) "
-                    "ORDER BY c.fecha, c.hora_inicio LIMIT 25"),
+                    f"ORDER BY c.fecha, c.hora_inicio LIMIT {LIMITE_LISTA}"),
         },
         {
             "clave": "a5b_sin_coach_asignable",
             "titulo": "A.5(b) clases futuras sin coach, pero con coach disponible en la disciplina",
             "sev": "info", "modo": "lista",
             "cabeceras": ("id", "fecha", "hora_inicio", "disciplina"),
-            "detalle": ("clase(s) futuras con `coach_id` NULL que SÍ tienen coach activo en su "
-                        "disciplina: falta asignarla (informativo; D-2 lo sacó del rojo)"),
+            "detalle": (f"clase(s) futuras con `coach_id` NULL de una disciplina que exige coach "
+                        f"({sql_requiere_coach()}) y que SÍ tiene coach activo: falta asignarla "
+                        "(informativo; D-2 lo sacó del rojo)"),
             "sql": ("SELECT c.id::text, c.fecha::text, c.hora_inicio::text, "
                     "COALESCE(d.nombre, '(sin disciplina)') FROM clases c "
                     "LEFT JOIN disciplinas d ON d.id = c.disciplina_id "
                     "WHERE c.coach_id IS NULL AND c.cancelada = false AND c.fecha >= current_date "
+                    f"AND {sql_requiere_coach()} "
                     "AND EXISTS (SELECT 1 FROM coach_disciplinas cd "
                     "  JOIN usuarios u ON u.id = cd.coach_id "
                     "  WHERE cd.disciplina_id = c.disciplina_id AND cd.activo = true "
                     "    AND u.rol::text = 'coach' AND u.activo = true) "
-                    "ORDER BY c.fecha, c.hora_inicio LIMIT 25"),
+                    f"ORDER BY c.fecha, c.hora_inicio LIMIT {LIMITE_LISTA}"),
         },
         {
             "clave": "a5c_coach_invalido",
@@ -769,7 +865,7 @@ def detecciones_sql(cfg: dict) -> tuple:
                     "u.activo::text FROM clases c JOIN usuarios u ON u.id = c.coach_id "
                     "WHERE c.cancelada = false AND c.fecha >= current_date "
                     "AND (u.rol::text <> 'coach' OR u.activo = false) "
-                    "ORDER BY c.fecha, c.id LIMIT 25"),
+                    f"ORDER BY c.fecha, c.id LIMIT {LIMITE_LISTA}"),
         },
     )
 def sql_descuadre_creditos(cfg: dict) -> str:
@@ -1047,9 +1143,17 @@ def descuadre_creditos(url: str, cfg: dict) -> dict:
 def detecciones(url: str, cfg: dict) -> dict:
     """A.1–A.5 en marcha: lee cada consulta y separa hallazgos (rojo) de informes (info).
 
-    Devuelve `{"hallazgos", "informes", "listas"}`. Un hallazgo NO aborta el mantenimiento
-    (igual que la integridad): pone el run rojo (exit 9) y viaja al mail con la lista
-    completa. Los informes sólo aparecen en el mail y NO cambian el exit code.
+    Devuelve `{"hallazgos", "informes", "listas", "nota_a5"}`. Un hallazgo NO aborta el
+    mantenimiento (igual que la integridad): pone el run rojo (exit 9) y viaja al mail con la
+    lista completa. Los informes sólo aparecen en el mail y NO cambian el exit code.
+
+    El `n` de cada lista es el **total real** de la consulta (`count(*) OVER ()`, que se calcula
+    antes del `LIMIT`), no el número de filas que viajan al mail: por eso `mostradas` existe. El
+    tope de la lista (`LIMITE_LISTA`, 25) capaba el conteo y hacía invisibles los conjuntos
+    grandes (el 25/25 de A.5(a) vs A.5(b), que son complementarios por construcción).
+
+    `nota_a5` es la nota de contexto de A.5(a) (`A5_NOTA_HASTA`), y sólo se calcula cuando esa
+    detección tiene filas: si no hay nada que explicar, no hay nota.
     """
     hallazgos, informes, listas = [], [], []
     for chequeo in detecciones_sql(cfg):
@@ -1059,12 +1163,17 @@ def detecciones(url: str, cfg: dict) -> dict:
                 texto = f"{chequeo['titulo']}: {n} — {chequeo['detalle']}"
                 (hallazgos if chequeo["sev"] == "rojo" else informes).append(texto)
             continue
-        filas = psql_leer(url, chequeo["sql"])
+        crudas = psql_leer(url, sql_con_total(chequeo["sql"]))
+        # La 1ª columna es el total del conjunto; NO es una columna de la lista (las cabeceras del
+        # mail no la llevan). Sin filas no hay total que leer ⇒ 0.
+        total = _int_o_cero(crudas[0][0]) if crudas else 0
+        filas = [f[1:] for f in crudas]
         listas.append({"clave": chequeo["clave"], "titulo": chequeo["titulo"],
                        "cabeceras": chequeo["cabeceras"], "destino": "", "sev": chequeo["sev"],
-                       "detalle": chequeo["detalle"], "filas": filas, "n": len(filas)})
-        if filas:
-            texto = f"{chequeo['titulo']}: {len(filas)} fila(s) — {chequeo['detalle']}"
+                       "detalle": chequeo["detalle"], "filas": filas, "n": total,
+                       "mostradas": len(filas)})
+        if total:
+            texto = f"{chequeo['titulo']}: {total} fila(s) — {chequeo['detalle']}"
             (hallazgos if chequeo["sev"] == "rojo" else informes).append(texto)
 
     creditos = descuadre_creditos(url, cfg)
@@ -1073,7 +1182,9 @@ def detecciones(url: str, cfg: dict) -> dict:
     hallazgos.extend(creditos["hallazgos"])
     if creditos["tabla"]["n"]:
         listas.append(creditos["tabla"])
-    return {"hallazgos": hallazgos, "informes": informes, "listas": listas}
+    con_a5a = any(c["clave"] == "a5a_sin_coach_posible" and c["n"] for c in listas)
+    return {"hallazgos": hallazgos, "informes": informes, "listas": listas,
+            "nota_a5": nota_a5(cfg) if con_a5a else ""}
 
 
 def neon_api_get(cfg: dict, ruta: str, timeout: int = 20) -> dict:
@@ -1638,13 +1749,24 @@ def _bloques_listas(listas: list, vacio: str = "(sin listas)") -> str:
     return bloques or f"<p>{_e(vacio)}</p>"
 
 
-def _bloques_detecciones(listas: list) -> str:
-    """Listas de las detecciones A.1–A.5: la severidad va delante y la lista COMPLETA detrás."""
+def _bloques_detecciones(listas: list, nota_a5: str = "") -> str:
+    """Listas de las detecciones A.1–A.5: la severidad va delante y las filas detrás.
+
+    El conteo es el **total** del conjunto; si el `LIMIT` dejó filas afuera se dice cuántas se
+    muestran ("mostrando 25 de 63"), para que el tope no se lea como el tamaño del hallazgo.
+    `nota_a5`, si viene, se agrega DENTRO del bloque de A.5(a): la alerta no se silencia, es sólo
+    el contexto de `A5_NOTA_HASTA`.
+    """
     bloques = ""
     for c in listas or []:
         marca = "🔴 rojo (exit 9)" if c.get("sev") == "rojo" else "ℹ️ sólo informativo"
+        mostradas = c.get("mostradas", c["n"])
+        corte = f" (mostrando {mostradas} de {c['n']})" if mostradas < c["n"] else ""
+        nota = (f"<br>ℹ️ <b>Nota A.5(a):</b> {_e(nota_a5)}"
+                if nota_a5 and c.get("clave") == "a5a_sin_coach_posible" else "")
         bloques += (f"<p style='margin:10px 0 2px'><b>{_e(c['titulo'])}</b> — {c['n']} "
-                    f"fila(s) [{marca}]<br><i>{_e(c.get('detalle'))}</i></p>{_tabla_lista(c)}")
+                    f"fila(s){corte} [{marca}]{nota}<br><i>{_e(c.get('detalle'))}</i></p>"
+                    f"{_tabla_lista(c)}")
     return bloques or "<p>(las detecciones no encontraron filas)</p>"
 
 
@@ -1665,11 +1787,16 @@ def construir_html(datos: dict, inicio: datetime, segundos: float, titulo: str =
     bloques_purga = _bloques_listas(datos.get("listas_purga"),
                                     "(sin nada que purgar)")
     detect = datos.get("detecciones") or {}
+    nota_a5_txt = detect.get("nota_a5") or ""
     # Sólo las listas CON filas: las 11 vacías serían ruido en un correo que ya es de alerta
     # (el detalle de qué se chequeó va igual en los hallazgos/informes de arriba).
-    detect_listas = _bloques_detecciones([c for c in (detect.get("listas") or []) if c["n"]])
-    detect_rojo = ("<ul>" + "".join(f"<li>⚠️ {_e(h)}</li>" for h in detect.get("hallazgos") or [])
-                   + "</ul>") if detect.get("hallazgos") else "<p>Sin hallazgos rojos ✅</p>"
+    detect_listas = _bloques_detecciones([c for c in (detect.get("listas") or []) if c["n"]],
+                                        nota_a5_txt)
+    detect_rojo = ("<ul>" + "".join(
+        f"<li>⚠️ {_e(h)}"
+        + (f"<br>ℹ️ <b>Nota A.5(a):</b> {_e(nota_a5_txt)}" if nota_a5_txt and "A.5(a)" in h else "")
+        + "</li>" for h in detect.get("hallazgos") or [])
+        + "</ul>") if detect.get("hallazgos") else "<p>Sin hallazgos rojos ✅</p>"
     detect_info = ("<ul>" + "".join(f"<li>{_e(i)}</li>" for i in detect.get("informes") or [])
                    + "</ul>") if detect.get("informes") else ""
     detecciones_html = detect_rojo + detect_info + detect_listas
@@ -1783,6 +1910,34 @@ def titulo_alerta(code: int, datos: dict) -> str:
         if partes:
             return "Neon: " + " y ".join(partes)
     return datos.get("estado") or TITULOS_EXIT.get(code) or "falla"
+
+
+def codigo_de(texto: str) -> str:
+    """Código de la detección que encabeza un texto (`A.5(a)`, `B.7`, …), o `""` si no lo trae.
+
+    Todas las detecciones A/B arrancan su texto con su código, así que esto es lo que permite que
+    el log nombre CUÁL puso el run en rojo (antes sólo decía "detecciones=1 hallazgo(s)").
+    """
+    m = re.match(r"([AB]\.\d+(?:\([a-z]\))?)\s", (texto or "").lstrip())
+    return m.group(1) if m else ""
+
+
+def sin_codigo(texto: str) -> str:
+    """El mismo texto sin el código delante (para no repetirlo: `ROJO (A.5(a)): <título>…`)."""
+    codigo = codigo_de(texto)
+    return (texto or "")[len(codigo):].lstrip() if codigo else (texto or "")
+
+
+def motivo_no_aborta(dry: bool, que: str) -> str:
+    """Motivo del run rojo por algo que NO aborta la escritura, según el modo.
+
+    En REAL el mantenimiento ya se aplicó (las guardas de volumen sí abortan, pero la integridad y
+    las detecciones no); en DRY-RUN **no se aplicó nada** (la transacción terminó en `ROLLBACK`),
+    así que decir "el mantenimiento se aplicó igual" sería falso: el texto cambia con el modo.
+    """
+    if dry:
+        return f"en DRY-RUN no se aplicó nada (la transacción terminó en ROLLBACK): {que}"
+    return f"el mantenimiento se aplicó igual: {que}"
 
 
 def hay_que_avisar(code: int, datos: dict) -> bool:
@@ -1919,9 +2074,15 @@ def main() -> int:
         f"cambios={cambios} | integridad={len(datos['integridad'])} hallazgo(s) | "
         f"neon={datos['neon']['mb']} MB ({datos['neon']['pct']}% de "
         f"{cfg['neon_limite_mb']} MB)")
+    detecc = datos["detecciones"]
+    # El log nombra CUÁL detección puso el run en rojo (`[A.5(a)]`) y, unas líneas más abajo, cada
+    # hallazgo con su código, su título y su conteo (`ROJO (A.5(a)): … — 25 fila(s)`).
+    codigos = ", ".join(codigo_de(h) for h in detecc["hallazgos"] if codigo_de(h))
     log(f"Lecturas OK (Fase 7): cierres={cierres} | purga={purga} | "
-        f"detecciones={len(datos['detecciones']['hallazgos'])} hallazgo(s) | "
+        f"detecciones={len(detecc['hallazgos'])} hallazgo(s){f' [{codigos}]' if codigos else ''} | "
         f"avisos Neon={len((datos['neon_api'] or {}).get('avisos') or [])}")
+    if detecc.get("nota_a5"):
+        log(f"NOTA A.5(a) (esperado hasta {cfg['a5_nota_hasta'].isoformat()}): {detecc['nota_a5']}")
     log(f"Límites: {linea_limites(evaluacion)}")
     api = datos["neon_api"] or {}
     if api.get("configurado"):
@@ -2030,7 +2191,7 @@ def main() -> int:
     # ── 5) Integridad: run rojo, sin abortar el mantenimiento (exit 4) ──
     if datos["integridad"]:
         datos["estado"] = f"integridad con {len(datos['integridad'])} problema(s)"
-        motivo = "los datos se actualizaron igual: la integridad no aborta el mantenimiento"
+        motivo = motivo_no_aborta(dry, "la integridad no aborta el mantenimiento")
         log(f"ROJO ({datos['estado']}: {motivo})")
         return reportar(False, motivo, datos, resumen, inicio, EXIT_INTEGRIDAD)
 
@@ -2039,9 +2200,13 @@ def main() -> int:
         (datos["neon_api"] or {}).get("hallazgos") or [])
     if rojos:
         datos["estado"] = f"los chequeos nuevos encontraron {len(rojos)} problema(s)"
-        motivo = ("el mantenimiento se aplicó igual: las detecciones A.1-A.5 y los chequeos de "
-                  "Neon no abortan la escritura")
+        motivo = motivo_no_aborta(dry, "las detecciones A.1-A.5 y los chequeos de Neon no "
+                                       "abortan la escritura")
         log(f"ROJO ({datos['estado']}: {motivo})")
+        # Cada hallazgo con SU código delante: es la línea que dice qué puso el run rojo, con el
+        # título y el conteo real (no sólo "detecciones=1 hallazgo(s)").
+        for hallazgo in rojos:
+            log(f"ROJO ({codigo_de(hallazgo) or 'chequeo'}): {sin_codigo(hallazgo)}")
         return reportar(False, motivo, datos, resumen, inicio, EXIT_DIAGNOSTICO)
 
     return reportar(True, f"mantenimiento {'simulado' if dry else 'aplicado'} y verificado: "
