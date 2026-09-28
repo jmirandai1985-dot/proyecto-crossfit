@@ -42,6 +42,7 @@ import ast  # noqa: E402 (guardia de la config: los `os.getenv` viven en un solo
 import pytest  # noqa: E402
 
 from maintenance import mantenimiento_cloud as men  # noqa: E402
+from shared import estados  # noqa: E402  (la lista compartida: predicado de "cancelada")
 
 CLAVE_FALSA = "SECRETO_FAKE_no_real"
 URL = ("postgresql://maint_rw:" + CLAVE_FALSA
@@ -56,9 +57,12 @@ def _filas(*filas) -> str:
     return "".join("|".join(str(c) for c in fila) + "\n" for fila in filas)
 
 
-# Claves de `_ctx` que son listas de DETECCIÓN A: su SELECT lleva `count(*) OVER ()` como primera
-# columna (`men.sql_con_total`), así que el doble tiene que devolver el total delante de cada fila.
-DETECCIONES = {"a1b", "a2a", "a2b", "a2c", "a4b", "a5a", "a5b", "a5c"}
+# Marcador de las listas que llevan el total delante: NO es una lista de claves, es el SQL. Si la
+# consulta va con `count(*) OVER ()` (`men.sql_con_total()`: las detecciones A y las listas que
+# declaran `"total": True`), el doble devuelve el total delante de cada fila — así prueba que el
+# código PIDE la ventana, en vez de que el test la dé por supuesta. La clave `<clave>_total` de
+# `_ctx` simula el caso que importa: 63 filas reales y 25 en la lista.
+VENTANA_TOTAL = "count(*) OVER ()::text"
 
 
 def _filas_lista(filas, total=None) -> str:
@@ -118,7 +122,8 @@ def _ctx(**kw) -> dict:
            "script_rc": 0, "script_err": "", "despues": "igual",
            # ── Fase 7: detecciones (A), consistencia (C) y reporte (E) ──
            "a1a": "0", "a1b": [], "a1c": "0", "a2a": [], "a2b": [], "a2c": [],
-           "a3_creditos": [], "a4a": "0", "a4b": [], "a5a": [], "a5b": [], "a5c": [],
+           "a3_creditos": [], "a3_creditos_total": None, "a4a": "0", "a4b": [],
+           "a5a": [], "a5b": [], "a5c": [], "a6": [], "a6_total": None,
            "cierre_pendientes": [], "aforo_resync": [], "tokens_reset": [], "notificaciones": [],
            "mrr": "60000", "mrr_ant": "50000", "vigentes": "60", "bajas": "2",
            "ret_base": "40", "ret_siguen": "36",
@@ -134,9 +139,10 @@ def _respuesta(sql: str, ctx: dict, vistas: dict) -> str:
     El orden de los `if` ES significativo: los marcadores de la Fase 7 van primero porque son
     más específicos (varias detecciones comparten fragmentos con las listas de otras fases).
     """
-    # ── A.3: se compara en Python, así que devuelve las columnas crudas ──
+    # ── A.3: se compara en Python, así que devuelve las columnas crudas, con el total delante
+    # (`descuadre_creditos()` la lee con `sql_con_total`) ──
     if "s.creditos_totales - s.creditos_disponibles" in sql:
-        return _filas(*ctx["a3_creditos"])
+        return _filas_lista(ctx["a3_creditos"], ctx.get("a3_creditos_total"))
 
     # ── Detecciones escalares (A.1a, A.1c demo, A.4a) ──
     if "activo <> (estado = 'activo')" in sql:
@@ -165,6 +171,7 @@ def _respuesta(sql: str, ctx: dict, vistas: dict) -> str:
             ("AND NOT EXISTS (SELECT 1 FROM coach_disciplinas", "a5a"),
             ("AND EXISTS (SELECT 1 FROM coach_disciplinas", "a5b"),
             ("FROM clases c JOIN usuarios u ON u.id = c.coach_id", "a5c"),
+            ("estado ILIKE '%cancel%'", "a6"),
             ("JOIN clases c ON c.id = r.clase_id", "cierre_pendientes"),
             ("FROM password_reset_tokens", "tokens_reset"),
             ("FROM notificaciones_enviadas", "notificaciones"),
@@ -176,7 +183,7 @@ def _respuesta(sql: str, ctx: dict, vistas: dict) -> str:
             vistas[clave] = vistas.get(clave, 0) + 1
             if vistas[clave] > 1 and ctx["despues"] == "vacio":
                 return ""                       # verificación posterior: la lista quedó vacía
-            if clave in DETECCIONES:             # las detecciones llevan el total real delante
+            if VENTANA_TOTAL in sql:             # la lista pide el total real (`sql_con_total`)
                 return _filas_lista(ctx[clave], ctx.get(f"{clave}_total"))
             return _filas(*ctx[clave])
 
@@ -187,7 +194,9 @@ def _respuesta(sql: str, ctx: dict, vistas: dict) -> str:
     if "fecha_expiracion < fecha_inicio" in sql:
         return ctx["fechas_malas"] + "\n"
     if "HAVING count(*) > 1" in sql:
-        return _filas(*ctx["dup_rut" if "rut" in sql else "dup_correo"])
+        # los duplicados de la integridad también van con la ventana (tope `LIMITE_DUP`)
+        clave = "dup_rut" if "rut" in sql else "dup_correo"
+        return _filas_lista(ctx[clave], ctx.get(f"{clave}_total"))
     if "FROM alembic_version" in sql:
         return ALEMBIC + "\n"
     if "pg_database_size" in sql:
@@ -691,7 +700,7 @@ def test_ao_verificacion_del_cierre_no_cuadra_exit_8(monkeypatch, mails):
     assert len(rastro["scripts"]) == 2                   # se cortó en la fase del cierre
 
 
-# ── Detecciones A.1–A.5 (sólo lectura) ────────────────────────────────────────
+# ── Detecciones A.1–A.6 (sólo lectura) ────────────────────────────────────────
 def test_aa_detecciones_rojas_exit_9_con_la_lista_completa_en_el_mail(monkeypatch, mails):
     """Un hallazgo rojo pone el run rojo (exit 9) SIN abortar la escritura, y la lista va
     completa. Exactamente el mismo contrato que la integridad (exit 4)."""
@@ -962,18 +971,21 @@ def test_bf_los_exit_codes_nuevos_tienen_titulo():
 
 
 # ── D-8 + C.8: "cancelada" no es un único literal y el cierre escribe `updated_at` ────────────
-def test_bg_ninguna_consulta_compara_contra_el_literal_cancelled():
-    """Guardia de regresión del punto 1: `reservas.estado` es un `character varying(20)` y en los
-    datos hay DOS formas de "cancelada" —`'cancelled'`, la que escribe la app, y `'cancelada'`, la
-    del enum viejo `estado_reserva`, que `kpis_populate.py` sigue contemplando—. Todo el SQL del
-    mantenimiento tiene que usar `sql_viva()`/`sql_cancelada()`: contra el literal, la otra
-    variante pasa por "viva" y el paso 8 le reescribiría `updated_at` (el dato de A.3).
+def test_bg_el_predicado_se_arma_con_la_lista_compartida_y_no_con_un_literal():
+    """Guardia de regresión (punto 1 + lista compartida): `reservas.estado` es un
+    `character varying(20)` y en los datos conviven `'cancelled'` (la que escribe la app) y
+    `'cancelada'` (la del enum viejo `estado_reserva`). Todo el SQL del job arma el predicado con
+    `shared.estados` (`sql_viva()`/`sql_cancelada()`), así que no queda un literal suelto que se
+    pueda desactualizar: contra el literal, la otra variante pasa por "viva" y el paso 8 le
+    reescribiría `updated_at` (el dato del que A.3 deduce la tardanza).
+
+    El `ILIKE '%cancel%'` "por parecido" no vuelve: lo que cubría de más ahora lo delata A.6, que
+    es un chequeo contra esta misma lista (no un predicado de escritura).
     """
     cfg = men.leer_config()
     sqls = [c["sql"] for c in men.consultas_lista(cfg["dias_pendiente"])]
     sqls += [c["sql"] for c in men.consultas_cierre(cfg)]
     sqls += [c["sql"] for c in men.consultas_purga(cfg)]
-    sqls += [c["sql"] for c in men.detecciones_sql(cfg)]
     sqls.append(men.sql_descuadre_creditos(cfg))
     sqls += [men.script_cambios(cfg["max_cambios"], cfg["dias_pendiente"], False),
              men.script_cierre(cfg["max_cierre"], cfg["dias_cierre"], False),
@@ -981,12 +993,24 @@ def test_bg_ninguna_consulta_compara_contra_el_literal_cancelled():
                               cfg["dias_purga_notif"], False)]
 
     todo = " ".join(sqls)
-    assert men.sql_viva() == "r.estado NOT ILIKE '%cancel%'"
-    assert men.sql_cancelada() == "r.estado ILIKE '%cancel%'"
-    assert "NOT ILIKE '%cancel%'" in todo and "ILIKE '%cancel%'" in todo
+    assert men.lista_sql() == ", ".join(f"'{e}'" for e in estados.ESTADOS_CANCELADA)
+    assert men.sql_viva() == f"r.estado NOT IN ({men.lista_sql()})"
+    assert men.sql_cancelada() == f"r.estado IN ({men.lista_sql()})"
+    assert men.sql_viva() in todo and men.sql_cancelada() in todo
     for sql in sqls:
-        assert "'cancelled'" not in sql, sql[:140]
-        assert "'cancelada'" not in sql, sql[:140]
+        # ni el literal suelto ni el `ILIKE "por parecido"` que tenía el predicado: la lista sale
+        # SIEMPRE de `shared.estados` (una sola definición para la app y el job)
+        assert "ILIKE '%cancel%'" not in sql, sql[:140]
+
+    # A.6 es la ÚNICA consulta con `ILIKE '%cancel%'`, y a propósito: busca las variantes que la
+    # lista exacta no conoce (y las compara contra la MISMA lista)
+    claves = {c["clave"]: c for c in men.detecciones_sql(cfg)}
+    sin_a6 = " ".join(c["sql"] for k, c in claves.items()
+                      if k != "a6_cancelaciones_no_previstas")
+    assert "ILIKE '%cancel%'" not in sin_a6
+    assert claves["a6_cancelaciones_no_previstas"]["sev"] == "rojo"
+    assert "ILIKE '%cancel%'" in claves["a6_cancelaciones_no_previstas"]["sql"]
+    assert men.lista_sql() in claves["a6_cancelaciones_no_previstas"]["sql"]
 
 
 def test_bh_el_paso_8_excluye_cualquier_cancelacion_y_el_paso_9_usa_lo_mismo():
@@ -998,15 +1022,15 @@ def test_bh_el_paso_8_excluye_cualquier_cancelacion_y_el_paso_9_usa_lo_mismo():
 
         assert "UPDATE reservas AS r SET asistencia_marcada_at = now()" in paso8
         assert "updated_at = now()" in paso8              # escribe updated_at: de ahí el cuidado
-        assert "r.estado NOT ILIKE '%cancel%'" in paso8   # ⇒ no toca NINGUNA cancelación
+        assert men.sql_viva() in paso8                   # ⇒ no toca NINGUNA cancelación
         assert "r.asistencia_marcada_at IS NULL" in paso8
         assert "SET estado" not in paso8                  # D-6: el estado no se toca
         # el conteo real y el `WHERE` del resync usan el MISMO predicado que el paso 8
-        assert paso9.count("r.estado NOT ILIKE '%cancel%'") == 2
+        assert paso9.count(men.sql_viva()) == 2
 
     # las 2 listas con las que se lee y se verifica el cierre, con el mismo predicado
     for consulta in men.consultas_cierre({"dias_cierre": 30}):
-        assert "r.estado NOT ILIKE '%cancel%'" in consulta["sql"]
+        assert men.sql_viva() in consulta["sql"]
 
 
 def test_bi_cancelada_con_anticipacion_no_la_toca_el_cierre_ni_la_cuenta_el_d8(monkeypatch,
@@ -1020,23 +1044,27 @@ def test_bi_cancelada_con_anticipacion_no_la_toca_el_cierre_ni_la_cuenta_el_d8(m
       del inicio de la clase", o sea una devolución que la app no pudo acreditar. Con 7,5 h de
       anticipación no entra, así que después del cierre el run sigue verde (consumo = vivas).
     """
-    # las 2 reglas, tal como las implementa el SQL (el SQL en sí se verifica en las aserciones)
-    def viva(estado):                       # espejo de `sql_viva()`
-        return "cancel" not in (estado or "").lower()
+    # las 2 reglas tal como las implementa el SQL (el SQL en sí se verifica en las aserciones):
+    # `viva` espeja `sql_viva()` = `NOT IN (shared.estados.ESTADOS_CANCELADA)`, EXACTO.
+    def viva(estado):
+        return not estados.es_cancelada(estado)
 
     def tardia(horas_antes, h=6):           # espejo de la LATERAL de A.3 (sólo canceladas)
         return horas_antes < h
 
     escenario = [{"estado": "cancelada", "horas_antes": 7.5},     # la del punto 1(b)
                  {"estado": "cancelled", "horas_antes": 2.0},     # tardía: SÍ cuenta
-                 {"estado": "confirmada", "horas_antes": None}]   # viva: cuenta como reserva
-    assert [viva(r["estado"]) for r in escenario] == [False, False, True]
+                 {"estado": "confirmada", "horas_antes": None},   # viva: cuenta como reserva
+                 # con el `ILIKE '%cancel%'` viejo esta fila se trataba como cancelada; la lista
+                 # exacta la deja viva y A.6 la delata (por eso A.6 es rojo, no informativo)
+                 {"estado": "cancelled_x", "horas_antes": None}]
+    assert [viva(r["estado"]) for r in escenario] == [False, False, True, True]
     assert [tardia(r["horas_antes"]) for r in escenario[:2]] == [False, True]
 
     cierre = men.script_cierre(500, 30, dry_run=False)
-    assert "r.estado NOT ILIKE '%cancel%'" in cierre               # el cierre no la toca
+    assert men.sql_viva() in cierre                        # el cierre no la toca
     sql_a3 = men.sql_descuadre_creditos({"tenant_id": 1})
-    assert "r.estado ILIKE '%cancel%'" in sql_a3                  # sólo las canceladas pueden ser tardías
+    assert men.sql_cancelada() in sql_a3                   # sólo las canceladas pueden ser tardías
     assert "r.updated_at >" in sql_a3 and "interval '6 hours'" in sql_a3
 
     # después del cierre (REAL) el run queda verde: 5 vivas + 0 tardías contra 5 gastados
@@ -1579,7 +1607,7 @@ def test_cj_en_dry_run_el_motivo_dice_que_no_se_aplico_nada(monkeypatch, mails):
     _psql_falso(monkeypatch, _ctx(a5a=[["30", "2026-10-02", "19:00:00", "CrossFit"]]))
 
     assert men.main() == men.EXIT_DIAGNOSTICO
-    assert "el mantenimiento se aplicó igual: las detecciones A.1-A.5" in mails[1][0]
+    assert "el mantenimiento se aplicó igual: las detecciones A.1-A.6" in mails[1][0]
 
 
 def test_ck_en_dry_run_el_motivo_de_la_integridad_tambien_dice_que_no_se_aplico(monkeypatch,
@@ -1597,4 +1625,98 @@ def test_ck_en_dry_run_el_motivo_de_la_integridad_tambien_dice_que_no_se_aplico(
 
     assert men.main() == men.EXIT_INTEGRIDAD
     assert "el mantenimiento se aplicó igual: la integridad no aborta " in mails[1][1]
+
+
+# ── T2: el tope de una lista NO es su conteo (integridad, A.3 y paso 9) ───────────────────────
+def test_cl_la_integridad_dice_el_total_real_y_no_el_tope_de_10(monkeypatch, mails):
+    """`SQL_DUP_RUT` corta en `LIMITE_DUP` (10): el hallazgo tiene que decir el total (37) y,
+    como el tope recortó, cuántas filas se muestran. Antes contaba las filas devueltas, o sea el
+    tope — el mismo defecto del "25/25" de A.5(a) vs A.5(b)."""
+    diez = [[f"111111{i}-9", "2"] for i in range(10)]
+    _psql_falso(monkeypatch, _ctx(dup_rut=diez, dup_rut_total=37))
+
+    assert men.main() == men.EXIT_INTEGRIDAD
+    html = mails[0][1]
+    assert "RUT duplicados (37) (mostrando 10 de 37)" in html
+    assert "1111110-9 x2" in html                    # el detalle de las 10 que sí viajan
+    assert "Correos duplicados" not in html          # esa lista no encontró nada
+
+
+def test_co_sin_recorte_el_texto_de_la_integridad_es_el_de_antes(monkeypatch, mails):
+    """Compatibilidad: con el tope sin recortar, el hallazgo se ve EXACTAMENTE como antes
+    (`RUT duplicados (2): …`): el paréntesis se agrega sólo cuando hay filas afuera."""
+    _psql_falso(monkeypatch, _ctx(dup_rut=[["12345678-9", "2"], ["9876543-2", "3"]],
+                                  dup_correo=[["a@example.com", "2"]]))
+
+    assert men.main() == men.EXIT_INTEGRIDAD
+    html = mails[0][1]
+    assert "RUT duplicados (2): 12345678-9 x2, 9876543-2 x3" in html
+    assert "Correos duplicados (1): a@example.com x2" in html
+    assert "mostrando" not in html
+
+
+def test_cm_a3_informa_las_revisadas_reales_y_las_que_se_evaluaron(monkeypatch):
+    """A.3 evalúa hasta `LIMITE_A3` (200) vigentes: con 250 el informe dice 250 revisadas y que se
+    evaluaron 5. Antes `revisadas` ERA el tope (200) y las 50 de más no existían para el correo."""
+    cinco = [["9", "a@example.com", "20", "14", "6", "5", "0"]] + \
+            [[str(i), f"b{i}@example.com", "20", "19", "1", "1", "0"] for i in range(1, 5)]
+    _psql_falso(monkeypatch, _ctx(a3_creditos=cinco, a3_creditos_total=250))
+
+    datos = men.detecciones(URL, men.leer_config())
+    assert [i for i in datos["informes"] if i.startswith("A.3 suscripciones")] == [
+        f"A.3 suscripciones vigentes revisadas: 250 (se evaluaron 5: el tope de A.3 "
+        f"({men.LIMITE_A3}) deja el resto para la próxima corrida) (tolerancia 0)"]
+    tabla = next(c for c in datos["listas"] if c["clave"] == "a3_creditos_descuadre")
+    assert tabla["n"] == 1 and tabla["mostradas"] == 1      # el descuadre de la suscripción 9
+    assert any("A.3 suscripción 9" in h for h in datos["hallazgos"])
+
+    # sin recorte (el tope alcanza) el informe es el de siempre
+    _psql_falso(monkeypatch, _ctx(a3_creditos=cinco))
+    datos = men.detecciones(URL, men.leer_config())
+    assert [i for i in datos["informes"] if i.startswith("A.3 suscripciones")] == [
+        "A.3 suscripciones vigentes revisadas: 5 (tolerancia 0)"]
+
+
+def test_cn_la_lista_del_paso_9_dice_el_total_real_y_no_el_tope_de_25(monkeypatch, mails):
+    """La lista del paso 9 tenía `LIMIT 25` hardcodeado y el correo lo mostraba como si fueran
+    todas: ahora usa `LIMITE_LISTA` y su `n` sale de `count(*) OVER ()` ⇒ 30 reales, 25 en la lista.
+    """
+    veinticinco = [[str(1000 + i), "2026-09-01", "0", "16", "3"] for i in range(25)]
+    monkeypatch.setenv("DRY_RUN", "0")               # REAL: la verificación espera 0 después
+    _psql_falso(monkeypatch, _ctx(despues="vacio", aforo_resync=veinticinco,
+                                  aforo_resync_total=30, dup_rut=[["12345678-9", "2"]]))
+
+    assert men.main() == men.EXIT_INTEGRIDAD         # cualquier rojo: el correo sale igual
+    html = mails[0][1]
+    assert ("Clases con el aforo desincronizado de sus reservas (paso 9) — 30 fila(s) "
+            "(mostrando 25 de 30)") in html
+
+
+def test_cp_c_9_el_conteo_real_lo_pide_la_consulta_y_no_el_doble(monkeypatch):
+    """El `n` de la lista del paso 9 sale de la VENTANA: el doble de psql sólo devuelve el total
+    delante si el SQL la trae (`sql_con_total`), así que si alguien la saca, el test lo ve."""
+    _psql_falso(monkeypatch, _ctx())
+    listas = men.leer_listas(URL, men.consultas_cierre({"dias_cierre": 30}))
+    aforo = next(c for c in listas if c["clave"] == "aforo_resync")
+
+    assert VENTANA_TOTAL in men.sql_con_total(aforo["sql"])
+    assert aforo["n"] == 0 and aforo["mostradas"] == 0        # base sana: nada que resincronizar
+    assert "total" not in aforo                              # la marca no viaja en el dict
+    paso8 = next(c for c in listas if c["clave"] == "cierre_asistencia")
+    assert "mostradas" not in paso8 and paso8["n"] == 0      # esa lista va completa: sin tope
+
+
+def test_cq_a6_una_variante_de_cancelacion_desconocida_pone_el_run_rojo(monkeypatch, mails):
+    """A.6 es la red que reemplaza al `ILIKE '%cancel%'`: una reserva `'cancelled_x'` NO es
+    cancelación para el predicado exacto (el paso 8 le escribiría `updated_at` y el paso 9 la
+    contaría en el aforo), así que el run queda rojo y el correo la nombra con su conteo."""
+    _psql_falso(monkeypatch, _ctx(a6=[["cancelled_x", "7"]]))
+
+    assert men.main() == men.EXIT_DIAGNOSTICO
+    html = mails[0][1]
+    assert "A.6 variantes de cancelación que el predicado no conoce: 1 fila(s)" in html
+    assert "🔴 rojo (exit 9)" in html
+    assert "cancelled_x" in html and ">7<" in html        # la fila viaja al correo
+
+
 

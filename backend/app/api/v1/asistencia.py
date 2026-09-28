@@ -29,6 +29,7 @@ from app.core.rate_limit import limiter
 from app.core.dependencies import (
     get_current_user, get_current_coach, verificar_coach_disciplina,
 )
+from app.core.estados import no_cancelada   # "viva" = NOT IN (cancelled, cancelada)
 from app.models.clase import Clase
 from app.models.reserva import Reserva
 from app.models.tenant import Tenant
@@ -81,7 +82,7 @@ def clases_hoy(
     if ids:
         counts = dict(db.query(Reserva.clase_id, func.count(Reserva.id)).filter(
             Reserva.clase_id.in_(ids),
-            Reserva.estado != "cancelled",
+            no_cancelada(Reserva.estado),
         ).group_by(Reserva.clase_id).all())
     else:
         counts = {}
@@ -172,7 +173,7 @@ def alumnos_clase(
     reservas = db.query(Reserva).filter(
         Reserva.clase_id == clase_id,
         Reserva.tenant_id == tenant_id,
-        Reserva.estado != "cancelled",
+        no_cancelada(Reserva.estado),
     ).order_by(Reserva.created_at.asc()).all()
 
     alumno_ids = {r.alumno_id for r in reservas}
@@ -258,7 +259,7 @@ def confirmar_asistencia(
         Reserva.id.in_(reserva_ids),
         Reserva.clase_id == clase_id,
         Reserva.tenant_id == tenant_id,
-        Reserva.estado != "cancelled",
+        no_cancelada(Reserva.estado),
     ).all()
 
     if len(reservas) != len(set(reserva_ids)):

@@ -17,6 +17,7 @@ from app.models.reserva import Reserva
 from app.models.clase import Clase
 from app.models.coach_disciplina import CoachDisciplina
 from app.core.dependencies import get_current_admin, get_current_coach
+from app.core.estados import no_cancelada   # "reserva activa" = NOT IN (cancelled, cancelada)
 from app.services.auditoria_service import registrar_auditoria
 
 router = APIRouter()
@@ -405,7 +406,7 @@ def alumnos_de_coach(
     filas = db.query(distinct(Reserva.alumno_id)).join(
         Clase, Reserva.clase_id == Clase.id
     ).filter(
-        Reserva.estado != "cancelled",
+        no_cancelada(Reserva.estado),
         *filtro_clase,
     ).all()
 

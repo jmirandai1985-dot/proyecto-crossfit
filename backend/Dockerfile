@@ -49,12 +49,15 @@ COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.
 COPY --from=deps /usr/local/bin /usr/local/bin
 
 # Código de la app + modelos de ML + migraciones + scripts de mantenimiento.
+# `shared/` es el paquete neutral (sin imports) que comparten la app y el Cron Job: tiene que
+# estar en LAS DOS imágenes (si falta acá, la app muere con "No module named 'shared'").
 COPY app/ app/
 COPY ml/ ml/
 COPY alembic/ alembic/
 COPY alembic.ini ./
 COPY requirements.txt ./
 COPY maintenance/ maintenance/
+COPY shared/ shared/
 
 # Directorios de datos en runtime (los volúmenes se declaran en compose,
 # no se bakean en la imagen).

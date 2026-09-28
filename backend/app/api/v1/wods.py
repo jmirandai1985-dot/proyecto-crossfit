@@ -8,6 +8,7 @@ from sqlalchemy import func
 from app.db.database import get_db
 from app.models.wod import Wod, EstadoWod
 from app.core.dependencies import get_current_user, get_current_coach, verificar_coach_disciplina
+from app.core.estados import no_cancelada   # "reserva viva": la lista compartida con el job
 from app.models.wod_movimiento import WodMovimiento
 from app.models.movimiento import Movimiento
 from app.models.clase import Clase
@@ -832,7 +833,7 @@ def obtener_wod_hoy(
             Reserva.alumno_id == alumno_id,
             Reserva.tenant_id == tenant_id,
             Clase.fecha == hoy,
-            Reserva.estado != "cancelled"
+            no_cancelada(Reserva.estado)
         ).order_by(Reserva.created_at.desc()).first()
 
         if reserva_hoy:

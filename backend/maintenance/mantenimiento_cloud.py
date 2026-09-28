@@ -13,7 +13,11 @@ Este módulo es el mecanismo de **nube** para PROD: corre en un Cron Job de Rend
 Principios
 ----------
 1. **Nada de la app**: no se importa `app.*` (ni FastAPI ni SQLAlchemy). `Dockerfile.cron`
-   no copia `app/`, y ésa es la razón por la que se habla con la base por `psql`.
+   no copia `app/`, y ésa es la razón por la que se habla con la base por `psql`. La ÚNICA
+   excepción es `shared.estados` (2026-09-27): un paquete neutral, sin un solo import, donde vive
+   la definición de "reserva cancelada" que **también** usa la app (`app/core/estados.py`). Se
+   importa para que la lista sea UNA: antes el job usaba `ILIKE '%cancel%'` y la app el literal
+   `'cancelled'`, dos criterios que podían divergir (README §Fase 7).
 2. **Un solo rol, con la escritura mínima**: `maint_rw` tiene `SELECT` en 5 tablas y
    `UPDATE` **a nivel de columna** en 3 (`suscripciones.estado/updated_at`,
    `solicitudes_planes.estado/comentario_admin/updated_at`, `usuarios.estado/activo`).
@@ -71,7 +75,7 @@ Variables de entorno (env group `mantenimiento-prod` + `alertas` de Render)
 Fase 7 (2026-09-27): detecciones, límites de Neon, consistencia y reporte
 -------------------------------------------------------------------------
 Sobre la base de la Fase 6, el mismo run agrega cuatro bloques, sin scripts nuevos:
-  * **A — detecciones de sólo lectura** (A.1–A.5): `estado` de usuario desconocido, aforo de
+  * **A — detecciones de sólo lectura** (A.1–A.6): `estado` de usuario desconocido, aforo de
     las clases desincronizado con sus reservas, reservas vivas duplicadas, sobrecupo,
     descuadre de créditos, reservas sin auditoría de asistencia y clases futuras sin coach.
     A.5(a)/(b) miran **sólo** las disciplinas que exigen coach (`disciplinas.requiere_coach`:
@@ -122,7 +126,7 @@ Exit codes
 ----------
 0 OK · 2 config (falta variable, URL con `-pooler`, usuario que no es `maint_rw`,
 `ENVIRONMENT` ≠ production, entero fuera de rango) · 3 un `SELECT` de lectura falló ·
-4 la integridad encontró problemas (run rojo; la escritura NO se aborta) · 9 las detecciones A.1–A.5 o el chequeo de Neon que
+4 la integridad encontró problemas (run rojo; la escritura NO se aborta) · 9 las detecciones A.1–A.6 o el chequeo de Neon que
 no pudo correr (rojo; la escritura NO se aborta) · 6 guarda de
 volumen (en DRY-RUN informa y no aplica; en REAL aborta y no se aplica nada) ·
 7 la transacción de escritura falló (nada quedó aplicado) · 8 la verificación posterior no
@@ -152,6 +156,9 @@ from maintenance.backup_cloud import (  # helpers existentes: no se duplican
     limpiar_valor,
     sanear,
 )
+# Paquete neutral (sin imports) compartido con la app: la lista de estados "cancelada" es UNA.
+# `app/` sigue sin importarse: `shared/estados.py` no arrastra nada (lo copia Dockerfile.cron).
+from shared.estados import lista_sql
 
 # ── Códigos de salida (Render marca fallido el run si != 0) ──
 EXIT_OK = 0
@@ -232,6 +239,11 @@ HORAS_DEVOLUCION = 6
 # mail dice "63 fila(s)" y lista las primeras 25. Sin eso, A.5(a) y A.5(b) —que son complementarios
 # por definición— se veían igual en 25/25 y no había forma de ver la magnitud real.
 LIMITE_LISTA = 25
+# Los dos topes que NO son de una detección A pero se leen igual (2026-09-27): el detalle de
+# duplicados de `integridad()` y las suscripciones vigentes que evalúa A.3. El tope NO es el
+# conteo: los dos se piden con `sql_con_total()` y, si recortan, el texto dice cuántas se muestran.
+LIMITE_DUP = 10        # detalle de duplicados que viaja al correo (integridad)
+LIMITE_A3 = 200        # suscripciones vigentes que evalúa A.3 en cada corrida
 # A.5(a) marca en rojo las clases futuras sin coach de disciplinas que NO tienen ningún coach
 # activo. En esta etapa (desarrollo) eso es ESPERABLE, así que `A5_NOTA_HASTA` (fecha ISO,
 # opcional) agrega una nota visible al log y al correo JUNTO a A.5(a) mientras `hoy <= la fecha`.
@@ -608,13 +620,15 @@ def consultas_lista(dias_pendiente: int) -> list:
 
 
 # ── Consultas de integridad (las mismas de verificar_integridad.py, en SQL) ──
+# Las dos primeras terminan en `LIMITE_DUP`: ese tope NO es el conteo (2026-09-27). Se leen con
+# `sql_con_total()` y el hallazgo dice el total real + "(mostrando N de M)" si el tope recortó.
 SQL_DUP_RUT = (
     "SELECT rut, count(*)::text FROM usuarios GROUP BY rut "
-    "HAVING count(*) > 1 ORDER BY count(*) DESC LIMIT 10"
+    f"HAVING count(*) > 1 ORDER BY count(*) DESC LIMIT {LIMITE_DUP}"
 )
 SQL_DUP_CORREO = (
     "SELECT correo, count(*)::text FROM usuarios GROUP BY correo "
-    "HAVING count(*) > 1 ORDER BY count(*) DESC LIMIT 10"
+    f"HAVING count(*) > 1 ORDER BY count(*) DESC LIMIT {LIMITE_DUP}"
 )
 SQL_SUSC_SIN_USUARIO = (
     "SELECT count(*)::text FROM suscripciones s "
@@ -647,24 +661,27 @@ SQL_TABLAS_TOP = (
 # Regla del proyecto que se repite en todo este bloque: el SQL es CONSTANTE salvo por
 # números ya validados (`_entero`/`_flotante`) y patrones de allowlist del charset seguro.
 # Ningún texto libre de una env var llega al SQL.
-# ── Predicado "reserva viva" ─────────────────────────────────────────────────
-# `reservas.estado` es un `character varying(20)` (default 'reserved') y en los datos hay DOS
-# formas de "cancelada": la que escribe la app (`'cancelled'`, en el DELETE de
-# `app/api/v1/reservas.py`) y la del enum viejo `estado_reserva` (`'cancelada'`, que
-# `kpis_populate.py` todavía contempla: `ESTADOS_CANCELADA = ("cancelled", "cancelada")`).
-# Comparar contra el literal `'cancelled'` dejaba a una reserva `'cancelada'` pasando por viva:
-# el paso 8 le escribiría `asistencia_marcada_at` **y `updated_at`** (el dato en el que se apoya
-# toda la reconstrucción de A.3) y el paso 9 la contaría en el aforo. Por eso TODO el módulo usa
-# estos dos predicados. El dump de PROD del 24/09/2026 sólo tiene `'cancelled'` y `'confirmada'`,
-# así que hoy el cambio es equivalente: es una red por si aparece la otra variante.
+# ── Predicado "reserva viva" (2026-09-27) ────────────────────────────────────
+# `reservas.estado` es un `character varying(20)` (default 'reserved') y en los datos conviven DOS
+# formas de "cancelada": `'cancelled'` (la que escribe la app en el DELETE de
+# `app/api/v1/reservas.py`) y `'cancelada'` (la del enum viejo `estado_reserva`). Comparar contra
+# el literal `'cancelled'` dejaba a la otra pasando por viva: el paso 8 le escribiría
+# `asistencia_marcada_at` **y `updated_at`** (el dato en el que se apoya toda la reconstrucción de
+# A.3) y el paso 9 la contaría en el aforo.
+# La lista es UNA sola y vive en `shared/estados.py` (`ESTADOS_CANCELADA`), la misma que usa la
+# app: antes el job comparaba con `ILIKE '%cancel%'` y la app contra el literal, así que una
+# variante nueva se comportaba distinto en cada lado. Lo que el `ILIKE` tapaba "por parecido"
+# ahora lo vigila la detección **A.6** (rojo) contra esta misma lista. El dump de PROD del
+# 24/09/2026 sólo tiene `'cancelled'` y `'confirmada'`: el cambio es equivalente, y es la red para
+# la otra variante.
 def sql_viva(alias: str = "r") -> str:
-    """Predicado de "la reserva está viva" (no cancelada en ninguna de sus formas)."""
-    return f"{alias}.estado NOT ILIKE '%cancel%'"
+    """Predicado de "la reserva está viva": `estado NOT IN (ESTADOS_CANCELADA)`."""
+    return f"{alias}.estado NOT IN ({lista_sql()})"
 
 
 def sql_cancelada(alias: str = "r") -> str:
-    """Predicado de "la reserva está cancelada" (cualquier variante de la palabra)."""
-    return f"{alias}.estado ILIKE '%cancel%'"
+    """Predicado de "la reserva está cancelada" (la MISMA lista, en positivo)."""
+    return f"{alias}.estado IN ({lista_sql()})"
 
 
 def sql_demo(permitidos: tuple) -> str:
@@ -717,7 +734,7 @@ def nota_a5(cfg: dict, hoy: date | None = None) -> str:
 
 
 def detecciones_sql(cfg: dict) -> tuple:
-    """A.1–A.5 declaradas como datos (para el mail) + SQL. `modo`:
+    """A.1–A.6 declaradas como datos (para el mail) + SQL. `modo`:
       * `escalar`: un conteo ⇒ hallazgo si ≠ 0.
       * `lista`:   filas ⇒ hallazgo si hay alguna (y van COMPLETAS al mail).
     `sev`: `rojo` (pone el run rojo, exit 9) o `info` (sólo informa, nunca cambia el exit).
@@ -867,7 +884,30 @@ def detecciones_sql(cfg: dict) -> tuple:
                     "AND (u.rol::text <> 'coach' OR u.activo = false) "
                     f"ORDER BY c.fecha, c.id LIMIT {LIMITE_LISTA}"),
         },
+        # A.6 (2026-09-27): red que reemplaza al `ILIKE '%cancel%'` que tenía el predicado. Comparar
+        # contra ESTADOS_CANCELADA es EXACTO (a propósito: nada de adivinar por parecido), así que
+        # una variante que el job no conoce tiene que VERSE. Es rojo porque significa que el paso 8
+        # le va a escribir `updated_at` a una reserva que en realidad estaba cancelada (el dato de
+        # A.3) y el paso 9 la va a contar en el aforo, y porque el correo sólo sale cuando el run es
+        # rojo: como `info` no se vería nunca.
+        {
+            "clave": "a6_cancelaciones_no_previstas",
+            "titulo": "A.6 variantes de cancelación que el predicado no conoce",
+            "sev": "rojo", "modo": "lista",
+            "cabeceras": ("estado", "reservas"),
+            "detalle": ("estado(s) de reserva que contienen \"cancel\" y NO están en "
+                        f"ESTADOS_CANCELADA ({lista_sql()}): el predicado los trata como vivos "
+                        "(el paso 8 les escribiría `updated_at` y el paso 9 los contaría en el "
+                        "aforo). Se agrega el valor a `shared/estados.ESTADOS_CANCELADA` —y con "
+                        "eso al SQL del job y a la app— o se corrige la fila: la lista es EXACTA "
+                        "a propósito (no hay `LIKE` que adivine)"),
+            "sql": (f"SELECT estado, count(*)::text FROM reservas r "
+                    f"WHERE r.estado ILIKE '%cancel%' AND r.estado NOT IN ({lista_sql()}) "
+                    f"GROUP BY estado ORDER BY count(*) DESC LIMIT {LIMITE_LISTA}"),
+        },
     )
+
+
 def sql_descuadre_creditos(cfg: dict) -> str:
     """A.3 — descuadre de créditos por suscripción VIGENTE (una sola por alumno).
 
@@ -890,6 +930,11 @@ def sql_descuadre_creditos(cfg: dict) -> str:
     el de cualquier otra edición de esa fila. Si alguien edita a mano una reserva ya cancelada, la
     cancelación "se mueve" y A.3 puede dar un descuadre falso (por eso la tolerancia es SIMÉTRICA).
     La solución de fondo es `reservas.cancelada_at`: está propuesta en el README, no implementada.
+
+    **Tope y conteo (2026-09-27)**: la consulta termina en `LIMITE_A3` y ordena por `s.id`, así que
+    el subconjunto evaluado es determinista. `descuadre_creditos()` la lee con `sql_con_total()`:
+    `revisadas` es el total real de vigentes y `escaneadas` lo que entró por el tope. Antes el tope
+    se leía como conteo ("revisadas 200" con 2000 vigentes).
     """
     h = int(HORAS_DEVOLUCION)
     return (
@@ -911,12 +956,17 @@ def sql_descuadre_creditos(cfg: dict) -> str:
         "  AND (SELECT count(*) FROM suscripciones s2 WHERE s2.usuario_id = s.usuario_id "
         "       AND s2.estado = 'activo' AND s2.fecha_inicio::date <= current_date "
         "       AND s2.fecha_expiracion::date >= current_date) = 1 "
-        "ORDER BY s.id LIMIT 200"
+        f"ORDER BY s.id LIMIT {LIMITE_A3}"
     )
 
 
 def consultas_cierre(cfg: dict) -> list:
-    """Las 2 listas del paso 8-9 (se leen antes y se verifican después de su transacción)."""
+    """Las 2 listas del paso 8-9 (se leen antes y se verifican después de su transacción).
+
+    La del paso 9 lleva `"total": True`: es la única lista del correo que termina en
+    `LIMITE_LISTA` (la del paso 8 va completa), así que su `n` se lee con `count(*) OVER ()` para
+    que el tope no se confunda con el tamaño del conjunto (2026-09-27).
+    """
     dias = int(cfg["dias_cierre"])
     return [
         {
@@ -938,13 +988,14 @@ def consultas_cierre(cfg: dict) -> list:
             "destino": "asistentes_confirmados = reservas vivas",
             "cabeceras": ("id", "fecha", "asistentes_confirmados", "cupo_maximo",
                           "reservas_vivas"),
+            "total": True,          # `n` = total real (la lista se corta en LIMITE_LISTA)
             "sql": ("SELECT c.id::text, c.fecha::text, c.asistentes_confirmados::text, "
                     "c.cupo_maximo::text, (SELECT count(*) FROM reservas r "
                     f"  WHERE r.clase_id = c.id AND {sql_viva()})::text "
                     "  AS reservas_vivas "
                     "FROM clases c WHERE c.asistentes_confirmados <> (SELECT count(*) "
                     f"  FROM reservas r WHERE r.clase_id = c.id AND {sql_viva()}) "
-                    "ORDER BY c.id LIMIT 25"),
+                    f"ORDER BY c.id LIMIT {LIMITE_LISTA}"),
         },
     ]
 
@@ -1061,12 +1112,45 @@ def leer_listas(url: str, consultas: list) -> list:
     Se le pasan las consultas hechas (`consultas_lista`, `consultas_cierre`,
     `consultas_purga`): así el SQL de escritura, el de la lista del mail y el de la
     verificación posterior salen SIEMPRE de la misma definición y no pueden divergir.
+
+    Si la consulta declara `"total": True`, el `n` es el **total real** del conjunto
+    (`count(*) OVER ()`, la ventana se calcula ANTES del `LIMIT`) y `mostradas` dice cuántas filas
+    vinieron en la lista: el tope no es el conteo (2026-09-27). `verificar()` sigue releyendo
+    `consulta["sql"]` sin la ventana y con el mismo tope, así que la comparación de después
+    (0 en REAL / el mismo número en DRY-RUN) no cambia.
     """
     listas = []
     for consulta in consultas:
+        if consulta.get("total"):
+            crudas = psql_leer(url, sql_con_total(consulta["sql"]))
+            # La 1ª columna es el total del conjunto; NO es una columna de la lista (las cabeceras
+            # del correo no la llevan). Sin filas no hay total que leer ⇒ 0.
+            total = _int_o_cero(crudas[0][0]) if crudas else 0
+            filas = [f[1:] for f in crudas]
+            limpia = {k: v for k, v in consulta.items() if k != "total"}
+            listas.append({**limpia, "filas": filas, "n": total, "mostradas": len(filas)})
+            continue
         filas = psql_leer(url, consulta["sql"])
         listas.append({**consulta, "filas": filas, "n": len(filas)})
     return listas
+
+
+def _duplicados(url: str, sql: str, etiqueta: str) -> str | None:
+    """Hallazgo de duplicados con el TOTAL real, o `None` si no hay ninguno.
+
+    `SQL_DUP_RUT`/`SQL_DUP_CORREO` cortan en `LIMITE_DUP`, así que contar las filas devueltas era
+    reportar el tope (2026-09-27: el mismo defecto que tenía A.5). Con `count(*) OVER ()`
+    (`sql_con_total`) el texto dice el total y, si el tope recortó, cuántas filas se muestran:
+    "RUT duplicados (37) (mostrando 10 de 37): …". Sin recorte el texto es el de antes.
+    """
+    crudas = psql_leer(url, sql_con_total(sql))
+    total = _int_o_cero(crudas[0][0]) if crudas else 0
+    if not total:
+        return None
+    filas = [f[1:] for f in crudas]
+    detalle = ", ".join(f"{r[0]} x{r[1]}" for r in filas[:LIMITE_DUP])
+    corte = f" (mostrando {len(filas)} de {total})" if len(filas) < total else ""
+    return f"{etiqueta} ({total}){corte}: {detalle}"
 
 
 def integridad(url: str) -> list:
@@ -1077,15 +1161,10 @@ def integridad(url: str) -> list:
     """
     hallazgos = []
 
-    dup = psql_leer(url, SQL_DUP_RUT)
-    if dup:
-        detalle = ", ".join(f"{r[0]} x{r[1]}" for r in dup[:10])
-        hallazgos.append(f"RUT duplicados ({len(dup)}): {detalle}")
-
-    dup = psql_leer(url, SQL_DUP_CORREO)
-    if dup:
-        detalle = ", ".join(f"{r[0]} x{r[1]}" for r in dup[:10])
-        hallazgos.append(f"Correos duplicados ({len(dup)}): {detalle}")
+    for etiqueta, sql in (("RUT duplicados", SQL_DUP_RUT),
+                          ("Correos duplicados", SQL_DUP_CORREO)):
+        if hallazgo := _duplicados(url, sql, etiqueta):
+            hallazgos.append(hallazgo)
 
     for etiqueta, sql in (
         ("Suscripciones con usuario inexistente", SQL_SUSC_SIN_USUARIO),
@@ -1108,8 +1187,15 @@ def descuadre_creditos(url: str, cfg: dict) -> dict:
     cancelar). La tolerancia existe para el segundo caso: si una corrida reporta descuadres
     hacia arriba por ediciones de staff sobre reservas ya canceladas (`updated_at` se corre y
     la cancelación parece tardía), se sube la variable y listo.
+
+    `revisadas` es el **total real** de vigentes evaluadas (`count(*) OVER ()`, sin el tope) y
+    `escaneadas` las que entraron por `LIMITE_A3`: cuando son distintos, el informe del correo lo
+    dice (2026-09-27).
     """
-    filas = psql_leer(url, sql_descuadre_creditos(cfg))
+    crudas = psql_leer(url, sql_con_total(sql_descuadre_creditos(cfg)))
+    # 1ª columna = total del conjunto (la ventana se calcula ANTES del LIMIT): es `revisadas`.
+    revisadas = _int_o_cero(crudas[0][0]) if crudas else 0
+    filas = [f[1:] for f in crudas]
     tol = int(cfg["creditos_tolerancia"])
     hallazgos, detalle = [], []
     for fila in filas:
@@ -1133,15 +1219,15 @@ def descuadre_creditos(url: str, cfg: dict) -> dict:
             "titulo": "A.3 descuadre de créditos por suscripción vigente",
             "cabeceras": ("suscripción", "correo", "totales", "disponibles", "gastados",
                           "reservas_vivas", "cancelaciones_tardias"),
-            "destino": "", "filas": detalle, "n": len(detalle),
+            "destino": "", "filas": detalle, "n": len(detalle), "mostradas": len(detalle),
             "detalle": f"descuadre fuera de 0..{tol}",
         },
-        "revisadas": len(filas), "tolerancia": tol,
+        "revisadas": revisadas, "escaneadas": len(filas), "tolerancia": tol,
     }
 
 
 def detecciones(url: str, cfg: dict) -> dict:
-    """A.1–A.5 en marcha: lee cada consulta y separa hallazgos (rojo) de informes (info).
+    """A.1–A.6 en marcha: lee cada consulta y separa hallazgos (rojo) de informes (info).
 
     Devuelve `{"hallazgos", "informes", "listas", "nota_a5"}`. Un hallazgo NO aborta el
     mantenimiento (igual que la integridad): pone el run rojo (exit 9) y viaja al mail con la
@@ -1177,7 +1263,12 @@ def detecciones(url: str, cfg: dict) -> dict:
             (hallazgos if chequeo["sev"] == "rojo" else informes).append(texto)
 
     creditos = descuadre_creditos(url, cfg)
-    informes.append(f"A.3 suscripciones vigentes revisadas: {creditos['revisadas']} "
+    # `revisadas` es el total real; si el tope de A.3 dejó vigentes afuera, se dice (el subconjunto
+    # evaluado es siempre el mismo: la consulta ordena por `s.id`).
+    corte_a3 = (f" (se evaluaron {creditos['escaneadas']}: el tope de A.3 ({LIMITE_A3}) deja el "
+                "resto para la próxima corrida)"
+                if creditos["revisadas"] > creditos["escaneadas"] else "")
+    informes.append(f"A.3 suscripciones vigentes revisadas: {creditos['revisadas']}{corte_a3} "
                     f"(tolerancia {creditos['tolerancia']})")
     hallazgos.extend(creditos["hallazgos"])
     if creditos["tabla"]["n"]:
@@ -1740,17 +1831,24 @@ def _lista_html(titulo: str, pares) -> str:
 
 
 def _bloques_listas(listas: list, vacio: str = "(sin listas)") -> str:
-    """Bloques de listas que SÍ cambian algo (`destino` vacío ⇒ la lista sólo informa)."""
+    """Bloques de listas que SÍ cambian algo (`destino` vacío ⇒ la lista sólo informa).
+
+    El conteo es el `n` (el total real cuando la consulta lo pide: paso 9 y A.3) y, si el tope
+    recortó la lista, se dice cuántas filas se muestran ("mostrando 25 de 63"): el tope no es el
+    tamaño del conjunto (2026-09-27).
+    """
     bloques = ""
     for c in listas or []:
         destino = f" → {_e(c['destino'])}" if c.get("destino") else ""
-        bloques += (f"<h4 style='margin:16px 0 4px'>{_e(c['titulo'])} — {c['n']} fila(s)"
+        mostradas = c.get("mostradas", c["n"])
+        corte = f" (mostrando {mostradas} de {c['n']})" if mostradas < c["n"] else ""
+        bloques += (f"<h4 style='margin:16px 0 4px'>{_e(c['titulo'])} — {c['n']} fila(s){corte}"
                     f"{destino}</h4>{_tabla_lista(c)}")
     return bloques or f"<p>{_e(vacio)}</p>"
 
 
 def _bloques_detecciones(listas: list, nota_a5: str = "") -> str:
-    """Listas de las detecciones A.1–A.5: la severidad va delante y las filas detrás.
+    """Listas de las detecciones A.1–A.6: la severidad va delante y las filas detrás.
 
     El conteo es el **total** del conjunto; si el `LIMIT` dejó filas afuera se dice cuántas se
     muestran ("mostrando 25 de 63"), para que el tope no se lea como el tamaño del hallazgo.
@@ -1873,7 +1971,7 @@ def construir_html(datos: dict, inicio: datetime, segundos: float, titulo: str =
         + "<h3>Cambios</h3>" + bloques
         + "<h3>Consistencia (pasos 8-9)</h3>" + bloques_cierre
         + "<h3>Purga (paso 10)</h3>" + bloques_purga
-        + "<h3>Detecciones (A.1-A.5)</h3>" + detecciones_html
+        + "<h3>Detecciones (A.1-A.6)</h3>" + detecciones_html
         + "<h3>Integridad</h3>" + integridad
         + "<h3>Neon (API v2: CU-horas y ramas)</h3>" + neon_api_html
         + "<h3>Neon (almacenamiento)</h3>" + neon_html
@@ -2200,7 +2298,7 @@ def main() -> int:
         (datos["neon_api"] or {}).get("hallazgos") or [])
     if rojos:
         datos["estado"] = f"los chequeos nuevos encontraron {len(rojos)} problema(s)"
-        motivo = motivo_no_aborta(dry, "las detecciones A.1-A.5 y los chequeos de Neon no "
+        motivo = motivo_no_aborta(dry, "las detecciones A.1-A.6 y los chequeos de Neon no "
                                        "abortan la escritura")
         log(f"ROJO ({datos['estado']}: {motivo})")
         # Cada hallazgo con SU código delante: es la línea que dice qué puso el run rojo, con el

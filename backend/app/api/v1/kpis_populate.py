@@ -19,6 +19,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.estados import ESTADOS_CANCELADA   # la MISMA lista que usa el mantenimiento
 from app.db.database import get_db
 from app.services import metricas_service as metricas
 from app.models.daily_kpis import DailyKpi
@@ -38,7 +39,6 @@ router = APIRouter(prefix="/api/v1/kpis", tags=["KPIs - Populate"])
 logger = logging.getLogger(__name__)
 
 TENANT_ID = 1
-ESTADOS_CANCELADA = ("cancelled", "cancelada")
 PLAN_PRUEBA = "Prueba"
 
 

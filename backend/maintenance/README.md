@@ -276,7 +276,7 @@ local logueaba "✅ Backup completado" con el dump fallando). El watchdog es un 
 | backup | 0 / 2 / 3 / 4 / 5 | OK / config / pg_dump / asserts de contenido / R2 |
 | watchdog | 0 / 2 / 6 / 7 | OK (sin email) / config (falta variable o R2 inaccesible) / **hay algo que avisar** / inesperado |
 | drill | 0 / 2 / 8 / 9 / 10 / 11 / 12 / 13 | OK (sin email) / config (falta variable o cupo de ramas lleno) / descarga-dump ilegible / API Neon / restore o verificación / **la prueba negativa no falló (crítico)** / inesperado / **la rama temporal quedó viva** (con el resto del drill OK) |
-| mantenimiento | 0 / 2 / 3 / 4 / 6 / 7 / 8 / **9** | OK (sin email, salvo que Neon pase el umbral de espacio o haya un aviso de CU-horas/ramas) / config / lectura / integridad / guarda de volumen (`MAX_VENCIDOS_PCT`, `MAX_HUERFANAS`, `MAX_CAMBIOS`, `MAX_CIERRE`, `MAX_PURGA`) / escritura / verificación / **detecciones A.1–A.5 o un chequeo de Neon que no pudo correr** |
+| mantenimiento | 0 / 2 / 3 / 4 / 6 / 7 / 8 / **9** | OK (sin email, salvo que Neon pase el umbral de espacio o haya un aviso de CU-horas/ramas) / config / lectura / integridad / guarda de volumen (`MAX_VENCIDOS_PCT`, `MAX_HUERFANAS`, `MAX_CAMBIOS`, `MAX_CIERRE`, `MAX_PURGA`) / escritura / verificación / **detecciones A.1–A.6 o un chequeo de Neon que no pudo correr** |
 
 ### Env groups (cero credenciales en el repo)
 
@@ -872,14 +872,20 @@ job no importa la app ni boto3.
 
 ```bash
 cd backend
-py -3.12 -m pytest tests/test_mantenimiento_cloud.py tests/test_mantenimiento_pasos.py tests/test_mantenimiento_vencidos.py tests/test_email_config_prod.py tests/test_watchdog_backups.py tests/test_restore_drill.py tests/test_email_header_saneo.py -q
+py -3.12 -m pytest tests/test_mantenimiento_cloud.py tests/test_mantenimiento_pasos.py tests/test_mantenimiento_vencidos.py tests/test_email_config_prod.py tests/test_watchdog_backups.py tests/test_restore_drill.py tests/test_email_header_saneo.py tests/test_estados_compartido.py -q
 ```
-Registrado el 2026-09-27, con la Fase 7, las **guardas por regla** y los ajustes de A.5 ya
-adentro: **199 passed, 1 skipped** — 119 de
+Registrado el 2026-09-27, con la Fase 7, las **guardas por regla**, los ajustes de A.5, el **conteo
+real** de las listas (integridad, A.3 y paso 9) y la **lista compartida de "cancelada"** ya
+adentro: **216 passed, 1 skipped** — 125 de
 `mantenimiento_cloud` (los 33 de la Fase 6 + 47 de la Fase 7 + **22 de los límites por regla**:
 evaluación pura, borde del %, huérfanas por lista, tope global, config inválida, las guardas en el
-SQL y el prefijo `[maint]` del correo, + **17 de A.5**: `requiere_coach`, complementariedad de
-(a)/(b), conteo real vs tope, `A5_NOTA_HASTA` y el log/motivo según el modo), 4 de
+SQL y el prefijo `[maint]` del correo, + **17 de A.5** (`requiere_coach`, complementariedad de
+(a)/(b), conteo real vs tope, `A5_NOTA_HASTA` y el log/motivo según el modo) + **6 del
+tope-conteo y A.6**: integridad con `LIMITE_DUP`, A.3 con `LIMITE_A3`, el paso 9 con
+`LIMITE_LISTA` y una variante de cancelación desconocida),
+11 de `estados_compartido` (la constante se define en un solo lugar, `shared/` no importa nada, los
+helpers son exactos, la app no compara contra el literal, el predicado ORM == el del job y las dos
+imágenes copian `shared/`), 4 de
 `mantenimiento_pasos`,
 1 de `mantenimiento_vencidos` y 76 de los tests de correo/drill/watchdog (el skip es el drill
 cuando falta una variable del env group). `psql`, `smtplib` y la API de Neon (`urllib`) están
@@ -896,7 +902,7 @@ revisar**).
 
 | Pieza | Qué agrega la Fase 7 |
 |---|---|
-| Detecciones (A) | 5 familias de chequeos de **sólo lectura** (A.1–A.5). No escriben nada: lo que encuentran viaja en el mail y pone el run rojo con **exit 9** |
+| Detecciones (A) | 6 familias de chequeos de **sólo lectura** (A.1–A.6). No escriben nada: lo que encuentran viaja en el mail y pone el run rojo con **exit 9** |
 | Límites de Neon (B) | `B.6` CU-horas del mes y `B.7` cupo de ramas, leídos de la **API v2** (env group `neon-api`, opcional). Son avisos: mandan correo pero **no** cambian el exit code |
 | Consistencia (C) | `C.8–C.10` con **escritura controlada**: cierre de asistencia de las clases pasadas, resincronización del aforo y purga de tokens/notificaciones viejas |
 | Reporte (E) | MRR, variación de MRR, retención/churn de la cohorte de 30 días y bajas del mes (mismas fórmulas que el BI) |
@@ -926,17 +932,29 @@ verifican igual: en REAL la lista tiene que quedar en 0 y en DRY-RUN en el mismo
 > las tablas el rol sigue **sin** `DELETE`, `INSERT`, `TRUNCATE` ni DDL, y la prueba negativa lo
 > verifica con cuatro sentencias que tienen que fallar.
 
-#### Qué significa "reserva viva" (y por qué no se compara contra `'cancelled'`)
+#### Qué significa "reserva viva" (una sola lista, compartida con la app)
 
 `reservas.estado` es un `character varying(20)` con default `'reserved'` y en los datos hay **dos
 formas de "cancelada"**: la que escribe la app (`'cancelled'`, en el `DELETE /reservas/{id}`) y la
-del enum viejo `estado_reserva` (`'cancelada'`, que `kpis_populate.py` sigue contemplando en
-`ESTADOS_CANCELADA`). Todo el SQL del job usa los predicados `sql_viva()` (`NOT ILIKE '%cancel%'`) y
-`sql_cancelada()` (`ILIKE '%cancel%'`): contra el literal, una reserva `'cancelada'` pasaría por
-viva, y entonces el **paso 8 le escribiría `updated_at`** —el dato con el que A.3 reconstruye la
-tardanza— y el paso 9 la contaría en el aforo. En el dump de PROD del 24/09/2026 sólo hay
-`'cancelled'` y `'confirmada'`, así que hoy el cambio es equivalente: es una red para la otra
-variante (y para cualquiera futura que contenga "cancel").
+del enum viejo `estado_reserva` (`'cancelada'`). Esa lista vive **una sola vez** en
+`backend/shared/estados.py` (`ESTADO_CANCELADO = 'cancelled'` —lo que se ESCRIBE—,
+`ESTADOS_CANCELADA = ('cancelled', 'cancelada')` —lo que se LEE—, más `lista_sql()` y
+`es_cancelada()`) y la importan las dos partes: la app por `app/core/estados.py` (que agrega
+`no_cancelada()`, el predicado de SQLAlchemy) y este job por `sql_viva()` (`NOT IN (...)`) y
+`sql_cancelada()` (`IN (...)`).
+
+Antes el job comparaba con `ILIKE '%cancel%'` y la app contra el literal, así que una variante nueva
+se comportaba distinto en cada lado: contra el literal, una reserva `'cancelada'` pasaba por viva y
+el **paso 8 le escribía `updated_at`** —el dato con el que A.3 reconstruye la tardanza— y el paso 9
+la contaba en el aforo. La lista es **exacta a propósito** (nada de `LIKE` "por parecido") y lo que
+el `ILIKE` cubría de más ahora lo delata la detección **A.6** (rojo) contra esa misma lista.
+
+`shared/` es un paquete **neutral** (sólo importa `typing`), porque lo copian las DOS imágenes de
+Docker: `Dockerfile.cron` copia `maintenance/` **+ `shared/`** y deliberadamente **no** lleva la
+app. Si uno de los dos Dockerfile se olvida de `shared/`, el runtime muere con *No module named
+'shared'* — por eso `tests/test_estados_compartido.py` verifica que esté en los dos. En el dump de
+PROD del 24/09/2026 sólo hay `'cancelled'` y `'confirmada'`, así que el cambio es equivalente: es la
+red para la otra variante.
 
 #### Guarda, verificación e idempotencia de los pasos 8-9
 
@@ -954,7 +972,7 @@ variante (y para cualquiera futura que contenga "cancel").
   (nada se puede duplicar) y un fallo en la 2 o la 3 no puede deshacer ni reescribir lo que la 1 ya
   confirmó con su `COMMIT`.
 
-### Detecciones A.1–A.5 (sólo leen)
+### Detecciones A.1–A.6 (sólo leen)
 
 | # | Chequeo | Rojo o informativo |
 |---|---|---|
@@ -970,6 +988,7 @@ variante (y para cualquiera futura que contenga "cancel").
 | A.5(a) | clase futura sin `coach_id` de una disciplina que **exige** coach (`COALESCE(d.requiere_coach, true)`: las self-service quedan fuera) **y** sin ningún coach activo en `coach_disciplinas` para su disciplina | **rojo** (D-2) — no hay a quién asignársela. Con `A5_NOTA_HASTA` vigente se le agrega una nota de contexto (el run sigue rojo) |
 | A.5(b) | igual que A.5(a) pero **con** coach activo en su disciplina (`EXISTS` en vez de `NOT EXISTS`) | informativo — falta asignarla |
 | A.5(c) | clase futura asignada a alguien que no es `coach` activo | **rojo** |
+| A.6 | `reservas.estado` que contiene "cancel" pero **no** está en la lista compartida (`shared/estados.ESTADOS_CANCELADA`) | **rojo** — el predicado lo ve como vivo (el paso 8 le escribiría `updated_at`, el dato de A.3) y el paso 9 lo contaría en el aforo: es la red que reemplaza al `ILIKE '%cancel%'` (la lista es exacta, así que una variante nueva tiene que verse) |
 
 Un hallazgo **no aborta** el mantenimiento (igual que la integridad): se aplica todo y el run queda
 rojo con **exit 9** (si además hay integridad, gana el 4). Las listas viajan completas en el correo;
@@ -992,6 +1011,25 @@ true`) y se administra en la pantalla **Disciplinas** del admin (`PUT /api/v1/di
 `requiere_coach` en el body): "Musculación" y "Open Box" se destildan ahí. **El mantenimiento nunca
 compara por nombre** —el nombre sólo aparece en ese destildado manual— y si en PROD la bandera
 quedó en `true`, A.5(a) sigue contando esas clases (fue exactamente el caso del run en rojo).
+
+#### El tope de una lista NO es su conteo: `sql_con_total()` (integridad, A.3 y paso 9)
+
+El defecto del punto anterior no era exclusivo de A.5: **toda** lista que termina en un `LIMIT` y
+reporta `len(filas)` está diciendo el tope como si fuera el tamaño del conjunto. Desde el
+2026-09-27 las tres listas que cortan se leen con `sql_con_total(sql)`, que prefija
+`count(*) OVER ()::text` (la ventana se calcula **después del `WHERE` y antes del `LIMIT`), y el
+`n` que va al log y al correo es ese total:
+
+| Lista | Tope | Qué se informa ahora |
+|---|---|---|
+| `SQL_DUP_RUT` / `SQL_DUP_CORREO` (integridad) | `LIMITE_DUP` = 10 | `RUT duplicados (37) (mostrando 10 de 37): …` — sin recorte el texto es el de antes |
+| A.3 (`descuadre_creditos()`) | `LIMITE_A3` = 200 | `revisadas` = total real y `escaneadas` = las que entraron por el tope; si difieren, el informe dice `(se evaluaron 200: el tope de A.3 (200) deja el resto para la próxima corrida)`. El subconjunto evaluado es determinista (la consulta ordena por `s.id`) |
+| Paso 9 (`aforo_resync`) | `LIMITE_LISTA` = 25 (antes un `25` **hardcodeado**) | el bloque del correo dice `30 fila(s) (mostrando 25 de 30)` |
+
+Las listas de la fase 8-10 (huérfanas) no tienen `LIMIT` y la de la purga corta en 5000: su
+verificación va por tabla temporal, así que ahí el conteo siempre fue exacto. En `verificar()` **no**
+se cambió nada a propósito: relee `consulta["sql"]` (sin la ventana, mismo tope), así que la
+comparación de después —0 en REAL, el mismo número en DRY-RUN— sigue siendo consistente.
 
 #### A5_NOTA_HASTA: la nota de contexto de A.5(a) (opcional)
 
@@ -1033,6 +1071,10 @@ corregir el `alumno_id` desde el panel de supervisión) mueve esa marca: si la d
 inicio de la clase, A.3 la cuenta como tardía y el descuadre sale negativo. Por eso la tolerancia es
 simétrica y el correo muestra los dos lados con el número esperado: con el caso a la vista se decide
 si es un dato a corregir o un umbral a ajustar.
+
+> **Tope y orden**: A.3 evalúa hasta `LIMITE_A3` (200) vigentes con `ORDER BY s.id` (determinista) y
+> el informe del correo dice el total real y cuántas se evaluaron — ver *El tope de una lista NO es
+> su conteo*, más arriba.
 
 > **Propuesta (NO implementada): `reservas.cancelada_at`.** Lo de fondo es dejar de usar `updated_at`
 > como proxy. Una columna `cancelada_at timestamptz` que la app escriba en el MISMO `UPDATE` que pone
@@ -1088,7 +1130,7 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
 | 6 | se pasó un tope de volumen (`MAX_VENCIDOS_PCT`, `MAX_HUERFANAS`, `MAX_CAMBIOS`, `MAX_CIERRE` o `MAX_PURGA`) |
 | 7 | falló una transacción de escritura |
 | 8 | la verificación posterior no cuadró |
-| **9** | **nuevo**: las detecciones A.1–A.5, o un chequeo de Neon configurado que no pudo correr |
+| **9** | **nuevo**: las detecciones A.1–A.6, o un chequeo de Neon configurado que no pudo correr |
 
 ### Variables de entorno nuevas (todas con default)
 
@@ -1210,6 +1252,34 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
   Nada de PROD (los "25" salen del run real; el doble de `psql` simula 63 filas con 25 en el
   `LIMIT`). Pendiente del usuario: destildar "Requiere coach" en **Musculación** y **Open Box**
   (pantalla Disciplinas) y setear `A5_NOTA_HASTA` en Render si quiere la nota.
+- **El tope no es el conteo (integridad, A.3 y paso 9) + lista compartida de "cancelada"
+  (2026-09-27, dos tareas del backlog):**
+  (1) **T2 — el mismo defecto de A.5, en tres lugares más:** `integridad()` reportaba `len(dup)` con
+  `LIMIT 10`, A.3 reportaba el `LIMIT 200` como "revisadas" y el paso 9 tenía un `LIMIT 25`
+  **hardcodeado** cuyo `len(filas)` viajaba como el tamaño del hallazgo. Los tres se leen ahora con
+  `sql_con_total()` (`count(*) OVER ()`): el hallazgo dice `RUT duplicados (37) (mostrando 10 de
+  37)`, en A.3 `revisadas` es el total real y `escaneadas` lo que entró por el tope (con el aviso de
+  que el resto queda para la próxima corrida) y el bloque del paso 9 dice `30 fila(s) (mostrando 25
+  de 30)`; `LIMITE_DUP` y `LIMITE_A3` pasan a constantes con nombre. `verificar()` **no** se toca
+  (relee el mismo SQL con el mismo tope: la comparación de después sigue siendo consistente) y
+  `_bloques_listas()` aprende a decir "(mostrando N de M)" como las detecciones. Sin recorte, los
+  textos son exactamente los de antes (test `test_co`).
+  (2) **T3 — el predicado de "cancelada" es uno solo:** `ESTADOS_CANCELADA` ya no se define en
+  `kpis_populate.py` ni se adivina con `ILIKE '%cancel%'`. Se agregó el paquete **neutral**
+  `backend/shared/` (`estados.py` con `ESTADO_CANCELADO`, `ESTADOS_CANCELADA`, `lista_sql()` y
+  `es_cancelada()`; sólo importa `typing`), que copian **las dos** imágenes de Docker
+  (`Dockerfile.cron` lo copia explícitamente y sigue **sin** llevar la app: por eso no puede importar
+  nada). El job arma `sql_viva()`/`sql_cancelada()` con `lista_sql()`; la app importa por
+  `app/core/estados.py` (re-exporta la constante y agrega `no_cancelada()` para SQLAlchemy) en **6
+  módulos** —`reservas.py` (incluido el `UPDATE` crudo del `DELETE /reservas/{id}`), `asistencia.py`,
+  `supervision.py` (donde `'cancelada'` se mostraba como activa: era un bug latente),
+  `kpis_populate.py`, `fidelizacion.py` y `wods.py`—. Como la lista es **exacta**, una variante nueva
+  pasaría por viva: para eso está la detección **A.6** (roja) — el único `ILIKE '%cancel%'` que
+  queda, y a propósito.
+  **Verificado:** `tests/test_mantenimiento_cloud.py` ⇒ **125 passed** (102 + 17 de A.5 + **6
+  nuevos**, `test_cl`–`test_cq`) y `tests/test_estados_compartido.py` (nuevo) ⇒ **11 passed**; el
+  comando completo del README ⇒ **216 passed, 1 skipped**. Nada de PROD ni de Render (todo con
+  `psql`/`smtplib`/API de Neon mockeados; el nuevo test ni siquiera sale a la red).
 - **Sin tocar:** nada de `carpeta_respaldo_box`, ni `.env`/`.env.test`, ni PROD (el único acceso
   a PROD es el `CREATE TABLE` que **debe** fallar).
 - **Fase 6 (entrega 2, 2026-09-27):** se escribió `maintenance/mantenimiento_cloud.py`, se agregó

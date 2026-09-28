@@ -57,12 +57,17 @@ WORKDIR /app
 #    `alertas` importa `backup_cloud` (si falta uno, el job muere con "No module named
 #    maintenance.<x>"). `mantenimiento_cloud` no necesita nada más: habla con la base por
 #    `psql`, así que no arrastra SQLAlchemy ni la app (y por eso tampoco hay pip nuevo).
+# EXCEPCIÓN (2026-09-27): `mantenimiento_cloud` importa `shared.estados` —el paquete neutral sin
+# imports donde vive la lista de estados "cancelada" que también usa la app—, así que `shared/`
+# va TAMBIÉN acá: si falta, el job muere con "No module named 'shared'". Son 2 archivos.
 COPY maintenance/__init__.py ./maintenance/__init__.py
 COPY maintenance/backup_cloud.py ./maintenance/backup_cloud.py
 COPY maintenance/alertas.py ./maintenance/alertas.py
 COPY maintenance/watchdog_backups.py ./maintenance/watchdog_backups.py
 COPY maintenance/restore_drill.py ./maintenance/restore_drill.py
 COPY maintenance/mantenimiento_cloud.py ./maintenance/mantenimiento_cloud.py
+COPY shared/__init__.py ./shared/__init__.py
+COPY shared/estados.py ./shared/estados.py
 
 # Usuario no-root (OJO: en Debian ya existe un usuario de sistema `backup`
 # con UID 34 ⇒ `useradd backup` falla con "username already in use").

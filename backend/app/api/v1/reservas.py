@@ -2,6 +2,9 @@ from app.schemas.reserva import (
     ReservaCreate, ReservaUpdate, ReservaResponse, ReservaListItem
 )
 from app.core.dependencies import get_current_user, get_current_coach, verificar_coach_disciplina
+# "Reserva cancelada" = UNA lista (`shared.estados`, la misma que usa el mantenimiento): acá se
+# agregan los predicados de SQLAlchemy (`no_cancelada`) y el lado Python (`es_cancelada`).
+from app.core.estados import ESTADO_CANCELADO, es_cancelada, lista_sql, no_cancelada
 from app.models.usuario import Usuario
 from app.models.disciplina import Disciplina
 from app.models.clase import Clase
@@ -131,7 +134,7 @@ def crear_reserva(
     existing = db.query(Reserva).filter(
         Reserva.clase_id == reserva_data.clase_id,
         Reserva.alumno_id == reserva_data.alumno_id,
-        Reserva.estado != "cancelled"
+        no_cancelada(Reserva.estado)
     ).first()
 
     if existing:
@@ -328,7 +331,7 @@ def listar_reservas_por_clase(
             "clase_id": r.clase_id,
             "alumno_id": r.alumno_id,
             "asistio": r.asistio,
-            "activa": r.estado not in ("cancelled",),
+            "activa": not es_cancelada(r.estado),
             "tokens_gastados": r.tokens_gastados,
             "fecha_reserva": str(r.fecha_reserva) if r.fecha_reserva else None,
             "alumno_nombre": alumno.nombre if alumno else f"Alumno #{r.alumno_id}",
@@ -727,8 +730,8 @@ def eliminar_reserva(
     # tocan ni el aforo ni los créditos.
     cambio = db.execute(
         text(
-            "UPDATE reservas SET estado = 'cancelled', updated_at = now() "
-            "WHERE id = :rid AND tenant_id = :tid AND estado <> 'cancelled'"
+            f"UPDATE reservas SET estado = '{ESTADO_CANCELADO}', updated_at = now() "
+            f"WHERE id = :rid AND tenant_id = :tid AND estado NOT IN ({lista_sql()})"
         ),
         {"rid": reserva_id, "tid": tenant_id},
     ).rowcount
