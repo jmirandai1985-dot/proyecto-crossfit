@@ -55,19 +55,38 @@ const icons = {
 const Layout = ({ children }) => {
     const { usuario, rol, logout } = useAuth();
     const [sidebarOpen, setSidebarOpen] = useState(true);
+    // ── N-6: `esPrueba` arranca en null = "todavía no sé". ──
+    // Mientras no haya dato (o si la consulta falla) el menú del alumno queda
+    // RESTRINGIDO: un chequeo de permisos no puede ABRIR el acceso cuando falla.
+    // Antes, un error dejaba `esPrueba = false` (menú completo) y cada pantalla
+    // de pago respondía 403 sin explicación.
     const [esPrueba, setEsPrueba] = useState(null);
+    const [esPruebaError, setEsPruebaError] = useState(false);
+    const [reintentoEsPrueba, setReintentoEsPrueba] = useState(0);
     const location = useLocation();
     const searchParams = new URLSearchParams(location.search);
     const currentTab = searchParams.get('tab') || 'resumen';
 
-    // Alumno nuevo con plan de prueba: menú restringido a Clases + Planes
+    // Alumno nuevo con plan de prueba: menú restringido a Clases + Planes.
+    // N-6: si la consulta falla, se asume RESTRINGIDO (fail-closed) y se ofrece
+    // Reintentar; nunca se asume "no es de prueba".
     useEffect(() => {
-        if (rol === 'alumno') {
-            api.get('/api/v1/alumnos/me/es-prueba')
-                .then(({ data }) => setEsPrueba(Boolean(data?.es_prueba)))
-                .catch(() => setEsPrueba(false));
-        }
-    }, [rol]);
+        if (rol !== 'alumno') return;
+        let cancelado = false;
+        setEsPruebaError(false);
+        api.get('/api/v1/alumnos/me/es-prueba')
+            .then(({ data }) => {
+                if (!cancelado) setEsPrueba(Boolean(data?.es_prueba));
+            })
+            .catch((e) => {
+                console.error('No se pudo verificar el plan de prueba del alumno:', e);
+                if (!cancelado) {
+                    setEsPrueba(true);      // fail-closed: menú restringido
+                    setEsPruebaError(true); // + aviso con Reintentar
+                }
+            });
+        return () => { cancelado = true; };
+    }, [rol, reintentoEsPrueba]);
 
     const coachSubTabs = [
         { key: 'resumen', label: '📊 Resumen', path: '/coach/dashboard?tab=resumen' },
@@ -94,8 +113,11 @@ const Layout = ({ children }) => {
                 { label: 'Mis Pedidos', path: '/alumno/mis-pedidos', icon: icons.calendar },
                 { label: 'Ajustes', path: '/alumno/ajustes', icon: icons.settings },
             ];
-            // Alumno nuevo en plan de prueba: solo Clases (Inicio) + Planes
-            if (esPrueba) {
+            // Alumno nuevo en plan de prueba: solo Clases (Inicio) + Planes.
+            // N-6: restringido salvo confirmación explícita de que NO es de prueba
+            // (`false`). `null` (cargando) y el error también restringen: ante la
+            // duda, el alumno ve menos, nunca más.
+            if (esPrueba !== false) {
                 return itemsAlumno.filter((i) => i.label === 'Inicio' || i.label === 'Planes');
             }
             return itemsAlumno;
@@ -157,6 +179,24 @@ const Layout = ({ children }) => {
                         )}
                     </div>
                 </div>
+
+                {/* ── N-6: si no pudimos verificar el plan, el menú queda restringido
+                    y el alumno tiene una salida visible (Reintentar) en vez de un
+                    menú completo que después responde 403. ── */}
+                {rol === 'alumno' && esPruebaError && (
+                    <div className="mx-3 mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+                        {sidebarOpen && (
+                            <p className="mb-1.5">⚠️ No pudimos verificar tu plan: mostrando el menú restringido.</p>
+                        )}
+                        <button
+                            type="button"
+                            onClick={() => setReintentoEsPrueba((n) => n + 1)}
+                            className="w-full rounded-md bg-amber-500/20 px-2 py-1 font-semibold text-amber-100 hover:bg-amber-500/30 transition-colors"
+                        >
+                            Reintentar
+                        </button>
+                    </div>
+                )}
 
                 {/* Menu Items */}
                 <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
