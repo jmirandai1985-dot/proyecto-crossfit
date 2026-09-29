@@ -313,7 +313,7 @@ ni el correo de la app. Nada se pusheó.
 | 4 | **N-8** — editar/borrar un PR dentro de las 24 h | `237d9c0` | `tests/test_pr_ventana_24h.py` **4/4**; **click real** en `/alumno/rms` (el botón "Editar PR" aparece y abre el modal en modo edición: movimiento bloqueado, valores precargados, "GUARDAR CAMBIOS", 0 errores) | ✅ cerrado (ver gap del DELETE) |
 | 5 | **N-9** — `POST /reservas` para el staff del box | `a11b659` | `tests/test_reservas_staff.py` **4/4** | ✅ cerrado |
 | 6 | **Voucher privado** (sólo verificación) | `802590f` | sondas HTTP contra TEST (tabla de §8), sin cambios de código | ✅ documentado |
-| 7 | Cierre del informe (esta sección) | *(este commit)* | — | ✅ |
+| 7 | Cierre del informe (esta sección) | `c91991d` (+ este ajuste) | — | ✅ |
 
 **Tests nuevos: 26 casos** (7 + 5 + 6 + 4 + 4). Corridas de la sesión: **10 · 11 · 13 · 4 · 4 passed**
 (42 casos ejecutados al re-correr también los archivos de regresión de N-1 y N-3), más **5 corridas de
@@ -359,6 +359,12 @@ TAREA 5:  py -3.12 -m pytest tests/test_reservas_staff.py -v
 `auditoria` creados en la última hora. Todo lo que escribieron los tests —teléfono/peso/estatura, la
 notificación marcada, el PR, la reserva, el aforo, los créditos, la auditoría y el usuario temporal del
 otro box— quedó restaurado o borrado.
+
+**Archivos:** `backend/app/private_uploads/` volvió a sus **3** archivos originales (los dos PNG de la
+sonda de §8 se borraron: uno lo borró la sonda misma y el otro quedó de una corrida fallida y se eliminó
+al cierre) y `backend/app/static/uploads/` sigue con sus 96. Los scripts y logs temporales de la sesión
+(`%TEMP%`) se borraron; la API de TEST y el dev server de Vite quedaron **detenidos** (puertos 8000 y
+5173 libres).
 
 ### Decisiones conservadoras tomadas (no cubiertas por la consigna)
 
