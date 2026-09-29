@@ -15,6 +15,8 @@ from sqlalchemy import func, text, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+# N-9: trazabilidad de las reservas que el staff crea en nombre de un alumno.
+from app.services.auditoria_service import registrar_auditoria
 """
 Router de endpoints para gestión de Reservas
 """
@@ -45,9 +47,19 @@ def crear_reserva(
     reservar para sí mismo (alumno_id == usuario_id del token JWT).
     """
 
-    # CRÍTICO 1 (IDOR): Validar que el usuario reserva para sí mismo.
+    # ── N-9: quién puede reservar para quién (mismo patrón que POST /pedidos y
+    # POST /solicitudes-planes):
+    #   * ALUMNO  -> sólo para sí mismo (si no, 403);
+    #   * STAFF   -> para un alumno DE SU BOX; si el alumno es de otro box, 403
+    #                (no 404: no se confirma si el id existe fuera del box).
+    # El resto de las validaciones (cupo atómico, duplicados, créditos) son las
+    # MISMAS en los dos caminos: cambia quién pide, no las reglas de negocio.
+    rol = current_user.get("rol", "")
+    es_staff = rol in ("coach", "admin", "administrador")
+
+    # CRÍTICO 1 (IDOR): el alumno reserva para sí mismo.
     # La clave del payload del JWT es 'usuario_id' (ver app/core/dependencies.py).
-    if reserva_data.alumno_id != current_user.get("usuario_id"):
+    if not es_staff and reserva_data.alumno_id != current_user.get("usuario_id"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No puedes reservar para otro usuario",
@@ -56,6 +68,18 @@ def crear_reserva(
     # ARREGLO 3: Extraer tenant_id del usuario autenticado (no del JSON)
     # (endurecimiento IDOR: el body no puede forzar otro tenant)
     tenant_id = current_user["tenant_id"]
+
+    # ── N-9: frontera de tenant para el staff (antes de tocar cupo/créditos) ──
+    if es_staff and reserva_data.alumno_id != current_user.get("usuario_id"):
+        destino = db.query(Usuario.id).filter(
+            Usuario.id == reserva_data.alumno_id,
+            Usuario.tenant_id == tenant_id,
+        ).first()
+        if not destino:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="El alumno destino no pertenece a este box",
+            )
 
     # Verificar que la clase existe y pertenece al tenant
     clase = db.query(Clase).filter(
@@ -184,6 +208,25 @@ def crear_reserva(
     db.add(db_reserva)
     db.commit()
     db.refresh(db_reserva)
+
+    # ── N-9: trazabilidad de la reserva creada POR el staff para un alumno ──
+    # (el alumno reservando para sí mismo no se audita: sería ruido; una reserva
+    # "en nombre de" sí es una acción sensible del box).
+    if es_staff and reserva_data.alumno_id != current_user.get("usuario_id"):
+        registrar_auditoria(
+            db,
+            tenant_id=tenant_id,
+            usuario_id=current_user["usuario_id"],
+            accion="CREATE",
+            entidad="reserva",
+            entidad_id=db_reserva.id,
+            detalle={
+                "alumno_id": reserva_data.alumno_id,
+                "clase_id": reserva_data.clase_id,
+                "creada_por_rol": rol,
+                "en_nombre_de": True,
+            },
+        )
 
     return db_reserva
 
