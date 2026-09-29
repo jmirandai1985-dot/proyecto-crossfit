@@ -85,6 +85,10 @@ class HistorialRMListItem(BaseModel):
 
 class RMPorMovimiento(BaseModel):
     """Esquema para mostrar el mejor RM por movimiento"""
+    # N-8: `id` real de la fila de historial_rm (no el del movimiento) y
+    # `created_at`, que es lo que permite a la UI saber si el PR sigue dentro de
+    # la ventana de edición de 24 h (la misma regla que aplica el PUT).
+    id: Optional[int] = None
     movimiento_id: int
     movimiento_nombre: str
     peso_kg: float
@@ -98,5 +102,6 @@ class RMPorMovimiento(BaseModel):
     calorias: Optional[int] = None
     fecha: date
     notas: Optional[str]
+    created_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)

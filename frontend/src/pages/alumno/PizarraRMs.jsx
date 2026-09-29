@@ -19,6 +19,34 @@ const getCategoriaMeta = (cat) => CATEGORIA_META[cat] || CATEGORIA_META.fuerza;
 // ─── Formatear resultado según categoría y campos disponibles ───────
 const formatResultado = (rm, categoria) => formatResultadoRM(rm, categoria);
 
+// ─── N-8: ventana de edición de PRs (24 h; MISMA regla que valida el PUT) ───
+const VENTANA_EDICION_PR_MS = 24 * 60 * 60 * 1000;
+
+// Milisegundos que le quedan al PR para ser editable (null si no hay dato).
+const msRestantesDeEdicion = (createdAt) => {
+    if (!createdAt) return null;
+    const creado = Date.parse(createdAt);
+    if (Number.isNaN(creado)) return null;
+    return VENTANA_EDICION_PR_MS - (Date.now() - creado);
+};
+
+const textoVentanaEdicion = (createdAt) => {
+    const restante = msRestantesDeEdicion(createdAt);
+    if (restante === null || restante <= 0) return '';
+    const horas = Math.floor(restante / 3600000);
+    const minutos = Math.floor((restante % 3600000) / 60000);
+    return horas > 0 ? `${horas} h ${minutos} min` : `${minutos} min`;
+};
+
+// RM-01: `peso_kg` es el "valor" del RM (kg / reps / min / km según categoría).
+// Vive acá porque lo usan el alta y la edición (una sola regla).
+const valorDelFormRM = (form, cat) => cat === 'fuerza'
+    ? (parseFloat(form.peso_kg) || 1)
+    : cat === 'gimnastico'
+        ? (parseInt(form.repeticiones) || 1)
+        : (parseInt(form.minutos) || parseFloat(form.km)
+            || parseInt(form.vueltas) || parseInt(form.calorias) || 1);
+
 const PizarraRMs = () => {
     const { usuario_id, tenant_id } = useAuth();
     const today = hoyChileStr();
@@ -44,9 +72,13 @@ const PizarraRMs = () => {
     const [rmSubmitting, setRmSubmitting] = useState(false);
     const [rmError, setRmError] = useState('');
     const [successMsg, setSuccessMsg] = useState('');
+    // N-8: PR que se está editando (null = el modal está en modo ALTA).
+    const [rmEditando, setRmEditando] = useState(null);
+    const [rmAccionando, setRmAccionando] = useState(false);
 
     const fetchAll = useCallback(async () => {
         setLoading(true);
+        setFetchError('');
         try {
             const [movRes, rmsRes] = await Promise.all([
                 api.get(`/api/v1/movimientos`),
@@ -56,6 +88,9 @@ const PizarraRMs = () => {
             const bestRMs = rmsRes.data || [];
             const mappedRMs = bestRMs.map(r => ({
                 ...r,
+                // N-8: `id` es la fila REAL de historial_rm (el backend la expone
+                // junto a `created_at`), que es lo que permite editar/borrar el PR
+                // mostrado. El fallback queda por compatibilidad con clientes viejos.
                 id: r.id || r.movimiento_id,
                 tipo_rm: r.tipo_rm || 'peso',
             }));
@@ -91,12 +126,7 @@ const PizarraRMs = () => {
                 // categoría, ver HistorialRMBase), así que NO se manda un 1 fijo: para
                 // gimnástico va el nº de repeticiones y para cardio/metabólico la métrica
                 // cargada. Antes, con 1 fijo, el nivel gimnástico daba siempre Principiante.
-                peso_kg: cat === 'fuerza'
-                    ? (parseFloat(rmForm.peso_kg) || 1)
-                    : cat === 'gimnastico'
-                        ? (parseInt(rmForm.repeticiones) || 1)
-                        : (parseInt(rmForm.minutos) || parseFloat(rmForm.km)
-                           || parseInt(rmForm.vueltas) || parseInt(rmForm.calorias) || 1),
+                peso_kg: valorDelFormRM(rmForm, cat),
                 fecha: rmForm.fecha || today,
                 notas: rmForm.notas || null,
                 repeticiones: rmForm.repeticiones ? parseInt(rmForm.repeticiones) : null,
@@ -134,6 +164,86 @@ const PizarraRMs = () => {
         setRmError('');
     };
 
+    // ─── N-8: editar / borrar un PR PROPIO dentro de la ventana de 24 h ───
+    // La ventana la hace cumplir el backend (PUT /historial-rm/{id}); acá sólo
+    // se muestra el botón cuando el PR todavía está dentro del plazo.
+    const esEditable = (rm) => {
+        const restante = msRestantesDeEdicion(rm.created_at);
+        return restante !== null && restante > 0;
+    };
+
+    const abrirEditarRM = (rm) => {
+        setRmEditando(rm);
+        setRmError('');
+        setRmForm({
+            movimiento_id: String(rm.movimiento_id),
+            peso_kg: rm.peso_kg ?? '',
+            repeticiones: rm.repeticiones ?? '',
+            series: rm.series ?? '',
+            minutos: rm.minutos ?? '',
+            vueltas: rm.vueltas ?? '',
+            km: rm.km ?? '',
+            calorias: rm.calorias ?? '',
+            fecha: rm.fecha || today,
+            notas: rm.notas || '',
+        });
+        setShowRMModal(true);
+    };
+
+    const cerrarModalRM = () => {
+        setShowRMModal(false);
+        setRmEditando(null);
+        setRmError('');
+    };
+
+    const handleEditarRM = async () => {
+        const cat = categoriaSeleccionada || 'fuerza';
+        setRmSubmitting(true);
+        setRmError('');
+        try {
+            await api.put(`/api/v1/historial-rm/${rmEditando.id}`, {
+                peso_kg: valorDelFormRM(rmForm, cat),
+                fecha: rmForm.fecha || today,
+                notas: rmForm.notas || null,
+                repeticiones: rmForm.repeticiones ? parseInt(rmForm.repeticiones) : null,
+                series: rmForm.series ? parseInt(rmForm.series) : null,
+                minutos: rmForm.minutos ? parseInt(rmForm.minutos) : null,
+                vueltas: rmForm.vueltas ? parseInt(rmForm.vueltas) : null,
+                km: rmForm.km ? parseFloat(rmForm.km) : null,
+                calorias: rmForm.calorias ? parseInt(rmForm.calorias) : null,
+            });
+            cerrarModalRM();
+            setSuccessMsg('✏️ PR actualizado');
+            setTimeout(() => setSuccessMsg(''), 3000);
+            fetchAll();
+        } catch (err) {
+            // El motivo real lo da el backend (p. ej. 403 si venció la ventana).
+            setRmError(err.response?.data?.detail || 'No se pudo actualizar el PR');
+        } finally {
+            setRmSubmitting(false);
+        }
+    };
+
+    const handleBorrarRM = async (rm) => {
+        const movName = movimientos.find(m => m.id === rm.movimiento_id)?.nombre || 'este PR';
+        if (!window.confirm(`¿Borrar tu PR de ${movName}? Esta acción no se puede deshacer.`)) {
+            return;
+        }
+        setRmAccionando(true);
+        setFetchError('');
+        try {
+            await api.delete(`/api/v1/historial-rm/${rm.id}`);
+            setSuccessMsg('🗑️ PR borrado');
+            setTimeout(() => setSuccessMsg(''), 3000);
+            fetchAll();
+        } catch (err) {
+            console.error('No se pudo borrar el PR:', err);
+            setFetchError(err.response?.data?.detail || 'No se pudo borrar el PR.');
+        } finally {
+            setRmAccionando(false);
+        }
+    };
+
     const rmsFiltrados = rmTab === 'todas'
         ? rms
         : rms.filter(rm => getCategoriaMovimiento(rm.movimiento_id) === rmTab);
@@ -164,7 +274,7 @@ const PizarraRMs = () => {
                         <p className="text-gray-500 mt-1">Tus récords personales por movimiento</p>
                     </div>
                     <button
-                        onClick={() => { resetForm(); setShowRMModal(true); }}
+                        onClick={() => { resetForm(); setRmEditando(null); setShowRMModal(true); }}
                         className="mt-4 md:mt-0 px-5 py-2.5 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-sm"
                     >
                         <span>+</span> REGISTRAR NUEVA MARCA / RM
@@ -259,7 +369,11 @@ const PizarraRMs = () => {
                 {/* Mi Evolución Reciente */}
                 {rmsFiltrados.length > 0 && (
                     <div>
-                        <h2 className="text-lg font-bold text-gray-800 mb-4">📈 MI EVOLUCIÓN RECIENTE</h2>
+                        <h2 className="text-lg font-bold text-gray-800 mb-1">📈 MI EVOLUCIÓN RECIENTE</h2>
+                        {/* N-8: la regla de las 24 h también se ve en la UI, no sólo en el backend. */}
+                        <p className="text-xs text-gray-500 mb-4">
+                            ✏️ Podés editar o borrar un PR durante las 24 h posteriores a su registro.
+                        </p>
                         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                             <div className="overflow-x-auto">
                                 <table className="w-full">
@@ -269,6 +383,7 @@ const PizarraRMs = () => {
                                             <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Movimiento</th>
                                             <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Resultado</th>
                                             <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Notas</th>
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Acciones</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
@@ -276,12 +391,49 @@ const PizarraRMs = () => {
                                             const cat = getCategoriaMovimiento(rm.movimiento_id);
                                             const movName = movimientos.find(m => m.id === rm.movimiento_id)?.nombre || '—';
                                             const valorDisplay = formatResultado(rm, cat);
+                                            const editable = esEditable(rm);
+                                            const queda = textoVentanaEdicion(rm.created_at);
                                             return (
                                                 <tr key={`hist-${rm.id}-${idx}`} className="hover:bg-gray-50 transition-colors">
                                                     <td className="px-5 py-3.5 text-sm text-gray-500">{rm.fecha || '—'}</td>
                                                     <td className="px-5 py-3.5 text-sm font-medium text-gray-800">{movName}</td>
                                                     <td className="px-5 py-3.5 text-sm font-bold text-emerald-600">{valorDisplay}</td>
                                                     <td className="px-5 py-3.5 text-sm text-gray-400 italic">{rm.notas || '—'}</td>
+                                                    {/* ── N-8: sólo dentro de las 24 h posteriores al registro ── */}
+                                                    <td className="px-5 py-3.5 text-sm">
+                                                        {editable ? (
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => abrirEditarRM(rm)}
+                                                                    disabled={rmAccionando}
+                                                                    aria-label="Editar PR"
+                                                                    title={`Podés editar este PR durante ${queda}`}
+                                                                    className="px-2.5 py-1 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-semibold hover:bg-emerald-100 disabled:opacity-50 transition-colors"
+                                                                >
+                                                                    ✏️ Editar
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleBorrarRM(rm)}
+                                                                    disabled={rmAccionando}
+                                                                    aria-label="Borrar PR"
+                                                                    title={`Podés borrar este PR durante ${queda}`}
+                                                                    className="px-2.5 py-1 rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs font-semibold hover:bg-red-100 disabled:opacity-50 transition-colors"
+                                                                >
+                                                                    🗑️ Borrar
+                                                                </button>
+                                                                <span className="text-[11px] text-gray-400">editable {queda}</span>
+                                                            </div>
+                                                        ) : (
+                                                            <span
+                                                                className="text-[11px] text-gray-400"
+                                                                title="Los PRs sólo se pueden editar o borrar dentro de las 24 h posteriores a su registro."
+                                                            >
+                                                                🔒 fuera de las 24 h
+                                                            </span>
+                                                        )}
+                                                    </td>
                                                 </tr>
                                             );
                                         })}
@@ -293,23 +445,28 @@ const PizarraRMs = () => {
                 )}
             </div>
 
-            {/* ─── MODAL REGISTRAR RM ─────────────────────────────────── */}
+            {/* ─── MODAL REGISTRAR / EDITAR RM ─────────────────────────── */}
             {showRMModal && (
                 <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
                         <div className="bg-emerald-600 text-white px-6 py-4 rounded-t-xl flex justify-between items-center">
-                            <h2 className="text-lg font-bold">📝 Registrar Nueva Marca</h2>
-                            <button onClick={() => { setShowRMModal(false); setRmError(''); }} className="text-white/80 hover:text-white text-xl">✕</button>
+                            <h2 className="text-lg font-bold">
+                                {rmEditando ? '✏️ Editar PR' : '📝 Registrar Nueva Marca'}
+                            </h2>
+                            <button onClick={cerrarModalRM} className="text-white/80 hover:text-white text-xl">✕</button>
                         </div>
                         <div className="p-6 space-y-5">
                             {/* Selección de movimiento por categoría */}
                             <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-3">Selecciona un movimiento:</label>
+                                <label className="block text-sm font-semibold text-gray-700 mb-3">
+                                    {rmEditando ? 'Movimiento (no editable):' : 'Selecciona un movimiento:'}
+                                </label>
                                 <div className="relative">
                                     <select
                                         value={rmForm.movimiento_id}
                                         onChange={(e) => setRmForm(prev => ({ ...prev, movimiento_id: e.target.value }))}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent appearance-none cursor-pointer"
+                                        disabled={!!rmEditando}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent appearance-none cursor-pointer disabled:bg-gray-100 disabled:cursor-not-allowed"
                                     >
                                         <option value="">-- Elige un movimiento --</option>
                                         {Object.entries(CATEGORIA_META).map(([catKey, catMeta]) => (
@@ -473,14 +630,14 @@ const PizarraRMs = () => {
                             )}
 
                             <div className="flex gap-3 pt-2">
-                                <button onClick={() => { setShowRMModal(false); setRmError(''); }}
+                                <button onClick={cerrarModalRM}
                                     className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-xl font-bold text-sm hover:bg-gray-50 transition-colors">
                                     Cancelar
                                 </button>
-                                <button onClick={handleRegistrarRM}
+                                <button onClick={rmEditando ? handleEditarRM : handleRegistrarRM}
                                     disabled={rmSubmitting || !rmForm.movimiento_id}
                                     className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-50">
-                                    {rmSubmitting ? '⏳ Guardando...' : '💪 GUARDAR RM'}
+                                    {rmSubmitting ? '⏳ Guardando...' : (rmEditando ? '💾 GUARDAR CAMBIOS' : '💪 GUARDAR RM')}
                                 </button>
                             </div>
                         </div>

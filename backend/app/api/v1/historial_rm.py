@@ -335,6 +335,7 @@ def obtener_rms_alumno(
     _verificar_acceso_alumno(current_user, alumno_id)
 
     cols = [
+        HistorialRM.id,
         HistorialRM.movimiento_id,
         Movimiento.nombre.label('movimiento_nombre'),
         HistorialRM.peso_kg,
@@ -348,6 +349,7 @@ def obtener_rms_alumno(
         HistorialRM.calorias,
         HistorialRM.fecha,
         HistorialRM.notas,
+        HistorialRM.created_at,
     ]
 
     base_filter = [
@@ -383,19 +385,22 @@ def obtener_rms_alumno(
 
     return [
         RMPorMovimiento(
-            movimiento_id=rm[0],
-            movimiento_nombre=rm[1],
-            peso_kg=rm[2],
-            tipo_rm=rm[3] or 'peso',
-            valor_extra=rm[4],
-            repeticiones=rm[5],
-            series=rm[6],
-            minutos=rm[7],
-            vueltas=rm[8],
-            km=rm[9],
-            calorias=rm[10],
-            fecha=rm[11],
-            notas=rm[12]
+            id=rm[0],
+            movimiento_id=rm[1],
+            movimiento_nombre=rm[2],
+            peso_kg=rm[3],
+            tipo_rm=rm[4] or 'peso',
+            valor_extra=rm[5],
+            repeticiones=rm[6],
+            series=rm[7],
+            minutos=rm[8],
+            vueltas=rm[9],
+            km=rm[10],
+            calorias=rm[11],
+            fecha=rm[12],
+            notas=rm[13],
+            # N-8: la UI calcula con esto la ventana de edición de 24 h.
+            created_at=rm[14],
         )
         for rm in rms
     ]
