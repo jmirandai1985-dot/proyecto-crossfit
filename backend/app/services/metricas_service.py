@@ -16,7 +16,7 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from shared.estados import sql_suscripcion_vigente
+from shared.estados import sql_plan_comercial, sql_suscripcion_vigente
 
 # Umbral minimo de base para publicar retencion/churn. Mismo criterio que
 # /kpis/cohortes (null cuando el horizonte no maduro): con una base muy chica el
@@ -39,6 +39,10 @@ def _vigente_sql(param_fecha):
     `estado = 'activo'` hacia que una suscripcion vencida hoy desapareciera
     tambien de las fechas PASADAS en las que si estuvo vigente, asi que la
     retencion/churn historica se movia sola (fix 2026-09-27).
+
+    Y el plan tiene que ser COMERCIAL (`sql_plan_comercial()`): el "Pase de
+    regreso" da acceso pero no es un cliente, asi que no entra a la cohorte ni
+    puede contar como retenido.
     """
     return (
         " u.tenant_id = :tid"
@@ -46,9 +50,11 @@ def _vigente_sql(param_fecha):
         " AND u.activo = true"
         " AND EXISTS ("
         "   SELECT 1 FROM suscripciones s"
+        "   JOIN planes p ON p.id = s.plan_id"
         "   WHERE s.usuario_id = u.id"
         "     AND s.tenant_id = :tid"
         "     AND " + sql_suscripcion_vigente("s", param_fecha) +
+        "     AND " + sql_plan_comercial("p") +
         " )"
     )
 
@@ -75,6 +81,7 @@ def mrr(db: Session, tenant_id: int, hasta: date) -> float:
         JOIN planes p ON s.plan_id = p.id
         WHERE s.tenant_id = :tid
           AND """ + sql_suscripcion_vigente("s", ":hasta") + """
+          AND """ + sql_plan_comercial("p") + """
     """), {"tid": tenant_id, "hasta": hasta}).scalar() or 0
     return float(valor)
 
@@ -141,9 +148,11 @@ def retencion_cohorte(db: Session, tenant_id: int, desde: date, hasta: date):
         "SELECT COUNT(*) FROM usuarios u WHERE " + _vigente_sql(":desde") +
         " AND EXISTS ("
         "   SELECT 1 FROM suscripciones s2"
+        "   JOIN planes p2 ON p2.id = s2.plan_id"
         "   WHERE s2.usuario_id = u.id"
         "     AND s2.tenant_id = :tid"
         "     AND " + sql_suscripcion_vigente("s2", ":hasta") +
+        "     AND " + sql_plan_comercial("p2") +
         " )"
     )
     siguen = int(db.execute(text(sql_siguen), {

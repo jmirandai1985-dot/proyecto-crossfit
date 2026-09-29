@@ -21,7 +21,9 @@ import pandas as pd
 from sqlalchemy import func
 
 import ml.features as features
+from app.core.estados import plan_comercial   # el MISMO criterio que los features y el BI
 from app.models.asistencia import Asistencia
+from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
 from app.models.transaccion_financiera import TransaccionFinanciera
 
@@ -104,13 +106,18 @@ def entrenar_churn(db, tenant_id, fecha_ref=None,
 
     # 2) sin suscripción activa a HOY. Acá SÍ se usa el estado actual de
     #    `suscripciones.estado`: fecha_ref es hoy, no una fecha pasada.
+    #    Sólo planes COMERCIALES: el "Pase de regreso" no es un plan vigente
+    #    (mismo criterio que los features del ML, `plan_comercial`).
     con_suscripcion_hoy = {uid for (uid,) in db.query(
         Suscripcion.usuario_id
+    ).join(
+        Plan, Suscripcion.plan_id == Plan.id
     ).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.usuario_id.in_(ids),
         Suscripcion.estado == "activo",
         Suscripcion.fecha_expiracion >= fecha_ref,
+        plan_comercial(Plan.es_comercial),
     ).distinct().all()}
 
     df["abandonado"] = [

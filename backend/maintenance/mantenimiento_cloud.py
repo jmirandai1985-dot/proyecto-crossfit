@@ -158,7 +158,7 @@ from maintenance.backup_cloud import (  # helpers existentes: no se duplican
 )
 # Paquete neutral (sin imports) compartido con la app: la lista de estados "cancelada" es UNA.
 # `app/` sigue sin importarse: `shared/estados.py` no arrastra nada (lo copia Dockerfile.cron).
-from shared.estados import lista_sql, sql_suscripcion_vigente
+from shared.estados import lista_sql, sql_plan_comercial, sql_suscripcion_vigente
 
 # ── Códigos de salida (Render marca fallido el run si != 0) ──
 EXIT_OK = 0
@@ -1069,18 +1069,22 @@ SQL_REPORTE = {
     "mrr": (
         "SELECT COALESCE(sum(p.precio_clp), 0)::text AS mrr_hoy "
         "FROM suscripciones s JOIN planes p ON p.id = s.plan_id "
-        "WHERE s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "current_date")
+        "WHERE s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "current_date") +
+        " AND " + sql_plan_comercial("p")
     ),
     "mrr_mes_anterior": (
         "SELECT COALESCE(sum(p.precio_clp), 0)::text AS mrr_mes_anterior "
         "FROM suscripciones s JOIN planes p ON p.id = s.plan_id "
-        "WHERE s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "'{fin_ant}'::date")
+        "WHERE s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "'{fin_ant}'::date") +
+        " AND " + sql_plan_comercial("p")
     ),
     "alumnos_vigentes": (
         "SELECT count(*)::text AS alumnos_vigentes FROM usuarios u "
         "WHERE u.tenant_id = {tid} AND u.rol = 'alumno' AND u.activo = true "
-        "AND EXISTS (SELECT 1 FROM suscripciones s WHERE s.usuario_id = u.id "
-        "  AND s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "current_date") + ")"
+        "AND EXISTS (SELECT 1 FROM suscripciones s "
+        "  JOIN planes p ON p.id = s.plan_id WHERE s.usuario_id = u.id "
+        "  AND s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "current_date") +
+        "  AND " + sql_plan_comercial("p") + ")"
     ),
     "bajas_mes": (
         "SELECT count(*)::text AS bajas_mes FROM usuarios WHERE tenant_id = {tid} "
@@ -1089,16 +1093,22 @@ SQL_REPORTE = {
     "retencion_base": (
         "SELECT count(*)::text AS retencion_base FROM usuarios u "
         "WHERE u.tenant_id = {tid} AND u.rol = 'alumno' AND u.activo = true "
-        "AND EXISTS (SELECT 1 FROM suscripciones s WHERE s.usuario_id = u.id "
-        "  AND s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "'{hace30}'::date") + ")"
+        "AND EXISTS (SELECT 1 FROM suscripciones s "
+        "  JOIN planes p ON p.id = s.plan_id WHERE s.usuario_id = u.id "
+        "  AND s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "'{hace30}'::date") +
+        "  AND " + sql_plan_comercial("p") + ")"
     ),
     "retencion_siguen": (
         "SELECT count(*)::text AS retencion_siguen FROM usuarios u "
         "WHERE u.tenant_id = {tid} AND u.rol = 'alumno' AND u.activo = true "
-        "AND EXISTS (SELECT 1 FROM suscripciones s WHERE s.usuario_id = u.id "
-        "  AND s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "'{hace30}'::date") + ") "
-        "AND EXISTS (SELECT 1 FROM suscripciones s2 WHERE s2.usuario_id = u.id "
-        "  AND s2.tenant_id = {tid} AND " + sql_suscripcion_vigente("s2", "current_date") + ")"
+        "AND EXISTS (SELECT 1 FROM suscripciones s "
+        "  JOIN planes p ON p.id = s.plan_id WHERE s.usuario_id = u.id "
+        "  AND s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "'{hace30}'::date") +
+        "  AND " + sql_plan_comercial("p") + ") "
+        "AND EXISTS (SELECT 1 FROM suscripciones s2 "
+        "  JOIN planes p2 ON p2.id = s2.plan_id WHERE s2.usuario_id = u.id "
+        "  AND s2.tenant_id = {tid} AND " + sql_suscripcion_vigente("s2", "current_date") +
+        "  AND " + sql_plan_comercial("p2") + ")"
     ),
 }
 

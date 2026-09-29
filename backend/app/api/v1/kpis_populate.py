@@ -20,7 +20,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.estados import ESTADOS_CANCELADA   # la MISMA lista que usa el mantenimiento
+from app.core.estados import ESTADOS_CANCELADA, plan_comercial   # las MISMAS listas que el mantenimiento
 from app.db.database import get_db
 from app.services import metricas_service as metricas
 from app.models.daily_kpis import DailyKpi
@@ -240,10 +240,15 @@ def populate_daily_kpis(
     tenant_id = TENANT_ID
     objetivo = fecha or (date.today() - timedelta(days=1))
 
-    alumnos_activos = db.query(func.count(Suscripcion.id)).filter(
+    # Sólo planes COMERCIALES: el "Pase de regreso" da acceso pero no es un alumno de pago
+    # (misma columna y mismo criterio que el BI y el ML: `shared.estados.sql_plan_comercial`).
+    alumnos_activos = db.query(func.count(Suscripcion.id)).join(
+        Plan, Suscripcion.plan_id == Plan.id
+    ).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.estado == "activo",
         Suscripcion.fecha_expiracion >= objetivo,
+        plan_comercial(Plan.es_comercial),
     ).scalar() or 0
 
     alumnos_nuevos = db.query(func.count(Usuario.id)).filter(
@@ -762,11 +767,16 @@ def populate_predictions(
             # VENCIDO no es un plan vigente. Sin este filtro daba un
             # `dias_para_vencer` negativo y contaba como "tiene plan vigente"
             # (motivo, probabilidad y recomendación equivocados).
-            proxima = db.query(func.max(Suscripcion.fecha_expiracion)).filter(
+            # Y tiene que ser COMERCIAL: un pase de regreso no es un plan vigente
+            # para el churn (mismo criterio que los features del ML).
+            proxima = db.query(func.max(Suscripcion.fecha_expiracion)).join(
+                Plan, Suscripcion.plan_id == Plan.id
+            ).filter(
                 Suscripcion.tenant_id == tenant_id,
                 Suscripcion.usuario_id == alumno.id,
                 Suscripcion.estado == "activo",
                 func.date(Suscripcion.fecha_expiracion) >= hoy,
+                plan_comercial(Plan.es_comercial),
             ).scalar()
             proxima_date = proxima.date() if proxima else None
             dias_para_vencer = (proxima_date - hoy).days if proxima_date else None

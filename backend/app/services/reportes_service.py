@@ -16,7 +16,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.formatting.rule import CellIsRule
 
 from app.services import metricas_service as metricas
-from shared.estados import sql_suscripcion_vigente
+from shared.estados import sql_plan_comercial, sql_suscripcion_vigente
 
 
 # ============================================================
@@ -257,12 +257,15 @@ def _build_historico_mensual(db, tenant_id):
         # ver `_corte_suscripciones`).
         corte = _corte_suscripciones(fin)
 
-        # Alumnos vigentes al corte (por FECHA: ver el docstring)
+        # Alumnos vigentes al corte (por FECHA: ver el docstring). Sólo planes COMERCIALES: el
+        # "Pase de regreso" da acceso pero no es un cliente (`sql_plan_comercial`).
         alumnos = db.execute(text("""
             SELECT COUNT(DISTINCT u.id) FROM usuarios u
             JOIN suscripciones s ON u.id = s.usuario_id
+            JOIN planes p ON p.id = s.plan_id
             WHERE u.tenant_id = :tid AND u.rol = 'alumno' AND u.activo = true
               AND """ + sql_suscripcion_vigente("s", ":corte") + """
+              AND """ + sql_plan_comercial("p") + """
         """), {"tid": tenant_id, "corte": corte}).scalar() or 0
 
         # Nuevos alumnos del mes

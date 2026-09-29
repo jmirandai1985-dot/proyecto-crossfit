@@ -24,6 +24,12 @@ class Plan(Base):
     precio_clp = Column(Integer, nullable=False)
     duracion_dias = Column(Integer, nullable=False, default=30)
     activo = Column(Boolean, nullable=False, default=True)
+    # ── ¿Es una membresía COMERCIAL? ──
+    # `false` = el plan se materializa como suscripción para habilitar el acceso, pero NO cuenta
+    # como cliente: lo excluyen MRR, retención, cohortes, "vigentes", churn y el dataset del ML
+    # (`shared.estados.sql_plan_comercial()`, migración 037). Hoy: el "Pase de regreso" de
+    # Fidelización. El plan "Prueba" sigue en `true` (no se movió ninguna métrica a propósito).
+    es_comercial = Column(Boolean, nullable=False, default=True)
     # ── Plan de prueba (registro de alumno nuevo) ──
     primera_clase_tomada = Column(Boolean, nullable=False, default=False)
     created_at = Column(TIMESTAMP(timezone=True),

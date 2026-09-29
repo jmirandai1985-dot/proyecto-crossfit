@@ -19,6 +19,10 @@ from sqlalchemy import func
 
 from app.models.asistencia import Asistencia
 from app.models.suscripcion import Suscripcion
+from app.core.estados import (   # los MISMOS criterios que el mantenimiento
+    plan_comercial,
+)
+from app.models.plan import Plan
 from app.models.usuario import RolUsuario, Usuario
 
 # Regla del label de abandono (idéntica a la del seed sintético ml.seed.*).
@@ -98,12 +102,19 @@ def _suscripcion_activa(db, tenant_id, usuario_id, fecha_ref):
       - NO se usa `estado`: una suscripción cancelada después sigue contando
         como activa para fechas anteriores a su `fecha_expiracion`.
       - `dias_para_vencer` nunca es negativo (a lo sumo 0 = vence ese día).
+
+    Y el plan tiene que ser COMERCIAL (`plan_comercial`): el "Pase de regreso"
+    da acceso sin ser un cliente, así que NO cuenta como plan vigente. Si contara,
+    el modelo aprendería que un alumno con un pase gratis "sigue siendo cliente".
     """
-    vence = db.query(func.max(Suscripcion.fecha_expiracion)).filter(
+    vence = db.query(func.max(Suscripcion.fecha_expiracion)).join(
+        Plan, Suscripcion.plan_id == Plan.id
+    ).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.usuario_id == usuario_id,
         func.date(Suscripcion.fecha_inicio) <= fecha_ref,
         func.date(Suscripcion.fecha_expiracion) >= fecha_ref,
+        plan_comercial(Plan.es_comercial),
     ).scalar()
     if not vence:
         return False, None
@@ -183,14 +194,18 @@ def build_features(db, tenant_id, fecha_ref=None) -> pd.DataFrame:
 
     # 3) vencimiento MÁS LEJANO entre las suscripciones VIGENTES a fecha_ref.
     #    AS-OF con FECHAS (no con `estado`, que es un snapshot mutable): ver el
-    #    detalle/limitación en `_suscripcion_activa`.
+    #    detalle/limitación en `_suscripcion_activa`. Sólo planes COMERCIALES:
+    #    un pase de regreso no es un plan vigente (mismo criterio que `_suscripcion_activa`).
     vencimientos = dict(db.query(
         Suscripcion.usuario_id, func.max(Suscripcion.fecha_expiracion)
+    ).join(
+        Plan, Suscripcion.plan_id == Plan.id
     ).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.usuario_id.in_(ids),
         func.date(Suscripcion.fecha_inicio) <= fecha_ref,
         func.date(Suscripcion.fecha_expiracion) >= fecha_ref,
+        plan_comercial(Plan.es_comercial),
     ).group_by(Suscripcion.usuario_id).all())
 
     filas = []

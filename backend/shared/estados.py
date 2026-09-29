@@ -19,6 +19,10 @@ Dos criterios viven acá:
    `sql_suscripcion_vigente()`). Ver el docstring de cada uno: es el criterio de las métricas
    históricas (MRR del mes anterior, cohorte de retención/churn de 30 días).
 
+3. **`planes.es_comercial` = "es una membresía de cliente"** (`COLUMNA_ES_COMERCIAL` +
+   `sql_plan_comercial()`): excluye de las métricas los planes que existen para dar acceso sin
+   ser un cliente (el "Pase de regreso").
+
 ⚠️ **Este paquete no puede importar NADA** (ni `app`, ni SQLAlchemy, ni FastAPI): lo usa también el
 Cron Job, cuya imagen (`backend/Dockerfile.cron`) copia sólo `maintenance/` y `shared/`. Los
 predicados de SQLAlchemy viven en la app (`app/core/estados.py`).
@@ -101,3 +105,35 @@ def sql_suscripcion_vigente(alias: str = "s", fecha: str = "current_date") -> st
     return (f"{alias}.estado NOT IN ({lista_sql(ESTADOS_SUSCRIPCION_NUNCA_VIGENTES)})"
             f" AND {alias}.fecha_inicio::date <= {fecha}"
             f" AND {alias}.fecha_expiracion::date >= {fecha}")
+
+
+# ── `planes.es_comercial`: ¿esta suscripción es una membresía (de cliente)? ────────────────────
+# El "Pase de regreso" (beneficio de Fidelización, F2) y cualquier regalo futuro se materializan
+# como una suscripción para que el alumno pueda reservar, pero NO son clientes ni ingresos: si
+# contaran, inflarían el MRR, la retención (un alumno "vuelve" gratis), las cohortes, la cuenta de
+# vigentes, el churn y el dataset del ML (una fila que el modelo aprendería como cliente real).
+#
+# Lo decide la COLUMNA `planes.es_comercial` (migración 037), NO el nombre del plan: renombrar
+# "Pase de regreso" no puede cambiar una métrica, y un plan nuevo se marca al crearlo. El plan
+# "Prueba" del autoservicio sigue con `es_comercial = true` a propósito: no se movió ninguna
+# métrica existente.
+COLUMNA_ES_COMERCIAL: Final[str] = "es_comercial"
+
+
+def sql_plan_comercial(alias: str = "p") -> str:
+    """Predicado SQL de "el plan de esa suscripción cuenta como MEMBRESÍA".
+
+    Devuelve, por ejemplo:
+
+        p.es_comercial = true
+
+    Se combina con `sql_suscripcion_vigente()` (vigencia por FECHAS) y NO está dentro de él: son
+    dos criterios distintos y quien mira el pasado sigue necesitando los dos. Las 5 vistas que lo
+    usan (MRR, retención/cohortes, "vigentes", churn y el dataset del ML) lo llaman con el alias
+    de SU join de `planes`.
+
+    ⚠️ `alias` se interpola en el SQL: es una constante del código (`"p"`, `"p2"`, …), **nunca**
+    texto que venga de un request o de una env var.
+    """
+    return f"{alias}.{COLUMNA_ES_COMERCIAL} = true"
+
