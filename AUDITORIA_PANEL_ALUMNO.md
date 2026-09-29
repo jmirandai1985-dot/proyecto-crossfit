@@ -197,9 +197,59 @@ N-7/N-8 son mejoras que no cambian una frontera de seguridad (ver §6).
    demo): **no** se ejecutó en esta sesión; la API se levantó a mano con `ENVIRONMENT=test` y se corrió
    `pytest` sólo con los tests de esta sesión.
 
-## 7. Estado al cierre de la sesión
+## 7. Estado al cierre de la sesión (medido)
 
-_(se completa en el último commit de la sesión con los hashes)_
+### Commits (uno por hallazgo; sin push)
+
+| Commit | Hallazgo | Contenido |
+|---|---|---|
+| `307cc7b` | — | `docs(auditoria)`: este informe |
+| `12c1c41` | **N-1** | nombre inmutable: `alumnos.py` (+42/-23) + `Ajustes.jsx` (+34) + test nuevo (108 líneas) |
+| `eaa4b22` | **N-3** | frontera de tenant en `notificaciones.py` (+30/-7) + test nuevo (180 líneas) |
+| `427d2dd` | **N-6** | `Layout.jsx`: fail-closed + Reintentar (+49/-9) |
+| `99daf63` | **N-5** | `PerformanceHub.jsx`: log + `erroresCarga` (+21/-3) |
+| `37f0ff2` | **N-4** | `PerformanceHub.jsx`: copy propio, no "del box" (+8/-2) |
+
+### pytest (medido, contra el branch TEST)
+
+```
+API levantada a mano: ENVIRONMENT=test + --lifespan off   (sin scheduler ⇒ ningún email puede salir)
+/debug/db-url → {"is_safe":true,"is_test":true,"branch":"ep-jolly-butterfly-b6ty2z89"}
+
+py -3.12 -m pytest tests/test_nombre_inmutable_alumno.py tests/test_notificaciones_tenant.py -v
+  → 9 passed
+```
+
+- `test_nombre_inmutable_alumno.py`: **3/3** (el alumno manda `nombre` → 200 + sin cambio ni en la
+  respuesta ni en la BD; el resto del payload sí se aplica; clave desconocida sigue en 422).
+- `test_notificaciones_tenant.py`: **6/6**, incluido `test_nb04` (cross-tenant real: el alumno existe en
+  el box 2 y el staff del box 1 recibe **403**).
+- Primera corrida: 8 passed + **1 error** de fixture (`usuarios.rut` es `varchar(12)` y el rut del alumno
+  temporal tenía 18 caracteres). Corregido en el mismo commit de N-3 (el INSERT falló entero: no quedó basura).
+- Los tests **no** dependen de ids fijos (en TEST no existe el alumno 999 que crea el orquestador): eligen
+  sus sujetos de la BD. El test cross-tenant crea y **borra** un alumno temporal del box 2.
+
+**Verificación post-corrida de la BD (read-only):** 0 filas residuales, `usuarios` sigue en 419 filas
+(sólo box 1), las 3 notificaciones siguen `leida=false` y el teléfono del alumno usado quedó restaurado.
+
+### Frontend (medido)
+
+- `npm run lint` → **73 warnings / 0 errors**: ningún aviso nuevo; el de `PerformanceHub.jsx:76`
+  (`catch` vacío) **desapareció** con N-5.
+- `npm run build` → **OK** (`dist/assets/index-*.js` 1.172 kB, `built in 8.86s`), es decir el JSX de
+  `Ajustes.jsx`, `Layout.jsx` y `PerformanceHub.jsx` compila.
+
+### Lo que NO se midió
+
+- La suite completa (`test_panel_alumno`, `test_reservas_integridad`, `test_p0_4_dinero`,
+  `test_mantenimiento_vencidos`) **no** se corrió: el orquestador del proyecto (`run_tests.bat` →
+  `_run_tests_orchestrator.py`) hace `DROP SCHEMA` del branch TEST y borra el seed de la demo. Los "✅
+  código" de §2 quedan como verificación por lectura, no por ejecución.
+- N-2, N-7, N-8 y N-9 siguen abiertos (§6).
+- `Ajustes.jsx`: se aplicó la instrucción literal ("solo teléfono, peso y estatura son editables"), así
+  que **correo, género y fecha de nacimiento también quedaron de sólo lectura** en la UI. El backend
+  sigue aceptándolos (`ActualizarMiPerfil`), de modo que revertirlo es desbloquear esos 3 campos en el
+  formulario, sin tocar el servidor.
 
   `alumno_id`/`tenant_id` provenientes de query/body en vez del JWT.
 - Trazado de **cada** endpoint del alumno a su fuente de identidad (`current_user[...]` del JWT).
