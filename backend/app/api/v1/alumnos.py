@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, date
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel, EmailStr, Field, AliasChoices, ConfigDict, model_validator
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import ClassVar, Optional
 
 from app.db.database import get_db
 from app.core.config import settings
@@ -35,9 +35,20 @@ logger = logging.getLogger(__name__)
 class ActualizarMiPerfil(BaseModel):
     """Campos editables por el usuario sobre su PROPIO perfil (Ajustes).
 
+    SOLO se aplican los campos AUTOEDITABLES:
+
+        telefono · peso_kg · estatura_cm
+
+    El resto de la ficha (`nombre`, `correo`, `genero`, `fecha_nacimiento`) es
+    dato de identidad/administración del box y se edita por
+    `PUT /usuarios/{id}` (admin-only). Esos 4 campos siguen declarados en el
+    schema por compatibilidad con clientes viejos, pero se DESCARTAN antes de
+    validar: el PUT responde 200, no cambia nada y el intento queda en el log
+    (antes el alumno podía reescribir su propio correo/género/fecha de
+    nacimiento desde Ajustes, con la UI ya bloqueada: backend ≠ UI).
+
     NO permite cambiar rol/activo/estado/password (eso es admin o un flujo
-    dedicado) ni el `nombre` completo: el nombre es el dato de identidad de la
-    ficha y lo gestiona el box (`PUT /usuarios/{id}`, admin-only).
+    dedicado).
     `extra='forbid'`: una clave desconocida falla con 422 en vez de ignorarse.
     """
     correo: Optional[EmailStr] = None
@@ -49,18 +60,30 @@ class ActualizarMiPerfil(BaseModel):
 
     model_config = ConfigDict(extra='forbid')
 
+    # Campos que el alumno SÍ autogestiona (contrato con Ajustes.jsx).
+    CAMPOS_AUTOEDITABLES: ClassVar[tuple] = ("telefono", "peso_kg", "estatura_cm")
+    # Campos que sólo modifica el box (`PUT /usuarios/{id}`): si llegan por acá
+    # se descartan (200 + log) en vez de aplicarse o dar 422.
+    CAMPOS_SOLO_BOX: ClassVar[tuple] = (
+        "nombre", "correo", "genero", "fecha_nacimiento")
+
     @model_validator(mode='before')
     @classmethod
-    def _descartar_nombre(cls, data):
-        """N-1: `nombre` NO se edita por acá; si un cliente viejo lo manda, se
-        descarta ANTES de validar (evita el 422 de `extra='forbid'` y sobre todo
-        evita que se aplique) y el intento queda registrado en el log.
+    def _descartar_campos_solo_box(cls, data):
+        """N-1 (extendido): ningún campo de `CAMPOS_SOLO_BOX` se edita por acá.
+
+        Se descartan ANTES de validar, así que un cliente viejo que los mande
+        (incluso con un `correo` malformado) recibe 200 + los valores viejos en
+        la respuesta, y el intento queda registrado en el log.
         """
-        if isinstance(data, dict) and "nombre" in data:
-            logger.info(
-                "'nombre' descartado en PUT /alumnos/me: el nombre completo "
-                "solo lo modifica el box (PUT /usuarios/{id})")
-            return {k: v for k, v in data.items() if k != "nombre"}
+        if isinstance(data, dict):
+            presentes = [c for c in cls.CAMPOS_SOLO_BOX if c in data]
+            if presentes:
+                logger.info(
+                    "PUT /alumnos/me: descartados %s (solo los modifica el box "
+                    "vía PUT /usuarios/{id})", ", ".join(sorted(presentes)))
+                return {k: v for k, v in data.items()
+                        if k not in cls.CAMPOS_SOLO_BOX}
         return data
 
 
@@ -466,17 +489,18 @@ def obtener_mi_perfil(
 
 # ─── PUT /me (el usuario edita su PROPIO perfil) ───
 # Endpoint correcto para Ajustes del alumno: el CRUD /usuarios/{id} es
-# admin-only por diseño. Acá sólo se editan campos de perfil
-# (correo/telefono/peso/estatura/genero/fecha_nacimiento); NO se puede tocar
-# rol/activo/estado/password ni el `nombre` completo (N-1: lo gestiona el box
-# vía PUT /usuarios/{id}; si llega, se descarta — ver `ActualizarMiPerfil`).
+# admin-only por diseño. Acá sólo se editan los campos de perfil que el alumno
+# autogestiona (telefono/peso_kg/estatura_cm); `nombre`, `correo`, `genero` y
+# `fecha_nacimiento` los gestiona el box vía `PUT /usuarios/{id}` (N-1: si
+# llegan, se descartan — ver `ActualizarMiPerfil`). NO se puede tocar
+# rol/activo/estado/password.
 @router.put("/me")
 def actualizar_mi_perfil(
     datos: ActualizarMiPerfil,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """Actualiza el perfil del usuario autenticado (solo campos seguros)."""
+    """Actualiza el perfil del usuario autenticado (solo campos autogestionados)."""
     uid = current_user.get("usuario_id")
     tenant_id = current_user.get("tenant_id")
     usuario = db.query(Usuario).filter(
@@ -488,12 +512,18 @@ def actualizar_mi_perfil(
 
     update_data = datos.model_dump(exclude_unset=True)
 
-    # 🔒 N-1 (defensa en profundidad): el nombre completo nunca se aplica desde
-    # este endpoint, aunque el schema lo aceptara (el alumno no cambia su propia
-    # identidad: eso es del box, `PUT /usuarios/{id}`).
-    update_data.pop("nombre", None)
+    # 🔒 N-1 (defensa en profundidad): los campos de identidad/ficha nunca se
+    # aplican desde este endpoint, aunque el schema los aceptara. El alumno no
+    # cambia su propia identidad ni sus datos administrativos: eso es del box
+    # (`PUT /usuarios/{id}`, admin-only). El valor de `rol` no interviene: el
+    # único cliente de este endpoint es el Ajustes del alumno (y el descarte ya
+    # ocurrió al validar, con log), así que la regla es la misma para todos.
+    for campo_solo_box in ActualizarMiPerfil.CAMPOS_SOLO_BOX:
+        update_data.pop(campo_solo_box, None)
 
     # Correo: único dentro del tenant (mismo criterio que el CRUD admin).
+    # ⚠️ Hoy es código DEFENSIVO: `correo` viene en CAMPOS_SOLO_BOX, así que
+    # `update_data` nunca lo trae. Se mantiene por si el campo se rehabilita.
     nuevo_correo = update_data.get("correo")
     if nuevo_correo is not None and nuevo_correo != usuario.correo:
         duplicado = db.query(Usuario).filter(
