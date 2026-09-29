@@ -314,10 +314,15 @@ const SeccionPagos = ({ datos, onPagina }) => {
             </div>
 
             <p className="text-xs text-zinc-500">
-                Las membresías se valorizan al precio de lista del plan (el mismo criterio que el
-                ingreso recurrente del BI) y del Bazar solo cuentan los pedidos validados o
-                entregados.
+                Las membresías muestran lo que se cobró DE VERDAD (las transacciones del box: el
+                descuento a la vista y las devoluciones ya restadas), no el precio de lista del
+                plan; del Bazar solo cuentan los pedidos validados o entregados.
             </p>
+            {t.descuentos_clp > 0 && (
+                <p className="text-xs text-emerald-400" data-testid="historial-descuentos">
+                    Pagó {clp(t.descuentos_clp)} menos que el precio de lista.
+                </p>
+            )}
 
             <Card titulo="Por año">
                 <Tabla columnas={['Año', 'Membresías', 'Bazar', 'Total']}>
@@ -353,6 +358,17 @@ const SeccionPagos = ({ datos, onPagina }) => {
                                 <td className="py-2 pr-4 text-zinc-300">{i.detalle}</td>
                                 <td className="py-2 pr-4 font-semibold text-zinc-100">
                                     {clp(i.monto_clp)}
+                                    {i.descuento_clp > 0 && (
+                                        <span className="block text-xs font-normal text-emerald-400"
+                                            data-testid="historial-pago-descuento">
+                                            lista {clp(i.precio_lista_clp)} · −{clp(i.descuento_clp)}
+                                        </span>
+                                    )}
+                                    {i.transacciones === 0 && (
+                                        <span className="block text-xs font-normal text-zinc-500">
+                                            sin pago registrado
+                                        </span>
+                                    )}
                                 </td>
                             </tr>
                         );
@@ -522,14 +538,13 @@ const SECCIONES_RENDER = {
 
 // Pestañas del primer render (mientras llega la primera respuesta), con los mismos
 // ids/labels que el servicio para no inventar un menú distinto al del backend.
+// `beneficios` NO está: el backend tampoco la anuncia hasta la Fase 2 de Fidelización.
 const SECCIONES_UI = [
     { id: 'resumen', label: 'Resumen', disponible: true },
     { id: 'asistencia', label: 'Asistencia', disponible: true },
     { id: 'pagos', label: 'Pagos', disponible: true },
     { id: 'membresias', label: 'Membresías', disponible: true },
     { id: 'rms', label: 'RMs', disponible: true },
-    { id: 'beneficios', label: 'Beneficios', disponible: false,
-        motivo: 'Llega con la Fase 2 de Fidelización.' },
 ];
 
 

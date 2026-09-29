@@ -12,7 +12,8 @@ Lo que fija este archivo (permisos = "tests completos del caso"):
   B. ACL: admin entra a cualquier alumno del box; el alumno entra a la suya (y NO a la de otro);
      el COACH recibe 403 (el panel trae plata); el staff no puede usar la puerta del alumno.
   C. 404 de un alumno que no existe en el tenant del token, 422 de una sección/página inválida y
-     200 de la sección reservada `beneficios` (disponible: false).
+     200 de la sección reservada `beneficios` (existe y responde, pero NO se anuncia en el menú:
+     llega en la Fase 2 de Fidelización).
   D. FIX 1: con plan de prueba, la sección `rms` responde 403 y las otras siguen abiertas.
 
 Corre con `TestClient` (httpx ya está en requirements): no levanta servidor, pero pega contra la
@@ -127,7 +128,9 @@ def test_b1_el_admin_ve_el_historial_completo_de_un_alumno(cliente, tokens):
     assert cuerpo["alumno"]["id"] == alumno_id
     assert cuerpo["incluye_privado"] is True
     assert "gestion" in cuerpo["datos"], "el admin tiene que ver la gestión del box"
-    assert len(cuerpo["secciones"]) == 6
+    # El menú trae las 5 secciones listas: `beneficios` llega en la Fase 2 (regla 7).
+    assert len(cuerpo["secciones"]) == 5
+    assert all(s["disponible"] for s in cuerpo["secciones"])
 
 
 def test_b2_el_coach_recibe_403_en_ambas_puertas(cliente, tokens):
@@ -194,14 +197,16 @@ def test_c2_seccion_invalida_y_paginacion_invalida_422(cliente, tokens):
                        headers=tokens["alumno"]).status_code == 422
 
 
-def test_c3_beneficios_esta_declarada_pero_vacia(cliente, tokens):
+def test_c3_beneficios_esta_declarada_pero_no_anunciada(cliente, tokens):
+    """La sección existe y responde, pero NO aparece en el menú de pestañas (regla 7)."""
     r = cliente.get(f"{BASE}/me/historial?seccion=beneficios", headers=tokens["alumno"])
 
     assert r.status_code == 200, r.text
     datos = r.json()["datos"]
     assert datos["disponible"] is False and datos["items"] == []
     secciones = {s["id"]: s for s in r.json()["secciones"]}
-    assert secciones["beneficios"]["disponible"] is False
+    assert len(secciones) == 5
+    assert "beneficios" not in secciones, "una pestaña deshabilitada es ruido (Fase 2)"
     assert secciones["asistencia"]["disponible"] is True
 
 

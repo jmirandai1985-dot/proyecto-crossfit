@@ -39,10 +39,15 @@ Reglas de negocio (UNA definición por número, todas acá)
     tiempo y las reservas futuras (`reservada`) NO ensucian el porcentaje.
  3. `promedio_semanal` = asistencias / semanas desde el alta (`usuarios.created_at`), con piso
     de 1 semana: un alumno de 3 días no divide por 0 ni infla el número.
- 4. `total_pagado` = membresías + Bazar. Membresías al PRECIO DE LISTA del plan de cada
-    suscripción que alguna vez estuvo vigente —mismo criterio que `metricas_service.mrr`, que
-    es "ingreso recurrente por precio de lista", no flujo cobrado—; Bazar por el `total` real
-    de los pedidos `validado`/`entregado` (un pedido `pendiente` no es plata cobrada).
+ 4. `total_pagado` = membresías COBRADAS + Bazar. Las membresías salen de las transacciones
+    REALES (`transacciones_financieras` de la suscripción: el ingreso suma y una devolución
+    —egreso— resta), NO del precio de lista: el historial tiene que mostrar lo que el alumno
+    pagó de verdad, con su descuento si el box se lo hizo. Qué suscripciones se listan lo
+    decide el mismo criterio que `metricas_service.mrr` (alguna vez vigentes: ni `pendiente`
+    ni `rechazado`). Bazar por el `total` real de los pedidos `validado`/`entregado` (un
+    pedido `pendiente` no es plata cobrada). La sección Membresías, en cambio, sigue mostrando
+    el PRECIO DE LISTA del plan: ahí la pregunta es cuánto VALE su plan, no cuánto entró (y el
+    `precio_lista_clp` de cada pago deja ver el descuento sin mezclar las dos cosas).
  5. "mes con plan" = mes calendario con una suscripción vigente. Mismo criterio que
     `shared.estados.sql_suscripcion_vigente()`: lo deciden las FECHAS (`fecha_inicio` dentro o
     antes del mes y `fecha_expiracion` dentro o después) y el estado sólo descarta lo que NUNCA
@@ -52,8 +57,10 @@ Reglas de negocio (UNA definición por número, todas acá)
  6. Las clases que canceló el BOX (`clases.cancelada = true`) no cuentan ni como falta ni como
     asistencia: se informan aparte en `clases_suspendidas`. Castigar al alumno por una clase
     que suspendió el box sería un dato falso.
- 7. `beneficios` (6ª sección) queda declarada y NO disponible: llega con la Fase 2 de
-    Fidelización.
+ 7. `beneficios` (6ª sección) está declarada pero NO se anuncia en el menú de pestañas hasta la
+    Fase 2 de Fidelización: una pestaña deshabilitada es ruido (y una promesa vacía) para el
+    alumno. El id sigue existiendo —se puede pedir `?seccion=beneficios` y devuelve el
+    motivo— porque es la sección que va a llenar la Fase 2.
 """
 import calendar
 from collections import Counter
@@ -76,6 +83,7 @@ from app.models.producto import Producto
 from app.models.reserva import Reserva
 from app.models.segmentacion_alumno import SegmentacionAlumno
 from app.models.suscripcion import Suscripcion
+from app.models.transaccion_financiera import TransaccionFinanciera
 from app.models.usuario import Usuario
 from app.services.rms_service import mejor_rm_por_movimiento
 from app.utils.santiago import SANTIAGO, ahora_santiago, hoy_santiago
@@ -86,6 +94,10 @@ from shared.estados import ESTADOS_SUSCRIPCION_NUNCA_VIGENTES
 HORAS_CANCELACION_TARDIA: Final[int] = 6
 # Un pedido del Bazar cuenta como plata cobrada sólo en estos estados.
 ESTADOS_PAGO_BAZAR: Final[tuple] = ("validado", "entregado")
+# Tipos de una transacción financiera y su efecto en "lo que se pagó": el ingreso suma y una
+# devolución (egreso) resta. Cualquier otro tipo no mueve la aguja (se ignora, no se adivina).
+TIPO_INGRESO: Final[str] = "ingreso"
+TIPO_EGRESO: Final[str] = "egreso"
 # Meses que viajan en `por_mes` (el historial completo sigue en `items`).
 MESES_EN_PAYLOAD: Final[int] = 12
 
@@ -218,15 +230,21 @@ def _paginado(items: list, pagina: int, por_pagina: int) -> dict:
 
 
 def secciones_disponibles() -> list:
-    """El menú de pestañas del panel (con las reservadas marcadas como no disponibles)."""
+    """El menú de pestañas del panel: SÓLO las secciones listas para usarse.
+
+    Las reservadas (`SECCIONES_RESERVADAS`, hoy `beneficios`) no se anuncian: una pestaña
+    deshabilitada con "llega más adelante" es ruido y una promesa que el alumno no pidió. El id
+    sigue siendo válido (Fase 2 de Fidelización), así que el filtro es de MENÚ, no de servicio.
+    """
     return [
         {
             "id": sid,
             "label": label,
-            "disponible": sid not in SECCIONES_RESERVADAS,
-            "motivo": MOTIVO_BENEFICIOS if sid in SECCIONES_RESERVADAS else None,
+            "disponible": True,
+            "motivo": None,
         }
         for sid, label in SECCIONES
+        if sid not in SECCIONES_RESERVADAS
     ]
 
 
@@ -475,11 +493,57 @@ def _seccion_membresias(db, alumno, tenant_id, pagina, por_pagina, **_kw) -> dic
 
 
 # ── Pagos (membresías + Bazar) ────────────────────────────────────────────────
+# La referencia con la que se ata una transacción financiera a una suscripción (mismo valor que
+# escriben `suscripciones.py` y `solicitudes_planes.py` al cobrar).
+REFERENCIA_SUSCRIPCION: Final[str] = "suscripcion"
+
+
+def signo_transaccion(tipo) -> int:
+    """Cuánto mueve una transacción financiera en "lo que se pagó": +1 ingreso, -1 devolución.
+
+    Un `tipo` desconocido devuelve 0: no se adivina a favor ni en contra del alumno.
+    """
+    if tipo == TIPO_INGRESO:
+        return 1
+    if tipo == TIPO_EGRESO:
+        return -1
+    return 0
+
+
+def monto_cobrado(transacciones) -> int:
+    """Lo REALMENTE cobrado por una membresía: sus ingresos menos sus devoluciones (regla 4).
+
+    Es la razón por la que el historial no puede usar el precio de lista: con un descuento (o
+    con un reembolso) el precio de lista miente sobre lo que entró a la caja del box.
+    """
+    return sum(signo_transaccion(t.tipo) * round(t.monto or 0) for t in transacciones)
+
+
+def _transacciones_por_suscripcion(db: Session, tenant_id: int, ids) -> dict:
+    """`{suscripcion_id: [TransaccionFinanciera]}` en UNA query (nada de N+1 por membresía)."""
+    ids = [i for i in ids if i is not None]
+    if not ids:
+        return {}
+    filas = (
+        db.query(TransaccionFinanciera)
+        .filter(TransaccionFinanciera.tenant_id == tenant_id,
+                TransaccionFinanciera.referencia_tipo == REFERENCIA_SUSCRIPCION,
+                TransaccionFinanciera.referencia_id.in_(ids))
+        .order_by(TransaccionFinanciera.fecha, TransaccionFinanciera.id)
+        .all()
+    )
+    por_suscripcion = {}
+    for tx in filas:
+        por_suscripcion.setdefault(tx.referencia_id, []).append(tx)
+    return por_suscripcion
+
+
 def _items_pagos(db: Session, alumno_id: int, tenant_id: int) -> list:
-    """Membresías + Bazar, del más nuevo al más viejo (regla 4).
+    """Membresías (por lo COBRADO, regla 4) + Bazar, del más nuevo al más viejo.
 
     `fecha` es SIEMPRE `date`: mezclar `datetime` y `date` en el mismo `sort` es un TypeError
-    en Python (y `fecha_pedido`/`fecha_inicio` son timestamptz).
+    en Python (y `fecha_pedido`/`fecha_inicio` son timestamptz). La fecha del pago de una
+    membresía es el INICIO de la membresía (el monto, en cambio, es el de sus transacciones).
     """
     items = []
 
@@ -490,15 +554,26 @@ def _items_pagos(db: Session, alumno_id: int, tenant_id: int) -> list:
                 Suscripcion.usuario_id == alumno_id)
         .all()
     )
-    for suscripcion, plan in filas:
-        if suscripcion.estado in ESTADOS_SUSCRIPCION_NUNCA_VIGENTES:
-            continue        # nunca contó: no es un pago (ni un mes con plan)
+    contaron = [(s, p) for s, p in filas
+                if s.estado not in ESTADOS_SUSCRIPCION_NUNCA_VIGENTES]
+    transacciones = _transacciones_por_suscripcion(
+        db, tenant_id, [s.id for s, _ in contaron])
+
+    for suscripcion, plan in contaron:
+        # Nunca contó (pendiente/rechazado) => no es un pago ni un mes con plan.
+        txs = transacciones.get(suscripcion.id, [])
+        cobrado = monto_cobrado(txs)
+        lista = round(plan.precio_clp or 0)
         items.append({
             "tipo": "membresia",
             "referencia_id": suscripcion.id,
             "fecha": fecha_chile(suscripcion.fecha_inicio),
             "detalle": plan.nombre,
-            "monto_clp": plan.precio_clp,
+            "monto_clp": cobrado,
+            # Lo que VALE el plan, para que el descuento se vea sin inventar un número.
+            "precio_lista_clp": lista,
+            "descuento_clp": max(0, lista - cobrado),
+            "transacciones": len(txs),
             "estado": _valor(suscripcion.estado),
         })
 
@@ -517,6 +592,10 @@ def _items_pagos(db: Session, alumno_id: int, tenant_id: int) -> list:
             "fecha": fecha_chile(pedido.fecha_pedido),
             "detalle": f"{pedido.cantidad or 1}x {producto or 'producto'}",
             "monto_clp": round(pedido.total or 0),
+            # El Bazar ya se cobra por su total real: no tiene precio de lista ni descuento.
+            "precio_lista_clp": None,
+            "descuento_clp": 0,
+            "transacciones": None,
             "estado": pedido.estado,
         })
 
@@ -529,6 +608,7 @@ def _seccion_pagos(db, alumno, tenant_id, pagina, por_pagina, **_kw) -> dict:
 
     membresias = sum(i["monto_clp"] for i in items if i["tipo"] == "membresia")
     bazar = sum(i["monto_clp"] for i in items if i["tipo"] == "bazar")
+    descuentos = sum(i["descuento_clp"] for i in items)
 
     por_anio = {}
     for item in items:
@@ -545,6 +625,7 @@ def _seccion_pagos(db, alumno, tenant_id, pagina, por_pagina, **_kw) -> dict:
             "total_clp": membresias + bazar,
             "membresias_clp": membresias,
             "bazar_clp": bazar,
+            "descuentos_clp": descuentos,
             "pagos": len(items),
             "ultimo_pago": items[0]["fecha"] if items else None,
         },

@@ -6,17 +6,19 @@ El panel del Historial es el ÚNICO lugar donde el alumno y el box ven sus núme
 (asistencia, plata, membresías, RMs). Este test fija esas reglas y, sobre todo, el dinero de
 las cancelaciones:
 
-  A. PURAS (sin BD): los 5 estados de una reserva, el corte de las 6 h, "mes con plan", la
-     paginación y el menú de secciones. Es lo que no puede cambiar sin un negocio distinto.
+  A. PURAS (sin BD): los 5 estados de una reserva, el corte de las 6 h, "mes con plan", el
+     dinero de las transacciones (lo cobrado vs. el precio de lista), la paginación y el menú
+     de secciones. Es lo que no puede cambiar sin un negocio distinto.
   B. SECCIONES contra TEST (in-process): la envoltura, el paginado, que `rms` devuelva LO MISMO
      que `rms_service` y que la privacidad del alumno (`incluir_privado=False`) no exponga la
      gestión del box.
   C. CASO ARMADO (escribe y RESTAURA): un alumno temporal con dos membresías que cuentan (una
-     vencida y una vigente) y una que no (pendiente), un pedido del Bazar validado y uno
-     pendiente, las 5 formas de una reserva y una clase suspendida por el box. Fija el total
-     pagado, el % de asistencia (la cancelación TARDE cuenta como falta) y el promedio semanal,
-     y compara "mes con plan" contra el predicado SQL compartido (`sql_suscripcion_vigente`).
-     Al final borra todo lo que creó.
+     vencida y una vigente) y una que no (pendiente), sus transacciones reales (la vencida
+     cobrada al precio de lista y con una devolución anotada; la vigente con descuento), un
+     pedido del Bazar validado y uno pendiente, las 5 formas de una reserva y una clase
+     suspendida por el box. Fija el total pagado, el % de asistencia (la cancelación TARDE
+     cuenta como falta) y el promedio semanal, y compara "mes con plan" contra el predicado SQL
+     compartido (`sql_suscripcion_vigente`). Al final borra todo lo que creó.
 
 No usa el servidor: habla con la MISMA rama TEST por `SessionLocal` (igual que la parte
 in-process de `test_bi_mrr_vivo.py`). El guard `is_test_db_url` falla CERRADO: si el proceso no
@@ -182,15 +184,22 @@ def test_a4_mes_con_plan_lo_deciden_las_fechas_y_el_estado():
     assert svc.suscripcion_del_mes([primero, segundo], 2026, 3) is segundo
 
 
-def test_a5_el_menu_de_secciones_tiene_6_y_beneficios_reservada():
+def test_a5_el_menu_de_secciones_no_anuncia_beneficios():
+    """5 pestañas, no 6: `beneficios` existe (Fase 2 de Fidelización) pero NO se anuncia.
+
+    Una pestaña deshabilitada con "llega más adelante" es ruido para el alumno; el id sigue
+    siendo válido para cuando la sección tenga contenido.
+    """
     secciones = svc.secciones_disponibles()
 
     assert [s["id"] for s in secciones] == ["resumen", "asistencia", "pagos",
-                                            "membresias", "rms", "beneficios"]
-    assert sum(1 for s in secciones if s["disponible"]) == 5
-    reservada = secciones[-1]
-    assert reservada["id"] == "beneficios" and reservada["disponible"] is False
-    assert "Fase 2" in reservada["motivo"]
+                                            "membresias", "rms"]
+    assert all(s["disponible"] is True and s["motivo"] is None for s in secciones)
+    assert "beneficios" not in [s["id"] for s in secciones]
+    # Reservada != borrada: el id es válido y el servicio la sigue resolviendo.
+    assert svc.SECCIONES_RESERVADAS == ("beneficios",)
+    assert "beneficios" in dict(svc.SECCIONES)
+    assert svc.normalizar_seccion("beneficios") == "beneficios"
 
 
 def test_a6_paginado_y_seccion_normalizada():
@@ -202,6 +211,25 @@ def test_a6_paginado_y_seccion_normalizada():
     assert svc._paginado(items, 9, 10)["items"] == []
     assert svc.normalizar_seccion("no_existe") == svc.DEFAULT_SECCION
     assert svc.normalizar_seccion("pagos") == "pagos"
+
+
+def test_a7_lo_cobrado_son_las_transacciones_no_el_precio_de_lista():
+    """Regla 4, en puro: ingreso suma, devolución resta y un tipo raro no mueve la aguja."""
+    def tx(tipo, monto):
+        return SimpleNamespace(tipo=tipo, monto=monto)
+
+    # Una membresía sin transacciones se cobró $0 (no el precio de lista del plan).
+    assert svc.monto_cobrado([]) == 0
+    assert svc.monto_cobrado([tx("ingreso", 33000)]) == 33000
+    # Un descuento es un ingreso MENOR: el número sale de la transacción, no del plan.
+    assert svc.monto_cobrado([tx("ingreso", 28000)]) == 28000
+    # Devolución (egreso) y renovación (dos ingresos) del mismo mes.
+    assert svc.monto_cobrado([tx("ingreso", 33000), tx("egreso", 3000)]) == 30000
+    assert svc.monto_cobrado([tx("ingreso", 20000), tx("ingreso", 15000)]) == 35000
+    # Un tipo desconocido se ignora y un monto NULL no rompe el cálculo.
+    assert svc.monto_cobrado([tx("ajuste", 999), tx("ingreso", None)]) == 0
+    assert (svc.signo_transaccion("ingreso"), svc.signo_transaccion("egreso"),
+            svc.signo_transaccion("otro")) == (1, -1, 0)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -226,7 +254,8 @@ def test_b1_la_envoltura_es_la_misma_en_las_6_secciones(db, alumno_test):
         assert set(panel) == {"alumno", "seccion", "secciones", "incluye_privado", "datos"}
         assert panel["seccion"] == seccion
         assert panel["alumno"]["id"] == alumno_test
-        assert len(panel["secciones"]) == 6
+        # Las secciones existen las 6, pero el MENÚ sólo anuncia las 5 listas (regla 7).
+        assert len(panel["secciones"]) == 5
         assert isinstance(panel["datos"], dict)
 
 
@@ -295,7 +324,12 @@ def test_b6_la_gestion_del_box_no_viaja_al_alumno(db, alumno_test):
 # ══════════════════════════════════════════════════════════════════════════════
 # C. Caso armado (escribe en TEST y RESTAURA al final)
 # ══════════════════════════════════════════════════════════════════════════════
-PRECIO_PLAN = 33000
+PRECIO_PLAN = 33000            # precio de lista del plan del caso armado
+COBRADO_VIGENTE = 28000        # la membresía vigente se cobró CON descuento
+DEVOLUCION_VENCIDA = 3000      # a la vencida se le anotó una devolución (egreso)
+COBRADO_VENCIDA = PRECIO_PLAN - DEVOLUCION_VENCIDA
+COBRADO_MEMBRESIAS = COBRADO_VENCIDA + COBRADO_VIGENTE
+DESCUENTOS = (PRECIO_PLAN - COBRADO_VENCIDA) + (PRECIO_PLAN - COBRADO_VIGENTE)
 BAZAR_VALIDADO = 12500
 BAZAR_PENDIENTE = 9999
 
@@ -325,7 +359,7 @@ def escenario(db):
     if not (horario and disciplina and producto):
         pytest.skip("TEST no tiene horario base / disciplina / producto para el caso armado")
 
-    clases, alumno_id, plan_id = [], None, None
+    clases, alumno_id, plan_id, suscripciones_ids = [], None, None, []
     sufijo = f"{datetime.now():%Y%m%d%H%M%S}"
     mes_actual = (hoy.year, hoy.month)
     mes_2atras = _mes_menos(*mes_actual, 2)
@@ -365,14 +399,31 @@ def escenario(db):
             (date(mes_actual[0], mes_actual[1], 1), hoy + timedelta(days=10), "activo"),
             (hoy - timedelta(days=5), hoy + timedelta(days=25), "pendiente"),
         ):
-            db.execute(text("""
+            suscripciones_ids.append(db.execute(text("""
                 INSERT INTO suscripciones (tenant_id, usuario_id, plan_id, estado,
                                            creditos_totales, creditos_disponibles,
                                            fecha_inicio, fecha_expiracion)
-                VALUES (:t, :u, :p, CAST(:e AS estado_suscripcion), 12, 3, :i, :f)"""),
+                VALUES (:t, :u, :p, CAST(:e AS estado_suscripcion), 12, 3, :i, :f)
+                RETURNING id"""),
                 {"t": TENANT_ID, "u": alumno_id, "p": plan_id, "e": estado,
                  "i": datetime.combine(desde, time(12, 0), tzinfo=SANTIAGO),
-                 "f": datetime.combine(hasta, time(12, 0), tzinfo=SANTIAGO)})
+                 "f": datetime.combine(hasta, time(12, 0), tzinfo=SANTIAGO)}).scalar())
+
+        # El dinero que entró (regla 4): la VENCIDA se cobró al precio de lista y después se le
+        # anotó una devolución; la VIGENTE se cobró con descuento; la PENDIENTE no tiene NINGUNA
+        # transacción porque nunca se cobró. Este es el caso que el precio de lista no puede
+        # representar.
+        for indice, monto, tipo in ((0, PRECIO_PLAN, "ingreso"),
+                                    (0, DEVOLUCION_VENCIDA, "egreso"),
+                                    (1, COBRADO_VIGENTE, "ingreso")):
+            db.execute(text("""
+                INSERT INTO transacciones_financieras (tenant_id, tipo, categoria, monto,
+                                                       descripcion, referencia_tipo,
+                                                       referencia_id, fecha)
+                VALUES (:t, :tp, 'membresia', :m, 'Cobro caso armado del historial',
+                        'suscripcion', :r, :f)"""),
+                {"t": TENANT_ID, "tp": tipo, "m": monto, "r": suscripciones_ids[indice],
+                 "f": hoy - timedelta(days=30)})
 
         # Bazar: uno validado (cuenta como plata) y uno pendiente (no).
         for estado, total in (("validado", BAZAR_VALIDADO), ("pendiente", BAZAR_PENDIENTE)):
@@ -403,10 +454,15 @@ def escenario(db):
 
         db.commit()
         yield {"alumno_id": alumno_id, "hoy": hoy, "sufijo": sufijo,
-               "mes_2atras": mes_2atras}
+               "mes_2atras": mes_2atras, "suscripciones": suscripciones_ids}
     finally:
         db.rollback()
         try:
+            if suscripciones_ids:
+                db.execute(text("DELETE FROM transacciones_financieras "
+                                "WHERE referencia_tipo = 'suscripcion' "
+                                "AND referencia_id = ANY(:ids)"),
+                           {"ids": suscripciones_ids})
             db.execute(text("DELETE FROM reservas WHERE alumno_id = :a"), {"a": alumno_id})
             db.execute(text("DELETE FROM pedidos WHERE alumno_id = :a"), {"a": alumno_id})
             db.execute(text("DELETE FROM suscripciones WHERE usuario_id = :a"), {"a": alumno_id})
@@ -453,17 +509,39 @@ def test_b8_el_endpoint_de_rms_ignora_el_tenant_del_query_param(db, alumno_test)
     assert [r.id for r in mio] == [r.id for r in ajeno]
 
 
-def test_c1_el_dinero_pagado_suma_membresias_y_bazar(db, escenario):
-    """Membresías VENCIDA + VIGENTE (×2) más el pedido validado; la pendiente y el pedido
-    pendiente NO son plata."""
+def test_c1_el_dinero_pagado_sale_de_las_transacciones_reales(db, escenario):
+    """Membresías: lo COBRADO (vencida = lista menos su devolución; vigente = con descuento),
+    NO el precio de lista; la membresía pendiente y el pedido pendiente no son plata."""
     datos = svc.panel(db, escenario["alumno_id"], TENANT_ID, seccion="pagos")["datos"]
     totales = datos["totales"]
 
-    assert totales["membresias_clp"] == 2 * PRECIO_PLAN
+    assert totales["membresias_clp"] == COBRADO_MEMBRESIAS
+    assert totales["descuentos_clp"] == DESCUENTOS
     assert totales["bazar_clp"] == BAZAR_VALIDADO
-    assert totales["total_clp"] == 2 * PRECIO_PLAN + BAZAR_VALIDADO
+    assert totales["total_clp"] == COBRADO_MEMBRESIAS + BAZAR_VALIDADO
     assert totales["pagos"] == 3
+    # El precio de lista NO se cuela en el total (2 x PRECIO_PLAN sería otra cifra).
+    assert totales["membresias_clp"] != 2 * PRECIO_PLAN
     assert [i["tipo"] for i in datos["items"]] == ["bazar", "membresia", "membresia"]
+
+    vigente, vencida = [i for i in datos["items"] if i["tipo"] == "membresia"]
+    assert (vencida["monto_clp"], vencida["precio_lista_clp"], vencida["descuento_clp"],
+            vencida["transacciones"]) == (COBRADO_VENCIDA, PRECIO_PLAN,
+                                          DEVOLUCION_VENCIDA, 2), \
+        "la devolución (egreso) tiene que restar y contar como transacción"
+    assert (vigente["monto_clp"], vigente["precio_lista_clp"], vigente["descuento_clp"],
+            vigente["transacciones"]) == (COBRADO_VIGENTE, PRECIO_PLAN,
+                                          PRECIO_PLAN - COBRADO_VIGENTE, 1), \
+        "el descuento se ve en precio_lista_clp, pero se cobra lo que dice la transacción"
+    # El Bazar ya viene por su total real: no tiene precio de lista ni descuento.
+    bazar = datos["items"][0]
+    assert (bazar["monto_clp"], bazar["precio_lista_clp"],
+            bazar["descuento_clp"]) == (BAZAR_VALIDADO, None, 0)
+
+    # La suscripción que NUNCA estuvo vigente no aparece como pago (ni con $0).
+    cobradas = {i["referencia_id"] for i in datos["items"] if i["tipo"] == "membresia"}
+    assert cobradas == set(escenario["suscripciones"][:2])
+    assert escenario["suscripciones"][2] not in cobradas
 
 
 def test_c2_los_5_estados_el_pct_y_el_promedio_semanal(db, escenario):
@@ -544,6 +622,6 @@ def test_c4_el_alumno_ve_sus_numeros_sin_la_gestion_del_box(db, escenario):
     assert "gestion" not in datos
     assert datos["asistencia"]["pct_asistencia"] == 33
     assert datos["membresia"]["meses_con_plan"] >= 2
-    assert datos["pagos"]["total_clp"] == 2 * PRECIO_PLAN + BAZAR_VALIDADO
+    assert datos["pagos"]["total_clp"] == COBRADO_MEMBRESIAS + BAZAR_VALIDADO
     assert datos["membresia"]["actual"]["plan"].startswith("Plan Historial TEST")
     assert datos["asistencia"] == de_staff["datos"]["asistencia"]
