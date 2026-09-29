@@ -193,6 +193,9 @@ ESTADOS_USUARIO = ("activo", "pendiente_activacion", "rechazado", "baja")
 ESTADOS_SUSCRIPCION = ("pendiente", "activo", "vencido", "rechazado")
 ESTADO_RESERVA_VIVA = "confirmada"       # lo que escribe la app al reservar
 ESTADO_RESERVA_CANCELADA = "cancelled"   # shared.estados.ESTADO_CANCELADO
+# La MISMA lista de canceladas que usa el job (`sql_viva()` = `NOT IN (ESTADOS_CANCELADA)`):
+# la app escribe `cancelled` y la base vieja tiene `cancelada`.
+ESTADOS_RESERVA_CANCELADA = (ESTADO_RESERVA_CANCELADA, "cancelada")
 ASISTENCIA_VIA = "batch"                 # vía de la app que deja marcada_por
 
 
@@ -1413,9 +1416,20 @@ def leer_entradas(db, env: dict, hoy: date, dias_futuro: int) -> dict:
     El seed NUNCA toca `horarios`, `disciplinas`, `planes` ni `coach_disciplinas`: son
     la realidad del box. Si falta lo mínimo (sin horarios activos, sin coaches en una
     disciplina que los exige, sin planes de pago) se aborta antes de calcular nada.
+
+    Dos reglas que hacen que el plan sea el MISMO con y sin un seed anterior:
+
+    * `clases` del seed (marcadas con `MARCA_TS`) **no son reales**: el recambio las borra
+      después de calcular el plan, así que un id suyo no puede entrar al plan (el INSERT de
+      reservas fallaba con FK) ni la agenda del box puede contarlas.
+    * `asistentes_confirmados` de las clases reales **no se lee**: el aforo base es el conteo de
+      sus reservas VIVAS sin las de los alumnos del seed, que es exactamente el valor que deja
+      el borrado al recalcular. Leer la columna dejaría el aforo inflado con el seed viejo
+      (A.2(a) y paso 9 con miles de filas para resincronizar).
     """
     HorarioBase, Clase, Disciplina = env["HorarioBase"], env["Clase"], env["Disciplina"]
     CoachDisciplina, Usuario, Plan = env["CoachDisciplina"], env["Usuario"], env["Plan"]
+    Reserva = env["Reserva"]
     inicio = hoy - timedelta(days=DIAS_VENTANA)
     fin = hoy + timedelta(days=dias_futuro)
 
@@ -1429,14 +1443,24 @@ def leer_entradas(db, env: dict, hoy: date, dias_futuro: int) -> dict:
 
     disc = {d.id: {"nombre": d.nombre, "requiere_coach": bool(d.requiere_coach)}
             for d in db.query(Disciplina).filter(Disciplina.tenant_id == TENANT_ID).all()}
+
+    from sqlalchemy import func, or_, true
+    ids_demo = [fila[0] for fila in db.query(Usuario.id).filter(
+        Usuario.correo.like(f"{PREFIJO_CORREO}%{DOMINIO_CORREO}")).all()]
+    sin_demo = ~Reserva.alumno_id.in_(ids_demo) if ids_demo else true()
+    base_por_clase = dict(db.query(Reserva.clase_id, func.count()).filter(
+        Reserva.estado.notin_(ESTADOS_RESERVA_CANCELADA), sin_demo
+    ).group_by(Reserva.clase_id).all())
+
     clases_reales = [{"id": c.id, "fecha": c.fecha, "horario_base_id": c.horario_base_id,
                       "disciplina_id": c.disciplina_id, "hora_inicio": c.hora_inicio,
                       "hora_fin": c.hora_fin, "cupo_maximo": c.cupo_maximo,
                       "cancelada": bool(c.cancelada),
-                      "asistentes_confirmados": int(c.asistentes_confirmados or 0)}
+                      "asistentes_confirmados": int(base_por_clase.get(c.id, 0))}
                      for c in db.query(Clase).filter(
                          Clase.tenant_id == TENANT_ID, Clase.fecha >= inicio,
-                         Clase.fecha <= fin).all()]
+                         Clase.fecha <= fin,
+                         or_(Clase.created_at.is_(None), Clase.created_at != MARCA_TS)).all()]
 
     coaches = defaultdict(list)
     for cd in db.query(CoachDisciplina).join(
@@ -1504,6 +1528,25 @@ def limpiar_previos(db, env: dict) -> dict:
         sys.path.insert(0, ruta)
     borrar = importlib.import_module("borrar_seed_anual")
     return borrar.borrar_en_transaccion(db, env, tenant_id=TENANT_ID)
+
+
+def filas_clases_seed(plan: dict) -> list:
+    """Payload del INSERT de las clases NUEVAS del seed (única fuente de esas filas).
+
+    `asistentes_confirmados` va con el valor del PLAN (`aforo_base + reservas vivas`), no en 0:
+    si quedara en 0, el paso 9 del mantenimiento tendría que resincronizar miles de clases y la
+    detección **A.2(a)** se dispararía (y con ella `MAX_CIERRE`). El invariante 4 de §2 se
+    verifica dos veces: en memoria (`validar_plan`) y contra la base (`verificar_post`).
+    """
+    return [{
+        "tenant_id": TENANT_ID, "horario_base_id": c["horario_id"],
+        "coach_id": c["coach_id"], "disciplina_id": c["disciplina_id"],
+        "fecha": c["fecha"], "hora_inicio": c["hora_inicio"], "hora_fin": c["hora_fin"],
+        "cupo_maximo": c["cupo_maximo"], "cupo_original": c["cupo_original"],
+        "asistentes_confirmados": c["asistentes_confirmados"],
+        "cancelada": False, "wod_id": None,
+        "created_at": MARCA_TS, "updated_at": MARCA_TS,
+    } for c in plan["clases"] if c["seed"]]
 
 
 def escribir_plan(db, plan: dict, env: dict, hash_pwd: str) -> dict:
@@ -1574,14 +1617,7 @@ def escribir_plan(db, plan: dict, env: dict, hash_pwd: str) -> dict:
 
     # 4) clases del seed (marcadas con MARCA_TS) y mapa clave -> id (reales + seed)
     nuevas = [c for c in plan["clases"] if c["seed"]]
-    ids_clases = insertar(Clase, [{
-        "tenant_id": TENANT_ID, "horario_base_id": c["horario_id"],
-        "coach_id": c["coach_id"], "disciplina_id": c["disciplina_id"],
-        "fecha": c["fecha"], "hora_inicio": c["hora_inicio"], "hora_fin": c["hora_fin"],
-        "cupo_maximo": c["cupo_maximo"], "cupo_original": c["cupo_original"],
-        "asistentes_confirmados": 0, "cancelada": False, "wod_id": None,
-        "created_at": MARCA_TS, "updated_at": MARCA_TS,
-    } for c in nuevas], con_id=True)
+    ids_clases = insertar(Clase, filas_clases_seed(plan), con_id=True)
     id_de_clase = {c["clave"]: c["id_real"] for c in plan["clases"] if not c["seed"]}
     id_de_clase.update({c["clave"]: cid for c, cid in zip(nuevas, ids_clases)})
 

@@ -14,7 +14,7 @@ Es para la **demo de la defensa (6/10/2026)**: PROD todavía no tiene alumnos re
 | `scripts/seed_anual_prod.py` | genera e inserta el seed (idempotente, reversible) |
 | `scripts/borrar_seed_anual.py` | borra SÓLO las filas del seed (y opcionalmente el viejo) |
 | `scripts/README_seed_anual.md` | este documento |
-| `tests/test_seed_anual_prod.py` | 30 tests unitarios **sin base** (invariantes, guards, reversión) |
+| `tests/test_seed_anual_prod.py` | 32 tests unitarios **sin base** (invariantes, guards, reversión) |
 
 ---
 
@@ -133,6 +133,16 @@ Detalles que valen la pena:
   es la que escribe el paso 8.
 - **`tokens_gastados = 1`** siempre, igual que la app; A.3 lo ignora a propósito
   (documentado en el job).
+- **El aforo del plan es el que se ESCRIBE** (`filas_clases_seed`): las clases del seed nacen con
+  `asistentes_confirmados = aforo_base + reservas vivas`, no en 0. Con 0 el paso 9 tenía que
+  resincronizar miles de clases y A.2(a) disparaba el run en rojo (en TEST: 4.484).
+- **Sembrar dos veces sin borrar (recambio `RECICLAR`) calcula el MISMO plan**: `leer_entradas`
+  deja fuera las clases del seed (`created_at = MARCA_TS`) —sus ids desaparecen con el borrado,
+  que corre DESPUÉS del plan— y toma el aforo base de las reservas vivas **sin los alumnos
+  demo**, que es el valor que deja el borrado al recalcular.
+- **La red de verdad es `verificar_post`**: al final de cada corrida el seed corre el SQL del
+  propio mantenimiento (paso 8, paso 9 y A.3) contra Postgres y avisa `REVISAR` si algo no
+  cuadra. Así los dos errores de escritura de arriba se detectaron en la primera corrida real.
 
 ---
 
@@ -144,7 +154,7 @@ Detalles que valen la pena:
 ### Paso 1 — Tests y dry-run en TEST
 
 ```powershell
-py -3.12 -m pytest tests\test_seed_anual_prod.py -q      # 30 tests, sin base
+py -3.12 -m pytest tests\test_seed_anual_prod.py -q      # 32 tests, sin base
 $env:ENVIRONMENT="test"
 python3.12 scripts\seed_anual_prod.py --destino test --dry-run
 ```
@@ -294,7 +304,7 @@ por un cierre del mantenimiento en el medio.
 
 ```powershell
 cd backend
-py -3.12 -m pytest tests\test_seed_anual_prod.py -q      # 30 passed (sin base, sin red)
+py -3.12 -m pytest tests\test_seed_anual_prod.py -q      # 32 passed (sin base, sin red)
 ```
 
 ⚠️ Usar **`py -3.12`**: el `python` del PATH (3.13) no tiene pytest instalado (la misma
@@ -302,8 +312,9 @@ nota que en `maintenance/README.md`).
 
 Cubren, sin tocar ninguna base:
 
-- **Invariantes del plan** (`test_plan_cumple_todos_los_invariantes` + 12 tests de detalle:
-  aforo, `asistencia_marcada_at`, reservas futuras, coach, estados, una sola suscripción
+- **Invariantes del plan** (`test_plan_cumple_todos_los_invariantes` + 13 tests de detalle:
+  aforo, **que el aforo del plan sea el que se inserta** (`filas_clases_seed`),
+  `asistencia_marcada_at`, reservas futuras, coach, estados, una sola suscripción
   vigente, label de churn ⇔ BAJA, sin huérfanas ni duplicados, una asistencia por reserva
   asistida, una transacción por suscripción, reparto por día, **créditos contra A.3** y
   cancelaciones contra el corte de **6 h**).
@@ -312,7 +323,9 @@ Cubren, sin tocar ninguna base:
   ventana de ejecución con `destino="prod"` (día 1, 15 y 2026-09) y que la **misma fecha en
   TEST no bloquee** (`validar_ventana(..., "test")` + `main()` con `--destino test` y `prod`).
 - **Pureza del módulo**: `test_el_seed_no_importa_la_app_al_importarse` — importar el seed
-  no abre conexiones ni lee el `.env` (por eso se puede testear sin base).
+  no abre conexiones ni lee el `.env` (por eso se puede testear sin base), y
+  `test_leer_entradas_ignora_el_seed_anterior` fija las dos reglas que hacen que el recambio
+  `RECICLAR` calcule el mismo plan (sin clases del seed y con el aforo base sin demo).
 - **Reversión**: marcadores coherentes entre seed y borrado, filtros por defecto vs
   `--limpiar-viejo`, orden de `pasos_borrado()` y que la reversión deje el aforo de las
   clases reales **como estaba**.

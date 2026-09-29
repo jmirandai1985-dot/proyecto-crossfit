@@ -177,6 +177,23 @@ def test_aforo_es_reservas_vivas_mas_la_base(plan):
         assert clase["asistentes_confirmados"] <= clase["cupo_maximo"], "A.2(c) sobrecupo"
 
 
+def test_el_insert_de_clases_lleva_el_aforo_del_plan(plan):
+    """El aforo calculado en memoria tiene que LLEGAR a la base (paso 9 y A.2(a)).
+
+    Regresión: el INSERT escribía `asistentes_confirmados = 0`, así que en TEST el paso 9
+    encontraba 4.484 clases para resincronizar y A.2(a) se disparaba (run rojo).
+    """
+    filas = seed.filas_clases_seed(plan)
+    clases_seed = [c for c in plan["clases"] if c["seed"]]
+    assert len(filas) == len(clases_seed) > 0
+    for fila, clase in zip(filas, clases_seed):
+        assert fila["asistentes_confirmados"] == clase["asistentes_confirmados"]
+        assert fila["fecha"] == clase["fecha"]
+        assert fila["created_at"] == seed.MARCA_TS
+    assert any(f["asistentes_confirmados"] > 0 for f in filas)
+    assert all("id_real" not in f and "seed" not in f for f in filas), "columnas del plan"
+
+
 def test_reservas_pasadas_tienen_marcada_at_y_nunca_cierre(plan):
     """Paso 8 y A.4(b): ninguna reserva viva y vieja queda sin marcar."""
     corte = HOY - timedelta(days=seed.DIAS_CIERRE_MANTENIMIENTO)
@@ -511,6 +528,22 @@ def test_main_en_test_no_evalua_la_ventana(monkeypatch, capsys):
     assert seed.main(["--destino", "test", "--dry-run"]) == 1
     assert llamadas == ["SI QUIERO TEST", "preparar_entorno:test"]
     assert "no aplica en TEST" in capsys.readouterr().out
+
+
+def test_leer_entradas_ignora_el_seed_anterior():
+    """El plan tiene que ser el MISMO con y sin un seed previo (recambio `RECICLAR`).
+
+    El recambio borra DESPUÉS de calcular el plan, así que `leer_entradas` no puede traer las
+    clases del seed viejo (ids que ya no van a existir: el INSERT de reservas fallaba con FK) ni
+    leer su `asistentes_confirmados` inflado: el aforo base son las reservas vivas SIN las de
+    los alumnos demo, que es lo que deja el borrado al recalcular. Necesita base, así que se
+    verifica sobre el código (la red de verdad es `verificar_post`, que corre contra Postgres).
+    """
+    fuente = (SCRIPTS / "seed_anual_prod.py").read_text(encoding="utf-8")
+    cuerpo = fuente.split("def leer_entradas(")[1].split("\ndef ")[0]
+    assert "!= MARCA_TS" in cuerpo, "las clases del seed tienen que quedar fuera del plan"
+    assert "notin_(ESTADOS_RESERVA_CANCELADA)" in cuerpo and "PREFIJO_CORREO" in cuerpo
+    assert "c.asistentes_confirmados" not in cuerpo, "el aforo base no se lee de la columna"
 
 
 def test_el_seed_no_importa_la_app_al_importarse():

@@ -1428,10 +1428,14 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
   los desactiva Jebbus en la UI de n8n (el job nuevo no depende de n8n).
 - **Nota cruzada (2026-09-28, sólo documentación + scripts locales, nada de PROD):** para la demo
   del 6/10 se escribió el **seed anual** (`scripts/seed_anual_prod.py` + `scripts/borrar_seed_anual.py`
-  + `tests/test_seed_anual_prod.py` ⇒ **30 passed**). Está diseñado contra ESTAS detecciones y estos
+  + `tests/test_seed_anual_prod.py` ⇒ **32 passed**). Está diseñado contra ESTAS detecciones y estos
   pasos: con el seed adentro, `mantenimiento_cloud.py` en `DRY_RUN=1` tiene que dar **0 cambios y 0
   detecciones nuevas** (el único número que sube es **A.1(c)**, informativo, +300 usuarios
   `demo.prod.anual.N@example.com`). El único cambio que este README registra por eso es esta nota:
-  **no se tocó** ni un paso, ni una guarda, ni un umbral del mantenimiento. Detalle, plan de
+  **no se tocó** ni un paso, ni una guarda, ni un umbral del mantenimiento. La primera corrida real
+  en **TEST** (28/09, DRY_RUN=1 antes/después del seed) encontró y ya corrigió dos bugs de escritura
+  del seed —el aforo de sus propias clases iba en 0 y el recambio `RECICLAR` calculaba el plan con
+  las clases del seed viejo—: los dos se veían como **A.2(a) + `aforo_resync` del paso 9** con miles
+  de filas y como una FK violation, nunca como un cambio silencioso. Detalle, plan de
   ejecución y reversión: `scripts/README_seed_anual.md`.
 
