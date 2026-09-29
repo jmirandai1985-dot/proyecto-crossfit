@@ -252,7 +252,9 @@ def obtener_usuario(
 def listar_usuarios(
     response: Response,
     tenant_id: Optional[int] = None,
-    skip: int = 0,
+    # `skip` negativo: Postgres rechaza el OFFSET negativo ("OFFSET must not be
+    # negative") y el endpoint devolvia 500. Con ge=0 es 422 (error del cliente).
+    skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     activo: Optional[bool] = Query(None),
     rol: str = None,
@@ -271,6 +273,11 @@ def listar_usuarios(
     "Página X de Y" sin una segunda llamada y sin cambiar el contrato (la respuesta
     sigue siendo la lista de usuarios).
 
+    Contrato estable (compatibilidad con los consumidores existentes: Coaches.jsx,
+    ModalClase.jsx, `paso1.py`): la respuesta es SIEMPRE la lista; `limit` default
+    100 y tope 1000; `X-Total-Count` lleva el total del padron SIN paginar.
+    `skip` mas alla del ultimo resultado NO es un error: 200 + lista vacia + total.
+
     `buscar` es server-side a propósito: con paginación real, filtrar en el cliente
     sólo alcanzaría a la página actual.
     """
@@ -288,7 +295,7 @@ def listar_usuarios(
     if rol is not None:
         query = query.filter(Usuario.rol == rol)
 
-    if buscar:
+    if buscar and buscar.strip():
         patron = f"%{buscar.strip()}%"
         query = query.filter(or_(Usuario.nombre.ilike(patron),
                                  Usuario.correo.ilike(patron)))

@@ -13,7 +13,7 @@ const Alumnos = () => {
     // PAGINACION REAL: el endpoint acepta limit/skip y devuelve el total (sin paginar)
     // en el header X-Total-Count. La busqueda tambien es server-side (`buscar`) porque
     // con paginacion, filtrar en el cliente solo alcanzaria la pagina actual.
-    const POR_PAGINA = 25;
+    const [porPagina, setPorPagina] = useState(25);
     const [pagina, setPagina] = useState(1);
     const [totalAlumnos, setTotalAlumnos] = useState(0);
     const [loading, setLoading] = useState(true);
@@ -53,17 +53,19 @@ const Alumnos = () => {
             const response = await api.get('/api/v1/usuarios', {
                 params: {
                     rol: 'alumno',
-                    limit: POR_PAGINA,
-                    skip: (pagina - 1) * POR_PAGINA,
+                    limit: porPagina,
+                    skip: (pagina - 1) * porPagina,
                     buscar: searchTerm.trim() || undefined,
                 },
             });
             const lista = response.data || [];
             const total = Number(response.headers?.['x-total-count'] ?? 0);
-            // Si la pagina quedo vacia (p. ej. borraste el ultimo de la ultima pagina)
-            // se retrocede una en vez de mostrar una tabla vacia.
-            if (lista.length === 0 && pagina > 1 && total > 0) {
-                setPagina(pagina - 1);
+            // Si la pagina pedida quedo FUERA DE RANGO (p. ej. borraste el ultimo de
+            // la ultima pagina, o el patron de busqueda encogio el total) se
+            // retrocede al ultimo tramo valido en vez de mostrar una tabla vacia.
+            const paginasServidor = Math.max(1, Math.ceil(total / porPagina));
+            if (pagina > paginasServidor) {
+                setPagina(paginasServidor);
                 return;
             }
             setAlumnos(lista);
@@ -82,7 +84,7 @@ const Alumnos = () => {
     useEffect(() => {
         const timer = setTimeout(fetchAlumnos, searchTerm ? 350 : 0);
         return () => clearTimeout(timer);
-    }, [tenant_id, pagina, searchTerm]);
+    }, [tenant_id, pagina, searchTerm, porPagina]);
 
     useEffect(() => {
         const fetchSuscripciones = async () => {
@@ -109,9 +111,9 @@ const Alumnos = () => {
     }, [tenant_id]);
 
     // La busqueda y el total los resuelve el backend (server-side).
-    const totalPaginas = Math.max(1, Math.ceil(totalAlumnos / POR_PAGINA));
-    const desde = totalAlumnos === 0 ? 0 : (pagina - 1) * POR_PAGINA + 1;
-    const hasta = (pagina - 1) * POR_PAGINA + alumnos.length;
+    const totalPaginas = Math.max(1, Math.ceil(totalAlumnos / porPagina));
+    const desde = totalAlumnos === 0 ? 0 : (pagina - 1) * porPagina + 1;
+    const hasta = (pagina - 1) * porPagina + alumnos.length;
 
     // Badge del estado REAL del registro. `estado` es la fuente de verdad (el flag
     // `activo` es derivado y el backend garantiza que no se desincronicen).
@@ -212,7 +214,10 @@ const Alumnos = () => {
         if (!window.confirm(`¿Estás seguro de eliminar a ${alumno.nombre}?`)) return;
         try {
             await api.delete(`/api/v1/usuarios/${alumno.id}`);
-            setAlumnos(alumnos.filter((a) => a.id !== alumno.id));
+            // Refetch (no un filtro local): el total del padron y el tramo
+            // "Mostrando A-B de N" los manda el servidor; filtrar en el cliente
+            // dejaria el pie mintiendo y la pagina con una fila de menos.
+            await fetchAlumnos();
         } catch (error) {
             console.error('Error al eliminar alumno:', error);
             alert('Error al eliminar: ' + (error.response?.data?.detail || 'Intenta nuevamente'));
@@ -360,6 +365,19 @@ const Alumnos = () => {
                                 : <>Mostrando <span className="font-bold text-zinc-100">{desde}-{hasta}</span> de <span className="font-bold text-zinc-100">{totalAlumnos}</span>{searchTerm ? ' (búsqueda)' : ' alumnos'}</>}
                         </p>
                         <div className="flex items-center gap-2">
+                            <label className="flex items-center gap-1 text-sm text-zinc-400">
+                                Por página
+                                <select
+                                    data-testid="por-pagina"
+                                    value={porPagina}
+                                    onChange={(e) => { setPorPagina(Number(e.target.value)); setPagina(1); }}
+                                    className="px-2 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm"
+                                >
+                                    <option value={25}>25</option>
+                                    <option value={50}>50</option>
+                                    <option value={100}>100</option>
+                                </select>
+                            </label>
                             <button
                                 data-testid="pagina-anterior"
                                 onClick={() => setPagina(p => Math.max(1, p - 1))}

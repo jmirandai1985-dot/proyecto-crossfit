@@ -99,3 +99,69 @@ ALL TESTS PASSED
 - ⬜ Eliminar `_loadtest_100_alumnos.py` tras revisión (script temporal)
 
 ### SIN COMMIT — esperando decisión del usuario
+
+---
+
+## 2026-09-28 — /admin/alumnos: paginación sobre TODO el padrón, verificada en TEST (415 alumnos del seed)
+
+### Hallazgo de auditoría revisado
+"`/admin/alumnos` trunca a 100 sin avisar". Estado REAL al abrir la tarea:
+
+- El endpoint **ya** tenía paginación (`limit`/`skip` + header `X-Total-Count`) y
+  `buscar` server-side desde el commit `0043232` (23/09), y la pantalla **ya** usaba
+  ambos (25 por página, pie "Mostrando A-B de N", `data-testid="rango-alumnos"`,
+  `expose_headers` en CORS). Lo del commit `17f0145` (aviso "Mostrando 100 de N") quedó
+  obsoleto con ese cambio.
+- Lo que faltaba de verdad: **(a)** tests del contrato, **(b)** el pie quedaba
+  desincronizado al eliminar (filtro local en vez de refetch), **(c)** sin clamp si la
+  página pedida quedaba fuera de rango, **(d)** `skip` negativo devolvía **500** de
+  Postgres (`OFFSET must not be negative`), **(e)** `buscar="   "` armaba `%%`.
+
+### Consumidores del endpoint (verificados antes de tocar nada)
+`frontend/src/pages/admin/Alumnos.jsx` (paginado), `Coaches.jsx` y `ModalClase.jsx`
+(`?rol=coach` sin paginar), `backend/paso1.py`, `backend/test_nivel.py`,
+`tests/test_panel_admin.py::test_a10_listar_usuarios_serializable`.
+Todos dependen de: (1) la respuesta es una **lista**, (2) `limit` default **100**, (3)
+`rol`/`activo`/`estado` siguen filtrando. El contrato no cambió.
+
+### Cambios
+- `backend/app/api/v1/usuarios.py`: `skip` con `ge=0` (422 en vez de 500); `buscar`
+  vacío o solo espacios se ignora; docstring con el contrato completo.
+- `frontend/src/pages/admin/Alumnos.jsx`: clamp al último tramo válido si la página
+  pedida ya no existe; refetch tras eliminar; selector "Por página" (25/50/100).
+- `backend/tests/test_usuarios_paginacion.py` (**NUEVO**, 13 tests, solo GET).
+
+### Medición en TEST (branch `ep-jolly-butterfly-b6ty2z89`, datos del seed: 415 alumnos)
+API (`GET /api/v1/usuarios/`):
+```
+página 1 (limit=25&skip=0)  -> 25 filas · X-Total-Count=415 -> 17 páginas
+                               pie: 'Mostrando 1-25 de 415 alumnos' · 'Página 1 de 17'
+página 2 (skip=25)          -> 'Mostrando 26-50 de 415 alumnos' (el total no cambia)
+última página (skip=400)    -> 15 filas -> 'Mostrando 401-415 de 415'
+skip=440 (fuera de rango)   -> HTTP 200 · [] · X-Total-Count=415
+skip=-1                     -> HTTP 422 (antes: 500 de Postgres)
+buscar=demo.prod.anual.300@example.com  (vive en la página 17, id=1438)
+                            -> HTTP 200 · 1 resultado · está en la lista: True
+buscar=<fragmento en minúsculas> -> 15 resultados, objetivo presente (ILIKE)
+buscar=zzz-no-existe-zzz    -> 0 -> pie 'Sin resultados'
+CORS (Origin 5173)          -> access-control-expose-headers: X-Total-Count
+?rol=coach (sin paginar)    -> lista · 3 filas · default limit=100 (compatibilidad)
+```
+UI real (Edge headless + CDP, `frontend/scripts/click-test.mjs`, `TEST_URL=/admin/alumnos`):
+```
+render inicial        -> 'Mostrando 1-25 de 415 alumnos'            (0 errores de consola)
+click "Siguiente"     -> 'Mostrando 26-50 de 415 alumnos'
+tipear el correo del alumno de la página 17 -> 'Mostrando 1-1 de 1 (búsqueda)' + fila visible
+"Por página" = 50     -> 'Mostrando 1-50 de 415 alumnos'
+```
+
+### Tests
+```
+py -3.12 -m pytest tests/test_seed_anual_prod.py tests/test_mantenimiento_cloud.py tests/test_usuarios_paginacion.py -q
+172 passed, 4 warnings in 93.33s        (159 previos + 13 nuevos)
+```
+⚠️ **NO** se corrió `run_tests.bat` / `_run_tests_orchestrator.py`: `run_setup_test_db.py`
+hace `DROP SCHEMA public CASCADE` y borraría el seed de la demo en TEST. El API se levantó
+a mano (`ENVIRONMENT=test`, `uvicorn app.main:app --port 8000`, verificado con
+`/debug/db-url` → `is_safe: true`) y solo se corrieron tests de lectura.
+
