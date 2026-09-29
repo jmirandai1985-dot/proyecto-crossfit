@@ -147,7 +147,7 @@ def crear_pedido(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Alta demanda, intentá de nuevo",
+            detail="Alta demanda, intenta de nuevo",
         )
 
     # ── Correo al alumno: confirmación de compra en el Bazar (no bloqueante) ──

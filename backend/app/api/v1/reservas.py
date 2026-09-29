@@ -133,7 +133,7 @@ def crear_reserva(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Alta demanda, intentá de nuevo",
+            detail="Alta demanda, intenta de nuevo",
         )
 
     if result.rowcount == 0:

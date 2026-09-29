@@ -578,7 +578,7 @@ def marcar_primera_clase(
         Plan.nombre == "Prueba"
     ).first()
     if not sus:
-        raise HTTPException(status_code=404, detail="No tenés plan de prueba activo")
+        raise HTTPException(status_code=404, detail="No tienes plan de prueba activo")
     sus[1].primera_clase_tomada = True
     db.commit()
     return {"ok": True, "mensaje": "Primera clase marcada"}

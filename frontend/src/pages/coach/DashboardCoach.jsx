@@ -467,7 +467,7 @@ const DashboardCoach = () => {
             setMsgContacto({
                 id: alumno.id,
                 tipo: 'error',
-                texto: `${alumno.nombre} no tiene correo registrado. Cargalo desde Admin y reintentá.`,
+                texto: `${alumno.nombre} no tiene correo registrado. Cárgalo desde Admin y reintenta.`,
             });
             return;
         }

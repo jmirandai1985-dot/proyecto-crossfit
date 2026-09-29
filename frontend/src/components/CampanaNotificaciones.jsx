@@ -66,8 +66,8 @@ const CampanaNotificaciones = () => {
             setContadorError('');
         } catch (e) {
             console.error('No se pudieron cargar las notificaciones:', e);
-            setError('No se pudieron cargar tus notificaciones. Verificá la conexión '
-                + 'con el servidor e intentá de nuevo.');
+            setError('No se pudieron cargar tus notificaciones. Verifica la conexión '
+                + 'con el servidor e intenta de nuevo.');
         } finally {
             setCargando(false);
         }
@@ -94,7 +94,7 @@ const CampanaNotificaciones = () => {
             setNoLeidas((n) => Math.max(0, n - 1));
         } catch (e) {
             console.error('No se pudo marcar la notificación como leída:', e);
-            setError('No se pudo marcar la notificación como leída. Intentá de nuevo.');
+            setError('No se pudo marcar la notificación como leída. Intenta de nuevo.');
         } finally {
             setAccionando(false);
         }
@@ -110,7 +110,7 @@ const CampanaNotificaciones = () => {
             setNoLeidas(0);
         } catch (e) {
             console.error('No se pudieron marcar todas las notificaciones:', e);
-            setError('No se pudieron marcar todas como leídas. Intentá de nuevo.');
+            setError('No se pudieron marcar todas como leídas. Intenta de nuevo.');
         } finally {
             setAccionando(false);
         }
