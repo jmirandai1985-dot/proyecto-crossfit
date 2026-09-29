@@ -1011,6 +1011,17 @@ Un hallazgo **no aborta** el mantenimiento (igual que la integridad): se aplica 
 rojo con **exit 9** (si además hay integridad, gana el 4). Las listas viajan completas en el correo;
 las de detecciones no llevan columna "→ nuevo" porque no cambian nada.
 
+> **Datos de demo y `A.1(c)`.** El único chequeo que **sube** cuando se siembra datos
+> sintéticos es A.1(c) (usuarios que matchean `PROD_PERMITIDOS`): es informativo justamente
+> por eso. El seed anual (`scripts/seed_anual_prod.py`) agrega **300** usuarios
+> `demo.prod.anual.N@example.com` (+ `DEMOPRODANUAL…` en `transacciones_financieras`), así que
+> el conteo de A.1(c) pasa de *n* a *n + 300* y **ningún otro número del run cambia**: el
+> seed está construido para que los pasos 1-9 y A.1-A.6 queden en **0 cambios / 0
+> detecciones**, incluido el descuadre de créditos de A.3. El plan, los invariantes y la
+> reversión (`scripts/borrar_seed_anual.py`) están en
+> **[`scripts/README_seed_anual.md`](../scripts/README_seed_anual.md)**.
+
+
 #### Por qué A.5(a) y A.5(b) daban "25 y 25" (y qué se corrigió)
 
 No eran dos conjuntos solapados: los dos `WHERE` son **el mismo** y sólo cambian `NOT EXISTS` ⇄
@@ -1415,4 +1426,12 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
   `MAX_HUERFANAS=10` y `MAX_CAMBIOS=500`).
 - **Menor, sigue pendiente:** volcar/desactivar los workflows de n8n "Mantenimiento %" (H2/H5):
   los desactiva Jebbus en la UI de n8n (el job nuevo no depende de n8n).
+- **Nota cruzada (2026-09-28, sólo documentación + scripts locales, nada de PROD):** para la demo
+  del 6/10 se escribió el **seed anual** (`scripts/seed_anual_prod.py` + `scripts/borrar_seed_anual.py`
+  + `tests/test_seed_anual_prod.py` ⇒ **27 passed**). Está diseñado contra ESTAS detecciones y estos
+  pasos: con el seed adentro, `mantenimiento_cloud.py` en `DRY_RUN=1` tiene que dar **0 cambios y 0
+  detecciones nuevas** (el único número que sube es **A.1(c)**, informativo, +300 usuarios
+  `demo.prod.anual.N@example.com`). El único cambio que este README registra por eso es esta nota:
+  **no se tocó** ni un paso, ni una guarda, ni un umbral del mantenimiento. Detalle, plan de
+  ejecución y reversión: `scripts/README_seed_anual.md`.
 
