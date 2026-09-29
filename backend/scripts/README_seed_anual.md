@@ -170,6 +170,36 @@ $env:DRY_RUN="1"; python -m maintenance.mantenimiento_cloud   # mismo set de hal
 Con el log del después en la mano: **todos los conteos iguales** salvo A.1(c). Si algo
 cambió, NO seguir: el problema está en el plan y se arregla en el script.
 
+#### Registro de la corrida en TEST (2026-09-28, rama `jolly-butterfly`)
+
+Medido, con el job apuntado a TEST (`DRY_RUN=1`, los 9 pasos + A.1–A.6):
+
+| Conteo | Baseline (sin seed) | Con el seed (23.336 reservas) | Después de borrarlo |
+| --- | --- | --- | --- |
+| `usuarios` | 119 | 419 (+300) | 119 |
+| `suscripciones_activas` | 44 | 299 (+255) | 44 |
+| `cambios_a_realizar` (pasos 1-7) | 0 | **0** | 0 |
+| `huerfanas_*` (pasos 2-4) | 0/0/0 | **0/0/0** | 0/0/0 |
+| `aforo_resync` (paso 9) | 0 | **0** | 0 |
+| `cierre_asistencia` (paso 8) | 1 | **1** | 1 |
+| `purga` (pasos 5-6) | 0 | 0 | 0 |
+| `integridad_hallazgos` | 0 | 0 | 0 |
+| `detecciones_hallazgos` | 1 · A.5(a)=24 | **1 · A.5(a)=24** | 1 · A.5(a)=24 |
+| A.1(c) demo declarada | 0 | **300** (informativo, sólo en el mail) | 0 |
+| `neon_mb` | 12,66 | 24,7 | 19,97 (sin `VACUUM`: el tamaño no baja) |
+
+- El job **ya sale rojo en TEST antes del seed** por datos reales de la rama: **A.5(a)=24**
+  (clases futuras sin coach) y **`cierre_asistencia`=1** (la reserva real de `alumno@urbantraining.cl`
+  del 14/07). No son del seed y el conteo no se mueve.
+- Verificación del propio seed contra Postgres (`verificar_post`): `paso 9 = 0`, A.3 = 0 y
+  `paso 8 = 1` (esa misma reserva real: el mensaje dice "esperado 0" porque en PROD, sin
+  alumnos reales, sí lo es).
+- Recambio `RECICLAR` (sembrar dos veces sin borrar): COMMIT con los mismos conteos que la
+  corrida fresca y `paso 9 = 0` ⇒ el dry-run con un seed adentro predice exactamente lo que
+  se va a escribir.
+- Duración real: **~6-8 min** contra Neon (el INSERT de ~53 k filas y las ~1.100 clases reales
+  del paso 7, que van una por round-trip). Para PROD, contar con eso en la ventana.
+
 ### Paso 3 — Backup de PROD
 
 ```powershell
