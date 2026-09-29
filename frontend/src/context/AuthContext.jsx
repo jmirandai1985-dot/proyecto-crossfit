@@ -15,21 +15,42 @@ export const AuthProvider = ({ children }) => {
     // Recuperar sesión desde localStorage al cargar
     useEffect(() => {
         const storedToken = localStorage.getItem('access_token');
-        const storedUsuario = localStorage.getItem('usuario');
-        const storedRol = localStorage.getItem('rol');
-        const storedTenant = localStorage.getItem('tenant_id');
-        const storedUsuarioId = localStorage.getItem('usuario_id');
 
-        if (storedToken && storedUsuario) {
-            setToken(storedToken);
-            setUsuario(storedUsuario);
-            setRol(storedRol);
-            setTenant_id(parseInt(storedTenant));
-            setUsuario_id(parseInt(storedUsuarioId));
-            setIsAuthenticated(true);
-        }
+        // ── N-7: la IDENTIDAD sale del SERVIDOR, no de localStorage ──
+        // `usuario_id`, `rol` y `tenant_id` son datos de AUTORIZACIÓN: si se
+        // toman de localStorage, cualquiera los edita desde la consola y el
+        // front decide el menú/rutas con un valor manipulado. Ahora se hidratan
+        // con `GET /alumnos/me` (misma fila que usa el backend para autorizar).
+        // localStorage queda solo como caché visual del nombre.
+        // Si la consulta falla, la sesión NO se restaura (fail-closed): sin
+        // identidad verificada no se muestra ningún panel.
+        const hidratar = async () => {
+            if (!storedToken) {
+                setLoading(false);
+                return;
+            }
+            try {
+                const { data } = await api.get('/api/v1/alumnos/me');
+                setToken(storedToken);
+                setUsuario_id(data.id);
+                setRol(data.rol);
+                setTenant_id(data.tenant_id);
+                setUsuario(data.nombre || localStorage.getItem('usuario'));
+                setIsAuthenticated(true);
 
-        setLoading(false);
+                // Caché visual (nunca fuente de decisión).
+                if (data.nombre) localStorage.setItem('usuario', data.nombre);
+                if (data.rol) localStorage.setItem('rol', data.rol);
+            } catch (e) {
+                // El interceptor de `api.js` ya limpia y manda a /login en 401.
+                console.error('No se pudo verificar la sesión contra el servidor:', e);
+                setIsAuthenticated(false);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        hidratar();
     }, []);
 
     // Persiste la sesión (localStorage + state) tras un login válido.

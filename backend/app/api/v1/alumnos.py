@@ -90,6 +90,10 @@ class ActualizarMiPerfil(BaseModel):
 def _serializar_mi_perfil(usuario):
     return {
         "id": usuario.id,
+        # N-7: el `tenant_id` del token también se expone acá para que el front
+        # pueda HIDRATAR su identidad desde el servidor (y no desde localStorage)
+        # en el bootstrap de la sesión.
+        "tenant_id": usuario.tenant_id,
         "nombre": usuario.nombre,
         "correo": usuario.correo,
         "telefono": usuario.telefono,
