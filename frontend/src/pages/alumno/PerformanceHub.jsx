@@ -37,6 +37,12 @@ const PerformanceHub = () => {
     const cargarTodo = useCallback(async () => {
         setLoading(true);
         const fallaron = [];
+        // ── N-4: las DOS llamadas son datos del PROPIO alumno. ──
+        // `/historial-rm/alumnos/{id}/rms` trae sus RMs y `/historial-rm?limit=500`
+        // (sin filtro de alumno) también devuelve sólo los suyos cuando quien
+        // consulta es un alumno (scoping por JWT). El copy hablaba del "box"
+        // ("historial del box"), lo que hacía pensar que esta pantalla agregaba
+        // los RMs de todos: es el perfil del atleta, no un tablero del box.
         const [rmsRes, allRes] = await Promise.allSettled([
             api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/rms`),
             api.get(`/api/v1/historial-rm?limit=500`),
@@ -52,8 +58,8 @@ const PerformanceHub = () => {
             ? (allRes.value.data || []).map(rm => ({ ...rm, categoria: inferirCategoria(rm) }))
             : [];
         if (allRes.status !== 'fulfilled') {
-            console.error('Error cargando el historial del box:', allRes.reason);
-            fallaron.push('historial del box');
+            console.error('Error cargando tu historial de RMs:', allRes.reason);
+            fallaron.push('tu historial de RMs');
         }
 
         const cats = { fuerza: [], gimnastico: [], cardio: [], metabolico: [] };
