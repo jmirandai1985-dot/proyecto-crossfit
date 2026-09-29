@@ -10,6 +10,7 @@ import { estiloReco } from '../../components/kpis/recoEstilo';
 import { ARQUETIPOS_UI, estiloArquetipo, arquetipoDe } from '../../components/kpis/arquetipoEstilo';
 import { KpiCard } from '../../components/kpis/KpiCard';
 import { ArquetipoBadge } from '../../components/kpis/ArquetipoBadge';
+import ModalEnviarCorreo from '../../components/ModalEnviarCorreo';
 import { Eye, TriangleAlert, Users, Sparkles } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
@@ -70,7 +71,8 @@ const Fidelizacion = () => {
     const [segError, setSegError] = useState(false);
     const [loading, setLoading] = useState(true);
     const [menuAccion, setMenuAccion] = useState(null);
-    const [enviandoCorreo, setEnviandoCorreo] = useState(null);
+    // Alumno al que se le va a mandar un correo: abre el modal de envío (F1).
+    const [alumnoCorreo, setAlumnoCorreo] = useState(null);
     const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
     const [detalleReco, setDetalleReco] = useState(null);
     const [msg, setMsg] = useState('');
@@ -111,44 +113,37 @@ const Fidelizacion = () => {
         setMenuAccion(menuAccion === id ? null : id);
     };
 
-    const enviarCorreoManual = async (alumno, tipo) => {
+    // Acción Rápida → abre el modal de envío (F1). Antes esto disparaba el correo a ciegas;
+    // ahora se elige la plantilla y se ve el mensaje EXACTO antes de mandarlo.
+    const enviarCorreoManual = (alumno, plantillaSugerida) => {
         setMenuAccion(null);
-        setEnviandoCorreo(alumno.usuario_id);
         setMsg('');
+        setAlumnoCorreo({ fila: alumno, plantilla_sugerida: plantillaSugerida });
+    };
+
+    // El correo SALIÓ (el modal no avisa en modo prueba): se marca la gestión como CONTACTADO
+    // en el BI, con el mismo PUT probado que usa la pestaña de KPIs. Si el PUT falla, el correo
+    // ya salió: se avisa y no se rompe el flujo.
+    const correoEnviado = async () => {
+        const alumno = alumnoCorreo?.fila;
+        if (!alumno) return;
+        setMsg(`✅ Correo enviado a ${alumno.alumno_nombre}`);
         try {
-            const tipoEnvio = tipo === 'riesgo' ? 'inactividad' : 'vencimiento';
-            const res = await api.post(`/api/v1/notificaciones-enviadas/enviar-manual`, null, {
-                params: { alumno_id: alumno.usuario_id, tipo: tipoEnvio }
-            });
-            if (res.data?.exito) {
-                setMsg(`✅ Correo de ${tipoEnvio === 'inactividad' ? 'recuperación' : 'renovación'} enviado a ${alumno.alumno_nombre}`);
-                // Marca la gestión como CONTACTADO en el BI (mismo PUT probado que
-                // usa la pestaña de KPIs: no se creó endpoint nuevo). Si el PUT
-                // falla, el correo YA salió: se avisa y no se rompe el flujo.
-                try {
-                    const { data } = await api.put(
-                        `/api/v1/kpis/churn/${alumno.usuario_id}/estado`,
-                        { estado_gestion: 'CONTACTADO' },
-                    );
-                    const { estado_anterior, ...fila } = data;
-                    setChurn((prev) => (prev ? {
-                        ...prev,
-                        predicciones: (prev.predicciones || []).map(
-                            (p) => (p.usuario_id === alumno.usuario_id ? { ...p, ...fila } : p)),
-                    } : prev));
-                    setMsg(`✅ Correo enviado a ${alumno.alumno_nombre} · gestión marcada como CONTACTADO (antes ${estado_anterior || 'PENDIENTE'})`);
-                } catch (errPut) {
-                    setMsg(`✅ Correo enviado a ${alumno.alumno_nombre}. ⚠️ No se pudo marcar la gestión como CONTACTADO: ${errPut.response?.data?.detail || errPut.message}`);
-                }
-            } else {
-                const detalle = res.data?.detalle_error || 'No se pudo enviar el correo via Gmail SMTP (revisar credenciales o destinatario).';
-                setMsg(`❌ Error al enviar correo a ${alumno.alumno_nombre}: ${detalle}`);
-            }
-        } catch (err) {
-            setMsg('❌ ' + (err.response?.data?.detail || err.message));
+            const { data } = await api.put(
+                `/api/v1/kpis/churn/${alumno.usuario_id}/estado`,
+                { estado_gestion: 'CONTACTADO' },
+            );
+            const { estado_anterior, ...fila } = data;
+            setChurn((prev) => (prev ? {
+                ...prev,
+                predicciones: (prev.predicciones || []).map(
+                    (p) => (p.usuario_id === alumno.usuario_id ? { ...p, ...fila } : p)),
+            } : prev));
+            setMsg(`✅ Correo enviado a ${alumno.alumno_nombre} · gestión marcada como CONTACTADO (antes ${estado_anterior || 'PENDIENTE'})`);
+        } catch (errPut) {
+            setMsg(`✅ Correo enviado a ${alumno.alumno_nombre}. ⚠️ No se pudo marcar la gestión como CONTACTADO: ${errPut.response?.data?.detail || errPut.message}`);
         }
-        setEnviandoCorreo(null);
-        setTimeout(() => setMsg(''), 6000);
+        setTimeout(() => setMsg(''), 8000);
     };
 
     const verDetalleAlumno = (id) => {
@@ -473,17 +468,15 @@ const Fidelizacion = () => {
                                                     <div className="relative inline-block">
                                                         <button
                                                             onClick={() => toggleMenuAccion(p.usuario_id)}
-                                                            disabled={enviandoCorreo === p.usuario_id}
                                                             aria-label={`Acciones para ${p.alumno_nombre || `alumno #${p.usuario_id}`}`}
                                                             className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 disabled:opacity-50"
                                                         >
-                                                            {enviandoCorreo === p.usuario_id ? '⏳ Enviando...' : '⚡ Acción Rápida'}
+                                                            ⚡ Acción Rápida
                                                         </button>
                                                         {menuAccion === p.usuario_id && (
                                                             <div className="absolute right-0 mt-1 w-44 bg-zinc-900 rounded-lg shadow-xl border border-zinc-700 z-20 overflow-hidden">
                                                                 <button
                                                                     onClick={() => enviarCorreoManual(p, tipoEnvioDe(p))}
-                                                                    disabled={enviandoCorreo === p.usuario_id}
                                                                     className="w-full px-4 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
                                                                 >
                                                                     ✉️ Enviar correo
@@ -551,6 +544,16 @@ const Fidelizacion = () => {
                 <RecomendacionModal
                     fila={detalleReco}
                     onClose={() => setDetalleReco(null)}
+                />
+            )}
+
+            {/* MODAL ENVIAR CORREO (F1): elegir plantilla → ver el correo exacto → enviar */}
+            {alumnoCorreo && (
+                <ModalEnviarCorreo
+                    alumno={alumnoCorreo.fila}
+                    plantillaInicial={alumnoCorreo.plantilla_sugerida}
+                    onClose={() => setAlumnoCorreo(null)}
+                    onEnviado={correoEnviado}
                 />
             )}
         </Layout>

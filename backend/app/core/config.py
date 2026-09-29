@@ -75,6 +75,13 @@ class Settings(BaseSettings):
     GMAIL_SMTP_USER: str = ""
     GMAIL_SMTP_APP_PASSWORD: str = ""
 
+    # Modo de envío de correos: "real" (por defecto) o "noop" (modo prueba).
+    # En "noop" `email_service._enviar` NO abre SMTP y registra el intento como
+    # `simulado` en notificaciones_enviadas: sirve para tests y para probar flujos
+    # sin mandar correo a nadie. El default es "real" a propósito: un modo prueba
+    # olvidado en PROD sería peor que un test que manda un correo de más.
+    EMAIL_MODO: str = "real"
+
     # n8n (Sistema de Asistencia/Hitos): API key para POST /api/v1/asistencia/n8n/evaluar-mes
     # Se envía en el header `X-N8N-API-Key` y se compara con secrets.compare_digest.
     N8N_API_KEY: str = ""

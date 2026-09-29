@@ -7,7 +7,7 @@
     notificaciones, notificaciones_enviadas, migracion,
     comprar_emergencia, fix_fechas, supervision,
     finanzas, configuracion, alumnos, asistencia, ranking, mantenimiento, kpis,
-    kpis_populate, ml, segmentacion, historial_alumno
+    kpis_populate, ml, segmentacion, historial_alumno, fidelizacion_plantillas
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -181,7 +181,11 @@ app.include_router(tenants.router, prefix="/api/v1/tenants", tags=["Tenants"])
 app.include_router(
     dashboard.router, prefix="/api/v1/dashboard", tags=["Dashboard"])
 app.include_router(fidelizacion.router,
-                   prefix="/api/v1/fidelizacion", tags=["FidelizaciÃ³n"])
+                   prefix="/api/v1/fidelizacion", tags=["Fidelización"])
+# Plantillas de Fidelización (F1): catálogo + preview + envío. Comparten prefijo con la
+# pantalla, pero viven en su módulo: `fidelizacion.py` es el análisis (pandas), esto el envío.
+app.include_router(fidelizacion_plantillas.router,
+                   prefix="/api/v1/fidelizacion", tags=["Fidelización"])
 app.include_router(disciplinas.router,
                    prefix="/api/v1/disciplinas", tags=["Disciplinas"])
 app.include_router(planes.router, prefix="/api/v1/planes", tags=["Planes"])

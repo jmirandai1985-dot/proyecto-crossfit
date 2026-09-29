@@ -160,18 +160,12 @@ def enviar_manual(
     exito = False
     try:
         if tipo == "inactividad":
-            # Días REALES de inactividad (antes: 7 fijo, mentía en el correo).
-            # Mismo criterio que el resto del proyecto: última asistencia y, si
-            # nunca asistió, la fecha de alta. Mínimo 1 para no decir "0 días".
-            from app.models.asistencia import Asistencia
-            ultima = db.query(func.max(Asistencia.fecha)).filter(
-                Asistencia.tenant_id == alumno.tenant_id,
-                Asistencia.usuario_id == alumno.id,
-            ).scalar()
-            referencia = ultima or (
-                alumno.created_at.date() if alumno.created_at else None)
-            dias = max(1, (date.today() - referencia).days) if referencia else 1
-            exito = enviar_email_fidelizacion(alumno.nombre, alumno.correo, dias)
+            # Días REALES de inactividad: UNA definición, la del servicio de plantillas de
+            # Fidelización (antes estaba copiada acá, con `date.today()`: con la TZ del
+            # servidor —UTC— de noche contaba un día de más).
+            from app.services.fidelizacion_plantillas import dias_inactividad
+            exito = enviar_email_fidelizacion(
+                alumno.nombre, alumno.correo, dias_inactividad(db, alumno))
         elif tipo == "vencimiento":
             from app.models.suscripcion import Suscripcion
             sus = db.query(Suscripcion).filter(
@@ -252,14 +246,13 @@ def _resumen_plan(db: Session, sus) -> tuple:
 
 
 def _dias_inactividad(db: Session, alumno) -> int:
-    """Días reales sin asistencia (mismo criterio que /enviar-manual y Fidelización)."""
-    from app.models.asistencia import Asistencia
-    ultima = db.query(func.max(Asistencia.fecha)).filter(
-        Asistencia.tenant_id == alumno.tenant_id,
-        Asistencia.usuario_id == alumno.id,
-    ).scalar()
-    referencia = ultima or (alumno.created_at.date() if alumno.created_at else None)
-    return max(1, (date.today() - referencia).days) if referencia else 1
+    """Días reales sin asistencia.
+
+    UNA definición (la del servicio de plantillas de Fidelización): acá sólo se reexporta
+    para no tener dos versiones del mismo número en el proyecto.
+    """
+    from app.services.fidelizacion_plantillas import dias_inactividad
+    return dias_inactividad(db, alumno)
 
 
 def _password_provisional(db: Session, alumno) -> str:

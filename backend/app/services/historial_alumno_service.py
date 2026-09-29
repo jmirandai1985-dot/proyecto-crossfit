@@ -86,7 +86,7 @@ from app.models.suscripcion import Suscripcion
 from app.models.transaccion_financiera import TransaccionFinanciera
 from app.models.usuario import Usuario
 from app.services.rms_service import mejor_rm_por_movimiento
-from app.utils.santiago import SANTIAGO, ahora_santiago, hoy_santiago
+from app.utils.santiago import SANTIAGO, ahora_santiago, fecha_chile, hoy_santiago
 from shared.estados import ESTADOS_SUSCRIPCION_NUNCA_VIGENTES
 
 # ── Umbrales / criterios ──────────────────────────────────────────────────────
@@ -139,9 +139,8 @@ def _tz(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def fecha_chile(dt: datetime) -> date:
-    """Fecha CHILENA de un timestamp del box (mismo criterio que `hoy_santiago()`)."""
-    return _tz(dt).astimezone(SANTIAGO).date()
+# `fecha_chile` NO se define acá: es la de `app.utils.santiago` (una sola definición,
+# compartida con las plantillas de Fidelización). Se importa arriba con el mismo nombre.
 
 
 def inicio_clase(clase) -> datetime:

@@ -24,6 +24,25 @@ ULTIMO_ERROR_SMTP = None
 LOGO_CID = "logo-urban-training"
 LOGO_FILENAME = "logo-urban-training.jpg"
 
+# ── Modo de envío (`EMAIL_MODO`) ─────────────────────────────────────────────
+# La ÚNICA puerta de salida de correos es `_enviar`: por eso el modo prueba vive acá
+# y no en cada llamador (un test de cualquier servicio deja de poder mandar correo).
+MODO_REAL = "real"
+MODO_NOOP = "noop"
+# Estado con el que se registra un envío en modo prueba: NUNCA "enviado".
+ESTADO_SIMULADO = "simulado"
+DETALLE_SIMULADO = "EMAIL_MODO=noop: el correo NO se envió (modo prueba)"
+
+
+def modo_envio() -> str:
+    """Modo vigente: `noop` sólo si `EMAIL_MODO` dice exactamente eso (si no, `real`)."""
+    return MODO_NOOP if (settings.EMAIL_MODO or "").strip().lower() == MODO_NOOP else MODO_REAL
+
+
+def es_modo_simulado() -> bool:
+    """True si los envíos NO salen de verdad (`EMAIL_MODO=noop`)."""
+    return modo_envio() == MODO_NOOP
+
 
 def _logo_attachment() -> dict:
     """Lee el logo y devuelve dict attachment inline (misma versión que funcionaba)."""
@@ -165,6 +184,19 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
 
         destinatario = _limpiar_header(destinatario).strip()
         asunto = _limpiar_header(asunto)
+        # ── Modo prueba (EMAIL_MODO=noop): no se abre SMTP ──
+        # El intento se registra como `simulado` (no `enviado`): el log de correos no
+        # puede decir que algo salió cuando no salió.
+        if es_modo_simulado():
+            _log_seguro(f"[EMAIL_MODO=noop] correo SIMULADO a {destinatario!r}: {asunto!r}",
+                        "info")
+            if alumno_id or tipo:
+                _registrar_envio(alumno_id, tipo, ESTADO_SIMULADO, DETALLE_SIMULADO,
+                                 mes_referencia=mes_referencia,
+                                 destinatario_correo=destinatario,
+                                 destinatario_nombre=destinatario_nombre,
+                                 destinatario_rol=destinatario_rol, tenant_id=tenant_id)
+            return True
         # Env vars que se pegan a mano en un dashboard: hay que sanearlas siempre.
         remitente = _limpiar_header(settings.GMAIL_SMTP_USER or "").strip()
         usuario_smtp = remitente
@@ -209,6 +241,18 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
         return False
 
 
+def enviar_renderizado(destinatario: str, asunto: str, html: str, alumno_id: int = None,
+                       tipo: str = "", tenant_id: int = None) -> bool:
+    """Manda un correo YA renderizado por la misma puerta que todo el resto (`_enviar`).
+
+    Existe para los servicios que arman su propio HTML (hoy `fidelizacion_plantillas`):
+    así no tocan `_enviar` directamente ni abren un segundo camino de envío con su
+    propio logging en `notificaciones_enviadas`.
+    """
+    return _enviar(destinatario, asunto, html, alumno_id=alumno_id, tipo=tipo,
+                   destinatario_nombre=None, tenant_id=tenant_id)
+
+
 def enviar_email_bienvenida(alumno: dict, token_onboarding: str) -> bool:
     """Correo de bienvenida (nuevo alumno). Nombre obligatorio en dict."""
     nombre = alumno.get("nombre", "Atleta")
@@ -226,13 +270,13 @@ def enviar_email_bienvenida(alumno: dict, token_onboarding: str) -> bool:
                    alumno.get("id"), tipo="bienvenida")
 
 
-def enviar_email_vencimiento_plan(alumno: dict, fecha_vencimiento) -> bool:
-    """Correo de vencimiento proximo de plan."""
-    nombre = alumno.get("nombre", "Atleta")
-    correo = alumno.get("correo", "")
-    plan = alumno.get("plan_nombre", "tu plan")
-    if not correo:
-        return False
+def render_email_vencimiento_plan(nombre: str, plan: str, fecha_vencimiento) -> tuple:
+    """Renderiza (asunto, html) del correo de vencimiento de plan.
+
+    Fuente ÚNICA del copy: la usan el envío real (`enviar_email_vencimiento_plan`) y el
+    preview del panel de Fidelización, así el correo que ve el admin es EXACTAMENTE el
+    que se manda.
+    """
     try:
         if isinstance(fecha_vencimiento, str):
             fecha_fmt = datetime.strptime(fecha_vencimiento[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
@@ -240,6 +284,7 @@ def enviar_email_vencimiento_plan(alumno: dict, fecha_vencimiento) -> bool:
             fecha_fmt = fecha_vencimiento.strftime("%d/%m/%Y")
     except Exception:
         fecha_fmt = str(fecha_vencimiento)
+    plan = plan or "tu plan"
     titulo = "No dejes que el impulso se pierda"
     saludo = f"Hola {nombre.split()[0]}, tu plan {plan} vence el <strong>{fecha_fmt}</strong>."
     cuerpo = ("Cada sesi&oacute;n suma. Cada d&iacute;a de entrenamiento construye h&aacute;bitos que te sostienen "
@@ -247,8 +292,19 @@ def enviar_email_vencimiento_plan(alumno: dict, fecha_vencimiento) -> bool:
               "renueva tu plan y segu&iacute; avanzando con nosotros.")
     url = url_frontend("/alumno/solicitar-plan")
     html = _template(titulo, saludo, cuerpo, "Renovar mi plan", url)
-    return _enviar(correo, f"Tu plan {plan} est&aacute; por vencer, {nombre.split()[0]} ⏳", html,
-                   alumno.get("id"), tipo="vencimiento")
+    asunto = f"Tu plan {plan} est&aacute; por vencer, {nombre.split()[0]} ⏳"
+    return asunto, html
+
+
+def enviar_email_vencimiento_plan(alumno: dict, fecha_vencimiento) -> bool:
+    """Correo de vencimiento proximo de plan."""
+    nombre = alumno.get("nombre", "Atleta")
+    correo = alumno.get("correo", "")
+    if not correo:
+        return False
+    asunto, html = render_email_vencimiento_plan(
+        nombre, alumno.get("plan_nombre", "tu plan"), fecha_vencimiento)
+    return _enviar(correo, asunto, html, alumno.get("id"), tipo="vencimiento")
 
 
 def render_email_fidelizacion(nombre: str, dias_ausente: int) -> tuple:
