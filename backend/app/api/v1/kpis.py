@@ -28,6 +28,7 @@ from app.models.predictions_forecast import PredictionsForecast
 from app.models.segmentacion_alumno import SegmentacionAlumno
 from app.models.usuario import Usuario
 from app.services.auditoria_service import registrar_auditoria
+from app.utils.santiago import hoy_santiago
 
 router = APIRouter(prefix="/api/v1/kpis", tags=["KPIs"])
 
@@ -333,12 +334,75 @@ def get_kpis_mensual(
         "conversion_rate": float(kpi.conversion_rate),
         "alumnos_activos_inicio": kpi.alumnos_activos_inicio,
         "alumnos_baja": kpi.alumnos_baja,
-        "churn_rate": float(kpi.churn_rate),
+        # `churn_rate` es NULLABLE a propósito (migración 027): None = la cohorte
+        # del mes no tiene base mínima y NO se publica retención; es un "sin dato",
+        # no un 0% de churn real. Antes se hacía `float(kpi.churn_rate)` y el mes
+        # con la columna en NULL respondía HTTP 500 (TypeError): la pestaña Mensual
+        # lo descartaba y mostraba "Sin datos para el período" aunque el mes
+        # existiera. La UI ya sabe mostrar "—" para null.
+        "churn_rate": float(kpi.churn_rate) if kpi.churn_rate is not None else None,
         "mrr": float(kpi.mrr),
         "ingresos_total": float(kpi.ingresos_total),
         "asistencia_promedio": float(kpi.asistencia_promedio),
         "frecuencia_semanal": float(kpi.frecuencia_semanal),
         "ocupacion_promedio": float(kpi.ocupacion_promedio),
+    }
+
+
+# ── 2b) GET /api/v1/kpis/mensual/periodos (selector de la pestaña MENSUAL) ───
+@router.get("/mensual/periodos")
+def get_kpis_mensual_periodos(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Meses del tenant que tienen fila en `monthly_kpis`, con su `default`.
+
+    POR QUÉ EXISTE: la pestaña Mensual pedía a ciegas los últimos 6 meses; los
+    meses sin fila responden 404 y la UI los descartaba, así que mostraba "Sin
+    datos para el período" aunque SÍ hubiera meses con datos (basta que estén
+    fuera de esa ventana, o que el único mes con fila haya fallado). Con esta
+    lista la UI pide sólo meses que existen y sabe cuál mostrar por defecto.
+
+    Criterio de los campos (no se recalcula nada acá: es un índice de la tabla):
+      - `parcial`: el período es el MES EN CURSO en Chile, así que sus números son
+        de un mes a medias (se publican recién al cierre del mes).
+      - `default`: el ÚLTIMO MES CERRADO con datos; si no hay ninguno cerrado, el
+        más reciente de la lista. Sin filas => null.
+      - `actual.tiene_fila`: si el mes en curso ya tiene fila (populate corrido a
+        mitad de mes o backfill que incluyó el mes en curso).
+
+    Orden ASCENDENTE por período (más viejo primero): la serie del gráfico se
+    arma tomando los últimos N sin reordenar.
+    """
+    tenant_id = current_user["tenant_id"]
+    hoy = hoy_santiago()
+
+    filas = db.query(MonthlyKpi).filter(
+        MonthlyKpi.tenant_id == tenant_id,
+    ).order_by(MonthlyKpi.year.asc(), MonthlyKpi.month.asc()).all()
+
+    periodos = [{
+        "year": f.year,
+        "month": f.month,
+        "parcial": (f.year, f.month) == (hoy.year, hoy.month),
+        "mrr": float(f.mrr),
+        "ingresos_total": float(f.ingresos_total),
+        "alumnos_activos_inicio": f.alumnos_activos_inicio,
+        "churn_rate": float(f.churn_rate) if f.churn_rate is not None else None,
+    } for f in filas]
+
+    mes_actual = (hoy.year, hoy.month)
+    cerrados = [p for p in periodos if (p["year"], p["month"]) < mes_actual]
+    elegido = cerrados[-1] if cerrados else (periodos[-1] if periodos else None)
+
+    return {
+        "hoy": hoy,
+        "periodos": periodos,
+        "default": ({"year": elegido["year"], "month": elegido["month"],
+                     "parcial": elegido["parcial"]} if elegido else None),
+        "actual": {"year": hoy.year, "month": hoy.month,
+                   "tiene_fila": any(p["parcial"] for p in periodos),
+                   "parcial": True},
     }
 
 
