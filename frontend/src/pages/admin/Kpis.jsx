@@ -475,7 +475,7 @@ const AdminKpis = () => {
                 },
                 { key: 'indice_ingresos', label: 'Índice ingresos', render: (v) => fmtIndice(v) },
                 {
-                    key: 'alumnos_activos', label: 'Alumnos activos (inicio)',
+                    key: 'alumnos_activos', label: 'Alumnos activos',
                     render: (v) => (v === null ? 'sin datos' : v),
                 },
                 { key: 'indice_alumnos', label: 'Índice alumnos', render: (v) => fmtIndice(v) },
@@ -489,10 +489,9 @@ const AdminKpis = () => {
             El <span className="text-zinc-100">índice estacional</span> compara cada mes del año
             contra el promedio del período: <span className="text-zinc-100">1,00×</span> es un mes
             igual al promedio, más de 1,00× un mes fuerte y menos de 1,00× un mes flojo. Se calcula
-            {' '}<em>valor del mes ÷ promedio de los meses</em> con los meses CERRADOS de
-            {' '}monthly_kpis ({estacionalidad?.fuente || 'monthly_kpis'}): los ingresos del mes
-            (netos, en CLP) y los alumnos activos al inicio del mes. El mes en curso queda afuera
-            porque todavía no cerró: sus números son parciales.
+            {' '}<em>valor del mes ÷ promedio de los meses</em> con los meses ya cerrados (los
+            ingresos netos del mes, en CLP, y los alumnos activos al inicio del mes). El mes en
+            curso queda afuera porque todavía no cerró: sus números son parciales.
             {mesFuerte && mesDebil && (
                 <> En este perfil el mes más fuerte es
                     {' '}<span className="text-zinc-100">{mesFuerte.label}</span>
@@ -504,7 +503,7 @@ const AdminKpis = () => {
             llenar (ahí va la campaña de captación y las promos) y el fuerte es el que hay que
             aguantar (cupos, horarios extra y profes). Comparar el mismo mes entre años avisa si el
             perfil se está moviendo.
-            {notaEstacionalidad ? ` ${notaEstacionalidad}` : ''}
+            {estacionalidad?.suficiente && notaEstacionalidad ? ` ${notaEstacionalidad}` : ''}
             {!alumnosDisponible && estacionalidad?.alumnos_activos?.motivo
                 ? ` Alumnos activos: ${estacionalidad.alumnos_activos.motivo}` : ''}
         </>
@@ -773,7 +772,8 @@ const AdminKpis = () => {
                                             data-testid="estacionalidad-mes-fuerte">
                                             {mesFuerte ? mesFuerte.label : '—'}
                                             {mesFuerte && (
-                                                <span className="text-lg ml-2 text-gray-500">
+                                                <span className="text-lg ml-2 text-gray-500"
+                                                    title="1,00× = mes promedio">
                                                     {fmtIndice(mesFuerte.indice_ingresos)}
                                                 </span>
                                             )}
@@ -783,10 +783,11 @@ const AdminKpis = () => {
                                 </div>
                                 <p className="mt-1 text-[11px] text-zinc-500">
                                     {avisoInsuficiente
-                                        ? `Datos insuficientes para estacionalidad: ${estacionalidad.meses_con_datos} de ${estacionalidad.minimo_meses} meses cerrados`
+                                        ? `${estacionalidad.meses_con_datos} de ${estacionalidad.minimo_meses} meses con datos`
                                         : (mesFuerte && mesDebil
-                                            ? `Mes más fuerte vs ${mesDebil.label} (${fmtIndice(mesDebil.indice_ingresos)}) · 1,00× = promedio`
+                                            ? `Mes más fuerte vs ${mesDebil.label} (${fmtIndice(mesDebil.indice_ingresos)})`
                                             : 'Todavía sin meses cerrados con datos')}
+                                    {' · '}1,00× = mes promedio
                                 </p>
                                 <div className="mt-3 h-16">
                                     {filasEstacionalidad.length > 0 && (
@@ -806,11 +807,10 @@ const AdminKpis = () => {
                                 role="status"
                                 className="rounded-xl border border-amber-600 bg-amber-900/30 px-4 py-3 text-sm text-amber-200"
                             >
-                                ⚠️ <strong>Datos insuficientes para estacionalidad</strong>: hay{' '}
-                                {estacionalidad.meses_con_datos} de {estacionalidad.minimo_meses} meses
-                                cerrados con datos. {estacionalidad.nota_historia}
-                                {' '}Se completa con
-                                {' '}<span className="text-amber-100">POST /api/v1/kpis/populate/monthly?backfill=12</span>.
+                                ⚠️ Aún no hay suficiente historia para calcular la estacionalidad:
+                                se necesitan {estacionalidad.minimo_meses} meses y hay{' '}
+                                {estacionalidad.meses_con_datos}. El gráfico se completa
+                                automáticamente a medida que cierran los meses.
                             </div>
                         )}
 
@@ -882,9 +882,9 @@ const AdminKpis = () => {
 
                             <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
                                 <span className="text-zinc-400">LTV = ARPU mensual × vida promedio (meses).</span>
-                                {' '}El ARPU se toma de GET /api/v1/reportes/ (ingresos netos del mes / alumnos
-                                activos: la misma definición que muestra Reportes), así no hay dos versiones del
-                                mismo número. Vida promedio: {financiero?.vida?.formula ?? '—'}.
+                                {' '}El ARPU es el de Reportes (ingresos netos del mes ÷ alumnos
+                                activos), para que no haya dos versiones del mismo número. Vida
+                                promedio: {financiero?.vida?.formula ?? '—'}.
                                 {financiero?.vida?.limitaciones ? ` (${financiero.vida.limitaciones})` : ''}
                                 {' '}No se calcula CAC: {financiero?.nota_cac ?? 'no hay dato de costo de adquisición.'}
                             </p>
@@ -963,12 +963,12 @@ const AdminKpis = () => {
                     onCerrar={() => setDetalle(null)}
                     explicacion={(
                         <>
-                            Proyección de ingresos del box mes a mes, calculada por el modelo de pronóstico
-                            (GET /kpis/forecast) sobre los ingresos históricos (transacciones_financieras,
-                            netos: ingresos − egresos) agrupados por mes. Cada punto es el ingreso proyectado
-                            de ese mes; la tabla de abajo muestra además la variación % contra el mes anterior
-                            y los alumnos proyectados cuando el modelo los estima. Si un mes no tiene mes
-                            anterior comparable, la variación aparece como guion en vez de un 0% inventado.
+                            Proyección de ingresos del box mes a mes, calculada por el modelo de
+                            pronóstico sobre los ingresos históricos netos (ingresos − egresos)
+                            agrupados por mes. Cada punto es el ingreso proyectado de ese mes; la tabla
+                            de abajo muestra además la variación % contra el mes anterior y los alumnos
+                            proyectados cuando el modelo los estima. Si un mes no tiene mes anterior
+                            comparable, la variación aparece como guion en vez de un 0% inventado.
                         </>
                     )}
                 >
@@ -987,13 +987,13 @@ const AdminKpis = () => {
                     onCerrar={() => setDetalle(null)}
                     explicacion={(
                         <>
-                            Mide la OFERTA de clases por franja horaria: cuántas clases se dictan en cada
-                            bloque y el cupo promedio ofrecido. La barra naranja (asistencias por clase) es
-                            el promedio de asistentes confirmados por clase del bloque, que es el dato que
-                            permite comparar pico vs valle. Sirve para decidir dónde falta oferta y dónde
-                            sobra cupo. Hoy la asistencia por clase puede verse en 0 porque las asistencias
-                            todavía no están vinculadas a su clase (asistencias.clase_id es NULL en toda la
-                            base): el dato siempre confiable de este gráfico es la oferta (clases y cupo).
+                            Mide cuántas clases se dictan en cada franja horaria (la oferta) y el cupo
+                            promedio ofrecido. La barra naranja (asistencias por clase) es el promedio
+                            de asistentes confirmados por clase del bloque, que es el dato que permite
+                            comparar pico vs valle. Sirve para decidir dónde falta oferta y dónde sobra
+                            cupo. Hoy la asistencia por clase puede verse en 0 porque las asistencias
+                            todavía no quedan vinculadas a su clase: el dato siempre confiable de este
+                            gráfico es la oferta (clases y cupo).
                         </>
                     )}
                 >
@@ -1028,12 +1028,12 @@ const AdminKpis = () => {
                     onCerrar={() => setDetalle(null)}
                     explicacion={(
                         <>
-                            Cohorte = mes de alta del alumno (usuarios.created_at). "Activo a los N días"
-                            significa que el alumno tiene al menos una asistencia en la ventana
-                            [alta, alta + N días]: es la señal de retención disponible hoy, porque las
-                            asistencias todavía no están asociadas a su clase. Solo se promedian los
-                            alumnos EVALUABLES, es decir los que ya cumplieron ese horizonte; si la cohorte
-                            es más joven, la celda muestra n/d en vez de un 0% inventado.
+                            Cohorte = el mes en que el alumno se dio de alta. "Activo a los N días"
+                            significa que tiene al menos una asistencia desde su alta hasta N días
+                            después: es la señal de retención disponible hoy, porque las asistencias
+                            todavía no quedan asociadas a su clase. Solo se promedian los alumnos que ya
+                            cumplieron ese plazo; si la cohorte es más nueva, la celda muestra n/d en vez
+                            de un 0% inventado.
                         </>
                     )}
                 >
@@ -1049,7 +1049,7 @@ const AdminKpis = () => {
                 <DetalleModal
                     titulo="Estacionalidad del box (índice por mes del año)"
                     subtitulo={estacionalidad
-                        ? `Valor del mes ÷ promedio de los meses · ${estacionalidad.meses_con_datos} meses cerrados con datos`
+                        ? `Cada mes ÷ promedio del período (1,00× = mes promedio) · ${estacionalidad.meses_con_datos} meses con datos`
                         : 'Todavía sin datos'}
                     onCerrar={() => setDetalle(null)}
                     explicacion={explicacionEstacionalidad}
@@ -1059,16 +1059,17 @@ const AdminKpis = () => {
                             data-testid="aviso-estacionalidad-modal"
                             className="mb-4 rounded-lg border border-amber-600 bg-amber-900/30 px-4 py-3 text-sm text-amber-200"
                         >
-                            ⚠️ <strong>Datos insuficientes para estacionalidad</strong>: hay{' '}
-                            {estacionalidad.meses_con_datos} de {estacionalidad.minimo_meses} meses
-                            cerrados con datos. {notaEstacionalidad}
+                            ⚠️ Aún no hay suficiente historia para calcular la estacionalidad:
+                            se necesitan {estacionalidad.minimo_meses} meses y hay{' '}
+                            {estacionalidad.meses_con_datos}. El gráfico se completa
+                            automáticamente a medida que cierran los meses.
                         </div>
                     )}
 
                     {filasEstacionalidad.length > 0 ? (
                         <>
                             <ChartCard
-                                title="Índice por mes del año (1,00× = promedio del período)"
+                                title="Índice por mes del año (1,00× = mes promedio)"
                                 height="h-96"
                             >
                                 {chartEstacionalidad}
@@ -1076,20 +1077,20 @@ const AdminKpis = () => {
                             <div className="mt-4 space-y-2">
                                 {tablaEstacionalidad}
                                 <p className="text-[11px] leading-relaxed text-zinc-500">
-                                    Ingresos: {estacionalidad.ingresos.columna}
-                                    {' '}({estacionalidad.ingresos.observaciones} observaciones).
-                                    {' '}Alumnos activos: {estacionalidad.alumnos_activos.columna}
+                                    Cada mes se compara con el promedio del período:
+                                    {' '}{estacionalidad.ingresos.observaciones} meses cerrados de
+                                    ingresos
                                     {alumnosDisponible
-                                        ? ` (${estacionalidad.alumnos_activos.observaciones} observaciones).`
-                                        : ' — sin serie histórica disponible.'}
+                                        ? ` y ${estacionalidad.alumnos_activos.observaciones} de alumnos activos.`
+                                        : '. Alumnos activos: todavía sin serie histórica.'}
                                 </p>
                             </div>
                         </>
                     ) : (
                         <div className="rounded-lg border border-zinc-700 bg-zinc-800/40 p-4 text-sm leading-relaxed text-zinc-300">
                             Todavía no hay meses cerrados con datos. Los KPIs mensuales se publican al
-                            cierre de cada mes; el histórico se completa con
-                            {' '}<span className="text-zinc-100">POST /api/v1/kpis/populate/monthly?backfill=12</span>.
+                            cierre de cada mes; el gráfico se completa solo a medida que cierran los
+                            meses.
                         </div>
                     )}
                 </DetalleModal>

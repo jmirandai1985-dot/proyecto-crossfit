@@ -201,8 +201,12 @@ def test_h_la_serie_de_alumnos_declara_si_esta_disponible(estacionalidad):
     else:
         # Hoy la columna está en 0 en TODOS los meses cerrados (el populate la llena
         # con el estado de HOY): se publica el 0 crudo con el motivo, sin índice.
+        # El motivo es COPY PARA EL ADMIN: explica la situación sin nombrar tablas,
+        # columnas ni comandos internos (el detalle técnico vive en el docstring).
         assert all(v == 0 for v in valores)
-        assert serie["motivo"] and "estado de HOY" in serie["motivo"]
+        assert serie["motivo"] and "serie histórica" in serie["motivo"]
+        for jerga in ("monthly_kpis", "populate", "data mart", "columna", "estado ="):
+            assert jerga not in serie["motivo"], jerga
         assert all(f["indice_alumnos"] is None for f in estacionalidad["filas"])
 
 

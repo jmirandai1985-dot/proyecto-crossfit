@@ -495,7 +495,7 @@ def get_estacionalidad(
 
     Honestidad del dato (todo viaja en la respuesta):
       · `suficiente`: sólo con >= `MESES_MIN_ESTACIONALIDAD` (12) meses cerrados;
-        con menos, la UI dice "datos insuficientes para estacionalidad".
+        con menos, la UI avisa que todavía no hay historia suficiente.
       · `nota_historia`: con 12 meses cada mes del calendario se observa UNA vez,
         así que es el perfil de ESA ventana, no una tendencia de varios años.
       · `alumnos_activos.disponible` + `motivo`: `alumnos_activos_inicio` se llena
@@ -525,10 +525,10 @@ def get_estacionalidad(
 
     suficiente = len(cerradas) >= MESES_MIN_ESTACIONALIDAD
     motivo_alumnos = None if alumnos["disponible"] else (
-        "La columna se llena con el estado de HOY de la suscripción "
-        "(`estado = 'activo'`), así que los meses ya cerrados quedan en 0 cuando el "
-        "plan vence: hoy NO hay serie histórica de alumnos activos en el data mart "
-        "(hallazgo 2026-09-29; se arregla en el populate, no acá).")
+        "Todavía no hay serie histórica de alumnos activos: de cada suscripción se "
+        "guarda sólo su estado actual, así que los meses ya cerrados quedan en 0 y "
+        "la línea no se dibuja (parecería un dato). Se completa cuando se "
+        "reconstruya el histórico.")
 
     return {
         "suficiente": suficiente,
@@ -543,8 +543,8 @@ def get_estacionalidad(
         "excluye_mes_en_curso": {"year": hoy.year, "month": hoy.month},
         "fuente": "monthly_kpis (meses cerrados)",
         "nota_historia": (
-            "1 año de historia: es el perfil de ESA ventana (cada mes del año se "
-            "observa UNA vez), no una tendencia de varios años."
+            "Es 1 año de historia: el perfil de ese período (cada mes del año se "
+            "mira una sola vez), no una tendencia de varios años."
             if suficiente else
             f"Todavía no hay un año completo: {len(cerradas)} de "
             f"{MESES_MIN_ESTACIONALIDAD} meses cerrados con datos."),
@@ -850,17 +850,19 @@ def get_financiero(
             "n_alumnos": int(vida[0] or 0),
             "n_con_baja": int(vida[1] or 0),
             "formula": (
-                "promedio de (fecha_baja o hoy - created_at) de los alumnos del "
-                f"tenant, en días / {DIAS_POR_MES}"),
+                "promedio de días desde el alta hasta la baja (o hasta hoy) de los "
+                "alumnos del box, pasado a meses"),
             "limitaciones": (
-                "censura a la derecha: los alumnos activos aportan su antigüedad "
-                "actual, así que la vida real de quien dure más queda subestimada"),
+                "los alumnos que siguen activos sólo aportan el tiempo que llevan "
+                "hasta hoy, así que la vida real de los más antiguos queda "
+                "subestimada"),
         },
         "ltv_formula": (
-            "LTV = ARPU mensual (GET /api/v1/reportes/) × vida_promedio_meses"),
+            "LTV = ARPU mensual (el de Reportes) × vida promedio en meses"),
         "nota_cac": (
-            "No se calcula CAC: la base no tiene costo de adquisición. Sin CAC no "
-            "hay payback ni ratio LTV/CAC."),
+            "No se calcula el costo de adquisición (CAC): no hay registro de ese "
+            "gasto, así que tampoco se puede estimar en cuánto tiempo se recupera "
+            "lo invertido por alumno."),
     }
 
 
@@ -943,10 +945,9 @@ def get_bloques_horarios(
             "con_clase": con_clase,
             "pct": round(con_clase / total_asis * 100, 1) if total_asis else 0.0,
             "nota": (
-                "Las asistencias todavía no están asociadas a su clase "
-                "(`asistencias.clase_id` nulo): el promedio por bloque se activa "
-                "cuando se corra el backfill desde reservas. Mientras tanto se "
-                "muestra la oferta real (clases y cupo)."),
+                "Las asistencias todavía no quedan asociadas a su clase, así que el "
+                "promedio de asistencias por bloque se activará más adelante. Por "
+                "ahora se muestra la oferta real (clases y cupo)."),
         },
         "bloques": bloques,
         "por_hora": por_hora,
@@ -1028,9 +1029,10 @@ def get_cohortes(
     return {
         "hoy": str(date.today()),
         "definicion": (
-            "Cohorte = mes de alta del alumno. Activo a los N días = al menos 1 "
-            "asistencia en [alta, alta + N días]; sólo se promedian los alumnos "
-            "evaluables (alta + N ya cumplido) -> null si la cohorte no maduró"),
+            "Cohorte = el mes en que el alumno se dio de alta. Activo a los N días "
+            "= tiene al menos 1 asistencia desde su alta hasta N días después; sólo "
+            "se promedian los alumnos que ya cumplieron ese plazo (si la cohorte es "
+            "más nueva, la celda queda en n/d)"),
         "horizontes_dias": [30, 60, 90],
         "cohortes": cohortes,
         "global": globales,
