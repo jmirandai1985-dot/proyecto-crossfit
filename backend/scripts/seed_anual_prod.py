@@ -25,10 +25,12 @@ GUARDS (todos deben pasar; corren ANTES de leer/escribir cualquier fila)
    ⚠️ `withered-silence` era el endpoint de PROD **viejo** (migración del 2026-09-24).
    El guard del seed anterior (`"withered-silence" in DATABASE_URL`) ya NO puede pasar:
    por eso este script no lo usa ni como host ni como confirmación.
-3. VENTANA DE EJECUCIÓN: aborta si hoy es día 1 o 15 (el mantenimiento escribe esos días:
-   pasos 1-9 = vencidos, huérfanas, cierre de asistencia y aforo) o si el mes en curso es
-   septiembre de 2026 (el run del 1/10 vencería TODAS las suscripciones de septiembre y
-   cortaría por `MAX_VENCIDOS_PCT`). Ventana prevista: 2 a 5 de octubre de 2026.
+3. VENTANA DE EJECUCIÓN (**sólo con `--destino prod`**): aborta si hoy es día 1 o 15 (el
+   mantenimiento escribe esos días: pasos 1-9 = vencidos, huérfanas, cierre de asistencia y
+   aforo) o si el mes en curso es septiembre de 2026 (el run del 1/10 vencería TODAS las
+   suscripciones de septiembre y cortaría por `MAX_VENCIDOS_PCT`). Ventana prevista en PROD:
+   2 a 5 de octubre de 2026. En TEST no corre ningún cron de mantenimiento, así que no hay
+   nada que romper: la ventana NO aplica y se puede sembrar cualquier día.
 4. Confirmación por teclado con frase exacta: `SI QUIERO PROD` / `SI QUIERO TEST`.
    Se pide ANTES del dry-run y antes de cualquier escritura o borrado.
    (Si ya hay datos del seed, se pide una SEGUNDA confirmación para el recambio.)
@@ -146,7 +148,7 @@ MARCA_DESC = "DEMOPRODANUAL"      # prefijo de transacciones_financieras.descrip
 # que el seed es idempotente/reversible sin tocar ninguna columna real de `clases`.
 MARCA_TS = datetime(2026, 10, 2, 4, 17, 3, 123456, tzinfo=timezone.utc)
 
-# ── Ventana de ejecución prohibida (guard 3) ──
+# ── Ventana de ejecución prohibida (guard 3) — SÓLO se evalúa con `--destino prod` ──
 DIAS_MANTENIMIENTO = (1, 15)      # el job escribe esos días
 MES_PROHIBIDO = "2026-09"         # el run del 1/10 vencería todas las de septiembre
 # ── Hosts de Neon (denylist/allowlist; los ids completos salen de app.core.config) ──
@@ -1324,8 +1326,19 @@ def validar_url_destino(url: str, destino: str, prod_id: str,
     return None
 
 
-def validar_ventana(hoy: date) -> Optional[str]:
-    """Motivo del rechazo si hoy no es un día ejecutable (guard 3), o `None`."""
+def validar_ventana(hoy: date, destino: str = "prod") -> Optional[str]:
+    """Motivo del rechazo si hoy no es un día ejecutable (guard 3), o `None`.
+
+    La ventana existe para proteger al **mantenimiento de PROD**, que escribe los días 1 y 15
+    (vencidos, huérfanas, cierre de asistencia y aforo) y corta por `MAX_VENCIDOS_PCT`. Por eso
+    se evalúa **sólo con `destino="prod"`**: en TEST no corre ningún cron de mantenimiento, así
+    que sembrar cualquier día no puede romper nada.
+
+    El default es `"prod"` a propósito: si una llamada se olvida el destino, queda del lado
+    ESTRICTO (el que no puede lastimar producción).
+    """
+    if destino != "prod":
+        return None
     if hoy.day in DIAS_MANTENIMIENTO:
         return (f"hoy es día {hoy.day}: el mantenimiento escribe ese día (vencidos, "
                 f"huérfanas, cierre de asistencia y aforo). Corré entre el 2 y el 14, o "
@@ -1668,7 +1681,8 @@ def parsear_args(argv=None):
     """`--destino` es OBLIGATORIO: no hay default, para que nadie corra "por defecto"."""
     parser = argparse.ArgumentParser(
         description="Seed anual de datos sintéticos para ML (300 alumnos / 12 meses).",
-        epilog="Ejecución prevista: 2 a 5 de octubre de 2026 (nunca día 1 ni 15).")
+        epilog="Ejecución prevista en PROD: 2 a 5 de octubre de 2026 (nunca día 1 ni 15; "
+               "esa ventana no aplica en TEST).")
     parser.add_argument("--destino", choices=("prod", "test"), required=True,
                         help="prod = base real; test = rama de TEST (jamás PROD).")
     parser.add_argument("--dry-run", action="store_true",
@@ -1702,11 +1716,16 @@ def main(argv=None) -> int:
     print(f"destino={args.destino.upper()} | hoy={hoy} | alumnos={args.alumnos} | "
           f"semilla={args.semilla}" + ("  [DRY-RUN]" if args.dry_run else ""))
 
-    # GUARD 3 (ventana): antes de pedir confirmaciones y antes de leer la base.
-    motivo = validar_ventana(hoy)
+    # GUARD 3 (ventana): SÓLO con destino=prod (el mantenimiento escribe el 1 y el 15 y, en
+    # septiembre, el run del 1/10 vencería todas las suscripciones del mes). En TEST no hay
+    # ningún cron de mantenimiento: se puede sembrar cualquier día.
+    motivo = validar_ventana(hoy, args.destino)
     if motivo:
         print(f"[guard] ABORTADO: {motivo}")
         return 1
+    if args.destino == "test":
+        print("[guard] ventana de ejecución: no aplica en TEST (no hay mantenimiento "
+              "programado); en PROD se exige día != 1 != 15 y mes != 2026-09.")
 
     # GUARD 4 (confirmación): antes del dry-run y de cualquier escritura o borrado.
     base = "PRODUCCIÓN" if args.destino == "prod" else "TEST"

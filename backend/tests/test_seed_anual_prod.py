@@ -456,14 +456,61 @@ def test_guard_de_url_por_destino():
     assert seed.validar_url_destino(cruzada, "test", PROD_ID, TEST_IDS)
 
 
-def test_guard_de_ventana_de_ejecucion():
-    """Nunca día 1 ni 15 (el mantenimiento escribe) ni septiembre de 2026."""
-    assert seed.validar_ventana(date(2026, 10, 1))
-    assert seed.validar_ventana(date(2026, 10, 15))
-    assert seed.validar_ventana(date(2026, 11, 1))
-    assert seed.validar_ventana(date(2026, 9, 20))
+def test_guard_de_ventana_de_ejecucion_solo_en_prod():
+    """PROD: nunca día 1 ni 15 (el mantenimiento escribe) ni septiembre de 2026."""
+    assert seed.validar_ventana(date(2026, 10, 1), "prod")
+    assert seed.validar_ventana(date(2026, 10, 15), "prod")
+    assert seed.validar_ventana(date(2026, 11, 1), "prod")
+    assert seed.validar_ventana(date(2026, 9, 20), "prod")
     for dia in (2, 3, 4, 5, 14, 16, 28):
-        assert seed.validar_ventana(date(2026, 10, dia)) is None
+        assert seed.validar_ventana(date(2026, 10, dia), "prod") is None
+    # El default es el lado ESTRICTO: una llamada sin destino se evalúa como PROD.
+    assert seed.validar_ventana(date(2026, 10, 1))
+    assert seed.validar_ventana(date(2026, 9, 20))
+
+
+def test_guard_de_ventana_no_aplica_en_test():
+    """TEST no tiene ningún cron de mantenimiento ⇒ cualquier día es ejecutable."""
+    for fecha in (date(2026, 9, 1), date(2026, 9, 15), date(2026, 9, 20), date(2026, 9, 28),
+                  date(2026, 10, 1), date(2026, 10, 15), date(2026, 11, 1)):
+        assert seed.validar_ventana(fecha, "test") is None
+
+
+def _hoy_falso(monkeypatch, valor: date) -> None:
+    """Fija `date.today()` DENTRO del módulo del seed (sin tocar el reloj del sistema)."""
+    class _Hoy(date):
+        @classmethod
+        def today(cls):
+            return valor
+
+    monkeypatch.setattr(seed, "date", _Hoy)
+
+
+def test_main_se_niega_a_sembrar_en_prod_dentro_de_la_ventana(monkeypatch, capsys):
+    """Con destino=prod la ventana corta ANTES de pedir teclado, del `.env` y de la base."""
+    _hoy_falso(monkeypatch, date(2026, 9, 20))
+    monkeypatch.setattr(seed, "pedir", lambda *a, **k: pytest.fail("no debe pedir confirmación"))
+    monkeypatch.setattr(seed, "preparar_entorno",
+                        lambda *a, **k: pytest.fail("no debe llegar al .env ni a la base"))
+    assert seed.main(["--destino", "prod", "--dry-run"]) == 1
+    assert "ABORTADO" in capsys.readouterr().out
+
+
+def test_main_en_test_no_evalua_la_ventana(monkeypatch, capsys):
+    """La MISMA fecha que PROD rechaza, en TEST pasa el guard 3 y avisa que no aplica."""
+    _hoy_falso(monkeypatch, date(2026, 9, 20))
+    llamadas = []
+    monkeypatch.setattr(seed, "pedir",
+                        lambda frase, prompt: (llamadas.append(frase), True)[1])
+
+    def _corte(destino):
+        llamadas.append(f"preparar_entorno:{destino}")
+        raise seed.GuardError("corte del test: la base no se toca")
+
+    monkeypatch.setattr(seed, "preparar_entorno", _corte)
+    assert seed.main(["--destino", "test", "--dry-run"]) == 1
+    assert llamadas == ["SI QUIERO TEST", "preparar_entorno:test"]
+    assert "no aplica en TEST" in capsys.readouterr().out
 
 
 def test_el_seed_no_importa_la_app_al_importarse():

@@ -14,7 +14,7 @@ Es para la **demo de la defensa (6/10/2026)**: PROD todavía no tiene alumnos re
 | `scripts/seed_anual_prod.py` | genera e inserta el seed (idempotente, reversible) |
 | `scripts/borrar_seed_anual.py` | borra SÓLO las filas del seed (y opcionalmente el viejo) |
 | `scripts/README_seed_anual.md` | este documento |
-| `tests/test_seed_anual_prod.py` | 27 tests unitarios **sin base** (invariantes, guards, reversión) |
+| `tests/test_seed_anual_prod.py` | 30 tests unitarios **sin base** (invariantes, guards, reversión) |
 
 ---
 
@@ -66,10 +66,13 @@ Reparto y forma:
    - Además se valida que `PROD_BRANCH_ID` siga conteniendo `nameless-sound`: si Neon
      recrea el endpoint, el script **aborta** en vez de escribir en una base que no es la
      que espera (y pide actualizar `config.py` + este script).
-3. **Ventana de ejecución**: aborta si hoy es **día 1 o 15** (el mantenimiento escribe esos
-   días) o si el mes en curso es **septiembre de 2026** (el run del 1/10 vencería todas las
-   suscripciones de septiembre y cortaría por `MAX_VENCIDOS_PCT`). Ventana prevista:
-   **2 a 5 de octubre de 2026**.
+3. **Ventana de ejecución (sólo con `--destino prod`)**: aborta si hoy es **día 1 o 15** (el
+   mantenimiento escribe esos días) o si el mes en curso es **septiembre de 2026** (el run del
+   1/10 vencería todas las suscripciones de septiembre y cortaría por `MAX_VENCIDOS_PCT`).
+   Ventana prevista en PROD: **2 a 5 de octubre de 2026**. En **TEST la ventana no aplica**
+   (cualquier día): ahí no corre ningún cron de mantenimiento, así que sembrar no puede romper
+   nada. El default de `validar_ventana(hoy, destino="prod")` es el lado estricto: una llamada
+   que se olvide el destino se evalúa como PROD.
 4. **Confirmación por teclado** con frase exacta (`SI QUIERO PROD` / `SI QUIERO TEST`), antes
    del dry-run y antes de cualquier escritura o borrado. Si ya hay datos del seed, pide una
    SEGUNDA confirmación (`RECICLAR`) porque los va a borrar y reinsertar.
@@ -135,12 +138,13 @@ Detalles que valen la pena:
 
 ## 5. Plan de ejecución (orden probado)
 
-> Todo desde `backend/`. El día de la corrida tiene que **no** ser 1 ni 15.
+> Todo desde `backend/`. Con `--destino prod` el día de la corrida tiene que **no** ser 1 ni 15
+> (y no puede ser septiembre de 2026); en `--destino test` la ventana no aplica.
 
 ### Paso 1 — Tests y dry-run en TEST
 
 ```powershell
-py -3.12 -m pytest tests\test_seed_anual_prod.py -q      # 27 tests, sin base
+py -3.12 -m pytest tests\test_seed_anual_prod.py -q      # 30 tests, sin base
 $env:ENVIRONMENT="test"
 python3.12 scripts\seed_anual_prod.py --destino test --dry-run
 ```
@@ -290,7 +294,7 @@ por un cierre del mantenimiento en el medio.
 
 ```powershell
 cd backend
-py -3.12 -m pytest tests\test_seed_anual_prod.py -q      # 27 passed (sin base, sin red)
+py -3.12 -m pytest tests\test_seed_anual_prod.py -q      # 30 passed (sin base, sin red)
 ```
 
 ⚠️ Usar **`py -3.12`**: el `python` del PATH (3.13) no tiene pytest instalado (la misma
@@ -304,8 +308,9 @@ Cubren, sin tocar ninguna base:
   asistida, una transacción por suscripción, reparto por día, **créditos contra A.3** y
   cancelaciones contra el corte de **6 h**).
 - **Determinismo**: mismo `SEED` + mismo insumo ⇒ plan idéntico (el seed es reproducible).
-- **Guards**: URL por destino (incluido el rechazo de `withered-silence` y del host cruzado)
-  y ventana de ejecución (día 1, 15 y 2026-09).
+- **Guards**: URL por destino (incluido el rechazo de `withered-silence` y del host cruzado),
+  ventana de ejecución con `destino="prod"` (día 1, 15 y 2026-09) y que la **misma fecha en
+  TEST no bloquee** (`validar_ventana(..., "test")` + `main()` con `--destino test` y `prod`).
 - **Pureza del módulo**: `test_el_seed_no_importa_la_app_al_importarse` — importar el seed
   no abre conexiones ni lee el `.env` (por eso se puede testear sin base).
 - **Reversión**: marcadores coherentes entre seed y borrado, filtros por defecto vs
@@ -323,5 +328,6 @@ Cubren, sin tocar ninguna base:
 - **No corre migraciones, no cambia `alembic_version`.**
 - **No hace backup ni reentrena**: el backup es el paso 3 (job de Render o
   `maintenance/backup_neon.py`) y el reentrenamiento es el paso 5 (endpoints de la app).
-- **No se puede correr en cualquier día**: los guards de §2 lo impiden (1, 15, septiembre).
+- **No se puede correr en cualquier día EN PROD**: los guards de §2 lo impiden (1, 15,
+  septiembre). En TEST la ventana no aplica: cualquier día es válido.
 - **No escribe nada sin `--destino` + la frase de teclado**, ni siquiera en `--dry-run`.
