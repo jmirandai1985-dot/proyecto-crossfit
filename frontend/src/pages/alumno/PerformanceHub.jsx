@@ -69,13 +69,31 @@ const PerformanceHub = () => {
         setCatsData(catsRes);
 
         const byCat = { fuerza: [], gimnastico: [], cardio: [], metabolico: [] };
+        // ── N-5: acá había un `catch (e) { }` VACÍO. ──
+        // Cualquier fallo al armar la serie semanal se perdía en silencio y el
+        // gráfico salía incompleto sin avisar. Ahora se registra en consola y se
+        // reporta en el banner de la pantalla (`erroresCarga`).
+        // Ojo: una `fecha` ilegible NO lanza excepción (`new Date('x')` da
+        // `Invalid Date`), y eso rompía el orden y las semanas del gráfico en
+        // silencio, así que también se descarta y se reporta acá.
+        const descartados = [];
         allRms.forEach(rm => {
             const c = inferirCategoria(rm);
-            if (byCat[c] && rm.fecha) {
-                try { byCat[c].push({ fecha: new Date(rm.fecha), valor: getValorNumerico(rm), nombre: rm.movimiento_nombre }); }
-                catch (e) { }
+            if (!byCat[c] || !rm.fecha) return;
+            try {
+                const fecha = new Date(rm.fecha);
+                if (Number.isNaN(fecha.getTime())) {
+                    throw new Error(`fecha inválida: ${rm.fecha}`);
+                }
+                byCat[c].push({ fecha, valor: getValorNumerico(rm), nombre: rm.movimiento_nombre });
+            } catch (e) {
+                console.error('RM descartado de la evolución semanal:', rm?.movimiento_nombre, rm?.fecha, e);
+                descartados.push(rm);
             }
         });
+        if (descartados.length > 0) {
+            fallaron.push(`evolución de RMs (${descartados.length} registro/s con fecha o valor inválido)`);
+        }
 
         const chartRes = {};
         Object.keys(byCat).forEach(c => {
