@@ -24,6 +24,17 @@ En este repo el valor está **sanitizado** como placeholder:
 | `Populate Daily/Monthly KPIs`, `Populate Predictions`, `Mantenimiento Diario/Mensual`, `Urgencia`, `1. RENOVACIÓN`, `INACTIVIDAD`, `ÚLTIMO CRÉDITO`, `SIN CRÉDITOS` | `http://host.docker.internal:8001` (**TEST**) | `N8N_API_KEY` de `backend/.env.test` |
 | `Populate Daily/Monthly KPIs [PROD]`, `Populate Predictions [PROD]`, `Reentrenar Modelo ML`, **`fidelizacion y retencion`** | `https://box-crossfit.onrender.com` (**PROD**) | `N8N_API_KEY` de `backend/.env` **y** de la env var del servicio backend en Render |
 
+> **Cambio 2026-09-29 — los workflows de KPIs/ML de PROD se retiran a favor de un Cron Job de
+> Render.** El trabajo de DATOS del grupo 1 (`Populate Daily/Monthly KPIs [PROD]`,
+> `Populate Predictions [PROD]` y `Reentrenar Modelo ML`) pasa a
+> `backend/maintenance/kpis_cloud.py` (Cron Job `box-crossfit-kpis-ml`, schedule
+> `0 10 * * *` UTC = ~06:00-07:00 CLT, un solo job diario que decide por fecha de Chile:
+> diario / día 1 / días 15 y último). Inventario real de esos 4 workflows (endpoint, cron,
+> header) y pasos de puesta en marcha: `backend/maintenance/README.md` §Fase 8. Los
+> workflows de **notificaciones** (esta tabla, las filas de correos) **no se tocan**.
+> Al 2026-09-29 los 4 siguen **activos**: hay que desactivarlos ANTES de encender el Cron
+> Job (si no, el trabajo se hace dos veces).
+>
 > **Cambio 2026-09-26 — `fidelizacion y retencion` pasó de TEST a PROD.**
 > Es el cierre MENSUAL (cron `0 5 0 1 * *` → día 1, 00:05 CLT) que llama a
 > `POST /api/v1/asistencia/n8n/evaluar-mes` y dispara los correos de

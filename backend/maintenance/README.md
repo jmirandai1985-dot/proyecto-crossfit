@@ -1439,3 +1439,169 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
   de filas y como una FK violation, nunca como un cambio silencioso. Detalle, plan de
   ejecución y reversión: `scripts/README_seed_anual.md`.
 
+
+## Fase 8 — KPIs y ML en la nube: Cron Job `kpis_cloud` (2026-09-29)
+
+Migración del **grupo 1** de workflows de n8n a un Cron Job de Render. Las
+**notificaciones a alumnos NO se tocan** (siguen en n8n: `fidelizacion y retencion`,
+`Urgencia`, `1. RENOVACIÓN`, `INACTIVIDAD`, `ÚLTIMO CRÉDITO`, `SIN CRÉDITOS`).
+
+### Inventario de lo que se reemplaza
+
+Medido en la **instancia de n8n** (la fuente de verdad; los JSON de `n8n/workflows/`
+son copias de referencia y pueden estar viejos). La instancia usa
+`GENERIC_TIMEZONE=America/Santiago`, así que estos cron son en **hora de Chile**:
+
+| Workflow (instancia) | id | Cron (CLT) | Endpoint | Auth |
+|---|---|---|---|---|
+| `Populate Daily KPIs [PROD]` | `dC579nyZalgnXKrq` | `0 30 2 * * *` → 02:30 diario | `POST /api/v1/kpis/populate/daily` | `X-N8N-API-Key` |
+| `Populate Monthly KPIs [PROD]` | `w3yg0bKz630RNXJ9` | `0 0 3 1 * *` → día 1, 03:00 | `POST /api/v1/kpis/populate/monthly` | `X-N8N-API-Key` |
+| `Populate Predictions [PROD]` | `VW2W36mnyGcM78Sy` | `45 3 1 * *` → día 1, 03:45 | `POST /api/v1/kpis/populate/predictions` | `X-N8N-API-Key` |
+| `Reentrenar Modelo ML` | `BfxooE9LAzKTQZMy` | `0 30 3 1 * *` → día 1, 03:30 | 1) `POST /api/v1/ml/reentrenar` → 2) **encadenado** `POST /api/v1/kpis/populate/predictions` | `X-N8N-API-Key` |
+
+Los 4 apuntan a `https://box-crossfit.onrender.com` (PROD) y estaban **activos** al
+2026-09-29.
+
+⚠️ **Dos diferencias REALES contra lo que se suele suponer** (verificado exportando los
+workflows de la instancia, no de los JSON del repo):
+
+1. **`Reentrenar Modelo ML` NO tiene nodo de segmentación.** Sus 3 nodos son
+   `Schedule Trigger` → `POST /ml/reentrenar` → `POST /kpis/populate/predictions`. La
+   segmentación K-Means (`POST /api/v1/segmentacion/reentrenar`) **no la corre ningún
+   workflow de n8n**: hoy es manual (y el README de `n8n/` ya lo decía). El Cron Job la
+   agrega a los días 15 y último del mes.
+2. El reentrenamiento pasaba el **día 1**; el job nuevo lo corre los **días 15 y
+   último** (lo pedido), y mantiene el encadenado del workflow viejo: después de
+   entrenar se refrescan las predicciones (si no, las predicciones quedarían hechas con
+   el modelo anterior).
+
+### Qué hace `maintenance/kpis_cloud.py`
+
+| Cuándo (día de Chile) | Llamadas, en orden |
+|---|---|
+| **todos los días** | `POST /api/v1/kpis/populate/daily?fecha=<ayer>` |
+| **día 1** | + `POST /api/v1/kpis/populate/monthly?year=<año>&month=<mes anterior>` + `POST /api/v1/kpis/populate/predictions` |
+| **día 15** y **último del mes** | + `POST /api/v1/ml/reentrenar` → `POST /api/v1/segmentacion/reentrenar` → `POST /api/v1/kpis/populate/predictions` |
+
+Decisiones que importan:
+
+- **Un solo Cron Job DIARIO** y el "día 1 / 15 / último" lo decide el script: un cron de
+  Render (5 campos) **no sabe expresar "último día del mes"**.
+- **El "día" es el de Chile** (`TZ`, default `America/Santiago`): el cron va en UTC y el
+  día del mes se calcula con el calendario local (`zoneinfo`). Los `fecha`/`year`/`month`
+  viajan **explícitos**, así el resultado no depende del huso del servidor de la API.
+- **Nada de la app**: sólo HTTP con `urllib` de la stdlib y el header `X-N8N-API-Key`. No
+  se importa `app.*`, no hay SQLAlchemy ni acceso a la base.
+- **Reintentos acotados**: 5xx, timeouts y cortes de red se reintentan
+  (`REINTENTOS`, espera que se duplica); **un 4xx no se reintenta** (una clave mal puesta
+  no se arregla sola) y se reporta con su código.
+- **Un fallo no aborta el resto**: si la segmentación falla, las predicciones igual
+  corren; al final el run sale != 0 y llega **un** correo con todo lo que falló.
+- **`parcial` es rojo**: `POST /ml/reentrenar` devuelve **200** con `status: "parcial"`
+  cuando uno de los dos modelos no se pudo entrenar. En n8n eso pasaba como verde; acá
+  deja el run rojo (**exit 5**) y manda alerta.
+- **Correo = algo que revisar** (regla permanente): el aviso sale **sólo** ante fallo o
+  `parcial`, con asunto `[ALERTA] KPIs y ML PROD: …` y por Gmail SMTP
+  (`maintenance/alertas.py`). Un run verde **no** manda correo.
+
+Exit codes: **0** OK (sin correo) · **2** config (falta o es inválida una variable) ·
+**3** alguna llamada falló tras los reintentos · **5** reentrenamiento `parcial` ·
+**4** inesperado.
+
+
+
+### Env group `kpis-prod` (Render → *Env Groups → New*) — **lo crea el dueño**
+
+| Variable | Valor | Por qué |
+|---|---|---|
+| `KPIS_API_URL` | `https://box-crossfit.onrender.com` (**sin** barra final) | Base de la API. Se rechaza `http://` contra un host remoto (exit 2): la clave viaja en un header y no puede ir sin TLS. |
+| `N8N_API_KEY` | **la misma** que valida el backend | El job manda `X-N8N-API-Key`. Es el valor de la env var `N8N_API_KEY` del **Web Service** en Render (y de `backend/.env` de PROD). Si se rota, se rota en los dos lados. |
+| `DRY_RUN` | `0` | ⚠️ **La imagen trae `DRY_RUN=1` por defecto**: con `1` el job imprime el plan y NO llama a nada. Para que actúe tiene que estar en `0`. |
+| `DIA_ML` | `15` (opcional) | Día del mes del reentrenamiento, además del último (rango 2-28: nunca el 1, y siempre existe en todos los meses). |
+| `REINTENTOS` | `2` (opcional) | Reintentos por llamada (rango 0-5). |
+| `ESPERA_REINTENTO_SEG` | `20` (opcional) | Espera del primer reintento; se duplica (rango 1-600). |
+| `TIMEOUT_SEG` | `300` (opcional) | Timeout por request (rango 10-3600). El reentrenamiento de ML tarda ~1,5 min: no conviene bajarlo. |
+| `TZ` | `America/Santiago` (ya viene en la imagen) | Huso con el que se decide el "día" de Chile. |
+
+Además se **enlaza el env group `alertas`** (`GMAIL_SMTP_USER`, `GMAIL_SMTP_APP_PASSWORD`,
+`ALERT_EMAIL`): es el correo de alerta. Sin esas 3 variables el job corre igual, pero el log
+avisa `AVISO (config)` y, si algo falla, no hay correo. **No** se enlaza `backups-prod` ni
+`neon-api` (este job no toca R2 ni la API de Neon).
+
+### El Cron Job en Render
+
+| Campo | Valor |
+|---|---|
+| Name | `box-crossfit-kpis-ml` |
+| Repo / Branch | `proyecto-crossfit` / `main` |
+| Dockerfile Path | `backend/Dockerfile.cron` |
+| Docker Context | `backend` |
+| Command | `python -m maintenance.kpis_cloud` |
+| Schedule | `0 10 * * *` (UTC) = **06:00 CLT** en invierno / **07:00 CLT** en verano (Chile = UTC-4 / UTC-3) |
+| Environment Groups | `kpis-prod` + `alertas` |
+| Region | **Oregon (us-west-2)** (la misma del Web Service) |
+
+### Puesta en marcha (el ORDEN importa)
+
+1. **En n8n primero**: desactivar (no borrar) los **4 workflows** —
+   `Populate Daily KPIs [PROD]`, `Populate Monthly KPIs [PROD]`,
+   `Populate Predictions [PROD]` y `Reentrenar Modelo ML`. Si el Cron Job arranca con los
+   workflows todavía activos, el trabajo se hace **dos veces** (los endpoints de populate son
+   upserts: no corrompe nada, es trabajo duplicado y un modelo entrenado dos veces).
+   Los workflows de **notificaciones NO se tocan**.
+2. Crear el env group `kpis-prod` (tabla de arriba) y **dejar `DRY_RUN=1`** en la primera
+   corrida.
+3. Crear el Cron Job (tabla de arriba) y apretar **Trigger Run**: el log tiene que mostrar
+   el plan del día (`· [DRY_RUN] POST /api/v1/kpis/populate/daily?fecha=…`) y terminar con
+   `DRY_RUN=1: NO se llamó a ningún endpoint`. **No** llega correo (no hay nada que revisar).
+4. Poner **`DRY_RUN=0`** y volver a `Trigger Run`: el log tiene que decir `HTTP 200` por
+   llamada y `fin: N/N llamada(s) ok`. Tampoco llega correo.
+5. Dejar el schedule `0 10 * * *` y **anotar el rollback**: reactivar los 4 workflows en
+   n8n (instantáneo) y apagar/borrar el Cron Job.
+
+Cómo enterarse de un problema: el run queda **rojo** en Render (exit != 0) y llega el correo
+`[ALERTA] KPIs y ML PROD: …` con el detalle de cada llamada (motivo incluido). Un run verde
+no manda nada. Las alertas de las notificaciones siguen siendo las de n8n.
+
+### Verificado al escribirlo (2026-09-29)
+
+- `tests/test_kpis_cloud.py` ⇒ **33 passed** con dobles: `_http` (el único lugar que abre una
+  conexión) y `DORMIR` mockeados ⇒ **sin red, sin credenciales y sin dormir**;
+  `enviar_email` mockeado ⇒ **no sale ningún correo**. Cubre: sin URL/clave ⇒ exit 2 sin
+  llamar (y con el MOTIVO en el correo), `http://` a host remoto ⇒ exit 2, `DIA_ML` fuera de
+  rango ⇒ exit 2, el plan de cada día (5, 1, 15, 28/30/31 y febrero), el orden de las
+  llamadas, que el día 1 NO reentrena y el 15 NO toca el mes, 5xx reintentado con espera
+  duplicada y acotada, 4xx sin reintento, timeout reintentado, un fallo que NO aborta el
+  resto, `parcial` ⇒ exit 5, `DRY_RUN`, y que ni el log ni el correo puedan filtrar la clave
+  (ni en el mensaje de un error de red ni en el cuerpo de un 500).
+- Smoke **real contra TEST** (`KPIS_API_URL=http://localhost:8001`, la clave de TEST del
+  contenedor, `DRY_RUN=0`): un día corriente ⇒ 1 llamada, `HTTP 200 {"status": "ok",
+  "accion": "daily_kpis upsert", "fecha": "2026-09-28"}`, exit 0 y sin correo. El plan del
+  día 15 (forzado) ⇒ **4/4 ok en 87 s** con los endpoints reales: `ml/reentrenar`
+  (`modelos_vigentes` con churn de 665 KB), `segmentacion/reentrenar` (`n_alumnos=415`,
+  `silhouette=0.3998`, `k=5`) y `kpis/populate/predictions` (full refresh).
+  **PROD no se tocó**: en este trabajo no hay ninguna conexión a PROD (el Cron Job lo crea el
+  dueño).
+- `py -3.12 -m py_compile maintenance/kpis_cloud.py` ⇒ rc 0. El `COPY` del módulo ya está en
+  `Dockerfile.cron` (sin `pip install` nuevo: el job sólo usa la stdlib + `alertas`).
+
+### Qué NO hace (a propósito)
+
+- **No toca las notificaciones**: ningún workflow de correos a alumnos se desactiva ni se
+  reemplaza (eso es el grupo 2, fuera de alcance).
+- **No usa la app ni la base**: no importa `app.*`, no usa SQLAlchemy y no se conecta a
+  Neon; sólo llama a la API pública con la clave de n8n.
+- **No toca `backup_cloud`, `watchdog_backups`, `restore_drill` ni `mantenimiento_cloud`**:
+  son otros Cron Jobs y siguen igual.
+- **No protege contra un doble disparo**: si en n8n se reactiva un workflow, el trabajo se
+  repite (los endpoints son idempotentes). La protección es el paso 1 de la puesta en marcha,
+  no el código.
+
+| Plan | Starter (el mismo de los otros Cron Jobs) |
+
+Por qué **10:00 UTC** y no las 02:30 de n8n: el cron de Render va en UTC **fijo**, así que un
+horario cerca de la medianoche chilena cambia de DÍA con el horario de verano (02:30 CLT =
+05:30 UTC en invierno y 06:30 UTC en verano). A las 10:00 UTC son ~06:00-07:00 en Chile: la
+fecha local es la misma con o sin DST, así que el "día 1 / 15 / último" nunca se corre de
+día. El KPI diario sale igual (`fecha=ayer`): a esa hora el día anterior ya cerró (en n8n
+corría 4 h antes, con el mismo resultado).

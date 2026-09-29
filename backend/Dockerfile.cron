@@ -53,10 +53,11 @@ WORKDIR /app
 # importa FastAPI/SQLAlchemy). `__init__.py` es obligatorio para que resuelva
 # `python -m maintenance.<script>`.
 # ⚠️ Al agregar un Cron Job hay que agregar ACÁ su módulo y sus dependencias internas:
-#    `watchdog_backups`, `restore_drill` y `mantenimiento_cloud` importan `alertas`, y
-#    `alertas` importa `backup_cloud` (si falta uno, el job muere con "No module named
-#    maintenance.<x>"). `mantenimiento_cloud` no necesita nada más: habla con la base por
-#    `psql`, así que no arrastra SQLAlchemy ni la app (y por eso tampoco hay pip nuevo).
+#    `watchdog_backups`, `restore_drill`, `mantenimiento_cloud` y `kpis_cloud` importan
+#    `alertas`, y `alertas` importa `backup_cloud` (si falta uno, el job muere con "No
+#    module named maintenance.<x>"). `mantenimiento_cloud` no necesita nada más: habla
+#    con la base por `psql`, así que no arrastra SQLAlchemy ni la app (y por eso tampoco
+#    hay pip nuevo). `kpis_cloud` tampoco: hace HTTP con `urllib` de la stdlib.
 # EXCEPCIÓN (2026-09-27): `mantenimiento_cloud` importa `shared.estados` —el paquete neutral sin
 # imports donde vive la lista de estados "cancelada" que también usa la app—, así que `shared/`
 # va TAMBIÉN acá: si falta, el job muere con "No module named 'shared'". Son 2 archivos.
@@ -66,6 +67,7 @@ COPY maintenance/alertas.py ./maintenance/alertas.py
 COPY maintenance/watchdog_backups.py ./maintenance/watchdog_backups.py
 COPY maintenance/restore_drill.py ./maintenance/restore_drill.py
 COPY maintenance/mantenimiento_cloud.py ./maintenance/mantenimiento_cloud.py
+COPY maintenance/kpis_cloud.py ./maintenance/kpis_cloud.py
 COPY shared/__init__.py ./shared/__init__.py
 COPY shared/estados.py ./shared/estados.py
 
@@ -76,8 +78,9 @@ RUN useradd --create-home --uid 1000 boxapp \
 USER boxapp
 
 # CMD por defecto = el backup (es el Cron Job que YA corre así en Render: no se cambia).
-# Los otros 3 jobs fijan su propio Command en el dashboard:
+# Los otros jobs fijan su propio Command en el dashboard:
 #   mantenimiento → python -m maintenance.mantenimiento_cloud
 #   watchdog      → python -m maintenance.watchdog_backups
 #   drill         → python -m maintenance.restore_drill
+#   kpis y ML     → python -m maintenance.kpis_cloud      (Fase 8)
 CMD ["python", "-m", "maintenance.backup_cloud"]
