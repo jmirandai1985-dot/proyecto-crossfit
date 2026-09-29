@@ -10,6 +10,7 @@ import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
 import AdminDashboard from './pages/admin/Dashboard';
 import AdminAlumnos from './pages/admin/Alumnos';
+import AdminHistorialAlumno from './pages/admin/HistorialAlumno';
 import AdminCoaches from './pages/admin/Coaches';
 import AdminClases from './pages/admin/Clases';
 import AdminBazar from './pages/admin/Bazar';
@@ -40,6 +41,7 @@ import AlumnoBazar from './pages/alumno/Bazar';
 import AlumnoMisPedidos from './pages/alumno/MisPedidos';
 import AlumnoPerformanceHub from './pages/alumno/PerformanceHub';
 import AlumnoMiProgreso from './pages/alumno/MiProgreso';
+import AlumnoMiHistorial from './pages/alumno/MiHistorial';
 
 // ─── Spinner compartido ────────────────────────────────────────────────
 const LoadingScreen = () => (
@@ -103,6 +105,8 @@ function App() {
           <Route path="/admin/*" element={<ProtectedRoute roles={ROLES_ADMIN} />}>
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="alumnos" element={<AdminAlumnos />} />
+            {/* Historial de UN alumno (se entra desde la tabla de Alumnos o desde la ficha). */}
+            <Route path="alumnos/:alumnoId/historial" element={<AdminHistorialAlumno />} />
             <Route path="alumnos-pendientes" element={<AdminAlumnosPendientes />} />
             <Route path="coaches" element={<AdminCoaches />} />
             <Route path="clases" element={<AdminClases />} />
@@ -141,6 +145,7 @@ function App() {
             <Route path="mis-pedidos" element={<AlumnoMisPedidos />} />
             <Route path="performance-hub" element={<AlumnoPerformanceHub />} />
             <Route path="mi-progreso" element={<AlumnoMiProgreso />} />
+            <Route path="mi-historial" element={<AlumnoMiHistorial />} />
             <Route path="*" element={<Navigate to="/alumno/dashboard" />} />
           </Route>
 

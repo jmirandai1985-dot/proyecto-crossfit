@@ -113,6 +113,7 @@ const Layout = ({ children }) => {
                 { label: 'Mi Progreso', path: '/alumno/mi-progreso', icon: icons.chart },
                 { label: 'Bazar', path: '/alumno/bazar', icon: icons.dumbbell },
                 { label: 'Mis Pedidos', path: '/alumno/mis-pedidos', icon: icons.calendar },
+                { label: 'Mi Historial', path: '/alumno/mi-historial', icon: icons.chart },
                 { label: 'Ajustes', path: '/alumno/ajustes', icon: icons.settings },
             ];
             // Alumno nuevo en plan de prueba: solo Clases (Inicio) + Planes.

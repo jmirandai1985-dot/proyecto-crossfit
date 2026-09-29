@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import AlumnoFichaModal from '../../components/AlumnoFichaModal';
 import { fmtFechaChile, sumarDiasInstante } from '../../utils/fecha';
 
@@ -28,6 +28,8 @@ const Alumnos = () => {
     const [editingAlumno, setEditingAlumno] = useState(null);
     const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
     const [searchParams, setSearchParams] = useSearchParams();
+    // Navegación al Historial del alumno (`/admin/alumnos/:id/historial`).
+    const navigate = useNavigate();
 
     // ?alumno_id=<id>: deep-link desde Notificaciones -> abre la ficha de ESE
     // alumno. AlumnoFichaModal se auto-carga por API, asi que no depende de que
@@ -331,6 +333,13 @@ const Alumnos = () => {
                                                     className="px-3 py-1 text-emerald-400 hover:bg-zinc-800 rounded transition-colors text-xs font-medium"
                                                 >
                                                     👤 Ficha
+                                                </button>
+                                                <button
+                                                    onClick={() => navigate(`/admin/alumnos/${alumno.id}/historial`)}
+                                                    data-testid={`btn-historial-${alumno.id}`}
+                                                    className="px-3 py-1 text-indigo-400 hover:bg-zinc-800 rounded transition-colors text-xs font-medium"
+                                                >
+                                                    📜 Historial
                                                 </button>
                                                 <button
                                                     onClick={() => openModal(alumno)}
