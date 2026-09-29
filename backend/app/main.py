@@ -7,7 +7,7 @@
     notificaciones, notificaciones_enviadas, migracion,
     comprar_emergencia, fix_fechas, supervision,
     finanzas, configuracion, alumnos, asistencia, ranking, mantenimiento, kpis,
-    kpis_populate, ml, segmentacion
+    kpis_populate, ml, segmentacion, historial_alumno
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -234,6 +234,11 @@ app.include_router(finanzas.router,
                    prefix="/api/v1/finanzas", tags=["Finanzas"])
 app.include_router(configuracion.router,
                    prefix="/api/v1/configuracion", tags=["ConfiguraciÃ³n"])
+# Historial del alumno: MISMO prefijo y ANTES que `alumnos.router`, para que
+# `/api/v1/alumnos/me/historial` (literal) se resuelva antes que cualquier ruta con
+# `{alumno_id}` y "me" nunca se intente parsear como int.
+app.include_router(historial_alumno.router, prefix="/api/v1/alumnos",
+                   tags=["Alumnos - Historial"])
 app.include_router(alumnos.router, prefix="/api/v1/alumnos",
                    tags=["Alumnos - Registro y ActivaciÃ³n"])
 app.include_router(asistencia.router, prefix="/api/v1/asistencia",
