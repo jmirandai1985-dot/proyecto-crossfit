@@ -67,14 +67,14 @@ const Ajustes = () => {
         setSaving(true);
         setMensaje(null);
         try {
+            // ── N-1: sólo se envían los campos que el alumno autogestiona. ──
+            // `nombre` es de SOLO LECTURA (lo modifica el box) y los demás datos
+            // de la ficha (correo, género, fecha de nacimiento) también: no van
+            // en el payload para no sugerir que se pueden cambiar desde acá.
             const payload = {};
-            if (formData.nombre) payload.nombre = formData.nombre;
             if (formData.telefono) payload.telefono = formData.telefono;
-            if (formData.correo) payload.correo = formData.correo;
             if (formData.peso_kg) payload.peso_kg = parseFloat(formData.peso_kg);
             if (formData.estatura_cm) payload.estatura_cm = parseInt(formData.estatura_cm);
-            if (formData.genero) payload.genero = formData.genero;
-            if (formData.fecha_nacimiento) payload.fecha_nacimiento = formData.fecha_nacimiento;
 
             await api.put('/api/v1/alumnos/me', payload);
             setMensaje({ tipo: 'exito', texto: 'Datos actualizados exitosamente' });
@@ -113,7 +113,7 @@ const Ajustes = () => {
                 {/* Título */}
                 <div>
                     <h1 className="text-3xl font-bold text-gray-900">⚙️ Ajustes</h1>
-                    <p className="text-gray-600 mt-1">Actualiza tus datos personales</p>
+                    <p className="text-gray-600 mt-1">Actualizá tus datos de contacto y medidas. El resto de tu ficha (nombre, correo, género y fecha de nacimiento) lo administra el box.</p>
                 </div>
 
                 {/* Mensajes */}
@@ -135,15 +135,20 @@ const Ajustes = () => {
                     ) : (
                         <form onSubmit={handleSubmit} className="space-y-5">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {/* ── N-1: dato de la FICHA → sólo lectura ── */}
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Nombre completo</label>
-                                    <input type="text" name="nombre" value={formData.nombre} onChange={handleChange} required
-                                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm" />
+                                    <input type="text" name="nombre" value={formData.nombre} readOnly
+                                        aria-readonly="true"
+                                        className="w-full px-3 py-2.5 border border-gray-200 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed text-sm" />
+                                    <p className="text-xs text-gray-500 mt-1">Solo el box puede modificar tu nombre</p>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Correo electrónico</label>
-                                    <input type="email" name="correo" value={formData.correo} onChange={handleChange} required
-                                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm" />
+                                    <input type="email" name="correo" value={formData.correo} readOnly
+                                        aria-readonly="true"
+                                        className="w-full px-3 py-2.5 border border-gray-200 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed text-sm" />
+                                    <p className="text-xs text-gray-500 mt-1">Solo el box puede modificar tu correo</p>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Teléfono</label>
@@ -164,18 +169,21 @@ const Ajustes = () => {
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Género</label>
-                                    <select name="genero" value={formData.genero} onChange={handleChange}
-                                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm">
+                                    <select name="genero" value={formData.genero} disabled
+                                        className="w-full px-3 py-2.5 border border-gray-200 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed text-sm">
                                         <option value="">Seleccionar...</option>
                                         <option value="M">Masculino</option>
                                         <option value="F">Femenino</option>
                                         <option value="Otro">Otro</option>
                                     </select>
+                                    <p className="text-xs text-gray-500 mt-1">Solo el box puede modificar este dato</p>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Fecha de nacimiento</label>
-                                    <input type="date" name="fecha_nacimiento" value={formData.fecha_nacimiento} onChange={handleChange}
-                                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm" />
+                                    <input type="date" name="fecha_nacimiento" value={formData.fecha_nacimiento} readOnly
+                                        aria-readonly="true"
+                                        className="w-full px-3 py-2.5 border border-gray-200 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed text-sm" />
+                                    <p className="text-xs text-gray-500 mt-1">Solo el box puede modificar este dato</p>
                                 </div>
                             </div>
                             <div className="pt-4 border-t border-gray-100">

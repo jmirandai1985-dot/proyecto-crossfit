@@ -8,7 +8,7 @@ import sentry_sdk
 from datetime import datetime, timedelta, date
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from pydantic import BaseModel, EmailStr, Field, AliasChoices, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, AliasChoices, ConfigDict, model_validator
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -29,15 +29,17 @@ from app.services.email_service import (
 
 router = APIRouter()
 
+logger = logging.getLogger(__name__)
+
 
 class ActualizarMiPerfil(BaseModel):
-    """Campos editables por el ALUMNO sobre su propio perfil (Ajustes).
+    """Campos editables por el usuario sobre su PROPIO perfil (Ajustes).
 
-    NO permite cambiar rol/activo/estado/password (eso es admin o flujo
-    dedicado). `extra='forbid'`: una clave desconocida falla con 422 en vez
-    de ignorarse.
+    NO permite cambiar rol/activo/estado/password (eso es admin o un flujo
+    dedicado) ni el `nombre` completo: el nombre es el dato de identidad de la
+    ficha y lo gestiona el box (`PUT /usuarios/{id}`, admin-only).
+    `extra='forbid'`: una clave desconocida falla con 422 en vez de ignorarse.
     """
-    nombre: Optional[str] = Field(None, min_length=2, max_length=150)
     correo: Optional[EmailStr] = None
     telefono: Optional[str] = Field(None, max_length=20)
     peso_kg: Optional[float] = Field(None, gt=0, le=400)
@@ -46,6 +48,20 @@ class ActualizarMiPerfil(BaseModel):
     fecha_nacimiento: Optional[date] = None
 
     model_config = ConfigDict(extra='forbid')
+
+    @model_validator(mode='before')
+    @classmethod
+    def _descartar_nombre(cls, data):
+        """N-1: `nombre` NO se edita por acá; si un cliente viejo lo manda, se
+        descarta ANTES de validar (evita el 422 de `extra='forbid'` y sobre todo
+        evita que se aplique) y el intento queda registrado en el log.
+        """
+        if isinstance(data, dict) and "nombre" in data:
+            logger.info(
+                "'nombre' descartado en PUT /alumnos/me: el nombre completo "
+                "solo lo modifica el box (PUT /usuarios/{id})")
+            return {k: v for k, v in data.items() if k != "nombre"}
+        return data
 
 
 def _serializar_mi_perfil(usuario):
@@ -448,11 +464,12 @@ def obtener_mi_perfil(
     return _serializar_mi_perfil(usuario)
 
 
-# ─── PUT /me (alumno edita su PROPIO perfil) ───
+# ─── PUT /me (el usuario edita su PROPIO perfil) ───
 # Endpoint correcto para Ajustes del alumno: el CRUD /usuarios/{id} es
-# admin-only por diseño. Acá el alumno solo puede editar campos de perfil
-# (nombre/correo/telefono/peso/estatura/genero/fecha_nacimiento); NO puede
-# tocar rol/activo/estado ni su propia password.
+# admin-only por diseño. Acá sólo se editan campos de perfil
+# (correo/telefono/peso/estatura/genero/fecha_nacimiento); NO se puede tocar
+# rol/activo/estado/password ni el `nombre` completo (N-1: lo gestiona el box
+# vía PUT /usuarios/{id}; si llega, se descarta — ver `ActualizarMiPerfil`).
 @router.put("/me")
 def actualizar_mi_perfil(
     datos: ActualizarMiPerfil,
@@ -470,6 +487,11 @@ def actualizar_mi_perfil(
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
     update_data = datos.model_dump(exclude_unset=True)
+
+    # 🔒 N-1 (defensa en profundidad): el nombre completo nunca se aplica desde
+    # este endpoint, aunque el schema lo aceptara (el alumno no cambia su propia
+    # identidad: eso es del box, `PUT /usuarios/{id}`).
+    update_data.pop("nombre", None)
 
     # Correo: único dentro del tenant (mismo criterio que el CRUD admin).
     nuevo_correo = update_data.get("correo")
