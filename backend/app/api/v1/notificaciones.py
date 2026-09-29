@@ -28,17 +28,33 @@ def listar_notificaciones(
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Devuelve las notificaciones del alumno autenticado.
-    Si solo_no_leidas=True, filtra solo las no leídas.
+    Devuelve las notificaciones de un alumno.
 
-    🔒 SEGURIDAD: alumno_id se deriva del JWT. Si el cliente envía un
-    alumno_id ajeno sin ser coach/admin del box → 403 explícito.
+    🔒 SEGURIDAD:
+      * ALUMNO: `alumno_id` se deriva del JWT; si pide el de otro → 403.
+      * STAFF (coach/admin): puede pedir el de un alumno **de su box**, y sólo
+        de su box (N-3). `notificaciones` no tiene `tenant_id` (sigue al
+        alumno), así que la pertenencia se valida contra `usuarios.tenant_id`:
+        un alumno de otro box → 403 (antes se devolvían sus avisos).
     """
     rol = current_user.get("rol", "")
     if alumno_id is not None:
         if rol in ("coach", "admin", "administrador"):
-            # Staff: puede listar notificaciones de cualquier alumno del box
-            pass
+            # ── N-3: frontera de tenant para el staff ──
+            # Mismo criterio de aislamiento que el resto del proyecto: la
+            # fuente de verdad de "de qué box es este alumno" es su fila en
+            # `usuarios`. Sin esta validación, un staff de otro box leía los
+            # avisos de cualquier alumno conociendo su id.
+            pertenece_al_box = db.query(Usuario.id).filter(
+                Usuario.id == alumno_id,
+                Usuario.tenant_id == current_user["tenant_id"],
+            ).first()
+            if not pertenece_al_box:
+                # 403 (no 404): no se confirma si el alumno existe o no.
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Ese alumno no pertenece a este box",
+                )
         elif alumno_id != current_user["usuario_id"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
