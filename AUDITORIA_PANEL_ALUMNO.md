@@ -19,16 +19,21 @@ endpoints que consumen (`alumnos`, `historial_rm`, `reservas`, `planes`/`membres
 | H-01 | `GET /clases` escribía (auto-generaba clases) | ✅ corregido: la escritura quedó **opt-in** (`generar=false` por defecto) |
 | E-01 | identidad del alumno salía de `localStorage` con fallback `\|\| 5` | ✅ corregido |
 | H-03 | 3 copias distintas del criterio categoría/valor de un RM | ✅ corregido (fuente única back + front) |
-| **N-1 … N-9** | **hallazgos nuevos de esta auditoría** | 1×P1, 2×P2, 6×P3 — ver §4 |
+| **N-1 … N-9** | **hallazgos nuevos de esta auditoría** | **9/9 cerrados**: N-1/N-3/N-4/N-5/N-6 en la 1ª pasada (§5 y §7) y N-2/N-7/N-8/N-9 en la 2ª (§9), todos con test |
 
 **Límite honesto:** la primera pasada no pudo ejecutarse contra la API (`/health` no respondió), así que
 todos los ✅ de §2 son **verificación por código** (lectura + `git log` + tests existentes), no medición
-en runtime. §7 registra la corrida de pytest de las regresiones nuevas.
+en runtime. §7 y §9 registran las corridas de pytest medidas (esta última con clicks reales en navegador).
 
 ## 1. Cómo se verificó
 
 - Lectura completa de las 10 pantallas del alumno y de los routers que consumen.
 - `grep` de patrones peligrosos: `localStorage`, `catch` vacíos, `Promise.all` sin `allSettled`,
+  `alumno_id`/`tenant_id` provenientes de query/body en vez del JWT.
+- Trazado de **cada** endpoint del alumno a su fuente de identidad (`current_user[...]` del JWT).
+- `git log` para fechar los fixes de P0–P3 y leer los tests de regresión que ya existen.
+- Sonda **read-only** a la rama TEST (`ENVIRONMENT=test` → `.env.test`) sólo para tipar datos
+  (usuarios/tenants/notificaciones) usados por los tests nuevos.
 
 ## 2. Estado de los hallazgos previos (P0–P3, H-01, E-01, H-03)
 
@@ -231,17 +236,12 @@ py -3.12 -m pytest tests/test_nombre_inmutable_alumno.py tests/test_notificacion
   `test_mantenimiento_vencidos`) **no** se corrió: el orquestador del proyecto (`run_tests.bat` →
   `_run_tests_orchestrator.py`) hace `DROP SCHEMA` del branch TEST y borra el seed de la demo. Los "✅
   código" de §2 quedan como verificación por lectura, no por ejecución.
-- N-2, N-7, N-8 y N-9 siguen abiertos (§6).
+- N-2, N-7, N-8 y N-9 quedaron abiertos al cierre de *esa* sesión; se cerraron en la sesión
+  siguiente (§9). Esta sección (§7) se deja como registro de lo que se midió entonces.
 - `Ajustes.jsx`: se aplicó la instrucción literal ("solo teléfono, peso y estatura son editables"), así
   que **correo, género y fecha de nacimiento también quedaron de sólo lectura** en la UI. El backend
   sigue aceptándolos (`ActualizarMiPerfil`), de modo que revertirlo es desbloquear esos 3 campos en el
   formulario, sin tocar el servidor.
-
-  `alumno_id`/`tenant_id` provenientes de query/body en vez del JWT.
-- Trazado de **cada** endpoint del alumno a su fuente de identidad (`current_user[...]` del JWT).
-- `git log` para fechar los fixes de P0–P3 y leer los tests de regresión que ya existen.
-- Sonda **read-only** a la rama TEST (`ENVIRONMENT=test` → `.env.test`) sólo para tipar datos
-  (usuarios/tenants/notificaciones) usados por los tests nuevos.
 
 ## 8. Verificación — voucher privado vs. `/static/uploads` (TAREA 6, sin cambios)
 
@@ -294,6 +294,111 @@ del correo, historial del navegador).
 - `SolicitarPlan.jsx:122` sube el **certificado de estudiante** SIN `privado=1` (queda público). Es
   deliberado y está comentado en el código ("no hay endpoint autenticado de certificados todavía"), pero
   es el mismo tipo de dato sensible que el voucher.
+
+## 9. Bloque de seguridad — cierre (TAREAS 1–7, 29/09/2026)
+
+**Cómo se midió:** API de TEST levantada a mano (`ENVIRONMENT=test` + `--lifespan off`, sin scheduler ⇒
+ningún correo puede salir), verificada con `/debug/db-url` → `{"is_safe":true,"is_test":true,"branch":"ep-jolly-butterfly-b6ty2z89"}`
+antes de cada corrida. Frontend en `npm run dev` (:5173, proxy `/api` → :8000) para los clicks reales
+(`frontend/scripts/click-test.mjs`, Edge headless + CDP). **Sin conexiones a producción**, sin tocar `.env`
+ni el correo de la app. Nada se pusheó.
+
+### Tabla de cierre
+
+| Tarea | Hallazgo | Commit | Tests (medidos) | Estado |
+|---|---|---|---|---|
+| 1 | **N-1 (2ª parte)** — la ficha administrativa deja de ser editable en `PUT /alumnos/me` | `75c3ca5` | `tests/test_perfil_campos_alumno.py` **7/7** + los 3 de N-1 → **10 passed** | ✅ cerrado |
+| 2 | **N-2** — campana de notificaciones del alumno | `301aacd` | `tests/test_notificaciones_alumno_campana.py` **5/5** + los 6 de N-3 → **11 passed**; **click real** (badge `1` → "Marcar leída" → badge desaparece, 0 errores) | ✅ cerrado |
+| 3 | **N-7** — la identidad del front sale del servidor | `807f8b0` | `tests/test_identidad_servidor.py` **6/6** + los 7 de la tarea 1 → **13 passed**; **3 corridas en navegador** (localStorage falsificado → `/alumno/dashboard`; admin y coach reales entran a su panel) | ✅ cerrado |
+| 4 | **N-8** — editar/borrar un PR dentro de las 24 h | `237d9c0` | `tests/test_pr_ventana_24h.py` **4/4**; **click real** en `/alumno/rms` (el botón "Editar PR" aparece y abre el modal en modo edición: movimiento bloqueado, valores precargados, "GUARDAR CAMBIOS", 0 errores) | ✅ cerrado (ver gap del DELETE) |
+| 5 | **N-9** — `POST /reservas` para el staff del box | `a11b659` | `tests/test_reservas_staff.py` **4/4** | ✅ cerrado |
+| 6 | **Voucher privado** (sólo verificación) | `802590f` | sondas HTTP contra TEST (tabla de §8), sin cambios de código | ✅ documentado |
+| 7 | Cierre del informe (esta sección) | *(este commit)* | — | ✅ |
+
+**Tests nuevos: 26 casos** (7 + 5 + 6 + 4 + 4). Corridas de la sesión: **10 · 11 · 13 · 4 · 4 passed**
+(42 casos ejecutados al re-correr también los archivos de regresión de N-1 y N-3), más **5 corridas de
+click real** (4 de campana/identidad y 1 del PR).
+
+### Comandos y salidas (medidos)
+
+```
+API a mano:  ENVIRONMENT=test  py -3.12 -m uvicorn app.main:app --port 8000 --lifespan off
+             /debug/db-url -> {"is_safe":true,"is_test":true,"branch":"ep-jolly-butterfly-b6ty2z89"}
+
+TAREA 1:  py -3.12 -m pytest tests/test_perfil_campos_alumno.py tests/test_nombre_inmutable_alumno.py -v
+          -> 10 passed, 4 warnings in 49.75s
+
+TAREA 2:  py -3.12 -m pytest tests/test_notificaciones_alumno_campana.py tests/test_notificaciones_tenant.py -v
+          -> 11 passed, 9 warnings in 48.87s
+
+TAREA 3:  py -3.12 -m pytest tests/test_identidad_servidor.py tests/test_perfil_campos_alumno.py -v
+          -> 13 passed, 9 warnings in 54.68s
+
+TAREA 4:  py -3.12 -m pytest tests/test_pr_ventana_24h.py -v
+          -> 4 passed, 3 warnings in 25.59s
+
+TAREA 5:  py -3.12 -m pytest tests/test_reservas_staff.py -v
+          -> 4 passed, 7 warnings in 41.50s
+```
+
+**Clicks reales (Edge headless + CDP, `frontend/scripts/click-test.mjs`):**
+
+| Corrida | Pantalla | Qué hizo | Resultado |
+|---|---|---|---|
+| 1 | `/alumno/dashboard` | click en la campana (`aria-label="Notificaciones"`) | `role="dialog"` con la lista: badge `1`, "PLAN APROBADO ✅ …", botón "Marcar leída"; 0 errores |
+| 2 | `/alumno/dashboard` | open + click en "Marcar leída" | `badge_antes:"1"` → `badge_despues:null`; 0 errores (notificación restaurada a `leida=false` al terminar) |
+| 3 | `/admin/dashboard` con **token de alumno** y localStorage falsificado (`rol=administrador`, `usuario_id=1`) | — | queda en **`/alumno/dashboard`**, `rol` en localStorage = `alumno` (lo pisó el servidor), menú admin **no** visible, campana visible; 0 errores |
+| 4 | `/admin/dashboard` y `/coach/dashboard` con tokens reales | — | admin → panel admin; coach → panel coach; ambos con su menú; 0 errores |
+| 5 | `/alumno/rms` con un PR recién creado | click en `button[aria-label="Editar PR"]` | modal "✏️ Editar PR", movimiento bloqueado, valores precargados (`minutos=4`, `km=1.2`), botones `["✕","Cancelar","💾 GUARDAR CAMBIOS"]`; 0 errores |
+
+**Frontend (medido):** `npm run build` → **OK** (`built in 5–6 s`, sin errores) después de cada tarea;
+`npm run lint` → **72 warnings / 0 errors** (bajó de 73: el `catch` vacío de N-5 ya no está).
+
+**Base de TEST al cierre (read-only):** `usuarios` 419 (0 en el box 2, 0 temporales), `notificaciones`
+3 sin leer, `historial_rm` 18 filas y **0** con marcas `TEMP`, **0** reservas y **0** registros de
+`auditoria` creados en la última hora. Todo lo que escribieron los tests —teléfono/peso/estatura, la
+notificación marcada, el PR, la reserva, el aforo, los créditos, la auditoría y el usuario temporal del
+otro box— quedó restaurado o borrado.
+
+### Decisiones conservadoras tomadas (no cubiertas por la consigna)
+
+1. **T1 — el descarte es incondicional, no por rol.** `correo`, `genero`, `fecha_nacimiento` y `nombre`
+   se descartan para CUALQUIER llamador de `PUT /alumnos/me`, no sólo para `rol == 'alumno'`: ramificar
+   por rol obligaba a validar el body a mano (para preservar el 200 de los clientes viejos) y el único
+   cliente de ese endpoint es el Ajustes del alumno (verificado con grep). El box sigue editando la
+   ficha por `PUT /usuarios/{id}` (admin-only), como dice el hallazgo. El chequeo de correo duplicado
+   queda como red defensiva hoy inalcanzable (comentada en el código).
+2. **T5 — 403 y no 404 para el alumno de otro box.** Mismo criterio que N-3: no se confirma si el id
+   existe fuera del box. El alumno de un tercero (preexistente) sigue devolviendo 404 como antes.
+3. **T3 — fail-closed en el bootstrap.** Si `GET /alumnos/me` falla, la sesión **no** se restaura: sin
+   identidad verificada no se renderiza ningún panel (y `ProtectedRoute` manda a `/login`). Costo
+   aceptado: un corte de red al arrancar fuerza re-login.
+4. **T4 — el DELETE no recibe ventana.** El backend permite borrar un PR propio sin límite de 24 h; la
+   ventana la aplica sólo la UI (el botón no se renderiza fuera de plazo). No se tocó para no quitarle
+   al box/admin la posibilidad de limpiar un PR viejo; queda documentado como gap.
+5. **T5 — auditoría sólo para la reserva "en nombre de".** El alumno reservando para sí mismo no genera
+   registro (sería ruido); sí lo hace el staff, que es la acción sensible.
+6. **T4 — cambios aditivos en la API.** `RMPorMovimiento` suma `id` y `created_at`; `GET/PUT /alumnos/me`
+   suma `tenant_id`. Nada se quitó ni se renombró, así que los clientes viejos siguen funcionando.
+7. **T6 — no se implementó nada** (era verificación): el fix queda propuesto en §8.
+
+### Lo que quedó pendiente y por qué
+
+- **Suite completa sin correr** (`test_panel_alumno`, `test_reservas_integridad`, `test_p0_4_dinero`,
+  `test_mantenimiento_vencidos`, …): el orquestador del proyecto (`run_tests.bat` →
+  `_run_tests_orchestrator.py`) hace `DROP SCHEMA` del branch TEST y **borra el seed de la demo**, que la
+  consigna prohíbe. Los "✅ código" de §2 siguen siendo verificación por lectura. Para promoverlos haría
+  falta un orquestador que no destruya el seed (o un branch TEST descartable).
+- **Voucher de pedido sin visor** (§8): no existe endpoint autenticado que lo sirva; el comprobante es
+  obligatorio desde P0-4 y el admin no puede verlo. Requiere decisión de producto (¿un
+  `GET /pedidos/{id}/voucher` con el mismo control de dueño/box?).
+- **Certificado de estudiante público** (§8): mismo caso que los vouchers históricos.
+- **DELETE de PR sin ventana** (decisión 4).
+- **`Ajustes.jsx`**: correo, género y fecha de nacimiento quedaron de sólo lectura en la UI **y ahora
+  también en el backend**. Si el producto quiere que el alumno los edite, hay que revertir en los dos
+  lados, no sólo en el formulario (esto cambia lo anotado en §7).
+- **§6 (recomendaciones de la primera pasada)**: siguen vigentes tal cual; no se tocaron en este bloque.
+
 
   → 9 passed
 ```
