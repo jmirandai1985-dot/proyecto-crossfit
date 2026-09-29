@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
+// N-2: campana de notificaciones del alumno (contador de no leídas + panel).
+import CampanaNotificaciones from './CampanaNotificaciones';
 
 // ─── Iconos SVG inline ───────────────────────────────────────────────────
 const icons = {
@@ -291,13 +293,16 @@ const Layout = ({ children }) => {
             {/* Main Content */}
             <div className="flex-1 flex flex-col overflow-hidden">
                 {/* Header */}
-                <header className="bg-zinc-900 border-b border-zinc-800">
+                <header className="relative z-30 bg-zinc-900 border-b border-zinc-800">
                     <div className="flex items-center justify-between px-6 py-3">
                         <div className="flex items-center gap-2">
                             <img src="/imgs/logo.png" alt="Urban Box" className="h-7 w-7 object-contain" />
                             <h1 className="text-lg font-bold text-white">URBAN BOX</h1>
                         </div>
                         <div className="flex items-center gap-4">
+                            {/* N-2: campana del alumno (el staff tiene sus propias
+                                alertas en /admin/notificaciones). */}
+                            {rol === 'alumno' && <CampanaNotificaciones />}
                             <span className="text-sm text-zinc-400">
                                 {new Date().toLocaleDateString('es-CL', {
                                     weekday: 'long',
