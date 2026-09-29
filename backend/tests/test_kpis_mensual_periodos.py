@@ -215,3 +215,62 @@ def test_f_periodos_exige_token():
     assert r.status_code == 401, r.text
 
 
+# ── D. BACKFILL: 12 meses de una vez, idempotente ────────────────────────────
+def _backfill(n8n_headers, **params):
+    return requests.post(f"{API_BASE}/kpis/populate/monthly", params=params,
+                         headers=n8n_headers, timeout=300)
+
+
+def test_d_backfill_de_12_meses_es_idempotente(admin_headers, n8n_headers):
+    """`?backfill=12` completa los meses que el job mensual nunca pobló (tras el seed
+    de 12 meses la tabla tenía UN mes) y re-ejecutarlo recalcula los MISMOS valores
+    sobre las MISMAS filas: upsert por (tenant, año, mes), sin duplicar."""
+    r1 = _backfill(n8n_headers, backfill=12)
+    assert r1.status_code == 200, r1.text
+    cuerpo1 = r1.json()
+    assert cuerpo1["status"] == "ok"
+    assert cuerpo1["accion"] == "monthly_kpis upsert (backfill)"
+    assert cuerpo1["meses_calculados"] == 12
+    assert len(cuerpo1["resultados"]) == 12
+
+    # Los 12 meses son consecutivos y terminan en el último mes CERRADO.
+    claves = [(m["year"], m["month"]) for m in cuerpo1["resultados"]]
+    assert claves == sorted(claves), claves
+    for (a, m), (b, n) in zip(claves, claves[1:]):
+        assert (b * 12 + n) - (a * 12 + m) == 1, f"salto entre {a}-{m} y {b}-{n}"
+
+    # 2ª corrida: mismos meses y MISMOS valores (idempotencia real).
+    r2 = _backfill(n8n_headers, backfill=12)
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["resultados"] == cuerpo1["resultados"]
+
+    # Quedaron EN LA TABLA: el índice las lista sin duplicados y sin huecos.
+    despues = _periodos(admin_headers)
+    claves_final = [(p["year"], p["month"]) for p in despues["periodos"]]
+    assert len(claves_final) == len(set(claves_final)), "el backfill duplicó filas"
+    ventana = [c for c in claves_final if claves[0] <= c <= claves[-1]]
+    assert ventana == claves, f"el backfill dejó huecos: {claves} vs {ventana}"
+    assert len(claves_final) >= 12, claves_final
+    # Y el default sigue apuntando a un mes con datos.
+    assert (despues["default"]["year"], despues["default"]["month"]) in claves_final
+
+
+# ── E. Validaciones de la API del backfill ───────────────────────────────────
+def test_e_validaciones_del_populate(n8n_headers):
+    """Pedidos inválidos => 422 y NINGÚN mes calculado (no escribe nada)."""
+    casos = {
+        "year sin month": {"year": 2026},
+        "backfill + mes puntual": {"backfill": 3, "year": 2026, "month": 8},
+        "rango incompleto": {"desde_year": 2026, "desde_month": 8, "hasta_year": 2026},
+        "rango invertido": {"desde_year": 2026, "desde_month": 8,
+                            "hasta_year": 2026, "hasta_month": 7},
+        "backfill 0": {"backfill": 0},
+        "backfill 40 (> MAX)": {"backfill": 40},
+        "rango de 45 meses (> MAX)": {"desde_year": 2023, "desde_month": 1,
+                                      "hasta_year": 2026, "hasta_month": 9},
+    }
+    for nombre, params in casos.items():
+        r = _backfill(n8n_headers, **params)
+        assert r.status_code == 422, f"{nombre}: HTTP {r.status_code} {r.text[:120]}"
+
+

@@ -3,7 +3,8 @@
 Protegidos con header `X-N8N-API-Key` (= settings.N8N_API_KEY). Calculan y
 persisten desde las tablas transaccionales:
   - POST /populate/daily        -> daily_kpis            (día anterior, o ?fecha=)
-  - POST /populate/monthly      -> monthly_kpis          (mes anterior, o ?year=&month=)
+  - POST /populate/monthly      -> monthly_kpis          (mes anterior, o ?year=&month=;
+                                   ?backfill=N o el rango desde/hasta para varios meses)
   - POST /populate/predictions  -> predictions_churn + predictions_forecast
 
 NOTA: `tenant_id` fijo en 1 (hoy hay un solo box). Parametrizable luego.
@@ -33,6 +34,7 @@ from app.models.clase import Clase
 from app.models.plan import Plan
 from app.models.asistencia import Asistencia
 from app.models.transaccion_financiera import TransaccionFinanciera
+from app.utils.santiago import hoy_santiago
 
 router = APIRouter(prefix="/api/v1/kpis", tags=["KPIs - Populate"])
 
@@ -315,20 +317,24 @@ def populate_daily_kpis(
 
 
 # ── 2) POST /api/v1/kpis/populate/monthly ────────────────────────────────────
-@router.post("/populate/monthly")
-def populate_monthly_kpis(
-    year: int = Query(None, description="Año (YYYY). Default: mes anterior"),
-    month: int = Query(None, description="Mes (1-12). Default: mes anterior"),
-    db: Session = Depends(get_db),
-    _auth: bool = Depends(_verificar_api_key_n8n),
-):
-    """Calcula y hace UPSERT de `monthly_kpis` para el mes indicado (default: anterior)."""
-    tenant_id = TENANT_ID
-    if year is None or month is None:
-        primer_dia_mes = date.today().replace(day=1)
-        anterior = primer_dia_mes - timedelta(days=1)
-        year, month = anterior.year, anterior.month
+# Tope de meses por corrida del backfill: acota el trabajo de una request (36 = 3
+# años) y evita que un `backfill` mal tipeado (p.ej. 999999) barra la tabla entera.
+MAX_MESES_BACKFILL = 36
 
+
+def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> dict:
+    """Calcula y hace UPSERT (idempotente) de UN mes en `monthly_kpis`.
+
+    Devuelve `{"year", "month", "valores"}`. Sin HTTP: lo comparten el populate de
+    un mes y el backfill del rango, así el cálculo existe UNA vez (antes estaba
+    embebido en el endpoint y recalcular un histórico obligaba a duplicar el SQL).
+
+    IDEMPOTENTE por construcción: el upsert es por la UNIQUE
+    (tenant_id, year, month) y los números dependen sólo de las tablas
+    transaccionales de ese período, así que correrlo dos veces sobre el mismo mes
+    deja el mismo valor y una sola fila (probado en
+    tests/test_kpis_mensual_periodos.py).
+    """
     inicio = date(year, month, 1)
     fin = date(year, month, calendar.monthrange(year, month)[1])
 
@@ -448,8 +454,7 @@ def populate_monthly_kpis(
     db.commit()
 
     return {
-        "status": "ok", "tenant_id": tenant_id, "year": year, "month": month,
-        "accion": "monthly_kpis upsert",
+        "year": year, "month": month,
         "valores": {
             "alumnos_prueba": alumnos_prueba,
             "alumnos_clase_prueba_ejecutada": alumnos_clase_prueba_ejecutada,
@@ -464,6 +469,158 @@ def populate_monthly_kpis(
             "ocupacion_promedio": ocupacion_promedio,
         },
     }
+
+
+def _mes_anterior(hoy: date):
+    """(año, mes) del mes CERRADO inmediatamente anterior a `hoy`."""
+    primer_dia = hoy.replace(day=1)
+    anterior = primer_dia - timedelta(days=1)
+    return anterior.year, anterior.month
+
+
+def _meses_entre(desde: tuple, hasta: tuple):
+    """[(año, mes), ...] desde `desde` hasta `hasta`, ambos inclusive y en orden."""
+    i_ini = desde[0] * 12 + (desde[1] - 1)
+    i_fin = hasta[0] * 12 + (hasta[1] - 1)
+    return [(i // 12, i % 12 + 1) for i in range(i_ini, i_fin + 1)]
+
+
+def _resolver_periodos(*, year, month, desde_year, desde_month, hasta_year,
+                       hasta_month, backfill, incluir_mes_en_curso):
+    """Resuelve QUÉ meses calcular: `( [(año, mes), ...], desde, hasta )`.
+
+    Cuatro formas de pedirlo (excluyentes entre sí; combinarlas => 422):
+      1. Nada             -> el MES ANTERIOR (el último cerrado) — el job de n8n.
+      2. `year` + `month` -> ese mes puntual (van juntos; uno solo => 422).
+      3. `backfill=N`     -> los últimos N meses CERRADOS, terminando en el mes
+                             anterior; con `incluir_mes_en_curso=true` la ventana
+                             termina en el mes EN CURSO (ese mes queda parcial).
+      4. Rango explícito  -> `desde_year/desde_month` .. `hasta_year/hasta_month`
+                             (los cuatro juntos; permite incluir el mes en curso).
+
+    `hoy` es la fecha CHILENA (`hoy_santiago`): con TZ=UTC el "mes anterior" se
+    calculaba con el día UTC y el 1° de mes a las 00:00 UTC (21:00 del último día
+    del mes anterior en Chile) elegía el mes equivocado.
+    """
+    hoy = hoy_santiago()
+
+    rango = (desde_year, desde_month, hasta_year, hasta_month)
+    tiene_rango = any(v is not None for v in rango)
+    if tiene_rango and any(v is None for v in rango):
+        raise HTTPException(
+            status_code=422,
+            detail="El rango necesita desde_year, desde_month, hasta_year y hasta_month")
+    if backfill is not None and (tiene_rango or year is not None or month is not None):
+        raise HTTPException(
+            status_code=422,
+            detail="`backfill` no se combina con year/month ni con el rango explícito")
+    if (year is None) != (month is None):
+        raise HTTPException(status_code=422, detail="`year` y `month` van juntos")
+
+    if backfill is not None:
+        hasta = (hoy.year, hoy.month) if incluir_mes_en_curso else _mes_anterior(hoy)
+        # N meses terminando en `hasta` (ambos inclusive): el primero es
+        # `hasta - (N - 1)`, así backfill=1 es exactamente el mes anterior.
+        i_fin = hasta[0] * 12 + (hasta[1] - 1)
+        i_ini = i_fin - (backfill - 1)
+        desde = (i_ini // 12, i_ini % 12 + 1)
+    elif tiene_rango:
+        desde = (desde_year, desde_month)
+        hasta = (hasta_year, hasta_month)
+    elif year is not None:
+        desde = hasta = (year, month)
+    else:
+        desde = hasta = _mes_anterior(hoy)
+
+    if desde > hasta:
+        raise HTTPException(
+            status_code=422,
+            detail="El rango está al revés: `desde` tiene que ser anterior a `hasta`")
+
+    meses = _meses_entre(desde, hasta)
+    if len(meses) > MAX_MESES_BACKFILL:
+        raise HTTPException(
+            status_code=422,
+            detail=f"El rango no puede superar {MAX_MESES_BACKFILL} meses "
+                   f"(pedidos: {len(meses)})")
+    return meses, desde, hasta
+
+
+# ── 2) POST /api/v1/kpis/populate/monthly ────────────────────────────────────
+@router.post("/populate/monthly")
+def populate_monthly_kpis(
+    year: int = Query(None, ge=2000, le=2100,
+                      description="Año (YYYY) de UN mes. Default: mes anterior"),
+    month: int = Query(None, ge=1, le=12,
+                       description="Mes (1-12) de UN mes. Default: mes anterior"),
+    desde_year: int = Query(None, ge=2000, le=2100,
+                            description="Año inicial del rango a recalcular"),
+    desde_month: int = Query(None, ge=1, le=12,
+                             description="Mes inicial del rango (1-12)"),
+    hasta_year: int = Query(None, ge=2000, le=2100,
+                            description="Año final del rango (inclusive)"),
+    hasta_month: int = Query(None, ge=1, le=12,
+                             description="Mes final del rango (inclusive)"),
+    backfill: int = Query(
+        None, ge=1, le=MAX_MESES_BACKFILL,
+        description=f"Recalcula los últimos N meses CERRADOS (1-{MAX_MESES_BACKFILL}), "
+                    "terminando en el mes anterior"),
+    incluir_mes_en_curso: bool = Query(
+        False, description="Con `backfill`: la ventana termina en el mes EN CURSO (parcial)"),
+    db: Session = Depends(get_db),
+    _auth: bool = Depends(_verificar_api_key_n8n),
+):
+    """Calcula y hace UPSERT de `monthly_kpis` (un mes, un rango o un backfill).
+
+    Por qué el rango: la tabla se poblaba de a UN mes por corrida (el job mensual
+    de n8n), así que tras un seed de 12 meses de datos transaccionales la tabla
+    tenía un solo mes y la pestaña Mensual mostraba un único punto (o ninguno, si
+    ese mes caía fuera de su ventana). Con `backfill=12` quedan los 12 meses.
+
+    IDEMPOTENTE: upsert por (tenant_id, year, month) => re-ejecutarlo recalcula los
+    MISMOS números sobre las MISMAS filas (no duplica nada), así que es seguro
+    repetirlo.
+
+    Formas de uso:
+      · (sin params)                           -> mes anterior (job de n8n, como antes)
+      · ?year=2026&month=8                     -> ese mes
+      · ?backfill=12                           -> últimos 12 meses CERRADOS
+      · ?backfill=12&incluir_mes_en_curso=true -> los 12 terminando en el mes actual
+      · ?desde_year=2025&desde_month=10&hasta_year=2026&hasta_month=9 -> rango exacto
+
+    Respuesta: con UN mes mantiene el shape histórico (`year`, `month`, `valores`)
+    y agrega `resultados`; con varios devuelve `meses_calculados` + `resultados`
+    (una entrada `{year, month, valores}` por mes).
+    """
+    tenant_id = TENANT_ID
+    meses, desde, hasta = _resolver_periodos(
+        year=year, month=month, desde_year=desde_year, desde_month=desde_month,
+        hasta_year=hasta_year, hasta_month=hasta_month, backfill=backfill,
+        incluir_mes_en_curso=incluir_mes_en_curso,
+    )
+
+    resultados = [_upsert_mes_monthly(db, tenant_id, y, m) for (y, m) in meses]
+    logger.info("monthly_kpis: %s mes(es) recalculados (%s-%s .. %s-%s)",
+                len(resultados), desde[0], desde[1], hasta[0], hasta[1])
+
+    if len(resultados) == 1:
+        return {
+            "status": "ok", "tenant_id": tenant_id,
+            "year": resultados[0]["year"], "month": resultados[0]["month"],
+            "accion": "monthly_kpis upsert",
+            "valores": resultados[0]["valores"],
+            "resultados": resultados,
+        }
+
+    return {
+        "status": "ok", "tenant_id": tenant_id,
+        "accion": "monthly_kpis upsert (backfill)",
+        "meses_calculados": len(resultados),
+        "desde": {"year": desde[0], "month": desde[1]},
+        "hasta": {"year": hasta[0], "month": hasta[1]},
+        "resultados": resultados,
+    }
+
 
 
 def _mes_desplazado(anio, mes, delta):

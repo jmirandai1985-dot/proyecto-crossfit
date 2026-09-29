@@ -219,12 +219,24 @@ Al final imprime la verificación con el SQL del propio mantenimiento (paso 8, p
 ### Paso 5 — Reentrenar los modelos (con el seed adentro)
 
 ```
-POST /ml/reentrenar                     (churn + forecast)
-POST /kpis/populate/predictions         (predicciones de todos los alumnos)
+POST /ml/reentrenar                             (churn + forecast)
+POST /kpis/populate/predictions                 (predicciones de todos los alumnos)
 POST /segmentacion/reentrenar
-POST /kpis/populate/daily?fecha=…       (opcional: backfill de KPIs del mes)
-POST /kpis/populate/monthly
+POST /kpis/populate/daily?fecha=…               (opcional: backfill de KPIs del mes)
+POST /kpis/populate/monthly?backfill=12         (los 12 meses CERRADOS del seed)
 ```
+
+El seed **no** puebla KPIs (a propósito): la tabla `monthly_kpis` la escribe el job mensual de
+n8n, así que sin el `backfill` queda con UN mes (el último que cerró el job) y la pestaña
+Mensual muestra un solo punto. `?backfill=12` recalcula de una vez los 12 meses cerrados
+(idempotente: upsert por tenant/año/mes, se puede repetir). Con datos que incluyan el mes en
+curso se puede usar el rango explícito:
+
+```
+POST /kpis/populate/monthly?desde_year=2025&desde_month=10&hasta_year=2026&hasta_month=9
+POST /kpis/populate/monthly?backfill=1          (sólo el mes anterior, como el job)
+```
+
 
 ### Paso 6 — Verificación final (Render → Cron Job → Trigger Run)
 
