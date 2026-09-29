@@ -12,6 +12,10 @@
 //   ADMIN_PASSWORD  (default Test1234!)
 //   TEST_TOKEN      si está, se usa tal cual en vez de pedir token por login
 //   EDGE_PATH       ruta de msedge.exe  (default: autodetecta x64/x86 en Windows)
+//   BLOCK_URLS      patrones separados por coma que el navegador NO deja pasar
+//                   (ej. *mensual/periodos*): sirve para probar que un bloque NO
+//                   depende de ese endpoint, o para forzar el camino de error de
+//                   un AvisoCarga (CDP Network.setBlockedURLs).
 //
 // Qué verifica y por qué existe: que el ícono "ver recomendación completa" abra
 // el modal [role="dialog"] y que en el camino no haya ReferenceError ni
@@ -155,6 +159,19 @@ const evalJs = async (expression) => {
         { expression, awaitPromise: true, returnByValue: true }, sessionId);
     return r.result?.result?.value;
 };
+
+// 0c) URLs BLOQUEADAS por el navegador (opcional).
+//     BLOCK_URLS=*patron1*,*patron2* (CDP `Network.setBlockedURLs`): sirve para
+//     probar que un bloque de la pantalla NO depende de un endpoint (con ese
+//     request bloqueado, el dato tiene que seguir apareciendo) o para forzar el
+//     camino de error de un catch que debería avisar (AvisoCarga + Reintentar).
+const BLOCK_URLS = (process.env.BLOCK_URLS || '')
+    .split(',').map((s) => s.trim()).filter(Boolean);
+if (BLOCK_URLS.length) {
+    await send('Network.enable', {}, sessionId);
+    await send('Network.setBlockedURLs', { urls: BLOCK_URLS }, sessionId);
+    console.log('URLs bloqueadas:', BLOCK_URLS.join(' '));
+}
 
 // 1) "login" por token: la app lee access_token/rol/usuario de localStorage
 // Identidad inyectada: por defecto admin local de TEST; overridable con

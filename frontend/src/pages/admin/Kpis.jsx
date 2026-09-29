@@ -178,9 +178,12 @@ const AdminKpis = () => {
         setLoading(false);
     }, []);
 
-    // ─── BI: churn + forecast (+ MRR del último mes cerrado) ─────────────
+    // ─── BI: churn + forecast (+ MRR DE HOY vía /reportes/) ──────────────
     const cargarBi = useCallback(async () => {
-        setLoading(true); setError(null); setSinDatos(false);
+        setLoading(true); setError(null); setSinDatos(false); setErroresCarga([]);
+        // Secciones que fallaron: se avisan con AvisoCarga + Reintentar en vez de
+        // dejar el bloque vacío como si no hubiera dato (catch mudo).
+        const fallos = [];
         try {
             const [churnRes, forecastRes] = await Promise.all([
                 api.get('/api/v1/kpis/churn'),
@@ -189,26 +192,27 @@ const AdminKpis = () => {
             setChurn(churnRes.data);
             setForecast(forecastRes.data?.proyecciones || []);
 
-            // MRR: el del ÚLTIMO MES CERRADO con datos, que ya viene en el índice de
-            // períodos (una request). Antes se pedía el mes actual y, si faltaba, el
-            // anterior a ciegas: el mes en curso no tiene fila hasta que cierra, así
-            // que en los primeros días del mes el bloque quedaba sin dato.
-            const rPer = await api.get('/api/v1/kpis/mensual/periodos').catch(() => null);
-            const def = rPer?.data?.default || null;
-            const filaMrr = def
-                ? (rPer.data.periodos || []).find((p) => p.year === def.year && p.month === def.month)
-                : null;
-            setMrrBi(filaMrr ? filaMrr.mrr : null);
-
-            // Bloque financiero (opcional, mismo criterio): el ticket y la vida
-            // salen del endpoint nuevo; el ARPU se REUSA de /reportes/ (la misma
-            // definición de Reportes.jsx: ingresos netos del mes / alumnos activos).
-            const rFin = await api.get('/api/v1/kpis/financiero').catch(() => null);
-            setFinanciero(rFin?.data || null);
+            // MRR: el de HOY —`metricas_service.mrr(db, tenant, hoy)`—, el que ya
+            // devuelve GET /reportes/ y que muestran el dashboard y Reportes.
+            // NO sale de `monthly_kpis`: hasta af77de2 la tarjeta leía la fila del
+            // último mes del data mart mensual, así que cuando esa fila no existía
+            // (o el índice de períodos fallaba) la tarjeta quedaba en "— CLP"
+            // aunque el MRR vivo sí se conocía (regresión reportada en PROD).
+            // El ARPU se REUSA de la MISMA respuesta (ingresos netos del mes /
+            // alumnos activos: la definición que muestra Reportes.jsx).
             const rRep = tenant_id
                 ? await api.get(`/api/v1/reportes/?tenant_id=${tenant_id}`).catch(() => null)
                 : null;
+            if (!rRep) {
+                fallos.push('el MRR y el ARPU de HOY (GET /reportes/)');
+            }
+            setMrrBi(rRep?.data?.mrr ?? null);
             setArpu(rRep?.data?.arpu ?? null);
+
+            // Bloque financiero (opcional, criterio de siempre): el ticket y la vida
+            // salen del endpoint propio.
+            const rFin = await api.get('/api/v1/kpis/financiero').catch(() => null);
+            setFinanciero(rFin?.data || null);
 
             // Bloques horarios (pico vs valle): opcional, mismo criterio.
             const rBlo = await api.get('/api/v1/kpis/bloques-horarios')
@@ -219,11 +223,13 @@ const AdminKpis = () => {
             const rCoh = await api.get('/api/v1/kpis/cohortes')
                 .catch(() => null);
             setCohortes(rCoh?.data || null);
+
+            setErroresCarga(fallos);
         } catch (err) {
             setError(err.response?.data?.detail || err.message);
         }
         setLoading(false);
-    }, []);
+    }, [tenant_id]);
 
     useEffect(() => {
         if (activeTab === 'diario') cargarDiario();
@@ -579,7 +585,15 @@ const AdminKpis = () => {
 
                 {/* ══ TAB BI (Inteligencia de Negocio) ══ */}
                 {!loading && !error && !sinDatos && activeTab === 'bi' && (
-                    <div className="space-y-6">
+                    <div className="space-y-6" data-testid="tab-bi">
+                        {/* Si GET /reportes/ falla, el MRR de HOY no tiene de dónde
+                            salir: se avisa con Reintentar en vez de dejar la tarjeta
+                            en "— CLP" como si el número no existiera. */}
+                        <AvisoCarga
+                            secciones={erroresCarga}
+                            variante="oscura"
+                            onReintentar={cargarBi}
+                        />
                         {/* ── Alertas operativas (resumen ejecutivo del backend) ── */}
                         {churn?.insight?.mensajes?.length > 0 && (
                             <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-5">
@@ -614,7 +628,16 @@ const AdminKpis = () => {
                         )}
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                            <KpiCard label="Ingresos Recurrentes Mensuales" value={mrrBi === null ? null : Number(mrrBi)} unit="CLP" icon={Banknote} color="border-emerald-500" />
+                            {/* El MRR de esta tarjeta es el de HOY (precio de lista de los
+                                planes vigentes): no espera a que cierre el mes ni depende
+                                del data mart mensual. El caption lo dice para que nadie lo
+                                lea como "el del último mes cerrado". */}
+                            <div>
+                                <KpiCard label="Ingresos Recurrentes Mensuales" value={mrrBi === null ? null : Number(mrrBi)} unit="CLP" icon={Banknote} color="border-emerald-500" />
+                                <p className="mt-1 text-[11px] text-zinc-500">
+                                    Vigente hoy · precio de lista de los planes activos
+                                </p>
+                            </div>
                             <KpiCard
                                 label="Proyección mes 1"
                                 value={forecast.length ? Number(forecast[0].ingresos_predicho) : null}
