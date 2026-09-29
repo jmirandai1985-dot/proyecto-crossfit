@@ -11,10 +11,13 @@
  *
  * Props:
  *   - alumno:           fila del BI (usa `usuario_id`, `alumno_nombre` y `alumno_correo`).
- *   - plantillaInicial: id sugerido por la pantalla (renovación si vence en ≤5 días; si no,
- *                       recuperación). Si no existe en el catálogo, se usa la primera.
  *   - onClose():        cerrar.
  *   - onEnviado(resultado): el correo SALIÓ de verdad (no en modo prueba) y quedó registrado.
+ *
+ * La plantilla con la que arranca la elige el BACKEND (`POST /fidelizacion/sugerir`): la pantalla
+ * no tiene su propia heurística (con 5 plantillas, "si vence en ≤5 días → vencimiento, si no →
+ * inactividad" nunca podría sugerir las otras tres). El modal muestra la regla y el motivo para
+ * que el admin sepa POR QUÉ se sugirió esa.
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import api from '../services/api';
@@ -25,9 +28,10 @@ const ETIQUETA_ESTADO = {
     fallido: '❌ No se pudo enviar el correo',
 };
 
-const ModalEnviarCorreo = ({ alumno, plantillaInicial = null, onClose, onEnviado }) => {
+const ModalEnviarCorreo = ({ alumno, onClose, onEnviado }) => {
     const [catalogo, setCatalogo] = useState(null);
-    const [plantilla, setPlantilla] = useState(plantillaInicial);
+    const [sugerencia, setSugerencia] = useState(null);
+    const [plantilla, setPlantilla] = useState(null);
     const [preview, setPreview] = useState(null);
     const [cargando, setCargando] = useState(true);
     const [previewando, setPreviewando] = useState(false);
@@ -37,7 +41,7 @@ const ModalEnviarCorreo = ({ alumno, plantillaInicial = null, onClose, onEnviado
 
     const alumnoId = alumno?.usuario_id;
 
-    // ── Catálogo ──
+    // ── Catálogo + sugerencia ──
     const cargarCatalogo = useCallback(async () => {
         setCargando(true);
         setError('');
@@ -45,18 +49,31 @@ const ModalEnviarCorreo = ({ alumno, plantillaInicial = null, onClose, onEnviado
             const { data } = await api.get('/api/v1/fidelizacion/plantillas');
             setCatalogo(data);
             const disponibles = (data?.plantillas || []).map((p) => p.id);
-            // La sugerencia manda sólo si existe en el catálogo (el backend es el dueño de
-            // qué se puede mandar): si no, se usa la primera disponible.
-            setPlantilla((actual) => (
-                actual && disponibles.includes(actual) ? actual : (disponibles[0] || null)
-            ));
+            // La sugerencia la define el backend. Si ese pedido falla, el modal sigue sirviendo
+            // (se elige la plantilla a mano): no se rompe el envío por una comodidad.
+            let propuesta = null;
+            try {
+                const r = await api.post('/api/v1/fidelizacion/sugerir', { alumno_id: alumnoId });
+                propuesta = r.data;
+                setSugerencia(r.data);
+            } catch {
+                // Si el pedido de la sugerencia falla, el modal sigue sirviendo (se elige a mano):
+                // el envío no se cae por una comodidad.
+                setSugerencia(null);
+            }
+            // La sugerencia manda sólo si existe en el catálogo (el backend es el dueño de qué
+            // se puede mandar): si no, se usa la primera disponible.
+            const inicial = propuesta?.plantilla;
+            setPlantilla(
+                inicial && disponibles.includes(inicial) ? inicial : (disponibles[0] || null)
+            );
         } catch (e) {
             setCatalogo(null);
             setError(e.response?.data?.detail || 'No se pudo cargar el catálogo de plantillas.');
         } finally {
             setCargando(false);
         }
-    }, []);
+    }, [alumnoId]);
 
     useEffect(() => { cargarCatalogo(); }, [cargarCatalogo]);
 
@@ -177,6 +194,26 @@ const ModalEnviarCorreo = ({ alumno, plantillaInicial = null, onClose, onEnviado
                                         </button>
                                     ))}
                                 </div>
+                                {/* Por qué esta plantilla: la eligió el backend con los datos
+                                    del alumno (y si no hay situación, lo dice). */}
+                                {sugerencia && (
+                                    <p className="text-xs mt-2" data-testid="modal-correo-sugerencia">
+                                        {sugerencia.plantilla ? (
+                                            <>
+                                                <span className="text-zinc-500">Sugerida por el sistema:</span>{' '}
+                                                <span className="text-orange-300 font-medium">
+                                                    {sugerencia.label}
+                                                </span>
+                                                <span className="text-zinc-500"> · {sugerencia.motivo}</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <span className="text-zinc-500">Hoy no le corresponde ninguna plantilla:</span>{' '}
+                                                <span className="text-zinc-300">{sugerencia.motivo}</span>
+                                            </>
+                                        )}
+                                    </p>
+                                )}
                                 {seleccionada && (
                                     <p className="text-xs text-zinc-500 mt-2">
                                         {seleccionada.descripcion} <em>{seleccionada.requiere}</em>

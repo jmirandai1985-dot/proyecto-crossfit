@@ -114,11 +114,13 @@ const Fidelizacion = () => {
     };
 
     // Acción Rápida → abre el modal de envío (F1). Antes esto disparaba el correo a ciegas;
-    // ahora se elige la plantilla y se ve el mensaje EXACTO antes de mandarlo.
-    const enviarCorreoManual = (alumno, plantillaSugerida) => {
+    // ahora se elige la plantilla y se ve el mensaje EXACTO antes de mandarlo. La plantilla
+    // sugerida la resuelve el BACKEND con los datos del alumno (`POST /fidelizacion/sugerir`):
+    // la pantalla no tiene su propia heurística (ver ModalEnviarCorreo).
+    const enviarCorreoManual = (alumno) => {
         setMenuAccion(null);
         setMsg('');
-        setAlumnoCorreo({ fila: alumno, plantilla_sugerida: plantillaSugerida });
+        setAlumnoCorreo({ fila: alumno });
     };
 
     // El correo SALIÓ (el modal no avisa en modo prueba): se marca la gestión como CONTACTADO
@@ -163,9 +165,6 @@ const Fidelizacion = () => {
         const f = venceISO(p);
         return f && f >= hoyISO && f <= limite5ISO;
     });
-    const idsPorVencer = new Set(porVencer.map((p) => p.usuario_id));
-    // Tipo de correo manual: renovación si el plan vence en ≤5 días; si no, recuperación.
-    const tipoEnvioDe = (p) => (idsPorVencer.has(p.usuario_id) ? 'vencimiento' : 'inactividad');
 
     // ── Filtro activo (query params) ─────────────────────────────────────
     const claveFiltro = searchParams.get('filtro') || null;
@@ -476,7 +475,7 @@ const Fidelizacion = () => {
                                                         {menuAccion === p.usuario_id && (
                                                             <div className="absolute right-0 mt-1 w-44 bg-zinc-900 rounded-lg shadow-xl border border-zinc-700 z-20 overflow-hidden">
                                                                 <button
-                                                                    onClick={() => enviarCorreoManual(p, tipoEnvioDe(p))}
+                                                                    onClick={() => enviarCorreoManual(p)}
                                                                     className="w-full px-4 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
                                                                 >
                                                                     ✉️ Enviar correo
@@ -551,7 +550,6 @@ const Fidelizacion = () => {
             {alumnoCorreo && (
                 <ModalEnviarCorreo
                     alumno={alumnoCorreo.fila}
-                    plantillaInicial={alumnoCorreo.plantilla_sugerida}
                     onClose={() => setAlumnoCorreo(null)}
                     onEnviado={correoEnviado}
                 />

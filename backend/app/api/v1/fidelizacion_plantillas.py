@@ -1,9 +1,11 @@
-"""Router de las plantillas de Fidelización: catálogo, preview y envío.
+"""Router de las plantillas de Fidelización: catálogo, sugerencia, preview y envío.
 
-Tres endpoints y UN servicio (`fidelizacion_plantillas`), que es donde viven el copy, los
-datos reales del alumno y el envío. Acá sólo se elige, se valida el ACL/tenant y se devuelve.
+Cuatro endpoints y UN servicio (`fidelizacion_plantillas`), que es donde viven el copy, los
+datos reales del alumno, la sugerencia y el envío. Acá sólo se elige, se valida el ACL/tenant y se
+devuelve.
 
   * `GET  /fidelizacion/plantillas` → lo que el modal puede mostrar (grupos reservados NO viajan).
+  * `POST /fidelizacion/sugerir`    → qué plantilla le corresponde al alumno y por qué regla.
   * `POST /fidelizacion/preview`    → el correo EXACTO que se va a mandar, sin mandarlo.
   * `POST /fidelizacion/enviar`     → lo manda y reporta `enviado` / `simulado` / `fallido`.
 
@@ -33,7 +35,13 @@ class EnvioPlantilla(BaseModel):
 
     plantilla: str = Field(
         ..., pattern=svc.PATRON_IDS,
-        description="Id de la plantilla del catálogo (ej. 'inactividad').")
+        description="Id de la plantilla del catálogo (ej. 'inactividad_15_30').")
+    alumno_id: int = Field(..., gt=0, description="Alumno del box del token.")
+
+
+class ConsultaAlumno(BaseModel):
+    """Sólo el alumno: es lo único que necesita la sugerencia (todavía no hay plantilla elegida)."""
+
     alumno_id: int = Field(..., gt=0, description="Alumno del box del token.")
 
 
@@ -63,6 +71,22 @@ def listar_plantillas(
     que recibe, así que ocultar la opción es una decisión de una sola parte.
     """
     return svc.catalogo()
+
+
+@router.post("/sugerir")
+def sugerir_plantilla(
+    datos: ConsultaAlumno,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Qué plantilla le corresponde al alumno según SUS datos reales (no manda ni renderiza nada).
+
+    La sugerencia la define el servicio (`sugerir`): la pantalla no adivina. Devuelve la plantilla,
+    la regla que ganó y el motivo; `plantilla:null` cuando hoy no hay una situación que la
+    justifique (el alumno que entrenó ayer no necesita que nadie lo vaya a buscar).
+    """
+    alumno = _alumno_del_box(db, current_user, datos.alumno_id)
+    return svc.sugerir(db, alumno)
 
 
 @router.post("/preview")

@@ -36,7 +36,7 @@ lugar donde se escriban los textos; pero no se diseña ni se implementa acá.
 | Panel del coach | `frontend/src/pages/coach/DashboardCoach.jsx` + `components/PreviewEmailModal.jsx` | Ya tiene preview (el correo lo renderiza el backend) |
 | API | `app/api/v1/fidelizacion.py` | `analizar`, `campana-email`, `coach/*`, `tenant/*` |
 | Puerta única de salida | `app/services/email_service.py` | `_template()` (layout de marca) + `_enviar()` (Gmail SMTP + fila en `notificaciones_enviadas`) |
-| Renders reutilizables | `email_service.render_email_fidelizacion()` | Fuente única del copy de inactividad (envío real y preview) |
+| Renders reutilizables | `email_service.render_email_fidelizacion*()` | Fuente única del copy de cada situación (envío real, preview del coach y catálogo) |
 | Envío manual actual | `POST /notificaciones-enviadas/enviar-manual` | Manda `inactividad`/`vencimiento` **sin preview** |
 | 6ª sección del Historial | `historial_alumno_service` | `beneficios` declarada y **no anunciada** (llega con F2) |
 

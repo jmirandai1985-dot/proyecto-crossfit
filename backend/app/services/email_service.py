@@ -1,4 +1,4 @@
-"""Servicio de envio de correos via Gmail SMTP (18 funciones)."""
+"""Servicio de envio de correos via Gmail SMTP (21 funciones)."""
 import os
 from app.core.urls import url_frontend  # B.2: URLs de correo saneadas
 import base64
@@ -313,6 +313,11 @@ def render_email_fidelizacion(nombre: str, dias_ausente: int) -> tuple:
     Fuente UNICA de verdad: la usan el envio real (`enviar_email_fidelizacion`)
     y el preview del panel coach, para que el mensaje que el coach ve antes de
     confirmar sea EXACTAMENTE el que se envia.
+
+    Es el copy del tramo del MEDIO del catalogo de Fidelizacion (15-30 dias sin venir). Los
+    otros tramos tienen su propio texto porque el tono no puede ser el mismo: al que recien
+    se esta desenganchando se le recuerda su horario (`..._temprana`) y al que ya lleva mas
+    de un mes (o dejo de pagar) hay que ofrecerle coordinar la vuelta (`..._larga`).
     """
     titulo = "Tu box te está esperando"
     saludo = f"Hola {nombre.split()[0]}, notamos que llevas <strong>{dias_ausente} d&iacute;as</strong> sin entrenar."
@@ -322,6 +327,70 @@ def render_email_fidelizacion(nombre: str, dias_ausente: int) -> tuple:
     url = url_frontend("/alumno/mis-reservas")
     html = _template(titulo, saludo, cuerpo, "Volver a entrenar", url)
     asunto = f"¡Te extrañamos en el box, {nombre.split()[0]}! 💪"
+    return asunto, html
+
+
+def render_email_fidelizacion_temprana(nombre: str, dias_ausente: int) -> tuple:
+    """Renderiza (asunto, html) del correo del alumno que lleva POCO sin venir (7 a 14 días).
+
+    Tono de recordatorio: lo que se rompe a las dos semanas es el HÁBITO, así que el mensaje
+    apunta a volver al horario de siempre y no a "empezar de nuevo".
+    """
+    primer_nombre = nombre.split()[0]
+    titulo = "Hace unos días que no te vemos"
+    saludo = (f"Hola {primer_nombre}, llevás <strong>{dias_ausente} días</strong> sin pasar por "
+              "el box.")
+    cuerpo = ("Una semana sin entrenar se nota, y también se recupera: volvé a tu horario de "
+              "siempre y el impulso vuelve con la primera sesión. Tu lugar, tu coach y tu gente "
+              "siguen acá esperándote.")
+    url = url_frontend("/alumno/mis-reservas")
+    html = _template(titulo, saludo, cuerpo, "Volver a entrenar", url)
+    asunto = f"Hace unos días que no te vemos, {primer_nombre} 💪"
+    return asunto, html
+
+
+def render_email_fidelizacion_larga(nombre: str, dias_ausente: int,
+                                    plan_vencido: bool = False) -> tuple:
+    """Renderiza (asunto, html) del correo del alumno con MÁS de un mes sin venir o sin plan.
+
+    `plan_vencido` (hoy no tiene una membresía vigente) cambia UNA frase: decirle "renová tu
+    plan" a alguien que todavía está pagando es un error que el alumno nota. El resto es el
+    mismo mensaje (coordinar la vuelta), así que no hay dos copias que puedan divergir.
+    """
+    primer_nombre = nombre.split()[0]
+    titulo = "Volver también es entrenar"
+    saludo = (f"Hola {primer_nombre}, pasaron <strong>{dias_ausente} días</strong> desde tu "
+              "última sesión.")
+    if plan_vencido:
+        saludo += (" Y hoy no tenés un plan vigente: las dos cosas se resuelven en la misma "
+                   "conversación.")
+    cuerpo = ("Después de un mes, la vuelta cuesta menos de lo que parece: no hace falta empezar "
+              "de cero ni esperar el lunes perfecto. Elegí un día, vení y armamos un plan que se "
+              "ajuste a tu semana.")
+    url = url_frontend("/alumno/solicitar-plan")
+    html = _template(titulo, saludo, cuerpo, "Coordinar mi vuelta", url)
+    asunto = f"¿Volvemos, {primer_nombre}? Tu lugar sigue acá"
+    return asunto, html
+
+
+def render_email_riesgo_alto(nombre: str, dias_ausente: int) -> tuple:
+    """Renderiza (asunto, html) del correo de acompañamiento del alumno en riesgo alto (ML).
+
+    ⚠️ La probabilidad y el motivo del modelo son datos del ADMIN: no se escriben acá. Al
+    alumno se le escribe como una persona del box que se preocupa, con sus días reales sin
+    venir como único número. Un correo que le diga "98 % de probabilidad de abandono" lo
+    expulsa del box, que es exactamente lo contrario de lo que busca la plantilla.
+    """
+    primer_nombre = nombre.split()[0]
+    titulo = "Nos importa cómo estás"
+    saludo = (f"Hola {primer_nombre}, hace <strong>{dias_ausente} días</strong> que no te vemos "
+              "y queremos saber cómo estás.")
+    cuerpo = ("No es sólo por el entrenamiento: si algo se te complicó —el tiempo, el trabajo, el "
+              "ánimo—, el equipo del box está para ayudarte a sostener el hábito que venías "
+              "construyendo. Contanos qué te está frenando y vemos juntos cómo seguir.")
+    url = url_frontend("/alumno/mis-reservas")
+    html = _template(titulo, saludo, cuerpo, "Contarle a mi coach", url)
+    asunto = f"¿Cómo venís, {primer_nombre}? Contame"
     return asunto, html
 
 
