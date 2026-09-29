@@ -22,6 +22,8 @@ from app.services.nivel_service import (
 )
 # H-03: criterio único de categorización de movimientos (BD -> normalización -> nombre).
 from app.services.movimiento_categoria import categoria_de
+# El "mejor RM por movimiento" tiene UNA sola definición: `app/services/rms_service.py`.
+from app.services.rms_service import CAMPOS_SCHEMA, mejor_rm_por_movimiento
 from app.db.crossfit_ratios import CROSSFIT_RATIOS
 from app.db.crossfit_habilidades import CROSSFIT_HABILIDADES
 from app.services.nivel_service import NIVELES
@@ -334,76 +336,14 @@ def obtener_rms_alumno(
     tenant_id = current_user["tenant_id"]
     _verificar_acceso_alumno(current_user, alumno_id)
 
-    cols = [
-        HistorialRM.id,
-        HistorialRM.movimiento_id,
-        Movimiento.nombre.label('movimiento_nombre'),
-        HistorialRM.peso_kg,
-        HistorialRM.tipo_rm,
-        HistorialRM.valor_extra,
-        HistorialRM.repeticiones,
-        HistorialRM.series,
-        HistorialRM.minutos,
-        HistorialRM.vueltas,
-        HistorialRM.km,
-        HistorialRM.calorias,
-        HistorialRM.fecha,
-        HistorialRM.notas,
-        HistorialRM.created_at,
-    ]
+    # El "mejor RM por movimiento" tiene UNA definición (`app/services/rms_service.py`):
+    # acá sólo se convierte a schema. El orden del resultado lo fija el servicio (primero
+    # fuerza/gimnasia por `movimiento_id` y después cardio/máquinas), el mismo que ya
+    # consumía la Pizarra de RMs.
+    rms = mejor_rm_por_movimiento(db, alumno_id, tenant_id)
 
-    base_filter = [
-        HistorialRM.alumno_id == alumno_id,
-        HistorialRM.tenant_id == tenant_id,
-    ]
-
-    # --- Fuerza y Gimnástico: se elige por mayor peso_kg ---
-    rms_fuerza = db.query(*cols).join(
-        Movimiento, HistorialRM.movimiento_id == Movimiento.id
-    ).filter(
-        *base_filter,
-        Movimiento.categoria.in_(['fuerza', 'gimnastico'])
-    ).order_by(
-        HistorialRM.movimiento_id,
-        HistorialRM.peso_kg.desc()
-    ).distinct(HistorialRM.movimiento_id).all()
-
-    # --- Cardio y Máquinas (metabolico): se elige el REGISTRO MÁS RECIENTE ---
-    # Usamos id.desc() como desempate para garantizar que sea el último creado
-    rms_cardio = db.query(*cols).join(
-        Movimiento, HistorialRM.movimiento_id == Movimiento.id
-    ).filter(
-        *base_filter,
-        Movimiento.categoria.in_(['cardio', 'metabolico'])
-    ).order_by(
-        HistorialRM.movimiento_id,
-        HistorialRM.fecha.desc(),
-        HistorialRM.id.desc()
-    ).distinct(HistorialRM.movimiento_id).all()
-
-    rms = rms_fuerza + rms_cardio
-
-    return [
-        RMPorMovimiento(
-            id=rm[0],
-            movimiento_id=rm[1],
-            movimiento_nombre=rm[2],
-            peso_kg=rm[3],
-            tipo_rm=rm[4] or 'peso',
-            valor_extra=rm[5],
-            repeticiones=rm[6],
-            series=rm[7],
-            minutos=rm[8],
-            vueltas=rm[9],
-            km=rm[10],
-            calorias=rm[11],
-            fecha=rm[12],
-            notas=rm[13],
-            # N-8: la UI calcula con esto la ventana de edición de 24 h.
-            created_at=rm[14],
-        )
-        for rm in rms
-    ]
+    return [RMPorMovimiento(**{campo: rm[campo] for campo in CAMPOS_SCHEMA})
+            for rm in rms]
 
 
 @router.put("/{historial_id}", response_model=HistorialRMResponse)
