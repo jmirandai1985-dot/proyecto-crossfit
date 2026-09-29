@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
     BarChart, Bar, AreaChart, Area, LineChart, Line,
-    XAxis, YAxis, CartesianGrid, Tooltip,
+    XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer,
 } from 'recharts';
 import {
     TrendingUp, Users, UserPlus, Activity, DollarSign, Percent,
@@ -43,6 +43,12 @@ const fmtMesCorto = (iso) => {
 };
 
 const fmtCLP = (n) => `$${Number(n || 0).toLocaleString('es-CL')}`;
+
+// Índice estacional: 1,00x = un mes igual al promedio del período; 1,42x = 42%
+// arriba del promedio. `null` = ese mes no tiene dato (se muestra "s/d", nunca 0).
+const fmtIndice = (v) => (v === null || v === undefined)
+    ? 's/d'
+    : `${Number(v).toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}×`;
 
 // Celda de retención de una cohorte: "activos/evaluables (P%)" o "n/d" si el
 // horizonte todavía no maduró (el backend manda `retencion_pct: null`).
@@ -89,6 +95,8 @@ const AdminKpis = () => {
     const [arpu, setArpu] = useState(null);
     // Bloques horarios (pico vs valle): oferta y asistencia por turno.
     const [bloques, setBloques] = useState(null);
+    // Estacionalidad: índice por mes del año (ene..dic) de ingresos y alumnos.
+    const [estacionalidad, setEstacionalidad] = useState(null);
     // Cohortes de retención por mes de alta.
     const [cohortes, setCohortes] = useState(null);
     // Bloque abierto en el modal de detalle ampliado (null = ninguno).
@@ -218,6 +226,17 @@ const AdminKpis = () => {
             const rBlo = await api.get('/api/v1/kpis/bloques-horarios')
                 .catch(() => null);
             setBloques(rBlo?.data || null);
+
+            // Estacionalidad (índice por mes del año): NO es opcional en silencio.
+            // Es la tarjeta que responde "¿cuáles son mis meses fuertes?": si la
+            // lectura falla, se avisa con AvisoCarga + Reintentar en vez de dejar la
+            // tarjeta vacía sin explicación.
+            const rEst = await api.get('/api/v1/kpis/estacionalidad')
+                .catch(() => null);
+            if (!rEst) {
+                fallos.push('la estacionalidad (GET /kpis/estacionalidad)');
+            }
+            setEstacionalidad(rEst?.data || null);
 
             // Cohortes de retención: opcional, mismo criterio.
             const rCoh = await api.get('/api/v1/kpis/cohortes')
@@ -407,6 +426,89 @@ const AdminKpis = () => {
             variacion: previo ? ((actual - previo) / previo) * 100 : null,
         };
     });
+
+    // ─── Estacionalidad: derivados del índice por mes (ene..dic) ────────────
+    // El mes en curso NO entra al cálculo (lo excluye el backend: es un mes a
+    // medias) y un índice `null` significa "ese mes del año no tiene dato": no se
+    // dibuja ni se cuenta como 0.
+    const filasEstacionalidad = estacionalidad?.filas || [];
+    const conIndice = filasEstacionalidad.filter((f) => f.indice_ingresos !== null);
+    const mesFuerte = conIndice.length
+        ? conIndice.reduce((a, b) => (b.indice_ingresos > a.indice_ingresos ? b : a))
+        : null;
+    const mesDebil = conIndice.length
+        ? conIndice.reduce((a, b) => (b.indice_ingresos < a.indice_ingresos ? b : a))
+        : null;
+    // La serie de alumnos se dibuja SÓLO si el backend la declara disponible: hoy
+    // `monthly_kpis.alumnos_activos_inicio` está en 0 en todos los meses cerrados y
+    // una línea plana en 0 PARECERÍA un dato (el backend manda el motivo).
+    const alumnosDisponible = !!estacionalidad?.alumnos_activos?.disponible;
+    // Menos de 12 meses cerrados = todavía no se puede hablar de estacionalidad.
+    const avisoInsuficiente = !!estacionalidad && !estacionalidad.suficiente;
+    const notaEstacionalidad = estacionalidad?.nota_historia || '';
+
+    const chartEstacionalidad = (
+        <LineChart data={filasEstacionalidad}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
+            <XAxis dataKey="label" stroke="#a1a1aa" fontSize={11} />
+            <YAxis stroke="#a1a1aa" fontSize={11} tickFormatter={(v) => `${v}×`} />
+            <Tooltip {...TOOLTIP_STYLE} formatter={(v) => fmtIndice(v)} />
+            {/* 1,00× = promedio del período: la referencia deja ver de un golpe qué
+                meses están arriba (fuertes) y cuáles abajo (flojos). */}
+            <ReferenceLine y={1} stroke="#71717a" strokeDasharray="4 4" />
+            <Line type="monotone" dataKey="indice_ingresos" name="Ingresos"
+                stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+            {alumnosDisponible && (
+                <Line type="monotone" dataKey="indice_alumnos" name="Alumnos activos"
+                    stroke="#38bdf8" strokeWidth={2} dot={{ r: 3 }} />
+            )}
+        </LineChart>
+    );
+
+    const tablaEstacionalidad = (
+        <DataTable
+            columns={[
+                { key: 'label', label: 'Mes' },
+                {
+                    key: 'ingresos', label: 'Ingresos del mes (CLP)',
+                    render: (v) => (v === null ? 'sin datos' : fmtCLP(v)),
+                },
+                { key: 'indice_ingresos', label: 'Índice ingresos', render: (v) => fmtIndice(v) },
+                {
+                    key: 'alumnos_activos', label: 'Alumnos activos (inicio)',
+                    render: (v) => (v === null ? 'sin datos' : v),
+                },
+                { key: 'indice_alumnos', label: 'Índice alumnos', render: (v) => fmtIndice(v) },
+            ]}
+            data={filasEstacionalidad}
+        />
+    );
+
+    const explicacionEstacionalidad = (
+        <>
+            El <span className="text-zinc-100">índice estacional</span> compara cada mes del año
+            contra el promedio del período: <span className="text-zinc-100">1,00×</span> es un mes
+            igual al promedio, más de 1,00× un mes fuerte y menos de 1,00× un mes flojo. Se calcula
+            {' '}<em>valor del mes ÷ promedio de los meses</em> con los meses CERRADOS de
+            {' '}monthly_kpis ({estacionalidad?.fuente || 'monthly_kpis'}): los ingresos del mes
+            (netos, en CLP) y los alumnos activos al inicio del mes. El mes en curso queda afuera
+            porque todavía no cerró: sus números son parciales.
+            {mesFuerte && mesDebil && (
+                <> En este perfil el mes más fuerte es
+                    {' '}<span className="text-zinc-100">{mesFuerte.label}</span>
+                    {' '}({fmtIndice(mesFuerte.indice_ingresos)}) y el más flojo
+                    {' '}<span className="text-zinc-100">{mesDebil.label}</span>
+                    {' '}({fmtIndice(mesDebil.indice_ingresos)}).</>
+            )}
+            {' '}Cómo se usa: para planificar campañas y dotación. El mes flojo es el que hay que
+            llenar (ahí va la campaña de captación y las promos) y el fuerte es el que hay que
+            aguantar (cupos, horarios extra y profes). Comparar el mismo mes entre años avisa si el
+            perfil se está moviendo.
+            {notaEstacionalidad ? ` ${notaEstacionalidad}` : ''}
+            {!alumnosDisponible && estacionalidad?.alumnos_activos?.motivo
+                ? ` Alumnos activos: ${estacionalidad.alumnos_activos.motivo}` : ''}
+        </>
+    );
 
     return (
         <Layout>
@@ -627,7 +729,7 @@ const AdminKpis = () => {
                             </div>
                         )}
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             {/* El MRR de esta tarjeta es el de HOY (precio de lista de los
                                 planes vigentes): no espera a que cierre el mes ni depende
                                 del data mart mensual. El caption lo dice para que nadie lo
@@ -645,7 +747,72 @@ const AdminKpis = () => {
                                 icon={TrendingUp}
                                 color="border-orange-500"
                             />
+                            {/* Estacionalidad (índice por mes del año): tercer bloque de la
+                                fila. Se clickea (o se abre con Enter/Espacio) y abre el
+                                DetalleModal, el MISMO patrón de los otros gráficos del BI. */}
+                            <div
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setDetalle('estacionalidad')}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        setDetalle('estacionalidad');
+                                    }
+                                }}
+                                title="Ver el detalle ampliado"
+                                data-testid="card-estacionalidad"
+                                className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-sky-500 cursor-zoom-in"
+                            >
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <p className="text-sm text-gray-400 uppercase tracking-wide">
+                                            Estacionalidad
+                                        </p>
+                                        <p className="text-3xl font-bold text-white mt-2"
+                                            data-testid="estacionalidad-mes-fuerte">
+                                            {mesFuerte ? mesFuerte.label : '—'}
+                                            {mesFuerte && (
+                                                <span className="text-lg ml-2 text-gray-500">
+                                                    {fmtIndice(mesFuerte.indice_ingresos)}
+                                                </span>
+                                            )}
+                                        </p>
+                                    </div>
+                                    <CalendarDays className="w-8 h-8 text-gray-600" />
+                                </div>
+                                <p className="mt-1 text-[11px] text-zinc-500">
+                                    {avisoInsuficiente
+                                        ? `Datos insuficientes para estacionalidad: ${estacionalidad.meses_con_datos} de ${estacionalidad.minimo_meses} meses cerrados`
+                                        : (mesFuerte && mesDebil
+                                            ? `Mes más fuerte vs ${mesDebil.label} (${fmtIndice(mesDebil.indice_ingresos)}) · 1,00× = promedio`
+                                            : 'Todavía sin meses cerrados con datos')}
+                                </p>
+                                <div className="mt-3 h-16">
+                                    {filasEstacionalidad.length > 0 && (
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            {chartEstacionalidad}
+                                        </ResponsiveContainer>
+                                    )}
+                                </div>
+                            </div>
                         </div>
+
+                        {/* Aviso de honestidad: con menos de 12 meses cerrados no se publica
+                            como "estacionalidad" (un año es el mínimo para un perfil). */}
+                        {avisoInsuficiente && (
+                            <div
+                                data-testid="aviso-estacionalidad"
+                                role="status"
+                                className="rounded-xl border border-amber-600 bg-amber-900/30 px-4 py-3 text-sm text-amber-200"
+                            >
+                                ⚠️ <strong>Datos insuficientes para estacionalidad</strong>: hay{' '}
+                                {estacionalidad.meses_con_datos} de {estacionalidad.minimo_meses} meses
+                                cerrados con datos. {estacionalidad.nota_historia}
+                                {' '}Se completa con
+                                {' '}<span className="text-amber-100">POST /api/v1/kpis/populate/monthly?backfill=12</span>.
+                            </div>
+                        )}
 
                         {/* ── Bloque financiero: ticket promedio por plan + LTV ──
                             El ticket y la vida salen de GET /kpis/financiero; el ARPU se
@@ -871,6 +1038,60 @@ const AdminKpis = () => {
                     )}
                 >
                     {tablaCohortes}
+                </DetalleModal>
+            )}
+
+            {/* ── Detalle ampliado: estacionalidad (índice por mes del año) ──
+                Mismo DetalleModal que el resto del BI: gráfico ampliado, tabla por mes y
+                la explicación en lenguaje simple (meses fuertes/flojos y cómo se usa para
+                planificar campañas). */}
+            {detalle === 'estacionalidad' && (
+                <DetalleModal
+                    titulo="Estacionalidad del box (índice por mes del año)"
+                    subtitulo={estacionalidad
+                        ? `Valor del mes ÷ promedio de los meses · ${estacionalidad.meses_con_datos} meses cerrados con datos`
+                        : 'Todavía sin datos'}
+                    onCerrar={() => setDetalle(null)}
+                    explicacion={explicacionEstacionalidad}
+                >
+                    {avisoInsuficiente && (
+                        <div
+                            data-testid="aviso-estacionalidad-modal"
+                            className="mb-4 rounded-lg border border-amber-600 bg-amber-900/30 px-4 py-3 text-sm text-amber-200"
+                        >
+                            ⚠️ <strong>Datos insuficientes para estacionalidad</strong>: hay{' '}
+                            {estacionalidad.meses_con_datos} de {estacionalidad.minimo_meses} meses
+                            cerrados con datos. {notaEstacionalidad}
+                        </div>
+                    )}
+
+                    {filasEstacionalidad.length > 0 ? (
+                        <>
+                            <ChartCard
+                                title="Índice por mes del año (1,00× = promedio del período)"
+                                height="h-96"
+                            >
+                                {chartEstacionalidad}
+                            </ChartCard>
+                            <div className="mt-4 space-y-2">
+                                {tablaEstacionalidad}
+                                <p className="text-[11px] leading-relaxed text-zinc-500">
+                                    Ingresos: {estacionalidad.ingresos.columna}
+                                    {' '}({estacionalidad.ingresos.observaciones} observaciones).
+                                    {' '}Alumnos activos: {estacionalidad.alumnos_activos.columna}
+                                    {alumnosDisponible
+                                        ? ` (${estacionalidad.alumnos_activos.observaciones} observaciones).`
+                                        : ' — sin serie histórica disponible.'}
+                                </p>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="rounded-lg border border-zinc-700 bg-zinc-800/40 p-4 text-sm leading-relaxed text-zinc-300">
+                            Todavía no hay meses cerrados con datos. Los KPIs mensuales se publican al
+                            cierre de cada mes; el histórico se completa con
+                            {' '}<span className="text-zinc-100">POST /api/v1/kpis/populate/monthly?backfill=12</span>.
+                        </div>
+                    )}
                 </DetalleModal>
             )}
         </Layout>

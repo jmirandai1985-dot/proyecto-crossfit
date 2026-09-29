@@ -16,6 +16,9 @@
 //                   (ej. *mensual/periodos*): sirve para probar que un bloque NO
 //                   depende de ese endpoint, o para forzar el camino de error de
 //                   un AvisoCarga (CDP Network.setBlockedURLs).
+//   EDGE_WINDOW     tamaño de la ventana headless (default 1280,800): con menos de
+//                   1024px las grillas responsive no se activan y los chequeos de
+//                   "misma fila" dan falso negativo.
 //
 // Qué verifica y por qué existe: que el ícono "ver recomendación completa" abra
 // el modal [role="dialog"] y que en el camino no haya ReferenceError ni
@@ -87,6 +90,10 @@ const edge = spawn(EDGE, [
     '--headless=new', `--remote-debugging-port=${PORT}`,
     `--user-data-dir=${join(tmpdir(), `edge-cdp-click-test-${process.pid}`)}`,
     '--no-first-run', '--no-default-browser-check', '--disable-gpu',
+    // EDGE_WINDOW=1440x900: el headless arranca en 800x600 y con ese ancho las
+    // grillas responsive (lg:grid-cols-N) NO se activan: los tests de layout
+    // ("la tarjeta está en la MISMA fila") necesitan un ancho de escritorio.
+    `--window-size=${process.env.EDGE_WINDOW || '1280,800'}`,
     'about:blank',
 ], { stdio: 'ignore' });
 

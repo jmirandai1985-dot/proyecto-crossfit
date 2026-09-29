@@ -406,6 +406,169 @@ def get_kpis_mensual_periodos(
     }
 
 
+# ── 2c) GET /api/v1/kpis/estacionalidad (BI: perfil del año) ─────────────────
+# Meses CERRADOS con fila en `monthly_kpis` que hacen falta para publicar el
+# índice: con menos, cada mes del calendario se observa a lo sumo una vez y el
+# "perfil" es el ruido de unos pocos meses, no una estacionalidad.
+MESES_MIN_ESTACIONALIDAD = 12
+# Rótulos de mes: los MISMOS que usa la pestaña Mensual en el eje de sus gráficos.
+MESES_CORTOS = ("ene", "feb", "mar", "abr", "may", "jun",
+                "jul", "ago", "sep", "oct", "nov", "dic")
+
+
+def _indice_estacional(filas: list) -> dict:
+    """Índice estacional por mes del calendario: valor del mes / promedio.
+
+    PURA (sin base ni HTTP): recibe `[{"month", "valor"}]` —sólo meses CERRADOS— y
+    devuelve SIEMPRE las 12 filas (ene..dic), con `None` en los meses sin
+    observaciones: así el gráfico tiene 12 puntos fijos y los huecos SE VEN (no se
+    interpolan como si hubiera dato).
+
+    Cómo se calcula:
+      1. Se agrupa por mes del calendario (1..12) sobre TODA la historia cargada.
+      2. `valor` de cada mes = promedio de sus observaciones (con un año de historia
+         es UNA: el valor de ese mes) y `muestras` dice cuántas hay.
+      3. `promedio` = promedio de TODAS las observaciones.
+      4. `indice` = valor / promedio: 1.00 es un mes igual al promedio del período,
+         > 1 un mes fuerte y < 1 un mes flojo. Con promedio 0 el índice es None
+         ("sin dato" NO es "0", mismo criterio que `churn_rate`).
+
+    `disponible`: False cuando NINGUNA observación es distinta de 0. Existe por un
+    hallazgo concreto: `alumnos_activos_inicio` viene en 0 en todos los meses
+    cerrados (el populate la llena con el estado de HOY de la suscripción), y sin
+    esta bandera el gráfico dibujaría una línea plana en 0 que PARECE un dato.
+    """
+    por_mes = {m: [] for m in range(1, 13)}
+    for f in filas:
+        valor = f.get("valor")
+        if valor is None:
+            continue
+        por_mes[f["month"]].append(float(valor))
+
+    todas = [v for valores in por_mes.values() for v in valores]
+    promedio = (sum(todas) / len(todas)) if todas else None
+    disponible = any(v != 0 for v in todas)
+
+    meses = []
+    for m in range(1, 13):
+        valores = por_mes[m]
+        media = (sum(valores) / len(valores)) if valores else None
+        meses.append({
+            "mes": m,
+            "label": MESES_CORTOS[m - 1],
+            "valor": round(media, 2) if media is not None else None,
+            "muestras": len(valores),
+            "indice": (round(media / promedio, 3)
+                       if media is not None and promedio and disponible else None),
+        })
+
+    return {
+        "meses": meses,
+        "promedio": round(promedio, 2) if promedio is not None else None,
+        "observaciones": len(todas),
+        "disponible": disponible,
+    }
+
+
+def _meta_serie(serie: dict) -> dict:
+    """Sólo los metadatos de una serie (los 12 meses van en `filas`)."""
+    return {k: serie[k] for k in ("promedio", "observaciones", "disponible")}
+
+
+@router.get("/estacionalidad")
+def get_estacionalidad(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Perfil estacional del box: índice por mes del año (ene..dic) de ingresos y alumnos.
+
+    POR QUÉ EXISTE: el BI ya mostraba el mes a mes (series) y el pronóstico, pero no
+    respondía la pregunta con la que se planifican campañas, profes y horarios:
+    "¿cuáles son MIS meses fuertes y cuáles los flojos?". El índice estacional pone
+    los meses en la MISMA escala (1.00 = promedio del período) aunque ingresos y
+    alumnos se midan en unidades distintas: es lo que se mira para adelantar una
+    campaña en el mes flojo y reforzar personal en el fuerte.
+
+    Fuente: `monthly_kpis` (meses CERRADOS del tenant). El mes EN CURSO se EXCLUYE
+    a propósito: son números de un mes a medias y ensuciarían el perfil (el
+    `parcial` lo decide el calendario chileno, no el navegador).
+
+    Honestidad del dato (todo viaja en la respuesta):
+      · `suficiente`: sólo con >= `MESES_MIN_ESTACIONALIDAD` (12) meses cerrados;
+        con menos, la UI dice "datos insuficientes para estacionalidad".
+      · `nota_historia`: con 12 meses cada mes del calendario se observa UNA vez,
+        así que es el perfil de ESA ventana, no una tendencia de varios años.
+      · `alumnos_activos.disponible` + `motivo`: `alumnos_activos_inicio` se llena
+        con el estado de HOY de la suscripción (`estado = 'activo'`), así que los
+        meses ya cerrados quedan en 0 (medido en TEST: los 12 meses del backfill
+        dan 0). La serie se publica con su valor crudo y marcada como NO
+        disponible: no se dibuja una línea plana que parezca un dato.
+
+    Respuesta: `filas` = 12 filas (ene..dic) con el índice de las dos series, más
+    `promedios`, `suficiente`, `meses_con_datos`, `ventana` y `nota_historia`.
+    """
+    tenant_id = current_user["tenant_id"]
+    hoy = hoy_santiago()
+
+    filas_bd = db.query(MonthlyKpi).filter(
+        MonthlyKpi.tenant_id == tenant_id,
+    ).order_by(MonthlyKpi.year.asc(), MonthlyKpi.month.asc()).all()
+
+    # Sólo meses CERRADOS: el mes en curso no cerró y sus números son parciales.
+    cerradas = [f for f in filas_bd
+                if (f.year, f.month) != (hoy.year, hoy.month)]
+
+    ingresos = _indice_estacional(
+        [{"month": f.month, "valor": float(f.ingresos_total)} for f in cerradas])
+    alumnos = _indice_estacional(
+        [{"month": f.month, "valor": f.alumnos_activos_inicio} for f in cerradas])
+
+    suficiente = len(cerradas) >= MESES_MIN_ESTACIONALIDAD
+    motivo_alumnos = None if alumnos["disponible"] else (
+        "La columna se llena con el estado de HOY de la suscripción "
+        "(`estado = 'activo'`), así que los meses ya cerrados quedan en 0 cuando el "
+        "plan vence: hoy NO hay serie histórica de alumnos activos en el data mart "
+        "(hallazgo 2026-09-29; se arregla en el populate, no acá).")
+
+    return {
+        "suficiente": suficiente,
+        "minimo_meses": MESES_MIN_ESTACIONALIDAD,
+        "meses_con_datos": len(cerradas),
+        "ventana": {
+            "desde": ({"year": cerradas[0].year, "month": cerradas[0].month}
+                      if cerradas else None),
+            "hasta": ({"year": cerradas[-1].year, "month": cerradas[-1].month}
+                      if cerradas else None),
+        },
+        "excluye_mes_en_curso": {"year": hoy.year, "month": hoy.month},
+        "fuente": "monthly_kpis (meses cerrados)",
+        "nota_historia": (
+            "1 año de historia: es el perfil de ESA ventana (cada mes del año se "
+            "observa UNA vez), no una tendencia de varios años."
+            if suficiente else
+            f"Todavía no hay un año completo: {len(cerradas)} de "
+            f"{MESES_MIN_ESTACIONALIDAD} meses cerrados con datos."),
+        "ingresos": {
+            "etiqueta": "Ingresos del mes (netos)",
+            "columna": "monthly_kpis.ingresos_total",
+            **_meta_serie(ingresos),
+        },
+        "alumnos_activos": {
+            "etiqueta": "Alumnos activos (inicio del mes)",
+            "columna": "monthly_kpis.alumnos_activos_inicio",
+            **_meta_serie(alumnos),
+            "motivo": motivo_alumnos,
+        },
+        "promedios": {"ingresos": ingresos["promedio"],
+                      "alumnos_activos": alumnos["promedio"]},
+        "filas": [{
+            "mes": a["mes"], "label": a["label"], "muestras": a["muestras"],
+            "alumnos_activos": a["valor"], "indice_alumnos": a["indice"],
+            "ingresos": i["valor"], "indice_ingresos": i["indice"],
+        } for a, i in zip(alumnos["meses"], ingresos["meses"])],
+    }
+
+
 # ── 3) GET /api/v1/kpis/churn (BI - CHURN) ───────────────────────────────────
 @router.get("/churn")
 def get_predictions_churn(
