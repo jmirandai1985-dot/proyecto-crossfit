@@ -217,20 +217,6 @@ API levantada a mano: ENVIRONMENT=test + --lifespan off   (sin scheduler ⇒ nin
 /debug/db-url → {"is_safe":true,"is_test":true,"branch":"ep-jolly-butterfly-b6ty2z89"}
 
 py -3.12 -m pytest tests/test_nombre_inmutable_alumno.py tests/test_notificaciones_tenant.py -v
-  → 9 passed
-```
-
-- `test_nombre_inmutable_alumno.py`: **3/3** (el alumno manda `nombre` → 200 + sin cambio ni en la
-  respuesta ni en la BD; el resto del payload sí se aplica; clave desconocida sigue en 422).
-- `test_notificaciones_tenant.py`: **6/6**, incluido `test_nb04` (cross-tenant real: el alumno existe en
-  el box 2 y el staff del box 1 recibe **403**).
-- Primera corrida: 8 passed + **1 error** de fixture (`usuarios.rut` es `varchar(12)` y el rut del alumno
-  temporal tenía 18 caracteres). Corregido en el mismo commit de N-3 (el INSERT falló entero: no quedó basura).
-- Los tests **no** dependen de ids fijos (en TEST no existe el alumno 999 que crea el orquestador): eligen
-  sus sujetos de la BD. El test cross-tenant crea y **borra** un alumno temporal del box 2.
-
-**Verificación post-corrida de la BD (read-only):** 0 filas residuales, `usuarios` sigue en 419 filas
-(sólo box 1), las 3 notificaciones siguen `leida=false` y el teléfono del alumno usado quedó restaurado.
 
 ### Frontend (medido)
 
@@ -256,3 +242,71 @@ py -3.12 -m pytest tests/test_nombre_inmutable_alumno.py tests/test_notificacion
 - `git log` para fechar los fixes de P0–P3 y leer los tests de regresión que ya existen.
 - Sonda **read-only** a la rama TEST (`ENVIRONMENT=test` → `.env.test`) sólo para tipar datos
   (usuarios/tenants/notificaciones) usados por los tests nuevos.
+
+## 8. Verificación — voucher privado vs. `/static/uploads` (TAREA 6, sin cambios)
+
+**Pregunta:** ¿un archivo subido con `privado=1` se puede descargar sin token o con el token de otro
+alumno? ¿Sigue público `/static/uploads`?
+
+**Método (medido en TEST el 29/09/2026; API a mano `ENVIRONMENT=test --lifespan off`):** subí un PNG
+real con `POST /upload/voucher?privado=true` (archivo temporal borrado al terminar) y probé todas las
+vías de lectura, más una sonda a los vouchers que ya están en la BD.
+
+| Prueba | Resultado |
+|---|---|
+| `POST /upload/voucher?privado=true` (alumno autenticado) | **201** → `{"url":"/privado/vouchers/voucher_<uuid>.png"}` |
+| ¿el archivo se guarda fuera de `static/`? | **Sí**: `backend/app/private_uploads/voucher_<uuid>.png` existe en disco |
+| `GET /privado/vouchers/voucher_<uuid>.png` **sin token** | **404** — no hay ruta: `main.py` sólo monta `/static`, y nginx sólo proxea `/api/`, `/static/` y `/health` |
+| `GET /static/uploads/` con el nombre privado | **404** (la carpeta privada no se sirve por `static`) |
+| `GET /solicitudes/95/voucher` **sin token** | **401** |
+| `GET /solicitudes/95/voucher` con token de **otro alumno del mismo box** | **403** (`solicitudes_planes.py:167-184`: sólo el dueño o el staff del mismo box) |
+| `GET /solicitudes/95/voucher` con token del **dueño** | 200 — en TEST da **404** porque el seed apunta a un archivo que no está en disco (dato, no seguridad) |
+| `GET /static/uploads/voucher_9ba7a0f3….jpeg` (voucher **histórico**, solicitud 2) **sin token** | **200** ← **sigue público** |
+
+**Respuesta:** un voucher `privado=1` **no** se puede descargar sin token ni con el token de otro alumno:
+la URL no existe como ruta y el único lector es el endpoint autenticado, que valida dueño/box.
+`/static/uploads` **sí sigue público** (por diseño: ahí viven las imágenes de catálogo), y los
+**vouchers históricos** —los subidos antes de que existiera `private_uploads/`: 96 archivos en disco y 1
+referenciado por una solicitud de TEST— siguen descargables por URL y sin token con sólo conocer el nombre.
+
+**Riesgo residual (vouchers históricos).** El comprobante de pago es dato sensible (nombre, banco, monto,
+fecha) y esas URLs **no se pueden revocar**. La mitigación actual es el nombre UUID (no adivinable) y que
+la UI use el endpoint autenticado; el agujero es cualquier filtración de la URL (logs, capturas, reenvío
+del correo, historial del navegador).
+
+**Propuesta de fix (NO implementada, por indicación de la tarea):**
+
+1. **Contención inmediata, sin tocar datos:** en nginx, cortar `location ^~ /static/uploads/voucher_`
+   con un 404. Los vouchers históricos dejan de servirse público y el endpoint autenticado los sigue
+   leyendo (lee el archivo del disco, no la URL).
+2. **Migración de datos:** script one-off con `--dry-run` que mueva a `private_uploads/` los archivos de
+   `solicitudes_planes.voucher_url`, `pedidos.voucher_url` y `suscripciones.voucher_url` que empiecen con
+   `/static/`, y actualice la URL a `/privado/vouchers/…`.
+3. **Regresión automática:** test que falle si un `voucher_url` nuevo queda en `/static/` (hoy el
+   contrato se sostiene sólo porque el front manda `privado=1`).
+
+**Observaciones relacionadas (medidas, fuera del alcance pedido):**
+
+- `pedidos.voucher_url` guarda comprobantes **privados** pero ningún endpoint autenticado los sirve (el
+  de vouchers es sólo de solicitudes) y ninguna pantalla los muestra (`admin/Bazar.jsx` y
+  `MisPedidos.jsx` no lo referencian): el comprobante de un pedido es obligatorio desde P0-4 y nadie
+  puede verlo.
+- `SolicitarPlan.jsx:122` sube el **certificado de estudiante** SIN `privado=1` (queda público). Es
+  deliberado y está comentado en el código ("no hay endpoint autenticado de certificados todavía"), pero
+  es el mismo tipo de dato sensible que el voucher.
+
+  → 9 passed
+```
+
+- `test_nombre_inmutable_alumno.py`: **3/3** (el alumno manda `nombre` → 200 + sin cambio ni en la
+  respuesta ni en la BD; el resto del payload sí se aplica; clave desconocida sigue en 422).
+- `test_notificaciones_tenant.py`: **6/6**, incluido `test_nb04` (cross-tenant real: el alumno existe en
+  el box 2 y el staff del box 1 recibe **403**).
+- Primera corrida: 8 passed + **1 error** de fixture (`usuarios.rut` es `varchar(12)` y el rut del alumno
+  temporal tenía 18 caracteres). Corregido en el mismo commit de N-3 (el INSERT falló entero: no quedó basura).
+- Los tests **no** dependen de ids fijos (en TEST no existe el alumno 999 que crea el orquestador): eligen
+  sus sujetos de la BD. El test cross-tenant crea y **borra** un alumno temporal del box 2.
+
+**Verificación post-corrida de la BD (read-only):** 0 filas residuales, `usuarios` sigue en 419 filas
+(sólo box 1), las 3 notificaciones siguen `leida=false` y el teléfono del alumno usado quedó restaurado.
+
