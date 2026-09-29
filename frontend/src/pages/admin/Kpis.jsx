@@ -17,6 +17,7 @@ import { KpiCard } from '../../components/kpis/KpiCard';
 import { ChartCard } from '../../components/kpis/ChartCard';
 import { DataTable } from '../../components/kpis/DataTable';
 import { DetalleModal } from '../../components/kpis/DetalleModal';
+import AvisoCarga from '../../components/AvisoCarga';
 
 const TABS = [
     { id: 'diario', label: 'Diario' },
@@ -71,6 +72,14 @@ const AdminKpis = () => {
 
     const [serieDiaria, setSerieDiaria] = useState([]);
     const [serieMensual, setSerieMensual] = useState([]);
+    // Pestaña MENSUAL: meses con fila en `monthly_kpis` (índice del backend), el mes
+    // elegido en el selector y el mes EN CURSO (calendario chileno) que informa el
+    // backend para poder decir "todavía no cerró" sin adivinarlo en el navegador.
+    const [periodos, setPeriodos] = useState([]);
+    const [mesSel, setMesSel] = useState(null);
+    const [mesActual, setMesActual] = useState(null);
+    // Secciones que fallaron al cargar (banner AvisoCarga + Reintentar).
+    const [erroresCarga, setErroresCarga] = useState([]);
     const [churn, setChurn] = useState(null);
     const [forecast, setForecast] = useState([]);
     const [mrrBi, setMrrBi] = useState(null);
@@ -116,23 +125,52 @@ const AdminKpis = () => {
         setLoading(false);
     }, []);
 
-    // ─── MENSUAL: últimos 6 meses ────────────────────────────────────────
-    const cargarMensual = useCallback(async () => {
-        setLoading(true); setError(null); setSinDatos(false);
-        const hoy = new Date();
-        const periodos = [];
-        for (let i = 5; i >= 0; i--) {
-            const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
-            periodos.push({ year: d.getFullYear(), month: d.getMonth() + 1 });
-        }
+    // ─── MENSUAL: meses CON fila en monthly_kpis (índice) ────────────────
+    // Antes se pedían a ciegas los últimos 6 meses: los que no tienen fila (el mes
+    // en curso, o los meses que el job aún no pobló) respondían 404 y se descartaban.
+    // Con el índice se pide SOLO lo que existe, se muestra por defecto el ÚLTIMO MES
+    // CERRADO con datos y se puede elegir otro mes en el selector.
+    const cargarMensual = useCallback(async (seleccion = null) => {
+        setLoading(true); setError(null); setSinDatos(false); setErroresCarga([]);
         try {
+            const rPer = await api.get('/api/v1/kpis/mensual/periodos');
+            const lista = rPer.data?.periodos || [];
+            setPeriodos(lista);
+            setMesActual(rPer.data?.actual || null);
+
+            if (lista.length === 0) {
+                setMesSel(null); setSerieMensual([]); setSinDatos(true);
+                setLoading(false);
+                return;
+            }
+
+            // Mes a mostrar: el que eligió el usuario (si sigue existiendo) o el
+            // `default` del backend = último mes CERRADO con datos.
+            const defaultEs = rPer.data?.default || null;
+            const pedido = (seleccion && lista.some((p) => p.year === seleccion.year && p.month === seleccion.month))
+                ? seleccion
+                : defaultEs;
+            setMesSel(pedido);
+
+            // Serie del gráfico: los últimos 6 meses CON datos hasta el elegido.
+            const idx = pedido
+                ? lista.findIndex((p) => p.year === pedido.year && p.month === pedido.month)
+                : -1;
+            const fin = idx >= 0 ? idx + 1 : lista.length;
+            const recorte = lista.slice(Math.max(0, fin - 6), fin);
             const res = await Promise.allSettled(
-                periodos.map((p) => api.get('/api/v1/kpis/mensual', { params: p }))
+                recorte.map((p) => api.get('/api/v1/kpis/mensual', { params: { year: p.year, month: p.month } }))
             );
             const serie = res
-                .map((r, i) => (r.status === 'fulfilled' ? { ...r.value.data, ...periodos[i] } : null))
+                .map((r, i) => (r.status === 'fulfilled' ? { ...r.value.data, ...recorte[i] } : null))
                 .filter(Boolean);
             setSerieMensual(serie);
+
+            // Si algún mes de la serie falla, se avisa y se ofrece Reintentar en vez
+            // de mostrar el gráfico incompleto como si fuera todo lo que hay.
+            const fallidos = res.filter((r) => r.status === 'rejected').length;
+            setErroresCarga(fallidos > 0
+                ? [`${fallidos} de los ${recorte.length} meses del gráfico`] : []);
             setSinDatos(serie.length === 0);
         } catch (err) {
             setError(err.response?.data?.detail || err.message);
@@ -140,10 +178,9 @@ const AdminKpis = () => {
         setLoading(false);
     }, []);
 
-    // ─── BI: churn + forecast (+ MRR del mes) ────────────────────────────
+    // ─── BI: churn + forecast (+ MRR del último mes cerrado) ─────────────
     const cargarBi = useCallback(async () => {
         setLoading(true); setError(null); setSinDatos(false);
-        const hoy = new Date();
         try {
             const [churnRes, forecastRes] = await Promise.all([
                 api.get('/api/v1/kpis/churn'),
@@ -152,18 +189,16 @@ const AdminKpis = () => {
             setChurn(churnRes.data);
             setForecast(forecastRes.data?.proyecciones || []);
 
-            // MRR: mes actual y, si no hay fila aún, el mes anterior.
-            const mesActual = { year: hoy.getFullYear(), month: hoy.getMonth() + 1 };
-            const rMes = await api.get('/api/v1/kpis/mensual', { params: mesActual }).catch(() => null);
-            let mrr = rMes?.data?.mrr ?? null;
-            if (mrr === null) {
-                const prev = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
-                const rPrev = await api
-                    .get('/api/v1/kpis/mensual', { params: { year: prev.getFullYear(), month: prev.getMonth() + 1 } })
-                    .catch(() => null);
-                mrr = rPrev?.data?.mrr ?? null;
-            }
-            setMrrBi(mrr);
+            // MRR: el del ÚLTIMO MES CERRADO con datos, que ya viene en el índice de
+            // períodos (una request). Antes se pedía el mes actual y, si faltaba, el
+            // anterior a ciegas: el mes en curso no tiene fila hasta que cierra, así
+            // que en los primeros días del mes el bloque quedaba sin dato.
+            const rPer = await api.get('/api/v1/kpis/mensual/periodos').catch(() => null);
+            const def = rPer?.data?.default || null;
+            const filaMrr = def
+                ? (rPer.data.periodos || []).find((p) => p.year === def.year && p.month === def.month)
+                : null;
+            setMrrBi(filaMrr ? filaMrr.mrr : null);
 
             // Bloque financiero (opcional, mismo criterio): el ticket y la vida
             // salen del endpoint nuevo; el ARPU se REUSA de /reportes/ (la misma
@@ -197,7 +232,76 @@ const AdminKpis = () => {
     }, [activeTab, cargarDiario, cargarMensual, cargarBi]);
 
     const dia = serieDiaria.length ? serieDiaria[serieDiaria.length - 1] : null;
-    const mes = serieMensual.length ? serieMensual[serieMensual.length - 1] : null;
+    // El mes que se muestra es el ELEGIDO en el selector (no simplemente el último de
+    // la serie: el gráfico se recorta hasta el mes elegido, así que coinciden, pero
+    // si un mes fallara la serie no mandaría sobre la selección del usuario).
+    const mes = (mesSel && serieMensual.find((p) => p.year === mesSel.year && p.month === mesSel.month))
+        || (serieMensual.length ? serieMensual[serieMensual.length - 1] : null);
+    // "parcial" = el mes elegido es el mes EN CURSO (lo dice el backend, calendario
+    // chileno): sus números son de un mes a medias.
+    const mesParcial = !!(mes && mes.parcial);
+    const mesCerradoConDatos = periodos.filter((p) => !p.parcial).slice(-1)[0] || null;
+    // Botón (no texto suelto) para volver al último mes cerrado: es el estado por
+    // defecto de la pestaña, y desde otro mes se llega en un click.
+    const volverAlCerrado = mesCerradoConDatos && mesSel
+        && (mesCerradoConDatos.year !== mesSel.year || mesCerradoConDatos.month !== mesSel.month)
+        ? mesCerradoConDatos : null;
+
+    // Selector de mes: SOLO los meses que existen en `monthly_kpis` (el backend los
+    // manda del más viejo al más nuevo; acá se muestran del más nuevo al más viejo).
+    // El mes EN CURSO aparece únicamente si ya tiene fila, rotulado "parcial"; si no,
+    // no es una opción y se explica por qué (`notaMesEnCurso`).
+    const selectorMes = (
+        <div className="flex flex-wrap items-center gap-3">
+            <label htmlFor="mes-mensual" className="text-sm text-gray-400">Mes:</label>
+            <select
+                id="mes-mensual"
+                data-testid="selector-mes-mensual"
+                value={mesSel ? `${mesSel.year}-${String(mesSel.month).padStart(2, '0')}` : ''}
+                onChange={(e) => {
+                    const [y, m] = e.target.value.split('-').map(Number);
+                    cargarMensual({ year: y, month: m });
+                }}
+                className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+            >
+                {[...periodos].reverse().map((p) => (
+                    <option
+                        key={`${p.year}-${p.month}`}
+                        value={`${p.year}-${String(p.month).padStart(2, '0')}`}
+                    >
+                        {MESES[p.month - 1]} {p.year}{p.parcial ? ' · parcial' : ''}
+                    </option>
+                ))}
+            </select>
+            {mesParcial && (
+                <span
+                    data-testid="badge-mes-parcial"
+                    title="El mes todavía no cerró: los números son de un mes a medias."
+                    className="rounded-full bg-amber-900/40 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-amber-300"
+                >
+                    parcial
+                </span>
+            )}
+            {volverAlCerrado && (
+                <button
+                    type="button"
+                    data-testid="ir-ultimo-mes-cerrado"
+                    onClick={() => cargarMensual(volverAlCerrado)}
+                    className="text-xs text-orange-400 underline transition-colors hover:text-orange-300"
+                >
+                    Ir al último mes cerrado ({MESES[volverAlCerrado.month - 1]} {volverAlCerrado.year})
+                </button>
+            )}
+        </div>
+    );
+
+    // Por qué el mes en curso no está en el selector (no tiene fila todavía).
+    const notaMesEnCurso = mesActual && !mesActual.tiene_fila ? (
+        <p data-testid="nota-mes-en-curso" className="text-[11px] text-zinc-500">
+            {MESES[mesActual.month - 1]} {mesActual.year} está en curso: sus KPIs se
+            publican al cierre del mes (por eso el selector arranca en el último mes cerrado).
+        </p>
+    ) : null;
 
     // LTV estimado = ARPU mensual × vida promedio del alumno en meses.
     // (La fórmula y sus límites los documenta el backend en `financiero`.)
@@ -329,9 +433,15 @@ const AdminKpis = () => {
 
                 {!loading && !error && sinDatos && (
                     <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-8 text-center">
-                        <p className="text-gray-300 font-medium">Sin datos para el período.</p>
+                        <p className="text-gray-300 font-medium">
+                            {activeTab === 'mensual'
+                                ? 'Todavía no hay KPIs mensuales cerrados.'
+                                : 'Sin datos para el período.'}
+                        </p>
                         <p className="text-sm text-gray-500 mt-2">
-                            Los datos se están generando, intentá de nuevo en unos minutos
+                            {activeTab === 'mensual'
+                                ? 'Los KPIs mensuales se publican al cierre de cada mes. Si ya hay meses con datos cargados, se completan con el backfill: POST /api/v1/kpis/populate/monthly?backfill=12'
+                                : 'Los datos se están generando: intenta de nuevo en unos minutos.'}
                         </p>
                     </div>
                 )}
@@ -387,10 +497,22 @@ const AdminKpis = () => {
 
                 {/* ══ TAB MENSUAL ══ */}
                 {!loading && !error && !sinDatos && activeTab === 'mensual' && mes && (
-                    <div className="space-y-6">
-                        <p className="text-xs text-gray-500">
-                            Último mes con datos: <span className="text-gray-300">{MESES[mes.month - 1]} {mes.year}</span>
-                        </p>
+                    <div className="space-y-6" data-testid="tab-mensual">
+                        <AvisoCarga
+                            secciones={erroresCarga}
+                            variante="oscura"
+                            onReintentar={() => cargarMensual(mesSel)}
+                        />
+                        <div className="space-y-2">
+                            {selectorMes}
+                            {notaMesEnCurso}
+                            <p className="text-xs text-gray-500">
+                                Mostrando <span className="text-gray-300">{MESES[mes.month - 1]} {mes.year}</span>
+                                {mesParcial ? ' (mes en curso: números parciales)' : ' (mes cerrado)'}
+                                {mesCerradoConDatos && !volverAlCerrado
+                                    ? ' · es el último mes cerrado con datos' : ''}
+                            </p>
+                        </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                             <KpiCard label="Conversión prueba→plan" value={Number(mes.conversion_rate)} unit="%" icon={TrendingUp} color="border-green-500" />
@@ -410,7 +532,7 @@ const AdminKpis = () => {
 
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             <div className="lg:col-span-2">
-                                <ChartCard title="Últimos 6 meses · Ingresos recurrentes e ingresos totales (CLP)">
+                                <ChartCard title={`Últimos ${serieMensual.length} meses con datos · Ingresos recurrentes e ingresos totales (CLP)`}>
                                     <AreaChart data={serieMensual}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
                                         <XAxis dataKey="month" tickFormatter={(mm) => MESES[Number(mm) - 1]} stroke="#a1a1aa" fontSize={12} />

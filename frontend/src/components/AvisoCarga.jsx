@@ -10,14 +10,22 @@ import React from 'react';
  *
  * Uso: <AvisoCarga secciones={erroresCarga} onReintentar={cargarTodo} />
  * (secciones = [] => no renderiza nada)
+ *
+ * `variante="oscura"`: mismo aviso y mismo Reintentar con los colores del tema oscuro
+ * (pantallas como la pestaña Mensual de KPIs); el default `clara` es el de siempre.
  */
-const AvisoCarga = ({ secciones = [], onReintentar, testid = 'aviso-carga' }) => {
+const AvisoCarga = ({ secciones = [], onReintentar, testid = 'aviso-carga', variante = 'clara' }) => {
     if (!secciones || secciones.length === 0) return null;
+    const oscura = variante === 'oscura';
     return (
         <div
             data-testid={testid}
             role="alert"
-            className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800"
+            className={`mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${
+                oscura
+                    ? 'border-red-700 bg-red-900/30 text-red-200'
+                    : 'border-red-300 bg-red-50 text-red-800'
+            }`}
         >
             <span>
                 ⚠️ No se pudieron cargar: <strong>{secciones.join(', ')}</strong>. Lo que ves puede estar incompleto.
