@@ -4,9 +4,10 @@ from app.schemas.reserva import (
 from app.core.dependencies import get_current_user, get_current_coach, verificar_coach_disciplina
 # "Reserva cancelada" = UNA lista (`shared.estados`, la misma que usa el mantenimiento): acá se
 # agregan los predicados de SQLAlchemy (`no_cancelada`) y el lado Python (`es_cancelada`).
-# `vigente_hoy` = "el plan da acceso HOY", con el día de vencimiento COMPLETO en hora de Chile.
-from app.core.estados import (ESTADO_CANCELADO, es_cancelada, lista_sql,
-                              no_cancelada, vigente_hoy)
+# `da_acceso_hoy` = "el plan da acceso HOY" (corrección C): DÍAS de Chile y sin estado de corte, no
+# el `estado == 'activo'` COMERCIAL (el "Pase de regreso" es un plan fuera del catálogo).
+from app.core.estados import (ESTADO_CANCELADO, da_acceso_hoy, es_cancelada,
+                              lista_sql, no_cancelada)
 from app.models.usuario import Usuario
 from app.models.disciplina import Disciplina
 from app.models.clase import Clase
@@ -176,12 +177,16 @@ def crear_reserva(
     # Antes: `fecha_expiracion > datetime.now(timezone.utc)`. Como las fechas se guardan con el
     # reloj del último día en UTC (20:59 CLT), a partir de esa hora el alumno quedaba SIN plan el
     # mismo día que le tocaba seguir entrenando: un plan de septiembre rechazaba reservas el 30/09
-    # a las 21:00. `vigente_hoy` compara DÍAS CHILENOS, así que el último día sirve completo.
+    # a las 21:00. `da_acceso_hoy` compara DÍAS CHILENOS, así que el último día sirve completo.
+    # ── Corrección C (F2): reservar se decide por VIGENCIA + CRÉDITOS, NO por `estado == 'activo'`
+    # (ése es el estado COMERCIAL, y el "Pase de regreso" es una suscripción gratuita de un plan que
+    # no está en el catálogo: `planes.activo = false`). Es el MISMO criterio del SQL del
+    # mantenimiento (`shared.estados.sql_suscripcion_vigente`): `pendiente`/`rechazado` NUNCA dan
+    # acceso y el resto lo deciden las fechas (día de Chile, último día completo).
     membresia = db.query(Suscripcion).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.usuario_id == reserva_data.alumno_id,
-        Suscripcion.estado == 'activo',
-        vigente_hoy(Suscripcion.fecha_expiracion)
+        da_acceso_hoy(Suscripcion.estado, Suscripcion.fecha_expiracion)
     ).order_by(
         Suscripcion.creditos_disponibles.desc().nulls_last(),
         Suscripcion.fecha_expiracion.desc()
@@ -814,15 +819,16 @@ def eliminar_reserva(
     horas_restantes = (inicio_clase - ahora).total_seconds() / 3600
 
     # Buscar membresía vigente para devolver el crédito si aplica.
-    # Vigencia por DÍA CHILENO (`vigente_hoy`): el plan del último día todavía devuelve el
+    # Vigencia por DÍA CHILENO (`da_acceso_hoy`): el plan del último día todavía devuelve el
     # crédito a las 21:00/23:00 CLT — antes la comparación por instante ya no lo encontraba.
+    # Misma puerta que el POST: el alumno con el "Pase de regreso" (plan no comercial) también
+    # recupera su crédito, porque acá tampoco decide el `estado == 'activo'` comercial (corrección C).
     reembolsado = False
     if horas_restantes >= 6:
         membresia = db.query(Suscripcion).filter(
             Suscripcion.tenant_id == tenant_id,
             Suscripcion.usuario_id == reserva.alumno_id,
-            Suscripcion.estado == 'activo',
-            vigente_hoy(Suscripcion.fecha_expiracion)
+            da_acceso_hoy(Suscripcion.estado, Suscripcion.fecha_expiracion)
         ).order_by(
             Suscripcion.creditos_disponibles.desc().nulls_last(),
             Suscripcion.fecha_expiracion.desc()
