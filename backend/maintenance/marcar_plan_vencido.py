@@ -24,16 +24,21 @@ producto aparte y debe setear los DOS campos de forma consistente
 `usuarios.py`) más `fecha_baja` para los KPIs de churn.
 """
 import logging
-from datetime import date
 
+from app.core.estados import dia_chile   # el DÍA de una columna timestamptz, en hora de Chile
 from app.db.database import SessionLocal
 from app.models import Suscripcion
+from app.utils.santiago import hoy_santiago
 
 logger = logging.getLogger(__name__)
 
 
 def marcar_vencidos():
-    """Marca como 'vencido' las suscripciones activas cuya fecha_expiracion ya pasó.
+    """Marca como 'vencido' las suscripciones activas cuyo ÚLTIMO día ya pasó.
+
+    El día de `fecha_expiracion` está vigente COMPLETO (hora de Chile): un plan de septiembre
+    sigue vigente el 30/09 y recién se marca `vencido` desde el 01/10. Se compara el DÍA CHILENO
+    (`dia_chile`) contra HOY en Chile (`hoy_santiago`), nunca el instante ni `date.today()`.
 
     NO toca `usuarios.activo`/`usuarios.estado` (ver el porqué en el docstring
     del módulo): eso violaba el CHECK de la 034 y rompía el job completo.
@@ -41,12 +46,12 @@ def marcar_vencidos():
 
     db = SessionLocal()
     try:
-        today = date.today()
+        hoy = hoy_santiago()
 
-        # Suscripciones activas con fecha_expiracion < hoy
+        # Suscripciones activas cuyo último día (en Chile) ya quedó atrás
         vencidas = db.query(Suscripcion).filter(
             Suscripcion.estado == 'activo',
-            Suscripcion.fecha_expiracion < today
+            dia_chile(Suscripcion.fecha_expiracion) < hoy
         ).all()
 
         for sub in vencidas:

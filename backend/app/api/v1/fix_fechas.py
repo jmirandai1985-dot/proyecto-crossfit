@@ -4,9 +4,8 @@ Endpoint para corregir fechas de suscripciones existentes (solo admin)
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from app.db.database import engine
-from datetime import datetime, timezone
-from calendar import monthrange
 from app.core.dependencies import get_current_admin
+from app.utils.santiago import fin_de_mes_chile
 
 router = APIRouter()
 
@@ -15,16 +14,18 @@ router = APIRouter()
 def corregir_fechas_membresias(
     current_user: dict = Depends(get_current_admin),
 ):
-    """Corrige fecha_expiracion de todas las suscripciones activas al último día del mes actual. Solo admin."""
+    """Corrige fecha_expiracion de todas las suscripciones activas al último día del mes actual. Solo admin.
+
+    El valor es 23:59:59 del último día del mes **en hora de Chile** (`fin_de_mes_chile()`): antes
+    se guardaba `23:59 UTC`, que en Chile son las 20:59 y le robaba las últimas 3 horas al último
+    día del plan.
+    """
     from app.db.database import SessionLocal
     from app.models.suscripcion import Suscripcion
 
     db = SessionLocal()
     try:
-        hoy = datetime.now(timezone.utc)
-        ultimo_dia = monthrange(hoy.year, hoy.month)[1]
-        fecha_correcta = hoy.replace(
-            day=ultimo_dia, hour=23, minute=59, second=59, microsecond=0)
+        fecha_correcta = fin_de_mes_chile()
 
         suscripciones = db.query(Suscripcion).filter(
             Suscripcion.estado == 'activo'

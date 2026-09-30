@@ -3,14 +3,14 @@ Endpoint para consultar membresía activa con tokens del alumno
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from datetime import datetime, timezone
-from calendar import monthrange
 from typing import Optional
 
 from app.db.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.estados import vigente_hoy   # vigencia por DÍA CHILENO (no por instante)
 from app.models.suscripcion import Suscripcion
 from app.models.plan import Plan
+from app.utils.santiago import dias_para_vencer, hoy_santiago
 
 router = APIRouter()
 
@@ -35,7 +35,7 @@ def obtener_mi_membresia(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.usuario_id == alumno_id,
         Suscripcion.estado == 'activo',
-        Suscripcion.fecha_expiracion > datetime.now(timezone.utc)
+        vigente_hoy(Suscripcion.fecha_expiracion)
     ).order_by(Suscripcion.fecha_expiracion.desc()).first()
 
     if not suscripcion:
@@ -55,20 +55,16 @@ def obtener_mi_membresia(
     usadas = (suscripcion.creditos_totales or 0) - \
         (suscripcion.creditos_disponibles or 0)
 
-    # Calcular días hasta el último día del MES ACTUAL
-    hoy = datetime.now(timezone.utc)
-    ultimo_dia = monthrange(hoy.year, hoy.month)[1]
-    fecha_ultimo_dia = hoy.replace(
-        day=ultimo_dia, hour=23, minute=59, second=59, microsecond=0)
-    dias_restantes = (fecha_ultimo_dia - hoy).days
-    if dias_restantes < 0:
-        dias_restantes = 0
+    # Días que le quedan AL PLAN, contando el día de vencimiento como completo (hora de Chile).
+    # Antes se calculaba hasta el último día del MES ACTUAL con `datetime.now(timezone.utc)`:
+    # para un plan que vence hoy daba 0 solo de casualidad y de noche en UTC corría el día.
+    dias_restantes = dias_para_vencer(suscripcion.fecha_expiracion) or 0
 
     # Determinar si puede comprar emergencia
     puede_comprar = True
     if suscripcion.fecha_compra_emergencia:
         anio_compra = suscripcion.fecha_compra_emergencia.year
-        anio_actual = datetime.now(timezone.utc).year
+        anio_actual = hoy_santiago().year
         if anio_compra == anio_actual:
             puede_comprar = False
 

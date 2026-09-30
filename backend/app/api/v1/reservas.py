@@ -4,7 +4,9 @@ from app.schemas.reserva import (
 from app.core.dependencies import get_current_user, get_current_coach, verificar_coach_disciplina
 # "Reserva cancelada" = UNA lista (`shared.estados`, la misma que usa el mantenimiento): acá se
 # agregan los predicados de SQLAlchemy (`no_cancelada`) y el lado Python (`es_cancelada`).
-from app.core.estados import ESTADO_CANCELADO, es_cancelada, lista_sql, no_cancelada
+# `vigente_hoy` = "el plan da acceso HOY", con el día de vencimiento COMPLETO en hora de Chile.
+from app.core.estados import (ESTADO_CANCELADO, es_cancelada, lista_sql,
+                              no_cancelada, vigente_hoy)
 from app.models.usuario import Usuario
 from app.models.disciplina import Disciplina
 from app.models.clase import Clase
@@ -169,13 +171,17 @@ def crear_reserva(
 
     # Verificar créditos disponibles del alumno
     from app.models.suscripcion import Suscripcion
-    from datetime import datetime, timezone
 
+    # ── El plan vale hasta las 23:59:59 de su ÚLTIMO día, hora de Chile (fix 2026-09-29) ──
+    # Antes: `fecha_expiracion > datetime.now(timezone.utc)`. Como las fechas se guardan con el
+    # reloj del último día en UTC (20:59 CLT), a partir de esa hora el alumno quedaba SIN plan el
+    # mismo día que le tocaba seguir entrenando: un plan de septiembre rechazaba reservas el 30/09
+    # a las 21:00. `vigente_hoy` compara DÍAS CHILENOS, así que el último día sirve completo.
     membresia = db.query(Suscripcion).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.usuario_id == reserva_data.alumno_id,
         Suscripcion.estado == 'activo',
-        Suscripcion.fecha_expiracion > datetime.now(timezone.utc)
+        vigente_hoy(Suscripcion.fecha_expiracion)
     ).order_by(
         Suscripcion.creditos_disponibles.desc().nulls_last(),
         Suscripcion.fecha_expiracion.desc()
@@ -807,14 +813,16 @@ def eliminar_reserva(
     )
     horas_restantes = (inicio_clase - ahora).total_seconds() / 3600
 
-    # Buscar membresía activa para devolver el crédito si aplica
+    # Buscar membresía vigente para devolver el crédito si aplica.
+    # Vigencia por DÍA CHILENO (`vigente_hoy`): el plan del último día todavía devuelve el
+    # crédito a las 21:00/23:00 CLT — antes la comparación por instante ya no lo encontraba.
     reembolsado = False
     if horas_restantes >= 6:
         membresia = db.query(Suscripcion).filter(
             Suscripcion.tenant_id == tenant_id,
             Suscripcion.usuario_id == reserva.alumno_id,
             Suscripcion.estado == 'activo',
-            Suscripcion.fecha_expiracion > ahora
+            vigente_hoy(Suscripcion.fecha_expiracion)
         ).order_by(
             Suscripcion.creditos_disponibles.desc().nulls_last(),
             Suscripcion.fecha_expiracion.desc()

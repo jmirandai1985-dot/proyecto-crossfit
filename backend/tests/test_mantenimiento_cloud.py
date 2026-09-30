@@ -175,7 +175,7 @@ def _respuesta(sql: str, ctx: dict, vistas: dict) -> str:
             ("JOIN clases c ON c.id = r.clase_id", "cierre_pendientes"),
             ("FROM password_reset_tokens", "tokens_reset"),
             ("FROM notificaciones_enviadas", "notificaciones"),
-            ("s.fecha_expiracion < current_date", "vencidos"),
+            ("(s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date < current_date", "vencidos"),
             ("s.estado = 'pendiente'", "susc_pendientes"),
             ("FROM solicitudes_planes", "solicitudes"),
             ("u.estado = 'pendiente_activacion'", "usuarios_pendientes")):
@@ -964,7 +964,8 @@ def test_cr_el_mrr_del_mes_anterior_y_el_churn_son_de_fecha_no_del_estado_de_hoy
         sql = men.SQL_REPORTE[clave]
         assert "estado = 'activo'" not in sql, clave
         assert nunca in sql, clave
-        assert "fecha_inicio::date <=" in sql and "fecha_expiracion::date >=" in sql, clave
+        assert "fecha_inicio AT TIME ZONE 'America/Santiago')::date <=" in sql, clave
+        assert "fecha_expiracion AT TIME ZONE 'America/Santiago')::date >=" in sql, clave
 
 
 def test_cs_el_mrr_del_mes_anterior_llega_al_sql_con_el_ultimo_dia_del_mes(monkeypatch, mails):
@@ -976,8 +977,8 @@ def test_cs_el_mrr_del_mes_anterior_llega_al_sql_con_el_ultimo_dia_del_mes(monke
     sql_ant = next(s for s in rastro["sql"] if "AS mrr_mes_anterior" in s)
     fin_ant = date.today().replace(day=1) - timedelta(days=1)
 
-    assert f"s.fecha_inicio::date <= '{fin_ant.isoformat()}'::date" in sql_ant
-    assert f"s.fecha_expiracion::date >= '{fin_ant.isoformat()}'::date" in sql_ant
+    assert f"(s.fecha_inicio AT TIME ZONE 'America/Santiago')::date <= '{fin_ant.isoformat()}'::date" in sql_ant
+    assert f"(s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date >= '{fin_ant.isoformat()}'::date" in sql_ant
     assert "estado = 'activo'" not in sql_ant
     assert "{fin_ant}" not in sql_ant                       # el placeholder se resolvió
 
@@ -1130,7 +1131,8 @@ def test_bj_las_tres_transacciones_son_idempotentes_y_escriben_tablas_disjuntas(
     purga = men.script_purga(5000, 90, 180, False)
 
     # 1) filtros de idempotencia
-    assert "s.estado = 'activo' AND s.fecha_expiracion < current_date" in cambios
+    assert ("s.estado = 'activo' AND (s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date"
+            " < current_date") in cambios
     assert "s.estado = 'pendiente' AND s.created_at < now() - interval" in cambios
     assert "sp.estado = 'pending' AND sp.created_at < now() - interval" in cambios
     assert "u.estado = 'pendiente_activacion' AND u.created_at < now() - interval" in cambios

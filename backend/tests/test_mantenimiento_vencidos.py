@@ -71,7 +71,8 @@ def test_p01_marcar_vencidos_no_rompe_el_check_de_estado():
         pendientes = _count(
             db,
             "SELECT count(*) FROM suscripciones "
-            "WHERE estado = 'activo' AND fecha_expiracion::date < CURRENT_DATE")
+            "WHERE estado = 'activo' AND "
+            "(fecha_expiracion AT TIME ZONE 'America/Santiago')::date < CURRENT_DATE")
         assert pendientes == 0, f"{pendientes} suscripciones vencidas siguen en estado 'activo'"
     finally:
         db.close()

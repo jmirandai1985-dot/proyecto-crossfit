@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from shared.estados import sql_plan_comercial, sql_suscripcion_vigente
+from app.utils.santiago import hoy_santiago
 
 # Umbral minimo de base para publicar retencion/churn. Mismo criterio que
 # /kpis/cohortes (null cuando el horizonte no maduro): con una base muy chica el
@@ -162,7 +163,7 @@ def retencion_cohorte(db: Session, tenant_id: int, desde: date, hasta: date):
 
 def retencion_ultimos_30_dias(db: Session, tenant_id: int, hoy: date = None):
     """Atajo de retencion_cohorte para la ventana de los ultimos 30 dias."""
-    hoy = hoy or date.today()
+    hoy = hoy or hoy_santiago()   # el "hoy" de Chile, no el del proceso (UTC en el contenedor)
     return retencion_cohorte(db, tenant_id, hoy - timedelta(days=30), hoy)
 
 

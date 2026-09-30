@@ -23,6 +23,9 @@ from app.schemas.solicitud import SolicitudPlanCreate
 from app.core.dependencies import get_current_admin, get_current_user
 from app.core.rate_limit import limiter, LIMIT_CRITICO
 from app.core.config import settings
+# El fin de mes de un plan se escribe EN HORA DE CHILE (23:59:59 del último día, ver la regla en
+# `app/utils/santiago.py`): una sola definición para este flujo y la compra de emergencia.
+from app.utils.santiago import ahora_santiago, fin_de_mes_chile
 from app.services.auditoria_service import registrar_auditoria
 from datetime import timedelta
 
@@ -286,12 +289,13 @@ def aprobar_solicitud(
     if not plan:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
-    from datetime import datetime, timezone
-    from calendar import monthrange
-    hoy = datetime.now(timezone.utc)
-    ultimo_dia = monthrange(hoy.year, hoy.month)[1]
-    expiracion = hoy.replace(day=ultimo_dia, hour=23,
-                             minute=59, second=59, microsecond=0)
+    # ── Fin de mes EN HORA DE CHILE (regla del negocio: el plan vale hasta las 23:59:59 del
+    # último día, hora de Chile) ──
+    # Antes: `datetime.now(timezone.utc).replace(hour=23)` = 23:59 UTC = 20:59 en Chile, así que
+    # el último día del plan terminaba 3 horas antes de lo que dice la regla. UNA definición:
+    # `fin_de_mes_chile()` (app/utils/santiago.py).
+    ahora = ahora_santiago()
+    expiracion = fin_de_mes_chile(ahora.date())
 
     suscripcion = Suscripcion(
         tenant_id=solicitud.tenant_id,
@@ -300,7 +304,7 @@ def aprobar_solicitud(
         estado="activo",
         creditos_totales=plan.creditos if plan.creditos else 999,
         creditos_disponibles=plan.creditos if plan.creditos else 999,
-        fecha_inicio=hoy,
+        fecha_inicio=ahora,
         fecha_expiracion=expiracion,
     )
     db.add(suscripcion)

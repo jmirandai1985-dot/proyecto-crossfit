@@ -2,13 +2,25 @@
 
 Usado por el scheduler (jobs diarios) y por endpoints admin de disparo manual.
 Deduplicación: cada envío se marca en `notificaciones_enviadas` para no repetirlo.
+
+── EL "HOY" DE UN PLAN ES EL DE CHILE (fix 2026-09-29) ────────────────────────
+Un plan vale hasta las 23:59:59 del último día, hora de Chile: el día de `fecha_expiracion`
+está vigente COMPLETO (el 30/09 un plan de septiembre sigue vigente; recién desde las 00:00
+del 01/10 está vencido). Por eso acá NO se usa:
+  * `date.today()` — la TZ del proceso, no la de Chile;
+  * `fecha_expiracion::date` — la TZ de la sesión de Postgres (UTC en Neon), que entre las
+    21:00 y las 23:59 CLT ya es mañana;
+  * `fecha_expiracion > now()` — corta el último día a las 20:59 CLT.
+El día se cuenta con `hoy_santiago()` y, en el SQL, con `sql_fecha_en_chile()`.
 """
 import calendar
 from app.core.urls import url_frontend  # B.2
 import logging
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 from app.core.config import settings
+from app.core.estados import sql_fecha_en_chile, vigente_hoy
+from app.utils.santiago import hoy_santiago
 
 logger = logging.getLogger("uvicorn.email")
 
@@ -57,18 +69,22 @@ def _marcar_enviado(db, alumno_id: int, tipo: str, tenant_id: int = None):
 
 
 def enviar_alertas_renovacion(db, tenant_id: int = 1, dias_aviso: int = 3) -> dict:
-    """EMAIL 3 (send_renovacion_plan): planes activos que vencen en `dias_aviso` días."""
+    """EMAIL 3 (send_renovacion_plan): planes que vencen en `dias_aviso` días.
+
+    El día objetivo es el DÍA CHILENO de vencimiento (hoy + `dias_aviso`, en hora de Chile), así
+    que el aviso sale siempre `dias_aviso` días antes del último día del plan.
+    """
     from sqlalchemy import text
     from app.services.email_service import send_renovacion_plan
-    target = (date.today() + timedelta(days=dias_aviso)).isoformat()
-    rows = db.execute(text("""
+    target = (hoy_santiago() + timedelta(days=dias_aviso)).isoformat()
+    rows = db.execute(text(f"""
         SELECT u.id, u.nombre, u.correo, s.fecha_expiracion
         FROM suscripciones s
         JOIN usuarios u ON u.id = s.usuario_id
         WHERE s.tenant_id = :tid
           AND s.estado = 'activo'
           AND u.activo = true
-          AND s.fecha_expiracion::date = :target
+          AND {sql_fecha_en_chile("s.fecha_expiracion")} = :target
     """), {"tid": tenant_id, "target": target}).fetchall()
 
     enviados, fallidos = [], []
@@ -102,7 +118,7 @@ def enviar_alertas_inactividad(db, tenant_id: int = 1, umbral_dias: int = 7) -> 
           AND u.estado = 'activo'
     """), {"tid": tenant_id}).fetchall()
 
-    limite = date.today() - timedelta(days=umbral_dias)
+    limite = hoy_santiago() - timedelta(days=umbral_dias)
     enviados, fallidos = [], []
     for r in rows:
         ultima = r.ultima
@@ -125,18 +141,24 @@ def enviar_alertas_inactividad(db, tenant_id: int = 1, umbral_dias: int = 7) -> 
 
 
 def enviar_alertas_urgencia(db, tenant_id: int = 1) -> dict:
-    """EMAIL 5 (send_alerta_urgencia_renovacion): planes activos que vencen HOY (1 envío/día)."""
+    """EMAIL 5 (send_alerta_urgencia_renovacion): planes cuyo ÚLTIMO DÍA es hoy (1 envío/día).
+
+    ⚠️ El job corre a las 06:00 CLT: el plan que "vence HOY" sigue VIGENTE hasta las 23:59, así
+    que el correo avisa de un vencimiento que todavía no ocurrió (antes el texto decía "tu plan
+    ha expirado" con el plan vigente: el bug reportado del 30/09). El día objetivo es el día
+    chileno de vencimiento, no el `date.today()` del proceso ni el `::date` de la sesión.
+    """
     from sqlalchemy import text
     from app.services.email_service import send_alerta_urgencia_renovacion
-    target = date.today().isoformat()
-    rows = db.execute(text("""
+    target = hoy_santiago().isoformat()
+    rows = db.execute(text(f"""
         SELECT u.id, u.nombre, u.correo
         FROM suscripciones s
         JOIN usuarios u ON u.id = s.usuario_id
         WHERE s.tenant_id = :tid
           AND s.estado = 'activo'
           AND u.activo = true
-          AND s.fecha_expiracion::date = :target
+          AND {sql_fecha_en_chile("s.fecha_expiracion")} = :target
     """), {"tid": tenant_id, "target": target}).fetchall()
 
     enviados, fallidos = [], []
@@ -159,8 +181,11 @@ def enviar_alertas_urgencia(db, tenant_id: int = 1) -> dict:
 # ALERTAS DE CRÉDITOS (fidelización) — últimas 2
 # ═════════════════════════════════════════════════════════════════════════════
 def _dias_restantes_mes() -> int:
-    """Días que faltan hasta el último día del mes actual (0 si hoy es el último)."""
-    hoy = date.today()
+    """Días que faltan hasta el último día del mes actual (0 si hoy es el último).
+
+    El mes es el de CHILE (`hoy_santiago()`): de noche, en UTC el mes ya puede ser otro.
+    """
+    hoy = hoy_santiago()
     ultimo_dia = calendar.monthrange(hoy.year, hoy.month)[1]
     return ultimo_dia - hoy.day
 
@@ -177,7 +202,7 @@ def enviar_alertas_ultimo_credito(db, tenant_id: int = 1) -> dict:
                 "detalle_enviados": [], "detalle_fallidos": [],
                 "motivo": "Es el último día del mes (días_restantes=0)"}
 
-    rows = db.execute(text("""
+    rows = db.execute(text(f"""
         SELECT DISTINCT ON (u.id) u.id, u.nombre, u.correo, s.creditos_disponibles
         FROM suscripciones s
         JOIN usuarios u ON u.id = s.usuario_id
@@ -186,9 +211,9 @@ def enviar_alertas_ultimo_credito(db, tenant_id: int = 1) -> dict:
           AND u.activo = true
           AND u.rol = 'alumno'
           AND s.creditos_disponibles = 1
-          AND s.fecha_expiracion > now()
+          AND {sql_fecha_en_chile("s.fecha_expiracion")} >= :hoy
         ORDER BY u.id
-    """), {"tid": tenant_id}).fetchall()
+    """), {"tid": tenant_id, "hoy": hoy_santiago()}).fetchall()
 
     enviados, fallidos = [], []
     for r in rows:
@@ -214,7 +239,7 @@ def enviar_alertas_sin_creditos(db, tenant_id: int = 1) -> dict:
     from sqlalchemy import text
     from app.services.email_service import send_alerta_sin_creditos
 
-    rows = db.execute(text("""
+    rows = db.execute(text(f"""
         SELECT DISTINCT ON (u.id) u.id, u.nombre, u.correo
         FROM suscripciones s
         JOIN usuarios u ON u.id = s.usuario_id
@@ -223,9 +248,9 @@ def enviar_alertas_sin_creditos(db, tenant_id: int = 1) -> dict:
           AND u.activo = true
           AND u.rol = 'alumno'
           AND s.creditos_disponibles = 0
-          AND s.fecha_expiracion > now()
+          AND {sql_fecha_en_chile("s.fecha_expiracion")} >= :hoy
         ORDER BY u.id
-    """), {"tid": tenant_id}).fetchall()
+    """), {"tid": tenant_id, "hoy": hoy_santiago()}).fetchall()
 
     enviados, fallidos = [], []
     for r in rows:

@@ -42,6 +42,7 @@ from typing import Dict, List, Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.estados import dia_chile   # el DÍA de una columna timestamptz, en hora de Chile
 from app.core.constants import (
     RANKING_TOP,
     SELLO_MONSTRUO,
@@ -155,13 +156,17 @@ def _encabezado_tramo(db: Session, tenant_id: int, planes: List[Plan]) -> List[s
 
 
 def _plan_del_mes(db: Session, tenant_id: int, anio: int, mes: int) -> Dict[int, Plan]:
-    """Alumno → plan del mes cerrado (decisión confirmada; ver docstring)."""
+    """Alumno → plan del mes cerrado (decisión confirmada; ver docstring).
+
+    El solapamiento se mide en DÍAS CHILENOS (`dia_chile`): el plan vale hasta el último día
+    completo, así que un mes calendario chileno no puede quedarse con el plan en el mes vecino.
+    """
     desde, hasta = _rango_mes(anio, mes)
 
     subs = db.query(Suscripcion).filter(
         Suscripcion.tenant_id == tenant_id,
-        Suscripcion.fecha_inicio <= hasta,
-        Suscripcion.fecha_expiracion >= desde,
+        dia_chile(Suscripcion.fecha_inicio) <= hasta,
+        dia_chile(Suscripcion.fecha_expiracion) >= desde,
         Suscripcion.estado.in_(ESTADOS_SUSCRIPCION_VALIDOS),
     ).order_by(Suscripcion.fecha_inicio.asc()).all()
 

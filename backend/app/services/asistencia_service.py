@@ -21,7 +21,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.utils.santiago import ahora_santiago, hoy_santiago
+from app.core.estados import dia_chile   # el DÍA de una columna timestamptz, en hora de Chile
+from app.utils.santiago import ahora_santiago, fecha_chile, hoy_santiago
 from app.models.reserva import Reserva
 from app.models.clase import Clase
 from app.models.usuario import Usuario, RolUsuario
@@ -71,14 +72,19 @@ def _tiene_suscripciones(db: Session, alumno_id: int, tenant_id: int) -> bool:
 
 def _tiene_suscripcion_que_cubre_mes(db: Session, alumno_id: int,
                                      tenant_id: int, anio: int, mes: int) -> bool:
-    """True si el mes está cubierto por alguna suscripción (activo/vencido/pendiente)."""
+    """True si el mes está cubierto por alguna suscripción (activo/vencido/pendiente).
+
+    Los bordes son DÍAS CHILENOS (`dia_chile`): el plan vale hasta el último día completo, así que
+    un plan que termina el 30/09 cubre septiembre (antes el `::date` de la sesión —UTC— podía
+    correrlo al 01/10 y el alumno aparecía "sin plan" el mismo mes en que sí tuvo).
+    """
     desde, hasta = _rango_mes(anio, mes)
     return db.query(Suscripcion.id).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.usuario_id == alumno_id,
         Suscripcion.estado.in_(ESTADOS_COBREN_REACTIVACION),
-        Suscripcion.fecha_inicio <= hasta,
-        Suscripcion.fecha_expiracion >= desde,
+        dia_chile(Suscripcion.fecha_inicio) <= hasta,
+        dia_chile(Suscripcion.fecha_expiracion) >= desde,
     ).first() is not None
 
 
@@ -96,6 +102,8 @@ def _meses_consecutivos_sin_plan(db: Session, alumno_id: int, tenant_id: int,
     ).scalar()
     if min_fecha is None:
         return 0
+    # El mes del alta se lee en hora de Chile (un alta de noche en UTC cae en el mes siguiente).
+    min_fecha = fecha_chile(min_fecha)
     min_ym = (min_fecha.year, min_fecha.month)
 
     meses_sin = 0

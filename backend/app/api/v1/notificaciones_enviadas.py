@@ -11,6 +11,7 @@ from app.db.database import get_db
 from app.models.notificacion_enviada import NotificacionEnviada
 from app.models.usuario import Usuario
 from app.core.dependencies import get_current_user, get_current_admin
+from app.utils.santiago import fecha_chile, hoy_santiago   # fechas de Chile
 from app.services.email_service import (
     enviar_email_bienvenida,
     enviar_email_vencimiento_plan,
@@ -241,7 +242,9 @@ def _resumen_plan(db: Session, sus) -> tuple:
         if not creditos and sus.creditos_totales:
             creditos = sus.creditos_totales
         if sus.fecha_expiracion:
-            fecha = sus.fecha_expiracion.strftime("%d/%m/%Y")
+            # Día CHILENO: el `%d/%m/%Y` de un timestamptz lo resuelve la TZ del
+            # proceso (UTC) y el plan vence a las 23:59:59 de Chile.
+            fecha = fecha_chile(sus.fecha_expiracion).strftime("%d/%m/%Y")
     return nombre, creditos, fecha
 
 
@@ -312,7 +315,7 @@ def _reenviar_asistencia(db: Session, reg, alumno) -> bool:
         enviar_email_cumplimiento, enviar_email_acompanamiento, _enviar_racha,
         enviar_email_reactivacion, _nombre_mes,
     )
-    mes_ref = reg.mes_referencia or date(date.today().year, date.today().month, 1)
+    mes_ref = reg.mes_referencia or hoy_santiago().replace(day=1)
     anio, mes = mes_ref.year, mes_ref.month
     mes_nombre = _nombre_mes(mes)
 

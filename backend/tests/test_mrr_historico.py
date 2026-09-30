@@ -82,16 +82,18 @@ def test_a_el_predicado_se_arma_con_la_lista_de_nunca_vigentes():
     del mes anterior y para hace 30 días."""
     assert estados.sql_suscripcion_vigente() == (
         "s.estado NOT IN (" + estados.lista_sql(estados.ESTADOS_SUSCRIPCION_NUNCA_VIGENTES) + ")"
-        " AND s.fecha_inicio::date <= current_date"
-        " AND s.fecha_expiracion::date >= current_date")
+        " AND (s.fecha_inicio AT TIME ZONE 'America/Santiago')::date"
+        " <= (now() AT TIME ZONE 'America/Santiago')::date"
+        " AND (s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date"
+        " >= (now() AT TIME ZONE 'America/Santiago')::date")
     assert estados.sql_suscripcion_vigente("s", "'{fin_ant}'::date") == (
         "s.estado NOT IN ('pendiente', 'rechazado')"
-        " AND s.fecha_inicio::date <= '{fin_ant}'::date"
-        " AND s.fecha_expiracion::date >= '{fin_ant}'::date")
+        " AND (s.fecha_inicio AT TIME ZONE 'America/Santiago')::date <= '{fin_ant}'::date"
+        " AND (s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date >= '{fin_ant}'::date")
     assert estados.sql_suscripcion_vigente("s2", ":hasta") == (
         "s2.estado NOT IN ('pendiente', 'rechazado')"
-        " AND s2.fecha_inicio::date <= :hasta"
-        " AND s2.fecha_expiracion::date >= :hasta")
+        " AND (s2.fecha_inicio AT TIME ZONE 'America/Santiago')::date <= :hasta"
+        " AND (s2.fecha_expiracion AT TIME ZONE 'America/Santiago')::date >= :hasta")
 
     assert estados.ESTADOS_SUSCRIPCION_NUNCA_VIGENTES == ("pendiente", "rechazado")
     assert estados.ESTADOS_SUSCRIPCION_VIGENTES == ("activo", "vencido")

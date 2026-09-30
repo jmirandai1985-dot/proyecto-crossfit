@@ -217,8 +217,10 @@ def test_b1_un_pase_vigente_no_mueve_el_mrr_ni_los_vigentes(db, escenario):
 
     # El escenario es el que dice el nombre: existe, está VIGENTE y su plan NO es comercial.
     vigente, comercial = db.execute(text(
-        "SELECT (s.fecha_inicio::date <= current_date"
-        "        AND s.fecha_expiracion::date >= current_date), p.es_comercial "
+        "SELECT ((s.fecha_inicio AT TIME ZONE 'America/Santiago')::date"
+        "        <= (now() AT TIME ZONE 'America/Santiago')::date"
+        "        AND (s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date"
+        "        >= (now() AT TIME ZONE 'America/Santiago')::date), p.es_comercial "
         "FROM suscripciones s JOIN planes p ON p.id = s.plan_id "
         "WHERE s.usuario_id = :a"), {"a": escenario["alumno_id"]}).first()
     assert (vigente, comercial) == (True, False)

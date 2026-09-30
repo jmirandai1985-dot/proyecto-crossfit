@@ -79,14 +79,46 @@ ESTADOS_SUSCRIPCION_NUNCA_VIGENTES: Final[tuple] = ("pendiente", "rechazado")
 ESTADOS_SUSCRIPCION_VIGENTES: Final[tuple] = ("activo", "vencido")
 
 
-def sql_suscripcion_vigente(alias: str = "s", fecha: str = "current_date") -> str:
-    """Predicado SQL de "suscripción vigente **en esa fecha**" (no "activa hoy").
+# La vigencia se mide en DÍAS DE CHILE (`sql_fecha_en_chile()`): un plan vale hasta las
+# 23:59:59 del último día, hora de Chile, y ese día cuenta COMPLETO (el 30/09 un plan de
+# septiembre sigue VIGENTE; recién desde las 00:00 del 01/10 está vencido).
+ZONA_CHILE: Final[str] = "America/Santiago"
 
-    Devuelve, por ejemplo:
+
+def sql_fecha_en_chile(columna: str) -> str:
+    """`(columna AT TIME ZONE 'America/Santiago')::date`: el DÍA CHILENO de un instante.
+
+    Las columnas de fechas son `timestamptz`, así que `columna::date` NO da el día chileno: lo
+    resuelve la TZ **de la sesión** de Postgres (UTC en Neon). Un plan que vence el 30/09 a las
+    23:59 hora de Chile se guarda como `01/10 02:59:59+00`, y en UTC su `::date` es el 01/10: el
+    plan quedaba vigente un día de más. Con el cast explícito, la MISMA fila es del 30/09 en
+    cualquier sesión y con cualquier TZ del servidor.
+
+    ⚠️ `columna` se interpola en el SQL: es una constante del código (`"s.fecha_expiracion"`,
+    `"u.created_at"`), **nunca** texto de un request o de una env var.
+    """
+    return f"({columna} AT TIME ZONE '{ZONA_CHILE}')::date"
+
+
+def sql_hoy_chile() -> str:
+    """`(now() AT TIME ZONE 'America/Santiago')::date`: HOY en Chile, en SQL.
+
+    Es el default de `sql_suscripcion_vigente()`: no depende de la TZ de la sesión ni de la del
+    proceso (a las 21:00 CLT en UTC ya es mañana, y `current_date` daría el día siguiente).
+    """
+    return f"(now() AT TIME ZONE '{ZONA_CHILE}')::date"
+
+
+def sql_suscripcion_vigente(alias: str = "s", fecha: str | None = None) -> str:
+    """Predicado SQL de "suscripción vigente **en ese día (de Chile)**".
+
+    Sin argumentos devuelve:
 
         s.estado NOT IN ('pendiente', 'rechazado')
-          AND s.fecha_inicio::date <= current_date
-          AND s.fecha_expiracion::date >= current_date
+          AND (s.fecha_inicio AT TIME ZONE 'America/Santiago')::date
+              <= (now() AT TIME ZONE 'America/Santiago')::date
+          AND (s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date
+              >= (now() AT TIME ZONE 'America/Santiago')::date
 
     **Por qué no `estado = 'activo'` (bug corregido el 2026-09-27):** `estado` es el estado de
     HOY, así que usarlo para mirar un mes pasado hace que el dato histórico dependa de lo que pasó
@@ -95,16 +127,26 @@ def sql_suscripcion_vigente(alias: str = "s", fecha: str = "current_date") -> st
     de MRR y el churn del correo se reescribían solos. Lo que define la vigencia en una fecha son
     las FECHAS; el estado sólo sirve para descartar lo que nunca estuvo vigente.
 
-    Las FECHAS se comparan como `::date` porque las columnas son `timestamptz`: así una suscripción
-    que empieza o vence el MISMO día cuenta como vigente ese día (`<=` y `>=` inclusivos). El
-    `fecha_inicio <=` también descarta las suscripciones que todavía no empiezan.
+    **Por qué el día es el de Chile (bug corregido el 2026-09-29):** la regla es que el plan vale
+    hasta las 23:59:59 del último día, hora de Chile (el 30/09 un plan de septiembre sigue
+    vigente). El `::date` a secas lo resolvía la TZ de la sesión, así que entre las 20:00/21:00 y
+    las 23:59 CLT —y con las filas guardadas como `01/10 02:59+00` de un plan que vence el 30/09—
+    el día se corría un lugar. El cast `AT TIME ZONE` lo resuelve en el propio SQL y deja de
+    depender de una env var.
 
-    ⚠️ `alias` y `fecha` se interpolan en el SQL: son constantes del código (`"s"`, `"current_date"`,
-    `"'{fin_ant}'::date"`, `":hasta"`), **nunca** texto que venga de una env var o de un request.
+    Los días se comparan inclusivos (`<=` y `>=`): una suscripción que empieza o vence el MISMO
+    día cuenta como vigente ese día COMPLETO. El `fecha_inicio <=` también descarta las
+    suscripciones que todavía no empiezan.
+
+    ⚠️ `alias` y `fecha` se interpolan en el SQL: son constantes del código (`"s"`, `"s2"`,
+    `"'{fin_ant}'::date"`, `":hasta"`, `sql_hoy_chile()`), **nunca** texto que venga de una env var
+    o de un request. Pasar `fecha="current_date"` es correcto SOLO dentro de una sesión con
+    `SET LOCAL TIME ZONE 'America/Santiago'` (es lo que hace el mantenimiento por psql).
     """
+    fecha = fecha or sql_hoy_chile()
     return (f"{alias}.estado NOT IN ({lista_sql(ESTADOS_SUSCRIPCION_NUNCA_VIGENTES)})"
-            f" AND {alias}.fecha_inicio::date <= {fecha}"
-            f" AND {alias}.fecha_expiracion::date >= {fecha}")
+            f" AND {sql_fecha_en_chile(alias + '.fecha_inicio')} <= {fecha}"
+            f" AND {sql_fecha_en_chile(alias + '.fecha_expiracion')} >= {fecha}")
 
 
 # ── `planes.es_comercial`: ¿esta suscripción es una membresía (de cliente)? ────────────────────

@@ -15,6 +15,7 @@ from app.schemas.retencion import (
     RetencionAlumnoListItem, AlumnoEnRiesgo, KPICoach
 )
 from app.core.dependencies import get_current_admin
+from app.utils.santiago import hoy_santiago   # el "hoy" de Chile, no el del servidor
 
 router = APIRouter()
 
@@ -107,7 +108,7 @@ def obtener_alumnos_en_riesgo(
     """
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
-    hoy = date.today()
+    hoy = hoy_santiago()
     fecha_limite = hoy + timedelta(days=dias_alerta)
 
     alumnos_riesgo = db.query(
@@ -152,7 +153,7 @@ def obtener_kpi_coach(
     """
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
-    hoy = date.today()
+    hoy = hoy_santiago()
     fecha_limite = hoy + timedelta(days=7)
 
     # Obtener todos los coaches con alumnos

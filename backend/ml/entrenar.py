@@ -21,11 +21,12 @@ import pandas as pd
 from sqlalchemy import func
 
 import ml.features as features
-from app.core.estados import plan_comercial   # el MISMO criterio que los features y el BI
+from app.core.estados import dia_chile, plan_comercial   # el MISMO criterio que los features y el BI
 from app.models.asistencia import Asistencia
 from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
 from app.models.transaccion_financiera import TransaccionFinanciera
+from app.utils.santiago import hoy_santiago   # `fecha_ref` por defecto: HOY en Chile
 
 # ── Hiperparámetros (ajustables desde el endpoint/CLI) ──
 RANDOM_STATE = 42
@@ -83,7 +84,7 @@ def entrenar_churn(db, tenant_id, fecha_ref=None,
             f"falta scikit-learn ({e}); instalá con: "
             f"pip install -r requirements.txt") from e
 
-    fecha_ref = fecha_ref or date.today()
+    fecha_ref = fecha_ref or hoy_santiago()
     fecha_corte = fecha_ref - timedelta(days=dias_horizonte)
 
     # ── X: features AS-OF a la fecha de corte (no ven nada posterior) ──
@@ -116,7 +117,7 @@ def entrenar_churn(db, tenant_id, fecha_ref=None,
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.usuario_id.in_(ids),
         Suscripcion.estado == "activo",
-        Suscripcion.fecha_expiracion >= fecha_ref,
+        dia_chile(Suscripcion.fecha_expiracion) >= fecha_ref,
         plan_comercial(Plan.es_comercial),
     ).distinct().all()}
 
@@ -188,7 +189,8 @@ def entrenar_churn(db, tenant_id, fecha_ref=None,
         "definicion_label": (
             f"abandonado = SIN asistencias en la ventana ({fecha_corte}, "
             f"{fecha_ref}] AND SIN suscripcion activa a {fecha_ref} "
-            f"(estado='activo' AND fecha_expiracion >= {fecha_ref})"),
+            f"(estado='activo' AND (fecha_expiracion AT TIME ZONE "
+            f"'America/Santiago')::date >= {fecha_ref})"),
         "nota_label": (
             "Label de EVENTO FUTURO, distinto de la regla historica de '>45 "
             f"dias sin asistir': el positivo exige silencio total en la ventana "

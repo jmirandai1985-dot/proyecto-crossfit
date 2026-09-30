@@ -158,7 +158,8 @@ from maintenance.backup_cloud import (  # helpers existentes: no se duplican
 )
 # Paquete neutral (sin imports) compartido con la app: la lista de estados "cancelada" es UNA.
 # `app/` sigue sin importarse: `shared/estados.py` no arrastra nada (lo copia Dockerfile.cron).
-from shared.estados import lista_sql, sql_plan_comercial, sql_suscripcion_vigente
+from shared.estados import (lista_sql, sql_fecha_en_chile, sql_plan_comercial,
+                            sql_suscripcion_vigente)
 
 # ── Códigos de salida (Render marca fallido el run si != 0) ──
 EXIT_OK = 0
@@ -566,7 +567,11 @@ def consultas_lista(dias_pendiente: int) -> list:
                 "FROM suscripciones s "
                 "LEFT JOIN usuarios u ON u.id = s.usuario_id "
                 "LEFT JOIN planes p ON p.id = s.plan_id "
-                "WHERE s.estado = 'activo' AND s.fecha_expiracion < current_date "
+                # El ÚLTIMO día del plan (hora de Chile) está vigente COMPLETO: se marca recién
+                # desde el día siguiente. El cast es el MISMO de `sql_suscripcion_vigente()`, de la
+                # guarda y del UPDATE, así que los cuatro no pueden divergir.
+                "WHERE s.estado = 'activo' AND " + sql_fecha_en_chile("s.fecha_expiracion")
+                + " < current_date "
                 "ORDER BY s.fecha_expiracion, s.id"
             ),
         },
@@ -1555,16 +1560,18 @@ def guarda_vencidos(max_vencidos_pct: int) -> str:
     universo previo (después del paso 1 esa fila ya es 'vencido').
 
     Cuenta el universo y los que el paso 1 va a tocar con EXACTAMENTE los mismos predicados de
-    `SQL_SUSCRIPCIONES_ACTIVAS` y del propio `UPDATE` (mismo `current_date`: la sesión ya fijó
-    `SET LOCAL TIME ZONE`). `max_vencidos_pct` viene validado como entero (1..100), así que no
-    hay forma de inyectar texto por esta vía. `%%` imprime un `%` literal en el RAISE.
+    `SQL_SUSCRIPCIONES_ACTIVAS` y del propio `UPDATE` (mismo `current_date` —la sesión ya fijó
+    `SET LOCAL TIME ZONE`— y mismo cast del DÍA en hora de Chile: el día de vencimiento está
+    vigente completo y recién se marca desde el día siguiente). `max_vencidos_pct` viene validado
+    como entero (1..100), así que no hay forma de inyectar texto por esta vía. `%%` imprime un `%`
+    literal en el RAISE.
     """
     pct = int(max_vencidos_pct)
     return f"""DO $$
 DECLARE v integer; a integer;
 BEGIN
   SELECT count(*) INTO a FROM {SUSCRIPCIONES_ACTIVAS};
-  SELECT count(*) INTO v FROM {SUSCRIPCIONES_ACTIVAS} AND fecha_expiracion < current_date;
+  SELECT count(*) INTO v FROM {SUSCRIPCIONES_ACTIVAS} AND {sql_fecha_en_chile('fecha_expiracion')} < current_date;
   IF v * 100 > a * {pct} THEN
     RAISE EXCEPTION '{MARCA_GUARDA}: MAX_VENCIDOS_PCT: % vencido(s) > {pct}%% de % activa(s) (no se aplica nada)', v, a;
   END IF;
@@ -1646,10 +1653,12 @@ BEGIN;
 SET LOCAL TIME ZONE '{TZ_CLT}';
 CREATE TEMP TABLE _maint_cambios (paso text NOT NULL, id integer NOT NULL) ON COMMIT DROP;
 {guarda_vencidos_tx}
--- 1) suscripciones activas con el plan vencido → 'vencido' (antes marcar_plan_vencido.py)
+-- 1) suscripciones activas con el plan vencido → 'vencido' (antes marcar_plan_vencido.py).
+--    El día de `fecha_expiracion` (hora de Chile) está vigente COMPLETO: se marca desde el
+--    día siguiente, no la mañana del último día.
 WITH up AS (
   UPDATE suscripciones AS s SET estado = 'vencido', updated_at = now()
-  WHERE s.estado = 'activo' AND s.fecha_expiracion < current_date
+  WHERE s.estado = 'activo' AND {sql_fecha_en_chile('s.fecha_expiracion')} < current_date
   RETURNING s.id)
 INSERT INTO _maint_cambios SELECT 'vencidos', id FROM up;
 

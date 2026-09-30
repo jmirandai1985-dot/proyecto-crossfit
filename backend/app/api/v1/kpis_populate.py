@@ -20,7 +20,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.estados import ESTADOS_CANCELADA, plan_comercial   # las MISMAS listas que el mantenimiento
+from app.core.estados import (ESTADOS_CANCELADA, dia_chile,   # dia_chile = dia en hora de Chile
+                              plan_comercial)  # las MISMAS listas que el mantenimiento
 from app.db.database import get_db
 from app.services import metricas_service as metricas
 from app.models.daily_kpis import DailyKpi
@@ -34,7 +35,7 @@ from app.models.clase import Clase
 from app.models.plan import Plan
 from app.models.asistencia import Asistencia
 from app.models.transaccion_financiera import TransaccionFinanciera
-from app.utils.santiago import hoy_santiago
+from app.utils.santiago import fecha_chile, hoy_santiago
 
 router = APIRouter(prefix="/api/v1/kpis", tags=["KPIs - Populate"])
 
@@ -238,7 +239,7 @@ def populate_daily_kpis(
 ):
     """Calcula y hace UPSERT de `daily_kpis` para el día indicado (default: ayer)."""
     tenant_id = TENANT_ID
-    objetivo = fecha or (date.today() - timedelta(days=1))
+    objetivo = fecha or (hoy_santiago() - timedelta(days=1))
 
     # Sólo planes COMERCIALES: el "Pase de regreso" da acceso pero no es un alumno de pago
     # (misma columna y mismo criterio que el BI y el ML: `shared.estados.sql_plan_comercial`).
@@ -247,14 +248,14 @@ def populate_daily_kpis(
     ).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.estado == "activo",
-        Suscripcion.fecha_expiracion >= objetivo,
+        dia_chile(Suscripcion.fecha_expiracion) >= objetivo,
         plan_comercial(Plan.es_comercial),
     ).scalar() or 0
 
     alumnos_nuevos = db.query(func.count(Usuario.id)).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
-        func.date(Usuario.created_at) == objetivo,
+        dia_chile(Usuario.created_at) == objetivo,
     ).scalar() or 0
 
     clases = db.query(Clase).filter(
@@ -277,13 +278,13 @@ def populate_daily_kpis(
 
     reservas_confirmadas = db.query(func.count(Reserva.id)).filter(
         Reserva.tenant_id == tenant_id,
-        func.date(Reserva.fecha_reserva) == objetivo,
+        dia_chile(Reserva.fecha_reserva) == objetivo,
         Reserva.estado == "confirmada",
     ).scalar() or 0
 
     cancellaciones = db.query(func.count(Reserva.id)).filter(
         Reserva.tenant_id == tenant_id,
-        func.date(Reserva.fecha_reserva) == objetivo,
+        dia_chile(Reserva.fecha_reserva) == objetivo,
         Reserva.estado.in_(ESTADOS_CANCELADA),
     ).scalar() or 0
 
@@ -349,8 +350,8 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
     ).join(Plan, Suscripcion.plan_id == Plan.id).filter(
         Suscripcion.tenant_id == tenant_id,
         Plan.nombre == PLAN_PRUEBA,
-        func.date(Suscripcion.fecha_inicio) >= inicio,
-        func.date(Suscripcion.fecha_inicio) <= fin,
+        dia_chile(Suscripcion.fecha_inicio) >= inicio,
+        dia_chile(Suscripcion.fecha_inicio) <= fin,
     ).scalar() or 0
 
     alumnos_clase_prueba_ejecutada = db.query(
@@ -369,8 +370,8 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
     ).filter(
         Suscripcion.tenant_id == tenant_id,
         Plan.precio_clp > 0,
-        func.date(Suscripcion.fecha_inicio) >= inicio,
-        func.date(Suscripcion.fecha_inicio) <= fin,
+        dia_chile(Suscripcion.fecha_inicio) >= inicio,
+        dia_chile(Suscripcion.fecha_inicio) <= fin,
     ).scalar() or 0
 
     conversion_rate = round(
@@ -382,15 +383,15 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
     ).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.estado == "activo",
-        func.date(Suscripcion.fecha_inicio) <= inicio,
-        func.date(Suscripcion.fecha_expiracion) >= inicio,
+        dia_chile(Suscripcion.fecha_inicio) <= inicio,
+        dia_chile(Suscripcion.fecha_expiracion) >= inicio,
     ).scalar() or 0
 
     alumnos_baja = db.query(func.count(Usuario.id)).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
-        func.date(Usuario.fecha_baja) >= inicio,
-        func.date(Usuario.fecha_baja) <= fin,
+        dia_chile(Usuario.fecha_baja) >= inicio,
+        dia_chile(Usuario.fecha_baja) <= fin,
     ).scalar() or 0
 
     # Retencion/churn: definicion COMPARTIDA con Reportes y con el criterio
@@ -643,7 +644,7 @@ def populate_predictions(
 ):
     """Recalcula (full refresh) churn de alumnos + forecast de ingresos."""
     tenant_id = TENANT_ID
-    hoy = date.today()
+    hoy = hoy_santiago()
 
     # Alumnos "vigentes" del box: se filtra por `estado` (string de negocio) en
     # lugar de `activo` (bool). En datos reales de PROD los alumnos vigentes
@@ -775,10 +776,10 @@ def populate_predictions(
                 Suscripcion.tenant_id == tenant_id,
                 Suscripcion.usuario_id == alumno.id,
                 Suscripcion.estado == "activo",
-                func.date(Suscripcion.fecha_expiracion) >= hoy,
+                dia_chile(Suscripcion.fecha_expiracion) >= hoy,
                 plan_comercial(Plan.es_comercial),
             ).scalar()
-            proxima_date = proxima.date() if proxima else None
+            proxima_date = fecha_chile(proxima) if proxima else None
             dias_para_vencer = (proxima_date - hoy).days if proxima_date else None
             # Ventanas de asistencia (rama heurística: se calculan pre-loop).
             asis_30 = conteos_30.get(alumno.id, 0)
@@ -837,7 +838,7 @@ def populate_predictions(
     ).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.estado == "activo",
-        Suscripcion.fecha_expiracion >= hoy,
+        dia_chile(Suscripcion.fecha_expiracion) >= hoy,
     ).scalar() or 0
 
     if modelo_forecast is not None:

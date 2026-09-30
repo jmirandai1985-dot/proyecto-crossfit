@@ -140,13 +140,17 @@ def obtener_reportes_analytics(
         # OJO con el nombre: esto cuenta VENCIMIENTOS (estado='vencido' con
         # fecha_expiracion dentro del mes), no cancelaciones explicitas (ese
         # estado no existe en la base). La UI lo rotula "Planes Vencidos (Mes)".
+        # El MES es el de CHILE (día chileno de la fecha, igual que el resto del
+        # backend): comparar contra los bordes UTC del mes mandaba el plan que
+        # vence el último día a las 23:59:59 de Chile al mes siguiente.
         cancelaciones_mes = db.execute(sql_text("""
             SELECT COUNT(*) FROM suscripciones
             WHERE tenant_id = :tid
               AND estado = 'vencido'
-              AND fecha_expiracion >= :inicio
-              AND fecha_expiracion <= :fin
-        """), {"tid": tenant_id, "inicio": inicio_mes, "fin": fin_mes}).scalar() or 0
+              AND (fecha_expiracion AT TIME ZONE 'America/Santiago')::date >= :inicio_d
+              AND (fecha_expiracion AT TIME ZONE 'America/Santiago')::date <= :fin_d
+        """), {"tid": tenant_id, "inicio_d": inicio_mes.date(),
+               "fin_d": fin_mes.date()}).scalar() or 0
 
         # --- 4. RETENCION (cohorte) ---
         # Definicion COMPARTIDA con el BI (metricas_service.retencion_cohorte):

@@ -520,7 +520,7 @@ locales y sin darle a PROD un usuario con más permisos de los necesarios.
 
 | # | `UPDATE` | Antes en |
 |---|---|---|
-| 1 | `suscripciones.estado` → `vencido` (+`updated_at`) si `estado='activo'` y `fecha_expiracion < current_date` | `marcar_plan_vencido.py` |
+| 1 | `suscripciones.estado` → `vencido` (+`updated_at`) si `estado='activo'` y `(fecha_expiracion AT TIME ZONE 'America/Santiago')::date < current_date` (el día de vencimiento está vigente **completo**: recién se marca desde el día siguiente) | `marcar_plan_vencido.py` |
 | 2 | `suscripciones.estado` → `rechazado` (+`updated_at`) si `estado='pendiente'` y `created_at < now() - 7 días` | `transacciones_huerfanas.py` |
 | 3 | `solicitudes_planes.estado` → `rejected` (+`comentario_admin`, `updated_at`) si `estado='pending'` y `created_at < now() - 7 días` | `transacciones_huerfanas.py` |
 | 4 | `usuarios.estado` → `rechazado` **y** `activo=false` si `estado='pendiente_activacion'` y `created_at < now() - 7 días` | `transacciones_huerfanas.py` |
@@ -549,6 +549,14 @@ reporte viaja **dentro de la alerta** (o queda sólo en el log si el run está v
 - La zona horaria se fija en la MISMA sesión que las consultas (`SET TIME ZONE
   'America/Santiago'`), así `current_date` y `now() - interval '7 days'` se calculan en hora de
   Chile igual que lo hacía el ORM del contenedor: el servidor de Neon corre en UTC.
+- Los días de una suscripción se comparan con el cast explícito
+  (`(fecha_expiracion AT TIME ZONE 'America/Santiago')::date`, `shared.estados.sql_fecha_en_chile()`)
+  y **no** con `::date` a secas: la regla del negocio es que el plan vale hasta las 23:59:59 del
+  último día **hora de Chile**, así que ese día está vigente completo (el 30/09 un plan de
+  septiembre sigue vigente; recién desde el 01/10 está vencido). El `::date` suelto lo resuelve la
+  TZ de la sesión: una fila guardada `01/10 02:59+00` (que es el 30/09 23:59:59 en Chile) contaba
+  como vigente el 01/10. El cast es el MISMO de la app (`sql_suscripcion_vigente()`) y de la guarda
+  del `%` de vencidos, así que los tres no pueden divergir.
 
 ### Guardas (todas antes de tocar nada)
 

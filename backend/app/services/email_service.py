@@ -477,8 +477,17 @@ MESES_ES = {
 
 
 def formatear_fecha_es(fecha) -> str:
-    """Convierte date/datetime a formato '11 de septiembre de 2026'."""
+    """Convierte date/datetime a formato '11 de septiembre de 2026'.
+
+    Un `datetime` tz-aware (lo que devuelve la BD para una columna `timestamptz`) se lee en hora de
+    CHILE antes de sacar el día: el plan vence a las 23:59:59 de Chile, y ese instante en UTC ya es
+    el día siguiente — mostrar `fecha.day` a secas le decía al alumno una fecha de vencimiento
+    corrida un día.
+    """
     try:
+        if isinstance(fecha, datetime) and fecha.tzinfo is not None:
+            from app.utils.santiago import fecha_chile
+            fecha = fecha_chile(fecha)
         return f"{fecha.day} de {MESES_ES[fecha.month]} de {fecha.year}"
     except Exception:
         return str(fecha)[:10]
@@ -585,21 +594,29 @@ def send_alerta_inactividad(nombre: str, correo: str) -> bool:
 
 
 def send_alerta_urgencia_renovacion(nombre: str, correo: str) -> bool:
-    """Último día - El plan expira HOY, cuenta pasa a acceso restringido."""
+    """ÚLTIMO DÍA del plan: vence HOY a las 23:59 (hora de Chile).
+
+    ⚠️ Este correo sale la MAÑANA del último día (job de las 06:00 CLT) y desde el 2026-09-29 el
+    texto dice lo que pasa de verdad: el plan TODAVÍA es vigente hasta las 23:59. Antes decía
+    "¡tu plan ha expirado!" / "ha caducado" / "acceso restringido" — el bug reportado del 30/09:
+    el alumno recibía "vencido" con el plan vigente todo el día. "Vencido" sólo se usa a partir del
+    día siguiente, y para ese caso no hay correo: éste es el último aviso.
+    """
     if not correo:
         return False
-    titulo = f"¡{nombre}, tu plan ha expirado! Renueva y vuelve al ruedo 🚨"
-    saludo = (f"¡Hola, {nombre}! Te informamos que tu membresía en Urban Training Box ha caducado. "
-              "Tu cuenta ha pasado a modo de acceso restringido.")
+    titulo = f"¡{nombre}, tu plan vence HOY a las 23:59! ⏳"
+    saludo = (f"¡Hola, {nombre}! Tu membresía en Urban Training Box vence HOY a las 23:59 "
+              "(hora de Chile): es tu ÚLTIMO día para usar las clases que te quedan.")
     cuerpo = (
-        "<p>Para volver a agendar tus clases, registrar tus marcas en el Performance Hub y seguir entrenando con nosotros, "
-        "necesitas activar tu nuevo plan.</p>"
-        "<p>Entra a la plataforma, selecciona tu plan, realiza el pago y envía tu comprobante al administrador "
-        "para habilitar tu cuenta de inmediato.</p>"
+        "<p>Hoy todavía puedes agendar y entrenar — el plan está vigente hasta las 23:59 de hoy. "
+        "Desde mañana la cuenta pasa a modo de acceso restringido.</p>"
+        "<p>Para seguir entrenando con nosotros, activa tu nuevo plan: entra a la plataforma, "
+        "selecciona tu plan, realiza el pago y envía tu comprobante al administrador para "
+        "habilitar tu cuenta de inmediato.</p>"
         "<p>¡No te quedes fuera del box! Te esperamos para seguir sumando.</p>"
     )
     html = _template(titulo, saludo, cuerpo, "Activar mi plan", url_frontend("/alumno/solicitar-plan"))
-    ok = _enviar(correo, f"¡{nombre}, tu plan ha expirado! Renueva y vuelve al ruedo 🚨", html,
+    ok = _enviar(correo, f"¡{nombre}, tu plan vence HOY a las 23:59! ⏳", html,
                  None, tipo="vencimiento_inminente")
     logger.info(f"[alerta_urgencia_renovacion] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok

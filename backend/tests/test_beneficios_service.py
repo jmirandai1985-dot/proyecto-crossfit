@@ -47,7 +47,7 @@ from app.models.plan import Plan                                              # 
 from app.models.suscripcion import EstadoSuscripcion, Suscripcion             # noqa: E402
 from app.models.usuario import Usuario                                        # noqa: E402
 from app.services import beneficios_service as svc                            # noqa: E402
-from app.utils.santiago import SANTIAGO                                       # noqa: E402
+from app.utils.santiago import SANTIAGO, fin_del_dia_chile                        # noqa: E402
 
 TENANT_ID = 1
 PRECIO_PASE = 25000
@@ -467,8 +467,12 @@ def _columna(db, beneficio_id, columna):
                       {"i": beneficio_id}).scalar()
 
 
-def _suscripcion(db, alumno_id, plan_id, creditos, dias=30):
-    """Una suscripción vigente hecha a mano: "el plan que el alumno YA tenía"."""
+def _suscripcion(db, alumno_id, plan_id, creditos, dias=30, fin=None):
+    """Una suscripción vigente hecha a mano: "el plan que el alumno YA tenía".
+
+    `fin` permite fijar el instante de vencimiento exacto (para probar el borde del último día);
+    por defecto vence a los `dias` días de `T0`.
+    """
     sid = db.execute(text("""
         INSERT INTO suscripciones (tenant_id, usuario_id, plan_id, estado, creditos_totales,
                                    creditos_disponibles, fecha_inicio, fecha_expiracion,
@@ -476,7 +480,7 @@ def _suscripcion(db, alumno_id, plan_id, creditos, dias=30):
         VALUES (:t, :u, :p, CAST('activo' AS estado_suscripcion), :c, :c, :ini, :fin, :ini, :ini)
         RETURNING id"""),
         {"t": TENANT_ID, "u": alumno_id, "p": plan_id, "c": creditos, "ini": T0,
-         "fin": T0 + timedelta(days=dias)}).scalar()
+         "fin": fin or (T0 + timedelta(days=dias))}).scalar()
     db.commit()
     return sid
 
@@ -593,6 +597,27 @@ def test_b4_con_plan_vigente_las_clases_se_suman_a_su_plan(escenario):
     assert db.execute(text("SELECT estado::text FROM suscripciones WHERE id = :i"),
                       {"i": sub_id}).scalar() == "activo", \
         "la membresía del alumno no se toca: sólo se le suman clases"
+
+
+def test_b4b_un_plan_que_vence_hoy_sigue_vigente_todo_el_dia(escenario):
+    """Regla E: el plan vale hasta las 23:59:59 de su ÚLTIMO día, hora de Chile.
+
+    El instante de vencimiento de este plan ya pasó (06:00 de Chile) pero el DÍA es hoy: con la
+    comparación por instante (`fecha_expiracion > ahora`) `plan_vigente()` no lo veía, así que el
+    regalo le abría un PASE a un alumno que todavía tiene plan hoy (y en el pase los créditos se
+    fugarían de la membresía que está pagando).
+    """
+    db, alumno = escenario["db"], escenario["alumno"]
+    sub_id = _suscripcion(db, alumno.id, escenario["plan_pago_id"], creditos=10,
+                          fin=T0.replace(hour=6, minute=0))
+
+    beneficio = svc.crear(db, alumno, svc.TIPO_CLASES_GRATIS, CLASES, ahora=T0)
+
+    assert beneficio.suscripcion_id == sub_id, "el plan de HOY está vigente hasta las 23:59 CLT"
+    assert beneficio.plan_id == escenario["plan_pago_id"]
+    assert _creditos(db, sub_id) == 10 + CLASES
+    assert db.execute(text("SELECT count(*) FROM suscripciones WHERE usuario_id = :a"),
+                      {"a": alumno.id}).scalar() == 1, "no se abre un pase teniendo plan hoy"
 
 
 def test_b5_un_plan_ilimitado_no_se_convierte_en_limitado(escenario):
@@ -814,8 +839,11 @@ def test_b13_las_clases_extra_caducan_con_el_plan_que_las_lleva(escenario):
     beneficio = svc.crear(db, alumno, svc.TIPO_CLASES_GRATIS, CLASES, ahora=T0)
 
     # Las clases SÍ se entregaron (se sumaron al plan); lo que caduca con el plan es el acceso.
+    # El recorte es al FIN DEL ÚLTIMO DÍA del plan (23:59:59 hora de Chile): los créditos del plan
+    # sirven hasta ahí, no hasta el reloj crudo de la fila (regla E, 29/09/2026).
     assert _creditos(db, sub_id) == 10 + CLASES
-    assert _instante(beneficio.vigente_hasta) == _instante(T0 + timedelta(days=3)), \
+    assert _instante(beneficio.vigente_hasta) == _instante(
+        fin_del_dia_chile(T0.date() + timedelta(days=3))), \
         "la ventana no puede prometer más días que el plan que lleva los créditos"
     assert svc.esta_vivo(beneficio, ahora=T0 + timedelta(days=2))
     assert not svc.esta_vivo(beneficio, ahora=T0 + timedelta(days=4)), \

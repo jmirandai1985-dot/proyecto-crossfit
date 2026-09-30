@@ -226,9 +226,19 @@ def test_g_el_predicado_de_vigencia_por_fecha_parte_el_enum_en_dos():
     assert nunca | vigentes == _labels_del_enum_suscripcion("app/models/suscripcion.py"), (
         "hay un estado del enum sin clasificar en shared/estados.py")
 
+    # El día también es el de CHILE (fix 2026-09-29): `columna::date` lo resolvía la TZ de la
+    # sesión de Postgres (UTC en Neon), así que un plan que vence el 30/09 a las 23:59 hora de
+    # Chile (guardado `01/10 02:59+00`) quedaba vigente un día de más; y el "hoy" del default era
+    # `current_date`, que tampoco es Chile. El cast `AT TIME ZONE` lo decide en el propio SQL.
     assert estados.sql_suscripcion_vigente() == (
         "s.estado NOT IN (" + estados.lista_sql(estados.ESTADOS_SUSCRIPCION_NUNCA_VIGENTES) + ")"
-        " AND s.fecha_inicio::date <= current_date"
-        " AND s.fecha_expiracion::date >= current_date")
+        " AND (s.fecha_inicio AT TIME ZONE 'America/Santiago')::date"
+        " <= (now() AT TIME ZONE 'America/Santiago')::date"
+        " AND (s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date"
+        " >= (now() AT TIME ZONE 'America/Santiago')::date")
+    assert estados.ZONA_CHILE == "America/Santiago"
+    assert estados.sql_hoy_chile() == "(now() AT TIME ZONE 'America/Santiago')::date"
+    assert estados.sql_fecha_en_chile("s.fecha_expiracion") == (
+        "(s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date")
     assert "estado = 'activo'" not in estados.sql_suscripcion_vigente()
 

@@ -8,6 +8,8 @@ from typing import Optional
 from app.db.database import get_db
 from app.models.plan import Plan
 from app.core.dependencies import get_current_admin, get_current_user
+from app.core.estados import vigente_hoy   # vigencia por DÍA CHILENO (no por instante)
+from app.utils.santiago import dias_para_vencer
 
 router = APIRouter()
 
@@ -92,32 +94,32 @@ def obtener_membresia_activa(
     de query se ignoran (cerraba IDOR que exponía el saldo de tokens de
     cualquier alumno).
     """
-    from datetime import datetime, timezone
     from app.models.suscripcion import Suscripcion
 
     tenant_id = current_user["tenant_id"]
     alumno_id = current_user["usuario_id"]
 
-    ahora = datetime.now(timezone.utc)
-
+    # Vigencia por DÍA CHILENO: el plan vale hasta las 23:59:59 de su último día (el 30/09 un
+    # plan de septiembre sigue vigente). El `> datetime.now(timezone.utc)` de antes lo cortaba
+    # a las 20:59 CLT del último día y dependía de la TZ del proceso.
     suscripcion = db.query(Suscripcion).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.usuario_id == alumno_id,
         Suscripcion.estado == 'activo',
-        Suscripcion.fecha_expiracion > ahora
+        vigente_hoy(Suscripcion.fecha_expiracion)
     ).order_by(Suscripcion.creditos_disponibles.desc().nulls_last(), Suscripcion.fecha_expiracion.desc()).first()
 
     if not suscripcion:
         return {"activa": False, "plan_nombre": None, "dias_restantes": 0, "clases_disponibles": 0, "es_ilimitado": False, "fecha_vencimiento": None}
 
     plan = db.query(Plan).filter(Plan.id == suscripcion.plan_id).first()
-    dias_restantes = (suscripcion.fecha_expiracion.replace(
-        tzinfo=timezone.utc) - ahora).days
+    # 0 = vence HOY (día de vencimiento inclusive) y sin fecha = 0: nunca negativo.
+    dias_restantes = dias_para_vencer(suscripcion.fecha_expiracion) or 0
 
     return {
         "activa": True,
         "plan_nombre": plan.nombre if plan else None,
-        "dias_restantes": max(dias_restantes, 0),
+        "dias_restantes": dias_restantes,
         "clases_disponibles": suscripcion.creditos_disponibles if hasattr(suscripcion, 'creditos_disponibles') else 0,
         "es_ilimitado": plan.es_ilimitado if plan else False,
         "fecha_vencimiento": suscripcion.fecha_expiracion,

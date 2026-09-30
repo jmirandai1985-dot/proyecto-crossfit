@@ -56,6 +56,7 @@ sys.path.insert(0, str(BACKEND))
 
 from app.services import metricas_service as metricas  # noqa: E402
 from app.services import reportes_service as rep  # noqa: E402
+from app.utils.santiago import hoy_santiago  # noqa: E402  (el "hoy" de Chile)
 from shared import estados  # noqa: E402
 
 TENANT = 7
@@ -142,16 +143,18 @@ def _filas_de_ejemplo(estado_de_la_vencida: str = "vencido") -> list:
 
 # ── El SQL capturado, evaluado contra las filas (sin base) ───────────────────────────────────────
 _RE_NUNCA = re.compile(r"estado NOT IN \(([^)]*)\)")
-_RE_INICIO = re.compile(r"fecha_inicio::date <= ([^\s,)]+)")
-_RE_FIN = re.compile(r"fecha_expiracion::date >= ([^\s,)]+)")
+_RE_INICIO = re.compile(r"fecha_inicio AT TIME ZONE '[^']+'\)::date <= ([^\s,)]+)")
+_RE_FIN = re.compile(r"fecha_expiracion AT TIME ZONE '[^']+'\)::date >= ([^\s,)]+)")
 
 
 def _fecha_del_operando(operando: str, params: dict) -> date:
-    """La fecha con la que se compara (`:hasta`/`:fin` del binding, `current_date` o un literal)."""
+    """La fecha con la que se compara (`:hasta`/`:fin` del binding, HOY en Chile o un literal)."""
     if operando.startswith(":"):
         valor = params[operando[1:]]
         assert isinstance(valor, date), f"{operando} no se ligó a una fecha: {valor!r}"
         return valor
+    if "now() AT TIME ZONE" in operando:      # default de `sql_suscripcion_vigente`: HOY en Chile
+        return hoy_santiago()
     if operando == "current_date":
         return datetime.now(timezone.utc).date()
     literal = re.fullmatch(r"'(\d{4}-\d{2}-\d{2})'(?:::date)?", operando)

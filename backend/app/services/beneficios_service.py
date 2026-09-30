@@ -51,12 +51,12 @@ from typing import Final
 
 from sqlalchemy.orm import Session
 
-from app.core.estados import plan_comercial
+from app.core.estados import plan_comercial, vigente_hoy
 from app.models.beneficio import Beneficio, EstadoBeneficio, TipoBeneficio
 from app.models.configuracion import ConfiguracionNegocio
 from app.models.plan import Plan
 from app.models.suscripcion import EstadoSuscripcion, Suscripcion
-from app.utils.santiago import ahora_santiago, fecha_chile
+from app.utils.santiago import ahora_santiago, fecha_chile, fin_del_dia_chile
 
 # ── Reglas del box (una definición cada una) ──────────────────────────────────
 # La ventana del regalo: 15 días desde el envío del correo. NO la fija quien ofrece.
@@ -252,13 +252,16 @@ def plan_vigente(db: Session, alumno, *, ahora: datetime | None = None) -> Suscr
     (los `NULL` —ilimitado— al final, nunca elegidos antes que uno con créditos contables).
     """
     momento = _ahora(ahora)
+    # El plan vale hasta las 23:59:59 de su último día (hora de Chile): se compara el DÍA, no el
+    # instante — con `> momento` un plan que vence HOY dejaba de estar vigente a las 20:59 CLT y el
+    # regalo abría un pase en vez de sumarle las clases al plan que el alumno ya tiene.
     return db.query(Suscripcion).join(
         Plan, Suscripcion.plan_id == Plan.id
     ).filter(
         Suscripcion.usuario_id == alumno.id,
         Suscripcion.tenant_id == alumno.tenant_id,
         Suscripcion.estado == EstadoSuscripcion.activo,
-        Suscripcion.fecha_expiracion > momento,
+        vigente_hoy(Suscripcion.fecha_expiracion, hoy=fecha_chile(momento)),
         plan_comercial(Plan.es_comercial),
     ).order_by(
         Suscripcion.creditos_disponibles.desc().nulls_last(),
@@ -331,13 +334,18 @@ def _vence_con_el_plan(vigente_hasta: datetime, suscripcion) -> datetime:
     (un plan mensual vence el último día del mes a las 23:59:59) los créditos se van con él, así que la
     ventana de 15 días no puede prometer más días que el acceso. Con el pase no cambia nada: su
     `fecha_expiracion` ES la ventana que se acaba de calcular.
+
+    ⚠️ El recorte es al FIN DEL ÚLTIMO DÍA del plan, hora de Chile (regla E, 29/09/2026): los
+    créditos del plan sirven hasta las 23:59:59 de su último día, así que cortar la ventana en el
+    reloj crudo de la fila (una fila legado guardada `23:59:59+00` es 20:59 CLT) dejaba al regalo sin
+    las últimas horas que el alumno todavía tenía.
     """
     if suscripcion is None:
         return vigente_hasta
     vence_plan = _aware(getattr(suscripcion, "fecha_expiracion", None))
     if vence_plan is None:
         return vigente_hasta
-    return min(vigente_hasta, vence_plan)
+    return min(vigente_hasta, fin_del_dia_chile(fecha_chile(vence_plan)))
 
 
 def _materializar_acceso(db: Session, alumno, valor: int, vigente_hasta: datetime,

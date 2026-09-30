@@ -57,6 +57,7 @@ from typing import Final
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.estados import vigente_hoy   # "el plan da acceso HOY" (día chileno, inclusivo)
 from app.models.asistencia import Asistencia
 from app.models.plan import Plan
 from app.models.predictions_churn import PredictionsChurn
@@ -155,7 +156,9 @@ def suscripcion_vigente(db: Session, alumno, hoy: date = None):
         .filter(Suscripcion.tenant_id == alumno.tenant_id,
                 Suscripcion.usuario_id == alumno.id,
                 Suscripcion.estado == ESTADO_SUSCRIPCION_ACTIVO,
-                Suscripcion.fecha_expiracion >= hoy)
+                # El día de vencimiento cuenta COMPLETO y en hora de Chile (misma definición que
+                # `shared.estados.sql_suscripcion_vigente()` y que los gates de reservas/planes).
+                vigente_hoy(Suscripcion.fecha_expiracion, hoy=hoy))
         .order_by(Suscripcion.fecha_expiracion.desc(), Suscripcion.id.desc())
         .first()
     )

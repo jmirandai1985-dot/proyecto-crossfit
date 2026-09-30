@@ -5,7 +5,7 @@ Analiza asistencias y detecta alumnos en riesgo de abandono
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct, or_
-from datetime import datetime, date
+from datetime import date, datetime
 from typing import List, Optional
 import pandas as pd
 from app.services.email_service import enviar_email_fidelizacion
@@ -17,7 +17,10 @@ from app.models.reserva import Reserva
 from app.models.clase import Clase
 from app.models.coach_disciplina import CoachDisciplina
 from app.core.dependencies import get_current_admin, get_current_coach
-from app.core.estados import no_cancelada   # "reserva activa" = NOT IN (cancelled, cancelada)
+# Vigencia de un plan y "hoy": SIEMPRE en hora de Chile (un plan vale hasta las 23:59:59 de su
+# último día; `date.today()` de noche en UTC ya es mañana). `dia_chile` es el cast SQL del día.
+from app.core.estados import dia_chile, no_cancelada, vigente_hoy
+from app.utils.santiago import dias_para_vencer, fecha_chile, hoy_santiago
 from app.services.auditoria_service import registrar_auditoria
 
 router = APIRouter()
@@ -85,7 +88,9 @@ def analizar_fidelizacion(
 
     mapa_asistencias = {r.usuario_id: r.ultima_fecha for r in ultimas}
 
-    hoy = date.today()
+    # El "hoy" es el de CHILE: `Asistencia.fecha` son fechas chilenas, y de noche en UTC
+    # `date.today()` ya era mañana (el conteo de días sin entrenar se corría un día).
+    hoy = hoy_santiago()
     data = []
     for alumno in alumnos:
         ultima = mapa_asistencias.get(alumno.id)
@@ -163,7 +168,7 @@ def registrar_asistencia(
             detail="Usuario no encontrado en este box"
         )
 
-    fecha_asistencia = fecha or date.today()
+    fecha_asistencia = fecha or hoy_santiago()
 
     ya_asistio = db.query(Asistencia).filter(
         Asistencia.usuario_id == usuario_id,
@@ -324,7 +329,9 @@ def alumnos_coach_en_riesgo(
 
     mapa_asistencias = {r.usuario_id: r.ultima_fecha for r in ultimas}
 
-    hoy = date.today()
+    # El "hoy" es el de CHILE (misma razón que en el resto del panel: `Asistencia.fecha` es una
+    # fecha chilena y `date.today()` ya era mañana de noche en UTC).
+    hoy = hoy_santiago()
     data = []
     for alumno in alumnos:
         ultima = mapa_asistencias.get(alumno.id)
@@ -507,8 +514,8 @@ def _dias_inactividad_alumno(db: Session, tenant_id: int, alumno: Usuario) -> in
         Asistencia.tenant_id == tenant_id,
         Asistencia.usuario_id == alumno.id,
     ).scalar()
-    referencia = ultima or (alumno.created_at.date() if alumno.created_at else None)
-    return max(1, (date.today() - referencia).days) if referencia else 1
+    referencia = ultima or fecha_chile(alumno.created_at)
+    return max(1, (hoy_santiago() - referencia).days) if referencia else 1
 
 
 @router.get("/coach/{coach_id}/contactar/{alumno_id}/preview")
@@ -641,10 +648,14 @@ def ficha_alumno_coach(
     from app.models.suscripcion import Suscripcion
     from app.models.plan import Plan
 
+    # El plan VIGENTE de hoy: vigencia por DÍA CHILENO (`vigente_hoy`), porque el plan vale hasta
+    # las 23:59:59 de su último día. Sin el predicado, la fila que el job aún no marcó `vencido`
+    # (corre 02:30) pasaba como vigente un día de más.
     suscripcion = db.query(Suscripcion).filter(
         Suscripcion.usuario_id == alumno.id,
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.estado == "activo",
+        vigente_hoy(Suscripcion.fecha_expiracion),
     ).order_by(Suscripcion.fecha_expiracion.desc()).first()
 
     plan_data = None
@@ -664,14 +675,16 @@ def ficha_alumno_coach(
             "estado": suscripcion.estado,
         }
 
-    alta = alumno.created_at.date() if alumno.created_at else None
+    # Antigüedad y fecha de alta, en días de CHILE (el `created_at` es `timestamptz`: su `.date()`
+    # crudo es el día UTC, que de noche ya es mañana).
+    alta = fecha_chile(alumno.created_at)
     return {
         "id": alumno.id,
         "nombre": alumno.nombre,
         "correo": alumno.correo,
         "telefono": alumno.telefono,
         "created_at": alumno.created_at.isoformat() if alumno.created_at else None,
-        "antiguedad_dias": (date.today() - alta).days if alta else None,
+        "antiguedad_dias": (hoy_santiago() - alta).days if alta else None,
         "plan": plan_data,
     }
 
@@ -716,7 +729,8 @@ def alumnos_tenant_en_riesgo(
 
     mapa_asistencias = {r.usuario_id: r.ultima_fecha for r in ultimas}
 
-    hoy = date.today()
+    # El "hoy" es el de CHILE (ver la nota del otro endpoint de riesgo).
+    hoy = hoy_santiago()
     data = []
     for alumno in alumnos:
         ultima = mapa_asistencias.get(alumno.id)
@@ -766,6 +780,10 @@ def vencimientos_inminentes(
     """
     Devuelve alumnos con membresia activa cuya fecha_expiracion esta
     dentro de los proximos N dias (default 5). Solo admin (tenant del token).
+
+    Vigencia y días en HORA DE CHILE: el plan vale hasta las 23:59:59 de su último día, así que
+    el que vence HOY sale con `dias_restantes` 0 — antes la resta de fechas UTC daba 1 de más (o
+    -1) según la hora, y `str(fecha.date())` informaba el día siguiente.
     """
     from app.models.suscripcion import Suscripcion
     from app.models.plan import Plan
@@ -774,7 +792,7 @@ def vencimientos_inminentes(
     # 🔒 SEGURIDAD: tenant_id del token; el path param se ignora.
     tenant_id = current_user["tenant_id"]
 
-    hoy = date.today()
+    hoy = hoy_santiago()
     fecha_limite = hoy + timedelta(days=dias_umbral)
 
     suscripciones = db.query(Suscripcion, Usuario, Plan).join(
@@ -784,21 +802,20 @@ def vencimientos_inminentes(
     ).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.estado == 'activo',
-        Suscripcion.fecha_expiracion >= hoy,
-        Suscripcion.fecha_expiracion <= fecha_limite
+        dia_chile(Suscripcion.fecha_expiracion) >= hoy,
+        dia_chile(Suscripcion.fecha_expiracion) <= fecha_limite
     ).all()
 
     resultado = []
     for s, u, p in suscripciones:
-        dias_restantes = (s.fecha_expiracion.date() - hoy).days
         resultado.append({
             "id": s.id,
             "usuario_id": u.id,
             "nombre": u.nombre,
             "correo": u.correo,
             "plan_nombre": p.nombre,
-            "fecha_expiracion": str(s.fecha_expiracion.date()),
-            "dias_restantes": dias_restantes,
+            "fecha_expiracion": str(fecha_chile(s.fecha_expiracion)),
+            "dias_restantes": dias_para_vencer(s.fecha_expiracion),
             "creditos_disponibles": s.creditos_disponibles
         })
 

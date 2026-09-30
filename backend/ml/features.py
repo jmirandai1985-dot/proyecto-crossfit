@@ -6,7 +6,8 @@ aprende el modelo coincida con lo que ya calcula el backend:
 
   - `_dias_inactividad`  -> dias_desde_ultima_asistencia (con fallback a created_at)
   - `_ultima_asistencia` -> última fecha en la tabla `asistencias`
-  - suscripción activa   -> estado == 'activo' AND fecha_expiracion >= hoy
+  - suscripción activa   -> vigente a la fecha de corte, en DÍAS DE CHILE
+    (`dia_chile`: el día de vencimiento cuenta completo, igual que el resto del backend)
 
 Uso:
     import ml.features as features
@@ -20,9 +21,11 @@ from sqlalchemy import func
 from app.models.asistencia import Asistencia
 from app.models.suscripcion import Suscripcion
 from app.core.estados import (   # los MISMOS criterios que el mantenimiento
+    dia_chile,
     plan_comercial,
 )
 from app.models.plan import Plan
+from app.utils.santiago import fecha_chile, hoy_santiago   # el DÍA, siempre en hora de Chile
 from app.models.usuario import RolUsuario, Usuario
 
 # Regla del label de abandono (idéntica a la del seed sintético ml.seed.*).
@@ -48,7 +51,7 @@ def dias_desde_ultima_asistencia(ultima, created_at, fecha_ref):
 
     Réplica exacta de `kpis_populate._dias_inactividad` (el fix del 999 fijo).
     """
-    referencia = ultima or (created_at.date() if created_at else None)
+    referencia = ultima or fecha_chile(created_at)
     if referencia is None:
         return 0
     return max(0, (fecha_ref - referencia).days)
@@ -112,13 +115,13 @@ def _suscripcion_activa(db, tenant_id, usuario_id, fecha_ref):
     ).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.usuario_id == usuario_id,
-        func.date(Suscripcion.fecha_inicio) <= fecha_ref,
-        func.date(Suscripcion.fecha_expiracion) >= fecha_ref,
+        dia_chile(Suscripcion.fecha_inicio) <= fecha_ref,
+        dia_chile(Suscripcion.fecha_expiracion) >= fecha_ref,
         plan_comercial(Plan.es_comercial),
     ).scalar()
     if not vence:
         return False, None
-    vence_date = vence.date()
+    vence_date = fecha_chile(vence)
     return True, (vence_date - fecha_ref).days
 
 
@@ -127,7 +130,7 @@ def features_alumno(db, tenant_id, alumno, fecha_ref) -> dict:
     ultima = _ultima_asistencia(db, tenant_id, alumno.id, hasta=fecha_ref)
     tiene_activa, dias_vencer = _suscripcion_activa(
         db, tenant_id, alumno.id, fecha_ref)
-    antiguedad = ((fecha_ref - alumno.created_at.date()).days
+    antiguedad = ((fecha_ref - fecha_chile(alumno.created_at)).days
                   if alumno.created_at else 0)
 
     fila = {
@@ -163,7 +166,7 @@ def build_features(db, tenant_id, fecha_ref=None) -> pd.DataFrame:
     Con Neon y ~100 alumnos, la versión por alumno tardaba minutos; esta tarda
     segundos. Los features son idénticos a `features_alumno()`.
     """
-    fecha_ref = fecha_ref or date.today()
+    fecha_ref = fecha_ref or hoy_santiago()
     alumnos = cargar_alumnos(db, tenant_id)
     if not alumnos:
         return pd.DataFrame(columns=ID_COLS + FEATURE_COLS)
@@ -203,16 +206,16 @@ def build_features(db, tenant_id, fecha_ref=None) -> pd.DataFrame:
     ).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.usuario_id.in_(ids),
-        func.date(Suscripcion.fecha_inicio) <= fecha_ref,
-        func.date(Suscripcion.fecha_expiracion) >= fecha_ref,
+        dia_chile(Suscripcion.fecha_inicio) <= fecha_ref,
+        dia_chile(Suscripcion.fecha_expiracion) >= fecha_ref,
         plan_comercial(Plan.es_comercial),
     ).group_by(Suscripcion.usuario_id).all())
 
     filas = []
     for alumno in alumnos:
         vence = vencimientos.get(alumno.id)
-        vence_date = vence.date() if vence else None
-        antiguedad = ((fecha_ref - alumno.created_at.date()).days
+        vence_date = fecha_chile(vence) if vence else None
+        antiguedad = ((fecha_ref - fecha_chile(alumno.created_at)).days
                       if alumno.created_at else 0)
         fila = {
             "usuario_id": alumno.id,

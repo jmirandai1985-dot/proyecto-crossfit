@@ -87,7 +87,7 @@ def _ultimo_contacto_por_alumno(db: Session, tenant_id: int, ids: list) -> dict:
     for n in recientes:
         ultimo.setdefault(n.alumno_id, n)   # el 1º de cada alumno = el más reciente
 
-    hoy = date.today()
+    hoy = hoy_santiago()
     return {
         uid: {
             "tipo": n.tipo,
@@ -189,7 +189,7 @@ def _dias_inactividad_por_alumno(db: Session, tenant_id: int, ids: list) -> dict
         Usuario.id.in_(ids),
     ).group_by(Usuario.id, Usuario.created_at).all()
 
-    hoy = date.today()
+    hoy = hoy_santiago()
     return {uid: max(0, (hoy - ref).days) for uid, ref in filas if ref}
 
 
@@ -225,7 +225,7 @@ def _generar_insight(filas: list, dias_por_alumno: dict) -> dict:
     con_plan = [f for f in filas
                 if f.get("riesgo_nivel") in ("ALTO", "CRITICO")
                 and f.get("fecha_proxima_renovacion")]
-    limite = date.today() + timedelta(days=7)
+    limite = hoy_santiago() + timedelta(days=7)
     vencen = [f for f in con_plan if f["fecha_proxima_renovacion"] <= limite]
 
     metricas = {
@@ -282,7 +282,7 @@ def get_kpis_diario(
     """KPIs del día para la pestaña DIARIA."""
     tenant_id = current_user["tenant_id"]
     if not fecha:
-        fecha = date.today()
+        fecha = hoy_santiago()
 
     kpi = db.query(DailyKpi).filter(
         DailyKpi.tenant_id == tenant_id,
@@ -1027,7 +1027,7 @@ def get_cohortes(
                              sum(int(r[i_act] or 0) for r in filas))
 
     return {
-        "hoy": str(date.today()),
+        "hoy": str(hoy_santiago()),
         "definicion": (
             "Cohorte = el mes en que el alumno se dio de alta. Activo a los N días "
             "= tiene al menos 1 asistencia desde su alta hasta N días después; sólo "

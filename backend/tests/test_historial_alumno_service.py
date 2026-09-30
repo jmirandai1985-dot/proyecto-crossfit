@@ -570,15 +570,15 @@ def test_c3_mes_con_plan_coincide_con_el_criterio_compartido(db, escenario):
     predicado compartido se exige la implicación (vigente el 1° del mes ⇒ mes con plan).
     """
     from shared.estados import ESTADOS_SUSCRIPCION_NUNCA_VIGENTES, lista_sql, \
-        sql_suscripcion_vigente
+        sql_fecha_en_chile, sql_suscripcion_vigente
 
     datos = svc.panel(db, escenario["alumno_id"], TENANT_ID, seccion="membresias")["datos"]
     sql_mes_con_plan = f"""
         SELECT COUNT(*) FROM suscripciones s
         WHERE s.tenant_id = :t AND s.usuario_id = :u
           AND s.estado NOT IN ({lista_sql(ESTADOS_SUSCRIPCION_NUNCA_VIGENTES)})
-          AND s.fecha_inicio::date <= :ultimo
-          AND s.fecha_expiracion::date >= :primero"""
+          AND {sql_fecha_en_chile('s.fecha_inicio')} <= :ultimo
+          AND {sql_fecha_en_chile('s.fecha_expiracion')} >= :primero"""
     sql_vigente_en = f"""
         SELECT COUNT(*) FROM suscripciones s
         WHERE s.tenant_id = :t AND s.usuario_id = :u

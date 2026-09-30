@@ -3,16 +3,16 @@ Endpoint para compra de emergencia de planes
 """
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from datetime import datetime, timezone
-from calendar import monthrange
 from pydantic import BaseModel
 
 from app.db.database import get_db
 from app.models.suscripcion import Suscripcion
 from app.models.plan import Plan
 from app.core.dependencies import get_current_user
+from app.core.estados import vigente_hoy
 from app.core.rate_limit import limiter, LIMIT_CRITICO
 from app.services.auditoria_service import registrar_auditoria
+from app.utils.santiago import ahora_santiago, fecha_chile, fin_de_mes_chile
 
 router = APIRouter()
 
@@ -57,12 +57,15 @@ def comprar_emergencia(
     if not plan:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
-    # Buscar suscripción activa actual
+    # Buscar suscripción vigente actual.
+    # Vigencia por DÍA CHILENO (`vigente_hoy`): el plan vale hasta las 23:59:59 del último día,
+    # así que el 30/09 un plan de septiembre sigue sirviendo para la compra de emergencia
+    # (antes, `fecha_expiracion > datetime.now(timezone.utc)` lo cortaba a las 20:59 CLT).
     suscripcion = db.query(Suscripcion).filter(
         Suscripcion.tenant_id == data.tenant_id,
         Suscripcion.usuario_id == data.alumno_id,
         Suscripcion.estado == 'activo',
-        Suscripcion.fecha_expiracion > datetime.now(timezone.utc)
+        vigente_hoy(Suscripcion.fecha_expiracion)
     ).order_by(Suscripcion.fecha_expiracion.desc()).first()
 
     if not suscripcion:
@@ -74,11 +77,12 @@ def comprar_emergencia(
         raise HTTPException(
             status_code=400, detail=f"Todavía tienes {suscripcion.creditos_disponibles} clases disponibles. No necesitas compra de emergencia.")
 
-    # Verificar si puede comprar emergencia (1 vez por año)
+    # Verificar si puede comprar emergencia (1 vez por año) — el año es el de CHILE
+    ahora = ahora_santiago()
     puede_comprar = True
     if suscripcion.fecha_compra_emergencia:
-        anio_compra = suscripcion.fecha_compra_emergencia.year
-        anio_actual = datetime.now(timezone.utc).year
+        anio_compra = fecha_chile(suscripcion.fecha_compra_emergencia).year
+        anio_actual = ahora.year
         if anio_compra == anio_actual:
             puede_comprar = False
 
@@ -86,11 +90,10 @@ def comprar_emergencia(
         raise HTTPException(
             status_code=400, detail="Ya usaste tu compra de emergencia este año. Vuelve en enero.")
 
-    # Calcular fin de mes actual
-    hoy = datetime.now(timezone.utc)
-    ultimo_dia = monthrange(hoy.year, hoy.month)[1]
-    fin_mes = hoy.replace(day=ultimo_dia, hour=23,
-                          minute=59, second=59, microsecond=0)
+    # Calcular fin de mes actual EN HORA DE CHILE (23:59:59 del último día): antes se armaba con
+    # `datetime.now(timezone.utc).replace(hour=23)`, que en Chile son las 20:59 y le robaba las
+    # últimas 3 horas al último día del plan.
+    fin_mes = fin_de_mes_chile(ahora.date())
 
     # Guardar tokens sobrantes antes de actualizar (0 o los que tenga)
     tokens_sobrantes = suscripcion.creditos_disponibles or 0
@@ -98,7 +101,7 @@ def comprar_emergencia(
     # Actualizar suscripción existente como compra emergencia
     suscripcion.es_compra_emergencia = True
     suscripcion.puede_comprar_emergencia = False
-    suscripcion.fecha_compra_emergencia = hoy
+    suscripcion.fecha_compra_emergencia = ahora
     suscripcion.fecha_expiracion = fin_mes
     suscripcion.creditos_totales = plan.creditos or 999
     suscripcion.creditos_disponibles = plan.creditos or 999
