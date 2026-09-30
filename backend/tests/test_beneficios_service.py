@@ -12,9 +12,13 @@ feature en silencio:
     no se puede usar, diga lo que diga la fila;
   * la **corrección B** — `crear()` vence los vencidos ANTES y en la MISMA transacción (UN solo
     `commit()`): si no, el alumno tendría dos regalos vivos y podría usar los dos;
-  * la regla 3 — el acceso se materializa AL ENVIAR: con plan vigente se SUMAN las clases, sin plan
-    se abre el pase, y el pase NO puede quedar como una membresía (corrección A);
-  * la regla 6 — el descuento se calcula AL USARLO: al ofrecerlo no se sabe qué plan va a comprar.
+  * la regla 3 — el acceso se materializa AL DARLO: con plan vigente se SUMAN las clases (y **caducan
+    con ese plan**: la ventana se recorta a su expiración), sin plan se abre el pase, y el pase NO
+    puede quedar como una membresía (corrección A);
+  * la regla 6 — el descuento se calcula AL USARLO: al ofrecerlo no se sabe qué plan va a comprar;
+  * la regla 9 (decisión 3) — **un solo regalo VIVO por alumno y tipo**: el segundo se rechaza con el
+    texto de `aviso_vigente()` (el router lo devuelve como 409) y no materializa nada;
+  * **`notificacion_id` es OPCIONAL**: el panel puede dar un beneficio sin avisar por correo.
 
   A. PURAS (sin BD): catálogo/enums, `esta_vivo`, el tope del box, la aritmética del descuento y el
      ORDEN vencimiento→alta→UN `commit()` (con una sesión falsa que registra los eventos).
@@ -188,17 +192,23 @@ class _ConsultaFalsa:
         self.sesion.eventos.append(("tope",))
         return self.valor
 
+    def all(self):
+        # `vivos()`: los regalos vivos que declare el escenario (la lectura de la decisión 3).
+        self.sesion.eventos.append(("vivos",))
+        return list(self.sesion.vivos_hoy)
+
 
 class _SesionFalsa:
     """Sesión mínima que registra el ORDEN de los eventos y las filas dadas de alta (no toca la BD)."""
 
-    def __init__(self, filas_vencidas=0, plan=None, vigente=None, tope=TOPE_TEST):
+    def __init__(self, filas_vencidas=0, plan=None, vigente=None, tope=TOPE_TEST, vivos_hoy=()):
         self.eventos = []
         self.nuevos = []
         self.filas_vencidas = filas_vencidas
         self.plan = plan            # el plan del pase que se va a regalar (si no hay vigente)
         self.vigente = vigente      # la suscripción vigente comercial del alumno (o None)
         self.tope = tope
+        self.vivos_hoy = list(vivos_hoy)   # lo que devuelve `vivos()` (un regalo vivo = decisión 3)
 
     def query(self, *modelos, **kwargs):
         modelo = modelos[0] if modelos else None
@@ -229,12 +239,8 @@ class _SesionFalsa:
 
 
 def test_a6_crear_rechaza_lo_imposible_antes_de_tocar_la_base():
-    """Sin correo de origen, sin tipo válido, sin valor posible o sobre el tope: no se crea nada."""
+    """Sin tipo válido, sin valor posible o sobre el tope: no se crea nada (el correo es opcional)."""
     alumno = SimpleNamespace(id=999, tenant_id=TENANT_ID)
-    # Sin correo de origen no hay beneficio: el error es previo a cualquier consulta (`db=None`).
-    with pytest.raises(svc.BeneficioSinCorreo):
-        svc.crear(None, alumno, svc.TIPO_CLASES_GRATIS, CLASES, notificacion_id=None, ahora=T0)
-
     with pytest.raises(svc.TipoDesconocido) as err:
         svc.crear(None, alumno, "pase_regresoo", CLASES, notificacion_id=1, ahora=T0)
     assert svc.TIPO_CLASES_GRATIS in str(err.value), "el error dice cuáles son los válidos"
@@ -253,6 +259,11 @@ def test_a6_crear_rechaza_lo_imposible_antes_de_tocar_la_base():
         svc.crear(_SesionFalsa(tope=TOPE_TEST), alumno, svc.TIPO_DESCUENTO, TOPE_TEST + 1,
                   notificacion_id=1, ahora=T0)
     assert str(TOPE_TEST) in str(err.value)
+
+    # Un regalo SIN correo también es válido (ajuste del paso 2): `notificacion_id` es opcional.
+    sin_correo = svc.crear(_SesionFalsa(tope=TOPE_TEST), alumno, svc.TIPO_DESCUENTO, TOPE_TEST,
+                           ahora=T0)
+    assert sin_correo.notificacion_id is None
 
 
 def test_a7_la_correccion_b_vence_y_da_de_alta_en_una_sola_transaccion():
@@ -331,6 +342,32 @@ def test_a9_usar_y_anular_no_se_repiten_ni_revierten_lo_usado():
         with pytest.raises(svc.ValorInvalido):
             svc.anular(None, _beneficio(EstadoBeneficio.ofrecido, T0 + timedelta(days=1)),
                        motivo=vacio, ahora=T0)
+
+def test_a10_un_solo_regalo_vivo_por_alumno_y_tipo():
+    """Regla 9 (decisión 3): si ya hay uno vivo, `crear()` no da de alta otro y dice valor y fecha."""
+    alumno = SimpleNamespace(id=999, tenant_id=TENANT_ID)
+    vivo = _beneficio(EstadoBeneficio.ofrecido, T0 + timedelta(days=5),
+                      tipo=TipoBeneficio.descuento, valor=20)
+    sesion = _SesionFalsa(vivos_hoy=[vivo], tope=TOPE_TEST)
+
+    with pytest.raises(svc.BeneficioYaVigente) as err:
+        svc.crear(sesion, alumno, svc.TIPO_DESCUENTO, 10, ahora=T0)
+
+    # El texto es UNO solo (el 409 del router y el aviso del panel): dice el % y hasta cuándo.
+    assert str(err.value) == "Ya tiene un descuento vigente del 20 % hasta el 04-10-2026."
+    assert [e for e in sesion.eventos if e[0] in ("add", "commit")] == [], \
+        "un alta rechazada no materializa nada (ni fila, ni créditos)"
+
+    # Las clases dicen las clases (y el plural es del sustantivo, no del valor).
+    vivo.tipo, vivo.valor = TipoBeneficio.clases_gratis, CLASES
+    assert svc.aviso_vigente(vivo) == "Ya tiene un regalo de 3 clases vigente hasta el 04-10-2026."
+    vivo.valor = 1
+    assert svc.aviso_vigente(vivo) == "Ya tiene un regalo de 1 clase vigente hasta el 04-10-2026."
+    # Una fila sin fecha no inventa una: el aviso dice menos, pero no miente.
+    vivo.vigente_hasta = None
+    assert svc.aviso_vigente(vivo) == "Ya tiene un regalo de 1 clase vigente."
+
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # B. Contra TEST (escribe y RESTAURA)
@@ -736,3 +773,76 @@ def test_b11_el_tope_lo_decide_el_box(escenario):
             db.execute(text("UPDATE configuracion_negocio SET beneficio_descuento_max_pct = :v "
                             "WHERE tenant_id = :t"), {"v": previo, "t": TENANT_ID})
         db.commit()
+
+
+
+def test_b12_no_se_da_un_segundo_beneficio_del_mismo_tipo_si_hay_uno_vivo(escenario):
+    """Decisión 3: con un regalo vivo de ese tipo, el segundo se rechaza (409) y no toca la base."""
+    db, alumno = escenario["db"], escenario["alumno"]
+    valor = _valor_descuento(db)
+    primero = svc.crear(db, alumno, svc.TIPO_DESCUENTO, valor, ahora=T0)
+
+    with pytest.raises(svc.BeneficioYaVigente) as err:
+        svc.crear(db, alumno, svc.TIPO_DESCUENTO, valor, ahora=T0 + timedelta(days=1))
+
+    assert str(err.value) == f"Ya tiene un descuento vigente del {valor} % hasta el 14-10-2026."
+    # El rechazo no dejó una fila a medias: sigue habiendo UN solo regalo — el primero.
+    assert db.execute(text("SELECT count(*) FROM beneficios WHERE alumno_id = :a"),
+                      {"a": alumno.id}).scalar() == 1
+    assert svc.vigente(db, alumno.id, ahora=T0 + timedelta(days=1)).id == primero.id
+
+    # Otro TIPO sí convive (la regla es por tipo): un % y un pase a la vez es legítimo.
+    pase = svc.crear(db, alumno, svc.TIPO_CLASES_GRATIS, CLASES, plan_id=escenario["plan_id"],
+                     ahora=T0 + timedelta(days=1))
+    assert _estado_en_la_base(db, pase.id) == "ofrecido"
+    vivos = svc.vivos(db, alumno.id, ahora=T0 + timedelta(days=2))
+    assert sorted(b.tipo.value for b in vivos) == ["clases_gratis", "descuento"]
+
+    # Y cuando el primero se usa, el tipo queda libre otra vez.
+    svc.usar(db, primero, precio_lista_clp=30000, ahora=T0 + timedelta(days=2))
+    assert _estado_en_la_base(db, primero.id) == "usado"
+    nuevo = svc.crear(db, alumno, svc.TIPO_DESCUENTO, valor, ahora=T0 + timedelta(days=2))
+    assert _estado_en_la_base(db, nuevo.id) == "ofrecido"
+
+
+def test_b13_las_clases_extra_caducan_con_el_plan_que_las_lleva(escenario):
+    """Regla 3: los créditos van al plan del alumno, así que el regalo vence CON ÉL, no a los 15 días."""
+    db, alumno = escenario["db"], escenario["alumno"]
+    # Un plan que vence ANTES de la ventana (el mensual vence el último día del mes).
+    sub_id = _suscripcion(db, alumno.id, escenario["plan_pago_id"], creditos=10, dias=3)
+
+    beneficio = svc.crear(db, alumno, svc.TIPO_CLASES_GRATIS, CLASES, ahora=T0)
+
+    # Las clases SÍ se entregaron (se sumaron al plan); lo que caduca con el plan es el acceso.
+    assert _creditos(db, sub_id) == 10 + CLASES
+    assert _instante(beneficio.vigente_hasta) == _instante(T0 + timedelta(days=3)), \
+        "la ventana no puede prometer más días que el plan que lleva los créditos"
+    assert svc.esta_vivo(beneficio, ahora=T0 + timedelta(days=2))
+    assert not svc.esta_vivo(beneficio, ahora=T0 + timedelta(days=4)), \
+        "con el plan vencido los créditos se fueron con él"
+    # Y como la ventana quedó recortada, la corrección B lo vence apenas vence el plan.
+    assert svc.vencer_vencidos(db, alumno_id=alumno.id, tipo=svc.TIPO_CLASES_GRATIS,
+                               ahora=T0 + timedelta(days=4)) == 1
+    db.commit()
+    assert _estado_en_la_base(db, beneficio.id) == "vencido"
+
+    # El pase, en cambio, dura EXACTAMENTE la ventana: no hay plan que lo recorte.
+    db.execute(text("DELETE FROM suscripciones WHERE usuario_id = :a"), {"a": alumno.id})
+    db.commit()
+    pase = svc.crear(db, alumno, svc.TIPO_CLASES_GRATIS, CLASES, plan_id=escenario["plan_id"],
+                     ahora=T0)
+    assert _instante(pase.vigente_hasta) == _instante(T0 + timedelta(days=svc.DIAS_VIGENCIA))
+
+
+def test_b14_un_beneficio_sin_correo_es_valido(escenario):
+    """Ajuste del paso 2: `notificacion_id` es opcional — se puede regalar sin avisar por correo."""
+    db, alumno = escenario["db"], escenario["alumno"]
+
+    beneficio = svc.crear(db, alumno, svc.TIPO_DESCUENTO, _valor_descuento(db), ahora=T0)
+
+    assert _columna(db, beneficio.id, "notificacion_id") is None
+    assert _estado_en_la_base(db, beneficio.id) == "ofrecido", "sin correo el regalo vale igual"
+    assert svc.vigente(db, alumno.id, ahora=T0).id == beneficio.id
+    # Y se usa como cualquier otro: el correo sirve para medir la gestión, no para usar el regalo.
+    svc.usar(db, beneficio, precio_lista_clp=30000, ahora=T0 + timedelta(days=1))
+    assert _estado_en_la_base(db, beneficio.id) == "usado"

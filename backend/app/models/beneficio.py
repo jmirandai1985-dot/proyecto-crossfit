@@ -1,9 +1,9 @@
 """
 Modelo SQLAlchemy para la tabla beneficios (Fase 2 de Fidelización).
 
-Un "beneficio" es un regalo que el box le MANDA a UN alumno por correo (clases gratis, o un
-descuento en su próximo plan). El correo ES el hecho que lo crea: no hay paso de aceptación. Las
-reglas (ventana, tope del descuento, materialización del acceso, anulación) viven en
+Un "beneficio" es un regalo que el box le da a UN alumno (clases gratis, o un descuento en su próximo
+plan), normalmente avisado por correo. **No hay paso de aceptación**: el acceso se materializa al
+darlo. Las reglas (ventana, tope del descuento, materialización del acceso, anulación) viven en
 `app/services/beneficios_service.py` — acá sólo se declara la tabla.
 """
 import enum
@@ -48,9 +48,10 @@ class TipoBeneficio(str, enum.Enum):
 class Beneficio(Base):
     """Un regalo del box a un alumno, con su valor, su ventana de uso y su estado.
 
-    `created_at` ES el envío del correo que lo creó (no hay una columna `ofrecido_en` aparte): la
-    ventana son 15 días desde ESE instante y la F4 mide los días hasta que el alumno vuelve desde
-    ese mismo instante. El vínculo con el correo es `notificacion_id`.
+    `created_at` es el alta del regalo (el envío del correo, cuando lo hubo: no hay una columna
+    `ofrecido_en` aparte): la ventana son 15 días desde ESE instante y la F4 mide los días hasta que
+    el alumno vuelve desde ese mismo instante. El vínculo con el correo, si existe, es
+    `notificacion_id`.
     """
     __tablename__ = "beneficios"
 
@@ -65,8 +66,10 @@ class Beneficio(Base):
                     default=EstadoBeneficio.ofrecido)
     # El regalo en su unidad: % de descuento (1..tope) o nº de clases (1/2/3/5), según `tipo`.
     valor = Column(Integer, nullable=False)
-    # Hasta cuándo se puede usar. La expiración NO es un job aparte: se vence al crear el beneficio
-    # siguiente del mismo alumno/tipo, en la MISMA transacción (corrección B del diseño de la F2).
+    # Hasta cuándo se puede usar. Es la ventana (15 días desde el alta) RECORTADA por la expiración
+    # del plan cuando las clases se le suman a una membresía que vence antes: los créditos extra son
+    # de esa suscripción y se van con ella. La expiración NO es un job aparte: se vence al crear el
+    # beneficio siguiente del mismo alumno/tipo, en la MISMA transacción (corrección B del diseño).
     vigente_hasta = Column(TIMESTAMP(timezone=True), nullable=False)
     # El plan que da el acceso: el pase (plan NO comercial) que se creó, o el plan vigente al que se
     # le sumaron las clases. NULL en un descuento: ese plan lo elige el alumno al comprarlo.
@@ -80,8 +83,9 @@ class Beneficio(Base):
     # ofrecerlo: se calcula AL USARLO, sobre el precio de lista del plan que el alumno compró
     # (NULL = todavía no se usó). El snapshot de esa compra vive en `solicitudes_planes`.
     descuento_clp = Column(Integer, nullable=True)
-    # El correo que lo originó. Sin este vínculo la F4 no puede medir la gestión, y un beneficio sin
-    # correo no se puede auditar. `SET NULL` porque el log de correos se puede podar.
+    # El correo que lo originó, CUANDO lo hubo: el panel puede dar un beneficio sin avisar por correo
+    # (la casilla "Avisar por correo" sin marcar). Con él, la F4 mide la tasa por beneficio; sin él, la
+    # fila sigue siendo válida y auditable. `SET NULL` porque el log de correos se puede podar.
     notificacion_id = Column(Integer, ForeignKey(
         "notificaciones_enviadas.id", ondelete="SET NULL"), nullable=True)
     # Quién lo mandó: la gestión la dispara una persona, nunca un job (diseño, regla 8).

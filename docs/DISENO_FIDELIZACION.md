@@ -98,14 +98,20 @@ oculto, la sección `beneficios` del Historial se llena, y el pase se materializ
 suscripción gratuita. **Antes de escribir la F2 hay que aplicar las correcciones A/B/C (§5).**
 
 #### El diseño aprobado de un beneficio (lo que la tabla y el servicio implementan)
-- **Estados: `ofrecido` | `usado` | `vencido` | `anulado`.** **No hay `aceptado`**: el correo ES el
-  hecho que crea el beneficio, así que el acceso se materializa al ENVIARLO.
+- **Estados: `ofrecido` | `usado` | `vencido` | `anulado`.** **No hay `aceptado`**: el regalo (con o
+  sin correo) se materializa al DARLO.
 - **Dos tipos** (`tipo_beneficio`): `clases_gratis` (el "Pase de regreso") y `descuento`.
 - **`valor`**: % de descuento (1..tope del box) o número de clases (1/2/3/5), según el tipo.
-- **Vigencia: 15 días desde el envío** (`beneficios_service.DIAS_VIGENCIA`), para todos los tipos.
-- **Materialización al enviar**: si el alumno tiene un plan vigente comercial (corrección A), las
+- **Vigencia: 15 días desde el alta** (`beneficios_service.DIAS_VIGENCIA`), para todos los tipos. Los
+  `clases_gratis` sumados a un plan que vence antes **caducan con ese plan** (un plan mensual vence el
+  último día del mes): la ventana se recorta a lo que le quede al plan, porque los créditos viven en
+  esa suscripción y el regalo no puede prometer más días que el acceso que los lleva.
+- **Materialización al darlo**: si el alumno tiene un plan vigente comercial (corrección A), las
   clases se **suman** a esa suscripción; si no tiene, se le abre el **pase** (una suscripción del plan
-  no comercial, vigente toda la ventana). Un `descuento` no materializa nada.
+  no comercial, que dura exactamente la ventana). Un `descuento` no materializa nada.
+- **Un solo regalo VIVO por alumno y tipo** (decisión 3): si ya tiene uno, el alta se rechaza con
+  **409** y el texto de `beneficios_service.aviso_vigente()` ("Ya tiene un descuento vigente del 20 %
+  hasta el 12-10-2026"), el MISMO que el panel muestra en la fila. Otro tipo sí puede convivir.
 - **`usado` = consumió la 1ª clase del pase** (o usó el descuento): es la conversión que mide la F4.
 - **Tope del descuento**: `configuracion_negocio.beneficio_descuento_max_pct` (default 50). Cuánto %
   se puede regalar es configuración del box, no una constante del código.
@@ -115,13 +121,14 @@ suscripción gratuita. **Antes de escribir la F2 hay que aplicar las correccione
   lista ya lo guarda `precio_clp_snapshot`, migración 035).
 - **Anulación (sólo el admin)**: `anulado_por`, `anulado_at` y `anulado_motivo` (obligatorio). Revoca
   lo entregado y sólo se permite mientras nadie lo haya usado: lo usado no se revierte.
-- **Vínculo con el correo de origen: `notificacion_id`** (FK a `notificaciones_enviadas`), que es
-  cómo la F4 mide la tasa por beneficio.
+- **Vínculo con el correo de origen: `notificacion_id`** (FK a `notificaciones_enviadas`), **OPCIONAL**:
+  el panel puede dar un beneficio sin avisar por correo. Con correo, la F4 mide la tasa por beneficio.
 
 Pendiente de la F2: la **corrección C** en `POST /reservas` (el pase tiene que poder reservar aunque
-`activo=False`), el selector de beneficio en el modal de envío, la pestaña `beneficios` del Historial
-y decidir si un envío en modo prueba (`simulado`) materializa el regalo (hoy `crear()` exige
-`notificacion_id`, así que la decisión es de quien envía).
+`activo=False`), los endpoints de beneficios (el **409** de la decisión 3 se emite ahí), el selector de
+beneficio en el modal de envío, la pestaña `beneficios` del Historial y decidir si un envío en modo
+prueba (`simulado`) materializa el regalo (hoy la decisión es de quien envía: `notificacion_id` es
+opcional).
 
 ### F3 — Seguimiento: "Ver correo" en Notificaciones
 El envío deja la gestión del alumno en `CONTACTADO` de forma consistente y **el correo que se mandó

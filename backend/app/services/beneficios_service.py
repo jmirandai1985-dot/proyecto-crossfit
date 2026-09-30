@@ -2,23 +2,29 @@
 
 Qué resuelve
 ------------
-Un beneficio es un regalo que el box le MANDA por correo a un alumno para traerlo de vuelta: clases
-gratis (el "Pase de regreso") o un descuento en su próximo plan. El correo ES el hecho que lo crea
-(`notificacion_id`): **no hay paso de aceptación**, el acceso se materializa al enviarlo. Sin una
-tabla propia no hay forma de saber qué se regaló, quién lo usó ni si sirvió, que es exactamente lo
-que mide la F4.
+Un beneficio es un regalo que el box le manda a un alumno para traerlo de vuelta: clases gratis (el
+"Pase de regreso") o un descuento en su próximo plan. Normalmente nace de un correo (`notificacion_id`
+liga el regalo al envío, que es lo que la F4 mide), pero **el correo NO es obligatorio**: el panel
+puede regalar sin avisar por correo. **No hay paso de aceptación**, el acceso se materializa al
+darlo. Sin una tabla propia no hay forma de saber qué se regaló, quién lo usó ni si sirvió, que es
+exactamente lo que mide la F4.
 
 Reglas (una definición por criterio)
 ------------------------------------
 1. **Estado y ventana se miran JUNTOS** (`esta_vivo`): un `ofrecido` con `vigente_hasta` pasado NO
    está vivo, aunque la fila siga diciendo `ofrecido`. Es la única definición de "este beneficio se
    puede usar hoy", y la usan la lectura, el uso y la anulación.
-2. **La ventana son 15 días desde el envío** (`DIAS_VIGENCIA`) y el % lo topea el BOX
-   (`configuracion_negocio.beneficio_descuento_max_pct`, default 50): quien ofrece no elige ni la
-   duración ni el máximo, así que no puede regalar un pase eterno ni un 100% por error.
-3. **El acceso se materializa AL ENVIAR** (`crear`), no al aceptar: con un plan vigente COMERCIAL las
-   clases se SUMAN a ese plan; sin plan vigente se abre el pase (una suscripción gratuita del plan
-   no comercial). Un descuento no materializa nada: se aplica al próximo plan que compre el alumno.
+2. **La ventana son 15 días desde el alta** (`DIAS_VIGENCIA`) — el día del envío del correo, cuando lo
+   hay — y el % lo topea el BOX (`configuracion_negocio.beneficio_descuento_max_pct`, default 50):
+   quien ofrece no elige ni la duración ni el máximo, así que no puede regalar un pase eterno ni un
+   100% por error.
+3. **El acceso se materializa AL DARLO** (`crear`), no al aceptar: con un plan vigente COMERCIAL las
+   clases se SUMAN a ese plan — y **caducan CON ÉL** (un plan mensual vence el último día del mes,
+   `suscripciones.fecha_expiracion`), así que la ventana se RECORTA a lo que le quede al plan: los
+   créditos viven en esa suscripción y el regalo no puede prometer más días que el acceso que los
+   lleva. Sin plan vigente se abre el pase (una suscripción gratuita del plan no comercial, que dura
+   EXACTAMENTE la ventana). Un descuento no materializa nada: se aplica al próximo plan que compre el
+   alumno.
 4. **Corrección B: al crear un beneficio se vencen antes los vencidos — en la MISMA transacción.**
    `crear()` marca `vencido` todo `ofrecido` del mismo alumno/tipo con la ventana pasada, da de alta
    el nuevo y hace UN solo `commit()`. Si la expiración quedara para un job aparte, entre que el
@@ -34,6 +40,11 @@ Reglas (una definición por criterio)
    reescribe). Un `descuento` no tiene nada materializado que revocar.
 8. **Ningún número de negocio se inventa acá**: la ventana, el tope y el precio de lista vienen de la
    configuración del box o entran como parámetro.
+9. **Un solo regalo VIVO por alumno y tipo** (decisión 3): si el alumno ya tiene uno, `crear()` no da
+   de alta otro — levanta `BeneficioYaVigente` con el texto de `aviso_vigente()` ("Ya tiene un
+   descuento vigente del 20 % hasta el 12-10-2026"), que el router devuelve como 409 y que el panel
+   muestra en la fila. Dos regalos del mismo tipo vigentes a la vez son el mismo regalo dos veces, y
+   es justo lo que la corrección B evitaba dejar pasar. Otro TIPO sí puede convivir (un % y un pase).
 """
 from datetime import datetime, timedelta, timezone
 from typing import Final
@@ -45,7 +56,7 @@ from app.models.beneficio import Beneficio, EstadoBeneficio, TipoBeneficio
 from app.models.configuracion import ConfiguracionNegocio
 from app.models.plan import Plan
 from app.models.suscripcion import EstadoSuscripcion, Suscripcion
-from app.utils.santiago import ahora_santiago
+from app.utils.santiago import ahora_santiago, fecha_chile
 
 # ── Reglas del box (una definición cada una) ──────────────────────────────────
 # La ventana del regalo: 15 días desde el envío del correo. NO la fija quien ofrece.
@@ -98,8 +109,13 @@ class DescuentoSobreTope(BeneficioError):
     """El descuento pide más de lo que el box autorizó regalar (`beneficio_descuento_max_pct`)."""
 
 
-class BeneficioSinCorreo(BeneficioError):
-    """El beneficio no dice de qué correo nació: sin eso la gestión no se puede medir ni auditar."""
+class BeneficioYaVigente(BeneficioError):
+    """El alumno YA tiene un regalo vivo de ese tipo: no se le da otro (decisión 3).
+
+    El router lo devuelve como **409 CONFLICT** con el texto de `aviso_vigente()` (el mismo que el
+    panel muestra en la fila): dos regalos del mismo tipo vivos a la vez son el mismo regalo dos
+    veces. Si el que ya tiene es de OTRO tipo, no hay conflicto.
+    """
 
 
 class BeneficioSinPlan(BeneficioError):
@@ -129,6 +145,27 @@ def etiqueta(tipo) -> str:
     if entrada is None:
         return str(tipo)
     return entrada["label"]
+
+
+def aviso_vigente(beneficio) -> str:
+    """El texto del conflicto: el alumno YA tiene un regalo vivo de ese tipo (decisión 3).
+
+    Es UN solo texto para los dos usos — el 409 que devuelve el router y lo que el panel muestra en
+    la fila — y dice el VALOR y hasta CUÁNDO: "Ya tiene un descuento vigente del 20 % hasta el
+    12-10-2026". Sin la fecha el admin no sabe si faltan días o minutos, y con dos textos distintos
+    el error y el panel se contradicen.
+    """
+    if beneficio.tipo == TipoBeneficio.descuento:
+        que = f"un descuento vigente del {beneficio.valor} %"
+    else:
+        # El plural es del sustantivo: "un regalo de 1 clase" / "un regalo de 3 clases".
+        cuantas = f"{beneficio.valor} clase" + ("" if beneficio.valor == 1 else "s")
+        que = f"un regalo de {cuantas} vigente"
+    hasta = fecha_chile(beneficio.vigente_hasta)
+    if hasta is None:
+        # Una fila sin fecha no inventa una: mejor decir menos que mentir.
+        return f"Ya tiene {que}."
+    return f"Ya tiene {que} hasta el {hasta.strftime('%d-%m-%Y')}."
 
 
 def _aware(momento: datetime | None) -> datetime | None:
@@ -287,9 +324,25 @@ def _exigir_plan(db: Session, alumno, plan_id) -> Plan:
     return plan
 
 
+def _vence_con_el_plan(vigente_hasta: datetime, suscripcion) -> datetime:
+    """Recorta la ventana a lo que le quede al plan que lleva los créditos (regla 3).
+
+    Un `clases_gratis` sumado al plan del alumno son créditos DE ESA suscripción: cuando el plan vence
+    (un plan mensual vence el último día del mes a las 23:59:59) los créditos se van con él, así que la
+    ventana de 15 días no puede prometer más días que el acceso. Con el pase no cambia nada: su
+    `fecha_expiracion` ES la ventana que se acaba de calcular.
+    """
+    if suscripcion is None:
+        return vigente_hasta
+    vence_plan = _aware(getattr(suscripcion, "fecha_expiracion", None))
+    if vence_plan is None:
+        return vigente_hasta
+    return min(vigente_hasta, vence_plan)
+
+
 def _materializar_acceso(db: Session, alumno, valor: int, vigente_hasta: datetime,
                          plan_id, momento: datetime):
-    """Le da el acceso al alumno AHORA (al enviar el correo) y devuelve `(plan_id, suscripción)`.
+    """Le da el acceso al alumno AHORA (al dar el regalo) y devuelve `(plan_id, suscripción)`.
 
     Con un plan vigente COMERCIAL las clases se le SUMAN a ESE plan: no se crea una segunda
     suscripción, porque el alumno ya tiene dónde usarlas. Si ese plan es ilimitado
@@ -322,29 +375,35 @@ def _materializar_acceso(db: Session, alumno, valor: int, vigente_hasta: datetim
     db.flush()      # el pase ya existe en esta transacción: el beneficio puede apuntarle
     return plan.id, suscripcion
 
-def crear(db: Session, alumno, tipo, valor, *, notificacion_id, plan_id=None,
+def crear(db: Session, alumno, tipo, valor, *, notificacion_id=None, plan_id=None,
           ofrecido_por=None, ahora: datetime | None = None) -> Beneficio:
     """Da de alta el beneficio del alumno y MATERIALIZA su acceso — todo en UNA transacción.
 
-    Lo llama el ENVÍO del correo, y por eso `notificacion_id` es obligatorio: un regalo sin correo de
-    origen no se puede medir (F4) ni auditar. La ventana NO se pide: son `DIAS_VIGENCIA` desde este
-    instante, así nadie puede ofrecer un pase eterno.
+    `notificacion_id` es OPCIONAL: si el regalo va con correo, la fila queda ligada al envío (que es
+    lo que la F4 mide); si el panel lo da sin avisar por correo, el beneficio vale exactamente igual.
+    La ventana NO se pide: son `DIAS_VIGENCIA` desde este instante, así nadie puede ofrecer un pase
+    eterno — y se RECORTA si las clases se suman a un plan que vence antes (regla 3).
 
     `plan_id` es el plan del PASE y sólo hace falta cuando el alumno no tiene un plan vigente
     comercial (si tiene, las clases se le suman a ese plan) — regla 3.
 
-    Corrección B: primero se vencen los `ofrecido` del mismo alumno/tipo que ya pasaron su ventana,
-    después se da de alta el nuevo, y TODO dentro de UN solo `commit()`.
+    Decisión 3: si el alumno YA tiene un regalo vivo de ese tipo no se da de alta otro
+    (`BeneficioYaVigente`: el router lo devuelve como 409). Corrección B: primero se vencen los
+    `ofrecido` del mismo alumno/tipo que ya pasaron su ventana, después se da de alta el nuevo, y
+    TODO dentro de UN solo `commit()`.
     """
     momento = _ahora(ahora)
-    if notificacion_id is None:
-        raise BeneficioSinCorreo(
-            "Un beneficio nace de un correo: sin `notificacion_id` no hay gestión que medir.")
     entrada = _tipo(tipo)
     if entrada is None:
         raise TipoDesconocido(
             f"Tipo de beneficio desconocido: `{tipo}`. Válidos: {', '.join(TIPOS_VALIDOS)}.")
     valor = _exigir_valor(db, alumno, entrada, valor)
+
+    # Decisión 3: un solo regalo VIVO por alumno y tipo. Se mira ANTES de materializar nada, así un
+    # rechazo no le deja al alumno créditos de más ni una fila a medias (el router lo devuelve 409).
+    ya_vivo = vigente(db, alumno.id, tipo=entrada["id"], ahora=momento)
+    if ya_vivo is not None:
+        raise BeneficioYaVigente(aviso_vigente(ya_vivo))
 
     vigente_hasta = momento + timedelta(days=DIAS_VIGENCIA)
     plan_final = None
@@ -352,6 +411,9 @@ def crear(db: Session, alumno, tipo, valor, *, notificacion_id, plan_id=None,
     if entrada["materializa"]:
         plan_final, suscripcion = _materializar_acceso(
             db, alumno, valor, vigente_hasta, plan_id, momento)
+        # Los créditos extra son de ESA suscripción: el regalo vence cuando vence el plan que los
+        # lleva (regla 3), no 15 días después.
+        vigente_hasta = _vence_con_el_plan(vigente_hasta, suscripcion)
 
     beneficio = Beneficio(
         tenant_id=alumno.tenant_id,
