@@ -27,6 +27,7 @@ from app.models.asistencia import Asistencia
 from app.models.hito_alumno import HitoAlumno
 from app.models.auditoria import Auditoria
 from app.models.password_reset_token import PasswordResetToken
+from app.models.beneficio import Beneficio, EstadoBeneficio, TipoBeneficio
 
 __all__ = ["Tenant", "Usuario", "RolUsuario",
            "Wod", "EstadoWod", "WodMovimiento", "Notificacion",
@@ -35,4 +36,5 @@ __all__ = ["Tenant", "Usuario", "RolUsuario",
            "Clase", "CoachDisciplina", "Disciplina", "HistorialRM",
            "HorarioBase", "Pedido", "Producto", "Reserva",
            "RetencionAlumno", "SolicitudPlan", "Asistencia", "HitoAlumno",
-           "Auditoria", "PasswordResetToken"]
+           "Auditoria", "PasswordResetToken", "Beneficio", "EstadoBeneficio",
+           "TipoBeneficio"]

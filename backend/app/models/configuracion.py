@@ -17,3 +17,10 @@ class ConfiguracionNegocio(Base):
     tipo_cuenta = Column(String(50), nullable=True)
     rut = Column(String(20), nullable=True)
     email_comprobantes = Column(String(200), nullable=True)
+    # ── F2 Fidelización: tope del descuento que un beneficio puede ofrecer ──
+    # Cuánto % puede regalar el box en el "próximo plan" (`beneficios.valor`). Es
+    # configuración y no una constante del código: un box puede querer 20% y otro
+    # 50%. `beneficios_service.tope_descuento()` lo lee y cae al default (50) si la
+    # fila no existe o el valor es imposible (>100).
+    beneficio_descuento_max_pct = Column(
+        Integer, nullable=False, server_default="50", default=50)

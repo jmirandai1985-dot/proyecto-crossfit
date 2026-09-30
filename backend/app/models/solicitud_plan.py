@@ -21,6 +21,15 @@ class SolicitudPlan(Base):
     # Snapshot para que la aprobación/ingreso no dependa del precio vigente al
     # aprobar (migración 035). NULL en solicitudes históricas.
     precio_clp_snapshot = Column(Integer, nullable=True)
+    # ── F2 Fidelización: el descuento que se aplicó a ESTA compra ──
+    # El snapshot del descuento es de la solicitud y no del beneficio (el beneficio
+    # no sabe qué plan va a comprar el alumno): `precio_clp_snapshot` es el precio de
+    # LISTA, `descuento_pct` el % del beneficio usado y `precio_final_clp` lo que se
+    # cobró. NULL = se compró sin beneficio (o la solicitud es histórica).
+    beneficio_id = Column(Integer, ForeignKey(
+        "beneficios.id", ondelete="SET NULL"), nullable=True)
+    descuento_pct = Column(Integer, nullable=True)
+    precio_final_clp = Column(Integer, nullable=True)
     comentario_admin = Column(String(500), nullable=True)
     aprobado_por = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -1,7 +1,8 @@
 # DISEÑO — FIDELIZACIÓN (F1–F4)
 
-Creado: 2026-09-29 · Estado: **F1 implementada** (catálogo completo por situación) · Autor: sesión
-de trabajo
+Creado: 2026-09-29 · Estado: **F1 implementada** · **F2 en curso** (tabla `beneficios` + servicio,
+con el diseño aprobado de abajo; faltan la corrección C, el selector del modal y la pestaña del
+Historial) · Autor: sesión de trabajo
 Este documento existe para que el diseño **no se pierda entre sesiones**: nació de una
 conversación y no estaba escrito en ninguna parte del repo (a diferencia de otros bloques, que
 tienen su `LOG_*.md` / `AUDITORIA_*.md`).
@@ -38,7 +39,7 @@ lugar donde se escriban los textos; pero no se diseña ni se implementa acá.
 | Puerta única de salida | `app/services/email_service.py` | `_template()` (layout de marca) + `_enviar()` (Gmail SMTP + fila en `notificaciones_enviadas`) |
 | Renders reutilizables | `email_service.render_email_fidelizacion*()` | Fuente única del copy de cada situación (envío real, preview del coach y catálogo) |
 | Envío manual actual | `POST /notificaciones-enviadas/enviar-manual` | Manda `inactividad`/`vencimiento` **sin preview** |
-| 6ª sección del Historial | `historial_alumno_service` | `beneficios` declarada y **no anunciada** (llega con F2) |
+| 6ª sección del Historial | `historial_alumno_service` | `beneficios` declarada y **no anunciada** (la tabla ya existe desde la F2; falta anunciarla) |
 
 Cuando se diseñó la F1 **no existía** nada de esto (y por eso la F1 no lo inventó): tabla de
 beneficios, "Pase de regreso" ni ningún tipo de campaña. La F2 los agrega; la F1 sólo dejó el
@@ -96,6 +97,32 @@ Tabla de beneficios del alumno (con migración), el grupo `beneficios` del modal
 oculto, la sección `beneficios` del Historial se llena, y el pase se materializa como una
 suscripción gratuita. **Antes de escribir la F2 hay que aplicar las correcciones A/B/C (§5).**
 
+#### El diseño aprobado de un beneficio (lo que la tabla y el servicio implementan)
+- **Estados: `ofrecido` | `usado` | `vencido` | `anulado`.** **No hay `aceptado`**: el correo ES el
+  hecho que crea el beneficio, así que el acceso se materializa al ENVIARLO.
+- **Dos tipos** (`tipo_beneficio`): `clases_gratis` (el "Pase de regreso") y `descuento`.
+- **`valor`**: % de descuento (1..tope del box) o número de clases (1/2/3/5), según el tipo.
+- **Vigencia: 15 días desde el envío** (`beneficios_service.DIAS_VIGENCIA`), para todos los tipos.
+- **Materialización al enviar**: si el alumno tiene un plan vigente comercial (corrección A), las
+  clases se **suman** a esa suscripción; si no tiene, se le abre el **pase** (una suscripción del plan
+  no comercial, vigente toda la ventana). Un `descuento` no materializa nada.
+- **`usado` = consumió la 1ª clase del pase** (o usó el descuento): es la conversión que mide la F4.
+- **Tope del descuento**: `configuracion_negocio.beneficio_descuento_max_pct` (default 50). Cuánto %
+  se puede regalar es configuración del box, no una constante del código.
+- **El descuento se aplica al PRÓXIMO plan que compre el alumno** y `descuento_clp` se calcula AL
+  USARLO (al ofrecerlo no se sabe qué plan va a comprar). El snapshot de ESA compra vive en la
+  solicitud: `solicitudes_planes.beneficio_id` + `descuento_pct` + `precio_final_clp` (el precio de
+  lista ya lo guarda `precio_clp_snapshot`, migración 035).
+- **Anulación (sólo el admin)**: `anulado_por`, `anulado_at` y `anulado_motivo` (obligatorio). Revoca
+  lo entregado y sólo se permite mientras nadie lo haya usado: lo usado no se revierte.
+- **Vínculo con el correo de origen: `notificacion_id`** (FK a `notificaciones_enviadas`), que es
+  cómo la F4 mide la tasa por beneficio.
+
+Pendiente de la F2: la **corrección C** en `POST /reservas` (el pase tiene que poder reservar aunque
+`activo=False`), el selector de beneficio en el modal de envío, la pestaña `beneficios` del Historial
+y decidir si un envío en modo prueba (`simulado`) materializa el regalo (hoy `crear()` exige
+`notificacion_id`, así que la decisión es de quien envía).
+
 ### F3 — Seguimiento: "Ver correo" en Notificaciones
 El envío deja la gestión del alumno en `CONTACTADO` de forma consistente y **el correo que se mandó
 queda legible después**, desde el panel de Notificaciones:
@@ -110,7 +137,7 @@ queda legible después**, desde el panel de Notificaciones:
 ### F4 — Métricas de efectividad (¿sirvió la gestión?)
 Todo lo que se mandó se puede medir, con los datos que ya existen (log de correos + asistencias +
 beneficios): **contactados**, **recuperados en 30 días** (volvieron a entrenar), **tasa por
-beneficio**, **conversión del pase** (aceptado → usado), **ingreso recuperado vs descuento
+beneficio**, **conversión del pase** (ofrecido → usado), **ingreso recuperado vs descuento
 otorgado** y **días hasta volver**. La tasa se rotula **"tasa observada"**: es una observación
 sobre la gestión que se hizo, no un experimento controlado (no hay grupo de control, así que no se
 promete causalidad).
@@ -218,6 +245,9 @@ verificarlo con un test que reserve con el pase puesto (si falla, el beneficio e
 ```powershell
 # Servicio + API de F1 (la API se prueba con EMAIL_MODO=noop: nunca manda correo real)
 cd backend; $env:ENVIRONMENT='test'; py -3.12 -m pytest tests/test_fidelizacion_plantillas.py -q
+
+# Servicio de beneficios de la F2 (escribe y RESTAURA en la rama TEST)
+cd backend; $env:ENVIRONMENT='test'; py -3.12 -m pytest tests/test_beneficios_service.py -q
 
 # Frontend
 cd frontend; npm run lint; npm run build
