@@ -26,6 +26,7 @@ from app.core.logging import setup_logger
 from app.core.urls import url_frontend, problemas_de_config, config_email_ok
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.middleware.tenant_audit import TenantAuditMiddleware
+from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
 
 # ── Logger con sanitización de PII ──
 logger = setup_logger()
@@ -281,12 +282,12 @@ async def startup_event():
 
         async def callback_generar_clases():
             """Callback async que genera clases para HOY + 28 dÃ­as (4 semanas)"""
-            from datetime import date, timedelta
+            from datetime import timedelta
             from app.db.database import SessionLocal
             from app.services.generar_clases import (
                 DIAS_ANTICIPACION, generar_clases_para_rango)
 
-            hoy = date.today()
+            hoy = hoy_santiago()
             fecha_hasta = hoy + timedelta(days=DIAS_ANTICIPACION)
             db = SessionLocal()
             try:
@@ -308,12 +309,12 @@ async def startup_event():
 
     # â”€â”€ 2. Ejecutar generaciÃ³n inmediata al iniciar (para desarrollo) â”€â”€
     try:
-        from datetime import date, timedelta
+        from datetime import timedelta
         from app.db.database import SessionLocal
         from app.services.generar_clases import (
             DIAS_ANTICIPACION, generar_clases_para_rango)
 
-        hoy = date.today()
+        hoy = hoy_santiago()
         fecha_hasta = hoy + timedelta(days=DIAS_ANTICIPACION)
         db = SessionLocal()
         try:

@@ -4,13 +4,14 @@ Router de endpoints para Supervision de Clases (admin).
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text as sql_text
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 
 from app.db.database import get_db
 from typing import List, Optional
 from pydantic import BaseModel
 from app.core.dependencies import get_current_admin
 from app.core.estados import es_cancelada   # 'cancelada' tampoco es una reserva activa
+from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
 
 router = APIRouter()
 
@@ -34,10 +35,10 @@ def proxima_clase_reservas(
     base y sus reservas (alumno_nombre, asistio, activa).
     Para disciplinas self-service (Open Box, Musculación). Solo admin.
     """
-    from datetime import date as _date
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
-    hoy = _date.today()
+    # HOY en Chile: `date.today()` usaba el reloj del proceso (UTC) y de noche saltaba de dia.
+    hoy = hoy_santiago()
 
     clase = db.execute(sql_text("""
         SELECT c.id, c.fecha::text, c.hora_inicio::text, c.hora_fin::text,

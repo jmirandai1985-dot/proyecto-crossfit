@@ -5,11 +5,12 @@ from app.schemas.dashboard import DashboardStats
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case, text
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 from app.db.database import get_db
 from typing import Optional
 from app.models.usuario import Usuario
 from app.core.dependencies import get_current_admin, get_current_user
+from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
 
 router = APIRouter()
 
@@ -24,7 +25,7 @@ def ocupacion_hoy(
     Requiere usuario autenticado. 🔒 SEGURIDAD: tenant_id del token (el path param se ignora)."""
     # 🔒 SEGURIDAD: tenant_id del token; el path param se ignora.
     tenant_id = current_user["tenant_id"]
-    hoy = date.today()
+    hoy = hoy_santiago()
     rows = db.execute(text("""
         SELECT c.id, c.hora_inicio::text, d.nombre as disciplina,
                u.nombre as coach, c.cupo_maximo, c.asistentes_confirmados

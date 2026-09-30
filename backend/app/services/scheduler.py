@@ -8,6 +8,7 @@ import pytz
 import logging
 
 from app.services.generar_clases import DIAS_ANTICIPACION
+from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
 
 logger = logging.getLogger("uvicorn.scheduler")
 
@@ -26,9 +27,11 @@ def set_generar_clases_callback(callback):
 
 async def job_generar_clases_diarias():
     """Job que se ejecuta a las 00:05 CLT y genera clases para HOY + 28 días (4 semanas)."""
-    from datetime import date, timedelta
+    from datetime import timedelta
 
-    hoy = date.today()
+    # HOY en Chile (el job corre a las 00:05 CLT): con `date.today()` el rango arrancaba el
+    # dia del proceso, que en un servidor con TZ=UTC todavia era el dia anterior.
+    hoy = hoy_santiago()
     fecha_hasta = hoy + timedelta(days=DIAS_ANTICIPACION)
     fecha_str = hoy.strftime("%Y-%m-%d")
 

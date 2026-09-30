@@ -25,7 +25,7 @@ from app.core.rate_limit import limiter, LIMIT_CRITICO
 from app.core.config import settings
 # El fin de mes de un plan se escribe EN HORA DE CHILE (23:59:59 del último día, ver la regla en
 # `app/utils/santiago.py`): una sola definición para este flujo y la compra de emergencia.
-from app.utils.santiago import ahora_santiago, fin_de_mes_chile
+from app.utils.santiago import ahora_santiago, fin_de_mes_chile, hoy_santiago
 from app.services.auditoria_service import registrar_auditoria
 from datetime import timedelta
 
@@ -345,7 +345,6 @@ def aprobar_solicitud(
     # Mismo formato que POST /suscripciones (suscripciones.py) para mantener
     # consistencia. No debe impedir la aprobación si falla.
     try:
-        from datetime import date
         # ── P0-4 (S-01): el ingreso usa el precio VIGENTE AL SOLICITAR ──
         # (snapshot guardado al crear la solicitud). Antes se usaba
         # `plan.precio_clp` del momento de APROBAR: si el admin cambiaba el
@@ -365,7 +364,7 @@ def aprobar_solicitud(
             ),
             referencia_tipo="suscripcion",
             referencia_id=suscripcion.id,
-            fecha=date.today(),
+            fecha=hoy_santiago(),
         )
         db.add(tx)
         db.commit()

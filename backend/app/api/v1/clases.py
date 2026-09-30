@@ -13,6 +13,7 @@ from app.schemas import clase as schemas
 from app.core.dependencies import (
     verificar_coach_disciplina, get_current_coach, get_current_user,
 )
+from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
 
 logger = logging.getLogger("uvicorn.clases")
 
@@ -52,7 +53,7 @@ def listar_clases(
         if generar:
             from datetime import timedelta
             from app.services.generar_clases import DIAS_ANTICIPACION
-            hoy = date.today()
+            hoy = hoy_santiago()
             # ¿Qué rango se está consultando?
             rango_desde = fecha_desde if fecha_desde is not None else (
                 fecha if fecha is not None else hoy)

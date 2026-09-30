@@ -9,6 +9,7 @@ from app.models.transaccion_financiera import TransaccionFinanciera
 from app.core.dependencies import get_current_admin
 from app.core.rate_limit import limiter, LIMIT_CRITICO
 from app.services.auditoria_service import registrar_auditoria
+from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
 
 router = APIRouter()
 
@@ -99,7 +100,6 @@ def crear_suscripcion(
 
     # Auto-insertar ingreso en transacciones_financieras
     try:
-        from datetime import date
         from app.models.plan import Plan
         plan = db.query(Plan).filter(Plan.id == data.plan_id).first()
         if plan and plan.precio_clp > 0:
@@ -111,7 +111,7 @@ def crear_suscripcion(
                 descripcion=f"Suscripcion plan {plan.nombre} (usuario #{data.usuario_id})",
                 referencia_tipo='suscripcion',
                 referencia_id=db_sus.id,
-                fecha=date.today(),
+                fecha=hoy_santiago(),
             )
             db.add(tx)
             db.commit()

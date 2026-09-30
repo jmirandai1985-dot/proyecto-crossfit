@@ -10,6 +10,7 @@ from app.db.database import get_db
 from app.models.horario_base import HorarioBase
 from sqlalchemy import text
 from app.core.dependencies import get_current_admin, get_current_user, get_current_coach
+from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
 
 router = APIRouter()
 
@@ -109,8 +110,9 @@ def generar_clases_dia_route(
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
     # `fecha` llega ya validada como date (FastAPI responde 422 si el formato es invalido);
-    # sin fecha se usa hoy (el contenedor corre con TZ America/Santiago).
-    fecha_date = fecha or date.today()
+    # sin fecha se usa HOY en Chile (antes `date.today()`: el reloj del proceso, UTC en el
+    # contenedor, adelantaba el dia entre las 21:00 y las 23:59 CLT).
+    fecha_date = fecha or hoy_santiago()
     resultado = generar_clases_para_fecha(db, tenant_id, fecha_date)
     return resultado
 
