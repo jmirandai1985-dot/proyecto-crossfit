@@ -1,8 +1,8 @@
 # DISEÑO — FIDELIZACIÓN (F1–F4)
 
-Creado: 2026-09-29 · Estado: **F1 implementada** · **F2 en curso** (tabla `beneficios` + servicio,
-con el diseño aprobado de abajo; faltan la corrección C, el selector del modal y la pestaña del
-Historial) · Autor: sesión de trabajo
+Creado: 2026-09-29 · Estado: **F1 implementada** · **F2 en curso** (tabla `beneficios`, servicio,
+API y pestaña del panel implementadas; faltan la aplicación del descuento al solicitar plan y la
+sección del Historial) · Autor: sesión de trabajo
 Este documento existe para que el diseño **no se pierda entre sesiones**: nació de una
 conversación y no estaba escrito en ninguna parte del repo (a diferencia de otros bloques, que
 tienen su `LOG_*.md` / `AUDITORIA_*.md`).
@@ -96,6 +96,29 @@ para poder mostrárselo al admin:
 Tabla de beneficios del alumno (con migración), el grupo `beneficios` del modal deja de estar
 oculto, la sección `beneficios` del Historial se llena, y el pase se materializa como una
 suscripción gratuita. **Antes de escribir la F2 hay que aplicar las correcciones A/B/C (§5).**
+
+**Estado al 30/09/2026 (implementado):**
+
+- API: `app/api/v1/beneficios.py` — `GET /tipos`, `GET /alumno/{id}`, `GET ""` (listado con filtros
+  + resumen de la F4), `POST ""` (alta, con `avisar_por_correo` opcional), `POST /preview` y
+  `POST /{id}/anular` (motivo obligatorio). Un segundo regalo VIVO del mismo tipo es **409 con el
+  texto de `aviso_vigente()`**, el MISMO que el panel muestra antes de intentar crear.
+- Correos de la Fase 2: `beneficio_descuento` y `beneficio_clases_gratis` en el catálogo de
+  `fidelizacion_plantillas` (grupo `beneficios`, que NO se anuncia en el modal de gestión). El alta
+  crea el beneficio y DESPUÉS manda el correo con los números reales de la fila, que queda ligada a
+  `notificaciones_enviadas` (`notificacion_id`: es lo que mide la F4).
+- Panel: dos botones por fila ("Enviar correo" y "Dar beneficio"), el detalle se abre con el clic en
+  el nombre, chips de TODOS los filtros activos con ✕ + "Limpiar filtros", las tarjetas aclaran
+  cuánto queda con el filtro puesto, la tarjeta "Vencimientos inminentes" aplica `plan_urgente`
+  (≤ 5 días) y una pestaña **Beneficios** con los cuatro estados, filtros, botón Anular y el bloque
+  de métricas de la F4.
+- La columna "Recomendación" y la plantilla que propone el modal de envío salen de la MISMA regla:
+  `sugerir()` en lote (`POST /fidelizacion/sugerencias`), con un test que compara el lote contra la
+  sugerencia de a uno.
+
+**Falta de la F2:** aplicar el descuento al solicitar el plan (precio de lista tachado + precio
+final + "válido hasta"), el aviso de beneficio vigente en los pendientes y en la asignación manual
+del alumno, y activar la sección `beneficios` del Historial.
 
 #### El diseño aprobado de un beneficio (lo que la tabla y el servicio implementan)
 - **Estados: `ofrecido` | `usado` | `vencido` | `anulado`.** **No hay `aceptado`**: el regalo (con o

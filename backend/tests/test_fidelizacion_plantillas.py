@@ -225,7 +225,9 @@ def test_a1_el_catalogo_cubre_las_cinco_situaciones():
     ids = [p["id"] for p in svc.PLANTILLAS]
 
     assert ids == [svc.P_VENCIMIENTO, svc.P_INACTIVIDAD_7_14, svc.P_INACTIVIDAD_15_30,
-                   svc.P_INACTIVIDAD_MAS_30, svc.P_RIESGO_ALTO]
+                   svc.P_INACTIVIDAD_MAS_30, svc.P_RIESGO_ALTO,
+                   # Fase 2: los dos correos del grupo `beneficios` (uno por tipo de regalo).
+                   svc.P_BENEFICIO_DESCUENTO, svc.P_BENEFICIO_CLASES_GRATIS]
     assert len(ids) == len(set(ids)), "dos plantillas con el mismo id"
     assert svc.PATRON_IDS == "^(" + "|".join(ids) + ")$", \
         "el patrón del router sale del catálogo: una plantilla nueva no puede quedar fuera"
@@ -234,7 +236,11 @@ def test_a1_el_catalogo_cubre_las_cinco_situaciones():
         assert p["label"] and p["descripcion"] and p["requiere"] and p["tipo_envio"]
         assert p["grupo"] in dict(svc.GRUPOS)
         assert p["tipo_envio"] in (svc.TIPO_INACTIVIDAD, svc.TIPO_VENCIMIENTO,
-                                   svc.TIPO_RIESGO_ALTO)
+                                   svc.TIPO_RIESGO_ALTO,
+                                   svc.P_BENEFICIO_DESCUENTO, svc.P_BENEFICIO_CLASES_GRATIS)
+        # Los correos de un regalo no se pueden armar sólo con el alumno: están declarados
+        # como los que necesitan los datos del beneficio.
+        assert (p["id"] in svc.PLANTILLAS_CON_DATOS) == (p["grupo"] == svc.GRUPO_BENEFICIOS)
 
 
 def test_a2_beneficios_no_se_anuncia_hasta_la_fase_2():
@@ -245,8 +251,13 @@ def test_a2_beneficios_no_se_anuncia_hasta_la_fase_2():
     assert svc.GRUPO_BENEFICIOS in dict(svc.GRUPOS), "el grupo tiene que estar declarado"
     assert svc.grupo_disponible(svc.GRUPO_BENEFICIOS) is False
     assert all(p["grupo"] != svc.GRUPO_BENEFICIOS for p in svc.plantillas_disponibles())
-    # Lo reservado no se anuncia, pero nada del catálogo se pierde en el camino.
-    assert [p["id"] for p in svc.plantillas_disponibles()] == [p["id"] for p in svc.PLANTILLAS]
+    # Lo reservado no se anuncia, pero nada del catálogo PÚBLICO se pierde en el camino.
+    assert [p["id"] for p in svc.plantillas_disponibles()] == [
+        p["id"] for p in svc.PLANTILLAS if p["grupo"] != svc.GRUPO_BENEFICIOS]
+    # Y al revés: las del grupo reservado existen (las usa el alta de un beneficio con
+    # "Avisar por correo"), pero NO viajan en el catálogo del modal.
+    assert [p["id"] for p in svc.PLANTILLAS if p["grupo"] == svc.GRUPO_BENEFICIOS] == \
+        list(svc.PLANTILLAS_CON_DATOS)
 
 
 def test_a3_lo_publico_no_filtra_las_funciones_internas():
@@ -563,9 +574,14 @@ def test_b14_la_plantilla_de_riesgo_necesita_un_riesgo_real(db, escenario):
 # C. La API (misma app, TestClient)
 # ══════════════════════════════════════════════════════════════════════════════
 def test_c0_las_cuatro_rutas_estan_en_el_router():
-    """El contrato de F1 son cuatro rutas, colgando del mismo prefijo de Fidelización."""
-    assert [r.path for r in api.router.routes] == ["/plantillas", "/sugerir", "/preview",
-                                                  "/enviar"]
+    """El contrato de F1 son cinco rutas, colgando del mismo prefijo de Fidelización.
+
+    Las cuatro de la F1 (catálogo, sugerencia, preview y envío) y la del LOTE que usa la columna
+    "Recomendación" del panel (`/sugerencias`, F2): la columna y el modal tienen que salir de la
+    misma regla, así que se piden por el mismo router.
+    """
+    assert [r.path for r in api.router.routes] == ["/plantillas", "/sugerir", "/sugerencias",
+                                                  "/preview", "/enviar"]
 
 
 def test_c1_el_catalogo_es_del_box_y_no_anuncia_beneficios(cliente, tokens):
@@ -576,8 +592,10 @@ def test_c1_el_catalogo_es_del_box_y_no_anuncia_beneficios(cliente, tokens):
     cuerpo = r.json()
     assert cuerpo["modo_envio"] in (email_service.MODO_REAL, email_service.MODO_NOOP)
     assert [g["id"] for g in cuerpo["grupos"]] == [svc.GRUPO_GESTION]
-    assert [p["id"] for p in cuerpo["plantillas"]] == [p["id"] for p in svc.PLANTILLAS]
+    assert [p["id"] for p in cuerpo["plantillas"]] == [p["id"] for p in svc.plantillas_disponibles()]
     assert "beneficios" not in [g["id"] for g in cuerpo["grupos"]]
+    assert all(p["id"] not in svc.PLANTILLAS_CON_DATOS for p in cuerpo["plantillas"]), \
+        "los correos de un regalo no son una plantilla de gestión: se mandan desde el beneficio"
     for p in cuerpo["plantillas"]:
         assert set(p) == set(svc.CAMPOS_PUBLICOS), "el JSON no puede llevar las funciones"
 

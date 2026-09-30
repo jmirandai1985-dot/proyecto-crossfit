@@ -21,6 +21,14 @@ LOGO_URL = "https://raw.githubusercontent.com/jmirandai1985-dot/urban-box-assets
 # Último error SMTP (para exponer detalle útil al admin en el Dashboard)
 ULTIMO_ERROR_SMTP = None
 
+# Id de la última fila creada en `notificaciones_enviadas` por `_registrar_envio`.
+# Existe porque hay un consumidor que necesita LIGAR otra fila al envío (el correo que
+# acompaña a un beneficio de Fidelización: `beneficios.notificacion_id` es lo que mide la
+# F4) y esa fila sólo puede tener el id después del commit. Se resetea al principio de
+# cada `_enviar`, así el id que se lee es el del envío que acaba de terminar (misma
+# mecánica que `ULTIMO_ERROR_SMTP`, que ya se usa así en este módulo).
+ULTIMO_ENVIO_ID = None
+
 LOGO_CID = "logo-urban-training"
 LOGO_FILENAME = "logo-urban-training.jpg"
 
@@ -101,7 +109,12 @@ def _registrar_envio(alumno_id, tipo, estado, detalle_error=None, mes_referencia
 
     `alumno_id` puede ser None (correos al admin/lead): en ese caso el tenant y el
     destinatario salen de los parámetros `tenant_id` / `destinatario_*`.
+
+    Devuelve el id de la fila creada (o `None` si no se pudo registrar) y lo deja en
+    `ULTIMO_ENVIO_ID`: hay un solo consumidor del id (el correo que acompaña a un
+    beneficio, que se liga por `beneficios.notificacion_id`).
     """
+    global ULTIMO_ENVIO_ID
     try:
         from app.db.database import SessionLocal
         from app.models.notificacion_enviada import NotificacionEnviada
@@ -125,9 +138,12 @@ def _registrar_envio(alumno_id, tipo, estado, detalle_error=None, mes_referencia
             destinatario_rol=destinatario_rol)
         db.add(reg)
         db.commit()
+        ULTIMO_ENVIO_ID = reg.id
         db.close()
+        return ULTIMO_ENVIO_ID
     except Exception as e:
         logger.warning(f"No se pudo registrar envio: {e}")
+        return None
 
 
 def _limpiar_header(valor) -> str:
@@ -179,6 +195,8 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
     conectarse a Gmail, así que el 100% de los correos de ese entorno fallaba (107 filas
     `fallido` en PROD el 26/09). Ahora se sanea acá y también en el login SMTP.
     """
+    global ULTIMO_ENVIO_ID
+    ULTIMO_ENVIO_ID = None
     try:
         from app.core.config import settings
 
@@ -251,6 +269,21 @@ def enviar_renderizado(destinatario: str, asunto: str, html: str, alumno_id: int
     """
     return _enviar(destinatario, asunto, html, alumno_id=alumno_id, tipo=tipo,
                    destinatario_nombre=None, tenant_id=tenant_id)
+
+
+def enviar_renderizado_con_id(destinatario: str, asunto: str, html: str,
+                              alumno_id: int = None, tipo: str = "",
+                              tenant_id: int = None) -> tuple:
+    """Igual que `enviar_renderizado`, pero devuelve `(ok, id_de_la_fila)`.
+
+    `ok` es exactamente el valor de `_enviar` (no cambia el contrato de nadie) y el segundo
+    elemento es la fila de `notificaciones_enviadas` que se acaba de crear, para que quien
+    manda un correo pueda ligarlo desde OTRA tabla (hoy: el beneficio, que se mide por su
+    correo). Si el envío falla o no se pudo registrar la fila, el id es `None`.
+    """
+    ok = enviar_renderizado(destinatario, asunto, html, alumno_id=alumno_id, tipo=tipo,
+                           tenant_id=tenant_id)
+    return ok, ULTIMO_ENVIO_ID
 
 
 def enviar_email_bienvenida(alumno: dict, token_onboarding: str) -> bool:
@@ -392,6 +425,60 @@ def render_email_riesgo_alto(nombre: str, dias_ausente: int) -> tuple:
     html = _template(titulo, saludo, cuerpo, "Contarle a mi coach", url)
     asunto = f"¿Cómo venís, {primer_nombre}? Contame"
     return asunto, html
+
+
+# Tipo de beneficio que da un descuento (los labels son los del enum `tipo_beneficio`).
+# Un tipo desconocido cae en el copy de clases, que es el único que no promete un
+# descuento que nadie calculó.
+TIPO_BENEFICIO_DESCUENTO = "descuento"
+
+
+def render_email_beneficio(nombre: str, tipo: str, valor: int, vigente_hasta,
+                           plan: str = None) -> tuple:
+    """Renderiza (asunto, html) del correo que ACOMPAÑA a un beneficio (Fase 2).
+
+    Fuente ÚNICA del copy del regalo: la usan la vista previa del panel (`POST
+    /api/v1/beneficios/preview`) y el envío real (`POST /api/v1/beneficios` con "Avisar por
+    correo"), así que lo que el admin aprueba es exactamente lo que recibe el alumno.
+
+    `tipo` es el del catálogo de `beneficios_service` (`descuento` | `clases_gratis`),
+    `valor` su unidad (% o nº de clases) y `vigente_hasta` la fecha REAL de la ventana: un
+    regalo sin fecha es un regalo que el alumno no sabe hasta cuándo puede usar. `plan` es
+    el plan al que se le SUMARON las clases (`None` cuando se le abrió un pase): cambia UNA
+    frase, porque decirle "se sumaron a tu plan" a quien no tiene plan es mentirle.
+    """
+    from app.utils.santiago import fecha_chile
+    primer_nombre = nombre.split()[0]
+    dia = fecha_chile(vigente_hasta)
+    fecha = dia.strftime("%d-%m-%Y") if dia else None
+    hasta = f"<strong>{fecha}</strong>" if fecha else "los próximos días"
+
+    if tipo == TIPO_BENEFICIO_DESCUENTO:
+        titulo = "Un regalo del box para tu próximo plan"
+        saludo = (f"Hola {primer_nombre}, el box te dejó un <strong>{valor} % de "
+                  "descuento</strong> en tu próximo plan.")
+        cuerpo = (f"Ya está en tu cuenta y lo puedes usar hasta el {hasta}. Cuando "
+                  "solicites tu plan desde la app vas a ver el precio con el descuento "
+                  "aplicado: no tienes que hacer ningún trámite.")
+        boton_texto = "Solicitar mi plan"
+        url = url_frontend("/alumno/solicitar-plan")
+        asunto = f"{primer_nombre}: tienes un {valor} % de descuento en tu próximo plan 🎁"
+    else:
+        cuantas = f"{valor} clase" + ("" if valor == 1 else "s")
+        titulo = "Tus clases de regalo ya están cargadas"
+        if plan:
+            saludo = (f"Hola {primer_nombre}, el box te regaló <strong>{cuantas}</strong> "
+                      f"y ya están sumadas a tu plan <strong>{plan}</strong>.")
+        else:
+            saludo = (f"Hola {primer_nombre}, el box te regaló <strong>{cuantas}</strong> "
+                      "y ya están cargadas en tu cuenta.")
+        cuerpo = (f"Las puedes usar hasta el {hasta}, reservando desde la app como "
+                  "cualquier otra clase: no hay nada que activar.")
+        boton_texto = "Reservar mi clase"
+        url = url_frontend("/alumno/mis-reservas")
+        asunto = f"{primer_nombre}: tienes {cuantas} de regalo en el box 🎁"
+
+    return asunto, _template(titulo, saludo, cuerpo, boton_texto, url)
 
 
 def enviar_email_fidelizacion(nombre: str, correo: str, dias_ausente: int) -> bool:

@@ -383,6 +383,17 @@ def _materializar_acceso(db: Session, alumno, valor: int, vigente_hasta: datetim
     db.flush()      # el pase ya existe en esta transacción: el beneficio puede apuntarle
     return plan.id, suscripcion
 
+def ventana(ahora: datetime | None = None) -> datetime:
+    """Hasta cuándo valdría un beneficio dado AHORA: `DIAS_VIGENCIA` desde este instante.
+
+    Es la MISMA ventana que aplica `crear()` (que después la recorta si las clases se suman a
+    un plan que vence antes) y existe para que la vista previa del correo no tenga su propia
+    copia de los 15 días: si la ventana cambia, el correo de prueba cambia con ella — un
+    preview que promete otra fecha que la del alta es un preview que miente.
+    """
+    return _ahora(ahora) + timedelta(days=DIAS_VIGENCIA)
+
+
 def crear(db: Session, alumno, tipo, valor, *, notificacion_id=None, plan_id=None,
           ofrecido_por=None, ahora: datetime | None = None) -> Beneficio:
     """Da de alta el beneficio del alumno y MATERIALIZA su acceso — todo en UNA transacción.
@@ -413,7 +424,7 @@ def crear(db: Session, alumno, tipo, valor, *, notificacion_id=None, plan_id=Non
     if ya_vivo is not None:
         raise BeneficioYaVigente(aviso_vigente(ya_vivo))
 
-    vigente_hasta = momento + timedelta(days=DIAS_VIGENCIA)
+    vigente_hasta = ventana(momento)
     plan_final = None
     suscripcion = None
     if entrada["materializa"]:

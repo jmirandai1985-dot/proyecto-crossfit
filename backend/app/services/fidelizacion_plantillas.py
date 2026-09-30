@@ -62,6 +62,7 @@ from app.models.asistencia import Asistencia
 from app.models.plan import Plan
 from app.models.predictions_churn import PredictionsChurn
 from app.models.suscripcion import Suscripcion
+from app.services import beneficios_service
 from app.services import email_service
 from app.utils.santiago import fecha_chile, hoy_santiago
 
@@ -81,6 +82,16 @@ P_INACTIVIDAD_15_30: Final[str] = "inactividad_15_30"
 P_INACTIVIDAD_MAS_30: Final[str] = "inactividad_mas_30"
 P_RIESGO_ALTO: Final[str] = "riesgo_alto"
 P_VENCIMIENTO: Final[str] = "vencimiento"
+# Los dos correos de la Fase 2 (grupo `beneficios`): no nacen de una situación del alumno
+# sino de un REGALO concreto, así que su id ES el tipo del beneficio que anuncian
+# (`beneficios_service.TIPOS`): el log de correos queda agrupado por tipo de regalo, que es
+# justo lo que mide la F4 (tasa de uso por beneficio).
+P_BENEFICIO_DESCUENTO: Final[str] = "beneficio_descuento"
+P_BENEFICIO_CLASES_GRATIS: Final[str] = "beneficio_clases_gratis"
+# Plantillas cuyo contexto NO alcanza con el alumno: necesitan los datos del regalo, que
+# viajan en el pedido (`datos`). Es una lista DECLARADA (y no un `if` escondido en el
+# render) para que se vea de un vistazo qué plantillas no se pueden renderizar sin datos.
+PLANTILLAS_CON_DATOS: Final[tuple] = (P_BENEFICIO_DESCUENTO, P_BENEFICIO_CLASES_GRATIS)
 
 # ── Umbrales de cada situación (cada número vive en UN lugar) ─────────────────
 # Piso de "días sin entrenar": un correo de recuperación no puede decir "0 días".
@@ -309,6 +320,54 @@ def _render_vencimiento(alumno, contexto) -> tuple:
         alumno.nombre, contexto["plan"], contexto["fecha_expiracion"])
 
 
+# ── Los correos del grupo `beneficios` (Fase 2) ───────────────────────────────
+def _contexto_beneficio(db: Session, alumno, datos) -> dict:
+    """Datos del REGALO que anuncia el correo (no del alumno): tipo, valor y vigencia.
+
+    El beneficio se crea ANTES de mandar el correo (es el alta la que materializa el acceso
+    y fija la ventana), así que lo que viaja acá son los números de la fila recién creada y
+    no una promesa del frontend. `plan` es el plan al que se sumaron las clases (`None` si
+    se le abrió un pase).
+    """
+    if not datos:
+        raise PlantillaSinDatos(
+            "El correo de un beneficio necesita el beneficio: sin tipo, valor y vigencia "
+            "no hay nada que anunciar.")
+    tipo = datos.get("tipo")
+    if not beneficios_service.tipo_valido(tipo):
+        raise PlantillaSinDatos(f"Tipo de beneficio desconocido: `{tipo}`.")
+    valor = datos.get("valor")
+    if isinstance(valor, bool) or not isinstance(valor, int) or valor <= 0:
+        raise PlantillaSinDatos(
+            "El valor del beneficio no sirve para armar el correo: un regalo dice un número.")
+    return {"tipo": str(tipo), "valor": valor,
+            "vigente_hasta": datos.get("vigente_hasta"), "plan": datos.get("plan")}
+
+
+def _render_beneficio(alumno, contexto, tipo_esperado: str) -> tuple:
+    """El correo del regalo, sólo si el tipo del catálogo es el del beneficio de verdad.
+
+    Los dos ids existen para que el LOG (y la F4) distingan un descuento de unas clases: si
+    el tipo del pedido no es el de la plantilla, el correo anunciaría un regalo que no es, y
+    eso el alumno lo nota.
+    """
+    if contexto["tipo"] != tipo_esperado:
+        raise PlantillaSinDatos(
+            f"Esta plantilla es para un beneficio `{tipo_esperado}` y este es "
+            f"`{contexto['tipo']}`: cada regalo tiene su correo.")
+    return email_service.render_email_beneficio(
+        alumno.nombre, contexto["tipo"], contexto["valor"], contexto["vigente_hasta"],
+        contexto["plan"])
+
+
+def _render_beneficio_descuento(alumno, contexto) -> tuple:
+    return _render_beneficio(alumno, contexto, beneficios_service.TIPO_DESCUENTO)
+
+
+def _render_beneficio_clases(alumno, contexto) -> tuple:
+    return _render_beneficio(alumno, contexto, beneficios_service.TIPO_CLASES_GRATIS)
+
+
 # ── El catálogo ──────────────────────────────────────────────────────────────
 # Cada entrada es autosuficiente: sus datos (`_contexto`) y su render (`_render`) viven en
 # la MISMA fila, así que agregar una plantilla no puede desincronizar un segundo diccionario.
@@ -369,6 +428,26 @@ PLANTILLAS: Final[tuple] = (
         "requiere": "Que el modelo lo marque con riesgo ALTO o CRÍTICO.",
         "_contexto": _contexto_riesgo_alto,
         "_render": _render_riesgo_alto,
+    },
+    {
+        "id": P_BENEFICIO_DESCUENTO,
+        "label": "Beneficio: descuento en el próximo plan",
+        "descripcion": "El correo que anuncia el % de descuento que el box acaba de regalarle.",
+        "grupo": GRUPO_BENEFICIOS,
+        "tipo_envio": P_BENEFICIO_DESCUENTO,
+        "requiere": "Un beneficio de descuento (lo crea el panel al darlo).",
+        "_contexto": _contexto_beneficio,
+        "_render": _render_beneficio_descuento,
+    },
+    {
+        "id": P_BENEFICIO_CLASES_GRATIS,
+        "label": "Beneficio: clases de regalo",
+        "descripcion": "El correo que anuncia las clases gratis y hasta cuándo usarlas.",
+        "grupo": GRUPO_BENEFICIOS,
+        "tipo_envio": P_BENEFICIO_CLASES_GRATIS,
+        "requiere": "Un beneficio de clases gratis (lo crea el panel al darlo).",
+        "_contexto": _contexto_beneficio,
+        "_render": _render_beneficio_clases,
     },
 )
 
@@ -446,10 +525,53 @@ def _sugerida(plantilla_id: str, motivo: str, contexto: dict) -> dict:
     }
 
 
-def sugerir(db: Session, alumno) -> dict:
-    """Qué plantilla le corresponde a este alumno, con la regla que ganó y su motivo.
+def _datos_sugerencia(db: Session, alumnos: list) -> dict:
+    """Todo lo que decide la sugerencia, para TODA una lista, en 3 consultas.
 
-    Es la ÚNICA definición de la sugerencia: la pantalla ya no adivina con su propia heurística
+    Devuelve `{alumno_id: {"alumno", "ultima_asistencia", "suscripcion", "prediccion"}}`.
+    Existe porque el panel de Fidelización necesita la sugerencia de toda su tabla: resolverla
+    alumno por alumno costaba 3 consultas POR FILA (y la tabla entera, cientos de consultas).
+    """
+    ids = [a.id for a in alumnos]
+    if not ids:
+        return {}
+    tenant_id = alumnos[0].tenant_id
+
+    asistencias = dict(db.query(Asistencia.usuario_id, func.max(Asistencia.fecha)).filter(
+        Asistencia.tenant_id == tenant_id,
+        Asistencia.usuario_id.in_(ids),
+    ).group_by(Asistencia.usuario_id).all())
+
+    # MISMO criterio que `suscripcion_vigente()`, en una consulta para todos: el orden por
+    # `fecha_expiracion` desc hace que la PRIMERA fila de cada alumno sea la que se queda.
+    vigentes: dict = {}
+    for suscripcion, plan in db.query(Suscripcion, Plan).join(
+            Plan, Suscripcion.plan_id == Plan.id).filter(
+            Suscripcion.tenant_id == tenant_id,
+            Suscripcion.usuario_id.in_(ids),
+            Suscripcion.estado == ESTADO_SUSCRIPCION_ACTIVO,
+            vigente_hoy(Suscripcion.fecha_expiracion, hoy=hoy_santiago()),
+    ).order_by(Suscripcion.fecha_expiracion.desc(), Suscripcion.id.desc()).all():
+        vigentes.setdefault(suscripcion.usuario_id, (suscripcion, plan))
+
+    predicciones: dict = {}
+    for prediccion in db.query(PredictionsChurn).filter(
+            PredictionsChurn.tenant_id == tenant_id,
+            PredictionsChurn.usuario_id.in_(ids),
+            PredictionsChurn.riesgo_nivel.in_(NIVELES_RIESGO_ALTO),
+    ).order_by(PredictionsChurn.created_at.desc(),
+               PredictionsChurn.id.desc()).all():
+        predicciones.setdefault(prediccion.usuario_id, prediccion)
+
+    return {a.id: {"alumno": a, "ultima_asistencia": asistencias.get(a.id),
+                   "suscripcion": vigentes.get(a.id),
+                   "prediccion": predicciones.get(a.id)} for a in alumnos}
+
+
+def _sugerir_con(datos: dict) -> dict:
+    """La REGLA de la sugerencia sobre datos YA resueltos (una sola definición).
+
+    Es la ÚNICA definición de la sugerencia: la pantalla no adivina con su propia heurística
     (dos definiciones de "le corresponde renovación" se desincronizan siempre). Gana la PRIMERA
     regla que aplica, en este orden:
 
@@ -465,9 +587,13 @@ def sugerir(db: Session, alumno) -> dict:
     `plantilla: None` (con `regla="sin_situacion"`) es una respuesta legítima, no un error: el
     alumno que entrenó ayer no necesita que nadie lo vaya a buscar.
     """
-    contexto = dict(_contexto_inactividad(db, alumno))
-    dias = contexto["dias_inactividad"]
-    fila = suscripcion_vigente(db, alumno)
+    alumno = datos["alumno"]
+    referencia = (datos["ultima_asistencia"]
+                  or fecha_chile(getattr(alumno, "created_at", None)))
+    dias = (DIAS_MINIMOS if referencia is None
+            else max(DIAS_MINIMOS, (hoy_santiago() - referencia).days))
+    contexto = {"dias_inactividad": dias, "ultima_asistencia": referencia}
+    fila = datos["suscripcion"]
     dias_para_vencer = None
     if fila is not None:
         suscripcion, _plan = fila
@@ -482,7 +608,7 @@ def sugerir(db: Session, alumno) -> dict:
     if dias > DIAS_INACTIVIDAD_LARGA:
         return _sugerida(P_INACTIVIDAD_MAS_30, f"Lleva {dias} días sin entrenar.", contexto)
 
-    prediccion = prediccion_riesgo(db, alumno)
+    prediccion = datos["prediccion"]
     if prediccion is not None:
         contexto["riesgo_nivel"] = prediccion.riesgo_nivel
         contexto["probabilidad_churn"] = float(prediccion.probabilidad_churn)
@@ -504,6 +630,21 @@ def sugerir(db: Session, alumno) -> dict:
     }
 
 
+def sugerir(db: Session, alumno) -> dict:
+    """Qué plantilla le corresponde a ESTE alumno, con la regla que ganó y su motivo."""
+    return _sugerir_con(_datos_sugerencia(db, [alumno])[alumno.id])
+
+
+def sugerir_lote(db: Session, alumnos) -> dict:
+    """La MISMA sugerencia para varios alumnos: `{alumno_id: sugerencia}`.
+
+    La usa el panel de Fidelización para su columna "Recomendación": con UNA sola regla, la
+    columna y la plantilla que propone el modal de envío no pueden decir cosas distintas.
+    """
+    return {aid: _sugerir_con(uno)
+            for aid, uno in _datos_sugerencia(db, list(alumnos)).items()}
+
+
 # ── Render y envío ───────────────────────────────────────────────────────────
 def _entrada(plantilla_id) -> dict:
     """La entrada del catálogo o `PlantillaDesconocida` (una sola validación)."""
@@ -515,24 +656,39 @@ def _entrada(plantilla_id) -> dict:
     return p
 
 
-def contexto(db: Session, alumno, plantilla_id) -> dict:
+def _contexto_de(p: dict, db: Session, alumno, datos=None) -> dict:
+    """Los datos de ESA plantilla: del alumno, o del regalo cuando la plantilla lo pide.
+
+    `PLANTILLAS_CON_DATOS` son las que no se pueden armar sólo con el alumno (los correos de
+    un beneficio anuncian un regalo concreto): a esas se les pasa el `datos` del pedido y
+    ellas mismas rechazan lo que no alcance. Las demás no ven `datos` ni de casualidad.
+    """
+    if p["id"] in PLANTILLAS_CON_DATOS:
+        return p["_contexto"](db, alumno, datos)
+    return p["_contexto"](db, alumno)
+
+
+def contexto(db: Session, alumno, plantilla_id, datos=None) -> dict:
     """Los datos REALES que alimentan la plantilla (o error claro si no alcanzan)."""
-    return _entrada(plantilla_id)["_contexto"](db, alumno)
+    return _contexto_de(_entrada(plantilla_id), db, alumno, datos)
 
 
-def render(db: Session, alumno, plantilla_id) -> dict:
+def render(db: Session, alumno, plantilla_id, datos=None) -> dict:
     """El correo tal como se va a mandar (regla 1). Lo usan el PREVIEW y el ENVÍO.
 
     Los dos caminos pasan por acá a propósito: si el preview y el envío tuvieran cada uno
     su render, el admin podría aprobar un mensaje y mandar otro.
+
+    `datos` viaja sólo a las plantillas que anuncian algo con números propios (un beneficio):
+    son las de `PLANTILLAS_CON_DATOS`, y el correo sale con los números REALES de la fila.
     """
     p = _entrada(plantilla_id)
     correo = (getattr(alumno, "correo", None) or "").strip()
     if not correo:
         raise PlantillaSinDatos(
             "El alumno no tiene correo registrado: no hay a quién mandarle este mensaje.")
-    datos = p["_contexto"](db, alumno)
-    asunto, html = p["_render"](alumno, datos)
+    armado = _contexto_de(p, db, alumno, datos)
+    asunto, html = p["_render"](alumno, armado)
     return {
         "plantilla": p["id"],
         "label": p["label"],
@@ -541,19 +697,22 @@ def render(db: Session, alumno, plantilla_id) -> dict:
         "destinatario": correo,
         "asunto": asunto,
         "html": html,
-        "contexto": datos,
+        "contexto": armado,
     }
 
 
-def enviar(db: Session, alumno, plantilla_id) -> dict:
+def enviar(db: Session, alumno, plantilla_id, datos=None) -> dict:
     """Manda el correo ya renderizado y devuelve qué pasó DE VERDAD.
 
     `estado` distingue los tres desenlaces, porque el log de correos no puede mentir:
     `enviado` (salió), `simulado` (modo prueba: NO salió) y `fallido` (Gmail falló, con el
     detalle del error). El fallo de un correo no es un error de la petición: se informa.
+
+    `notificacion_id` es la fila del log que dejó ESTE envío (o `None`): es lo que permite
+    ligar el correo a lo que anunciaba (el beneficio, que la F4 mide por su correo).
     """
-    mensaje = render(db, alumno, plantilla_id)
-    ok = email_service.enviar_renderizado(
+    mensaje = render(db, alumno, plantilla_id, datos)
+    ok, notificacion_id = email_service.enviar_renderizado_con_id(
         mensaje["destinatario"], mensaje["asunto"], mensaje["html"],
         alumno_id=alumno.id, tipo=mensaje["tipo_envio"], tenant_id=alumno.tenant_id)
     modo = email_service.modo_envio()
@@ -568,6 +727,7 @@ def enviar(db: Session, alumno, plantilla_id) -> dict:
         "modo_envio": modo,
         "detalle_error": None if ok else (email_service.ULTIMO_ERROR_SMTP
                                           or "No se pudo enviar el correo via Gmail SMTP."),
+        "notificacion_id": notificacion_id,
         "plantilla": mensaje["plantilla"],
         "label": mensaje["label"],
         "tipo_envio": mensaje["tipo_envio"],

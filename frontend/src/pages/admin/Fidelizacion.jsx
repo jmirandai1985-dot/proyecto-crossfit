@@ -11,7 +11,10 @@ import { ARQUETIPOS_UI, estiloArquetipo, arquetipoDe } from '../../components/kp
 import { KpiCard } from '../../components/kpis/KpiCard';
 import { ArquetipoBadge } from '../../components/kpis/ArquetipoBadge';
 import ModalEnviarCorreo from '../../components/ModalEnviarCorreo';
-import { Eye, TriangleAlert, Users, Sparkles } from 'lucide-react';
+import BeneficioModal from '../../components/BeneficioModal';
+import BeneficiosPanel from '../../components/BeneficiosPanel';
+import { TabBar } from '../../components/kpis/TabBar';
+import { Eye, TriangleAlert, Users, Sparkles, Gift, Mail } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 /** ISO local (YYYY-MM-DD) para comparar contra fecha_proxima_renovacion. */
@@ -47,32 +50,49 @@ const FILTROS = {
         test: (p) => ['ALTO', 'CRITICO'].includes(p.riesgo_nivel),
     },
     plan_urgente: {
-        // Misma Regla B del backend/BI: riesgo ALTO/CRÍTICO con plan vigente
-        // que vence en ≤7 días.
-        etiqueta: 'Riesgo alto/crítico con plan que vence en ≤7 días',
+        // "Vencimientos inminentes": el plan vigente vence en ≤ 5 días. Es EXACTAMENTE el
+        // criterio de la tarjeta del mismo nombre (la tarjeta usa este `test` para contar), así
+        // que al clickearla la tabla muestra tantas filas como dice el número. Antes pedía además
+        // riesgo ALTO/CRÍTICO: la tarjeta contaba 37 y la tabla mostraba 1.
+        etiqueta: 'Vencimientos inminentes (≤ 5 días)',
         test: (p) => {
-            if (!['ALTO', 'CRITICO'].includes(p.riesgo_nivel)) return false;
-            if (!p.fecha_proxima_renovacion) return false;
+            const f = p.fecha_proxima_renovacion
+                ? String(p.fecha_proxima_renovacion).slice(0, 10) : null;
+            if (!f) return false;
             const limite = new Date();
-            limite.setDate(limite.getDate() + 7);
-            return String(p.fecha_proxima_renovacion).slice(0, 10) <= toISO(limite);
+            limite.setDate(limite.getDate() + 5);
+            return f >= toISO(new Date()) && f <= toISO(limite);
         },
     },
 };
+
+// Pestañas de la pantalla. Los ids viajan en `?tab=` (TabBar) y el resto de la URL (los filtros)
+// se conserva al cambiar de pestaña.
+const TABS = [
+    { id: 'gestion', label: 'Gestión' },
+    { id: 'beneficios', label: 'Beneficios' },
+];
 
 const Fidelizacion = () => {
     const { tenant_id } = useAuth();
     // Filtros que llegan desde la pestaña BI (?filtro=... y/o ?arquetipo=...).
     const [searchParams, setSearchParams] = useSearchParams();
+    // Pestaña activa: Gestión (la tabla de siempre) o Beneficios (todos los regalos del box).
+    const tab = searchParams.get('tab') || 'gestion';
     // Datos del BI (GET /kpis/churn): score, motivo, recomendación, gestión.
     const [churn, setChurn] = useState(null);
     // Segmentación (conteos por arquetipo) para las 6 tarjetas de abajo.
     const [segmentacion, setSegmentacion] = useState(null);
     const [segError, setSegError] = useState(false);
     const [loading, setLoading] = useState(true);
-    const [menuAccion, setMenuAccion] = useState(null);
     // Alumno al que se le va a mandar un correo: abre el modal de envío (F1).
     const [alumnoCorreo, setAlumnoCorreo] = useState(null);
+    // Alumno al que se le va a DAR un beneficio: abre el modal de la F2.
+    const [alumnoBeneficio, setAlumnoBeneficio] = useState(null);
+    // Sugerencia de plantilla por alumno (`POST /fidelizacion/sugerencias`): es la MISMA regla
+    // que usa el modal de envío, así la columna "Recomendación" y la plantilla propuesta no
+    // pueden decir cosas distintas.
+    const [sugerencias, setSugerencias] = useState({});
     const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
     const [detalleReco, setDetalleReco] = useState(null);
     const [msg, setMsg] = useState('');
@@ -84,6 +104,23 @@ const Fidelizacion = () => {
             const res = await api.get('/api/v1/kpis/churn');
             setChurn(res.data);
             setMsg('');
+            // La sugerencia de plantilla de TODA la tabla, en UNA petición: la columna
+            // "Recomendación" y el modal de envío salen de la MISMA regla del backend
+            // (`sugerir()`), que es la única forma de que no digan cosas distintas.
+            const ids = (res.data?.predicciones || []).map((p) => p.usuario_id).slice(0, 300);
+            if (ids.length) {
+                try {
+                    const rSug = await api.post('/api/v1/fidelizacion/sugerencias',
+                        { alumno_ids: ids });
+                    setSugerencias(rSug?.data?.sugerencias || {});
+                } catch {
+                    // Sin sugerencias la tabla sigue (esa columna queda en "—"): el panel no se
+                    // cae por una comodidad.
+                    setSugerencias({});
+                }
+            } else {
+                setSugerencias({});
+            }
             // Segmentación: opcional (si falla o no se entrenó, las tarjetas de
             // arquetipo no se muestran y el resto del panel sigue igual).
             // La segmentación se pide aparte y ahora se distingue "falló el fetch"
@@ -109,18 +146,34 @@ const Fidelizacion = () => {
         cargarFidelizacion();
     }, [tenant_id]);
 
-    const toggleMenuAccion = (id) => {
-        setMenuAccion(menuAccion === id ? null : id);
-    };
-
-    // Acción Rápida → abre el modal de envío (F1). Antes esto disparaba el correo a ciegas;
-    // ahora se elige la plantilla y se ve el mensaje EXACTO antes de mandarlo. La plantilla
-    // sugerida la resuelve el BACKEND con los datos del alumno (`POST /fidelizacion/sugerir`):
-    // la pantalla no tiene su propia heurística (ver ModalEnviarCorreo).
+    // Enviar correo (F1): abre el modal con la plantilla sugerida. La sugerencia la resuelve el
+    // BACKEND con los datos del alumno (`POST /fidelizacion/sugerir`) y la pantalla le pasa la que
+    // ya trajo en lote (`/sugerencias`), así el modal arranca con EXACTAMENTE lo que muestra la
+    // columna "Recomendación" de esta misma tabla.
     const enviarCorreoManual = (alumno) => {
-        setMenuAccion(null);
         setMsg('');
         setAlumnoCorreo({ fila: alumno });
+    };
+
+    // Dar beneficio (F2): abre el modal que crea el regalo (y, si se pide, avisa por correo).
+    const darBeneficio = (alumno) => {
+        setMsg('');
+        setAlumnoBeneficio({ fila: alumno });
+    };
+
+    // El beneficio quedó dado: se avisa en el cartel de la pantalla (la pestaña Beneficios lo
+    // muestra al recargar) y se dice CÓMO se avisó al alumno.
+    const beneficioDado = (resultado) => {
+        const b = resultado?.beneficio || {};
+        const entrega = b.unidad === 'pct' ? `−${b.valor} %` : `${b.valor} clases`;
+        let correo = 'sin avisar por correo';
+        if (resultado?.correo) {
+            correo = resultado.correo.estado === 'fallido'
+                ? 'el correo no salió'
+                : `correo ${resultado.correo.estado}`;
+        }
+        setMsg(`🎁 Beneficio dado a ${b.alumno_nombre || 'el alumno'}: ${entrega} · ${correo}`);
+        setTimeout(() => setMsg(''), 10000);
     };
 
     // El correo SALIÓ (el modal no avisa en modo prueba): se marca la gestión como CONTACTADO
@@ -148,23 +201,18 @@ const Fidelizacion = () => {
         setTimeout(() => setMsg(''), 8000);
     };
 
+    // Ver la ficha del alumno: se abre con el CLIC EN SU NOMBRE (ya no hay menú de acciones).
     const verDetalleAlumno = (id) => {
-        setMenuAccion(null);
         setFichaAlumnoId(id);
     };
 
-    // ── Derivados del BI (los mismos criterios que las 2 tarjetas de siempre) ──
-    // En riesgo: riesgo ALTO/CRÍTICO del modelo. Próximos a vencer: plan que
-    // expira en <= 5 días (el campo es de la fila: no hay endpoint nuevo).
+    // ── Derivados del BI (los mismos criterios que las tarjetas) ──
+    // En riesgo: riesgo ALTO/CRÍTICO del modelo. Vencimientos inminentes: el plan vence en ≤ 5
+    // días, medido con el MISMO test que aplica su filtro (el número de la tarjeta y las filas
+    // de la tabla no pueden diferir; el campo es de la fila: no hay endpoint nuevo).
     const predicciones = churn?.predicciones || [];
-    const hoyISO = toISO(new Date());
-    const limite5ISO = (() => { const d = new Date(); d.setDate(d.getDate() + 5); return toISO(d); })();
-    const venceISO = (p) => (p.fecha_proxima_renovacion ? String(p.fecha_proxima_renovacion).slice(0, 10) : null);
     const enRiesgo = predicciones.filter((p) => ['ALTO', 'CRITICO'].includes(p.riesgo_nivel));
-    const porVencer = predicciones.filter((p) => {
-        const f = venceISO(p);
-        return f && f >= hoyISO && f <= limite5ISO;
-    });
+    const porVencer = predicciones.filter(FILTROS.plan_urgente.test);
 
     // ── Filtro activo (query params) ─────────────────────────────────────
     const claveFiltro = searchParams.get('filtro') || null;
@@ -186,9 +234,23 @@ const Fidelizacion = () => {
         return okRiesgo && okArquetipo;
     });
     const quitarFiltros = () => setSearchParams({});
-    const etiquetaFiltro = filtroArquetipo
-        ? `Arquetipo: ${estiloArquetipo(filtroArquetipo).label}`
-        : (filtroDef?.etiqueta || null);
+
+    // TODOS los filtros activos, uno por chip: el de riesgo y el de arquetipo SE SUMAN, así que la
+    // pantalla no puede mostrar sólo uno (antes, con los dos puestos, el de riesgo quedaba oculto:
+    // la tarjeta decía 37 y la tabla mostraba 1). Cada chip se quita solo.
+    const filtrosActivos = [
+        claveFiltro && { clave: 'filtro', valor: claveFiltro,
+                         etiqueta: `Riesgo: ${filtroDef?.etiqueta || claveFiltro}` },
+        filtroArquetipo && { clave: 'arquetipo', valor: filtroArquetipo,
+                             etiqueta: `Arquetipo: ${estiloArquetipo(filtroArquetipo).label}` },
+    ].filter(Boolean);
+    const hayFiltros = filtrosActivos.length > 0;
+
+    const quitarFiltro = (clave) => {
+        const next = new URLSearchParams(searchParams);
+        next.delete(clave);
+        setSearchParams(next);
+    };
 
     // Los filtros viven en la URL (query params): los setean las tarjetas y el
     // dropdown de ESTA pantalla, y el link que llega desde KPIs ya los trae.
@@ -234,13 +296,20 @@ const Fidelizacion = () => {
                     </button>
                 </div>
 
+                <TabBar tabs={TABS} />
+
                 {msg && (
                     <div className={`p-4 rounded-lg font-bold shadow-lg transition-all ${msg.includes('✅') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                         {msg}
                     </div>
                 )}
 
-                {loading ? (
+                {/* ── Pestaña Beneficios: TODOS los regalos del box (F2) ── */}
+                {tab === 'beneficios' && (
+                    <BeneficiosPanel onVerAlumno={verDetalleAlumno} onMensaje={setMsg} />
+                )}
+
+                {tab === 'gestion' && (loading ? (
                     <div className="flex justify-center py-12">
                         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-orange-500" />
                     </div>
@@ -253,32 +322,61 @@ const Fidelizacion = () => {
                             total: era el mismo número. */}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                             {[
-                                { clave: 'critico', label: 'Abandono Crítico', valor: churn?.criticos ?? 0, icon: TriangleAlert, color: 'border-red-500' },
-                                { clave: 'alto', label: 'Riesgo alto', valor: churn?.altos ?? 0, icon: TriangleAlert, color: 'border-orange-500' },
-                                { clave: 'total', label: 'En riesgo (total)', valor: churn?.total ?? 0, icon: Users, color: 'border-yellow-500' },
-                            ].map(({ clave, label, valor, icon, color }) => (
-                                <button
-                                    key={clave}
-                                    type="button"
-                                    onClick={() => alternarFiltro(clave)}
-                                    aria-pressed={claveFiltro === clave}
-                                    aria-label={`Filtrar la tabla por: ${label}`}
-                                    title={claveFiltro === clave
-                                        ? 'Quitar este filtro'
-                                        : 'Filtrar la tabla por este grupo'}
-                                    className={`w-full text-left rounded-lg transition ${claveFiltro === clave
-                                        ? 'ring-2 ring-orange-500'
-                                        : 'hover:ring-1 hover:ring-zinc-600'}`}
-                                >
-                                    <KpiCard label={label} value={valor} icon={icon} color={color} />
-                                </button>
-                            ))}
-                            {/* Informativa (no filtra): define el tipo de correo de la Acción Rápida. */}
-                            <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-orange-600">
-                                <p className="text-sm text-gray-400 uppercase tracking-wide">Vencimientos Inminentes</p>
-                                <p className="text-3xl font-bold text-white mt-2">{porVencer.length}</p>
-                                <p className="text-sm mt-2 text-zinc-500">Plan que vence en ≤ 5 días</p>
-                            </div>
+                                { clave: 'critico', label: 'Abandono Crítico', valor: churn?.criticos ?? 0, icon: TriangleAlert, color: 'border-red-500', test: FILTROS.critico.test },
+                                { clave: 'alto', label: 'Riesgo alto', valor: churn?.altos ?? 0, icon: TriangleAlert, color: 'border-orange-500', test: FILTROS.alto.test },
+                                { clave: 'total', label: 'En riesgo (total)', valor: churn?.total ?? 0, icon: Users, color: 'border-yellow-500', test: FILTROS.total.test },
+                            ].map(({ clave, label, valor, icon, color, test }) => {
+                                // Los números de la tarjeta son los del BI; con un filtro puesto se
+                                // aclara cuántos de ese grupo quedan EN LA TABLA (el arquetipo y el
+                                // riesgo se suman): así el número grande no contradice al de abajo.
+                                const conFiltro = predicciones.filter((p) => test(p)
+                                    && (!filtroArquetipo || arquetipoDe(p) === filtroArquetipo)).length;
+                                return (
+                                    <button
+                                        key={clave}
+                                        type="button"
+                                        onClick={() => alternarFiltro(clave)}
+                                        aria-pressed={claveFiltro === clave}
+                                        aria-label={`Filtrar la tabla por: ${label}`}
+                                        title={claveFiltro === clave
+                                            ? 'Quitar este filtro'
+                                            : 'Filtrar la tabla por este grupo'}
+                                        className={`w-full text-left rounded-lg transition ${claveFiltro === clave
+                                            ? 'ring-2 ring-orange-500'
+                                            : 'hover:ring-1 hover:ring-zinc-600'}`}
+                                    >
+                                        <KpiCard label={label} value={valor} icon={icon} color={color} />
+                                        <p className="px-6 -mt-4 pb-2 text-xs text-zinc-500"
+                                            data-testid={`tarjeta-aclaracion-${clave}`}>
+                                            {hayFiltros ? `${conFiltro} con el filtro activo` : `${valor} en total`}
+                                        </p>
+                                    </button>
+                                );
+                            })}
+                            {/* Clickeable: aplica el filtro `plan_urgente` (≤ 5 días) con su chip ✕, y se
+                                combina con los otros. El número sale del MISMO test que el filtro. */}
+                            <button
+                                type="button"
+                                onClick={() => alternarFiltro('plan_urgente')}
+                                aria-pressed={claveFiltro === 'plan_urgente'}
+                                aria-label="Filtrar la tabla por vencimientos inminentes (≤ 5 días)"
+                                title={claveFiltro === 'plan_urgente'
+                                    ? 'Quitar este filtro'
+                                    : 'Filtrar la tabla por los planes que vencen en ≤ 5 días'}
+                                data-testid="tarjeta-vencimientos"
+                                className={`w-full text-left rounded-lg transition ${claveFiltro === 'plan_urgente'
+                                    ? 'ring-2 ring-orange-500'
+                                    : 'hover:ring-1 hover:ring-zinc-600'}`}
+                            >
+                                <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-orange-600">
+                                    <p className="text-sm text-gray-400 uppercase tracking-wide">Vencimientos Inminentes</p>
+                                    <p className="text-3xl font-bold text-white mt-2">{porVencer.length}</p>
+                                    <p className="text-sm mt-2 text-zinc-500">
+                                        Plan que vence en ≤ 5 días
+                                        {hayFiltros && ` · ${porVencer.filter((p) => !filtroArquetipo || arquetipoDe(p) === filtroArquetipo).length} con el filtro activo`}
+                                    </p>
+                                </div>
+                            </button>
                         </div>
 
                         {/* ── Tarjetas de arquetipos (MOVIDAS desde la BI) ──
@@ -372,21 +470,30 @@ const Fidelizacion = () => {
                                     ))}
                                 </select>
                             </label>
-                            {etiquetaFiltro && (
-                                <span className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-orange-300">
-                                    Filtro: {etiquetaFiltro}
+                            {/* TODOS los filtros activos como chips: el riesgo y el arquetipo se SUMAN,
+                                y cada uno se quita solo con su ✕ (antes se mostraba uno solo y el otro
+                                quedaba oculto mintiendo sobre el número de filas). */}
+                            {filtrosActivos.map((f) => (
+                                <span key={f.clave}
+                                    data-testid={`chip-filtro-${f.clave}`}
+                                    className="flex items-center gap-1 rounded-full bg-zinc-800 border border-zinc-600 px-2 py-0.5 text-xs text-orange-300">
+                                    {f.etiqueta}
+                                    <button type="button" onClick={() => quitarFiltro(f.clave)}
+                                        aria-label={`Quitar el filtro ${f.etiqueta}`}
+                                        className="text-zinc-400 hover:text-white">✕</button>
                                 </span>
-                            )}
+                            ))}
                             <span className="text-xs text-zinc-500">
                                 {prediccionesFiltradas.length} de {predicciones.length} alumnos
                             </span>
-                            {etiquetaFiltro && (
+                            {hayFiltros && (
                                 <button
                                     type="button"
                                     onClick={quitarFiltros}
-                                    className="text-xs text-zinc-300 underline hover:text-orange-300"
+                                    data-testid="limpiar-filtros"
+                                    className="px-3 py-1 bg-zinc-800 text-zinc-200 rounded-lg text-xs font-medium hover:bg-zinc-700"
                                 >
-                                    Ver todos
+                                    Limpiar filtros
                                 </button>
                             )}
                         </div>
@@ -424,7 +531,18 @@ const Fidelizacion = () => {
                                         {prediccionesFiltradas.map((p, idx) => (
                                             <tr key={p.usuario_id} className={idx % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
                                                 <td className="px-6 py-4">
-                                                    <p className="text-sm font-bold text-zinc-100">{p.alumno_nombre || `Alumno #${p.usuario_id}`}</p>
+                                                    {/* El detalle se abre con clic en el NOMBRE (ya no hay
+                                                        menú "Acción Rápida"): las dos acciones están a la
+                                                        vista, una por fila. */}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => verDetalleAlumno(p.usuario_id)}
+                                                        aria-label={`Ver el detalle de ${p.alumno_nombre || `alumno #${p.usuario_id}`}`}
+                                                        className="text-sm font-bold text-zinc-100 hover:text-orange-300 underline decoration-dotted"
+                                                        data-testid={`alumno-nombre-${p.usuario_id}`}
+                                                    >
+                                                        {p.alumno_nombre || `Alumno #${p.usuario_id}`}
+                                                    </button>
                                                     <p className="text-xs text-zinc-500">#{p.usuario_id}{p.alumno_correo ? ` · ${p.alumno_correo}` : ''}</p>
                                                 </td>
                                                 <td className="px-6 py-4">
@@ -436,27 +554,40 @@ const Fidelizacion = () => {
                                                 </td>
                                                 <td className="px-6 py-4 text-sm text-zinc-400">{p.motivo || '—'}</td>
                                                 <td className="px-6 py-4">
-                                                    {p.recomendacion ? (
-                                                        <div className={`max-w-xs border-l-2 pl-2 ${estiloReco(p.recomendacion_codigo).borde}`} title={p.recomendacion}>
-                                                            <div className="flex items-start justify-between gap-2">
-                                                                <span className={`text-[10px] font-semibold uppercase tracking-wide ${estiloReco(p.recomendacion_codigo).texto}`}>
-                                                                    {estiloReco(p.recomendacion_codigo).etiqueta}
-                                                                </span>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => setDetalleReco(p)}
-                                                                    title="Ver recomendación completa"
-                                                                    aria-label={`Ver recomendación completa de ${p.alumno_nombre || `alumno #${p.usuario_id}`}`}
-                                                                    className="shrink-0 rounded p-0.5 text-zinc-400 hover:bg-zinc-700/60 hover:text-orange-400"
-                                                                >
-                                                                    <Eye className="h-3.5 w-3.5" />
-                                                                </button>
+                                                    {/* Esta columna y la plantilla que propone el modal salen de
+                                                        la MISMA regla del backend (`sugerir()`), pedida en lote. */}
+                                                    {(() => {
+                                                        const sug = sugerencias[String(p.usuario_id)];
+                                                        if (!sug) return <span className="text-zinc-500">—</span>;
+                                                        return (
+                                                            <div className="max-w-xs border-l-2 pl-2 border-orange-500"
+                                                                data-testid={`sugerencia-${p.usuario_id}`}>
+                                                                <div className="flex items-start justify-between gap-2">
+                                                                    <span className="text-[10px] font-semibold uppercase tracking-wide text-orange-300"
+                                                                        title={sug.label || 'Sin plantilla sugerida'}>
+                                                                        {sug.plantilla || 'Sin correo que mandar'}
+                                                                    </span>
+                                                                    {p.recomendacion && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => setDetalleReco(p)}
+                                                                            title={`Recomendación del modelo: ${p.recomendacion}`}
+                                                                            aria-label={`Ver la recomendación del modelo para ${p.alumno_nombre || `alumno #${p.usuario_id}`}`}
+                                                                            className="shrink-0 rounded p-0.5 text-zinc-400 hover:bg-zinc-700/60 hover:text-orange-400"
+                                                                        >
+                                                                            <Eye className="h-3.5 w-3.5" />
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                                <div className="text-xs leading-snug text-zinc-300 line-clamp-2">
+                                                                    {sug.plantilla ? sug.label : sug.motivo}
+                                                                </div>
+                                                                <div className="text-[11px] leading-snug text-zinc-500 line-clamp-1">
+                                                                    {sug.plantilla ? sug.motivo : `Modelo: ${estiloReco(p.recomendacion_codigo).etiqueta}`}
+                                                                </div>
                                                             </div>
-                                                            <div className="text-xs leading-snug text-zinc-300 line-clamp-2">{p.recomendacion}</div>
-                                                        </div>
-                                                    ) : (
-                                                        <span className="text-zinc-500">—</span>
-                                                    )}
+                                                        );
+                                                    })()}
                                                 </td>
                                                 <td className="px-6 py-4 text-xs">
                                                     <span className="inline-block px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300">
@@ -464,30 +595,27 @@ const Fidelizacion = () => {
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4">
-                                                    <div className="relative inline-block">
+                                                    {/* DOS botones a la vista (antes era un menú "Acción Rápida"):
+                                                        una fila = dos acciones, sin abrir nada para verlas. */}
+                                                    <div className="flex flex-wrap gap-2">
                                                         <button
-                                                            onClick={() => toggleMenuAccion(p.usuario_id)}
-                                                            aria-label={`Acciones para ${p.alumno_nombre || `alumno #${p.usuario_id}`}`}
-                                                            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 disabled:opacity-50"
+                                                            type="button"
+                                                            onClick={() => enviarCorreoManual(p)}
+                                                            title="Elegir plantilla y ver el correo exacto antes de mandarlo"
+                                                            data-testid={`enviar-correo-${p.usuario_id}`}
+                                                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700"
                                                         >
-                                                            ⚡ Acción Rápida
+                                                            <Mail className="h-3.5 w-3.5" /> Enviar correo
                                                         </button>
-                                                        {menuAccion === p.usuario_id && (
-                                                            <div className="absolute right-0 mt-1 w-44 bg-zinc-900 rounded-lg shadow-xl border border-zinc-700 z-20 overflow-hidden">
-                                                                <button
-                                                                    onClick={() => enviarCorreoManual(p)}
-                                                                    className="w-full px-4 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
-                                                                >
-                                                                    ✉️ Enviar correo
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => verDetalleAlumno(p.usuario_id)}
-                                                                    className="w-full px-4 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-800 border-t border-zinc-700"
-                                                                >
-                                                                    👤 Ver detalle
-                                                                </button>
-                                                            </div>
-                                                        )}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => darBeneficio(p)}
+                                                            title="Regalar clases o un descuento (y avisarle por correo si quieres)"
+                                                            data-testid={`dar-beneficio-${p.usuario_id}`}
+                                                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700"
+                                                        >
+                                                            <Gift className="h-3.5 w-3.5" /> Dar beneficio
+                                                        </button>
                                                     </div>
                                                 </td>
                                             </tr>
@@ -520,7 +648,7 @@ const Fidelizacion = () => {
                         </div>
 
                     </>
-                )}
+                ))}
             </div>
 
             {/* MODAL FICHA ALUMNO */}
@@ -546,12 +674,24 @@ const Fidelizacion = () => {
                 />
             )}
 
-            {/* MODAL ENVIAR CORREO (F1): elegir plantilla → ver el correo exacto → enviar */}
+            {/* MODAL ENVIAR CORREO (F1): elegir plantilla → ver el correo exacto → enviar.
+                La sugerencia viaja desde acá (la misma que muestra la columna "Recomendación"),
+                para que el modal arranque con la plantilla que el admin acaba de ver en la tabla. */}
             {alumnoCorreo && (
                 <ModalEnviarCorreo
                     alumno={alumnoCorreo.fila}
+                    sugerencia={sugerencias[String(alumnoCorreo.fila.usuario_id)] || null}
                     onClose={() => setAlumnoCorreo(null)}
                     onEnviado={correoEnviado}
+                />
+            )}
+
+            {/* MODAL DAR BENEFICIO (F2): tipo → valor → plan del pase → (avisar por correo) */}
+            {alumnoBeneficio && (
+                <BeneficioModal
+                    alumno={alumnoBeneficio.fila}
+                    onClose={() => setAlumnoBeneficio(null)}
+                    onCreado={beneficioDado}
                 />
             )}
         </Layout>

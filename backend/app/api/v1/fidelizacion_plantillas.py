@@ -29,6 +29,10 @@ from app.services import fidelizacion_plantillas as svc
 
 router = APIRouter()
 
+# Tope de ids que acepta una consulta en lote (`/sugerencias`): la tabla del panel que la usa
+# arranca con las filas del churn del box, y un lote sin tope sería un `IN (...)` sin techo.
+MAX_ALUMNOS = 300
+
 
 class EnvioPlantilla(BaseModel):
     """Qué plantilla y a qué alumno (el mismo cuerpo para preview y envío)."""
@@ -43,6 +47,14 @@ class ConsultaAlumno(BaseModel):
     """Sólo el alumno: es lo único que necesita la sugerencia (todavía no hay plantilla elegida)."""
 
     alumno_id: int = Field(..., gt=0, description="Alumno del box del token.")
+
+
+class ConsultaAlumnos(BaseModel):
+    """Varios alumnos: la tabla del panel pide la sugerencia de TODA su lista de una vez."""
+
+    alumno_ids: list[int] = Field(
+        ..., min_length=1, max_length=MAX_ALUMNOS,
+        description="Ids de alumnos del box del token (los de otro box se omiten).")
 
 
 def _alumno_del_box(db: Session, current_user: dict, alumno_id: int) -> Usuario:
@@ -87,6 +99,29 @@ def sugerir_plantilla(
     """
     alumno = _alumno_del_box(db, current_user, datos.alumno_id)
     return svc.sugerir(db, alumno)
+
+
+@router.post("/sugerencias")
+def sugerir_varios_alumnos(
+    datos: ConsultaAlumnos,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """La MISMA sugerencia de `/sugerir`, para varios alumnos y en UNA petición.
+
+    La usa la columna "Recomendación" del panel de Fidelización: la columna y la plantilla que
+    propone el modal de envío salen así de la MISMA regla (`svc.sugerir_lote`), que es la única
+    forma de que no puedan decir cosas distintas del mismo alumno (regla 10 del módulo).
+
+    Un alumno de OTRO box NO es un error: se omite de la respuesta. Un 404 en un lote dejaría sin
+    sugerencias a toda la tabla por una fila que no corresponde a este box.
+    """
+    alumnos = db.query(Usuario).filter(
+        Usuario.id.in_(datos.alumno_ids),
+        Usuario.tenant_id == current_user["tenant_id"],
+    ).all()
+    return {"sugerencias": {str(alumno_id): sugerencia
+                            for alumno_id, sugerencia in svc.sugerir_lote(db, alumnos).items()}}
 
 
 @router.post("/preview")

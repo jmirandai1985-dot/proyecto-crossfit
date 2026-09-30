@@ -11,6 +11,9 @@
  *
  * Props:
  *   - alumno:           fila del BI (usa `usuario_id`, `alumno_nombre` y `alumno_correo`).
+ *   - sugerencia:       la sugerencia que YA trajo la tabla (opcional): si viene, no se vuelve a
+ *                       pedir al backend, así la columna "Recomendación" y esta propuesta son la
+ *                       MISMA (`sugerir()` en lote y de a uno dan lo mismo — está probado).
  *   - onClose():        cerrar.
  *   - onEnviado(resultado): el correo SALIÓ de verdad (no en modo prueba) y quedó registrado.
  *
@@ -28,7 +31,7 @@ const ETIQUETA_ESTADO = {
     fallido: '❌ No se pudo enviar el correo',
 };
 
-const ModalEnviarCorreo = ({ alumno, onClose, onEnviado }) => {
+const ModalEnviarCorreo = ({ alumno, sugerencia: sugerenciaPrevia = null, onClose, onEnviado }) => {
     const [catalogo, setCatalogo] = useState(null);
     const [sugerencia, setSugerencia] = useState(null);
     const [plantilla, setPlantilla] = useState(null);
@@ -49,17 +52,20 @@ const ModalEnviarCorreo = ({ alumno, onClose, onEnviado }) => {
             const { data } = await api.get('/api/v1/fidelizacion/plantillas');
             setCatalogo(data);
             const disponibles = (data?.plantillas || []).map((p) => p.id);
-            // La sugerencia la define el backend. Si ese pedido falla, el modal sigue sirviendo
-            // (se elige la plantilla a mano): no se rompe el envío por una comodidad.
-            let propuesta = null;
-            try {
-                const r = await api.post('/api/v1/fidelizacion/sugerir', { alumno_id: alumnoId });
-                propuesta = r.data;
-                setSugerencia(r.data);
-            } catch {
-                // Si el pedido de la sugerencia falla, el modal sigue sirviendo (se elige a mano):
-                // el envío no se cae por una comodidad.
-                setSugerencia(null);
+            // La sugerencia la define el backend. Si la pantalla YA la trajo (columna
+            // "Recomendación"), se usa ESA: pedirla otra vez podría mostrar dos distintas.
+            let propuesta = sugerenciaPrevia;
+            setSugerencia(sugerenciaPrevia);
+            if (!sugerenciaPrevia) {
+                try {
+                    const r = await api.post('/api/v1/fidelizacion/sugerir', { alumno_id: alumnoId });
+                    propuesta = r.data;
+                    setSugerencia(r.data);
+                } catch {
+                    // Si el pedido de la sugerencia falla, el modal sigue sirviendo (se elige a mano):
+                    // el envío no se cae por una comodidad.
+                    setSugerencia(null);
+                }
             }
             // La sugerencia manda sólo si existe en el catálogo (el backend es el dueño de qué
             // se puede mandar): si no, se usa la primera disponible.
@@ -73,7 +79,7 @@ const ModalEnviarCorreo = ({ alumno, onClose, onEnviado }) => {
         } finally {
             setCargando(false);
         }
-    }, [alumnoId]);
+    }, [alumnoId, sugerenciaPrevia]);
 
     useEffect(() => { cargarCatalogo(); }, [cargarCatalogo]);
 

@@ -7,7 +7,8 @@
     notificaciones, notificaciones_enviadas, migracion,
     comprar_emergencia, fix_fechas, supervision,
     finanzas, configuracion, alumnos, asistencia, ranking, mantenimiento, kpis,
-    kpis_populate, ml, segmentacion, historial_alumno, fidelizacion_plantillas
+    kpis_populate, ml, segmentacion, historial_alumno, fidelizacion_plantillas,
+    beneficios
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -187,6 +188,10 @@ app.include_router(fidelizacion.router,
 # pantalla, pero viven en su módulo: `fidelizacion.py` es el análisis (pandas), esto el envío.
 app.include_router(fidelizacion_plantillas.router,
                    prefix="/api/v1/fidelizacion", tags=["Fidelización"])
+# Beneficios (F2): dar / listar / anular un regalo (clases gratis o descuento). Vive aparte
+# porque es la única parte de Fidelización que ESCRIBE en la cuenta del alumno.
+app.include_router(beneficios.router,
+                   prefix="/api/v1/beneficios", tags=["Beneficios"])
 app.include_router(disciplinas.router,
                    prefix="/api/v1/disciplinas", tags=["Disciplinas"])
 app.include_router(planes.router, prefix="/api/v1/planes", tags=["Planes"])
