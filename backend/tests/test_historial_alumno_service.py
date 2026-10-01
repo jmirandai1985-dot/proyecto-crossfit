@@ -524,9 +524,20 @@ def test_c1_el_dinero_pagado_sale_de_las_transacciones_reales(db, escenario):
     assert totales["pagos"] == 3
     # El precio de lista NO se cuela en el total (2 x PRECIO_PLAN sería otra cifra).
     assert totales["membresias_clp"] != 2 * PRECIO_PLAN
-    assert [i["tipo"] for i in datos["items"]] == ["bazar", "membresia", "membresia"]
 
-    vigente, vencida = [i for i in datos["items"] if i["tipo"] == "membresia"]
+    # Los 3 pagos están y la lista viene del más nuevo al más viejo (lo que promete el servicio).
+    # NO se fija el orden EXACTO de los del MISMO día: el pedido de bazar es de HOY y la membresía
+    # vigente arranca el 1° del mes, así que los días 1 del mes empatan y ese desempate no es lo que
+    # este test mide (mide de dónde sale cada monto).
+    assert sorted(i["tipo"] for i in datos["items"]) == ["bazar", "membresia", "membresia"]
+    fechas = [i["fecha"] for i in datos["items"]]
+    assert fechas == sorted(fechas, reverse=True), fechas
+
+    # Se eligen por estado y no por posición: el orden de la lista no se asume acá.
+    vigente = next(i for i in datos["items"]
+                   if i["tipo"] == "membresia" and i["estado"] == "activo")
+    vencida = next(i for i in datos["items"]
+                   if i["tipo"] == "membresia" and i["estado"] == "vencido")
     assert (vencida["monto_clp"], vencida["precio_lista_clp"], vencida["descuento_clp"],
             vencida["transacciones"]) == (COBRADO_VENCIDA, PRECIO_PLAN,
                                           DEVOLUCION_VENCIDA, 2), \
@@ -536,7 +547,7 @@ def test_c1_el_dinero_pagado_sale_de_las_transacciones_reales(db, escenario):
                                           PRECIO_PLAN - COBRADO_VIGENTE, 1), \
         "el descuento se ve en precio_lista_clp, pero se cobra lo que dice la transacción"
     # El Bazar ya viene por su total real: no tiene precio de lista ni descuento.
-    bazar = datos["items"][0]
+    bazar = next(i for i in datos["items"] if i["tipo"] == "bazar")
     assert (bazar["monto_clp"], bazar["precio_lista_clp"],
             bazar["descuento_clp"]) == (BAZAR_VALIDADO, None, 0)
 
@@ -610,8 +621,14 @@ def test_c3_mes_con_plan_coincide_con_el_criterio_compartido(db, escenario):
     }
     # Del más nuevo al más viejo: mes en curso (vigente), mes pasado (hueco) y el de hace dos.
     assert [f["con_plan"] for f in datos["items"]] == [True, False, True]
-    # La lista de suscripciones sí muestra la pendiente, marcada como no vigente.
-    assert [s["cuenta_como_vigente"] for s in datos["suscripciones"]] == [False, True, True]
+    # La lista de suscripciones se ordena por fecha de INICIO, de la más nueva a la más vieja, y
+    # muestra la pendiente marcada como no vigente. Las fechas del escenario son relativas a hoy
+    # (la pendiente arranca "hoy - 5 días" y la vigente el 1° del mes), así que en los primeros días
+    # del mes la pendiente es la MÁS NUEVA y va primera: se comprueba la REGLA (el orden por fecha y
+    # que una no cuente como vigente), no una lista literal que dependa del día en que se corre.
+    assert sorted(s["cuenta_como_vigente"] for s in datos["suscripciones"]) == [False, True, True]
+    inicios = [s["fecha_inicio"] for s in datos["suscripciones"]]
+    assert inicios == sorted(inicios, reverse=True), inicios
     assert datos["membresia_actual"]["plan"].startswith("Plan Historial TEST")
 
 
