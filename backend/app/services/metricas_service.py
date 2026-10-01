@@ -128,6 +128,34 @@ def ocupacion_promedio(db: Session, tenant_id: int, inicio: date, fin: date) -> 
     return round(asistentes / cupo * 100, 2) if cupo > 0 else 0
 
 
+def alumnos_vigentes(db: Session, tenant_id: int, fecha: date) -> int:
+    """Alumnos con suscripción VIGENTE **EN LA FECHA** `fecha` (el criterio de esta capa).
+
+    Es la MISMA definición que la cohorte de retención (`_vigente_sql`): rol `alumno`,
+    `activo = true`, una suscripción que no sea de las que nunca dieron acceso
+    (`sql_suscripcion_vigente()`, o sea las FECHAS en días de Chile) y con `planes.es_comercial`
+    (`sql_plan_comercial()`): el "Pase de regreso" da acceso pero no es un cliente.
+
+    POR QUÉ EXISTE (fix 2026-10-01): `monthly_kpis.alumnos_activos_inicio` es "cuántos alumnos
+    había al ABRIR el mes" — una métrica HISTÓRICA —, así que se calcula con esa fecha y no con el
+    estado de HOY. El populate la llenaba con `estado = 'activo'` + las fechas, así que un mes ya
+    cerrado quedaba en 0 apenas sus suscripciones vencían (y de ahí salían `frecuencia_semanal` en
+    0 y la serie de alumnos de la estacionalidad sin datos). Con esta función, un mes pasado dice
+    lo mismo hoy que el día en que se calculó.
+
+    `fecha` es un DÍA chileno (`date`), el mismo tipo que el resto de las fechas del BI: la
+    comparación la hace `vigente_hoy()`/`sql_suscripcion_vigente()` contra el día chileno de cada
+    `timestamptz`, así que el plan que vence el último día del mes cuenta ese día COMPLETO.
+
+    El marcador del SQL es `:desde` (el nombre con el que viaja la fecha en el predicado
+    compartido): es el MISMO texto que ya emitía la cohorte de retención, así que la consulta no
+    cambió al unificar el conteo (y los tests que la tienen fijada siguen valiendo).
+    """
+    return int(db.execute(
+        text("SELECT COUNT(*) FROM usuarios u WHERE " + _vigente_sql(":desde")),
+        {"tid": tenant_id, "desde": fecha}).scalar() or 0)
+
+
 def retencion_cohorte(db: Session, tenant_id: int, desde: date, hasta: date):
     """Retencion de COHORTE: de los vigentes en una fecha, cuantos siguen vigentes.
 
@@ -138,11 +166,10 @@ def retencion_cohorte(db: Session, tenant_id: int, desde: date, hasta: date):
     Devuelve (retencion_pct, base):
       - retencion_pct: entero 0-100 de 0 a 100 por construccion (es un
         subconjunto), o None si la base no llega a MIN_BASE_RETENCION.
-      - base: alumnos que habia en la cohorte (para explicar el sin dato).
+      - base: alumnos que habia en la cohorte (para explicar el sin dato). Sale de
+        `alumnos_vigentes()`, la misma funcion que cuenta "alumnos al inicio del mes" en el BI.
     """
-    sql_base = "SELECT COUNT(*) FROM usuarios u WHERE " + _vigente_sql(":desde")
-    base = int(db.execute(
-        text(sql_base), {"tid": tenant_id, "desde": desde}).scalar() or 0)
+    base = alumnos_vigentes(db, tenant_id, desde)
     if base < MIN_BASE_RETENCION:
         return None, base
     sql_siguen = (

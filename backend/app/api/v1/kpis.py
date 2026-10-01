@@ -433,10 +433,11 @@ def _indice_estacional(filas: list) -> dict:
          > 1 un mes fuerte y < 1 un mes flojo. Con promedio 0 el índice es None
          ("sin dato" NO es "0", mismo criterio que `churn_rate`).
 
-    `disponible`: False cuando NINGUNA observación es distinta de 0. Existe por un
-    hallazgo concreto: `alumnos_activos_inicio` viene en 0 en todos los meses
-    cerrados (el populate la llena con el estado de HOY de la suscripción), y sin
-    esta bandera el gráfico dibujaría una línea plana en 0 que PARECE un dato.
+    `disponible`: False cuando NINGUNA observación es distinta de 0: sin esta bandera el gráfico
+    dibujaría una línea plana en 0 que PARECE un dato. Nació del hallazgo de `alumnos_activos_inicio`
+    (venía en 0 en TODOS los meses cerrados porque se contaba con el estado de HOY de la
+    suscripción; el cálculo se corrigió el 2026-10-01 —ver `metricas_service.alumnos_vigentes`—) y
+    queda como guarda genérica: un box sin historia sigue sin serie.
     """
     por_mes = {m: [] for m in range(1, 13)}
     for f in filas:
@@ -498,11 +499,14 @@ def get_estacionalidad(
         con menos, la UI avisa que todavía no hay historia suficiente.
       · `nota_historia`: con 12 meses cada mes del calendario se observa UNA vez,
         así que es el perfil de ESA ventana, no una tendencia de varios años.
-      · `alumnos_activos.disponible` + `motivo`: `alumnos_activos_inicio` se llena
-        con el estado de HOY de la suscripción (`estado = 'activo'`), así que los
-        meses ya cerrados quedan en 0 (medido en TEST: los 12 meses del backfill
-        dan 0). La serie se publica con su valor crudo y marcada como NO
-        disponible: no se dibuja una línea plana que parezca un dato.
+      · `alumnos_activos.disponible` + `motivo`: la columna es "alumnos al ABRIR el mes" y se
+        calcula con la vigencia EN ESA FECHA (`metricas_service.alumnos_vigentes`: fechas, estado
+        y plan comercial), así que un mes cerrado ya no se cae a 0 cuando sus suscripciones vencen
+        —ese era el hallazgo del 2026-09-29, corregido el 2026-10-01—. La bandera sigue: si NINGÚN
+        mes cargado tiene alumnos, la serie se publica con su valor crudo y marcada como NO
+        disponible (no se dibuja una línea plana que parezca un dato). Con la bandera en False
+        sobre meses ya cargados, la lectura es "esos meses se calcularon antes del fix": se rehacen
+        con el populate (`POST /kpis/populate/monthly?backfill=12`).
 
     Respuesta: `filas` = 12 filas (ene..dic) con el índice de las dos series, más
     `promedios`, `suficiente`, `meses_con_datos`, `ventana` y `nota_historia`.
@@ -525,10 +529,8 @@ def get_estacionalidad(
 
     suficiente = len(cerradas) >= MESES_MIN_ESTACIONALIDAD
     motivo_alumnos = None if alumnos["disponible"] else (
-        "Todavía no hay serie histórica de alumnos activos: de cada suscripción se "
-        "guarda sólo su estado actual, así que los meses ya cerrados quedan en 0 y "
-        "la línea no se dibuja (parecería un dato). Se completa cuando se "
-        "reconstruya el histórico.")
+        "Todavía no hay serie histórica de alumnos activos: ningún mes cargado tiene alumnos con "
+        "un plan vigente al ABRIR el mes, así que la línea no se dibuja (parecería un dato).")
 
     return {
         "suficiente": suficiente,

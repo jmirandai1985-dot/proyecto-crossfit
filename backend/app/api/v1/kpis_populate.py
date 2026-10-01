@@ -378,14 +378,12 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
         alumnos_plan_comprado / alumnos_prueba * 100, 2) if alumnos_prueba else 0
 
     # ── Actividad / churn ──
-    alumnos_activos_inicio = db.query(
-        func.count(func.distinct(Suscripcion.usuario_id))
-    ).filter(
-        Suscripcion.tenant_id == tenant_id,
-        Suscripcion.estado == "activo",
-        dia_chile(Suscripcion.fecha_inicio) <= inicio,
-        dia_chile(Suscripcion.fecha_expiracion) >= inicio,
-    ).scalar() or 0
+    # "Cuántos alumnos había al ABRIR el mes": se mide con la vigencia EN ESA FECHA
+    # (`metricas.alumnos_vigentes`, el MISMO criterio que la cohorte de retención y el MRR), no
+    # con el estado de HOY. Antes era `estado == 'activo'` + las fechas: apenas las suscripciones
+    # de ese mes vencían, el mes YA CERRADO quedaba en 0 (bug corregido el 2026-10-01), y con 0 el
+    # BI no podía publicar la serie de alumnos de la estacionalidad y `frecuencia_semanal` salía 0.
+    alumnos_activos_inicio = metricas.alumnos_vigentes(db, tenant_id, inicio)
 
     alumnos_baja = db.query(func.count(Usuario.id)).filter(
         Usuario.tenant_id == tenant_id,
