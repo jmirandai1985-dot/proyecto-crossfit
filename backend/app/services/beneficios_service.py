@@ -48,14 +48,16 @@ Reglas (una definición por criterio)
    es justo lo que la corrección B evitaba dejar pasar. Otro TIPO sí puede convivir (un % y un pase).
 10. **El plan del pase lo crea el sistema, no el admin** (`plan_del_pase`): el box NO tiene que
     configurar nada. Si ya existe el plan del box llamado "Pase de regreso" se REUSA (a lo sumo uno
-    por box: dos altas simultáneas no dejan dos planes); si no existe, se crea con `precio_clp=0`,
-    `es_comercial=false` (corrección A: no es una membresía), `activo=false` (corrección C: no
-    aparece en el catálogo que compra el alumno) y las clases que el regalo entrega. Un `plan_id`
-    explícito sigue mandando, pero el panel ya no lo pide.
+    por box: el alta es un `INSERT … ON CONFLICT (tenant_id, nombre) DO NOTHING` sobre el índice
+    único de la migración 040, así que dos altas simultáneas tampoco dejan dos planes); si no
+    existe, se crea con `precio_clp=0`, `es_comercial=false` (corrección A: no es una membresía),
+    `activo=false` (corrección C: no aparece en el catálogo que compra el alumno) y las clases que
+    el regalo entrega. Un `plan_id` explícito sigue mandando, pero el panel ya no lo pide.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Final
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.estados import plan_comercial, vigente_hoy
@@ -63,7 +65,6 @@ from app.models.beneficio import Beneficio, EstadoBeneficio, TipoBeneficio
 from app.models.configuracion import ConfiguracionNegocio
 from app.models.plan import Plan
 from app.models.suscripcion import EstadoSuscripcion, Suscripcion
-from app.models.tenant import Tenant
 from app.utils.santiago import ahora_santiago, fecha_chile, fin_del_dia_chile
 
 # ── Reglas del box (una definición cada una) ──────────────────────────────────
@@ -364,31 +365,36 @@ def _plan_del_pase_guardado(db: Session, tenant_id: int) -> Plan | None:
 def _crear_plan_del_pase(db: Session, tenant_id: int, valor: int) -> Plan:
     """Crea el plan del pase del box UNA vez, aunque el alta sea simultánea (idempotente).
 
-    El `FOR UPDATE` sobre la fila del box es lo que hace idempotente al "si no existe, créalo": sin
-    él, dos altas concurrentes no ven la fila de la otra —nadie ve lo que la otra todavía no
-    confirmó— y cada una crearía su plan. Con el lock, la segunda espera, vuelve a leer y reusa el
-    del primero.
+    La idempotencia la da el ÍNDICE ÚNICO `planes (tenant_id, nombre)` (migración 040): el alta es un
+    `INSERT … ON CONFLICT (tenant_id, nombre) DO NOTHING`, así que si dos altas simultáneas llegan
+    juntas la que pierde NO inserta una segunda fila —y no hay `IntegrityError` que atrapar: el
+    `ON CONFLICT` resuelve en la misma sentencia—. El plan que queda es el de la que ganó, y la
+    relectura de abajo se lo devuelve a las dos.
+
+    Hasta la 040 esto se serializaba a mano con un `SELECT … FOR UPDATE` de la fila del box: el lock
+    era el reemplazo del índice que la tabla no tenía, y de paso serializaba TODAS las altas de
+    beneficios del box.
     """
-    # El lock se toma ANTES de leer, así la relectura de abajo ya ve el plan del que ganó la carrera.
-    db.query(Tenant.id).filter(Tenant.id == tenant_id).with_for_update().scalar()
-    ya_existe = _plan_del_pase_guardado(db, tenant_id)
-    if ya_existe is not None:
-        return ya_existe
-    # Los flags NO son negociables: `es_comercial=false` porque un pase no es una membresía
-    # (corrección A: si contara, inflaría MRR, retención, cohortes, vigentes, churn y el ML) y
-    # `activo=false` porque no se vende (corrección C: da acceso, no está en el catálogo).
-    plan = Plan(
-        tenant_id=tenant_id,
-        nombre=NOMBRE_PLAN_PASE,
-        creditos=valor,                     # las clases que este regalo entrega
-        es_ilimitado=False,
-        precio_clp=0,                       # se regala: no tiene precio de venta
-        duracion_dias=DIAS_VIGENCIA,        # el pase dura EXACTAMENTE la ventana del regalo
-        activo=False,                       # no aparece en el catálogo que compra el alumno (C)
-        es_comercial=False,                 # no es una membresía: fuera de las métricas (A)
+    db.execute(
+        pg_insert(Plan.__table__).values(
+            tenant_id=tenant_id,
+            nombre=NOMBRE_PLAN_PASE,
+            creditos=valor,                     # las clases que este regalo entrega
+            es_ilimitado=False,
+            precio_clp=0,                       # se regala: no tiene precio de venta
+            duracion_dias=DIAS_VIGENCIA,        # el pase dura EXACTAMENTE la ventana del regalo
+            activo=False,                       # no aparece en el catálogo que compra el alumno (C)
+            es_comercial=False,                 # no es una membresía: fuera de las métricas (A)
+        # Las MISMAS columnas del índice único de la 040 (es lo que hace que el conflicto exista).
+        ).on_conflict_do_nothing(index_elements=["tenant_id", "nombre"])
     )
-    db.add(plan)
-    db.flush()      # el plan ya existe en esta transacción: la suscripción puede apuntarle
+    # El plan que QUEDÓ —el nuestro o el del alta que se nos adelantó—: hay a lo sumo uno con ese
+    # (tenant_id, nombre), y la suscripción del pase necesita su id en ESTA transacción.
+    plan = _plan_del_pase_guardado(db, tenant_id)
+    if plan is None:        # no puede pasar: el INSERT de arriba deja la fila (o la dejó la otra alta)
+        raise RuntimeError(
+            f"El box {tenant_id} quedó sin plan del pase después del "
+            f"INSERT … ON CONFLICT (tenant_id, nombre) DO NOTHING.")
     return plan
 
 

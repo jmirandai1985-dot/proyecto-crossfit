@@ -17,7 +17,8 @@ feature en silencio:
     puede quedar como una membresía (corrección A);
   * la regla 10 — el plan del pase lo crea el SISTEMA (`plan_del_pase`), uno por box y reusado por los
     regalos siguientes: el admin no configura nada y el plan nace gratis, no comercial y fuera del
-    catálogo;
+    catálogo — el alta es un `INSERT … ON CONFLICT (tenant_id, nombre) DO NOTHING` sobre el índice
+    único de la migración 040 (antes se serializaba a mano con un `FOR UPDATE` del box);
   * la regla 6 — el descuento se calcula AL USARLO: al ofrecerlo no se sabe qué plan va a comprar;
   * la regla 9 (decisión 3) — **un solo regalo VIVO por alumno y tipo**: el segundo se rechaza con el
     texto de `aviso_vigente()` (el router lo devuelve como 409) y no materializa nada;
@@ -39,6 +40,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.dialects import postgresql
 
 BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
@@ -58,6 +60,9 @@ CLASES = 3
 TOPE_TEST = 20
 # Instante de referencia fijo: los tests son consistentes entre sí sin depender del reloj.
 T0 = datetime(2026, 9, 29, 12, 0, tzinfo=SANTIAGO)
+# El id que la sesión falsa le da al plan del pase que "inserta" el `ON CONFLICT DO NOTHING` (no hay
+# base: es la fila que la relectura tiene que devolver).
+ID_PLAN_CREADO = 4242
 
 
 def _beneficio(estado, vence, tipo=TipoBeneficio.clases_gratis, valor=CLASES):
@@ -187,10 +192,9 @@ class _ConsultaFalsa:
         return self.sesion.filas_vencidas
 
     def with_for_update(self):
-        # El lock del box (`SELECT tenants.id ... FOR UPDATE`) que hace idempotente al "si no existe,
-        # créalo": acá no hay concurrencia que serializar, pero la sesión falsa tiene que aceptarlo.
-        self.sesion.eventos.append(("lock_box",))
-        return self
+        raise AssertionError(
+            "el `SELECT … FOR UPDATE` del box se eliminó en la migración 040: la idempotencia del "
+            "plan del pase ahora es del índice único `planes (tenant_id, nombre)` (ON CONFLICT)")
 
     def first(self):
         # `plan` = el plan del pase del box (`plan_del_pase`); `vigente` = la suscripción del alumno.
@@ -214,15 +218,31 @@ class _SesionFalsa:
         self.eventos = []
         self.nuevos = []
         self.filas_vencidas = filas_vencidas
-        self.plan = plan            # el plan del pase que se va a regalar (si no hay vigente)
+        self.plan = plan            # el plan del pase que el box YA tiene (si no hay vigente)
         self.vigente = vigente      # la suscripción vigente comercial del alumno (o None)
         self.tope = tope
         self.vivos_hoy = list(vivos_hoy)   # lo que devuelve `vivos()` (un regalo vivo = decisión 3)
+        self.insert_plan = None     # el `INSERT … ON CONFLICT` del plan del pase (lo arma el servicio)
+        self.plan_creado = None     # la fila que ese INSERT deja: es lo que devuelve la relectura
+
+    def execute(self, sentencia, *args, **kwargs):
+        """`db.execute(INSERT … ON CONFLICT (tenant_id, nombre) DO NOTHING)` del plan del pase.
+
+        Sin base: se guarda la SENTENCIA (el test la inspecciona: ahí viven los flags del plan del
+        pase) y se deja la fila que esa inserción produciría, que es la que la relectura de
+        `_crear_plan_del_pase` devuelve.
+        """
+        self.eventos.append(("insert_plan",))
+        self.insert_plan = sentencia
+        self.plan_creado = SimpleNamespace(id=ID_PLAN_CREADO)
+        return None
 
     def query(self, *modelos, **kwargs):
         modelo = modelos[0] if modelos else None
         if modelo is Plan:
-            return _ConsultaFalsa(self, "plan", self.plan)
+            # Lo que hay guardado AHORA: el plan que el box ya tenía o el que acaba de insertar el
+            # `ON CONFLICT` (las dos relecturas del "si no existe, créalo" pasan por acá).
+            return _ConsultaFalsa(self, "plan", self.plan or self.plan_creado)
         if modelo is Suscripcion:
             return _ConsultaFalsa(self, "vigente", self.vigente)
         if modelo is Beneficio:
@@ -335,31 +355,42 @@ def test_a8b_sin_plan_del_pase_el_alta_lo_crea_en_la_misma_transaccion():
     Es el bug que esto cierra: un box sin plan del pase dejaba el regalo de clases en un 400. Acá no
     se pasa `plan_id` y el alta crea el plan del box DENTRO de su propia transacción (nada de un plan
     suelto o de un acceso sin plan).
+
+    El alta es un `INSERT … ON CONFLICT (tenant_id, nombre) DO NOTHING` (migración 040): el índice
+    único de `planes` es lo que hace idempotente al "si no existe, créalo", y los valores del INSERT
+    SON los flags del plan del pase.
     """
     alumno = SimpleNamespace(id=999, tenant_id=TENANT_ID)
     sesion = _SesionFalsa()     # sin plan del pase y sin plan vigente del alumno
 
     beneficio = svc.crear(sesion, alumno, svc.TIPO_CLASES_GRATIS, CLASES, ahora=T0)
 
-    plan = sesion.nuevos[0]
-    assert isinstance(plan, Plan)
-    assert plan.nombre == svc.NOMBRE_PLAN_PASE
-    assert (plan.precio_clp, plan.creditos) == (0, CLASES), \
+    insert = sesion.insert_plan
+    assert insert is not None and insert.table.name == "planes", \
+        "sin plan del pase el alta tiene que INSERTAR el plan del box"
+    assert "ON CONFLICT (tenant_id, nombre) DO NOTHING" in str(insert), \
+        "la idempotencia la da el índice único de la 040 (no un `FOR UPDATE` del box)"
+    valores = insert.compile(dialect=postgresql.dialect()).params
+    assert valores["tenant_id"] == TENANT_ID
+    assert valores["nombre"] == svc.NOMBRE_PLAN_PASE
+    assert (valores["precio_clp"], valores["creditos"]) == (0, CLASES), \
         "el plan del pase es gratis y nace con las clases que este regalo entrega"
-    assert (plan.es_comercial, plan.activo) == (False, False), \
+    assert (valores["es_comercial"], valores["activo"]) == (False, False), \
         "no es una membresía (corrección A) y no se vende (corrección C)"
-    assert (plan.es_ilimitado, plan.duracion_dias) == (False, svc.DIAS_VIGENCIA)
-    # El lock del box se toma antes de crear: es lo que hace idempotente al "si no existe, créalo".
-    assert ("lock_box",) in sesion.eventos
+    assert (valores["es_ilimitado"], valores["duracion_dias"]) == (False, svc.DIAS_VIGENCIA)
 
-    pase = sesion.nuevos[1]
-    assert isinstance(pase, Suscripcion)
-    assert beneficio.plan_id == plan.id and beneficio.suscripcion_id == pase.id
     pasos = [e[0] for e in sesion.eventos
              if e[0] in ("add", "flush", "vencer", "commit", "refresh")]
-    assert pasos == ["add", "flush", "add", "flush", "vencer", "add", "commit", "refresh"], \
-        "el plan, el pase y el alta van en UNA transacción (los dos `add`+`flush` son plan y pase)"
+    assert pasos == ["add", "flush", "vencer", "add", "commit", "refresh"], \
+        "el pase, el vencimiento y el alta van en UNA sola transacción (el plan lo inserta la BD)"
     assert pasos.count("commit") == 1
+
+    # La relectura devuelve la fila que dejó el INSERT y es la que usan el pase y el beneficio.
+    pase = sesion.nuevos[0]
+    assert isinstance(pase, Suscripcion)
+    assert (pase.plan_id, beneficio.plan_id) == (ID_PLAN_CREADO, ID_PLAN_CREADO)
+    assert (pase.creditos_totales, pase.creditos_disponibles) == (CLASES, CLASES)
+    assert beneficio.suscripcion_id == pase.id
 
 
 def test_a9_usar_y_anular_no_se_repiten_ni_revierten_lo_usado():

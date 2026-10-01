@@ -35,8 +35,16 @@ class Plan(Base):
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())
 
+    # ── Un nombre de plan por box ──
+    # UNIQUE porque dos planes con el mismo nombre en el mismo box son el mismo plan dos veces, y
+    # porque es lo que respalda el `ON CONFLICT (tenant_id, nombre) DO NOTHING` con el que
+    # `beneficios_service._crear_plan_del_pase` crea (una sola vez) el plan del pase. Hasta la
+    # migración 040 ese "si no existe, créalo" se serializaba a mano con un `FOR UPDATE` del box.
+    # El NOMBRE del índice es el MISMO que crea esa migración (`CREATE UNIQUE INDEX CONCURRENTLY
+    # planes_tenant_nombre`): el seed de TEST y los drills arman el esquema con `create_all()`
+    # (run_setup_test_db.py) y un nombre distinto dejaría dos objetos para la misma regla.
     __table_args__ = (
-        Index('ix_planes_tenant_nombre', 'tenant_id', 'nombre', unique=True),
+        Index('planes_tenant_nombre', 'tenant_id', 'nombre', unique=True),
     )
 
     def __repr__(self):
