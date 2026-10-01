@@ -12,8 +12,9 @@ Endpoints
 ---------
   * `GET  /api/v1/beneficios/tipos`         → el catálogo de regalos + el tope que autoriza el box.
   * `GET  /api/v1/beneficios/alumno/{id}`   → lo que el modal necesita ANTES de intentar crear:
-                                              qué regalos tiene vivos (con el texto del aviso),
-                                              su plan vigente y los planes del pase.
+                                              qué regalos tiene vivos (con el texto del aviso) y su
+                                              plan vigente (para decir si las clases se suman a ese
+                                              plan o si se le abre el pase).
   * `GET  /api/v1/beneficios`               → todos los beneficios del box (filtros + resumen F4).
   * `POST /api/v1/beneficios`               → lo da (y opcionalmente avisa por correo).
   * `POST /api/v1/beneficios/preview`       → el correo EXACTO que se le va a mandar.
@@ -28,7 +29,8 @@ Reglas de esta capa
    lee y se filtra como `vencido` usando `esta_vivo()` (la única definición de "vivo"): la
    lectura no escribe, pero tampoco puede hacer parecer usable un regalo que ya no lo es.
 3. **Nada de números de negocio en el router**: la ventana sale de `svc.ventana()`, el tope de
-   `svc.tope_descuento()` y los planes del pase de la tabla de planes.
+   `svc.tope_descuento()` y el plan del pase de `svc.plan_del_pase()` (que lo reusa o lo crea: el
+   box no configura nada).
 4. **El alumno y el beneficio se buscan dentro del box del token**: otro box es 404, no 403.
 """
 from typing import Optional
@@ -68,7 +70,7 @@ class NuevoBeneficio(BaseModel):
     valor: int = Field(..., gt=0,
                        description="% de descuento o nº de clases, según el tipo.")
     plan_id: Optional[int] = Field(
-        None, description="Plan del pase: sólo si el alumno NO tiene un plan vigente.")
+        None, description="Plan del pase (opcional): si no se manda, se usa el del box o se crea.")
     avisar_por_correo: bool = Field(
         False, description="Manda el correo del regalo después de crearlo.")
 
@@ -79,7 +81,8 @@ class ConsultaBeneficio(BaseModel):
     alumno_id: int = Field(..., gt=0)
     tipo: str
     valor: int = Field(..., gt=0)
-    plan_id: Optional[int] = None
+    plan_id: Optional[int] = Field(
+        None, description="Plan del pase (opcional): si no se manda, se usa el del box o se crea.")
 
 
 class Anulacion(BaseModel):
@@ -254,8 +257,9 @@ def estado_del_alumno(
 
     Devuelve, por tipo, el AVISO del regalo que ya tiene vivo (`aviso_vigente`: el mismo texto del
     409, así el panel lo enseña antes de mandar la petición en vez de después) y, para las clases
-    gratis, si las va a recibir en su plan o hace falta el plan del pase. Con esto el modal puede
-    decir qué va a pasar sin adivinar ni crear nada.
+    gratis, si las va a recibir en su plan o si se le va a abrir el pase. Con esto el modal puede
+    decir qué va a pasar sin adivinar ni crear nada — y sin elegir el plan del pase: ese lo resuelve
+    el servicio (`svc.plan_del_pase`: reusa el del box o lo crea).
     """
     alumno = _alumno_del_box(db, current_user, alumno_id)
     vivos = svc.vivos(db, alumno.id)
@@ -270,13 +274,6 @@ def estado_del_alumno(
     plan_nombre = None
     if plan is not None:
         plan_nombre = db.query(Plan.nombre).filter(Plan.id == plan.plan_id).scalar()
-    # Los planes del pase: los NO comerciales del box (el "Pase de regreso" vive ahí). Se
-    # pregunta por `es_comercial` y no por `activo` a propósito: un plan regalo se crea
-    # `activo=false` para que no aparezca en el catálogo que compra el alumno (corrección C).
-    planes_pase = db.query(Plan.id, Plan.nombre).filter(
-        Plan.tenant_id == alumno.tenant_id,
-        or_(Plan.es_comercial.is_(False), Plan.es_comercial.is_(None)),
-    ).order_by(Plan.id).all()
 
     return {
         "alumno": {
@@ -297,7 +294,6 @@ def estado_del_alumno(
             "creditos_disponibles": plan.creditos_disponibles,
             "vence": _iso(plan.fecha_expiracion),
         }),
-        "planes_pase": [{"id": p[0], "nombre": p[1]} for p in planes_pase],
     }
 
 
@@ -398,8 +394,10 @@ def dar_beneficio(
     regalo, y eso lo decide el alta.
 
     `409` = el alumno ya tiene un regalo VIVO de ese tipo, con el mismo texto que muestra el panel
-    (`aviso_vigente`). `422` = el tipo no está en el catálogo. `400` = el valor o el plan no sirven
-    (el tope lo decide la configuración del box y el mensaje lo explica).
+    (`aviso_vigente`). `422` = el tipo no está en el catálogo. `400` = el valor no sirve o el
+    `plan_id` es de otro box (el tope lo decide la configuración del box y el mensaje lo explica).
+    El plan del PASE no se pide: si el alumno no tiene plan vigente, el servicio usa el plan del pase
+    del box o lo crea (`svc.plan_del_pase`) — el admin no configura nada.
     """
     alumno = _alumno_del_box(db, current_user, datos.alumno_id)
     try:
@@ -409,7 +407,7 @@ def dar_beneficio(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except svc.TipoDesconocido as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except (svc.ValorInvalido, svc.DescuentoSobreTope, svc.BeneficioSinPlan) as e:
+    except (svc.ValorInvalido, svc.DescuentoSobreTope, svc.PlanInvalido) as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     correo = _avisar(db, alumno, beneficio) if datos.avisar_por_correo else None

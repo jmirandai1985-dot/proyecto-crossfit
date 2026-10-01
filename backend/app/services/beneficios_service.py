@@ -23,8 +23,9 @@ Reglas (una definición por criterio)
    `suscripciones.fecha_expiracion`), así que la ventana se RECORTA a lo que le quede al plan: los
    créditos viven en esa suscripción y el regalo no puede prometer más días que el acceso que los
    lleva. Sin plan vigente se abre el pase (una suscripción gratuita del plan no comercial, que dura
-   EXACTAMENTE la ventana). Un descuento no materializa nada: se aplica al próximo plan que compre el
-   alumno.
+   EXACTAMENTE la ventana) — y ese plan **no hay que configurarlo**: si el box no tiene su "Pase de
+   regreso", se crea acá al dar el primer regalo (regla 10). Un descuento no materializa nada: se
+   aplica al próximo plan que compre el alumno.
 4. **Corrección B: al crear un beneficio se vencen antes los vencidos — en la MISMA transacción.**
    `crear()` marca `vencido` todo `ofrecido` del mismo alumno/tipo con la ventana pasada, da de alta
    el nuevo y hace UN solo `commit()`. Si la expiración quedara para un job aparte, entre que el
@@ -45,6 +46,12 @@ Reglas (una definición por criterio)
    descuento vigente del 20 % hasta el 12-10-2026"), que el router devuelve como 409 y que el panel
    muestra en la fila. Dos regalos del mismo tipo vigentes a la vez son el mismo regalo dos veces, y
    es justo lo que la corrección B evitaba dejar pasar. Otro TIPO sí puede convivir (un % y un pase).
+10. **El plan del pase lo crea el sistema, no el admin** (`plan_del_pase`): el box NO tiene que
+    configurar nada. Si ya existe el plan del box llamado "Pase de regreso" se REUSA (a lo sumo uno
+    por box: dos altas simultáneas no dejan dos planes); si no existe, se crea con `precio_clp=0`,
+    `es_comercial=false` (corrección A: no es una membresía), `activo=false` (corrección C: no
+    aparece en el catálogo que compra el alumno) y las clases que el regalo entrega. Un `plan_id`
+    explícito sigue mandando, pero el panel ya no lo pide.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Final
@@ -56,6 +63,7 @@ from app.models.beneficio import Beneficio, EstadoBeneficio, TipoBeneficio
 from app.models.configuracion import ConfiguracionNegocio
 from app.models.plan import Plan
 from app.models.suscripcion import EstadoSuscripcion, Suscripcion
+from app.models.tenant import Tenant
 from app.utils.santiago import ahora_santiago, fecha_chile, fin_del_dia_chile
 
 # ── Reglas del box (una definición cada una) ──────────────────────────────────
@@ -65,6 +73,10 @@ DIAS_VIGENCIA: Final[int] = 15
 TOPE_DESCUENTO_DEFAULT: Final[int] = 50
 # Las clases que se pueden regalar: el regalo es acotado, no "cualquier número".
 CLASES_VALIDAS: Final[tuple] = (1, 2, 3, 5)
+# El plan que lleva el pase: NO es un plan del catálogo (no se vende, se regala), es el soporte de la
+# suscripción que materializa el acceso. Uno por box, con este nombre exacto: los regalos siguientes
+# lo REUSAN, así que el admin nunca tiene que crearlo ni elegirlo.
+NOMBRE_PLAN_PASE: Final[str] = "Pase de regreso"
 
 # ── El catálogo de regalos (una entrada por TIPO) ─────────────────────────────
 # `id` es el label del enum `tipo_beneficio` y lo que agrupa la "tasa por beneficio" de la F4.
@@ -118,8 +130,13 @@ class BeneficioYaVigente(BeneficioError):
     """
 
 
-class BeneficioSinPlan(BeneficioError):
-    """No hay plan con el que dar acceso: el alumno no tiene plan vigente y falta el del pase."""
+class PlanInvalido(BeneficioError):
+    """El `plan_id` que se pidió para el pase no sirve (no existe en este box, o es de otro).
+
+    ⚠️ NO es "el box no tiene plan del pase": eso ya no es un error, porque el plan del pase se crea
+    solo cuando hace falta (`plan_del_pase`, regla 10). Sólo se levanta si alguien pidió un plan que
+    no es de este box.
+    """
 
 
 class BeneficioNoVivo(BeneficioError):
@@ -308,22 +325,70 @@ def _exigir_valor(db: Session, alumno, entrada: dict, valor) -> int:
     return valor
 
 
-def _exigir_plan(db: Session, alumno, plan_id) -> Plan:
-    """El plan del pase: sin él no hay acceso que darle a un alumno sin plan vigente.
+def plan_del_pase(db: Session, alumno, *, valor: int, plan_id=None) -> Plan:
+    """El plan que lleva el pase de ESTE alumno: el pedido, el del box o uno nuevo (regla 10).
 
-    NO se filtra por `planes.activo`: un plan regalo se crea `activo = false` justamente para que no
-    aparezca en el catálogo que compra el alumno — usarlo como criterio de acceso dejaría el pase
-    inusable (el `activo=False` de la corrección C).
+    Un alumno sin plan vigente igual necesita un plan: la suscripción que materializa el regalo ES de
+    un plan. El admin no tiene que configurar nada:
+    1. un `plan_id` explícito manda (la API lo sigue aceptando; el panel ya no lo pide);
+    2. si el box ya tiene su "Pase de regreso" (`NOMBRE_PLAN_PASE`), se REUSA;
+    3. si no lo tiene, se CREA acá con las clases que este regalo entrega.
     """
-    if plan_id is None:
-        raise BeneficioSinPlan(
-            "El alumno no tiene un plan vigente: hace falta el plan del pase (`plan_id`) para "
-            "abrirle el acceso.")
-    plan = db.query(Plan).filter(
-        Plan.id == plan_id, Plan.tenant_id == alumno.tenant_id).first()
-    if plan is None:
-        raise BeneficioSinPlan(
-            "Ese plan no existe en este box: no se puede regalar un plan de otro box.")
+    if plan_id is not None:
+        plan = db.query(Plan).filter(
+            Plan.id == plan_id, Plan.tenant_id == alumno.tenant_id).first()
+        if plan is None:
+            raise PlanInvalido(
+                "Ese plan no existe en este box: no se puede regalar un plan de otro box.")
+        return plan
+    guardado = _plan_del_pase_guardado(db, alumno.tenant_id)
+    if guardado is not None:
+        return guardado
+    return _crear_plan_del_pase(db, alumno.tenant_id, valor)
+
+
+def _plan_del_pase_guardado(db: Session, tenant_id: int) -> Plan | None:
+    """El plan del pase que el box YA tiene (a lo sumo uno: los regalos siguientes lo reusan).
+
+    Se busca por NOMBRE: el "Pase de regreso" del box ES el plan del pase, así que si el box lo tenía
+    configurado a mano manda su configuración (no se le reescribe una fila propia). Lo que el sistema
+    crea —con los flags del diseño— es el que no existe. Si alguna vez quedaran dos filas con ese
+    nombre, se usa siempre la primera por id (determinista).
+    """
+    return db.query(Plan).filter(
+        Plan.tenant_id == tenant_id,
+        Plan.nombre == NOMBRE_PLAN_PASE,
+    ).order_by(Plan.id).first()
+
+
+def _crear_plan_del_pase(db: Session, tenant_id: int, valor: int) -> Plan:
+    """Crea el plan del pase del box UNA vez, aunque el alta sea simultánea (idempotente).
+
+    El `FOR UPDATE` sobre la fila del box es lo que hace idempotente al "si no existe, créalo": sin
+    él, dos altas concurrentes no ven la fila de la otra —nadie ve lo que la otra todavía no
+    confirmó— y cada una crearía su plan. Con el lock, la segunda espera, vuelve a leer y reusa el
+    del primero.
+    """
+    # El lock se toma ANTES de leer, así la relectura de abajo ya ve el plan del que ganó la carrera.
+    db.query(Tenant.id).filter(Tenant.id == tenant_id).with_for_update().scalar()
+    ya_existe = _plan_del_pase_guardado(db, tenant_id)
+    if ya_existe is not None:
+        return ya_existe
+    # Los flags NO son negociables: `es_comercial=false` porque un pase no es una membresía
+    # (corrección A: si contara, inflaría MRR, retención, cohortes, vigentes, churn y el ML) y
+    # `activo=false` porque no se vende (corrección C: da acceso, no está en el catálogo).
+    plan = Plan(
+        tenant_id=tenant_id,
+        nombre=NOMBRE_PLAN_PASE,
+        creditos=valor,                     # las clases que este regalo entrega
+        es_ilimitado=False,
+        precio_clp=0,                       # se regala: no tiene precio de venta
+        duracion_dias=DIAS_VIGENCIA,        # el pase dura EXACTAMENTE la ventana del regalo
+        activo=False,                       # no aparece en el catálogo que compra el alumno (C)
+        es_comercial=False,                 # no es una membresía: fuera de las métricas (A)
+    )
+    db.add(plan)
+    db.flush()      # el plan ya existe en esta transacción: la suscripción puede apuntarle
     return plan
 
 
@@ -368,7 +433,7 @@ def _materializar_acceso(db: Session, alumno, valor: int, vigente_hasta: datetim
                 vigente_actual.creditos_totales += valor
         return vigente_actual.plan_id, vigente_actual
 
-    plan = _exigir_plan(db, alumno, plan_id)
+    plan = plan_del_pase(db, alumno, valor=valor, plan_id=plan_id)
     suscripcion = Suscripcion(
         tenant_id=alumno.tenant_id,
         usuario_id=alumno.id,
@@ -403,8 +468,9 @@ def crear(db: Session, alumno, tipo, valor, *, notificacion_id=None, plan_id=Non
     La ventana NO se pide: son `DIAS_VIGENCIA` desde este instante, así nadie puede ofrecer un pase
     eterno — y se RECORTA si las clases se suman a un plan que vence antes (regla 3).
 
-    `plan_id` es el plan del PASE y sólo hace falta cuando el alumno no tiene un plan vigente
-    comercial (si tiene, las clases se le suman a ese plan) — regla 3.
+    `plan_id` es el plan del PASE y es OPCIONAL: sólo se usa cuando el alumno no tiene un plan
+    vigente comercial (si lo tiene, las clases se le suman a ese plan) y, si no se pide ninguno, el
+    plan del pase del box se reusa o se crea solo (regla 10) — el admin no configura nada.
 
     Decisión 3: si el alumno YA tiene un regalo vivo de ese tipo no se da de alta otro
     (`BeneficioYaVigente`: el router lo devuelve como 409). Corrección B: primero se vencen los

@@ -1,5 +1,5 @@
 /**
- * Modal "Dar beneficio" de Fidelización (F2): tipo → valor → plan del pase → correo.
+ * Modal "Dar beneficio" de Fidelización (F2): tipo → valor → correo.
  *
  * Qué resuelve
  * ------------
@@ -12,8 +12,9 @@
  *   * La ventana (`dias_vigencia`) y el tope del descuento (`tope_descuento`) los fija el box.
  *   * Si el alumno ya tiene un regalo VIVO del mismo tipo, el aviso se muestra ANTES de intentar
  *     crear (`avisos[tipo]`, el mismo texto del 409): no se manda una petición que va a fallar.
- *   * Si el alumno no tiene plan vigente, las clases gratis necesitan el plan del PASE, que se
- *     elige entre los planes no comerciales del box.
+ *   * Si el alumno no tiene plan vigente, las clases gratis se le abren como un pase: el PLAN del
+ *     pase lo resuelve el backend (reusa el del box o lo crea). El admin no configura nada, así que
+ *     el modal no lo pide ni manda `plan_id`.
  *
  * Props:
  *   - alumno:      fila del BI (usa `usuario_id` y `alumno_nombre`).
@@ -35,7 +36,6 @@ const BeneficioModal = ({ alumno, onClose, onCreado }) => {
     const [estado, setEstado] = useState(null);
     const [tipo, setTipo] = useState(null);
     const [valor, setValor] = useState(1);
-    const [planPase, setPlanPase] = useState('');
     const [avisar, setAvisar] = useState(false);
     const [preview, setPreview] = useState(null);
     const [previewando, setPreviewando] = useState(false);
@@ -81,13 +81,8 @@ const BeneficioModal = ({ alumno, onClose, onCreado }) => {
     const entradaTipo = (estado?.tipos || []).find((t) => t.id === tipo) || null;
     const aviso = tipo ? estado?.avisos?.[tipo] : null;
     const planVigente = estado?.plan_vigente || null;
-    // Las clases gratis necesitan el plan del PASE sólo si el alumno no tiene plan vigente.
-    const necesitaPase = Boolean(entradaTipo?.materializa && !planVigente);
-    const planesPase = estado?.planes_pase || [];
-    const sinPlanPase = necesitaPase && planesPase.length === 0;
     const tieneCorreo = Boolean(estado?.alumno?.tiene_correo);
-    const puedeCrear = Boolean(tipo) && !aviso && !sinPlanPase && !creando
-        && (!necesitaPase || Boolean(planPase));
+    const puedeCrear = Boolean(tipo) && !aviso && !creando;
 
     const pedirPreview = useCallback(async () => {
         if (!tipo || !alumnoId) return;
@@ -96,7 +91,6 @@ const BeneficioModal = ({ alumno, onClose, onCreado }) => {
         try {
             const { data } = await api.post('/api/v1/beneficios/preview', {
                 alumno_id: alumnoId, tipo, valor: Number(valor),
-                plan_id: necesitaPase && planPase ? Number(planPase) : null,
             });
             setPreview(data);
         } catch (e) {
@@ -105,7 +99,7 @@ const BeneficioModal = ({ alumno, onClose, onCreado }) => {
         } finally {
             setPreviewando(false);
         }
-    }, [alumnoId, tipo, valor, necesitaPase, planPase]);
+    }, [alumnoId, tipo, valor]);
 
     useEffect(() => {
         if (avisar) pedirPreview();
@@ -118,7 +112,6 @@ const BeneficioModal = ({ alumno, onClose, onCreado }) => {
         try {
             const { data } = await api.post('/api/v1/beneficios', {
                 alumno_id: alumnoId, tipo, valor: Number(valor),
-                plan_id: necesitaPase && planPase ? Number(planPase) : null,
                 avisar_por_correo: avisar,
             });
             setResultado(data);
@@ -238,32 +231,6 @@ const BeneficioModal = ({ alumno, onClose, onCreado }) => {
                                 </div>
                             )}
 
-                            {necesitaPase && (
-                                <div>
-                                    <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1">
-                                        Plan del pase
-                                    </label>
-                                    {sinPlanPase ? (
-                                        <p className="text-sm text-red-300">
-                                            No tiene plan vigente y este box no tiene un plan de pase
-                                            configurado (un plan no comercial): sin él no hay acceso
-                                            que regalarle.
-                                        </p>
-                                    ) : (
-                                        <select
-                                            value={planPase} data-testid="beneficio-plan-pase"
-                                            onChange={(e) => setPlanPase(e.target.value)}
-                                            className="bg-zinc-800 border border-zinc-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
-                                        >
-                                            <option value="">Elegir el plan del pase…</option>
-                                            {planesPase.map((p) => (
-                                                <option key={p.id} value={p.id}>{p.nombre}</option>
-                                            ))}
-                                        </select>
-                                    )}
-                                </div>
-                            )}
-
                             {/* Qué va a pasar, con los datos REALES del alumno (no una suposición). */}
                             {entradaTipo && (
                                 <p className="text-xs text-zinc-400" data-testid="beneficio-efecto">
@@ -272,7 +239,8 @@ const BeneficioModal = ({ alumno, onClose, onCreado }) => {
                                     ) : planVigente ? (
                                         <>Se SUMAN a su plan vigente <span className="text-zinc-200">{planVigente.nombre}</span> (vence el {fmtFechaChile(planVigente.vence)}). </>
                                     ) : (
-                                        <>Se le abre un pase con esas clases, sin esperar ningún pago. </>
+                                        <>Se le abre el pase del box, sin esperar ningún pago: su plan interno
+                                            se crea solo la primera vez. </>
                                     )}
                                     Vigencia: {estado.dias_vigencia} días desde que lo des.
                                 </p>

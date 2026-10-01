@@ -3,8 +3,8 @@
 Qué cubre (todo visto desde HTTP, la misma app que sirve el navegador)
 ---------------------------------------------------------------------
   * ACL y tenant: alumno y coach no entran; el alumno/beneficio de otro box es 404.
-  * El alta: descuento sin correo, y clases gratis que abren un PASE (plan no comercial) o se
-    SUMAN al plan vigente del alumno.
+  * El alta: descuento sin correo, y clases gratis que abren un PASE (plan no comercial: el del box o
+    uno que el sistema crea solo, porque el admin no configura nada) o se SUMAN al plan vigente.
   * La regla del regalo único: un segundo beneficio VIVO del mismo tipo es **409 con el texto de
     `aviso_vigente()`** — el mismo que el panel muestra en la fila — y no crea ni toca créditos.
   * La anulación: el motivo es OBLIGATORIO (422 sin él) y revoca el pase; repetirla es 409.
@@ -18,6 +18,7 @@ Reglas de test del proyecto: se escribe y se RESTAURA en la rama TEST (nunca PRO
 correo real y nada depende de datos que ya existan en TEST (todo sale del escenario).
 """
 import sys
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -151,6 +152,68 @@ def escenario(db):
         print(f"\n[WARN] no se pudo limpiar el escenario de beneficios: {e}")
 
 
+@pytest.fixture(scope="module")
+def caja(db):
+    """Un BOX recién creado: sin planes, sin plan del pase y sin suscripciones.
+
+    Es el escenario del bug que esto arregla —un box al que nunca le configuraron el plan del pase—
+    y por eso el box se CREA acá en vez de usar el tenant 1: "no tiene plan del pase" tiene que ser un
+    HECHO del escenario, no una suposición sobre lo que ya haya en TEST. Se borra entero al final (en
+    orden de dependencias: las FK a `planes` y `suscripciones` no son CASCADE), así que no deja rastro.
+    """
+    sufijo = f"{datetime.now():%Y%m%d%H%M%S%f}"
+    ids = []
+    tenant = admin = None
+    try:
+        tenant = db.execute(text("""
+            INSERT INTO tenants (nombre, subdomain, public_id, activo, created_at)
+            VALUES (:n, :s, :pub, true, :alta) RETURNING id"""),
+            {"n": f"Box Beneficios API TEST {sufijo}", "s": f"box-beneficios-{sufijo}",
+             "pub": str(uuid.uuid4()), "alta": T0}).scalar()
+        admin = db.execute(text("""
+            INSERT INTO usuarios (tenant_id, rut, nombre, correo, password_hash, rol, activo,
+                                  estado, created_at)
+            VALUES (:t, '11111111-1', 'Admin Beneficios TEST', :c, 'x', 'administrador', true,
+                    'activo', :alta) RETURNING id"""),
+            {"t": tenant, "c": f"caja.admin.{sufijo}@test.local", "alta": T0}).scalar()
+        # Un alumno por test: los regalos viven en el alumno, así ningún test depende del orden.
+        for n in (1, 2, 3, 4):
+            ids.append(db.execute(text("""
+                INSERT INTO usuarios (tenant_id, rut, nombre, correo, password_hash, rol, activo,
+                                      estado, created_at)
+                VALUES (:t, :r, :nom, :c, 'x', 'alumno', true, 'activo', :alta)
+                RETURNING id"""),
+                {"t": tenant, "r": f"2{n}{sufijo[-7:]}-{n}",
+                 "nom": f"Alumno Caja Nueva TEST {n}",
+                 "c": f"caja.nueva{n}.{sufijo}@test.local", "alta": T0}).scalar())
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    def token(usuario_id, rol):
+        """Un token REAL del box nuevo (el mismo camino que el navegador)."""
+        return {"Authorization": "Bearer " + create_access_token({
+            "usuario_id": usuario_id, "tenant_id": tenant, "rol": rol,
+            "correo": "caja.nueva1@test.local"})}
+
+    try:
+        yield {"db": db, "tenant_id": tenant, "admin": admin, "alumnos": ids,
+               "alumno_id": ids[0], "otro_id": ids[1], "sufijo": sufijo,
+               "cabeceras": token(admin, "administrador"),
+               "cabeceras_alumno": token(ids[0], "alumno")}
+    finally:
+        db.rollback()
+        try:
+            for tabla in ("beneficios", "suscripciones", "planes", "usuarios"):
+                db.execute(text(f"DELETE FROM {tabla} WHERE tenant_id = :t"), {"t": tenant})
+            db.execute(text("DELETE FROM tenants WHERE id = :t"), {"t": tenant})
+            db.commit()
+        except Exception as e:      # el borrado no debe tapar el fallo real del test
+            db.rollback()
+            print(f"\n[WARN] no se pudo limpiar el box de prueba: {e}")
+
+
 def _valor_descuento(db):
     """Un % válido para este box, sin depender de cómo esté configurado el tope en TEST."""
     return min(10, svc.tope_descuento(db, TENANT_ID))
@@ -166,6 +229,14 @@ def _beneficios_de(db, alumno_id):
 def _creditos(db, suscripcion_id):
     return db.execute(text("SELECT creditos_disponibles FROM suscripciones WHERE id = :i"),
                       {"i": suscripcion_id}).scalar()
+
+
+def _planes_del_pase(db, tenant_id):
+    """Las filas del plan del pase del box: cuántas hay y con qué flags las dejó el alta."""
+    return db.execute(text("""
+        SELECT id, nombre, creditos, precio_clp, activo, es_comercial
+        FROM planes WHERE tenant_id = :t AND nombre = :n ORDER BY id"""),
+        {"t": tenant_id, "n": svc.NOMBRE_PLAN_PASE}).mappings().all()
 
 
 def _dar(cliente, cabeceras, alumno_id, tipo, valor, **extra):
@@ -289,34 +360,70 @@ def test_b3_un_segundo_regalo_vivo_del_mismo_tipo_es_409_con_el_aviso_del_panel(
         "un alta rechazada no puede dejar una segunda fila"
 
 
-def test_b4_sin_plan_vigente_las_clases_abren_el_pase(cliente, tokens, db, escenario):
-    """Regla 3: sin plan vigente la alta NECESITA el plan del pase, y con él abre el acceso."""
-    sin_plan = _dar(cliente, tokens["admin"], escenario["alumno_id"],
-                    svc.TIPO_CLASES_GRATIS, CLASES)
+def test_b4_un_box_sin_plan_del_pase_se_lo_crea_solo(cliente, caja, db):
+    """El bug: un box sin plan del pase no podía regalar clases (400 y nada pasaba).
 
-    assert sin_plan.status_code == 400, "sin plan del pase no hay acceso que dar"
-    assert "plan_id" in sin_plan.json()["detail"]
-    assert _beneficios_de(db, escenario["alumno_id"]) == []
+    Ahora el admin no configura nada y NO manda `plan_id`: el alta usa el plan del pase del box o lo
+    crea, y abre el pase en el mismo movimiento.
+    """
+    respuesta = _dar(cliente, caja["cabeceras"], caja["alumnos"][0], svc.TIPO_CLASES_GRATIS, CLASES)
 
-    con_pase = _dar(cliente, tokens["admin"], escenario["alumno_id"],
-                    svc.TIPO_CLASES_GRATIS, CLASES, plan_id=escenario["plan_pase_id"])
-
-    assert con_pase.status_code == 201
-    beneficio = con_pase.json()["beneficio"]
+    assert respuesta.status_code == 201, respuesta.json()
+    beneficio = respuesta.json()["beneficio"]
     assert beneficio["estado"] == "vigente" and beneficio["valor"] == CLASES
-    filas = _beneficios_de(db, escenario["alumno_id"])
+    # El plan del pase: UNO por box, y con los flags del diseño (A: no es membresía, C: no se vende).
+    planes = _planes_del_pase(db, caja["tenant_id"])
+    assert len(planes) == 1, "el box no tenía plan del pase: se crea uno y no más de uno"
+    plan = planes[0]
+    assert plan["nombre"] == svc.NOMBRE_PLAN_PASE
+    assert (plan["precio_clp"], plan["creditos"]) == (0, CLASES)
+    assert plan["es_comercial"] is False
+    assert plan["activo"] is False
+    # Y el acceso quedó DADO: el pase es la suscripción del alumno, con las clases regaladas.
+    filas = _beneficios_de(db, caja["alumnos"][0])
     assert len(filas) == 1
-    pase = filas[0]
-    assert pase.plan_id == escenario["plan_pase_id"]
-    assert pase.suscripcion_id is not None, "el pase se materializa al darlo (sin aceptación)"
-    assert _creditos(db, pase.suscripcion_id) == CLASES
-    # El pase es un plan NO comercial: no cuenta como membresía (corrección A) pero da acceso (C).
-    assert db.execute(text("SELECT es_comercial FROM planes WHERE id = :p"),
-                      {"p": escenario["plan_pase_id"]}).scalar() is False
-    estado = cliente.get(f"{BASE_BENEFICIOS}/alumno/{escenario['alumno_id']}",
-                         headers=tokens["admin"]).json()
+    assert filas[0].plan_id == plan["id"]
+    assert filas[0].suscripcion_id is not None, "el pase se materializa al darlo (sin aceptación)"
+    assert _creditos(db, filas[0].suscripcion_id) == CLASES
+    # El modal, con lo que devuelve el backend, ya puede decir que el alumno tiene el regalo vivo.
+    estado = cliente.get(f"{BASE_BENEFICIOS}/alumno/{caja['alumnos'][0]}",
+                         headers=caja["cabeceras"]).json()
     assert estado["plan_vigente"] is None, "un pase no es 'el plan del alumno'"
-    assert estado["planes_pase"], "el modal tiene que poder ofrecer el plan del pase"
+    assert estado["avisos"][svc.TIPO_CLASES_GRATIS], "el panel ya ve el regalo vivo"
+
+
+def test_b4b_el_regalo_siguiente_reusa_el_mismo_plan_del_pase(cliente, caja, db):
+    """Uno por box: el plan del pase se crea UNA vez y los regalos siguientes lo reusan."""
+    primero = _dar(cliente, caja["cabeceras"], caja["alumnos"][1], svc.TIPO_CLASES_GRATIS, CLASES)
+    assert primero.status_code == 201, primero.json()
+    plan = _planes_del_pase(db, caja["tenant_id"])[0]
+
+    segundo = _dar(cliente, caja["cabeceras"], caja["alumnos"][2], svc.TIPO_CLASES_GRATIS, 5)
+
+    assert segundo.status_code == 201, segundo.json()
+    assert [p["id"] for p in _planes_del_pase(db, caja["tenant_id"])] == [plan["id"]], \
+        "el segundo regalo no crea un plan nuevo: reusa el del box"
+    # Los créditos del regalo viven en la SUSCRIPCIÓN del alumno, no en la fila del plan: el plan del
+    # box no se reescribe en cada regalo (cada pase nuevo es una suscripción nueva del mismo plan).
+    pase = _beneficios_de(db, caja["alumnos"][2])[0]
+    assert pase.plan_id == plan["id"]
+    assert _creditos(db, pase.suscripcion_id) == 5
+
+
+def test_b4c_el_plan_del_pase_no_se_le_ofrece_al_alumno(cliente, caja, db):
+    """Da acceso pero no se vende: el box tiene el plan del pase y el catálogo está vacío."""
+    assert _dar(cliente, caja["cabeceras"], caja["alumnos"][3],
+                svc.TIPO_CLASES_GRATIS, CLASES).status_code == 201
+
+    # `activo=true` es el catálogo que se compra: ahí NO está (si estuviera, el alumno podría comprar
+    # su propio regalo). Se mira también con los ojos del alumno.
+    for cabeceras in (caja["cabeceras"], caja["cabeceras_alumno"]):
+        catalogo = cliente.get("/api/v1/planes", params={"activo": "true"},
+                               headers=cabeceras).json()
+        assert catalogo == [], "el plan del pase no se le ofrece al alumno para comprar"
+    # Lo que sí existe es la fila del pase: es la que lleva la suscripción del regalo.
+    assert len(_planes_del_pase(db, caja["tenant_id"])) == 1
+
 
 
 def test_b5_el_tipo_y_el_valor_se_validan_antes_de_regalar(cliente, tokens, db, escenario):

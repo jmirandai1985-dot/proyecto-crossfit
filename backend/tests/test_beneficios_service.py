@@ -15,6 +15,9 @@ feature en silencio:
   * la regla 3 — el acceso se materializa AL DARLO: con plan vigente se SUMAN las clases (y **caducan
     con ese plan**: la ventana se recorta a su expiración), sin plan se abre el pase, y el pase NO
     puede quedar como una membresía (corrección A);
+  * la regla 10 — el plan del pase lo crea el SISTEMA (`plan_del_pase`), uno por box y reusado por los
+    regalos siguientes: el admin no configura nada y el plan nace gratis, no comercial y fuera del
+    catálogo;
   * la regla 6 — el descuento se calcula AL USARLO: al ofrecerlo no se sabe qué plan va a comprar;
   * la regla 9 (decisión 3) — **un solo regalo VIVO por alumno y tipo**: el segundo se rechaza con el
     texto de `aviso_vigente()` (el router lo devuelve como 409) y no materializa nada;
@@ -183,8 +186,14 @@ class _ConsultaFalsa:
         self.sesion.eventos.append(("vencer", dict(valores)))
         return self.sesion.filas_vencidas
 
+    def with_for_update(self):
+        # El lock del box (`SELECT tenants.id ... FOR UPDATE`) que hace idempotente al "si no existe,
+        # créalo": acá no hay concurrencia que serializar, pero la sesión falsa tiene que aceptarlo.
+        self.sesion.eventos.append(("lock_box",))
+        return self
+
     def first(self):
-        # `plan` = el plan del pase (`_exigir_plan`); `vigente` = la suscripción vigente del alumno.
+        # `plan` = el plan del pase del box (`plan_del_pase`); `vigente` = la suscripción del alumno.
         self.sesion.eventos.append(("buscar_" + self.modo,))
         return self.valor
 
@@ -318,6 +327,39 @@ def test_a8_el_acceso_se_materializa_al_enviar_el_correo():
     # Y el beneficio apunta al acceso que acaba de abrir.
     assert beneficio.suscripcion_id == pase.id
     assert beneficio.plan_id == plan.id
+
+
+def test_a8b_sin_plan_del_pase_el_alta_lo_crea_en_la_misma_transaccion():
+    """Regla 10: el plan del pase lo crea el SISTEMA — el admin no lo elige ni lo configura.
+
+    Es el bug que esto cierra: un box sin plan del pase dejaba el regalo de clases en un 400. Acá no
+    se pasa `plan_id` y el alta crea el plan del box DENTRO de su propia transacción (nada de un plan
+    suelto o de un acceso sin plan).
+    """
+    alumno = SimpleNamespace(id=999, tenant_id=TENANT_ID)
+    sesion = _SesionFalsa()     # sin plan del pase y sin plan vigente del alumno
+
+    beneficio = svc.crear(sesion, alumno, svc.TIPO_CLASES_GRATIS, CLASES, ahora=T0)
+
+    plan = sesion.nuevos[0]
+    assert isinstance(plan, Plan)
+    assert plan.nombre == svc.NOMBRE_PLAN_PASE
+    assert (plan.precio_clp, plan.creditos) == (0, CLASES), \
+        "el plan del pase es gratis y nace con las clases que este regalo entrega"
+    assert (plan.es_comercial, plan.activo) == (False, False), \
+        "no es una membresía (corrección A) y no se vende (corrección C)"
+    assert (plan.es_ilimitado, plan.duracion_dias) == (False, svc.DIAS_VIGENCIA)
+    # El lock del box se toma antes de crear: es lo que hace idempotente al "si no existe, créalo".
+    assert ("lock_box",) in sesion.eventos
+
+    pase = sesion.nuevos[1]
+    assert isinstance(pase, Suscripcion)
+    assert beneficio.plan_id == plan.id and beneficio.suscripcion_id == pase.id
+    pasos = [e[0] for e in sesion.eventos
+             if e[0] in ("add", "flush", "vencer", "commit", "refresh")]
+    assert pasos == ["add", "flush", "add", "flush", "vencer", "add", "commit", "refresh"], \
+        "el plan, el pase y el alta van en UNA transacción (los dos `add`+`flush` son plan y pase)"
+    assert pasos.count("commit") == 1
 
 
 def test_a9_usar_y_anular_no_se_repiten_ni_revierten_lo_usado():

@@ -132,7 +132,12 @@ es la F3 (seguimiento del correo) y la F4 (las métricas que la pestaña Benefic
   esa suscripción y el regalo no puede prometer más días que el acceso que los lleva.
 - **Materialización al darlo**: si el alumno tiene un plan vigente comercial (corrección A), las
   clases se **suman** a esa suscripción; si no tiene, se le abre el **pase** (una suscripción del plan
-  no comercial, que dura exactamente la ventana). Un `descuento` no materializa nada.
+  no comercial, que dura exactamente la ventana). Ese plan **lo crea el sistema**: el admin no
+  configura nada. Si el box ya tiene su "Pase de regreso" (`beneficios_service.NOMBRE_PLAN_PASE`) se
+  **reusa** (si lo configuró a mano, manda esa configuración); si no existe, se crea `precio_clp=0`,
+  `es_comercial=false` (A), `activo=false` (C) y con las clases del regalo. Uno por box: la creación
+  bloquea la fila del box (`FOR UPDATE`) para que dos altas simultáneas no dejen dos planes. Un
+  `descuento` no materializa nada.
 - **Un solo regalo VIVO por alumno y tipo** (decisión 3): si ya tiene uno, el alta se rechaza con
   **409** y el texto de `beneficios_service.aviso_vigente()` ("Ya tiene un descuento vigente del 20 %
   hasta el 12-10-2026"), el MISMO que el panel muestra en la fila. Otro tipo sí puede convivir.
@@ -297,6 +302,9 @@ cd backend; $env:ENVIRONMENT='test'; py -3.12 -m pytest tests/test_fidelizacion_
 
 # Servicio de beneficios de la F2 (escribe y RESTAURA en la rama TEST)
 cd backend; $env:ENVIRONMENT='test'; py -3.12 -m pytest tests/test_beneficios_service.py -q
+
+# API de beneficios de la F2 (el alta HTTP: un box sin plan del pase se lo crea solo y lo reusa)
+cd backend; $env:ENVIRONMENT='test'; py -3.12 -m pytest tests/test_beneficios_api.py -q
 
 # Marca y contacto de los correos (bloque C: encabezado, asuntos en texto plano y el WhatsApp del
 # box; escribe y RESTAURA el whatsapp de la configuración del box en la rama TEST)
