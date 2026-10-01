@@ -969,18 +969,54 @@ def test_cr_el_mrr_del_mes_anterior_y_el_churn_son_de_fecha_no_del_estado_de_hoy
 
 
 def test_cs_el_mrr_del_mes_anterior_llega_al_sql_con_el_ultimo_dia_del_mes(monkeypatch, mails):
-    """El SQL que sale al proceso corta el mes anterior en `fin_ant` (último día del mes anterior):
+    """El SQL que sale al proceso corta el mes ANTERIOR AL REPORTADO en `fin_ant` (su último día):
     si alguien lo cambia por `current_date`, la variación de MRR se compara contra el mes en curso."""
     rastro = _psql_falso(monkeypatch, _ctx(dup_rut=[["12345678-9", "2"]]))   # rojo para leer el mail
 
     assert men.main() == men.EXIT_INTEGRIDAD
     sql_ant = next(s for s in rastro["sql"] if "AS mrr_mes_anterior" in s)
-    fin_ant = date.today().replace(day=1) - timedelta(days=1)
+    # El reporte del día 1 es el mes CERRADO, así que su "mes anterior" es el de dos meses atrás:
+    # el borde se calcula desde el período reportado, no desde hoy (ver `periodo_reporte`).
+    fin_ant = men.periodo_reporte(date.today())["ini"] - timedelta(days=1)
 
     assert f"(s.fecha_inicio AT TIME ZONE 'America/Santiago')::date <= '{fin_ant.isoformat()}'::date" in sql_ant
     assert f"(s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date >= '{fin_ant.isoformat()}'::date" in sql_ant
     assert "estado = 'activo'" not in sql_ant
     assert "{fin_ant}" not in sql_ant                       # el placeholder se resolvió
+
+
+def test_ct_el_dia_1_reporta_el_mes_cerrado_y_el_dia_15_el_parcial():
+    """El correo del día 1 reporta el MES CERRADO (el anterior completo); el del 15, el mes EN CURSO
+    rotulado "parcial".
+
+    Bug corregido (2026-10-01): el reporte se calculaba siempre sobre el mes EN CURSO (`{ini}` = el
+    día 1 del mes de hoy), así que el run del día 1 —a las 05:00, con el mes recién empezado— mandaba
+    ingresos 0, variación −100 % y el churn de una cohorte de 30 días que no era la del mes que el
+    admin creía estar leyendo. El día 15 sigue reportando el mes en curso, pero ahora lo dice.
+    """
+    # Día 1: el mes CERRADO anterior, COMPLETO (no el que recién empieza).
+    dia1 = men.periodo_reporte(date(2026, 10, 1))
+    assert (dia1["ini"], dia1["fin"]) == (date(2026, 9, 1), date(2026, 9, 30))
+    assert dia1["mes"] == "2026-09 (cerrado)" and dia1["parcial"] is False
+
+    # Día 15: el mes EN CURSO hasta HOY, con el rótulo puesto.
+    dia15 = men.periodo_reporte(date(2026, 10, 15))
+    assert (dia15["ini"], dia15["fin"]) == (date(2026, 10, 1), date(2026, 10, 15))
+    assert dia15["mes"] == "2026-10 (parcial)" and dia15["parcial"] is True
+
+    # El día 1 cruza el año sin caso especial (enero -> diciembre del año anterior).
+    enero = men.periodo_reporte(date(2027, 1, 1))
+    assert (enero["ini"], enero["fin"]) == (date(2026, 12, 1), date(2026, 12, 31))
+    assert enero["mes"] == "2026-12 (cerrado)"
+
+    # El período acota los DATOS del mes: sin el borde de arriba, el reporte del mes cerrado se
+    # llevaba también lo que hubiera del mes que recién empieza.
+    for clave in ("nuevos_alumnos_mes", "ingresos_mes", "bajas_mes"):
+        assert "'{ini}'::date" in men.SQL_REPORTE[clave], clave
+        assert "'{fin}'::date" in men.SQL_REPORTE[clave], clave
+    # `planes_vencidos_mes` es la excepción A PROPÓSITO: cuenta cuándo se MARCÓ el vencido, y los
+    # planes vencen el último día del mes (el run del día 1 los marca al empezar el mes siguiente).
+    assert "'{fin}'" not in men.SQL_REPORTE["planes_vencidos_mes"]
 
 
 # ── La regla del correo y el orden de los exit codes nuevos ───────────────────

@@ -1036,21 +1036,30 @@ def consultas_purga(cfg: dict) -> list:
 
 # Mismo criterio que reporte_estadisticas.py. El corte del mes se arma en Python como
 # 'YYYY-MM-DD'::date (nunca texto que venga de afuera) y se evalúa en la TZ de Chile.
+#
+# `{ini}`/`{fin}` son el período REPORTADO, que decide `periodo_reporte()`: el día 1 el mes cerrado
+# anterior (completo) y el día 15 el mes en curso (parcial). Las consultas que miden DATOS DEL
+# PERÍODO van acotadas por los dos bordes: sin el borde de arriba, el día 1 el mes cerrado se
+# llevaba también lo que hubiera del mes que recién empieza.
 SQL_REPORTE = {
     "total_alumnos": "SELECT count(*)::text FROM usuarios WHERE rol = 'alumno'",
     "alumnos_activos": "SELECT count(*)::text FROM usuarios WHERE rol = 'alumno' AND activo = true",
     "planes_activos": SQL_SUSCRIPCIONES_ACTIVAS,
+    # ABIERTA a propósito (sin `{fin}`): cuenta cuándo se MARCÓ el vencido, y los planes vencen el
+    # último día del mes — el run del día 1 los marca a las 05:00 del mes siguiente. Con el borde
+    # de arriba, el reporte del mes cerrado (el que sale justo ese día) los perdería todos.
     "planes_vencidos_mes": (
         "SELECT count(*)::text FROM suscripciones "
         "WHERE estado = 'vencido' AND updated_at >= '{ini}'::date"
     ),
     "nuevos_alumnos_mes": (
         "SELECT count(*)::text FROM usuarios "
-        "WHERE rol = 'alumno' AND created_at >= '{ini}'::date"
+        "WHERE rol = 'alumno' AND created_at BETWEEN '{ini}'::date"
+        " AND '{fin}'::date + interval '1 day'"
     ),
     "ingresos_mes": (
         "SELECT COALESCE(sum(monto), 0)::text FROM transacciones_financieras "
-        "WHERE tipo = 'ingreso' AND fecha >= '{ini}'::date"
+        "WHERE tipo = 'ingreso' AND fecha BETWEEN '{ini}'::date AND '{fin}'::date"
     ),
     "ingresos_mes_anterior": (
         "SELECT COALESCE(sum(monto), 0)::text FROM transacciones_financieras "
@@ -1093,7 +1102,8 @@ SQL_REPORTE = {
     ),
     "bajas_mes": (
         "SELECT count(*)::text AS bajas_mes FROM usuarios WHERE tenant_id = {tid} "
-        "AND rol = 'alumno' AND fecha_baja IS NOT NULL AND fecha_baja >= '{ini}'::date"
+        "AND rol = 'alumno' AND fecha_baja IS NOT NULL"
+        " AND fecha_baja BETWEEN '{ini}'::date AND '{fin}'::date"
     ),
     "retencion_base": (
         "SELECT count(*)::text AS retencion_base FROM usuarios u "
@@ -1421,22 +1431,58 @@ def neon_uso(url: str, limite_mb: int, umbral_pct: float) -> dict:
 
 # Fase 7: además del reporte de la Fase 6, el MISMO run agrega MRR, variación de MRR,
 # retención/churn de la cohorte de 30 días y bajas del mes (bloque E del diseño).
-def reporte_mes(url: str, cfg: dict) -> dict:
+def periodo_reporte(hoy: date) -> dict:
+    """QUÉ mes reporta el correo, decidido por el DÍA del run (el Cron Job corre los días 1 y 15).
+
+    Bug corregido (2026-10-01): el reporte se calculaba SIEMPRE sobre el mes EN CURSO (`{ini}` = el
+    día 1 del mes de hoy), así que el run del día 1 —a las 05:00, con el mes recién empezado—
+    mandaba el mes vacío: ingresos 0, variación −100 % y un churn/retención de la cohorte de 30
+    días que no tiene nada que ver con el mes que el admin cree estar leyendo. Ahora:
+
+      · día 1  -> el MES CERRADO inmediatamente anterior, COMPLETO (sus datos ya están todos).
+      · día 15 -> el mes EN CURSO, rotulado "parcial" (a mitad de mes los números son de un mes a
+                  medias, y el rótulo lo dice: no se compara con un mes cerrado).
+
+    Devuelve `{"ini", "fin", "mes", "parcial"}`: `ini`/`fin` son los bordes del período (`date`,
+    días chilenos; van al SQL de `SQL_REPORTE`) y `mes` es el rótulo que sale en el correo.
+
+    PURA (sin base, sin reloj y sin entorno): recibe la fecha, así el día 1 y el día 15 se prueban
+    sin correr el mantenimiento.
+    """
+    if hoy.day == 1:
+        fin = hoy - timedelta(days=1)          # último día del mes anterior
+        ini = fin.replace(day=1)
+        parcial = False
+    else:
+        ini = hoy.replace(day=1)
+        fin = hoy                              # el mes en curso, hasta HOY
+        parcial = True
+    etiqueta = f"{ini:%Y-%m}" + (" (parcial)" if parcial else " (cerrado)")
+    return {"ini": ini, "fin": fin, "mes": etiqueta, "parcial": parcial}
+
+
+def reporte_mes(url: str, cfg: dict, hoy: date | None = None) -> dict:
     """Las mismas métricas de `reporte_estadisticas.py` (sin escribir el JSON local).
 
     No se escribe ningún archivo: en un Cron Job de Render el filesystem es efímero, así
     que el "reporte" es el mail (y el log).
+
+    El PERÍODO es el de `periodo_reporte()` (día 1 = mes cerrado anterior · día 15 = mes en curso)
+    y `hoy` se puede inyectar para probarlo. El mes anterior del bloque E (`{fin_ant}`) es el mes
+    ANTERIOR AL REPORTADO, así la variación de MRR compara el mes que se está leyendo contra el
+    que le precede (no contra hoy).
     """
-    hoy = date.today()
-    ini = hoy.replace(day=1)
+    hoy = hoy or date.today()
+    periodo = periodo_reporte(hoy)
+    ini, fin = periodo["ini"], periodo["fin"]
     ini_ant = (ini - timedelta(days=1)).replace(day=1)
     fin_ant = ini - timedelta(days=1)      # último día del mes anterior (MMR de referencia)
     hace30 = hoy - timedelta(days=30)      # cohorte de retención: igual que el BI
     datos = {}
     for clave, plantilla in SQL_REPORTE.items():
         crudo = psql_escalar(url, plantilla.format(
-            ini=ini.isoformat(), ini_ant=ini_ant.isoformat(), fin_ant=fin_ant.isoformat(),
-            hace30=hace30.isoformat(), tid=int(cfg["tenant_id"])))
+            ini=ini.isoformat(), fin=fin.isoformat(), ini_ant=ini_ant.isoformat(),
+            fin_ant=fin_ant.isoformat(), hace30=hace30.isoformat(), tid=int(cfg["tenant_id"])))
         datos[clave] = (float(crudo or 0)
                         if clave.startswith(("ingresos", "mrr")) else _int_o_cero(crudo))
 
@@ -1460,8 +1506,34 @@ def reporte_mes(url: str, cfg: dict) -> dict:
         datos["retencion_30d_pct"] = None
         datos["churn_30d_pct"] = None
         datos["churn_nota"] = f"sin dato: base {base} < MIN_BASE_RETENCION {minimo}"
-    datos["mes"] = ini.isoformat()
+    # El rótulo del período en el correo: "2026-09 (cerrado)" / "2026-10 (parcial)". El mes en
+    # curso se marca a propósito, para que nadie lea un mes a medias como si fuera uno completo.
+    datos["mes"] = periodo["mes"]
+    datos["parcial"] = periodo["parcial"]
     return datos
+
+
+def reporte_tras_cambios(datos: dict, cfg: dict) -> None:
+    """Lee el reporte del mes DESPUÉS de las transacciones, UNA sola vez por run.
+
+    POR QUÉ DESPUÉS (fix 2026-10-01): las consultas que cuentan clientes y dinero se leen de la
+    base YA mantenida, así el correo no mezcla dos fotos del mismo box. Antes se leía en la fase de
+    lecturas, ANTES de los cambios: el run del día 1 mandaba `planes_activos` con las suscripciones
+    que estaba por vencer y `alumnos_vigentes`/`mrr` de la misma corrida, y en el mismo correo
+    aparecían los dos números (36 y 27) sin forma de saber cuál era el vigente.
+
+    El reporte se lee en el ÚNICO punto de salida (`reportar`), así TODOS los correos lo
+    llevan —también los que salen por una guarda a mitad de camino, con la foto de lo que sí se
+    aplicó—. BEST-EFFORT a propósito: si esa lectura falla, el run conserva su resultado y el
+    correo sale sin el bloque "Reporte del mes" con el aviso en el log; perder el mail entero (o
+    cambiar el exit code) por un bloque informativo sería peor que perder el bloque.
+    """
+    if "reporte" in datos:
+        return
+    try:
+        datos["reporte"] = reporte_mes(cfg["url"], cfg)
+    except LecturaError as e:
+        log(f"AVISO (reporte): no se pudo leer el reporte del mes: {e}")
 
 
 # ── Escritura: UNA transacción con los 4 UPDATE ──────────────────────────────
@@ -2084,12 +2156,19 @@ def enviar_reporte(code: int, motivo: str, datos: dict, inicio: datetime) -> boo
     return enviar_email(asunto, construir_html(datos, inicio, segundos, titulo), logger=log)
 
 
-def reportar(ok: bool, motivo: str, datos: dict, resumen: dict, inicio: datetime, code: int) -> int:
+def reportar(ok: bool, motivo: str, datos: dict, resumen: dict, inicio: datetime, code: int,
+             cfg: dict | None = None) -> int:
     """Único punto de salida de main(): log + alerta SÓLO si hay algo que revisar + exit code.
 
     `datos` arma el HTML (listas completas incluidas, por eso no se loguea) y `resumen` son
     los escalares que sí van al log del run. El correo no cambia el exit code: que el mail no
     salga (o que salga de más) no altera el resultado del run en Render.
+
+    Con `cfg` (todos los caminos de `main` después de leer la config) el REPORTE del mes se lee
+    ACÁ si todavía no se leyó: es el único punto de salida, así que el reporte queda calculado
+    DESPUÉS de las transacciones en TODOS los correos —también en los que salen por una guarda a
+    mitad de camino—. La config llega como argumento y no se guarda en `datos` a propósito: `datos`
+    termina en el HTML y la URL de mantenimiento lleva credenciales.
     """
     datos["ok"] = ok
     datos["motivo"] = motivo
@@ -2099,6 +2178,10 @@ def reportar(ok: bool, motivo: str, datos: dict, resumen: dict, inicio: datetime
     if not hay_que_avisar(code, datos):
         log("MAIL: no se envía (todo OK: la regla es 'correo sólo si hay algo que revisar')")
         return code
+    # El reporte se lee JUSTO antes de armar el correo (y sólo si hay correo): es para el mail, y
+    # así una corrida verde sin aviso no paga una lectura que nadie va a leer.
+    if cfg:
+        reporte_tras_cambios(datos, cfg)
     if not enviar_reporte(code, motivo, datos, inicio):
         log("AVISO: la alerta no salió por Gmail; el exit code no cambia")
     return code
@@ -2156,12 +2239,14 @@ def main() -> int:
         datos["detecciones"] = detecciones(cfg["url"], cfg)
         datos["neon"] = neon_uso(cfg["url"], cfg["neon_limite_mb"], cfg["neon_umbral_pct"])
         datos["neon_api"] = neon_api_limites(cfg)
-        datos["reporte"] = reporte_mes(cfg["url"], cfg)
+        # El REPORTE del mes NO se lee acá: se lee en el punto de salida (`reportar`) DESPUÉS de
+        # las transacciones, para que sea la foto del box ya mantenido (ver
+        # `reporte_tras_cambios`).
         datos["resumen_cambios"] = {}     # lo que tocó cada una de las 3 transacciones
         datos["verificacion"] = {}        # la verificación posterior de cada una
     except LecturaError as e:
         log(f"FATAL (lectura): {e}")
-        return reportar(False, f"lectura: {e}", datos, resumen, inicio, EXIT_LECTURA)
+        return reportar(False, f"lectura: {e}", datos, resumen, inicio, EXIT_LECTURA, cfg)
 
     cambios = sum(c["n"] for c in listas)
     cierres = sum(c["n"] for c in datos["listas_cierre"])
@@ -2243,7 +2328,7 @@ def main() -> int:
         except OSError as e:
             log(f"FATAL (escritura, {fase['nombre']}): {type(e).__name__}: {e}")
             return reportar(False, f"escritura ({fase['nombre']}): {type(e).__name__}",
-                            datos, resumen, inicio, EXIT_ESCRITURA)
+                            datos, resumen, inicio, EXIT_ESCRITURA, cfg)
 
         resumen_tx = parsear_resumen(r.stdout or "")
         total = sum(resumen_tx.values())
@@ -2263,23 +2348,23 @@ def main() -> int:
                 motivo = (f"la transacción de {fase['nombre']} abortó por la guarda de volumen "
                           "y NO se aplicó nada")
                 log(f"ABORTADO ({datos['estado']}: {motivo})")
-                return reportar(False, motivo, datos, resumen, inicio, EXIT_GUARDA)
+                return reportar(False, motivo, datos, resumen, inicio, EXIT_GUARDA, cfg)
             log(f"FATAL (escritura, {fase['nombre']}): psql rc={r.returncode}: {error}")
             return reportar(False, f"escritura rc={r.returncode}: {error}", datos, resumen,
-                            inicio, EXIT_ESCRITURA)
+                            inicio, EXIT_ESCRITURA, cfg)
 
         try:
             ok_ver, verificacion = verificar(cfg["url"], fase["consultas"], fase["listas"], dry)
         except LecturaError as e:
             log(f"FATAL (verificación, {fase['nombre']}): {e}")
             return reportar(False, f"verificación ({fase['nombre']}): {e}", datos, resumen,
-                            inicio, EXIT_VERIFICACION)
+                            inicio, EXIT_VERIFICACION, cfg)
         datos["verificacion"].update(verificacion)
         if not ok_ver:
             motivo = ("verificación: la base no quedó como debía — "
                       + "; ".join(f"{k} {v}" for k, v in verificacion.items()))
             log(f"FATAL ({motivo})")
-            return reportar(False, motivo, datos, resumen, inicio, EXIT_VERIFICACION)
+            return reportar(False, motivo, datos, resumen, inicio, EXIT_VERIFICACION, cfg)
 
         total_tx += total
         resumen.update({fase["clave_tx"]: total,
@@ -2301,14 +2386,14 @@ def main() -> int:
                 f"excede {fase['tope_var']} ({total} > {fase['tope']})")
             return reportar(False, "la guarda de volumen no aborta en DRY-RUN: no se aplicaría "
                                    "nada (revisar la lista de este mail antes de decidir si se "
-                                   "sube el tope)", datos, resumen, inicio, EXIT_GUARDA)
+                                   "sube el tope)", datos, resumen, inicio, EXIT_GUARDA, cfg)
 
     # ── 5) Integridad: run rojo, sin abortar el mantenimiento (exit 4) ──
     if datos["integridad"]:
         datos["estado"] = f"integridad con {len(datos['integridad'])} problema(s)"
         motivo = motivo_no_aborta(dry, "la integridad no aborta el mantenimiento")
         log(f"ROJO ({datos['estado']}: {motivo})")
-        return reportar(False, motivo, datos, resumen, inicio, EXIT_INTEGRIDAD)
+        return reportar(False, motivo, datos, resumen, inicio, EXIT_INTEGRIDAD, cfg)
 
     # ── 6) Detecciones A y chequeos de Neon (B): rojo, sin abortar nada (exit 9) ──
     rojos = list(datos["detecciones"]["hallazgos"]) + list(
@@ -2322,11 +2407,11 @@ def main() -> int:
         # título y el conteo real (no sólo "detecciones=1 hallazgo(s)").
         for hallazgo in rojos:
             log(f"ROJO ({codigo_de(hallazgo) or 'chequeo'}): {sin_codigo(hallazgo)}")
-        return reportar(False, motivo, datos, resumen, inicio, EXIT_DIAGNOSTICO)
+        return reportar(False, motivo, datos, resumen, inicio, EXIT_DIAGNOSTICO, cfg)
 
     return reportar(True, f"mantenimiento {'simulado' if dry else 'aplicado'} y verificado: "
                           f"{total_tx} fila(s) {'habrían cambiado' if dry else 'tocadas'} en "
-                          "3 transacciones", datos, resumen, inicio, EXIT_OK)
+                          "3 transacciones", datos, resumen, inicio, EXIT_OK, cfg)
 
 
 
