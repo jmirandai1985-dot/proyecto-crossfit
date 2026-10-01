@@ -17,6 +17,7 @@ import { KpiCard } from '../../components/kpis/KpiCard';
 import { ChartCard } from '../../components/kpis/ChartCard';
 import { DataTable } from '../../components/kpis/DataTable';
 import { DetalleModal } from '../../components/kpis/DetalleModal';
+import { KpiDetalleModal } from '../../components/kpis/KpiDetalleModal';
 import AvisoCarga from '../../components/AvisoCarga';
 
 const TABS = [
@@ -101,6 +102,9 @@ const AdminKpis = () => {
     const [cohortes, setCohortes] = useState(null);
     // Bloque abierto en el modal de detalle ampliado (null = ninguno).
     const [detalle, setDetalle] = useState(null);
+    // Tarjeta de KPI abierta en su detalle: `{ id, valor, unidad, nota }`. El texto sale del
+    // catálogo `detallesKpi` (id = "<pestaña>:<dato>") y el valor se copia del que se está viendo.
+    const [detalleKpi, setDetalleKpi] = useState(null);
 
     // ─── BI: SOLO LECTURA ────────────────────────────────────────────────
     // La gestión individual de alumnos vive en /admin/fidelizacion: acá las
@@ -334,6 +338,24 @@ const AdminKpis = () => {
         ? Math.round(arpu * financiero.vida.vida_promedio_meses)
         : null;
 
+    // ─── Detalle de las tarjetas de KPI ──────────────────────────────────
+    // Cada tarjeta se abre al hacer clic (o con Enter/Espacio) y muestra qué mide, cómo se
+    // calcula, cómo se lee y qué hacer (el texto vive en `components/kpis/detallesKpi.js`).
+    // El período que se está mirando viaja como `nota`, así el modal no repite la pantalla.
+    const verKpiDiario = (id, valor, unidad = '') => () => setDetalleKpi({
+        id, valor, unidad,
+        nota: dia ? `Día ${fmtFechaCorta(dia.fecha)}` : '',
+    });
+    const verKpiMensual = (id, valor, unidad = '') => () => setDetalleKpi({
+        id, valor, unidad,
+        nota: mes
+            ? `${MESES[mes.month - 1]} ${mes.year}${mesParcial ? ' · mes en curso, números parciales' : ' · mes cerrado'}`
+            : '',
+    });
+    const verKpiBi = (id, valor, unidad = '', nota = '') => () => setDetalleKpi({
+        id, valor, unidad, nota,
+    });
+
     // Pico vs valle: ordenado por cantidad de clases (dato real de la oferta).
     const bloquesOrdenados = [...(bloques?.bloques || [])]
         .sort((a, b) => b.clases - a.clases);
@@ -439,9 +461,9 @@ const AdminKpis = () => {
     const mesDebil = conIndice.length
         ? conIndice.reduce((a, b) => (b.indice_ingresos < a.indice_ingresos ? b : a))
         : null;
-    // La serie de alumnos se dibuja SÓLO si el backend la declara disponible: hoy
-    // `monthly_kpis.alumnos_activos_inicio` está en 0 en todos los meses cerrados y
-    // una línea plana en 0 PARECERÍA un dato (el backend manda el motivo).
+    // La serie de alumnos se dibuja SÓLO si el backend la declara disponible: si ningún
+    // mes cargado tiene alumnos, una línea plana en 0 PARECERÍA un dato (el backend
+    // manda el motivo, que la UI muestra tal cual).
     const alumnosDisponible = !!estacionalidad?.alumnos_activos?.disponible;
     // Menos de 12 meses cerrados = todavía no se puede hablar de estacionalidad.
     const avisoInsuficiente = !!estacionalidad && !estacionalidad.suficiente;
@@ -547,7 +569,7 @@ const AdminKpis = () => {
                         </p>
                         <p className="text-sm text-gray-500 mt-2">
                             {activeTab === 'mensual'
-                                ? 'Los KPIs mensuales se publican al cierre de cada mes. Si ya hay meses con datos cargados, se completan con el backfill: POST /api/v1/kpis/populate/monthly?backfill=12'
+                                ? 'Los KPIs mensuales se publican al cierre de cada mes: un mes que ya terminó aparece acá en cuanto se procesan sus datos.'
                                 : 'Los datos se están generando: intenta de nuevo en unos minutos.'}
                         </p>
                     </div>
@@ -561,22 +583,32 @@ const AdminKpis = () => {
                         </p>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                            <KpiCard label="Alumnos activos" value={dia.alumnos_activos} icon={Users} color="border-blue-500" />
-                            <KpiCard label="Alumnos nuevos" value={dia.alumnos_nuevos} icon={UserPlus} color="border-green-500" />
-                            <KpiCard label="Asistentes del día" value={dia.asistentes_totales} icon={Activity} color="border-purple-500" />
-                            <KpiCard label="Ingresos del día" value={Number(dia.ingresos_total)} unit="CLP" icon={DollarSign} color="border-emerald-500" />
+                            <KpiCard label="Alumnos activos" value={dia.alumnos_activos} icon={Users} color="border-blue-500"
+                                onDetalle={verKpiDiario('diario:alumnos_activos', dia.alumnos_activos)} />
+                            <KpiCard label="Alumnos nuevos" value={dia.alumnos_nuevos} icon={UserPlus} color="border-green-500"
+                                onDetalle={verKpiDiario('diario:alumnos_nuevos', dia.alumnos_nuevos)} />
+                            <KpiCard label="Asistentes del día" value={dia.asistentes_totales} icon={Activity} color="border-purple-500"
+                                onDetalle={verKpiDiario('diario:asistentes_totales', dia.asistentes_totales)} />
+                            <KpiCard label="Ingresos del día" value={Number(dia.ingresos_total)} unit="CLP" icon={DollarSign} color="border-emerald-500"
+                                onDetalle={verKpiDiario('diario:ingresos_total', Number(dia.ingresos_total), 'CLP')} />
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                            <KpiCard label="Clases ejecutadas" value={dia.clases_ejecutadas} icon={CalendarDays} color="border-cyan-500" />
-                            <KpiCard label="Ocupación promedio" value={Number(dia.ocupacion_promedio)} unit="%" icon={Percent} color="border-amber-500" />
-                            <KpiCard label="Reservas confirmadas" value={dia.reservas_confirmadas} icon={Gauge} color="border-sky-500" />
-                            <KpiCard label="Cancelaciones" value={dia.cancellaciones} icon={TriangleAlert} color="border-red-500" />
+                            <KpiCard label="Clases ejecutadas" value={dia.clases_ejecutadas} icon={CalendarDays} color="border-cyan-500"
+                                onDetalle={verKpiDiario('diario:clases_ejecutadas', dia.clases_ejecutadas)} />
+                            <KpiCard label="Ocupación promedio" value={Number(dia.ocupacion_promedio)} unit="%" icon={Percent} color="border-amber-500"
+                                onDetalle={verKpiDiario('diario:ocupacion_promedio', Number(dia.ocupacion_promedio), '%')} />
+                            <KpiCard label="Reservas confirmadas" value={dia.reservas_confirmadas} icon={Gauge} color="border-sky-500"
+                                onDetalle={verKpiDiario('diario:reservas_confirmadas', dia.reservas_confirmadas)} />
+                            <KpiCard label="Cancelaciones" value={dia.cancellaciones} icon={TriangleAlert} color="border-red-500"
+                                onDetalle={verKpiDiario('diario:cancellaciones', dia.cancellaciones)} />
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <KpiCard label="Ingresos por membresía" value={Number(dia.ingresos_membresia)} unit="CLP" icon={Banknote} color="border-emerald-500" />
-                            <KpiCard label="Ingresos por bazar" value={Number(dia.ingresos_bazar)} unit="CLP" icon={ShoppingCart} color="border-teal-500" />
+                            <KpiCard label="Ingresos por membresía" value={Number(dia.ingresos_membresia)} unit="CLP" icon={Banknote} color="border-emerald-500"
+                                onDetalle={verKpiDiario('diario:ingresos_membresia', Number(dia.ingresos_membresia), 'CLP')} />
+                            <KpiCard label="Ingresos por bazar" value={Number(dia.ingresos_bazar)} unit="CLP" icon={ShoppingCart} color="border-teal-500"
+                                onDetalle={verKpiDiario('diario:ingresos_bazar', Number(dia.ingresos_bazar), 'CLP')} />
                         </div>
 
                         <ChartCard title="Últimos 7 días · asistentes vs reservas confirmadas">
@@ -622,19 +654,27 @@ const AdminKpis = () => {
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                            <KpiCard label="Conversión prueba→plan" value={Number(mes.conversion_rate)} unit="%" icon={TrendingUp} color="border-green-500" />
+                            <KpiCard label="Conversión prueba→plan" value={Number(mes.conversion_rate)} unit="%" icon={TrendingUp} color="border-green-500"
+                                onDetalle={verKpiMensual('mensual:conversion_rate', Number(mes.conversion_rate), '%')} />
                             <KpiCard label="Riesgo de Abandono"
                                         value={mes.churn_rate === null ? null : Number(mes.churn_rate)}
-                                        unit="%" icon={TriangleAlert} color="border-red-500" />
-                            <KpiCard label="Ingresos Recurrentes Mensuales (MRR)" value={Number(mes.mrr)} unit="CLP" icon={Banknote} color="border-emerald-500" />
-                            <KpiCard label="Ingresos del mes" value={Number(mes.ingresos_total)} unit="CLP" icon={DollarSign} color="border-blue-500" />
+                                        unit="%" icon={TriangleAlert} color="border-red-500"
+                                        onDetalle={verKpiMensual('mensual:churn_rate', mes.churn_rate === null ? null : Number(mes.churn_rate), '%')} />
+                            <KpiCard label="Ingresos Recurrentes Mensuales (MRR)" value={Number(mes.mrr)} unit="CLP" icon={Banknote} color="border-emerald-500"
+                                onDetalle={verKpiMensual('mensual:mrr', Number(mes.mrr), 'CLP')} />
+                            <KpiCard label="Ingresos del mes" value={Number(mes.ingresos_total)} unit="CLP" icon={DollarSign} color="border-blue-500"
+                                onDetalle={verKpiMensual('mensual:ingresos_total', Number(mes.ingresos_total), 'CLP')} />
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                            <KpiCard label="Asistencia promedio" value={Number(mes.asistencia_promedio)} unit="%" icon={Activity} color="border-purple-500" />
-                            <KpiCard label="Frecuencia semanal" value={Number(mes.frecuencia_semanal)} unit="clases/sem" icon={Gauge} color="border-cyan-500" />
-                            <KpiCard label="Ocupación promedio" value={Number(mes.ocupacion_promedio)} unit="%" icon={Target} color="border-amber-500" />
-                            <KpiCard label="Alumnos activos (inicio)" value={mes.alumnos_activos_inicio} icon={Users} color="border-sky-500" />
+                            <KpiCard label="Asistencia promedio" value={Number(mes.asistencia_promedio)} unit="%" icon={Activity} color="border-purple-500"
+                                onDetalle={verKpiMensual('mensual:asistencia_promedio', Number(mes.asistencia_promedio), '%')} />
+                            <KpiCard label="Frecuencia semanal" value={Number(mes.frecuencia_semanal)} unit="clases/sem" icon={Gauge} color="border-cyan-500"
+                                onDetalle={verKpiMensual('mensual:frecuencia_semanal', Number(mes.frecuencia_semanal), 'clases/sem')} />
+                            <KpiCard label="Ocupación promedio" value={Number(mes.ocupacion_promedio)} unit="%" icon={Target} color="border-amber-500"
+                                onDetalle={verKpiMensual('mensual:ocupacion_promedio', Number(mes.ocupacion_promedio), '%')} />
+                            <KpiCard label="Alumnos activos (inicio)" value={mes.alumnos_activos_inicio} icon={Users} color="border-sky-500"
+                                onDetalle={verKpiMensual('mensual:alumnos_activos_inicio', mes.alumnos_activos_inicio)} />
                         </div>
 
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -734,7 +774,9 @@ const AdminKpis = () => {
                                 del data mart mensual. El caption lo dice para que nadie lo
                                 lea como "el del último mes cerrado". */}
                             <div>
-                                <KpiCard label="Ingresos Recurrentes Mensuales" value={mrrBi === null ? null : Number(mrrBi)} unit="CLP" icon={Banknote} color="border-emerald-500" />
+                                <KpiCard label="Ingresos Recurrentes Mensuales" value={mrrBi === null ? null : Number(mrrBi)} unit="CLP" icon={Banknote} color="border-emerald-500"
+                                    onDetalle={verKpiBi('bi:mrr', mrrBi === null ? null : Number(mrrBi), 'CLP',
+                                        'Vigente hoy · precio de lista de los planes activos')} />
                                 <p className="mt-1 text-[11px] text-zinc-500">
                                     Vigente hoy · precio de lista de los planes activos
                                 </p>
@@ -745,6 +787,9 @@ const AdminKpis = () => {
                                 unit="CLP"
                                 icon={TrendingUp}
                                 color="border-orange-500"
+                                onDetalle={verKpiBi('bi:forecast_mes1',
+                                    forecast.length ? Number(forecast[0].ingresos_predicho) : null,
+                                    'CLP', 'Estimación del mes que viene')}
                             />
                             {/* Estacionalidad (índice por mes del año): tercer bloque de la
                                 fila. Se clickea (o se abre con Enter/Espacio) y abre el
@@ -830,6 +875,9 @@ const AdminKpis = () => {
                                         unit="CLP"
                                         icon={Banknote}
                                         color="border-emerald-500"
+                                        onDetalle={verKpiBi('bi:ticket_promedio',
+                                            financiero?.ticket_promedio?.global ?? null, 'CLP',
+                                            `Membresías (${financiero?.ticket_promedio?.n_transacciones ?? 0} compras)`)}
                                     />
                                     <p className="mt-1 text-[11px] text-zinc-500">
                                         Membresías ({financiero?.ticket_promedio?.n_transacciones ?? 0} transacciones)
@@ -842,6 +890,8 @@ const AdminKpis = () => {
                                         unit="CLP"
                                         icon={TrendingUp}
                                         color="border-sky-500"
+                                        onDetalle={verKpiBi('bi:ltv_estimado', ltvEstimado, 'CLP',
+                                            `ARPU ${arpu != null ? fmtCLP(arpu) : '—'} × ${financiero?.vida?.vida_promedio_meses ?? '—'} meses`)}
                                     />
                                     <p className="mt-1 text-[11px] text-zinc-500">
                                         ARPU {arpu != null ? fmtCLP(arpu) : '—'} × {financiero?.vida?.vida_promedio_meses ?? '—'} meses
@@ -854,6 +904,9 @@ const AdminKpis = () => {
                                         unit="meses"
                                         icon={Users}
                                         color="border-purple-500"
+                                        onDetalle={verKpiBi('bi:vida_promedio',
+                                            financiero?.vida?.vida_promedio_meses ?? null, 'meses',
+                                            `${financiero?.vida?.vida_promedio_dias ?? 0} días · ${financiero?.vida?.n_con_baja ?? 0} de ${financiero?.vida?.n_alumnos ?? 0} con baja`)}
                                     />
                                     <p className="mt-1 text-[11px] text-zinc-500">
                                         {financiero?.vida?.vida_promedio_dias ?? 0} días · {financiero?.vida?.n_con_baja ?? 0} de {financiero?.vida?.n_alumnos ?? 0} con baja
@@ -954,6 +1007,17 @@ const AdminKpis = () => {
                     </div>
                 )}
             </div>
+
+            {/* ── Detalle de una tarjeta de KPI (clic o Enter/Espacio en la tarjeta) ── */}
+            {detalleKpi && (
+                <KpiDetalleModal
+                    id={detalleKpi.id}
+                    valor={detalleKpi.valor}
+                    unidad={detalleKpi.unidad}
+                    nota={detalleKpi.nota}
+                    onCerrar={() => setDetalleKpi(null)}
+                />
+            )}
 
             {/* ── Detalle ampliado: pronóstico (gráfico + tabla de desglose) ── */}
             {detalle === 'forecast' && (

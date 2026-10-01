@@ -334,7 +334,7 @@ const Reportes = () => {
                         Mismo criterio que la tarjeta de Retención para el sin dato. */}
                     <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-rose-500">
                         <p className="text-zinc-400 text-sm font-medium"
-                            title="Churn de cohorte de los últimos 30 días = 100 − retención (metricas_service.churn_desde_retencion): de los alumnos vigentes hace 30 días, cuántos dejaron de estarlo. Si la base no alcanza el mínimo, no se calcula.">
+                            title="Churn de cohorte de los últimos 30 días = 100 − retención: de los alumnos vigentes hace 30 días, cuántos dejaron de estarlo. Si la base no alcanza el mínimo, no se calcula.">
                             Tasa de Churn Mensual
                         </p>
                         {reportData?.churnMensual === null || reportData?.churnMensual === undefined ? (
@@ -621,11 +621,10 @@ const Reportes = () => {
                     onCerrar={() => setDetalleGrafico(null)}
                     explicacion={(
                         <>
-                            Ingreso NETO de cada mes: ingresos menos egresos de
-                            transacciones_financieras, para los últimos 6 meses. Es el MISMO cálculo que
-                            usa el resto del sistema (metricas_service.ingresos_netos), el que reusan el
-                            bloque Financiero de Inteligencia de Negocio y el populate de KPIs, así que
-                            el número coincide con esas pantallas para el mismo mes.
+                            Ingreso NETO de cada mes: ingresos menos egresos, para los últimos 6 meses.
+                            Es el MISMO cálculo que usa el resto del sistema (el bloque Financiero de
+                            Inteligencia de Negocio y los KPIs mensuales), así que el número coincide
+                            con esas pantallas para el mismo mes.
                         </>
                     )}
                 >
