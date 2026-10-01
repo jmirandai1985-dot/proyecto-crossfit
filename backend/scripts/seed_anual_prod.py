@@ -1315,7 +1315,7 @@ def validar_url_destino(url: str, destino: str, prod_id: str,
         return "DATABASE_URL vacía"
     if HOST_PROD_VIEJO in u:
         return (f"la URL apunta a {HOST_PROD_VIEJO}, que era el PROD viejo (endpoint "
-                f"retirado el 2026-09-24): corregí el .env antes de correr el seed")
+                f"retirado el 2026-09-24): corrige el .env antes de correr el seed")
     if destino == "prod":
         if prod_id not in u:
             return f"destino=prod pero la URL no es el endpoint de PROD ({prod_id})"
@@ -1344,7 +1344,7 @@ def validar_ventana(hoy: date, destino: str = "prod") -> Optional[str]:
         return None
     if hoy.day in DIAS_MANTENIMIENTO:
         return (f"hoy es día {hoy.day}: el mantenimiento escribe ese día (vencidos, "
-                f"huérfanas, cierre de asistencia y aforo). Corré entre el 2 y el 14, o "
+                f"huérfanas, cierre de asistencia y aforo). Corre entre el 2 y el 14, o "
                 f"entre el 16 y el 28.")
     if mes_iso(hoy) == MES_PROHIBIDO:
         return (f"{MES_PROHIBIDO} está bloqueado: el run del 1/10 marcaría vencidas todas "
@@ -1380,7 +1380,7 @@ def preparar_entorno(destino: str) -> dict:
     if HOST_PROD not in prod_id:
         raise GuardError(
             f"PROD_BRANCH_ID cambió ({prod_id!r}): el script está escrito para "
-            f"{HOST_PROD}. Revisá la topología de Neon y actualizá los guards "
+            f"{HOST_PROD}. Revisa la topología de Neon y actualiza los guards "
             f"(config.py + este script) antes de escribir.")
     motivo = validar_url_destino(config.settings.DATABASE_URL, destino, prod_id, test_ids)
     if motivo:
@@ -1767,7 +1767,7 @@ def main(argv=None) -> int:
     base = "PRODUCCIÓN" if args.destino == "prod" else "TEST"
     frase = "SI QUIERO PROD" if args.destino == "prod" else "SI QUIERO TEST"
     print(f"\n⚠️  Esto va a escribir en la base de datos de {base}.")
-    if not pedir(frase, f"Escribí '{frase}' para continuar: "):
+    if not pedir(frase, f"Escribe '{frase}' para continuar: "):
         return 1
     print(f"[ok] confirmado: se opera contra {args.destino.upper()}.\n")
 
@@ -1786,7 +1786,7 @@ def main(argv=None) -> int:
             if not args.dry_run:
                 print("[aviso] se borran y se vuelven a generar en la MISMA transacción "
                       "(idempotencia por marcadores: si algo falla, el rollback los deja).")
-                if not pedir("RECICLAR", "Escribí 'RECICLAR' para confirmar el recambio: "):
+                if not pedir("RECICLAR", "Escribe 'RECICLAR' para confirmar el recambio: "):
                     return 1
 
         entradas = leer_entradas(db, env, hoy, DIAS_RESERVA_FUTURA)
@@ -1810,7 +1810,7 @@ def main(argv=None) -> int:
 
         imprimir_dry_run(plan, resumen, args.destino)
         if args.dry_run:
-            print("\n[dry-run] no se escribió nada. Para ejecutar de verdad: quitá --dry-run.")
+            print("\n[dry-run] no se escribió nada. Para ejecutar de verdad: quita --dry-run.")
             return 0
 
         if not pedir("GENERAR", "\nEscribí 'GENERAR' para confirmar: "):
@@ -1843,7 +1843,7 @@ def main(argv=None) -> int:
     print(f"    DELETE FROM usuarios WHERE correo LIKE '{PREFIJO_CORREO}%{DOMINIO_CORREO}';")
     print(f"    DELETE FROM transacciones_financieras WHERE descripcion LIKE '{MARCA_DESC}%';")
     print(f"    DELETE FROM clases WHERE created_at = '{MARCA_TS.isoformat()}';")
-    print("  Recordá: limpiar ANTES del día 1 del mes siguiente (1/11: el paso 1 vencería "
+    print("  Recuerda: limpiar ANTES del día 1 del mes siguiente (1/11: el paso 1 vencería "
           "las suscripciones del seed) y reentrenar los modelos de ML.")
     print("  RESULTADO:", "OK - datos consistentes" if ok else "REVISAR - hay discrepancias")
     print("=" * 74)

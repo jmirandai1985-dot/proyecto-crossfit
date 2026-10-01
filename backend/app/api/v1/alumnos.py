@@ -251,7 +251,7 @@ def registrar_alumno_nuevo(
 
     # RG-04: ⚠️ el servicio de correo NO levanta excepción cuando falla: devuelve False
     # (y guarda el detalle en ULTIMO_ERROR_SMTP). Antes el endpoint ignoraba el valor y
-    # respondía siempre "revisá tu correo", incluso si el alumno nunca iba a recibir la
+    # respondía siempre "revisa tu correo", incluso si el alumno nunca iba a recibir la
     # contraseña temporal. Ahora se usa el valor devuelto (y también se cubre una
     # eventual excepción) y, si falló, se devuelve la contraseña provisional + aviso.
     email_enviado = False
@@ -275,11 +275,11 @@ def registrar_alumno_nuevo(
             usuario.correo)
         return {
             "mensaje": ("Tu registro quedó creado, pero NO pudimos enviarte el correo con "
-                        "la contraseña temporal. Usá la contraseña de abajo para ingresar "
+                        "la contraseña temporal. Usa la contraseña de abajo para ingresar "
                         "y cambiala desde Ajustes."),
             "email_enviado": False,
             "password_provisional": password_tmp,
-            "aviso": ("El envío del correo falló; si no podés ingresar, contactá al box "
+            "aviso": ("El envío del correo falló; si no puedes ingresar, contacta al box "
                       "para que te ayuden a restablecerla."),
         }
 

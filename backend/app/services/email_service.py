@@ -472,7 +472,7 @@ def render_email_fidelizacion(nombre: str, dias_ausente: int) -> tuple:
     saludo = f"Hola {nombre.split()[0]}, notamos que llevas <strong>{dias_ausente} d&iacute;as</strong> sin entrenar."
     cuerpo = ("El descanso es parte del proceso, pero el impulso también se entrena. "
               "Tu lugar en Urban Training Box sigue esperándote: la comunidad, tu gente y tu propia mejora "
-              "están listos para que vuelvas. Retomá donde lo dejaste, cada sesión cuenta.")
+              "están listos para que vuelvas. Retoma donde lo dejaste, cada sesión cuenta.")
     url = url_frontend("/alumno/mis-reservas")
     html = _template(titulo, saludo, cuerpo, "Volver a entrenar", url)
     asunto = f"¡Te extrañamos en el box, {nombre.split()[0]}! 💪"
@@ -487,9 +487,9 @@ def render_email_fidelizacion_temprana(nombre: str, dias_ausente: int) -> tuple:
     """
     primer_nombre = nombre.split()[0]
     titulo = "Hace unos días que no te vemos"
-    saludo = (f"Hola {primer_nombre}, llevás <strong>{dias_ausente} días</strong> sin pasar por "
+    saludo = (f"Hola {primer_nombre}, llevas <strong>{dias_ausente} días</strong> sin pasar por "
               "el box.")
-    cuerpo = ("Una semana sin entrenar se nota, y también se recupera: volvé a tu horario de "
+    cuerpo = ("Una semana sin entrenar se nota, y también se recupera: vuelve a tu horario de "
               "siempre y el impulso vuelve con la primera sesión. Tu lugar, tu gente y tu "
               "entrenador de siempre siguen acá esperándote.")
     url = url_frontend("/alumno/mis-reservas")
@@ -503,7 +503,7 @@ def render_email_fidelizacion_larga(nombre: str, dias_ausente: int,
     """Renderiza (asunto, html) del correo del alumno con MÁS de un mes sin venir o sin plan.
 
     `plan_vencido` (hoy no tiene una membresía vigente) cambia DOS cosas, y las dos son porque
-    el alumno las nota: la frase de la renovación —decirle "renová tu plan" a alguien que todavía
+    el alumno las nota: la frase de la renovación —decirle "renueva tu plan" a alguien que todavía
     está pagando es un error— y el botón, que tiene que llevar a donde puede hacer algo (sin plan
     vigente, a activar uno; con plan vigente, a reservar su clase). El resto es el mismo mensaje.
     """
@@ -512,10 +512,10 @@ def render_email_fidelizacion_larga(nombre: str, dias_ausente: int,
     saludo = (f"Hola {primer_nombre}, pasaron <strong>{dias_ausente} días</strong> desde tu "
               "última sesión.")
     if plan_vencido:
-        saludo += (" Y hoy no tenés un plan vigente: las dos cosas se resuelven en la misma "
+        saludo += (" Y hoy no tienes un plan vigente: las dos cosas se resuelven en la misma "
                    "conversación.")
     cuerpo = ("Después de un mes, la vuelta cuesta menos de lo que parece: no hace falta empezar "
-              "de cero ni esperar el lunes perfecto. Elegí un día, vení y armamos un plan que se "
+              "de cero ni esperar el lunes perfecto. Elige un día, ven y armamos un plan que se "
               "ajuste a tu semana.")
     if plan_vencido:
         url = url_frontend("/alumno/solicitar-plan")
@@ -546,10 +546,10 @@ def render_email_riesgo_alto(nombre: str, dias_ausente: int) -> tuple:
               "y queremos saber cómo estás.")
     cuerpo = ("No es sólo por el entrenamiento: si algo se te complicó —el tiempo, el trabajo, el "
               "ánimo—, el equipo del box está para ayudarte a sostener el hábito que venías "
-              "construyendo. Contanos qué te está frenando y vemos juntos cómo seguir.")
+              "construyendo. Cuéntanos qué te está frenando y vemos juntos cómo seguir.")
     url = url_frontend("/alumno/mis-reservas")
     html = _template(titulo, saludo, cuerpo, "Reservar mi clase", url)
-    asunto = f"¿Cómo venís, {primer_nombre}? Contame"
+    asunto = f"¿Cómo vienes, {primer_nombre}? Cuéntame"
     return asunto, html
 
 
@@ -651,7 +651,7 @@ def enviar_email_solicitud_admin(alumno: dict, tenant_id: int) -> bool:
     titulo = "Nueva solicitud de registro"
     saludo = "Un nuevo alumno solicitó su ingreso al box y está esperando tu revisión."
     cuerpo = (f"<strong>{nombre}</strong> (<em>{correo_alumno}</em>) está pendiente de activación. "
-              "Ingresá al panel de administración para aprobar o rechazar la solicitud.")
+              "Ingresa al panel de administración para aprobar o rechazar la solicitud.")
     url = url_frontend("/admin/alumnos-pendientes")
     html = _template(titulo, saludo, cuerpo, "Revisar solicitudes", url)
     # destinatario = el ADMIN del box (no un alumno): se registra con destinatario_rol.
@@ -668,8 +668,8 @@ def enviar_email_activacion_alumno(alumno: dict, password: str) -> bool:
     if not correo:
         return False
     titulo = "¡Tu cuenta está activa!"
-    saludo = f"Hola {nombre.split()[0]}, tu cuenta en Urban Training Box fue activada y ya podés ingresar."
-    cuerpo = ("Estas son tus credenciales de acceso. Recordá que deberás cambiarlas en tu primer ingreso.<br/><br/>"
+    saludo = f"Hola {nombre.split()[0]}, tu cuenta en Urban Training Box fue activada y ya puedes ingresar."
+    cuerpo = ("Estas son tus credenciales de acceso. Recuerda que deberás cambiarlas en tu primer ingreso.<br/><br/>"
               f"<strong>Correo:</strong> {correo}<br/>"
               f"<strong>Contrase&ntilde;a provisional:</strong> {password}")
     url = url_frontend("/login")
@@ -896,7 +896,7 @@ def send_emergencia_cobertura(admin_correo: str, admin_id: int, mensaje: str,
         return False
     titulo = "🚨 Cobertura de emergencia registrada"
     saludo = "Un coach activó la cobertura de emergencia en una clase."
-    cuerpo = f"<p>{mensaje}</p><p>Revisá el panel de Supervisión para ver el detalle.</p>"
+    cuerpo = f"<p>{mensaje}</p><p>Revisa el panel de Supervisión para ver el detalle.</p>"
     url = url_frontend("/admin/supervision-clases")
     html = _template(titulo, saludo, cuerpo, "Ver supervisión", url)
     # destinatario = el ADMIN (no el alumno): se registra con alumno_id=None y
@@ -980,7 +980,7 @@ def send_confirmacion_plan(nombre: str, correo: str, plan_nombre: str,
         f"<p><strong>Plan:</strong> {plan_nombre}<br/>"
         f"<strong>Clases disponibles:</strong> {cantidad_clases} clases al mes<br/>"
         f"<strong>Vigencia:</strong> Hasta el {fecha_vigencia}</p>"
-        "<p>Ya podés agendar tus clases, registrar tus marcas y acceder a todas "
+        "<p>Ya puedes agendar tus clases, registrar tus marcas y acceder a todas "
         "las funciones del sistema.</p>"
         "<p>¡Nos vemos entrenando en el box!<br/>— El equipo de Urban Training Box 🏋️‍♂️</p>"
     )
@@ -1054,7 +1054,7 @@ def send_alerta_stock_bajo(producto_nombre: str, stock_actual: int,
         f"<p><strong>Producto:</strong> {producto_nombre}<br/>"
         f"<strong>Stock actual:</strong> {stock_actual}<br/>"
         f"<strong>Stock mínimo:</strong> {stock_minimo}</p>"
-        "<p>Reponé stock o ajustá el umbral del producto para desactivar esta alerta.</p>"
+        "<p>Repón stock o ajusta el umbral del producto para desactivar esta alerta.</p>"
     )
     from app.core.config import settings
     url = url_frontend("/admin/bazar")

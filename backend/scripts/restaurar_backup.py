@@ -111,17 +111,17 @@ def main():
         #   2) el destino NO es un endpoint TEST conocido
         #   3) --confirmo-host=<host> coincide EXACTO con el host de DIRECT_URL
         if os.getenv("ENVIRONMENT") != "production":
-            sys.exit("FATAL modo PROD: definí ENVIRONMENT=production (backend/.env).")
+            sys.exit("FATAL modo PROD: define ENVIRONMENT=production (backend/.env).")
         if is_test_db_url(settings.DATABASE_URL):
-            sys.exit("FATAL modo PROD: el destino es un endpoint TEST. Usá el modo por defecto.")
+            sys.exit("FATAL modo PROD: el destino es un endpoint TEST. Usa el modo por defecto.")
         if confirmo != host:
-            sys.exit(f"FATAL modo PROD: agregá --confirmo-host={host} para confirmar el destino.")
+            sys.exit(f"FATAL modo PROD: agrega --confirmo-host={host} para confirmar el destino.")
         print("Guard PROD OK: ENVIRONMENT=production + host confirmado a mano.")
     else:
         # Modo por defecto (TEST): sólo endpoints TEST conocidos.
         if not is_test_db_url(settings.DATABASE_URL):
             sys.exit("FATAL: la BD activa NO es un endpoint TEST conocido. "
-                     "Para restaurar PROD usá --prod --confirmo-host=<host>.")
+                     "Para restaurar PROD usa --prod --confirmo-host=<host>.")
         print("Guard TEST OK: endpoint TEST conocido.")
     print("=" * 70)
 

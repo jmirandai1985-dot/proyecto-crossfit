@@ -34,10 +34,10 @@ export default function LandingPage() {
 
       // RG-04: si el envío del correo con la contraseña temporal falló, el backend
       // la devuelve en la respuesta. Hay que mostrarla: si no, el alumno no tiene
-      // forma de ingresar y el "revisá tu correo" le mentiría.
+      // forma de ingresar y el "revisa tu correo" le mentiría.
       const d = res.data || {};
       if (d.email_enviado === false && d.password_provisional) {
-        setMensaje(`⚠️ Registro creado, pero no pudimos enviarte el correo. Tu contraseña temporal es: ${d.password_provisional} — entrá y cambiala en Ajustes.`);
+        setMensaje(`⚠️ Registro creado, pero no pudimos enviarte el correo. Tu contraseña temporal es: ${d.password_provisional} — entra y cambiala en Ajustes.`);
       } else {
         setMensaje('✅ ¡Solicitud recibida! Revisa tu correo (incluyendo SPAM).');
       }

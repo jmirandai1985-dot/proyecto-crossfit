@@ -104,7 +104,7 @@ const AdminAlumnosPendientes = () => {
                             ⚠️ El alumno quedó activo, pero el correo de credenciales NO se pudo enviar
                             ({credenciales.error}).
                         </p>
-                        <p>Pasale esta contraseña provisional y pedile que la cambie al entrar:</p>
+                        <p>Pásale esta contraseña provisional y pídele que la cambie al entrar:</p>
                         <div className="flex items-center gap-2">
                             <code className="bg-zinc-900/70 border border-amber-500/30 rounded px-3 py-1 font-mono text-base text-amber-100">
                                 {credenciales.password}

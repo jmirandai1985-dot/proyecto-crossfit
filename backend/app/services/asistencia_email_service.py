@@ -51,9 +51,9 @@ RACHA_COPY = {
         "titulo": "Tres meses de fuego 🔥🔥",
         "cuerpo": (
             "<p><strong>{nombre}, tres meses seguidos con asistencia perfecta.</strong> "
-            "Mientras otros buscan excusas, vos construís hábito 🔥🔥. La constancia "
+            "Mientras otros buscan excusas, tú construyes hábito 🔥🔥. La constancia "
             "ya es tu marca personal.</p>"
-            "<p>Seguí así: la meta de los 6 meses está más cerca de lo que creés.</p>"
+            "<p>Sigue así: la meta de los 6 meses está más cerca de lo que crees.</p>"
         ),
     },
     6: {
@@ -61,9 +61,9 @@ RACHA_COPY = {
         "titulo": "Medio año imparable 🔥🔥🔥",
         "cuerpo": (
             "<p><strong>{nombre}, medio año sin faltarle a tu entrenamiento.</strong> "
-            "Seis meses de compromiso ininterrumpido 🔥🔥🔥. Ya sos referente del box.</p>"
+            "Seis meses de compromiso ininterrumpido 🔥🔥🔥. Ya eres referente del box.</p>"
             "<p>Falta la mitad para el año de leyenda: nosotros ponemos los WODs, "
-            "vos el resto.</p>"
+            "tú el resto.</p>"
         ),
     },
     12: {
@@ -73,7 +73,7 @@ RACHA_COPY = {
             "<p><strong>{nombre}, un año entero con asistencia perfecta.</strong> "
             "Doce meses de constancia, disciplina y carácter 🏆. Esto no se logra "
             "con motivación: se logra con identidad.</p>"
-            "<p>Tenés un lugar entre la élite del box. Nivel máximo alcanzado.</p>"
+            "<p>Tienes un lugar entre la élite del box. Nivel máximo alcanzado.</p>"
         ),
     },
 }
@@ -107,8 +107,8 @@ def enviar_email_cumplimiento(nombre: str, correo: str, alumno_id: int,
     cuerpo = (
         f"<p>Asististe a las <strong>{total_clases} clases</strong> que reservaste "
         f"en {mes_nombre}. Eso no es suerte: es constancia.</p>"
-        f"<p>Llevás una racha de <strong>{racha} mes(es)</strong> con asistencia "
-        "perfecta. Seguí así: cada mes suma a tu racha.</p>"
+        f"<p>Llevas una racha de <strong>{racha} mes(es)</strong> con asistencia "
+        "perfecta. Sigue así: cada mes suma a tu racha.</p>"
         "<p>¡Nos vemos en el box!</p>"
     )
     html = _template("¡Mes perfecto! 🔥", saludo, cuerpo,
@@ -138,7 +138,7 @@ def enviar_email_acompanamiento(nombre: str, correo: str, alumno_id: int,
         "clases que reservaste. Cualquier caída es parte del camino: lo que importa "
         "es volver.</p>"
         "<p>El equipo del box está listo para ayudarte a retomar el ritmo. "
-        "Agendá tus próximas clases y volvé a sumar a tu racha.</p>"
+        "Agenda tus próximas clases y vuelve a sumar a tu racha.</p>"
         "<p>Te esperamos en el box 💪</p>"
     )
     html = _template("Te acompañamos", saludo, cuerpo,
@@ -159,7 +159,7 @@ REACTIVACION_COPY = {
         "parrafos": [
             "En Urban Training Box seguimos entrenando fuerte, pero notamos que "
             "hace un tiempo no te vemos por acá.",
-            "La manada no es la misma sin vos. Sabemos que la vida a veces se "
+            "La manada no es la misma sin ti. Sabemos que la vida a veces se "
             "complica y los planes cambian — no hay drama.",
             "Cuando quieras volver a sumarte, ahí vamos a estar. La puerta sigue abierta.",
         ],
@@ -171,7 +171,7 @@ REACTIVACION_COPY = {
         "parrafos": [
             "Van ya varios meses desde tu última clase en Urban Training Box.",
             "La manada sigue subiendo de nivel — nuevos récords, nuevas rachas, "
-            "gente llegando a su mejor versión. Y sabemos que vos también ibas "
+            "gente llegando a su mejor versión. Y sabemos que tú también ibas "
             "por ese camino.",
             "Cada mes que pasa sin entrenar es progreso que cuesta más recuperar: "
             "la fuerza, el hábito, la energía que habías construido. Nada de esto "
@@ -212,7 +212,7 @@ def enviar_email_reactivacion(nombre: str, correo: str, alumno_id: int,
                   f"/api/v1/notificaciones/reactivacion/optout?token={token}")
     cuerpo += (
         "<p style='text-align:center;font-size:12px;color:#71717a;margin-top:24px;'>"
-        "¿No querés recibir más correos como este? "
+        "¿No quieres recibir más correos como este? "
         f"<a href='{optout_url}' style='color:#71717a;'>"
         "Click acá para darte de baja</a></p>"
     )

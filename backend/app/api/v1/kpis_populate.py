@@ -119,11 +119,11 @@ def _plural_dias(n) -> str:
 RECO_SIN_PLAN = (
     "Alumno sin actividad y sin plan vigente. Te recomendamos contactarlo "
     "personalmente para indagar qué está pasando —podría ser tiempo, motivación "
-    "o un tema económico. Si es económico, considerá ofrecerle una alternativa "
+    "o un tema económico. Si es económico, considera ofrecerle una alternativa "
     "(clase de cortesía, descuento temporal) para facilitar que vuelva."
 )
 RECO_CRITICO_CON_PLAN = (
-    "Su plan está activo pero las señales de riesgo son críticas. Contactalo con "
+    "Su plan está activo pero las señales de riesgo son críticas. Contáctalo con "
     "prioridad: no lo trates como un recordatorio más —preguntale cómo está de "
     "verdad y si algo del box (horario, clima, precio, lesión) le está jugando "
     "en contra."

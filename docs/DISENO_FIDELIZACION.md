@@ -220,6 +220,11 @@ promete causalidad).
 12. **Los asuntos son texto plano.** Un asunto con entidades HTML (`est&aacute;`) se muestra
    literal en la bandeja: los acentos van como acentos y las plantillas se prueban decodificando el
    header (`tests/test_email_marca_contacto.py`).
+13. **La app habla de "tú".** Ningún texto que vea el alumno, el coach o el admin usa voseo (ni el
+   imperativo con acento final ni el presente terminado en "-és"): todo va en tuteo, igual que los
+   asuntos y el pie de los correos. El guard es `tests/test_textos_tuteo.py`: recorre
+   `frontend/src` y `backend/app` con una lista curada de las formas voseo y falla si alguna vuelve
+   (también fija los textos ya arreglados, para que un copy-paste viejo no los reviva).
 
 ---
 
@@ -296,6 +301,9 @@ cd backend; $env:ENVIRONMENT='test'; py -3.12 -m pytest tests/test_beneficios_se
 # Marca y contacto de los correos (bloque C: encabezado, asuntos en texto plano y el WhatsApp del
 # box; escribe y RESTAURA el whatsapp de la configuración del box en la rama TEST)
 cd backend; $env:ENVIRONMENT='test'; py -3.12 -m pytest tests/test_email_marca_contacto.py -q
+
+# Los textos hablan de tú (bloque D): guard de voseo sobre frontend/src y backend/app
+cd backend; $env:ENVIRONMENT='test'; py -3.12 -m pytest tests/test_textos_tuteo.py -q
 
 # Frontend
 cd frontend; npm run lint; npm run build

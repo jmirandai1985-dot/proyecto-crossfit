@@ -42,7 +42,7 @@ const PreviewEmailModal = ({ alumnoId, coachId, onClose, onConfirmar, enviando }
                     <div>
                         <h3 className="text-lg font-bold text-zinc-100">Vista previa del correo</h3>
                         <p className="text-sm text-zinc-400">
-                            Revisá el mensaje antes de enviarlo. Es exactamente lo que va a recibir el alumno.
+                            Revisa el mensaje antes de enviarlo. Es exactamente lo que va a recibir el alumno.
                         </p>
                     </div>
                     <button onClick={onClose} className="text-zinc-400 hover:text-zinc-100 text-xl leading-none" aria-label="Cerrar">×</button>

@@ -72,7 +72,7 @@ def db():
 
     if not is_test_db_url(settings.DATABASE_URL):
         pytest.fail("DATABASE_URL no es una rama de TEST: aborto por seguridad "
-                    "(definí ENVIRONMENT=test / revisá .env.test)")
+                    "(define ENVIRONMENT=test / revisa .env.test)")
     print("\n[OK] base de datos de TEST confirmada\n")
     session = SessionLocal()
     yield session
@@ -540,14 +540,14 @@ def test_b13_el_mensaje_de_fondo_cambia_la_frase_del_plan(db, escenario):
     _fijar_vencimiento(db, escenario, -10)
     preview = svc.render(db, _alumno(db, escenario), svc.P_INACTIVIDAD_MAS_30)
     assert preview["contexto"]["plan_vencido"] is True
-    assert "no tenés un plan vigente" in preview["html"]
+    assert "no tienes un plan vigente" in preview["html"]
 
     # Con plan vigente y más de 30 días, el mismo tramo NO habla de renovaciones.
     _fijar_vencimiento(db, escenario, 60)
     _fijar_dias(db, escenario, DIAS_TRAMO_LARGO)
     preview2 = svc.render(db, _alumno(db, escenario), svc.P_INACTIVIDAD_MAS_30)
     assert preview2["contexto"]["plan_vencido"] is False
-    assert "no tenés un plan vigente" not in preview2["html"]
+    assert "no tienes un plan vigente" not in preview2["html"]
 
 
 def test_b14_la_plantilla_de_riesgo_necesita_un_riesgo_real(db, escenario):

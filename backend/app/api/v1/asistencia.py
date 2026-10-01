@@ -455,8 +455,8 @@ def qr_checkin_alumno(
     if len(en_curso) > 1:
         return {
             "estado": "ambiguo",
-            "mensaje": "Tenés más de una clase en curso ahora. "
-                       "Hablá con tu coach para registrar la correcta.",
+            "mensaje": "Tienes más de una clase en curso ahora. "
+                       "Habla con tu coach para registrar la correcta.",
             "reserva_ids": [r.id for r, _ in en_curso],
         }
 
@@ -484,6 +484,6 @@ def qr_checkin_alumno(
 
     return {
         "estado": "sin_reserva",
-        "mensaje": "No tenés reserva para este horario, hablá con tu coach.",
+        "mensaje": "No tienes reserva para este horario, habla con tu coach.",
     }
 

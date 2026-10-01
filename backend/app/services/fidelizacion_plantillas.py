@@ -97,7 +97,7 @@ PLANTILLAS_CON_DATOS: Final[tuple] = (P_BENEFICIO_DESCUENTO, P_BENEFICIO_CLASES_
 # Piso de "días sin entrenar": un correo de recuperación no puede decir "0 días".
 DIAS_MINIMOS: Final[int] = 1
 # Tramos de inactividad del catálogo.
-DIAS_TEMPRANA_MIN: Final[int] = 7        # desde acá ya es "hace unos días que no venís"
+DIAS_TEMPRANA_MIN: Final[int] = 7        # desde acá ya es "hace unos días que no vienes"
 DIAS_TEMPRANA_MAX: Final[int] = 14       # hasta acá todavía se recupera el hábito solo
 DIAS_INACTIVIDAD_LARGA: Final[int] = 30  # más de un mes: se ofrece coordinar la vuelta
 # "Plan por vencer": el MISMO corte que usa el panel para la tarjeta de próximos a vencer.

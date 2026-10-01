@@ -231,7 +231,7 @@ const AsistenciaClases = ({ variant = 'light' } = {}) => {
 
                             <p className={`text-sm font-medium mb-3 ${osc ? 'text-zinc-300' : 'text-gray-700'}`}>
                                 {marcada
-                                    ? 'Asistencia ya guardada — corregí si hace falta y reconfirmá.'
+                                    ? 'Asistencia ya guardada — corrige si hace falta y reconfirma.'
                                     : 'Todos los alumnos vienen marcados por defecto.'}
                             </p>
 

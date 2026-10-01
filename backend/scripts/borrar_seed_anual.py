@@ -328,7 +328,7 @@ def main(argv=None) -> int:
         return 1
     if args.limpiar_viejo:
         if not pedir("TAMBIEN EL VIEJO",
-                     "Confirmá el borrado del seed viejo (escribí 'TAMBIEN EL VIEJO'): "):
+                     "Confirma el borrado del seed viejo (escribe 'TAMBIEN EL VIEJO'): "):
             return 1
     if args.destino == "prod":
         print("[ok] confirmado: se opera contra PRODUCCIÓN.\n")
@@ -352,7 +352,7 @@ def main(argv=None) -> int:
               f"{len(afectadas)}")
 
         if args.dry_run:
-            print("\n[dry-run] no se borró nada. Para borrar de verdad: quitá --dry-run.")
+            print("\n[dry-run] no se borró nada. Para borrar de verdad: quita --dry-run.")
             return 0
         if not pedir("BORRAR", "\nEscribí 'BORRAR' para confirmar el borrado: "):
             return 1
@@ -370,8 +370,8 @@ def main(argv=None) -> int:
 
     print("\n" + "=" * 74)
     print("  RESULTADO:", "OK - seed borrado y verificado" if ok else "REVISAR - quedan restos")
-    print("  Recordá: los modelos de ML quedaron entrenados con datos que ya no están;")
-    print("  si vas a usar la base sin el seed, reentrená (/ml/reentrenar) cuando toque.")
+    print("  Recuerda: los modelos de ML quedaron entrenados con datos que ya no están;")
+    print("  si vas a usar la base sin el seed, reentrena (/ml/reentrenar) cuando toque.")
     print("=" * 74)
     return 0 if ok else 1
 

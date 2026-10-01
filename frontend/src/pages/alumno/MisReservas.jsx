@@ -183,9 +183,9 @@ const MisReservas = () => {
                             <QrCode size={24} />
                         </div>
                         <div>
-                            <p className="font-bold text-gray-900">Marcá tu asistencia con el QR del box</p>
+                            <p className="font-bold text-gray-900">Marca tu asistencia con el QR del box</p>
                             <p className="text-sm text-gray-600 mt-0.5">
-                                Escaneá el código en recepción para registrar tu ingreso a la clase en curso.
+                                Escanea el código en recepción para registrar tu ingreso a la clase en curso.
                             </p>
                         </div>
                     </div>

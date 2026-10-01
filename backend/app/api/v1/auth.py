@@ -84,8 +84,8 @@ def login(
     if usuario.estado != "activo":
         detalle = {
             "pendiente_activacion": "Tu cuenta está pendiente de activación por el box.",
-            "rechazado": "Tu solicitud fue rechazada. Contactá al box.",
-            "baja": "Tu cuenta está dada de baja. Contactá al box.",
+            "rechazado": "Tu solicitud fue rechazada. Contacta al box.",
+            "baja": "Tu cuenta está dada de baja. Contacta al box.",
         }.get(usuario.estado, "Usuario inactivo")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

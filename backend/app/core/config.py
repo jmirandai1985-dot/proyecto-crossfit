@@ -121,7 +121,7 @@ if _ENVIRONMENT not in ("production", "test"):
     # antes que romper el arranque). Sin ENVIRONMENT definido ⇒ se asume TEST.
     logging.getLogger("app.core.config").warning(
         "[config] ENVIRONMENT=%r no reconocido: se asume TEST (se carga .env.test). "
-        "Para trabajar contra producción definí ENVIRONMENT=production explícitamente.",
+        "Para trabajar contra producción define ENVIRONMENT=production explícitamente.",
         os.getenv("ENVIRONMENT"))
 
 

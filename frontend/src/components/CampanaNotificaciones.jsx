@@ -212,7 +212,7 @@ const CampanaNotificaciones = () => {
                         ) : (!error && notificaciones.length === 0) ? (
                             <div className="px-4 py-8 text-center text-sm text-zinc-400">
                                 <Inbox className="w-8 h-8 mx-auto mb-2 text-zinc-600" />
-                                No tenés notificaciones.
+                                No tienes notificaciones.
                             </div>
                         ) : (
                             <ul className="divide-y divide-zinc-800">

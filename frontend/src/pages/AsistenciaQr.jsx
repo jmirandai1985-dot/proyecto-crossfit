@@ -35,7 +35,7 @@ const AsistenciaQr = () => {
             setVista({
                 tipo: 'info',
                 titulo: 'Este QR es para alumnos',
-                mensaje: 'Si sos coach o administrador, marcá la asistencia de tus clases desde tu panel. Para autoescanearte necesitás una cuenta de alumno.',
+                mensaje: 'Si eres coach o administrador, marca la asistencia de tus clases desde tu panel. Para autoescanearte necesitas una cuenta de alumno.',
             });
             return;
         }
@@ -49,9 +49,9 @@ const AsistenciaQr = () => {
                 } else if (d.estado === 'ya_marcado') {
                     setVista({ tipo: 'ok', titulo: '🔄 Ya estabas registrado', mensaje: d.mensaje || 'Tu asistencia a esta clase ya estaba marcada.' });
                 } else if (d.estado === 'ambiguo') {
-                    setVista({ tipo: 'amb', titulo: '⚠️ Más de una clase en curso', mensaje: d.mensaje || 'Hablá con tu coach para registrar la clase correcta.' });
+                    setVista({ tipo: 'amb', titulo: '⚠️ Más de una clase en curso', mensaje: d.mensaje || 'Habla con tu coach para registrar la clase correcta.' });
                 } else {
-                    setVista({ tipo: 'sin', titulo: '😕 No tenés reserva en este horario', mensaje: d.mensaje || 'Hablá con tu coach.' });
+                    setVista({ tipo: 'sin', titulo: '😕 No tienes reserva en este horario', mensaje: d.mensaje || 'Habla con tu coach.' });
                 }
             } catch (e) {
                 const det = e.response?.data?.detail

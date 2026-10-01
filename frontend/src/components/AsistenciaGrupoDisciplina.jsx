@@ -56,7 +56,7 @@ const AsistenciaGrupoDisciplina = ({ grupo, osc, abierta, onToggle, onAbrir, for
                 claseId: clase.id,
                 tipo: 'error',
                 texto: s === 409 ? 'Tope alcanzado (+10 sobre el original)'
-                    : s === 403 ? 'Solo podes ampliar el cupo de tus clases o disciplinas'
+                    : s === 403 ? 'Solo puedes ampliar el cupo de tus clases o disciplinas'
                         : s === 422 ? 'Cupos extra debe estar entre 1 y 10'
                             : (e.response?.data?.detail || 'No se pudo ampliar el cupo'),
             });

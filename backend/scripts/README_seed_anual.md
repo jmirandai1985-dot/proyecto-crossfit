@@ -241,7 +241,7 @@ POST /kpis/populate/monthly?backfill=1          (sólo el mes anterior, como el 
 ### Paso 6 — Verificación final (Render → Cron Job → Trigger Run)
 
 Con `DRY_RUN=1`: **0 cambios, 0 detecciones nuevas** (A.1(c) informativo sube en 300). Si
-usás el camino de Render, el correo del run llega con la lista completa; si no hay nada
+usas el camino de Render, el correo del run llega con la lista completa; si no hay nada
 rojo, no llega ningún correo: mirar el log del run.
 
 ---
@@ -268,8 +268,8 @@ Tres cosas que hacen ruido y **no** son fallas del seed:
 
 1. **A.5(a)/(b) ya venían rojas/informativas en PROD** por las 25 clases futuras sin coach
    de Musculación/Open Box. El seed **no las agrega** (no crea clases futuras) pero tampoco
-   las arregla: si querés el run verde, destildá `requiere_coach` en Disciplinas (migración
-   018) o asigná esos coaches — es un tema aparte, documentado en `maintenance/README.md`.
+   las arregla: si quieres el run verde, destilda `requiere_coach` en Disciplinas (migración
+   018) o asigna esos coaches — es un tema aparte, documentado en `maintenance/README.md`.
 2. **`fecha_expiracion` a fin de mes**: el 1/11 el paso 1 va a marcar vencidas las
    suscripciones de octubre (≈300 filas) ⇒ `MAX_VENCIDOS_PCT=80` **corta el run**. Por eso
    la reversión va **antes del 1/11**.

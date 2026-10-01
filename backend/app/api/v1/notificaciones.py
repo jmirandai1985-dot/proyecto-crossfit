@@ -196,11 +196,12 @@ def _html_optout(ok: bool) -> str:
     if ok:
         titulo, texto = "Preferencia registrada ✅", (
             "Dejaste de recibir los correos de reactivación. "
-            "Podés volver a recibirlos hablando con tu coach en el box.")
+            "Si quieres volver a recibirlos, responde cualquiera de nuestros correos "
+            "y lo activamos.")
     else:
         titulo, texto = "Link inválido o expirado ❌", (
             "El link que usaste no es válido. Si sigue pasando, "
-            "escribinos y lo resolvemos.")
+            "escríbenos y lo resolvemos.")
     return f"""<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;">
 <div style="max-width:480px;margin:40px auto;background:#ffffff;border-radius:12px;padding:32px;text-align:center;border:1px solid #e4e4e7;">

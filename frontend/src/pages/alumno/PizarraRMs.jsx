@@ -372,7 +372,7 @@ const PizarraRMs = () => {
                         <h2 className="text-lg font-bold text-gray-800 mb-1">📈 MI EVOLUCIÓN RECIENTE</h2>
                         {/* N-8: la regla de las 24 h también se ve en la UI, no sólo en el backend. */}
                         <p className="text-xs text-gray-500 mb-4">
-                            ✏️ Podés editar o borrar un PR durante las 24 h posteriores a su registro.
+                            ✏️ Puedes editar o borrar un PR durante las 24 h posteriores a su registro.
                         </p>
                         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                             <div className="overflow-x-auto">
@@ -408,7 +408,7 @@ const PizarraRMs = () => {
                                                                     onClick={() => abrirEditarRM(rm)}
                                                                     disabled={rmAccionando}
                                                                     aria-label="Editar PR"
-                                                                    title={`Podés editar este PR durante ${queda}`}
+                                                                    title={`Puedes editar este PR durante ${queda}`}
                                                                     className="px-2.5 py-1 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-semibold hover:bg-emerald-100 disabled:opacity-50 transition-colors"
                                                                 >
                                                                     ✏️ Editar
@@ -418,7 +418,7 @@ const PizarraRMs = () => {
                                                                     onClick={() => handleBorrarRM(rm)}
                                                                     disabled={rmAccionando}
                                                                     aria-label="Borrar PR"
-                                                                    title={`Podés borrar este PR durante ${queda}`}
+                                                                    title={`Puedes borrar este PR durante ${queda}`}
                                                                     className="px-2.5 py-1 rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs font-semibold hover:bg-red-100 disabled:opacity-50 transition-colors"
                                                                 >
                                                                     🗑️ Borrar

@@ -1306,7 +1306,7 @@ def crear_wods_batch(
                     raise HTTPException(
                         status_code=400,
                         detail=(f"Ninguna de las clases seleccionadas es del {wd.fecha} "
-                                f"en esa disciplina: no se publicó nada. Elegí otra clase "
+                                f"en esa disciplina: no se publicó nada. Elige otra clase "
                                 f"o el alcance 'todas las horas'."))
             else:
                 clases_dia = db.query(Clase).filter(

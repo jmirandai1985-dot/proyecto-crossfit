@@ -113,7 +113,7 @@ const Ajustes = () => {
                 {/* Título */}
                 <div>
                     <h1 className="text-3xl font-bold text-gray-900">⚙️ Ajustes</h1>
-                    <p className="text-gray-600 mt-1">Actualizá tus datos de contacto y medidas. El resto de tu ficha (nombre, correo, género y fecha de nacimiento) lo administra el box.</p>
+                    <p className="text-gray-600 mt-1">Actualiza tus datos de contacto y medidas. El resto de tu ficha (nombre, correo, género y fecha de nacimiento) lo administra el box.</p>
                 </div>
 
                 {/* Mensajes */}

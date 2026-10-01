@@ -212,7 +212,7 @@ def db():
 
     if not is_test_db_url(settings.DATABASE_URL):
         pytest.fail("DATABASE_URL no es una rama de TEST: aborto por seguridad "
-                    "(definí ENVIRONMENT=test / revisá .env.test)")
+                    "(define ENVIRONMENT=test / revisa .env.test)")
     print("\n[OK] base de datos de TEST confirmada\n")
     sesion = SessionLocal()
     yield sesion

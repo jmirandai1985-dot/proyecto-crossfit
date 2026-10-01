@@ -426,7 +426,7 @@ def ampliar_cupo_clase(
         if not es_suya:
             raise HTTPException(
                 status_code=403,
-                detail="Solo podes ampliar el cupo de tus clases o de tus disciplinas asignadas",
+                detail="Solo puedes ampliar el cupo de tus clases o de tus disciplinas asignadas",
             )
 
     original = clase.cupo_original or clase.cupo_maximo

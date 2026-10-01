@@ -331,7 +331,7 @@ export default function GestionClases() {
                 let claseIdsAlcance = null;
                 if (alcance === 'hora') {
                     if (!horaDestino) {
-                        throw new Error('Esta clase no tiene hora cargada: elegí "todas las horas" para publicar');
+                        throw new Error('Esta clase no tiene hora cargada: elige "todas las horas" para publicar');
                     }
                     diasPayload = diasConClaseHora;
                     claseIdsAlcance = diasPayload.map(f => alcanceHoraPorDia[f].id);

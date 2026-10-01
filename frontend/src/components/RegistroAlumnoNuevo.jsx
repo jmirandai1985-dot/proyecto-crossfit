@@ -81,7 +81,7 @@ const RegistroAlumnoNuevo = ({ onClose }) => {
                             <p className="mt-2 text-amber-100/90">{avisoCorreo.mensaje}</p>
                             <p className="mt-3 text-xs uppercase tracking-wide text-amber-200/70">Contraseña temporal</p>
                             <p data-testid="password-provisional" className="mt-1 font-mono text-lg font-bold text-white break-all">{avisoCorreo.password}</p>
-                            <p className="mt-2 text-amber-200/80">Ingresá con esta contraseña y cambiala en Ajustes.</p>
+                            <p className="mt-2 text-amber-200/80">Ingresa con esta contraseña y cambiala en Ajustes.</p>
                         </div>
                     ) : (
                     <div className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 px-4 py-4 rounded-lg text-sm text-center">
