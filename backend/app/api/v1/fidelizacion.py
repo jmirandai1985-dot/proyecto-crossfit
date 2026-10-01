@@ -534,8 +534,10 @@ def preview_correo_contacto(
     alumno = _alumno_para_contacto(db, current_user, coach_id, alumno_id)
     dias = _dias_inactividad_alumno(db, current_user["tenant_id"], alumno)
 
-    from app.services.email_service import render_email_fidelizacion
+    from app.services.email_service import render_email_fidelizacion, render_con_contacto
     asunto, html = render_email_fidelizacion(alumno.nombre, dias)
+    # Mismo pie que el envío real (el contacto del box de este tenant).
+    html = render_con_contacto(html, current_user["tenant_id"])
 
     return {
         "destinatario": alumno.correo,

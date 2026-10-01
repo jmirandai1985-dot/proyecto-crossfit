@@ -207,6 +207,19 @@ promete causalidad).
 9. **La sugerencia también vive en el servicio.** `sugerir()` es la única definición de qué
    plantilla le corresponde al alumno, y devuelve la regla que ganó: la pantalla ya no tiene su
    propia heurística (dos definiciones de "corresponde renovación" se desincronizan siempre).
+10. **El encabezado de los correos es uno solo.** `email_service.encabezado_marca()` es la única
+   definición del encabezado de marca: logo del gorila por **URL pública** (el `logo/logo.png` del
+   repo, servido en `/imgs/logo.png`), 160 px de ancho, `alt` y el nombre en texto debajo (si el
+   cliente bloquea imágenes remotas, el correo se sigue entendiendo). **Nada de adjunto inline ni
+   base64:** Gmail y Outlook lo bloquean y el correo llegaba sin logo.
+11. **El correo lo manda el box, no el coach.** Ningún copy le pide al alumno "coordinar con el
+   coach": la acción es reservar/activar en la app y, para dudas, está el pie con el contacto real
+   del box — responder el correo y, si el box cargó su **WhatsApp** en `/admin/configuracion`
+   (`configuracion_negocio.whatsapp`), el link de WhatsApp. Sin número cargado no se promete canal:
+   el pie dice sólo "responde este correo".
+12. **Los asuntos son texto plano.** Un asunto con entidades HTML (`est&aacute;`) se muestra
+   literal en la bandeja: los acentos van como acentos y las plantillas se prueban decodificando el
+   header (`tests/test_email_marca_contacto.py`).
 
 ---
 
@@ -279,6 +292,10 @@ cd backend; $env:ENVIRONMENT='test'; py -3.12 -m pytest tests/test_fidelizacion_
 
 # Servicio de beneficios de la F2 (escribe y RESTAURA en la rama TEST)
 cd backend; $env:ENVIRONMENT='test'; py -3.12 -m pytest tests/test_beneficios_service.py -q
+
+# Marca y contacto de los correos (bloque C: encabezado, asuntos en texto plano y el WhatsApp del
+# box; escribe y RESTAURA el whatsapp de la configuración del box en la rama TEST)
+cd backend; $env:ENVIRONMENT='test'; py -3.12 -m pytest tests/test_email_marca_contacto.py -q
 
 # Frontend
 cd frontend; npm run lint; npm run build

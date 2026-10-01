@@ -1,7 +1,6 @@
 """Servicio de envio de correos via Gmail SMTP (21 funciones)."""
 import os
 from app.core.urls import url_frontend  # B.2: URLs de correo saneadas
-import base64
 import logging
 import smtplib
 import sys
@@ -12,11 +11,18 @@ from app.core.config import settings
 
 logger = logging.getLogger("uvicorn.email")
 
-BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# Logo real: proyecto_root/logo/logo.png (el archivo 'images (17).jfif' no existe)
-LOGO_PATH = os.path.join(os.path.dirname(BACKEND_DIR), "logo", "logo.png")
-# Logo servido desde repo público de assets (GitHub raw) para usar URL en vez de adjunto
-LOGO_URL = "https://raw.githubusercontent.com/jmirandai1985-dot/urban-box-assets/main/logo.png"
+# ── El logo del gorila (encabezado de TODOS los correos) ──────────────────────
+# El archivo es `logo/logo.png` del repo (447x447, 35 KB) y el MISMO archivo está
+# copiado a `frontend/public/imgs/logo.png`, que es lo que sirve nginx en la web.
+# Por eso el correo usa esa URL PÚBLICA (absoluta, vía `url_frontend`) y no un
+# adjunto: antes había un `LOGO_PATH` local + un adjunto inline en base64 con
+# `cid:` (`_logo_attachment`), que Gmail y Outlook bloquean en muchos casos —el
+# correo llegaba SIN logo— y que además pesaba ~47 KB por correo.
+LOGO_EMAIL_PATH = "/imgs/logo.png"
+# Ancho EN PANTALLA: 160 px (el archivo tiene 447 px, así que sobra resolución para
+# pantallas retina sin re-encodear nada: el PNG del repo ya está optimizado).
+LOGO_EMAIL_ANCHO = 160
+LOGO_EMAIL_ALT = "Urban Training Box"
 
 # Último error SMTP (para exponer detalle útil al admin en el Dashboard)
 ULTIMO_ERROR_SMTP = None
@@ -29,8 +35,13 @@ ULTIMO_ERROR_SMTP = None
 # mecánica que `ULTIMO_ERROR_SMTP`, que ya se usa así en este módulo).
 ULTIMO_ENVIO_ID = None
 
-LOGO_CID = "logo-urban-training"
-LOGO_FILENAME = "logo-urban-training.jpg"
+# Este placeholder va en el pie del template y `_enviar` lo reemplaza por el contacto
+# REAL del box del alumno: el template es el mismo para todos los tenants, así que no
+# puede saber el WhatsApp de cada uno.
+PLACEHOLDER_CONTACTO = "{{CONTACTO_BOX}}"
+# Sin WhatsApp/teléfono cargado en la configuración del negocio, la llamada a la acción
+# es responder el correo (siempre funciona y no promete un canal que no existe).
+CONTACTO_FALLBACK = "¿Tienes dudas? Responde este correo y te contesta el equipo del box."
 
 # ── Modo de envío (`EMAIL_MODO`) ─────────────────────────────────────────────
 # La ÚNICA puerta de salida de correos es `_enviar`: por eso el modo prueba vive acá
@@ -52,40 +63,135 @@ def es_modo_simulado() -> bool:
     return modo_envio() == MODO_NOOP
 
 
-def _logo_attachment() -> dict:
-    """Lee el logo y devuelve dict attachment inline (misma versión que funcionaba)."""
-    try:
-        with open(LOGO_PATH, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode()
-        return {
-            "filename": LOGO_FILENAME,
-            "content": b64,
-            "content_id": LOGO_CID,
-            "disposition": "inline",
-            "type": "image/jpeg",
-        }
-    except Exception as e:
-        logger.warning(f"No se pudo leer logo: {e}")
-        return {}
+def url_logo_email() -> str:
+    """URL PÚBLICA del logo del gorila (absoluta y saneada por `url_frontend`)."""
+    return url_frontend(LOGO_EMAIL_PATH)
 
 
-def _template(titulo: str, saludo: str, cuerpo: str, boton_texto: str, boton_url: str) -> str:
-    """Template visual comun: header de marca (negro/blanco/naranja), cuerpo motivacional, boton CTA."""
-    logo_html = """
-    <div style="background: #000000; padding: 40px 20px; text-align: center; width: 100%; margin: 0; border: 3px solid #ff8c00; border-radius: 8px;">
-      <h1 style="color: #ffffff; font-size: 44px; font-weight: 900; margin: 0; letter-spacing: 2px; font-family: Arial, sans-serif; line-height: 1.3;">
-        URBAN<br>TRAINING<br>BOX
-      </h1>
-      <p style="color: #ff8c00; font-size: 13px; margin: 16px 0 0 0; font-weight: bold; letter-spacing: 3px; font-family: Arial, sans-serif;">
+def encabezado_marca() -> str:
+    """EL encabezado de marca: uno solo para TODOS los correos del sistema.
+
+    Existe por el bug de las ~21 copias: cada correo nuevo se armaba su propio header
+    (unas veces con el `h1` de texto, otras con el adjunto inline) y el box terminaba con
+    correos de dos marcas distintas. Todo correo que se agregue tiene que pasar por acá.
+
+    El logo va por URL ABSOLUTA (no base64 ni `cid:`) y con `alt` + el nombre en texto
+    debajo: si el cliente bloquea imágenes remotas (Outlook por defecto), el correo se
+    sigue entendiendo.
+    """
+    return f"""
+    <div style="background-color:#09090b;border:3px solid #ff8c00;border-radius:8px;padding:24px 20px;text-align:center;">
+      <img src="{url_logo_email()}" width="{LOGO_EMAIL_ANCHO}" alt="{LOGO_EMAIL_ALT}"
+           style="display:block;margin:0 auto;width:{LOGO_EMAIL_ANCHO}px;max-width:100%;height:auto;border:0;border-radius:6px;outline:none;text-decoration:none;" />
+      <p style="color:#ffffff;font-size:20px;font-weight:900;letter-spacing:2px;margin:14px 0 0;font-family:Arial,sans-serif;">
+        URBAN TRAINING BOX
+      </p>
+      <p style="color:#ff8c00;font-size:12px;font-weight:bold;letter-spacing:3px;margin:8px 0 0;font-family:Arial,sans-serif;">
         – TU BOX DE ÉLITE –
       </p>
     </div>
+    """
+
+
+def _solo_digitos(valor) -> str:
+    """Sólo los dígitos de un teléfono escrito como sea (+56 9 1234 5678, (9)1234-5678)."""
+    return "".join(ch for ch in str(valor or "") if ch.isdigit())
+
+
+def wa_link(whatsapp) -> str:
+    """Link de WhatsApp del número del box (o `""` si no alcanza para armar uno)."""
+    digitos = _solo_digitos(whatsapp)
+    if len(digitos) < 8:
+        return ""
+    if len(digitos) <= 9:
+        # Sin código de país: el box es chileno (9 dígitos = 9 XXXX XXXX) -> +56.
+        digitos = "56" + digitos
+    return f"https://wa.me/{digitos}"
+
+
+def contacto_del_box(tenant_id=None) -> str:
+    """El WhatsApp/teléfono del box desde la CONFIGURACIÓN DEL NEGOCIO (o `""`).
+
+    Único lector de `configuracion_negocio.whatsapp` en los correos. Abre una sesión
+    corta y la cierra: el template y `_enviar` no reciben una `Session` (mismo criterio
+    que `_registrar_envio`). Un box sin fila de configuración, sin número, o una DB con
+    problemas devuelven `""`: el correo sale igual, con el fallback que no promete nada.
+    """
+    if not tenant_id:
+        return ""
+    try:
+        from app.db.database import SessionLocal
+        from app.models.configuracion import ConfiguracionNegocio
+        db = SessionLocal()
+        try:
+            config = (db.query(ConfiguracionNegocio)
+                        .filter(ConfiguracionNegocio.tenant_id == tenant_id)
+                        .first())
+            return (getattr(config, "whatsapp", None) or "").strip()
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"No se pudo leer el contacto del box: {e}")
+        return ""
+
+
+def bloque_contacto(tenant_id=None) -> str:
+    """La llamada a la acción del pie: responder el correo y, si hay, el WhatsApp del box."""
+    numero = contacto_del_box(tenant_id)
+    link = wa_link(numero)
+    if not link:
+        return (f'<p style="color:#71717a;font-size:13px;line-height:1.6;'
+                f'text-align:center;margin:18px 0 0;">{CONTACTO_FALLBACK}</p>')
+    return (
+        '<p style="color:#71717a;font-size:13px;line-height:1.6;text-align:center;'
+        'margin:18px 0 0;">¿Tienes dudas? <strong>Responde este correo</strong> o '
+        f'escríbenos al <a href="{link}" style="color:#c2410c;font-weight:bold;">'
+        f'WhatsApp {numero}</a>.</p>')
+
+
+def render_con_contacto(html: str, tenant_id=None) -> str:
+    """Reemplaza el placeholder de contacto por el del box REAL (idempotente).
+
+    Se usa en los DOS caminos del correo: `_enviar` (lo que sale de verdad) y el preview
+    (`fidelizacion_plantillas.render`), así el admin ve exactamente lo que se manda.
+    Sin el placeholder no se toca la BD (y volver a pasar el html ya resuelto no hace nada).
+    """
+    html = html or ""
+    if PLACEHOLDER_CONTACTO not in html:
+        return html
+    return html.replace(PLACEHOLDER_CONTACTO, bloque_contacto(tenant_id))
+
+
+def _tenant_de_alumno(alumno_id):
+    """El tenant del alumno, para resolver el contacto del box (o `None`)."""
+    if not alumno_id:
+        return None
+    try:
+        from app.db.database import SessionLocal
+        from app.models.usuario import Usuario
+        db = SessionLocal()
+        try:
+            alumno = db.query(Usuario).filter(Usuario.id == alumno_id).first()
+            return alumno.tenant_id if alumno else None
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"No se pudo resolver el tenant del alumno {alumno_id}: {e}")
+        return None
+
+
+def _template(titulo: str, saludo: str, cuerpo: str, boton_texto: str, boton_url: str) -> str:
+    """Template visual comun: encabezado de marca, cuerpo motivacional, boton CTA y contacto.
+
+    El encabezado NO se arma acá: sale de `encabezado_marca()` (una sola definición).
+    El pie deja `PLACEHOLDER_CONTACTO`, que resuelve `render_con_contacto()` con el
+    WhatsApp del box del alumno.
     """
     return f"""<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background-color:#f4f4f5;font-family:Arial,Helvetica,sans-serif;">
 <div style="max-width:600px;margin:0 auto;background-color:#ffffff;">
   <div style="background-color:#09090b;padding:24px 32px;text-align:center;">
-    {logo_html}
+    {encabezado_marca()}
   </div>
   <div style="padding:36px 32px;">
     <h1 style="color:#09090b;font-size:26px;margin:0 0 16px;">{titulo}</h1>
@@ -94,9 +200,10 @@ def _template(titulo: str, saludo: str, cuerpo: str, boton_texto: str, boton_url
     <div style="text-align:center;margin:28px 0 8px;">
       <a href="{boton_url}" style="background-color:#f97316;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:8px;font-weight:bold;font-size:16px;">{boton_texto}</a>
     </div>
+    {PLACEHOLDER_CONTACTO}
   </div>
   <div style="background-color:#f4f4f5;padding:16px 32px;text-align:center;color:#71717a;font-size:12px;">
-    <p style="margin:0;">Urban Training Box &mdash; CrossFit Maip&uacute;</p>
+    <p style="margin:0;">Urban Training Box — CrossFit Maipú</p>
   </div>
 </div>
 </body></html>"""
@@ -202,6 +309,15 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
 
         destinatario = _limpiar_header(destinatario).strip()
         asunto = _limpiar_header(asunto)
+        # ── El pie con el contacto REAL del box (bloque C) ──
+        # El template deja `PLACEHOLDER_CONTACTO` porque es el mismo para todos los
+        # tenants; acá se reemplaza por el WhatsApp del box del alumno (o por el
+        # fallback). Va ANTES del modo prueba: el correo simulado se registra igual con
+        # el contacto ya puesto, y el html que se loguea es el que se mandaría.
+        # El `if` es el que evita la consulta: un html que no trae el placeholder (tests
+        # unitarios con "<p>x</p>", correos armados por otro servicio) no toca la BD.
+        if PLACEHOLDER_CONTACTO in (html or ""):
+            html = render_con_contacto(html, _tenant_de_alumno(alumno_id) or tenant_id)
         # ── Modo prueba (EMAIL_MODO=noop): no se abre SMTP ──
         # El intento se registra como `simulado` (no `enviado`): el log de correos no
         # puede decir que algo salió cuando no salió.
@@ -325,7 +441,7 @@ def render_email_vencimiento_plan(nombre: str, plan: str, fecha_vencimiento) -> 
               "renueva tu plan y segu&iacute; avanzando con nosotros.")
     url = url_frontend("/alumno/solicitar-plan")
     html = _template(titulo, saludo, cuerpo, "Renovar mi plan", url)
-    asunto = f"Tu plan {plan} est&aacute; por vencer, {nombre.split()[0]} ⏳"
+    asunto = f"Tu plan {plan} está por vencer, {nombre.split()[0]} ⏳"
     return asunto, html
 
 
@@ -354,9 +470,9 @@ def render_email_fidelizacion(nombre: str, dias_ausente: int) -> tuple:
     """
     titulo = "Tu box te está esperando"
     saludo = f"Hola {nombre.split()[0]}, notamos que llevas <strong>{dias_ausente} d&iacute;as</strong> sin entrenar."
-    cuerpo = ("El descanso es parte del proceso, pero el impulso tambi&eacute;n se entrena. "
-              "Tu lugar en Urban Training Box sigue esper&aacute;ndote: la comunidad, el coach y tu propia mejora "
-              "est&aacute;n listos para que vuelvas. Retom&aacute; donde lo dejaste, cada sesi&oacute;n cuenta.")
+    cuerpo = ("El descanso es parte del proceso, pero el impulso también se entrena. "
+              "Tu lugar en Urban Training Box sigue esperándote: la comunidad, tu gente y tu propia mejora "
+              "están listos para que vuelvas. Retomá donde lo dejaste, cada sesión cuenta.")
     url = url_frontend("/alumno/mis-reservas")
     html = _template(titulo, saludo, cuerpo, "Volver a entrenar", url)
     asunto = f"¡Te extrañamos en el box, {nombre.split()[0]}! 💪"
@@ -374,8 +490,8 @@ def render_email_fidelizacion_temprana(nombre: str, dias_ausente: int) -> tuple:
     saludo = (f"Hola {primer_nombre}, llevás <strong>{dias_ausente} días</strong> sin pasar por "
               "el box.")
     cuerpo = ("Una semana sin entrenar se nota, y también se recupera: volvé a tu horario de "
-              "siempre y el impulso vuelve con la primera sesión. Tu lugar, tu coach y tu gente "
-              "siguen acá esperándote.")
+              "siempre y el impulso vuelve con la primera sesión. Tu lugar, tu gente y tu "
+              "entrenador de siempre siguen acá esperándote.")
     url = url_frontend("/alumno/mis-reservas")
     html = _template(titulo, saludo, cuerpo, "Volver a entrenar", url)
     asunto = f"Hace unos días que no te vemos, {primer_nombre} 💪"
@@ -386,9 +502,10 @@ def render_email_fidelizacion_larga(nombre: str, dias_ausente: int,
                                     plan_vencido: bool = False) -> tuple:
     """Renderiza (asunto, html) del correo del alumno con MÁS de un mes sin venir o sin plan.
 
-    `plan_vencido` (hoy no tiene una membresía vigente) cambia UNA frase: decirle "renová tu
-    plan" a alguien que todavía está pagando es un error que el alumno nota. El resto es el
-    mismo mensaje (coordinar la vuelta), así que no hay dos copias que puedan divergir.
+    `plan_vencido` (hoy no tiene una membresía vigente) cambia DOS cosas, y las dos son porque
+    el alumno las nota: la frase de la renovación —decirle "renová tu plan" a alguien que todavía
+    está pagando es un error— y el botón, que tiene que llevar a donde puede hacer algo (sin plan
+    vigente, a activar uno; con plan vigente, a reservar su clase). El resto es el mismo mensaje.
     """
     primer_nombre = nombre.split()[0]
     titulo = "Volver también es entrenar"
@@ -400,8 +517,13 @@ def render_email_fidelizacion_larga(nombre: str, dias_ausente: int,
     cuerpo = ("Después de un mes, la vuelta cuesta menos de lo que parece: no hace falta empezar "
               "de cero ni esperar el lunes perfecto. Elegí un día, vení y armamos un plan que se "
               "ajuste a tu semana.")
-    url = url_frontend("/alumno/solicitar-plan")
-    html = _template(titulo, saludo, cuerpo, "Coordinar mi vuelta", url)
+    if plan_vencido:
+        url = url_frontend("/alumno/solicitar-plan")
+        boton = "Activar mi plan"
+    else:
+        url = url_frontend("/alumno/mis-reservas")
+        boton = "Reservar mi clase"
+    html = _template(titulo, saludo, cuerpo, boton, url)
     asunto = f"¿Volvemos, {primer_nombre}? Tu lugar sigue acá"
     return asunto, html
 
@@ -413,6 +535,10 @@ def render_email_riesgo_alto(nombre: str, dias_ausente: int) -> tuple:
     alumno se le escribe como una persona del box que se preocupa, con sus días reales sin
     venir como único número. Un correo que le diga "98 % de probabilidad de abandono" lo
     expulsa del box, que es exactamente lo contrario de lo que busca la plantilla.
+
+    El CTA invita a VOLVER A ENTRENAR (el botón lleva a reservar su clase): el correo lo manda
+    el box, así que no se le pide al alumno "coordinar con el coach" ni hablar con nadie para
+    poder volver.
     """
     primer_nombre = nombre.split()[0]
     titulo = "Nos importa cómo estás"
@@ -422,7 +548,7 @@ def render_email_riesgo_alto(nombre: str, dias_ausente: int) -> tuple:
               "ánimo—, el equipo del box está para ayudarte a sostener el hábito que venías "
               "construyendo. Contanos qué te está frenando y vemos juntos cómo seguir.")
     url = url_frontend("/alumno/mis-reservas")
-    html = _template(titulo, saludo, cuerpo, "Contarle a mi coach", url)
+    html = _template(titulo, saludo, cuerpo, "Reservar mi clase", url)
     asunto = f"¿Cómo venís, {primer_nombre}? Contame"
     return asunto, html
 

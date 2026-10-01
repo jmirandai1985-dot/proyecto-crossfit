@@ -122,7 +122,13 @@ def enviar_email_cumplimiento(nombre: str, correo: str, alumno_id: int,
 def enviar_email_acompanamiento(nombre: str, correo: str, alumno_id: int,
                                 mes_nombre: str, asistidas: int, total: int,
                                 coach_nombre: str, mes_referencia) -> bool:
-    """Correo 2: mes con asistencia parcial (<100%)."""
+    """Correo 2: mes con asistencia parcial (<100%).
+
+    `coach_nombre` ya NO se escribe en el copy (bloque C): el correo lo manda el box y al
+    alumno no se le pide "hablar con el coach" para volver — la acción es agendar, y para
+    dudas está responder el correo o el WhatsApp del box, que ya van en el pie de todos los
+    correos. El parámetro se mantiene porque es la firma que ya usan los llamadores.
+    """
     if not correo:
         return False
     asunto = f"{nombre.split()[0]}, queremos ayudarte a retomar el ritmo"
@@ -131,7 +137,7 @@ def enviar_email_acompanamiento(nombre: str, correo: str, alumno_id: int,
         f"<p>En {mes_nombre} asististe a <strong>{asistidas} de {total}</strong> "
         "clases que reservaste. Cualquier caída es parte del camino: lo que importa "
         "es volver.</p>"
-        f"<p>{coach_nombre or 'Tu coach'} está listo para ayudarte a retomar el ritmo. "
+        "<p>El equipo del box está listo para ayudarte a retomar el ritmo. "
         "Agendá tus próximas clases y volvé a sumar a tu racha.</p>"
         "<p>Te esperamos en el box 💪</p>"
     )

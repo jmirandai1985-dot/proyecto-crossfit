@@ -22,6 +22,9 @@ class ConfiguracionUpdate(BaseModel):
     tipo_cuenta: Optional[str] = None
     rut: Optional[str] = None
     email_comprobantes: Optional[str] = None
+    # Bloque C: el WhatsApp del box para el pie de los correos (vacío = sólo responder
+    # el correo). El link lo arma `email_service.wa_link()` a partir de los dígitos.
+    whatsapp: Optional[str] = None
 
 
 @router.get("")
@@ -42,6 +45,7 @@ def obtener_configuracion(
             "tipo_cuenta": None,
             "rut": None,
             "email_comprobantes": None,
+            "whatsapp": None,
             "configurado": False
         }
 
@@ -53,6 +57,7 @@ def obtener_configuracion(
         "tipo_cuenta": config.tipo_cuenta,
         "rut": config.rut,
         "email_comprobantes": config.email_comprobantes,
+        "whatsapp": config.whatsapp,
         "configurado": True
     }
 
@@ -88,6 +93,10 @@ def actualizar_configuracion(
         config.rut = data.rut
     if data.email_comprobantes is not None:
         config.email_comprobantes = data.email_comprobantes
+    if data.whatsapp is not None:
+        # Se guarda recortado y con "" -> None: un campo vacío en el formulario significa
+        # "sin WhatsApp" y no una cadena vacía que después habría que chequear en cada uso.
+        config.whatsapp = data.whatsapp.strip() or None
 
     db.commit()
     db.refresh(config)
@@ -100,5 +109,6 @@ def actualizar_configuracion(
         "tipo_cuenta": config.tipo_cuenta,
         "rut": config.rut,
         "email_comprobantes": config.email_comprobantes,
+        "whatsapp": config.whatsapp,
         "configurado": True
     }

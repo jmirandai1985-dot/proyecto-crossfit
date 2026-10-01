@@ -189,6 +189,10 @@ def disparar_alertas_sin_creditos(
 # confirmación — no requiere frontend ni login.
 # ═════════════════════════════════════════════════════════════════════════════
 def _html_optout(ok: bool) -> str:
+    # El encabezado de marca es el MISMO que el de los correos (`email_service.encabezado_marca`):
+    # el logo del gorila se define una sola vez. La página es HTML público, así que la URL del
+    # logo se resuelve igual (`url_frontend`).
+    from app.services.email_service import encabezado_marca
     if ok:
         titulo, texto = "Preferencia registrada ✅", (
             "Dejaste de recibir los correos de reactivación. "
@@ -200,9 +204,9 @@ def _html_optout(ok: bool) -> str:
     return f"""<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;">
 <div style="max-width:480px;margin:40px auto;background:#ffffff;border-radius:12px;padding:32px;text-align:center;border:1px solid #e4e4e7;">
-  <h1 style="font-size:20px;color:#09090b;margin:0 0 12px;">{titulo}</h1>
+  {encabezado_marca()}
+  <h1 style="font-size:20px;color:#09090b;margin:24px 0 12px;">{titulo}</h1>
   <p style="color:#3f3f46;font-size:14px;line-height:1.6;margin:0;">{texto}</p>
-  <p style="color:#71717a;font-size:11px;margin:24px 0 0;">Urban Training Box</p>
 </div>
 </body></html>"""
 

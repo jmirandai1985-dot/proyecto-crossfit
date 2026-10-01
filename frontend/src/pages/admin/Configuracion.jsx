@@ -11,6 +11,7 @@ const Configuracion = () => {
         tipo_cuenta: '',
         rut: '',
         email_comprobantes: '',
+        whatsapp: '',
     });
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -28,6 +29,7 @@ const Configuracion = () => {
                         tipo_cuenta: data.tipo_cuenta || '',
                         rut: data.rut || '',
                         email_comprobantes: data.email_comprobantes || '',
+                        whatsapp: data.whatsapp || '',
                     });
                 }
             } catch (err) {
@@ -122,6 +124,19 @@ const Configuracion = () => {
                         <input type="email" name="email_comprobantes" value={form.email_comprobantes} onChange={handleChange}
                             placeholder="Ej: pagos@urbanbox.cl"
                             className="w-full px-4 py-2.5 border border-zinc-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm" />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-zinc-300 mb-1">WhatsApp / Teléfono del box</label>
+                        <input type="text" name="whatsapp" value={form.whatsapp} onChange={handleChange}
+                            placeholder="Ej: +56 9 1234 5678"
+                            maxLength={30}
+                            data-testid="config-whatsapp"
+                            className="w-full px-4 py-2.5 border border-zinc-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm" />
+                        <p className="text-xs text-zinc-500 mt-1">
+                            Va en el pie de todos los correos a los alumnos: "responde este correo o escríbenos al WhatsApp".
+                            Si lo dejas vacío, los correos sólo ofrecen responder el correo.
+                        </p>
                     </div>
 
                     <button onClick={handleSave} disabled={saving}

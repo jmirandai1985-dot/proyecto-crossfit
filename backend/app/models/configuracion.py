@@ -24,3 +24,10 @@ class ConfiguracionNegocio(Base):
     # fila no existe o el valor es imposible (>100).
     beneficio_descuento_max_pct = Column(
         Integer, nullable=False, server_default="50", default=50)
+    # ── Bloque C: el contacto del box para los correos ────────────────────────
+    # El pie de TODOS los correos ofrece "responde este correo" y, si esta columna tiene
+    # un número, también el WhatsApp del box (`email_service.contacto_del_box`). Se guarda
+    # como texto y no como teléfono normalizado porque lo escribe el admin a mano (+56 9
+    # 1234 5678, 9 1234 5678, ...): `wa_link()` normaliza los dígitos al armar el link.
+    # NULL/vacío = el correo no promete un canal que el box no atiende.
+    whatsapp = Column(String(30), nullable=True)
