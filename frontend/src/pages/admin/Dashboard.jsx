@@ -424,7 +424,18 @@ const AdminDashboard = () => {
                                             </td>
                                             <td className="px-6 py-4 text-sm text-zinc-100">{s.plan_nombre}</td>
                                             <td className="px-6 py-4 text-sm font-bold text-green-700">
-                                                ${(s.plan_precio || 0).toLocaleString('es-CL')}
+                                                ${(s.precio_final ?? s.plan_precio ?? 0).toLocaleString('es-CL')}
+                                                {/* F2: si la solicitud trae un beneficio, se dice el % y el
+                                                    precio de lista (lo que el alumno va a pagar es el final). */}
+                                                {s.descuento_pct != null && (
+                                                    <span className="block text-[11px] font-medium text-amber-600"
+                                                        data-testid={`beneficio-aplicado-${s.id}`}>
+                                                        Beneficio aplicado: −{s.descuento_pct} %
+                                                        <span className="ml-1 text-zinc-500 line-through">
+                                                            ${(s.plan_precio || 0).toLocaleString('es-CL')}
+                                                        </span>
+                                                    </span>
+                                                )}
                                             </td>
                                             <td className="px-6 py-4">
                                                 {s.voucher_url ? (

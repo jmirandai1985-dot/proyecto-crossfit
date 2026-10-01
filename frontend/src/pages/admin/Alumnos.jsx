@@ -25,6 +25,10 @@ const Alumnos = () => {
     const [aprobandoPago, setAprobandoPago] = useState(false);
     const [mensajeAprobacion, setMensajeAprobacion] = useState('');
     const [suscripciones, setSuscripciones] = useState([]);
+    // ─── F2: el estado de beneficios del alumno que se está aprobando ──
+    // Trae el descuento vigente y el precio final de cada plan (lo calcula el backend): el panel
+    // avisa ANTES de asignar y precarga lo que hay que cobrar.
+    const [beneficioAlumno, setBeneficioAlumno] = useState(null);
     const [editingAlumno, setEditingAlumno] = useState(null);
     const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
     const [searchParams, setSearchParams] = useSearchParams();
@@ -111,6 +115,36 @@ const Alumnos = () => {
         };
         fetchPlanes();
     }, [tenant_id]);
+
+    // ─── F2: beneficios del alumno cuando se abre la aprobación del pago ───────────────
+    // Se piden los precios de TODOS los planes de una vez (con el descuento del alumno puesto):
+    // el aviso y el precio precargado salen del backend, no de una cuenta del navegador.
+    useEffect(() => {
+        const traerBeneficios = async () => {
+            if (!selectedAlumnoVoucher?.id || planes.length === 0) {
+                setBeneficioAlumno(null);
+                return;
+            }
+            try {
+                const { data } = await api.get(
+                    `/api/v1/beneficios/alumno/${selectedAlumnoVoucher.id}`,
+                    { params: { plan_ids: planes.map((p) => p.id).join(',') } },
+                );
+                setBeneficioAlumno(data);
+            } catch {
+                // Sin esta info el panel sigue igual (sin aviso): no se cae la aprobación.
+                setBeneficioAlumno(null);
+            }
+        };
+        traerBeneficios();
+    }, [selectedAlumnoVoucher, planes]);
+
+    /** Plan elegido en la aprobación del pago (o `undefined`). */
+    const planElegido = planes.find((p) => p.id === parseInt(planSeleccionado));
+
+    /** Desglose del descuento para un plan (o `null`): lo calcula el backend. */
+    const precioConBeneficio = (plan) =>
+        beneficioAlumno?.precios?.[String(plan?.id)] || null;
 
     // La busqueda y el total los resuelve el backend (server-side).
     const totalPaginas = Math.max(1, Math.ceil(totalAlumnos / porPagina));
@@ -493,6 +527,31 @@ const Alumnos = () => {
                                         ))}
                                     </select>
                                 </div>
+                                {planElegido && (
+                                    <p className="text-sm text-zinc-300" data-testid="precio-precargado">
+                                        Precio a cobrar:{' '}
+                                        <span className="font-bold text-white">
+                                            ${(precioConBeneficio(planElegido)?.precio_final_clp
+                                                ?? planElegido.precio_clp ?? 0).toLocaleString('es-CL')}
+                                        </span>
+                                        {precioConBeneficio(planElegido) && (
+                                            <span className="ml-2 text-xs text-zinc-500 line-through">
+                                                ${(planElegido.precio_clp || 0).toLocaleString('es-CL')}
+                                            </span>
+                                        )}
+                                    </p>
+                                )}
+                                {beneficioAlumno?.descuento_pct && (
+                                    <div className="bg-amber-500/10 border-l-4 border-amber-500 rounded p-3 text-sm text-amber-200"
+                                        data-testid="aviso-beneficio-alumno">
+                                        🎁 Este alumno tiene un −{beneficioAlumno.descuento_pct} % de
+                                        descuento vigente hasta el {fmtFechaChile(beneficioAlumno.descuento_hasta)}.
+                                        <span className="block text-xs mt-1 text-amber-300/80">
+                                            El descuento lo aplica el sistema cuando él solicita su plan
+                                            desde la app: acá se muestra para cobrar el precio correcto.
+                                        </span>
+                                    </div>
+                                )}
                                 {mensajeAprobacion && (
                                     <p className={`text-sm font-medium ${mensajeAprobacion.startsWith('✅') ? 'text-green-700' : 'text-red-600'}`}>
                                         {mensajeAprobacion}

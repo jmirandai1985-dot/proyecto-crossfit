@@ -27,6 +27,9 @@ from app.core.config import settings
 # `app/utils/santiago.py`): una sola definición para este flujo y la compra de emergencia.
 from app.utils.santiago import ahora_santiago, fin_de_mes_chile, hoy_santiago
 from app.services.auditoria_service import registrar_auditoria
+# F2: el descuento vigente del alumno se aplica al SOLICITAR un plan. La aritmética (`desglose`)
+# y el ciclo de vida del beneficio (`vigente`/`usar`) viven en su servicio, no acá.
+from app.services import beneficios_service as beneficios
 from datetime import timedelta
 
 router = APIRouter()
@@ -93,6 +96,22 @@ def solicitar_plan(
         raise HTTPException(
             status_code=400, detail="Ya tienes una solicitud pendiente")
 
+    # ── F2: el descuento VIGENTE del alumno se aplica a ESTA compra ──
+    # El precio de lista se conserva como snapshot (`precio_clp_snapshot`, P0-4) y la solicitud
+    # guarda el % y el precio final: la aprobación cobra el FINAL, no el de lista. La aritmética es
+    # del servicio (`desglose`): un `%` calculado en dos lados es un `%` que se desincroniza.
+    descuento = {}
+    lista = plan.precio_clp
+    if isinstance(lista, int) and not isinstance(lista, bool) and lista > 0:
+        vigente = beneficios.vigente(db, data.alumno_id, tipo=beneficios.TIPO_DESCUENTO)
+        if vigente is not None:
+            aritmetica = beneficios.desglose(vigente, lista)
+            descuento = {
+                "beneficio_id": vigente.id,
+                "descuento_pct": aritmetica["descuento_pct"],
+                "precio_final_clp": aritmetica["precio_final_clp"],
+            }
+
     solicitud = SolicitudPlan(
         tenant_id=data.tenant_id,
         alumno_id=data.alumno_id,
@@ -103,12 +122,35 @@ def solicitar_plan(
         # ── P0-4 (S-01): snapshot del precio vigente AL SOLICITAR ──
         # La aprobación/ingreso NO debe depender de cambios de precio posteriores.
         precio_clp_snapshot=plan.precio_clp,
+        **descuento,
     )
     db.add(solicitud)
     db.commit()
     db.refresh(solicitud)
 
-    return {"status": "pending", "message": "Solicitud enviada. El admin la revisará en 24h", "id": solicitud.id}
+    # El beneficio se marca USADO en el mismo movimiento: es la conversión que mide la F4 y ocurre
+    # una sola vez (si la solicitud se rechaza, el descuento ya se aplicó a esta compra: volver a
+    # usarlo sería el mismo regalo dos veces).
+    if descuento.get("beneficio_id"):
+        beneficio = beneficios.vigente(db, data.alumno_id, tipo=beneficios.TIPO_DESCUENTO)
+        if beneficio is not None and beneficio.id == descuento["beneficio_id"]:
+            try:
+                beneficios.usar(db, beneficio, precio_lista_clp=plan.precio_clp)
+            except beneficios.BeneficioError as e:
+                # La solicitud YA está guardada con su descuento: si el uso falla, se dice y no se
+                # rompe la solicitud (el panel lo puede ver en la pestaña Beneficios).
+                logger.warning(f"No se pudo marcar el beneficio #{beneficio.id} como usado: {e}")
+
+    return {
+        "status": "pending",
+        "message": "Solicitud enviada. El admin la revisará en 24h",
+        "id": solicitud.id,
+        # F2: el frontend muestra el precio de lista tachado y el final (y hasta cuándo valía).
+        "precio_lista_clp": plan.precio_clp,
+        "descuento_pct": solicitud.descuento_pct,
+        "precio_final_clp": solicitud.precio_final_clp,
+        "beneficio_id": solicitud.beneficio_id,
+    }
 
 
 @router.get("/pendientes")
@@ -138,6 +180,14 @@ def listar_solicitudes_pendientes(
             "plan_precio": (s.precio_clp_snapshot
                             if s.precio_clp_snapshot is not None
                             else (plan.precio_clp if plan else 0)),
+            # ── F2: el descuento que se le aplicó al precio de lista (NULL = sin beneficio) ──
+            # El precio de lista ya viaja en `plan_precio`: acá van el % y lo que hay que cobrar.
+            "descuento_pct": s.descuento_pct,
+            "precio_final": (s.precio_final_clp if s.precio_final_clp is not None
+                             else (s.precio_clp_snapshot
+                                   if s.precio_clp_snapshot is not None
+                                   else (plan.precio_clp if plan else 0))),
+            "beneficio_id": s.beneficio_id,
             "voucher_url": s.voucher_url,
             "certificado_estudiante_url": s.certificado_estudiante_url,
             "estado": s.estado,
@@ -351,9 +401,13 @@ def aprobar_solicitud(
         # precio entre medio, la transacción quedaba por el precio nuevo
         # (reproducido en TEST: 44.000 al solicitar -> ingreso de 99.000).
         # Fallback para solicitudes históricas sin snapshot.
-        monto_facturado = (solicitud.precio_clp_snapshot
-                           if solicitud.precio_clp_snapshot is not None
-                           else (plan.precio_clp or 0))
+        # ── F2: si la solicitud trae un descuento aplicado, se cobra el PRECIO FINAL ──
+        # (`precio_final_clp` lo calculó el beneficio sobre el precio de lista; NULL = sin regalo).
+        monto_facturado = (solicitud.precio_final_clp
+                           if solicitud.precio_final_clp is not None
+                           else (solicitud.precio_clp_snapshot
+                                 if solicitud.precio_clp_snapshot is not None
+                                 else (plan.precio_clp or 0)))
         tx = TransaccionFinanciera(
             tenant_id=suscripcion.tenant_id,
             tipo="ingreso",

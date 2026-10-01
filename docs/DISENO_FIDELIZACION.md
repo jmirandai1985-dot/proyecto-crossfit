@@ -116,9 +116,10 @@ suscripción gratuita. **Antes de escribir la F2 hay que aplicar las correccione
   `sugerir()` en lote (`POST /fidelizacion/sugerencias`), con un test que compara el lote contra la
   sugerencia de a uno.
 
-**Falta de la F2:** aplicar el descuento al solicitar el plan (precio de lista tachado + precio
-final + "válido hasta"), el aviso de beneficio vigente en los pendientes y en la asignación manual
-del alumno, y activar la sección `beneficios` del Historial.
+**Falta de la F2:** nada del camino del dinero (el descuento ya se aplica al solicitar, se ve en
+los pendientes, el ingreso cobra el precio final, la asignación manual avisa y precarga el precio y
+la sección del Historial está abierta) — ver `tests/test_descuento_solicitud_plan.py`. Lo que queda
+es la F3 (seguimiento del correo) y la F4 (las métricas que la pestaña Beneficios ya muestra).
 
 #### El diseño aprobado de un beneficio (lo que la tabla y el servicio implementan)
 - **Estados: `ofrecido` | `usado` | `vencido` | `anulado`.** **No hay `aceptado`**: el regalo (con o

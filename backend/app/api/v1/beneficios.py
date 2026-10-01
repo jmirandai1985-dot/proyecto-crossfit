@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_current_admin
+from app.core.dependencies import get_current_admin, get_current_user
 from app.db.database import get_db
 from app.models.beneficio import Beneficio, EstadoBeneficio, TipoBeneficio
 from app.models.plan import Plan
@@ -53,6 +53,8 @@ router = APIRouter()
 ESTADOS_FILTRO = ("vigente", "usado", "vencido", "anulado", "todos")
 # Máximo de filas por página (la tabla del panel usa 25).
 MAX_POR_PAGINA = 100
+# Máximo de planes para los que se calcula el precio con descuento en UNA consulta (`/mios`).
+MAX_PLANES = 60
 # Valores válidos de `tipo` en un query string, sacados del catálogo del servicio (un tipo nuevo
 # entra a la API sola) — el `pattern` hace que un typo sea un 422 del cliente y no un filtro vacío.
 PATRON_TIPOS = "^(" + "|".join(svc.TIPOS_VALIDOS) + ")$"
@@ -204,6 +206,27 @@ def _resumen(items: list) -> dict:
     }
 
 
+def _precios_con_descuento(db: Session, tenant_id: int, descuento, plan_ids) -> dict:
+    """`{plan_id: desglose}` de los planes pedidos, con el MISMO cálculo que se cobra.
+
+    La aritmética es del SERVICIO (`desglose`): la pantalla muestra un precio, no lo calcula. La
+    usan las dos puertas —la del alumno (`/mios`) y la del panel (`/alumno/{id}`)—, así que no
+    pueden mostrar dos precios distintos del mismo plan. `plan_ids` es una lista separada por comas.
+    """
+    if descuento is None or not plan_ids:
+        return {}
+    ids = [int(trozo) for trozo in str(plan_ids).split(",") if trozo.strip().isdigit()][:MAX_PLANES]
+    if not ids:
+        return {}
+    precios = {}
+    for plan in db.query(Plan).filter(
+            Plan.id.in_(ids), Plan.tenant_id == tenant_id).all():
+        lista = plan.precio_clp
+        if isinstance(lista, int) and not isinstance(lista, bool) and lista > 0:
+            precios[str(plan.id)] = svc.desglose(descuento, lista)
+    return precios
+
+
 @router.get("/tipos")
 def tipos_disponibles(
     db: Session = Depends(get_db),
@@ -220,6 +243,10 @@ def tipos_disponibles(
 @router.get("/alumno/{alumno_id}")
 def estado_del_alumno(
     alumno_id: int,
+    plan_ids: Optional[str] = Query(
+        None,
+        description="Ids de planes separados por coma: devuelve el precio con el descuento puesto "
+                    "de cada uno (lo usa la asignación manual del panel)."),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
@@ -236,6 +263,8 @@ def estado_del_alumno(
     for tipo in svc.TIPOS_VALIDOS:
         vivo = next((b for b in vivos if b.tipo.value == tipo), None)
         avisos[tipo] = svc.aviso_vigente(vivo) if vivo is not None else None
+    # El descuento vivo (si lo hay) es lo que el panel necesita para precargar el precio final.
+    descuento = next((b for b in vivos if b.tipo == TipoBeneficio.descuento), None)
 
     plan = svc.plan_vigente(db, alumno)
     plan_nombre = None
@@ -259,6 +288,10 @@ def estado_del_alumno(
         **_tipos(db, current_user["tenant_id"]),
         "vivos": [_item(b, alumno) for b in vivos],
         "avisos": avisos,
+        "descuento_pct": (descuento.valor if descuento is not None else None),
+        "descuento_hasta": (descuento.vigente_hasta.isoformat()
+                            if descuento is not None else None),
+        "precios": _precios_con_descuento(db, current_user["tenant_id"], descuento, plan_ids),
         "plan_vigente": (None if plan is None else {
             "plan_id": plan.plan_id, "nombre": plan_nombre,
             "creditos_disponibles": plan.creditos_disponibles,
@@ -381,6 +414,37 @@ def dar_beneficio(
 
     correo = _avisar(db, alumno, beneficio) if datos.avisar_por_correo else None
     return {"beneficio": _item(beneficio, alumno), "correo": correo}
+
+
+@router.get("/mios")
+def mis_beneficios(
+    plan_ids: Optional[str] = Query(
+        None,
+        description="Ids de planes separados por coma: devuelve el precio con el descuento puesto "
+                    "de cada uno (lo usa la pantalla de solicitar plan)."),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Los regalos VIVOS del alumno que consulta (su propia puerta, sin panel).
+
+    Es lo que su pantalla necesita para saber si tiene un descuento al solicitar un plan: el % y
+    HASTA CUÁNDO. Sólo viajan los vivos (`esta_vivo`): el descuento que ya usó o que venció no se
+    anuncia, porque el backend no lo va a aplicar y prometer un precio es peor que no prometerlo.
+
+    Con `plan_ids` va además el precio final de cada plan, calculado por el SERVICIO (`desglose`):
+    la pantalla muestra un número, no lo calcula (una segunda aritmética del descuento se
+    desincroniza del cobro por un peso y el alumno lo ve).
+    """
+    vivos = svc.vivos(db, current_user["usuario_id"])
+    descuento = next((b for b in vivos if b.tipo == TipoBeneficio.descuento), None)
+
+    return {
+        "vivos": [_item(b) for b in vivos],
+        "descuento_pct": (descuento.valor if descuento is not None else None),
+        "descuento_hasta": (descuento.vigente_hasta.isoformat()
+                            if descuento is not None else None),
+        "precios": _precios_con_descuento(db, current_user["tenant_id"], descuento, plan_ids),
+    }
 
 
 @router.post("/preview")

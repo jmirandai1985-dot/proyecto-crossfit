@@ -71,6 +71,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.estados import es_cancelada
+from app.models.beneficio import Beneficio, EstadoBeneficio, TipoBeneficio
 from app.models.churn_gestion import ChurnGestion
 from app.models.clase import Clase
 from app.models.disciplina import Disciplina
@@ -85,6 +86,8 @@ from app.models.segmentacion_alumno import SegmentacionAlumno
 from app.models.suscripcion import Suscripcion
 from app.models.transaccion_financiera import TransaccionFinanciera
 from app.models.usuario import Usuario
+from app.services.beneficios_service import esta_vivo as beneficio_esta_vivo
+from app.services.beneficios_service import etiqueta as beneficio_etiqueta
 from app.services.rms_service import mejor_rm_por_movimiento
 from app.utils.santiago import SANTIAGO, ahora_santiago, fecha_chile, hoy_santiago
 from shared.estados import ESTADOS_SUSCRIPCION_NUNCA_VIGENTES
@@ -124,9 +127,9 @@ SECCIONES: Final[tuple] = (
     ("rms", "RMs"),
     ("beneficios", "Beneficios"),
 )
-SECCIONES_RESERVADAS: Final[tuple] = ("beneficios",)
-MOTIVO_BENEFICIOS: Final[str] = (
-    "Llega con la Fase 2 de Fidelización (beneficios por correo y su seguimiento).")
+# La sección de beneficios dejó de estar reservada: la F2 la implementa, así que se anuncia como
+# las demás (el id sigue siendo el mismo y el menú se arma de `SECCIONES`).
+SECCIONES_RESERVADAS: Final[tuple] = ()
 
 DEFAULT_SECCION: Final[str] = "resumen"
 DEFAULT_POR_PAGINA: Final[int] = 25
@@ -231,9 +234,10 @@ def _paginado(items: list, pagina: int, por_pagina: int) -> dict:
 def secciones_disponibles() -> list:
     """El menú de pestañas del panel: SÓLO las secciones listas para usarse.
 
-    Las reservadas (`SECCIONES_RESERVADAS`, hoy `beneficios`) no se anuncian: una pestaña
-    deshabilitada con "llega más adelante" es ruido y una promesa que el alumno no pidió. El id
-    sigue siendo válido (Fase 2 de Fidelización), así que el filtro es de MENÚ, no de servicio.
+    Las reservadas (`SECCIONES_RESERVADAS`) no se anuncian: una pestaña deshabilitada con "llega
+    más adelante" es ruido y una promesa que el alumno no pidió. Hoy la lista está vacía (la sección
+    `beneficios` se anunció al implementarse la F2) y el filtro sigue siendo de MENÚ, no de servicio:
+    el id sigue siendo válido para quien lo pida.
     """
     return [
         {
@@ -671,15 +675,61 @@ def _seccion_rms(db, alumno, tenant_id, pagina, por_pagina, **_kw) -> dict:
     }
 
 
-# ── Beneficios (reservada: Fase 2 de Fidelización) ────────────────────────────
-def _seccion_beneficios(db, alumno, tenant_id, pagina, por_pagina, **_kw) -> dict:
-    """6ª sección: declarada y VACÍA hasta la Fase 2 de Fidelización (regla 7)."""
+# ── Beneficios (F2 de Fidelización: el regalo y si sirvió) ────────────────────
+def _beneficio_item(beneficio) -> dict:
+    """Un beneficio como lo lee el historial: qué se regaló, si sigue vivo y si el alumno lo usó.
+
+    El estado lo define `beneficios_service.esta_vivo()` (la MISMA regla que usa el panel): un
+    `ofrecido` con la ventana pasada se muestra `vencido` aunque la fila todavía diga `ofrecido`.
+    """
+    vivo = beneficio_esta_vivo(beneficio)
+    estado = ("vigente" if vivo else
+              ("vencido" if beneficio.estado == EstadoBeneficio.ofrecido
+               else beneficio.estado.value))
     return {
-        "disponible": False,
-        "motivo": MOTIVO_BENEFICIOS,
-        "totales": {"total": 0},
-        "paginado": {"total": 0, "pagina": pagina, "por_pagina": por_pagina, "paginas": 1},
-        "items": [],
+        "id": beneficio.id,
+        "tipo": beneficio.tipo.value,
+        "tipo_label": beneficio_etiqueta(beneficio.tipo),
+        "valor": beneficio.valor,
+        "unidad": "pct" if beneficio.tipo == TipoBeneficio.descuento else "clases",
+        "estado": estado,
+        "created_at": beneficio.created_at,
+        "vigente_hasta": beneficio.vigente_hasta,
+        "usado_en": beneficio.usado_en,
+        "descuento_clp": beneficio.descuento_clp,
+        "anulado_motivo": beneficio.anulado_motivo,
+        # Si el regalo salió con correo, el historial puede decirlo (el correo NO es obligatorio).
+        "avisado_por_correo": beneficio.notificacion_id is not None,
+    }
+
+
+def _seccion_beneficios(db, alumno, tenant_id, pagina, por_pagina, **_kw) -> dict:
+    """6ª sección: los regalos del alumno (clases gratis y descuentos) y qué pasó con cada uno.
+
+    Se muestran TODOS —vigentes, usados, vencidos y anulados— porque esta sección es la auditoría
+    del gesto: la anulación exige motivo y acá está el motivo. Los números del encabezado son los
+    mismos estados que muestra el panel de Fidelización (una sola definición: `esta_vivo`).
+    """
+    filas = db.query(Beneficio).filter(
+        Beneficio.tenant_id == tenant_id,
+        Beneficio.alumno_id == alumno.id,
+    ).order_by(Beneficio.created_at.desc(), Beneficio.id.desc()).all()
+    items = [_beneficio_item(b) for b in filas]
+    por_estado = {estado: sum(1 for i in items if i["estado"] == estado)
+                  for estado in ("vigente", "usado", "vencido", "anulado")}
+    paginado = _paginado(items, pagina, por_pagina)
+    return {
+        "disponible": True,
+        "motivo": None,
+        "totales": {
+            "total": len(items),
+            "vigentes": por_estado["vigente"],
+            "usados": por_estado["usado"],
+            "vencidos": por_estado["vencido"],
+            "anulados": por_estado["anulado"],
+        },
+        "paginado": {k: paginado[k] for k in ("total", "pagina", "por_pagina", "paginas")},
+        "items": paginado["items"],
     }
 
 

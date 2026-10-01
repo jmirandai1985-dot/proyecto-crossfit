@@ -187,18 +187,16 @@ def test_a4_mes_con_plan_lo_deciden_las_fechas_y_el_estado():
 def test_a5_el_menu_de_secciones_no_anuncia_beneficios():
     """5 pestañas, no 6: `beneficios` existe (Fase 2 de Fidelización) pero NO se anuncia.
 
-    Una pestaña deshabilitada con "llega más adelante" es ruido para el alumno; el id sigue
-    siendo válido para cuando la sección tenga contenido.
+    Una pestaña deshabilitada con "llega más adelante" es ruido para el alumno: la sección se
+    anuncia cuando tiene contenido, y la F2 le dio el suyo (los regalos del alumno).
     """
     secciones = svc.secciones_disponibles()
 
     assert [s["id"] for s in secciones] == ["resumen", "asistencia", "pagos",
-                                            "membresias", "rms"]
+                                            "membresias", "rms", "beneficios"]
     assert all(s["disponible"] is True and s["motivo"] is None for s in secciones)
-    assert "beneficios" not in [s["id"] for s in secciones]
-    # Reservada != borrada: el id es válido y el servicio la sigue resolviendo.
-    assert svc.SECCIONES_RESERVADAS == ("beneficios",)
-    assert "beneficios" in dict(svc.SECCIONES)
+    # Ya no hay secciones reservadas: `beneficios` se implementó (F2) y se anuncia como las demás.
+    assert svc.SECCIONES_RESERVADAS == ()
     assert svc.normalizar_seccion("beneficios") == "beneficios"
 
 
@@ -254,8 +252,8 @@ def test_b1_la_envoltura_es_la_misma_en_las_6_secciones(db, alumno_test):
         assert set(panel) == {"alumno", "seccion", "secciones", "incluye_privado", "datos"}
         assert panel["seccion"] == seccion
         assert panel["alumno"]["id"] == alumno_test
-        # Las secciones existen las 6, pero el MENÚ sólo anuncia las 5 listas (regla 7).
-        assert len(panel["secciones"]) == 5
+        # Las 6 secciones existen Y se anuncian (la última en llegar fue `beneficios`, F2).
+        assert len(panel["secciones"]) == 6
         assert isinstance(panel["datos"], dict)
 
 
@@ -297,15 +295,19 @@ def test_b4_pagos_cuadra_y_rms_es_el_mismo_que_rms_service(db, alumno_test):
         assert set(CAMPOS_SCHEMA).issubset(set(item))
 
 
-def test_b5_membresias_cuadra_y_beneficios_esta_reservada(db, alumno_test):
+def test_b5_membresias_cuadra_y_beneficios_tiene_su_seccion(db, alumno_test):
     datos = svc.panel(db, alumno_test, TENANT_ID, seccion="membresias")["datos"]
     resumen = datos["resumen"]
 
     assert resumen["meses_con_plan"] + resumen["meses_sin_plan"] == resumen["meses_como_alumno"]
     assert datos["paginado"]["total"] == resumen["meses_como_alumno"]
 
+    # La sección de beneficios está ABIERTA (F2) y devuelve la misma envoltura que las demás: el
+    # alumno de prueba no tiene regalos, así que la lista viene vacía con sus totales en cero.
     beneficios = svc.panel(db, alumno_test, TENANT_ID, seccion="beneficios")["datos"]
-    assert beneficios["disponible"] is False and beneficios["items"] == []
+    assert beneficios["disponible"] is True and beneficios["motivo"] is None
+    assert set(beneficios["totales"]) == {"total", "vigentes", "usados", "vencidos", "anulados"}
+    assert beneficios["totales"]["total"] == len(beneficios["items"])
 
 
 def test_b6_la_gestion_del_box_no_viaja_al_alumno(db, alumno_test):

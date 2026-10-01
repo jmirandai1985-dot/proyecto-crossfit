@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
+import { fmtFechaChile } from '../../utils/fecha';
 
 const SolicitarPlan = () => {
     const { usuario_id, tenant_id } = useAuth();
@@ -24,6 +25,19 @@ const SolicitarPlan = () => {
     const [subiendo, setSubiendo] = useState(false);
     const [mensajeExito, setMensajeExito] = useState('');
     const [mensajeError, setMensajeError] = useState('');
+    // ─── F2: el descuento vigente del alumno (beneficio de Fidelización) ──
+    // `precios` viene del BACKEND (`/beneficios/mios?plan_ids=...`): la pantalla muestra el precio
+    // final, no lo calcula (la aritmética del descuento vive en un solo lugar y es la que se cobra).
+    const [descuento, setDescuento] = useState(null);
+
+    /** Precio final del plan si tiene un descuento vigente (o `null`). */
+    const precioConDescuento = (plan) => descuento?.precios?.[String(plan?.id)] || null;
+
+    /** dd-mm-aaaa de la vigencia del descuento (lo que ve el alumno en el aviso). */
+    const vigenciaDescuento = () => {
+        if (!descuento?.descuento_hasta) return '';
+        return fmtFechaChile(descuento.descuento_hasta);
+    };
 
     // ─── Cargar configuracion bancaria ────────────────────────────────
     useEffect(() => {
@@ -56,6 +70,18 @@ const SolicitarPlan = () => {
                 const data = res.data?.planes || res.data || [];
                 const todosLosPlanes = Array.isArray(data) ? data : [];
                 setPlanes(todosLosPlanes);
+
+                // ── F2: ¿tiene un descuento vigente? Los precios finales los calcula el backend ──
+                // Si esto falla, la pantalla sigue igual (sin descuento anunciado): no se cae la
+                // compra por una comodidad.
+                try {
+                    const rBen = await api.get('/api/v1/beneficios/mios', {
+                        params: { plan_ids: todosLosPlanes.map((p) => p.id).join(',') },
+                    });
+                    setDescuento(rBen.data?.descuento_pct ? rBen.data : null);
+                } catch {
+                    setDescuento(null);
+                }
 
                 const categoriaInicial = sexo === 'M' ? 'masculino' : sexo === 'F' ? 'femenino' : null;
                 setCategoriaSeleccionada(categoriaInicial);
@@ -150,7 +176,9 @@ const SolicitarPlan = () => {
         return '$' + precio.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
     };
 
-    const renderPlanCard = (plan) => (
+    const renderPlanCard = (plan) => {
+        const conDescuento = precioConDescuento(plan);
+        return (
         <button
             key={plan.id}
             onClick={() => handleSeleccionarPlan(plan)}
@@ -162,9 +190,23 @@ const SolicitarPlan = () => {
                     {plan.nombre}
                 </h3>
             </div>
-            <p className="text-3xl font-bold text-emerald-600 mb-4">
-                {formatearPrecio(plan.precio_clp)}
-            </p>
+            {conDescuento ? (
+                <div className="mb-4" data-testid={`precio-descuento-${plan.id}`}>
+                    <p className="text-sm text-gray-400 line-through">
+                        {formatearPrecio(conDescuento.precio_lista_clp)}
+                    </p>
+                    <p className="text-3xl font-bold text-emerald-600">
+                        {formatearPrecio(conDescuento.precio_final_clp)}
+                    </p>
+                    <p className="text-xs font-semibold text-emerald-700">
+                        con tu −{descuento.descuento_pct} % de descuento · válido hasta el {vigenciaDescuento()}
+                    </p>
+                </div>
+            ) : (
+                <p className="text-3xl font-bold text-emerald-600 mb-4">
+                    {formatearPrecio(plan.precio_clp)}
+                </p>
+            )}
             <div className="space-y-2 text-sm text-gray-600">
                 <div className="flex items-center gap-2">
                     <span className="text-emerald-500">✅</span>
@@ -194,6 +236,21 @@ const SolicitarPlan = () => {
                 </span>
             </div>
         </button>
+        );
+    };
+
+    // Aviso del descuento vigente (F2): el alumno lo ve ANTES de elegir, con su fecha límite.
+    const avisoDescuento = descuento && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4"
+            data-testid="aviso-descuento">
+            <p className="text-emerald-800 font-semibold">
+                🎁 Tienes un {descuento.descuento_pct} % de descuento en tu próximo plan
+            </p>
+            <p className="text-sm text-emerald-700">
+                Válido hasta el {vigenciaDescuento()}. Se aplica al solicitar: los precios de abajo
+                ya están con el descuento hecho.
+            </p>
+        </div>
     );
 
     // ─── Loading ───────────────────────────────────────────────────────
@@ -276,6 +333,9 @@ const SolicitarPlan = () => {
                             </button>
                         </div>
 
+                        {/* ── El descuento vigente, antes de elegir (F2) ── */}
+                        {avisoDescuento}
+
                         {planesRegulares.length === 0 && planesEstudiante.length === 0 && (
                             <div className="col-span-full text-center py-12">
                                 <p className="text-gray-400 text-lg mb-2">📋 No hay planes disponibles</p>
@@ -322,9 +382,24 @@ const SolicitarPlan = () => {
                                     <h3 className="text-xl font-bold text-gray-800">{planSeleccionado.nombre}</h3>
                                 </div>
                                 <span className="text-2xl font-bold text-emerald-600">
-                                    {formatearPrecio(planSeleccionado.precio_clp)}
+                                    {precioConDescuento(planSeleccionado) ? (
+                                        <>
+                                            <span className="text-base text-gray-400 line-through mr-2"
+                                                data-testid="resumen-precio-lista">
+                                                {formatearPrecio(precioConDescuento(planSeleccionado).precio_lista_clp)}
+                                            </span>
+                                            {formatearPrecio(precioConDescuento(planSeleccionado).precio_final_clp)}
+                                        </>
+                                    ) : formatearPrecio(planSeleccionado.precio_clp)}
                                 </span>
                             </div>
+                            {precioConDescuento(planSeleccionado) && (
+                                <p className="mt-2 text-xs font-semibold text-emerald-700"
+                                    data-testid="resumen-descuento">
+                                    Beneficio aplicado: −{descuento.descuento_pct} % · válido hasta el {vigenciaDescuento()}
+                                    {' '}· transfiere el precio final
+                                </p>
+                            )}
                         </div>
 
                         {/* ─── DATOS BANCARIOS PARA TRANSFERENCIA ── */}

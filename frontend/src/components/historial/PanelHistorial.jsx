@@ -516,15 +516,68 @@ const SeccionRms = ({ datos, onPagina }) => {
 };
 
 
-const SeccionBeneficios = ({ datos }) => (
-    <div data-testid="historial-beneficios">
-        <Card titulo="Beneficios">
-            <p className="text-sm text-zinc-400">
-                {datos.motivo || 'Esta sección se habilita más adelante.'}
-            </p>
-        </Card>
-    </div>
-);
+const ESTADO_BENEFICIO = {
+    vigente: 'bg-emerald-500/15 text-emerald-300',
+    usado: 'bg-sky-500/15 text-sky-300',
+    vencido: 'bg-zinc-700/40 text-zinc-300',
+    anulado: 'bg-red-500/10 text-red-300',
+};
+
+const SeccionBeneficios = ({ datos, onPagina }) => {
+    const t = datos.totales || {};
+    const items = datos.items || [];
+
+    return (
+        <div className="space-y-5" data-testid="historial-beneficios">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Dato label="Vigentes" valor={num(t.vigentes)} destacado />
+                <Dato label="Usados" valor={num(t.usados)} />
+                <Dato label="Vencidos" valor={num(t.vencidos)} />
+                <Dato label="Anulados" valor={num(t.anulados)} />
+            </div>
+
+            <Card titulo="Regalos del box">
+                <Tabla columnas={['Beneficio', 'Estado', 'Dado', 'Vale hasta', 'Uso', 'Nota']}>
+                    {items.map((b) => (
+                        <tr key={b.id} data-testid="historial-beneficio">
+                            <td className="py-2 pr-4 text-zinc-200">
+                                {b.tipo_label}
+                                <span className="ml-1 font-semibold text-white">
+                                    {b.unidad === 'pct' ? `−${b.valor} %` : `${b.valor} clase${b.valor === 1 ? '' : 's'}`}
+                                </span>
+                            </td>
+                            <td className="py-2 pr-4">
+                                <span className={`inline-block rounded-full px-2 py-0.5 text-xs ${ESTADO_BENEFICIO[b.estado] || ''}`}>
+                                    {b.estado}
+                                </span>
+                            </td>
+                            <td className="py-2 pr-4 text-zinc-400">{fechaCorta(b.created_at)}</td>
+                            <td className="py-2 pr-4 text-zinc-400">{fechaCorta(b.vigente_hasta)}</td>
+                            <td className="py-2 pr-4 text-zinc-400">
+                                {b.estado === 'usado'
+                                    ? `${fechaCorta(b.usado_en)}${b.descuento_clp != null ? ` · $${b.descuento_clp.toLocaleString('es-CL')}` : ''}`
+                                    : '—'}
+                            </td>
+                            <td className="py-2 pr-4 text-zinc-500">
+                                {b.anulado_motivo
+                                    || (b.avisado_por_correo ? 'avisado por correo' : 'sin correo')}
+                            </td>
+                        </tr>
+                    ))}
+                    {items.length === 0 && (
+                        <tr>
+                            <td colSpan="6" className="py-6 text-center text-zinc-500">
+                                Todavía no tiene beneficios
+                            </td>
+                        </tr>
+                    )}
+                </Tabla>
+                <Paginado paginado={datos.paginado} onPagina={onPagina}
+                    testid="historial-paginado-beneficios" />
+            </Card>
+        </div>
+    );
+};
 
 // Sección → componente. La clave es el `id` que devuelve el backend.
 const SECCIONES_RENDER = {
@@ -538,13 +591,13 @@ const SECCIONES_RENDER = {
 
 // Pestañas del primer render (mientras llega la primera respuesta), con los mismos
 // ids/labels que el servicio para no inventar un menú distinto al del backend.
-// `beneficios` NO está: el backend tampoco la anuncia hasta la Fase 2 de Fidelización.
 const SECCIONES_UI = [
     { id: 'resumen', label: 'Resumen', disponible: true },
     { id: 'asistencia', label: 'Asistencia', disponible: true },
     { id: 'pagos', label: 'Pagos', disponible: true },
     { id: 'membresias', label: 'Membresías', disponible: true },
     { id: 'rms', label: 'RMs', disponible: true },
+    { id: 'beneficios', label: 'Beneficios', disponible: true },
 ];
 
 
