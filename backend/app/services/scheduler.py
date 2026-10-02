@@ -110,10 +110,21 @@ def iniciar_scheduler():
         replace_existing=True,
         misfire_grace_time=3600,
     )
+    # ── Cierre de mes (día 1, 00:05 CLT): antes lo hacía n8n ──
+    scheduler.add_job(
+        job_cierre_mes,
+        CronTrigger(day=1, hour=0, minute=5,
+                    timezone=pytz.timezone("America/Santiago")),
+        id="cierre_mes",
+        name="Cierre de mes anterior: asistencia + hitos + correos",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
     scheduler.start()
     logger.info(
         "🚀 Scheduler iniciado - generación de clases 00:05, "
-        "alertas de email 06:00 / 07:00 / 08:00 / 09:00 / 10:00 CLT "
+        "alertas de email 06:00 / 07:00 / 08:00 / 09:00 / 10:00 CLT, "
+        "cierre de mes día 1 00:05 CLT "
         "(mantenimiento diario/mensual movido al contenedor de mantenimiento)")
 
 
@@ -171,6 +182,83 @@ async def job_alerta_ultimo_credito():
 async def job_alerta_sin_creditos():
     """Diario 10:00 CLT - alumnos con 0 créditos disponibles."""
     await _ejecutar_alertas("sin_creditos")
+
+
+async def job_cierre_mes():
+    """Día 1 a las 00:05 CLT - cierra el MES ANTERIOR (asistencia + hitos + correos).
+
+    Reemplaza el webhook de n8n `POST /api/v1/asistencia/n8n/evaluar-mes` (n8n quedó
+    apagado): recorre los tenants ACTIVOS y llama al MISMO servicio que usaba el
+    endpoint (`asistencia_service.evaluar_mes`), sin pasar por HTTP. La
+    deduplicación (notificaciones_enviadas.mes_referencia + UNIQUE(alumno_id, nivel))
+    la sigue garantizando el servicio, así que es idempotente igual que antes.
+
+    Los tenants se leen de la tabla `tenants` (activo=True), NO derivados de
+    Usuario.activo: en PROD hay alumnos con estado='activo' y activo=false, y
+    derivar la lista de ahí la podía dejar vacía sin que el job hiciera nada en
+    silencio. Si no hay tenants activos se deja un warning explícito.
+    """
+    from app.db.database import SessionLocal
+    from app.models.tenant import Tenant
+    from app.services import asistencia_service as svc
+    from app.utils.santiago import hoy_santiago
+
+    # El job corre el día 1 a las 00:05 CLT → el "mes anterior" es el que acaba de
+    # cerrar (el 1 de enero retrocede a diciembre del año anterior: lo resuelve
+    # `_mes_anterior`, el mismo helper que usaba el endpoint de n8n).
+    hoy = hoy_santiago()
+    anio, mes = svc._mes_anterior(hoy.year, hoy.month)
+    logger.info(
+        f"⏰ [Scheduler] Cierre de mes {anio}-{mes:02d} (mes anterior) iniciado")
+
+    db = SessionLocal()
+    try:
+        # Tenants ACTIVOS desde su propia tabla (fuente de verdad del box), no
+        # derivados de Usuario.activo (ver docstring).
+        tenants = [r[0] for r in db.query(Tenant.id).filter(
+            Tenant.activo == True,  # noqa: E712
+        ).all()]
+
+        if not tenants:
+            logger.warning(
+                f"⚠️ [Scheduler] Cierre de mes {anio}-{mes:02d}: no hay tenants "
+                "activos, no se evaluó ningún box")
+
+        # Aislamiento por tenant: si uno falla (correo, dato raro, etc.) se hace
+        # rollback y se sigue con el resto, para no perder el cierre de mes entero.
+        hitos_total = 0
+        for tid in tenants:
+            try:
+                res = svc.evaluar_mes(db, tid, anio, mes)
+                hitos_total += res.get("hitos_generados", 0)
+            except Exception as e:
+                db.rollback()
+                logger.error(
+                    f"❌ [Scheduler] Error en cierre de mes {anio}-{mes:02d} "
+                    f"tenant {tid} (se continúa con el resto): {e}",
+                    exc_info=True)
+                try:
+                    import sentry_sdk
+                    sentry_sdk.capture_exception(e)
+                except Exception:
+                    pass
+
+        logger.info(
+            f"✅ [Scheduler] Cierre de mes {anio}-{mes:02d} completado: "
+            f"{len(tenants)} tenants evaluados, {hitos_total} hitos generados")
+    except Exception as e:
+        # Fallo fuera del loop (p. ej. la query de tenants): se registra y va a
+        # Sentry, pero NO tumba el scheduler.
+        logger.error(
+            f"❌ [Scheduler] Error en cierre de mes {anio}-{mes:02d}: {e}",
+            exc_info=True)
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(e)
+        except Exception:
+            pass
+    finally:
+        db.close()
 
 
 def detener_scheduler():
