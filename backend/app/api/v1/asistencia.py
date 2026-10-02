@@ -10,21 +10,19 @@ Alumno:
   GET  /mi-resumen                 — racha actual + % del mes en curso + próximo hito
   GET  /mis-hitos                  — logros alcanzados
 
-n8n (webhook mensual, API key dedicada):
-  POST /n8n/evaluar-mes            — cierra el mes, genera hitos y dispara los correos
+El cierre de mes que hacía el webhook de n8n (POST /n8n/evaluar-mes,
+eliminado en 2026-10) ahora lo dispara APScheduler
+(app/services/scheduler.py).
 
 Seguridad: tenant_id SIEMPRE del token JWT (patrón del resto de la API).
 """
-import secrets
 from datetime import datetime, timedelta
-from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.core.dependencies import (
     get_current_user, get_current_coach, verificar_coach_disciplina,
@@ -312,67 +310,6 @@ def mis_hitos(
     tenant_id = current_user["tenant_id"]
     usuario_id = current_user["usuario_id"]
     return {"hitos": svc.hitos_alumno_list(db, usuario_id, tenant_id)}
-
-
-# ── n8n: evaluación mensual (webhook protegido con API key) ──────────────────
-@router.post("/n8n/evaluar-mes")
-def evaluar_mes_n8n(
-    db: Session = Depends(get_db),
-    x_n8n_api_key: str = Header(default="", alias="X-N8N-API-Key"),
-    anio: Optional[int] = Query(None, description="Año a cerrar (default: mes anterior)"),
-    mes: Optional[int] = Query(None, description="Mes a cerrar (default: mes anterior)"),
-    tenant_id: Optional[int] = Query(None, description="Box a evaluar (default: todos)"),
-):
-    """Webhook mensual de n8n.
-
-    Cierra el mes indicado (o el mes anterior si no se pasa) para cada alumno
-    activo del/los tenant(s): calcula el %, dispara el correo de cumplimiento
-    o acompañamiento y genera el hito de racha si corresponde.
-
-    Idempotente: si n8n lo llama 2 veces el mismo mes, los dedupes
-    (notificaciones_enviadas.mes_referencia + UNIQUE(alumno_id, nivel))
-    evitan re-envíos y duplicados.
-    """
-    esperada = settings.N8N_API_KEY
-    if not esperada or not secrets.compare_digest(esperada, x_n8n_api_key):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="API key inválida para el endpoint de n8n")
-
-    if (anio is None) != (mes is None):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="anio y mes deben ir juntos (o ninguno para cerrar el mes anterior)")
-    if anio is None:
-        hoy = hoy_santiago()
-        anio, mes = svc._mes_anterior(hoy.year, hoy.month)
-    if not (1 <= mes <= 12):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="mes fuera de rango (1-12)")
-
-    if tenant_id is not None:
-        tenants = [tenant_id]
-    else:
-        tenants = [r[0] for r in db.query(Usuario.tenant_id).filter(
-            Usuario.rol == RolUsuario.alumno,
-            Usuario.activo == True,
-        ).distinct().all()]
-
-    resultados = []
-    for tid in tenants:
-        res = svc.evaluar_mes(db, tid, anio, mes)
-        resultados.append(res)
-
-    total_hitos = sum(r["hitos_generados"] for r in resultados)
-    return {
-        "status": "ok",
-        "anio": anio,
-        "mes": mes,
-        "tenants_evaluados": len(resultados),
-        "hitos_generados_total": total_hitos,
-        "tenants": resultados,
-    }
 
 
 # ── Alumno: check-in por QR (autoescaneo) ────────────────────────────────────

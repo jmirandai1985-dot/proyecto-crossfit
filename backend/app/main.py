@@ -6,7 +6,7 @@
     suscripciones, wods, solicitudes_planes, upload, membresias,
     notificaciones, notificaciones_enviadas, migracion,
     comprar_emergencia, fix_fechas, supervision,
-    finanzas, configuracion, alumnos, asistencia, ranking, mantenimiento, kpis,
+    finanzas, configuracion, alumnos, asistencia, ranking, kpis,
     kpis_populate, ml, segmentacion, historial_alumno, fidelizacion_plantillas,
     beneficios
 )
@@ -257,7 +257,6 @@ app.include_router(ranking.router, prefix="/api/v1/ranking",
                    tags=["Ranking de Asistencia"])
 app.include_router(admin.router, prefix="/api/v1/admin",
                    tags=["Admin"])
-app.include_router(mantenimiento.router, tags=["Mantenimiento"])
 app.include_router(kpis.router, tags=["KPIs"])
 app.include_router(kpis_populate.router, tags=["KPIs - Populate"])
 app.include_router(ml.router, tags=["ML"])

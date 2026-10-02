@@ -65,7 +65,7 @@ const TOOLTIP_STYLE = {
 
 /**
  * Página KPIs (admin) — 3 pestañas por query param `?tab=diario|mensual|bi`.
- * Consume los data marts vía /api/v1/kpis/* (poblados por los workflows n8n).
+ * Consume los data marts vía /api/v1/kpis/* (poblados por el cron `box-crossfit-kpis-ml` de Render).
  */
 const AdminKpis = () => {
     const [searchParams] = useSearchParams();
@@ -111,7 +111,7 @@ const AdminKpis = () => {
     // tarjetas y las alertas NAVEGAN a esa pantalla con un query param.
 
     // ─── DIARIO: últimos 7 días ──────────────────────────────────────────
-    // El job n8n puebla el DÍA ANTERIOR (02:30), por eso la serie termina ayer.
+    // El cron `box-crossfit-kpis-ml` de Render puebla el DÍA ANTERIOR, por eso la serie termina ayer.
     const cargarDiario = useCallback(async () => {
         setLoading(true); setError(null); setSinDatos(false);
         const fin = new Date();

@@ -124,9 +124,11 @@ services:
   #       http://backend:8000 (o mantener host.docker.internal si el 8000
   #       sigue publicado).
   #
-  # Auth básica habilitada desde el inicio: usuario/contraseña se leen de
-  # backend/.env.test (N8N_BASIC_AUTH_USER / N8N_BASIC_AUTH_PASSWORD),
-  # NUNCA hardcodeados en este archivo.
+  # Login (verificado en v2.36.4): ya NO hay auth básica por variables —
+  # N8N_BASIC_AUTH_USER / N8N_BASIC_AUTH_PASSWORD se IGNORAN (ver el comentario
+  # de `environment:` abajo). El primer acceso crea el OWNER vía USER MANAGEMENT.
+  # Esas 2 vars se quitaron de backend/.env y backend/.env.test el 2026-10
+  # (estaban obsoletas: n8n v2 no las lee).
   # ─────────────────────────────────────────────────────────────
   # ⚠️ PERFIL OPCIONAL `n8n` (cambio 2026-10): este contenedor YA NO se crea
   #    con `docker compose up -d` (ni en TEST ni con el override de PROD).
