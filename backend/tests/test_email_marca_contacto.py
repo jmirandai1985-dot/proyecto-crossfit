@@ -339,6 +339,8 @@ def test_b3_el_correo_que_sale_lleva_el_whatsapp_y_el_asunto_con_acentos(
     monkeypatch.setattr(smtplib, "SMTP_SSL", SMTPFalso)
     monkeypatch.setattr(email_service, "_registrar_envio", lambda *a, **k: None)
     # Este es el ÚNICO test del módulo que arma el mensaje de verdad (y sale a un SMTP falso).
+    # El camino real sólo existe EN PRODUCCIÓN: fuera de prod el fail-safe fuerza `noop`.
+    monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "EMAIL_MODO", email_service.MODO_REAL)
 
     asunto, html = email_service.render_email_vencimiento_plan(NOMBRE, "Plan 12", date(2026, 10, 5))

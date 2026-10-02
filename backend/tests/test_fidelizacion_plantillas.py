@@ -281,7 +281,10 @@ def test_a4_una_plantilla_desconocida_no_cae_en_un_default():
 
 
 def test_a5_el_modo_prueba_solo_se_activa_con_noop(monkeypatch):
-    """`EMAIL_MODO=noop` es la única forma de no mandar; un valor raro NO prueba nada."""
+    """En PRODUCCIÓN `EMAIL_MODO=noop` es la única forma de no mandar y un valor raro NO
+    prueba nada; fuera de producción el fail-safe fuerza `noop` pase lo que pase."""
+    # Producción: manda exactamente lo que diga EMAIL_MODO.
+    monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "EMAIL_MODO", "noop")
     assert email_service.es_modo_simulado() is True
     assert email_service.modo_envio() == email_service.MODO_NOOP
@@ -293,6 +296,11 @@ def test_a5_el_modo_prueba_solo_se_activa_con_noop(monkeypatch):
         monkeypatch.setattr(settings, "EMAIL_MODO", raro)
         assert email_service.modo_envio() == email_service.MODO_REAL, \
             f"'{raro}' NO puede dejar el sistema en modo prueba"
+
+    # Fuera de producción el fail-safe fuerza `noop` aunque EMAIL_MODO diga "real".
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setattr(settings, "EMAIL_MODO", "real")
+    assert email_service.modo_envio() == email_service.MODO_NOOP
 
 
 def test_a6_cada_plantilla_manda_un_correo_distinto():

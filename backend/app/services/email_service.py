@@ -1,6 +1,6 @@
 """Servicio de envio de correos via Gmail SMTP (21 funciones)."""
 import os
-from app.core.urls import url_frontend  # B.2: URLs de correo saneadas
+from app.core.urls import url_frontend, en_produccion  # B.2: URLs de correo saneadas
 import logging
 import smtplib
 import sys
@@ -53,14 +53,50 @@ ESTADO_SIMULADO = "simulado"
 DETALLE_SIMULADO = "EMAIL_MODO=noop: el correo NO se envió (modo prueba)"
 
 
+# Aviso de fail-safe: una sola vez por proceso (ver `avisar_failsafe_una_vez`).
+_ya_avisado_failsafe = False
+
+
 def modo_envio() -> str:
-    """Modo vigente: `noop` sólo si `EMAIL_MODO` dice exactamente eso (si no, `real`)."""
+    """Modo vigente de envío de correos.
+
+    FAIL-SAFE (fuera de producción): si `ENVIRONMENT != "production"` se fuerza `noop`
+    aunque `EMAIL_MODO` diga "real". Motivo: un `.env` de TEST/PROD cruzado (o una env
+    var pegada a mano) NO puede terminar mandando correo real a destinatarios reales.
+    EN PRODUCCIÓN (`ENVIRONMENT=production`) el comportamiento NO cambia: manda lo que
+    diga `EMAIL_MODO` (por eso el default sigue siendo "real").
+    """
+    if not en_produccion():
+        return MODO_NOOP
     return MODO_NOOP if (settings.EMAIL_MODO or "").strip().lower() == MODO_NOOP else MODO_REAL
 
 
 def es_modo_simulado() -> bool:
-    """True si los envíos NO salen de verdad (`EMAIL_MODO=noop`)."""
+    """True si los envíos NO salen de verdad (fuera de producción, o `EMAIL_MODO=noop`)."""
     return modo_envio() == MODO_NOOP
+
+
+def avisar_failsafe_una_vez() -> None:
+    """WARNING único al arranque si el fail-safe está forzando `noop` fuera de producción.
+
+    Se llama desde el startup de la app (`app/main.py`): así queda VISIBLE en el log del
+    deploy que los correos NO van a salir (en vez de descubrirlo cuando nadie los recibe).
+    Si ya se avisó, no repite; y si estamos en producción o `EMAIL_MODO=noop` a propósito,
+    tampoco avisa (no hay nada anómalo que reportar).
+    """
+    global _ya_avisado_failsafe
+    if _ya_avisado_failsafe:
+        return
+    _ya_avisado_failsafe = True
+    if en_produccion():
+        return
+    if (settings.EMAIL_MODO or "").strip().lower() == MODO_NOOP:
+        return
+    _log_seguro(
+        "[email] FAIL-SAFE: ENVIRONMENT=%r no es 'production'; se fuerza EMAIL_MODO=noop "
+        "(se ignora EMAIL_MODO=%r). Los correos NO se envian."
+        % (os.getenv("ENVIRONMENT"), settings.EMAIL_MODO),
+        "warning")
 
 
 def url_logo_email() -> str:

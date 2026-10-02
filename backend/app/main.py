@@ -281,6 +281,13 @@ async def startup_event():
     else:
         logger.info("[config] URLs publicas y credenciales SMTP sin problemas detectados")
 
+    # -- Fail-safe de correo (2026-10): fuera de produccion se fuerza EMAIL_MODO=noop --
+    try:
+        from app.services.email_service import avisar_failsafe_una_vez
+        avisar_failsafe_una_vez()
+    except Exception as e:
+        logger.error("[email] no se pudo avisar el fail-safe de correo: %s", e)
+
     # ── 1. Inicializar scheduler de generación diaria de clases ──
     try:
         from app.services.scheduler import iniciar_scheduler, set_generar_clases_callback
