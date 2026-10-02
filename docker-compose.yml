@@ -19,6 +19,9 @@
 #   maintenance → cron con los scripts de mantenimiento (target maintenance)
 #   frontend    → build Vite servido por nginx con proxy /api/ → backend:8000
 #   n8n         → automatización visual de flujos (imagen oficial n8nio/n8n)
+#                 ⚠️ PERFIL OPCIONAL: `docker compose up -d` YA NO lo levanta.
+#                 Se levanta con `docker compose --profile n8n up -d n8n`
+#                 (ver el bloque comentado del servicio n8n más abajo).
 #
 # La BD es EXTERNA (Neon, cloud): este stack NO incluye Postgres.
 # El frontend y el backend viven en el MISMO origen (nginx proxea /api/),
@@ -125,8 +128,26 @@ services:
   # backend/.env.test (N8N_BASIC_AUTH_USER / N8N_BASIC_AUTH_PASSWORD),
   # NUNCA hardcodeados en este archivo.
   # ─────────────────────────────────────────────────────────────
+  # ⚠️ PERFIL OPCIONAL `n8n` (cambio 2026-10): este contenedor YA NO se crea
+  #    con `docker compose up -d` (ni en TEST ni con el override de PROD).
+  #    Motivo: la automatización que vivía acá se migró —
+  #      · cierre de mes (asistencia + hitos + correos) y las alertas diarias
+  #        → APScheduler del backend (`app/services/scheduler.py`);
+  #      · KPIs diarios/mensuales, predicciones y reentrenamiento ML
+  #        → Cron Job de Render `box-crossfit-kpis-ml`
+  #          (`backend/maintenance/kpis_cloud.py`).
+  #    Lo único que sigue existiendo SÓLO acá son los workflows de
+  #    NOTIFICACIONES (endpoints `POST /api/v1/notificaciones/n8n/enviar-alertas-*`).
+  #    La instalación NO se borra: el volumen `n8n_data` sigue intacto y la UI se
+  #    levanta cuando haga falta consultar/editar/republicar workflows:
+  #        docker compose --profile n8n up -d n8n
+  #    (el servicio y el perfil se llaman igual, así que `--profile n8n` alcanza;
+  #     para PROD se agrega el override `-f docker-compose.prod.yml` como siempre).
+  # ─────────────────────────────────────────────────────────────
   n8n:
     image: n8nio/n8n:2.36.4   # version estable pineada (no latest: reproducible)
+    # Sin este perfil activo, compose IGNORA el servicio: `up -d` no lo crea.
+    profiles: ["n8n"]
     environment:
       # ⚠️ LOGIN (verificado en v2.36.4): n8n v2 ya NO soporta N8N_BASIC_AUTH_*
       #    (feature removida del servidor — esas vars se IGNORAN). El login es
