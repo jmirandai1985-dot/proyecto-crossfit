@@ -154,7 +154,8 @@ if not settings.JWT_SECRET_KEY:
 #     (abortan si la BD no es TEST, para no escribir sobre datos reales)
 #   - scripts/sync_test_from_prod.py y scripts/restaurar_backup.py (origen/destino)
 TEST_BRANCH_IDS = (
-    "ep-jolly-butterfly-b6ty2z89",    # TEST actual: rama de box-crossfit (2026-09-24)
+    "ep-summer-river-b6c8fj2f",       # TEST actual: rama recreada (2026-10-04)
+    "ep-jolly-butterfly-b6ty2z89",    # TEST anterior: Neon ya la eliminó (se conserva por historial)
 )
 
 # Endpoint de PROD (rama principal del mismo proyecto). Se usa como DENYLIST:
