@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../services/api';
+import { urlArchivo } from '../utils/imagen';
 
 const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }) => {
     const [loading, setLoading] = useState(false);
@@ -13,6 +14,9 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
     });
     const [imagenArchivo, setImagenArchivo] = useState(null);
     const [imagenPreview, setImagenPreview] = useState(null);
+    // "Quitar imagen": en edición marca que se borre la foto actual del producto
+    // (PUT con imagen_url: null). Se resetea cada vez que se abre el modal.
+    const [quitarImagen, setQuitarImagen] = useState(false);
     const [errors, setErrors] = useState({});
 
     const esEdicion = !!productoEditar;
@@ -44,6 +48,7 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
             setErrors({});
             setImagenArchivo(null);
             setImagenPreview(null);
+            setQuitarImagen(false);
         }
     }, [isOpen, productoEditar]);
 
@@ -94,7 +99,20 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                         ? null : parseInt(formData.stock_minimo),
                     activo: formData.activo,
                 };
+                // La foto se QUITA mandando imagen_url: null explícito. El PUT es
+                // JSON (no puede llevar archivo): si se eligió una imagen nueva, se
+                // sube aparte con POST /productos/{id}/imagen.
+                if (quitarImagen) {
+                    payload.imagen_url = null;
+                }
                 await api.put(`/api/v1/productos/${productoEditar.id}`, payload);
+                if (imagenArchivo) {
+                    const dataImagen = new FormData();
+                    dataImagen.append('file', imagenArchivo);
+                    await api.post(`/api/v1/productos/${productoEditar.id}/imagen`, dataImagen, {
+                        headers: { 'Content-Type': 'multipart/form-data' },
+                    });
+                }
             } else {
                 // POST para crear con FormData (multipart/form-data para soportar imagen)
                 const data = new FormData();
@@ -124,6 +142,7 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
             });
             setImagenArchivo(null);
             setImagenPreview(null);
+            setQuitarImagen(false);
             setErrors({});
 
             if (onSuccess) onSuccess();
@@ -232,29 +251,46 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                         />
                     </div>
 
-                    {!esEdicion && (
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                📷 Imagen del Producto
-                            </label>
-                            <input
-                                type="file"
-                                accept="image/*"
-                                onChange={handleImagenChange}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm text-gray-600 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 cursor-pointer"
-                            />
-                            {imagenPreview && (
-                                <div className="mt-2">
-                                    <img
-                                        src={imagenPreview}
-                                        alt="Vista previa"
-                                        className="h-24 w-24 object-cover rounded-lg border border-gray-200"
-                                    />
-                                </div>
-                            )}
-                            <p className="text-xs text-gray-500 mt-1">Opcional. Formatos: JPG, PNG, WEBP (máx. 5 MB)</p>
-                        </div>
-                    )}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            📷 Imagen del Producto
+                        </label>
+                        <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleImagenChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm text-gray-600 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 cursor-pointer"
+                        />
+                        {/* Vista previa: manda la imagen recién elegida; si no hay,
+                            en edición se muestra la que ya tiene el producto. */}
+                        {(imagenPreview || (esEdicion && productoEditar?.imagen_url && !quitarImagen)) && (
+                            <div className="mt-2 flex items-center gap-3">
+                                <img
+                                    src={imagenPreview || urlArchivo(productoEditar.imagen_url)}
+                                    alt="Vista previa"
+                                    className="h-24 w-24 object-cover rounded-lg border border-gray-200"
+                                />
+                                {esEdicion && productoEditar?.imagen_url && !quitarImagen && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setQuitarImagen(true);
+                                            setImagenArchivo(null);
+                                            setImagenPreview(null);
+                                        }}
+                                        className="text-xs font-medium text-red-600 hover:text-red-700 underline"
+                                    >
+                                        Quitar imagen
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                        <p className="text-xs text-gray-500 mt-1">
+                            {esEdicion
+                                ? 'Opcional. Si eliges una imagen, reemplaza la actual (JPG, PNG, WEBP, máx. 5 MB).'
+                                : 'Opcional. Formatos: JPG, PNG, WEBP (máx. 5 MB)'}
+                        </p>
+                    </div>
 
                     {esEdicion && (
                         <div className="flex items-center gap-3">

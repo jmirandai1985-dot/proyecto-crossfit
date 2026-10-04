@@ -3,6 +3,7 @@ import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import AvisoCarga from '../../components/AvisoCarga';
 import api from '../../services/api';
+import { urlArchivo } from '../../utils/imagen';
 
 const Bazar = () => {
     const { usuario_id, tenant_id } = useAuth();
@@ -111,7 +112,16 @@ const Bazar = () => {
                             </div>
                         ) : productos.map(p => (
                             <div key={p.id} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-md transition-all">
-                                <span className="text-4xl block mb-3">🛍️</span>
+                                {/* Foto del producto si el box la subió; sin foto queda el icono */}
+                                {p.imagen_url ? (
+                                    <img
+                                        src={urlArchivo(p.imagen_url)}
+                                        alt={p.nombre}
+                                        className="w-full h-40 object-cover rounded-lg mb-3 border border-gray-100"
+                                    />
+                                ) : (
+                                    <span className="text-4xl block mb-3">🛍️</span>
+                                )}
                                 <h3 className="font-bold text-gray-800">{p.nombre}</h3>
                                 {p.descripcion && <p className="text-xs text-gray-400 mt-1">{p.descripcion}</p>}
                                 <p className="text-2xl font-bold text-emerald-600 mt-3">${(p.precio || 0).toLocaleString('es-CL')}</p>

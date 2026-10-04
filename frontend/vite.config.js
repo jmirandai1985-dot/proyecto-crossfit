@@ -25,6 +25,14 @@ export default defineConfig({
         // el 307 apunta de vuelta al MISMO origen del dev server => no hay CORS.
         changeOrigin: false,
       },
+      // /static: las imágenes de los productos (que en dev/TEST guarda el backend
+      // en app/static/uploads) las sirve uvicorn en :8000. Vite NO las proxea por
+      // defecto, así que el <img src="/static/uploads/..."> del Bazar daba 404.
+      // En PROD nginx ya proxea /static/ al backend (mismo origen).
+      '/static': {
+        target: 'http://localhost:8000',
+        changeOrigin: false,
+      },
     },
   },
 })

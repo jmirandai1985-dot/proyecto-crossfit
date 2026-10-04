@@ -19,7 +19,10 @@ class ProductoBase(BaseModel):
     # y el flag se resetea en PUT /productos/{id} al reponer por encima del umbral.
     stock_minimo: Optional[int] = Field(
         None, ge=0, description="Umbral de stock bajo (NULL = alerta desactivada)")
-    # imagen_url removido - columna no existe en la base de datos PostgreSQL
+    # URL pública de la foto del producto (NULL = sin foto). En dev/TEST apunta a
+    # /static/uploads/<archivo>; en PROD a la URL absoluta del bucket público de R2.
+    imagen_url: Optional[str] = Field(
+        None, max_length=500, description="URL pública de la imagen del producto")
     activo: bool = Field(True, description="Indica si el producto está activo")
 
 
@@ -36,6 +39,10 @@ class ProductoUpdate(BaseModel):
     stock: Optional[int] = Field(None, ge=0)
     stock_minimo: Optional[int] = Field(
         None, ge=0, description="Umbral de stock bajo (NULL = alerta desactivada)")
+    # Imagen del producto: se sube por POST /productos/{id}/imagen (multipart) y
+    # acá se puede QUITAR mandando null. En la respuesta viene resuelta.
+    imagen_url: Optional[str] = Field(
+        None, max_length=500, description="URL de la imagen (null = quitarla)")
     activo: Optional[bool] = None
 
 
@@ -57,6 +64,9 @@ class ProductoListItem(BaseModel):
     precio: float
     stock: int
     stock_minimo: Optional[int] = None
+    # URL de la foto del producto (NULL = sin foto: la UI muestra el placeholder).
+    # La consumen el Bazar del alumno y la tabla del admin.
+    imagen_url: Optional[str] = None
     # Flag de "ya se avisó en este ciclo de stock bajo". Se resetea a False en
     # PUT /productos/{id} al reponer por encima del umbral. Lo consume el panel
     # admin Bazar para mostrar el estado de alerta en la tabla.

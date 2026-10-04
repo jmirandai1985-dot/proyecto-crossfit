@@ -3,9 +3,7 @@ Router de endpoints para gestión de Productos
 """
 import os
 import uuid
-import shutil
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -16,17 +14,61 @@ from app.schemas.producto import (
 )
 from app.core.dependencies import get_current_admin, get_current_user, require_full_access
 from app.core.file_validation import validar_archivo, EXTENSIONES_IMAGEN
+from app.services import storage
 
 # FIX 1: catálogo de movimientos restringido para alumnos de prueba
 router = APIRouter(dependencies=[Depends(require_full_access)])
 
-# Directorio donde se guardarán las imágenes subidas
-UPLOAD_DIR = os.path.join(os.path.dirname(
-    __file__), "..", "..", "static", "uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
+# Las fotos del Bazar son PÚBLICAS: las guarda la capa ÚNICA de almacenamiento
+# (app/services/storage.py) en app/static/uploads/ (dev/TEST) o en el prefijo
+# publico/ del bucket de R2 (PROD, con URL absoluta). Antes se escribían a mano en
+# el disco EFÍMERO del contenedor y la URL se DESCARTABA (no había columna).
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
+
+
+async def _guardar_imagen_publica(file: UploadFile) -> str:
+    """Valida la imagen subida y la guarda como archivo PÚBLICO. Devuelve su URL.
+
+    Chequeos de siempre: tipo declarado, tamaño máximo y contenido real por magic
+    bytes (el content-type lo declara el cliente y es spoofeable: rechaza ejecutables
+    disfrazados de imagen).
+    """
+    # Validar tipo de contenido declarado (chequeo primario)
+    if file.content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Tipo de archivo no permitido: {file.content_type}. Use JPG, PNG, WEBP o GIF."
+        )
+
+    # Leer contenido y validar tamaño
+    contenido = await file.read()
+    if len(contenido) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El archivo supera el tamaño máximo permitido de 5 MB."
+        )
+
+    extension = os.path.splitext(file.filename or "")[1].lower()
+    if not validar_archivo(
+        extension, contenido,
+        content_type=file.content_type, permitidas=EXTENSIONES_IMAGEN
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El contenido del archivo no coincide con una imagen válida (JPG, PNG, WEBP o GIF)."
+        )
+
+    # Nombre único: evita colisiones y no se puede adivinar la URL
+    nombre_archivo = f"{uuid.uuid4().hex}{extension}"
+    try:
+        return storage.guardar_publico(contenido, nombre_archivo)
+    except storage.ErrorAlmacenamiento:
+        # Guardado fallido (p. ej. R2 inaccesible): mejor un error claro que guardar
+        # una URL que apunte a un archivo que no existe.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No se pudo guardar la imagen. Vuelve a intentarlo en unos segundos.")
 
 
 @router.post("", response_model=ProductoResponse, status_code=status.HTTP_201_CREATED)
@@ -51,46 +93,10 @@ async def crear_producto(
     nombre = (nombre or "").strip()
     descripcion = (descripcion or "").strip() or None
 
-    imagen_url = None
-
-    # Procesar imagen si se adjuntó
-    if file and file.filename:
-        # Validar tipo de contenido declarado (chequeo primario)
-        if file.content_type not in ALLOWED_CONTENT_TYPES:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Tipo de archivo no permitido: {file.content_type}. Use JPG, PNG, WEBP o GIF."
-            )
-
-        # Leer contenido y validar tamaño
-        contenido = await file.read()
-        if len(contenido) > MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El archivo supera el tamaño máximo permitido de 5 MB."
-            )
-
-        # Validar contenido real por magic bytes (el content-type lo declara el
-        # cliente y es spoofeable). Rechaza ejecutables disfrazados de imagen.
-        extension = os.path.splitext(file.filename)[1].lower()
-        if not validar_archivo(
-            extension, contenido,
-            content_type=file.content_type, permitidas=EXTENSIONES_IMAGEN
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El contenido del archivo no coincide con una imagen válida (JPG, PNG, WEBP o GIF)."
-            )
-
-        # Generar nombre único para evitar colisiones
-        nombre_archivo = f"{uuid.uuid4().hex}{extension}"
-        ruta_destino = os.path.join(UPLOAD_DIR, nombre_archivo)
-
-        # Guardar el archivo en disco
-        with open(ruta_destino, "wb") as f:
-            f.write(contenido)
-
-        imagen_url = f"/static/uploads/{nombre_archivo}"
+    # Imagen opcional: se valida y se guarda con la capa ÚNICA de almacenamiento
+    # (disco en dev/TEST, bucket público de R2 en PROD). Sin archivo queda NULL.
+    imagen_url = (await _guardar_imagen_publica(file)
+                  if file and file.filename else None)
 
     db_producto = Producto(
         tenant_id=tenant_id,
@@ -99,6 +105,7 @@ async def crear_producto(
         precio=precio,
         stock=stock,
         stock_minimo=stock_minimo,
+        imagen_url=imagen_url,
         activo=activo,
     )
 
@@ -107,6 +114,39 @@ async def crear_producto(
     db.refresh(db_producto)
 
     return db_producto
+
+
+@router.post("/{producto_id}/imagen", response_model=ProductoResponse)
+async def subir_imagen_producto(
+    producto_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Agrega o REEMPLAZA la imagen de un producto existente (multipart). Solo admin.
+
+    El PUT /{id} es JSON (no puede llevar archivo), así que la imagen se sube por
+    acá. La imagen vieja queda en el almacenamiento (no se borra): el registro de
+    la BD apunta a la nueva.
+    """
+    # 🔒 SEGURIDAD: tenant_id del token (el producto tiene que ser del mismo box).
+    tenant_id = current_user["tenant_id"]
+    producto = db.query(Producto).filter(
+        Producto.id == producto_id,
+        Producto.tenant_id == tenant_id
+    ).first()
+
+    if not producto:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Producto con ID {producto_id} no encontrado"
+        )
+
+    producto.imagen_url = await _guardar_imagen_publica(file)
+    db.commit()
+    db.refresh(producto)
+
+    return producto
 
 
 @router.get("/{producto_id}", response_model=ProductoResponse)

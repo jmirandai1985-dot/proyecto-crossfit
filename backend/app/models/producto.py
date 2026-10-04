@@ -29,7 +29,10 @@ class Producto(Base):
     # encima del umbral (para que la próxima bajada vuelva a alertar).
     stock_minimo = Column(Integer, nullable=True)
     alerta_stock_enviada = Column(Boolean, nullable=False, default=False)
-    # imagen_url removido - columna no existe en la base de datos PostgreSQL
+    # imagen_url: URL pública de la foto del producto (migración 041). NULL = sin
+    # foto (la UI muestra el placeholder). En dev/TEST es /static/uploads/<archivo>
+    # y en PROD la URL absoluta del bucket público de R2 (app/services/storage.py).
+    imagen_url = Column(String(500), nullable=True)
     activo = Column(Boolean, nullable=False, default=True)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())

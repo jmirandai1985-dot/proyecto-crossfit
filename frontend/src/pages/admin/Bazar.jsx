@@ -3,6 +3,7 @@ import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import ModalProducto from '../../components/ModalProducto';
+import { urlArchivo } from '../../utils/imagen';
 
 const FILTROS = [
     { key: 'todos', label: 'Todos' },
@@ -323,12 +324,23 @@ const Bazar = () => {
                                         <tr key={p.id} className="hover:bg-zinc-800/40 transition-colors">
                                             <td className="px-4 py-3.5">
                                                 <div className="flex items-center gap-3">
-                                                    <div
-                                                        className="w-[42px] h-[42px] rounded-xl flex items-center justify-center text-lg flex-shrink-0"
-                                                        style={{ background: THUMB_BG[p.id % THUMB_BG.length] }}
-                                                    >
-                                                        {getProductoEmoji(p.nombre)}
-                                                    </div>
+                                                    {/* Foto del producto si el admin la subió (imagen_url:
+                                                        en PROD es la URL pública de R2). Sin foto se
+                                                        mantiene el cuadro de color con el emoji. */}
+                                                    {p.imagen_url ? (
+                                                        <img
+                                                            src={urlArchivo(p.imagen_url)}
+                                                            alt={p.nombre}
+                                                            className="w-[42px] h-[42px] rounded-xl object-cover flex-shrink-0 border border-zinc-700"
+                                                        />
+                                                    ) : (
+                                                        <div
+                                                            className="w-[42px] h-[42px] rounded-xl flex items-center justify-center text-lg flex-shrink-0"
+                                                            style={{ background: THUMB_BG[p.id % THUMB_BG.length] }}
+                                                        >
+                                                            {getProductoEmoji(p.nombre)}
+                                                        </div>
+                                                    )}
                                                     <div>
                                                         <div className="font-bold text-zinc-100">{p.nombre}</div>
                                                         {p.descripcion && (
