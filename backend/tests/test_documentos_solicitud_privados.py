@@ -22,6 +22,7 @@ TEMPORAL que se borra al final (no depende del seed y no deja rastro).
 import base64
 import os
 import uuid
+import warnings
 from datetime import datetime, timezone
 
 import pytest
@@ -117,16 +118,32 @@ def box():
             except OSError:
                 pass
         db.rollback()
+        # Cada tabla se borra en su propia transacción (savepoint) y con 3 pasadas:
+        # si una FK inesperada rechaza un DELETE (p.ej. notificaciones_enviadas, que
+        # referencia al alumno) NO se revierte el box entero; el resto se limpia igual
+        # y lo que quede se reporta como warning VISIBLE (no un residuo silencioso).
+        pendientes = ["notificaciones_enviadas", "solicitudes_planes",
+                      "planes", "usuarios"]
+        for _ in range(3):
+            for tabla in list(pendientes):
+                try:
+                    with db.begin_nested():
+                        db.execute(text(f"DELETE FROM {tabla} WHERE tenant_id = :t"),
+                                   {"t": tenant})
+                except Exception:
+                    continue            # queda para la pasada siguiente
+                pendientes.remove(tabla)
+            if not pendientes:
+                break
         try:
-            db.execute(text("DELETE FROM solicitudes_planes WHERE tenant_id = :t"),
-                       {"t": tenant})
-            db.execute(text("DELETE FROM planes WHERE tenant_id = :t"), {"t": tenant})
-            db.execute(text("DELETE FROM usuarios WHERE tenant_id = :t"), {"t": tenant})
-            db.execute(text("DELETE FROM tenants WHERE id = :t"), {"t": tenant})
-            db.commit()
-        except Exception as e:      # el borrado no debe tapar el fallo real del test
-            db.rollback()
-            print(f"\n[WARN] no se pudo limpiar el box de documentos: {e}")
+            with db.begin_nested():
+                db.execute(text("DELETE FROM tenants WHERE id = :t"), {"t": tenant})
+        except Exception:
+            pendientes.append("tenants")
+        if pendientes:
+            warnings.warn(f"[residuo] box de documentos {tenant}: no se pudo borrar "
+                          f"{pendientes} (revisar FKs)", stacklevel=2)
+        db.commit()
         db.close()
 
 

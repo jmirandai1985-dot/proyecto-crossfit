@@ -30,6 +30,7 @@ TEMPORAL que se borra al final.
 import base64
 import os
 import uuid
+import warnings
 from datetime import datetime, timezone
 
 import pytest
@@ -115,14 +116,33 @@ def box():
             except OSError:
                 pass
         db.rollback()
+        # Cada tabla se borra en su propia transacción (savepoint) y con 3 pasadas:
+        # si una FK inesperada rechaza un DELETE (p.ej. notificaciones_enviadas, que
+        # referencia al pedido y al alumno) NO se revierte el box entero; el resto se
+        # limpia igual y lo que quede se reporta como warning VISIBLE (no un residuo
+        # silencioso: la primera versión dejaba el box completo en la BD de TEST).
+        pendientes = ["notificaciones_enviadas", "pedidos", "solicitudes_planes",
+                      "productos", "usuarios"]
+        for _ in range(3):
+            for tabla in list(pendientes):
+                try:
+                    with db.begin_nested():
+                        db.execute(text(f"DELETE FROM {tabla} WHERE tenant_id = :t"),
+                                   {"t": tenant})
+                except Exception:
+                    continue            # queda para la pasada siguiente
+                pendientes.remove(tabla)
+            if not pendientes:
+                break
         try:
-            for tabla in ("pedidos", "solicitudes_planes", "productos", "usuarios"):
-                db.execute(text(f"DELETE FROM {tabla} WHERE tenant_id = :t"), {"t": tenant})
-            db.execute(text("DELETE FROM tenants WHERE id = :t"), {"t": tenant})
-            db.commit()
-        except Exception as e:      # el borrado no debe tapar el fallo real del test
-            db.rollback()
-            print(f"\n[WARN] no se pudo limpiar el box de pedidos: {e}")
+            with db.begin_nested():
+                db.execute(text("DELETE FROM tenants WHERE id = :t"), {"t": tenant})
+        except Exception:
+            pendientes.append("tenants")
+        if pendientes:
+            warnings.warn(f"[residuo] box de pedidos {tenant}: no se pudo borrar "
+                          f"{pendientes} (revisar FKs)", stacklevel=2)
+        db.commit()
         db.close()
 
 
