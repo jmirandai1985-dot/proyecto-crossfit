@@ -157,6 +157,68 @@ def guardar_publico(contenido: bytes, nombre_archivo: str) -> str:
     return f"{_url_publica_base()}/{PUBLIC_KEY_PREFIX}{nombre_archivo}"
 
 
+# ── Borrado del archivo público (mantenimiento) ───────────────────────────────
+# Al REEMPLAZAR o QUITAR la foto de un producto, la anterior se borra: si no, el
+# archivo queda huérfano (y en R2 se sigue almacenando/pagando para siempre).
+
+def _nombre_publico(url_archivo: str) -> Optional[str]:
+    """Nombre del archivo público de una URL guardada en la BD, o None si no es nuestra.
+
+    Acepta las DOS formas que devuelve `guardar_publico`:
+      * local (dev/TEST): `/static/uploads/<archivo>`
+      * r2 (PROD):        `<STORAGE_R2_PUBLIC_BASE_URL>/publico/<archivo>`
+    """
+    if not url_archivo or not isinstance(url_archivo, str):
+        return None
+    for marca in (PUBLIC_KEY_PREFIX, "static/uploads/"):
+        if marca in url_archivo:
+            nombre = url_archivo.split(marca, 1)[1]
+            break
+    else:
+        return None
+    # Sólo un archivo PLANO de la carpeta pública (mismo criterio que _clave_r2):
+    # con separadores o ".." no es un archivo nuestro.
+    if not nombre or "/" in nombre or "\\" in nombre or ".." in nombre:
+        return None
+    return nombre
+
+
+def borrar_publico(url_archivo: str) -> bool:
+    """Borra un archivo PÚBLICO (imagen) a partir de la URL guardada en la BD.
+
+    Se usa al REEMPLAZAR o QUITAR la foto de un producto (no dejar huérfanos).
+    Devuelve True si borró algo y False si no había nada que borrar.
+
+    NUNCA toca los archivos PRIVADOS: una URL que no sea pública se ignora (los
+    comprobantes viven en otro bucket/prefijo y no se borran por acá). Es
+    BEST-EFFORT: si el borrado falla se loguea y se sigue, porque el dato que
+    importa (la URL nueva en la BD) ya quedó guardado.
+    """
+    nombre = _nombre_publico(url_archivo)
+    if not nombre:
+        return False
+
+    if backend() == "local":
+        base = os.path.realpath(UPLOAD_DIR)
+        ruta = os.path.realpath(os.path.join(base, nombre))
+        if not ruta.startswith(base + os.sep) or not os.path.isfile(ruta):
+            return False
+        try:
+            os.remove(ruta)
+            return True
+        except OSError as e:
+            log.error("[storage] no se pudo borrar %s del disco: %s", ruta, e)
+            return False
+
+    try:
+        _cliente_r2().delete_object(Bucket=_bucket_publico(),
+                                    Key=PUBLIC_KEY_PREFIX + nombre)
+        return True
+    except Exception as e:  # botocore: ClientError / EndpointConnectionError / ...
+        log.error("[storage] no se pudo borrar %s de R2: %s", nombre, e)
+        return False
+
+
 # ── Lectura (documentos privados) ────────────────────────────────────────────
 
 def _relativo(url_documento: str) -> tuple:

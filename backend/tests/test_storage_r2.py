@@ -5,6 +5,8 @@ Qué se prueba, SIN red, SIN boto3 y SIN base de datos:
   * local: guardar/leer un archivo privado y uno público (las URLs de siempre);
   * r2 (cliente FALSO en memoria): subir+leer el privado, la URL pública absoluta
     de la imagen de un producto y el error CLARO si el objeto no está;
+  * borrado de la imagen PÚBLICA (borrar_publico): borra el archivo público y NUNCA
+    un comprobante ni nada fuera de la carpeta/bucket público;
   * 400 origen desconocido / 403 path traversal en los dos backends;
   * STORAGE_BACKEND desconocido -> error explícito (no cae a "local" en silencio);
   * el mapeo a códigos HTTP del guard (documentos_privados.respuesta_documento):
@@ -38,11 +40,12 @@ class SinObjeto(Exception):
 
 
 class ClienteR2Fake:
-    """Cliente S3 EN MEMORIA con lo único que usa la capa: put/get_object."""
+    """Cliente S3 EN MEMORIA con lo único que usa la capa: put/get/delete_object."""
 
     def __init__(self):
         self.objetos = {}
         self.subidas = []          # (bucket, clave, content_type)
+        self.borrados = []         # (bucket, clave)
 
     def put_object(self, Bucket, Key, Body, ContentType=None):
         self.objetos[(Bucket, Key)] = Body
@@ -53,6 +56,12 @@ class ClienteR2Fake:
         if (Bucket, Key) not in self.objetos:
             raise SinObjeto()
         return {"Body": io.BytesIO(self.objetos[(Bucket, Key)])}
+
+    def delete_object(self, Bucket, Key):
+        """En S3 real borrar algo que no existe NO es error (idempotente)."""
+        self.borrados.append((Bucket, Key))
+        self.objetos.pop((Bucket, Key), None)
+        return {}
 
 
 @pytest.fixture
@@ -108,6 +117,22 @@ def test_local_publico_url_de_static(local):
     assert storage.guardar_publico(PNG_1X1, "producto_1.png") == \
         "/static/uploads/producto_1.png"
     assert (pub / "producto_1.png").read_bytes() == PNG_1X1
+
+
+def test_local_borrar_publico_elimina_el_archivo(local):
+    """Reemplazar/quitar la foto de un producto borra la vieja del disco."""
+    priv, pub = local
+    url = storage.guardar_publico(PNG_1X1, "producto_viejo.png")
+
+    assert storage.borrar_publico(url) is True
+    assert not (pub / "producto_viejo.png").exists()
+    # Borrar de nuevo no es un error (el archivo ya no está).
+    assert storage.borrar_publico(url) is False
+
+    # Un comprobante PRIVADO jamás se borra por esta vía.
+    privado = storage.guardar_privado(b"contenido-voucher", "voucher_z.pdf")
+    assert storage.borrar_publico(privado) is False
+    assert (priv / "voucher_z.pdf").exists()
 
 
 def test_local_legacy_vive_en_static_y_avisa_si_no_esta(local):
@@ -168,6 +193,29 @@ def test_r2_sin_bucket_publico_usa_el_privado(r2, monkeypatch):
     storage.guardar_publico(PNG_1X1, "producto_11.png")
     assert ("box-crossfit-uploads-test", "publico/producto_11.png",
             "image/png") in r2.subidas
+
+
+def test_r2_borrar_publico_borra_solo_del_bucket_publico(r2):
+    """El borrado sale por el bucket PÚBLICO, no por el de los comprobantes."""
+    url = storage.guardar_publico(PNG_1X1, "producto_12.png")
+
+    assert storage.borrar_publico(url) is True
+    assert r2.borrados == [("box-crossfit-public-test", "publico/producto_12.png")]
+    assert ("box-crossfit-public-test", "publico/producto_12.png") not in r2.objetos
+
+
+def test_r2_borrar_publico_nunca_toca_un_comprobante(r2):
+    """NUNCA se borra un privado: ni por /privado/, ni por traversal, ni por basura."""
+    url_voucher = storage.guardar_privado(b"contenido-voucher", "voucher_e.pdf")
+
+    assert storage.borrar_publico(url_voucher) is False
+    assert storage.borrar_publico("/privado/../../etc/passwd") is False
+    assert storage.borrar_publico("publico/../privado/vouchers/voucher_e.pdf") is False
+    assert storage.borrar_publico("https://otro-sitio.example/foto.png") is False
+    assert storage.borrar_publico(None) is False
+
+    assert r2.borrados == []
+    assert ("box-crossfit-uploads-test", "privado/vouchers/voucher_e.pdf") in r2.objetos
 
 
 def test_r2_imagen_sin_url_publica_falla_claro(r2, monkeypatch):

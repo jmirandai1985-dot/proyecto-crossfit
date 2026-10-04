@@ -126,8 +126,7 @@ async def subir_imagen_producto(
     """Agrega o REEMPLAZA la imagen de un producto existente (multipart). Solo admin.
 
     El PUT /{id} es JSON (no puede llevar archivo), así que la imagen se sube por
-    acá. La imagen vieja queda en el almacenamiento (no se borra): el registro de
-    la BD apunta a la nueva.
+    acá. La foto VIEJA se borra del almacenamiento (no queda huérfana).
     """
     # 🔒 SEGURIDAD: tenant_id del token (el producto tiene que ser del mismo box).
     tenant_id = current_user["tenant_id"]
@@ -142,9 +141,18 @@ async def subir_imagen_producto(
             detail=f"Producto con ID {producto_id} no encontrado"
         )
 
-    producto.imagen_url = await _guardar_imagen_publica(file)
+    # Primero se guarda la NUEVA: si el guardado falla (503) la foto vieja sigue
+    # intacta y el producto no queda sin imagen.
+    url_nueva = await _guardar_imagen_publica(file)
+    url_previa = producto.imagen_url
+
+    producto.imagen_url = url_nueva
     db.commit()
     db.refresh(producto)
+
+    # Recién ahora se borra la vieja, y es best-effort: nunca rompe la respuesta.
+    if url_previa and url_previa != url_nueva:
+        storage.borrar_publico(url_previa)
 
     return producto
 
@@ -220,6 +228,7 @@ def actualizar_producto(
         )
 
     update_data = producto_data.model_dump(exclude_unset=True)
+    imagen_previa = producto.imagen_url
 
     # Normalización: sin espacios sobrantes al guardar (nombre/descripción).
     for _campo in ("nombre", "descripcion"):
@@ -237,6 +246,11 @@ def actualizar_producto(
 
     db.commit()
     db.refresh(producto)
+
+    # Botón "Quitar imagen" (imagen_url=null explícito): el archivo no se deja
+    # huérfano, se borra DESPUÉS de que el cambio quedó guardado en la BD.
+    if imagen_previa and producto.imagen_url is None:
+        storage.borrar_publico(imagen_previa)
 
     return producto
 

@@ -9,8 +9,10 @@ pública, que administra `app/services/storage.py` (disco en dev/TEST, R2 en PRO
 CONTRATO QUE SE PRUEBA — POST /productos (con archivo) y POST /productos/{id}/imagen:
   * la imagen queda PÚBLICA y se descarga por su URL SIN token, con su tipo real;
   * GET /productos (listado) y GET /productos/{id} devuelven `imagen_url`;
-  * POST /productos/{id}/imagen REEMPLAZA la foto (URL nueva y vigente);
-  * PUT /productos/{id} con imagen_url=null la QUITA (el producto vuelve al emoji);
+  * POST /productos/{id}/imagen REEMPLAZA la foto (URL nueva y vigente) y BORRA la
+    anterior del almacenamiento;
+  * PUT /productos/{id} con imagen_url=null la QUITA (el producto vuelve al emoji)
+    y también borra el archivo;
   * sin archivo, el producto queda con imagen_url=null;
   * 401 sin token, 403 con token de alumno, 404 si el producto es de OTRO box.
 
@@ -177,10 +179,20 @@ def test_03_reemplazar_la_imagen_cambia_la_url(box):
     if despues.startswith("/static/uploads/"):
         assert requests.get(f"{RAIZ_API}{despues}", timeout=30).status_code == 200
 
+    # La foto VIEJA ya no está: reemplazar no deja archivos huérfanos.
+    if antes.startswith("/static/uploads/"):
+        assert requests.get(f"{RAIZ_API}{antes}", timeout=30).status_code == 404, \
+            "la imagen anterior quedó huérfana en el almacenamiento"
+
 
 def test_04_put_con_null_quita_la_imagen(box):
-    """El admin puede dejar el producto sin foto (vuelve el placeholder del Bazar)."""
+    """El admin puede dejar el producto sin foto (vuelve el placeholder del Bazar).
+
+    Y la foto que tenía se BORRA del almacenamiento (botón "Quitar imagen").
+    """
     producto_id = box["productos"][-1]
+    antes = requests.get(f"{BASE}/productos/{producto_id}", headers=box["admin"],
+                         timeout=30).json()["imagen_url"]
 
     r = requests.put(f"{BASE}/productos/{producto_id}", headers=box["admin"],
                      json={"imagen_url": None}, timeout=30)
@@ -189,6 +201,10 @@ def test_04_put_con_null_quita_la_imagen(box):
 
     detalle = requests.get(f"{BASE}/productos/{producto_id}", headers=box["admin"], timeout=30)
     assert detalle.json()["imagen_url"] is None
+
+    if antes and antes.startswith("/static/uploads/"):
+        assert requests.get(f"{RAIZ_API}{antes}", timeout=30).status_code == 404, \
+            "al quitar la imagen el archivo quedó huérfano"
 
 
 def test_05_sin_foto_queda_en_null(box):
