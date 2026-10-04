@@ -48,3 +48,21 @@ services:
         sync: false
       - key: REACTIVACION_OPT_OUT_SECRET
         sync: false
+      # ── Archivos subidos por la app (app/services/storage.py) ──
+      # PROD guarda en Cloudflare R2 (disco efímero: sin esto, cada deploy borra
+      # los comprobantes, certificados e imágenes del Bazar).
+      - key: STORAGE_BACKEND
+        value: r2
+      - key: STORAGE_R2_BUCKET
+        value: box-crossfit-uploads
+      - key: STORAGE_R2_PUBLIC_BUCKET
+        value: box-crossfit-public
+      # Secretos/config del bucket: se pegan en el dashboard (sync: false).
+      - key: STORAGE_R2_ENDPOINT
+        sync: false
+      - key: STORAGE_R2_ACCESS_KEY_ID
+        sync: false
+      - key: STORAGE_R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: STORAGE_R2_PUBLIC_BASE_URL
+        sync: false

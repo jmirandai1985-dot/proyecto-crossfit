@@ -47,6 +47,11 @@ numpy==2.1.2  # Dependencia DIRECTA desde backend/ml (seno/coseno estacional).
 # Programación de tareas (generación automática de clases)
 apscheduler==3.11.3
 
+# Almacenamiento de archivos en Cloudflare R2 (app/services/storage.py): cliente
+# S3-compatible. Se importa PEREZOSAMENTE (sólo con STORAGE_BACKEND=r2), así que
+# dev/TEST no lo cargan. Pin explícito para builds reproducibles.
+boto3==1.43.108
+
 # Seguridad: rate limiting (login, registro, cambios críticos)
 slowapi==0.1.10
 

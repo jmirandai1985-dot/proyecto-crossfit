@@ -22,7 +22,7 @@ from app.core.config import settings
 # solicitud de plan: dos orígenes (/static/uploads y /privado/vouchers), media type
 # real y resolución del path sin salirse de la carpeta base.
 from app.core.documentos_privados import (
-    puede_ver_documento, resolver_documento, respuesta_documento,
+    puede_ver_documento, respuesta_documento,
 )
 
 logger = logging.getLogger(__name__)
@@ -316,8 +316,7 @@ def descargar_voucher_pedido(
     if not pedido.voucher_url:
         raise HTTPException(status_code=404, detail="Sin comprobante disponible")
 
-    return respuesta_documento(
-        resolver_documento(pedido.voucher_url, "comprobante"), inline)
+    return respuesta_documento(pedido.voucher_url, "comprobante", inline)
 
 
 @router.get("", response_model=List[PedidoListItem])

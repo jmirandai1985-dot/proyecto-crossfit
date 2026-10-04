@@ -286,3 +286,21 @@ def test_cert_08_origen_legacy_y_traversal(escenario):
         assert r3.status_code == 400, f"origen: {r3.status_code} {r3.text[:200]}"
     finally:
         _set_certificado(db, sid, url_original)
+
+
+def test_cert_09_archivo_perdido_es_404_con_mensaje(escenario):
+    """La URL apunta a un archivo que YA NO ESTÁ (disco efímero de un deploy anterior).
+
+    Antes de la capa de almacenamiento este caso devolvía un 404 mudo ("no encontrado
+    en el servidor"): el staff no sabía si el archivo nunca existió o se perdió. Ahora
+    el detalle pide volver a subirlo (mismo 404, mensaje accionable).
+    """
+    db, sid = escenario["db"], escenario["solicitud_id"]
+    url_original = escenario["certificado_url"]
+    try:
+        _set_certificado(db, sid, "/privado/vouchers/certificado_que_no_esta.png")
+        r = _get(sid, headers=escenario["admin"])
+        assert r.status_code == 404, f"status {r.status_code}: {r.text[:200]}"
+        assert "lo vuelva a subir" in r.json()["detail"]
+    finally:
+        _set_certificado(db, sid, url_original)

@@ -71,6 +71,29 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "./uploads/vouchers"
     MAX_UPLOAD_SIZE_MB: int = 5
 
+    # ── Almacenamiento de archivos (app/services/storage.py) ─────────────────
+    # "local" (dev y TEST): disco (app/private_uploads y app/static/uploads).
+    # "r2" (PROD): Cloudflare R2. El disco del contenedor de Render es EFÍMERO:
+    # sin esto, cada deploy borraba los comprobantes, certificados e imágenes.
+    # Default "local" a propósito: un entorno que no declare el backend sigue
+    # funcionando igual que antes (nunca escribe a R2 por accidente).
+    STORAGE_BACKEND: str = "local"
+    # Bucket PROPIO de los archivos subidos por la app (distinto del de backups:
+    # no compartir credenciales ni bucket con `box-crossfit-backups`).
+    STORAGE_R2_ENDPOINT: str = ""
+    STORAGE_R2_BUCKET: str = ""
+    # Bucket PÚBLICO (imágenes del Bazar). Cloudflare expone el bucket COMPLETO
+    # (r2.dev o dominio propio): no se puede hacer público sólo un prefijo, así que
+    # los privados viven en STORAGE_R2_BUCKET (sin acceso público) y las imágenes en
+    # este. Si queda vacío, se usa el mismo bucket (para dev/TEST: nunca en PROD,
+    # ahí el voucher sería público).
+    STORAGE_R2_PUBLIC_BUCKET: str = ""
+    STORAGE_R2_ACCESS_KEY_ID: str = ""
+    STORAGE_R2_SECRET_ACCESS_KEY: str = ""
+    # URL pública del bucket público (el dominio r2.dev o el dominio propio). Con
+    # esto se arma la URL de la imagen de un producto (la BD guarda la URL absoluta).
+    STORAGE_R2_PUBLIC_BASE_URL: str = ""
+
     # Gmail SMTP (correos reales)
     GMAIL_SMTP_USER: str = ""
     GMAIL_SMTP_APP_PASSWORD: str = ""

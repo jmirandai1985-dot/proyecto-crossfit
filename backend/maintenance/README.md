@@ -206,6 +206,47 @@ alembic=035_precio_snapshot_solicitudes | VEREDICTO: OK`.
 > Para versionarlo se puede declarar en `render.yaml` (`type: cron`), pero recién después de
 > validarlo a mano, así un sync del blueprint no crea algo a medio probar.
 
+## Archivos subidos por la app en R2 — bucket propio (2026-04-10)
+
+Los archivos que suben los usuarios (comprobantes de pago, certificados de estudiante,
+imágenes del Bazar) se guardan con la capa `app/services/storage.py`: en dev/TEST en
+disco (`app/private_uploads`, `app/static/uploads`) y en PROD en **Cloudflare R2**
+cuando `STORAGE_BACKEND=r2`. Antes se escribían en el disco EFÍMERO del contenedor del
+Web Service: cada deploy los borraba.
+
+**Bucket y credenciales PROPIOS:** `box-crossfit-uploads` (sólo archivos PRIVADOS)
+y `box-crossfit-public` (sólo imágenes del Bazar, con acceso público). NO se
+reutiliza el bucket de respaldos (`R2_BUCKET` del grupo `backups-prod`): los
+respaldos son la red de seguridad y no comparten bucket ni token con lo que sube
+el público.
+
+⚠️ Por qué DOS buckets: Cloudflare habilita el acceso público (r2.dev o dominio
+propio) para el **bucket completo**, no para un prefijo. Con un solo bucket, el
+`privado/` de los comprobantes quedaría al alcance de quien adivine/consiga la URL.
+
+Dos prefijos, en buckets distintos:
+
+| Bucket | Prefijo | Qué guarda | Acceso |
+|---|---|---|---|
+| `box-crossfit-uploads` | `privado/vouchers/` | voucher de plan, certificado, comprobante de pedido | **Sólo** los endpoints autenticados (streaming del backend con el guard de dueño/box). El bucket NO tiene acceso público |
+| `box-crossfit-public` | `publico/` | imágenes de productos del Bazar | Público (r2.dev o dominio propio). La BD guarda la URL absoluta |
+
+Variables (valores por entorno; **ninguna credencial en el repo**):
+
+| Variable | Qué es | Dónde va |
+|---|---|---|
+| `STORAGE_BACKEND` | `local` (dev/TEST) o `r2` (PROD) | Web Service |
+| `STORAGE_R2_ENDPOINT` | `https://<account-id>.r2.cloudflarestorage.com` | Web Service |
+| `STORAGE_R2_BUCKET` | `box-crossfit-uploads` (privado) | Web Service |
+| `STORAGE_R2_PUBLIC_BUCKET` | `box-crossfit-public` (público) | Web Service |
+| `STORAGE_R2_ACCESS_KEY_ID` / `STORAGE_R2_SECRET_ACCESS_KEY` | token *Object Read & Write* limitado a esos DOS buckets | Web Service (secretos) |
+| `STORAGE_R2_PUBLIC_BASE_URL` | dominio público del bucket público (p. ej. `https://pub-xxxx.r2.dev`) o el dominio propio; con esto se arma la URL de la imagen | Web Service |
+
+Con `STORAGE_BACKEND=r2` y alguna variable faltante, el guardado responde **503** con
+mensaje claro (nunca devuelve una URL que apunte a un archivo inexistente). Un archivo
+que ya no está (disco efímero de un deploy anterior) responde **404** pidiendo que se
+vuelva a subir.
+
 ## Alertas por correo: la regla es "correo = algo que revisar" (2026-09-27)
 
 Los 4 Cron Jobs comparten **un solo camino de correo** (`maintenance/alertas.py` → Gmail SMTP) y

@@ -10,7 +10,9 @@
 # No toca el web service ni `Dockerfile.render` / `backend/Dockerfile` (esos siguen igual).
 #
 # Por qué una imagen aparte:
-#   * El web service no necesita pg_dump ni boto3 (menos superficie).
+#   * El web service no necesita pg_dump (menos superficie). Sí usa boto3 desde
+#     2026-04-10 para subir los archivos de los usuarios a R2 (viene de
+#     requirements.txt, no de acá).
 #   * El código de mantenimiento corre aislado, sin acceso a la app ni a sus secretos.
 #
 # Contexto de build = backend/  (para que `COPY maintenance/` resuelva):

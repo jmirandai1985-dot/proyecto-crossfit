@@ -22,7 +22,7 @@ from app.core.dependencies import get_current_admin, get_current_user
 # resolución del path dentro de su carpeta base, el media type real y la respuesta
 # viven en un helper común (mismo guard para ambos documentos).
 from app.core.documentos_privados import (
-    puede_ver_documento, resolver_documento, respuesta_documento,
+    puede_ver_documento, respuesta_documento,
 )
 from app.core.rate_limit import limiter, LIMIT_CRITICO
 from app.core.config import settings
@@ -251,8 +251,7 @@ def descargar_voucher(
     # Dos orígenes posibles: comprobantes HISTÓRICOS en /static/uploads/... y los
     # NUEVOS en /privado/vouchers/ (private_uploads/). El helper resuelve el path
     # DENTRO de su carpeta base (anti traversal) y arma la respuesta.
-    return respuesta_documento(
-        resolver_documento(solicitud.voucher_url, "voucher"), inline)
+    return respuesta_documento(solicitud.voucher_url, "voucher", inline)
 
 
 @router.get("/{solicitud_id}/certificado")
@@ -279,8 +278,7 @@ def descargar_certificado(
         raise HTTPException(status_code=404, detail="Sin certificado disponible")
 
     return respuesta_documento(
-        resolver_documento(solicitud.certificado_estudiante_url, "certificado"),
-        inline)
+        solicitud.certificado_estudiante_url, "certificado", inline)
 
 
 @router.put("/{solicitud_id}/aprobar")
