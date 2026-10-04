@@ -18,6 +18,12 @@ from app.schemas.pedido import (
 )
 from app.core.dependencies import get_current_admin, get_current_user, require_full_access
 from app.core.config import settings
+# El comprobante de un pedido se sirve con el MISMO helper que el voucher de una
+# solicitud de plan: dos orígenes (/static/uploads y /privado/vouchers), media type
+# real y resolución del path sin salirse de la carpeta base.
+from app.core.documentos_privados import (
+    puede_ver_documento, resolver_documento, respuesta_documento,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +232,94 @@ def obtener_pedido(
     return pedido
 
 
+def _con_nombres(db: Session, pedidos: List[Pedido]) -> List[dict]:
+    """Adjunta los NOMBRES de alumno y producto a cada pedido del listado.
+
+    El panel admin muestra "alumno / producto": resolverlos acá son 2 consultas con
+    IN (no N+1) en vez de que el frontend cruce listados paginados (que además no
+    siempre traen el alumno del pedido). Los ids se mantienen en la respuesta.
+    """
+    if not pedidos:
+        return []
+    ids_alumnos = {p.alumno_id for p in pedidos}
+    ids_productos = {p.producto_id for p in pedidos}
+    alumnos = db.query(Usuario.id, Usuario.nombre, Usuario.correo).filter(
+        Usuario.id.in_(ids_alumnos)).all()
+    productos = db.query(Producto.id, Producto.nombre).filter(
+        Producto.id.in_(ids_productos)).all()
+    mapa_alumnos = {a.id: a for a in alumnos}
+    mapa_productos = {p.id: p.nombre for p in productos}
+
+    items = []
+    for p in pedidos:
+        alumno = mapa_alumnos.get(p.alumno_id)
+        items.append({
+            "id": p.id,
+            "alumno_id": p.alumno_id,
+            "producto_id": p.producto_id,
+            "cantidad": p.cantidad,
+            "total": p.total,
+            "estado": p.estado,
+            "voucher_url": p.voucher_url,
+            "fecha_pedido": p.fecha_pedido,
+            "alumno_nombre": alumno.nombre if alumno else None,
+            "alumno_email": alumno.correo if alumno else None,
+            "producto_nombre": mapa_productos.get(p.producto_id),
+        })
+    return items
+
+
+@router.get("/{pedido_id}/voucher")
+def descargar_voucher_pedido(
+    pedido_id: int,
+    inline: bool = False,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Devuelve el COMPROBANTE de pago (voucher) de un pedido del Bazar.
+
+    POR QUÉ EXISTE: el comprobante se subía con ?privado=1 a la carpeta privada
+    (fuera de /static/), pero NADIE podía verlo: no había endpoint que lo sirviera,
+    así que el admin no podía revisar el pago de un pedido.
+
+    Mismo contrato que el voucher de una solicitud de plan:
+    - solo el alumno dueño del pedido o el staff del MISMO box;
+    - ?inline=1 para previsualizar (por defecto: descarga forzada).
+    """
+    # 🔒 SEGURIDAD: tenant_id del token; el query param no existe acá.
+    tenant_id = current_user["tenant_id"]
+    pedido = db.query(Pedido).filter(
+        Pedido.id == pedido_id,
+        Pedido.tenant_id == tenant_id,
+    ).first()
+    if not pedido:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido con ID {pedido_id} no encontrado",
+        )
+
+    # 🔒 IDOR: solo el dueño del pedido o el staff del box (mismo guard que el GET).
+    visible = puede_ver_documento(
+        usuario_id=current_user["usuario_id"],
+        tenant_id=tenant_id,
+        alumno_id=pedido.alumno_id,
+        tenant_documento=pedido.tenant_id,
+        rol=current_user.get("rol", ""),
+    )
+    if not visible:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No puedes ver el comprobante de este pedido",
+        )
+
+    if not pedido.voucher_url:
+        raise HTTPException(status_code=404, detail="Sin comprobante disponible")
+
+    return respuesta_documento(
+        resolver_documento(pedido.voucher_url, "comprobante"), inline)
+
+
 @router.get("", response_model=List[PedidoListItem])
 def listar_pedidos(
     tenant_id: Optional[int] = None,
@@ -261,7 +355,9 @@ def listar_pedidos(
     pedidos = query.order_by(Pedido.fecha_pedido.desc()).offset(
         skip).limit(limit).all()
 
-    return pedidos
+    # Los nombres (alumno / producto) los completa el backend: el panel admin los
+    # muestra en la tabla y el panel del alumno sigue leyendo los ids.
+    return _con_nombres(db, pedidos)
 
 
 @router.put("/{pedido_id}/estado", response_model=PedidoResponse)

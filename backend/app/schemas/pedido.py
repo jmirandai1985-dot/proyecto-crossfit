@@ -51,7 +51,12 @@ class PedidoResponse(BaseModel):
 
 
 class PedidoListItem(BaseModel):
-    """Esquema simplificado para listados de pedidos"""
+    """Esquema simplificado para listados de pedidos.
+
+    `alumno_nombre`, `alumno_email` y `producto_nombre` los completa el backend en
+    el listado (2 consultas con IN, no N+1): el panel admin muestra la tabla con
+    nombres sin cruzar listados paginados en el frontend. Los ids se mantienen.
+    """
     id: int
     alumno_id: int
     producto_id: int
@@ -60,5 +65,8 @@ class PedidoListItem(BaseModel):
     estado: str
     voucher_url: Optional[str] = None
     fecha_pedido: datetime
+    alumno_nombre: Optional[str] = None
+    alumno_email: Optional[str] = None
+    producto_nombre: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)

@@ -14,6 +14,8 @@ import AdminHistorialAlumno from './pages/admin/HistorialAlumno';
 import AdminCoaches from './pages/admin/Coaches';
 import AdminClases from './pages/admin/Clases';
 import AdminBazar from './pages/admin/Bazar';
+// Pedidos del Bazar: revisar comprobantes y avanzar el estado (pendiente → validado → entregado).
+import AdminPedidos from './pages/admin/Pedidos';
 import AdminReportes from './pages/admin/Reportes';
 import AdminSupervisionClases from './pages/admin/SupervisionClases';
 import AdminConfiguracion from './pages/admin/Configuracion';
@@ -116,6 +118,7 @@ function App() {
             <Route path="planes" element={<AdminPlanes />} />
             <Route path="disciplinas" element={<AdminDisciplinas />} />
             <Route path="bazar" element={<AdminBazar />} />
+            <Route path="pedidos" element={<AdminPedidos />} />
             <Route path="reportes" element={<AdminReportes />} />
             <Route path="configuracion" element={<AdminConfiguracion />} />
             <Route path="notificaciones" element={<AdminNotificaciones />} />

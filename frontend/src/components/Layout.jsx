@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
     ChartColumn, Users, Clock, Eye, SquareCheck, QrCode, CreditCard,
-    Dumbbell, ShoppingCart, Heart, TrendingUp, FileText, Bell, Settings,
+    Dumbbell, ShoppingCart, ShoppingBag, Heart, TrendingUp, FileText, Bell, Settings,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
@@ -144,6 +144,7 @@ const Layout = ({ children }) => {
                 { label: 'Planes', path: '/admin/planes', icon: <CreditCard className="w-5 h-5" /> },
                 { label: 'Disciplinas', path: '/admin/disciplinas', icon: <Dumbbell className="w-5 h-5" /> },
                 { label: 'Bazar', path: '/admin/bazar', icon: <ShoppingCart className="w-5 h-5" /> },
+                { label: 'Pedidos', path: '/admin/pedidos', icon: <ShoppingBag className="w-5 h-5" /> },
 
                 // ── ANÁLISIS ──
                 { type: 'section', label: 'ANÁLISIS' },
