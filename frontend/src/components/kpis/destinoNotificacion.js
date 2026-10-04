@@ -22,6 +22,8 @@ export const DESTINOS = {
     solicitud_prueba_clase: { path: '/admin/alumnos-pendientes', label: 'Pendientes' },
     // Bazar
     confirmacion_pedido: { path: '/admin/bazar', label: 'Bazar' },
+    // Pedido nuevo: es el aviso de CAMPANA del admin (pedidos.py) -> Pedidos.
+    pedido_nuevo: { path: '/admin/pedidos', label: 'Pedidos' },
     // El slug REAL que emite email_service es `alerta_stock_bajo` (antes acá decía
     // `stock_bajo`, que no existe => opción muerta en el filtro de tipo).
     alerta_stock_bajo: { path: '/admin/bazar', label: 'Bazar' },
@@ -51,6 +53,7 @@ export const ETIQUETAS = {
     solicitud_registro: 'Solicitud de registro',
     solicitud_prueba_clase: 'Solicitud de clase de prueba',
     confirmacion_pedido: 'Confirmación de pedido (bazar)',
+    pedido_nuevo: 'Pedido nuevo (bazar)',
     alerta_stock_bajo: 'Alerta de stock bajo (admin)',
     confirmacion_renovacion: 'Confirmación de renovación',
     confirmacion_plan: 'Confirmación de plan',

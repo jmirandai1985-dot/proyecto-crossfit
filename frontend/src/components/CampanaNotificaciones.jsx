@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Bell, CheckCheck, Inbox, RefreshCw, X } from 'lucide-react';
 import api from '../services/api';
 
@@ -28,6 +29,19 @@ const ETIQUETAS_TIPO = {
     aprobado: 'Plan aprobado',
     rechazado: 'Plan rechazado',
     plan_activo: 'Plan activo',
+    // Bazar: aviso de campana al admin del box y al alumno dueño (pedidos.py).
+    pedido_nuevo: 'Pedido nuevo (Bazar)',
+    pedido_validado: 'Pedido validado',
+    pedido_entregado: 'Pedido entregado',
+};
+
+// Pantalla propia de cada tipo de aviso: la fila navega al hacer click. El
+// backend no guarda URLs, así que el destino se deriva del `tipo` (igual que
+// hace la tabla de Notificaciones Enviadas con destinoNotificacion.js).
+const DESTINOS_TIPO = {
+    pedido_nuevo: '/admin/pedidos',
+    pedido_validado: '/alumno/mis-pedidos',
+    pedido_entregado: '/alumno/mis-pedidos',
 };
 
 const CampanaNotificaciones = () => {
@@ -38,6 +52,7 @@ const CampanaNotificaciones = () => {
     const [cargando, setCargando] = useState(false);
     const [error, setError] = useState('');
     const [accionando, setAccionando] = useState(false);
+    const navigate = useNavigate();
 
     // ── Contador inicial: una sola consulta, sin polling ──
     const cargarContador = useCallback(async () => {
@@ -114,6 +129,14 @@ const CampanaNotificaciones = () => {
         } finally {
             setAccionando(false);
         }
+    };
+
+    // Ir a la pantalla del aviso (si el tipo tiene una) y cerrar el panel.
+    const abrirDestino = (tipo) => {
+        const destino = DESTINOS_TIPO[tipo];
+        if (!destino) return;
+        setAbierto(false);
+        navigate(destino);
     };
 
     return (
@@ -218,7 +241,18 @@ const CampanaNotificaciones = () => {
                             <ul className="divide-y divide-zinc-800">
                                 {notificaciones.map((n) => (
                                     <li key={n.id}
-                                        className={`px-4 py-3 ${n.leida ? 'opacity-60' : ''}`}>
+                                        {...(DESTINOS_TIPO[n.tipo] ? {
+                                            onClick: () => abrirDestino(n.tipo),
+                                            role: 'button',
+                                            tabIndex: 0,
+                                            onKeyDown: (e) => {
+                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                    e.preventDefault();
+                                                    abrirDestino(n.tipo);
+                                                }
+                                            },
+                                        } : {})}
+                                        className={`px-4 py-3 ${n.leida ? 'opacity-60' : ''} ${DESTINOS_TIPO[n.tipo] ? 'cursor-pointer hover:bg-zinc-800/60 transition-colors' : ''}`}>
                                         <div className="flex items-start justify-between gap-2">
                                             <div className="min-w-0">
                                                 <p className="text-[11px] uppercase tracking-wide text-orange-400 font-semibold">
@@ -237,7 +271,10 @@ const CampanaNotificaciones = () => {
                                             {!n.leida && (
                                                 <button
                                                     type="button"
-                                                    onClick={() => marcarLeida(n.id)}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        marcarLeida(n.id);
+                                                    }}
                                                     disabled={accionando}
                                                     className="shrink-0 text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 disabled:opacity-40"
                                                 >

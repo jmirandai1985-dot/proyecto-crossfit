@@ -302,9 +302,12 @@ const Layout = ({ children }) => {
                             <h1 className="text-lg font-bold text-white">URBAN BOX</h1>
                         </div>
                         <div className="flex items-center gap-4">
-                            {/* N-2: campana del alumno (el staff tiene sus propias
-                                alertas en /admin/notificaciones). */}
-                            {rol === 'alumno' && <CampanaNotificaciones />}
+                            {/* N-2: campana del alumno y del ADMIN (le entran los
+                                avisos del box: p. ej. pedidos nuevos del Bazar).
+                                El coach sigue con sus alertas en
+                                /admin/notificaciones hasta su propia campana. */}
+                            {(rol === 'alumno' || rol === 'administrador' || rol === 'admin')
+                                && <CampanaNotificaciones />}
                             <span className="text-sm text-zinc-400">
                                 {new Date().toLocaleDateString('es-CL', {
                                     weekday: 'long',

@@ -24,6 +24,12 @@ from app.core.config import settings
 from app.core.documentos_privados import (
     puede_ver_documento, respuesta_documento,
 )
+# Avisos del PANEL (tabla `notificaciones`, la que lee la campana): el Bazar no
+# dejaba ninguna traza y el pedido sólo se veía entrando a las pantallas de
+# Pedidos. Ver services/notificaciones_panel.py.
+from app.services.notificaciones_panel import (
+    notificar_admins_del_tenant, notificar_alumno,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +43,14 @@ TRANSICIONES_PERMITIDAS = {
     "pendiente": ["validado"],
     "validado": ["entregado"],
     "entregado": []
+}
+
+# Mensaje de campana para el alumno dueño cuando el admin avanza su pedido.
+# (El estado 'rechazado' todavía no existe en pedidos: cuando se agregue, se
+# suma acá y el aviso sale solo.)
+MENSAJES_ESTADO_PEDIDO = {
+    "validado": "✅ Tu pedido de {producto} x{cantidad} fue validado",
+    "entregado": "📦 Tu pedido de {producto} x{cantidad} fue entregado",
 }
 
 
@@ -155,6 +169,18 @@ def crear_pedido(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Alta demanda, intenta de nuevo",
         )
+
+    # ── Aviso en el PANEL de los admins del box (campana; sin correo) ──
+    # El pedido ya está commiteado: el aviso es best-effort (nunca tumba la
+    # compra). Destinatarios: los administradores ACTIVOS del mismo tenant.
+    if current_user.get("rol") in ("coach", "admin", "administrador"):
+        nombre_alumno = alumno.nombre if alumno else "Atleta"
+    else:
+        nombre_alumno = current_user.get("nombre", "Atleta")
+    notificar_admins_del_tenant(
+        db, tenant_id, "pedido_nuevo",
+        f"Nuevo pedido de {nombre_alumno}: {producto.nombre} "
+        f"x{pedido_data.cantidad}")
 
     # ── Correo al alumno: confirmación de compra en el Bazar (no bloqueante) ──
     try:
@@ -401,6 +427,19 @@ def actualizar_estado_pedido(
     pedido.estado = nuevo_estado
     db.commit()
     db.refresh(pedido)
+
+    # ── Aviso en el PANEL del alumno dueño (campana; sin correo) ──
+    # Antes, el avance del pedido sólo se veía entrando a Mis Pedidos.
+    plantilla = MENSAJES_ESTADO_PEDIDO.get(nuevo_estado)
+    if plantilla:
+        producto_pedido = db.query(Producto).filter(
+            Producto.id == pedido.producto_id).first()
+        nombre_producto = (
+            producto_pedido.nombre if producto_pedido else "tu producto")
+        notificar_alumno(
+            db, pedido.alumno_id, f"pedido_{nuevo_estado}",
+            plantilla.format(
+                producto=nombre_producto, cantidad=pedido.cantidad))
 
     return pedido
 
