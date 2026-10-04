@@ -1,12 +1,9 @@
 """
 Router de endpoints para Solicitudes de Planes (flujo admin)
 """
-import os
 from app.core.urls import url_frontend  # B.2
 import logging
-import mimetypes
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.responses import FileResponse
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -21,6 +18,12 @@ from app.models.notificacion import Notificacion
 from app.models.transaccion_financiera import TransaccionFinanciera
 from app.schemas.solicitud import SolicitudPlanCreate
 from app.core.dependencies import get_current_admin, get_current_user
+# Servido de comprobantes (voucher de plan / certificado de estudiante): la
+# resolución del path dentro de su carpeta base, el media type real y la respuesta
+# viven en un helper común (mismo guard para ambos documentos).
+from app.core.documentos_privados import (
+    puede_ver_documento, resolver_documento, respuesta_documento,
+)
 from app.core.rate_limit import limiter, LIMIT_CRITICO
 from app.core.config import settings
 # El fin de mes de un plan se escribe EN HORA DE CHILE (23:59:59 del último día, ver la regla en
@@ -35,6 +38,33 @@ from datetime import timedelta
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
+
+
+def _solicitud_con_guard(solicitud_id: int, db: Session, current_user: dict,
+                         etiqueta: str):
+    """Carga la solicitud y aplica el guard de documentos.
+
+    404 si la solicitud no existe; 403 si quien pide no es el alumno dueño ni
+    staff del mismo box (convención del proyecto: no silenciar la autorización).
+    """
+    solicitud = db.query(SolicitudPlan).filter(
+        SolicitudPlan.id == solicitud_id).first()
+    if not solicitud:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+
+    visible = puede_ver_documento(
+        usuario_id=current_user["usuario_id"],
+        tenant_id=current_user["tenant_id"],
+        alumno_id=solicitud.alumno_id,
+        tenant_documento=solicitud.tenant_id,
+        rol=current_user.get("rol", ""),
+    )
+    if not visible:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"No puedes descargar {etiqueta} de esta solicitud",
+        )
+    return solicitud
 
 
 @router.post("/solicitar", status_code=status.HTTP_201_CREATED)
@@ -213,79 +243,44 @@ def descargar_voucher(
     vista previa y descarga, en vez de la URL pública /static/uploads/... (que
     StaticFiles sirve SIN autenticación).
     """
-    solicitud = db.query(SolicitudPlan).filter(
-        SolicitudPlan.id == solicitud_id).first()
-    if not solicitud:
-        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-
-    # ── FIX S1 (seguridad): control de propiedad/tenant ──
-    # El voucher es un comprobante de pago sensible. Solo pueden descargarlo:
-    # (a) el alumno dueño de la solicitud, o (b) un admin/coach del MISMO box
-    # al que pertenece la solicitud. Sin esto, cualquier usuario autenticado
-    # podía leer vouchers ajenos de cualquier tenant con solo cambiar el id (IDOR).
-    rol = current_user.get("rol", "")
-    es_dueno = current_user["usuario_id"] == solicitud.alumno_id
-    es_staff_mismo_box = (
-        rol in ("coach", "admin", "administrador")
-        and current_user["tenant_id"] == solicitud.tenant_id
-    )
-    if not (es_dueno or es_staff_mismo_box):
-        # 403 explícito (convención del proyecto: no silenciar la autorización)
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="No puedes descargar el voucher de esta solicitud",
-        )
+    solicitud = _solicitud_con_guard(solicitud_id, db, current_user, "el voucher")
 
     if not solicitud.voucher_url:
         raise HTTPException(status_code=404, detail="Sin voucher disponible")
 
-    # ── SEGURIDAD: prevenir path traversal ──
-    # Dos ubicaciones posibles:
-    #   /static/uploads/...   -> vouchers HISTORICOS (carpeta publica)
-    #   /privado/vouchers/... -> vouchers NUEVOS (carpeta privada, fuera de static/,
-    #                            NO servida por StaticFiles: solo este endpoint)
-    # El archivo resuelto debe quedar DENTRO de su carpeta base
-    # (evita '../../../etc/passwd').
-    base_app = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    if solicitud.voucher_url.startswith("/privado/"):
-        base_dir = os.path.join(base_app, "private_uploads")
-        rel = solicitud.voucher_url.replace("/privado/vouchers/", "")
-    elif solicitud.voucher_url.startswith("/static/"):
-        base_dir = os.path.join(base_app, "static")
-        rel = solicitud.voucher_url.replace("/static/", "")
-    else:
-        raise HTTPException(
-            status_code=400, detail="Origen de voucher no soportado")
+    # Dos orígenes posibles: comprobantes HISTÓRICOS en /static/uploads/... y los
+    # NUEVOS en /privado/vouchers/ (private_uploads/). El helper resuelve el path
+    # DENTRO de su carpeta base (anti traversal) y arma la respuesta.
+    return respuesta_documento(
+        resolver_documento(solicitud.voucher_url, "voucher"), inline)
 
-    base_dir = os.path.realpath(base_dir)
-    voucher_path = os.path.realpath(os.path.join(base_dir, rel.lstrip("/")))
 
-    if not voucher_path.startswith(base_dir + os.sep):
-        raise HTTPException(
-            status_code=403, detail="Acceso denegado")
+@router.get("/{solicitud_id}/certificado")
+def descargar_certificado(
+    solicitud_id: int,
+    inline: bool = False,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Devuelve el CERTIFICADO DE ESTUDIANTE de una solicitud (usuario autenticado).
 
-    if not os.path.exists(voucher_path):
-        raise HTTPException(
-            status_code=404, detail="Archivo de voucher no encontrado en el servidor")
+    Espejo del endpoint del voucher: mismo guard (alumno dueño o staff del mismo
+    box), mismos DOS orígenes de archivo y mismo ?inline=1 para previsualizar.
 
-    # Obtener nombre del archivo para el filename
-    voucher_filename = os.path.basename(voucher_path)
+    Antes el certificado se subía a /static/uploads/ (público) y el panel lo abría
+    por su URL: cualquiera con el link veía el documento del alumno. Ahora se sube
+    con ?privado=1 y se sirve SOLO por este endpoint autenticado.
+    """
+    solicitud = _solicitud_con_guard(
+        solicitud_id, db, current_user, "el certificado")
 
-    # El media_type real depende de la extensión: los vouchers pueden ser
-    # JPG/PNG/GIF/WEBP o PDF (ver upload.py: ALLOWED_EXTENSIONS). Antes se
-    # forzaba "image/jpeg", así que un voucher PDF se servía con el tipo
-    # equivocado (y el <iframe> del panel no lo renderizaba bien).
-    media_type = mimetypes.guess_type(
-        voucher_filename)[0] or "application/octet-stream"
-    disposicion = "inline" if inline else "attachment"
+    if not solicitud.certificado_estudiante_url:
+        raise HTTPException(status_code=404, detail="Sin certificado disponible")
 
-    # attachment = descarga forzada; inline = previsualización en el panel admin
-    return FileResponse(
-        path=voucher_path,
-        media_type=media_type,
-        headers={
-            "Content-Disposition": f"{disposicion}; filename={voucher_filename}"}
-    )
+    return respuesta_documento(
+        resolver_documento(solicitud.certificado_estudiante_url, "certificado"),
+        inline)
 
 
 @router.put("/{solicitud_id}/aprobar")
