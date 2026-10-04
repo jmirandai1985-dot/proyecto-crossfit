@@ -55,6 +55,8 @@ const Bazar = () => {
     // Producto en alerta de stock bajo: tiene umbral configurado y el stock
     // quedó en/bajo ese umbral (misma definición que usa el backend para alertar).
     // Criterio unico de stock: fila, filtro y KPI usan la MISMA funcion.
+    // BUG 10: los KPIs y el chip "Stock bajo" cuentan SOLO productos activos
+    // (lo vendible); lo retirado no infla inventario ni alertas.
     // stock_minimo NULL = alerta desactivada (contrato del backend).
     const TONOS = {
         agotado: "bg-red-100 text-red-800",
@@ -79,10 +81,15 @@ const Bazar = () => {
 
     const stats = useMemo(() => {
         const total = productos.length;
-        const activos = productos.filter((p) => p.activo).length;
-        const stockTotal = productos.reduce((s, p) => s + (p.stock || 0), 0);
-        const valor = productos.reduce((s, p) => s + (p.stock || 0) * (p.precio || 0), 0);
-        const alertas = productos.filter(enAlerta).length;
+        // BUG 10: los KPIs describen el inventario VENDIBLE, así que sólo
+        // cuentan productos ACTIVOS. Lo retirado (activo=false) sigue en la
+        // tabla y en el chip "Inactivos", pero no infla Total productos,
+        // Stock total ni Valor inventario.
+        const activosLista = productos.filter((p) => p.activo);
+        const activos = activosLista.length;
+        const stockTotal = activosLista.reduce((s, p) => s + (p.stock || 0), 0);
+        const valor = activosLista.reduce((s, p) => s + (p.stock || 0) * (p.precio || 0), 0);
+        const alertas = activosLista.filter(enAlerta).length;
         return { total, activos, inactivos: total - activos, stockTotal, valor, alertas };
     }, [productos]);
 
@@ -96,7 +103,7 @@ const Bazar = () => {
             }
             if (filtro === 'activos') return p.activo;
             if (filtro === 'inactivos') return !p.activo;
-            if (filtro === 'stock_bajo') return enAlerta(p);
+            if (filtro === 'stock_bajo') return p.activo && enAlerta(p);
             return true;
         });
     }, [productos, searchTerm, filtro]);
@@ -243,26 +250,26 @@ const Bazar = () => {
                     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 pl-5 relative overflow-hidden">
                         <span className="absolute left-0 top-0 bottom-0 w-1 bg-orange-500"></span>
                         <div className="text-[11.5px] text-zinc-400 font-semibold uppercase tracking-wide">Total productos</div>
-                        <div className="text-2xl font-extrabold text-zinc-100 mt-1.5">{stats.total}</div>
-                        <div className="text-[11px] text-zinc-500 mt-1">{stats.activos} activos · {stats.inactivos} inactivo{stats.inactivos === 1 ? '' : 's'}</div>
+                        <div className="text-2xl font-extrabold text-zinc-100 mt-1.5">{stats.activos}</div>
+                        <div className="text-[11px] text-zinc-500 mt-1">solo activos · {stats.inactivos} inactivo{stats.inactivos === 1 ? '' : 's'} fuera de venta</div>
                     </div>
                     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 pl-5 relative overflow-hidden">
                         <span className="absolute left-0 top-0 bottom-0 w-1 bg-violet-500"></span>
                         <div className="text-[11.5px] text-zinc-400 font-semibold uppercase tracking-wide">Stock total</div>
                         <div className="text-2xl font-extrabold text-zinc-100 mt-1.5">{stats.stockTotal}</div>
-                        <div className="text-[11px] text-zinc-500 mt-1">unidades en inventario</div>
+                        <div className="text-[11px] text-zinc-500 mt-1">unidades de productos activos</div>
                     </div>
                     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 pl-5 relative overflow-hidden">
                         <span className="absolute left-0 top-0 bottom-0 w-1 bg-green-500"></span>
                         <div className="text-[11.5px] text-zinc-400 font-semibold uppercase tracking-wide">Valor inventario</div>
                         <div className="text-2xl font-extrabold text-zinc-100 mt-1.5">{formatCompact(stats.valor)}</div>
-                        <div className="text-[11px] text-zinc-500 mt-1">a precio de venta</div>
+                        <div className="text-[11px] text-zinc-500 mt-1">a precio de venta (solo activos)</div>
                     </div>
                     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 pl-5 relative overflow-hidden">
                         <span className="absolute left-0 top-0 bottom-0 w-1 bg-red-500"></span>
                         <div className="text-[11.5px] text-zinc-400 font-semibold uppercase tracking-wide">Alertas activas</div>
                         <div className="text-2xl font-extrabold text-zinc-100 mt-1.5">{stats.alertas}</div>
-                        <div className="text-[11px] text-zinc-500 mt-1">productos bajo su mínimo</div>
+                        <div className="text-[11px] text-zinc-500 mt-1">productos activos bajo su mínimo</div>
                     </div>
                 </div>
                 {/* Aviso con la tabla ya cargada (p. ej. fallo al reactivar). */}

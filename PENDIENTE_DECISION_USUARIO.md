@@ -21,7 +21,7 @@ Actualmente Planes.jsx tiene botón "+ Nuevo Plan". La tabla plana podría organ
 Horarios.jsx actualmente lista plana ordenada por hora. Se recomienda agrupar por turno (AM/MD/PM) como en Supervisión.
 
 ### BUG 10 — Bazar: productos inactivos cuentan en stats
-Producto marcado inactivo sigue sumando en "Total de Productos", "Stock Total" y "Valor Inventario" del Dashboard de Bazar. Pendiente para próxima sesión.
+Producto marcado inactivo sigue sumando en "Total de Productos", "Stock Total" y "Valor Inventario" del Dashboard de Bazar. **[Corregido 2026-10-04]** Los KPIs (Total productos / Stock total / Valor inventario) y el chip "Stock bajo" ahora cuentan solamente productos `activo=true`; los inactivos siguen visibles en la tabla y en el chip "Inactivos". Estado previo: pendiente para próxima sesión.
 
 ### P6 — Dashboard Administrativo: gráficos de negocio
 Pendiente de decisión: ¿el Dashboard (/admin/dashboard) debe mostrar los **mismos** gráficos que ya existen en Reportes (/admin/reportes), o gráficos **distintos/más resumidos**? Opciones:
