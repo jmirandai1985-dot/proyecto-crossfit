@@ -16,7 +16,7 @@ const Bazar = () => {
     const [subiendo, setSubiendo] = useState(false);
     const [mensaje, setMensaje] = useState({ type: '', text: '' });
     // P1: si falla la carga, se avisa con banner + Reintentar (antes quedaba
-    // "📦 No hay productos disponibles" como si el catálogo estuviera vacío).
+    // "El box aún no publicó productos" como si el catálogo estuviera vacío).
     const [erroresCarga, setErroresCarga] = useState([]);
 
     const cargarTodo = useCallback(async () => {
@@ -107,7 +107,7 @@ const Bazar = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                         {productos.length === 0 && erroresCarga.length === 0 ? (
                             <div className="col-span-full text-center py-12">
-                                <p className="text-gray-400 text-lg">📦 No hay productos disponibles</p>
+                                <p className="text-gray-400 text-lg">📦 El box aún no publicó productos</p>
                             </div>
                         ) : productos.map(p => (
                             <div key={p.id} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-md transition-all">
