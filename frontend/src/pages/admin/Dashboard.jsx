@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
+import { fmtFechaChile, toChileFechaStr } from '../../utils/fecha';
 import AdminTarjetaAlumnosPrueba from '../../components/AdminTarjetaAlumnosPrueba';
 
 const AdminDashboard = () => {
@@ -10,6 +11,14 @@ const AdminDashboard = () => {
     const { tenant_id } = useAuth();
     const [solicitudes, setSolicitudes] = useState([]);
     const [countPendientes, setCountPendientes] = useState(0);
+    // ── Pendientes: DOS colas distintas, cada una con su propio error ──────────
+    // `countPendientes` = REGISTROS de alumnos nuevos (pendientes-activacion/count)
+    // `solicitudes`     = SOLICITUDES DE PLAN con comprobante (/solicitudes/pendientes)
+    // Antes la tarjeta del dashboard mostraba SOLO la primera: con 1 comprobante de
+    // plan esperando revisión, el contador decía "0". Y si un endpoint fallaba, se
+    // pintaba un 0 falso; ahora se muestra "s/d" + el motivo.
+    const [registrosError, setRegistrosError] = useState('');
+    const [solicitudesError, setSolicitudesError] = useState('');
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
     const [processingId, setProcessingId] = useState(null);
@@ -34,12 +43,21 @@ const AdminDashboard = () => {
     const [ocupacionLoading, setOcupacionLoading] = useState(true);
     // Fidelización — modal membresías del mes
     const [fidelizacionModal, setFidelizacionModal] = useState(null); // 'membresias'
+    // ── Tarjetas BI (data mart): "Alumnos nuevos" y "Convertidos" ─────────────
+    // Reutilizan los MISMOS endpoints de la pestaña KPIs (/api/v1/kpis/diario y
+    // /api/v1/kpis/mensual) — no se recalcula nada acá. Si el job BI todavía no
+    // publicó el día/mes, la tarjeta dice "s/d" con el motivo, nunca un 0 falso.
+    const [biNuevos, setBiNuevos] = useState({ loading: true, valor: null, fecha: '', error: '' });
+    const [biConversion, setBiConversion] = useState({
+        loading: true, valor: null, prueba: null, rate: null, periodo: '', error: '',
+    });
 
     useEffect(() => {
         cargarSolicitudes();
         cargarCountPendientes();
         cargarFidelizacion();
         cargarOcupacionHoy();
+        cargarBi();
     }, [tenant_id]);
 
     const cargarOcupacionHoy = async () => {
@@ -71,9 +89,13 @@ const AdminDashboard = () => {
         ]);
         if (sols.status === 'fulfilled') {
             setSolicitudes(sols.value.data || []);
+            setSolicitudesError('');
         } else {
             console.error('Error cargando solicitudes pendientes', sols.reason);
             setSolicitudes([]);
+            setSolicitudesError(sols.reason?.response?.data?.detail
+                || sols.reason?.message
+                || 'No se pudieron cargar las solicitudes de plan');
         }
         if (statsRes.status === 'fulfilled') {
             setStats(statsRes.value.data);
@@ -88,8 +110,77 @@ const AdminDashboard = () => {
         try {
             const res = await api.get('/api/v1/alumnos/pendientes-activacion/count');
             setCountPendientes(res.data?.count || 0);
-        } catch {
+            setRegistrosError('');
+        } catch (err) {
+            // Un fallo de red NO es "no hay nada pendiente": se guarda el motivo y
+            // la tarjeta muestra "s/d" en vez de un 0 tranquilizador pero falso.
+            console.error('Error cargando el conteo de registros pendientes', err);
             setCountPendientes(0);
+            setRegistrosError(err?.response?.data?.detail || err?.message
+                || 'No se pudo cargar el dato');
+        }
+    };
+
+    // ── BI (SOLO LECTURA): "Alumnos nuevos" y "Convertidos" ───────────────────
+    // Mismo criterio que la pestaña KPIs: el cron `box-crossfit-kpis-ml` publica el
+    // día ANTERIOR, así que se pide ayer y, si el job todavía no corrió, se
+    // retrocede hasta 3 días. El mensual usa el ÚLTIMO MES CERRADO con datos
+    // (índice /kpis/mensual/periodos -> `default`), no el mes en curso (vacío).
+    const cargarBi = async () => {
+        setBiNuevos((prev) => ({ ...prev, loading: true }));
+        const dias = [];
+        for (let i = 1; i <= 3; i++) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            dias.push(toChileFechaStr(d));
+        }
+        const res = await Promise.allSettled(
+            dias.map((fecha) => api.get('/api/v1/kpis/diario', { params: { fecha } }))
+        );
+        const ok = res.find((r) => r.status === 'fulfilled');
+        if (ok) {
+            setBiNuevos({
+                loading: false,
+                valor: ok.value.data?.alumnos_nuevos ?? null,
+                fecha: ok.value.data?.fecha || '',
+                error: '',
+            });
+        } else {
+            setBiNuevos({
+                loading: false, valor: null, fecha: '',
+                error: res[0]?.reason?.response?.data?.detail
+                    || 'Sin dato del BI para los últimos días',
+            });
+        }
+
+        setBiConversion((prev) => ({ ...prev, loading: true }));
+        try {
+            const rPer = await api.get('/api/v1/kpis/mensual/periodos');
+            const pedido = rPer.data?.default || null;
+            if (!pedido) {
+                setBiConversion({
+                    loading: false, valor: null, prueba: null, rate: null, periodo: '',
+                    error: 'Aún no hay meses cerrados publicados por el BI',
+                });
+                return;
+            }
+            const r = await api.get('/api/v1/kpis/mensual', {
+                params: { year: pedido.year, month: pedido.month },
+            });
+            setBiConversion({
+                loading: false,
+                valor: r.data?.alumnos_plan_comprado ?? null,
+                prueba: r.data?.alumnos_prueba ?? null,
+                rate: r.data?.conversion_rate ?? null,
+                periodo: `${String(pedido.month).padStart(2, '0')}/${pedido.year}`,
+                error: '',
+            });
+        } catch (err) {
+            setBiConversion({
+                loading: false, valor: null, prueba: null, rate: null, periodo: '',
+                error: err?.response?.data?.detail || err?.message
+                    || 'No se pudo cargar el BI mensual',
+            });
         }
     };
 
@@ -238,6 +329,13 @@ const AdminDashboard = () => {
         }
     };
 
+    // Pendientes por revisar = REGISTROS de alumno nuevo + SOLICITUDES DE PLAN con
+    // comprobante (dos colas distintas). Si falló cualquiera de las dos fuentes se
+    // devuelve null y la tarjeta muestra "s/d" en vez de un total incompleto.
+    const totalPendientes = (registrosError || solicitudesError)
+        ? null
+        : (countPendientes || 0) + solicitudes.length;
+
     if (loading) {
         return (
             <Layout>
@@ -257,7 +355,7 @@ const AdminDashboard = () => {
                         <h1 className="text-3xl font-bold text-zinc-100">Dashboard Administrativo</h1>
                         <p className="text-zinc-400">Panel de gestión de membresías y fidelización</p>
                     </div>
-                    <button onClick={() => { cargarSolicitudes(); cargarFidelizacion(); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold">
+                    <button onClick={() => { cargarSolicitudes(); cargarCountPendientes(); cargarFidelizacion(); cargarBi(); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold">
                         🔄 Recargar
                     </button>
                 </div>
@@ -317,11 +415,74 @@ const AdminDashboard = () => {
                         </div>
                         <button onClick={() => document.getElementById('solicitudes-pendientes')?.scrollIntoView({ behavior: 'smooth' })} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-rose-600 hover:shadow-md hover:border-rose-700 transition-all cursor-pointer text-left">
                             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Solicitudes Pendientes</p>
-                            <p className="text-3xl font-bold text-rose-700 mt-1">{countPendientes}</p>
-                            <p className="text-xs text-zinc-500 mt-1">Esperando aprobación — Clic para ver</p>
+                            {totalPendientes === null ? (
+                                <p className="text-sm font-bold text-rose-400 mt-2" title={registrosError || solicitudesError}>
+                                    ⚠️ s/d (no se pudo consultar)
+                                </p>
+                            ) : (
+                                <p className="text-3xl font-bold text-rose-700 mt-1">{totalPendientes}</p>
+                            )}
+                            {/* Desglose: son DOS colas. Antes solo se contaban los registros
+                                y una solicitud de plan con voucher no sumaba en ninguna parte. */}
+                            <p className="text-xs text-zinc-500 mt-1">
+                                {countPendientes || 0} registro{countPendientes === 1 ? '' : 's'} ·
+                                {' '}{solicitudes.length} solicitud{solicitudes.length === 1 ? '' : 'es'} de plan — Clic para ver
+                            </p>
                         </button>
                     </div>
                 )}
+
+                {/* TARJETAS BI: "Alumnos nuevos" y "Convertidos". Reutilizan los
+                    endpoints de /admin/kpis (el cálculo vive en el backend, en los
+                    data marts daily_kpis/monthly_kpis): acá solo se pinta el número. */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <button onClick={() => navigate('/admin/kpis')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-emerald-600 hover:shadow-md hover:border-emerald-700 transition-all cursor-pointer text-left">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos Nuevos</p>
+                                {biNuevos.loading ? (
+                                    <p className="text-3xl font-bold text-zinc-600 mt-1">…</p>
+                                ) : biNuevos.valor === null ? (
+                                    <p className="text-sm font-bold text-amber-400 mt-2">s/d</p>
+                                ) : (
+                                    <p className="text-3xl font-bold text-emerald-600 mt-1">{biNuevos.valor}</p>
+                                )}
+                                <p className="text-xs text-zinc-500 mt-1">
+                                    {biNuevos.loading
+                                        ? 'Consultando el BI…'
+                                        : biNuevos.error
+                                            ? `⚠️ ${biNuevos.error === 'KPI diario no encontrado' ? 'el BI todavía no publicó esos días' : biNuevos.error}`
+                                            : `Registros nuevos del ${fmtFechaChile(biNuevos.fecha)}`}
+                                    {' '}— Clic para ver KPIs
+                                </p>
+                            </div>
+                            <span className="text-4xl">👤</span>
+                        </div>
+                    </button>
+                    <button onClick={() => navigate('/admin/kpis')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-teal-600 hover:shadow-md hover:border-teal-700 transition-all cursor-pointer text-left">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Convertidos</p>
+                                {biConversion.loading ? (
+                                    <p className="text-3xl font-bold text-zinc-600 mt-1">…</p>
+                                ) : biConversion.valor === null ? (
+                                    <p className="text-sm font-bold text-amber-400 mt-2">s/d</p>
+                                ) : (
+                                    <p className="text-3xl font-bold text-teal-600 mt-1">{biConversion.valor}</p>
+                                )}
+                                <p className="text-xs text-zinc-500 mt-1">
+                                    {biConversion.loading
+                                        ? 'Consultando el BI…'
+                                        : biConversion.error
+                                            ? `⚠️ ${biConversion.error}`
+                                            : `Compraron plan${biConversion.periodo ? ` (${biConversion.periodo})` : ''} · Conversión prueba→plan: ${biConversion.rate}% · ${biConversion.prueba || 0} en prueba`}
+                                    {' '}— Clic para ver KPIs
+                                </p>
+                            </div>
+                            <span className="text-4xl">🚀</span>
+                        </div>
+                    </button>
+                </div>
 
                 {/* WIDGET OCUPACION CLASES HOY */}
                 <div className="bg-zinc-900 rounded-lg shadow p-5">
@@ -394,13 +555,40 @@ const AdminDashboard = () => {
 
                 {/* SOLICITUDES PENDIENTES */}
                 <div id="solicitudes-pendientes" className="bg-zinc-900 rounded-lg shadow overflow-hidden">
-                    <div className="px-6 py-4 border-b border-zinc-800">
-                        <h2 className="text-lg font-bold text-zinc-100">
-                            📋 Solicitudes Pendientes {solicitudes.length > 0 && `(${solicitudes.length})`}
-                        </h2>
+                    <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between gap-3">
+                        <div>
+                            <h2 className="text-lg font-bold text-zinc-100">
+                                📋 Solicitudes de plan pendientes {solicitudes.length > 0 && `(${solicitudes.length})`}
+                            </h2>
+                            <p className="text-xs text-zinc-500 mt-0.5">
+                                Comprobantes de pago (voucher) esperando aprobación o rechazo
+                            </p>
+                        </div>
+                        <button
+                            onClick={() => navigate('/admin/alumnos-pendientes')}
+                            className="shrink-0 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold transition-colors"
+                            title="Ver también los registros de alumnos nuevos pendientes"
+                        >
+                            Ver registros pendientes ({countPendientes || 0})
+                        </button>
                     </div>
-                    {solicitudes.length === 0 ? (
-                        <div className="p-8 text-center text-zinc-400">No hay solicitudes pendientes</div>
+                    {solicitudesError ? (
+                        <div className="p-8 text-center">
+                            <p className="text-red-400 text-sm">⚠️ {solicitudesError}</p>
+                            <button
+                                onClick={cargarSolicitudes}
+                                className="mt-3 px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors"
+                            >
+                                Reintentar
+                            </button>
+                        </div>
+                    ) : solicitudes.length === 0 ? (
+                        <div className="p-8 text-center text-zinc-400">
+                            No hay solicitudes de plan esperando revisión
+                            <span className="block text-xs text-zinc-500 mt-1">
+                                Aparecen acá cuando un alumno sube el comprobante de un plan desde su panel.
+                            </span>
+                        </div>
                     ) : (
                         <div className="overflow-x-auto">
                             <table className="w-full">

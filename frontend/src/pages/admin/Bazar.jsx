@@ -29,6 +29,10 @@ const Bazar = () => {
     const [productoEditar, setProductoEditar] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [filtro, setFiltro] = useState('todos');
+    // Reactivación en 1 clic desde la fila (sin abrir el modal). Un producto
+    // INACTIVO no aparece en el Bazar del alumno: si todo el catálogo quedó
+    // inactivo, el alumno ve el Bazar vacío sin ninguna pista de por qué.
+    const [reactivandoId, setReactivandoId] = useState(null);
 
     const fetchProductos = async () => {
         try {
@@ -164,6 +168,23 @@ const Bazar = () => {
         }
     };
 
+    // Reactivar un producto inactivo (PUT /productos/{id} con activo=true).
+    // Restaura de inmediato la visibilidad en el Bazar del alumno, que lista
+    // con activo=true.
+    const handleReactivarProducto = async (id) => {
+        setReactivandoId(id);
+        setError('');
+        try {
+            await api.put(`/api/v1/productos/${id}`, { activo: true });
+            await fetchProductos();
+        } catch (error) {
+            console.error('Error reactivando producto:', error);
+            setError(error.response?.data?.detail || 'No se pudo reactivar el producto.');
+        } finally {
+            setReactivandoId(null);
+        }
+    };
+
     const handleModalClose = () => {
         setShowModal(false);
         setProductoEditar(null);
@@ -244,7 +265,21 @@ const Bazar = () => {
                         <div className="text-[11px] text-zinc-500 mt-1">productos bajo su mínimo</div>
                     </div>
                 </div>
-                {/* ── Chips de filtro ── */}
+                {/* Aviso con la tabla ya cargada (p. ej. fallo al reactivar). */}
+                {error && productos.length > 0 && (
+                    <div className="mb-4 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-[13px] text-red-200">
+                        ⚠️ {error}
+                    </div>
+                )}
+                {/* Catálogo sin NINGÚN producto activo: el listado del alumno
+                    filtra activo=true, así que su Bazar aparece vacío. */}
+                {productos.length > 0 && stats.activos === 0 && (
+                    <div className="mb-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-[13px] text-amber-200">
+                        ⚠️ No hay productos <strong>activos</strong>: el Bazar del panel del alumno se ve vacío.
+                        Usa <strong>↺ Reactivar</strong> en el producto que quieras poner a la venta.
+                    </div>
+                )}
+                {/* Chips de filtro: por estado de publicación y por stock. */}
                 <div className="flex flex-wrap gap-2 mb-4">
                     {FILTROS.map((f) => {
                         const activo = filtro === f.key;
@@ -329,6 +364,17 @@ const Bazar = () => {
                                                     >
                                                         ✎
                                                     </button>
+                                                    {!p.activo && (
+                                                        <button
+                                                            onClick={() => handleReactivarProducto(p.id)}
+                                                            disabled={reactivandoId === p.id}
+                                                            title="Reactivar (vuelve a ser visible en el Bazar del alumno)"
+                                                            aria-label="Reactivar producto"
+                                                            className="h-8 px-2.5 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-[11px] font-bold text-zinc-400 hover:border-green-500 hover:text-green-500 transition-colors disabled:opacity-50"
+                                                        >
+                                                            {reactivandoId === p.id ? 'Reactivando…' : '↺ Reactivar'}
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={() => handleEliminarProducto(p.id)}
                                                         title="Desactivar" aria-label="Desactivar producto"
