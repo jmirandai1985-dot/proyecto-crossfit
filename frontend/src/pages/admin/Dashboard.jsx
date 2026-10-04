@@ -5,6 +5,9 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { fmtFechaChile, toChileFechaStr } from '../../utils/fecha';
 import AdminTarjetaAlumnosPrueba from '../../components/AdminTarjetaAlumnosPrueba';
+// Vista previa/descarga del voucher: la lógica del blob autenticado (y su
+// descarga forzada) vive en el hook compartido, no en cada pantalla.
+import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
 
 const AdminDashboard = () => {
     const navigate = useNavigate();
@@ -26,10 +29,8 @@ const AdminDashboard = () => {
     const [voucherModal, setVoucherModal] = useState({ open: false, url: '', solicitud_id: null, tipo: 'voucher' });
     // Voucher AUTENTICADO: la vista previa y la descarga van por el endpoint
     // protegido GET /solicitudes/{id}/voucher (con Bearer) y se materializan como
-    // blob. Así no se depende de la URL pública /static/uploads/... (que se sirve
-    // sin autenticación por StaticFiles).
-    const [voucherPreview, setVoucherPreview] = useState({ loading: false, blobUrl: '', error: '', mime: '' });
-    const [descargandoVoucher, setDescargandoVoucher] = useState(false);
+    // blob (hook `useDocumentoAutenticado` más abajo). Así no se depende de la URL
+    // pública /static/uploads/... (que se sirve sin autenticación por StaticFiles).
     const [rechazoModal, setRechazoModal] = useState({ open: false, solicitud_id: null, motivo: '' });
     // Fidelización state
     const [alumnosRiesgo, setAlumnosRiesgo] = useState([]);
@@ -253,80 +254,27 @@ const AdminDashboard = () => {
         setProcessingId(null);
     };
 
-    // Extrae el mensaje de error de una respuesta blob: con responseType 'blob'
-    // axios NO parsea el JSON del error, viene como Blob.
-    const detalleDeErrorBlob = async (err) => {
-        const d = err?.response?.data;
-        if (d instanceof Blob) {
-            try {
-                return JSON.parse(await d.text())?.detail || 'Error al procesar el archivo';
-            } catch {
-                // el cuerpo no era JSON
-            }
-        }
-        return d?.detail || err?.message || 'Error al procesar el archivo';
-    };
-
-    // Vista previa del voucher: se pide el archivo con el token y se muestra el blob.
-    // Si el modal muestra un CERTIFICADO se sigue usando la URL pública (no hay
-    // endpoint autenticado de certificados), para no ampliar el alcance de este fix.
-    useEffect(() => {
-        if (!voucherModal.open || voucherModal.tipo !== 'voucher' || !voucherModal.solicitud_id) {
-            setVoucherPreview({ loading: false, blobUrl: '', error: '', mime: '' });
-            return;
-        }
-        let cancelado = false;
-        let objectUrl = '';
-        (async () => {
-            setVoucherPreview({ loading: true, blobUrl: '', error: '', mime: '' });
-            try {
-                const res = await api.get(
-                    `/api/v1/solicitudes/${voucherModal.solicitud_id}/voucher?inline=1`,
-                    { responseType: 'blob' }
-                );
-                if (cancelado) return;
-                objectUrl = URL.createObjectURL(res.data);
-                setVoucherPreview({ loading: false, blobUrl: objectUrl, error: '', mime: res.data.type || '' });
-            } catch (err) {
-                if (cancelado) return;
-                setVoucherPreview({ loading: false, blobUrl: '', error: await detalleDeErrorBlob(err), mime: '' });
-            }
-        })();
-        return () => {
-            cancelado = true;
-            if (objectUrl) URL.revokeObjectURL(objectUrl);
-        };
-    }, [voucherModal.open, voucherModal.tipo, voucherModal.solicitud_id]);
+    // Vista previa del voucher por el endpoint AUTENTICADO (blob): la lógica vive
+    // en el hook compartido, que además revoca el object URL al cerrar el modal.
+    // NOTA: si el modal muestra un CERTIFICADO se sigue usando la URL pública
+    // (todavía no hay endpoint autenticado de certificados).
+    const {
+        preview: voucherPreview,
+        descargando: descargandoVoucher,
+        descargar: descargarDocumento,
+    } = useDocumentoAutenticado({
+        previewUrl: (voucherModal.open && voucherModal.tipo === 'voucher' && voucherModal.solicitud_id)
+            ? `/api/v1/solicitudes/${voucherModal.solicitud_id}/voucher?inline=1`
+            : '',
+        nombreFallback: voucherModal.solicitud_id ? `voucher_${voucherModal.solicitud_id}` : 'voucher',
+    });
 
     const handleDescargarVoucher = async (solicitud_id) => {
         if (!solicitud_id) return;
-        setDescargandoVoucher(true);
         setMsg('');
-        try {
-            const res = await api.get(
-                `/api/v1/solicitudes/${solicitud_id}/voucher`,
-                { responseType: 'blob' }
-            );
-            const cd = res.headers?.['content-disposition'] || '';
-            const coincide = cd.match(/filename="?([^";]+)"?/i);
-            const nombre = coincide ? coincide[1] : `voucher_${solicitud_id}`;
-            const objectUrl = URL.createObjectURL(res.data);
-            const a = document.createElement('a');
-            a.href = objectUrl;
-            a.download = nombre;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            // El revoke inmediato puede abortar la descarga en algunos navegadores.
-            setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
-            setMsg('✅ Voucher descargado.');
-            setTimeout(() => setMsg(''), 4000);
-        } catch (err) {
-            setMsg('❌ ' + await detalleDeErrorBlob(err));
-            setTimeout(() => setMsg(''), 4000);
-        } finally {
-            setDescargandoVoucher(false);
-        }
+        const res = await descargarDocumento(`/api/v1/solicitudes/${solicitud_id}/voucher`);
+        setMsg(res.ok ? '✅ Voucher descargado.' : '❌ ' + res.error);
+        setTimeout(() => setMsg(''), 4000);
     };
 
     // Pendientes por revisar = REGISTROS de alumno nuevo + SOLICITUDES DE PLAN con

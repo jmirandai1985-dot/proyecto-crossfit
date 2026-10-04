@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../../components/Layout';
 import api from '../../services/api';
+// Vista previa del comprobante (blob autenticado): hook compartido con el Dashboard.
+import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
 
 const AdminAlumnosPendientes = () => {
     const [pendientes, setPendientes] = useState([]);
@@ -24,9 +26,8 @@ const AdminAlumnosPendientes = () => {
     const [rechazoPlanModal, setRechazoPlanModal] = useState(null); // solicitud
     const [motivoRechazo, setMotivoRechazo] = useState('');
     // Vista previa del voucher por el endpoint AUTENTICADO (blob): la URL pública
-    // /static/uploads/... no lleva token. Mismo patrón que el Dashboard.
+    // /static/uploads/... no lleva token. La lógica vive en el hook compartido.
     const [voucherSolicitud, setVoucherSolicitud] = useState(null); // solicitud
-    const [voucherPreview, setVoucherPreview] = useState({ loading: false, blobUrl: '', error: '', mime: '' });
 
     const cargarPendientes = async ({ silencioso = false } = {}) => {
         // Las DOS colas se piden en paralelo con allSettled: si una falla, la otra
@@ -118,49 +119,14 @@ const AdminAlumnosPendientes = () => {
         }
     };
 
-    // Extrae el mensaje de error de una respuesta blob: con responseType 'blob'
-    // axios NO parsea el JSON del error, viene como Blob.
-    const detalleDeErrorBlob = async (err) => {
-        const d = err?.response?.data;
-        if (d instanceof Blob) {
-            try {
-                return JSON.parse(await d.text())?.detail || 'Error al procesar el archivo';
-            } catch {
-                // el cuerpo no era JSON
-            }
-        }
-        return d?.detail || err?.message || 'Error al procesar el archivo';
-    };
-
-    // Vista previa del voucher: se pide el archivo CON el token (endpoint protegido)
-    // y se muestra el blob. El object URL se revoca al cerrar/desmontar.
-    useEffect(() => {
-        if (!voucherSolicitud?.id) {
-            setVoucherPreview({ loading: false, blobUrl: '', error: '', mime: '' });
-            return;
-        }
-        let cancelado = false;
-        let objectUrl = '';
-        (async () => {
-            setVoucherPreview({ loading: true, blobUrl: '', error: '', mime: '' });
-            try {
-                const res = await api.get(
-                    `/api/v1/solicitudes/${voucherSolicitud.id}/voucher?inline=1`,
-                    { responseType: 'blob' }
-                );
-                if (cancelado) return;
-                objectUrl = URL.createObjectURL(res.data);
-                setVoucherPreview({ loading: false, blobUrl: objectUrl, error: '', mime: res.data.type || '' });
-            } catch (err) {
-                if (cancelado) return;
-                setVoucherPreview({ loading: false, blobUrl: '', error: await detalleDeErrorBlob(err), mime: '' });
-            }
-        })();
-        return () => {
-            cancelado = true;
-            if (objectUrl) URL.revokeObjectURL(objectUrl);
-        };
-    }, [voucherSolicitud?.id]);
+    // Vista previa del comprobante: el hook pide el archivo CON el token (endpoint
+    // protegido) y revoca el object URL al cerrar el modal / desmontar.
+    const { preview: voucherPreview } = useDocumentoAutenticado({
+        previewUrl: voucherSolicitud?.id
+            ? `/api/v1/solicitudes/${voucherSolicitud.id}/voucher?inline=1`
+            : '',
+        nombreFallback: `comprobante_${voucherSolicitud?.id || ''}`,
+    });
 
     return (
         <Layout>
