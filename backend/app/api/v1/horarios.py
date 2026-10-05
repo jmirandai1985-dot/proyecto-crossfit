@@ -8,8 +8,11 @@ from datetime import date
 
 from app.db.database import get_db
 from app.models.horario_base import HorarioBase
+from app.models.disciplina import Disciplina
 from sqlalchemy import text
 from app.core.dependencies import get_current_admin, get_current_user, get_current_coach
+from app.services import asignaciones_clases as asignaciones
+from app.services.auditoria_service import registrar_auditoria
 from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
 
 router = APIRouter()
@@ -145,9 +148,18 @@ def actualizar_horario(
     hora_fin: Optional[str] = None,
     cupo_maximo: Optional[int] = None,
     activo: Optional[bool] = None,
+    disciplina_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
+    """Actualiza una plantilla de horario (admin).
+
+    B6 · `disciplina_id`: si se CAMBIA la disciplina de la plantilla, se suelta al
+    coach que la tenía (se cierra la vigencia de `horarios_coach`) y se liberan las
+    clases FUTURAS de ese horario: nadie queda a cargo de una disciplina que no
+    dicta. Las clases YA generadas conservan su disciplina (no se reescriben: puede
+    haber alumnos reservados); la disciplina nueva aplica a lo que se genere después.
+    """
     horario = db.query(HorarioBase).filter(
         HorarioBase.id == horario_id).first()
     if not horario:
@@ -156,7 +168,8 @@ def actualizar_horario(
             detail=f"Horario {horario_id} no encontrado"
         )
     # 🔒 Verificar que el horario pertenezca al tenant del admin
-    if horario.tenant_id != current_user.get("tenant_id"):
+    tenant_id = current_user["tenant_id"]
+    if horario.tenant_id != tenant_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes acceso a este horario",
@@ -171,8 +184,50 @@ def actualizar_horario(
         horario.cupo_maximo = cupo_maximo
     if activo is not None:
         horario.activo = activo
+
+    # ── B6: cambio de disciplina de la plantilla ──
+    cambio_disciplina = (
+        disciplina_id is not None and disciplina_id != horario.disciplina_id)
+    vigencia_cerrada = False
+    clases_liberadas = 0
+    if disciplina_id is not None:
+        nueva = db.query(Disciplina).filter(
+            Disciplina.id == disciplina_id,
+            Disciplina.tenant_id == tenant_id,
+        ).first()
+        if not nueva:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="La disciplina no existe o no pertenece a este box",
+            )
+        horario.disciplina_id = disciplina_id
+
+    if cambio_disciplina:
+        hoy = hoy_santiago()
+        vigencia = asignaciones.coach_vigente(db, tenant_id, horario.id)
+        if vigencia:
+            asignaciones.cerrar_vigencia(vigencia, hoy)
+            vigencia_cerrada = True
+        clases_liberadas = asignaciones.liberar_clases_futuras_de_horario(
+            db, tenant_id, horario.id, hoy)
+
     db.commit()
     db.refresh(horario)
+
+    if cambio_disciplina:
+        registrar_auditoria(
+            db,
+            tenant_id=tenant_id,
+            usuario_id=current_user["usuario_id"],
+            accion="cambiar_disciplina_horario",
+            entidad="horario",
+            entidad_id=horario.id,
+            detalle={
+                "disciplina_id": horario.disciplina_id,
+                "vigencia_cerrada": vigencia_cerrada,
+                "clases_liberadas": clases_liberadas,
+            },
+        )
     return horario
 
 

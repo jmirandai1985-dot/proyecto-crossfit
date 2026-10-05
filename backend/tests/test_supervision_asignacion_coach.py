@@ -450,3 +450,99 @@ def test_asignar_un_coach_de_otra_disciplina_marca_emergencia():
         _borrar_clase(clase_id)
 
 
+# ── B6: liberación al dar de baja al coach / cambiar la disciplina ─────────
+#
+# ⚠️ Estos tests crean un coach TEMPORAL en TEST (nombre `zz_test_coach_b6`) y lo
+# BORRAN en el `finally` (hard delete): no tocan los datos de la demo.
+
+def _crear_coach_temporal(horario):
+    """Coach de prueba (activo) asignado a la disciplina del horario."""
+    fila = _one(
+        "INSERT INTO usuarios (tenant_id, rut, nombre, correo, password_hash, "
+        "rol, activo, estado, acepta_correo_reactivacion, cambiar_password_al_login) "
+        "VALUES (:t, :rut, 'zz_test_coach_b6', :correo, 'x', 'coach', true, "
+        "'activo', true, false) RETURNING id, tenant_id, correo, nombre",
+        t=TENANT_ID, rut="zz-b6-1", correo="zz_test_coach_b6@example.com")
+    _exec("INSERT INTO coach_disciplinas (tenant_id, coach_id, disciplina_id, activo) "
+          "VALUES (:t, :c, :d, true)",
+          t=TENANT_ID, c=fila.id, d=horario.disciplina_id)
+    return fila
+
+
+def _borrar_coach_temporal(coach_id):
+    _exec("DELETE FROM horarios_coach WHERE coach_id = :id", id=coach_id)
+    _exec("DELETE FROM coach_disciplinas WHERE coach_id = :id", id=coach_id)
+    _exec("DELETE FROM notificaciones WHERE alumno_id = :id", id=coach_id)
+    _exec("DELETE FROM usuarios WHERE id = :id", id=coach_id)
+
+
+def test_dar_de_baja_a_un_coach_libera_sus_clases_futuras():
+    admin = _admin_activo()
+    horario = _horario_con_coach()
+    coach = _crear_coach_temporal(horario)
+    clase_id = _crear_clase(HOY + timedelta(days=15), horario)
+    hermana_id = _crear_clase(HOY + timedelta(days=22), horario)
+    pasada = _one("SELECT id FROM clases WHERE tenant_id = :t AND fecha < :hoy "
+                  "ORDER BY id LIMIT 1", t=TENANT_ID, hoy=HOY)
+    try:
+        # Toma el horario (crea vigencia + backfill) y después lo dan de baja.
+        requests.post(f"{BASE}/clases/{clase_id}/tomar",
+                      params={"alcance": "horario"},
+                      headers=_token(coach, "coach"))
+        assert _one("SELECT coach_id FROM clases WHERE id = :id",
+                    id=hermana_id).coach_id == coach.id
+
+        r = requests.put(f"{BASE}/usuarios/{coach.id}",
+                         json={"estado": "baja"},
+                         headers=_token(admin, "administrador"))
+        assert r.status_code == 200, r.text
+
+        futuras = _all("SELECT id FROM clases WHERE tenant_id = :t "
+                       "AND coach_id = :c AND fecha >= :hoy",
+                       t=TENANT_ID, c=coach.id, hoy=HOY)
+        assert futuras == [], "el coach dado de baja seguía con clases futuras"
+        assert _one("SELECT id FROM horarios_coach WHERE coach_id = :c "
+                    "AND vigente_hasta IS NULL", c=coach.id) is None
+        if pasada:
+            # Las clases pasadas NO se tocan (historia del box).
+            assert _one("SELECT id FROM clases WHERE id = :id",
+                        id=pasada.id) is not None
+    finally:
+        _borrar_clase(clase_id)
+        _borrar_clase(hermana_id)
+        _borrar_coach_temporal(coach.id)
+
+def test_cambiar_la_disciplina_del_horario_libera_el_coach():
+    admin = _admin_activo()
+    horario = _horario_con_coach()
+    otra = _one("SELECT id FROM disciplinas WHERE tenant_id = :t AND id <> :d "
+                "ORDER BY id LIMIT 1", t=TENANT_ID, d=horario.disciplina_id)
+    if not otra:
+        pytest.skip("Hace falta otra disciplina en TEST")
+    coach = _crear_coach_temporal(horario)
+    clase_id = _crear_clase(HOY + timedelta(days=16), horario)
+    try:
+        requests.post(f"{BASE}/clases/{clase_id}/tomar",
+                      params={"alcance": "horario"},
+                      headers=_token(coach, "coach"))
+        r = requests.put(f"{BASE}/horarios/{horario.id}",
+                         params={"disciplina_id": otra.id},
+                         headers=_token(admin, "administrador"))
+        assert r.status_code == 200, r.text
+        assert r.json()["disciplina_id"] == otra.id
+
+        assert _one("SELECT coach_id FROM clases WHERE id = :id",
+                    id=clase_id).coach_id is None
+        assert _one("SELECT id FROM horarios_coach WHERE horario_id = :h "
+                    "AND vigente_hasta IS NULL", h=horario.id) is None
+        # La disciplina de la clase YA generada no se reescribe (puede estar reservada).
+        assert _one("SELECT disciplina_id FROM clases WHERE id = :id",
+                    id=clase_id).disciplina_id == horario.disciplina_id
+    finally:
+        _exec("UPDATE horarios SET disciplina_id = :d WHERE id = :h",
+              d=horario.disciplina_id, h=horario.id)
+        _borrar_clase(clase_id)
+        _borrar_coach_temporal(coach.id)
+
+
+

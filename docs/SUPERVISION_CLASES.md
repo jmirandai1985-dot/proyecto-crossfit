@@ -178,3 +178,27 @@ Guardas: 404 si el coach no es del box; 409 si no tiene rol `coach`, no está ac
 clase ya es suya, está cancelada o es pasada. Las dos acciones quedan en `auditoria`
 (`asignar_coach_admin`, `quitar_coach_admin`).
 
+## 8. Liberación automática (B6)
+
+Un coach que ya no puede dictar no queda a cargo de nada:
+
+| Disparador | Endpoint | Qué se libera |
+|---|---|---|
+| Coach dado de baja (soft delete) | `DELETE /usuarios/{id}` | Sus vigencias abiertas + sus clases futuras |
+| Coach pasa a `estado != 'activo'` o deja de tener rol `coach` | `PUT /usuarios/{id}` | Idem, en la MISMA transacción del cambio |
+| Se cambia la **disciplina** de una plantilla | `PUT /horarios/{id}` con `disciplina_id` | La vigencia de ESE horario + las clases futuras de ESE horario |
+
+- `services/asignaciones_clases.hay_que_liberar_coach` decide si toca liberar (función
+  pura, con tests) y `liberar_coach` ejecuta.
+- `cerrar_vigencia` pone `vigente_hasta = hoy - 1 día` sin violar el CHECK
+  (`vigente_hasta >= vigente_desde`): si la vigencia arrancó hoy, cierra hoy mismo.
+- Se limpian `coach_id`, `asignacion_origen`, `asignada_por` y `asignada_en` de las clases
+  con `fecha >= hoy` (hora de Chile) que eran suyas. **Las clases pasadas no se tocan**
+  (historia del box).
+- Al cambiar la disciplina de una plantilla **no** se reescribe la disciplina de las
+  clases ya generadas (puede haber alumnos reservados): la disciplina nueva aplica a lo
+  que se genere de ahora en adelante; esas clases quedan 🔴 sin coach.
+- Todo queda en `auditoria`: `coach_liberado` en el detalle del usuario y
+  `cambiar_disciplina_horario` en el horario.
+
+

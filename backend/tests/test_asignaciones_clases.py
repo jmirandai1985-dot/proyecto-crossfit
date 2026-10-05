@@ -42,14 +42,36 @@ DESDE = HOY
 class _SesionFalsa:
     """Sesión mínima: registra `add` y devuelve stubs de `execute` (sin BD)."""
 
-    def __init__(self, rowcount=3, primera_fila=None):
+    def __init__(self, rowcount=3, primera_fila=None, vigencias=()):
         self.agregadas = []
         self.ejecutados = []          # [(sql, params)]
         self.rowcount = rowcount
         self.primera_fila = primera_fila
+        self.vigencias = list(vigencias)
+        self.consultas = 0
 
     def add(self, obj):
         self.agregadas.append(obj)
+
+    def query(self, modelo):
+        """`db.query(HorarioCoach).filter(...).all()` para B6 (vigencias)."""
+        padre = self
+        self.consultas += 1
+
+        class _Consulta:
+            def filter(self, *args, **kwargs):
+                return self
+
+            def order_by(self, *args, **kwargs):
+                return self
+
+            def all(self):
+                return list(padre.vigencias)
+
+            def first(self):
+                return padre.vigencias[0] if padre.vigencias else None
+
+        return _Consulta()
 
     def execute(self, sql, params=None):
         self.ejecutados.append((str(sql), params))
@@ -283,4 +305,80 @@ def test_mensaje_liberada():
     texto = asig.mensaje_clase_liberada("clase de CrossFit del 2026-04-14 19:00",
                                         "Ana Admin")
     assert texto.startswith("🔴 Ana Admin te quitó la clase de CrossFit")
+
+
+# ── B6: cuándo y cómo se libera a un coach ─────────────────────────────────
+
+def test_hay_que_liberar_coach_cuando_queda_inactivo():
+    assert asig.hay_que_liberar_coach(True, True, "activo", "baja") is True
+    assert asig.hay_que_liberar_coach(True, True, "activo", "rechazado") is True
+    # Estados sucios (mayúsculas/espacios) no confunden la decisión.
+    assert asig.hay_que_liberar_coach(True, True, " ACTIVO ", "Baja") is True
+
+
+def test_no_se_libera_si_sigue_activo_y_coach():
+    assert asig.hay_que_liberar_coach(True, True, "activo", "activo") is False
+    assert asig.hay_que_liberar_coach(True, True, "baja", "baja") is False
+
+
+def test_se_libera_al_dejar_de_ser_coach():
+    assert asig.hay_que_liberar_coach(True, False, "activo", "activo") is True
+
+
+def test_un_no_coach_nunca_libera_nada():
+    assert asig.hay_que_liberar_coach(False, True, "baja", "activo") is False
+    assert asig.hay_que_liberar_coach(False, False, "activo", "baja") is False
+
+
+def test_liberar_coach_cierra_vigencias_y_suelta_clases_futuras():
+    vigencia_a = SimpleNamespace(vigente_desde=DESDE - timedelta(days=5),
+                                 vigente_hasta=None, horario_id=5)
+    vigencia_b = SimpleNamespace(vigente_desde=DESDE,
+                                 vigente_hasta=None, horario_id=6)
+    db = _SesionFalsa(rowcount=7, vigencias=[vigencia_a, vigencia_b])
+
+    resumen = asig.liberar_coach(db, tenant_id=1, coach_id=9, desde=DESDE)
+
+    assert resumen["vigencias_cerradas"] == 2
+    assert resumen["clases_liberadas"] == 7
+    assert resumen["horarios"] == [5, 6]
+    assert vigencia_a.vigente_hasta == DESDE - timedelta(days=1)
+    assert vigencia_b.vigente_hasta == DESDE          # empezó hoy: cierra hoy
+    sql, params = db.ejecutados[-1]
+    assert "coach_id = :cid" in sql and "fecha >= :desde" in sql
+    assert "asignacion_origen = NULL" in sql
+    assert params["cid"] == 9 and params["tid"] == 1 and params["desde"] == DESDE
+
+
+def test_liberar_coach_sin_vigencias_solo_suelta_clases():
+    db = _SesionFalsa(rowcount=2, vigencias=[])
+    resumen = asig.liberar_coach(db, tenant_id=1, coach_id=9, desde=DESDE)
+    assert resumen["vigencias_cerradas"] == 0
+    assert resumen["clases_liberadas"] == 2
+    assert resumen["horarios"] == []
+
+
+# ── B6: los endpoints que disparan la liberación (guard de fuente) ─────────
+
+def _fuente(relativa: str) -> str:
+    raiz = Path(__file__).resolve().parents[1]      # .../backend
+    return (raiz / relativa).read_text(encoding="utf-8")
+
+
+def test_usuarios_libera_al_coach_en_baja_o_cambio_de_rol():
+    fuente = _fuente("app/api/v1/usuarios.py")
+    assert "hay_que_liberar_coach(" in fuente
+    assert fuente.count("liberar_coach(db, tenant_id, usuario.id, hoy_santiago())") == 2
+    assert "estado_anterior = usuario.estado" in fuente
+    assert '"coach_liberado": liberado' in fuente
+
+
+def test_horarios_libera_al_cambiar_la_disciplina():
+    fuente = _fuente("app/api/v1/horarios.py")
+    assert "disciplina_id: Optional[int] = None," in fuente
+    assert "cambio_disciplina" in fuente
+    assert "liberar_clases_futuras_de_horario(" in fuente
+    assert "cerrar_vigencia(" in fuente
+    assert "cambiar_disciplina_horario" in fuente
+
 

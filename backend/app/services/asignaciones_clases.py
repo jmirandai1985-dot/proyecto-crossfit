@@ -67,6 +67,26 @@ def porcentaje_cobertura(con_coach: int, total: int) -> float:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# B6: cuándo hay que liberar a un coach
+# ─────────────────────────────────────────────────────────────────────────────
+
+def hay_que_liberar_coach(era_coach: bool, es_coach: bool,
+                          estado_antes: Optional[str],
+                          estado_despues: Optional[str]) -> bool:
+    """True si al actualizar un usuario hay que soltarle horarios y clases futuras.
+
+    Dos casos (B6): dejó de ser coach (cambio de rol) o pasó de activo a cualquier
+    otro estado. Un usuario que NO era coach nunca libera nada (no tiene clases).
+    """
+    if not era_coach:
+        return False
+    if not es_coach:
+        return True
+    return (estado_antes or "").strip().lower() == "activo" and \
+        (estado_despues or "").strip().lower() != "activo"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # B3: avisos al coach (tabla `notificaciones`, la de la campana; sin correo)
 #   Los `tipo` tienen que entrar en `notificaciones.tipo` (VARCHAR(20)).
 # ─────────────────────────────────────────────────────────────────────────────

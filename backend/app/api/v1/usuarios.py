@@ -20,8 +20,13 @@ from app.models.suscripcion import Suscripcion
 from app.schemas.usuario import UsuarioCreate, UsuarioUpdate, UsuarioResponse, UsuarioListItem
 from app.core.dependencies import get_current_user, get_current_admin
 from app.core.rate_limit import limiter, LIMIT_CRITICO
+from app.services.asignaciones_clases import (
+    hay_que_liberar_coach,
+    liberar_coach,
+)
 from app.services.auditoria_service import registrar_auditoria
 from app.services.email_service import send_solicitud_prueba_clase
+from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
 
 router = APIRouter()
 
@@ -330,6 +335,8 @@ def actualizar_usuario(
         )
 
     rol_anterior = usuario.rol.value if hasattr(usuario.rol, "value") else str(usuario.rol)
+    # B6: el estado ANTES del cambio (para saber si hay que liberar al coach).
+    estado_anterior = usuario.estado
 
     update_data = usuario_data.model_dump(exclude_unset=True)
 
@@ -363,6 +370,19 @@ def actualizar_usuario(
     for field, value in update_data.items():
         setattr(usuario, field, value)
 
+    # ── B6: si el coach queda inactivo o deja de ser coach se le sueltan sus
+    #    horarios (se cierra la vigencia) y sus clases FUTURAS: nadie queda a cargo
+    #    de una clase que ya no dicta. Misma transacción que el cambio de usuario.
+    rol_nuevo_tmp = usuario.rol.value if hasattr(usuario.rol, "value") else str(usuario.rol)
+    liberado = None
+    if hay_que_liberar_coach(
+        era_coach=(rol_anterior == "coach"),
+        es_coach=(rol_nuevo_tmp == "coach"),
+        estado_antes=estado_anterior,
+        estado_despues=usuario.estado,
+    ):
+        liberado = liberar_coach(db, tenant_id, usuario.id, hoy_santiago())
+
     db.commit()
     db.refresh(usuario)
 
@@ -380,6 +400,8 @@ def actualizar_usuario(
             "rol_anterior": rol_anterior,
             "rol_nuevo": rol_nuevo,
             "hubo_cambio_rol": rol_anterior != rol_nuevo,
+            # B6: qué se le soltó al coach (None = no era coach / sigue activo).
+            "coach_liberado": liberado,
         },
     )
 
@@ -408,8 +430,16 @@ def eliminar_usuario(
 
     # Soft delete: se sincronizan AMBOS campos. `estado` es la fuente de verdad y el
     # CHECK de la migración 034 exige activo == (estado == 'activo').
+    rol_liberado = usuario.rol.value if hasattr(usuario.rol, "value") else str(usuario.rol)
     usuario.estado = "baja"
     usuario.activo = False
+
+    # ── B6: dar de baja a un coach lo saca de sus horarios (vigencia) y de sus
+    #    clases FUTURAS. Las clases pasadas se conservan como historia.
+    liberado = None
+    if rol_liberado == "coach":
+        liberado = liberar_coach(db, tenant_id, usuario.id, hoy_santiago())
+
     db.commit()
 
     # ── Auditoría interna: baja (soft delete) de usuario ──
@@ -420,7 +450,7 @@ def eliminar_usuario(
         accion="DELETE",
         entidad="usuario",
         entidad_id=usuario.id,
-        detalle={"rol": str(usuario.rol)},
+        detalle={"rol": str(usuario.rol), "coach_liberado": liberado},
     )
 
     return None
