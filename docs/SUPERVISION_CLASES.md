@@ -7,9 +7,10 @@ para dejar por escrito dos cosas que ya causaron bugs y confusión:
 1. hay **dos tablas "de horarios"** en la base y sólo una está viva;
 2. la convención de `dia_semana` **no** es la de PostgreSQL.
 
-> Estado de este documento: B0 de la Tanda 1 (backend). Los bloques siguientes agregan
-> secciones al implementarse (B1: grilla por rango; B2: `clases.asignacion_origen` +
-> `horarios_coach`; B3: asignación de emergencia del admin; B6: liberación).
+> Estado de este documento: Tanda 1 en curso. Escrito en **B0**; actualizado en **B1**
+> (grilla por rango + DOW) y **B2** (asignación de coach: `clases.asignacion_origen` +
+> `horarios_coach` + tomar/soltar). Faltan B3 (asignación de emergencia del admin con
+> aviso al coach) y B6 (liberación al dar de baja un coach / cambiar la disciplina).
 
 ---
 
@@ -87,3 +88,69 @@ leen `horarios` (plantilla recurrente) y `clases` (instancias generadas).
   `cobertura_emergencia` con un `EXISTS` sobre la tabla `cobertura_emergencia` por
   `clase_id`; cada fila la registra `core/dependencies.verificar_coach_disciplina`
   cuando un coach opera una disciplina que no tiene asignada.
+- **`asignacion_origen`** (B2, §6) dice además *cómo* llegó ese coach: `'coach'` (✅ la
+  tomó el coach) o `'admin'` (🟦 la asignó el admin).
+
+## 5. Endpoints del módulo (mapa)
+
+**Supervisión** (admin, `/api/v1/supervision`):
+
+| Endpoint | Para qué |
+|---|---|
+| `GET /grilla?desde=&hasta=&disciplina_id=` | **B1** · grilla por rango (lunes-sábado): `dias`, `plantillas` (tabla `horarios`), `celdas` (clases reales) y `resumen` de cobertura. Máx. 62 días; `desde > hasta` → 400 |
+| `GET /grid-semanal?fecha=` | semana fija (lunes-domingo) de la semana de `fecha`; ya devuelve `dia_semana` 0=Lunes (era el bug de DOW) |
+| `GET /horarios-base?disciplina_id=` | plantillas de una disciplina + coach de la última clase generada |
+| `GET /coaches-todos?disciplina_id=` | coaches activos del box marcando si pertenecen a la disciplina |
+| `GET /cupos-disciplinas`, `PATCH /cupo-disciplina` | cupos por disciplina (afecta clases futuras) |
+| `GET /proxima-clase-reservas?horario_base_id=` | próxima clase de un horario + reservas (self-service) |
+
+La grilla **oculta** disciplinas inactivas, sin horarios activos y las que **no**
+requieren coach (`requiere_coach=false`, p. ej. Open Box/Musculación self-service).
+
+## 6. Asignación de coach (B2) — tomar / soltar
+
+### Las cuatro marcas (B5 las pinta)
+
+| Marca | `marca` | De dónde sale |
+|---|---|---|
+| ✅ tomada por el coach | `coach` | `clases.coach_id` + `asignacion_origen='coach'` |
+| 🟦 asignada por el admin | `admin` | `clases.coach_id` + `asignacion_origen='admin'` |
+| ⚠️ cobertura de emergencia | `emergencia` | existe fila en `cobertura_emergencia` para la clase (gana siempre) |
+| 🔴 sin coach | `sin_coach` | `clases.coach_id IS NULL` |
+
+Regla única y compartida: `services/asignaciones_clases.marca_cobertura` (el backend la
+manda lista en `GET /clases` y en la grilla; el frontend no la recalcula).
+
+### Columnas nuevas en `clases` (migración **042**)
+
+`asignacion_origen` (`'coach'` | `'admin'` | NULL), `asignada_por` (FK usuarios,
+SET NULL) y `asignada_en` (TIMESTAMPTZ). La clase sigue **sin** `tenant_id`-less:
+nada cambia en el aislamiento por box.
+
+### `horarios_coach` (migración **043**)
+
+Una fila por asignación de horario recurrente, con **vigencia** (`vigente_desde` /
+`vigente_hasta`; NULL = sigue vigente) y el índice **único parcial**
+`uq_horarios_coach_vigente` sobre (`horario_id`) `WHERE vigente_hasta IS NULL`:
+la BD garantiza **un solo coach vigente por horario**.
+
+### Flujos
+
+| Acción | Endpoint | Qué hace |
+|---|---|---|
+| Tomar una clase puntual | `POST /clases/{id}/tomar?alcance=clase` | `coach_id` + marca ✅ de ESA clase |
+| Tomar el horario recurrente | `POST /clases/{id}/tomar?alcance=horario` | lo anterior **+** vigencia en `horarios_coach` **+** backfill de las clases futuras del horario |
+| Soltar la clase | `POST /clases/{id}/soltar?alcance=clase` | limpia `coach_id` y la marca |
+| Soltar el horario | `POST /clases/{id}/soltar?alcance=horario` | cierra la vigencia y libera las clases futuras del horario |
+| Clases **nuevas** | `services/generar_clases.py` | cada clase generada hereda al coach **vigente** de su horario (1 query por día) |
+
+Guardas (todas devuelven **409** con el nombre de quien la tiene):
+
+- tomar/soltar una clase de **otro** coach → 409 (soltar ajeno para un coach → 403);
+- tomar un **horario** donde alguna clase futura es de otro coach → 409 con nombre y fecha;
+- vigencia **vigente** de otro coach en ese horario → 409;
+- clase **pasada** (`fecha < hoy` en Chile) → 409;
+- `alcance` que no sea `clase`/`horario` → 400.
+
+El admin puede usar los mismos endpoints (queda registrado como 🟦 `admin`); para
+la asignación de emergencia tiene su propio camino (B3).

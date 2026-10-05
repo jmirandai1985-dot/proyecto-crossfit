@@ -3,7 +3,7 @@ Servicio compartido para generación de clases desde horarios_base
 Usado por: endpoint HTTP, scheduler diario, y respaldo automático
 """
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger("uvicorn.generar_clases")
@@ -33,11 +33,21 @@ def generar_clases_para_fecha(
 
     Returns:
         dict con: creadas, omitidas, total_horarios, message
+
+    B2: cada clase nueva hereda al coach VIGENTE de su horario (tabla
+    `horarios_coach`): así, tomar un horario recurrente alcanza también a las
+    clases que se generen después (ver services/asignaciones_clases.py).
     """
     from app.models.horario_base import HorarioBase
     from app.models.clase import Clase
+    # B2 (migración 043): import local para no crear un ciclo de imports con el
+    # servicio de asignaciones, que es quien lee `horarios_coach`.
+    from app.services.asignaciones_clases import (
+        ORIGEN_COACH,
+        vigencias_por_horario,
+    )
 
-    dia_semana = fecha.weekday()  # 0=Lun ... 6=Dom
+    dia_semana = fecha.weekday()  # 0=Lun ... 6=Dom  (B2: ver coach vigente más abajo)
     if dia_semana == 6:
         return {"message": "Domingo: no hay horarios base programados", "creadas": 0, "omitidas": 0, "total_horarios": 0}
 
@@ -49,6 +59,10 @@ def generar_clases_para_fecha(
 
     if not horarios:
         return {"message": f"No hay horarios base activos para el día {dia_semana}", "creadas": 0, "omitidas": 0, "total_horarios": 0}
+
+    # Coach VIGENTE por horario para esta fecha: 1 sola query para todo el día.
+    vigencias = vigencias_por_horario(
+        db, tenant_id, [h.id for h in horarios], fecha)
 
     creadas = 0
     omitidas = 0
@@ -62,6 +76,7 @@ def generar_clases_para_fecha(
             omitidas += 1
             continue
 
+        vigencia = vigencias.get(h.id)
         clase = Clase(
             tenant_id=tenant_id,
             horario_base_id=h.id,
@@ -73,6 +88,11 @@ def generar_clases_para_fecha(
             cupo_original=h.cupo_maximo,
             asistentes_confirmados=0,
             cancelada=False,
+            # B2: hereda el coach del horario recurrente (marca ✅ 'coach').
+            coach_id=vigencia.coach_id if vigencia else None,
+            asignacion_origen=ORIGEN_COACH if vigencia else None,
+            asignada_por=vigencia.coach_id if vigencia else None,
+            asignada_en=datetime.now(timezone.utc) if vigencia else None,
         )
         db.add(clase)
         creadas += 1

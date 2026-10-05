@@ -65,6 +65,21 @@ class ClaseListItem(BaseModel):
     cancelada: bool
     coach_nombre: Optional[str] = None
     disciplina_nombre: Optional[str] = None
+    # ⚠️ Cobertura de emergencia: la query ya la calculaba, pero al no estar
+    # declarada el response_model la BORRABA de la respuesta (el indicador del
+    # panel nunca aparecía). Declarada acá, viaja de verdad.
+    cobertura_emergencia: bool = False
+    # ── Asignación de coach (Supervisión, migración 042/043) ──
+    # 'coach' = la tomó el coach desde su panel (✅) · 'admin' = la asignó el admin
+    # en emergencia (🟦) · None = sin marca.
+    asignacion_origen: Optional[str] = None
+    asignada_por: Optional[int] = None
+    asignada_en: Optional[datetime] = None
+    # Coach VIGENTE del horario recurrente de la clase (si lo hay).
+    horario_coach_id: Optional[int] = None
+    horario_coach_nombre: Optional[str] = None
+    # Marca lista para pintar: sin_coach | coach | admin | emergencia
+    marca: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

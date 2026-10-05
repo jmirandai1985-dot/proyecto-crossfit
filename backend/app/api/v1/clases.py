@@ -8,6 +8,12 @@ from datetime import datetime, date, time, timedelta
 from app.db.database import get_db
 from app.models.clase import Clase
 from app.models.coach_disciplina import CoachDisciplina
+from app.services import asignaciones_clases as asignaciones
+from app.services.asignaciones_clases import (
+    ORIGEN_ADMIN,
+    ORIGEN_COACH,
+    marca_cobertura,
+)
 from app.services.auditoria_service import registrar_auditoria
 from app.schemas import clase as schemas
 from app.core.dependencies import (
@@ -158,6 +164,11 @@ def listar_clases(
                c.horario_base_id, c.tenant_id, c.created_at, c.updated_at,
                d.nombre AS disciplina_nombre,
                u.nombre AS coach_nombre,
+               -- B2: quién y cómo se asignó el coach (✅ coach / 🟦 admin)
+               c.asignacion_origen, c.asignada_por, c.asignada_en,
+               -- B2: coach VIGENTE del horario recurrente (si lo hay)
+               hco.coach_id AS horario_coach_id,
+               uco.nombre AS horario_coach_nombre,
                CASE WHEN EXISTS (
                    SELECT 1 FROM cobertura_emergencia ce
                    WHERE ce.clase_id = c.id AND ce.tenant_id = c.tenant_id
@@ -166,6 +177,13 @@ def listar_clases(
         LEFT JOIN disciplinas d ON c.disciplina_id = d.id
         LEFT JOIN usuarios u ON c.coach_id = u.id
         LEFT JOIN wods w ON c.wod_id = w.id
+        -- Vigencia del horario que cubre ESTA fecha (migración 043)
+        LEFT JOIN horarios_coach hco
+               ON hco.horario_id = c.horario_base_id
+              AND hco.tenant_id = c.tenant_id
+              AND hco.vigente_desde <= c.fecha
+              AND (hco.vigente_hasta IS NULL OR hco.vigente_hasta >= c.fecha)
+        LEFT JOIN usuarios uco ON uco.id = hco.coach_id
         {where_clause}
         ORDER BY c.fecha DESC, c.hora_inicio ASC
         LIMIT :limit OFFSET :skip
@@ -223,6 +241,15 @@ def listar_clases(
             "disciplina_nombre": row.disciplina_nombre,
             "coach_nombre": coach_nombre,
             "cobertura_emergencia": bool(row.cobertura_emergencia),
+            # B2: cómo se asignó el coach (marca ✅/🟦 de Supervisión) + si el
+            # horario recurrente tiene coach vigente (migración 043).
+            "asignacion_origen": row.asignacion_origen,
+            "asignada_por": row.asignada_por,
+            "asignada_en": row.asignada_en,
+            "horario_coach_id": row.horario_coach_id,
+            "horario_coach_nombre": row.horario_coach_nombre,
+            "marca": marca_cobertura(row.coach_id, row.asignacion_origen,
+                                     bool(row.cobertura_emergencia)),
         })
     return result
 
@@ -476,4 +503,226 @@ def ampliar_cupo_clase(
         "cupo_original": original,
         "tope": tope,
         "extra_disponible": tope - clase.cupo_maximo,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOMAR / SOLTAR (panel del coach) — B2
+#   El coach vive en `clases.coach_id`; `alcance='horario'` además se acuerda del
+#   recurrente (`horarios_coach`, migración 043) para las clases que se generen.
+#   Regla: NUNCA se pisa a otro coach (409 con el nombre de quien la tiene).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _alcance_valido(alcance: str) -> str:
+    if alcance not in ("clase", "horario"):
+        raise HTTPException(
+            status_code=400,
+            detail="'alcance' debe ser 'clase' (solo esta clase) o 'horario' "
+                   "(todos los de ese día y hora)",
+        )
+    return alcance
+
+
+def _nombre_usuario(db: Session, usuario_id) -> str:
+    """Nombre del usuario para los mensajes de choque ("ya la tiene <nombre>")."""
+    if not usuario_id:
+        return "otro coach"
+    nombre = db.execute(
+        text("SELECT nombre FROM usuarios WHERE id = :id"), {"id": usuario_id}
+    ).scalar()
+    return nombre or f"Coach #{usuario_id}"
+
+
+@router.post("/{clase_id}/tomar")
+def tomar_clase(
+    clase_id: int,
+    alcance: str = Query(
+        "clase",
+        description="'clase' = sólo esta clase · 'horario' = todos los [día] [hora]"),
+    modo_emergencia: bool = Query(
+        False,
+        description="Permite tomar una clase de otra disciplina (con auditoría)"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
+):
+    """El coach TOMA una clase (✅) o su horario recurrente desde su panel.
+
+    `alcance='horario'` aplica a las clases futuras de ese horario y a las que se
+    generen después (vigencia en `horarios_coach`). Si otro coach la tiene → 409 con
+    su nombre. Admin también puede usarlo (queda como 🟦 'admin').
+    """
+    tenant_id = current_user["tenant_id"]
+    coach_id = current_user["usuario_id"]
+    rol = current_user.get("rol", "")
+    es_admin = rol in ("admin", "administrador")
+    origen = ORIGEN_ADMIN if es_admin else ORIGEN_COACH
+    alcance = _alcance_valido(alcance)
+
+    clase = db.query(Clase).filter(
+        Clase.id == clase_id, Clase.tenant_id == tenant_id).first()
+    if not clase:
+        raise HTTPException(status_code=404, detail="Clase no encontrada")
+    if clase.cancelada:
+        raise HTTPException(status_code=409, detail="Esa clase está cancelada")
+    hoy = hoy_santiago()
+    if clase.fecha < hoy:
+        raise HTTPException(
+            status_code=409, detail="No puedes tomar una clase que ya pasó")
+    if clase.coach_id is not None and clase.coach_id != coach_id:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Esa clase ya la tiene {_nombre_usuario(db, clase.coach_id)}",
+        )
+
+    hid = clase.horario_base_id
+    vigencia = None
+    if alcance == "horario" and hid:
+        # 1) ¿alguna clase futura del horario es de OTRO coach?
+        choque = asignaciones.conflicto_futuro_en_horario(
+            db, tenant_id, hid, hoy, coach_id)
+        if choque:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Ese horario ya lo tiene {choque['coach_nombre']} "
+                       f"(clase del {choque['fecha']}). El admin puede reasignarlo.",
+            )
+        # 2) ¿hay una vigencia vigente de otro coach?
+        actual = asignaciones.coach_vigente(db, tenant_id, hid)
+        if actual and actual.coach_id != coach_id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Ese horario ya lo tiene "
+                       f"{_nombre_usuario(db, actual.coach_id)}",
+            )
+        vigencia = actual
+
+    # ── Relación coach<->disciplina (con cobertura de emergencia si se pidió) ──
+    if clase.disciplina_id and not es_admin:
+        verificar_coach_disciplina(
+            coach_id, clase.disciplina_id, db,
+            modo_emergencia=modo_emergencia, clase_id=clase_id,
+            accion="tomar_clase", tenant_id=tenant_id)
+
+    # ── Marcar (y acordarse del recurrente) ──
+    asignaciones.marcar_clase(clase, coach_id, origen, quien_id=coach_id)
+    horario_registrado = False
+    if alcance == "horario" and hid:
+        if vigencia is None:
+            asignaciones.abrir_vigencia(
+                db, tenant_id, hid, coach_id, hoy, creado_por=coach_id)
+            horario_registrado = True
+        db.flush()   # la vigencia tiene que existir antes del backfill
+        clases_tocadas = asignaciones.backfill_horario(
+            db, tenant_id, hid, coach_id, quien_id=coach_id, desde=hoy,
+            origen=origen)
+    else:
+        clases_tocadas = 1
+
+    db.commit()
+    db.refresh(clase)
+
+    registrar_auditoria(
+        db, tenant_id=tenant_id, usuario_id=coach_id,
+        accion="tomar_clase", entidad="clase", entidad_id=clase_id,
+        detalle={
+            "alcance": alcance,
+            "horario_base_id": hid,
+            "origen": origen,
+            "clases_tocadas": clases_tocadas,
+            "vigencia_creada": horario_registrado,
+            "rol": rol or "desconocido",
+        },
+    )
+    return {
+        "ok": True,
+        "clase_id": clase.id,
+        "alcance": alcance,
+        "coach_id": coach_id,
+        "coach_nombre": current_user.get("nombre"),
+        "origen": origen,
+        "marca": marca_cobertura(clase.coach_id, origen),
+        "horario_base_id": hid,
+        "horario_coach_vigente": horario_registrado or bool(vigencia),
+        "clases_tocadas": clases_tocadas,
+    }
+
+
+@router.post("/{clase_id}/soltar")
+def soltar_clase(
+    clase_id: int,
+    alcance: str = Query(
+        "clase",
+        description="'clase' = sólo esta clase · 'horario' = todos los [día] [hora]"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
+):
+    """El coach SUELTA una clase (o su horario recurrente) desde su panel.
+
+    `alcance='horario'` cierra la vigencia (`horarios_coach`) y libera las clases
+    futuras de ese horario. Un coach sólo puede soltar lo suyo; el admin, cualquiera
+    (es el mismo camino que usa Supervisión para quitar una asignación).
+    """
+    tenant_id = current_user["tenant_id"]
+    coach_id = current_user["usuario_id"]
+    rol = current_user.get("rol", "")
+    es_admin = rol in ("admin", "administrador")
+    alcance = _alcance_valido(alcance)
+
+    clase = db.query(Clase).filter(
+        Clase.id == clase_id, Clase.tenant_id == tenant_id).first()
+    if not clase:
+        raise HTTPException(status_code=404, detail="Clase no encontrada")
+
+    hoy = hoy_santiago()
+    if clase.fecha < hoy:
+        raise HTTPException(
+            status_code=409, detail="No puedes soltar una clase que ya pasó")
+    if clase.coach_id is None:
+        raise HTTPException(
+            status_code=409, detail="Esa clase no tiene coach asignado")
+    if not es_admin and clase.coach_id != coach_id:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Solo puedes soltar tus propias clases: esa la tiene "
+                   f"{_nombre_usuario(db, clase.coach_id)}",
+        )
+
+    coach_que_la_tenia = clase.coach_id
+    hid = clase.horario_base_id
+    asignaciones.liberar_clase(clase)
+
+    horario_cerrado = False
+    clases_liberadas = 1
+    if alcance == "horario" and hid:
+        vigencia = asignaciones.coach_vigente(db, tenant_id, hid)
+        if vigencia and vigencia.coach_id == coach_que_la_tenia:
+            asignaciones.cerrar_vigencia(vigencia, hoy)
+            horario_cerrado = True
+        clases_liberadas = asignaciones.liberar_clases_futuras_de_horario(
+            db, tenant_id, hid, hoy, coach_id=coach_que_la_tenia)
+
+    db.commit()
+    db.refresh(clase)
+
+    registrar_auditoria(
+        db, tenant_id=tenant_id, usuario_id=coach_id,
+        accion="soltar_clase", entidad="clase", entidad_id=clase_id,
+        detalle={
+            "alcance": alcance,
+            "horario_base_id": hid,
+            "coach_liberado_id": coach_que_la_tenia,
+            "clases_liberadas": clases_liberadas,
+            "horario_cerrado": horario_cerrado,
+            "rol": rol or "desconocido",
+        },
+    )
+    return {
+        "ok": True,
+        "clase_id": clase.id,
+        "alcance": alcance,
+        "coach_liberado_id": coach_que_la_tenia,
+        "horario_base_id": hid,
+        "horario_cerrado": horario_cerrado,
+        "clases_liberadas": clases_liberadas,
+        "marca": marca_cobertura(clase.coach_id),
     }

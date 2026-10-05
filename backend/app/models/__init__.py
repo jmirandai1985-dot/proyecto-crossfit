@@ -18,6 +18,7 @@ from app.models.coach_disciplina import CoachDisciplina
 from app.models.disciplina import Disciplina
 from app.models.historial_rm import HistorialRM
 from app.models.horario_base import HorarioBase
+from app.models.horario_coach import HorarioCoach
 from app.models.pedido import Pedido
 from app.models.producto import Producto
 from app.models.reserva import Reserva
@@ -34,7 +35,7 @@ __all__ = ["Tenant", "Usuario", "RolUsuario",
            "Movimiento", "Plan", "Suscripcion", "CoberturaEmergencia",
            "TransaccionFinanciera", "ConfiguracionNegocio",
            "Clase", "CoachDisciplina", "Disciplina", "HistorialRM",
-           "HorarioBase", "Pedido", "Producto", "Reserva",
+           "HorarioBase", "HorarioCoach", "Pedido", "Producto", "Reserva",
            "RetencionAlumno", "SolicitudPlan", "Asistencia", "HitoAlumno",
            "Auditoria", "PasswordResetToken", "Beneficio", "EstadoBeneficio",
            "TipoBeneficio"]
