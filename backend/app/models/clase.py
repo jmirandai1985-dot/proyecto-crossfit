@@ -1,7 +1,8 @@
 """
 Modelo SQLAlchemy para la tabla clases
 """
-from sqlalchemy import Column, Integer, Boolean, ForeignKey, Index, Date, Time
+from sqlalchemy import (Column, Integer, Boolean, ForeignKey, Index, Date, Time,
+                        String, CheckConstraint)
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -23,6 +24,28 @@ class Clase(Base):
         "horarios.id", ondelete="CASCADE"), nullable=False)
     coach_id = Column(Integer, ForeignKey(
         "usuarios.id", ondelete="SET NULL"), nullable=True)
+    # -- Asignacion del coach (migracion 042) --------------------------------
+    # QUIEN puso al coach en esta clase, con que origen y cuando; lo pinta la
+    # grilla de Supervision (ver services/asignaciones_clases.py):
+    #   'coach' = la tomo el propio coach | 'admin' = la asigno el admin
+    #   NULL    = nadie la asigno (clase generada sin coach, o liberada)
+    # ⚠ DECLARARLAS NO ES OPCIONAL: `services/generar_clases.py` las pasa al
+    # CONSTRUCTOR (`Clase(asignacion_origen=..., asignada_por=..., asignada_en=
+    # ...)`) y el constructor de SQLAlchemy rechaza los kwargs que no son
+    # columnas mapeadas ->
+    #   TypeError: 'asignacion_origen' is an invalid keyword argument for Clase
+    # Ese fue el bug de PROD (2026-10-05, desplegado en 2dddbfa): la migracion
+    # 042 creo las columnas en `clases`, pero el modelo no las declaraba, asi
+    # que la generacion de clases fallaba SIEMPRE (arranque, scheduler 00:05 y
+    # respaldo de GET /clases) y el rango HOY+28 quedaba vacio. Escribirlas por
+    # ATRIBUTO (`clase.asignacion_origen = ...`, que es lo que hace
+    # `marcar_clase`) SI funciona sin declararlas -- queda en el `__dict__` de
+    # la instancia -- y por eso los tests aislados de B2 no lo cazaron: miraban
+    # solo ese camino, y el que escribe en la BD es SQL crudo.
+    asignacion_origen = Column(String(20), nullable=True)
+    asignada_por = Column(Integer, ForeignKey(
+        "usuarios.id", ondelete="SET NULL"), nullable=True)
+    asignada_en = Column(TIMESTAMP(timezone=True), nullable=True)
     disciplina_id = Column(Integer, ForeignKey(
         "disciplinas.id", ondelete="CASCADE"), nullable=False)
     fecha = Column(Date, nullable=False)
@@ -49,6 +72,15 @@ class Clase(Base):
         Index('ix_clases_fecha', 'fecha'),
         Index('ix_clases_coach_id', 'coach_id'),
         Index('ix_clases_wod_id', 'wod_id'),
+        # Migracion 042: la grilla de Supervision pregunta "clases de este box
+        # sin coach" muy seguido. Mismos nombres que la migracion para que el
+        # esquema de la BD y el modelo no diverjan.
+        Index('ix_clases_asignacion_origen', 'tenant_id', 'asignacion_origen'),
+        # Unicos origenes posibles (NULL = sin asignacion registrada).
+        CheckConstraint(
+            "asignacion_origen IS NULL OR "
+            "asignacion_origen IN ('coach', 'admin')",
+            name='ck_clases_asignacion_origen'),
     )
 
     def __repr__(self):
