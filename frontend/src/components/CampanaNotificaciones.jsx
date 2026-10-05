@@ -8,8 +8,11 @@ import { useAuth } from '../context/AuthContext';
 //  N-2 — Campana de notificaciones del ALUMNO (Layout del panel alumno)
 //
 //  Contrato de la UI:
-//    * contador de NO leídas: UNA consulta al montar (sin polling);
-//    * el panel se REFRESCA AL ABRIRLO (no hay timer de fondo);
+//    * contador de NO leídas: consulta al montar + refresco cada 45 s y al
+//      volver el foco a la ventana. Sin eso, el admin aprobaba un voucher o
+//      entraba un pedido y el badge seguía en 0 hasta recargar la página;
+//    * el panel se REFRESCA AL ABRIRLO y el refresco de fondo se PAUSA mientras
+//      está abierto (no se pisa la lista que el usuario está leyendo);
 //    * marcar una leída (PUT /{id}/leer) y marcar todas (PUT /leer-todas);
 //    * estados de CARGA y de ERROR visibles, con Reintentar (sin catch mudo).
 //
@@ -30,6 +33,14 @@ const ETIQUETAS_TIPO = {
     aprobado: 'Plan aprobado',
     rechazado: 'Plan rechazado',
     plan_activo: 'Plan activo',
+    // Solicitud de plan con voucher: la pide el alumno y la revisa el ADMIN
+    // (solicitudes_planes.py -> notificar_admins_del_tenant).
+    plan_solicitado: 'Solicitud de plan (voucher)',
+    // Alta de alumno por autoservicio (alumnos.py -> admins del box).
+    alumno_nuevo: 'Alumno nuevo',
+    // Cobertura de emergencia: un coach cubrió una clase que no era suya
+    // (core/dependencies.py -> admins del box).
+    emergencia: 'Cobertura de emergencia',
     // Bazar: aviso de campana al admin del box y al alumno dueño (pedidos.py).
     pedido_nuevo: 'Pedido nuevo (Bazar)',
     pedido_validado: 'Pedido validado',
@@ -48,6 +59,15 @@ const DESTINOS_TIPO = {
     pedido_nuevo: '/admin/pedidos',
     pedido_validado: '/alumno/mis-pedidos',
     pedido_entregado: '/alumno/mis-pedidos',
+    // Planes: la solicitud pendiente se revisa en el Dashboard del admin; el
+    // alumno ve el estado de su trámite en su pantalla de solicitar plan.
+    plan_solicitado: '/admin/dashboard',
+    aprobado: '/alumno/solicitar-plan',
+    rechazado: '/alumno/solicitar-plan',
+    // Alta de alumno: la lista de alumnos del box.
+    alumno_nuevo: '/admin/alumnos-pendientes',
+    // Cobertura de emergencia: la grilla de Supervisión (marca "emergencia").
+    emergencia: '/admin/supervision-clases',
     // Los avisos de clase van SIEMPRE a un coach: su grilla de clases.
     clase_asignada: '/coach/gestion-clases',
     clase_reasignada: '/coach/gestion-clases',
@@ -62,6 +82,11 @@ const ROLES_POR_TIPO = {
     pedido_nuevo: ['administrador', 'admin'],
     pedido_validado: ['alumno'],
     pedido_entregado: ['alumno'],
+    plan_solicitado: ['administrador', 'admin'],
+    aprobado: ['alumno'],
+    rechazado: ['alumno'],
+    alumno_nuevo: ['administrador', 'admin'],
+    emergencia: ['administrador', 'admin'],
     clase_asignada: ['coach'],
     clase_reasignada: ['coach'],
     clase_liberada: ['coach'],
@@ -89,7 +114,7 @@ const CampanaNotificaciones = () => {
     const [accionando, setAccionando] = useState(false);
     const navigate = useNavigate();
 
-    // ── Contador inicial: una sola consulta, sin polling ──
+    // ── Contador: consulta al montar + refresco de fondo (ver el efecto de abajo) ──
     const cargarContador = useCallback(async () => {
         try {
             const { data } = await api.get('/api/v1/notificaciones',
@@ -103,6 +128,26 @@ const CampanaNotificaciones = () => {
     }, []);
 
     useEffect(() => { cargarContador(); }, [cargarContador]);
+
+    // ── F4: el contador se entera SOLO de los avisos nuevos ──
+    // El aviso lo provoca OTRO usuario (el alumno sube el voucher, compra en el
+    // Bazar, se registra) mientras el admin puede estar en cualquier pantalla:
+    // sin este refresco el badge sólo cambiaba al recargar la página. Mismo
+    // intervalo que la grilla de Supervisión (45 s) y también al volver el foco
+    // a la ventana (el caso más común: volver después de estar en otra app).
+    // Se PAUSA con el panel abierto: la lista se refresca al abrirlo y el usuario
+    // puede estar leyéndola (no se pisa).
+    useEffect(() => {
+        const vigilarContador = () => {
+            if (!abierto) cargarContador();
+        };
+        const intervalo = setInterval(vigilarContador, 45000);
+        window.addEventListener('focus', vigilarContador);
+        return () => {
+            clearInterval(intervalo);
+            window.removeEventListener('focus', vigilarContador);
+        };
+    }, [cargarContador, abierto]);
 
     // ── Lista: se pide cada vez que se ABRE el panel ──
     const cargarLista = useCallback(async () => {
