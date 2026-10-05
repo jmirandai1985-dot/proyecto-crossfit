@@ -155,7 +155,9 @@ Y dos cosas de infraestructura que afectan a los avisos:
 * **Aviso silencioso**: como el helper es best-effort, un fallo de la BD (por ejemplo una
   conexión stale del pooler de Neon, `SSL SYSCALL error: EOF detected`) deja sólo un
   `warning` en `app.log` y el aviso no existe. Si la campana "pierde" avisos sueltos,
-  mirar primero `app/logs/app.log` y la configuración del pool (`app/db/database.py`).
+  mirar primero `app/logs/app.log` y la configuración del pool (`app/db/database.py`): esa
+  conexión muerta ya la corta el `pool_pre_ping=True` que quedó activado en esta misma
+  tanda (la razón y el porqué de haber estado en `False` están en el comentario del módulo).
 * **`crear_usuarios_demo.py --borrar`** borra las notificaciones de los usuarios demo
   (`backend/scripts/crear_usuarios_demo.py`): si la campana queda vacía después de correrlo,
   es eso y no la app.
