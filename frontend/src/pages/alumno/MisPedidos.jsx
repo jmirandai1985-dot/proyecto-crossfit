@@ -4,6 +4,34 @@ import AvisoCarga from '../../components/AvisoCarga';
 import api from '../../services/api';
 // TZ Chile: la fecha del pedido (instante) se muestra en horario chileno.
 import { fmtFechaChile } from '../../utils/fecha';
+// El QR del código de retiro lo sirve el backend (SVG) y exige sesión: se pide como
+// blob CON el token, igual que el comprobante de una solicitud de plan.
+import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
+
+/**
+ * QR del código de retiro de UN pedido (SVG autenticado del backend).
+ *
+ * POR QUÉ no es un <img src="..."> directo: el endpoint exige el token del alumno
+ * dueño y el navegador no manda el header Authorization en un <img>. El hook pide el
+ * blob y devuelve un object URL que sí se puede pintar (y lo revoca al desmontar).
+ */
+const QrRetiro = ({ pedidoId, codigo }) => {
+    const { preview } = useDocumentoAutenticado({
+        previewUrl: `/api/v1/pedidos/${pedidoId}/qr.svg`,
+        nombreFallback: `qr-retiro-${pedidoId}`,
+    });
+    if (preview.loading) {
+        return <div className="h-28 w-28 shrink-0 animate-pulse rounded-lg bg-gray-200" />;
+    }
+    if (preview.error || !preview.blobUrl) return null;
+    return (
+        <img
+            src={preview.blobUrl}
+            alt={`QR del código de retiro ${codigo}`}
+            className="h-28 w-28 shrink-0 rounded-lg border border-gray-200 bg-white p-1"
+        />
+    );
+};
 
 const MisPedidos = () => {
     const [pedidos, setPedidos] = useState([]);
@@ -93,6 +121,35 @@ const MisPedidos = () => {
                                         {getEstadoIcon(p.estado)} {p.estado.charAt(0).toUpperCase() + p.estado.slice(1)}
                                     </span>
                                 </div>
+
+                                {/* ── Código de retiro: se genera al VALIDAR el pedido ──
+                                    Es lo que se muestra (o se escanea) en el mesón. El
+                                    QR se pide al backend con la sesión del dueño. */}
+                                {p.codigo_retiro && p.estado === 'validado' && (
+                                    <div className="mt-4 flex items-center gap-4 rounded-xl border-2 border-dashed border-emerald-400 bg-emerald-50 p-3">
+                                        <QrRetiro pedidoId={p.id} codigo={p.codigo_retiro} />
+                                        <div className="min-w-0">
+                                            <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+                                                Código de retiro
+                                            </p>
+                                            <p className="font-mono text-3xl font-black tracking-widest text-emerald-800">
+                                                {p.codigo_retiro}
+                                            </p>
+                                            <p className="mt-1 text-xs text-emerald-700">
+                                                Muéstralo en el mesón (o que escaneen el QR) para
+                                                retirar tu pedido.
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Traza de la entrega: cuándo y quién la cerró. */}
+                                {p.estado === 'entregado' && (
+                                    <p className="mt-3 text-xs text-gray-500">
+                                        ✅ Entregado {p.entregado_en ? fmtFechaChile(p.entregado_en) : ''}
+                                        {p.entregado_por_nombre ? ` por ${p.entregado_por_nombre}` : ''}
+                                    </p>
+                                )}
                             </div>
                         ))}
                     </div>

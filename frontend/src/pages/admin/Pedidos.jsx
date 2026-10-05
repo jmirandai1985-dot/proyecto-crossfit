@@ -6,6 +6,9 @@ import { fmtFechaChile } from '../../utils/fecha';
 // El comprobante del pedido se pide al endpoint AUTENTICADO (blob) con el hook
 // compartido: nunca por una URL pública (se sube a la carpeta privada).
 import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
+// Mesón: entrega con el CÓDIGO DE RETIRO del alumno (mismo modal que el panel del
+// coach). El código se genera al validar; acá también se puede respaldar a mano.
+import ModalEntregarPedido from '../../components/ModalEntregarPedido';
 
 /**
  * Pedidos del Bazar (panel admin).
@@ -26,7 +29,11 @@ const ESTADOS = [
 
 // Mismas transiciones que valida el backend (solo se avanza, no se retrocede).
 const SIGUIENTE_ESTADO = { pendiente: 'validado', validado: 'entregado', entregado: null };
-const ETIQUETA_ACCION = { pendiente: 'Marcar validado', validado: 'Marcar entregado' };
+// El paso a 'entregado' por acá es el RESPALDO (sin código): lo normal es que la
+// entrega la cierre el mesón con el código de retiro (📷 Entregar / Entregar con
+// código). Se deja porque el alumno puede haber perdido el código, y queda
+// registrado igual quién entregó.
+const ETIQUETA_ACCION = { pendiente: 'Marcar validado', validado: 'Marcar entregado (respaldo)' };
 
 const tonoDe = (estado) => ESTADOS.find((e) => e.key === estado)?.tono
     || 'bg-zinc-800 text-zinc-300 border-zinc-700';
@@ -45,6 +52,9 @@ const AdminPedidos = () => {
     const [msg, setMsg] = useState('');
     const [comprobante, setComprobante] = useState(null);   // pedido cuyo comprobante se ve
     const [confirmar, setConfirmar] = useState(null);       // { pedido, nuevoEstado }
+    // Entrega por código: `entrega` = código pre-cargado (el de la fila) o '' para
+    // abrir el modal vacío desde el botón del header. `null` = modal cerrado.
+    const [entrega, setEntrega] = useState(null);
 
     const cargar = useCallback(async () => {
         setLoading(true);
@@ -96,6 +106,11 @@ const AdminPedidos = () => {
         setConfirmar({ pedido, nuevoEstado });
     };
 
+    // ── Entrega por código (mesón) ────────────────────────────────────────────
+    // `codigo` pre-cargado = "Entregar" de una fila validada; sin código = el botón
+    // del header (el que atiende escanea o tipea el código del alumno).
+    const abrirEntrega = (codigo = '') => setEntrega(codigo);
+
     if (loading && pedidos.length === 0) {
         return (
             <Layout>
@@ -117,15 +132,24 @@ const AdminPedidos = () => {
                     <div>
                         <h1 className="text-2xl font-extrabold text-zinc-100">Bazar — Pedidos</h1>
                         <p className="text-zinc-400 text-sm mt-1">
-                            Revisa el comprobante de cada pedido y avanza su estado: pendiente → validado → entregado
+                            Revisa el comprobante de cada pedido y avanza su estado: pendiente → validado → entregado.
+                            Al validar se genera el <strong className="text-zinc-200">código de retiro</strong> del alumno.
                         </p>
                     </div>
-                    <button
-                        onClick={cargar}
-                        className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-semibold transition-colors"
-                    >
-                        ⟳ Refrescar
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            onClick={() => abrirEntrega('')}
+                            className="px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold transition-colors"
+                        >
+                            📷 Entregar con código
+                        </button>
+                        <button
+                            onClick={cargar}
+                            className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-semibold transition-colors"
+                        >
+                            ⟳ Refrescar
+                        </button>
+                    </div>
                 </div>
 
                 {msg && (
@@ -187,6 +211,7 @@ const AdminPedidos = () => {
                                         <th className="px-4 py-3.5 text-left text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Total</th>
                                         <th className="px-4 py-3.5 text-left text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Fecha</th>
                                         <th className="px-4 py-3.5 text-left text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Estado</th>
+                                        <th className="px-4 py-3.5 text-left text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Código de retiro</th>
                                         <th className="px-4 py-3.5 text-right text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Acciones</th>
                                     </tr>
                                 </thead>
@@ -219,6 +244,28 @@ const AdminPedidos = () => {
                                                         {etiquetaDe(p.estado)}
                                                     </span>
                                                 </td>
+                                                {/* Código de retiro + traza de la entrega: el código
+                                                    aparece desde que el pedido se valida y sólo lo
+                                                    puede usar el mesón (aquí, o el coach con su propio
+                                                    acceso). */}
+                                                <td className="px-4 py-3.5">
+                                                    {p.codigo_retiro ? (
+                                                        <>
+                                                            <span className="font-mono text-[13.5px] font-bold tracking-wider text-orange-300">
+                                                                {p.codigo_retiro}
+                                                            </span>
+                                                            {p.entregado_en && (
+                                                                <div className="text-[11px] text-zinc-500 mt-0.5">
+                                                                    Entregado {fmtFechaChile(p.entregado_en)}
+                                                                    {p.entregado_por_nombre
+                                                                        ? ` por ${p.entregado_por_nombre}` : ''}
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    ) : (
+                                                        <span className="text-xs text-zinc-600">—</span>
+                                                    )}
+                                                </td>
                                                 <td className="px-4 py-3.5">
                                                     <div className="flex items-center justify-end gap-2">
                                                         {p.voucher_url ? (
@@ -230,6 +277,15 @@ const AdminPedidos = () => {
                                                             </button>
                                                         ) : (
                                                             <span className="text-zinc-500 text-xs">Sin comprobante</span>
+                                                        )}
+                                                        {p.estado === 'validado' && (
+                                                            <button
+                                                                onClick={() => abrirEntrega(p.codigo_retiro || '')}
+                                                                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors"
+                                                                title="Entregar este pedido con su código de retiro"
+                                                            >
+                                                                📷 Entregar
+                                                            </button>
                                                         )}
                                                         <button
                                                             onClick={() => abrirConfirmacion(p)}
@@ -264,6 +320,15 @@ const AdminPedidos = () => {
                                 <strong>{confirmar.pedido.alumno_nombre || `Alumno #${confirmar.pedido.alumno_id}`}</strong>{' '}
                                 como <strong>{confirmar.nuevoEstado}</strong>?
                             </div>
+                            {confirmar.nuevoEstado === 'entregado' && (
+                                <div className="px-4 pb-4 pt-3 border-t border-zinc-800 text-[12.5px] leading-relaxed text-amber-200/90">
+                                    ⚠️ <strong>Respaldo sin código:</strong> lo normal es que el
+                                    mesón cierre la entrega con el código de retiro del alumno
+                                    (<span className="font-mono">{confirmar.pedido.codigo_retiro || 'UB-XXXX'}</span>).
+                                    Úsalo solo si el alumno no puede mostrarlo; queda registrado
+                                    igual que entregaste tú.
+                                </div>
+                            )}
                             <div className="p-4 border-t border-zinc-800 flex justify-end gap-2">
                                 <button
                                     onClick={() => setConfirmar(null)}
@@ -336,6 +401,18 @@ const AdminPedidos = () => {
                             </div>
                         </div>
                     </div>
+                )}
+                {/* MODAL compartido (admin + coach): entrega con el código de retiro. */}
+                {entrega !== null && (
+                    <ModalEntregarPedido
+                        codigoInicial={entrega}
+                        onCerrar={() => setEntrega(null)}
+                        onEntregado={() => {
+                            setMsg('✅ Pedido entregado con código.');
+                            setTimeout(() => setMsg(''), 4000);
+                            cargar();
+                        }}
+                    />
                 )}
             </div>
 

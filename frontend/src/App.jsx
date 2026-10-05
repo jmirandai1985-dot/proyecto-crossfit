@@ -31,6 +31,9 @@ import CoachDashboard from './pages/coach/DashboardCoach';
 import CoachPizarra from './pages/coach/Pizarra';
 import CoachGenerarClases from './pages/coach/GenerarClases';
 import CoachGestionClases from './pages/coach/GestionClases';
+// Código de retiro del Bazar: el coach entrega pedidos con el código del alumno
+// (misma pantalla/modal que usa el admin), sin ver listados ni montos.
+import CoachEntregarPedido from './pages/coach/EntregarPedido';
 import AlumnoDashboard from './pages/alumno/Dashboard';
 import AlumnoMisReservas from './pages/alumno/MisReservas';
 import AlumnoPizarraRMs from './pages/alumno/PizarraRMs';
@@ -133,6 +136,8 @@ function App() {
             <Route path="pizarra" element={<CoachPizarra />} />
             <Route path="generar-clases" element={<CoachGenerarClases />} />
             <Route path="gestion-clases" element={<CoachGestionClases />} />
+            {/* Mesón del Bazar: entrega con el código de retiro del alumno. */}
+            <Route path="entregar-pedido" element={<CoachEntregarPedido />} />
             <Route path="*" element={<Navigate to="/coach/dashboard" />} />
           </Route>
 

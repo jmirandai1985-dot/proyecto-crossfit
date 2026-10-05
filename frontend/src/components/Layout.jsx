@@ -128,6 +128,9 @@ const Layout = ({ children }) => {
             return [
                 { label: 'Dashboard', path: '/coach/dashboard', icon: icons.home },
                 { label: 'Gestión de Clases', path: '/coach/gestion-clases', icon: icons.calendar },
+                // Mesón del Bazar: entregar un pedido con el código de retiro del
+                // alumno (mismo modal que el admin; sin listados ni montos).
+                { label: 'Entregar pedido', path: '/coach/entregar-pedido', icon: icons.qr },
             ];
         } else if (rol === 'administrador' || rol === 'admin') {
             return [
