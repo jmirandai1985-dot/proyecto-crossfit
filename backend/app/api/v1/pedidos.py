@@ -1,9 +1,10 @@
 """
 Router de endpoints para gestión de Pedidos
 """
+import io
 import logging
 from app.core.urls import url_frontend  # B.2
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
@@ -14,9 +15,13 @@ from app.models.pedido import Pedido
 from app.models.producto import Producto
 from app.models.usuario import Usuario
 from app.schemas.pedido import (
-    PedidoCreate, PedidoUpdate, PedidoResponse, PedidoListItem
+    PedidoCreate, PedidoUpdate, PedidoResponse, PedidoListItem,
+    PedidoEntregaRequest, PedidoEntregaResponse,
 )
-from app.core.dependencies import get_current_admin, get_current_user, require_full_access
+from app.core.dependencies import (
+    get_current_admin, get_current_coach, get_current_user, require_full_access,
+)
+from app.core.rate_limit import limiter, LIMIT_CODIGO_RETIRO
 from app.core.config import settings
 # El comprobante de un pedido se sirve con el MISMO helper que el voucher de una
 # solicitud de plan: dos orígenes (/static/uploads y /privado/vouchers), media type
@@ -30,6 +35,11 @@ from app.core.documentos_privados import (
 from app.services.notificaciones_panel import (
     notificar_admins_del_tenant, notificar_alumno,
 )
+# Las dos caras del código de retiro del Bazar (migración 044): generarlo al VALIDAR
+# y consumirlo en el mesón. Toda la regla vive en el servicio (formato, unicidad por
+# box, normalización de lo que se tipea/escanea y los textos de los 409).
+from app.services import codigos_retiro
+from app.utils.santiago import ahora_santiago
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +58,19 @@ TRANSICIONES_PERMITIDAS = {
 # Mensaje de campana para el alumno dueño cuando el admin avanza su pedido.
 # (El estado 'rechazado' todavía no existe en pedidos: cuando se agregue, se
 # suma acá y el aviso sale solo.)
+# OJO: 'validado' NO está en este mapa a propósito — ese aviso lleva el CÓDIGO DE
+# RETIRO y lo arma services/codigos_retiro.texto_validado().
 MENSAJES_ESTADO_PEDIDO = {
-    "validado": "✅ Tu pedido de {producto} x{cantidad} fue validado",
     "entregado": "📦 Tu pedido de {producto} x{cantidad} fue entregado",
 }
+
+
+def _nombre_de(db: Session, usuario_id: Optional[int]) -> Optional[str]:
+    """Nombre del usuario `usuario_id` (o None): lo usa el 409 de 'ya entregado'."""
+    if not usuario_id:
+        return None
+    fila = db.query(Usuario.nombre).filter(Usuario.id == usuario_id).first()
+    return fila.nombre if fila else None
 
 
 @router.post("", response_model=PedidoResponse, status_code=status.HTTP_201_CREATED)
@@ -269,8 +288,11 @@ def _con_nombres(db: Session, pedidos: List[Pedido]) -> List[dict]:
         return []
     ids_alumnos = {p.alumno_id for p in pedidos}
     ids_productos = {p.producto_id for p in pedidos}
+    # El que entregó también es un usuario: se resuelve en la MISMA consulta con IN
+    # (antes eran 2 consultas, ahora sigue siendo 2 pese a sumar la traza de entrega).
+    ids_entrego = {p.entregado_por for p in pedidos if p.entregado_por}
     alumnos = db.query(Usuario.id, Usuario.nombre, Usuario.correo).filter(
-        Usuario.id.in_(ids_alumnos)).all()
+        Usuario.id.in_(ids_alumnos | ids_entrego)).all()
     productos = db.query(Producto.id, Producto.nombre).filter(
         Producto.id.in_(ids_productos)).all()
     mapa_alumnos = {a.id: a for a in alumnos}
@@ -279,6 +301,7 @@ def _con_nombres(db: Session, pedidos: List[Pedido]) -> List[dict]:
     items = []
     for p in pedidos:
         alumno = mapa_alumnos.get(p.alumno_id)
+        entrego = mapa_alumnos.get(p.entregado_por)
         items.append({
             "id": p.id,
             "alumno_id": p.alumno_id,
@@ -291,6 +314,13 @@ def _con_nombres(db: Session, pedidos: List[Pedido]) -> List[dict]:
             "alumno_nombre": alumno.nombre if alumno else None,
             "alumno_email": alumno.correo if alumno else None,
             "producto_nombre": mapa_productos.get(p.producto_id),
+            # Código de retiro + traza de la entrega (migración 044): es lo que el
+            # panel del admin y el del alumno pintan (código destacado, QR y "quién
+            # entregó").
+            "codigo_retiro": p.codigo_retiro,
+            "entregado_en": p.entregado_en,
+            "entregado_por": p.entregado_por,
+            "entregado_por_nombre": entrego.nombre if entrego else None,
         })
     return items
 
@@ -425,21 +455,49 @@ def actualizar_estado_pedido(
         )
 
     pedido.estado = nuevo_estado
+
+    # ── CÓDIGO DE RETIRO: se genera UNA sola vez, al VALIDAR (migración 044) ──
+    # En la MISMA transacción que la validación, para que el aviso de campana de
+    # abajo viaje con el código definitivo. Si el pedido ya tiene uno (revalidar
+    # tras un 400, datos viejos), se respeta: el código no cambia nunca.
+    if nuevo_estado == "validado" and not pedido.codigo_retiro:
+        try:
+            pedido.codigo_retiro = codigos_retiro.generar_codigo_unico(
+                db, tenant_id)
+        except codigos_retiro.SinCodigoDisponible as error:
+            db.rollback()
+            logger.error(f"No se pudo generar el código de retiro: {error}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No se pudo generar el código de retiro. Intenta de nuevo.",
+            )
+
+    # La entrega deja SIEMPRE su traza (quién y cuándo), venga del mesón (código)
+    # o de este respaldo del admin.
+    if nuevo_estado == "entregado":
+        pedido.entregado_por = current_user["usuario_id"]
+        pedido.entregado_en = ahora_santiago()
+
     db.commit()
     db.refresh(pedido)
 
     # ── Aviso en el PANEL del alumno dueño (campana; sin correo) ──
     # Antes, el avance del pedido sólo se veía entrando a Mis Pedidos.
-    plantilla = MENSAJES_ESTADO_PEDIDO.get(nuevo_estado)
-    if plantilla:
-        producto_pedido = db.query(Producto).filter(
-            Producto.id == pedido.producto_id).first()
-        nombre_producto = (
-            producto_pedido.nombre if producto_pedido else "tu producto")
+    producto_pedido = db.query(Producto).filter(
+        Producto.id == pedido.producto_id).first()
+    nombre_producto = (
+        producto_pedido.nombre if producto_pedido else "tu producto")
+    if nuevo_estado == "validado":
+        # El aviso de validación llega con el CÓDIGO DE RETIRO adentro.
+        mensaje = codigos_retiro.texto_validado(
+            nombre_producto, pedido.cantidad, pedido.codigo_retiro)
+    else:
+        plantilla = MENSAJES_ESTADO_PEDIDO.get(nuevo_estado)
+        mensaje = (plantilla.format(producto=nombre_producto, cantidad=pedido.cantidad)
+                   if plantilla else None)
+    if mensaje:
         notificar_alumno(
-            db, pedido.alumno_id, f"pedido_{nuevo_estado}",
-            plantilla.format(
-                producto=nombre_producto, cantidad=pedido.cantidad))
+            db, pedido.alumno_id, f"pedido_{nuevo_estado}", mensaje)
 
     return pedido
 
@@ -516,3 +574,180 @@ def eliminar_pedido(
     db.commit()
 
     return None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  CÓDIGO DE RETIRO DEL BAZAR (migración 044 · services/codigos_retiro.py)
+#
+#  El código se GENERA al validar (PUT /{id}/estado, arriba) y se CONSUME acá, en el
+#  mesón: el alumno muestra su QR/código, quien atiende lo ingresa o lo escanea y el
+#  pedido pasa a `entregado` con quién y cuándo. El endpoint va declarado por su
+#  ruta completa (`/entregar`) y usa POST, así que no compite con `GET /{pedido_id}`.
+# ══════════════════════════════════════════════════════════════════════════════
+@router.post("/entregar", response_model=PedidoEntregaResponse)
+@limiter.limit(LIMIT_CODIGO_RETIRO)
+def entregar_pedido_con_codigo(
+    request: Request,
+    data: PedidoEntregaRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
+):
+    """Entrega un pedido del Bazar contra su CÓDIGO DE RETIRO (pantalla del mesón).
+
+    Quién: el administrador o un COACH DEL MISMO BOX (`get_current_coach`). Un alumno
+    nunca pasa este guard (403): el código prueba que quien retira es el dueño, pero
+    sólo el staff puede cerrar la entrega.
+
+    Respuestas:
+    - 200: entregado (alumno / producto / cantidad, SIN montos: el coach no
+      administra el Bazar);
+    - 404 genérico: el código no existe EN ESTE BOX (uno de otro box da lo mismo:
+      el 404 no revela que exista en otro lado);
+    - 409: el código existe pero su pedido no se puede entregar todavía (sigue
+      pendiente) o YA se entregó, con la fecha y quién lo entregó.
+
+    Rate limit propio: un código son 4 símbolos, sin límite se podría barrer.
+    """
+    # 🔒 SEGURIDAD: el box sale del TOKEN; no hay query param que se pueda falsear.
+    tenant_id = current_user["tenant_id"]
+
+    pedido = codigos_retiro.buscar_pedido_por_codigo(db, tenant_id, data.codigo)
+    if not pedido:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Código de retiro no válido",
+        )
+
+    motivo = codigos_retiro.motivo_no_entregable(pedido)
+    if motivo == codigos_retiro.MOTIVO_YA_ENTREGADO:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=codigos_retiro.texto_ya_entregado(
+                pedido, _nombre_de(db, pedido.entregado_por)),
+        )
+    if motivo == codigos_retiro.MOTIVO_NO_VALIDADO:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=codigos_retiro.texto_no_validado(pedido),
+        )
+
+    # ── Entrega ATÓMICA (mismo patrón que el descuento de stock del Bazar) ───
+    # UPDATE condicional: sólo pasa si el pedido SIGUE validado. Si dos mesones
+    # escanean el mismo código a la vez, el segundo ve rowcount=0 y recibe el 409
+    # de "ya fue entregado" en vez de entregar el pedido dos veces.
+    try:
+        resultado = db.execute(
+            update(Pedido)
+            .where(Pedido.id == pedido.id)
+            .where(Pedido.tenant_id == tenant_id)
+            .where(Pedido.estado == "validado")
+            .values(
+                estado="entregado",
+                entregado_por=current_user["usuario_id"],
+                entregado_en=ahora_santiago(),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if resultado.rowcount == 0:
+            # Se lo llevaron entre la lectura y el UPDATE: se informa el estado real.
+            db.rollback()
+            otro = codigos_retiro.buscar_pedido_por_codigo(
+                db, tenant_id, data.codigo)
+            detalle = (
+                codigos_retiro.texto_ya_entregado(
+                    otro, _nombre_de(db, otro.entregado_por))
+                if otro is not None else
+                "Este pedido ya no se puede entregar")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=detalle)
+        db.commit()
+    except DBAPIError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Alta demanda, intenta de nuevo",
+        )
+    db.refresh(pedido)
+
+    # ── Aviso en la campana del alumno dueño (best-effort, ya commiteado) ────
+    producto = db.query(Producto.nombre).filter(
+        Producto.id == pedido.producto_id).first()
+    nombre_producto = producto.nombre if producto else "tu producto"
+    notificar_alumno(
+        db, pedido.alumno_id, "pedido_entregado",
+        MENSAJES_ESTADO_PEDIDO["entregado"].format(
+            producto=nombre_producto, cantidad=pedido.cantidad))
+
+    alumno = db.query(Usuario.nombre).filter(
+        Usuario.id == pedido.alumno_id).first()
+    return PedidoEntregaResponse(
+        pedido_id=pedido.id,
+        alumno_nombre=alumno.nombre if alumno else None,
+        producto_nombre=nombre_producto,
+        cantidad=pedido.cantidad,
+        entregado_en=pedido.entregado_en,
+        codigo=pedido.codigo_retiro,
+    )
+
+
+@router.get("/{pedido_id}/qr.svg")
+@limiter.limit("30/minute")
+def qr_retiro_pedido(
+    request: Request,
+    pedido_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """SVG del QR del CÓDIGO DE RETIRO del pedido (lo escanea el mesón).
+
+    Contenido del QR: SÓLO el código ("UB-4827"), no una URL — así lo lee cualquier
+    lector, incluida la cámara del celular. El mesón lo tipea o lo escanea en la
+    pantalla de entrega.
+
+    Mismo guard de visibilidad que el comprobante: el alumno DUEÑO o el staff del
+    box. Sin código (pedido todavía sin validar) → 404.
+    """
+    # 🔒 SEGURIDAD: tenant_id del token; el query param no existe acá.
+    tenant_id = current_user["tenant_id"]
+    pedido = db.query(Pedido).filter(
+        Pedido.id == pedido_id,
+        Pedido.tenant_id == tenant_id,
+    ).first()
+    if not pedido:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido con ID {pedido_id} no encontrado",
+        )
+
+    # 🔒 IDOR: solo el dueño del pedido o el staff del box.
+    visible = puede_ver_documento(
+        usuario_id=current_user["usuario_id"],
+        tenant_id=tenant_id,
+        alumno_id=pedido.alumno_id,
+        tenant_documento=pedido.tenant_id,
+        rol=current_user.get("rol", ""),
+    )
+    if not visible:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No puedes ver el código de retiro de este pedido",
+        )
+
+    if not pedido.codigo_retiro:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="El pedido todavía no tiene código de retiro",
+        )
+
+    # Import diferido: segno es pura Python y sólo se necesita acá (igual que el QR
+    # del box en tenants.py).
+    from segno import make as qr_make
+
+    qr = qr_make(pedido.codigo_retiro, error="m")
+    buf = io.BytesIO()
+    qr.save(buf, kind="svg", scale=8)
+    return Response(
+        content=buf.getvalue(),
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
