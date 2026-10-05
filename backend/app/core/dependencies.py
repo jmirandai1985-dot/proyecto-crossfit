@@ -220,16 +220,19 @@ def _notificar_emergencia(db: Session, tenant_id: int, coach_id: int,
     + email.
 
     Decisión (19/08/2026): el canal real de alerta al admin es EMAIL (mismo
-    patrón que health_check/enviar_email_solicitud_admin). La in-app queda
-    como registro (el admin aún no tiene inbox in-app propio; el badge de
-    Supervisión sigue siendo la señal visual del panel).
+    patrón que health_check/enviar_email_solicitud_admin); la in-app queda como
+    registro. Actualización: desde que la campana del panel se monta también para
+    el rol admin (Layout.jsx), ESE registro es el que enciende el badge — así que
+    la fila la escribe el helper del panel (services/notificaciones_panel.py) y no
+    una construcción a mano acá: el filtro de destinatarios (admins ACTIVOS del
+    box) y el best-effort viven en un solo lugar.
     """
     try:
-        from app.models.notificacion import Notificacion
         from app.models.usuario import Usuario
         from app.models.disciplina import Disciplina
         from app.models.clase import Clase
         from app.services.email_service import send_emergencia_cobertura
+        from app.services.notificaciones_panel import notificar_admins_del_tenant
 
         coach = db.query(Usuario).filter(Usuario.id == coach_id).first()
         coach_nombre = coach.nombre if coach else f"Coach #{coach_id}"
@@ -244,14 +247,19 @@ def _notificar_emergencia(db: Session, tenant_id: int, coach_id: int,
             f"de {disc_nombre} (acción: {accion})"
         )
 
+        # In-app: helper del panel. `commit=False` porque la transacción es del
+        # llamador (acá sólo se hace flush, igual que antes).
+        notificar_admins_del_tenant(
+            db, tenant_id, "emergencia", mensaje, commit=False)
+
+        # Email: se mantiene como canal paralelo. Se filtra `estado='activo'`
+        # para que el correo llegue exactamente a los mismos destinatarios que el
+        # aviso in-app (antes un admin dado de baja seguía recibiendo la alerta).
         admins = db.query(Usuario).filter(
             Usuario.tenant_id == tenant_id,
             Usuario.rol == "administrador",
+            Usuario.estado == "activo",
         ).all()
-        for ad in admins:
-            db.add(Notificacion(
-                alumno_id=ad.id, tipo="emergencia", mensaje=mensaje, leida=False))
-        db.flush()
 
         for ad in admins:
             try:

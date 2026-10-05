@@ -21,6 +21,9 @@ from app.models.suscripcion import Suscripcion
 from app.api.v1.usuarios import hash_password
 from app.core.dependencies import get_current_user, get_current_admin, es_usuario_prueba
 from app.services.auditoria_service import registrar_auditoria
+# Avisos del PANEL (la campana): el alta avisa al admin del box también in-app.
+# Ver docs/NOTIFICACIONES_PANEL.md.
+from app.services.notificaciones_panel import notificar_admins_del_tenant
 from app.services.email_service import (
     enviar_email_solicitud_admin,
     send_solicitud_prueba_clase, send_bienvenida_activacion,
@@ -236,6 +239,16 @@ def registrar_alumno_nuevo(
     )
     db.add(suscripcion)
     db.commit()
+
+    # ── Campana del ADMIN: el alta también avisa in-app ──
+    # El registro avisa por EMAIL más abajo (enviar_email_solicitud_admin), pero el
+    # correo no siempre es un canal disponible (con EMAIL_MODO=noop —TEST— no llega
+    # nada, y en prod puede fallar el SMTP). El aviso del panel deja el alta visible
+    # en la campana del box apenas el alumno se registra. Best-effort: si el aviso
+    # falla, el registro NO se cae (el alumno ya está creado).
+    notificar_admins_del_tenant(
+        db, datos.tenant_id, "alumno_nuevo",
+        f"🆕 Nuevo alumno de prueba: {usuario.nombre} ({usuario.correo})")
 
     try:
         # Notifica al admin que ingresó un alumno de prueba hoy (tarjeta informativa)

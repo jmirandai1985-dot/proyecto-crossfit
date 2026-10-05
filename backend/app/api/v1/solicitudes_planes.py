@@ -33,6 +33,9 @@ from app.services.auditoria_service import registrar_auditoria
 # F2: el descuento vigente del alumno se aplica al SOLICITAR un plan. La aritmética (`desglose`)
 # y el ciclo de vida del beneficio (`vigente`/`usar`) viven en su servicio, no acá.
 from app.services import beneficios_service as beneficios
+# Avisos del PANEL (la campana): un solo módulo decide A QUIÉN y CÓMO se avisa
+# (best-effort: un aviso nunca tumba la solicitud). Ver docs/NOTIFICACIONES_PANEL.md.
+from app.services.notificaciones_panel import notificar_admins_del_tenant
 from datetime import timedelta
 
 router = APIRouter()
@@ -170,6 +173,23 @@ def solicitar_plan(
                 # La solicitud YA está guardada con su descuento: si el uso falla, se dice y no se
                 # rompe la solicitud (el panel lo puede ver en la pestaña Beneficios).
                 logger.warning(f"No se pudo marcar el beneficio #{beneficio.id} como usado: {e}")
+
+    # ── Campana del ADMIN: la solicitud con voucher también avisa ──
+    # Antes la solicitud vivía SÓLO en el Dashboard (/admin/dashboard, GET
+    # /solicitudes/pendientes): si el admin no entraba a esa pantalla, el voucher
+    # quedaba sin revisar y nada se lo recordaba (la campana sólo tenía avisos para
+    # el alumno). El mensaje dice el alumno y el plan —lo que el admin necesita para
+    # ubicar el comprobante— y el #id para encontrarla en la lista de pendientes.
+    # El `tipo` 'plan_solicitado' entra en la columna (`String(20)`: 14 caracteres).
+    alumno_solicitante = db.query(Usuario).filter(
+        Usuario.id == data.alumno_id).first()
+    nombre_alumno = (
+        alumno_solicitante.nombre if alumno_solicitante
+        else f"Alumno #{data.alumno_id}")
+    notificar_admins_del_tenant(
+        db, data.tenant_id, "plan_solicitado",
+        f"💳 Nueva solicitud de plan de {nombre_alumno}: "
+        f"{plan.nombre} (solicitud #{solicitud.id})")
 
     return {
         "status": "pending",
