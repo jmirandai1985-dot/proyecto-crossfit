@@ -17,11 +17,17 @@ cliente R2 falso de test_storage_r2.py):
   * `notificar_alumno`: id vacío -> None sin tocar la BD;
   * los mensajes de estado del Bazar (`MENSAJES_ESTADO_PEDIDO`) existen para
     validado/entregado y el `tipo` que genera `pedidos.py` entra en la columna
-    (`String(20)`).
+    (`String(20)`);
+  * CONTRATO de los flujos que avisan al ADMIN: la solicitud de plan con voucher
+    (`plan_solicitado`), el alta de alumno (`alumno_nuevo`) y la cobertura de
+    emergencia llaman a `notificar_admins_del_tenant`, y la emergencia NO vuelve a
+    construir la fila a mano (el bug era que no filtraba por `estado`).
 
 Los avisos end-to-end (pedido real por API) los cubre la integración
-tests/test_pedidos_notificaciones.py.
+tests/test_pedidos_notificaciones.py; los del voucher de plan y el alta de
+alumno, la integración tests/test_notificaciones_admin_flujos.py.
 """
+from pathlib import Path
 from types import SimpleNamespace
 
 from app.api.v1.pedidos import MENSAJES_ESTADO_PEDIDO
@@ -265,9 +271,59 @@ def test_mensajes_de_estado_del_bazar():
 
 
 def test_los_tipos_entran_en_la_columna():
-    """`Notificacion.tipo` es String(20): 'pedido_<estado>' tiene que caber."""
+    """`Notificacion.tipo` es String(20): TODO tipo que se genera tiene que caber.
+
+    Un tipo de 21 caracteres NO rompe el flujo (el aviso es best-effort): revienta
+    el INSERT y el aviso se pierde en silencio, así que se revisa acá — es más
+    barato que descubrirlo cuando el badge del admin no enciende.
+    """
     for estado in MENSAJES_ESTADO_PEDIDO:
         assert len(f"pedido_{estado}") <= 20
-    assert len("pedido_nuevo") <= 20
+    for tipo in ("pedido_nuevo", "plan_solicitado", "alumno_nuevo", "emergencia",
+                 "aprobado", "rechazado", "plan_activo", "clase_asignada",
+                 "clase_reasignada", "clase_liberada"):
+        assert len(tipo) <= 20, tipo
+
+
+# ── contrato de los flujos que avisan al ADMIN ────────────────────────────────
+# Guardas de FUENTE (sin BD): el bug no era del helper, era que los flujos que
+# tienen que avisar al admin no lo llamaban (el voucher de una solicitud de plan
+# no avisaba a nadie) o que armaban la fila a mano salteándose el filtro de
+# destinatarios (emergencia sin `estado='activo'`). Mismo patrón que
+# test_estados_compartido.py / test_asignaciones_clases.py, que leen el código.
+
+def _fuente(relativa: str) -> str:
+    raiz = Path(__file__).resolve().parents[1]      # .../backend
+    return (raiz / relativa).read_text(encoding="utf-8")
+
+
+def test_la_solicitud_de_plan_avisa_a_los_admins():
+    """POST /solicitudes/solicitar deja el aviso en la campana del box."""
+    fuente = _fuente("app/api/v1/solicitudes_planes.py")
+    assert "from app.services.notificaciones_panel import notificar_admins_del_tenant" in fuente
+    assert "notificar_admins_del_tenant(" in fuente
+    assert '"plan_solicitado"' in fuente
+
+
+def test_el_registro_de_alumno_avisa_a_los_admins():
+    """POST /alumnos/registro/alumno-nuevo avisa al admin sin depender del correo."""
+    fuente = _fuente("app/api/v1/alumnos.py")
+    assert "from app.services.notificaciones_panel import notificar_admins_del_tenant" in fuente
+    assert "notificar_admins_del_tenant(" in fuente
+    assert '"alumno_nuevo"' in fuente
+
+
+def test_la_emergencia_usa_el_helper_y_filtra_admins_activos():
+    """La emergencia avisa por el helper, no armando la fila a mano.
+
+    Dos cosas que se rompieron antes y que esta prueba congela: la fila in-app se
+    construía a mano (sin `estado='activo'`, así que un admin dado de baja seguía
+    recibiendo la alerta) y el helper no se usaba en este flujo.
+    """
+    fuente = _fuente("app/core/dependencies.py")
+    assert "from app.services.notificaciones_panel import notificar_admins_del_tenant" in fuente
+    assert 'notificar_admins_del_tenant(\n            db, tenant_id, "emergencia", mensaje' in fuente
+    assert "Notificacion(" not in fuente
+    assert 'Usuario.estado == "activo"' in fuente
 
 
