@@ -213,6 +213,47 @@ def test_notificar_alumno_es_best_effort():
     assert db.rollbacks == 1
 
 
+# ── notificar_usuario (B3: el destinatario puede ser coach/admin) ──────────
+
+def test_notificar_usuario_crea_el_aviso_del_destinatario():
+    db = _SesionFalsa()
+    aviso = notificaciones_panel.notificar_usuario(
+        db, 7, "clase_asignada", "🟦 El admin te asignó la clase de CrossFit")
+
+    assert isinstance(aviso, Notificacion)
+    assert aviso.alumno_id == 7              # 7 = id de usuario, no de alumno
+    assert aviso.tipo == "clase_asignada"
+    assert aviso.leida is False
+    assert db.commits == 1
+
+
+def test_notificar_usuario_commit_false_es_la_transaccion_del_llamador():
+    db = _SesionFalsa()
+    assert notificaciones_panel.notificar_usuario(
+        db, 7, "clase_liberada", "m", commit=False) is not None
+    assert db.commits == 0
+    assert db.flushes == 1
+
+
+def test_notificar_usuario_sin_id_no_toca_la_bd():
+    db = _SesionFalsa()
+    assert notificaciones_panel.notificar_usuario(db, None, "t", "m") is None
+    assert db.agregadas == []
+    assert db.commits == 0
+
+
+def test_notificar_usuario_es_best_effort():
+    db = _SesionFalsa(fallar_en_add=True)
+    assert notificaciones_panel.notificar_usuario(db, 7, "t", "m") is None
+    assert db.rollbacks == 1
+
+
+def test_notificar_alumno_es_un_alias_de_notificar_usuario():
+    db = _SesionFalsa()
+    aviso = notificaciones_panel.notificar_alumno(db, 42, "pedido_validado", "m")
+    assert aviso is not None and aviso.alumno_id == 42
+
+
 # ── mensajes / contrato con pedidos.py ─────────────────────────────────────
 
 def test_mensajes_de_estado_del_bazar():

@@ -154,3 +154,27 @@ Guardas (todas devuelven **409** con el nombre de quien la tiene):
 
 El admin puede usar los mismos endpoints (queda registrado como 🟦 `admin`); para
 la asignación de emergencia tiene su propio camino (B3).
+
+## 7. Asignación de emergencia del admin (B3) — con aviso al coach
+
+| Acción | Endpoint | Qué hace |
+|---|---|---|
+| Asignar coach a una clase | `POST /supervision/clases/{id}/asignar` (body: `coach_id`, `motivo?`, `forzar_emergencia?`) | marca 🟦 `admin` + **aviso al coach** en su campana. Si el coach **no dicta** esa disciplina: con `forzar_emergencia=true` (default) se registra la ⚠️ cobertura de emergencia (y el aviso a los admins del flujo existente); con `false` → 409 |
+| Quitar el coach de una clase | `DELETE /supervision/clases/{id}/asignar` | 🔴 sin coach + aviso al coach que la tenía |
+
+Sólo la clase puntual: **no** toca el horario recurrente (para eso, el coach usa
+`POST /clases/{id}/tomar?alcance=horario` y el admin reasigna con el endpoint de arriba).
+
+Avisos: tabla `notificaciones` (la de la campana, **sin correo**), emitidos con
+`services/notificaciones_panel.notificar_usuario`:
+
+| `tipo` | Destinatario | Cuándo |
+|---|---|---|
+| `clase_asignada` | coach nuevo | El admin le asignó la clase |
+| `clase_reasignada` | coach anterior | La clase era suya y se la pasaron a otro |
+| `clase_liberada` | coach saliente | El admin le quitó la clase |
+
+Guardas: 404 si el coach no es del box; 409 si no tiene rol `coach`, no está activo, la
+clase ya es suya, está cancelada o es pasada. Las dos acciones quedan en `auditoria`
+(`asignar_coach_admin`, `quitar_coach_admin`).
+

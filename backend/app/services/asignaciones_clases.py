@@ -67,6 +67,49 @@ def porcentaje_cobertura(con_coach: int, total: int) -> float:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# B3: avisos al coach (tabla `notificaciones`, la de la campana; sin correo)
+#   Los `tipo` tienen que entrar en `notificaciones.tipo` (VARCHAR(20)).
+# ─────────────────────────────────────────────────────────────────────────────
+
+TIPO_CLASE_ASIGNADA = "clase_asignada"      # 14
+TIPO_CLASE_REASIGNADA = "clase_reasignada"  # 16
+TIPO_CLASE_LIBERADA = "clase_liberada"      # 14
+
+
+def descripcion_clase(disciplina: Optional[str], fecha, hora_inicio) -> str:
+    """Texto corto de la clase para los avisos: 'clase de CrossFit del 2026-04-14 19:00'."""
+    partes = ["clase"]
+    if disciplina:
+        partes.append(f"de {disciplina}")
+    partes.append(f"del {fecha}")
+    if hora_inicio:
+        partes.append(str(hora_inicio)[:5])
+    return " ".join(partes)
+
+
+def mensaje_clase_asignada(descripcion: str, admin_nombre: str,
+                           emergencia: bool = False) -> str:
+    """Aviso al coach que RECIBE la clase (🟦 o ⚠️ si es cobertura)."""
+    if emergencia:
+        return (f"⚠️ Cobertura de emergencia: {admin_nombre} te asignó la "
+                f"{descripcion}.")
+    return f"🟦 {admin_nombre} te asignó la {descripcion}."
+
+
+def mensaje_clase_reasignada(descripcion: str, admin_nombre: str,
+                             coach_nuevo: str) -> str:
+    """Aviso al coach que PIERDE la clase: se la pasaron a otro."""
+    return (f"🔁 {admin_nombre} reasignó la {descripcion} a {coach_nuevo}. "
+            f"Ya no está en tu panel.")
+
+
+def mensaje_clase_liberada(descripcion: str, admin_nombre: str) -> str:
+    """Aviso al coach al que le QUITARON la clase (queda 🔴 sin coach)."""
+    return f"🔴 {admin_nombre} te quitó la {descripcion}."
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Marcar / liberar UNA clase (en memoria; el llamador commitea)
 # ─────────────────────────────────────────────────────────────────────────────
 

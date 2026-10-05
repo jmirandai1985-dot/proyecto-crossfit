@@ -242,3 +242,45 @@ def test_migracion_043_un_solo_vigente_por_horario():
     m043 = _fuente_migracion("043_horarios_coach_vigencia.py")
     assert 'unique=True, postgresql_where=sa.text("vigente_hasta IS NULL")' in m043
     assert "ck_horarios_coach_vigencia" in m043
+
+
+# ── B3: avisos al coach (campana, sin correo) ──────────────────────────────
+
+def test_los_tipos_de_aviso_entran_en_la_columna():
+    """`notificaciones.tipo` es VARCHAR(20): los tipos de B3 tienen que caber."""
+    for tipo in (asig.TIPO_CLASE_ASIGNADA, asig.TIPO_CLASE_REASIGNADA,
+                 asig.TIPO_CLASE_LIBERADA):
+        assert len(tipo) <= 20, tipo
+
+
+def test_descripcion_de_clase_para_los_avisos():
+    assert asig.descripcion_clase("CrossFit", "2026-04-14", "19:00:00") == \
+        "clase de CrossFit del 2026-04-14 19:00"
+    # Sin disciplina (dato sucio) sigue siendo legible.
+    assert asig.descripcion_clase(None, "2026-04-14", "19:00:00") == \
+        "clase del 2026-04-14 19:00"
+
+
+def test_mensaje_asignada_normal_y_emergencia():
+    normal = asig.mensaje_clase_asignada("clase de CrossFit del 2026-04-14 19:00",
+                                         "Ana Admin")
+    assert normal.startswith("🟦 Ana Admin te asignó la clase de CrossFit")
+    emergencia = asig.mensaje_clase_asignada("clase de CrossFit del 2026-04-14 19:00",
+                                             "Ana Admin", emergencia=True)
+    assert "Cobertura de emergencia" in emergencia
+    assert "Ana Admin" in emergencia
+
+
+def test_mensaje_reasignada_nombra_al_coach_nuevo():
+    texto = asig.mensaje_clase_reasignada("clase de CrossFit del 2026-04-14 19:00",
+                                          "Ana Admin", "Pedro")
+    assert "🔁" in texto
+    assert "Pedro" in texto
+    assert "Ya no está en tu panel" in texto
+
+
+def test_mensaje_liberada():
+    texto = asig.mensaje_clase_liberada("clase de CrossFit del 2026-04-14 19:00",
+                                        "Ana Admin")
+    assert texto.startswith("🔴 Ana Admin te quitó la clase de CrossFit")
+

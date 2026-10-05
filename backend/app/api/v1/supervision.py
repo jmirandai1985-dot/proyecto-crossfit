@@ -9,9 +9,26 @@ from datetime import date, datetime, timedelta
 from app.db.database import get_db
 from typing import List, Optional
 from pydantic import BaseModel
-from app.core.dependencies import get_current_admin
+from app.core.dependencies import get_current_admin, verificar_coach_disciplina
 from app.core.estados import es_cancelada   # 'cancelada' tampoco es una reserva activa
-from app.services.asignaciones_clases import marca_cobertura, porcentaje_cobertura
+from app.models.clase import Clase
+from app.models.coach_disciplina import CoachDisciplina
+from app.models.usuario import RolUsuario, Usuario
+from app.services import asignaciones_clases as asignaciones
+from app.services import notificaciones_panel
+from app.services.asignaciones_clases import (
+    ORIGEN_ADMIN,
+    TIPO_CLASE_ASIGNADA,
+    TIPO_CLASE_LIBERADA,
+    TIPO_CLASE_REASIGNADA,
+    descripcion_clase,
+    marca_cobertura,
+    mensaje_clase_asignada,
+    mensaje_clase_liberada,
+    mensaje_clase_reasignada,
+    porcentaje_cobertura,
+)
+from app.services.auditoria_service import registrar_auditoria
 from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
 from app.utils.semana import (
     MAX_DIAS_RANGO,
@@ -640,3 +657,208 @@ def listar_cupos_disciplinas(
         }
         for r in rows
     ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ASIGNACIÓN DE EMERGENCIA DEL ADMIN (B3)
+#   🟦 el admin asigna UNA clase; si el coach no dicta esa disciplina queda
+#   registrada la ⚠️ cobertura de emergencia. El coach SIEMPRE se entera por la
+#   campana de su panel (tabla `notificaciones`, sin correo).
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AsignacionEmergenciaRequest(BaseModel):
+    """Body de `POST /supervision/clases/{id}/asignar`."""
+    coach_id: int
+    motivo: Optional[str] = None
+    # Si el coach no dicta la disciplina de la clase: true = se registra la
+    # cobertura de emergencia (⚠️ + aviso a los admins); false = 409.
+    forzar_emergencia: bool = True
+
+
+def _nombre_de_usuario(db: Session, usuario_id) -> str:
+    if not usuario_id:
+        return "otro coach"
+    nombre = db.execute(
+        sql_text("SELECT nombre FROM usuarios WHERE id = :id"), {"id": usuario_id}
+    ).scalar()
+    return nombre or f"Coach #{usuario_id}"
+
+
+def _descripcion_de_clase(db: Session, clase: Clase) -> str:
+    """'clase de CrossFit del 2026-04-14 19:00' para los mensajes de la campana."""
+    disc_nombre = None
+    if clase.disciplina_id:
+        disc_nombre = db.execute(
+            sql_text("SELECT nombre FROM disciplinas WHERE id = :id"),
+            {"id": clase.disciplina_id}).scalar()
+    return descripcion_clase(disc_nombre, clase.fecha, clase.hora_inicio)
+
+@router.post("/clases/{clase_id}/asignar")
+def asignar_coach_emergencia(
+    clase_id: int,
+    body: AsignacionEmergenciaRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """El admin ASIGNA un coach a UNA clase (🟦). Es el camino de **emergencia**.
+
+    - el coach tiene que ser del box y estar activo;
+    - si no dicta esa disciplina: con `forzar_emergencia=true` se registra la
+      cobertura de emergencia (⚠️ + aviso a los admins por el flujo existente) y la
+      marca resultante es `emergencia`; con `false` responde 409;
+    - **avisa al coach** en su campana (sin correo) y, si la clase era de otro coach,
+      también avisa a ese (se la reasignaron);
+    - no toca las demás clases del horario (eso es `POST /clases/{id}/tomar?alcance=horario`).
+    """
+    tenant_id = current_user["tenant_id"]
+    admin_id = current_user["usuario_id"]
+    admin_nombre = current_user.get("nombre") or f"Admin #{admin_id}"
+
+    clase = db.query(Clase).filter(
+        Clase.id == clase_id, Clase.tenant_id == tenant_id).first()
+    if not clase:
+        raise HTTPException(status_code=404, detail="Clase no encontrada")
+    if clase.cancelada:
+        raise HTTPException(status_code=409, detail="Esa clase está cancelada")
+    hoy = hoy_santiago()
+    if clase.fecha < hoy:
+        raise HTTPException(
+            status_code=409, detail="No puedes asignar una clase que ya pasó")
+
+    coach = db.query(Usuario).filter(
+        Usuario.id == body.coach_id,
+        Usuario.tenant_id == tenant_id,
+    ).first()
+    if not coach:
+        raise HTTPException(
+            status_code=404, detail="Ese coach no existe en este box")
+    if coach.rol != RolUsuario.coach:
+        raise HTTPException(
+            status_code=409, detail=f"{coach.nombre} no tiene rol de coach")
+    if coach.estado != "activo":
+        raise HTTPException(
+            status_code=409, detail=f"{coach.nombre} no está activo")
+    coach_nombre = coach.nombre or f"Coach #{coach.id}"
+    if clase.coach_id == coach.id:
+        raise HTTPException(
+            status_code=409, detail=f"Esa clase ya es de {coach_nombre}")
+
+    previo_id = clase.coach_id
+    previo_nombre = _nombre_de_usuario(db, previo_id) if previo_id else None
+
+    # ── ¿Hay que registrar cobertura de emergencia? ──
+    es_emergencia = False
+    if clase.disciplina_id:
+        pertenece = db.query(CoachDisciplina).filter(
+            CoachDisciplina.coach_id == coach.id,
+            CoachDisciplina.disciplina_id == clase.disciplina_id,
+            CoachDisciplina.activo == True,  # noqa: E712
+        ).first() is not None
+        if not pertenece:
+            if not body.forzar_emergencia:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"{coach_nombre} no dicta esa disciplina: confirma la "
+                           f"cobertura de emergencia (forzar_emergencia=true)",
+                )
+            verificar_coach_disciplina(
+                coach.id, clase.disciplina_id, db, modo_emergencia=True,
+                clase_id=clase_id, accion="asignar_coach_admin",
+                tenant_id=tenant_id)
+            es_emergencia = True
+
+    # ── Marca 🟦 + avisos, todo en la misma transacción ──
+    asignaciones.marcar_clase(clase, coach.id, ORIGEN_ADMIN, quien_id=admin_id)
+    descripcion = _descripcion_de_clase(db, clase)
+
+    avisados = []
+    if notificaciones_panel.notificar_usuario(
+        db, coach.id, TIPO_CLASE_ASIGNADA,
+        mensaje_clase_asignada(descripcion, admin_nombre, es_emergencia),
+        commit=False,
+    ):
+        avisados.append(coach.id)
+    if previo_id and previo_id != coach.id:
+        if notificaciones_panel.notificar_usuario(
+            db, previo_id, TIPO_CLASE_REASIGNADA,
+            mensaje_clase_reasignada(descripcion, admin_nombre, coach_nombre),
+            commit=False,
+        ):
+            avisados.append(previo_id)
+
+    db.commit()
+    db.refresh(clase)
+
+    registrar_auditoria(
+        db, tenant_id=tenant_id, usuario_id=admin_id,
+        accion="asignar_coach_admin", entidad="clase", entidad_id=clase_id,
+        detalle={
+            "coach_id": coach.id,
+            "coach_anterior_id": previo_id,
+            "emergencia": es_emergencia,
+            "motivo": body.motivo,
+            "avisados": avisados,
+        },
+    )
+    return {
+        "ok": True,
+        "clase_id": clase.id,
+        "coach_id": coach.id,
+        "coach_nombre": coach_nombre,
+        "coach_anterior_id": previo_id,
+        "coach_anterior_nombre": previo_nombre,
+        "origen": ORIGEN_ADMIN,
+        "emergencia": es_emergencia,
+        "marca": marca_cobertura(clase.coach_id, clase.asignacion_origen,
+                                 es_emergencia),
+        "avisados": avisados,
+    }
+
+@router.delete("/clases/{clase_id}/asignar")
+def quitar_coach_de_clase(
+    clase_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """El admin QUITA el coach de una clase (queda 🔴 sin coach) y avisa al coach."""
+    tenant_id = current_user["tenant_id"]
+    admin_id = current_user["usuario_id"]
+    admin_nombre = current_user.get("nombre") or f"Admin #{admin_id}"
+
+    clase = db.query(Clase).filter(
+        Clase.id == clase_id, Clase.tenant_id == tenant_id).first()
+    if not clase:
+        raise HTTPException(status_code=404, detail="Clase no encontrada")
+    if clase.coach_id is None:
+        raise HTTPException(
+            status_code=409, detail="Esa clase no tiene coach asignado")
+    hoy = hoy_santiago()
+    if clase.fecha < hoy:
+        raise HTTPException(
+            status_code=409,
+            detail="No puedes quitar el coach de una clase que ya pasó")
+
+    previo_id = clase.coach_id
+    descripcion = _descripcion_de_clase(db, clase)
+    asignaciones.liberar_clase(clase)
+    notificado = notificaciones_panel.notificar_usuario(
+        db, previo_id, TIPO_CLASE_LIBERADA,
+        mensaje_clase_liberada(descripcion, admin_nombre), commit=False)
+
+    db.commit()
+    db.refresh(clase)
+
+    registrar_auditoria(
+        db, tenant_id=tenant_id, usuario_id=admin_id,
+        accion="quitar_coach_admin", entidad="clase", entidad_id=clase_id,
+        detalle={"coach_anterior_id": previo_id,
+                 "notificado": bool(notificado)},
+    )
+    return {
+        "ok": True,
+        "clase_id": clase.id,
+        "coach_anterior_id": previo_id,
+        "marca": marca_cobertura(clase.coach_id),
+        "notificado": bool(notificado),
+    }
+

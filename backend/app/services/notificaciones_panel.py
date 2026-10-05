@@ -9,10 +9,10 @@ a mano:
   * cobertura de emergencia -> core/dependencies.py
     (tipo 'emergencia', destinatarios = los administradores del box).
 
-`notificaciones` NO tiene `tenant_id`: sigue al alumno (`alumno_id`). El
-aislamiento entre boxes se logra eligiendo bien los destinatarios — por eso
-`notificar_admins_del_tenant` filtra por `usuarios.tenant_id`, igual que el
-resto del proyecto (ver tests/test_notificaciones_tenant.py).
+`notificaciones` NO tiene `tenant_id`: sigue al DESTINATARIO (`alumno_id` es el id de
+usuario, sin importar su rol). El aislamiento entre boxes se logra eligiendo bien los
+destinatarios — por eso `notificar_admins_del_tenant` filtra por `usuarios.tenant_id`,
+igual que el resto del proyecto (ver tests/test_notificaciones_tenant.py).
 
 Dos reglas de este módulo:
 
@@ -36,7 +36,7 @@ from app.models.usuario import RolUsuario, Usuario
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["notificar_alumno", "notificar_admins_del_tenant"]
+__all__ = ["notificar_alumno", "notificar_admins_del_tenant", "notificar_usuario"]
 
 
 def _rollback_si_propio(db: Session, commit: bool) -> None:
@@ -53,19 +53,20 @@ def _rollback_si_propio(db: Session, commit: bool) -> None:
         pass
 
 
-def notificar_alumno(
-    db: Session, alumno_id: int, tipo: str, mensaje: str, *, commit: bool = True
+def notificar_usuario(
+    db: Session, usuario_id: int, tipo: str, mensaje: str, *, commit: bool = True
 ) -> Optional[Notificacion]:
-    """Crea el aviso de UN alumno (`alumno_id` = destinatario).
+    """Crea el aviso de UN usuario cualquiera (alumno, coach o admin).
 
-    Devuelve la `Notificacion` creada, o `None` si no se pudo (best-effort: no
-    levanta excepción). `alumno_id` vacío/None -> `None` sin tocar la BD.
+    Es la primitiva genérica: `alumno_id` en la tabla es "el destinatario".
+    Devuelve la `Notificacion` creada, o `None` si no se pudo (best-effort).
+    `usuario_id` vacío/None -> `None` sin tocar la BD.
     """
-    if not alumno_id:
+    if not usuario_id:
         return None
     try:
         notificacion = Notificacion(
-            alumno_id=alumno_id, tipo=tipo, mensaje=mensaje, leida=False)
+            alumno_id=usuario_id, tipo=tipo, mensaje=mensaje, leida=False)
         db.add(notificacion)
         if commit:
             db.commit()
@@ -74,10 +75,18 @@ def notificar_alumno(
         return notificacion
     except Exception as e:
         logger.warning(
-            f"No se pudo crear la notificación '{tipo}' del alumno "
-            f"{alumno_id}: {e}")
+            f"No se pudo crear la notificación '{tipo}' del usuario "
+            f"{usuario_id}: {e}")
         _rollback_si_propio(db, commit)
         return None
+
+
+def notificar_alumno(
+    db: Session, alumno_id: int, tipo: str, mensaje: str, *, commit: bool = True
+) -> Optional[Notificacion]:
+    """Crea el aviso de UN alumno (`alumno_id` = destinatario). Alias de
+    `notificar_usuario` con el nombre del caso más común (Bazar, planes)."""
+    return notificar_usuario(db, alumno_id, tipo, mensaje, commit=commit)
 
 
 def notificar_admins_del_tenant(

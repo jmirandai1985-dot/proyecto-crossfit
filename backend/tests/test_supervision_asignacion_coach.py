@@ -319,3 +319,134 @@ def test_un_coach_no_puede_soltar_la_clase_de_otro():
     finally:
         _borrar_clase(clase_id)
 
+
+# ── B3: asignación de emergencia del admin (🟦) + campana del coach ────────
+
+def _avisos_de(usuario_id, tipo):
+    return _all("SELECT id, tipo, mensaje, leida FROM notificaciones "
+                "WHERE alumno_id = :u AND tipo = :t ORDER BY id DESC",
+                u=usuario_id, t=tipo)
+
+
+def _borrar_avisos(filas):
+    for f in filas:
+        _exec("DELETE FROM notificaciones WHERE id = :id", id=f.id)
+
+
+def test_admin_asigna_clase_y_le_avisa_al_coach():
+    admin = _admin_activo()
+    coach = _coach_activo()
+    horario = _horario_con_coach()
+    clase_id = _crear_clase(HOY + timedelta(days=10), horario)
+    try:
+        r = requests.post(f"{BASE}/supervision/clases/{clase_id}/asignar",
+                          json={"coach_id": coach.id, "motivo": "test"},
+                          headers=_token(admin, "administrador"))
+        assert r.status_code == 200, r.text
+        assert r.json()["coach_id"] == coach.id
+        assert r.json()["origen"] == "admin"
+        assert r.json()["marca"] in ("admin", "emergencia")
+        assert coach.id in r.json()["avisados"]
+
+        en_bd = _one("SELECT coach_id, asignacion_origen, asignada_por "
+                     "FROM clases WHERE id = :id", id=clase_id)
+        assert en_bd.coach_id == coach.id
+        assert en_bd.asignacion_origen == "admin"
+        assert en_bd.asignada_por == admin.id
+
+        avisos = _avisos_de(coach.id, "clase_asignada")
+        assert avisos, "el coach no recibió el aviso en su campana"
+        assert "clase" in avisos[0].mensaje
+        assert avisos[0].leida is False
+        _borrar_avisos(avisos)
+    finally:
+        _borrar_clase(clase_id)
+
+
+def test_admin_reasigna_y_avisa_al_coach_nuevo_y_al_anterior():
+    admin = _admin_activo()
+    coach = _coach_activo()
+    otro = _one("SELECT id, nombre FROM usuarios WHERE tenant_id = :t "
+                "AND rol::text = 'coach' AND id <> :c LIMIT 1",
+                t=TENANT_ID, c=coach.id)
+    if not otro:
+        pytest.skip("Hace falta un segundo coach en TEST")
+    horario = _horario_con_coach()
+    clase_id = _crear_clase(HOY + timedelta(days=11), horario)
+    _exec("UPDATE clases SET coach_id = :c WHERE id = :id", c=otro.id, id=clase_id)
+    try:
+        r = requests.post(f"{BASE}/supervision/clases/{clase_id}/asignar",
+                          json={"coach_id": coach.id},
+                          headers=_token(admin, "administrador"))
+        assert r.status_code == 200, r.text
+        assert r.json()["coach_anterior_id"] == otro.id
+
+        avisos_nuevo = _avisos_de(coach.id, "clase_asignada")
+        avisos_anterior = _avisos_de(otro.id, "clase_reasignada")
+        assert avisos_nuevo and avisos_anterior
+        assert coach.nombre in avisos_anterior[0].mensaje
+        _borrar_avisos(avisos_nuevo)
+        _borrar_avisos(avisos_anterior)
+    finally:
+        _borrar_clase(clase_id)
+
+
+def test_admin_quita_al_coach_y_le_avisa():
+    admin = _admin_activo()
+    coach = _coach_activo()
+    horario = _horario_con_coach()
+    clase_id = _crear_clase(HOY + timedelta(days=13), horario)
+    _exec("UPDATE clases SET coach_id = :c, asignacion_origen = 'coach', "
+          "asignada_por = :c WHERE id = :id", c=coach.id, id=clase_id)
+    try:
+        r = requests.delete(f"{BASE}/supervision/clases/{clase_id}/asignar",
+                            headers=_token(admin, "administrador"))
+        assert r.status_code == 200, r.text
+        assert r.json()["marca"] == "sin_coach"
+        assert r.json()["notificado"] is True
+
+        en_bd = _one("SELECT coach_id, asignacion_origen FROM clases WHERE id = :id",
+                     id=clase_id)
+        assert en_bd.coach_id is None and en_bd.asignacion_origen is None
+        avisos = _avisos_de(coach.id, "clase_liberada")
+        assert avisos
+        _borrar_avisos(avisos)
+    finally:
+        _borrar_clase(clase_id)
+
+
+def test_asignar_un_coach_de_otra_disciplina_marca_emergencia():
+    admin = _admin_activo()
+    horario = _horario_con_coach()
+    ajeno = _one(
+        "SELECT u.id, u.nombre FROM usuarios u "
+        "WHERE u.tenant_id = :t AND u.rol::text = 'coach' AND u.estado = 'activo' "
+        "AND NOT EXISTS (SELECT 1 FROM coach_disciplinas cd WHERE cd.coach_id = u.id "
+        "  AND cd.disciplina_id = :d AND cd.activo = true) "
+        "ORDER BY u.id LIMIT 1", t=TENANT_ID, d=horario.disciplina_id)
+    if not ajeno:
+        pytest.skip("No hay un coach de otra disciplina en TEST")
+    clase_id = _crear_clase(HOY + timedelta(days=14), horario)
+    try:
+        # Sin forzar: 409 (el admin tiene que confirmar la cobertura).
+        r = requests.post(f"{BASE}/supervision/clases/{clase_id}/asignar",
+                          json={"coach_id": ajeno.id, "forzar_emergencia": False},
+                          headers=_token(admin, "administrador"))
+        assert r.status_code == 409, r.text
+
+        r = requests.post(f"{BASE}/supervision/clases/{clase_id}/asignar",
+                          json={"coach_id": ajeno.id, "forzar_emergencia": True},
+                          headers=_token(admin, "administrador"))
+        assert r.status_code == 200, r.text
+        assert r.json()["emergencia"] is True
+        assert r.json()["marca"] == "emergencia"
+
+        cobertura = _one("SELECT c.id FROM cobertura_emergencia c "
+                         "WHERE c.clase_id = :id", id=clase_id)
+        assert cobertura is not None
+        _borrar_avisos(_avisos_de(ajeno.id, "clase_asignada"))
+    finally:
+        _exec("DELETE FROM cobertura_emergencia WHERE clase_id = :id", id=clase_id)
+        _borrar_clase(clase_id)
+
+
