@@ -80,6 +80,11 @@ class ClaseListItem(BaseModel):
     horario_coach_nombre: Optional[str] = None
     # Marca lista para pintar: sin_coach | coach | admin | emergencia
     marca: Optional[str] = None
+    # Horario recurrente del que salió la clase (migración 042/043). El panel
+    # Coach lo necesita para ofrecer "tomar / soltar TODOS los [día] [hora]":
+    # esa opción sólo se ofrece si la clase viene de un horario fijo. Sin
+    # declararlo acá el response_model lo descarta (mismo caso que cupo_original).
+    horario_base_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 

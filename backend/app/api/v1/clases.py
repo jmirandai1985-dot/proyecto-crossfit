@@ -230,6 +230,11 @@ def listar_clases(
             "hora_fin": row.hora_fin,
             "disciplina_id": row.disciplina_id,
             "coach_id": row.coach_id,
+            # B4: horario recurrente de la clase. La consulta ya lo traía, pero al
+            # no viajar en la respuesta el panel Coach no podía ofrecer
+            # "tomar/soltar TODOS los [día] [hora]" (esa opción sólo tiene
+            # sentido si la clase viene de un horario fijo).
+            "horario_base_id": row.horario_base_id,
             "wod_id": row.wod_id,
             # Título del WOD publicado ('' si no tiene): la tarjeta del panel Coach
             # lo usa para mostrar el nombre real en vez de "WOD #<id>".

@@ -41,6 +41,51 @@ function parseHora(h) {
     return parseInt(partes[0]) || -1;
 }
 
+// ── B4: estado + acciones del coach de UNA clase del día ─────────────────────
+// Se usa en las DOS listas del día (con y sin WOD). `coach_id` = el coach logueado:
+//   * la clase es suya          -> puede soltarla;
+//   * la clase no tiene coach   -> puede tomarla;
+//   * la tiene otro coach       -> sólo se muestra quién la tiene (el backend
+//     responde 409 "ya la tiene X"; reasignarla es tarea del admin en Supervisión).
+// Todo click corta la propagación porque la tarjeta con WOD abre el detalle.
+function CoachClaseAcciones({ clase, coachId, onTomar, onSoltar }) {
+    const mia = clase.coach_id != null && clase.coach_id === coachId;
+    const libre = clase.coach_id == null;
+    const texto = mia ? '👤 Tú' : libre ? '⚠️ Sin coach'
+        : `👤 ${clase.coach_nombre || `Coach #${clase.coach_id}`}`;
+    const color = mia ? 'text-emerald-700' : libre ? 'text-red-600 font-bold' : 'text-gray-600';
+    return (
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            <span
+                className={`text-xs ${color}`}
+                title={clase.cobertura_emergencia ? 'Cubierta en modo emergencia' : undefined}
+            >
+                {texto}{clase.cobertura_emergencia ? ' ⚠️' : ''}
+            </span>
+            {libre && (
+                <button
+                    type="button"
+                    data-testid={`tomar-clase-${clase.id}`}
+                    onClick={() => onTomar(clase)}
+                    className="px-2.5 py-1 bg-emerald-600 text-white rounded text-xs font-bold hover:bg-emerald-700"
+                >
+                    ✋ Tomar
+                </button>
+            )}
+            {mia && (
+                <button
+                    type="button"
+                    data-testid={`soltar-clase-${clase.id}`}
+                    onClick={() => onSoltar(clase)}
+                    className="px-2.5 py-1 bg-gray-200 text-gray-700 rounded text-xs font-bold hover:bg-gray-300"
+                >
+                    Soltar
+                </button>
+            )}
+        </div>
+    );
+}
+
 export default function GestionClases() {
     const navigate = useNavigate();
     const location = useLocation();
@@ -79,6 +124,16 @@ export default function GestionClases() {
     const [modoEmergencia, setModoEmergencia] = useState(false);
     const [confirmarEmergencia, setConfirmarEmergencia] = useState(null); // { disciplinaNombre }
     const [coachDisciplinas, setCoachDisciplinas] = useState([]); // disciplinas asignadas al coach
+
+    // ── B4: TOMAR / SOLTAR clase desde el panel del coach ──
+    // `accionClase` = { clase, accion: 'tomar'|'soltar', alcance: 'clase'|'horario',
+    //                   cargando, error }  -> modal de alcance ("sólo esta clase /
+    //                   todos los [día] [hora]").
+    // `tomaEmergencia` = { clase, alcance, detalle } -> confirmación de cobertura de
+    //                    emergencia cuando el backend responde 409 (el coach no
+    //                    dicta esa disciplina). Muestra el detalle REAL del 409.
+    const [accionClase, setAccionClase] = useState(null);
+    const [tomaEmergencia, setTomaEmergencia] = useState(null);
 
     // ── TAREA 4: selección múltiple de días (semana actual) ──
     const semanaActual = getSemanaActual();
@@ -531,6 +586,65 @@ export default function GestionClases() {
     const diasSinVerificarHora = [...diasSeleccionados].sort().filter(f => alcanceHoraPorDia[f] === undefined);
     const clasesAlcanceDia = [...diasSeleccionados].sort().flatMap(f => clasesAlcance[f] || []);
 
+    // ── B4: TOMAR / SOLTAR una clase del día ─────────────────────────────────
+    /** Nombre del día de semana de una fecha 'YYYY-MM-DD' (NOMBRES_DIAS_LARGO es 0=Domingo). */
+    const diaSemanaDe = (fechaStr) => {
+        const d = new Date(`${fechaStr}T12:00:00`);
+        return Number.isNaN(d.getTime()) ? '' : NOMBRES_DIAS_LARGO[d.getDay()];
+    };
+
+    /** ¿La clase es de una disciplina que este coach NO dicta? (→ modo emergencia). */
+    const esDeOtraDisciplina = (c) => (
+        coachDisciplinas.length > 0 && c.disciplina_id != null
+        && !coachDisciplinas.includes(c.disciplina_id)
+    );
+
+    const abrirAccionClase = (clase, accion) => {
+        setMsg({ tipo: '', texto: '' });
+        setTomaEmergencia(null);
+        // Sin horario recurrente no existe "todos los [día] [hora]": queda sólo la clase.
+        setAccionClase({
+            clase, accion, alcance: 'clase', cargando: false, error: '',
+        });
+    };
+
+    // Ejecuta tomar/soltar. `alcance='horario'` aplica a las clases futuras del
+    // horario recurrente; `modoEmergencia` es el segundo intento del 409 (el coach
+    // no dicta esa disciplina: queda registrada la cobertura de emergencia).
+    const ejecutarAccionClase = async (clase, accion, alcance, modoEmergencia = false) => {
+        setAccionClase((prev) => (prev ? { ...prev, alcance, cargando: true, error: '' } : prev));
+        setTomaEmergencia(null);
+        try {
+            const params = { alcance };
+            if (accion === 'tomar' && modoEmergencia) params.modo_emergencia = true;
+            const r = await api.post(`${API_BASE}/clases/${clase.id}/${accion}`, null, { params });
+            const data = r.data || {};
+            const cuantas = accion === 'tomar' ? (data.clases_tocadas ?? 1) : (data.clases_liberadas ?? 1);
+            const detalle = alcance === 'horario'
+                ? `${cuantas} clase(s) del horario ${diaSemanaDe(fechaCortaDe(clase) || fechaClases)} ${horaCorta(clase.hora_inicio)}`
+                : `La clase de ${horaCorta(clase.hora_inicio)} (${clase.disciplina_nombre || '-'})`;
+            setAccionClase(null);
+            setMsg({
+                tipo: 'exito',
+                texto: accion === 'tomar'
+                    ? `✅ ${detalle} quedó a tu nombre.`
+                    : `✅ ${detalle} quedó sin coach.`,
+            });
+            await recargarVistaDia(fechaClases);
+        } catch (e) {
+            const status = e.response?.status;
+            const detalle = e.response?.data?.detail || e.message || 'No se pudo completar la acción';
+            setAccionClase((prev) => (prev ? { ...prev, cargando: false, error: detalle } : prev));
+            // 409 típico: "no dictas esa disciplina" → se ofrece el modo emergencia
+            // (mismo camino auditado que la Supervisión del admin). Cualquier otro
+            // 409 (clase pasada, ya la tiene otro coach) se queda como mensaje:
+            // reintentar en emergencia volvería a fallar.
+            if (accion === 'tomar' && status === 409 && esDeOtraDisciplina(clase)) {
+                setTomaEmergencia({ clase, alcance, detalle });
+            }
+        }
+    };
+
     return (
         <Layout>
             <div className="p-6 max-w-6xl mx-auto">
@@ -788,12 +902,20 @@ export default function GestionClases() {
                                                                 <span className="text-gray-500">{c.disciplina_nombre || '-'}</span>
                                                                 <span className="text-sm text-gray-400">{(c.asistentes_confirmados || 0)}/{c.cupo_maximo || '?'}</span>
                                                             </div>
-                                                            <button
-                                                                onClick={() => abrirFormularioClase(c)}
-                                                                className="px-3 py-1.5 bg-emerald-600 text-white rounded text-sm font-medium hover:bg-emerald-700 transition-colors"
-                                                            >
-                                                                📝 Publicar WOD
-                                                            </button>
+                                                            <div className="flex items-center gap-2">
+                                                                <CoachClaseAcciones
+                                                                    clase={c}
+                                                                    coachId={coach_id}
+                                                                    onTomar={(x) => abrirAccionClase(x, 'tomar')}
+                                                                    onSoltar={(x) => abrirAccionClase(x, 'soltar')}
+                                                                />
+                                                                <button
+                                                                    onClick={() => abrirFormularioClase(c)}
+                                                                    className="px-3 py-1.5 bg-emerald-600 text-white rounded text-sm font-medium hover:bg-emerald-700 transition-colors"
+                                                                >
+                                                                    📝 Publicar WOD
+                                                                </button>
+                                                            </div>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -826,7 +948,15 @@ export default function GestionClases() {
                                                                     <span className="text-gray-500">{c.disciplina_nombre || '-'}</span>
                                                                     {enCurso && <span className="px-2 py-0.5 bg-emerald-500 text-white text-xs rounded-full font-bold animate-pulse">EN CURSO</span>}
                                                                 </div>
+                                                            <div className="flex items-center gap-3">
+                                                                <CoachClaseAcciones
+                                                                    clase={c}
+                                                                    coachId={coach_id}
+                                                                    onTomar={(x) => abrirAccionClase(x, 'tomar')}
+                                                                    onSoltar={(x) => abrirAccionClase(x, 'soltar')}
+                                                                />
                                                                 <div className="text-sm text-gray-500">{(c.asistentes_confirmados || 0)}/{c.cupo_maximo || '?'}</div>
+                                                            </div>
                                                             </div>
                                                             <button
                                                                 type="button"
@@ -862,6 +992,112 @@ export default function GestionClases() {
                                 )}
                             </div>
                         )}
+                    </div>
+                )}
+
+                {/* ── B4: modal de alcance al TOMAR/SOLTAR una clase ── */}
+                {accionClase && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+                        onClick={() => { if (!accionClase.cargando) setAccionClase(null); }}>
+                        <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full border-2 border-emerald-300"
+                            onClick={(e) => e.stopPropagation()}>
+                            <h2 className="text-lg font-bold mb-1">
+                                {accionClase.accion === 'tomar' ? '✋ Tomar clase' : '🖐️ Soltar clase'}
+                            </h2>
+                            <p className="text-sm text-gray-600 mb-4" data-testid="accion-clase-resumen">
+                                {diaSemanaDe(fechaCortaDe(accionClase.clase))} {fechaCortaDe(accionClase.clase)} ·{' '}
+                                {horaCorta(accionClase.clase.hora_inicio)}-{horaCorta(accionClase.clase.hora_fin)} ·{' '}
+                                {accionClase.clase.disciplina_nombre || '-'} · cupo{' '}
+                                {accionClase.clase.asistentes_confirmados || 0}/{accionClase.clase.cupo_maximo || '?'}
+                            </p>
+                            <p className="text-sm text-gray-500 mb-4">
+                                {accionClase.accion === 'tomar'
+                                    ? 'La clase quedará a tu nombre (✅ en Supervisión).'
+                                    : 'La clase quedará sin coach (🔴 en Supervisión).'}
+                            </p>
+
+                            <div className="space-y-2 mb-4">
+                                <button type="button" data-testid="alcance-clase"
+                                    onClick={() => setAccionClase((p) => ({ ...p, alcance: 'clase' }))}
+                                    disabled={accionClase.cargando}
+                                    className={`w-full text-left p-3 rounded-lg border-2 transition-all ${accionClase.alcance === 'clase' ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' : 'border-gray-200 hover:border-emerald-300'}`}>
+                                    <span className="block text-sm font-bold text-gray-900">Sólo esta clase</span>
+                                    <span className="block text-xs text-gray-600 mt-0.5">
+                                        {diaSemanaDe(fechaCortaDe(accionClase.clase))} {fechaCortaDe(accionClase.clase)} — 1 clase.
+                                    </span>
+                                </button>
+                                <button type="button" data-testid="alcance-horario"
+                                    disabled={!accionClase.clase.horario_base_id || accionClase.cargando}
+                                    onClick={() => setAccionClase((p) => ({ ...p, alcance: 'horario' }))}
+                                    className={`w-full text-left p-3 rounded-lg border-2 transition-all ${!accionClase.clase.horario_base_id
+                                        ? 'border-gray-200 bg-gray-50 cursor-not-allowed opacity-60'
+                                        : accionClase.alcance === 'horario'
+                                            ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-200'
+                                            : 'border-gray-200 hover:border-orange-300'}`}>
+                                    <span className="block text-sm font-bold text-gray-900">
+                                        Todos los {diaSemanaDe(fechaCortaDe(accionClase.clase))} {horaCorta(accionClase.clase.hora_inicio)}
+                                    </span>
+                                    <span className="block text-xs text-gray-600 mt-0.5">
+                                        {accionClase.clase.horario_base_id
+                                            ? 'Las clases futuras de ese horario y las que se generen después.'
+                                            : 'Esta clase no viene de un horario fijo.'}
+                                    </span>
+                                </button>
+                            </div>
+
+                            {accionClase.error && (
+                                <div className="mb-4 p-3 rounded text-sm bg-red-100 text-red-800 border-l-4 border-red-500"
+                                    data-testid="accion-clase-error">
+                                    {accionClase.error}
+                                </div>
+                            )}
+
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => ejecutarAccionClase(accionClase.clase, accionClase.accion, accionClase.alcance)}
+                                    disabled={accionClase.cargando}
+                                    data-testid="confirmar-accion-clase"
+                                    className="flex-1 py-2 bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 disabled:opacity-50">
+                                    {accionClase.cargando ? 'Procesando…'
+                                        : accionClase.accion === 'tomar' ? '✅ Tomar' : 'Soltar'}
+                                </button>
+                                <button onClick={() => setAccionClase(null)} disabled={accionClase.cargando}
+                                    className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 disabled:opacity-50">
+                                    Cancelar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* ── B4: cobertura de emergencia (se muestra el 409 tal cual) ── */}
+                {tomaEmergencia && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-60"
+                        onClick={() => setTomaEmergencia(null)}>
+                        <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full border-2 border-red-400"
+                            onClick={(e) => e.stopPropagation()}>
+                            <h2 className="text-lg font-bold text-red-700 mb-2">⚠️ Cobertura de emergencia</h2>
+                            <p className="text-sm text-gray-700 mb-3" data-testid="emergencia-detalle">
+                                {tomaEmergencia.detalle}
+                            </p>
+                            <p className="text-sm text-gray-500 mb-5">
+                                Puedes cubrirla igual: la clase queda a tu nombre y la cobertura de
+                                emergencia queda registrada en la auditoría para Supervisión.
+                                {tomaEmergencia.alcance === 'horario' && ` El alcance elegido (todos los ${diaSemanaDe(fechaCortaDe(tomaEmergencia.clase))} ${horaCorta(tomaEmergencia.clase.hora_inicio)}) se mantiene.`}
+                            </p>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => ejecutarAccionClase(tomaEmergencia.clase, 'tomar', tomaEmergencia.alcance, true)}
+                                    data-testid="confirmar-emergencia-clase"
+                                    className="flex-1 py-2 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700">
+                                    ✅ Sí, cubrir como emergencia
+                                </button>
+                                <button onClick={() => setTomaEmergencia(null)}
+                                    className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300">
+                                    Cancelar
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 )}
 

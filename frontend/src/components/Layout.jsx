@@ -302,11 +302,12 @@ const Layout = ({ children }) => {
                             <h1 className="text-lg font-bold text-white">URBAN BOX</h1>
                         </div>
                         <div className="flex items-center gap-4">
-                            {/* N-2: campana del alumno y del ADMIN (le entran los
-                                avisos del box: p. ej. pedidos nuevos del Bazar).
-                                El coach sigue con sus alertas en
-                                /admin/notificaciones hasta su propia campana. */}
-                            {(rol === 'alumno' || rol === 'administrador' || rol === 'admin')
+                            {/* N-2/B4: campana del alumno, del ADMIN y del COACH.
+                                Al alumno le entran los avisos de sus planes/pedidos;
+                                al admin, los del box (p. ej. pedidos nuevos del Bazar);
+                                al coach, las clases que le asignan/reasignan/liberan
+                                desde Supervisión (B3) y que lo llevan a su grilla. */}
+                            {(rol === 'alumno' || rol === 'administrador' || rol === 'admin' || rol === 'coach')
                                 && <CampanaNotificaciones />}
                             <span className="text-sm text-zinc-400">
                                 {new Date().toLocaleDateString('es-CL', {

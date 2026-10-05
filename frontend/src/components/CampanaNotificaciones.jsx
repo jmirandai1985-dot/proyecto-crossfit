@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Bell, CheckCheck, Inbox, RefreshCw, X } from 'lucide-react';
 import api from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
 // ══════════════════════════════════════════════════════════════════════════
 //  N-2 — Campana de notificaciones del ALUMNO (Layout del panel alumno)
@@ -33,6 +34,11 @@ const ETIQUETAS_TIPO = {
     pedido_nuevo: 'Pedido nuevo (Bazar)',
     pedido_validado: 'Pedido validado',
     pedido_entregado: 'Pedido entregado',
+    // Supervisión → Coach (B3/B4): el admin asignó, reasignó o liberó una clase
+    // y el coach se entera por SU campana (services/asignaciones_clases.py).
+    clase_asignada: 'Clase asignada',
+    clase_reasignada: 'Clase reasignada',
+    clase_liberada: 'Clase liberada',
 };
 
 // Pantalla propia de cada tipo de aviso: la fila navega al hacer click. El
@@ -42,9 +48,38 @@ const DESTINOS_TIPO = {
     pedido_nuevo: '/admin/pedidos',
     pedido_validado: '/alumno/mis-pedidos',
     pedido_entregado: '/alumno/mis-pedidos',
+    // Los avisos de clase van SIEMPRE a un coach: su grilla de clases.
+    clase_asignada: '/coach/gestion-clases',
+    clase_reasignada: '/coach/gestion-clases',
+    clase_liberada: '/coach/gestion-clases',
+};
+
+// Rol(es) que pueden abrir cada destino. Evita ofrecer (y seguir) un link a una
+// pantalla de otro rol si un aviso llegara a un destinatario inesperado: en ese
+// caso la fila queda sin link, pero se puede leer y marcar como leída.
+// La campana es la MISMA para alumno, admin y coach (Layout.jsx).
+const ROLES_POR_TIPO = {
+    pedido_nuevo: ['administrador', 'admin'],
+    pedido_validado: ['alumno'],
+    pedido_entregado: ['alumno'],
+    clase_asignada: ['coach'],
+    clase_reasignada: ['coach'],
+    clase_liberada: ['coach'],
+};
+
+/** Ruta del aviso para el rol actual (null = la fila NO navega). */
+const destinoDe = (tipo, rol) => {
+    const destino = DESTINOS_TIPO[tipo];
+    if (!destino) return null;
+    const roles = ROLES_POR_TIPO[tipo];
+    if (roles && !roles.includes(rol)) return null;
+    return destino;
 };
 
 const CampanaNotificaciones = () => {
+    // El rol decide si un aviso puede abrir su pantalla (ROLES_POR_TIPO): la
+    // misma campana la usan alumno, admin y —desde B4— el coach.
+    const { rol } = useAuth();
     const [abierto, setAbierto] = useState(false);
     const [noLeidas, setNoLeidas] = useState(0);
     const [contadorError, setContadorError] = useState('');
@@ -133,7 +168,7 @@ const CampanaNotificaciones = () => {
 
     // Ir a la pantalla del aviso (si el tipo tiene una) y cerrar el panel.
     const abrirDestino = (tipo) => {
-        const destino = DESTINOS_TIPO[tipo];
+        const destino = destinoDe(tipo, rol);
         if (!destino) return;
         setAbierto(false);
         navigate(destino);
@@ -239,9 +274,11 @@ const CampanaNotificaciones = () => {
                             </div>
                         ) : (
                             <ul className="divide-y divide-zinc-800">
-                                {notificaciones.map((n) => (
+                                {notificaciones.map((n) => {
+                                    const destino = destinoDe(n.tipo, rol);
+                                    return (
                                     <li key={n.id}
-                                        {...(DESTINOS_TIPO[n.tipo] ? {
+                                        {...(destino ? {
                                             onClick: () => abrirDestino(n.tipo),
                                             role: 'button',
                                             tabIndex: 0,
@@ -252,7 +289,7 @@ const CampanaNotificaciones = () => {
                                                 }
                                             },
                                         } : {})}
-                                        className={`px-4 py-3 ${n.leida ? 'opacity-60' : ''} ${DESTINOS_TIPO[n.tipo] ? 'cursor-pointer hover:bg-zinc-800/60 transition-colors' : ''}`}>
+                                        className={`px-4 py-3 ${n.leida ? 'opacity-60' : ''} ${destino ? 'cursor-pointer hover:bg-zinc-800/60 transition-colors' : ''}`}>
                                         <div className="flex items-start justify-between gap-2">
                                             <div className="min-w-0">
                                                 <p className="text-[11px] uppercase tracking-wide text-orange-400 font-semibold">
@@ -283,7 +320,8 @@ const CampanaNotificaciones = () => {
                                             )}
                                         </div>
                                     </li>
-                                ))}
+                                    );
+                                })}
                             </ul>
                         )}
                     </div>
