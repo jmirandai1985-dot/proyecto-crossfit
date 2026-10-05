@@ -4,14 +4,21 @@ Router de endpoints para Supervision de Clases (admin).
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text as sql_text
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from app.db.database import get_db
 from typing import List, Optional
 from pydantic import BaseModel
 from app.core.dependencies import get_current_admin
 from app.core.estados import es_cancelada   # 'cancelada' tampoco es una reserva activa
+from app.services.asignaciones_clases import marca_cobertura, porcentaje_cobertura
 from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
+from app.utils.semana import (
+    MAX_DIAS_RANGO,
+    fechas_del_rango,
+    nombre_dia,
+    sql_dow_lunes_cero,
+)
 
 router = APIRouter()
 
@@ -103,9 +110,10 @@ def horarios_base_por_disciplina(
     current_user: dict = Depends(get_current_admin),
 ):
     """
-    Devuelve los HORARIOS BASE (tabla `horarios`) de una disciplina con el coach
-    asignado en la clase más reciente de cada horario (patrón semanal real).
-    Fuente: horarios_base, NO la tabla `clases` (instancias generadas).
+    Devuelve las PLANTILLAS de horario (tabla `horarios`, la REAL: `horarios_base` es una
+    tabla legado/zombie sin uso — ver docs/SUPERVISION_CLASES.md) de una disciplina, con
+    el coach de la clase generada más reciente de cada horario (patrón semanal real).
+    Fuente: `horarios` (plantilla), NO la tabla `clases` (instancias generadas).
     Solo admin.
     """
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
@@ -177,9 +185,14 @@ def supervision_grid_semanal(
     lunes = fecha_date - timedelta(days=dia_semana_py)
     domingo = lunes + timedelta(days=6)
 
-    rows = db.execute(sql_text("""
+    # B1 · DOW CONSISTENTE: `EXTRACT(DOW …)` de Postgres es 0=Domingo..6=Sábado; el
+    # resto del proyecto (y el frontend) usa 0=Lunes..6=Domingo. Sin esta conversión
+    # la grilla se mostraba corrida un día. Ver app/utils/semana.py.
+    _dow_lunes_cero = sql_dow_lunes_cero("c.fecha")
+
+    rows = db.execute(sql_text(f"""
         SELECT
-            EXTRACT(DOW FROM c.fecha)::int AS dia_semana,
+            {_dow_lunes_cero} AS dia_semana,
             c.hora_inicio::text,
             c.hora_fin::text,
             c.fecha::text,
@@ -244,6 +257,249 @@ def supervision_grid_semanal(
             }
             for (dia, h_ini, h_fin), clases in sorted(grid.items())
         ]
+    }
+
+
+@router.get("/grilla")
+def supervision_grilla(
+    desde: date = Query(..., description="Primer día del rango (YYYY-MM-DD)"),
+    hasta: date = Query(..., description="Último día del rango (YYYY-MM-DD)"),
+    disciplina_id: Optional[int] = Query(
+        None, description="Filtra una sola disciplina (opcional)"),
+    tenant_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Grilla de Supervisión por RANGO + resumen de cobertura. Solo admin.
+
+    Qué devuelve (contrato para el frontend de Supervisión):
+
+      * `dias`: cada fecha del rango que NO es domingo (`dia_semana` 0=Lunes..6=Domingo,
+        consistente con `date.weekday()` — ver `app/utils/semana.py`);
+      * `plantillas`: las celdas de la tabla `horarios` (activas) de las disciplinas
+        `requiere_coach=true`, para pintar la semana completa aunque falten clases
+        generadas; `marca` dice si esa plantilla tiene coach o no;
+      * `celdas`: las clases REALES del rango agrupadas por (fecha, hora_inicio, hora_fin),
+        cada una con su `marca` (sin_coach / coach / admin / emergencia);
+      * `resumen`: cobertura del rango (total, con/sin coach, por marca, por disciplina).
+
+    Qué NO hace: no genera clases (`POST /horarios/generar-clases-dia`), no escribe nada
+    y no incluye días fuera del rango. `disciplina_id` es opcional.
+
+    B1: el coach de cada `plantilla` sale de la última clase generada de ese horario
+    (igual que `/horarios-base`); B2 lo pasa a leer de `horarios_coach` (el recurrente).
+    """
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
+    tenant_id = current_user["tenant_id"]
+
+    if desde > hasta:
+        raise HTTPException(
+            status_code=400, detail="'desde' no puede ser posterior a 'hasta'")
+    if (hasta - desde).days + 1 > MAX_DIAS_RANGO:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Rango máximo {MAX_DIAS_RANGO} días (se pidió "
+                   f"{(hasta - desde).days + 1})",
+        )
+
+    dias_rango = fechas_del_rango(desde, hasta)
+    if not dias_rango:
+        raise HTTPException(
+            status_code=400,
+            detail="El rango no tiene días hábiles: la grilla es lunes-sábado "
+                   "(los domingos no hay clases)",
+        )
+
+    params = {"tid": tenant_id, "desde": desde, "hasta": hasta}
+    filtro_disc_clases = ""
+    filtro_disc_plantillas = ""
+    if disciplina_id is not None:
+        params["did"] = disciplina_id
+        filtro_disc_clases = "AND c.disciplina_id = :did"
+        filtro_disc_plantillas = "AND h.disciplina_id = :did"
+
+    # ── 1) PLANTILLAS: tabla `horarios` (activa) de disciplinas que requieren coach ──
+    # `horarios_base` NO se usa: es una tabla legado/zombie (docs/SUPERVISION_CLASES.md).
+    plantillas_rows = db.execute(sql_text(f"""
+        SELECT h.id AS horario_id, h.disciplina_id, d.nombre AS disciplina_nombre,
+               h.dia_semana, h.hora_inicio::text AS hora_inicio,
+               h.hora_fin::text AS hora_fin, h.cupo_maximo,
+               ult.coach_id, u.nombre AS coach_nombre
+        FROM horarios h
+        JOIN disciplinas d ON d.id = h.disciplina_id
+        LEFT JOIN LATERAL (
+            SELECT c2.coach_id
+            FROM clases c2
+            WHERE c2.horario_base_id = h.id
+              AND c2.tenant_id = :tid
+              AND c2.cancelada = false
+            ORDER BY c2.fecha DESC, c2.id DESC
+            LIMIT 1
+        ) ult ON true
+        LEFT JOIN usuarios u ON u.id = ult.coach_id
+        WHERE h.tenant_id = :tid
+          AND h.activo = true
+          AND d.activo = true
+          AND d.requiere_coach = true
+          {filtro_disc_plantillas}
+        ORDER BY h.dia_semana, h.hora_inicio, d.nombre
+    """), params).fetchall()
+
+    plantillas = []
+    for r in plantillas_rows:
+        plantillas.append({
+            "horario_id": r.horario_id,
+            "disciplina_id": r.disciplina_id,
+            "disciplina_nombre": r.disciplina_nombre,
+            "dia_semana": r.dia_semana,   # ya viene 0=Lunes (columna de `horarios`)
+            "hora_inicio": r.hora_inicio[:5] if r.hora_inicio else None,
+            "hora_fin": r.hora_fin[:5] if r.hora_fin else None,
+            "cupo_maximo": r.cupo_maximo,
+            "coach_id": r.coach_id,
+            "coach_nombre": r.coach_nombre or None,
+            "marca": marca_cobertura(r.coach_id),
+        })
+
+    # ── 2) CLASES REALES del rango ──
+    _dow_lunes_cero = sql_dow_lunes_cero("c.fecha")
+    clases_rows = db.execute(sql_text(f"""
+        SELECT c.id AS clase_id, c.fecha::text AS fecha,
+               {_dow_lunes_cero} AS dia_semana,
+               c.hora_inicio::text AS hora_inicio, c.hora_fin::text AS hora_fin,
+               c.horario_base_id, c.disciplina_id,
+               d.nombre AS disciplina_nombre,
+               c.coach_id, u.nombre AS coach_nombre,
+               c.cupo_maximo, c.asistentes_confirmados,
+               c.wod_id, COALESCE(w.titulo, '') AS wod_titulo,
+               CASE WHEN ce.id IS NOT NULL THEN true ELSE false END AS cobertura_emergencia
+        FROM clases c
+        JOIN disciplinas d ON c.disciplina_id = d.id
+        LEFT JOIN usuarios u ON u.id = c.coach_id
+        LEFT JOIN wods w ON w.id = c.wod_id
+        LEFT JOIN cobertura_emergencia ce ON ce.clase_id = c.id
+        WHERE c.tenant_id = :tid
+          AND c.fecha >= :desde
+          AND c.fecha <= :hasta
+          AND c.cancelada = false
+          AND d.activo = true
+          AND d.requiere_coach = true
+          AND EXISTS (
+              SELECT 1 FROM horarios h2
+              WHERE h2.disciplina_id = d.id
+                AND h2.tenant_id = :tid
+                AND h2.activo = true
+          )
+          {filtro_disc_clases}
+        ORDER BY c.fecha, c.hora_inicio, d.nombre, c.id
+    """), params).fetchall()
+
+    from collections import defaultdict
+
+    celdas = defaultdict(list)
+    contadores = {
+        "total_clases": 0,
+        "con_coach": 0,
+        "sin_coach": 0,
+        "tomadas_por_coach": 0,    # marca 'coach' (✅)
+        "asignadas_por_admin": 0,  # marca 'admin' (🟦)
+        "cobertura_emergencia": 0,  # marca 'emergencia' (⚠️)
+    }
+    por_disciplina = {}
+    disciplinas_vistas = {}
+
+    for r in clases_rows:
+        fila = {
+            "clase_id": r.clase_id,
+            "fecha": r.fecha,
+            "dia_semana": r.dia_semana,
+            "hora_inicio": r.hora_inicio[:5] if r.hora_inicio else None,
+            "hora_fin": r.hora_fin[:5] if r.hora_fin else None,
+            "horario_base_id": r.horario_base_id,
+            "disciplina_id": r.disciplina_id,
+            "disciplina_nombre": r.disciplina_nombre,
+            "coach_id": r.coach_id,
+            "coach_nombre": r.coach_nombre or None,
+            "marca": marca_cobertura(r.coach_id, None, bool(r.cobertura_emergencia)),
+            "cupo_maximo": r.cupo_maximo,
+            "asistentes_confirmados": r.asistentes_confirmados,
+            "wod_id": r.wod_id,
+            "wod_titulo": r.wod_titulo,
+            "cobertura_emergencia": bool(r.cobertura_emergencia),
+        }
+        celdas[(r.fecha, fila["hora_inicio"], fila["hora_fin"])].append(fila)
+
+        contadores["total_clases"] += 1
+        if r.coach_id:
+            contadores["con_coach"] += 1
+        else:
+            contadores["sin_coach"] += 1
+        if fila["marca"] == "coach":
+            contadores["tomadas_por_coach"] += 1
+        elif fila["marca"] == "admin":
+            contadores["asignadas_por_admin"] += 1
+        elif fila["marca"] == "emergencia":
+            contadores["cobertura_emergencia"] += 1
+
+        disciplinas_vistas[r.disciplina_id] = r.disciplina_nombre
+        acum = por_disciplina.setdefault(r.disciplina_id, {
+            "disciplina_id": r.disciplina_id,
+            "nombre": r.disciplina_nombre,
+            "total": 0,
+            "con_coach": 0,
+            "sin_coach": 0,
+        })
+        acum["total"] += 1
+        if r.coach_id:
+            acum["con_coach"] += 1
+        else:
+            acum["sin_coach"] += 1
+
+    hoy = hoy_santiago()
+    dias = [
+        {
+            "fecha": d.isoformat(),
+            "dia_semana": d.weekday(),
+            "nombre_dia": nombre_dia(d.weekday()),
+            "es_hoy": d == hoy,
+            "es_pasado": d < hoy,
+        }
+        for d in dias_rango
+    ]
+
+    resumen_disc = [
+        {**v, "cobertura_pct": porcentaje_cobertura(v["con_coach"], v["total"])}
+        for v in sorted(por_disciplina.values(), key=lambda x: x["nombre"] or "")
+    ]
+
+    return {
+        "desde": desde.isoformat(),
+        "hasta": hasta.isoformat(),
+        "dias": dias,
+        "disciplinas": [
+            {"id": did, "nombre": nombre}
+            for did, nombre in sorted(disciplinas_vistas.items(),
+                                      key=lambda x: x[1] or "")
+        ],
+        "plantillas": plantillas,
+        "celdas": [
+            {
+                "fecha": fecha,
+                "dia_semana": clases[0]["dia_semana"],
+                "hora_inicio": h_ini,
+                "hora_fin": h_fin,
+                "clases": clases,
+            }
+            for (fecha, h_ini, h_fin), clases in sorted(celdas.items())
+        ],
+        "resumen": {
+            **contadores,
+            "cobertura_pct": porcentaje_cobertura(
+                contadores["con_coach"], contadores["total_clases"]),
+            "plantillas_activas": len(plantillas),
+            "plantillas_sin_coach": sum(
+                1 for p in plantillas if p["marca"] == "sin_coach"),
+            "por_disciplina": resumen_disc,
+        },
     }
 
 
