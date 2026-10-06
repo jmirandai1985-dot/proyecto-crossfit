@@ -23,6 +23,11 @@ CONTRATO QUE SE PRUEBA ACÁ:
     * 200 avanzando pendiente → validado → entregado;
     * 400 si intenta saltar (pendiente → entregado);
     * 403 para un alumno (es de admin).
+  POST /pedidos/{id}/rechazar (T3)
+    * 200 rechazando un PENDIENTE con motivo: devuelve el stock de forma atómica y avisa
+      al alumno en su campana con el motivo; `rechazado` no suma en ventas del Bazar;
+    * 422 sin motivo (o con uno de menos de 3 caracteres);
+    * 400 si el pedido ya está cobrado (validado/entregado); 403 para un alumno.
 
 Requiere la API corriendo contra el branch TEST. Todo el escenario vive en un box
 TEMPORAL que se borra al final.
@@ -289,3 +294,83 @@ def test_ped_08_alumno_no_puede_cambiar_el_estado(pedido):
     """El cambio de estado es de admin: un alumno recibe 403."""
     r = _cambiar_estado(pedido["pedido_id"], "validado", pedido["alumno"])
     assert r.status_code == 403, f"status {r.status_code}: {r.text[:200]}"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# POST /pedidos/{id}/rechazar — rechazar un pendiente (T3)
+# ═══════════════════════════════════════════════════════════════════
+
+def test_ped_09_admin_rechaza_un_pendiente_y_devuelve_stock(box):
+    """T3: rechazar con motivo devuelve el stock (atómico) y avisa al alumno.
+
+    INTEGRACIÓN (escrita, NO ejecutada en la validación local): necesita la API contra el
+    branch TEST. Usa un producto NUEVO para medir el stock sin depender de otros tests
+    (el `pedido` de la fixture es module-scoped y test_ped_07 lo deja en `entregado`).
+    """
+    # Producto del box (lo crea el admin) para poder medir el stock antes/después.
+    r = requests.post(f"{BASE}/productos", headers=box["admin"],
+                      data={"nombre": "Producto Rechazo TEST", "precio": 4000,
+                            "stock": 5, "activo": "true"}, timeout=30)
+    if r.status_code != 201:
+        pytest.skip(f"no se pudo crear el producto: {r.status_code} {r.text[:120]}")
+    producto_id = r.json()["id"]
+
+    r = requests.post(f"{BASE}/upload/voucher", params={"privado": "1"},
+                      headers=box["alumno"],
+                      files={"file": ("comprobante.png", PNG_1x1, "image/png")}, timeout=30)
+    if r.status_code != 201:
+        pytest.skip(f"no se pudo subir el comprobante: {r.status_code} {r.text[:120]}")
+    url = r.json()["url"]
+    box["archivos"].append(os.path.join(PRIVATE_DIR, os.path.basename(url)))
+
+    r = requests.post(f"{BASE}/pedidos", headers=box["alumno"],
+                      json={"tenant_id": box["tenant_id"], "alumno_id": box["alumno_id"],
+                            "producto_id": producto_id, "cantidad": 2, "voucher_url": url},
+                      timeout=30)
+    if r.status_code != 201:
+        pytest.skip(f"no se pudo crear el pedido: {r.status_code} {r.text[:120]}")
+    pedido_id = r.json()["id"]
+
+    def stock():
+        db = SessionLocal()
+        try:
+            return db.execute(text("SELECT stock FROM productos WHERE id = :p"),
+                              {"p": producto_id}).scalar()
+        finally:
+            db.close()
+
+    assert stock() == 3, "el pedido no descontó el stock"
+
+    # Motivo obligatorio: vacío -> 422 (no se permite rechazar sin explicar).
+    vacio = requests.post(f"{BASE}/pedidos/{pedido_id}/rechazar",
+                          headers=box["admin"], json={"motivo": ""}, timeout=30)
+    assert vacio.status_code == 422, vacio.text[:200]
+
+    r = requests.post(f"{BASE}/pedidos/{pedido_id}/rechazar",
+                      headers=box["admin"], json={"motivo": "El comprobante no coincide"},
+                      timeout=30)
+    assert r.status_code == 200, r.text[:200]
+    assert r.json()["estado"] == "rechazado"
+    assert stock() == 5, "el rechazo no devolvió el stock"
+
+    # Aviso en la campana del alumno, CON el motivo.
+    db = SessionLocal()
+    try:
+        notif = db.execute(text(
+            "SELECT tipo, mensaje FROM notificaciones WHERE alumno_id = :a "
+            "AND tipo = 'pedido_rechazado' ORDER BY id DESC LIMIT 1"),
+            {"a": box["alumno_id"]}).first()
+    finally:
+        db.close()
+    assert notif is not None, "el alumno no recibió el aviso de rechazo"
+    assert "El comprobante no coincide" in notif.mensaje
+
+    # Un pedido ya rechazado no se puede rechazar de nuevo (ya no está pendiente).
+    r2 = requests.post(f"{BASE}/pedidos/{pedido_id}/rechazar",
+                       headers=box["admin"], json={"motivo": "otra vez"}, timeout=30)
+    assert r2.status_code == 400, f"status {r2.status_code}: {r2.text[:200]}"
+
+    # Un alumno no puede rechazar (es de admin).
+    r3 = requests.post(f"{BASE}/pedidos/{pedido_id}/rechazar",
+                       headers=box["alumno"], json={"motivo": "quiero mi plata"}, timeout=30)
+    assert r3.status_code == 403, f"status {r3.status_code}: {r3.text[:200]}"

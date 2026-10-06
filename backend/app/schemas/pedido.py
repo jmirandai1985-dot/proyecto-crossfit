@@ -33,6 +33,17 @@ class PedidoUpdate(BaseModel):
     estado: Optional[str] = Field(None, description="Nuevo estado del pedido")
 
 
+class PedidoRechazoRequest(BaseModel):
+    """Cuerpo del POST /pedidos/{id}/rechazar: el motivo del rechazo (T3).
+
+    El motivo es OBLIGATORIO y viaja al alumno en su campana: "rechazado" sin explicación
+    deja al alumno sin saber qué pasó con su plata. Largo acotado (200) para que el aviso
+    del panel siga siendo legible; `min_length=3` filtra un motivo vacío o de una letra.
+    """
+    motivo: str = Field(..., min_length=3, max_length=200,
+                        description="Por qué se rechaza el pedido (lo ve el alumno)")
+
+
 class _PedidoTrazaRetiro(BaseModel):
     """Traza del código de retiro del Bazar (migración 044).
 

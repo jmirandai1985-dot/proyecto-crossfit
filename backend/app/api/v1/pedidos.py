@@ -16,7 +16,7 @@ from app.models.producto import Producto
 from app.models.usuario import Usuario
 from app.schemas.pedido import (
     PedidoCreate, PedidoUpdate, PedidoResponse, PedidoListItem,
-    PedidoEntregaRequest, PedidoEntregaResponse,
+    PedidoEntregaRequest, PedidoEntregaResponse, PedidoRechazoRequest,
 )
 from app.core.dependencies import (
     get_current_admin, get_current_coach, get_current_user, require_full_access,
@@ -56,12 +56,12 @@ TRANSICIONES_PERMITIDAS = {
 }
 
 # Mensaje de campana para el alumno dueño cuando el admin avanza su pedido.
-# (El estado 'rechazado' todavía no existe en pedidos: cuando se agregue, se
-# suma acá y el aviso sale solo.)
 # OJO: 'validado' NO está en este mapa a propósito — ese aviso lleva el CÓDIGO DE
 # RETIRO y lo arma services/codigos_retiro.texto_validado().
+# 'rechazado' (T3) sí está: el texto lo completa `texto_rechazo()` con el motivo del box.
 MENSAJES_ESTADO_PEDIDO = {
     "entregado": "📦 Tu pedido de {producto} x{cantidad} fue entregado",
+    "rechazado": "❌ Tu pedido de {producto} x{cantidad} fue rechazado",
 }
 
 
@@ -498,6 +498,98 @@ def actualizar_estado_pedido(
     if mensaje:
         notificar_alumno(
             db, pedido.alumno_id, f"pedido_{nuevo_estado}", mensaje)
+
+    return pedido
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  RECHAZO DE UN PEDIDO PENDIENTE (admin, T3)
+#
+#  Un pedido `pendiente` (comprobante subido, sin validar) se puede RECHAZAR con un
+#  motivo. Es el camino que faltaba: sin esto, un comprobante inválido quedaba pendiente
+#  para siempre (o el admin lo borraba, perdiendo el rastro) y el alumno no se enteraba.
+#
+#  Reglas (dinero/stock, por eso viven juntas):
+#   * SÓLO desde `pendiente`: un `validado`/`entregado` ya se cobró y devolverlo es un
+#     reembolso (otro flujo) → 400, no se toca el stock.
+#   * La devolución de stock es ATÓMICA: el pedido y el producto se bloquean con
+#     `with_for_update()` y el cambio de estado + stock van en UNA transacción (dos
+#     rechazos simultáneos no devuelven el stock dos veces).
+#   * `rechazado` NO está en `ESTADOS_PAGO_BAZAR` → no suma en ventas del Bazar (BI,
+#     Excel e historial) por construcción.
+#   * El alumno recibe el motivo en su campana (`notificar_alumno`, best-effort).
+# ═══════════════════════════════════════════════════════════════════════════════
+def texto_rechazo(producto: str, cantidad: int, motivo: str) -> str:
+    """Mensaje de campana del pedido rechazado, CON el motivo que dejó el box.
+
+    Puro (se testea sin BD). El motivo se agrega al final para que el aviso funcione igual
+    aunque el motivo venga vacío en una llamada interna.
+    """
+    base = MENSAJES_ESTADO_PEDIDO["rechazado"].format(producto=producto, cantidad=cantidad)
+    return f"{base}. Motivo: {motivo}"
+
+
+@router.post("/{pedido_id}/rechazar", response_model=PedidoResponse)
+def rechazar_pedido(
+    pedido_id: int,
+    data: PedidoRechazoRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """RECHAZA un pedido PENDIENTE con un motivo (sólo admin del box del token).
+
+    Devuelve el stock de forma atómica, deja el pedido en `rechazado` y avisa al alumno
+    en su campana con el motivo. Un pedido ya cobrado (`validado`/`entregado`) → 400.
+    """
+    # 🔒 SEGURIDAD: tenant_id del token; el query param no existe acá.
+    tenant_id = current_user["tenant_id"]
+    motivo = (data.motivo or "").strip()
+
+    # Bloqueo del pedido: dos admins no pueden rechazarlo/entregarlo a la vez.
+    pedido = (
+        db.query(Pedido)
+        .filter(Pedido.id == pedido_id, Pedido.tenant_id == tenant_id)
+        .with_for_update()
+        .first()
+    )
+    if not pedido:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido con ID {pedido_id} no encontrado",
+        )
+    if pedido.estado != "pendiente":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=("Sólo se puede rechazar un pedido pendiente. Un pedido "
+                    f"'{pedido.estado}' ya fue cobrado: para devolverlo hace falta un "
+                    "reembolso, no un rechazo."),
+        )
+
+    try:
+        # El stock se devuelve en la MISMA transacción que el cambio de estado.
+        producto = (
+            db.query(Producto)
+            .filter(Producto.id == pedido.producto_id)
+            .with_for_update()
+            .first()
+        )
+        if producto is not None:
+            producto.stock = (producto.stock or 0) + pedido.cantidad
+        pedido.estado = "rechazado"
+        db.commit()
+    except DBAPIError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Alta demanda, intenta de nuevo",
+        )
+    db.refresh(pedido)
+
+    # ── Aviso en la campana del alumno dueño (best-effort, ya commiteado) ────
+    nombre_producto = producto.nombre if producto else "tu producto"
+    notificar_alumno(
+        db, pedido.alumno_id, "pedido_rechazado",
+        texto_rechazo(nombre_producto, pedido.cantidad, motivo))
 
     return pedido
 

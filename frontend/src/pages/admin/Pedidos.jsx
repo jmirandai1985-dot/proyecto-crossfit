@@ -25,6 +25,10 @@ const ESTADOS = [
     { key: 'pendiente', label: '⏳ Pendiente', tono: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
     { key: 'validado', label: '✅ Validado', tono: 'bg-blue-500/20 text-blue-300 border-blue-500/30' },
     { key: 'entregado', label: '📦 Entregado', tono: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
+    // Rechazado (T3): un pendiente con comprobante inválido que el admin descartó. No es
+    // un paso del avance (pendiente → validado → entregado), por eso no está en
+    // SIGUIENTE_ESTADO: se llega por el botón "Rechazar" con un motivo obligatorio.
+    { key: 'rechazado', label: '❌ Rechazado', tono: 'bg-red-500/20 text-red-300 border-red-500/30' },
 ];
 
 // Mismas transiciones que valida el backend (solo se avanza, no se retrocede).
@@ -52,6 +56,10 @@ const AdminPedidos = () => {
     const [msg, setMsg] = useState('');
     const [comprobante, setComprobante] = useState(null);   // pedido cuyo comprobante se ve
     const [confirmar, setConfirmar] = useState(null);       // { pedido, nuevoEstado }
+    // Rechazo (T3): pedido pendiente a rechazar + el motivo que escribe el admin. El
+    // motivo es obligatorio (mínimo 3 caracteres) y viaja al alumno en su campana.
+    const [rechazar, setRechazar] = useState(null);         // { pedido } o null
+    const [motivoRechazo, setMotivoRechazo] = useState('');
     // Entrega por código: `entrega` = código pre-cargado (el de la fila) o '' para
     // abrir el modal vacío desde el botón del header. `null` = modal cerrado.
     const [entrega, setEntrega] = useState(null);
@@ -104,6 +112,28 @@ const AdminPedidos = () => {
         const nuevoEstado = SIGUIENTE_ESTADO[pedido.estado];
         if (!nuevoEstado) return;
         setConfirmar({ pedido, nuevoEstado });
+    };
+
+    // Rechazo de un pedido pendiente: POST /pedidos/{id}/rechazar con el motivo. El
+    // backend devuelve el stock de forma atómica y avisa al alumno en su campana.
+    const rechazarPedido = async (pedido, motivo) => {
+        setAccionId(pedido.id);
+        try {
+            await api.post(`/api/v1/pedidos/${pedido.id}/rechazar`, { motivo });
+            setMsg(`❌ Pedido #${pedido.id} rechazado. Se devolvió el stock y se avisó al alumno.`);
+            setTimeout(() => setMsg(''), 5000);
+            setError('');
+            cargar();
+        } catch (err) {
+            setError(err.response?.data?.detail || 'No se pudo rechazar el pedido.');
+        } finally {
+            setAccionId(null);
+        }
+    };
+
+    const abrirRechazo = (pedido) => {
+        setMotivoRechazo('');
+        setRechazar(pedido);
     };
 
     // ── Entrega por código (mesón) ────────────────────────────────────────────
@@ -287,6 +317,16 @@ const AdminPedidos = () => {
                                                                 📷 Entregar
                                                             </button>
                                                         )}
+                                                        {p.estado === 'pendiente' && (
+                                                            <button
+                                                                onClick={() => abrirRechazo(p)}
+                                                                disabled={accionId === p.id}
+                                                                className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition-colors"
+                                                                title="Rechazar este pedido y devolver el stock"
+                                                            >
+                                                                ❌ Rechazar
+                                                            </button>
+                                                        )}
                                                         <button
                                                             onClick={() => abrirConfirmacion(p)}
                                                             disabled={!siguiente || accionId === p.id}
@@ -345,6 +385,65 @@ const AdminPedidos = () => {
                                     className="px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold transition-colors"
                                 >
                                     Sí, cambiar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* MODAL: rechazar un pedido pendiente (motivo obligatorio + confirmación). */}
+                {rechazar && (
+                    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+                        onClick={() => setRechazar(null)}>
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-md w-full shadow-2xl"
+                            onClick={(e) => e.stopPropagation()}>
+                            <div className="p-4 border-b border-zinc-800">
+                                <h3 className="font-bold text-zinc-100">
+                                    Rechazar pedido #{rechazar.id}
+                                </h3>
+                            </div>
+                            <div className="p-4 space-y-3">
+                                <p className="text-sm text-zinc-300">
+                                    Se devolverá el stock de{' '}
+                                    <strong>{rechazar.producto_nombre || `Producto #${rechazar.producto_id}`}</strong>
+                                    {' '}(x{rechazar.cantidad}) y se avisará al alumno en su campana
+                                    con este motivo. El pedido no sumará en las ventas del Bazar.
+                                </p>
+                                <label className="block text-xs font-bold uppercase tracking-wide text-zinc-400">
+                                    Motivo del rechazo
+                                </label>
+                                <textarea
+                                    value={motivoRechazo}
+                                    onChange={(e) => setMotivoRechazo(e.target.value)}
+                                    rows={3}
+                                    maxLength={200}
+                                    data-testid="motivo-rechazo"
+                                    placeholder="Ej: el comprobante no coincide con el monto del pedido."
+                                    className="w-full rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-zinc-100 p-2.5 focus:outline-none focus:border-orange-500"
+                                />
+                                <p className="text-[11px] text-zinc-500">
+                                    Mínimo 3 caracteres ({motivoRechazo.trim().length}/200).
+                                </p>
+                            </div>
+                            <div className="p-4 border-t border-zinc-800 flex justify-end gap-2">
+                                <button
+                                    onClick={() => setRechazar(null)}
+                                    className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-semibold transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        const p = rechazar;
+                                        const m = motivoRechazo.trim();
+                                        setRechazar(null);
+                                        rechazarPedido(p, m);
+                                    }}
+                                    disabled={motivoRechazo.trim().length < 3 || accionId === rechazar.id}
+                                    data-testid="confirmar-rechazo"
+                                    className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold transition-colors"
+                                >
+                                    Sí, rechazar
                                 </button>
                             </div>
                         </div>
