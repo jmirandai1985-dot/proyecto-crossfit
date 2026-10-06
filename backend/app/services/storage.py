@@ -312,7 +312,7 @@ def _bucket_publico() -> str:
     if not publico:
         log.warning(
             "[storage] STORAGE_R2_PUBLIC_BUCKET vacío: las imágenes del Bazar se "
-            "guardan en el MISMO bucket que los comprobantes. En PROD poné un bucket "
+            "guardan en el MISMO bucket que los comprobantes. En PROD pon un bucket "
             "público aparte (el acceso público de R2 es por bucket, no por prefijo).")
         return _bucket()
     return publico
