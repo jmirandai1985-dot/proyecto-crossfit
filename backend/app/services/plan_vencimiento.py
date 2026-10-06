@@ -42,6 +42,10 @@ from app.utils.santiago import fecha_chile, hoy_santiago
 # Estado comercial de una membresía que HOY da acceso (el único que se considera vigente).
 ESTADO_SUSCRIPCION_ACTIVO = "activo"
 
+# El corte de "plan por vencer" que la SITUACIÓN nombra en el texto (<= N días). Es el mismo
+# valor que usa la recomendación del churn; acá vive UNA vez.
+DIAS_PLAN_POR_VENCER = 7
+
 # "plan vence en 7 días" / "plan vence en 1 día": el fragmento del `motivo` (situación)
 # que se refresca EN VIVO al servir el panel de Fidelización.
 _RE_PLAN_EN_MOTIVO = re.compile(r"plan vence en \d+ días?")
@@ -50,6 +54,29 @@ _RE_PLAN_EN_MOTIVO = re.compile(r"plan vence en \d+ días?")
 def plural_dias(n: int) -> str:
     """`1 -> 'día'`, cualquier otro -> `'días'` (misma regla que el resto del módulo)."""
     return "día" if n == 1 else "días"
+
+
+def motivo_situacion(dias_sin_asistir, dias_para_vencer) -> str:
+    """El `motivo` (columna "Motivo" del panel de Fidelización) armado 100% EN VIVO.
+
+    Texto ÚNICO para las dos ramas del BI (heurística y ML) y para el refresco al servir el
+    panel: `dias_sin_asistir` (días desde la última asistencia, o desde el alta) + qué pasa con
+    el plan vigente (`dias_para_vencer = None` si HOY no tiene uno usable). Es la SITUACIÓN
+    actual del alumno: del snapshot del modelo sólo quedan el riesgo, la probabilidad y el
+    arquetipo (números del modelo), nunca esta frase.
+
+    Antes el `motivo` era un TEXTO congelado al poblar `predictions_churn` y sólo se refrescaba
+    su fragmento "plan vence en N días": un alumno que recuperaba el plan (o dejaba de tenerlo)
+    seguía mostrando la situación vieja ("sin plan vigente" con plan vigente).
+    """
+    dias_sin_asistir = int(dias_sin_asistir or 0)
+    base = f"{dias_sin_asistir} {plural_dias(dias_sin_asistir)} sin asistir"
+    if dias_para_vencer is None:
+        return f"{base} · sin plan vigente"
+    if dias_para_vencer <= DIAS_PLAN_POR_VENCER:
+        return (f"{base} · plan vence en {dias_para_vencer} "
+                f"{plural_dias(dias_para_vencer)}")
+    return base
 
 
 def dias_hasta(fecha_expiracion, hoy: date | None = None) -> int | None:

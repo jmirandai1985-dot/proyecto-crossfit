@@ -799,16 +799,13 @@ def populate_predictions(
             # query extra. Habilitan la regla #2 de la recomendación.
             asis_30 = int(ctx.get("asistencias_ultimos_30_dias", 0) or 0)
             asis_90 = int(ctx.get("asistencias_ultimos_90_dias", 0) or 0)
-            if dias_para_vencer is None:
-                proxima_date = None
-                motivo = (f"{dias_inactivo} {_plural_dias(dias_inactivo)} sin "
-                          f"asistir · sin plan vigente")
-            else:
+            if dias_para_vencer is not None:
                 dias_para_vencer = int(dias_para_vencer)
                 proxima_date = hoy + timedelta(days=dias_para_vencer)
-                motivo = (f"{dias_inactivo} {_plural_dias(dias_inactivo)} sin "
-                          f"asistir · plan vence en "
-                          f"{dias_para_vencer} {_plural_dias(dias_para_vencer)}")
+            else:
+                proxima_date = None
+            # SITUACIÓN EN VIVO (una sola definición): el mismo texto que sirve el panel.
+            motivo = plan_vencimiento.motivo_situacion(dias_inactivo, dias_para_vencer)
         else:
             # ── Fallback: heurística original (no hay modelo entrenado) ──
             ultima = _ultima_asistencia(db, tenant_id, alumno.id)
@@ -838,16 +835,11 @@ def populate_predictions(
             prob = min(dias_inactivo, 60) / 60 * 70
             if dias_para_vencer is None:
                 prob += 20
-                motivo = (f"Sin suscripción activa · {dias_inactivo} "
-                          f"{_plural_dias(dias_inactivo)} sin asistir")
             elif dias_para_vencer <= 7:
                 prob += 10
-                motivo = (f"{dias_inactivo} {_plural_dias(dias_inactivo)} sin "
-                          f"asistir · plan vence en {dias_para_vencer} "
-                          f"{_plural_dias(dias_para_vencer)}")
-            else:
-                motivo = f"{dias_inactivo} {_plural_dias(dias_inactivo)} sin asistir"
             prob = round(min(prob, 100), 2)
+            # SITUACIÓN EN VIVO (una sola definición): el mismo texto que sirve el panel.
+            motivo = plan_vencimiento.motivo_situacion(dias_inactivo, dias_para_vencer)
 
         # ── Mapeo común de nivel de riesgo (mismos umbrales en ambos métodos) ──
         if prob >= 70:

@@ -134,13 +134,14 @@ def _arquetipo_por_alumno(db: Session, tenant_id: int, ids: list) -> dict:
 
 
 def _fila_churn(p, nombre, correo, estado_gestion, ultimo_contacto,
-                arquetipo=None, dias_plan=None) -> dict:
+                arquetipo=None, dias_plan=None, dias_sin_asistir=None) -> dict:
     """Formato de fila que consume el frontend (GET y PUT responden igual).
 
-    `dias_plan`: días para vencer el plan vigente calculados EN VIVO con
-    `plan_vencimiento`. El `motivo` es un snapshot del BI: su "plan vence en N días"
-    se refresca acá para que la situación (esta columna) y la recomendación digan el
-    MISMO número (antes el snapshot viejo mostraba 7 y la recomendación en vivo 3).
+    `dias_plan` (días para vencer el plan vigente) y `dias_sin_asistir` se calculan EN VIVO con
+    `plan_vencimiento`. Con ellos se arma la SITUACIÓN (columna "Motivo") 100% en vivo: así dice
+    lo mismo que la recomendación y refleja lo que pasa HOY (un alumno que acaba de recuperar su
+    plan ya no muestra "sin plan vigente"). Del snapshot del modelo queda sólo el riesgo, la
+    probabilidad y el arquetipo.
     """
     return {
         "usuario_id": p.usuario_id,
@@ -148,7 +149,7 @@ def _fila_churn(p, nombre, correo, estado_gestion, ultimo_contacto,
         "alumno_correo": correo,
         "probabilidad_churn": float(p.probabilidad_churn),
         "riesgo_nivel": p.riesgo_nivel,
-        "motivo": plan_vencimiento.refrescar_dias_plan(p.motivo, dias_plan),
+        "motivo": plan_vencimiento.motivo_situacion(dias_sin_asistir, dias_plan),
         "recomendacion": p.recomendacion,
         "recomendacion_codigo": p.recomendacion_codigo,
         "estado_gestion": estado_gestion,
@@ -607,8 +608,8 @@ def get_predictions_churn(
     - `buscar`: filtra la TABLA por nombre o correo (server-side, sin mayúsculas
       ni tildes). Los CONTADORES de las tarjetas siguen siendo del box COMPLETO:
       buscar no cambia el tamaño del box.
-    - `motivo` (situación): su "plan vence en N días" se refresca en vivo
-      (`plan_vencimiento`) para que coincida con la recomendación.
+    - `motivo` (situación): se arma 100% EN VIVO (`plan_vencimiento.motivo_situacion`) con el
+      plan vigente y los días sin asistir de HOY; no usa el `motivo` del snapshot del BI.
     """
     tenant_id = current_user["tenant_id"]
 
@@ -653,6 +654,7 @@ def get_predictions_churn(
             contactos.get(p.usuario_id),
             arquetipos.get(p.usuario_id),
             dias_plan.get(p.usuario_id),
+            dias_inactivo.get(p.usuario_id),
         )
         for p, nombre, correo in filas
     ]
@@ -750,10 +752,12 @@ def actualizar_estado_gestion_churn(
     contactos = _ultimo_contacto_por_alumno(db, tenant_id, [usuario_id])
     arquetipos = _arquetipo_por_alumno(db, tenant_id, [usuario_id])
     dias_plan = plan_vencimiento.dias_para_vencer_lote(db, tenant_id, [usuario_id])
+    dias_inactivo = _dias_inactividad_por_alumno(db, tenant_id, [usuario_id])
     fila = _fila_churn(p, nombre, correo, data.estado_gestion,
                        contactos.get(usuario_id),
                        arquetipos.get(usuario_id),
-                       dias_plan.get(usuario_id))
+                       dias_plan.get(usuario_id),
+                       dias_inactivo.get(usuario_id))
     fila["estado_anterior"] = estado_anterior
     return fila
 
