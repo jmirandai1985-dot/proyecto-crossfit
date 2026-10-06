@@ -8,11 +8,11 @@ Todos filtran por `tenant_id` del token JWT (nunca por query/body).
 """
 import json
 from datetime import date, datetime, timedelta, timezone
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, text as sql_text
+from sqlalchemy import func, or_, text as sql_text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -29,6 +29,7 @@ from app.models.segmentacion_alumno import SegmentacionAlumno
 from app.models.usuario import Usuario
 from app.services import plan_vencimiento
 from app.services.auditoria_service import registrar_auditoria
+from app.utils.busqueda import columna_normalizada, normalizar
 from app.utils.santiago import hoy_santiago
 
 router = APIRouter(prefix="/api/v1/kpis", tags=["KPIs"])
@@ -586,6 +587,10 @@ def get_estacionalidad(
 # ── 3) GET /api/v1/kpis/churn (BI - CHURN) ───────────────────────────────────
 @router.get("/churn")
 def get_predictions_churn(
+    buscar: Optional[str] = Query(
+        None, max_length=80,
+        description="Filtra la tabla por nombre o correo del alumno (parcial, sin "
+                    "distinguir mayúsculas ni tildes; server-side)."),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -599,6 +604,9 @@ def get_predictions_churn(
     - `ultimo_contacto_automatico`: último correo automático ENVIADO (o None).
     - `arquetipo`: segmentación vigente del alumno (tabla
       `segmentacion_alumnos`), o None si el reentrenamiento no corrió.
+    - `buscar`: filtra la TABLA por nombre o correo (server-side, sin mayúsculas
+      ni tildes). Los CONTADORES de las tarjetas siguen siendo del box COMPLETO:
+      buscar no cambia el tamaño del box.
     - `motivo` (situación): su "plan vence en N días" se refresca en vivo
       (`plan_vencimiento`) para que coincida con la recomendación.
     """
@@ -606,17 +614,30 @@ def get_predictions_churn(
 
     # outerjoin: si el alumno fue borrado, la predicción igual se devuelve
     # (con nombre None) en vez de desaparecer de la lista.
-    filas = db.query(
+    consulta = db.query(
         PredictionsChurn, Usuario.nombre, Usuario.correo,
     ).outerjoin(
         Usuario, Usuario.id == PredictionsChurn.usuario_id,
     ).filter(
         PredictionsChurn.tenant_id == tenant_id,
-    ).all()
+    )
 
-    criticos = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "CRITICO")
-    altos = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "ALTO")
-    medios = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "MEDIO")
+    # Contadores de las tarjetas: SIEMPRE del box COMPLETO (todas las predicciones),
+    # no del subconjunto buscado. `total` es el tamaño del box, no el de la búsqueda.
+    todas = consulta.all()
+    criticos = sum(1 for p, _n, _c in todas if p.riesgo_nivel == "CRITICO")
+    altos = sum(1 for p, _n, _c in todas if p.riesgo_nivel == "ALTO")
+    medios = sum(1 for p, _n, _c in todas if p.riesgo_nivel == "MEDIO")
+
+    # Filas de la TABLA: con `buscar`, filtradas SERVER-SIDE (sin mayúsculas ni tildes).
+    if buscar and buscar.strip():
+        patron = f"%{normalizar(buscar.strip())}%"
+        filas = consulta.filter(or_(
+            columna_normalizada(Usuario.nombre).like(patron),
+            columna_normalizada(Usuario.correo).like(patron),
+        )).all()
+    else:
+        filas = todas
 
     ids = [p.usuario_id for p, _n, _c in filas]
     gestion = _gestion_por_alumno(db, tenant_id, ids)
@@ -638,7 +659,7 @@ def get_predictions_churn(
 
     return {
         "predicciones": predicciones,
-        "total": len(filas),
+        "total": len(todas),
         "criticos": criticos,
         "altos": altos,
         "medios": medios,

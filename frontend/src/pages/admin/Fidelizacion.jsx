@@ -85,6 +85,11 @@ const Fidelizacion = () => {
     const [segmentacion, setSegmentacion] = useState(null);
     const [segError, setSegError] = useState(false);
     const [loading, setLoading] = useState(true);
+    // Búsqueda server-side (nombre o correo) de la tabla: input con debounce (350ms,
+    // igual que Alumnos.jsx). `buscar` es el término YA aplicado (el que viaja al
+    // backend); los filtros de riesgo/arquetipo se combinan ENCIMA de su resultado.
+    const [searchTerm, setSearchTerm] = useState('');
+    const [buscar, setBuscar] = useState('');
     // Alumno al que se le va a mandar un correo: abre el modal de envío (F1).
     const [alumnoCorreo, setAlumnoCorreo] = useState(null);
     // Alumno al que se le va a DAR un beneficio: abre el modal de la F2.
@@ -101,11 +106,15 @@ const Fidelizacion = () => {
     // del box, incluida la pestaña Bazar), reutilizando `PanelHistorial`.
     const navigate = useNavigate();
 
-    const cargarFidelizacion = async () => {
-        setLoading(true);
+    // Trae la tabla del churn (+ sugerencias de esa misma lista, en UNA petición).
+    // `spinner` sólo en la carga completa: al BUSCAR no se tapa la pantalla (sin parpadeo).
+    const cargarChurn = async (termino, { spinner = false } = {}) => {
+        if (spinner) setLoading(true);
         try {
-            // Una sola fuente: el BI (score ML + motivo + recomendación + gestión).
-            const res = await api.get('/api/v1/kpis/churn');
+            // `buscar` es server-side (nombre o correo, sin mayúsculas ni tildes).
+            const res = await api.get('/api/v1/kpis/churn', {
+                params: { buscar: termino || undefined },
+            });
             setChurn(res.data);
             setMsg('');
             // La sugerencia de plantilla de TODA la tabla, en UNA petición: la columna
@@ -125,30 +134,55 @@ const Fidelizacion = () => {
             } else {
                 setSugerencias({});
             }
-            // Segmentación: opcional (si falla o no se entrenó, las tarjetas de
-            // arquetipo no se muestran y el resto del panel sigue igual).
-            // La segmentación se pide aparte y ahora se distingue "falló el fetch"
-            // (error) de "respondió bien pero todavía no hay nada generado" (total 0):
-            // antes un .catch(() => null) dejaba los dos casos idénticos y el bloque
-            // de las 6 tarjetas se ocultaba sin ningún aviso.
-            try {
-                const rSeg = await api.get('/api/v1/segmentacion');
-                setSegmentacion(rSeg?.data || null);
-                setSegError(false);
-            } catch {
-                setSegmentacion(null);
-                setSegError(true);
-            }
         } catch (err) {
             setChurn(null);
             setMsg('❌ ' + (err.response?.data?.detail || err.message || 'No se pudo cargar el panel'));
+        } finally {
+            if (spinner) setLoading(false);
         }
+    };
+
+    // Segmentación: opcional (si falla o no se entrenó, las tarjetas de arquetipo no se
+    // muestran y el resto del panel sigue igual). Se pide aparte: NO depende de la
+    // búsqueda. Se distingue "falló el fetch" (error) de "respondió bien pero todavía no
+    // hay nada generado" (total 0): antes un .catch(() => null) dejaba los dos casos
+    // idénticos y el bloque de las 6 tarjetas se ocultaba sin ningún aviso.
+    const cargarSegmentacion = async () => {
+        try {
+            const rSeg = await api.get('/api/v1/segmentacion');
+            setSegmentacion(rSeg?.data || null);
+            setSegError(false);
+        } catch {
+            setSegmentacion(null);
+            setSegError(true);
+        }
+    };
+
+    // Carga completa (montaje / cambio de tenant / botón Recargar): tabla + segmentación.
+    const cargarFidelizacion = async () => {
+        setLoading(true);
+        await Promise.all([cargarChurn(buscar), cargarSegmentacion()]);
         setLoading(false);
     };
 
     useEffect(() => {
         cargarFidelizacion();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [tenant_id]);
+
+    // Al cambiar el término BUSCADO (ya debounced) se re-trae SÓLO la tabla, sin spinner.
+    // La carga inicial ya la cubre el efecto de arriba (`churn` todavía es null).
+    useEffect(() => {
+        if (churn === null) return;
+        cargarChurn(buscar);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [buscar]);
+
+    // Debounce del input (350ms): no dispara una request por tecla.
+    useEffect(() => {
+        const t = setTimeout(() => setBuscar(searchTerm.trim()), 350);
+        return () => clearTimeout(t);
+    }, [searchTerm]);
 
     // Enviar correo (F1): abre el modal con la plantilla sugerida. La sugerencia la resuelve el
     // BACKEND con los datos del alumno (`POST /fidelizacion/sugerir`) y la pantalla le pasa la que
@@ -456,8 +490,32 @@ const Fidelizacion = () => {
                             </div>
                         )}
 
-                        {/* ── Filtros de la tabla (mismo estado que en KPIs) ── */}
+                        {/* ── Buscador + filtros de la tabla (mismo estado que en KPIs) ── */}
                         <div className="flex flex-wrap items-center gap-3">
+                            {/* Buscador SERVER-SIDE por nombre o correo (sin mayúsculas ni
+                                tildes, con debounce 350ms). Se combina con los filtros de abajo:
+                                el backend filtra por texto y la tabla por riesgo/arquetipo. */}
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    placeholder="Buscar por nombre o correo…"
+                                    aria-label="Buscar alumno por nombre o correo"
+                                    data-testid="buscar-fidelizacion"
+                                    className="bg-zinc-800 border border-zinc-600 rounded px-3 py-1 pr-8 text-xs text-white w-56 focus:outline-none focus:border-orange-500"
+                                />
+                                {searchTerm && (
+                                    <button
+                                        type="button"
+                                        onClick={() => { setSearchTerm(''); setBuscar(''); }}
+                                        aria-label="Limpiar búsqueda"
+                                        title="Limpiar búsqueda"
+                                        data-testid="limpiar-busqueda"
+                                        className="absolute right-1.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white"
+                                    >✕</button>
+                                )}
+                            </div>
                             <label className="flex items-center gap-2 text-xs text-zinc-400">
                                 Arquetipo
                                 <select
@@ -487,7 +545,10 @@ const Fidelizacion = () => {
                                         className="text-zinc-400 hover:text-white">✕</button>
                                 </span>
                             ))}
-                            <span className="text-xs text-zinc-500">
+                            <span className="text-xs text-zinc-500" data-testid="resultados-fidelizacion">
+                                {prediccionesFiltradas.length} resultados
+                            </span>
+                            <span className="text-xs text-zinc-600">
                                 {prediccionesFiltradas.length} de {predicciones.length} alumnos
                             </span>
                             {hayFiltros && (
