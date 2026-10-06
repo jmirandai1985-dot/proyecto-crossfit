@@ -24,9 +24,14 @@ SessionLocal = importlib.import_module("app.db.database").SessionLocal
 print("=== APLICANDO OVERRIDES TEST (endpoint TEST de Neon) ===")
 db = SessionLocal()
 try:
-    r = db.execute(text("UPDATE usuarios SET activo=true WHERE id=7"))
+    # T12: se escriben LOS DOS campos. `estado` es la fuente de verdad y `activo` es derivado:
+    # el CHECK `ck_usuarios_activo_estado` exige `activo = (estado = 'activo')`, así que el
+    # `SET activo=true` a secas que había acá sólo funcionaba si el usuario YA estaba activo
+    # (y si no, la base lo rechazaba).
+    r = db.execute(text(
+        "UPDATE usuarios SET estado='activo', activo=true WHERE id=7"))
     db.commit()
-    print(f"[OK] usuarios.activo=True id=7 (filas: {r.rowcount})")
+    print(f"[OK] usuarios.estado='activo' + activo=True id=7 (filas: {r.rowcount})")
 except Exception as e:
     db.rollback()
     print(f"[ERROR] usuario: {e}")

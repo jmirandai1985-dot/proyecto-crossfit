@@ -121,7 +121,7 @@ def obtener_reportes_analytics(
             JOIN suscripciones s ON u.id = s.usuario_id
             WHERE u.tenant_id = :tid
               AND u.rol = 'alumno'
-              AND u.activo = true
+              AND u.estado = 'activo'
               AND s.estado = 'activo'
               AND s.fecha_expiracion >= (now() AT TIME ZONE 'America/Santiago')::date
         """), {"tid": tenant_id}).scalar() or 0

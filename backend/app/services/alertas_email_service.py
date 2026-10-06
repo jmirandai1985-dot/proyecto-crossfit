@@ -83,7 +83,7 @@ def enviar_alertas_renovacion(db, tenant_id: int = 1, dias_aviso: int = 3) -> di
         JOIN usuarios u ON u.id = s.usuario_id
         WHERE s.tenant_id = :tid
           AND s.estado = 'activo'
-          AND u.activo = true
+          AND u.estado = 'activo'
           AND {sql_fecha_en_chile("s.fecha_expiracion")} = :target
     """), {"tid": tenant_id, "target": target}).fetchall()
 
@@ -114,7 +114,6 @@ def enviar_alertas_inactividad(db, tenant_id: int = 1, umbral_dias: int = 7) -> 
         FROM usuarios u
         WHERE u.tenant_id = :tid
           AND u.rol = 'alumno'
-          AND u.activo = true
           AND u.estado = 'activo'
     """), {"tid": tenant_id}).fetchall()
 
@@ -157,7 +156,7 @@ def enviar_alertas_urgencia(db, tenant_id: int = 1) -> dict:
         JOIN usuarios u ON u.id = s.usuario_id
         WHERE s.tenant_id = :tid
           AND s.estado = 'activo'
-          AND u.activo = true
+          AND u.estado = 'activo'
           AND {sql_fecha_en_chile("s.fecha_expiracion")} = :target
     """), {"tid": tenant_id, "target": target}).fetchall()
 
@@ -208,7 +207,7 @@ def enviar_alertas_ultimo_credito(db, tenant_id: int = 1) -> dict:
         JOIN usuarios u ON u.id = s.usuario_id
         WHERE s.tenant_id = :tid
           AND s.estado = 'activo'
-          AND u.activo = true
+          AND u.estado = 'activo'
           AND u.rol = 'alumno'
           AND s.creditos_disponibles = 1
           AND {sql_fecha_en_chile("s.fecha_expiracion")} >= :hoy
@@ -245,7 +244,7 @@ def enviar_alertas_sin_creditos(db, tenant_id: int = 1) -> dict:
         JOIN usuarios u ON u.id = s.usuario_id
         WHERE s.tenant_id = :tid
           AND s.estado = 'activo'
-          AND u.activo = true
+          AND u.estado = 'activo'
           AND u.rol = 'alumno'
           AND s.creditos_disponibles = 0
           AND {sql_fecha_en_chile("s.fecha_expiracion")} >= :hoy

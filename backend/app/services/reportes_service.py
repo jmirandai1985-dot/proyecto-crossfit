@@ -264,7 +264,7 @@ def _build_historico_mensual(db, tenant_id):
             SELECT COUNT(DISTINCT u.id) FROM usuarios u
             JOIN suscripciones s ON u.id = s.usuario_id
             JOIN planes p ON p.id = s.plan_id
-            WHERE u.tenant_id = :tid AND u.rol = 'alumno' AND u.activo = true
+            WHERE u.tenant_id = :tid AND u.rol = 'alumno' AND u.estado = 'activo'
               AND """ + sql_suscripcion_vigente("s", ":corte") + """
               AND """ + sql_plan_comercial("p") + """
         """), {"tid": tenant_id, "corte": corte}).scalar() or 0
@@ -483,7 +483,7 @@ def crear_reporte_ventas_mensual_bytes(
     alumnos_activos = db.execute(text("""
         SELECT COUNT(DISTINCT u.id) FROM usuarios u
         JOIN suscripciones s ON u.id = s.usuario_id
-        WHERE u.tenant_id = :tid AND u.rol = 'alumno' AND u.activo = true
+        WHERE u.tenant_id = :tid AND u.rol = 'alumno' AND u.estado = 'activo'
           AND s.estado = 'activo' AND s.fecha_expiracion >= (now() AT TIME ZONE 'America/Santiago')::date
     """), {"tid": tenant_id}).scalar() or 0
 

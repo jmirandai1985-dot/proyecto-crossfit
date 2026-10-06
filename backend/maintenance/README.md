@@ -1074,7 +1074,7 @@ las de detecciones no llevan columna "→ nuevo" porque no cambian nada.
 #### Por qué A.5(a) y A.5(b) daban "25 y 25" (y qué se corrigió)
 
 No eran dos conjuntos solapados: los dos `WHERE` son **el mismo** y sólo cambian `NOT EXISTS` ⇄
-`EXISTS` sobre el mismo subquery (`coach_disciplinas` + `usuarios.rol = 'coach' AND activo`), así
+`EXISTS` sobre el mismo subquery (`coach_disciplinas` + `usuarios.rol = 'coach' AND estado = 'activo'`), así
 que ninguna clase puede salir en los dos. Lo que se veía igual era el **tope de la lista**: cada
 detección de tipo lista termina en `LIMIT 25` (`LIMITE_LISTA`) y el conteo reportado era
 `len(filas)`, o sea el tope. Ahora `detecciones()` pide el total real con `count(*) OVER ()`

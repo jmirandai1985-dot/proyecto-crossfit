@@ -120,7 +120,11 @@ def test_b_vencer_una_suscripcion_hoy_no_cambia_el_mrr_de_los_meses_pasados():
 
     assert sql_previo == sql_hoy, "el MRR del pasado no puede tener una consulta distinta"
     assert estados.sql_suscripcion_vigente("s", ":hasta") in sql_previo
-    assert "estado = 'activo'" not in sql_previo
+    # La prohibición es sobre el estado de la SUSCRIPCIÓN: el "vigente HOY" no puede decidir la
+    # vigencia histórica. `u.estado = 'activo'` (el alumno habilitado) es otra cosa y desde T12
+    # sí puede aparecer (antes era `u.activo = true`, el MISMO dato).
+    assert "s.estado = 'activo'" not in sql_previo
+    assert "s2.estado = 'activo'" not in sql_previo
     assert params_previo == {"tid": TENANT, "hasta": FIN_MES_ANTERIOR}
     assert params_hoy == {"tid": TENANT, "hasta": HOY}
     assert (previo, ahora) == (45000.0, 60000.0)
@@ -155,7 +159,9 @@ def test_d_el_churn_de_la_cohorte_de_30_dias_no_depende_del_estado_de_hoy():
     assert metricas.churn_desde_retencion(retencion) == 10.0
     assert estados.sql_suscripcion_vigente("s", ":desde") in sql_base
     assert estados.sql_suscripcion_vigente("s2", ":hasta") in sql_siguen
-    assert "estado = 'activo'" not in sql_base + sql_siguen
+    # Misma precisión que en (B): lo prohibido es el estado de la SUSCRIPCIÓN, no el del alumno.
+    assert "s.estado = 'activo'" not in sql_base + sql_siguen
+    assert "s2.estado = 'activo'" not in sql_base + sql_siguen
     assert params_base == {"tid": TENANT, "desde": HACE_30}
     assert params_siguen == {"tid": TENANT, "desde": HACE_30, "hasta": HOY}
 

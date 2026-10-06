@@ -203,7 +203,7 @@ def _respuesta(sql: str, ctx: dict, vistas: dict) -> str:
         return str(int(ctx["tamano_mb"] * 1024 * 1024)) + "\n"
     if "pg_stat_user_tables" in sql:
         return _filas(("usuarios", "120"), ("asistencias", "900"))
-    if "rol = 'alumno' AND activo = true" in sql:
+    if "rol = 'alumno' AND estado = 'activo'" in sql:
         return "87\n"
     if "rol = 'alumno' AND created_at" in sql:
         return "3\n"
@@ -962,7 +962,11 @@ def test_cr_el_mrr_del_mes_anterior_y_el_churn_son_de_fecha_no_del_estado_de_hoy
     for clave in ("mrr", "mrr_mes_anterior", "alumnos_vigentes", "retencion_base",
                   "retencion_siguen"):
         sql = men.SQL_REPORTE[clave]
-        assert "estado = 'activo'" not in sql, clave
+        # La prohibición es sobre el estado de la SUSCRIPCIÓN (`s`/`s2`): el "vigente HOY" no
+        # puede decidir la vigencia histórica. `u.estado = 'activo'` es otra cosa —el alumno
+        # habilitado— y desde T12 sí aparece (antes era `u.activo = true`, el MISMO dato).
+        assert "s.estado = 'activo'" not in sql, clave
+        assert "s2.estado = 'activo'" not in sql, clave
         assert nunca in sql, clave
         assert "fecha_inicio AT TIME ZONE 'America/Santiago')::date <=" in sql, clave
         assert "fecha_expiracion AT TIME ZONE 'America/Santiago')::date >=" in sql, clave

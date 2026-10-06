@@ -75,7 +75,10 @@ def obtener_estadisticas_dashboard(
     total_alumnos = db.query(func.count(Usuario.id)).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == 'alumno',
-        Usuario.activo == True
+        # T12: `estado` es la fuente de verdad del "habilitado"; `activo` es derivado y el
+        # CHECK `ck_usuarios_activo_estado` lo mantiene igual, así que leerlo sería una
+        # segunda definición de lo mismo.
+        Usuario.estado == "activo"
     ).scalar() or 0
 
     # ⚠️ `total_suscripciones_activas` y `recaudacion_mes` se ELIMINARON de esta respuesta

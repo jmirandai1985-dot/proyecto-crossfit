@@ -202,7 +202,7 @@ def listar_clases(
                 JOIN usuarios u ON u.id = cd.coach_id
                 WHERE cd.tenant_id = :tenant_id
                   AND cd.activo = true
-                  AND u.activo = true
+                  AND u.estado = 'activo'
                 GROUP BY cd.disciplina_id, u.nombre
             """),
             {"tenant_id": tenant_id}

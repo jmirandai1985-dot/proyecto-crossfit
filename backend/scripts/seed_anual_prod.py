@@ -1466,7 +1466,7 @@ def leer_entradas(db, env: dict, hoy: date, dias_futuro: int) -> dict:
     for cd in db.query(CoachDisciplina).join(
             Usuario, Usuario.id == CoachDisciplina.coach_id).filter(
             CoachDisciplina.tenant_id == TENANT_ID, CoachDisciplina.activo == True,  # noqa: E712
-            Usuario.rol == env["RolUsuario"].coach, Usuario.activo == True).order_by(  # noqa: E712
+            Usuario.rol == env["RolUsuario"].coach, Usuario.estado == "activo").order_by(
             CoachDisciplina.disciplina_id, CoachDisciplina.coach_id).all():
         coaches[cd.disciplina_id].append(cd.coach_id)
 

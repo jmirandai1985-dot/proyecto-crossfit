@@ -22,7 +22,7 @@ def _obtener_reporte(db) -> dict:
     total_alumnos = scalar(
         "SELECT COUNT(*) FROM usuarios WHERE rol = 'alumno'")
     alumnos_activos = scalar(
-        "SELECT COUNT(*) FROM usuarios WHERE rol = 'alumno' AND activo = true")
+        "SELECT COUNT(*) FROM usuarios WHERE rol = 'alumno' AND estado = 'activo'")
     planes_activos = scalar(
         "SELECT COUNT(*) FROM suscripciones WHERE estado = 'activo'")
     planes_vencidos_mes = scalar(

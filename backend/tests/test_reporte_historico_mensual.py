@@ -351,7 +351,10 @@ def test_d_la_columna_de_alumnos_del_corte_usa_el_predicado_por_fecha():
     assert len(consultas) == len(_meses_esperados()) == 6
     for (sql, params), (anio, mes, corte) in zip(consultas, _meses_esperados()):
         assert estados.sql_suscripcion_vigente("s", ":corte") in sql, (anio, mes)
-        assert "estado = 'activo'" not in sql, (anio, mes)
+        # La prohibición es sobre el estado de la SUSCRIPCIÓN: el "vigente HOY" no puede decidir el
+        # corte histórico. `u.estado = 'activo'` (el alumno habilitado) es otra cosa y desde T12 sí
+        # aparece (antes era `u.activo = true`, el MISMO dato).
+        assert "s.estado = 'activo'" not in sql, (anio, mes)
         assert params == {"tid": TENANT, "corte": corte}, (anio, mes)
 
     assert historico[-2]["alumnos"] == ALUMNOS_MES_PASADO

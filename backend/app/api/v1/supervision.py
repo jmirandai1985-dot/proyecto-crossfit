@@ -539,7 +539,7 @@ def listar_coaches_con_pertenencia(
     coaches = db.execute(sql_text("""
         SELECT u.id, u.nombre
         FROM usuarios u
-        WHERE u.tenant_id = :tid AND u.rol = 'coach' AND u.activo = true
+        WHERE u.tenant_id = :tid AND u.rol = 'coach' AND u.estado = 'activo'
         ORDER BY u.nombre
     """), {"tid": tenant_id}).fetchall()
 

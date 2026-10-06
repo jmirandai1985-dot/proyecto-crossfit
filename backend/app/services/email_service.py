@@ -678,7 +678,8 @@ def enviar_email_solicitud_admin(alumno: dict, tenant_id: int) -> bool:
         admin = db.query(Usuario).filter(
             Usuario.tenant_id == tenant_id,
             Usuario.rol == RolUsuario.administrador,
-            Usuario.activo == True,
+            # T12: `estado` es la fuente de verdad del "habilitado" (`activo` es derivado).
+            Usuario.estado == "activo",
         ).order_by(Usuario.id).first()
         correo_admin = admin.correo if admin else None
         admin_nombre = admin.nombre if admin else None
@@ -1076,7 +1077,8 @@ def send_alerta_stock_bajo(producto_nombre: str, stock_actual: int,
         admin = db.query(Usuario).filter(
             Usuario.tenant_id == tenant_id,
             Usuario.rol == RolUsuario.administrador,
-            Usuario.activo == True,
+            # T12: `estado` es la fuente de verdad del "habilitado" (`activo` es derivado).
+            Usuario.estado == "activo",
         ).order_by(Usuario.id).first()
         correo_admin = admin.correo if admin else None
         admin_nombre = admin.nombre if admin else None

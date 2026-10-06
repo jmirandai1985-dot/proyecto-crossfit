@@ -49,7 +49,7 @@ def _vigente_sql(param_fecha):
     return (
         " u.tenant_id = :tid"
         " AND u.rol = 'alumno'"
-        " AND u.activo = true"
+        " AND u.estado = 'activo'"
         " AND EXISTS ("
         "   SELECT 1 FROM suscripciones s"
         "   JOIN planes p ON p.id = s.plan_id"
@@ -167,7 +167,7 @@ def alumnos_vigentes(db: Session, tenant_id: int, fecha: date) -> int:
     """Alumnos con suscripción VIGENTE **EN LA FECHA** `fecha` (el criterio de esta capa).
 
     Es la MISMA definición que la cohorte de retención (`_vigente_sql`): rol `alumno`,
-    `activo = true`, una suscripción que no sea de las que nunca dieron acceso
+    `estado = 'activo'`, una suscripción que no sea de las que nunca dieron acceso
     (`sql_suscripcion_vigente()`, o sea las FECHAS en días de Chile) y con `planes.es_comercial`
     (`sql_plan_comercial()`): el "Pase de regreso" da acceso pero no es un cliente.
 

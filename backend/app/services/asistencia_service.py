@@ -278,7 +278,8 @@ def _coach_del_box(db: Session, tenant_id: int):
     coach = db.query(Usuario).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.coach,
-        Usuario.activo == True,
+        # T12: `estado` (fuente de verdad) en vez de `activo` (derivado por el CHECK de la 034).
+        Usuario.estado == "activo",
     ).order_by(Usuario.id).first()
     return coach.nombre if coach else "Tu coach"
 
@@ -302,7 +303,8 @@ def evaluar_mes(db: Session, tenant_id: int, anio: int, mes: int,
     alumnos = db.query(Usuario).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.rol == RolUsuario.alumno,
-        Usuario.activo == True,
+        # T12: alcanza con `estado`. El `activo == True` que había acá era la MISMA condición
+        # escrita dos veces (el CHECK `ck_usuarios_activo_estado` las mantiene equivalentes).
         Usuario.estado == "activo",
     ).all()
 
@@ -402,7 +404,7 @@ def backfill_hitos(db: Session, meses: int = 12,
 
     query_alumnos = db.query(Usuario).filter(
         Usuario.rol == RolUsuario.alumno,
-        Usuario.activo == True,
+        # T12: `estado` es la fuente de verdad (ver `evaluar_mes`, mismo criterio).
         Usuario.estado == "activo",
     )
     if tenant_id is not None:

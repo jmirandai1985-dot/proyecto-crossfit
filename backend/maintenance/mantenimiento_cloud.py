@@ -854,7 +854,7 @@ def detecciones_sql(cfg: dict) -> tuple:
                     "AND NOT EXISTS (SELECT 1 FROM coach_disciplinas cd "
                     "  JOIN usuarios u ON u.id = cd.coach_id "
                     "  WHERE cd.disciplina_id = c.disciplina_id AND cd.activo = true "
-                    "    AND u.rol::text = 'coach' AND u.activo = true) "
+                    "    AND u.rol::text = 'coach' AND u.estado = 'activo') "
                     f"ORDER BY c.fecha, c.hora_inicio LIMIT {LIMITE_LISTA}"),
         },
         {
@@ -873,20 +873,20 @@ def detecciones_sql(cfg: dict) -> tuple:
                     "AND EXISTS (SELECT 1 FROM coach_disciplinas cd "
                     "  JOIN usuarios u ON u.id = cd.coach_id "
                     "  WHERE cd.disciplina_id = c.disciplina_id AND cd.activo = true "
-                    "    AND u.rol::text = 'coach' AND u.activo = true) "
+                    "    AND u.rol::text = 'coach' AND u.estado = 'activo') "
                     f"ORDER BY c.fecha, c.hora_inicio LIMIT {LIMITE_LISTA}"),
         },
         {
             "clave": "a5c_coach_invalido",
             "titulo": "A.5(c) clases futuras con un coach que no es coach activo",
             "sev": "rojo", "modo": "lista",
-            "cabeceras": ("id", "fecha", "coach_id", "rol", "activo"),
-            "detalle": ("clase(s) futuras asignadas a un usuario que no es `coach` o que está "
-                        "inactivo: la clase queda sin nadie que la tome"),
+            "cabeceras": ("id", "fecha", "coach_id", "rol", "estado"),
+            "detalle": ("clase(s) futuras asignadas a un usuario que no es `coach` o que no "
+                        "está en `estado='activo'`: la clase queda sin nadie que la tome"),
             "sql": ("SELECT c.id::text, c.fecha::text, c.coach_id::text, u.rol::text, "
-                    "u.activo::text FROM clases c JOIN usuarios u ON u.id = c.coach_id "
+                    "u.estado::text FROM clases c JOIN usuarios u ON u.id = c.coach_id "
                     "WHERE c.cancelada = false AND c.fecha >= current_date "
-                    "AND (u.rol::text <> 'coach' OR u.activo = false) "
+                    "AND (u.rol::text <> 'coach' OR u.estado <> 'activo') "
                     f"ORDER BY c.fecha, c.id LIMIT {LIMITE_LISTA}"),
         },
         # A.6 (2026-09-27): red que reemplaza al `ILIKE '%cancel%'` que tenía el predicado. Comparar
@@ -1043,7 +1043,7 @@ def consultas_purga(cfg: dict) -> list:
 # llevaba también lo que hubiera del mes que recién empieza.
 SQL_REPORTE = {
     "total_alumnos": "SELECT count(*)::text FROM usuarios WHERE rol = 'alumno'",
-    "alumnos_activos": "SELECT count(*)::text FROM usuarios WHERE rol = 'alumno' AND activo = true",
+    "alumnos_activos": "SELECT count(*)::text FROM usuarios WHERE rol = 'alumno' AND estado = 'activo'",
     "planes_activos": SQL_SUSCRIPCIONES_ACTIVAS,
     # ABIERTA a propósito (sin `{fin}`): cuenta cuándo se MARCÓ el vencido, y los planes vencen el
     # último día del mes — el run del día 1 los marca a las 05:00 del mes siguiente. Con el borde
@@ -1094,7 +1094,7 @@ SQL_REPORTE = {
     ),
     "alumnos_vigentes": (
         "SELECT count(*)::text AS alumnos_vigentes FROM usuarios u "
-        "WHERE u.tenant_id = {tid} AND u.rol = 'alumno' AND u.activo = true "
+        "WHERE u.tenant_id = {tid} AND u.rol = 'alumno' AND u.estado = 'activo' "
         "AND EXISTS (SELECT 1 FROM suscripciones s "
         "  JOIN planes p ON p.id = s.plan_id WHERE s.usuario_id = u.id "
         "  AND s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "current_date") +
@@ -1107,7 +1107,7 @@ SQL_REPORTE = {
     ),
     "retencion_base": (
         "SELECT count(*)::text AS retencion_base FROM usuarios u "
-        "WHERE u.tenant_id = {tid} AND u.rol = 'alumno' AND u.activo = true "
+        "WHERE u.tenant_id = {tid} AND u.rol = 'alumno' AND u.estado = 'activo' "
         "AND EXISTS (SELECT 1 FROM suscripciones s "
         "  JOIN planes p ON p.id = s.plan_id WHERE s.usuario_id = u.id "
         "  AND s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "'{hace30}'::date") +
@@ -1115,7 +1115,7 @@ SQL_REPORTE = {
     ),
     "retencion_siguen": (
         "SELECT count(*)::text AS retencion_siguen FROM usuarios u "
-        "WHERE u.tenant_id = {tid} AND u.rol = 'alumno' AND u.activo = true "
+        "WHERE u.tenant_id = {tid} AND u.rol = 'alumno' AND u.estado = 'activo' "
         "AND EXISTS (SELECT 1 FROM suscripciones s "
         "  JOIN planes p ON p.id = s.plan_id WHERE s.usuario_id = u.id "
         "  AND s.tenant_id = {tid} AND " + sql_suscripcion_vigente("s", "'{hace30}'::date") +

@@ -303,7 +303,7 @@ cur_test.execute("""
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
 """)
-cur_test.execute("INSERT INTO coach_disciplinas (tenant_id, coach_id, disciplina_id, activo) SELECT 1, id, 1, true FROM usuarios WHERE rol='coach' AND tenant_id=1 AND activo=true AND NOT EXISTS (SELECT 1 FROM coach_disciplinas cd WHERE cd.coach_id=usuarios.id AND cd.disciplina_id=1)")
+cur_test.execute("INSERT INTO coach_disciplinas (tenant_id, coach_id, disciplina_id, activo) SELECT 1, id, 1, true FROM usuarios WHERE rol='coach' AND tenant_id=1 AND estado='activo' AND NOT EXISTS (SELECT 1 FROM coach_disciplinas cd WHERE cd.coach_id=usuarios.id AND cd.disciplina_id=1)")
 print("[OK] coach_disciplinas table + inserts")
 
 # 5d. cobertura_emergencia table
