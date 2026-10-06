@@ -25,6 +25,8 @@ from app.core.estados import (   # los MISMOS criterios que el mantenimiento
     plan_comercial,
 )
 from app.models.plan import Plan
+from app.services.plan_vencimiento import dias_hasta   # días de Chile, UNA sola definición
+
 from app.utils.santiago import fecha_chile, hoy_santiago   # el DÍA, siempre en hora de Chile
 from app.models.usuario import RolUsuario, Usuario
 
@@ -121,8 +123,8 @@ def _suscripcion_activa(db, tenant_id, usuario_id, fecha_ref):
     ).scalar()
     if not vence:
         return False, None
-    vence_date = fecha_chile(vence)
-    return True, (vence_date - fecha_ref).days
+    # Días de Chile: misma función que la situación del BI y la recomendación.
+    return True, dias_hasta(vence, fecha_ref)
 
 
 def features_alumno(db, tenant_id, alumno, fecha_ref) -> dict:
@@ -225,8 +227,8 @@ def build_features(db, tenant_id, fecha_ref=None) -> pd.DataFrame:
             "antiguedad_dias": max(0, antiguedad),
             # As-of: la query ya garantiza fecha_expiracion >= fecha_ref.
             "tiene_suscripcion_activa": vence_date is not None,
-            "dias_para_vencer_plan": (
-                (vence_date - fecha_ref).days if vence_date else None),
+            # Días de Chile: la MISMA función que la situación del BI y la recomendación.
+            "dias_para_vencer_plan": dias_hasta(vence, fecha_ref),
         }
         for dias in VENTANAS_DIAS:
             fila[f"asistencias_ultimos_{dias}_dias"] = conteos[dias].get(

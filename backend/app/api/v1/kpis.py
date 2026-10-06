@@ -27,6 +27,7 @@ from app.models.predictions_churn import PredictionsChurn
 from app.models.predictions_forecast import PredictionsForecast
 from app.models.segmentacion_alumno import SegmentacionAlumno
 from app.models.usuario import Usuario
+from app.services import plan_vencimiento
 from app.services.auditoria_service import registrar_auditoria
 from app.utils.santiago import hoy_santiago
 
@@ -132,15 +133,21 @@ def _arquetipo_por_alumno(db: Session, tenant_id: int, ids: list) -> dict:
 
 
 def _fila_churn(p, nombre, correo, estado_gestion, ultimo_contacto,
-                arquetipo=None) -> dict:
-    """Formato de fila que consume el frontend (GET y PUT responden igual)."""
+                arquetipo=None, dias_plan=None) -> dict:
+    """Formato de fila que consume el frontend (GET y PUT responden igual).
+
+    `dias_plan`: días para vencer el plan vigente calculados EN VIVO con
+    `plan_vencimiento`. El `motivo` es un snapshot del BI: su "plan vence en N días"
+    se refresca acá para que la situación (esta columna) y la recomendación digan el
+    MISMO número (antes el snapshot viejo mostraba 7 y la recomendación en vivo 3).
+    """
     return {
         "usuario_id": p.usuario_id,
         "alumno_nombre": nombre,
         "alumno_correo": correo,
         "probabilidad_churn": float(p.probabilidad_churn),
         "riesgo_nivel": p.riesgo_nivel,
-        "motivo": p.motivo,
+        "motivo": plan_vencimiento.refrescar_dias_plan(p.motivo, dias_plan),
         "recomendacion": p.recomendacion,
         "recomendacion_codigo": p.recomendacion_codigo,
         "estado_gestion": estado_gestion,
@@ -592,6 +599,8 @@ def get_predictions_churn(
     - `ultimo_contacto_automatico`: último correo automático ENVIADO (o None).
     - `arquetipo`: segmentación vigente del alumno (tabla
       `segmentacion_alumnos`), o None si el reentrenamiento no corrió.
+    - `motivo` (situación): su "plan vence en N días" se refresca en vivo
+      (`plan_vencimiento`) para que coincida con la recomendación.
     """
     tenant_id = current_user["tenant_id"]
 
@@ -605,15 +614,16 @@ def get_predictions_churn(
         PredictionsChurn.tenant_id == tenant_id,
     ).all()
 
+    criticos = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "CRITICO")
+    altos = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "ALTO")
+    medios = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "MEDIO")
+
     ids = [p.usuario_id for p, _n, _c in filas]
     gestion = _gestion_por_alumno(db, tenant_id, ids)
     contactos = _ultimo_contacto_por_alumno(db, tenant_id, ids)
     dias_inactivo = _dias_inactividad_por_alumno(db, tenant_id, ids)
     arquetipos = _arquetipo_por_alumno(db, tenant_id, ids)
-
-    criticos = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "CRITICO")
-    altos = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "ALTO")
-    medios = sum(1 for p, _n, _c in filas if p.riesgo_nivel == "MEDIO")
+    dias_plan = plan_vencimiento.dias_para_vencer_lote(db, tenant_id, ids)
 
     predicciones = [
         _fila_churn(
@@ -621,6 +631,7 @@ def get_predictions_churn(
             gestion.get(p.usuario_id, ESTADO_GESTION_DEFAULT),
             contactos.get(p.usuario_id),
             arquetipos.get(p.usuario_id),
+            dias_plan.get(p.usuario_id),
         )
         for p, nombre, correo in filas
     ]
@@ -717,9 +728,11 @@ def actualizar_estado_gestion_churn(
 
     contactos = _ultimo_contacto_por_alumno(db, tenant_id, [usuario_id])
     arquetipos = _arquetipo_por_alumno(db, tenant_id, [usuario_id])
+    dias_plan = plan_vencimiento.dias_para_vencer_lote(db, tenant_id, [usuario_id])
     fila = _fila_churn(p, nombre, correo, data.estado_gestion,
                        contactos.get(usuario_id),
-                       arquetipos.get(usuario_id))
+                       arquetipos.get(usuario_id),
+                       dias_plan.get(usuario_id))
     fila["estado_anterior"] = estado_anterior
     return fila
 

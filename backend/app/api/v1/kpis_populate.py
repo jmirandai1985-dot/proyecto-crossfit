@@ -24,6 +24,7 @@ from app.core.estados import (ESTADOS_CANCELADA, dia_chile,   # dia_chile = dia 
                               plan_comercial)  # las MISMAS listas que el mantenimiento
 from app.db.database import get_db
 from app.services import metricas_service as metricas
+from app.services import plan_vencimiento
 from app.models.daily_kpis import DailyKpi
 from app.models.monthly_kpis import MonthlyKpi
 from app.models.predictions_churn import PredictionsChurn
@@ -755,6 +756,8 @@ def populate_predictions(
             prob = round(float(probs_ml.get(alumno.id, 0.0)) * 100, 2)
             ctx = contexto_ml.get(alumno.id, {})
             dias_inactivo = int(ctx.get("dias_desde_ultima_asistencia", 0))
+            # `dias_para_vencer_plan` lo calcula `ml.features.build_features` con la MISMA
+            # función que la situación heurística y la recomendación (`plan_vencimiento`).
             dias_para_vencer = ctx.get("dias_para_vencer_plan")
             # Ventanas de asistencia: ya vienen en `contexto_ml` (features), sin
             # query extra. Habilitan la regla #2 de la recomendación.
@@ -784,17 +787,13 @@ def populate_predictions(
             # (motivo, probabilidad y recomendación equivocados).
             # Y tiene que ser COMERCIAL: un pase de regreso no es un plan vigente
             # para el churn (mismo criterio que los features del ML).
-            proxima = db.query(func.max(Suscripcion.fecha_expiracion)).join(
-                Plan, Suscripcion.plan_id == Plan.id
-            ).filter(
-                Suscripcion.tenant_id == tenant_id,
-                Suscripcion.usuario_id == alumno.id,
-                Suscripcion.estado == "activo",
-                dia_chile(Suscripcion.fecha_expiracion) >= hoy,
-                plan_comercial(Plan.es_comercial),
-            ).scalar()
+            # TODO esto (vigencia + comercial + días de Chile) vive en UNA sola
+            # función compartida con la recomendación: `plan_vencimiento`.
+            fila_plan = plan_vencimiento.suscripcion_vigente(
+                db, alumno, hoy, solo_comercial=True)
+            proxima = fila_plan[0].fecha_expiracion if fila_plan else None
             proxima_date = fecha_chile(proxima) if proxima else None
-            dias_para_vencer = (proxima_date - hoy).days if proxima_date else None
+            dias_para_vencer = plan_vencimiento.dias_hasta(proxima, hoy)
             # Ventanas de asistencia (rama heurística: se calculan pre-loop).
             asis_30 = conteos_30.get(alumno.id, 0)
             asis_90 = conteos_90.get(alumno.id, 0)

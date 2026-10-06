@@ -64,6 +64,9 @@ from app.models.predictions_churn import PredictionsChurn
 from app.models.suscripcion import Suscripcion
 from app.services import beneficios_service
 from app.services import email_service
+# ÚNICA definición de "días para vencer el plan vigente": la comparte con la situación del BI
+# (kpis_populate) para que la columna "Recomendación" y el "Motivo" nunca digan nº distintos.
+from app.services.plan_vencimiento import dias_hasta, suscripcion_vigente
 from app.utils.santiago import fecha_chile, hoy_santiago
 
 # ── Grupos del catálogo ───────────────────────────────────────────────────────
@@ -155,24 +158,8 @@ def dias_inactividad(db: Session, alumno) -> int:
     return _contexto_inactividad(db, alumno)["dias_inactividad"]
 
 
-def suscripcion_vigente(db: Session, alumno, hoy: date = None):
-    """`(Suscripcion, Plan)` de la membresía que HOY da acceso, o `None` (criterio 5).
-
-    Si hay más de una, gana la que vence MÁS TARDE: es la que el alumno va a renovar.
-    """
-    hoy = hoy or hoy_santiago()
-    return (
-        db.query(Suscripcion, Plan)
-        .join(Plan, Suscripcion.plan_id == Plan.id)
-        .filter(Suscripcion.tenant_id == alumno.tenant_id,
-                Suscripcion.usuario_id == alumno.id,
-                Suscripcion.estado == ESTADO_SUSCRIPCION_ACTIVO,
-                # El día de vencimiento cuenta COMPLETO y en hora de Chile (misma definición que
-                # `shared.estados.sql_suscripcion_vigente()` y que los gates de reservas/planes).
-                vigente_hoy(Suscripcion.fecha_expiracion, hoy=hoy))
-        .order_by(Suscripcion.fecha_expiracion.desc(), Suscripcion.id.desc())
-        .first()
-    )
+# `suscripcion_vigente` se importa de `app.services.plan_vencimiento` (arriba) y NO se
+# redefine acá: la membresía "vigente" es UNA sola definición (criterio 5 del módulo).
 
 
 def _contexto_vencimiento(db: Session, alumno) -> dict:
@@ -187,7 +174,7 @@ def _contexto_vencimiento(db: Session, alumno) -> dict:
     return {
         "plan": plan.nombre,
         "fecha_expiracion": vence,
-        "dias_restantes": max(0, (vence - hoy_santiago()).days),
+        "dias_restantes": dias_hasta(suscripcion.fecha_expiracion),
         "suscripcion_id": suscripcion.id,
     }
 
@@ -597,8 +584,8 @@ def _sugerir_con(datos: dict) -> dict:
     dias_para_vencer = None
     if fila is not None:
         suscripcion, _plan = fila
-        dias_para_vencer = max(0, (fecha_chile(suscripcion.fecha_expiracion)
-                                  - hoy_santiago()).days)
+        # Días de Chile del plan vigente: la MISMA función que usa la situación del BI.
+        dias_para_vencer = dias_hasta(suscripcion.fecha_expiracion)
     contexto["dias_para_vencer"] = dias_para_vencer
 
     if dias_para_vencer is not None and dias_para_vencer <= DIAS_RENOVACION_SUGERIDA:
