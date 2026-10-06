@@ -43,3 +43,22 @@ Se corrige en Tarea 1.
 ## Duda 3: Filtro por activo en GET usuarios
 El endpoint GET /api/v1/usuarios no filtra por defecto activo=true.
 Se decide que el frontend pase activo=true explicitamente.
+
+---
+
+## Pendientes técnicos (sesión 2026-10-04)
+
+### TEST — 2 tests de entrega por código postean pedidos sin `tenant_id` (422)
+
+`backend/tests/test_pedido_entrega_codigo.py::_crear_pedido` (lo usan
+`test_validar_genera_el_codigo_y_el_admin_lo_entrega` y
+`test_el_respaldo_sin_codigo_del_admin_tambien_sella_la_traza`) hace
+`POST /api/v1/pedidos` con `{alumno_id, producto_id, cantidad, voucher_url}` y **sin
+`tenant_id`**, pero `PedidoCreate` lo exige (`app/schemas/pedido.py`:
+`tenant_id: int = Field(..., gt=0)`) → **422** y los 2 tests fallan.
+
+* **Es pre-existente**: no depende del cambio de "ventas del Bazar" (nada del diff toca
+  `pedidos.py` ni sus schemas). `test_pedidos_admin.py` sí manda `tenant_id` y pasa.
+* **Arreglo (cuando se retome, NO en esta sesión)**: agregar `"tenant_id"` al payload del
+  helper (tomarlo del fixture del alumno/box) — o decidir si el endpoint debe seguir
+  exigiéndolo en el body. `voucher_url` ya es obligatorio por P0-4/B-03.
