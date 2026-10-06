@@ -42,8 +42,13 @@ const AdminDashboard = () => {
     // ambas listas vacías y las tarjetas mostraban "0" como si no hubiera nadie en
     // riesgo (dato falso en un panel de churn).
     const [fidelizacionError, setFidelizacionError] = useState({ riesgo: '', vencimientos: '' });
-    const [ocupacionHoy, setOcupacionHoy] = useState([]);
-    const [ocupacionLoading, setOcupacionLoading] = useState(true);
+    // ── "Clases de hoy" (tarjeta + sección) ────────────────────────────────────
+    // Reutiliza GET /asistencia/clases-hoy (ya trae coach, estado y reservas) y filtra
+    // en el front las disciplinas que EXIGEN coach (`requiere_coach`), sin hardcodear
+    // CrossFit/Levantamiento. Se refresca solo cada 45s (pausado si la pestaña está oculta).
+    const [clasesHoy, setClasesHoy] = useState([]);
+    const [clasesHoyLoading, setClasesHoyLoading] = useState(true);
+    const [clasesHoyError, setClasesHoyError] = useState('');
     // Fidelización — modal membresías del mes
     const [fidelizacionModal, setFidelizacionModal] = useState(null); // 'membresias'
     // ── Tarjetas BI (data mart): "Alumnos nuevos" y "Convertidos" ─────────────
@@ -59,17 +64,36 @@ const AdminDashboard = () => {
         cargarSolicitudes();
         cargarCountPendientes();
         cargarFidelizacion();
-        cargarOcupacionHoy();
+        cargarClasesHoy();
         cargarBi();
     }, [tenant_id]);
 
-    const cargarOcupacionHoy = async () => {
-        setOcupacionLoading(true);
+    // Auto-refresco de "Clases de hoy": cada 45s, PAUSADO cuando la pestaña está oculta
+    // (no gasta cuota de la BD ni batería si el admin no está mirando), y al volver.
+    useEffect(() => {
+        const intervalo = setInterval(() => {
+            if (!document.hidden) cargarClasesHoy();
+        }, 45000);
+        const alVolver = () => { if (!document.hidden) cargarClasesHoy(); };
+        document.addEventListener('visibilitychange', alVolver);
+        return () => {
+            clearInterval(intervalo);
+            document.removeEventListener('visibilitychange', alVolver);
+        };
+    }, [tenant_id]);
+
+    const cargarClasesHoy = async () => {
         try {
-            const res = await api.get(`/api/v1/dashboard/${tenant_id}/ocupacion-hoy`);
-            setOcupacionHoy(res.data || []);
-        } catch { setOcupacionHoy([]); }
-        setOcupacionLoading(false);
+            const res = await api.get('/api/v1/asistencia/clases-hoy');
+            // El backend ya devuelve el día completo (admin) con coach/estado/reservas.
+            setClasesHoy((res.data || []).filter(c => c.requiere_coach));
+            setClasesHoyError('');
+        } catch (err) {
+            setClasesHoy([]);
+            setClasesHoyError(err?.response?.data?.detail || err?.message
+                || 'No se pudieron cargar las clases de hoy');
+        }
+        setClasesHoyLoading(false);
     };
 
     const cargarStats = async () => {
@@ -291,6 +315,14 @@ const AdminDashboard = () => {
         ? null
         : (countPendientes || 0) + solicitudes.length;
 
+    // Resumen de "Clases de hoy" (tarjeta + encabezado de la sección):
+    // X de Y realizadas + ocupación del día (reservas sobre cupos ofrecidos).
+    const clasesHoyRealizadas = clasesHoy.filter(c => c.estado === 'realizada').length;
+    const clasesHoyTotal = clasesHoy.length;
+    const reservasHoy = clasesHoy.reduce((a, c) => a + (c.reservas_count || 0), 0);
+    const cuposHoy = clasesHoy.reduce((a, c) => a + (c.cupo_maximo || 0), 0);
+    const ocupacionHoyPct = cuposHoy > 0 ? Math.round(reservasHoy / cuposHoy * 100) : 0;
+
     if (loading) {
         return (
             <Layout>
@@ -310,7 +342,7 @@ const AdminDashboard = () => {
                         <h1 className="text-3xl font-bold text-zinc-100">Dashboard Administrativo</h1>
                         <p className="text-zinc-400">Panel de gestión de membresías y fidelización</p>
                     </div>
-                    <button onClick={() => { cargarSolicitudes(); cargarCountPendientes(); cargarFidelizacion(); cargarBi(); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold">
+                    <button onClick={() => { cargarSolicitudes(); cargarCountPendientes(); cargarFidelizacion(); cargarClasesHoy(); cargarBi(); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold">
                         🔄 Recargar
                     </button>
                 </div>
@@ -373,11 +405,23 @@ const AdminDashboard = () => {
                             <p className="text-3xl font-bold text-purple-700 mt-1">{stats.asistenciaPromedio || 0}%</p>
                             <p className="text-xs text-zinc-500 mt-1">Ocupación en clases</p>
                         </div>
-                        <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-indigo-600">
-                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Clases Impartidas</p>
-                            <p className="text-3xl font-bold text-indigo-700 mt-1">{stats.clasesImpartidas || 0}</p>
-                            <p className="text-xs text-zinc-500 mt-1">Clases realizadas este mes</p>
-                        </div>
+                        <button onClick={() => document.getElementById('clases-hoy')?.scrollIntoView({ behavior: 'smooth' })} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-indigo-600 hover:shadow-md hover:border-indigo-700 transition-all cursor-pointer text-left">
+                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Clases de Hoy</p>
+                            {clasesHoyLoading ? (
+                                <p className="text-3xl font-bold text-zinc-600 mt-1">…</p>
+                            ) : clasesHoyError ? (
+                                <p className="text-sm font-bold text-amber-400 mt-2" title={clasesHoyError}>⚠️ s/d</p>
+                            ) : (
+                                <>
+                                    <p className="text-3xl font-bold text-indigo-700 mt-1">
+                                        {clasesHoyRealizadas}<span className="text-lg font-semibold text-zinc-500">/{clasesHoyTotal}</span>
+                                    </p>
+                                    <p className="text-xs text-zinc-500 mt-1">
+                                        {clasesHoyRealizadas} de {clasesHoyTotal} realizadas · {reservasHoy}/{cuposHoy} reservas ({ocupacionHoyPct}%) — Clic para ver
+                                    </p>
+                                </>
+                            )}
+                        </button>
                         <button onClick={() => document.getElementById('solicitudes-pendientes')?.scrollIntoView({ behavior: 'smooth' })} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-rose-600 hover:shadow-md hover:border-rose-700 transition-all cursor-pointer text-left">
                             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Solicitudes Pendientes</p>
                             {totalPendientes === null ? (
@@ -455,25 +499,22 @@ const AdminDashboard = () => {
                         📅 Clases de hoy — estado de ocupación
                     </h2>
                     <p className="text-xs text-zinc-400 mt-0.5">CrossFit y Levantamiento Olímpico, solo clases con coach asignado</p>
-                    {ocupacionLoading ? (
+                    {clasesHoyLoading ? (
                         <div className="flex justify-center py-6"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-900"></div></div>
-                    ) : ocupacionHoy.length === 0 ? (
+                    ) : clasesHoy.length === 0 ? (
                         <div className="py-6 text-center text-zinc-500 text-sm">Sin clases de CrossFit/Levantamiento con coach asignado hoy</div>
                     ) : (
                         <div className="mt-4 space-y-3">
-                            {ocupacionHoy.map(c => (
+                            {clasesHoy.map(c => (
                                 <div key={c.id} className="flex items-center gap-4">
-                                    <div className="text-sm font-semibold text-zinc-300 w-16 shrink-0">{c.hora} hrs</div>
+                                    <div className="text-sm font-semibold text-zinc-300 w-16 shrink-0">{c.hora_inicio?.slice(0, 5)} hrs</div>
                                     <div className="flex-1 bg-zinc-800 rounded-full h-4 overflow-hidden">
-                                        <div className={`h-full rounded-full transition-all ${c.color === 'red' ? 'bg-red-500' : c.color === 'amber' ? 'bg-amber-500' : 'bg-green-500'}`}
-                                            style={{ width: `${Math.min(c.porcentaje, 100)}%` }} />
+                                        <div className={`h-full rounded-full transition-all ${(c.cupo_maximo && (c.reservas_count || 0) / c.cupo_maximo >= 1) ? 'bg-red-500' : (c.cupo_maximo && (c.reservas_count || 0) / c.cupo_maximo >= 0.8) ? 'bg-amber-500' : 'bg-green-500'}`}
+                                            style={{ width: `${Math.min(c.cupo_maximo ? Math.round((c.reservas_count || 0) / c.cupo_maximo * 100) : 0, 100)}%` }} />
                                     </div>
-                                    <div className="text-sm text-zinc-400 w-20 shrink-0">{c.ocupados}/{c.cupo}</div>
-                                    <div className="text-sm font-semibold w-14 shrink-0">{c.porcentaje}%</div>
-                                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0
-                                        ${c.color === 'red' ? 'bg-red-100 text-red-800' :
-                                            c.color === 'amber' ? 'bg-amber-100 text-amber-800' :
-                                                'bg-green-100 text-green-800'}`}>
+                                    <div className="text-sm text-zinc-400 w-20 shrink-0">{c.reservas_count || 0}/{c.cupo_maximo || 0}</div>
+                                    <div className="text-sm font-semibold w-14 shrink-0">{c.cupo_maximo ? Math.round((c.reservas_count || 0) / c.cupo_maximo * 100) : 0}%</div>
+                                    <span className="px-2 py-0.5 rounded-full text-xs font-medium shrink-0 bg-zinc-700 text-zinc-300">
                                         {c.estado}
                                     </span>
                                 </div>
