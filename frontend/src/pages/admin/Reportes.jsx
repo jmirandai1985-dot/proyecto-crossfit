@@ -548,9 +548,11 @@ const Reportes = () => {
                     <button
                         onClick={async () => {
                             try {
-                                const now = new Date();
-                                const mes = now.getMonth() + 1;
-                                const anio = now.getFullYear();
+                                // Mes/año del CALENDARIO CHILENO (helper compartido): el
+                                // navegador del admin puede estar en otra zona, y con
+                                // `new Date()` la última noche del mes el reporte salía
+                                // del mes siguiente (mismo bug que en Supervisión).
+                                const [anio, mes] = hoyChileStr().split('-').map(Number);
                                 const tenantIdValue = tenant_id || 1;
 
                                 const response = await api({

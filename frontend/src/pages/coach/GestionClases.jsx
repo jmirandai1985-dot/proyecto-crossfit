@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import Layout from '../../components/Layout';
 import WodDetalleModal from '../../components/WodDetalleModal';
 import api from '../../services/api';
-import { hoyChileStr as hoyStr, toChileFechaStr as toLocalFechaStr } from '../../utils/fecha';
+import { horaChileStr, hoyChileStr as hoyStr, toChileFechaStr as toLocalFechaStr } from '../../utils/fecha';
 
 const API_BASE = '/api/v1';
 const TURNOS = [
@@ -266,7 +266,12 @@ export default function GestionClases() {
         setClasesDiaVista(cls);
         setClasesConWod(cls.filter(c => c.wod_id));
         if (f === hoyStr()) {
-            const ahora = new Date(); const minActual = ahora.getHours() * 60 + ahora.getMinutes();
+            // Hora de CHILE (helper compartido), no la del navegador: los horarios de la
+            // grilla son hora local del box y el coach puede estar en otra zona (con el
+            // reloj local del navegador la clase "en curso" se marcaba mal).
+            const [hh, mm] = horaChileStr().split(':').map(Number);
+            // ICU puede devolver '24:00' para la medianoche: eso son las 00:00 = 0 min.
+            const minActual = (Number.isFinite(hh) ? hh % 24 : 0) * 60 + (mm || 0);
             const ec = cls.find(c => {
                 const hi = parseHora(c.hora_inicio), hf = parseHora(c.hora_fin);
                 return minActual >= hi * 60 && minActual <= hf * 60;
