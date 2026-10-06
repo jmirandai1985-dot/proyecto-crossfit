@@ -15,9 +15,10 @@ cliente R2 falso de test_storage_r2.py):
     puede caerse porque no se pudo escribir un aviso). El rollback sólo se hace
     cuando la transacción la cerró el módulo (`commit=True`);
   * `notificar_alumno`: id vacío -> None sin tocar la BD;
-  * los mensajes de estado del Bazar (`MENSAJES_ESTADO_PEDIDO`) existen para
-    validado/entregado y el `tipo` que genera `pedidos.py` entra en la columna
-    (`String(20)`);
+  * los mensajes de estado del Bazar avisan al alumno: `entregado` sale del mapa
+    `MENSAJES_ESTADO_PEDIDO` y `validado` de `codigos_retiro.texto_validado` (lleva el
+    código de retiro desde la migración 044, por eso NO es una plantilla del mapa); y
+    el `tipo` que genera `pedidos.py` entra en la columna (`String(20)`);
   * CONTRATO de los flujos que avisan al ADMIN: la solicitud de plan con voucher
     (`plan_solicitado`), el alta de alumno (`alumno_nuevo`) y la cobertura de
     emergencia llaman a `notificar_admins_del_tenant`, y la emergencia NO vuelve a
@@ -33,7 +34,7 @@ from types import SimpleNamespace
 from app.api.v1.pedidos import MENSAJES_ESTADO_PEDIDO
 from app.models.notificacion import Notificacion
 from app.models.usuario import RolUsuario, Usuario
-from app.services import notificaciones_panel
+from app.services import codigos_retiro, notificaciones_panel
 
 TENANT = 1
 
@@ -263,11 +264,35 @@ def test_notificar_alumno_es_un_alias_de_notificar_usuario():
 # ── mensajes / contrato con pedidos.py ─────────────────────────────────────
 
 def test_mensajes_de_estado_del_bazar():
-    assert set(MENSAJES_ESTADO_PEDIDO) == {"validado", "entregado"}
-    render = MENSAJES_ESTADO_PEDIDO["validado"].format(
+    """Los DOS avisos de estado del Bazar, cada uno por su camino.
+
+    El mapa sólo tiene `entregado`: desde el código de retiro (migración 044) el aviso de
+    `validado` lleva el código adentro, así que lo arma `codigos_retiro.texto_validado()` y
+    NO puede ser una plantilla sin variables (el comentario de `pedidos.py` lo explica). El
+    test fija las dos mitades —el mapa no puede perder `entregado` y el aviso de validación
+    no puede perder ni el texto ni el código— en vez de exigir que los dos estados salgan
+    del mismo diccionario.
+    """
+    assert set(MENSAJES_ESTADO_PEDIDO) == {"entregado"}, (
+        "cambió el mapa de mensajes: revisa que CADA estado siga avisando al alumno")
+
+    entregado = MENSAJES_ESTADO_PEDIDO["entregado"].format(
         producto="Polera", cantidad=2)
-    assert "Polera x2" in render
-    assert render.endswith("fue validado")
+    assert "Polera x2" in entregado
+    assert entregado.endswith("fue entregado")
+
+    validado = codigos_retiro.texto_validado("Polera", 2, "UB-4827")
+    assert "Polera x2" in validado
+    assert "fue validado" in validado
+    assert "UB-4827" in validado, "el aviso de validación perdió el código de retiro"
+
+
+def test_el_aviso_de_validado_se_arma_con_el_codigo():
+    """Guard de FUENTE: `pedidos.py` no puede volver a plantillar `validado` sin el código."""
+    fuente = _fuente("app/api/v1/pedidos.py")
+    assert "codigos_retiro.texto_validado(" in fuente, (
+        "el aviso de validado dejó de usar el helper que agrega el código de retiro")
+    assert 'f"pedido_{nuevo_estado}"' in fuente, "cambió el tipo del aviso (campana)"
 
 
 def test_los_tipos_entran_en_la_columna():
@@ -279,7 +304,8 @@ def test_los_tipos_entran_en_la_columna():
     """
     for estado in MENSAJES_ESTADO_PEDIDO:
         assert len(f"pedido_{estado}") <= 20
-    for tipo in ("pedido_nuevo", "plan_solicitado", "alumno_nuevo", "emergencia",
+    for tipo in ("pedido_nuevo", "pedido_validado", "pedido_entregado",
+                 "plan_solicitado", "alumno_nuevo", "emergencia",
                  "aprobado", "rechazado", "plan_activo", "clase_asignada",
                  "clase_reasignada", "clase_liberada", "config_bancaria"):
         assert len(tipo) <= 20, tipo
