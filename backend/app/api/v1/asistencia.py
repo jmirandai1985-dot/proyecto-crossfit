@@ -37,6 +37,7 @@ from app.models.disciplina import Disciplina
 from app.utils.santiago import ahora_santiago, hoy_santiago, SANTIAGO
 from app.schemas.asistencia import ConfirmarAsistenciaRequest
 from app.services import asistencia_service as svc
+from app.services.clases_service import estado_clase   # estado de la clase (realizada/en curso/…)
 
 router = APIRouter()
 
@@ -109,11 +110,23 @@ def clases_hoy(
         }
         marcadas = con_reservas - con_pendientes
 
-    disc_ids_set = {c.disciplina_id for c in clases}
-    disc_map = {}
+    disc_ids_set = {c.disciplina_id for c in clases if c.disciplina_id}
+    disc_map, disc_req = {}, {}
     if disc_ids_set:
-        disc_map = {d.id: d.nombre for d in db.query(Disciplina).filter(
-            Disciplina.id.in_(disc_ids_set)).all()}
+        for d in db.query(Disciplina).filter(Disciplina.id.in_(disc_ids_set)).all():
+            disc_map[d.id] = d.nombre
+            disc_req[d.id] = bool(d.requiere_coach)
+
+    # Nombre del coach de cada clase (None = "sin coach asignado": lo pinta el frontend).
+    coach_ids = {c.coach_id for c in clases if c.coach_id}
+    coach_map = {}
+    if coach_ids:
+        coach_map = {u.id: u.nombre for u in db.query(Usuario).filter(
+            Usuario.id.in_(coach_ids)).all()}
+
+    # El estado ("realizada" / "en_curso" / "proxima" / "cancelada") se evalúa con el MISMO
+    # instante para todas las filas (definición única de `clases_service`).
+    ahora_dt = ahora_santiago()
 
     return [
         {
@@ -123,11 +136,14 @@ def clases_hoy(
             "hora_fin": str(c.hora_fin),
             "disciplina_id": c.disciplina_id,
             "disciplina_nombre": disc_map.get(c.disciplina_id, "Clase"),
+            "requiere_coach": disc_req.get(c.disciplina_id, False),
+            "coach": coach_map.get(c.coach_id) if c.coach_id else None,
             "cupo_maximo": c.cupo_maximo,
             "cupo_original": c.cupo_original,
             "asistentes_confirmados": c.asistentes_confirmados,
             "reservas_count": counts.get(c.id, 0),
             "marcada": c.id in marcadas,
+            "estado": estado_clase(c.fecha, c.hora_inicio, c.hora_fin, c.cancelada, ahora_dt),
         }
         for c in clases
     ]

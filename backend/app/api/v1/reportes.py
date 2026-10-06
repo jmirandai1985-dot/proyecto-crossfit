@@ -14,6 +14,7 @@ import logging
 from app.db.database import get_db
 from app.core.dependencies import get_current_admin
 from app.services import metricas_service as metricas
+from app.services.clases_service import sql_clase_realizada
 
 logger = logging.getLogger(__name__)
 
@@ -198,11 +199,16 @@ def obtener_reportes_analytics(
             crecimiento_mom = None
 
         # --- 9. CLASES IMPARTIDAS ESTE MES ---
+        # "Impartida" = clase REALIZADA (ya terminó en hora de Chile y no cancelada), la
+        # definición única de `clases_service`. Antes se contaban TODAS las clases del mes,
+        # incluidas las futuras: en el mes en curso eso inflaba el número (bug 2026-10: 559 con
+        # el mes recién empezado). Para un mes cerrado el resultado no cambia.
         clases_impartidas = db.execute(sql_text("""
             SELECT COUNT(*) FROM clases
             WHERE tenant_id = :tid
               AND fecha >= :inicio_d
               AND fecha <= :fin_d
+              AND """ + sql_clase_realizada("clases") + """
         """), {"tid": tenant_id, "inicio_d": inicio_mes.date(), "fin_d": fin_mes.date()}).scalar() or 0
 
         # --- 10. OCUPACION PROMEDIO ---
@@ -222,6 +228,7 @@ def obtener_reportes_analytics(
             WHERE c.tenant_id = :tid
               AND c.fecha >= :inicio_d
               AND c.fecha <= :fin_d
+              AND """ + sql_clase_realizada("c") + """
             GROUP BY d.id, d.nombre
             ORDER BY d.id
         """), {"tid": tenant_id, "inicio_d": inicio_mes.date(), "fin_d": fin_mes.date()}).fetchall()

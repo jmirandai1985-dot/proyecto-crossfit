@@ -16,6 +16,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.formatting.rule import CellIsRule
 
 from app.services import metricas_service as metricas
+from app.services.clases_service import sql_clase_realizada
 from shared.estados import (lista_sql_pago_bazar, sql_plan_comercial,
                             sql_suscripcion_vigente)
 
@@ -506,7 +507,9 @@ def crear_reporte_ventas_mensual_bytes(
     arpu_val = round(neto_mes / alumnos_activos,
                      0) if alumnos_activos > 0 else 0
 
-    # Ocupacion por disciplina
+    # Ocupacion por disciplina — solo clases REALIZADAS (ya terminaron y no canceladas;
+    # definición única de `clases_service`), igual que la tarjeta de Reportes. Antes entraban
+    # también las clases futuras del mes en curso.
     ocupacion = db.execute(text("""
         SELECT d.nombre,
                SUM(COALESCE(c.asistentes_confirmados, 0)) as asistentes,
@@ -514,6 +517,7 @@ def crear_reporte_ventas_mensual_bytes(
         FROM clases c
         JOIN disciplinas d ON c.disciplina_id = d.id
         WHERE c.tenant_id = :tid AND c.fecha >= :ini AND c.fecha < :fin
+          AND """ + sql_clase_realizada("c") + """
         GROUP BY d.nombre ORDER BY d.nombre
     """), {"tid": tenant_id, "ini": fecha_inicio, "fin": fecha_fin}).fetchall()
 

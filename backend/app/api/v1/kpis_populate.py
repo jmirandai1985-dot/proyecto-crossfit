@@ -16,7 +16,7 @@ import secrets
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -25,6 +25,7 @@ from app.core.estados import (ESTADOS_CANCELADA, dia_chile,   # dia_chile = dia 
 from app.db.database import get_db
 from app.services import metricas_service as metricas
 from app.services import plan_vencimiento
+from app.services.clases_service import sql_clase_realizada
 from app.models.daily_kpis import DailyKpi
 from app.models.monthly_kpis import MonthlyKpi
 from app.models.predictions_churn import PredictionsChurn
@@ -262,7 +263,10 @@ def populate_daily_kpis(
     clases = db.query(Clase).filter(
         Clase.tenant_id == tenant_id,
         Clase.fecha == objetivo,
-        Clase.cancelada == False,  # noqa: E712
+        # "Clase ejecutada" = realizada (ya terminó y no cancelada; definición única de
+        # `clases_service`). Para un día pasado equivale a "no cancelada"; si el día es HOY,
+        # además descarta las que todavía no terminan.
+        text(sql_clase_realizada("clases")),
     ).all()
     clases_ejecutadas = len(clases)
     cupo_total = sum((c.cupo_maximo or 0) for c in clases)
@@ -273,6 +277,7 @@ def populate_daily_kpis(
         Reserva.tenant_id == tenant_id,
         Clase.fecha == objetivo,
         Reserva.asistio == True,  # noqa: E712
+        text(sql_clase_realizada("clases")),
     ).scalar() or 0
 
     ocupacion = round((asistentes / cupo_total * 100), 2) if cupo_total else 0
@@ -425,11 +430,14 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
     ingresos_bazar = metricas.ventas_bazar(db, tenant_id, inicio, fin)
 
     # ── Asistencia ──
+    # Solo clases REALIZADAS del mes (ya terminaron y no canceladas; definición única de
+    # `clases_service`): en el mes en curso descarta las futuras, y en un mes cerrado no cambia.
     asistentes_mes = db.query(
         func.coalesce(func.sum(Clase.asistentes_confirmados), 0)
     ).filter(
         Clase.tenant_id == tenant_id,
         Clase.fecha >= inicio, Clase.fecha <= fin,
+        text(sql_clase_realizada("clases")),
     ).scalar() or 0
 
     reservas_mes = db.query(func.count(Reserva.id)).join(

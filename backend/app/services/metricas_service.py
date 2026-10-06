@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from shared.estados import (lista_sql_pago_bazar, sql_fecha_en_chile,
                             sql_plan_comercial, sql_suscripcion_vigente)
+from app.services.clases_service import sql_clase_realizada
 from app.utils.santiago import hoy_santiago
 
 # Umbral minimo de base para publicar retencion/churn. Mismo criterio que
@@ -150,6 +151,12 @@ def ocupacion_promedio(db: Session, tenant_id: int, inicio: date, fin: date) -> 
     no tasa de asistencia; eso requeriria comparar asistencias reales contra
     reservas confirmadas. Reportes la muestra como Asistencia Promedio y
     monthly_kpis.ocupacion_promedio guarda el mismo numero.
+
+    Solo cuenta clases REALIZADAS (`clases_service.sql_clase_realizada`: ya
+    terminadas en hora de Chile y no canceladas). Antes entraban TODAS las clases
+    del periodo, asi que en el mes EN CURSO las clases futuras inflaban el
+    denominador y el % salia artificialmente bajo (bug reportado 2026-10: 2.11%).
+    Para un mes ya cerrado todas las clases terminaron, asi que el numero no cambia.
     """
     fila = db.execute(text("""
         SELECT COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0)), 0),
@@ -157,6 +164,7 @@ def ocupacion_promedio(db: Session, tenant_id: int, inicio: date, fin: date) -> 
         FROM clases c
         WHERE c.tenant_id = :tid
           AND c.fecha >= :ini AND c.fecha <= :fin
+          AND """ + sql_clase_realizada("c") + """
     """), {
         "tid": tenant_id, "ini": inicio, "fin": fin}).first()
     asistentes, cupo = int(fila[0] or 0), int(fila[1] or 0)
