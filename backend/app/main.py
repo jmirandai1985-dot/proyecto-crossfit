@@ -296,14 +296,14 @@ async def startup_event():
             from datetime import timedelta
             from app.db.database import SessionLocal
             from app.services.generar_clases import (
-                DIAS_ANTICIPACION, generar_clases_para_rango)
+                DIAS_ANTICIPACION, generar_dias_incompletos, revisar_rango)
 
             hoy = hoy_santiago()
             fecha_hasta = hoy + timedelta(days=DIAS_ANTICIPACION)
             db = SessionLocal()
             try:
                 # Generar para tenant_id=1 (principal) en rango de 7 dÃ­as
-                resultado = generar_clases_para_rango(
+                resultado = generar_dias_incompletos(
                     db, tenant_id=1, fecha_desde=hoy, fecha_hasta=fecha_hasta)
                 return resultado
             except Exception as e:
@@ -323,39 +323,21 @@ async def startup_event():
         from datetime import timedelta
         from app.db.database import SessionLocal
         from app.services.generar_clases import (
-            DIAS_ANTICIPACION, generar_clases_para_rango)
+            DIAS_ANTICIPACION, generar_dias_incompletos, revisar_rango)
 
         hoy = hoy_santiago()
         fecha_hasta = hoy + timedelta(days=DIAS_ANTICIPACION)
         db = SessionLocal()
         try:
-            from app.models.clase import Clase
-            from sqlalchemy import text
+            # Revisión del rango [hoy, hoy + DIAS_ANTICIPACION] en UNA pasada: el
+            # servicio hace DOS consultas agregadas (conteo de clases por fecha +
+            # horarios activos por día) en vez de un COUNT por día (hasta 28 x 2
+            # consultas con la latencia de Neon).
+            faltantes = revisar_rango(db, tenant_id=1, fecha_desde=hoy,
+                                      fecha_hasta=fecha_hasta)
 
-            # Verificar si ALGUNA fecha del rango [hoy, hoy+6] estÃ¡ incompleta
-            faltan_clases = False
-            for i in range(DIAS_ANTICIPACION + 1):
-                f = hoy + timedelta(days=i)
-                if f.weekday() == 6:  # domingo, skip
-                    continue
-                count_clases = db.execute(
-                    text(
-                        "SELECT COUNT(*) FROM clases WHERE tenant_id = 1 AND fecha = :fecha"),
-                    {"fecha": f}
-                ).scalar()
-                count_horarios = db.execute(
-                    text(
-                        "SELECT COUNT(*) FROM horarios WHERE tenant_id = 1 AND dia_semana = :ds AND activo = true"),
-                    {"ds": f.weekday()}
-                ).scalar()
-                if count_clases < count_horarios:
-                    faltan_clases = True
-                    logger.info(
-                        f"ðŸ” [Startup] {f} tiene {count_clases}/{count_horarios} clases (faltan {count_horarios - count_clases})")
-                    break
-
-            if faltan_clases:
-                resultado = generar_clases_para_rango(
+            if faltantes:
+                resultado = generar_dias_incompletos(
                     db, tenant_id=1, fecha_desde=hoy, fecha_hasta=fecha_hasta)
                 logger.info(
                     f"ðŸ”„ [Startup] Se generaron {resultado['creadas']} clases faltantes para HOY + 28 dÃ­as (4 semanas)")

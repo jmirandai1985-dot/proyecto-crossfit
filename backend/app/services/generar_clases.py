@@ -4,6 +4,7 @@ Usado por: endpoint HTTP, scheduler diario, y respaldo automático
 """
 import logging
 from datetime import date, datetime, timedelta, timezone
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger("uvicorn.generar_clases")
@@ -161,6 +162,98 @@ def generar_clases_para_rango(
         "creadas": total_creadas,
         "omitidas": total_omitidas,
         "fechas_procesadas": fechas_procesadas,
+        "fecha_desde": fecha_desde.isoformat(),
+        "fecha_hasta": fecha_hasta.isoformat(),
+    }
+
+
+# ── Revisión del rango en UNA pasada (arranque del backend más rápido) ──────────
+# Antes, el arranque (`main.startup_event`) recorría el rango día por día y hacía un COUNT
+# de clases Y otro de horarios por CADA fecha (hasta 28 x 2 consultas; con la latencia de
+# Neon eso alargaba el arranque). Acá la revisión es UNA consulta agregada de conteo por
+# fecha + UNA de horarios activos por día de semana, y la generación toca SÓLO los días
+# incompletos. El resultado final es el MISMO que regenerar el rango entero: un día
+# completo no crea nada (el generador ya omite las clases existentes).
+def dias_incompletos(conteo_clases_por_fecha, conteo_horarios_por_dia,
+                     fecha_desde: date, fecha_hasta: date) -> list:
+    """Fechas del rango (sin domingos) que NO tienen todas sus clases.
+
+    `conteo_clases_por_fecha` = `{fecha: n}` y `conteo_horarios_por_dia` = `{weekday: n}`.
+    Una fecha está incompleta si tiene horarios activos y le faltan clases
+    (`clases < horarios`). Un día sin horarios (0) nunca está incompleto.
+
+    **Puro** (recibe los conteos ya resueltos): es el MISMO criterio que el bucle día a día
+    que reemplaza, y por eso se puede comparar contra él en un test sin base de datos.
+    """
+    faltantes = []
+    f = fecha_desde
+    while f <= fecha_hasta:
+        if f.weekday() == 6:                      # Domingo: no hay horarios base.
+            f += timedelta(days=1)
+            continue
+        esperado = conteo_horarios_por_dia.get(f.weekday(), 0)
+        if conteo_clases_por_fecha.get(f, 0) < esperado:
+            faltantes.append(f)
+        f += timedelta(days=1)
+    return faltantes
+
+
+def revisar_rango(db: Session, tenant_id: int, fecha_desde: date,
+                  fecha_hasta: date) -> list:
+    """Fechas incompletas del rango con DOS consultas agregadas (no 2 por día).
+
+    Devuelve la lista de fechas que `dias_incompletos` marca. Es la lectura que usa el
+    arranque para decidir qué generar.
+    """
+    from app.models.clase import Clase
+    from app.models.horario_base import HorarioBase
+
+    filas_clases = (
+        db.query(Clase.fecha, func.count(Clase.id))
+        .filter(Clase.tenant_id == tenant_id,
+                Clase.fecha >= fecha_desde,
+                Clase.fecha <= fecha_hasta)
+        .group_by(Clase.fecha)
+        .all()
+    )
+    conteo_clases = {fecha: n for fecha, n in filas_clases}
+
+    filas_horarios = (
+        db.query(HorarioBase.dia_semana, func.count(HorarioBase.id))
+        .filter(HorarioBase.tenant_id == tenant_id,
+                HorarioBase.activo == True)        # noqa: E712 (columna booleana)
+        .group_by(HorarioBase.dia_semana)
+        .all()
+    )
+    conteo_horarios = {dia: n for dia, n in filas_horarios}
+
+    return dias_incompletos(conteo_clases, conteo_horarios, fecha_desde, fecha_hasta)
+
+
+def generar_dias_incompletos(db: Session, tenant_id: int, fecha_desde: date,
+                             fecha_hasta: date) -> dict:
+    """Genera SÓLO los días incompletos del rango y los informa.
+
+    Mismo resultado final que `generar_clases_para_rango` (los días completos no crearían
+    nada), pero sin recorrer los días que ya están listos.
+    """
+    faltantes = revisar_rango(db, tenant_id, fecha_desde, fecha_hasta)
+    total_creadas = 0
+    total_omitidas = 0
+    for f in faltantes:
+        resultado = generar_clases_para_fecha(db, tenant_id=tenant_id, fecha=f)
+        total_creadas += resultado.get("creadas", 0)
+        total_omitidas += resultado.get("omitidas", 0)
+
+    logger.info(
+        f"🔄 Días incompletos [{fecha_desde.isoformat()} -> {fecha_hasta.isoformat()}]: "
+        f"{len(faltantes)} día(s), {total_creadas} creadas, {total_omitidas} omitidas")
+
+    return {
+        "message": f"{total_creadas} clases generadas en {len(faltantes)} día(s) incompleto(s)",
+        "creadas": total_creadas,
+        "omitidas": total_omitidas,
+        "dias_incompletos": [f.isoformat() for f in faltantes],
         "fecha_desde": fecha_desde.isoformat(),
         "fecha_hasta": fecha_hasta.isoformat(),
     }
