@@ -6,6 +6,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
 import logging
+from datetime import datetime
 
 from app.services.generar_clases import DIAS_ANTICIPACION
 from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
@@ -59,7 +60,18 @@ async def job_generar_clases_diarias():
 
 
 def iniciar_scheduler():
-    """Inicia el scheduler con el job diario a las 00:05 CLT + alertas de email."""
+    """Inicia el scheduler con el job diario a las 00:05 CLT + alertas de email.
+
+    Sólo la INSTANCIA LÍDER programa jobs (lock de sesión en Postgres): con dos
+    réplicas en Render, las dos arrancaban su propio APScheduler y los correos
+    salían DUPLICADOS (08:00:09 y 08:00:10 el 26/09). La standby no agenda nada.
+    """
+    from app.services.scheduler_lock import tomar_lock_lider
+    if not tomar_lock_lider():
+        logger.warning(
+            "🟡 [Scheduler] Otra instancia ya es la líder (advisory lock). "
+            "Esta instancia queda en standby y NO programa jobs.")
+        return
     scheduler.add_job(
         job_generar_clases_diarias,
         CronTrigger(hour=0, minute=5,
@@ -262,8 +274,16 @@ async def job_cierre_mes():
 
 
 def detener_scheduler():
-    """Detiene el scheduler (se llama en shutdown)"""
+    """Detiene el scheduler (se llama en shutdown) y libera el lock de líder."""
     if scheduler.running:
         scheduler.shutdown(wait=False)
         logger.info("🛑 Scheduler detenido")
+    # Libera el advisory lock para que otra instancia pueda pasar a liderar
+    # (un deploy limpio libera el lock; si el proceso muere de golpe, lo libera
+    # el server al caerse la conexión).
+    try:
+        from app.services.scheduler_lock import soltar_lock_lider
+        soltar_lock_lider()
+    except Exception as e:
+        logger.warning(f"[Scheduler] no se pudo liberar el lock de líder: {e}")
 
