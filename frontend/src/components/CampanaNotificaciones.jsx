@@ -45,6 +45,9 @@ const ETIQUETAS_TIPO = {
     pedido_nuevo: 'Pedido nuevo (Bazar)',
     pedido_validado: 'Pedido validado',
     pedido_entregado: 'Pedido entregado',
+    // Datos bancarios del box: los guarda un admin en /admin/configuracion y los DEMÁS
+    // admins del box se enteran por acá (api/v1/configuracion.py, I1).
+    config_bancaria: 'Datos bancarios actualizados',
     // Supervisión → Coach (B3/B4): el admin asignó, reasignó o liberó una clase
     // y el coach se entera por SU campana (services/asignaciones_clases.py).
     clase_asignada: 'Clase asignada',
@@ -68,6 +71,8 @@ const DESTINOS_TIPO = {
     alumno_nuevo: '/admin/alumnos-pendientes',
     // Cobertura de emergencia: la grilla de Supervisión (marca "emergencia").
     emergencia: '/admin/supervision-clases',
+    // Datos bancarios del box: la pantalla que los edita (sólo admin).
+    config_bancaria: '/admin/configuracion',
     // Los avisos de clase van SIEMPRE a un coach: su grilla de clases.
     clase_asignada: '/coach/gestion-clases',
     clase_reasignada: '/coach/gestion-clases',
@@ -87,6 +92,7 @@ const ROLES_POR_TIPO = {
     rechazado: ['alumno'],
     alumno_nuevo: ['administrador', 'admin'],
     emergencia: ['administrador', 'admin'],
+    config_bancaria: ['administrador', 'admin'],
     clase_asignada: ['coach'],
     clase_reasignada: ['coach'],
     clase_liberada: ['coach'],

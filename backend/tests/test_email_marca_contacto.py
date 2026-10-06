@@ -121,7 +121,8 @@ def config_del_box(db, cliente, tokens):
     Devuelve `guardar(numero)` (el PUT del admin) y `leer()` (el GET del box que ve el alumno).
     ⚠️ R1: el GET ya NO es público (el `tenant_id` sale del JWT, el query se ignora), así
     que se lee con la sesión del admin — la MISMA que escribe.
-    El teardown deja la fila como estaba, pase lo que pase.
+    El teardown deja la fila como estaba, pase lo que pase, y borra la traza que el PUT
+    crea (`auditoria` + el aviso `config_bancaria` de la campana, I1).
     """
     def _leer():
         r = cliente.get(f"/api/v1/configuracion?tenant_id={TENANT_ID}",
@@ -135,9 +136,27 @@ def config_del_box(db, cliente, tokens):
         assert r.status_code == 200, r.text
         return r.json()
 
+    from sqlalchemy import text
+
+    def _max_id(tabla):
+        return db.execute(text(f"SELECT COALESCE(MAX(id), 0) FROM {tabla}")).scalar()
+
     original = _leer().get("whatsapp")
+    # I1: el PUT ya no es silencioso (deja fila en `auditoria` y el aviso `config_bancaria`
+    # en la campana de los admins del box). Se anota el punto de partida para borrar SÓLO
+    # lo que creen estos tests: la rama TEST queda como estaba.
+    notif_desde = _max_id("notificaciones")
+    audit_desde = _max_id("auditoria")
+
     yield {"original": original, "guardar": _guardar, "leer": _leer}
+
     _guardar(original or "")
+    db.rollback()
+    db.execute(text("DELETE FROM notificaciones WHERE id > :i AND tipo = 'config_bancaria'"),
+               {"i": notif_desde})
+    db.execute(text("DELETE FROM auditoria WHERE id > :i AND entidad = 'configuracion_negocio'"),
+               {"i": audit_desde})
+    db.commit()
 
 
 @pytest.fixture

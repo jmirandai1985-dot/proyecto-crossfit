@@ -47,9 +47,16 @@ No confundir con `notificaciones_enviadas`: esa es el **log de correos** de la p
 | Alta de alumno (autoservicio) | `api/v1/alumnos.py:249` (`POST /alumnos/registro/alumno-nuevo`) | admins **activos** del box | `alumno_nuevo` | `/admin/alumnos-pendientes` |
 | Cobertura de emergencia (un coach cubre una clase ajena) | `core/dependencies.py:252` (`_notificar_emergencia`) | admins **activos** del box | `emergencia` | `/admin/supervision-clases` |
 | Clase asignada / reasignada / liberada | `api/v1/supervision.py:775,782,844` | coach | `clase_asignada` / `clase_reasignada` / `clase_liberada` | `/coach/gestion-clases` |
+| Cambio de datos bancarios del box | `api/v1/configuracion.py` (PUT, tanda R1) | admins **activos** del box (incluido el que guardó) | `config_bancaria` | `/admin/configuracion` |
 
 `plan_solicitado`, `alumno_nuevo` y `emergencia` (los tres avisos **al admin**) son los que
 arregló esta tanda, junto con el refresco del contador (sección 3).
+
+`config_bancaria` es posterior (tanda R1, datos bancarios por tenant, 2026-04-10): el PUT
+de `/admin/configuracion` avisa a los admins del box **sólo si algún campo cambió** (el
+helper no excluye al autor, así que el admin que guardó también ve el aviso: es la
+confirmación de que quedó). El mismo PUT deja la fila en `auditoria` (`UPDATE`,
+`entidad='configuracion_negocio'`, `detalle.antes` / `detalle.despues`).
 
 ---
 

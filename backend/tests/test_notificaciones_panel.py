@@ -281,7 +281,7 @@ def test_los_tipos_entran_en_la_columna():
         assert len(f"pedido_{estado}") <= 20
     for tipo in ("pedido_nuevo", "plan_solicitado", "alumno_nuevo", "emergencia",
                  "aprobado", "rechazado", "plan_activo", "clase_asignada",
-                 "clase_reasignada", "clase_liberada"):
+                 "clase_reasignada", "clase_liberada", "config_bancaria"):
         assert len(tipo) <= 20, tipo
 
 
@@ -325,5 +325,23 @@ def test_la_emergencia_usa_el_helper_y_filtra_admins_activos():
     assert 'notificar_admins_del_tenant(\n            db, tenant_id, "emergencia", mensaje' in fuente
     assert "Notificacion(" not in fuente
     assert 'Usuario.estado == "activo"' in fuente
+
+
+def test_el_cambio_de_datos_bancarios_avisa_y_queda_en_auditoria():
+    """Guardar los datos bancarios del box no puede ser silencioso (tanda R1).
+
+    Congela las tres piezas del arreglo, que son de FUENTE (sin BD): el aviso sale por
+    el helper (no armando la fila a mano), el tipo entra en la columna `String(20)` y el
+    cambio queda en `auditoria` con `antes`/`despues` — que es lo que después lee el admin
+    cuando dos admins del mismo box se pisan la cuenta.
+    """
+    fuente = _fuente("app/api/v1/configuracion.py")
+    assert "from app.services.notificaciones_panel import notificar_admins_del_tenant" in fuente
+    assert '"config_bancaria"' in fuente
+    assert "Notificacion(" not in fuente
+    assert "from app.services.auditoria_service import registrar_auditoria" in fuente
+    assert '"antes": antes, "despues": despues' in fuente
+    assert 'entidad="configuracion_negocio"' in fuente
+
 
 

@@ -21,8 +21,16 @@ from app.models.configuracion import ConfiguracionNegocio
 from app.models.usuario import Usuario
 from app.core.dependencies import get_current_user, get_current_admin
 from app.core.rate_limit import LIMIT_CONFIG_LECTURA, LIMIT_CRITICO, limiter
+from app.services.auditoria_service import registrar_auditoria
+from app.services.notificaciones_panel import notificar_admins_del_tenant
 
 router = APIRouter()
+
+# Los campos que edita el admin: los que la auditoría compara antes/después (I1).
+# `updated_at` / `updated_by` quedan afuera a propósito: son la marca de autoría, no
+# un dato que el admin haya cambiado.
+CAMPOS_EDITABLES = ("banco", "numero_cuenta", "tipo_cuenta", "rut",
+                    "email_comprobantes", "whatsapp")
 
 
 class ConfiguracionUpdate(BaseModel):
@@ -67,7 +75,9 @@ def obtener_configuracion(
             "rut": None,
             "email_comprobantes": None,
             "whatsapp": None,
-            "configurado": False
+            "configurado": False,
+            "updated_at": None,
+            "updated_by": None,
         }
 
     return {
@@ -79,7 +89,10 @@ def obtener_configuracion(
         "rut": config.rut,
         "email_comprobantes": config.email_comprobantes,
         "whatsapp": config.whatsapp,
-        "configurado": True
+        "configurado": True,
+        # I1: quién guardó la fila y cuándo (para que el admin note que otro la cambió).
+        "updated_at": config.updated_at,
+        "updated_by": config.updated_by,
     }
 
 
@@ -92,7 +105,14 @@ def actualizar_configuracion(
     current_user: dict = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """Actualiza o crea la configuracion del negocio. Solo admin (tenant del token)."""
+    """Actualiza o crea la configuracion del negocio. Solo admin (tenant del token).
+
+    I1 — trazabilidad: el cambio queda en `auditoria` con los valores de antes y después,
+    la fila guarda quién y cuándo la tocó (`updated_by` / `updated_at`) y los DEMÁS
+    admins del box se enteran por la campana (`config_bancaria` → `/admin/configuracion`).
+    El aviso llega a todos los admins activos, incluido el que guardó (el helper no
+    excluye al autor): es el precio de no duplicar la consulta de destinatarios.
+    """
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
 
@@ -104,6 +124,9 @@ def actualizar_configuracion(
     if not config:
         config = ConfiguracionNegocio(tenant_id=tenant_id)
         db.add(config)
+
+    # I1: foto ANTES de tocar nada (los campos del formulario, en el orden de CAMPOS_EDITABLES).
+    antes = {campo: getattr(config, campo) for campo in CAMPOS_EDITABLES}
 
     # Actualizar campos
     if data.banco is not None:
@@ -121,7 +144,32 @@ def actualizar_configuracion(
         # "sin WhatsApp" y no una cadena vacía que después habría que chequear en cada uso.
         config.whatsapp = data.whatsapp.strip() or None
 
-    db.commit()
+    # ── I1: cierre de la trazabilidad ────────────────────────────────────────
+    despues = {campo: getattr(config, campo) for campo in CAMPOS_EDITABLES}
+    config.updated_by = current_user["usuario_id"]
+
+    # El cambio y su traza viajan en la MISMA transacción (registrar_auditoria commitea
+    # las dos cosas): o queda todo —fila + auditoría— o no queda nada.
+    db.flush()
+    registrar_auditoria(
+        db,
+        tenant_id=tenant_id,
+        usuario_id=current_user["usuario_id"],
+        accion="UPDATE",
+        entidad="configuracion_negocio",
+        entidad_id=config.id,
+        detalle={"antes": antes, "despues": despues},
+    )
+
+    # Campana de los demás admins del box (best-effort: el helper filtra por
+    # tenant + rol + estado='activo' y nunca tumba el guardado).
+    # Sólo si algo cambió de verdad: re-guardar el mismo formulario no tiene que
+    # ensuciar la campana con un aviso de "cambié algo" que no cambió.
+    if antes != despues:
+        notificar_admins_del_tenant(
+            db, tenant_id, "config_bancaria",
+            f"🏦 {current_user['nombre']} actualizó los datos bancarios del box")
+
     db.refresh(config)
 
     return {
@@ -133,5 +181,7 @@ def actualizar_configuracion(
         "rut": config.rut,
         "email_comprobantes": config.email_comprobantes,
         "whatsapp": config.whatsapp,
-        "configurado": True
+        "configurado": True,
+        "updated_at": config.updated_at,
+        "updated_by": config.updated_by,
     }

@@ -2,6 +2,9 @@
 Modelo de Configuracion del Negocio (datos bancarios por tenant)
 """
 from sqlalchemy import Column, Integer, String, ForeignKey
+from sqlalchemy.dialects.postgresql import TIMESTAMP
+from sqlalchemy.sql import func
+
 from app.db.database import Base
 
 
@@ -31,3 +34,15 @@ class ConfiguracionNegocio(Base):
     # 1234 5678, 9 1234 5678, ...): `wa_link()` normaliza los dígitos al armar el link.
     # NULL/vacío = el correo no promete un canal que el box no atiende.
     whatsapp = Column(String(30), nullable=True)
+
+    # ── Trazabilidad del último cambio (I1, migración 046) ───────────────────
+    # Con DOS admins por box, "quién cambió la cuenta bancaria y cuándo" no puede vivir
+    # sólo en `auditoria` (el admin que abre esta pantalla no lee la auditoría): el que
+    # guarda pisa el valor del otro sin avisar. `updated_at` lo escribe la BD (server
+    # default en el alta + `onupdate` en cada UPDATE) y `updated_by` lo setea el endpoint
+    # con el usuario del token. NULL en `updated_by` = fila anterior a la 046 o borrada
+    # la cuenta del admin (`ondelete="SET NULL"`).
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=False,
+                        server_default=func.now(), onupdate=func.now())
+    updated_by = Column(Integer, ForeignKey("usuarios.id", ondelete="SET NULL"),
+                        nullable=True)
