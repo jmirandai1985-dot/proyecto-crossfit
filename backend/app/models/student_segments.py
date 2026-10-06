@@ -1,4 +1,13 @@
-"""Modelo SQLAlchemy para la tabla analítica `student_segments` (segmentación de atletas)."""
+"""Modelo SQLAlchemy para la tabla analítica `student_segments` (segmentación de atletas).
+
+⚠️ SIN CONSUMIDORES (auditoría 2026-10-06): ninguna parte del sistema la escribe ni la lee
+(no hay `INSERT`, no hay query, no hay endpoint). Es de una segmentación de ATLETA (nivel
+BASICO/INTERMEDIO/AVANZADO + scores de fuerza/gimnástica/asistencia/retención, migración 021)
+que quedó sin usarse. NO confundir con `segmentacion_alumnos` (arquetipos de retención por
+K-Means, migración 026), que SÍ se usa (Fidelización, panel, BI).
+Se deja la tabla y el modelo como están (NO se borran): documentarla alcanza para que nadie
+las confunda al tocar la segmentación.
+"""
 from sqlalchemy import (
     Column, Integer, String, Numeric, Boolean, ForeignKey, Index,
 )
