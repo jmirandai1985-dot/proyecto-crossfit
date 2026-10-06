@@ -9,8 +9,12 @@ import api from '../services/api';
  *   - alumnoId: ID del alumno a mostrar
  *   - tenantId: ID del tenant (box)
  *   - onClose: callback al cerrar el modal
+ *   - onVerHistorial: (opcional) abre el Historial del alumno (`PanelHistorial`), la
+ *     MISMA pantalla que ve el alumno. Se ofrece desde Alumnos y desde Fidelización
+ *     para que el admin no tenga que salir del flujo en el que está. Sin esta prop no
+ *     se dibuja el botón (el modal sigue sirviendo donde no haya historial).
  */
-const AlumnoFichaModal = ({ alumnoId, tenantId, onClose }) => {
+const AlumnoFichaModal = ({ alumnoId, tenantId, onClose, onVerHistorial }) => {
     const [data, setData] = useState(null);
     const [suscripcion, setSuscripcion] = useState(null);
     const [planes, setPlanes] = useState([]);
@@ -223,8 +227,18 @@ const AlumnoFichaModal = ({ alumnoId, tenantId, onClose }) => {
                     )}
                 </div>
 
-                {/* Footer */}
-                <div className="p-4 border-t border-zinc-700 flex justify-end">
+                {/* Footer. "Ver historial" sólo aparece si el contenedor lo habilita
+                    (Alumnos y Fidelización): abre `PanelHistorial`, la misma pantalla
+                    del alumno, en la pestaña Resumen. */}
+                <div className="p-4 border-t border-zinc-700 flex justify-between gap-2">
+                    {onVerHistorial ? (
+                        <button onClick={onVerHistorial} data-testid="ficha-ver-historial"
+                            className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 text-sm font-bold">
+                            📜 Ver historial
+                        </button>
+                    ) : (
+                        <span />
+                    )}
                     <button onClick={onClose}
                         className="px-4 py-2 bg-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-600 text-sm font-bold">
                         Cerrar

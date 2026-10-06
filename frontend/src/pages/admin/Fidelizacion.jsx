@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
@@ -96,6 +96,10 @@ const Fidelizacion = () => {
     const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
     const [detalleReco, setDetalleReco] = useState(null);
     const [msg, setMsg] = useState('');
+    // Navegación al Historial del alumno (`/admin/alumnos/:id/historial`): desde la ficha
+    // el admin entra a la MISMA pantalla "Mi historial" que ve el alumno (con la gestión
+    // del box, incluida la pestaña Bazar), reutilizando `PanelHistorial`.
+    const navigate = useNavigate();
 
     const cargarFidelizacion = async () => {
         setLoading(true);
@@ -656,6 +660,7 @@ const Fidelizacion = () => {
                 <AlumnoFichaModal
                     alumnoId={fichaAlumnoId}
                     tenantId={tenant_id}
+                    onVerHistorial={() => navigate(`/admin/alumnos/${fichaAlumnoId}/historial`)}
                     onClose={() => {
                         setFichaAlumnoId(null);
                         // Limpia el deep-link para no re-abrir la ficha.

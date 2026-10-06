@@ -606,6 +606,7 @@ const Alumnos = () => {
                 <AlumnoFichaModal
                     alumnoId={fichaAlumnoId}
                     tenantId={tenant_id}
+                    onVerHistorial={() => navigate(`/admin/alumnos/${fichaAlumnoId}/historial`)}
                     onClose={() => {
                         setFichaAlumnoId(null);
                         // Limpia el deep-link para no re-abrir la ficha.
