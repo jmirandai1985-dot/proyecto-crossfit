@@ -27,7 +27,7 @@ const Coaches = () => {
 
     const fetchCoaches = async () => {
         try {
-            const response = await api.get('/api/v1/usuarios', { params: { rol: 'coach' } });
+            const response = await api.get('/api/v1/usuarios/', { params: { rol: 'coach' } });
             setCoaches(response.data || []);
         } catch (error) {
             console.error('Error fetching coaches:', error); setErrorCoaches('No se pudieron cargar los coaches. Reintenta.');
@@ -39,7 +39,7 @@ const Coaches = () => {
 
     const fetchDisciplinas = async () => {
         try {
-            const r = await api.get('/api/v1/disciplinas');
+            const r = await api.get('/api/v1/disciplinas/');
             setDisciplinas(r.data?.filter(d => d.activo !== false) || []);
         } catch (e) { console.error(e); setErrorDisciplinas('No se pudieron cargar las disciplinas.'); }
     };
@@ -105,7 +105,7 @@ const Coaches = () => {
                 });
                 coachId = editingCoach.id;
             } else {
-                const res = await api.post('/api/v1/usuarios', {
+                const res = await api.post('/api/v1/usuarios/', {
                     nombre: formData.nombre,
                     correo: formData.correo,
                     password: formData.password,

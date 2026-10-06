@@ -201,7 +201,7 @@ export default function SupervisionClases() {
     const cargarDisciplinas = useCallback(async () => {
         setErrorDisciplinas('');
         try {
-            const r = await api.get(`${API_BASE}/disciplinas`);
+            const r = await api.get(`${API_BASE}/disciplinas/`);
             setDisciplinas(r.data || []);
         } catch (e) {
             console.error('Error cargando disciplinas', e);
