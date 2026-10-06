@@ -13,7 +13,7 @@ Qué verifica (hoy ningún test cubre los permisos de este endpoint):
 
   1. GET sin token -> 401 · token basura -> 401 (antes era 200 sin credencial: R1).
   2. GET con token de alumno y de coach -> 200 con el box del TOKEN, aunque el query diga
-     `?tenant_id=2` (el parámetro se ignora).
+     `?tenant_id=3` (el parámetro se ignora; 3 = el otro box con usuarios en TEST).
   3. PUT: alumno -> 403 · coach -> 403 · admin -> 200 (sólo admin).
   4. El PUT del admin deja la fila en `auditoria` (`UPDATE` / `configuracion_negocio` con
      `detalle.antes` y `detalle.despues`) y un aviso `config_bancaria` por cada admin activo
@@ -49,7 +49,10 @@ from app.core.security import create_access_token                     # noqa: E4
 API_BASE = os.environ.get("API_BASE", "http://localhost:8001/api/v1")
 HOST = API_BASE.replace("/api/v1", "")
 TENANT_ID = 1
-OTRO_TENANT_ID = 2
+# El "otro box" con usuarios REALES en TEST: el box 2 existe pero está vacío (0 usuarios),
+# así que el aislamiento se prueba contra el 3 (tiene 1 admin activo). Si algún día se
+# vacía, el test se salta con un mensaje claro en vez de mentir.
+OTRO_TENANT_ID = 3
 RUT_OK = "12345678-5"
 RUT_DV_MALO = "12.345.678-9"
 COLUMNAS = ("banco", "numero_cuenta", "tipo_cuenta", "rut",
@@ -257,20 +260,21 @@ def test_08_un_dato_bancario_invalido_no_se_guarda(caso, cuerpo, tokens):
 
 
 def test_09_un_token_de_otro_box_lee_su_propio_box(db):
-    """El aislamiento no depende del query: con el token del box 2, el GET trae el box 2."""
+    """El aislamiento no depende del query: con el token del OTRO box, el GET trae ese box."""
     from sqlalchemy import text
 
     otro = db.execute(text(
         "SELECT id, correo FROM usuarios WHERE tenant_id = :t AND estado = 'activo' "
         "ORDER BY id LIMIT 1"), {"t": OTRO_TENANT_ID}).first()
     if otro is None:
-        pytest.skip("TEST no tiene usuarios en el box 2")
+        pytest.skip(f"TEST no tiene usuarios activos en el box {OTRO_TENANT_ID}")
     token = create_access_token({"usuario_id": int(otro[0]),
                                  "tenant_id": OTRO_TENANT_ID,
                                  "rol": "administrador",
-                                 "correo": otro[1] or "box2@test.com"})
+                                 "correo": otro[1] or "box3@test.com"})
 
     r = _get({"Authorization": f"Bearer {token}"}, tenant_id=TENANT_ID)
 
     assert r.status_code == 200
     assert r.json()["tenant_id"] == OTRO_TENANT_ID, "el query pudo cambiar el box"
+    assert r.json()["tenant_id"] != TENANT_ID, "devolvió el box del QUERY y no el del token"
