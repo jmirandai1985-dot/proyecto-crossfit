@@ -85,6 +85,9 @@ const AdminKpis = () => {
     const [periodos, setPeriodos] = useState([]);
     const [mesSel, setMesSel] = useState(null);
     const [mesActual, setMesActual] = useState(null);
+    // True cuando se eligió el MES EN CURSO y todavía no tiene fila en `monthly_kpis`:
+    // el tab lo explica (los KPIs se publican al cierre) en vez de mostrar un error.
+    const [mesSinFila, setMesSinFila] = useState(false);
     // Secciones que fallaron al cargar (banner AvisoCarga + Reintentar).
     const [erroresCarga, setErroresCarga] = useState([]);
     const [churn, setChurn] = useState(null);
@@ -147,22 +150,37 @@ const AdminKpis = () => {
         try {
             const rPer = await api.get('/api/v1/kpis/mensual/periodos');
             const lista = rPer.data?.periodos || [];
+            const actual = rPer.data?.actual || null;
             setPeriodos(lista);
-            setMesActual(rPer.data?.actual || null);
+            setMesActual(actual);
 
             if (lista.length === 0) {
                 setMesSel(null); setSerieMensual([]); setSinDatos(true);
+                setMesSinFila(false);
                 setLoading(false);
                 return;
             }
 
-            // Mes a mostrar: el que eligió el usuario (si sigue existiendo) o el
+            // El mes a mostrar: el que eligió el usuario (si sigue existiendo) o el
             // `default` del backend = último mes CERRADO con datos.
+            // El MES EN CURSO también es elegible aunque todavía no tenga fila: figura en
+            // el selector marcado "(en curso)" y NUNCA es el default.
+            const esActual = (p) => !!(actual && p.year === actual.year && p.month === actual.month);
+            const actualSinFila = !!(actual && !actual.tiene_fila);
+            const enLista = (p) => lista.some((x) => x.year === p.year && x.month === p.month);
             const defaultEs = rPer.data?.default || null;
-            const pedido = (seleccion && lista.some((p) => p.year === seleccion.year && p.month === seleccion.month))
+            const pedido = (seleccion && (enLista(seleccion) || (actualSinFila && esActual(seleccion))))
                 ? seleccion
                 : defaultEs;
             setMesSel(pedido);
+
+            // Mes en curso SIN fila: no se pide (daría 404). Se avisa por qué.
+            if (pedido && actualSinFila && esActual(pedido) && !enLista(pedido)) {
+                setSerieMensual([]); setErroresCarga([]); setMesSinFila(true);
+                setLoading(false);
+                return;
+            }
+            setMesSinFila(false);
 
             // Serie del gráfico: los últimos 6 meses CON datos hasta el elegido.
             const idx = pedido
@@ -276,10 +294,15 @@ const AdminKpis = () => {
         && (mesCerradoConDatos.year !== mesSel.year || mesCerradoConDatos.month !== mesSel.month)
         ? mesCerradoConDatos : null;
 
-    // Selector de mes: SOLO los meses que existen en `monthly_kpis` (el backend los
-    // manda del más viejo al más nuevo; acá se muestran del más nuevo al más viejo).
-    // El mes EN CURSO aparece únicamente si ya tiene fila, rotulado "parcial"; si no,
-    // no es una opción y se explica por qué (`notaMesEnCurso`).
+    // Opciones del selector: los meses con fila en `monthly_kpis` + el MES EN CURSO aunque
+    // todavía no tenga fila (marcado "(en curso)"). El backend los manda del más viejo al
+    // más nuevo; acá se muestran del más nuevo al más viejo. El mes en curso NUNCA es el
+    // default: el default es el último mes CERRADO con datos.
+    const mesActualSinFila = !!(mesActual && !mesActual.tiene_fila
+        && !periodos.some((p) => p.year === mesActual.year && p.month === mesActual.month));
+    const opcionesMes = mesActualSinFila
+        ? [...periodos, { year: mesActual.year, month: mesActual.month, parcial: true }]
+        : periodos;
     const selectorMes = (
         <div className="flex flex-wrap items-center gap-3">
             <label htmlFor="mes-mensual" className="text-sm text-gray-400">Mes:</label>
@@ -293,12 +316,12 @@ const AdminKpis = () => {
                 }}
                 className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
             >
-                {[...periodos].reverse().map((p) => (
+                {[...opcionesMes].reverse().map((p) => (
                     <option
                         key={`${p.year}-${p.month}`}
                         value={`${p.year}-${String(p.month).padStart(2, '0')}`}
                     >
-                        {MESES[p.month - 1]} {p.year}{p.parcial ? ' · parcial' : ''}
+                        {MESES[p.month - 1]} {p.year}{p.parcial ? ' (en curso)' : ''}
                     </option>
                 ))}
             </select>
@@ -324,11 +347,14 @@ const AdminKpis = () => {
         </div>
     );
 
-    // Por qué el mes en curso no está en el selector (no tiene fila todavía).
-    const notaMesEnCurso = mesActual && !mesActual.tiene_fila ? (
+    // Nota del mes en curso: está SIEMPRE en el selector (marcado "(en curso)"), pero sus
+    // KPIs se publican al cierre. Si todavía no tiene fila, elegirlo lo explica en vez de
+    // mostrar un error.
+    const notaMesEnCurso = mesActual ? (
         <p data-testid="nota-mes-en-curso" className="text-[11px] text-zinc-500">
-            {MESES[mesActual.month - 1]} {mesActual.year} está en curso: sus KPIs se
-            publican al cierre del mes (por eso el selector arranca en el último mes cerrado).
+            {MESES[mesActual.month - 1]} {mesActual.year} está en curso{mesActual.tiene_fila
+                ? ': los números son parciales hasta el cierre del mes.'
+                : ': todavía no tiene KPIs publicados (se generan al cierre del mes).'}
         </p>
     ) : null;
 
@@ -631,6 +657,28 @@ const AdminKpis = () => {
                                 <Area type="monotone" dataKey="ingresos_total" name="Ingresos" stroke="#10b981" fill="#10b981" fillOpacity={0.25} />
                             </AreaChart>
                         </ChartCard>
+                    </div>
+                )}
+
+                {/* ══ TAB MENSUAL: se eligió el MES EN CURSO y todavía no tiene fila ══ */}
+                {!loading && !error && activeTab === 'mensual' && mesSinFila && mesSel && (
+                    <div className="space-y-2" data-testid="mensual-mes-en-curso">
+                        {selectorMes}
+                        <p data-testid="nota-mes-en-curso-sin-kpis" className="text-sm text-gray-300">
+                            {MESES[mesSel.month - 1]} {mesSel.year} está en curso: sus KPIs se
+                            publican al cierre del mes, así que todavía no hay números que
+                            mostrar. El mes por defecto sigue siendo el último cerrado.
+                        </p>
+                        {volverAlCerrado && (
+                            <button
+                                type="button"
+                                data-testid="ir-ultimo-mes-cerrado"
+                                onClick={() => cargarMensual(volverAlCerrado)}
+                                className="text-xs text-orange-400 underline transition-colors hover:text-orange-300"
+                            >
+                                Ir al último mes cerrado ({MESES[volverAlCerrado.month - 1]} {volverAlCerrado.year})
+                            </button>
+                        )}
                     </div>
                 )}
 
