@@ -27,7 +27,24 @@ def set_generar_clases_callback(callback):
 
 
 async def job_generar_clases_diarias():
-    """Job que se ejecuta a las 00:05 CLT y genera clases para HOY + 28 días (4 semanas)."""
+    """Job 00:05 CLT: genera clases para HOY + 28 días (4 semanas).
+
+    Toma el lock (job, día) para que la generación salga UNA sola vez aunque
+    haya dos instancias vivas (deploy solapado). Fail-open: si el lock no está
+    disponible se ejecuta igual.
+    """
+    from app.services.scheduler_lock import lock_de_job
+    with lock_de_job("generar_clases_diarias") as puede:
+        if not puede:
+            logger.info(
+                "🔒 [Scheduler] generar_clases_diarias ya lo tomó otra instancia "
+                "hoy; se omite esta corrida")
+            return
+        await _generar_clases_diarias_impl()
+
+
+async def _generar_clases_diarias_impl():
+    """Cuerpo real de la generación diaria (sin lock)."""
     from datetime import timedelta
 
     # HOY en Chile (el job corre a las 00:05 CLT): con `date.today()` el rango arrancaba el
@@ -159,7 +176,24 @@ def iniciar_scheduler():
 
 
 async def _ejecutar_alertas(tipo: str):
-    """Wrapper genérico: abre sesión DB y ejecuta la alerta indicada."""
+    """Toma el lock (job, día) y ejecuta la alerta indicada.
+
+    El lock `alerta_<tipo>` evita que dos instancias manden el mismo aviso el
+    mismo día (deploy solapado, o la líder recuperando el lock mientras la vieja
+    seguía viva). Fail-open: si el lock no está disponible, la alerta corre igual.
+    """
+    from app.services.scheduler_lock import lock_de_job
+    with lock_de_job(f"alerta_{tipo}") as puede:
+        if not puede:
+            logger.info(
+                f"🔒 [Scheduler] Alerta {tipo}: otra instancia ya la envió hoy "
+                "(lock job+día); esta se omite")
+            return
+        await _enviar_alerta(tipo)
+
+
+async def _enviar_alerta(tipo: str):
+    """Abre sesión DB y ejecuta la alerta indicada (sin lock)."""
     from app.db.database import SessionLocal
     db = SessionLocal()
     try:
@@ -215,6 +249,21 @@ async def job_alerta_sin_creditos():
 
 
 async def job_cierre_mes():
+    """Job día 1 00:05 CLT: cierra el MES ANTERIOR (con lock job+día).
+
+    El lock `cierre_mes` evita que dos instancias evalúen el mismo mes el mismo
+    día (deploy solapado). Fail-open: si el lock no está disponible, corre igual.
+    """
+    from app.services.scheduler_lock import lock_de_job
+    with lock_de_job("cierre_mes") as puede:
+        if not puede:
+            logger.info(
+                "🔒 [Scheduler] cierre_mes ya lo tomó otra instancia hoy; se omite")
+            return
+        await _cierre_mes_impl()
+
+
+async def _cierre_mes_impl():
     """Día 1 a las 00:05 CLT - cierra el MES ANTERIOR (asistencia + hitos + correos).
 
     Reemplaza el webhook de n8n `POST /api/v1/asistencia/n8n/evaluar-mes` (n8n quedó

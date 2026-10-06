@@ -110,6 +110,18 @@ def _preparar(monkeypatch, hoy, tenant_ids, fallar_en=()):
     log = _CapturadorLogger()
     monkeypatch.setattr(sch, "logger", log)
 
+    # El job ahora envuelve su cuerpo en `lock_de_job` (job, día). Acá se dobla
+    # para no tocar Postgres (con --noconftest no hay BD) y que el cuerpo corra
+    # siempre: estos tests fijan el cierre de mes, no el lock.
+    import app.services.scheduler_lock as sl
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _sin_lock(job_id, dia=None, conexion=None):
+        yield True
+
+    monkeypatch.setattr(sl, "lock_de_job", _sin_lock)
+
     fallar_en = set(fallar_en)
     llamadas = []
 
