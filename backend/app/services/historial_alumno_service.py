@@ -1089,12 +1089,13 @@ def panel(db: Session, alumno_id: int, tenant_id: int,
 
     # "Alumno desde" (regla 3): primera suscripción o primera asistencia. Se resuelve una
     # vez acá y viaja a la ficha y a las secciones (promedio semanal y días como alumno).
-    inicio, fuente_inicio = _inicio_actividad(db, alumno, tenant_id)
+    inicio = _inicio_actividad(db, alumno, tenant_id)   # (fecha, fuente)
+    inicio_fecha, fuente_inicio = inicio
 
     datos = _SECCIONES[seccion](db, alumno, tenant_id, pagina, por_pagina,
                                 incluir_privado=bool(incluir_privado), inicio=inicio)
     return {
-        "alumno": ficha_alumno(alumno, inicio=inicio[0], fuente=fuente_inicio),
+        "alumno": ficha_alumno(alumno, inicio=inicio_fecha, fuente=fuente_inicio),
         "seccion": seccion,
         "secciones": secciones_disponibles(),
         "incluye_privado": bool(incluir_privado),
