@@ -110,9 +110,12 @@ def _producto():
 
 
 def _crear_pedido(alumno, producto, cantidad=1):
+    # `tenant_id` es obligatorio en PedidoCreate (aunque el backend lo fuerce con el del
+    # token): sin él el POST daba 422 y los dos tests que arman un pedido fallaban.
     r = requests.post(
         f"{BASE}/pedidos", headers=_token(alumno, "alumno"),
-        json={"alumno_id": alumno.id, "producto_id": producto.id,
+        json={"tenant_id": alumno.tenant_id, "alumno_id": alumno.id,
+              "producto_id": producto.id,
               "cantidad": cantidad,
               "voucher_url": "https://test.local/comprobante.png"},
         timeout=30)
