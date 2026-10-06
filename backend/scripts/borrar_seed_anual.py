@@ -63,6 +63,11 @@ from seed_anual_prod import (  # noqa: E402
     DOMINIO_CORREO, MARCA_DESC, MARCA_TS, PREFIJO_CORREO, TENANT_ID, GuardError,
     mes_iso, preparar_entorno, pedir,
 )
+# Las cuentas del instituto son permanentes: este borrado masivo por patrón se NIEGA si
+# su LIKE pudiera alcanzarlas (mismo guard que usan los otros scripts de limpieza).
+from cuentas_instituto import (  # noqa: E402
+    CuentaInstituto, abortar_si_patron_alcanza_instituto,
+)
 
 MES_ALERTA_LIMPIEZA = "2026-11"      # el run del 1/11 vencería las suscripciones del seed
 PREFIJO_VIEJO = "demo.prod."         # seed viejo (`seed_ml_data_prod.py`)
@@ -321,6 +326,18 @@ def main(argv=None) -> int:
         print("⚠️  --limpiar-viejo: se borran TAMBIÉN los datos del seed viejo")
         print(f"     (usuarios 'demo.prod.%{DOMINIO_CORREO}' y transacciones "
               f"'{MARCA_DESC_VIEJA}%'), no sólo los del seed anual.")
+
+    # ── GUARD: las cuentas del instituto no pueden caer en este borrado masivo ──
+    # El filtro es un LIKE por prefijo + dominio (el del seed, y el del viejo si se pide
+    # --limpiar-viejo): si alguno alcanzara demo.*@urbanbox.cl, se aborta.
+    try:
+        for prefijo in ((PREFIJO_CORREO, PREFIJO_VIEJO) if args.limpiar_viejo
+                        else (PREFIJO_CORREO,)):
+            abortar_si_patron_alcanza_instituto(prefijo, DOMINIO_CORREO,
+                                                "borrar_seed_anual.py")
+    except CuentaInstituto as e:
+        print(f"[guard] ABORTADO: {e}")
+        return 1
 
     # Se pide ANTES del dry-run y antes de cualquier borrado (igual que el seed).
     frase = "BORRAR SEED PROD" if args.destino == "prod" else "BORRAR SEED TEST"

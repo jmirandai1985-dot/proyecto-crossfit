@@ -46,12 +46,29 @@ GUARDS (mismos que `seed_anual_prod.py`):
      esos días). `--forzar-ventana` lo salta a propósito.
   4. Confirmación por teclado con la frase exacta `SI QUIERO PROD` / `SI QUIERO TEST`.
   5. `--dry-run`: muestra todo sin escribir nada y sin pedir la contraseña.
+  6. `--borrar` se NIEGA a tocar las 3 cuentas si no se pasa
+     `--forzar-borrado-cuentas-instituto`: son las cuentas PERMANENTES del instituto
+     (módulo compartido `scripts/cuentas_instituto.py`, el mismo que usan los scripts
+     de purga para no tocarlas).
+
+CLAVE: re-ejecutar el script NO rota la contraseña de las cuentas que ya existen (las
+deja con la que tienen). Para rotarla a propósito: `--cambiar-password`.
+
+PLAN: `--extender-plan HASTA` (YYYY-MM-DD) empuja el vencimiento de la suscripción del
+alumno demo hasta esa fecha (nunca la acorta).
 
 Uso (desde `backend/`):
     # TEST (rama ep-summer-river-b6c8fj2f)
     $env:ENVIRONMENT="test";       py -3.12 scripts\\crear_usuarios_demo.py --destino test --dry-run
     $env:ENVIRONMENT="test";       py -3.12 scripts\\crear_usuarios_demo.py --destino test
     $env:ENVIRONMENT="test";       py -3.12 scripts\\crear_usuarios_demo.py --destino test --borrar
+
+    # Rotar la clave de los 3 (sin esto, re-ejecutar NO la toca)
+    $env:ENVIRONMENT="test";       py -3.12 scripts\\crear_usuarios_demo.py --destino test --cambiar-password
+    # Empujar el vencimiento del plan del alumno demo (YYYY-MM-DD)
+    $env:ENVIRONMENT="test";       py -3.12 scripts\\crear_usuarios_demo.py --destino test --extender-plan 2026-12-31
+    # Borrar las cuentas del instituto A PROPÓSITO (piden el flag extra)
+    $env:ENVIRONMENT="test";       py -3.12 scripts\\crear_usuarios_demo.py --destino test --borrar --forzar-borrado-cuentas-instituto
 
     # PROD (rama principal) -> lo corre el dueño del box, a mano
     $env:ENVIRONMENT="production"; py -3.12 scripts\\crear_usuarios_demo.py --destino prod --dry-run
@@ -74,6 +91,14 @@ from typing import Optional, Sequence
 
 from sqlalchemy import text
 
+# Las 3 cuentas son las PERMANENTES del instituto: la lista y los guards viven en un
+# módulo compartido (lo usan también los scripts de purga). `scripts/` no es un paquete,
+# así que el import funciona de las dos formas: como script y como módulo importado.
+try:                              # corrido como script: py scripts\crear_usuarios_demo.py
+    from cuentas_instituto import CUENTAS_INSTITUTO
+except ImportError:               # importado como paquete: scripts.crear_usuarios_demo
+    from scripts.cuentas_instituto import CUENTAS_INSTITUTO
+
 # Consola de Windows: al pipear la salida los acentos romperían con cp1252.
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -89,6 +114,12 @@ CORREO_ADMIN = "demo.admin@urbanbox.cl"
 CORREO_COACH = "demo.coach@urbanbox.cl"
 CORREO_ALUMNO = "demo.alumno@urbanbox.cl"
 CORREOS_DEMO = (CORREO_ADMIN, CORREO_COACH, CORREO_ALUMNO)
+# Auto-verificación: estas 3 direcciones SON las cuentas permanentes del instituto. Si
+# alguien toca una de las dos listas, el script no arranca (mejor eso que un guard ciego).
+if tuple(CUENTAS_INSTITUTO) != CORREOS_DEMO:
+    raise RuntimeError(
+        f"los correos del script {CORREOS_DEMO} no coinciden con las cuentas del "
+        f"instituto {tuple(CUENTAS_INSTITUTO)} (scripts/cuentas_instituto.py)")
 
 NOMBRES = {
     CORREO_ADMIN: "Admin Demo",
@@ -201,6 +232,20 @@ def pedir_password() -> str:
         return p1
 
 
+def parsear_fecha_hasta(texto: str) -> date:
+    """`YYYY-MM-DD` -> `date`. Falla CERRADO (GuardError) si el formato no es ese.
+
+    Se exige el ISO del `<input type=date>` y una fecha REAL: `strptime` rechaza
+    '2026-02-30', 'hoy' o '31/12/2026' (y así `--extender-plan` no adivina nunca).
+    """
+    try:
+        return datetime.strptime(str(texto).strip(), "%Y-%m-%d").date()
+    except (TypeError, ValueError) as e:
+        raise GuardError(
+            f"--extender-plan espera una fecha YYYY-MM-DD (ej. 2026-12-31), no {texto!r}"
+        ) from e
+
+
 def parsear_args(argv=None):
     """`--destino` es OBLIGATORIO: no hay default, para que nadie corra 'por defecto'."""
     parser = argparse.ArgumentParser(
@@ -212,6 +257,15 @@ def parsear_args(argv=None):
                         help="muestra el plan completo sin escribir nada.")
     parser.add_argument("--borrar", action="store_true",
                         help="elimina SOLO estos 3 usuarios y sus datos.")
+    parser.add_argument("--forzar-borrado-cuentas-instituto", action="store_true",
+                        help="permite que --borrar elimine las cuentas PERMANENTES del "
+                             "instituto (sin este flag, --borrar se NIEGA).")
+    parser.add_argument("--cambiar-password", action="store_true",
+                        help="rota la contraseña de los 3 usuarios; sin este flag, a los "
+                             "que ya existen NO se les toca la clave.")
+    parser.add_argument("--extender-plan", default=None, metavar="HASTA",
+                        help="empuja la fecha_expiracion de la suscripción del alumno "
+                             "demo hasta HASTA (YYYY-MM-DD); nunca la acorta.")
     parser.add_argument("--forzar-ventana", action="store_true",
                         help="permite correr en PROD el día 1 o 15 (mantenimiento).")
     parser.add_argument("--plan", default=None,
@@ -445,7 +499,13 @@ def imprimir_plan(entradas: dict, args) -> None:
     for c in entradas["clases"]:
         print(f"    - clase {c['id']} | {c['fecha']} {c['hora_inicio']} | "
               f"{c['disciplina']} | cupo {c['asistentes_confirmados']}/{c['cupo_maximo']}")
-    print(f"Contraseña           : se pide por teclado (getpass), una sola para los 3")
+    print(f"Contraseña           : se pide por teclado (getpass), una sola para los 3, y "
+          f"SÓLO si hay cuentas nuevas o se pasó --cambiar-password")
+    if args.extender_plan:
+        print(f"Plan (extensión)     : fecha_expiracion del alumno -> {args.extender_plan}")
+    if args.borrar and args.forzar_borrado_cuentas_instituto:
+        print("⚠️  --forzar-borrado-cuentas-instituto: se van a BORRAR las cuentas del "
+              "instituto")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -465,8 +525,14 @@ def rut_libre(db, preferido: str) -> str:
     raise GuardError("no se encontró un RUT libre en el box")
 
 
-def upsert_usuario(db, correo: str, password_hash: str) -> int:
+def upsert_usuario(db, correo: str, password_hash: Optional[str],
+                   cambiar_password: bool = False) -> int:
     """Crea o actualiza el usuario demo (devuelve su id). NO le toca el RUT si ya existe.
+
+    CLAVE: a un usuario que YA existe NO se le toca `password_hash` salvo que se pase
+    `cambiar_password` (viene de `--cambiar-password`): así re-ejecutar el script no rota
+    la contraseña de las cuentas del instituto. Si el usuario NO existe, `password_hash`
+    es obligatorio (lo pide `main` una sola vez para los 3).
 
     `activo = true` y `estado = 'activo'` van SIEMPRE juntos: el CHECK
     `ck_usuarios_activo_estado` los mantiene sincronizados y el login lee `estado`
@@ -478,15 +544,22 @@ def upsert_usuario(db, correo: str, password_hash: str) -> int:
     fila = db.execute(text("SELECT id FROM usuarios WHERE tenant_id = :t AND correo = :c"),
                       {"t": TENANT_ID, "c": correo}).first()
     if fila:
-        db.execute(text(
-            "UPDATE usuarios SET nombre = :n, rol = :rol, password_hash = :p, "
-            "  activo = true, estado = 'activo', cambiar_password_al_login = false, "
-            "  acepta_correo_reactivacion = false, fecha_baja = NULL "
-            "WHERE id = :id AND tenant_id = :t"),
-            {"n": NOMBRES[correo], "rol": ROLES[correo], "p": password_hash,
-             "id": fila.id, "t": TENANT_ID})
-        print(f"  [ACTUALIZADO] id={fila.id:>4} | {ROLES[correo]:<14} | {correo}")
+        campos = ("nombre = :n, rol = :rol, activo = true, estado = 'activo', "
+                  "cambiar_password_al_login = false, "
+                  "acepta_correo_reactivacion = false, fecha_baja = NULL")
+        params = {"n": NOMBRES[correo], "rol": ROLES[correo], "id": fila.id, "t": TENANT_ID}
+        if cambiar_password:
+            if not password_hash:
+                raise GuardError(f"{correo}: --cambiar-password sin contraseña nueva")
+            campos = "password_hash = :p, " + campos
+            params["p"] = password_hash
+        db.execute(text(f"UPDATE usuarios SET {campos} WHERE id = :id AND tenant_id = :t"),
+                   params)
+        print(f"  [ACTUALIZADO] id={fila.id:>4} | {ROLES[correo]:<14} | {correo} "
+              f"({'clave ROTADA' if cambiar_password else 'clave intacta'})")
         return fila.id
+    if not password_hash:
+        raise GuardError(f"{correo} no existe y no se puede crear sin contraseña")
     rut = rut_libre(db, RUTS_PREFERIDOS[correo])
     nueva = db.execute(text(
         "INSERT INTO usuarios (tenant_id, rut, nombre, telefono, correo, password_hash, "
@@ -557,6 +630,32 @@ def upsert_suscripcion(db, alumno_id: int, plan: dict, creditos_disponibles: int
     print(f"  [CREADA]      suscripción id={nueva.id} | plan {plan['nombre']} | "
           f"créditos {creditos_disponibles}/{plan['creditos']} | vence {expira.date()}")
     return nueva.id
+
+
+def extender_plan(db, alumno_id: int, hasta: date) -> Optional[date]:
+    """Lleva `fecha_expiracion` de la suscripción del alumno demo hasta `hasta`.
+
+    NUNCA la acorta: si la suscripción ya vence después de `hasta`, no se toca (se avisa).
+    Devuelve la fecha que quedó. `hasta` se guarda a MEDIODÍA UTC, igual que
+    `ventana_suscripcion()`, para que la conversión a hora de Chile no corra el día.
+    """
+    fila = db.execute(text("SELECT id, fecha_expiracion FROM suscripciones "
+                           "WHERE usuario_id = :a AND tenant_id = :t ORDER BY id LIMIT 1"),
+                      {"a": alumno_id, "t": TENANT_ID}).first()
+    if fila is None:
+        raise GuardError("--extender-plan: el alumno demo no tiene suscripción que extender")
+    nueva = datetime(hasta.year, hasta.month, hasta.day, 12, 0, tzinfo=timezone.utc)
+    actual = fila.fecha_expiracion
+    if actual is not None and actual.tzinfo is None:      # BD naive (por si acaso)
+        actual = actual.replace(tzinfo=timezone.utc)
+    if actual is not None and actual >= nueva:
+        print(f"  [plan]        ya vence el {actual.date()} (>= {hasta}): no se acorta")
+        return actual
+    db.execute(text("UPDATE suscripciones SET fecha_expiracion = :fe, updated_at = now() "
+                    "WHERE id = :sid"), {"fe": nueva, "sid": fila.id})
+    print(f"  [plan]        vencimiento extendido: "
+          f"{actual.date() if actual else '—'} -> {hasta}")
+    return nueva
 
 
 # SQL compartido por `limpiar_datos_previos()` y `borrar()`: devuelve el aforo de las
@@ -874,12 +973,37 @@ def verificar_borrado(db, ids: dict) -> bool:
 # ════════════════════════════════════════════════════════════════════════════
 def main(argv=None) -> int:
     args = parsear_args(argv)
+
+    # GUARD 6 (cuentas del instituto): `--borrar` NO toca las 3 cuentas permanentes.
+    # Se chequea ANTES de la confirmación y antes de tocar la base (fail closed): para
+    # borrarlas hay que pedirlo explícitamente con --forzar-borrado-cuentas-instituto.
+    if args.borrar and not args.forzar_borrado_cuentas_instituto:
+        print("[guard] ABORTADO: --borrar eliminaría las cuentas PERMANENTES del instituto")
+        for c in CORREOS_DEMO:
+            print(f"        - {c}")
+        print("        Son las cuentas de presentación del box y no se borran por accidente.")
+        print("        Si de verdad querés borrarlas, volvé a correr con "
+              "--forzar-borrado-cuentas-instituto.")
+        return 1
+    if args.borrar and args.extender_plan:
+        print("[guard] ABORTADO: --borrar y --extender-plan son acciones distintas.")
+        return 1
+    hasta = None
+    if args.extender_plan:
+        try:
+            hasta = parsear_fecha_hasta(args.extender_plan)
+        except GuardError as e:
+            print(f"[guard] ABORTADO: {e}")
+            return 1
+
     print("=" * 74)
     print(f"  USUARIOS DE DEMO (admin, coach y alumno) — box tenant_id={TENANT_ID}")
     print("=" * 74)
     print(f"destino={args.destino.upper()} | hoy={date.today()} | "
           f"acción={'BORRAR' if args.borrar else 'CREAR/ACTUALIZAR'} | "
-          f"reservas={args.reservas} | días={args.dias}"
+          f"reservas={args.reservas} | días={args.dias} | "
+          f"clave={'ROTAR' if args.cambiar_password else 'intacta'}"
+          + (f" | plan hasta {hasta}" if hasta else "")
           + ("  [DRY-RUN]" if args.dry_run else ""))
 
     # GUARD 3 (ventana): SÓLO con destino=prod. El mantenimiento escribe los días 1 y 15.
@@ -911,6 +1035,9 @@ def main(argv=None) -> int:
     try:
         # ── Rama --borrar ───────────────────────────────────────────────────
         if args.borrar:
+            if args.forzar_borrado_cuentas_instituto:
+                print("⚠️  --forzar-borrado-cuentas-instituto: se BORRAN las cuentas "
+                      "permanentes del instituto (queda dicho).")
             ids = ids_usuarios_demo(db)
             if not ids:
                 print("[fin] no hay ningún usuario demo que borrar.")
@@ -936,19 +1063,30 @@ def main(argv=None) -> int:
             print("\n[dry-run] no se escribió nada (la contraseña no se pide en dry-run).")
             return 0
 
-        try:
-            password_hash = env["get_password_hash"](pedir_password())
-        except GuardError as e:
-            print(f"[abort] {e}")
-            return 1
+        # CLAVE: se pide SÓLO si hay que crear alguna cuenta o si se pidió rotarla
+        # (--cambiar-password). A las cuentas que YA existen no se les toca la
+        # contraseña: re-ejecutar el script no rota nada.
+        faltantes = [c for c in CORREOS_DEMO if c not in entradas["existentes"]]
+        password_hash = None
+        if args.cambiar_password or faltantes:
+            if faltantes and not args.cambiar_password:
+                print(f"[i] hay {len(faltantes)} cuentas nuevas: se pide la contraseña "
+                      f"para crearlas")
+            try:
+                password_hash = env["get_password_hash"](pedir_password())
+            except GuardError as e:
+                print(f"[abort] {e}")
+                return 1
+        else:
+            print("[i] las 3 cuentas ya existen: la contraseña queda INTACTA "
+                  "(usá --cambiar-password para rotarla).")
 
         print("\n" + "=" * 74)
         print("  ESCRITURA (una sola transacción)")
         print("=" * 74)
         try:
-            ids = {CORREO_ADMIN: upsert_usuario(db, CORREO_ADMIN, password_hash),
-                   CORREO_COACH: upsert_usuario(db, CORREO_COACH, password_hash),
-                   CORREO_ALUMNO: upsert_usuario(db, CORREO_ALUMNO, password_hash)}
+            ids = {c: upsert_usuario(db, c, password_hash, args.cambiar_password)
+                   for c in CORREOS_DEMO}
             asignar_coach(db, ids[CORREO_COACH], entradas["disciplinas"])
             # Idempotencia: el alumno demo es del script, así que sus reservas/asistencias
             # previas se borran (y se devuelve el aforo) antes de recrearlas.
@@ -962,6 +1100,9 @@ def main(argv=None) -> int:
             upsert_suscripcion(db, ids[CORREO_ALUMNO], entradas["plan"],
                                entradas["plan"]["creditos"] - creadas,
                                entradas["inicio"], entradas["expira"])
+            # `--extender-plan HASTA`: empuja el vencimiento del plan (nunca lo acorta).
+            if hasta:
+                extender_plan(db, ids[CORREO_ALUMNO], hasta)
             db.commit()
         except Exception as e:  # noqa: BLE001
             db.rollback()

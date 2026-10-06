@@ -50,6 +50,16 @@ WodMovimiento = importlib.import_module(
 HistorialRM = importlib.import_module("app.models.historial_rm").HistorialRM
 Reserva = importlib.import_module("app.models.reserva").Reserva
 
+# Cuentas PERMANENTES del instituto (demo.*@urbanbox.cl): este seed borra TODOS los
+# usuarios y TODOS los tenants, y `usuarios.tenant_id` es ON DELETE CASCADE, así que se
+# capturan ANTES de la limpieza y se reinsertan AL FINAL (mismos ids y claves). La lista
+# y los guards viven en `scripts/cuentas_instituto.py` (mismo módulo que usan los otros
+# scripts de limpieza/purga para no tocarlas).
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+if _BACKEND_DIR not in sys.path:
+    sys.path.insert(0, _BACKEND_DIR)
+_instituto = importlib.import_module("scripts.cuentas_instituto")
+
 
 DB_URL = settings.DATABASE_URL
 
@@ -156,6 +166,20 @@ except Exception as _e:  # noqa: BLE001
 
 db = DB()
 try:
+    # ── 0. CUENTAS DEL INSTITUTO: se capturan ANTES de la limpieza ───────────────
+    # El DELETE de abajo borra todos los usuarios y todos los tenants (y el tenant se
+    # lleva sus usuarios por CASCADE): sin esta captura, las 3 cuentas permanentes del
+    # instituto desaparecerían de TEST. Se reinsertan al final, con sus mismos ids,
+    # correos y password_hash, para que sigan sirviendo de demo.
+    _instituto_previas = _instituto.capturar(db)
+    if _instituto_previas:
+        print(f"\n=== CUENTAS DEL INSTITUTO: {len(_instituto_previas)} se conservan "
+              f"(se reinsertan al final)")
+        for _f in _instituto_previas:
+            print(f"   - {_f.get('correo')} (id={_f.get('id')})")
+    else:
+        print("\n=== CUENTAS DEL INSTITUTO: no hay ninguna en TEST (nada que conservar)")
+
     # â”€â”€ 1. LIMPIAR TODO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     print("\n=== LIMPIANDO datos anteriores...")
     # Orden inverso de FK
@@ -384,6 +408,19 @@ try:
     # plan 1, disciplinas 1-5...) pero deja las secuencias en 1. Si luego la app
     # inserta una fila autoincremental (ej. crear_usuario crea el plan "Prueba"),
     # choca con UniqueViolation (id=1 ya existe). Resincronizar a MAX(id)+1.
+    if _instituto_previas:
+        _reinsertadas = _instituto.restaurar(db, _instituto_previas)
+        db.flush()
+        print(f"   [OK] Cuentas del instituto reinsertadas: {_reinsertadas} de "
+              f"{len(_instituto_previas)}")
+        faltan = [f.get("correo") for f in _instituto_previas
+                  if f.get("correo") not in
+                  {r[0] for r in db.execute(text(
+                      "SELECT correo FROM usuarios WHERE correo = ANY(:c)"),
+                      {"c": list(_instituto.CUENTAS_INSTITUTO)}).fetchall()}]
+        if faltan:
+            print(f"   [WARN] no se pudieron restaurar: {', '.join(map(str, faltan))}")
+
     _RESYNC = {
         "tenants": "tenants_id_seq",
         "usuarios": "usuarios_id_seq",
