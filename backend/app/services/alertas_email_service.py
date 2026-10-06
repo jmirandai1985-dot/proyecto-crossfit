@@ -119,13 +119,15 @@ def enviar_alertas_renovacion(db, tenant_id: int = 1, dias_aviso: int = 3) -> di
     from app.services.email_service import send_renovacion_plan
     target = (hoy_santiago() + timedelta(days=dias_aviso)).isoformat()
     rows = db.execute(text(f"""
-        SELECT u.id, u.nombre, u.correo, s.fecha_expiracion
+        SELECT DISTINCT ON (u.id) u.id, u.nombre, u.correo, s.fecha_expiracion
         FROM suscripciones s
         JOIN usuarios u ON u.id = s.usuario_id
         WHERE s.tenant_id = :tid
           AND s.estado = 'activo'
           AND u.estado = 'activo'
+          AND u.rol = 'alumno'
           AND {sql_fecha_en_chile("s.fecha_expiracion")} = :target
+        ORDER BY u.id, s.fecha_expiracion DESC
     """), {"tid": tenant_id, "target": target}).fetchall()
 
     enviados, fallidos = [], []
@@ -199,13 +201,15 @@ def enviar_alertas_urgencia(db, tenant_id: int = 1) -> dict:
     from app.services.email_service import send_alerta_urgencia_renovacion
     target = hoy_santiago().isoformat()
     rows = db.execute(text(f"""
-        SELECT u.id, u.nombre, u.correo
+        SELECT DISTINCT ON (u.id) u.id, u.nombre, u.correo
         FROM suscripciones s
         JOIN usuarios u ON u.id = s.usuario_id
         WHERE s.tenant_id = :tid
           AND s.estado = 'activo'
           AND u.estado = 'activo'
+          AND u.rol = 'alumno'
           AND {sql_fecha_en_chile("s.fecha_expiracion")} = :target
+        ORDER BY u.id
     """), {"tid": tenant_id, "target": target}).fetchall()
 
     enviados, fallidos = [], []
