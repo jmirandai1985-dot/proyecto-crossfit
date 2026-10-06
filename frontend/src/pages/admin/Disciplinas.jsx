@@ -14,7 +14,7 @@ const Disciplinas = () => {
 
     const fetch = async () => {
         try {
-            const r = await api.get('/api/v1/disciplinas');
+            const r = await api.get('/api/v1/disciplinas/');
             setItems(r.data || []);
         } catch (e) { console.error(e); setItems([]); }
         finally { setLoading(false); }
@@ -31,7 +31,7 @@ const Disciplinas = () => {
             if (editingId) {
                 await api.put(`/api/v1/disciplinas/${editingId}`, formData);
             } else {
-                await api.post('/api/v1/disciplinas', { ...formData, tenant_id });
+                await api.post('/api/v1/disciplinas/', { ...formData, tenant_id });
             }
             setMsgError('');
             setShowForm(false);

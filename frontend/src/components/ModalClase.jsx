@@ -55,7 +55,7 @@ const ModalClase = ({ isOpen, onClose, onSuccess, tenant_id, claseEditar }) => {
 
     const fetchCoaches = async () => {
         try {
-            const response = await api.get(`/api/v1/usuarios?rol=coach`);
+            const response = await api.get(`/api/v1/usuarios/?rol=coach`);
             const coachesData = Array.isArray(response.data) ? response.data : [];
             setCoaches(coachesData.length > 0 ? coachesData : [
                 { id: 1, nombre: 'Juan Pérez' },
@@ -74,7 +74,7 @@ const ModalClase = ({ isOpen, onClose, onSuccess, tenant_id, claseEditar }) => {
 
     const fetchDisciplinas = async () => {
         try {
-            const response = await api.get(`/api/v1/disciplinas`);
+            const response = await api.get(`/api/v1/disciplinas/`);
             // Asegurar que cada disciplina tenga id y nombre válidos
             const disciplinasData = Array.isArray(response.data) ? response.data : [];
             const disciplinasValidas = disciplinasData.filter(d => d && d.id && d.nombre);
@@ -154,7 +154,7 @@ const ModalClase = ({ isOpen, onClose, onSuccess, tenant_id, claseEditar }) => {
                 await api.put(`/api/v1/clases/${claseEditar.id}`, payload);
             } else {
                 // POST para crear
-                await api.post(`/api/v1/clases`, payload);
+                await api.post(`/api/v1/clases/`, payload);
             }
 
             setFormData({

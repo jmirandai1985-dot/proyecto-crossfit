@@ -56,7 +56,7 @@ const Alumnos = () => {
 
     const fetchAlumnos = async () => {
         try {
-            const response = await api.get('/api/v1/usuarios', {
+            const response = await api.get('/api/v1/usuarios/', {
                 params: {
                     rol: 'alumno',
                     limit: porPagina,
@@ -229,7 +229,7 @@ const Alumnos = () => {
             return;
         }
         try {
-            await api.post('/api/v1/usuarios', {
+            await api.post('/api/v1/usuarios/', {
                 nombre: formData.nombre,
                 correo: formData.correo,
                 telefono: formData.telefono,

@@ -217,7 +217,7 @@ export default function GestionClases() {
 
     // Cargar disciplinas
     useEffect(() => {
-        api.get(`${API_BASE}/disciplinas`)
+        api.get(`${API_BASE}/disciplinas/`)
             .then(r => {
                 const data = r.data || [];
                 const filt = data.filter(d =>
@@ -243,7 +243,7 @@ export default function GestionClases() {
 
     const cargarClases = useCallback(async (f) => {
         try {
-            const r = await api.get(`${API_BASE}/clases`, { params: { fecha_desde: f, fecha_hasta: f, limit: 200 } });
+            const r = await api.get(`${API_BASE}/clases/`, { params: { fecha_desde: f, fecha_hasta: f, limit: 200 } });
             const data = r.data || [];
             return Array.isArray(data) ? data : (data.clases || []);
         } catch (e) { console.error('Error clases', e); return []; }
@@ -297,7 +297,7 @@ export default function GestionClases() {
             // TAREA 4: cargar TODA la semana para el calendario multi-día
             const desdeSemana = semanaActual[0];
             const hastaSemana = semanaActual[6];
-            const r = await api.get(`${API_BASE}/clases`, { params: { disciplina_id: dId, fecha_desde: desdeSemana, fecha_hasta: hastaSemana, limit: 500 } });
+            const r = await api.get(`${API_BASE}/clases/`, { params: { disciplina_id: dId, fecha_desde: desdeSemana, fecha_hasta: hastaSemana, limit: 500 } });
             const data = r.data || [];
             let clasesSemana = Array.isArray(data) ? data : (data.clases || []);
             if (turno) clasesSemana = clasesSemana.filter(c => { const hora = parseHora(c.hora_inicio); return hora >= turno.desde && hora <= turno.hasta; });
@@ -539,7 +539,7 @@ export default function GestionClases() {
             const res = {};
             await Promise.all(dias.map(async (f) => {
                 try {
-                    const r = await api.get(`${API_BASE}/clases`, {
+                    const r = await api.get(`${API_BASE}/clases/`, {
                         params: { disciplina_id: disciplinaActiva, fecha_desde: f, fecha_hasta: f, limit: 200 },
                     });
                     const data = r.data || [];

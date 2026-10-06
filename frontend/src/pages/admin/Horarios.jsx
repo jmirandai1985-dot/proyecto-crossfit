@@ -45,7 +45,7 @@ export default function Horarios() {
         try {
             const [rG, rD] = await Promise.all([
                 api.get('/api/v1/horarios/grid-semanal'),
-                api.get('/api/v1/disciplinas')
+                api.get('/api/v1/disciplinas/')
             ]);
             setGridData(rG.data || []);
             setDisciplinas(rD.data || []);

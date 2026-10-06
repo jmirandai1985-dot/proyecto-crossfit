@@ -40,7 +40,7 @@ const Clases = () => {
 
     const fetchDisciplinas = useCallback(async () => {
         try {
-            const r = await api.get('/api/v1/disciplinas');
+            const r = await api.get('/api/v1/disciplinas/');
             setDisciplinas(r.data || []);
         } catch (e) { console.error(e); }
     }, [tenant_id]);
@@ -50,7 +50,7 @@ const Clases = () => {
         try {
             const params = { limit: 500 };
             if (disciplinaId) params.disciplina_id = disciplinaId;
-            const response = await api.get('/api/v1/clases', { params });
+            const response = await api.get('/api/v1/clases/', { params });
             let data = response.data || [];
             if (turnoId) {
                 const turno = TURNOS.find(t => t.id === turnoId);
