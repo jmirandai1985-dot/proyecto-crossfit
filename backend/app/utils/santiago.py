@@ -23,7 +23,7 @@ Un comparación por INSTANTE (`fecha_expiracion > now()`) no sirve para esto:
 corta el día al mediodía de la tarde y depende de la TZ del proceso.
 """
 import calendar
-from datetime import datetime, date, time, timezone
+from datetime import datetime, date, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 SANTIAGO = ZoneInfo("America/Santiago")
@@ -108,3 +108,26 @@ def fin_de_mes_chile(desde: date | None = None) -> datetime:
     desde = desde or hoy_santiago()
     ultimo = calendar.monthrange(desde.year, desde.month)[1]
     return fin_del_dia_chile(date(desde.year, desde.month, ultimo))
+
+
+def fin_de_plan_chile(inicio, duracion_dias: int) -> datetime:
+    """23:59:59 hora de Chile del ÚLTIMO día de un plan: `inicio + duracion_dias` días.
+
+    ÚNICA forma de calcular `suscripciones.fecha_expiracion` (regla 2026-10-06): un plan
+    dura `duracion_dias` días SEGUIDOS contados desde el día de contratación (`inicio`),
+    en días CALENDARIO de Chile, y vale hasta el final de ese último día (mismo criterio
+    que `vigente_el_dia`/`fin_del_dia_chile`).
+
+    La usan los CUATRO caminos de escritura —`solicitudes_planes.aprobar_solicitud`,
+    `comprar_emergencia`, `fix_fechas` y `POST /suscripciones`—: una sola definición => no
+    pueden divergir. Antes cada uno lo armaba distinto (fin de MES en tres de ellos,
+    `inicio + duracion` en el seeder demo): dos reglas sobre dinero que se desincronizan.
+    El plan de Prueba cae solo (su `duracion_dias` es 7).
+
+    Acepta `date` o `datetime` de inicio (un datetime se lleva a su DÍA de Chile primero:
+    la contratación es un día, no un instante). `duracion_dias` <= 0 se trata como 1.
+    """
+    dia = fecha_chile(inicio) if isinstance(inicio, datetime) else inicio
+    if dia is None:
+        dia = hoy_santiago()
+    return fin_del_dia_chile(dia + timedelta(days=max(int(duracion_dias), 1)))

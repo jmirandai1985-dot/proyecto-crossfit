@@ -12,7 +12,7 @@ from app.core.dependencies import get_current_user
 from app.core.estados import vigente_hoy
 from app.core.rate_limit import limiter, LIMIT_CRITICO
 from app.services.auditoria_service import registrar_auditoria
-from app.utils.santiago import ahora_santiago, fecha_chile, fin_de_mes_chile
+from app.utils.santiago import ahora_santiago, fecha_chile, fin_de_plan_chile
 
 router = APIRouter()
 
@@ -90,10 +90,10 @@ def comprar_emergencia(
         raise HTTPException(
             status_code=400, detail="Ya usaste tu compra de emergencia este año. Vuelve en enero.")
 
-    # Calcular fin de mes actual EN HORA DE CHILE (23:59:59 del último día): antes se armaba con
-    # `datetime.now(timezone.utc).replace(hour=23)`, que en Chile son las 20:59 y le robaba las
-    # últimas 3 horas al último día del plan.
-    fin_mes = fin_de_mes_chile(ahora.date())
+    # Vigencia EN HORA DE CHILE: `inicio + plan.duracion_dias` días seguidos (regla 2026-10-06),
+    # hasta el fin de ese último día. Misma función que la aprobación/creación (`fin_de_plan_chile`)
+    # — antes se usaba el fin de mes, una segunda regla para el mismo campo.
+    vencimiento = fin_de_plan_chile(ahora, plan.duracion_dias)
 
     # Guardar tokens sobrantes antes de actualizar (0 o los que tenga)
     tokens_sobrantes = suscripcion.creditos_disponibles or 0
@@ -102,7 +102,7 @@ def comprar_emergencia(
     suscripcion.es_compra_emergencia = True
     suscripcion.puede_comprar_emergencia = False
     suscripcion.fecha_compra_emergencia = ahora
-    suscripcion.fecha_expiracion = fin_mes
+    suscripcion.fecha_expiracion = vencimiento
     suscripcion.creditos_totales = plan.creditos or 999
     suscripcion.creditos_disponibles = plan.creditos or 999
 
@@ -133,7 +133,7 @@ def comprar_emergencia(
         "mensaje": "Compra de emergencia activada",
         "plan_nombre": plan.nombre,
         "clases_compradas": plan.creditos or 999,
-        "fecha_vencimiento": fin_mes,
+        "fecha_vencimiento": vencimiento,
         "acumula_tokens": acumula,
         "tokens_sobrantes": tokens_sobrantes,
     }

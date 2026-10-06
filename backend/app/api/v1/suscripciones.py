@@ -9,7 +9,8 @@ from app.models.transaccion_financiera import TransaccionFinanciera
 from app.core.dependencies import get_current_admin
 from app.core.rate_limit import limiter, LIMIT_CRITICO
 from app.services.auditoria_service import registrar_auditoria
-from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
+from app.models.plan import Plan
+from app.utils.santiago import hoy_santiago, fin_de_plan_chile   # HOY en Chile (la TZ del proceso es UTC)
 
 router = APIRouter()
 
@@ -25,7 +26,10 @@ class SuscripcionCreate(BaseModel):
     creditos_totales: Optional[int] = None
     creditos_disponibles: Optional[int] = None
     fecha_inicio: Optional[str] = None
-    fecha_expiracion: str
+    # OPCIONAL desde 2026-10-06: si no viene, se calcula `inicio + plan.duracion_dias`
+    # (días de Chile) con la MISMA función que la aprobación de una solicitud
+    # (`fin_de_plan_chile`). Antes era obligatoria.
+    fecha_expiracion: Optional[str] = None
 
 
 @router.post("/suscripciones", status_code=201)
@@ -38,12 +42,34 @@ def crear_suscripcion(
 ):
     # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT (el body se ignora).
     data.tenant_id = current_user["tenant_id"]
-    try:
-        fecha_exp = datetime.fromisoformat(
-            data.fecha_expiracion.replace('Z', '+00:00'))
-    except Exception:
-        raise HTTPException(
-            status_code=400, detail="Formato de fecha_expiracion inválido.")
+
+    # ── Inicio: el body puede traerlo; si no, ahora (UTC, como antes). ──
+    if data.fecha_inicio:
+        try:
+            inicio_dt = datetime.fromisoformat(
+                data.fecha_inicio.replace('Z', '+00:00'))
+        except Exception:
+            raise HTTPException(
+                status_code=400, detail="Formato de fecha_inicio inválido.")
+    else:
+        inicio_dt = datetime.now(timezone.utc)
+
+    plan = db.query(Plan).filter(Plan.id == data.plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan no encontrado")
+
+    # ── Vencimiento: si viene en el body se respeta; si no, ÚNICA regla
+    # `inicio + plan.duracion_dias` (días de Chile), la MISMA que `aprobar_solicitud`. ──
+    if data.fecha_expiracion:
+        try:
+            fecha_exp = datetime.fromisoformat(
+                data.fecha_expiracion.replace('Z', '+00:00'))
+        except Exception:
+            raise HTTPException(
+                status_code=400, detail="Formato de fecha_expiracion inválido.")
+    else:
+        fecha_exp = fin_de_plan_chile(inicio_dt, plan.duracion_dias)
+
     db_sus = Suscripcion(
         tenant_id=data.tenant_id,
         usuario_id=data.usuario_id,
@@ -51,7 +77,7 @@ def crear_suscripcion(
         estado=data.estado,
         creditos_totales=data.creditos_totales,
         creditos_disponibles=data.creditos_disponibles,
-        fecha_inicio=datetime.now(timezone.utc),
+        fecha_inicio=inicio_dt,
         fecha_expiracion=fecha_exp,
     )
     db.add(db_sus)
