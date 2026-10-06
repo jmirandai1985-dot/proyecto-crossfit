@@ -5,6 +5,8 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { fmtFechaChile, toChileFechaStr } from '../../utils/fecha';
 import AdminTarjetaAlumnosPrueba from '../../components/AdminTarjetaAlumnosPrueba';
+// Aviso REUTILIZABLE (secciones + Reintentar) para las tarjetas que pueden fallar.
+import AvisoCarga from '../../components/AvisoCarga';
 // Vista previa/descarga del voucher: la lógica del blob autenticado (y su
 // descarga forzada) vive en el hook compartido, no en cada pantalla.
 import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
@@ -481,6 +483,20 @@ const AdminDashboard = () => {
                 </div>
 
                 {/* TARJETAS DE FIDELIZACIÓN */}
+                {/* El fallo se avisa ARRIBA y con Reintentar: las tarjetas ya muestran su
+                    motivo en vez de un 0 falso, pero sin botón el admin tenía que
+                    recargar la página entera para volver a intentar. */}
+                {!fidelizacionLoading && (
+                    <AvisoCarga
+                        secciones={[
+                            fidelizacionError.riesgo && 'alumnos en riesgo',
+                            fidelizacionError.vencimientos && 'vencimientos inminentes',
+                        ].filter(Boolean)}
+                        variante="oscura"
+                        testid="aviso-fidelizacion"
+                        onReintentar={cargarFidelizacion}
+                    />
+                )}
                 {!fidelizacionLoading && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Tarjeta Alumnos en Riesgo */}
