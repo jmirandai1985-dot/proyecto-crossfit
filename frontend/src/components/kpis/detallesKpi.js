@@ -202,7 +202,8 @@ export const DETALLES_KPI = {
         'Asistencia promedio',
         'Reservas que terminan en clase',
         'De las reservas que se hicieron en el mes, qué porcentaje terminó entrenando.',
-        'Asistentes del mes dividido por las reservas confirmadas del mes, en porcentaje.',
+        'Asistentes del mes dividido por las reservas confirmadas de las clases que YA se '
+        + 'realizaron, en porcentaje. En el mes en curso cuenta sólo lo transcurrido hasta hoy.',
         'Es el "no-show" del box: 90 % o más es excelente; abajo de 70 % hay muchas reservas que no se '
         + 'usan, y son lugares que quedaron tomados sin que nadie los aprovechara.',
         'Si está baja, recordar la reserva (notificaciones) y revisar la política de cancelación: liberar '
@@ -213,7 +214,7 @@ export const DETALLES_KPI = {
         'Clases por semana de cada alumno',
         'Cuántas clases por semana entrena, en promedio, cada alumno con plan vigente.',
         'Asistentes del mes dividido por los alumnos con plan vigente al inicio del mes y por las semanas '
-        + 'que tuvo el mes.',
+        + 'TRANSCURRIDAS del período: en el mes en curso hasta hoy, en un mes cerrado el mes completo.',
         'Quien entrena 3 veces por semana se queda; quien viene una vez, se va. En un box de CrossFit 2,5 '
         + 'o más es un box sano; menos de 1,5 avisa que los alumnos están pagando y no viniendo.',
         'Si está baja, mirar la asistencia de cada alumno en su historial y usar los avisos: el que dejó '

@@ -344,6 +344,22 @@ def populate_daily_kpis(
 MAX_MESES_BACKFILL = 36
 
 
+def _semanas_transcurridas(inicio: date, fin: date, hoy: date) -> float:
+    """Semanas del tramo REALMENTE transcurrido de `inicio`..`fin` (con tope en `hoy`).
+
+    PURA (sin BD ni HTTP), para poder probarla. Un período CERRADO devuelve sus semanas
+    completas (su último día ya pasó); el mes EN CURSO devuelve sólo lo transcurrido, para
+    no diluir los promedios por semana con días que todavía no ocurrieron. Un período
+    futuro (o vacío) devuelve 0.
+
+    Es el divisor de `frecuencia_semanal`: antes se usaba `(fin - inicio).days + 1` (el
+    mes COMPLETO) y en el mes en curso el número salía artificialmente bajo (2026-10-06:
+    0.24 en vez de 1.22 clases/semana, con el numerador cubriendo sólo 6 días).
+    """
+    dias = (min(fin, hoy) - inicio).days + 1
+    return dias / 7.0 if dias > 0 else 0.0
+
+
 def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> dict:
     """Calcula y hace UPSERT (idempotente) de UN mes en `monthly_kpis`.
 
@@ -440,12 +456,19 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
         text(sql_clase_realizada("clases")),
     ).scalar() or 0
 
+    # Reservas CONFIRMADAS del mes, pero SOLO de las clases REALIZADAS — el MISMO
+    # predicado que `asistentes_mes`. Si el denominador incluyera las clases futuras, en
+    # el mes EN CURSO la tasa salía artificialmente baja (2026-10-06: 67.65% contra 100%
+    # real, porque las clases futuras ya tienen reservas). En un mes cerrado todas las
+    # clases terminaron, así que el número no cambia (y en TEST/PROD no hay clases
+    # `cancelada`, así que tampoco cambia por descartarlas).
     reservas_mes = db.query(func.count(Reserva.id)).join(
         Clase, Reserva.clase_id == Clase.id
     ).filter(
         Reserva.tenant_id == tenant_id,
         Clase.fecha >= inicio, Clase.fecha <= fin,
         Reserva.estado == "confirmada",
+        text(sql_clase_realizada("clases")),
     ).scalar() or 0
 
     # Definicion COMPARTIDA con Reportes (metricas_service.ocupacion_promedio).
@@ -453,7 +476,12 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
     asistencia_promedio = round(
         asistentes_mes / reservas_mes * 100, 2) if reservas_mes else 0
 
-    semanas = ((fin - inicio).days + 1) / 7.0
+    # `frecuencia_semanal` = asistentes por semana por alumno activo. El divisor son las
+    # semanas TRANSCURRIDAS del período, NO las del mes completo: en el mes EN CURSO el
+    # numerador sólo cubre lo que ya pasó, así que dividir por las 4-5 semanas del mes
+    # diluía el promedio (2026-10-06: 0.24 en vez de 1.22). En un mes cerrado es el mes
+    # completo y el valor no cambia.
+    semanas = _semanas_transcurridas(inicio, fin, hoy_santiago())
     frecuencia_semanal = round(
         asistentes_mes / (alumnos_activos_inicio * semanas), 2
     ) if (alumnos_activos_inicio and semanas) else 0
