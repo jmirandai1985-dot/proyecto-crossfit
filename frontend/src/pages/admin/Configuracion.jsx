@@ -1,7 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
+import { fmtFechaChile, horaChileStr } from '../../utils/fecha';
+
+/**
+ * Mensaje legible de un error de la API.
+ *
+ * Un 422 de FastAPI trae `detail` como LISTA de errores de Pydantic (validaciones de
+ * `ConfiguracionUpdate`): hay que armar el texto campo por campo, si no la pantalla
+ * muestra "[object Object]" y el admin no sabe qué corregir.
+ */
+const detalleDeError = (err) => {
+    const detalle = err.response?.data?.detail;
+    if (typeof detalle === 'string') return detalle;
+    if (Array.isArray(detalle)) {
+        const lineas = detalle.map((e) => {
+            const campo = (e.loc || []).filter((p) => p !== 'body').join('.');
+            const msg = String(e.msg || '').replace(/^Value error, /, '');
+            return campo ? `${campo}: ${msg}` : msg;
+        });
+        if (lineas.length) return lineas.join(' · ');
+    }
+    return 'No se pudo guardar. Revisa los datos e intenta nuevamente.';
+};
 
 const Configuracion = () => {
     const { tenant_id } = useAuth();
@@ -16,44 +38,64 @@ const Configuracion = () => {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState({ type: '', text: '' });
+    // I4/I5: el resultado de la carga se GUARDA en el estado (antes sólo iba a
+    // `console.error`). Esta pantalla ESCRIBE datos bancarios, así que el admin tiene que
+    // ver que no se pudo leer lo guardado —y no poder guardar encima a ciegas.
+    const [configurado, setConfigurado] = useState(false);
+    const [errorCarga, setErrorCarga] = useState('');
+    const [updatedAt, setUpdatedAt] = useState(null);
+
+    // `useCallback` porque la usan el efecto Y el botón "Reintentar" del aviso de error:
+    // así la dependencia del efecto es la función y no hay warning de exhaustive-deps.
+    const fetchConfig = useCallback(async () => {
+        setErrorCarga('');
+        try {
+            const res = await api.get(`/api/v1/configuracion?tenant_id=${tenant_id}`);
+            const data = res.data;
+            setConfigurado(!!data.configurado);
+            setUpdatedAt(data.updated_at || null);
+            if (data.configurado) {
+                setForm({
+                    banco: data.banco || '',
+                    numero_cuenta: data.numero_cuenta || '',
+                    tipo_cuenta: data.tipo_cuenta || '',
+                    rut: data.rut || '',
+                    email_comprobantes: data.email_comprobantes || '',
+                    whatsapp: data.whatsapp || '',
+                });
+            }
+        } catch (err) {
+            console.error('Error cargando config:', err);
+            setErrorCarga('No se pudieron cargar los datos bancarios guardados. Si guardas ahora, puedes sobrescribir sin ver lo que hay.');
+        }
+    }, [tenant_id]);
 
     useEffect(() => {
-        const fetchConfig = async () => {
-            try {
-                const res = await api.get(`/api/v1/configuracion?tenant_id=${tenant_id}`);
-                const data = res.data;
-                if (data.configurado) {
-                    setForm({
-                        banco: data.banco || '',
-                        numero_cuenta: data.numero_cuenta || '',
-                        tipo_cuenta: data.tipo_cuenta || '',
-                        rut: data.rut || '',
-                        email_comprobantes: data.email_comprobantes || '',
-                        whatsapp: data.whatsapp || '',
-                    });
-                }
-            } catch (err) {
-                console.error('Error cargando config:', err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchConfig();
-    }, [tenant_id]);
+        setLoading(true);
+        fetchConfig().finally(() => setLoading(false));
+    }, [fetchConfig]);
 
     const handleChange = (e) => {
         setForm({ ...form, [e.target.name]: e.target.value });
     };
 
-    const handleSave = async () => {
+    const handleSave = async (e) => {
+        e?.preventDefault();
+        // M6: guardar con datos ya cargados los REEMPLAZA (y el otro admin del box no ve
+        // este formulario): se pide confirmación explícita antes de pisar.
+        if (configurado && !window.confirm(
+            'Ya hay datos bancarios guardados y se van a reemplazar por los de este formulario. ¿Guardar?')) {
+            return;
+        }
         setSaving(true);
         setMessage({ type: '', text: '' });
         try {
-            await api.put(`/api/v1/configuracion`, form);
+            const res = await api.put(`/api/v1/configuracion`, form);
+            setConfigurado(true);
+            setUpdatedAt(res.data?.updated_at || null);
             setMessage({ type: 'success', text: 'Datos bancarios guardados exitosamente.' });
         } catch (err) {
-            const detalle = err.response?.data?.detail || 'Error al guardar. Intenta nuevamente.';
-            setMessage({ type: 'error', text: detalle });
+            setMessage({ type: 'error', text: detalleDeError(err) });
         } finally {
             setSaving(false);
         }
@@ -89,18 +131,55 @@ const Configuracion = () => {
                     </div>
                 )}
 
-                <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6 shadow-sm space-y-5">
+                {/* I5: si la carga falló, se dice y se deshabilita Guardar (estos datos
+                    bancarios los lee el alumno para transferir: guardar a ciegas encima de
+                    lo que hay es peor que no guardar). */}
+                {errorCarga && (
+                    <div role="alert" data-testid="config-error-carga"
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-700 bg-red-900/30 px-4 py-3 text-sm text-red-200">
+                        <span>⚠️ {errorCarga}</span>
+                        <button type="button" onClick={fetchConfig}
+                            data-testid="config-reintentar"
+                            className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-700 transition-colors">
+                            Reintentar
+                        </button>
+                    </div>
+                )}
+
+                {/* I4: el box no tiene fila guardada. Antes la pantalla se veía igual que con
+                    datos cargados (formulario vacío) y el admin no sabía si faltaba cargarlos. */}
+                {!configurado && !errorCarga && (
+                    <div data-testid="config-sin-datos"
+                        className="rounded-xl border border-amber-700 bg-amber-900/30 px-4 py-3 text-sm text-amber-200">
+                        📭 <strong>Todavía no has cargado los datos bancarios.</strong> Mientras no los
+                        cargues, los alumnos no pueden transferir: el Bazar bloquea los pedidos y en
+                        Solicitar plan sólo ven "el box aún no ha configurado sus datos de pago".
+                    </div>
+                )}
+
+                {configurado && updatedAt && (
+                    <p className="text-xs text-zinc-500" data-testid="config-ultima-modificacion">
+                        Última modificación: {fmtFechaChile(updatedAt)} {horaChileStr(updatedAt)}
+                        {/* El "quién" (updated_by) lo avisa la campana del panel: los admins del
+                            box se enteran cuando el otro cambia estos datos. */}
+                    </p>
+                )}
+
+                <form onSubmit={handleSave} className="bg-zinc-900 rounded-xl border border-zinc-800 p-6 shadow-sm space-y-5">
                     <div>
                         <label className="block text-sm font-medium text-zinc-300 mb-1">Banco</label>
                         <input type="text" name="banco" value={form.banco} onChange={handleChange}
-                            placeholder="Ej: Banco Santander"
+                            placeholder="Ej: Banco Santander" maxLength={200}
                             className="w-full px-4 py-2.5 border border-zinc-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm" />
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-zinc-300 mb-1">Número de Cuenta</label>
                         <input type="text" name="numero_cuenta" value={form.numero_cuenta} onChange={handleChange}
-                            placeholder="Ej: 12345678"
+                            placeholder="Ej: 12345678" maxLength={50}
                             className="w-full px-4 py-2.5 border border-zinc-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm" />
+                        <p className="text-xs text-zinc-500 mt-1">
+                            Sólo dígitos (se aceptan puntos y guiones: se guardan sin ellos).
+                        </p>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-zinc-300 mb-1">Tipo de Cuenta</label>
@@ -116,13 +195,16 @@ const Configuracion = () => {
                     <div>
                         <label className="block text-sm font-medium text-zinc-300 mb-1">RUT</label>
                         <input type="text" name="rut" value={form.rut} onChange={handleChange}
-                            placeholder="Ej: 12.345.678-9"
+                            placeholder="Ej: 12345678-5" maxLength={20}
                             className="w-full px-4 py-2.5 border border-zinc-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm" />
+                        <p className="text-xs text-zinc-500 mt-1">
+                            RUT del titular de la cuenta. Se valida el dígito verificador.
+                        </p>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-zinc-300 mb-1">Email para Comprobantes</label>
                         <input type="email" name="email_comprobantes" value={form.email_comprobantes} onChange={handleChange}
-                            placeholder="Ej: pagos@urbanbox.cl"
+                            placeholder="Ej: pagos@urbanbox.cl" maxLength={200}
                             className="w-full px-4 py-2.5 border border-zinc-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm" />
                     </div>
 
@@ -139,11 +221,12 @@ const Configuracion = () => {
                         </p>
                     </div>
 
-                    <button onClick={handleSave} disabled={saving}
+                    <button type="submit" disabled={saving || !!errorCarga}
+                        data-testid="config-guardar"
                         className="w-full py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm transition-colors disabled:opacity-50">
                         {saving ? 'Guardando...' : '💾 Guardar'}
                     </button>
-                </div>
+                </form>
             </div>
         </Layout>
     );
