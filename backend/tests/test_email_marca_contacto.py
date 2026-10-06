@@ -20,8 +20,10 @@ B. CONTRA TEST (escribe y RESTAURA):
 
 Ningún test manda correo real: `EMAIL_MODO=noop` (autouse) y el único envío con SMTP falso
 patchea `smtplib.SMTP_SSL`. Nunca se toca PROD (fixture `db` con `is_test_db_url`).
-Correr con:
-    docker exec box-crossfit-backend-1 python -m pytest tests/test_email_marca_contacto.py -q
+Correr con (⚠️ la imagen del backend NO copia `tests/`: se corre desde el HOST; el `cliente`
+es un TestClient in-process contra la MISMA rama TEST que ve el API del contenedor):
+    cd backend && ENVIRONMENT=test py -3.12 -m pytest tests/test_email_marca_contacto.py ^
+      -q --noconftest
 """
 import email as email_lib
 import email.header
@@ -121,8 +123,9 @@ def config_del_box(db, cliente, tokens):
     Devuelve `guardar(numero)` (el PUT del admin) y `leer()` (el GET del box que ve el alumno).
     ⚠️ R1: el GET ya NO es público (el `tenant_id` sale del JWT, el query se ignora), así
     que se lee con la sesión del admin — la MISMA que escribe.
-    El teardown deja la fila como estaba, pase lo que pase, y borra la traza que el PUT
-    crea (`auditoria` + el aviso `config_bancaria` de la campana, I1).
+    El teardown deja la fila como estaba, pase lo que pase (si el box no tenía fila, la
+    BORRA: restaurar con `""` dejaría una fila vacía que antes no estaba), y borra la traza
+    que el PUT crea (`auditoria` + el aviso `config_bancaria` de la campana, I1).
     """
     def _leer():
         r = cliente.get(f"/api/v1/configuracion?tenant_id={TENANT_ID}",
@@ -142,16 +145,33 @@ def config_del_box(db, cliente, tokens):
         return db.execute(text(f"SELECT COALESCE(MAX(id), 0) FROM {tabla}")).scalar()
 
     original = _leer().get("whatsapp")
+    # ¿El box YA tenía fila en `configuracion_negocio`? El GET no lo distingue (sin datos
+    # devuelve `whatsapp: null` igual que una fila vacía), así que se mira la tabla: si NO
+    # existía, el teardown BORRA la fila que creó el PUT. Restaurar con `""` dejaría una
+    # fila vacía que antes no estaba (basura en TEST, que hoy arranca con 0 filas).
+    habia_fila = db.execute(text(
+        "SELECT id FROM configuracion_negocio WHERE tenant_id = :t"),
+        {"t": TENANT_ID}).first() is not None
     # I1: el PUT ya no es silencioso (deja fila en `auditoria` y el aviso `config_bancaria`
     # en la campana de los admins del box). Se anota el punto de partida para borrar SÓLO
     # lo que creen estos tests: la rama TEST queda como estaba.
     notif_desde = _max_id("notificaciones")
     audit_desde = _max_id("auditoria")
 
-    yield {"original": original, "guardar": _guardar, "leer": _leer}
+    yield {"original": original, "habia_fila": habia_fila,
+           "guardar": _guardar, "leer": _leer}
 
-    _guardar(original or "")
     db.rollback()
+    if habia_fila:
+        # El PUT es PARCIAL (sólo `whatsapp`): el resto de los datos del box no se toca.
+        # ⚠️ El PUT va por el API (otra sesión, él commitea): el `rollback` de abajo sólo
+        # suelta la lectura que dejó el test en ESTA sesión — si se borrara una fila, hay
+        # que borrarla DESPUÉS de este rollback (o el DELETE se descarta en silencio).
+        _guardar(original or "")
+        db.rollback()
+    else:
+        db.execute(text("DELETE FROM configuracion_negocio WHERE tenant_id = :t"),
+                   {"t": TENANT_ID})
     db.execute(text("DELETE FROM notificaciones WHERE id > :i AND tipo = 'config_bancaria'"),
                {"i": notif_desde})
     db.execute(text("DELETE FROM auditoria WHERE id > :i AND entidad = 'configuracion_negocio'"),
