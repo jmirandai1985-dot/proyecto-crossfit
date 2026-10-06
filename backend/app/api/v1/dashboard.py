@@ -78,10 +78,15 @@ def obtener_estadisticas_dashboard(
         Usuario.activo == True
     ).scalar() or 0
 
-    total_suscripciones_activas = 0
-    recaudacion_mes = 0
+    # ⚠️ `total_suscripciones_activas` y `recaudacion_mes` se ELIMINARON de esta respuesta
+    # (2026-10): eran dos constantes en 0 que no consumía nadie (el dashboard admin arma sus
+    # tarjetas con GET /reportes/, /dashboard/{id}/ocupacion-hoy y los KPIs). Un campo fijo en 0
+    # se lee como un dato del box ("0 suscripciones activas", "0 recaudado") cuando en realidad es
+    # "no calculado": devolverlo era peor que no devolverlo. Si alguna vez se necesita, se calcula
+    # con la definición COMPARTIDA (`metricas_service.alumnos_vigentes` / `ingresos_netos`), no con
+    # un cero escrito a mano.
+    # `asistencia_promedio` sigue en 0 por el mismo motivo, pero NO se tocó en este cambio.
     asistencia_promedio = 0
-
     hace_una_semana = datetime.now() - timedelta(days=7)
     nuevos_alumnos_semana = db.query(func.count(Usuario.id)).filter(
         Usuario.tenant_id == tenant_id,
@@ -91,8 +96,6 @@ def obtener_estadisticas_dashboard(
 
     return {
         "total_alumnos": total_alumnos,
-        "total_suscripciones_activas": total_suscripciones_activas,
-        "recaudacion_mes": recaudacion_mes,
         "asistencia_promedio": asistencia_promedio,
         "nuevos_alumnos_semana": nuevos_alumnos_semana
     }
