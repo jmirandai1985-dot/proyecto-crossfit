@@ -131,11 +131,14 @@ def enviar_alertas_renovacion(db, tenant_id: int = 1, dias_aviso: int = 3) -> di
     """), {"tid": tenant_id, "target": target}).fetchall()
 
     enviados, fallidos = [], []
+    candidatos, deduplicados = len(rows), 0
     for r in rows:
         if _ya_enviado(db, r.id, "renovacion_plan", dias=2):
+            deduplicados += 1
             continue
         envio_id = _reclamar_envio(db, r.id, "renovacion_plan", tenant_id=tenant_id)
         if envio_id is None:
+            deduplicados += 1
             continue  # otra réplica ya lo reclamó hoy (índice único parcial)
         fecha_es = _formatear_fecha_es(r.fecha_expiracion)
         # registrar=False: la fila YA la escribió `_reclamar_envio`; que email_service
@@ -147,8 +150,11 @@ def enviar_alertas_renovacion(db, tenant_id: int = 1, dias_aviso: int = 3) -> di
         else:
             _marcar_fallido(db, envio_id, f"renovacion_plan FALLIDO -> {r.correo}")
             fallidos.append(r.correo)
-    logger.info(f"[alertas] renovación: {len(enviados)} enviados, {len(fallidos)} fallidos")
+    logger.info(
+        f"[alertas] renovación: {candidatos} candidatos, {deduplicados} deduplicados, "
+        f"{len(enviados)} enviados, {len(fallidos)} fallidos")
     return {"tipo": "renovacion", "enviados": len(enviados), "fallidos": len(fallidos),
+            "candidatos": candidatos, "deduplicados": deduplicados,
             "detalle_enviados": enviados, "detalle_fallidos": fallidos}
 
 
@@ -167,6 +173,7 @@ def enviar_alertas_inactividad(db, tenant_id: int = 1, umbral_dias: int = 7) -> 
 
     limite = hoy_santiago() - timedelta(days=umbral_dias)
     enviados, fallidos = [], []
+    candidatos, deduplicados = len(rows), 0
     for r in rows:
         ultima = r.ultima
         if ultima is None:
@@ -174,9 +181,11 @@ def enviar_alertas_inactividad(db, tenant_id: int = 1, umbral_dias: int = 7) -> 
         if ultima > limite:
             continue  # asistió dentro del umbral → no está inactivo
         if _ya_enviado(db, r.id, "inactividad", dias=umbral_dias):
+            deduplicados += 1
             continue
         envio_id = _reclamar_envio(db, r.id, "inactividad", tenant_id=tenant_id)
         if envio_id is None:
+            deduplicados += 1
             continue  # otra réplica ya lo reclamó hoy
         ok = send_alerta_inactividad(r.nombre, r.correo, registrar=False)
         if ok:
@@ -184,8 +193,11 @@ def enviar_alertas_inactividad(db, tenant_id: int = 1, umbral_dias: int = 7) -> 
         else:
             _marcar_fallido(db, envio_id, f"inactividad FALLIDO -> {r.correo}")
             fallidos.append(r.correo)
-    logger.info(f"[alertas] inactividad: {len(enviados)} enviados, {len(fallidos)} fallidos")
+    logger.info(
+        f"[alertas] inactividad: {candidatos} candidatos, {deduplicados} deduplicados, "
+        f"{len(enviados)} enviados, {len(fallidos)} fallidos")
     return {"tipo": "inactividad", "enviados": len(enviados), "fallidos": len(fallidos),
+            "candidatos": candidatos, "deduplicados": deduplicados,
             "detalle_enviados": enviados, "detalle_fallidos": fallidos}
 
 
@@ -213,11 +225,14 @@ def enviar_alertas_urgencia(db, tenant_id: int = 1) -> dict:
     """), {"tid": tenant_id, "target": target}).fetchall()
 
     enviados, fallidos = [], []
+    candidatos, deduplicados = len(rows), 0
     for r in rows:
         if _ya_enviado(db, r.id, "vencimiento_inminente", dias=1):
+            deduplicados += 1
             continue
         envio_id = _reclamar_envio(db, r.id, "vencimiento_inminente", tenant_id=tenant_id)
         if envio_id is None:
+            deduplicados += 1
             continue  # otra réplica ya lo reclamó hoy
         ok = send_alerta_urgencia_renovacion(r.nombre, r.correo, registrar=False)
         if ok:
@@ -225,8 +240,11 @@ def enviar_alertas_urgencia(db, tenant_id: int = 1) -> dict:
         else:
             _marcar_fallido(db, envio_id, f"vencimiento_inminente FALLIDO -> {r.correo}")
             fallidos.append(r.correo)
-    logger.info(f"[alertas] urgencia: {len(enviados)} enviados, {len(fallidos)} fallidos")
+    logger.info(
+        f"[alertas] urgencia: {candidatos} candidatos, {deduplicados} deduplicados, "
+        f"{len(enviados)} enviados, {len(fallidos)} fallidos")
     return {"tipo": "urgencia_renovacion", "enviados": len(enviados), "fallidos": len(fallidos),
+            "candidatos": candidatos, "deduplicados": deduplicados,
             "detalle_enviados": enviados, "detalle_fallidos": fallidos}
 
 
@@ -252,6 +270,7 @@ def enviar_alertas_ultimo_credito(db, tenant_id: int = 1) -> dict:
     dias_restantes = _dias_restantes_mes()
     if dias_restantes <= 0:
         return {"tipo": "ultimo_credito", "enviados": 0, "fallidos": 0,
+                "candidatos": 0, "deduplicados": 0,
                 "detalle_enviados": [], "detalle_fallidos": [],
                 "motivo": "Es el último día del mes (días_restantes=0)"}
 
@@ -269,11 +288,14 @@ def enviar_alertas_ultimo_credito(db, tenant_id: int = 1) -> dict:
     """), {"tid": tenant_id, "hoy": hoy_santiago()}).fetchall()
 
     enviados, fallidos = [], []
+    candidatos, deduplicados = len(rows), 0
     for r in rows:
         if _ya_enviado(db, r.id, "ultimo_credito", dias=7):
+            deduplicados += 1
             continue
         envio_id = _reclamar_envio(db, r.id, "ultimo_credito", tenant_id=tenant_id)
         if envio_id is None:
+            deduplicados += 1
             continue  # otra réplica ya lo reclamó hoy
         ok = send_alerta_ultimo_credito(r.nombre, r.correo,
                                         r.creditos_disponibles, dias_restantes,
@@ -283,8 +305,11 @@ def enviar_alertas_ultimo_credito(db, tenant_id: int = 1) -> dict:
         else:
             _marcar_fallido(db, envio_id, f"ultimo_credito FALLIDO -> {r.correo}")
             fallidos.append(r.correo)
-    logger.info(f"[alertas] ultimo_credito: {len(enviados)} enviados, {len(fallidos)} fallidos")
+    logger.info(
+        f"[alertas] ultimo_credito: {candidatos} candidatos, {deduplicados} deduplicados, "
+        f"{len(enviados)} enviados, {len(fallidos)} fallidos")
     return {"tipo": "ultimo_credito", "enviados": len(enviados), "fallidos": len(fallidos),
+            "candidatos": candidatos, "deduplicados": deduplicados,
             "dias_restantes_mes": dias_restantes,
             "detalle_enviados": enviados, "detalle_fallidos": fallidos}
 
@@ -309,11 +334,14 @@ def enviar_alertas_sin_creditos(db, tenant_id: int = 1) -> dict:
     """), {"tid": tenant_id, "hoy": hoy_santiago()}).fetchall()
 
     enviados, fallidos = [], []
+    candidatos, deduplicados = len(rows), 0
     for r in rows:
         if _ya_enviado(db, r.id, "sin_creditos", dias=7):
+            deduplicados += 1
             continue
         envio_id = _reclamar_envio(db, r.id, "sin_creditos", tenant_id=tenant_id)
         if envio_id is None:
+            deduplicados += 1
             continue  # otra réplica ya lo reclamó hoy
         ok = send_alerta_sin_creditos(r.nombre, r.correo, registrar=False)
         if ok:
@@ -321,6 +349,9 @@ def enviar_alertas_sin_creditos(db, tenant_id: int = 1) -> dict:
         else:
             _marcar_fallido(db, envio_id, f"sin_creditos FALLIDO -> {r.correo}")
             fallidos.append(r.correo)
-    logger.info(f"[alertas] sin_creditos: {len(enviados)} enviados, {len(fallidos)} fallidos")
+    logger.info(
+        f"[alertas] sin_creditos: {candidatos} candidatos, {deduplicados} deduplicados, "
+        f"{len(enviados)} enviados, {len(fallidos)} fallidos")
     return {"tipo": "sin_creditos", "enviados": len(enviados), "fallidos": len(fallidos),
+            "candidatos": candidatos, "deduplicados": deduplicados,
             "detalle_enviados": enviados, "detalle_fallidos": fallidos}

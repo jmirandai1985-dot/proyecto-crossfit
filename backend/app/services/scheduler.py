@@ -220,7 +220,8 @@ async def _enviar_alerta(tipo: str):
     recibían ningún aviso. Ahora se recorre `tenants.activo=True` (igual que el cierre
     de mes) y se pasa el `tenant_id` a cada llamada. Aislamiento por tenant: si un box
     falla (SMTP, dato raro) se hace rollback y se sigue con el resto, para no perder la
-    alerta entera. Se deja log por alerta y por tenant, más un resumen final.
+    alerta entera. Se deja un log por alerta y por tenant con los cuatro conteos
+    (candidatos, deduplicados, enviados, fallidos), más un resumen final agregado.
     """
     from app.db.database import SessionLocal
     from app.models.tenant import Tenant
@@ -237,15 +238,20 @@ async def _enviar_alerta(tipo: str):
             return
 
         enviados = fallidos = con_error = 0
+        candidatos = deduplicados = 0
         for tid in tenants:
             try:
                 res = _ejecutar_alerta_de_tenant(tipo, db, tid)
                 if res is None:
                     return  # tipo de alerta desconocido: no hay nada que enviar
+                candidatos += res.get("candidatos", 0)
+                deduplicados += res.get("deduplicados", 0)
                 enviados += res.get("enviados", 0)
                 fallidos += res.get("fallidos", 0)
                 logger.info(
                     f"⏰ [Scheduler] Alerta {tipo} · tenant {tid}: "
+                    f"{res.get('candidatos', 0)} candidatos, "
+                    f"{res.get('deduplicados', 0)} deduplicados, "
                     f"{res.get('enviados', 0)} enviados, "
                     f"{res.get('fallidos', 0)} fallidos")
             except Exception as e:
@@ -262,6 +268,7 @@ async def _enviar_alerta(tipo: str):
 
         logger.info(
             f"✅ [Scheduler] Alerta {tipo}: {len(tenants)} tenants, "
+            f"{candidatos} candidatos, {deduplicados} deduplicados, "
             f"{enviados} enviados, {fallidos} fallidos"
             + (f", {con_error} con error" if con_error else ""))
     except Exception as e:
