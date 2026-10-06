@@ -109,6 +109,13 @@ class Settings(BaseSettings):
     # Se envía en el header `X-N8N-API-Key` y se compara con secrets.compare_digest.
     N8N_API_KEY: str = ""
 
+    # Cron Job de Render (KPIs/ML/segmentacion): API key ALTERNATIVA para los MISMOS
+    # endpoints de automatizacion. Si esta definida, `automation_api_key` la usa en vez de
+    # `N8N_API_KEY` (asi se puede dar de baja n8n sin tocar el backend); si no, vale
+    # `N8N_API_KEY`. El header sigue siendo `X-N8N-API-Key` (compatibilidad) y la
+    # comparacion sigue siendo `secrets.compare_digest`.
+    CRON_API_KEY: str = ""
+
     # Reactivación (correo "sin plan"): secret para firmar tokens HMAC del opt-out.
     # Generar con: openssl rand -hex 32
     REACTIVACION_OPT_OUT_SECRET: str = ""
@@ -118,6 +125,16 @@ class Settings(BaseSettings):
     # ⚠️ En producción real este valor se inyecta como env var de la plataforma
     #    (URL pública del API); el default localhost es solo para desarrollo.
     BACKEND_PUBLIC_URL: str = "http://localhost:8000"
+
+    @property
+    def automation_api_key(self) -> str:
+        """La key que valida los endpoints de automatizacion (KPIs/ML/segmentacion).
+
+        `CRON_API_KEY` si esta definida (Cron Job de Render), si no `N8N_API_KEY` (n8n).
+        Una sola definicion para los dos verificadores del backend
+        (`kpis_populate._verificar_api_key_n8n` y `ml._verificar_api_key_n8n`).
+        """
+        return self.CRON_API_KEY or self.N8N_API_KEY
 
     @property
     def cors_origins_list(self) -> List[str]:

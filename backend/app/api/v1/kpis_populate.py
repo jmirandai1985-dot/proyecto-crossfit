@@ -1,6 +1,6 @@
 """Endpoints n8n para POBLAR los data marts de KPIs (BI).
 
-Protegidos con header `X-N8N-API-Key` (= settings.N8N_API_KEY). Calculan y
+Protegidos con header `X-N8N-API-Key` (= settings.automation_api_key: CRON_API_KEY o N8N_API_KEY). Calculan y
 persisten desde las tablas transaccionales:
   - POST /populate/daily        -> daily_kpis            (día anterior, o ?fecha=)
   - POST /populate/monthly      -> monthly_kpis          (mes anterior, o ?year=&month=;
@@ -48,8 +48,8 @@ PLAN_PRUEBA = "Prueba"
 def _verificar_api_key_n8n(
     x_n8n_api_key: str = Header(default="", alias="X-N8N-API-Key"),
 ) -> bool:
-    """Valida `X-N8N-API-Key` contra settings.N8N_API_KEY (401 si no coincide)."""
-    esperada = settings.N8N_API_KEY
+    """Valida la key contra settings.automation_api_key (CRON_API_KEY o N8N_API_KEY; 401 si no coincide)."""
+    esperada = settings.automation_api_key
     if not esperada or not secrets.compare_digest(esperada, x_n8n_api_key):
         raise HTTPException(
             status_code=401, detail="API key inválida para el endpoint de n8n")

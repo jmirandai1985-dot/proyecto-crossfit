@@ -13,7 +13,7 @@ GET /api/v1/ranking/asistencia/{box_public_id}?mes=YYYY-MM
 NOTA n8n (fase de Dockerización, NO construir todavía): este endpoint queda
 preparado para que n8n dispare un recálculo/cache-refresh con el mismo patrón
 de /asistencia/n8n/evaluar-mes (header X-N8N-API-Key + secrets.compare_digest
-+ settings.N8N_API_KEY). El punto exacto de enganche está marcado con
++ settings.automation_api_key: CRON_API_KEY o N8N_API_KEY). El punto exacto de enganche está marcado con
 "# TODO(n8n) cache-refresh" en ranking_asistencia_service.construir_ranking.
 """
 import re
