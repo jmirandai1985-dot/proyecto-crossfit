@@ -57,6 +57,11 @@ deja con la que tienen). Para rotarla a propósito: `--cambiar-password`.
 PLAN: `--extender-plan HASTA` (YYYY-MM-DD) empuja el vencimiento de la suscripción del
 alumno demo hasta esa fecha (nunca la acorta).
 
+CRÉDITOS: `--recargar-creditos N` suma N créditos a la suscripción ACTIVA del alumno demo
+sin recrear reservas ni tocar la contraseña; suma N a `creditos_totales` y a
+`creditos_disponibles` para mantener A.3. Es una acción APARTE: no combina con `--borrar`
+ni con `--extender-plan`.
+
 Uso (desde `backend/`):
     # TEST (rama ep-summer-river-b6c8fj2f)
     $env:ENVIRONMENT="test";       py -3.12 scripts\\crear_usuarios_demo.py --destino test --dry-run
@@ -266,6 +271,9 @@ def parsear_args(argv=None):
     parser.add_argument("--extender-plan", default=None, metavar="HASTA",
                         help="empuja la fecha_expiracion de la suscripción del alumno "
                              "demo hasta HASTA (YYYY-MM-DD); nunca la acorta.")
+    parser.add_argument("--recargar-creditos", type=int, default=None, metavar="N",
+                        help="suma N créditos a la suscripción ACTIVA del alumno demo "
+                             "(sin tocar reservas ni contraseña; mantiene A.3).")
     parser.add_argument("--forzar-ventana", action="store_true",
                         help="permite correr en PROD el día 1 o 15 (mantenimiento).")
     parser.add_argument("--plan", default=None,
@@ -632,6 +640,37 @@ def upsert_suscripcion(db, alumno_id: int, plan: dict, creditos_disponibles: int
     return nueva.id
 
 
+def recargar_creditos(db, alumno_id: int, n: int) -> dict:
+    """Suma `n` créditos a la suscripción ACTIVA del alumno demo (SIN tocar reservas).
+
+    Suma el MISMO `n` a `creditos_totales` y a `creditos_disponibles`: así la diferencia
+    `totales - disponibles` (lo que A.3 compara contra las reservas vivas) NO cambia y la
+    invariante se mantiene. No toca reservas, asistencias ni la contraseña.
+    """
+    if n is None or n <= 0:
+        raise GuardError("--recargar-creditos espera un N mayor que 0")
+    fila = db.execute(text(
+        "SELECT id, creditos_totales, creditos_disponibles FROM suscripciones "
+        "WHERE usuario_id = :a AND tenant_id = :t AND estado = 'activo' "
+        "ORDER BY id LIMIT 1"), {"a": alumno_id, "t": TENANT_ID}).first()
+    if fila is None:
+        raise GuardError(
+            "--recargar-creditos: el alumno demo no tiene suscripción ACTIVA")
+    if fila.creditos_totales is None or fila.creditos_disponibles is None:
+        raise GuardError(
+            "--recargar-creditos: la suscripción no tiene créditos finitos (ilimitada): "
+            "no hay nada que recargar")
+    db.execute(text(
+        "UPDATE suscripciones SET creditos_totales = creditos_totales + :n, "
+        "  creditos_disponibles = creditos_disponibles + :n, updated_at = now() "
+        "WHERE id = :sid"), {"n": n, "sid": fila.id})
+    print(f"  [creditos]    {fila.creditos_disponibles}/{fila.creditos_totales} -> "
+          f"{fila.creditos_disponibles + n}/{fila.creditos_totales + n} (+{n})")
+    return {"suscripcion_id": fila.id,
+            "creditos_totales": fila.creditos_totales + n,
+            "creditos_disponibles": fila.creditos_disponibles + n}
+
+
 def extender_plan(db, alumno_id: int, hasta: date) -> Optional[date]:
     """Lleva `fecha_expiracion` de la suscripción del alumno demo hasta `hasta`.
 
@@ -988,6 +1027,13 @@ def main(argv=None) -> int:
     if args.borrar and args.extender_plan:
         print("[guard] ABORTADO: --borrar y --extender-plan son acciones distintas.")
         return 1
+    if args.borrar and args.recargar_creditos is not None:
+        print("[guard] ABORTADO: --borrar y --recargar-creditos son acciones distintas.")
+        return 1
+    if args.extender_plan and args.recargar_creditos is not None:
+        print("[guard] ABORTADO: --extender-plan y --recargar-creditos son acciones "
+              "distintas (la recarga no recrea la suscripción).")
+        return 1
     hasta = None
     if args.extender_plan:
         try:
@@ -1004,6 +1050,8 @@ def main(argv=None) -> int:
           f"reservas={args.reservas} | días={args.dias} | "
           f"clave={'ROTAR' if args.cambiar_password else 'intacta'}"
           + (f" | plan hasta {hasta}" if hasta else "")
+          + (f" | recargar {args.recargar_creditos} créditos"
+             if args.recargar_creditos is not None else "")
           + ("  [DRY-RUN]" if args.dry_run else ""))
 
     # GUARD 3 (ventana): SÓLO con destino=prod. El mantenimiento escribe los días 1 y 15.
@@ -1055,6 +1103,34 @@ def main(argv=None) -> int:
                 return 1
             print("\n[commit] OK")
             return 0 if verificar_borrado(db, ids) else 1
+
+        # ── Rama --recargar-creditos ───────────────────────────────────────────
+        # Acción SOLO de créditos: NO recrea reservas ni toca la contraseña. Suma N a
+        # `creditos_totales` y a `creditos_disponibles` por igual, así la invariante A.3
+        # (`disponibles = totales - reservas`) se mantiene.
+        if args.recargar_creditos is not None:
+            ids = ids_usuarios_demo(db)
+            alumno_id = ids.get(CORREO_ALUMNO)
+            if not alumno_id:
+                print("[guard] ABORTADO: el alumno demo no existe. Corre el script sin "
+                      "--recargar-creditos para crearlo primero.")
+                return 1
+            if args.dry_run:
+                print(f"\n[dry-run] se sumarían {args.recargar_creditos} créditos al "
+                      f"alumno demo (id={alumno_id}); no se escribió nada.")
+                return 0
+            try:
+                recargar_creditos(db, alumno_id, args.recargar_creditos)
+                db.commit()
+            except Exception as e:  # noqa: BLE001
+                db.rollback()
+                print(f"\n[ERROR] rollback: no se recargó nada: {e}")
+                return 1
+            print("\n[commit] OK")
+            descuadre = db.execute(text(SQL_A3), {"ids": [alumno_id]}).scalar()
+            ok = descuadre == 0
+            print(f"  {'OK ' if ok else 'MAL'} A.3 (créditos descuadrados == 0): {descuadre}")
+            return 0 if ok else 1
 
         # ── Rama crear/actualizar ───────────────────────────────────────────
         entradas = leer_entradas(db, args)
