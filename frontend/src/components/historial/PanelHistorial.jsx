@@ -725,7 +725,7 @@ const PanelHistorial = ({ alumnoId = null }) => {
                     <div>
                         <h2 className="text-xl font-bold text-white">{alumno.nombre}</h2>
                         <p className="text-sm text-zinc-400">
-                            {alumno.correo} · alumno desde {fecha(alumno.created_at)}
+                            {alumno.correo} · alumno desde {fecha(alumno.alumno_desde || alumno.created_at)}
                             {alumno.antiguedad_dias !== null
                                 && ` (${num(alumno.antiguedad_dias)} días)`}
                         </p>

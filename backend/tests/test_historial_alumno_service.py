@@ -569,8 +569,14 @@ def test_c2_los_5_estados_el_pct_y_el_promedio_semanal(db, escenario):
     assert totales["pct_asistencia"] == 33
     # La clase que suspendió el BOX queda fuera del listado y del porcentaje.
     assert totales["clases_suspendidas"] == 1
-    assert totales["dias_como_alumno"] == 56
-    assert totales["promedio_semanal"] == 0.1        # 1 asistencia / 8 semanas
+    # "Alumno desde" (T2) es la PRIMERA suscripción (más antigua que el alta del usuario y
+    # que la primera asistencia): los días como alumno y el promedio se miden desde ahí.
+    primero_m2, _ultimo_m2 = svc._rango_mes(*escenario["mes_2atras"])
+    desde = min(primero_m2, escenario["hoy"] - timedelta(days=56),
+                escenario["hoy"] - timedelta(days=30))
+    assert totales["dias_como_alumno"] == (escenario["hoy"] - desde).days
+    assert totales["promedio_semanal"] == svc.promedio_semanal(
+        1, desde, escenario["hoy"])                 # 1 asistencia / semanas REALES
     assert totales["ultima_asistencia"] == escenario["hoy"] - timedelta(days=30)
 
 
@@ -645,3 +651,21 @@ def test_c4_el_alumno_ve_sus_numeros_sin_la_gestion_del_box(db, escenario):
     assert datos["pagos"]["total_clp"] == COBRADO_MEMBRESIAS + BAZAR_VALIDADO
     assert datos["membresia"]["actual"]["plan"].startswith("Plan Historial TEST")
     assert datos["asistencia"] == de_staff["datos"]["asistencia"]
+
+
+def test_c5_la_racha_del_panel_ignora_el_mes_en_curso(db, alumno_test):
+    """T2: la racha del Resumen arranca en el último mes COMPLETO.
+
+    INTEGRACIÓN (se corre con el stack y el branch TEST arriba; acá no se ejecuta): el panel
+    tiene que decir lo MISMO que `calcular_racha` arrancando en el mes ANTERIOR, no en el mes
+    en curso. Un mes perfecto a mitad de camino no es un mes cerrado al 100%.
+    """
+    from app.services.asistencia_service import calcular_racha
+    from app.utils.santiago import hoy_santiago
+
+    hoy = hoy_santiago()
+    anio_prev, mes_prev = svc._mes_anterior(hoy.year, hoy.month)
+    esperado = calcular_racha(db, alumno_test, TENANT_ID, anio_prev, mes_prev)
+
+    resumen = svc.panel(db, alumno_test, TENANT_ID, seccion="resumen")["datos"]
+    assert resumen["asistencia"]["racha_meses_100"] == esperado

@@ -228,6 +228,66 @@ def _meses_entre(desde: tuple, hasta: tuple) -> list:
     return meses
 
 
+# ── "Alumno desde" y promedio semanal (predicados PUROS: se testean sin BD) ──────────
+def _mes_anterior(anio: int, mes: int) -> tuple:
+    """`(anio, mes)` del mes ANTERIOR. Puro (se testea sin BD)."""
+    return (anio - 1, 12) if mes == 1 else (anio, mes - 1)
+
+
+def _como_fecha(valor):
+    """`date` del valor: acepta un `date` (Clase.fecha) o un `datetime` tz-aware.
+
+    `Clase.fecha` es `date` y `Suscripcion.fecha_inicio` / `usuarios.created_at` son
+    `timestamptz`: los helpers puros tienen que aceptar los dos sin asumir la TZ del
+    servidor (ver `fecha_chile`). `None` entra, `None` sale.
+    """
+    if valor is None:
+        return None
+    if isinstance(valor, datetime):
+        return fecha_chile(valor)
+    return valor
+
+
+def inicio_actividad(created_at=None, primera_suscripcion=None, primera_asistencia=None):
+    """Primer día REAL del alumno en el box (la fecha "alumno desde", regla 3).
+
+    Es la fecha MÁS ANTIGUA entre la primera suscripción (vigente alguna vez) y la primera
+    asistencia; la creación del usuario (`created_at`) sólo se usa como RESPALDO cuando no
+    hay ninguna de las dos —un alumno recién creado, sin plan ni clase—: nunca compite por
+    ser "la más antigua" (un alta vieja sin actividad no adelanta el "alumno desde").
+    Devuelve `(fecha, fuente)` con `fuente` in `{"suscripcion", "asistencia", "alta"}`, o
+    `(None, None)` sin datos.
+
+    Antes se mostraba directamente `usuarios.created_at`: un alumno dado de alta en
+    diciembre y activado en marzo contaba "alumno desde diciembre" con 0 asistencias.
+    Puro: recibe fechas ya resueltas (se testea sin BD).
+    """
+    candidatos = []
+    for valor, fuente in ((primera_suscripcion, "suscripcion"),
+                          (primera_asistencia, "asistencia")):
+        fecha = _como_fecha(valor)
+        if fecha is not None:
+            candidatos.append((fecha, fuente))
+    if candidatos:
+        return min(candidatos, key=lambda c: c[0])
+    alta = _como_fecha(created_at)
+    return (alta, "alta") if alta is not None else (None, None)
+
+
+def promedio_semanal(asistidas: int, inicio, hoy: date) -> float:
+    """Asistencias por SEMANA REAL del período (`inicio` → `hoy`), con piso de 1 semana.
+
+    Antes el denominador eran las semanas desde el ALTA del usuario: un alumno dado de alta
+    y activado meses después arrastraba todas esas semanas vacías y su promedio se
+    desplomaba. El denominador es el período en el que DE VERDAD fue alumno. Puro.
+    """
+    desde = _como_fecha(inicio)
+    if desde is None:
+        return 0.0
+    semanas = max(1.0, (hoy - desde).days / 7)
+    return round(asistidas / semanas, 1)
+
+
 def _paginado(items: list, pagina: int, por_pagina: int) -> dict:
     """Lista recortada a la página pedida + los metadatos de paginación."""
     total = len(items)
@@ -283,8 +343,13 @@ def _filas_asistencia(db: Session, alumno_id: int, tenant_id: int) -> tuple:
     return vivas, len(filas) - len(vivas)
 
 
-def _agregados_asistencia(filas: list, alumno, ahora: datetime, hoy: date) -> dict:
-    """Totales, promedio semanal y desglose por mes de las reservas vivas."""
+def _agregados_asistencia(filas: list, alumno, ahora: datetime, hoy: date,
+                          inicio=None) -> dict:
+    """Totales, promedio semanal y desglose por mes de las reservas vivas.
+
+    `inicio` es el `(fecha, fuente)` de `inicio_actividad`: el período REAL del alumno.
+    Sin él (o sin fechas) se cae al alta del usuario, para no cambiar el resto de la API.
+    """
     conteo = {estado: 0 for estado in ESTADOS_ASISTENCIA}
     por_mes = {}
     ultima_asistencia = None
@@ -307,11 +372,13 @@ def _agregados_asistencia(filas: list, alumno, ahora: datetime, hoy: date) -> di
     cuentan = sum(conteo[e] for e in ESTADOS_QUE_CUENTAN)
     pct = round(asistidas / cuentan * 100) if cuentan else 0
 
-    # promedio/semana = asistencias / semanas desde el alta, con piso de 1 semana (regla 3).
-    alta = getattr(alumno, "created_at", None)
-    dias_como_alumno = (hoy - fecha_chile(alta)).days if alta else None
-    semanas = max(1.0, dias_como_alumno / 7) if dias_como_alumno is not None else None
-    promedio = round(asistidas / semanas, 1) if semanas else 0.0
+    # "Alumno desde" = primeras suscripción/asistencia (regla 3): el promedio por semana y
+    # los días como alumno se miden sobre ESE período, no desde el alta del usuario.
+    desde = _como_fecha(inicio[0]) if inicio else None
+    if desde is None:
+        desde = _como_fecha(getattr(alumno, "created_at", None))
+    dias_como_alumno = (hoy - desde).days if desde is not None else None
+    promedio = promedio_semanal(asistidas, desde, hoy)
 
     meses = []
     for clave in sorted(por_mes, reverse=True)[:MESES_EN_PAYLOAD]:
@@ -350,10 +417,10 @@ def _item_asistencia(reserva, clase, disciplina, coach, ahora: datetime) -> dict
     }
 
 
-def _seccion_asistencia(db, alumno, tenant_id, pagina, por_pagina, **_kw) -> dict:
+def _seccion_asistencia(db, alumno, tenant_id, pagina, por_pagina, inicio=None, **_kw) -> dict:
     ahora = ahora_santiago()
     vivas, suspendidas = _filas_asistencia(db, alumno.id, tenant_id)
-    agg = _agregados_asistencia(vivas, alumno, ahora, ahora.date())
+    agg = _agregados_asistencia(vivas, alumno, ahora, ahora.date(), inicio=inicio)
     items = [
         _item_asistencia(reserva, clase, disc, coach, ahora)
         for reserva, clase, disc, coach in vivas
@@ -865,7 +932,7 @@ def _hitos(db: Session, alumno_id: int, tenant_id: int) -> dict:
 
 # ── Resumen ───────────────────────────────────────────────────────────────────
 def _seccion_resumen(db, alumno, tenant_id, pagina, por_pagina,
-                     incluir_privado=True) -> dict:
+                     incluir_privado=True, inicio=None) -> dict:
     """La foto de hoy del alumno. Los bloques de Pagos y RMs se piden a SUS secciones
     (pidiendo 1 item por página: los totales no dependen de la página), así el número del
     Resumen y el de la pestaña son el MISMO por construcción, no por coincidencia."""
@@ -875,8 +942,12 @@ def _seccion_resumen(db, alumno, tenant_id, pagina, por_pagina,
     hoy = ahora.date()
 
     vivas, suspendidas = _filas_asistencia(db, alumno.id, tenant_id)
-    agg = _agregados_asistencia(vivas, alumno, ahora, hoy)
-    racha = calcular_racha(db, alumno.id, tenant_id, hoy.year, hoy.month)
+    agg = _agregados_asistencia(vivas, alumno, ahora, hoy, inicio=inicio)
+    # Racha: SÓLO meses COMPLETOS. El mes en curso todavía no terminó —un mes perfecto a
+    # mitad de camino no es "100% en un mes completo"—, así que la caminata arranca en el
+    # mes ANTERIOR. Un alumno con actividad sólo en el mes en curso da racha 0 (nada cerrado).
+    anio_racha, mes_racha = _mes_anterior(hoy.year, hoy.month)
+    racha = calcular_racha(db, alumno.id, tenant_id, anio_racha, mes_racha)
 
     suscripciones = _suscripciones(db, alumno.id, tenant_id)
     primer_mes = _primer_mes(alumno, suscripciones)
@@ -933,11 +1004,44 @@ def normalizar_seccion(seccion) -> str:
     return seccion if seccion in _SECCIONES else DEFAULT_SECCION
 
 
-def ficha_alumno(alumno, hoy: date = None) -> dict:
-    """Identidad del alumno: acompaña a CUALQUIER sección (el encabezado del panel)."""
+def _inicio_actividad(db: Session, alumno, tenant_id: int):
+    """`inicio_actividad` con las fechas resueltas en la BD (una consulta por fuente).
+
+    La primera suscripción ignora las que NUNCA estuvieron vigentes (pendiente/rechazado):
+    una solicitud no es actividad. La primera asistencia sale de las reservas con
+    `asistio = true` dentro del box del alumno.
+    """
+    primera_sus = (
+        db.query(func.min(Suscripcion.fecha_inicio))
+        .filter(Suscripcion.tenant_id == tenant_id,
+                Suscripcion.usuario_id == alumno.id,
+                Suscripcion.estado.notin_(ESTADOS_SUSCRIPCION_NUNCA_VIGENTES))
+        .scalar()
+    )
+    primera_asi = (
+        db.query(func.min(Clase.fecha))
+        .join(Reserva, Reserva.clase_id == Clase.id)
+        .filter(Reserva.tenant_id == tenant_id,
+                Reserva.alumno_id == alumno.id,
+                Reserva.asistio.is_(True))
+        .scalar()
+    )
+    return inicio_actividad(getattr(alumno, "created_at", None),
+                            primera_sus, primera_asi)
+
+
+def ficha_alumno(alumno, hoy: date = None, inicio=None, fuente: str = None) -> dict:
+    """Identidad del alumno: acompaña a CUALQUIER sección (el encabezado del panel).
+
+    `inicio` es la fecha REAL en que empezó a ser alumno (primera suscripción o primera
+    asistencia, ver `inicio_actividad`); si no llega, se cae al alta del usuario. La fecha
+    visible (`alumno_desde`) y la antigüedad se miden desde ahí; `created_at` se conserva
+    como el registro del usuario (dato distinto del "alumno desde").
+    """
     hoy = hoy or hoy_santiago()
     alta = getattr(alumno, "created_at", None)
-    dias = (hoy - fecha_chile(alta)).days if alta else None
+    desde = _como_fecha(inicio) or _como_fecha(alta)
+    dias = (hoy - desde).days if desde is not None else None
     return {
         "id": alumno.id,
         "nombre": alumno.nombre,
@@ -949,6 +1053,9 @@ def ficha_alumno(alumno, hoy: date = None) -> dict:
         "estado": alumno.estado,
         "activo": bool(alumno.activo),
         "created_at": alta,
+        # "Alumno desde": la primera suscripción o asistencia (regla 3), nunca el alta.
+        "alumno_desde": desde,
+        "alumno_desde_fuente": (fuente or "alta") if desde is not None else None,
         "antiguedad_dias": dias,
         "antiguedad_semanas": round(dias / 7, 1) if dias is not None else None,
     }
@@ -980,10 +1087,14 @@ def panel(db: Session, alumno_id: int, tenant_id: int,
     if alumno is None:
         return None
 
+    # "Alumno desde" (regla 3): primera suscripción o primera asistencia. Se resuelve una
+    # vez acá y viaja a la ficha y a las secciones (promedio semanal y días como alumno).
+    inicio, fuente_inicio = _inicio_actividad(db, alumno, tenant_id)
+
     datos = _SECCIONES[seccion](db, alumno, tenant_id, pagina, por_pagina,
-                                incluir_privado=bool(incluir_privado))
+                                incluir_privado=bool(incluir_privado), inicio=inicio)
     return {
-        "alumno": ficha_alumno(alumno),
+        "alumno": ficha_alumno(alumno, inicio=inicio[0], fuente=fuente_inicio),
         "seccion": seccion,
         "secciones": secciones_disponibles(),
         "incluye_privado": bool(incluir_privado),
