@@ -118,11 +118,14 @@ def tokens(db):
 def config_del_box(db, cliente, tokens):
     """La fila de `configuracion_negocio` del box: se escribe por la API y se RESTAURA.
 
-    Devuelve `guardar(numero)` (el PUT del admin) y `leer()` (el GET público que ve el alumno).
+    Devuelve `guardar(numero)` (el PUT del admin) y `leer()` (el GET del box que ve el alumno).
+    ⚠️ R1: el GET ya NO es público (el `tenant_id` sale del JWT, el query se ignora), así
+    que se lee con la sesión del admin — la MISMA que escribe.
     El teardown deja la fila como estaba, pase lo que pase.
     """
     def _leer():
-        r = cliente.get(f"/api/v1/configuracion?tenant_id={TENANT_ID}")
+        r = cliente.get(f"/api/v1/configuracion?tenant_id={TENANT_ID}",
+                        headers=tokens["admin"])
         assert r.status_code == 200, r.text
         return r.json()
 

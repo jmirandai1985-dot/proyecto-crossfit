@@ -230,8 +230,8 @@ Leyenda: 🅰️ = `get_current_admin` · 🛡️ = `get_current_coach` · 👤 
 | `/api/v1/notificaciones-enviadas` | GET ``, POST `/enviar-manual`, POST `/{id}/reenviar` | 🅰️ | G | sin tenant en tabla |
 | | POST `/registrar` | 👤 | G | |
 | `/api/v1/upload` | POST `/voucher` | 👤 | T | valida **solo extensión**, no MIME real (§6) |
-| `/api/v1/configuracion` | GET `` | 🔓 | C | público por diseño (datos bancarios para el comprobante) |
-| | PUT `` | 👤 (chequeo manual de rol) | C | **debería usar `get_current_admin`**; no valida tenant vs token |
+| `/api/v1/configuracion` | GET `` | 🔒 (era 🔓) | C | ⚠️ era "público por diseño"; **corregido en R1 (2026-04-10):** exige token y el box sale del JWT (el query se ignora) |
+| | PUT `` | 👤 `get_current_admin` | C | tenant del token; **R1 suma** rate limit + auditoría antes/después + aviso a los admins |
 | `/api/v1/supervision` | GET `/proxima-clase-reservas`, `/horarios-base`, `/grid-semanal`, `/coaches-todos`, `/cupos-disciplinas` | 🔓 | C (`=1`) | |
 | | PATCH `/cupo-disciplina` | 🅰️ | C (`=1`) | |
 | `/api/v1/coach-disciplinas` | POST/PUT/DELETE | 🅰️ | C | |
