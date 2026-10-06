@@ -25,6 +25,7 @@ from app.core.estados import (ESTADOS_CANCELADA, dia_chile,   # dia_chile = dia 
 from app.db.database import get_db
 from app.services import metricas_service as metricas
 from app.services import plan_vencimiento
+from app.services import churn_service
 from app.services.clases_service import sql_clase_realizada
 from app.models.daily_kpis import DailyKpi
 from app.models.monthly_kpis import MonthlyKpi
@@ -831,25 +832,20 @@ def populate_predictions(
             asis_30 = conteos_30.get(alumno.id, 0)
             asis_90 = conteos_90.get(alumno.id, 0)
 
-            # Heurística simple (0-100): inactividad + ausencia de plan vigente
-            prob = min(dias_inactivo, 60) / 60 * 70
-            if dias_para_vencer is None:
-                prob += 20
-            elif dias_para_vencer <= 7:
-                prob += 10
-            prob = round(min(prob, 100), 2)
+            # Heurística simple (0-100): inactividad + ausencia de plan vigente.
+            # UNA definición (`churn_service`): la comparte el recalculo en segundo plano.
+            prob = churn_service.probabilidad_heuristica(dias_inactivo, dias_para_vencer)
             # SITUACIÓN EN VIVO (una sola definición): el mismo texto que sirve el panel.
             motivo = plan_vencimiento.motivo_situacion(dias_inactivo, dias_para_vencer)
 
         # ── Mapeo común de nivel de riesgo (mismos umbrales en ambos métodos) ──
-        if prob >= 70:
-            nivel, criticos = "CRITICO", criticos + 1
-        elif prob >= 50:
-            nivel, altos = "ALTO", altos + 1
-        elif prob >= 30:
-            nivel, medios = "MEDIO", medios + 1
-        else:
-            nivel = "BAJO"
+        nivel = churn_service.nivel_de_riesgo(prob)
+        if nivel == "CRITICO":
+            criticos += 1
+        elif nivel == "ALTO":
+            altos += 1
+        elif nivel == "MEDIO":
+            medios += 1
 
         # Recomendación empática/accionable: MISMA lógica en ambas ramas.
         # `tiene_suscripcion_activa` == `dias_para_vencer is not None`

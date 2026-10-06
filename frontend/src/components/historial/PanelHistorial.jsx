@@ -190,6 +190,12 @@ const SeccionResumen = ({ datos }) => {
                             <div>
                                 <p className="text-xs text-zinc-500">Arquetipo</p>
                                 <p className="text-zinc-100 font-semibold">{g.arquetipo || '—'}</p>
+                                {g.arquetipo_calculado_en && (
+                                    <p className="text-[10px] text-zinc-500 mt-0.5"
+                                        title="Cuándo se entrenó el modelo de segmentación">
+                                        calculado el {fechaCorta(g.arquetipo_calculado_en)}
+                                    </p>
+                                )}
                             </div>
                             <div>
                                 <p className="text-xs text-zinc-500">Riesgo de baja</p>
@@ -198,6 +204,12 @@ const SeccionResumen = ({ datos }) => {
                                     {g.riesgo_probabilidad !== null && g.riesgo_probabilidad !== undefined
                                         && <span className="text-zinc-400"> · {g.riesgo_probabilidad}%</span>}
                                 </p>
+                                {g.riesgo_calculado_en && (
+                                    <p className="text-[10px] text-zinc-500 mt-0.5"
+                                        title="Cuándo se calculó el modelo (no es la situación de hoy, que es en vivo)">
+                                        calculado el {fechaCorta(g.riesgo_calculado_en)}
+                                    </p>
+                                )}
                             </div>
                             <div>
                                 <p className="text-xs text-zinc-500">Gestión</p>

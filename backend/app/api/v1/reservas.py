@@ -17,9 +17,10 @@ from typing import List, Optional
 from sqlalchemy import func, text, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, status
 # N-9: trazabilidad de las reservas que el staff crea en nombre de un alumno.
 from app.services.auditoria_service import registrar_auditoria
+from app.services import churn_service
 """
 Router de endpoints para gestión de Reservas
 """
@@ -31,6 +32,7 @@ router = APIRouter()
 @router.post("", response_model=ReservaResponse, status_code=status.HTTP_201_CREATED)
 def crear_reserva(
     reserva_data: ReservaCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -220,6 +222,9 @@ def crear_reserva(
     db.commit()
     db.refresh(db_reserva)
 
+    # ── La reserva descontó un crédito -> recalc del churn del alumno (segundo plano). ──
+    churn_service.programar_recalculo(background_tasks, tenant_id, reserva_data.alumno_id)
+
     # ── N-9: trazabilidad de la reserva creada POR el staff para un alumno ──
     # (el alumno reservando para sí mismo no se audita: sería ruido; una reserva
     # "en nombre de" sí es una acción sensible del box).
@@ -250,7 +255,8 @@ def marcar_asistencia(
     asistio: bool = Body(True, embed=True),
     current_user: dict = Depends(get_current_coach),
     modo_emergencia: bool = Query(
-        False, description="Modo cobertura de emergencia")
+        False, description="Modo cobertura de emergencia"),
+    background_tasks: BackgroundTasks = None,
 ):
     """
     Marca la asistencia de una reserva.
@@ -317,6 +323,9 @@ def marcar_asistencia(
     reserva.asistencia_via = "coach" if rol == "coach" else "admin"
     db.commit()
     db.refresh(reserva)
+
+    # ── Marcó asistencia -> su situación de churn cambió -> recalc (segundo plano). ──
+    churn_service.programar_recalculo(background_tasks, tenant_id, reserva.alumno_id)
 
     return {
         "id": reserva.id,
@@ -741,6 +750,7 @@ def eliminar_reserva(
     tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
+    background_tasks: BackgroundTasks = None,
 ):
     """
     Cancela una reserva (soft delete) y DECREMENTA asistentes_confirmados.
@@ -838,6 +848,10 @@ def eliminar_reserva(
             reembolsado = True
 
     db.commit()
+
+    # ── Si se devolvió el crédito, cambió la situación -> recalc del churn (segundo plano). ──
+    if reembolsado:
+        churn_service.programar_recalculo(background_tasks, tenant_id, reserva.alumno_id)
 
     # ── P0-3: el response DICE si hubo reembolso ──
     # Antes devolvía 204 (sin body) y el front mostraba siempre "Reserva

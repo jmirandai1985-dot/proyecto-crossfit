@@ -18,7 +18,7 @@ Seguridad: tenant_id SIEMPRE del token JWT (patrón del resto de la API).
 """
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -28,6 +28,7 @@ from app.core.dependencies import (
     get_current_user, get_current_coach, verificar_coach_disciplina,
 )
 from app.core.estados import no_cancelada   # "viva" = NOT IN (cancelled, cancelada)
+from app.services import churn_service
 from app.models.clase import Clase
 from app.models.reserva import Reserva
 from app.models.tenant import Tenant
@@ -219,6 +220,7 @@ def alumnos_clase(
 def confirmar_asistencia(
     clase_id: int,
     body: ConfirmarAsistenciaRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_coach),
     modo_emergencia: bool = Query(
@@ -296,6 +298,10 @@ def confirmar_asistencia(
 
     db.commit()
 
+    # ── Asistencias marcadas -> recalc del churn de cada alumno (segundo plano). ──
+    for alumno_id in {r.alumno_id for r in reservas}:
+        churn_service.programar_recalculo(background_tasks, tenant_id, alumno_id)
+
     return {
         "status": "ok",
         "clase_id": clase_id,
@@ -341,6 +347,7 @@ RESERVA_ESTADOS_CHECKIN = ("confirmada", "completada")
 def qr_checkin_alumno(
     request: Request,
     public_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -428,6 +435,9 @@ def qr_checkin_alumno(
         r.asistencia_marcada_at = ahora
         r.asistencia_via = "qr_alumno"
         db.commit()
+        # ── Marcó asistencia por QR -> recalc del churn del alumno (segundo plano). ──
+        churn_service.programar_recalculo(
+            background_tasks, tenant.id, current_user["usuario_id"])
         return {
             "estado": "ok",
             "mensaje": "✅ Asistencia registrada. ¡Buen entrenamiento!",

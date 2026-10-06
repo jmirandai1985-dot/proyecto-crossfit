@@ -1,7 +1,7 @@
 """
 Endpoint para compra de emergencia de planes
 """
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -12,6 +12,7 @@ from app.core.dependencies import get_current_user
 from app.core.estados import vigente_hoy
 from app.core.rate_limit import limiter, LIMIT_CRITICO
 from app.services.auditoria_service import registrar_auditoria
+from app.services import churn_service
 from app.utils.santiago import ahora_santiago, fecha_chile, fin_de_plan_chile
 
 router = APIRouter()
@@ -28,6 +29,7 @@ class CompraEmergenciaRequest(BaseModel):
 def comprar_emergencia(
     request: Request,
     data: CompraEmergenciaRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -107,6 +109,9 @@ def comprar_emergencia(
     suscripcion.creditos_disponibles = plan.creditos or 999
 
     db.commit()
+
+    # ── La compra de emergencia cambió créditos/vencimiento -> recalc del churn (segundo plano). ──
+    churn_service.programar_recalculo(background_tasks, current_user["tenant_id"], data.alumno_id)
 
     # ── Auditoría interna: compra de emergencia (ajuste de tokens) ──
     registrar_auditoria(

@@ -156,6 +156,11 @@ def _fila_churn(p, nombre, correo, estado_gestion, ultimo_contacto,
         "arquetipo": arquetipo,
         "fecha_proxima_renovacion": p.fecha_proxima_renovacion,
         "ultimo_contacto_automatico": ultimo_contacto,
+        # Cuándo se calculó el MODELO (snapshot): el panel lo muestra junto a Riesgo y Arquetipo
+        # para no confundirlo con la SITUACIÓN (que es de hoy, calculada en vivo).
+        "riesgo_calculado_en": (p.created_at.isoformat() if p.created_at else None),
+        "arquetipo_calculado_en": (arquetipo.get("modelo_fecha")
+                                   if isinstance(arquetipo, dict) else None),
     }
 
 

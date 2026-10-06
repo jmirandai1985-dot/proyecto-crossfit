@@ -911,6 +911,12 @@ def _datos_gestion(db: Session, alumno_id: int, tenant_id: int,
         "riesgo_probabilidad": (float(prediccion.probabilidad_churn)
                                 if prediccion else None),
         "riesgo_motivo": prediccion.motivo if prediccion else None,
+        # Fechas en que se calculó el MODELO (arquetipo = segmentación; riesgo = churn). NO son
+        # la situación de hoy: el panel las muestra para no confundir snapshot con actualidad.
+        "riesgo_calculado_en": (prediccion.created_at.isoformat()
+                                if prediccion and prediccion.created_at else None),
+        "arquetipo_calculado_en": (segmentacion.modelo_fecha.isoformat()
+                                   if segmentacion and segmentacion.modelo_fecha else None),
         "estado_gestion": gestion.estado_gestion if gestion else None,
         "dias_sin_asistir": dias_sin_asistir,
     }

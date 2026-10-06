@@ -3,7 +3,7 @@ Router de endpoints para Solicitudes de Planes (flujo admin)
 """
 from app.core.urls import url_frontend  # B.2
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -30,6 +30,7 @@ from app.core.config import settings
 # `app/utils/santiago.py`): una sola definición para este flujo y la compra de emergencia.
 from app.utils.santiago import ahora_santiago, fin_de_plan_chile, hoy_santiago
 from app.services.auditoria_service import registrar_auditoria
+from app.services import churn_service
 # F2: el descuento vigente del alumno se aplica al SOLICITAR un plan. La aritmética (`desglose`)
 # y el ciclo de vida del beneficio (`vigente`/`usar`) viven en su servicio, no acá.
 from app.services import beneficios_service as beneficios
@@ -306,6 +307,7 @@ def descargar_certificado(
 def aprobar_solicitud(
     request: Request,
     solicitud_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
@@ -403,6 +405,9 @@ def aprobar_solicitud(
         )
 
     db.commit()
+
+    # ── Churn del alumno: al aprobar un plan cambia su situación -> recalc en segundo plano. ──
+    churn_service.programar_recalculo(background_tasks, solicitud.tenant_id, solicitud.alumno_id)
 
     # ── FIX 4: registrar la transacción financiera del pago aprobado ──
     # Mismo formato que POST /suscripciones (suscripciones.py) para mantener

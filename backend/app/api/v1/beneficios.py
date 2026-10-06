@@ -35,7 +35,7 @@ Reglas de esta capa
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -47,6 +47,7 @@ from app.models.plan import Plan
 from app.models.usuario import Usuario
 from app.services import beneficios_service as svc
 from app.services import fidelizacion_plantillas as plantillas
+from app.services import churn_service
 
 router = APIRouter()
 
@@ -383,6 +384,7 @@ def _avisar(db: Session, alumno, beneficio: Beneficio) -> dict:
 @router.post("", status_code=status.HTTP_201_CREATED)
 def dar_beneficio(
     datos: NuevoBeneficio,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
@@ -411,6 +413,10 @@ def dar_beneficio(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     correo = _avisar(db, alumno, beneficio) if datos.avisar_por_correo else None
+
+    # El regalo cambió los créditos del alumno (o le abrió un pase) -> recalc (segundo plano).
+    churn_service.programar_recalculo(background_tasks, current_user["tenant_id"], datos.alumno_id)
+
     return {"beneficio": _item(beneficio, alumno), "correo": correo}
 
 

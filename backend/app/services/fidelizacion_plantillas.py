@@ -279,6 +279,10 @@ def _contexto_riesgo_alto(db: Session, alumno) -> dict:
         "probabilidad_churn": float(prediccion.probabilidad_churn),
         "motivo_ml": prediccion.motivo,
         "recomendacion_ml": prediccion.recomendacion,
+        # Cuándo se calculó el MODELO: el admin ve el riesgo CON su fecha (no se confunde con
+        # la situación, que es de hoy).
+        "riesgo_calculado_en": (prediccion.created_at.isoformat()
+                                if prediccion.created_at else None),
     })
     return datos
 
@@ -599,8 +603,14 @@ def _sugerir_con(datos: dict) -> dict:
     if prediccion is not None:
         contexto["riesgo_nivel"] = prediccion.riesgo_nivel
         contexto["probabilidad_churn"] = float(prediccion.probabilidad_churn)
-        return _sugerida(P_RIESGO_ALTO,
-                         f"El modelo lo marca con riesgo {prediccion.riesgo_nivel}.", contexto)
+        # El riesgo del modelo se usa, pero con su FECHA visible (no es la situación de hoy).
+        calculado = (prediccion.created_at.isoformat()
+                     if prediccion.created_at else None)
+        contexto["riesgo_calculado_en"] = calculado
+        etiqueta = f"El modelo lo marca con riesgo {prediccion.riesgo_nivel}"
+        if calculado:
+            etiqueta += f" (calculado el {fecha_chile(prediccion.created_at)})"
+        return _sugerida(P_RIESGO_ALTO, f"{etiqueta}.", contexto)
     if dias > DIAS_TEMPRANA_MAX:
         return _sugerida(P_INACTIVIDAD_15_30, f"Lleva {dias} días sin entrenar.", contexto)
     if dias >= DIAS_TEMPRANA_MIN:

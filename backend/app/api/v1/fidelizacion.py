@@ -22,6 +22,7 @@ from app.core.dependencies import get_current_admin, get_current_coach
 from app.core.estados import dia_chile, no_cancelada, vigente_hoy
 from app.utils.santiago import dias_para_vencer, fecha_chile, hoy_santiago
 from app.services.auditoria_service import registrar_auditoria
+from app.services import churn_service
 
 router = APIRouter()
 
@@ -152,6 +153,7 @@ def registrar_asistencia(
     fecha: Optional[date] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
+    background_tasks: BackgroundTasks = None,
 ):
     """Registra la asistencia de un alumno al box. Solo admin (tenant del token)."""
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
@@ -190,6 +192,9 @@ def registrar_asistencia(
 
     db.add(nueva)
     db.commit()
+
+    # ── Registró una asistencia -> su situación de churn cambió -> recalc (segundo plano). ──
+    churn_service.programar_recalculo(background_tasks, tenant_id, usuario_id)
 
     return {
         "status": "success",

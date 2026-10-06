@@ -613,9 +613,21 @@ const Fidelizacion = () => {
                                                 <td className="px-6 py-4">
                                                     <RiskBadge nivel={p.riesgo_nivel} />
                                                     <p className="text-xs text-zinc-500 mt-1">{Number(p.probabilidad_churn || 0).toFixed(1)}%</p>
+                                                    {p.riesgo_calculado_en && (
+                                                        <p className="text-[10px] text-zinc-600 mt-0.5"
+                                                            title="Cuándo se calculó el modelo (no es la situación de hoy, que es en vivo)">
+                                                            calculado el {fmtFechaHora(p.riesgo_calculado_en)}
+                                                        </p>
+                                                    )}
                                                 </td>
                                                 <td className="px-6 py-4">
                                                     <ArquetipoBadge arquetipo={p.arquetipo} />
+                                                    {p.arquetipo_calculado_en && (
+                                                        <p className="text-[10px] text-zinc-600 mt-0.5"
+                                                            title="Cuándo se entrenó el modelo de segmentación">
+                                                            calculado el {fmtFechaHora(p.arquetipo_calculado_en)}
+                                                        </p>
+                                                    )}
                                                 </td>
                                                 <td className="px-6 py-4 text-sm text-zinc-400">{p.motivo || '—'}</td>
                                                 <td className="px-6 py-4">
