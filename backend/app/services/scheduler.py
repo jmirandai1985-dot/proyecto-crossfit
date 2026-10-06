@@ -192,33 +192,85 @@ async def _ejecutar_alertas(tipo: str):
         await _enviar_alerta(tipo)
 
 
+# Mapa tipo de job → servicio de email que lo resuelve. El scheduler NO conoce los
+# detalles de cada alerta: delega en `alertas_email_service` pasándole SIEMPRE el
+# `tenant_id` del box que se está recorriendo.
+_ALERTA_POR_TIPO = {
+    "renovacion": "enviar_alertas_renovacion",
+    "inactividad": "enviar_alertas_inactividad",
+    "urgencia": "enviar_alertas_urgencia",
+    "ultimo_credito": "enviar_alertas_ultimo_credito",
+    "sin_creditos": "enviar_alertas_sin_creditos",
+}
+
+
+def _ejecutar_alerta_de_tenant(tipo: str, db, tenant_id: int):
+    """Ejecuta la alerta `tipo` para UN box. Devuelve su resumen o None si el tipo no existe."""
+    nombre = _ALERTA_POR_TIPO.get(tipo)
+    if nombre is None:
+        return None
+    from app.services import alertas_email_service as alertas
+    return getattr(alertas, nombre)(db, tenant_id=tenant_id)
+
+
 async def _enviar_alerta(tipo: str):
-    """Abre sesión DB y ejecuta la alerta indicada (sin lock)."""
+    """Manda la alerta `tipo` a TODOS los tenants ACTIVOS (sin lock).
+
+    Antes se ejecutaba sin `tenant_id` → siempre el box 1, así que los demás boxes no
+    recibían ningún aviso. Ahora se recorre `tenants.activo=True` (igual que el cierre
+    de mes) y se pasa el `tenant_id` a cada llamada. Aislamiento por tenant: si un box
+    falla (SMTP, dato raro) se hace rollback y se sigue con el resto, para no perder la
+    alerta entera. Se deja log por alerta y por tenant, más un resumen final.
+    """
     from app.db.database import SessionLocal
+    from app.models.tenant import Tenant
+
     db = SessionLocal()
     try:
-        if tipo == "renovacion":
-            from app.services.alertas_email_service import enviar_alertas_renovacion
-            res = enviar_alertas_renovacion(db)
-        elif tipo == "inactividad":
-            from app.services.alertas_email_service import enviar_alertas_inactividad
-            res = enviar_alertas_inactividad(db)
-        elif tipo == "urgencia":
-            from app.services.alertas_email_service import enviar_alertas_urgencia
-            res = enviar_alertas_urgencia(db)
-        elif tipo == "ultimo_credito":
-            from app.services.alertas_email_service import enviar_alertas_ultimo_credito
-            res = enviar_alertas_ultimo_credito(db)
-        elif tipo == "sin_creditos":
-            from app.services.alertas_email_service import enviar_alertas_sin_creditos
-            res = enviar_alertas_sin_creditos(db)
-        else:
+        tenants = [r[0] for r in db.query(Tenant.id).filter(
+            Tenant.activo == True,  # noqa: E712
+        ).order_by(Tenant.id).all()]
+
+        if not tenants:
+            logger.warning(
+                f"⚠️ [Scheduler] Alerta {tipo}: no hay tenants activos, no se envió nada")
             return
+
+        enviados = fallidos = con_error = 0
+        for tid in tenants:
+            try:
+                res = _ejecutar_alerta_de_tenant(tipo, db, tid)
+                if res is None:
+                    return  # tipo de alerta desconocido: no hay nada que enviar
+                enviados += res.get("enviados", 0)
+                fallidos += res.get("fallidos", 0)
+                logger.info(
+                    f"⏰ [Scheduler] Alerta {tipo} · tenant {tid}: "
+                    f"{res.get('enviados', 0)} enviados, "
+                    f"{res.get('fallidos', 0)} fallidos")
+            except Exception as e:
+                db.rollback()
+                con_error += 1
+                logger.error(
+                    f"❌ [Scheduler] Alerta {tipo} · tenant {tid} "
+                    f"(se continúa con el resto): {e}", exc_info=True)
+                try:
+                    import sentry_sdk
+                    sentry_sdk.capture_exception(e)
+                except Exception:
+                    pass
+
         logger.info(
-            f"⏰ [Scheduler] Alerta {tipo}: {res.get('enviados', 0)} enviados, "
-            f"{res.get('fallidos', 0)} fallidos")
+            f"✅ [Scheduler] Alerta {tipo}: {len(tenants)} tenants, "
+            f"{enviados} enviados, {fallidos} fallidos"
+            + (f", {con_error} con error" if con_error else ""))
     except Exception as e:
         logger.error(f"❌ [Scheduler] Error alerta {tipo}: {e}", exc_info=True)
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(e)
+        except Exception:
+            pass
     finally:
         db.close()
 
