@@ -175,6 +175,14 @@ def obtener_reportes_analytics(
         ingresos_mes_ant = metricas.ingresos_netos(
             db, tenant_id, inicio_mes_ant.date(), fin_mes_ant.date())
 
+        # --- 6b. VENTAS DEL BAZAR DEL MES (bruto, NO neto) ---
+        # Definicion COMPARTIDA con el BI (`daily/monthly_kpis`) y con el historial del alumno:
+        # `metricas_service.ventas_bazar` = pedidos COBRADOS (`validado`/`entregado`). Se publica
+        # en su propio campo porque el Bazar no genera transaccion financiera (no esta dentro de
+        # `ingresoMensual`) y no es ingreso recurrente (no esta dentro del MRR).
+        ventas_bazar_mes = metricas.ventas_bazar(
+            db, tenant_id, inicio_mes.date(), fin_mes.date())
+
         # --- 7. ARPU (Ingresos del mes / alumnos activos) ---
         arpu = round(ingresos_mes / alumnos_activos,
                      0) if alumnos_activos > 0 else 0
@@ -334,6 +342,9 @@ def obtener_reportes_analytics(
             "mrr": mrr,
             "ingresoMensual": ingresos_mes,
             "ingresoMesAnterior": ingresos_mes_ant,
+            # Bruto del Bazar del mes (pedidos cobrados), en su propio campo: el
+            # ingresoMensual es NETO de transacciones y no lo contiene.
+            "ventasBazar": ventas_bazar_mes,
             "arpu": arpu,
             "crecimientoMensual": crecimiento_mom,  # None si no hay base comparable
 

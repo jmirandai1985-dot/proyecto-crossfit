@@ -355,6 +355,16 @@ const AdminDashboard = () => {
                                 </p>
                             )}
                         </div>
+                        {/* Ventas del Bazar del mes: campo propio de /reportes/ (`ventasBazar`).
+                            Es BRUTA y no recurrente: no está dentro de "Ingreso Mensual" (neto de
+                            transacciones) ni del MRR. */}
+                        <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-teal-600">
+                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Ventas Bazar (mes)</p>
+                            <p className="text-3xl font-bold text-teal-600 mt-1">
+                                ${(stats.ventasBazar || 0).toLocaleString('es-CL')}
+                            </p>
+                            <p className="text-xs text-zinc-500 mt-1">Pedidos cobrados del mes</p>
+                        </div>
                         <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-purple-600">
                             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide"
                                 title="Ocupacion: clases.asistentes_confirmados / clases.cupo_maximo (lugares reservados sobre cupo ofrecido). NO mide asistencia real. Puede verse 0% porque las asistencias todavia no estan vinculadas a su clase (asistencias.clase_id es NULL en toda la base).">Ocupación promedio</p>

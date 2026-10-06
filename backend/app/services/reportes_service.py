@@ -16,7 +16,8 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.formatting.rule import CellIsRule
 
 from app.services import metricas_service as metricas
-from shared.estados import sql_plan_comercial, sql_suscripcion_vigente
+from shared.estados import (lista_sql_pago_bazar, sql_plan_comercial,
+                            sql_suscripcion_vigente)
 
 
 # ============================================================
@@ -278,12 +279,11 @@ def _build_historico_mensual(db, tenant_id):
         # MRR al corte: NO una copia acá, la misma definición del dashboard y del BI
         mrr_val = metricas.mrr(db, tenant_id, corte)
 
-        # Ventas bazar del mes
-        ventas = db.execute(text("""
-            SELECT COALESCE(SUM(total), 0) FROM pedidos
-            WHERE tenant_id = :tid AND fecha_pedido >= :ini AND fecha_pedido <= :fin
-              AND estado != 'cancelado'
-        """), {"tid": tenant_id, "ini": inicio, "fin": fin}).scalar() or 0
+        # Ventas del Bazar del mes: MISMA definicion que el BI y que el historial del alumno
+        # (`metricas_service.ventas_bazar` = pedidos cobrados). Antes era un SQL propio con
+        # `estado != 'cancelado'`, que contaba tambien los pendientes: la celda de esta tabla y
+        # la columna "Bazar / Tienda" del Resumen podian decir numeros distintos.
+        ventas = metricas.ventas_bazar(db, tenant_id, inicio, fin)
 
         meses_es = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
                     'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
@@ -368,7 +368,16 @@ def _categorias_por_genero(db, tenant_id):
 
 
 def _pedidos_bazar_mes(db, tenant_id, inicio, fin):
-    """Obtiene pedidos del bazar del mes."""
+    """Pedidos del Bazar COBRADOS en [inicio, fin) — el detalle del Excel.
+
+    Solo `validado`/`entregado` (`lista_sql_pago_bazar()`, la lista COMPARTIDA con
+    `metricas_service.ventas_bazar`): asi el detalle, su fila TOTAL y la columna
+    "Bazar / Tienda" del Resumen cuentan lo MISMO. Los pedidos `pendiente` no son plata
+    todavia y se resumen aparte en la tarjeta "Pendientes" del Excel.
+
+    El rango es el del archivo (fin EXCLUSIVO, el primer dia del mes siguiente) y se compara
+    por DIA CHILENO de `fecha_pedido`, igual que la metrica compartida.
+    """
     try:
         rows = db.execute(text("""
             SELECT p.id, p.alumno_id, u.nombre as alumno_nombre,
@@ -376,12 +385,34 @@ def _pedidos_bazar_mes(db, tenant_id, inicio, fin):
             FROM pedidos p
             JOIN usuarios u ON p.alumno_id = u.id
             JOIN productos pr ON p.producto_id = pr.id
-            WHERE p.tenant_id = :tid AND p.fecha_pedido >= :ini AND p.fecha_pedido < :fin
+            WHERE p.tenant_id = :tid
+              AND (p.fecha_pedido AT TIME ZONE 'America/Santiago')::date >= :ini
+              AND (p.fecha_pedido AT TIME ZONE 'America/Santiago')::date < :fin
+              AND p.estado IN (""" + lista_sql_pago_bazar() + """)
             ORDER BY p.fecha_pedido DESC
         """), {"tid": tenant_id, "ini": inicio, "fin": fin}).fetchall()
         return rows
     except Exception:
         return []
+
+
+def _pedidos_bazar_pendientes_mes(db, tenant_id, inicio, fin) -> int:
+    """Cuántos pedidos del mes quedaron SIN cobrar (`pendiente`): informativo, no es plata.
+
+    Se cuenta aparte porque `_pedidos_bazar_mes` devuelve sólo los cobrados (el detalle y su
+    total tienen que sumar igual). Antes la tarjeta salía de la lista completa, así que al
+    corregir la definición habría quedado SIEMPRE en 0.
+    """
+    try:
+        return int(db.execute(text("""
+            SELECT COUNT(*) FROM pedidos p
+            WHERE p.tenant_id = :tid
+              AND (p.fecha_pedido AT TIME ZONE 'America/Santiago')::date >= :ini
+              AND (p.fecha_pedido AT TIME ZONE 'America/Santiago')::date < :fin
+              AND p.estado = 'pendiente'
+        """), {"tid": tenant_id, "ini": inicio, "fin": fin}).scalar() or 0)
+    except Exception:
+        return 0
 
 
 def crear_reporte_ventas_mensual_bytes(
@@ -497,11 +528,17 @@ def crear_reporte_ventas_mensual_bytes(
     # Planes y categorias
     categorias, planes_list = _categorias_por_genero(db, tenant_id)
 
-    # Pedidos bazar
+    # Pedidos bazar COBRADOS (el detalle del archivo) + los pendientes del mes (informativos).
+    # La plata sale de la definicion COMPARTIDA (`metricas.ventas_bazar`): asi el detalle, su fila
+    # TOTAL y la columna "Bazar / Tienda" suman lo MISMO, y el archivo no puede diferir del BI ni
+    # del historial del alumno. OJO con el rango: `fecha_fin` es el 1° del mes siguiente
+    # (EXCLUSIVO para el detalle) y `ventas_bazar` compara dias inclusivos.
     pedidos = _pedidos_bazar_mes(db, tenant_id, fecha_inicio, fecha_fin)
-    ventas_bazar = sum(p.total for p in pedidos)
+    ventas_bazar = metricas.ventas_bazar(db, tenant_id, fecha_inicio,
+                                         fecha_fin - timedelta(days=1))
     pedidos_completados = sum(1 for p in pedidos if p.estado == "entregado")
-    pedidos_pendientes = sum(1 for p in pedidos if p.estado == "pendiente")
+    pedidos_pendientes = _pedidos_bazar_pendientes_mes(
+        db, tenant_id, fecha_inicio, fecha_fin)
 
     # Ventas por producto (bazar)
     ventas_producto = {}
@@ -591,10 +628,11 @@ def crear_reporte_ventas_mensual_bytes(
     _style_table_header(ws1, r, tbl_headers)
     r += 1
     negocio_data_start = r  # track first data row for charts
-    ing_ant_total = ing_ant_f + float(db.execute(text("""
-        SELECT COALESCE(SUM(total), 0) FROM pedidos
-        WHERE tenant_id = :tid AND fecha_pedido >= :ini AND fecha_pedido < :fin AND estado != 'cancelado'
-    """), {"tid": tenant_id, "ini": inicio_ant, "fin": fin_ant}).scalar() or 0)
+    # Bazar del mes anterior: MISMA definicion compartida que la fila de este mes (antes el SQL de
+    # aca usaba `estado != 'cancelado'`, o sea contaba los pendientes, asi que la variacion
+    # comparaba dos reglas distintas). `fin_ant` es el 1° del mes siguiente (exclusivo).
+    ing_ant_total = ing_ant_f + metricas.ventas_bazar(
+        db, tenant_id, inicio_ant, fin_ant - timedelta(days=1))
 
     for i, (nom, monto_item) in enumerate(negocio_items):
         is_alt = i % 2 == 1
@@ -698,8 +736,8 @@ def crear_reporte_ventas_mensual_bytes(
     neto_cell.alignment = Alignment(horizontal='center')
     r += 2
 
-    # ── SECCION: Detalle Ventas Bazar ──
-    _style_section_header(ws1, r, 1, "Detalle de Ventas - Bazar", PURPLE_KPI)
+    # ── SECCION: Detalle Ventas Bazar (solo pedidos COBRADOS: el total tiene que sumar igual) ──
+    _style_section_header(ws1, r, 1, "Detalle de Ventas - Bazar (cobradas)", PURPLE_KPI)
     r += 1
     _style_table_header(
         ws1, r, ["ID", "Alumno", "Producto", "Cant.", "Total", "Estado", "Fecha"])
@@ -889,17 +927,17 @@ def crear_reporte_ventas_mensual_bytes(
     # KPI cards
     r = 4
     _apply_kpi_card(ws3, r, 2, "Ventas del Mes",
-                    f"${ventas_bazar:,.0f}", "Total en pedidos", ORANGE_ACCENT, "🛒")
+                    f"${ventas_bazar:,.0f}", "Validados y entregados", ORANGE_ACCENT, "🛒")
     _apply_kpi_card(ws3, r, 3, "Pedidos",
-                    f"{len(pedidos)}", "Total del mes", BLUE_KPI, "📦")
+                    f"{len(pedidos)}", "Cobrados del mes", BLUE_KPI, "📦")
     _apply_kpi_card(ws3, r, 4, "Completados",
                     f"{pedidos_completados}", "Entregados", GREEN_KPI, "✅")
     _apply_kpi_card(ws3, r, 5, "Pendientes",
-                    f"{pedidos_pendientes}", "Sin entregar", PURPLE_KPI, "⏳")
+                    f"{pedidos_pendientes}", "Sin cobrar (no suman)", PURPLE_KPI, "⏳")
     r += 4
 
-    # Detalle de pedidos
-    _style_section_header(ws3, r, 1, "Detalle de Pedidos", BLUE_KPI)
+    # Detalle de pedidos (cobrados)
+    _style_section_header(ws3, r, 1, "Detalle de Pedidos Cobrados", BLUE_KPI)
     r += 1
     _style_table_header(
         ws3, r, ["ID", "Alumno", "Producto", "Cant.", "Total", "Estado", "Fecha"])

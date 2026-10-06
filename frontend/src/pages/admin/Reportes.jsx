@@ -330,8 +330,18 @@ const Reportes = () => {
                             {' '}El MRR, en cambio, es el precio de lista de los planes con suscripción activa vigente.
                         </p>
                     </div>
-                    {/* 4ta tarjeta: cierra la fila simétrica con las 3 anteriores.
-                        Mismo criterio que la tarjeta de Retención para el sin dato. */}
+                    {/* Ventas del Bazar del mes (BRUTAS): campo `ventasBazar` de /reportes/.
+                        No están dentro del MRR (que es sólo planes) ni del ingreso mensual (que es
+                        caja neta de transacciones): por eso van en su propia tarjeta. */}
+                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-teal-500">
+                        <p className="text-zinc-400 text-sm font-medium"
+                            title="Pedidos del bazar ya cobrados (validados o entregados) del mes en curso, por la fecha del pedido. Un pedido con el comprobante sin revisar todavía no suma.">Ventas Bazar (Mes)</p>
+                        <p className="text-3xl font-bold text-zinc-100 mt-2">{formatCompact(reportData?.ventasBazar || 0)}</p>
+                        <p className="text-xs text-zinc-400 mt-2">Pedidos cobrados (validados/entregados)</p>
+                        <span className="text-4xl">🛒</span>
+                    </div>
+                    {/* Última tarjeta de la fila (Churn). Mismo criterio que la tarjeta de
+                        Retención para el sin dato. */}
                     <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-rose-500">
                         <p className="text-zinc-400 text-sm font-medium"
                             title="Churn de cohorte de los últimos 30 días = 100 − retención: de los alumnos vigentes hace 30 días, cuántos dejaron de estarlo. Si la base no alcanza el mínimo, no se calcula.">
