@@ -3,13 +3,35 @@ import { useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
-import { fmtFechaChile, toChileFechaStr } from '../../utils/fecha';
+import { fmtFechaChile, toChileFechaStr, horaChileStr } from '../../utils/fecha';
 import AdminTarjetaAlumnosPrueba from '../../components/AdminTarjetaAlumnosPrueba';
 // Aviso REUTILIZABLE (secciones + Reintentar) para las tarjetas que pueden fallar.
 import AvisoCarga from '../../components/AvisoCarga';
 // Vista previa/descarga del voucher: la lógica del blob autenticado (y su
 // descarga forzada) vive en el hook compartido, no en cada pantalla.
 import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
+
+// Estilo de una clase del día (ocupación, color de barra, cupo ampliado y badge de estado).
+// Lo comparten la tarjeta y la sección "Clases de hoy": misma lectura para todas las filas.
+// El estado viene del backend (`clases_service.estado_clase`): realizada / en_curso / proxima.
+const ESTADO_CLASE_LABEL = {
+    realizada: 'Terminada',
+    en_curso: 'En curso',
+    proxima: 'Próxima',
+    cancelada: 'Cancelada',
+};
+
+const visualClaseHoy = (c) => {
+    const pct = c.cupo_maximo ? Math.round((c.reservas_count || 0) / c.cupo_maximo * 100) : 0;
+    const color = pct >= 100 ? 'red' : pct >= 80 ? 'amber' : 'green';
+    const ampliado = (c.cupo_original && c.cupo_maximo > c.cupo_original)
+        ? c.cupo_maximo - c.cupo_original : 0;
+    const badge = c.estado === 'realizada' ? 'bg-green-100 text-green-800'
+        : c.estado === 'en_curso' ? 'bg-blue-100 text-blue-800'
+            : c.estado === 'cancelada' ? 'bg-red-100 text-red-800'
+                : 'bg-zinc-700 text-zinc-300';
+    return { pct, color, ampliado, estado: ESTADO_CLASE_LABEL[c.estado] || '', badge };
+};
 
 const AdminDashboard = () => {
     const navigate = useNavigate();
@@ -49,6 +71,11 @@ const AdminDashboard = () => {
     const [clasesHoy, setClasesHoy] = useState([]);
     const [clasesHoyLoading, setClasesHoyLoading] = useState(true);
     const [clasesHoyError, setClasesHoyError] = useState('');
+    const [ultimaActualizacion, setUltimaActualizacion] = useState(null);
+    // Detalle de una clase (modal): reservas de la clase desde /asistencia/clases/{id}/alumnos.
+    const [claseDetalle, setClaseDetalle] = useState(null);
+    const [detalleReservas, setDetalleReservas] = useState([]);
+    const [detalleLoading, setDetalleLoading] = useState(false);
     // Fidelización — modal membresías del mes
     const [fidelizacionModal, setFidelizacionModal] = useState(null); // 'membresias'
     // ── Tarjetas BI (data mart): "Alumnos nuevos" y "Convertidos" ─────────────
@@ -88,12 +115,26 @@ const AdminDashboard = () => {
             // El backend ya devuelve el día completo (admin) con coach/estado/reservas.
             setClasesHoy((res.data || []).filter(c => c.requiere_coach));
             setClasesHoyError('');
+            setUltimaActualizacion(new Date());
         } catch (err) {
             setClasesHoy([]);
             setClasesHoyError(err?.response?.data?.detail || err?.message
                 || 'No se pudieron cargar las clases de hoy');
         }
         setClasesHoyLoading(false);
+    };
+
+    const abrirDetalleClase = async (clase) => {
+        setClaseDetalle(clase);
+        setDetalleReservas([]);
+        setDetalleLoading(true);
+        try {
+            const r = await api.get(`/api/v1/asistencia/clases/${clase.id}/alumnos`);
+            setDetalleReservas(r.data?.reservas || []);
+        } catch {
+            setDetalleReservas([]);
+        }
+        setDetalleLoading(false);
     };
 
     const cargarStats = async () => {
@@ -493,32 +534,68 @@ const AdminDashboard = () => {
                     </button>
                 </div>
 
-                {/* WIDGET OCUPACION CLASES HOY */}
-                <div className="bg-zinc-900 rounded-lg shadow p-5">
-                    <h2 className="text-lg font-bold text-zinc-100 flex items-center gap-2">
-                        📅 Clases de hoy — estado de ocupación
-                    </h2>
-                    <p className="text-xs text-zinc-400 mt-0.5">CrossFit y Levantamiento Olímpico, solo clases con coach asignado</p>
+                {/* SECCIÓN "CLASES DE HOY": todas las clases del día que exigen coach, por hora,
+                    con ocupación, coach y estado. Reutiliza GET /asistencia/clases-hoy; al hacer
+                    clic en una clase se abren sus alumnos (GET /asistencia/clases/{id}/alumnos). */}
+                <div id="clases-hoy" className="bg-zinc-900 rounded-lg shadow p-5">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                        <h2 className="text-lg font-bold text-zinc-100 flex items-center gap-2">
+                            📅 Clases de hoy
+                        </h2>
+                        {ultimaActualizacion && (
+                            <span className="text-xs text-zinc-500">
+                                Actualizado {horaChileStr(ultimaActualizacion)} · se refresca solo
+                            </span>
+                        )}
+                    </div>
+                    <p className="text-xs text-zinc-400 mt-0.5">
+                        Clases del día que exigen coach · {clasesHoyRealizadas}/{clasesHoyTotal} realizadas ·
+                        {' '}{reservasHoy}/{cuposHoy} reservas ({ocupacionHoyPct}%)
+                    </p>
                     {clasesHoyLoading ? (
-                        <div className="flex justify-center py-6"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-900"></div></div>
+                        <div className="flex justify-center py-6"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-500"></div></div>
+                    ) : clasesHoyError ? (
+                        <div className="py-6 text-center text-sm text-amber-400">⚠️ {clasesHoyError}</div>
                     ) : clasesHoy.length === 0 ? (
-                        <div className="py-6 text-center text-zinc-500 text-sm">Sin clases de CrossFit/Levantamiento con coach asignado hoy</div>
+                        <div className="py-6 text-center text-zinc-500 text-sm">No hay clases hoy que exijan coach</div>
                     ) : (
-                        <div className="mt-4 space-y-3">
-                            {clasesHoy.map(c => (
-                                <div key={c.id} className="flex items-center gap-4">
-                                    <div className="text-sm font-semibold text-zinc-300 w-16 shrink-0">{c.hora_inicio?.slice(0, 5)} hrs</div>
-                                    <div className="flex-1 bg-zinc-800 rounded-full h-4 overflow-hidden">
-                                        <div className={`h-full rounded-full transition-all ${(c.cupo_maximo && (c.reservas_count || 0) / c.cupo_maximo >= 1) ? 'bg-red-500' : (c.cupo_maximo && (c.reservas_count || 0) / c.cupo_maximo >= 0.8) ? 'bg-amber-500' : 'bg-green-500'}`}
-                                            style={{ width: `${Math.min(c.cupo_maximo ? Math.round((c.reservas_count || 0) / c.cupo_maximo * 100) : 0, 100)}%` }} />
+                        <div className="mt-4 space-y-1">
+                            {clasesHoy.map(c => {
+                                const v = visualClaseHoy(c);
+                                return (
+                                    <div key={c.id} onClick={() => abrirDetalleClase(c)}
+                                        className="cursor-pointer rounded-lg px-2 py-2 hover:bg-zinc-800/60 transition-colors">
+                                        <div className="flex items-center gap-3">
+                                            <div className="text-sm font-semibold text-zinc-300 w-12 shrink-0">{c.hora_inicio?.slice(0, 5)}</div>
+                                            <div className="w-40 shrink-0">
+                                                <div className="text-sm text-zinc-200 truncate">{c.disciplina_nombre}</div>
+                                                <div className={`text-xs truncate ${c.coach ? 'text-zinc-500' : 'text-amber-400 font-semibold'}`}>
+                                                    {c.coach ? `👤 ${c.coach}` : '⚠️ Sin coach'}
+                                                </div>
+                                            </div>
+                                            <div className="flex-1 bg-zinc-800 rounded-full h-4 overflow-hidden min-w-[40px]">
+                                                <div className={`h-full rounded-full transition-all ${v.color === 'red' ? 'bg-red-500' : v.color === 'amber' ? 'bg-amber-500' : 'bg-green-500'}`}
+                                                    style={{ width: `${Math.min(v.pct, 100)}%` }} />
+                                            </div>
+                                            <div className="text-sm text-zinc-400 w-28 shrink-0 text-right">
+                                                {c.reservas_count || 0}/{c.cupo_maximo || 0}
+                                                {v.ampliado > 0 && (
+                                                    <span className="text-amber-400" title={`Cupo ampliado +${v.ampliado} sobre el original de ${c.cupo_original}`}> (+{v.ampliado})</span>
+                                                )}
+                                            </div>
+                                            <div className="text-sm font-semibold text-zinc-300 w-12 shrink-0 text-right">{v.pct}%</div>
+                                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0 w-24 text-center ${v.badge}`}>
+                                                {v.estado}
+                                            </span>
+                                        </div>
+                                        {c.estado === 'realizada' && (
+                                            <div className="text-xs text-zinc-500 mt-1 pl-14">
+                                                ✅ {c.asistentes_confirmados || 0} asistieron · {c.reservas_count || 0} reservaron
+                                            </div>
+                                        )}
                                     </div>
-                                    <div className="text-sm text-zinc-400 w-20 shrink-0">{c.reservas_count || 0}/{c.cupo_maximo || 0}</div>
-                                    <div className="text-sm font-semibold w-14 shrink-0">{c.cupo_maximo ? Math.round((c.reservas_count || 0) / c.cupo_maximo * 100) : 0}%</div>
-                                    <span className="px-2 py-0.5 rounded-full text-xs font-medium shrink-0 bg-zinc-700 text-zinc-300">
-                                        {c.estado}
-                                    </span>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </div>
@@ -765,6 +842,54 @@ const AdminDashboard = () => {
                                         </tbody>
                                     </table>
                             )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL DETALLE CLASE (alumnos): se abre al hacer clic en una fila de "Clases de hoy".
+                Reutiliza GET /asistencia/clases/{id}/alumnos (mismos datos que el panel del coach). */}
+            {claseDetalle && (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+                    onClick={() => setClaseDetalle(null)}>
+                    <div className="bg-zinc-900 rounded-xl max-w-md w-full shadow-2xl"
+                        onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-zinc-800 flex justify-between items-start">
+                            <div>
+                                <h3 className="font-bold text-zinc-100">
+                                    {claseDetalle.disciplina_nombre} · {claseDetalle.hora_inicio?.slice(0, 5)}
+                                </h3>
+                                <p className="text-xs text-zinc-500 mt-0.5">
+                                    {claseDetalle.coach ? `👤 ${claseDetalle.coach}` : '⚠️ Sin coach asignado'}
+                                    {' '}· {claseDetalle.reservas_count || 0}/{claseDetalle.cupo_maximo || 0} reservas
+                                </p>
+                            </div>
+                            <button onClick={() => setClaseDetalle(null)}
+                                className="text-zinc-400 hover:text-zinc-200 text-xl font-bold">✕</button>
+                        </div>
+                        <div className="p-4 max-h-96 overflow-y-auto">
+                            {detalleLoading ? (
+                                <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div></div>
+                            ) : detalleReservas.length === 0 ? (
+                                <p className="text-center text-sm text-zinc-500 py-8">Esta clase no tiene reservas activas.</p>
+                            ) : (
+                                <ul className="space-y-2">
+                                    {detalleReservas.map(r => (
+                                        <li key={r.reserva_id} className="flex items-center justify-between p-2.5 rounded-lg border border-zinc-800">
+                                            <span className="text-sm text-zinc-200">{r.nombre}</span>
+                                            <span className={`text-xs font-medium ${r.asistio ? 'text-green-400' : 'text-zinc-500'}`}>
+                                                {r.asistio ? '✅ Asistió' : '—'}
+                                            </span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                        <div className="px-4 py-3 border-t border-zinc-800 flex justify-end">
+                            <button onClick={() => setClaseDetalle(null)}
+                                className="px-4 py-2 bg-zinc-700 text-zinc-200 rounded-lg hover:bg-zinc-600 text-sm font-bold">
+                                Cerrar
+                            </button>
                         </div>
                     </div>
                 </div>
