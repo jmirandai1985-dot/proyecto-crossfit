@@ -343,7 +343,7 @@ def test_b6_el_put_tambien_valida(cliente, auth):
     ("RUT que no es un RUT", {"rut": "abc"}),
     ("RUT sin guion", {"rut": "123456785"}),
     ("email que no es email", {"email_comprobantes": "pagos arroba box.cl"}),
-    ("clave desconocida", {"beneficio_descuento_max_pct": 99}),
+    ("clave desconocida", {"clave_que_no_existe": 99}),
     ("banco de 201 caracteres", {"banco": "x" * 201}),
     ("cuenta de 51 caracteres", {"numero_cuenta": "1" * 51}),
     ("whatsapp de 31 caracteres", {"whatsapp": "9" * 31}),

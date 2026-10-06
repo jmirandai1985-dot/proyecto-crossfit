@@ -23,6 +23,7 @@ from app.models.usuario import Usuario
 from app.core.dependencies import get_current_user, get_current_admin
 from app.core.rate_limit import LIMIT_CONFIG_LECTURA, LIMIT_CRITICO, limiter
 from app.services.auditoria_service import registrar_auditoria
+from app.services.beneficios_service import TOPE_DESCUENTO_DEFAULT
 from app.services.notificaciones_panel import notificar_admins_del_tenant
 from app.utils.rut import normalizar_rut, validar_rut
 
@@ -31,8 +32,11 @@ router = APIRouter()
 # Los campos que edita el admin: los que la auditoría compara antes/después (I1).
 # `updated_at` / `updated_by` quedan afuera a propósito: son la marca de autoría, no
 # un dato que el admin haya cambiado.
+# `beneficio_descuento_max_pct` (M4) entra acá también: es el tope del descuento que un
+# beneficio de Fidelización puede ofrecer y el cambio tiene que quedar auditado igual que
+# los datos bancarios (un box podría subirlo a 100 y regalar todo el plan: eso se registra).
 CAMPOS_EDITABLES = ("banco", "numero_cuenta", "tipo_cuenta", "rut",
-                    "email_comprobantes", "whatsapp")
+                    "email_comprobantes", "whatsapp", "beneficio_descuento_max_pct")
 
 
 class ConfiguracionUpdate(BaseModel):
@@ -59,6 +63,13 @@ class ConfiguracionUpdate(BaseModel):
     # Bloque C: el WhatsApp del box para el pie de los correos (vacío = sólo responder
     # el correo). El link lo arma `email_service.wa_link()` a partir de los dígitos.
     whatsapp: Optional[str] = Field(None, max_length=30)
+    # M4: tope (%) del descuento que un beneficio de Fidelización puede ofrecer sobre el
+    # "próximo plan". 0-100 (un descuento >100% sería regalar plata). Sólo admin y queda
+    # auditado. `None` = no lo mandaron (se conserva lo guardado); si nunca se configuró,
+    # el sistema usa TOPE_DESCUENTO_DEFAULT (50).
+    beneficio_descuento_max_pct: Optional[int] = Field(
+        None, ge=0, le=100,
+        description="Tope del descuento (%) que un beneficio puede ofrecer (0-100)")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -140,6 +151,8 @@ def obtener_configuracion(
             "rut": None,
             "email_comprobantes": None,
             "whatsapp": None,
+            # M4: sin fila todavía, el tope efectivo es el default del diseño (50).
+            "beneficio_descuento_max_pct": TOPE_DESCUENTO_DEFAULT,
             "configurado": False,
             "updated_at": None,
             "updated_by": None,
@@ -154,6 +167,10 @@ def obtener_configuracion(
         "rut": config.rut,
         "email_comprobantes": config.email_comprobantes,
         "whatsapp": config.whatsapp,
+        "beneficio_descuento_max_pct": (
+            config.beneficio_descuento_max_pct
+            if config.beneficio_descuento_max_pct is not None
+            else TOPE_DESCUENTO_DEFAULT),
         "configurado": True,
         # I1: quién guardó la fila y cuándo (para que el admin note que otro la cambió).
         "updated_at": config.updated_at,
@@ -239,6 +256,10 @@ def actualizar_configuracion(
         "rut": config.rut,
         "email_comprobantes": config.email_comprobantes,
         "whatsapp": config.whatsapp,
+        "beneficio_descuento_max_pct": (
+            config.beneficio_descuento_max_pct
+            if config.beneficio_descuento_max_pct is not None
+            else TOPE_DESCUENTO_DEFAULT),
         "configurado": True,
         "updated_at": config.updated_at,
         "updated_by": config.updated_by,

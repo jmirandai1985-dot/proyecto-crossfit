@@ -34,6 +34,8 @@ const Configuracion = () => {
         rut: '',
         email_comprobantes: '',
         whatsapp: '',
+        // M4: tope (%) del descuento que un beneficio de Fidelización puede ofrecer.
+        beneficio_descuento_max_pct: 50,
     });
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -62,7 +64,14 @@ const Configuracion = () => {
                     rut: data.rut || '',
                     email_comprobantes: data.email_comprobantes || '',
                     whatsapp: data.whatsapp || '',
+                    beneficio_descuento_max_pct: data.beneficio_descuento_max_pct ?? 50,
                 });
+            } else {
+                // Sin fila guardada el backend ya devuelve el default efectivo (50).
+                setForm((f) => ({
+                    ...f,
+                    beneficio_descuento_max_pct: data.beneficio_descuento_max_pct ?? 50,
+                }));
             }
         } catch (err) {
             console.error('Error cargando config:', err);
@@ -90,10 +99,19 @@ const Configuracion = () => {
         setSaving(true);
         setMessage({ type: '', text: '' });
         try {
-            const res = await api.put(`/api/v1/configuracion`, form);
+            // El tope de descuento viaja como número (el input lo da como string); si el
+            // campo quedó vacío, se omite para no pisar el valor guardado con un 0.
+            const payload = { ...form };
+            const pct = Number(form.beneficio_descuento_max_pct);
+            if (Number.isFinite(pct) && form.beneficio_descuento_max_pct !== '') {
+                payload.beneficio_descuento_max_pct = pct;
+            } else {
+                delete payload.beneficio_descuento_max_pct;
+            }
+            const res = await api.put(`/api/v1/configuracion`, payload);
             setConfigurado(true);
             setUpdatedAt(res.data?.updated_at || null);
-            setMessage({ type: 'success', text: 'Datos bancarios guardados exitosamente.' });
+            setMessage({ type: 'success', text: 'Configuración guardada exitosamente.' });
         } catch (err) {
             setMessage({ type: 'error', text: detalleDeError(err) });
         } finally {
@@ -218,6 +236,21 @@ const Configuracion = () => {
                         <p className="text-xs text-zinc-500 mt-1">
                             Va en el pie de todos los correos a los alumnos: "responde este correo o escríbenos al WhatsApp".
                             Si lo dejas vacío, los correos sólo ofrecen responder el correo.
+                        </p>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-zinc-300 mb-1">
+                            Descuento máximo de beneficios (%)
+                        </label>
+                        <input type="number" name="beneficio_descuento_max_pct"
+                            value={form.beneficio_descuento_max_pct} onChange={handleChange}
+                            min={0} max={100} step={1}
+                            data-testid="config-descuento-max"
+                            className="w-full px-4 py-2.5 border border-zinc-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm" />
+                        <p className="text-xs text-zinc-500 mt-1">
+                            Tope que puede regalar un beneficio de Fidelización sobre el próximo plan
+                            (0-100). Por defecto 50%. Un valor fuera de ese rango no se acepta.
                         </p>
                     </div>
 

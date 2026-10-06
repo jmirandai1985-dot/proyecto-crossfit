@@ -139,10 +139,14 @@ def test_a3_la_ventana_sin_zona_se_asume_utc():
 
 
 def test_a4_el_tope_del_box_no_puede_regalar_mas_de_100():
-    """El tope del % es configuración saneada: un valor imposible cae al default del diseño."""
-    for imposible in (None, "50", 0, -5, 101, 1000, True):
+    """El tope del % es configuración saneada: un valor imposible cae al default del diseño.
+
+    `0` es VÁLIDO ("no autorizo descuentos"): mismo rango 0-100 que valida el endpoint PUT
+    /configuracion (M4). Antes el saneador trataba 0 como imposible y lo subía a 50.
+    """
+    for imposible in (None, "50", -5, 101, 1000, True):
         assert svc._normalizar_tope(imposible) == svc.TOPE_DESCUENTO_DEFAULT, imposible
-    for valido in (1, 20, 50, 100):
+    for valido in (0, 1, 20, 50, 100):
         assert svc._normalizar_tope(valido) == valido
 
     # Y se lee de UNA sola fila: la configuración del box (`configuracion_negocio`).

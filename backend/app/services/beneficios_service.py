@@ -216,14 +216,16 @@ def esta_vivo(beneficio, ahora: datetime | None = None) -> bool:
 
 
 def _normalizar_tope(valor) -> int:
-    """El tope de descuento del box, saneado: fuera de 1..100 NO se usa (nadie regala más del 100%).
+    """El tope de descuento del box, saneado: fuera de 0..100 NO se usa (nadie regala más del 100%).
 
-    Un tope mal cargado (o un `NULL` de una fila vieja) no puede terminar en un descuento mayor al
-    precio: en ese caso vale el default aprobado del diseño.
+    `0` es un valor VÁLIDO y significa "este box no autoriza ningún descuento" (mismo rango
+    que valida el endpoint PUT /configuracion, M4: 0-100). Un tope mal cargado (o un `NULL`
+    de una fila vieja) no puede terminar en un descuento mayor al precio: en ese caso vale
+    el default aprobado del diseño.
     """
     if isinstance(valor, bool) or not isinstance(valor, int):
         return TOPE_DESCUENTO_DEFAULT
-    return valor if 1 <= valor <= 100 else TOPE_DESCUENTO_DEFAULT
+    return valor if 0 <= valor <= 100 else TOPE_DESCUENTO_DEFAULT
 
 
 def tope_descuento(db: Session, tenant_id: int) -> int:
