@@ -59,6 +59,52 @@ async def job_generar_clases_diarias():
             f"❌ [Scheduler] Error en generación automática: {e}", exc_info=True)
 
 
+# Ventana de gracia: cuánto se tolera correr un job después de su hora.
+GRACIA_SEG = 3600
+
+
+def _proximo_disparo_con_catchup(trigger, ahora, gracia_seg=GRACIA_SEG):
+    """El disparo de HOY si ya pasó hace <= `gracia_seg`; si no, `None`.
+
+    `add_job` sin `next_run_time` calcula el PRÓXIMO disparo futuro, así que un
+    job cuya hora ya pasó mientras la instancia se reiniciaba (deploy) se saltaba
+    ese día ENTERO: así se perdió la alerta de las 09:00 del 26/09, porque el
+    proceso anterior murió a las 09:02. Si el disparo de hoy cayó dentro de la
+    ventana, se devuelve ese instante (pasado) para que APScheduler lo vea vencido
+    y lo corra apenas arranque (su `misfire_grace_time` se lo permite). Fuera de
+    la ventana → `None`: no se rescatan avisos viejos.
+    """
+    try:
+        inicio_dia = ahora.replace(hour=0, minute=0, second=0, microsecond=0)
+        disparo = trigger.get_next_fire_time(None, inicio_dia)
+    except Exception:
+        return None
+    if disparo is None or disparo > ahora:
+        return None
+    if (ahora - disparo).total_seconds() <= gracia_seg:
+        return disparo
+    return None
+
+
+def _programar(func, trigger, job_id, name, ahora):
+    """Agrega un job con política anti-duplicados y arranque con catch-up.
+
+    · `coalesce=True`      → varios disparos pendientes juntos = UNO solo.
+    · `max_instances=1`    → dos disparos solapados no corren a la vez en el proceso.
+    · `misfire_grace_time` → sigue valiendo correrlo hasta 1h tarde.
+    · catch-up de arranque → ver `_proximo_disparo_con_catchup`.
+    """
+    kwargs = dict(id=job_id, name=name, replace_existing=True,
+                  coalesce=True, max_instances=1, misfire_grace_time=GRACIA_SEG)
+    catchup = _proximo_disparo_con_catchup(trigger, ahora)
+    if catchup is not None:
+        kwargs["next_run_time"] = catchup
+        logger.warning(
+            f"⏪ [Scheduler] {job_id}: el disparo de hoy ({catchup.isoformat()}) "
+            "quedó pendiente por un reinicio; se recupera ahora")
+    scheduler.add_job(func, trigger, **kwargs)
+
+
 def iniciar_scheduler():
     """Inicia el scheduler con el job diario a las 00:05 CLT + alertas de email.
 
@@ -72,66 +118,38 @@ def iniciar_scheduler():
             "🟡 [Scheduler] Otra instancia ya es la líder (advisory lock). "
             "Esta instancia queda en standby y NO programa jobs.")
         return
-    scheduler.add_job(
-        job_generar_clases_diarias,
-        CronTrigger(hour=0, minute=5,
-                    timezone=pytz.timezone("America/Santiago")),
-        id="generar_clases_diarias",
-        name="Generar clases del día desde horarios_base",
-        replace_existing=True,
-        misfire_grace_time=3600,  # Si falla por hasta 1h, igual lo ejecuta
-    )
+    ahora = datetime.now(pytz.timezone("America/Santiago"))
+    tz = pytz.timezone("America/Santiago")
+    _programar(job_generar_clases_diarias,
+               CronTrigger(hour=0, minute=5, timezone=tz),
+               "generar_clases_diarias",
+               "Generar clases del día desde horarios_base", ahora)
     # ── Alertas automáticas de email ──
-    scheduler.add_job(
-        job_alerta_urgencia_renovacion,
-        CronTrigger(hour=6, minute=0, timezone=pytz.timezone("America/Santiago")),
-        id="alerta_urgencia_renovacion",
-        name="Alerta urgencia: planes que vencen HOY",
-        replace_existing=True,
-        misfire_grace_time=3600,
-    )
-    scheduler.add_job(
-        job_alerta_renovacion,
-        CronTrigger(hour=8, minute=0, timezone=pytz.timezone("America/Santiago")),
-        id="alerta_renovacion",
-        name="Alerta renovación: planes que vencen en 3 días",
-        replace_existing=True,
-        misfire_grace_time=3600,
-    )
-    scheduler.add_job(
-        job_alerta_inactividad,
-        CronTrigger(hour=9, minute=0, timezone=pytz.timezone("America/Santiago")),
-        id="alerta_inactividad",
-        name="Alerta inactividad: 7+ días sin asistencia (cada 24h)",
-        replace_existing=True,
-        misfire_grace_time=3600,
-    )
-    scheduler.add_job(
-        job_alerta_ultimo_credito,
-        CronTrigger(hour=7, minute=0, timezone=pytz.timezone("America/Santiago")),
-        id="alerta_ultimo_credito",
-        name="Alerta último crédito: 1 crédito y días restantes del mes",
-        replace_existing=True,
-        misfire_grace_time=3600,
-    )
-    scheduler.add_job(
-        job_alerta_sin_creditos,
-        CronTrigger(hour=10, minute=0, timezone=pytz.timezone("America/Santiago")),
-        id="alerta_sin_creditos",
-        name="Alerta sin créditos: 0 créditos disponibles",
-        replace_existing=True,
-        misfire_grace_time=3600,
-    )
+    _programar(job_alerta_urgencia_renovacion,
+               CronTrigger(hour=6, minute=0, timezone=tz),
+               "alerta_urgencia_renovacion",
+               "Alerta urgencia: planes que vencen HOY", ahora)
+    _programar(job_alerta_renovacion,
+               CronTrigger(hour=8, minute=0, timezone=tz),
+               "alerta_renovacion",
+               "Alerta renovación: planes que vencen en 3 días", ahora)
+    _programar(job_alerta_inactividad,
+               CronTrigger(hour=9, minute=0, timezone=tz),
+               "alerta_inactividad",
+               "Alerta inactividad: 7+ días sin asistencia (cada 24h)", ahora)
+    _programar(job_alerta_ultimo_credito,
+               CronTrigger(hour=7, minute=0, timezone=tz),
+               "alerta_ultimo_credito",
+               "Alerta último crédito: 1 crédito y días restantes del mes", ahora)
+    _programar(job_alerta_sin_creditos,
+               CronTrigger(hour=10, minute=0, timezone=tz),
+               "alerta_sin_creditos",
+               "Alerta sin créditos: 0 créditos disponibles", ahora)
     # ── Cierre de mes (día 1, 00:05 CLT): antes lo hacía n8n ──
-    scheduler.add_job(
-        job_cierre_mes,
-        CronTrigger(day=1, hour=0, minute=5,
-                    timezone=pytz.timezone("America/Santiago")),
-        id="cierre_mes",
-        name="Cierre de mes anterior: asistencia + hitos + correos",
-        replace_existing=True,
-        misfire_grace_time=3600,
-    )
+    _programar(job_cierre_mes,
+               CronTrigger(day=1, hour=0, minute=5, timezone=tz),
+               "cierre_mes",
+               "Cierre de mes anterior: asistencia + hitos + correos", ahora)
     scheduler.start()
     logger.info(
         "🚀 Scheduler iniciado - generación de clases 00:05, "
