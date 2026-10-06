@@ -6,6 +6,10 @@ import smtplib
 import sys
 from email.message import EmailMessage
 from datetime import datetime, date
+# `_escape_html`: el WhatsApp del box lo escribe el admin a mano y termina en el HTML del
+# correo (`bloque_contacto`) y en el preview del panel — hay que escaparlo. Se importa con
+# alias porque en este módulo `html` es el nombre de las variables con el cuerpo del correo.
+from html import escape as _escape_html
 
 from app.core.config import settings
 
@@ -182,7 +186,7 @@ def bloque_contacto(tenant_id=None) -> str:
         '<p style="color:#71717a;font-size:13px;line-height:1.6;text-align:center;'
         'margin:18px 0 0;">¿Tienes dudas? <strong>Responde este correo</strong> o '
         f'escríbenos al <a href="{link}" style="color:#c2410c;font-weight:bold;">'
-        f'WhatsApp {numero}</a>.</p>')
+        f'WhatsApp {_escape_html(numero)}</a>.</p>')
 
 
 def render_con_contacto(html: str, tenant_id=None) -> str:

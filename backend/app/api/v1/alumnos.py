@@ -1,5 +1,4 @@
 """Router de endpoints para el flujo de registro/activación de alumnos."""
-import re
 from app.core.urls import url_frontend  # B.2
 import string
 import secrets
@@ -20,6 +19,11 @@ from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
 from app.api.v1.usuarios import hash_password
 from app.core.dependencies import get_current_user, get_current_admin, es_usuario_prueba
+# El RUT chileno vive en `app/utils/rut.py` (módulo 11): lo comparten esta ruta y la
+# configuración bancaria del box (`api/v1/configuracion.py`, donde el RUT es del titular
+# de la cuenta). Se importa acá y se sigue exponiendo como `alumnos.validar_rut` porque
+# hay consumidores que lo importan desde este módulo (`scripts/seed_ml_data*.py`).
+from app.utils.rut import validar_rut
 from app.services.auditoria_service import registrar_auditoria
 # Avisos del PANEL (la campana): el alta avisa al admin del box también in-app.
 # Ver docs/NOTIFICACIONES_PANEL.md.
@@ -111,26 +115,6 @@ def _serializar_mi_perfil(usuario):
         "fecha_nacimiento": usuario.fecha_nacimiento,
     }
 
-
-
-def validar_rut(rut: str) -> bool:
-    """Valida RUT chileno con dígito verificador (módulo 11)."""
-    rut = (rut or "").strip().upper().replace(".", "")
-    if not re.match(r"^\d{1,8}-[0-9K]$", rut):
-        return False
-    cuerpo, dv = rut.split("-")
-    suma = 0
-    multiplo = 2
-    for d in reversed(cuerpo):
-        suma += int(d) * multiplo
-        multiplo = 2 if multiplo == 7 else multiplo + 1
-    resto = suma % 11
-    dv_calc = 11 - resto
-    if dv_calc == 11:
-        dv_calc = 0
-    elif dv_calc == 10:
-        dv_calc = "K"
-    return str(dv_calc) == dv
 
 
 def generar_password_provisional(longitud=8) -> str:
