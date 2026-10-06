@@ -6,7 +6,7 @@ import { fmtFechaChile, fmtFechaCortaChile } from '../../utils/fecha';
 /**
  * Panel del Historial del alumno: la MISMA pantalla para el box y para el alumno.
  *
- * El backend devuelve SIEMPRE la misma envoltura para las 6 secciones
+ * El backend devuelve SIEMPRE la misma envoltura para las 7 secciones
  * (`{alumno, seccion, secciones, incluye_privado, datos}`), así que acá hay un solo
  * cliente: se pide una sección por vez (`?seccion=...`) y se dibuja lo que traiga
  * `datos`. Nada de números calculados en el front (el backend es la única
@@ -473,6 +473,79 @@ const SeccionMembresias = ({ datos, onPagina }) => {
 };
 
 
+// Estados de un pedido del Bazar (mismos valores que el backend) para la etiqueta de color.
+const ESTADOS_BAZAR = {
+    pendiente: { label: 'Pendiente', clase: 'bg-amber-500/20 text-amber-200' },
+    validado: { label: 'Validado', clase: 'bg-sky-500/20 text-sky-300' },
+    entregado: { label: 'Entregado', clase: 'bg-emerald-500/20 text-emerald-300' },
+    cancelado: { label: 'Cancelado', clase: 'bg-red-500/20 text-red-300' },
+};
+
+const SeccionBazar = ({ datos, onPagina }) => {
+    const t = datos.totales || {};
+    const items = datos.items || [];
+
+    return (
+        <div className="space-y-5" data-testid="historial-bazar">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Dato label="Pedidos" valor={num(t.pedidos)} destacado
+                    testid="historial-bazar-pedidos" />
+                <Dato label="Cobrados" valor={num(t.cobrados)} />
+                <Dato label="Pendientes" valor={num(t.pendientes)} />
+                <Dato label="Total cobrado" valor={clp(t.cobrado_clp)}
+                    testid="historial-bazar-cobrado" />
+            </div>
+
+            <p className="text-xs text-zinc-500">
+                Aparecen TODOS los pedidos, incluidos los que todavía no se validaron. El “Total
+                cobrado” suma solo los validados y entregados: es el mismo Bazar que muestra la
+                pestaña Pagos. El código de retiro se genera cuando el box valida el pedido.
+            </p>
+
+            <Card titulo="Pedidos del bazar">
+                <Tabla columnas={['Fecha', 'Producto', 'Cant.', 'Total', 'Estado', 'Código',
+                    'Entregado por', 'Entregado el']}>
+                    {items.map((p) => {
+                        const estado = ESTADOS_BAZAR[p.estado]
+                            || { label: p.estado, clase: 'bg-zinc-700 text-zinc-200' };
+                        return (
+                            <tr key={p.id} data-testid="historial-pedido">
+                                <td className="py-2 pr-4 text-zinc-200">{fechaCorta(p.fecha)}</td>
+                                <td className="py-2 pr-4 text-zinc-300">{p.producto}</td>
+                                <td className="py-2 pr-4 text-zinc-400">{num(p.cantidad)}</td>
+                                <td className="py-2 pr-4 font-semibold text-zinc-100">{clp(p.total_clp)}</td>
+                                <td className="py-2 pr-4">
+                                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${estado.clase}`}>
+                                        {estado.label}
+                                    </span>
+                                </td>
+                                <td className="py-2 pr-4 font-mono text-zinc-300">
+                                    {p.codigo_retiro
+                                        || <span className="font-sans text-zinc-600">—</span>}
+                                </td>
+                                <td className="py-2 pr-4 text-zinc-400">{p.entregado_por || '—'}</td>
+                                <td className="py-2 pr-4 text-zinc-400">
+                                    {p.entregado_en ? fechaCorta(p.entregado_en) : '—'}
+                                </td>
+                            </tr>
+                        );
+                    })}
+                    {items.length === 0 && (
+                        <tr>
+                            <td colSpan="8" className="py-6 text-center text-zinc-500">
+                                Todavía no hay pedidos del bazar
+                            </td>
+                        </tr>
+                    )}
+                </Tabla>
+                <Paginado paginado={datos.paginado} onPagina={onPagina}
+                    testid="historial-paginado-bazar" />
+            </Card>
+        </div>
+    );
+};
+
+
 const SeccionRms = ({ datos, onPagina }) => {
     const t = datos.totales || {};
     const items = datos.items || [];
@@ -585,6 +658,7 @@ const SECCIONES_RENDER = {
     asistencia: SeccionAsistencia,
     pagos: SeccionPagos,
     membresias: SeccionMembresias,
+    bazar: SeccionBazar,
     rms: SeccionRms,
     beneficios: SeccionBeneficios,
 };
@@ -596,6 +670,7 @@ const SECCIONES_UI = [
     { id: 'asistencia', label: 'Asistencia', disponible: true },
     { id: 'pagos', label: 'Pagos', disponible: true },
     { id: 'membresias', label: 'Membresías', disponible: true },
+    { id: 'bazar', label: 'Bazar', disponible: true },
     { id: 'rms', label: 'RMs', disponible: true },
     { id: 'beneficios', label: 'Beneficios', disponible: true },
 ];

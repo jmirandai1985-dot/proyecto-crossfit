@@ -1,4 +1,4 @@
-"""Router del Historial del alumno: las 6 secciones del panel, para el box y para el alumno.
+"""Router del Historial del alumno: las 7 secciones del panel, para el box y para el alumno.
 
 Dos entradas y UN solo servicio (`historial_alumno_service.panel`), que es donde viven las
 reglas y los números del panel:
@@ -19,7 +19,7 @@ datos financieros (`AlumnoFichaCoach.jsx`). Es un criterio MÁS estricto que el 
 
 FIX 1 (plan de prueba): un alumno en modo prueba no puede usar el Performance Hub / Pizarra de
 RMs, así que la sección `rms` le responde 403 con el mismo mensaje que el resto de las secciones
-de pago. Las otras 5 sí: son su asistencia, su plan y sus pagos.
+de pago. Las otras 6 sí: son su asistencia, su plan y sus pagos.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session

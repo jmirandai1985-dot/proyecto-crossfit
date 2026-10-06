@@ -127,8 +127,9 @@ def test_b1_el_admin_ve_el_historial_completo_de_un_alumno(cliente, tokens):
     assert cuerpo["alumno"]["id"] == alumno_id
     assert cuerpo["incluye_privado"] is True
     assert "gestion" in cuerpo["datos"], "el admin tiene que ver la gestión del box"
-    # El menú trae las 6 secciones listas: `beneficios` se sumó al implementarse la F2.
-    assert len(cuerpo["secciones"]) == 6
+    # El menú trae las 7 secciones listas: `beneficios` se sumó al implementarse la F2 y
+    # `bazar` al publicarse el detalle de pedidos.
+    assert len(cuerpo["secciones"]) == 7
     assert all(s["disponible"] for s in cuerpo["secciones"])
 
 
@@ -205,8 +206,9 @@ def test_c3_beneficios_se_anuncia_y_responde(cliente, tokens):
     assert datos["disponible"] is True and datos["motivo"] is None
     assert set(datos["totales"]) == {"total", "vigentes", "usados", "vencidos", "anulados"}
     secciones = {s["id"]: s for s in r.json()["secciones"]}
-    assert len(secciones) == 6
+    assert len(secciones) == 7
     assert secciones["beneficios"]["disponible"] is True
+    assert secciones["bazar"]["disponible"] is True
     assert secciones["asistencia"]["disponible"] is True
 
 

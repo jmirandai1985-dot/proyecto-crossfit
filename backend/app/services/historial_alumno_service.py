@@ -45,7 +45,10 @@ Reglas de negocio (UNA definición por número, todas acá)
     pagó de verdad, con su descuento si el box se lo hizo. Qué suscripciones se listan lo
     decide el mismo criterio que `metricas_service.mrr` (alguna vez vigentes: ni `pendiente`
     ni `rechazado`). Bazar por el `total` real de los pedidos `validado`/`entregado` (un
-    pedido `pendiente` no es plata cobrada). La sección Membresías, en cambio, sigue mostrando
+    pedido `pendiente` no es plata cobrada). La lista de esos dos estados es la COMPARTIDA
+    (`shared.estados.ESTADOS_PAGO_BAZAR`: la misma que usan el BI y el Excel de Reportes a través
+    de `metricas_service.ventas_bazar`), así que "venta del Bazar" significa lo mismo en las tres
+    pantallas. La sección Membresías, en cambio, sigue mostrando
     el PRECIO DE LISTA del plan: ahí la pregunta es cuánto VALE su plan, no cuánto entró (y el
     `precio_lista_clp` de cada pago deja ver el descuento sin mezclar las dos cosas).
  5. "mes con plan" = mes calendario con una suscripción vigente. Mismo criterio que
@@ -57,7 +60,11 @@ Reglas de negocio (UNA definición por número, todas acá)
  6. Las clases que canceló el BOX (`clases.cancelada = true`) no cuentan ni como falta ni como
     asistencia: se informan aparte en `clases_suspendidas`. Castigar al alumno por una clase
     que suspendió el box sería un dato falso.
- 7. `beneficios` (6ª sección) está declarada pero NO se anuncia en el menú de pestañas hasta la
+ 7. `bazar` es el detalle de los pedidos (fecha, producto, cantidad, total, estado, código de
+    retiro y quién/cuándo entregó), NO una segunda lista de plata: muestra también los `pendiente`
+    y los `cancelado`, y marca con `cobrado` los que suman (la lista compartida). Lo que suma
+    coincide con el "Bazar" de la pestaña Pagos, con el BI y con el Excel.
+ 8. `beneficios` (la última sección) está declarada pero NO se anuncia en el menú de pestañas hasta la
     Fase 2 de Fidelización: una pestaña deshabilitada es ruido (y una promesa vacía) para el
     alumno. El id sigue existiendo —se puede pedir `?seccion=beneficios` y devuelve el
     motivo— porque es la sección que va a llenar la Fase 2.
@@ -70,7 +77,7 @@ from typing import Final
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.estados import es_cancelada
+from app.core.estados import es_cancelada, pago_bazar
 from app.models.beneficio import Beneficio, EstadoBeneficio, TipoBeneficio
 from app.models.churn_gestion import ChurnGestion
 from app.models.clase import Clase
@@ -90,13 +97,16 @@ from app.services.beneficios_service import esta_vivo as beneficio_esta_vivo
 from app.services.beneficios_service import etiqueta as beneficio_etiqueta
 from app.services.rms_service import mejor_rm_por_movimiento
 from app.utils.santiago import SANTIAGO, ahora_santiago, fecha_chile, hoy_santiago
-from shared.estados import ESTADOS_SUSCRIPCION_NUNCA_VIGENTES
+from shared.estados import ESTADOS_PAGO_BAZAR, ESTADOS_SUSCRIPCION_NUNCA_VIGENTES
 
 # ── Umbrales / criterios ──────────────────────────────────────────────────────
 # Mismo valor que la LATERAL de A.3 del mantenimiento (`interval '6 hours'`).
 HORAS_CANCELACION_TARDIA: Final[int] = 6
-# Un pedido del Bazar cuenta como plata cobrada sólo en estos estados.
-ESTADOS_PAGO_BAZAR: Final[tuple] = ("validado", "entregado")
+# Un pedido del Bazar cuenta como plata cobrada sólo en estos estados. La lista NO se define
+# acá: vive en `shared.estados.ESTADOS_PAGO_BAZAR` (importada arriba), porque es la MISMA que
+# usan el BI (`daily_kpis.ingresos_bazar`) y el Excel de Reportes
+# (`metricas_service.ventas_bazar`). Antes cada pantalla tenía la suya y el Excel contaba
+# también los pendientes.
 # Tipos de una transacción financiera y su efecto en "lo que se pagó": el ingreso suma y una
 # devolución (egreso) resta. Cualquier otro tipo no mueve la aguja (se ignora, no se adivina).
 TIPO_INGRESO: Final[str] = "ingreso"
@@ -118,12 +128,13 @@ ESTADOS_ASISTENCIA: Final[tuple] = (
 ESTADOS_QUE_CUENTAN: Final[tuple] = (
     ESTADO_ASISTIO, ESTADO_FALTO, ESTADO_CANCELADA_TARDIA)
 
-# ── Las 6 secciones del panel ─────────────────────────────────────────────────
+# ── Las 7 secciones del panel ─────────────────────────────────────────────────
 SECCIONES: Final[tuple] = (
     ("resumen", "Resumen"),
     ("asistencia", "Asistencia"),
     ("pagos", "Pagos"),
     ("membresias", "Membresías"),
+    ("bazar", "Bazar"),
     ("rms", "RMs"),
     ("beneficios", "Beneficios"),
 )
@@ -585,7 +596,9 @@ def _items_pagos(db: Session, alumno_id: int, tenant_id: int) -> list:
         .outerjoin(Producto, Pedido.producto_id == Producto.id)
         .filter(Pedido.tenant_id == tenant_id,
                 Pedido.alumno_id == alumno_id,
-                Pedido.estado.in_(ESTADOS_PAGO_BAZAR))
+                # "Venta del Bazar cobrada": predicado COMPARTIDO con el BI y con el Excel de
+                # Reportes (misma lista `shared.estados.ESTADOS_PAGO_BAZAR`).
+                pago_bazar(Pedido.estado))
         .all()
     )
     for pedido, producto in pedidos:
@@ -636,6 +649,78 @@ def _seccion_pagos(db, alumno, tenant_id, pagina, por_pagina, **_kw) -> dict:
         "paginado": {k: v for k, v in paginado.items() if k != "items"},
         "items": paginado["items"],
     }
+
+
+# ── Bazar (los pedidos del alumno: qué pidió, cuánto y si ya lo retiró) ────────────────────────
+def _pedidos_bazar(db: Session, alumno_id: int, tenant_id: int) -> list:
+    """Pedidos del alumno, del más nuevo al más viejo, con producto y quién lo entregó.
+
+    Es el HISTORIAL de pedidos (TODOS los estados: incluye los `pendiente` —comprobante sin
+    revisar— y los `cancelado`), NO la plata cobrada: `cobrado` marca cuáles suman
+    (`ESTADOS_PAGO_BAZAR`, el mismo criterio que la pestaña Pagos, el BI y el Excel).
+
+    `entregado_por` sale de `usuarios` (migración 044, `ON DELETE SET NULL`): si el usuario que
+    entregó se dio de baja, queda en `None` y la UI muestra la fecha y el código, no un nombre
+    inventado. `entregado_en` es el DÍA CHILENO de la entrega (o `None` si todavía no se entregó).
+    """
+    filas = (
+        db.query(Pedido, Producto.nombre, Usuario.nombre)
+        .outerjoin(Producto, Pedido.producto_id == Producto.id)
+        .outerjoin(Usuario, Pedido.entregado_por == Usuario.id)
+        .filter(Pedido.tenant_id == tenant_id,
+                Pedido.alumno_id == alumno_id)
+        .all()
+    )
+
+    items = []
+    for pedido, producto, entregado_por in filas:
+        items.append({
+            "id": pedido.id,
+            "fecha": fecha_chile(pedido.fecha_pedido),
+            "producto": producto or f"Producto {pedido.producto_id}",
+            "cantidad": pedido.cantidad or 1,
+            "total_clp": round(pedido.total or 0),
+            "estado": pedido.estado,
+            # ¿Es plata cobrada? La MISMA lista compartida que usa el resto del sistema.
+            "cobrado": pedido.estado in ESTADOS_PAGO_BAZAR,
+            # Código de retiro (migración 044): se genera al validar; NULL mientras no se valide.
+            "codigo_retiro": pedido.codigo_retiro,
+            "entregado_por": entregado_por,
+            "entregado_en": fecha_chile(pedido.entregado_en),
+        })
+    items.sort(key=lambda i: (i["fecha"], i["id"]), reverse=True)
+    return items
+
+
+def _seccion_bazar(db, alumno, tenant_id, pagina, por_pagina, **_kw) -> dict:
+    """Los pedidos del Bazar del alumno, uno por fila.
+
+    Es el detalle del Bazar separado de Pagos: acá se ven TAMBIÉN los pedidos que no son plata
+    (`pendiente`, `cancelado`) y los datos del retiro (código, quién y cuándo entregó). El monto
+    que suma es sólo el de los pedidos cobrados, así que coincide con el "Bazar" de la pestaña
+    Pagos, con el BI y con el Excel de Reportes.
+    """
+    items = _pedidos_bazar(db, alumno.id, tenant_id)
+
+    cobrados = [i for i in items if i["cobrado"]]
+    conteo = Counter(i["estado"] for i in items)
+    paginado = _paginado(items, pagina, por_pagina)
+    return {
+        "totales": {
+            "pedidos": len(items),
+            "cobrados": len(cobrados),
+            "entregados": conteo.get("entregado", 0),
+            "pendientes": conteo.get("pendiente", 0),
+            # Plata COBRADA por Bazar (mismo criterio que la pestaña Pagos): un pendiente no es
+            # un pago todavía.
+            "cobrado_clp": sum(i["total_clp"] for i in cobrados),
+            "unidades": sum(i["cantidad"] for i in items),
+            "ultimo_pedido": items[0]["fecha"] if items else None,
+        },
+        "paginado": {k: v for k, v in paginado.items() if k != "items"},
+        "items": paginado["items"],
+    }
+
 
 
 # ── RMs ───────────────────────────────────────────────────────────────────────
@@ -837,6 +922,7 @@ _SECCIONES = {
     "asistencia": _seccion_asistencia,
     "pagos": _seccion_pagos,
     "membresias": _seccion_membresias,
+    "bazar": _seccion_bazar,
     "rms": _seccion_rms,
     "beneficios": _seccion_beneficios,
 }

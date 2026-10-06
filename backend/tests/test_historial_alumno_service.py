@@ -184,18 +184,17 @@ def test_a4_mes_con_plan_lo_deciden_las_fechas_y_el_estado():
     assert svc.suscripcion_del_mes([primero, segundo], 2026, 3) is segundo
 
 
-def test_a5_el_menu_de_secciones_no_anuncia_beneficios():
-    """5 pestañas, no 6: `beneficios` existe (Fase 2 de Fidelización) pero NO se anuncia.
+def test_a5_el_menu_de_secciones_anuncia_las_7_y_ninguna_reservada():
+    """El menú lista las 7 secciones, todas disponibles y sin motivo.
 
-    Una pestaña deshabilitada con "llega más adelante" es ruido para el alumno: la sección se
-    anuncia cuando tiene contenido, y la F2 le dio el suyo (los regalos del alumno).
+    Ni `beneficios` (F2 de Fidelización) ni `bazar` (detalle de pedidos) están reservadas:
+    la sección se anuncia cuando tiene contenido, y las dos lo tienen.
     """
     secciones = svc.secciones_disponibles()
 
     assert [s["id"] for s in secciones] == ["resumen", "asistencia", "pagos",
-                                            "membresias", "rms", "beneficios"]
+                                            "membresias", "bazar", "rms", "beneficios"]
     assert all(s["disponible"] is True and s["motivo"] is None for s in secciones)
-    # Ya no hay secciones reservadas: `beneficios` se implementó (F2) y se anuncia como las demás.
     assert svc.SECCIONES_RESERVADAS == ()
     assert svc.normalizar_seccion("beneficios") == "beneficios"
 
@@ -245,15 +244,17 @@ def alumno_test(db):
     return int(fila[0])
 
 
-def test_b1_la_envoltura_es_la_misma_en_las_6_secciones(db, alumno_test):
-    for seccion in ("resumen", "asistencia", "pagos", "membresias", "rms", "beneficios"):
+def test_b1_la_envoltura_es_la_misma_en_las_7_secciones(db, alumno_test):
+    for seccion in ("resumen", "asistencia", "pagos", "membresias", "bazar", "rms",
+                    "beneficios"):
         panel = svc.panel(db, alumno_test, TENANT_ID, seccion=seccion)
 
         assert set(panel) == {"alumno", "seccion", "secciones", "incluye_privado", "datos"}
         assert panel["seccion"] == seccion
         assert panel["alumno"]["id"] == alumno_test
-        # Las 6 secciones existen Y se anuncian (la última en llegar fue `beneficios`, F2).
-        assert len(panel["secciones"]) == 6
+        # Las 7 secciones existen Y se anuncian (las últimas en llegar fueron `beneficios`, F2,
+        # y `bazar`, el detalle de pedidos).
+        assert len(panel["secciones"]) == 7
         assert isinstance(panel["datos"], dict)
 
 
