@@ -113,7 +113,17 @@ const AlumnoFichaModal = ({ alumnoId, tenantId, onClose }) => {
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500" />
                         </div>
                     ) : errores.usuario && !data ? (
-                        <p className="text-center text-red-400 py-6 text-sm">⚠️ {errores.usuario}</p>
+                        <div className="py-6 text-center space-y-2">
+                            <p className="text-red-400 text-sm">⚠️ {errores.usuario}</p>
+                            {/* Los otros dos bloques se resolvieron por separado: si
+                                alguno también falló, se dice acá en vez de esconderlo. */}
+                            {errores.suscripcion && (
+                                <p className="text-red-400 text-xs">⚠️ Membresía: {errores.suscripcion}</p>
+                            )}
+                            {errores.planes && (
+                                <p className="text-red-400 text-xs">⚠️ Catálogo de planes: {errores.planes}</p>
+                            )}
+                        </div>
                     ) : data ? (
                         <>
                             {/* Nombre + estado */}
@@ -196,6 +206,15 @@ const AlumnoFichaModal = ({ alumnoId, tenantId, onClose }) => {
                                             <p className="text-zinc-200 capitalize">{suscripcion.estado || '—'}</p>
                                         </div>
                                     </div>
+                                )}
+                                {/* El nombre del plan sale del catálogo (`/planes`): si
+                                    esa request falló, el bloque lo DICE en vez de mostrar
+                                    el "Plan ID 7" como si fuera lo normal. */}
+                                {errores.planes && (
+                                    <p className="text-[11px] text-red-400">
+                                        ⚠️ No se pudo cargar el catálogo de planes ({errores.planes}):
+                                        el plan se muestra por su ID.
+                                    </p>
                                 )}
                             </div>
                         </>
