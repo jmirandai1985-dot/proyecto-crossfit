@@ -47,6 +47,9 @@ const Bazar = () => {
     }, [cargarTodo]);
 
     const handleComprar = (producto) => {
+        // Sin datos bancarios cargados no hay compra: el pedido exige subir el comprobante
+        // de la transferencia (ver el aviso de la grilla y el bloque de paso 2).
+        if (!configBancaria) return;
         setProductoSeleccionado(producto);
         setCantidad(1);
         setPaso(2);
@@ -54,6 +57,13 @@ const Bazar = () => {
     };
 
     const handleEnviarPedido = async () => {
+        if (!configBancaria) {
+            setMensaje({
+                type: 'error',
+                text: 'El box todavía no cargó los datos de transferencia: no se puede enviar el pedido.',
+            });
+            return;
+        }
         if (!archivoVoucher) {
             setMensaje({ type: 'error', text: 'Debes seleccionar un comprobante de pago.' });
             return;
@@ -104,6 +114,17 @@ const Bazar = () => {
 
                 <AvisoCarga secciones={erroresCarga} onReintentar={cargarTodo} />
 
+                {/* P2/I3: sin datos de transferencia no se puede comprar (el pedido exige el
+                    comprobante de la transferencia). Antes el Bazar escondía el bloque de datos
+                    bancarios y dejaba llegar hasta "Enviar Pedido" sin destino al que transferir. */}
+                {paso === 1 && !configBancaria && erroresCarga.length === 0 && (
+                    <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+                        data-testid="bazar-sin-datos-bancarios">
+                        ⚠️ El box <strong>todavía no cargó los datos de transferencia</strong>, así que
+                        los pedidos quedan deshabilitados. Contacta al administrador.
+                    </div>
+                )}
+
                 {paso === 1 && (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                         {productos.length === 0 && erroresCarga.length === 0 ? (
@@ -127,8 +148,8 @@ const Bazar = () => {
                                 <p className="text-2xl font-bold text-emerald-600 mt-3">${(p.precio || 0).toLocaleString('es-CL')}</p>
                                 <p className="text-xs text-gray-400 mt-1">Stock: {p.stock} unidades</p>
                                 {p.stock > 0 ? (
-                                    <button onClick={() => handleComprar(p)}
-                                        className="mt-4 w-full py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-bold text-sm transition-colors">
+                                    <button onClick={() => handleComprar(p)} disabled={!configBancaria}
+                                        className="mt-4 w-full py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                                         Comprar
                                     </button>
                                 ) : (
@@ -158,17 +179,26 @@ const Bazar = () => {
                             <span className="text-xs text-gray-400">Stock disponible: {productoSeleccionado.stock}</span>
                         </div>
 
-                        {configBancaria && (
-                            <div className="bg-blue-50 rounded-xl border border-blue-200 p-5">
-                                <h4 className="font-bold text-blue-800 mb-3">🏦 Datos para Transferencia</h4>
+                        {/* I3: el bloque va SIEMPRE, con el mismo fallback que SolicitarPlan.
+                            Sin datos cargados, antes no se renderizaba nada y el alumno subía el
+                            comprobante sin saber a qué cuenta transferir. */}
+                        <div className="bg-blue-50 rounded-xl border border-blue-200 p-5">
+                            <h4 className="font-bold text-blue-800 mb-3">🏦 Datos para Transferencia</h4>
+                            {configBancaria ? (
                                 <div className="bg-white rounded-lg p-3 border border-blue-100 space-y-1.5 text-sm">
                                     <p><span className="font-medium text-gray-600">Banco:</span> {configBancaria.banco}</p>
                                     <p><span className="font-medium text-gray-600">Tipo:</span> {configBancaria.tipo_cuenta}</p>
                                     <p><span className="font-medium text-gray-600">N° Cuenta:</span> <span className="font-bold text-blue-800">{configBancaria.numero_cuenta}</span></p>
                                     <p><span className="font-medium text-gray-600">RUT:</span> {configBancaria.rut}</p>
                                 </div>
-                            </div>
-                        )}
+                            ) : (
+                                <div className="text-sm text-blue-600 bg-white rounded-lg p-3 border border-blue-100"
+                                    data-testid="bazar-datos-bancarios-faltantes">
+                                    <p>⏳ El box aún no ha configurado sus datos de pago.</p>
+                                    <p className="text-xs mt-1">Por favor contacta al administrador para obtener la información de transferencia.</p>
+                                </div>
+                            )}
+                        </div>
 
                         <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                             <h4 className="font-bold text-gray-800 mb-3">📎 Subir Comprobante de Pago</h4>
@@ -193,7 +223,7 @@ const Bazar = () => {
                                 className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-medium text-sm">
                                 ← Volver
                             </button>
-                            <button onClick={handleEnviarPedido} disabled={subiendo || !archivoVoucher}
+                            <button onClick={handleEnviarPedido} disabled={subiendo || !archivoVoucher || !configBancaria}
                                 className="flex-1 px-6 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm disabled:opacity-50">
                                 {subiendo ? 'Procesando...' : '✅ Enviar Pedido'}
                             </button>
