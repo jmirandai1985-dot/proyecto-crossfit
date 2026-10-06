@@ -14,11 +14,13 @@ from shared.estados import (  # noqa: F401  (re-export: punto de importación de
     COLUMNA_ES_COMERCIAL,
     ESTADO_CANCELADO,
     ESTADOS_CANCELADA,
+    ESTADOS_PAGO_BAZAR,
     ESTADOS_SUSCRIPCION_NUNCA_VIGENTES,
     ESTADOS_SUSCRIPCION_VIGENTES,
     ZONA_CHILE,
     es_cancelada,
     lista_sql,
+    lista_sql_pago_bazar,
     sql_fecha_en_chile,
     sql_hoy_chile,
     sql_plan_comercial,
@@ -44,6 +46,17 @@ def plan_comercial(columna):
     NOT NULL) NO pasaría el filtro, que es el lado seguro.
     """
     return columna.is_(True)
+
+
+def pago_bazar(columna):
+    """`columna.in_(ESTADOS_PAGO_BAZAR)`: "el pedido del Bazar ya está cobrado", en una consulta ORM.
+
+    Espejo ORM de `shared.estados.lista_sql_pago_bazar()` (la MISMA lista, `("validado",
+    "entregado")`): la usan el historial del alumno y la pestaña Bazar para que "venta del Bazar"
+    signifique lo mismo que en el BI y en el Excel de Reportes. La lista se lee de
+    `shared.estados` en CADA llamada (no se captura al importar), igual que `no_cancelada()`.
+    """
+    return columna.in_(estados.ESTADOS_PAGO_BAZAR)
 
 
 def dia_chile(columna):

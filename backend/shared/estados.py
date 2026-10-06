@@ -23,6 +23,12 @@ Dos criterios viven acá:
    `sql_plan_comercial()`): excluye de las métricas los planes que existen para dar acceso sin
    ser un cliente (el "Pase de regreso").
 
+4. **`pedidos.estado` = "venta del Bazar COBRADA"** (`ESTADOS_PAGO_BAZAR`): un pedido sólo es plata
+   cobrada cuando está `validado` o `entregado`. Lo usan las tres pantallas que hablan de ventas
+   del Bazar (BI → `daily_kpis.ingresos_bazar`, Reportes → Excel/histórico y el historial del
+   alumno → sección Pagos), que antes tenían TRES reglas distintas (el Excel contaba también los
+   `pendiente`).
+
 ⚠️ **Este paquete no puede importar NADA** (ni `app`, ni SQLAlchemy, ni FastAPI): lo usa también el
 Cron Job, cuya imagen (`backend/Dockerfile.cron`) copia sólo `maintenance/` y `shared/`. Los
 predicados de SQLAlchemy viven en la app (`app/core/estados.py`).
@@ -178,4 +184,28 @@ def sql_plan_comercial(alias: str = "p") -> str:
     texto que venga de un request o de una env var.
     """
     return f"{alias}.{COLUMNA_ES_COMERCIAL} = true"
+
+
+# ── `pedidos.estado`: ¿esta venta del Bazar ya está COBRADA? ───────────────────────────────────
+# El Bazar cobra por pedido: el alumno sube el comprobante y el box valida. Sólo `validado`
+# (cobrado, esperando retiro) y `entregado` (cobrado y retirado) son plata cobrada; `pendiente`
+# es un pedido con comprobante sin revisar y `cancelado` nunca se cobró.
+#
+# Antes cada pantalla decidía por su cuenta y las tres definiciones no coincidían:
+#   · el BI (`daily_kpis.ingresos_bazar`) leía `transacciones_financieras` con `categoria='bazar'`
+#     → como el Bazar NO inserta transacciones, el KPI quedaba SIEMPRE en 0;
+#   · el Excel de Reportes contaba `estado != 'cancelado'` (o sea también los `pendiente`);
+#   · el historial del alumno ya usaba esta lista.
+ESTADOS_PAGO_BAZAR: Final[tuple] = ("validado", "entregado")
+
+
+def lista_sql_pago_bazar() -> str:
+    """`'validado', 'entregado'`: la lista pronta para un `IN (...)` en SQL crudo.
+
+    Los valores son constantes del código (nunca texto de un request), así que interpolarlos en el
+    SQL es seguro. Se lee la constante del MÓDULO en cada llamada (igual que `lista_sql()`), así que
+    agregar un estado no obliga a tocar las consultas.
+    """
+    return lista_sql(ESTADOS_PAGO_BAZAR)
+
 

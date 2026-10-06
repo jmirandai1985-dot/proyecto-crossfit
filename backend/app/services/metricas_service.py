@@ -16,7 +16,8 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from shared.estados import sql_plan_comercial, sql_suscripcion_vigente
+from shared.estados import (lista_sql_pago_bazar, sql_fecha_en_chile,
+                            sql_plan_comercial, sql_suscripcion_vigente)
 from app.utils.santiago import hoy_santiago
 
 # Umbral minimo de base para publicar retencion/churn. Mismo criterio que
@@ -106,6 +107,40 @@ def ingresos_netos(db: Session, tenant_id: int, inicio: date, fin: date) -> floa
           AND fecha >= :ini AND fecha <= :fin
     """), params).scalar() or 0
     return float(ing) - float(egr)
+
+
+def ventas_bazar(db: Session, tenant_id: int, inicio: date, fin: date) -> float:
+    """Ventas del Bazar COBRADAS en el rango de DÍAS chilenos [inicio, fin], inclusive.
+
+    ÚNICA definición de "venta del Bazar": suma de `pedidos.total` de los pedidos cobrados
+    (`ESTADOS_PAGO_BAZAR` = `validado` / `entregado`). Un pedido `pendiente` todavía no es plata
+    (el comprobante no se revisó) y uno `cancelado` nunca lo fue.
+
+    POR QUÉ EXISTE (2026-10): las tres pantallas que hablan de ventas del Bazar tenían reglas
+    distintas y daban números distintos para el mismo mes —
+      · el BI (`daily_kpis.ingresos_bazar`) sumaba `transacciones_financieras` con
+        `categoria='bazar'`, y como el Bazar NUNCA inserta transacciones el KPI quedaba en 0;
+      · el Excel de Reportes contaba `estado != 'cancelado'` (o sea también los `pendiente`);
+      · el historial del alumno contaba `validado`/`entregado`.
+    Ahora las tres la importan y sólo se diferencian en el PERIODO (el BI persiste un día o un mes
+    cerrado; Reportes muestra el mes en vivo y el historial la vida del alumno).
+
+    La fecha es el DÍA CHILENO de `pedidos.fecha_pedido` (timestamptz), igual que el resto de las
+    métricas históricas: comparar contra los bordes UTC del día mandaba la venta de la noche
+    (21:00-23:59 CLT) al día siguiente.
+
+    ⚠️ El neto de `ingresos_netos()` (transacciones) NO incluye estas ventas: hoy el Bazar no
+    genera transacción financiera, así que sumar los dos números no duplica nada. Si en una fase
+    siguiente el pedido inserta su transacción (`categoria='bazar'`), esta función y
+    `ingresos_netos()` se solaparían y habría que excluir la categoría en uno de los dos.
+    """
+    return float(db.execute(text(
+        "SELECT COALESCE(SUM(p.total), 0) FROM pedidos p"
+        " WHERE p.tenant_id = :tid"
+        "   AND " + sql_fecha_en_chile("p.fecha_pedido") + " >= :desde"
+        "   AND " + sql_fecha_en_chile("p.fecha_pedido") + " <= :hasta"
+        "   AND p.estado IN (" + lista_sql_pago_bazar() + ")"
+    ), {"tid": tenant_id, "desde": inicio, "hasta": fin}).scalar() or 0)
 
 
 def ocupacion_promedio(db: Session, tenant_id: int, inicio: date, fin: date) -> int:
