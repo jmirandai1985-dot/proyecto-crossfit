@@ -2,13 +2,24 @@
 Modelo para registrar correos enviados (bienvenida, vencimiento, inactividad).
 No confundir con notificaciones in-app (tabla notificaciones).
 """
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Date
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Date, Index, text
 from sqlalchemy.sql import func
 from app.db.database import Base
 
 
 class NotificacionEnviada(Base):
     __tablename__ = "notificaciones_enviadas"
+
+    # Índice único PARCIAL: hace ATÓMICA la deduplicación de las alertas diarias del
+    # scheduler por (alumno, tipo, día chileno). El `ON CONFLICT` de `_reclamar_envio`
+    # repite este predicado EXACTO. Fuera del índice quedan las filas sin alumno
+    # (correos al admin/lead) y las históricas sin `dia_chile`. La migración 047 crea
+    # el mismo índice en las bases existentes (acá lo ve `create_all` en TEST).
+    __table_args__ = (
+        Index("uq_notif_alumno_tipo_dia", "alumno_id", "tipo", "dia_chile",
+              unique=True,
+              postgresql_where=text("alumno_id IS NOT NULL AND dia_chile IS NOT NULL")),
+    )
 
     id = Column(Integer, primary_key=True)
     # FIX cobertura (26/09/2026): hay correos del sistema cuyo destinatario NO es un
@@ -35,3 +46,9 @@ class NotificacionEnviada(Base):
     # 'YYYY-MM-01' del mes que generó el correo (dedupe de correos mensuales
     # de Asistencia/Hitos: no re-enviar cumplimiento/acompañamiento del mismo mes)
     mes_referencia = Column(Date, nullable=True)
+    # Día calendario de CHILE ('YYYY-MM-DD') del envío: ancla del índice único
+    # parcial `uq_notif_alumno_tipo_dia` (alumno_id, tipo, dia_chile). Hace ATÓMICA
+    # la deduplicación de las alertas diarias del scheduler (evita que dos réplicas
+    # manden el mismo aviso el mismo día). Lo llena `_reclamar_envio`; en las filas
+    # anteriores a la migración 047 queda NULL.
+    dia_chile = Column(Date, nullable=True)

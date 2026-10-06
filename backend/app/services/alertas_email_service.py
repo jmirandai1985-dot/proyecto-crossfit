@@ -1,7 +1,14 @@
 """Servicio de alertas de email automáticas (renovación, inactividad, urgencia).
 
 Usado por el scheduler (jobs diarios) y por endpoints admin de disparo manual.
-Deduplicación: cada envío se marca en `notificaciones_enviadas` para no repetirlo.
+
+── UNA fila por envío, sin carrera entre réplicas ────────────────────────────
+Cada alerta RECLAMA su envío ANTES de mandarlo con `_reclamar_envio`: inserta la fila
+`enviado` con `dia_chile`=hoy y un índice único parcial (`alumno_id, tipo, dia_chile`)
+hace que, si DOS réplicas corren el job el mismo día, sólo una obtenga el id y mande el
+correo; la otra recibe `None` y se va. Si el correo no sale, `_marcar_fallido` deja la
+fila como `fallido` (visible en /admin). El envío pasa `registrar=False` a
+`email_service.send_*` para que NO se cree una segunda fila del mismo correo.
 
 ── EL "HOY" DE UN PLAN ES EL DE CHILE (fix 2026-09-29) ────────────────────────
 Un plan vale hasta las 23:59:59 del último día, hora de Chile: el día de `fecha_expiracion`
@@ -16,7 +23,7 @@ El día se cuenta con `hoy_santiago()` y, en el SQL, con `sql_fecha_en_chile()`.
 import calendar
 from app.core.urls import url_frontend  # B.2
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from app.core.config import settings
 from app.core.estados import sql_fecha_en_chile, vigente_hoy
@@ -35,37 +42,71 @@ def _formatear_fecha_es(fecha) -> str:
 
 
 def _ya_enviado(db, alumno_id: int, tipo: str, dias: int = 7) -> bool:
-    """True si ya existe un registro del envío en los últimos N días (dedupe)."""
-    from app.models.notificacion_enviada import NotificacionEnviada
-    desde = datetime.utcnow() - timedelta(days=dias)
-    return db.query(NotificacionEnviada).filter(
-        NotificacionEnviada.alumno_id == alumno_id,
-        NotificacionEnviada.tipo == tipo,
-        NotificacionEnviada.fecha_envio >= desde,
-    ).first() is not None
+    """True si este alumno ya recibió ESTE tipo en los últimos `dias` (dedupe por ventana).
 
-
-def _marcar_enviado(db, alumno_id: int, tipo: str, tenant_id: int = None):
-    """Registra el envío en `notificaciones_enviadas` CON el tenant del alumno.
-
-    Antes insertaba sin `tenant_id`, así que esas filas quedaban invisibles para
-    GET /notificaciones-enviadas, que filtra por el tenant del token del admin
-    (medido: 33/35 de inactividad, 3/3 de renovacion_plan y 1/1 de
-    vencimiento_inminente quedaron con tenant_id NULL).
-
-    Mismo patrón que `email_service._registrar_envio`: el llamador puede pasar
-    `tenant_id` (lo tiene, porque filtra por tenant) y si no, se resuelve desde
-    el alumno.
+    Sólo cuenta `estado = 'enviado'`: una fila `fallido` (el correo NO salió) NO bloquea
+    el reintento. El día se mide contra `now()` de Postgres (la columna es TIMESTAMPTZ).
     """
-    from app.models.notificacion_enviada import NotificacionEnviada
-    from app.models.usuario import Usuario
-    if tenant_id is None and alumno_id:
-        alumno = db.query(Usuario).filter(Usuario.id == alumno_id).first()
-        tenant_id = alumno.tenant_id if alumno else None
-    db.add(NotificacionEnviada(
-        alumno_id=alumno_id, tipo=tipo, estado="enviado",
-        fecha_envio=datetime.utcnow(), tenant_id=tenant_id,
-    ))
+    from sqlalchemy import text
+    fila = db.execute(text("""
+        SELECT 1 FROM notificaciones_enviadas
+         WHERE alumno_id = :alumno_id
+           AND tipo = :tipo
+           AND estado = 'enviado'
+           AND fecha_envio >= now() - make_interval(days => :dias)
+         LIMIT 1
+    """), {"alumno_id": alumno_id, "tipo": tipo, "dias": dias}).first()
+    return fila is not None
+
+
+def _reclamar_envio(db, alumno_id: int, tipo: str, tenant_id: int = None):
+    """Reclama ATÓMICAMENTE el envío de HOY para (alumno, tipo) y devuelve su id.
+
+    Inserta la fila en estado `enviado` con `dia_chile` = hoy (Chile). El índice único
+    parcial `uq_notif_alumno_tipo_dia (alumno_id, tipo, dia_chile)` hace que
+    `INSERT ... ON CONFLICT DO NOTHING RETURNING id` devuelva el id SÓLO a la instancia
+    que ganó la carrera: con DOS réplicas corriendo el mismo job el mismo día, una sola
+    manda el correo (antes ambas veían `_ya_enviado()==False` y mandaban las dos).
+
+    El `WHERE` del `ON CONFLICT` es el predicado EXACTO del índice parcial: sin él,
+    Postgres no infiere el índice y el `ON CONFLICT` falla.
+
+    Devuelve el id de la fila reclamada, o `None` si otra instancia ya la reclamó hoy.
+
+    Como reclama ANTES de mandar, quien llama debe marcar `fallido` la fila si el correo
+    no sale (`_marcar_fallido`); si no, quedaría una fila `enviado` que nunca salió.
+    """
+    from sqlalchemy import text
+    fila = db.execute(text("""
+        INSERT INTO notificaciones_enviadas
+            (alumno_id, tenant_id, tipo, estado, fecha_envio, dia_chile)
+        VALUES (:alumno_id, :tenant_id, :tipo, 'enviado', now(), :dia)
+        ON CONFLICT (alumno_id, tipo, dia_chile)
+            WHERE alumno_id IS NOT NULL AND dia_chile IS NOT NULL
+            DO NOTHING
+        RETURNING id
+    """), {"alumno_id": alumno_id, "tenant_id": tenant_id, "tipo": tipo,
+           "dia": hoy_santiago()})
+    db.commit()
+    return fila.scalar()
+
+
+def _marcar_fallido(db, envio_id: int, error: str):
+    """Marca `fallido` la fila reclamada (el correo NO salió) y guarda el motivo.
+
+    Sin esto, la fila reclamada antes del envío quedaría como `enviado` aunque el correo
+    nunca saliera: /admin/notificaciones mostraría un éxito falso. `error` se recorta a
+    500 caracteres (la columna es TEXT, pero el motivo de SMTP no aporta más).
+    """
+    if not envio_id:
+        return
+    from sqlalchemy import text
+    db.execute(text("""
+        UPDATE notificaciones_enviadas
+           SET estado = 'fallido', detalle_error = :err
+         WHERE id = :id
+    """), {"id": envio_id, "err": (error or "")[:500]})
+    db.commit()
 
 
 def enviar_alertas_renovacion(db, tenant_id: int = 1, dias_aviso: int = 3) -> dict:
@@ -91,14 +132,19 @@ def enviar_alertas_renovacion(db, tenant_id: int = 1, dias_aviso: int = 3) -> di
     for r in rows:
         if _ya_enviado(db, r.id, "renovacion_plan", dias=2):
             continue
+        envio_id = _reclamar_envio(db, r.id, "renovacion_plan", tenant_id=tenant_id)
+        if envio_id is None:
+            continue  # otra réplica ya lo reclamó hoy (índice único parcial)
         fecha_es = _formatear_fecha_es(r.fecha_expiracion)
-        ok = send_renovacion_plan(r.nombre, r.correo, fecha_es, LINK_RENOVAR)
+        # registrar=False: la fila YA la escribió `_reclamar_envio`; que email_service
+        # no inserte una SEGUNDA (antes eran 2 filas por envío, una con tenant NULL).
+        ok = send_renovacion_plan(r.nombre, r.correo, fecha_es, LINK_RENOVAR,
+                                  registrar=False)
         if ok:
-            _marcar_enviado(db, r.id, "renovacion_plan", tenant_id=tenant_id)
             enviados.append(r.correo)
         else:
+            _marcar_fallido(db, envio_id, f"renovacion_plan FALLIDO -> {r.correo}")
             fallidos.append(r.correo)
-    db.commit()
     logger.info(f"[alertas] renovación: {len(enviados)} enviados, {len(fallidos)} fallidos")
     return {"tipo": "renovacion", "enviados": len(enviados), "fallidos": len(fallidos),
             "detalle_enviados": enviados, "detalle_fallidos": fallidos}
@@ -127,13 +173,15 @@ def enviar_alertas_inactividad(db, tenant_id: int = 1, umbral_dias: int = 7) -> 
             continue  # asistió dentro del umbral → no está inactivo
         if _ya_enviado(db, r.id, "inactividad", dias=umbral_dias):
             continue
-        ok = send_alerta_inactividad(r.nombre, r.correo)
+        envio_id = _reclamar_envio(db, r.id, "inactividad", tenant_id=tenant_id)
+        if envio_id is None:
+            continue  # otra réplica ya lo reclamó hoy
+        ok = send_alerta_inactividad(r.nombre, r.correo, registrar=False)
         if ok:
-            _marcar_enviado(db, r.id, "inactividad", tenant_id=tenant_id)
             enviados.append(r.correo)
         else:
+            _marcar_fallido(db, envio_id, f"inactividad FALLIDO -> {r.correo}")
             fallidos.append(r.correo)
-    db.commit()
     logger.info(f"[alertas] inactividad: {len(enviados)} enviados, {len(fallidos)} fallidos")
     return {"tipo": "inactividad", "enviados": len(enviados), "fallidos": len(fallidos),
             "detalle_enviados": enviados, "detalle_fallidos": fallidos}
@@ -164,13 +212,15 @@ def enviar_alertas_urgencia(db, tenant_id: int = 1) -> dict:
     for r in rows:
         if _ya_enviado(db, r.id, "vencimiento_inminente", dias=1):
             continue
-        ok = send_alerta_urgencia_renovacion(r.nombre, r.correo)
+        envio_id = _reclamar_envio(db, r.id, "vencimiento_inminente", tenant_id=tenant_id)
+        if envio_id is None:
+            continue  # otra réplica ya lo reclamó hoy
+        ok = send_alerta_urgencia_renovacion(r.nombre, r.correo, registrar=False)
         if ok:
-            _marcar_enviado(db, r.id, "vencimiento_inminente", tenant_id=tenant_id)
             enviados.append(r.correo)
         else:
+            _marcar_fallido(db, envio_id, f"vencimiento_inminente FALLIDO -> {r.correo}")
             fallidos.append(r.correo)
-    db.commit()
     logger.info(f"[alertas] urgencia: {len(enviados)} enviados, {len(fallidos)} fallidos")
     return {"tipo": "urgencia_renovacion", "enviados": len(enviados), "fallidos": len(fallidos),
             "detalle_enviados": enviados, "detalle_fallidos": fallidos}
@@ -218,14 +268,17 @@ def enviar_alertas_ultimo_credito(db, tenant_id: int = 1) -> dict:
     for r in rows:
         if _ya_enviado(db, r.id, "ultimo_credito", dias=7):
             continue
+        envio_id = _reclamar_envio(db, r.id, "ultimo_credito", tenant_id=tenant_id)
+        if envio_id is None:
+            continue  # otra réplica ya lo reclamó hoy
         ok = send_alerta_ultimo_credito(r.nombre, r.correo,
-                                        r.creditos_disponibles, dias_restantes)
+                                        r.creditos_disponibles, dias_restantes,
+                                        registrar=False)
         if ok:
-            _marcar_enviado(db, r.id, "ultimo_credito", tenant_id=tenant_id)
             enviados.append(r.correo)
         else:
+            _marcar_fallido(db, envio_id, f"ultimo_credito FALLIDO -> {r.correo}")
             fallidos.append(r.correo)
-    db.commit()
     logger.info(f"[alertas] ultimo_credito: {len(enviados)} enviados, {len(fallidos)} fallidos")
     return {"tipo": "ultimo_credito", "enviados": len(enviados), "fallidos": len(fallidos),
             "dias_restantes_mes": dias_restantes,
@@ -255,13 +308,15 @@ def enviar_alertas_sin_creditos(db, tenant_id: int = 1) -> dict:
     for r in rows:
         if _ya_enviado(db, r.id, "sin_creditos", dias=7):
             continue
-        ok = send_alerta_sin_creditos(r.nombre, r.correo)
+        envio_id = _reclamar_envio(db, r.id, "sin_creditos", tenant_id=tenant_id)
+        if envio_id is None:
+            continue  # otra réplica ya lo reclamó hoy
+        ok = send_alerta_sin_creditos(r.nombre, r.correo, registrar=False)
         if ok:
-            _marcar_enviado(db, r.id, "sin_creditos", tenant_id=tenant_id)
             enviados.append(r.correo)
         else:
+            _marcar_fallido(db, envio_id, f"sin_creditos FALLIDO -> {r.correo}")
             fallidos.append(r.correo)
-    db.commit()
     logger.info(f"[alertas] sin_creditos: {len(enviados)} enviados, {len(fallidos)} fallidos")
     return {"tipo": "sin_creditos", "enviados": len(enviados), "fallidos": len(fallidos),
             "detalle_enviados": enviados, "detalle_fallidos": fallidos}

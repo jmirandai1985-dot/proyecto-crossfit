@@ -328,11 +328,16 @@ def _log_seguro(mensaje: str, nivel: str = "error") -> None:
 
 def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, tipo: str = "",
             mes_referencia=None, destinatario_nombre: str = None,
-            destinatario_rol: str = None, tenant_id: int = None) -> bool:
+            destinatario_rol: str = None, tenant_id: int = None,
+            registrar: bool = True) -> bool:
     """Envía via Gmail SMTP con log en BD.
 
     `alumno_id=None` + `destinatario_rol` (admin/lead) también se registra: son correos
     reales del sistema que antes quedaban invisibles en /admin/notificaciones.
+
+    `registrar=False` NO escribe la fila de `notificaciones_enviadas`: lo usan los envíos
+    que YA tienen su propia fila (las alertas del scheduler, que la reclaman ANTES de
+    mandar para deduplicar sin carrera). Evita la fila DUPLICADA por cada envío.
 
     ── FIX (2026-09-26): el `From` NO se saneaba ──
     `To` y `Subject` pasaban por `_limpiar_header`, pero el `From` se armaba con
@@ -364,7 +369,7 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
         if es_modo_simulado():
             _log_seguro(f"[EMAIL_MODO=noop] correo SIMULADO a {destinatario!r}: {asunto!r}",
                         "info")
-            if alumno_id or tipo:
+            if registrar and (alumno_id or tipo):
                 _registrar_envio(alumno_id, tipo, ESTADO_SIMULADO, DETALLE_SIMULADO,
                                  mes_referencia=mes_referencia,
                                  destinatario_correo=destinatario,
@@ -392,7 +397,7 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
             server.send_message(msg)
 
         _log_seguro(f"Correo enviado a {destinatario!r}: {asunto!r}", "info")
-        if alumno_id or tipo:
+        if registrar and (alumno_id or tipo):
             _registrar_envio(alumno_id, tipo, "enviado", mes_referencia=mes_referencia,
                              destinatario_correo=destinatario,
                              destinatario_nombre=destinatario_nombre,
@@ -404,7 +409,7 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
         # El registro en BD va PRIMERO y en su propio try: antes, si el logging
         # reventaba (carácter raro en el destinatario), la fila se perdía.
         try:
-            if alumno_id or tipo:
+            if registrar and (alumno_id or tipo):
                 _registrar_envio(alumno_id, tipo, "fallido", str(e), mes_referencia,
                                  destinatario_correo=destinatario,
                                  destinatario_nombre=destinatario_nombre,
@@ -807,7 +812,8 @@ def send_bienvenida_activacion(nombre: str, correo: str, password: str, plan_nom
     return ok
 
 
-def send_renovacion_plan(nombre: str, correo: str, fecha_vencimiento: str, link_renovar: str) -> bool:
+def send_renovacion_plan(nombre: str, correo: str, fecha_vencimiento: str, link_renovar: str,
+                         registrar: bool = True) -> bool:
     """Vencimiento próximo (3 días antes) - Recordatorio de renovación."""
     if not correo:
         return False
@@ -823,12 +829,12 @@ def send_renovacion_plan(nombre: str, correo: str, fecha_vencimiento: str, link_
     )
     html = _template(titulo, saludo, cuerpo, "Renovar mi plan", link_renovar)
     ok = _enviar(correo, f"¡Atención, {nombre}! Tu plan en Urban Training Box está por vencer ⏳", html,
-                 None, tipo="renovacion_plan")
+                 None, tipo="renovacion_plan", registrar=registrar)
     logger.info(f"[renovacion_plan] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
 
 
-def send_alerta_inactividad(nombre: str, correo: str) -> bool:
+def send_alerta_inactividad(nombre: str, correo: str, registrar: bool = True) -> bool:
     """Inactividad (7+ días sin asistencia) - Email motivacional de la manada."""
     if not correo:
         return False
@@ -842,12 +848,12 @@ def send_alerta_inactividad(nombre: str, correo: str) -> bool:
     )
     html = _template(titulo, saludo, cuerpo, "Agendar mi próxima clase", url_frontend("/alumno/mis-reservas"))
     ok = _enviar(correo, f"¡Te echamos de menos en la manada, {nombre}! ¿Cuándo vuelves? 👀🏋️‍♂️", html,
-                 None, tipo="inactividad")
+                 None, tipo="inactividad", registrar=registrar)
     logger.info(f"[alerta_inactividad] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
 
 
-def send_alerta_urgencia_renovacion(nombre: str, correo: str) -> bool:
+def send_alerta_urgencia_renovacion(nombre: str, correo: str, registrar: bool = True) -> bool:
     """ÚLTIMO DÍA del plan: vence HOY a las 23:59 (hora de Chile).
 
     ⚠️ Este correo sale la MAÑANA del último día (job de las 06:00 CLT) y desde el 2026-09-29 el
@@ -871,12 +877,13 @@ def send_alerta_urgencia_renovacion(nombre: str, correo: str) -> bool:
     )
     html = _template(titulo, saludo, cuerpo, "Activar mi plan", url_frontend("/alumno/solicitar-plan"))
     ok = _enviar(correo, f"¡{nombre}, tu plan vence HOY a las 23:59! ⏳", html,
-                 None, tipo="vencimiento_inminente")
+                 None, tipo="vencimiento_inminente", registrar=registrar)
     logger.info(f"[alerta_urgencia_renovacion] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
 
 
-def send_alerta_ultimo_credito(nombre: str, correo: str, creditos: int, dias_restantes: int) -> bool:
+def send_alerta_ultimo_credito(nombre: str, correo: str, creditos: int, dias_restantes: int,
+                               registrar: bool = True) -> bool:
     """Último crédito: al alumno le queda 1 crédito y aún hay días del mes.
 
     Disparador (orquestador): `enviar_alertas_ultimo_credito`
@@ -895,12 +902,12 @@ def send_alerta_ultimo_credito(nombre: str, correo: str, creditos: int, dias_res
     html = _template(titulo, saludo, cuerpo, "Reservar mi clase",
                      url_frontend("/alumno/mis-reservas"))
     ok = _enviar(correo, "⚠️ Te queda 1 crédito — ¡No pierdas esta oportunidad!", html,
-                 None, tipo="ultimo_credito")
+                 None, tipo="ultimo_credito", registrar=registrar)
     logger.info(f"[ultimo_credito] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
 
 
-def send_alerta_sin_creditos(nombre: str, correo: str) -> bool:
+def send_alerta_sin_creditos(nombre: str, correo: str, registrar: bool = True) -> bool:
     """Sin créditos: el alumno tiene 0 créditos disponibles (no puede reservar).
 
     Disparador (orquestador): `enviar_alertas_sin_creditos`
@@ -919,7 +926,7 @@ def send_alerta_sin_creditos(nombre: str, correo: str) -> bool:
     html = _template(titulo, saludo, cuerpo, "Renovar mi plan",
                      url_frontend("/alumno/solicitar-plan"))
     ok = _enviar(correo, "❌ Sin créditos — Renueva tu plan y sigue entrenando", html,
-                 None, tipo="sin_creditos")
+                 None, tipo="sin_creditos", registrar=registrar)
     logger.info(f"[sin_creditos] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
 
