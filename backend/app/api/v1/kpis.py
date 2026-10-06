@@ -343,6 +343,10 @@ def get_kpis_mensual(
         "churn_rate": float(kpi.churn_rate) if kpi.churn_rate is not None else None,
         "mrr": float(kpi.mrr),
         "ingresos_total": float(kpi.ingresos_total),
+        # Ventas del Bazar del mes (pedidos cobrados): MISMA definición que Reportes y el
+        # historial del alumno (`metricas_service.ventas_bazar`). Se publica aparte del MRR
+        # porque no es ingreso recurrente. Migración 045.
+        "ingresos_bazar": float(kpi.ingresos_bazar),
         "asistencia_promedio": float(kpi.asistencia_promedio),
         "frecuencia_semanal": float(kpi.frecuencia_semanal),
         "ocupacion_promedio": float(kpi.ocupacion_promedio),
@@ -387,6 +391,7 @@ def get_kpis_mensual_periodos(
         "parcial": (f.year, f.month) == (hoy.year, hoy.month),
         "mrr": float(f.mrr),
         "ingresos_total": float(f.ingresos_total),
+        "ingresos_bazar": float(f.ingresos_bazar),
         "alumnos_activos_inicio": f.alumnos_activos_inicio,
         "churn_rate": float(f.churn_rate) if f.churn_rate is not None else None,
     } for f in filas]

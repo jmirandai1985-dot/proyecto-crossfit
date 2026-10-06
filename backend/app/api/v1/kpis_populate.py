@@ -289,8 +289,15 @@ def populate_daily_kpis(
     ).scalar() or 0
 
     ingresos_membresia = _sum_ingresos(db, tenant_id, objetivo, objetivo, "membresia")
-    ingresos_bazar = _sum_ingresos(db, tenant_id, objetivo, objetivo, "bazar")
-    ingresos_total = _sum_ingresos(db, tenant_id, objetivo, objetivo)
+    # Bazar: definición COMPARTIDA con Reportes y con el historial del alumno
+    # (`metricas.ventas_bazar` = pedidos cobrados del día). Antes se sumaban transacciones con
+    # `categoria='bazar'` y, como el Bazar NO inserta transacciones financieras, el KPI quedaba
+    # SIEMPRE en 0 (bug corregido el 2026-10): la venta del Bazar era invisible para el BI.
+    ingresos_bazar = metricas.ventas_bazar(db, tenant_id, objetivo, objetivo)
+    # El día suma las DOS fuentes de ingreso del box. El esquema diario no tiene un bucket
+    # "otros" (sólo membresía y bazar), así que una categoría nueva de transacción tiene que
+    # agregarse acá a propósito en vez de colarse sola en el total.
+    ingresos_total = ingresos_membresia + ingresos_bazar
 
     row = db.query(DailyKpi).filter(
         DailyKpi.tenant_id == tenant_id, DailyKpi.fecha == objetivo
@@ -317,7 +324,10 @@ def populate_daily_kpis(
         "valores": {
             "alumnos_activos": alumnos_activos, "alumnos_nuevos": alumnos_nuevos,
             "clases_ejecutadas": clases_ejecutadas, "asistentes_totales": asistentes,
-            "ocupacion_promedio": ocupacion, "ingresos_total": ingresos_total,
+            "ocupacion_promedio": ocupacion,
+            "ingresos_membresia": ingresos_membresia,
+            "ingresos_bazar": ingresos_bazar,
+            "ingresos_total": ingresos_total,
         },
     }
 
@@ -408,6 +418,10 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
     # calcula el mes cerrado que se persiste en monthly_kpis.
     mrr = metricas.mrr(db, tenant_id, fin)
     ingresos_total = metricas.ingresos_netos(db, tenant_id, inicio, fin)
+    # Ventas del Bazar del mes: MISMA definición que Reportes y que el historial del alumno
+    # (pedidos cobrados). Tiene columna propia porque NO es ingreso recurrente: la pestaña
+    # Mensual la publica separada del MRR y del ingreso neto del mes (caja).
+    ingresos_bazar = metricas.ventas_bazar(db, tenant_id, inicio, fin)
 
     # ── Asistencia ──
     asistentes_mes = db.query(
@@ -452,6 +466,7 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
     row.churn_rate = churn_rate
     row.mrr = mrr
     row.ingresos_total = ingresos_total
+    row.ingresos_bazar = ingresos_bazar
     row.asistencia_promedio = asistencia_promedio
     row.frecuencia_semanal = frecuencia_semanal
     row.ocupacion_promedio = ocupacion_promedio
@@ -468,6 +483,7 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
             "alumnos_baja": alumnos_baja, "churn_rate": churn_rate,
             "retencion_pct": retencion_pct, "retencion_base": base_retencion,
             "mrr": float(mrr), "ingresos_total": ingresos_total,
+            "ingresos_bazar": ingresos_bazar,
             "asistencia_promedio": asistencia_promedio,
             "frecuencia_semanal": frecuencia_semanal,
             "ocupacion_promedio": ocupacion_promedio,

@@ -653,7 +653,9 @@ const AdminKpis = () => {
                             </p>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        {/* 5 tarjetas (incluye "Ventas Bazar"): 4 columnas hasta `lg` y una sola
+                            fila desde `xl` (mismo criterio responsive que las tarjetas del Dashboard). */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6">
                             <KpiCard label="Conversión prueba→plan" value={Number(mes.conversion_rate)} unit="%" icon={TrendingUp} color="border-green-500"
                                 onDetalle={verKpiMensual('mensual:conversion_rate', Number(mes.conversion_rate), '%')} />
                             <KpiCard label="Riesgo de Abandono"
@@ -664,6 +666,11 @@ const AdminKpis = () => {
                                 onDetalle={verKpiMensual('mensual:mrr', Number(mes.mrr), 'CLP')} />
                             <KpiCard label="Ingresos del mes" value={Number(mes.ingresos_total)} unit="CLP" icon={DollarSign} color="border-blue-500"
                                 onDetalle={verKpiMensual('mensual:ingresos_total', Number(mes.ingresos_total), 'CLP')} />
+                            {/* Ventas del Bazar del mes: tarjeta APARTE del MRR y del ingreso del mes.
+                                No es ingreso recurrente y el Bazar no genera transacción financiera,
+                                así que no está dentro de ninguna de las otras dos. */}
+                            <KpiCard label="Ventas Bazar" value={Number(mes.ingresos_bazar)} unit="CLP" icon={ShoppingCart} color="border-teal-500"
+                                onDetalle={verKpiMensual('mensual:ingresos_bazar', Number(mes.ingresos_bazar), 'CLP')} />
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

@@ -30,6 +30,10 @@ class MonthlyKpi(Base):
     # Finanzas
     mrr = Column(Numeric(12, 0), nullable=False, default=0)
     ingresos_total = Column(Numeric(12, 0), nullable=False, default=0)
+    # Ventas del Bazar del mes (pedidos `validado`/`entregado`, `metricas_service.ventas_bazar`).
+    # Columna propia a propósito: NO es ingreso recurrente, así que la pestaña Mensual la
+    # publica separada del MRR y del ingreso neto del mes. Migración 045.
+    ingresos_bazar = Column(Numeric(12, 0), nullable=False, default=0)
     # Asistencia
     asistencia_promedio = Column(Numeric(5, 2), nullable=False, default=0)
     frecuencia_semanal = Column(Numeric(4, 2), nullable=False, default=0)

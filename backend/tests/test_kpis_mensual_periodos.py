@@ -114,6 +114,8 @@ def _fila_mensual(**overrides):
         conversion_rate=Decimal("30.00"), alumnos_activos_inicio=0,
         alumnos_baja=0, churn_rate=None, mrr=Decimal("2439000"),
         ingresos_total=Decimal("4262000"), asistencia_promedio=Decimal("88.50"),
+        # Ventas del Bazar del mes (migración 045): se serializa desde la columna nueva.
+        ingresos_bazar=Decimal("175000"),
         frecuencia_semanal=Decimal("2.10"), ocupacion_promedio=Decimal("64.30"),
     )
     base.update(overrides)
@@ -141,6 +143,8 @@ def test_a_churn_null_no_rompe_el_endpoint_mensual():
     assert resp["mrr"] == 2439000.0
     assert resp["ingresos_total"] == 4262000.0
     assert resp["ocupacion_promedio"] == 64.30
+    # El Bazar del mes se publica aparte (migración 045) y también sobrevive el churn NULL.
+    assert resp["ingresos_bazar"] == 175000.0
 
 
 def test_a2_churn_con_valor_sigue_siendo_numero():

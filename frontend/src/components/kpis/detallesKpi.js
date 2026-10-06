@@ -125,10 +125,14 @@ export const DETALLES_KPI = {
         'Ingresos por bazar',
         'Dinero de bazar ese día',
         'La parte de los ingresos del día que viene del bazar (suplementos, ropa, accesorios).',
-        'Igual que Ingresos del día, mirando sólo las transacciones de bazar.',
-        'Es ingreso variable, no recurrente: suma, pero no se puede planificar como la membresía.',
-        'Si el bazar aporta mucho, dejar el stock y los precios al día: los avisos de stock bajo llegan '
-        + 'por correo.',
+        'Suma de los pedidos del bazar COBRADOS ese día: los que el box ya validó (o entregó). '
+        + 'Un pedido con el comprobante sin revisar todavía no es plata y no suma; un pedido '
+        + 'cancelado tampoco. Es la misma cuenta que ven el historial del alumno y el reporte '
+        + 'descargable.',
+        'Es ingreso variable, no recurrente: suma, pero no se puede planificar como la membresía. '
+        + 'Un día en 0 es normal si nadie pidió nada.',
+        'Si el bazar aporta mucho, dejar el stock y los precios al día: los avisos de stock bajo '
+        + 'llegan por correo.',
     ),
 
     // ── Pestaña MENSUAL: el mes elegido (cerrado, o el mes en curso parcial) ─────
@@ -178,6 +182,21 @@ export const DETALLES_KPI = {
         + 'flojo por menos bazar o menos altas nuevas. En el mes EN CURSO los números van a medias.',
         'Comparar con los meses anteriores en el selector de arriba y bajar al detalle de ingresos de '
         + 'Reportes para revisar los meses flojos.',
+    ),
+    // Separada a propósito de MRR e Ingresos del mes: es BRUTA (sin egresos), no recurrente y no
+    // está incluida en las otras dos.
+    'mensual:ingresos_bazar': kpi(
+        'Ventas Bazar',
+        'Plata del bazar en el mes',
+        'Cuánto vendió el bazar del box en el mes (suplementos, ropa, accesorios).',
+        'Suma de los pedidos COBRADOS del mes (validados o entregados), por la fecha del pedido. '
+        + 'Un pedido con el comprobante sin revisar todavía no es plata y no suma. No está incluida '
+        + 'en el MRR (que sólo cuenta planes, a precio de lista) ni en el ingreso del mes (que es '
+        + 'caja neta de las transacciones).',
+        'Es ingreso variable: un mes fuerte de bazar mejora la caja, pero no dice nada del tamaño '
+        + 'del negocio (para eso está el MRR). Conviene compararlo con el mismo mes de años anteriores.',
+        'Si el bazar crece, revisar stock, precios y la entrega de los pedidos: un pedido pagado que '
+        + 'nadie retira es una mala experiencia para el alumno.',
     ),
     'mensual:asistencia_promedio': kpi(
         'Asistencia promedio',
