@@ -6,7 +6,6 @@ import api from '../../services/api';
 import AlumnoFichaModal from '../../components/AlumnoFichaModal';
 import { RiskBadge } from '../../components/kpis/RiskBadge';
 import RecomendacionModal from '../../components/kpis/RecomendacionModal';
-import { estiloReco } from '../../components/kpis/recoEstilo';
 import { ARQUETIPOS_UI, estiloArquetipo, arquetipoDe } from '../../components/kpis/arquetipoEstilo';
 import { KpiCard } from '../../components/kpis/KpiCard';
 import { ArquetipoBadge } from '../../components/kpis/ArquetipoBadge';
@@ -631,8 +630,9 @@ const Fidelizacion = () => {
                                                 </td>
                                                 <td className="px-6 py-4 text-sm text-zinc-400">{p.motivo || '—'}</td>
                                                 <td className="px-6 py-4">
-                                                    {/* Esta columna y la plantilla que propone el modal salen de
-                                                        la MISMA regla del backend (`sugerir()`), pedida en lote. */}
+                                                    {/* Esta columna y el modal de detalle salen de la MISMA función
+                                                        del backend (`sugerir()`), pedida en lote: no pueden decir
+                                                        cosas distintas del mismo alumno. */}
                                                     {(() => {
                                                         const sug = sugerencias[String(p.usuario_id)];
                                                         if (!sug) return <span className="text-zinc-500">—</span>;
@@ -641,27 +641,27 @@ const Fidelizacion = () => {
                                                                 data-testid={`sugerencia-${p.usuario_id}`}>
                                                                 <div className="flex items-start justify-between gap-2">
                                                                     <span className="text-[10px] font-semibold uppercase tracking-wide text-orange-300"
-                                                                        title={sug.label || 'Sin plantilla sugerida'}>
+                                                                        title={sug.label || 'Sin correo que mandar'}>
                                                                         {sug.plantilla || 'Sin correo que mandar'}
                                                                     </span>
-                                                                    {p.recomendacion && (
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => setDetalleReco(p)}
-                                                                            title={`Recomendación (situación de hoy): ${p.recomendacion}${p.desactualizada ? ' · refrescando el modelo…' : ''}`}
-                                                                            aria-label={`Ver la recomendación para ${p.alumno_nombre || `alumno #${p.usuario_id}`}`}
-                                                                            className="shrink-0 rounded p-0.5 text-zinc-400 hover:bg-zinc-700/60 hover:text-orange-400"
-                                                                        >
-                                                                            <Eye className="h-3.5 w-3.5" />
-                                                                        </button>
-                                                                    )}
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setDetalleReco(p)}
+                                                                        title={`Detalle de hoy: ${sug.plantilla ? sug.label : 'sin acción'} · ${sug.motivo}`}
+                                                                        aria-label={`Ver el detalle para ${p.alumno_nombre || `alumno #${p.usuario_id}`}`}
+                                                                        className="shrink-0 rounded p-0.5 text-zinc-400 hover:bg-zinc-700/60 hover:text-orange-400"
+                                                                    >
+                                                                        <Eye className="h-3.5 w-3.5" />
+                                                                    </button>
                                                                 </div>
                                                                 <div className="text-xs leading-snug text-zinc-300 line-clamp-2">
                                                                     {sug.plantilla ? sug.label : sug.motivo}
                                                                 </div>
-                                                                <div className="text-[11px] leading-snug text-zinc-500 line-clamp-1">
-                                                                    {sug.plantilla ? sug.motivo : `Situación: ${estiloReco(p.recomendacion_codigo).etiqueta}`}
-                                                                </div>
+                                                                {sug.plantilla && (
+                                                                    <div className="text-[11px] leading-snug text-zinc-500 line-clamp-1">
+                                                                        {sug.motivo}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         );
                                                     })()}
@@ -744,10 +744,12 @@ const Fidelizacion = () => {
                 />
             )}
 
-            {/* MODAL RECOMENDACIÓN (mismo componente que usa la pestaña BI) */}
+            {/* MODAL DE DETALLE: la recomendación es la MISMA función que la columna (sugerir),
+                y el riesgo/probabilidad del modelo va aparte, como contexto. */}
             {detalleReco && (
                 <RecomendacionModal
                     fila={detalleReco}
+                    sugerencia={sugerencias[String(detalleReco.usuario_id)] || null}
                     onClose={() => setDetalleReco(null)}
                 />
             )}

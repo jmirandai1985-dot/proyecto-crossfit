@@ -16,10 +16,10 @@ test fija las cuatro cosas que no pueden romperse:
      vencimiento del preview, el rechazo cuando NO hay membresía vigente, que un envío en modo
      prueba quede `simulado` (nunca `enviado`) sin dejar basura en el log de correos, y todo el
      comportamiento del catálogo por situación:
-       * `sugerir()` aplica las reglas en orden y **dice cuál ganó** (renovación → sin plan o
-         más de 30 días → riesgo alto → 15-30 → 7-14 → ninguna);
+       * `sugerir()` aplica las reglas en orden y **dice cuál ganó** (renovación → plan sin usar →
+         sin plan → riesgo alto → 15-30 → 7-14 → ninguna);
        * cada tramo RECHAZA los días que no le tocan, nombrando el que sí corresponde;
-       * el mensaje de fondo cambia la frase del plan cuando la membresía venció;
+       * el mensaje de fondo es SOLO para quien ya no tiene plan vigente;
        * el correo de riesgo alto NO menciona la probabilidad del modelo (dato del admin).
   C. API (TestClient): catálogo y sugerencia sólo para el admin (alumno y coach 403), preview y
      envío del mismo mensaje (asunto y HTML IDÉNTICOS: si divergieran, el preview sería una
@@ -476,14 +476,18 @@ def test_b8_sin_plan_vigente_la_sugerencia_es_el_mensaje_de_fondo(db, escenario)
 
 
 def test_b9_cada_tramo_le_corresponde_a_sus_dias(db, escenario):
-    """Reglas 4 y 5: el tramo sale de los días REALES (y por encima de 30, el de fondo)."""
+    """Reglas 5-6: el tramo sale de los días REALES; con plan vigente, por encima de 30 días el
+    mensaje de fondo NUNCA aplica (es para quien ya no tiene plan): si la última asistencia es
+    ANTERIOR al inicio del plan, es `plan_sin_usar`."""
     _fijar_vencimiento(db, escenario, 60)     # un plan lejano: no compite con la inactividad
 
     _fijar_dias(db, escenario, DIAS_TRAMO_MEDIO)
     assert svc.sugerir(db, _alumno(db, escenario))["regla"] == svc.P_INACTIVIDAD_15_30
 
+    # 40 días sin venir, pero el plan (inicio hace 25 días) arrancó DESPUÉS de su última
+    # asistencia: compró el plan y no lo estrenó -> "plan sin usar", no el mensaje de fondo.
     _fijar_dias(db, escenario, DIAS_TRAMO_LARGO)
-    assert svc.sugerir(db, _alumno(db, escenario))["regla"] == svc.P_INACTIVIDAD_MAS_30
+    assert svc.sugerir(db, _alumno(db, escenario))["regla"] == svc.P_PLAN_SIN_USAR
 
     _fijar_dias(db, escenario, DIAS_ASISTENCIA)
     assert svc.sugerir(db, _alumno(db, escenario))["regla"] == svc.P_INACTIVIDAD_7_14
@@ -540,8 +544,8 @@ def test_b12_cada_tramo_rechaza_los_dias_que_no_le_tocan(db, escenario):
     assert svc.render(db, _alumno(db, escenario), svc.P_INACTIVIDAD_7_14)["asunto"]
 
 
-def test_b13_el_mensaje_de_fondo_cambia_la_frase_del_plan(db, escenario):
-    """El tramo de fondo aplica por DÍAS o por plan vencido, y el correo lo dice sólo si aplica."""
+def test_b13_el_mensaje_de_fondo_es_solo_sin_plan_vigente(db, escenario):
+    """El tramo de fondo aplica SOLO sin plan vigente: con plan activo se rechaza SIEMPRE."""
     with pytest.raises(svc.PlantillaSinDatos):
         svc.render(db, _alumno(db, escenario), svc.P_INACTIVIDAD_MAS_30)  # 10 días, plan vigente
 
@@ -550,12 +554,11 @@ def test_b13_el_mensaje_de_fondo_cambia_la_frase_del_plan(db, escenario):
     assert preview["contexto"]["plan_vencido"] is True
     assert "no tienes un plan vigente" in preview["html"]
 
-    # Con plan vigente y más de 30 días, el mismo tramo NO habla de renovaciones.
+    # Con plan vigente (aunque lleve más de 30 días) el mismo tramo NO se puede mandar.
     _fijar_vencimiento(db, escenario, 60)
     _fijar_dias(db, escenario, DIAS_TRAMO_LARGO)
-    preview2 = svc.render(db, _alumno(db, escenario), svc.P_INACTIVIDAD_MAS_30)
-    assert preview2["contexto"]["plan_vencido"] is False
-    assert "no tienes un plan vigente" not in preview2["html"]
+    with pytest.raises(svc.PlantillaSinDatos):
+        svc.render(db, _alumno(db, escenario), svc.P_INACTIVIDAD_MAS_30)
 
 
 def test_b14_la_plantilla_de_riesgo_necesita_un_riesgo_real(db, escenario):

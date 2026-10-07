@@ -139,16 +139,22 @@ class PlantillaSinDatos(ValueError):
 
 # ── Datos reales que alimentan cada plantilla ─────────────────────────────────
 def _referencia_actividad(db: Session, alumno) -> date | None:
-    """Desde cuándo se cuentan los días sin entrenar.
+    """Desde cuándo se cuentan los días sin entrenar (ÚNICA definición).
 
-    Última asistencia y, si nunca asistió, la fecha de alta: mismo criterio que la
-    Acción Rápida del panel (decir "7 días" fijo era un número inventado).
+    La última asistencia; si el alumno NUNCA asistió, el INICIO de su plan vigente (compró un plan
+    y todavía no lo estrenó); y sin plan vigente, su alta. Es la MISMA referencia que usa
+    `_sugerir_con`: la sugerencia y los tramos no pueden contar días distintos.
     """
     ultima = db.query(func.max(Asistencia.fecha)).filter(
         Asistencia.tenant_id == alumno.tenant_id,
         Asistencia.usuario_id == alumno.id,
     ).scalar()
-    return ultima or fecha_chile(getattr(alumno, "created_at", None))
+    if ultima is not None:
+        return ultima
+    fila = suscripcion_vigente(db, alumno)
+    if fila is not None:
+        return fecha_chile(fila[0].fecha_inicio)
+    return fecha_chile(getattr(alumno, "created_at", None))
 
 
 def _contexto_inactividad(db: Session, alumno) -> dict:
@@ -280,19 +286,21 @@ def _contexto_inactividad_15_30(db: Session, alumno) -> dict:
 
 
 def _contexto_inactividad_mas_30(db: Session, alumno) -> dict:
-    """El mensaje de fondo: más de un mes sin entrenar **o** sin plan vigente.
+    """El mensaje de fondo: el alumno YA NO tiene un plan vigente (su membresía venció).
 
-    Acá SÍ se admite una de las dos situaciones (no hay rango de días que rechazar): el texto
-    del correo cambia la frase del plan según `plan_vencido`.
+    Con un plan vigente este correo NUNCA aplica: su copy habla de "no tienes un plan vigente" y de
+    coordinar la vuelta con el coach. Los días sin entrenar los cubren los tramos 7-14/15-30 y, por
+    encima de 30, el modelo de riesgo; acá sólo se admite "sin plan". El correo cambia la frase del
+    plan según `plan_vencido` (que ahora es siempre verdadero).
     """
     datos = _contexto_inactividad(db, alumno)
     datos["plan_vencido"] = not tiene_membresia_vigente(db, alumno)
-    if datos["dias_inactividad"] <= DIAS_INACTIVIDAD_LARGA and not datos["plan_vencido"]:
+    if not datos["plan_vencido"]:
         otra = _tramo_que_corresponde(db, alumno)
         raise PlantillaSinDatos(
-            f"Esta plantilla es para más de {DIAS_INACTIVIDAD_LARGA} días sin entrenar o una "
-            f"membresía vencida, y este alumno lleva {datos['dias_inactividad']} días con plan "
-            f"vigente." + (f" Le corresponde `{otra}`." if otra else ""))
+            "Esta plantilla es para un alumno SIN plan vigente (su membresía ya venció), y este "
+            f"alumno todavía tiene un plan activo y lleva {datos['dias_inactividad']} días sin "
+            "entrenar." + (f" Le corresponde `{otra}`." if otra else ""))
     return datos
 
 
@@ -451,12 +459,12 @@ PLANTILLAS: Final[tuple] = (
     },
     {
         "id": P_INACTIVIDAD_MAS_30,
-        "label": "Recuperación (más de 30 días o plan vencido)",
-        "descripcion": "El mensaje de fondo: propone coordinar la vuelta con el coach y, si dejó "
-                       "de pagar, lo dice sin mezclar las dos cosas.",
+        "label": "Recuperación (sin plan vigente)",
+        "descripcion": "El mensaje de fondo para quien dejó de pagar: propone coordinar la vuelta "
+                       "con el coach y lo dice sin mezclarlo con la inactividad.",
         "grupo": GRUPO_GESTION,
         "tipo_envio": TIPO_INACTIVIDAD,
-        "requiere": "Más de 30 días sin entrenar o una membresía vencida.",
+        "requiere": "No tener un plan vigente (su membresía ya venció).",
         "_contexto": _contexto_inactividad_mas_30,
         "_render": _render_inactividad_mas_30,
     },
@@ -621,75 +629,98 @@ def _sugerir_con(datos: dict) -> dict:
                                único caso con fecha límite y el alumno todavía está pagando.
       2. `plan_sin_usar`       plan vigente que todavía no estrenó ninguna clase: un plan pago
                                esperando (la MISMA definición que la recomendación del churn).
-      3. `inactividad_mas_30`  sin plan vigente (su plan ya venció) o más de
-                               `DIAS_INACTIVIDAD_LARGA` días sin entrenar: el mensaje de fondo.
-      4. `riesgo_alto`         el modelo lo marca ALTO/CRÍTICO: paga hoy, pero se va.
+      3. `inactividad_mas_30`  SIN plan vigente (su plan ya venció): el mensaje de fondo. Con un
+                               plan vigente NUNCA aplica (su copy habla de "no tienes un plan").
+      4. `riesgo_alto`         el modelo lo marca ALTO/CRÍTICO y ya pasó `DIAS_TEMPRANA_MIN` días:
+                               paga hoy, pero se va.
       5. `inactividad_15_30`   entre 15 y 30 días sin entrenar.
-      6. `inactividad_7_14`    el resto de los inactivos.
-      7. (ninguna)             menos de `DIAS_TEMPRANA_MIN` días: no se inventa un correo.
+      6. `inactividad_7_14`    entre 7 y 14 días sin entrenar.
+      7. (ninguna)             menos de `DIAS_TEMPRANA_MIN` días (o más de 30 con plan vigente):
+                               no se inventa un correo.
+
+    "Días sin entrenar" se cuentan desde la última asistencia; si el alumno NUNCA asistió, desde el
+    INICIO de su plan vigente (compró un plan y todavía no lo estrenó); y sin plan vigente, desde su
+    alta. Es la MISMA referencia que `_contexto_inactividad` (los tramos no pueden contar distinto).
 
     `plantilla: None` (con `regla="sin_situacion"`) es una respuesta legítima, no un error: el
     alumno que entrenó ayer no necesita que nadie lo vaya a buscar.
     """
     alumno = datos["alumno"]
-    referencia = (datos["ultima_asistencia"]
-                  or fecha_chile(getattr(alumno, "created_at", None)))
+    fila = datos["suscripcion"]              # (Suscripcion, Plan) vigente, o None
+    ultima = datos["ultima_asistencia"]      # date de la última asistencia, o None
+    inicio = fecha_chile(fila[0].fecha_inicio) if fila is not None else None
+
+    # Desde cuándo se cuentan los días sin entrenar (ÚNICA definición): la última asistencia; si
+    # NUNCA asistió, el INICIO del plan vigente (compró un plan y todavía no lo estrenó); y sin
+    # plan vigente, el alta. Antes, "nunca asistió" contaba desde el alta: un alumno que compró un
+    # plan hace 4 días salía con "79 días sin entrenar" y caía en el mensaje de fondo.
+    if ultima is not None:
+        referencia = ultima
+    elif fila is not None:
+        referencia = inicio
+    else:
+        referencia = fecha_chile(getattr(alumno, "created_at", None))
     dias = (DIAS_MINIMOS if referencia is None
             else max(DIAS_MINIMOS, (hoy_santiago() - referencia).days))
     contexto = {"dias_inactividad": dias, "ultima_asistencia": referencia}
-    fila = datos["suscripcion"]
-    dias_para_vencer = None
-    if fila is not None:
-        suscripcion, _plan = fila
-        # Días de Chile del plan vigente: la MISMA función que usa la situación del BI.
-        dias_para_vencer = dias_hasta(suscripcion.fecha_expiracion)
+
+    dias_para_vencer = dias_hasta(fila[0].fecha_expiracion) if fila is not None else None
     contexto["dias_para_vencer"] = dias_para_vencer
 
+    # 1. `vencimiento`: plan vigente que vence en ≤ DIAS_RENOVACION_SUGERIDA días.
     if dias_para_vencer is not None and dias_para_vencer <= DIAS_RENOVACION_SUGERIDA:
         return _sugerida(P_VENCIMIENTO, f"Su plan vence en {dias_para_vencer} día(s).", contexto)
-    # Plan sin usar: compró un plan vigente y todavía no estrenó ninguna clase. Va DESPUÉS de
-    # vencimiento (si está por vencer, el aviso con fecha manda) y ANTES de inactividad: un plan
-    # pago esperando es lo más concreto que hay para ofrecer. Misma definición que el churn.
-    if fila is not None:
-        suscripcion_psu, plan_psu = fila
-        inicio_psu = fecha_chile(suscripcion_psu.fecha_inicio)
-        if churn_service.es_plan_sin_usar(True, inicio_psu, datos["ultima_asistencia"]):
-            contexto["plan_sin_usar"] = True
-            dias_plan = (hoy_santiago() - inicio_psu).days if inicio_psu else dias
-            return _sugerida(
-                P_PLAN_SIN_USAR,
-                f"Activó el plan {plan_psu.nombre} hace {dias_plan} día(s) y no registra "
-                "asistencias.",
-                contexto)
+    # 2. `plan_sin_usar`: plan vigente comprado y todavía sin estrenar. Va DESPUÉS de vencimiento
+    #    (si está por vencer, el aviso con fecha manda) y ANTES de inactividad: un plan pago
+    #    esperando es lo más concreto que hay para ofrecer. Misma definición que el churn.
+    if fila is not None and churn_service.es_plan_sin_usar(True, inicio, ultima):
+        contexto["plan_sin_usar"] = True
+        dias_plan = (hoy_santiago() - inicio).days if inicio else dias
+        return _sugerida(
+            P_PLAN_SIN_USAR,
+            f"Activó el plan {fila[1].nombre} hace {dias_plan} día(s) y no registra asistencias.",
+            contexto)
+    # 3. `inactividad_mas_30` — el mensaje de fondo: SOLO para quien YA no tiene plan vigente. Su
+    #    copy habla de "no tienes un plan vigente", así que con un plan activo nunca aplica.
     if fila is None:
         return _sugerida(P_INACTIVIDAD_MAS_30, "No tiene un plan vigente.", contexto)
-    if dias > DIAS_INACTIVIDAD_LARGA:
-        return _sugerida(P_INACTIVIDAD_MAS_30, f"Lleva {dias} días sin entrenar.", contexto)
 
-    prediccion = datos["prediccion"]
-    if prediccion is not None:
-        contexto["riesgo_nivel"] = prediccion.riesgo_nivel
-        contexto["probabilidad_churn"] = float(prediccion.probabilidad_churn)
-        # El riesgo del modelo se usa, pero con su FECHA visible (no es la situación de hoy).
-        calculado = (prediccion.created_at.isoformat()
-                     if prediccion.created_at else None)
-        contexto["riesgo_calculado_en"] = calculado
-        etiqueta = f"El modelo lo marca con riesgo {prediccion.riesgo_nivel}"
-        if calculado:
-            etiqueta += f" (calculado el {fecha_chile(prediccion.created_at)})"
-        return _sugerida(P_RIESGO_ALTO, f"{etiqueta}.", contexto)
-    if dias > DIAS_TEMPRANA_MAX:
-        return _sugerida(P_INACTIVIDAD_15_30, f"Lleva {dias} días sin entrenar.", contexto)
+    # 4. CON plan vigente: el modelo de riesgo sólo cuenta como situación cuando ya hay una señal
+    #    de tiempo (≥ DIAS_TEMPRANA_MIN días). A quien compró el plan esta semana no se le manda un
+    #    "estamos preocupados": todavía no hay nada que interpretar.
     if dias >= DIAS_TEMPRANA_MIN:
-        return _sugerida(P_INACTIVIDAD_7_14, f"Lleva {dias} días sin entrenar.", contexto)
+        prediccion = datos["prediccion"]
+        if prediccion is not None:
+            contexto["riesgo_nivel"] = prediccion.riesgo_nivel
+            contexto["probabilidad_churn"] = float(prediccion.probabilidad_churn)
+            # El riesgo del modelo se usa, pero con su FECHA visible (no es la situación de hoy).
+            calculado = (prediccion.created_at.isoformat()
+                         if prediccion.created_at else None)
+            contexto["riesgo_calculado_en"] = calculado
+            etiqueta = f"El modelo lo marca con riesgo {prediccion.riesgo_nivel}"
+            if calculado:
+                etiqueta += f" (calculado el {fecha_chile(prediccion.created_at)})"
+            return _sugerida(P_RIESGO_ALTO, f"{etiqueta}.", contexto)
+        if dias <= DIAS_TEMPRANA_MAX:
+            return _sugerida(P_INACTIVIDAD_7_14, f"Lleva {dias} días sin entrenar.", contexto)
+        if dias <= DIAS_INACTIVIDAD_LARGA:
+            return _sugerida(P_INACTIVIDAD_15_30, f"Lleva {dias} días sin entrenar.", contexto)
+        # Más de 30 días CON plan vigente: el mensaje de fondo es para quien YA no tiene plan, así
+        # que acá no se inventa un correo (lo cubre el modelo si lo marca; si no, ninguno).
+
+    if ultima is None:
+        motivo = (f"Su plan arrancó hace {dias} día(s) y todavía no registra asistencias: hoy no "
+                  "hay una situación que justifique un correo.")
+    else:
+        motivo = (f"Entrenó hace {dias} día(s): hoy no hay una situación que justifique un "
+                  "correo.")
     return {
         "plantilla": None,
         "label": None,
         "grupo": None,
         "tipo_envio": None,
         "regla": REGLA_SIN_SITUACION,
-        "motivo": (f"Entrenó hace {dias} día(s): hoy no hay una situación que justifique un "
-                   "correo."),
+        "motivo": motivo,
         "contexto": contexto,
     }
 
@@ -702,8 +733,9 @@ def sugerir(db: Session, alumno) -> dict:
 def sugerir_lote(db: Session, alumnos) -> dict:
     """La MISMA sugerencia para varios alumnos: `{alumno_id: sugerencia}`.
 
-    La usa el panel de Fidelización para su columna "Recomendación": con UNA sola regla, la
-    columna y la plantilla que propone el modal de envío no pueden decir cosas distintas.
+    La usa el panel de Fidelización para la columna "Recomendación" y para el modal de detalle: con
+    UNA sola regla (`_sugerir_con`), la columna de la tabla, el modal de detalle, el modal de envío
+    y los correos no pueden decir cosas distintas del mismo alumno.
     """
     return {aid: _sugerir_con(uno)
             for aid, uno in _datos_sugerencia(db, list(alumnos)).items()}

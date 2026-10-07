@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
 import { RiskBadge } from './RiskBadge';
-import { estiloReco } from './recoEstilo';
 
 // Meses abreviados para la fecha exacta del último contacto (mismo formato que
 // `fmtFechaCorta` de la tabla: "12 sep").
@@ -55,7 +54,10 @@ const fmtHace = (dias) => {
  * card zinc-900 y ✕ (más cierre con Esc).
  *
  * Props:
- *   - fila:           fila de GET /kpis/churn (incluye motivo y recomendación)
+ *   - fila:           fila de GET /kpis/churn (incluye motivo, riesgo y probabilidad)
+ *   - sugerencia:     objeto que devuelve el backend (`sugerir()`): la MISMA situación que la
+ *                     columna "Recomendación" de la tabla. Es la recomendación principal del
+ *                     modal; el riesgo/probabilidad del modelo son CONTEXTO aparte.
  *   - onClose:        callback al cerrar
  *   - contactoTxt:    texto ya formateado del último contacto automático. Si no
  *                     viene, se deriva de `fila.ultimo_contacto_automatico` (el
@@ -63,7 +65,7 @@ const fmtHace = (dias) => {
  *   - renovacionTxt:  fecha ya formateada de la próxima renovación. Si no
  *                     viene, se deriva de `fila.fecha_proxima_renovacion`.
  */
-export const RecomendacionModal = ({ fila, onClose, contactoTxt, renovacionTxt }) => {
+export const RecomendacionModal = ({ fila, onClose, contactoTxt, renovacionTxt, sugerencia }) => {
     useEffect(() => {
         const onKey = (e) => { if (e.key === 'Escape') onClose(); };
         window.addEventListener('keydown', onKey);
@@ -73,7 +75,14 @@ export const RecomendacionModal = ({ fila, onClose, contactoTxt, renovacionTxt }
     if (!fila) return null;
 
     const nombre = fila.alumno_nombre || `Alumno #${fila.usuario_id}`;
-    const estilo = estiloReco(fila.recomendacion_codigo);
+
+    // La recomendación sale de `sugerencia` (la MISMA que la columna "Recomendación": una sola
+    // función, `fidelizacion_plantillas.sugerir`). El riesgo/probabilidad del modelo son otro
+    // dato: se muestran arriba, como contexto, no como recomendación.
+    const tienePlantilla = !!(sugerencia && sugerencia.plantilla);
+    const sugBorde = tienePlantilla ? 'border-orange-500' : 'border-emerald-600';
+    const sugTexto = tienePlantilla ? 'text-orange-200' : 'text-zinc-400';
+    const sugEtiqueta = tienePlantilla ? sugerencia.label : 'Sin acción';
 
     // Días hasta la próxima renovación (negativo = ya venció). null si no hay plan.
     const diasParaVencer = (() => {
@@ -136,12 +145,19 @@ export const RecomendacionModal = ({ fila, onClose, contactoTxt, renovacionTxt }
                 </div>
 
                 <div className="space-y-4 p-4">
-                    {/* Riesgo */}
+                    {/* Riesgo/probabilidad del MODELO: contexto aparte (con su fecha), no la
+                        recomendación (esa sale de `sugerencia`, la MISMA que la tabla). */}
                     <div className="flex flex-wrap items-center gap-3">
                         <RiskBadge nivel={fila.riesgo_nivel} />
                         <span className="text-xs text-zinc-400">
                             {Number(fila.probabilidad_churn || 0).toFixed(1)}% de probabilidad de abandono
                         </span>
+                        {fila.riesgo_calculado_en && (
+                            <span className="text-[10px] text-zinc-500"
+                                title="Cuándo se calculó el modelo (no es la situación de hoy, que es en vivo)">
+                                calculado el {fechaCorta(fila.riesgo_calculado_en)}
+                            </span>
+                        )}
                     </div>
 
                     {/* Motivo completo */}
@@ -152,20 +168,21 @@ export const RecomendacionModal = ({ fila, onClose, contactoTxt, renovacionTxt }
                         <p className="mt-1 text-sm text-zinc-200">{fila.motivo || '—'}</p>
                     </div>
 
-                    {/* Recomendación completa. La calcula el backend EN VIVO (misma regla
-                        que el populate): lo que se ve es la situación de HOY, no el snapshot. */}
-                    <div className={`rounded-lg border-l-4 bg-zinc-800/40 p-3 ${estilo.borde}`}>
-                        <p className={`text-[10px] font-semibold uppercase tracking-wide ${estilo.texto}`}>
-                            {estilo.etiqueta}
+                    {/* Recomendación: la MISMA situación que la columna "Recomendación" de la
+                        tabla (una sola función, `sugerir()`). El riesgo/probabilidad del modelo
+                        van aparte (arriba) como contexto, no como recomendación. */}
+                    <div className={`rounded-lg border-l-4 bg-zinc-800/40 p-3 ${sugBorde}`}>
+                        <p className={`text-[10px] font-semibold uppercase tracking-wide ${sugTexto}`}>
+                            {sugEtiqueta}
                         </p>
                         <p className="mt-1 text-sm leading-relaxed text-zinc-200">
-                            {fila.recomendacion || 'Sin recomendación calculada.'}
+                            {sugerencia?.motivo || 'Sin recomendación calculada.'}
                         </p>
-                        <p className="mt-1 text-[11px] text-zinc-500">
-                            Situación calculada hoy{fila.desactualizada
-                                ? ' · el snapshot del modelo quedó atrás y se está refrescando'
-                                : ''}
-                        </p>
+                        {tienePlantilla && (
+                            <p className="mt-1 text-[11px] text-zinc-500">
+                                Plantilla sugerida: {sugerencia.plantilla}
+                            </p>
+                        )}
                     </div>
 
                     {/* Contexto de la fila: estos 2 datos YA NO están en la tabla

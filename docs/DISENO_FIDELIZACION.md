@@ -68,7 +68,7 @@ situación:
 |---|---|---|
 | `inactividad_7_14` | 7 a 14 días sin entrenar | días sin entrenar |
 | `inactividad_15_30` | 15 a 30 días sin entrenar | días sin entrenar |
-| `inactividad_mas_30` | más de 30 días sin entrenar **o** plan vencido | días sin entrenar + si la membresía venció |
+| `inactividad_mas_30` | ya no tiene plan vigente (su membresía venció) | días sin entrenar |
 | `riesgo_alto` | el modelo (ML) lo marca ALTO/CRÍTICO | probabilidad de churn, motivo y recomendación de `predictions_churn` |
 | `vencimiento` | plan por vencer (≤ 5 días) | plan y fecha reales de vencimiento |
 
@@ -84,13 +84,22 @@ para poder mostrárselo al admin:
 
 1. **`vencimiento`** — membresía vigente que vence en ≤ `DIAS_RENOVACION_SUGERIDA` (5) días: es el
    único caso con fecha límite y el alumno todavía está pagando.
-2. **`inactividad_mas_30`** — no tiene membresía vigente (su plan ya venció) o lleva más de
-   `DIAS_INACTIVIDAD_LARGA` (30) días sin entrenar.
-3. **`riesgo_alto`** — el ML lo marca ALTO/CRÍTICO (paga hoy, pero el modelo dice que se va).
-4. **`inactividad_15_30`** — entre 15 y 30 días sin entrenar.
-5. **`inactividad_7_14`** — el resto de los inactivos.
-6. Si **ninguna** aplica (ej. entrenó hace 2 días), la sugerencia es **vacía** con el motivo: no
-   hay nada que reclamarle y el sistema no inventa un correo.
+2. **`plan_sin_usar`** — plan vigente comprado y todavía sin estrenar (la MISMA definición que la
+   categoría `plan_sin_usar` del churn).
+3. **`inactividad_mas_30`** — NO tiene plan vigente (su membresía ya venció): el mensaje de fondo.
+   Con un plan vigente NUNCA aplica.
+4. **`riesgo_alto`** — el ML lo marca ALTO/CRÍTICO y ya pasó `DIAS_TEMPRANA_MIN` días (paga hoy,
+   pero el modelo dice que se va).
+5. **`inactividad_15_30`** — entre 15 y 30 días sin entrenar (con plan vigente).
+6. **`inactividad_7_14`** — entre 7 y 14 días sin entrenar (con plan vigente).
+7. Si **ninguna** aplica (ej. compró el plan esta semana, o entrenó hace 2 días), la sugerencia es
+   **vacía** con el motivo: no hay nada que reclamarle y el sistema no inventa un correo.
+
+Los "días sin entrenar" se cuentan desde la última asistencia; si el alumno NUNCA asistió, desde el
+INICIO de su plan vigente; y sin plan vigente, desde su alta. Esta MISMA función (`sugerir()`) es la
+recomendación que muestran la columna "Recomendación", el modal de detalle del panel, el modal de
+envío y los correos: son la misma cosa (cambio de esta sesión —antes el modal de detalle mostraba el
+código del churn y divergía).
 
 ### F2 — Beneficios y el "Pase de regreso"
 Tabla de beneficios del alumno (con migración), el grupo `beneficios` del modal deja de estar
