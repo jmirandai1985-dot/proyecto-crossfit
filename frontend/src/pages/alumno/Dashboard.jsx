@@ -258,6 +258,7 @@ const AlumnoDashboard = () => {
                     usuario={usuario}
                     membresia={membresia}
                     nivelFuerza={nivelFuerza}
+                    reservas={misReservas}
                 />
             </div>
 

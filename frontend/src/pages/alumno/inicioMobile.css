@@ -139,3 +139,94 @@
     color: #2b1f05;
     background: var(--ub-gold);
 }
+
+/* ── Reserva de hoy: el único bloque naranja a pantalla completa ── */
+.ub-inicio .hero {
+    background: var(--ub-orange);
+    color: #160b03;
+    /* radio con la esquina inferior derecha recortada, como el mockup */
+    border-radius: var(--ub-r-lg) var(--ub-r-lg) var(--ub-r-lg) var(--ub-r-sm);
+    padding: 20px;
+    transition: background .35s;
+}
+
+.ub-inicio[data-checked="1"] .hero {
+    background: var(--ub-ok);
+}
+
+.ub-inicio .hero .hr {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+    font-size: 14.5px;
+}
+
+.ub-inicio .hero .chip {
+    background: #160b03;
+    color: var(--ub-text);
+    font-size: 13px;
+    font-weight: 700;
+    border-radius: 999px;
+    padding: 5px 12px;
+}
+
+.ub-inicio .hero .time {
+    font-family: var(--ub-cond);
+    font-weight: 800;
+    font-size: 92px;
+    line-height: .88;
+    letter-spacing: -.01em;
+    margin-top: 10px;
+}
+
+.ub-inicio .hero .what {
+    font-family: var(--ub-cond);
+    font-weight: 700;
+    font-size: 30px;
+}
+
+/* Estado "sin clases hoy": no hay hora, así que el texto toma su aire. */
+.ub-inicio .hero .what.empty {
+    margin-top: 10px;
+}
+
+.ub-inicio .hero .hint {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 16px;
+    padding: 13px 14px;
+    background: rgba(0, 0, 0, .16);
+    border-radius: var(--ub-r-md);
+    font-weight: 600;
+    font-size: 15px;
+    line-height: 1.25;
+}
+
+/* ── Acciones rápidas de la reserva (dos botones) ── */
+.ub-inicio .links {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.ub-inicio .links button {
+    border: 1.5px solid #34363f;
+    border-radius: var(--ub-r-md);
+    min-height: 48px;
+    padding: 12px;
+    font-weight: 600;
+    font-size: 15px;
+}
+
+/* Pendiente/asistió: mismo mecanismo que el mockup (un solo estado global).
+   `!important` porque las reglas de layout (.hint/.chip) son más específicas. */
+.ub-inicio:not([data-checked="1"]) .done {
+    display: none !important;
+}
+
+.ub-inicio[data-checked="1"] .pend {
+    display: none !important;
+}
