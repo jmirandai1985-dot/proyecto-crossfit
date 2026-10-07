@@ -490,6 +490,7 @@ def preview_beneficio(
 def anular_beneficio(
     beneficio_id: int,
     datos: Anulacion,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
@@ -508,6 +509,12 @@ def anular_beneficio(
     except svc.ValorInvalido as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     alumno = db.query(Usuario).filter(Usuario.id == anulado.alumno_id).first()
+
+    # Anular REVOCA lo que el regalo había entregado (los créditos del pase) -> cambió la
+    # situación del alumno: se ENCOLA su recálculo de churn (segundo plano, sin bloquear).
+    churn_service.programar_recalculo(background_tasks, current_user["tenant_id"],
+                                      anulado.alumno_id)
+
     return {"beneficio": _item(anulado, alumno)}
 
 

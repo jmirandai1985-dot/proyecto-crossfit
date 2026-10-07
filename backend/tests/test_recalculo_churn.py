@@ -2,10 +2,12 @@
 
 Que fija este archivo
 ---------------------
-`predictions_churn` es un data mart de full refresh (cron). Al aprobar un plan, registrar una
-asistencia o cambiar creditos, la fila del alumno quedaba vieja hasta el proximo poblado. Ahora
-esos eventos encolan `churn_service.recalcular_alumno` en segundo plano (BackgroundTasks, sin
-bloquear) y el panel muestra junto a Riesgo y Arquetipo CUANDO se calculo el modelo.
+`predictions_churn` es un data mart de full refresh (cron). Al aprobar una solicitud de plan,
+crear una membresía (suscripción), registrar una asistencia, reservar una clase, comprar una
+clase de emergencia o cambiar los créditos (dar o anular un beneficio), la fila del alumno
+quedaba vieja hasta el próximo poblado. Ahora esos eventos encolan
+`churn_service.recalcular_alumno` en segundo plano (BackgroundTasks, sin bloquear) y el panel
+muestra junto a Riesgo y Arquetipo CUÁNDO se calculó el modelo.
 
   A. PURAS (sin BD): `probabilidad_heuristica` / `nivel_de_riesgo` (los MISMOS del populate) y
      que la fila del panel traiga `riesgo_calculado_en` / `arquetipo_calculado_en`.
@@ -55,35 +57,36 @@ def test_a3_la_fila_trae_cuando_se_calculo_el_modelo():
         motivo="x", recomendacion="y", recomendacion_codigo="sin_accion",
         fecha_proxima_renovacion=None,
         created_at=datetime(2026, 10, 2, tzinfo=timezone.utc))
+    # `_fila_churn` toma motivo/recomendación de la SITUACIÓN EN VIVO (dict), no del snapshot.
+    situacion = {"motivo": "m", "recomendacion": "r",
+                 "recomendacion_codigo": "sin_accion",
+                 "fecha_proxima_renovacion": None, "desactualizada": False}
     fila = kpis._fila_churn(pred, "N", "c", "PENDIENTE", None,
                             {"arquetipo": "ACTIVO_FIEL", "modelo_fecha": "2026-10-01T00:00:00"},
-                            dias_plan=5, dias_sin_asistir=2)
+                            situacion)
     assert fila["riesgo_calculado_en"].startswith("2026-10-02")
     assert fila["arquetipo_calculado_en"].startswith("2026-10-01")
 
 
 # ---- B. Estructura: los disparadores encolan el recalculo ----
-def test_b1_los_disparadores_usan_churn_service():
+def _disparadores():
     import app.api.v1.solicitudes_planes as sp
     import app.api.v1.comprar_emergencia as ce
     import app.api.v1.reservas as rv
     import app.api.v1.fidelizacion as fid
     import app.api.v1.asistencia as asis
     import app.api.v1.beneficios as ben
+    import app.api.v1.suscripciones as sus
+    return (sp, ce, rv, fid, asis, ben, sus)
 
-    for mod in (sp, ce, rv, fid, asis, ben):
+
+def test_b1_los_disparadores_usan_churn_service():
+    for mod in _disparadores():
         assert mod.churn_service is churn_service, mod.__name__
 
 
 def test_b2_los_endpoints_llaman_programar_recalculo():
-    import app.api.v1.solicitudes_planes as sp
-    import app.api.v1.comprar_emergencia as ce
-    import app.api.v1.reservas as rv
-    import app.api.v1.fidelizacion as fid
-    import app.api.v1.asistencia as asis
-    import app.api.v1.beneficios as ben
-
-    for mod in (sp, ce, rv, fid, asis, ben):
+    for mod in _disparadores():
         src = inspect.getsource(mod)
         assert "churn_service.programar_recalculo(" in src, mod.__name__
 

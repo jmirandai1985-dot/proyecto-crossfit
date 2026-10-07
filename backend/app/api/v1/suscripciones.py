@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, timezone
@@ -8,6 +8,7 @@ from app.models.suscripcion import EstadoSuscripcion, Suscripcion
 from app.models.transaccion_financiera import TransaccionFinanciera
 from app.core.dependencies import get_current_admin
 from app.core.rate_limit import limiter, LIMIT_CRITICO
+from app.services import churn_service
 from app.services.auditoria_service import registrar_auditoria
 from app.models.plan import Plan
 from app.utils.santiago import hoy_santiago, fin_de_plan_chile   # HOY en Chile (la TZ del proceso es UTC)
@@ -37,6 +38,7 @@ class SuscripcionCreate(BaseModel):
 def crear_suscripcion(
     request: Request,
     data: SuscripcionCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
@@ -146,6 +148,11 @@ def crear_suscripcion(
         import logging
         logging.getLogger("uvicorn").warning(
             f"No se pudo registrar transaccion financiera: {e}")
+
+    # ── La membresía cambió el plan vigente y/o los créditos del alumno: se ENCOLA su recálculo
+    # de churn (segundo plano, sin bloquear): la próxima lectura del panel ya trae el snapshot
+    # fresco (motivo/recomendación/renovación de HOY). Mismo enganche que aprobar una solicitud.
+    churn_service.programar_recalculo(background_tasks, data.tenant_id, data.usuario_id)
 
     return db_sus
 
