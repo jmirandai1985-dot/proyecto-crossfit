@@ -10,7 +10,7 @@ import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, or_, text as sql_text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -27,6 +27,7 @@ from app.models.predictions_churn import PredictionsChurn
 from app.models.predictions_forecast import PredictionsForecast
 from app.models.segmentacion_alumno import SegmentacionAlumno
 from app.models.usuario import Usuario
+from app.services import churn_service
 from app.services import plan_vencimiento
 from app.services.auditoria_service import registrar_auditoria
 from app.utils.busqueda import columna_normalizada, normalizar
@@ -133,28 +134,76 @@ def _arquetipo_por_alumno(db: Session, tenant_id: int, ids: list) -> dict:
     return salida
 
 
+def _situacion_en_vivo(db: Session, predicciones: list, dias_plan: dict,
+                       dias_inactivo: dict, hoy: date | None = None) -> dict:
+    """{usuario_id: {...}} de la SITUACIÓN 100% en vivo (motivo, recomendación y fecha de
+    próxima renovación de HOY). El snapshot del modelo (`predictions_churn`) sólo aporta el
+    riesgo, la probabilidad y el arquetipo.
+
+    La recomendación y la fecha de próxima renovación se RECALCULAN acá con la MISMA regla que
+    el populate y el recálculo por alumno (`churn_service.recomendacion_churn`), para que la
+    pantalla nunca muestre una recomendación vieja. `desactualizada=True` avisa que el snapshot
+    guardaba otra recomendación (o fecha) que la que HOY corresponde: lo usa el GET para encolar
+    el recálculo de ese alumno.
+    """
+    ids = [p.usuario_id for p in predicciones]
+    if not ids:
+        return {}
+    hoy = hoy or hoy_santiago()
+    tenant_id = predicciones[0].tenant_id
+    asis_30 = _asistencias_ventana_por_alumno(db, tenant_id, ids, 30)
+    asis_90 = _asistencias_ventana_por_alumno(db, tenant_id, ids, 90)
+    psu = churn_service.plan_sin_usar_lote(db, tenant_id, ids, hoy)
+
+    salida = {}
+    for p in predicciones:
+        uid = p.usuario_id
+        dias_para_vencer = dias_plan.get(uid)
+        recomendacion, codigo = churn_service.recomendacion_churn(
+            p.riesgo_nivel, dias_para_vencer is not None, dias_para_vencer,
+            asis_30.get(uid, 0), asis_90.get(uid, 0),
+            es_plan_sin_usar=uid in psu)
+        fecha_renov = (hoy + timedelta(days=dias_para_vencer)
+                       if dias_para_vencer is not None else None)
+        # El snapshot quedó viejo si la recomendación guardada (o la fecha de renovación) difiere
+        # de la de HOY: el panel lo marca y el GET encola el recálculo de ese alumno.
+        desactualizada = (
+            p.recomendacion_codigo != codigo
+            or p.fecha_proxima_renovacion != fecha_renov)
+        salida[uid] = {
+            "motivo": plan_vencimiento.motivo_situacion(
+                dias_inactivo.get(uid), dias_para_vencer),
+            "recomendacion": recomendacion,
+            "recomendacion_codigo": codigo,
+            "fecha_proxima_renovacion": fecha_renov,
+            "desactualizada": desactualizada,
+        }
+    return salida
+
+
 def _fila_churn(p, nombre, correo, estado_gestion, ultimo_contacto,
-                arquetipo=None, dias_plan=None, dias_sin_asistir=None) -> dict:
+                arquetipo=None, situacion=None) -> dict:
     """Formato de fila que consume el frontend (GET y PUT responden igual).
 
-    `dias_plan` (días para vencer el plan vigente) y `dias_sin_asistir` se calculan EN VIVO con
-    `plan_vencimiento`. Con ellos se arma la SITUACIÓN (columna "Motivo") 100% en vivo: así dice
-    lo mismo que la recomendación y refleja lo que pasa HOY (un alumno que acaba de recuperar su
-    plan ya no muestra "sin plan vigente"). Del snapshot del modelo queda sólo el riesgo, la
-    probabilidad y el arquetipo.
+    El estado del MODELO (probabilidad/riesgo/arquetipo) viene del snapshot `predictions_churn`;
+    la SITUACIÓN (motivo, recomendación y fecha de próxima renovación) viene de `situacion`,
+    calculada 100% EN VIVO por `_situacion_en_vivo`. `desactualizada` avisa que el snapshot quedó
+    viejo respecto de la situación de hoy (el GET, entonces, encola el recálculo del alumno).
     """
+    situacion = situacion or {}
     return {
         "usuario_id": p.usuario_id,
         "alumno_nombre": nombre,
         "alumno_correo": correo,
         "probabilidad_churn": float(p.probabilidad_churn),
         "riesgo_nivel": p.riesgo_nivel,
-        "motivo": plan_vencimiento.motivo_situacion(dias_sin_asistir, dias_plan),
-        "recomendacion": p.recomendacion,
-        "recomendacion_codigo": p.recomendacion_codigo,
+        "motivo": situacion.get("motivo"),
+        "recomendacion": situacion.get("recomendacion"),
+        "recomendacion_codigo": situacion.get("recomendacion_codigo"),
         "estado_gestion": estado_gestion,
         "arquetipo": arquetipo,
-        "fecha_proxima_renovacion": p.fecha_proxima_renovacion,
+        "fecha_proxima_renovacion": situacion.get("fecha_proxima_renovacion"),
+        "desactualizada": situacion.get("desactualizada", False),
         "ultimo_contacto_automatico": ultimo_contacto,
         # Cuándo se calculó el MODELO (snapshot): el panel lo muestra junto a Riesgo y Arquetipo
         # para no confundirlo con la SITUACIÓN (que es de hoy, calculada en vivo).
@@ -205,6 +254,27 @@ def _dias_inactividad_por_alumno(db: Session, tenant_id: int, ids: list) -> dict
 
     hoy = hoy_santiago()
     return {uid: max(0, (hoy - ref).days) for uid, ref in filas if ref}
+
+
+def _asistencias_ventana_por_alumno(db: Session, tenant_id: int, ids: list,
+                                    dias: int) -> dict:
+    """{usuario_id: nº de asistencias} en los últimos `dias` (UNA query agregada, sin N+1).
+
+    Misma ventana que `churn_service._conteos` (asistencias entre `hoy - dias` y HOY, en hora
+    de Chile): alimenta la detección de "caída reciente" de la recomendación servida en vivo.
+    """
+    if not ids:
+        return {}
+    desde = hoy_santiago() - timedelta(days=dias)
+    filas = db.query(
+        Asistencia.usuario_id, func.count(Asistencia.id),
+    ).filter(
+        Asistencia.tenant_id == tenant_id,
+        Asistencia.usuario_id.in_(ids),
+        Asistencia.fecha >= desde,
+        Asistencia.fecha <= hoy_santiago(),
+    ).group_by(Asistencia.usuario_id).all()
+    return {uid: n for uid, n in filas}
 
 
 def _generar_insight(filas: list, dias_por_alumno: dict) -> dict:
@@ -593,6 +663,7 @@ def get_estacionalidad(
 # ── 3) GET /api/v1/kpis/churn (BI - CHURN) ───────────────────────────────────
 @router.get("/churn")
 def get_predictions_churn(
+    background_tasks: BackgroundTasks,
     buscar: Optional[str] = Query(
         None, max_length=80,
         description="Filtra la tabla por nombre o correo del alumno (parcial, sin "
@@ -613,8 +684,11 @@ def get_predictions_churn(
     - `buscar`: filtra la TABLA por nombre o correo (server-side, sin mayúsculas
       ni tildes). Los CONTADORES de las tarjetas siguen siendo del box COMPLETO:
       buscar no cambia el tamaño del box.
-    - `motivo` (situación): se arma 100% EN VIVO (`plan_vencimiento.motivo_situacion`) con el
-      plan vigente y los días sin asistir de HOY; no usa el `motivo` del snapshot del BI.
+    - `motivo`/`recomendacion`/`fecha_proxima_renovacion` (SITUACIÓN): se arman 100% EN VIVO
+      (MISMA regla que el populate: `plan_vencimiento` + `churn_service.recomendacion_churn`) con
+      el plan vigente, sus asistencias y los días sin asistir de HOY; no usan el snapshot del BI.
+    - `desactualizada`: True si la recomendación guardada en el snapshot ya no es la de HOY (el
+      GET encola el recálculo de ese alumno en segundo plano).
     """
     tenant_id = current_user["tenant_id"]
 
@@ -651,6 +725,10 @@ def get_predictions_churn(
     dias_inactivo = _dias_inactividad_por_alumno(db, tenant_id, ids)
     arquetipos = _arquetipo_por_alumno(db, tenant_id, ids)
     dias_plan = plan_vencimiento.dias_para_vencer_lote(db, tenant_id, ids)
+    # SITUACIÓN en vivo (motivo/recomendación/renovación de HOY): el snapshot del modelo aporta
+    # sólo riesgo/probabilidad/arquetipo. MISMA regla que el populate y el recálculo.
+    situacion = _situacion_en_vivo(
+        db, [p for p, _n, _c in filas], dias_plan, dias_inactivo)
 
     predicciones = [
         _fila_churn(
@@ -658,11 +736,17 @@ def get_predictions_churn(
             gestion.get(p.usuario_id, ESTADO_GESTION_DEFAULT),
             contactos.get(p.usuario_id),
             arquetipos.get(p.usuario_id),
-            dias_plan.get(p.usuario_id),
-            dias_inactivo.get(p.usuario_id),
+            situacion.get(p.usuario_id),
         )
         for p, nombre, correo in filas
     ]
+
+    # Snapshot VIEJO: la recomendación guardada ya no es la de HOY. Se marca la fila
+    # (`desactualizada`, que ya devuelve `_fila_churn`) y se ENCOLA el recálculo de ese alumno
+    # (segundo plano, sin bloquear la respuesta): la próxima lectura ya trae el snapshot fresco.
+    for p, _nombre, _correo in filas:
+        if situacion.get(p.usuario_id, {}).get("desactualizada"):
+            churn_service.programar_recalculo(background_tasks, tenant_id, p.usuario_id)
 
     return {
         "predicciones": predicciones,
@@ -758,11 +842,12 @@ def actualizar_estado_gestion_churn(
     arquetipos = _arquetipo_por_alumno(db, tenant_id, [usuario_id])
     dias_plan = plan_vencimiento.dias_para_vencer_lote(db, tenant_id, [usuario_id])
     dias_inactivo = _dias_inactividad_por_alumno(db, tenant_id, [usuario_id])
+    # SITUACIÓN en vivo (misma que el GET): el snapshot sólo aporta riesgo/probabilidad/arquetipo.
+    situacion = _situacion_en_vivo(db, [p], dias_plan, dias_inactivo)
     fila = _fila_churn(p, nombre, correo, data.estado_gestion,
                        contactos.get(usuario_id),
                        arquetipos.get(usuario_id),
-                       dias_plan.get(usuario_id),
-                       dias_inactivo.get(usuario_id))
+                       situacion.get(usuario_id))
     fila["estado_anterior"] = estado_anterior
     return fila
 
