@@ -191,6 +191,17 @@ const AlumnoDashboard = () => {
                 estado: 'confirmada',
             });
             setReservasActivas((prev) => prev + 1);
+            // Reflejar la reserva en la lista local: el hero del Inicio móvil y la
+            // detección de duplicados se leen de `misReservas`, no vuelven a la API.
+            setMisReservas((prev) => [
+                ...prev,
+                {
+                    disciplina_nombre: claseSeleccionada.disciplina_nombre,
+                    clase_fecha: claseSeleccionada.fecha || claseSeleccionada.fecha_clase,
+                    hora_inicio: claseSeleccionada.hora_inicio,
+                    asistio: false,
+                },
+            ]);
             // Actualizar disponibilidad en el estado local
             setClasesPorDia((prev) => {
                 const nuevas = { ...prev };
@@ -259,6 +270,9 @@ const AlumnoDashboard = () => {
                     membresia={membresia}
                     nivelFuerza={nivelFuerza}
                     reservas={misReservas}
+                    clasesPorDia={clasesPorDia}
+                    proximosDias={proximosDias}
+                    onReservar={handleAbrirReserva}
                 />
             </div>
 
@@ -730,79 +744,79 @@ const AlumnoDashboard = () => {
                     )}
                 </div>
 
-                {/* ─── MODAL CONFIRMAR RESERVA ─────────────────────────────── */}
-                {showReservaModal && claseSeleccionada && (() => {
-                    const fechaClase = claseSeleccionada.fecha || claseSeleccionada.fecha_clase;
-                    const disciplina = claseSeleccionada.disciplina_nombre;
-                    // D-02: cupos REALES de la clase (antes el modal decía siempre
-                    // "Cupos disponibles", incluso con la clase llena).
-                    const cupoMax = Number(claseSeleccionada.cupo_maximo || 0);
-                    const asistentes = Number(claseSeleccionada.asistentes_confirmados || 0);
-                    const cuposModal = Math.max(0, cupoMax - asistentes);
-                    const tieneDuplicado = disciplina && fechaClase && misReservas.some(r =>
-                        r.disciplina_nombre === disciplina &&
-                        (r.clase_fecha === fechaClase || r.fecha === fechaClase)
-                    );
+            </div>
+            </div>
+            {/* ─── MODAL CONFIRMAR RESERVA ─────────────────────────────── */}
+            {showReservaModal && claseSeleccionada && (() => {
+                const fechaClase = claseSeleccionada.fecha || claseSeleccionada.fecha_clase;
+                const disciplina = claseSeleccionada.disciplina_nombre;
+                // D-02: cupos REALES de la clase (antes el modal decía siempre
+                // "Cupos disponibles", incluso con la clase llena).
+                const cupoMax = Number(claseSeleccionada.cupo_maximo || 0);
+                const asistentes = Number(claseSeleccionada.asistentes_confirmados || 0);
+                const cuposModal = Math.max(0, cupoMax - asistentes);
+                const tieneDuplicado = disciplina && fechaClase && misReservas.some(r =>
+                    r.disciplina_nombre === disciplina &&
+                    (r.clase_fecha === fechaClase || r.fecha === fechaClase)
+                );
 
-                    return (
-                        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-                            <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
-                                <div className="bg-emerald-600 text-white px-6 py-4 rounded-t-xl">
-                                    <h2 className="text-lg font-bold">Confirmar Reserva</h2>
-                                    <p className="text-emerald-100 text-sm">¿Estás seguro de reservar esta clase?</p>
+                return (
+                    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
+                            <div className="bg-emerald-600 text-white px-6 py-4 rounded-t-xl">
+                                <h2 className="text-lg font-bold">Confirmar Reserva</h2>
+                                <p className="text-emerald-100 text-sm">¿Estás seguro de reservar esta clase?</p>
+                            </div>
+                            <div className="p-6 space-y-4">
+                                {errorReserva && (
+                                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                                        ❌ {errorReserva}
+                                    </div>
+                                )}
+                                {tieneDuplicado && (
+                                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                                        ⚠️ Ya tienes una reserva de <strong>{disciplina}</strong> para esta fecha.
+                                        Esta será tu <strong>segunda clase</strong> del día y se descontará <strong>otro crédito</strong>.
+                                        ¿Confirmas igual?
+                                    </div>
+                                )}
+                                <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+                                    <p className="font-bold text-gray-900 text-lg">{disciplina || 'Clase'}</p>
+                                    <div className="grid grid-cols-2 gap-2 text-sm">
+                                        <p className="text-gray-600">🕐 {claseSeleccionada.hora_inicio} - {claseSeleccionada.hora_fin}</p>
+                                        <p className="text-gray-600">👨‍🏫 {claseSeleccionada.coach_nombre || '—'}</p>
+                                        <p className="text-gray-600">📅 {fechaClase}</p>
+                                        <p className={cuposModal > 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                                            {cuposModal > 0
+                                                ? `✅ ${cuposModal}/${cupoMax} cupos disponibles`
+                                                : `⛔ Sin cupos (${asistentes}/${cupoMax})`}
+                                        </p>
+                                    </div>
                                 </div>
-                                <div className="p-6 space-y-4">
-                                    {errorReserva && (
-                                        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                                            ❌ {errorReserva}
-                                        </div>
-                                    )}
-                                    {tieneDuplicado && (
-                                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-                                            ⚠️ Ya tienes una reserva de <strong>{disciplina}</strong> para esta fecha.
-                                            Esta será tu <strong>segunda clase</strong> del día y se descontará <strong>otro crédito</strong>.
-                                            ¿Confirmas igual?
-                                        </div>
-                                    )}
-                                    <div className="bg-gray-50 rounded-xl p-4 space-y-2">
-                                        <p className="font-bold text-gray-900 text-lg">{disciplina || 'Clase'}</p>
-                                        <div className="grid grid-cols-2 gap-2 text-sm">
-                                            <p className="text-gray-600">🕐 {claseSeleccionada.hora_inicio} - {claseSeleccionada.hora_fin}</p>
-                                            <p className="text-gray-600">👨‍🏫 {claseSeleccionada.coach_nombre || '—'}</p>
-                                            <p className="text-gray-600">📅 {fechaClase}</p>
-                                            <p className={cuposModal > 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
-                                                {cuposModal > 0
-                                                    ? `✅ ${cuposModal}/${cupoMax} cupos disponibles`
-                                                    : `⛔ Sin cupos (${asistentes}/${cupoMax})`}
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-3 pt-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => { setShowReservaModal(false); setClaseSeleccionada(null); }}
-                                            className="flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-medium text-sm transition-colors"
-                                            disabled={submitting}
-                                        >
-                                            Cancelar
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={handleConfirmarReserva}
-                                            disabled={submitting}
-                                            className="flex-1 px-4 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm transition-colors disabled:opacity-50"
-                                        >
-                                            {submitting ? 'Reservando...' : '✅ Confirmar Reserva'}
-                                        </button>
-                                    </div>
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => { setShowReservaModal(false); setClaseSeleccionada(null); }}
+                                        className="flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-medium text-sm transition-colors"
+                                        disabled={submitting}
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleConfirmarReserva}
+                                        disabled={submitting}
+                                        className="flex-1 px-4 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm transition-colors disabled:opacity-50"
+                                    >
+                                        {submitting ? 'Reservando...' : '✅ Confirmar Reserva'}
+                                    </button>
                                 </div>
                             </div>
                         </div>
-                    );
-                })()
-                }
-            </div>
-            </div>
+                    </div>
+                );
+            })()
+            }
         </Layout>
     );
 };

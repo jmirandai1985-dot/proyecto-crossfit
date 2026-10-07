@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 // TZ Chile: "hoy" en el calendario chileno (no el del navegador), misma fuente
 // que el Dashboard (utils/fecha.js): así la reserva de hoy coincide con las clases.
@@ -27,6 +27,18 @@ const horaCorta = (h) => {
     return partes.length >= 2 ? `${partes[0]}:${partes[1]}` : String(h);
 };
 
+// Dedupe de filas repetidas del backend (varias sedes comparten disciplina y
+// hora), mismo criterio que AGRUPAR_CLASES del Dashboard.
+const agruparClases = (clases) => {
+    const vistos = new Set();
+    return (clases || []).filter((c) => {
+        const clave = `${c.disciplina_nombre || ''}|${c.hora_inicio || ''}|${c.hora_fin || ''}`;
+        if (vistos.has(clave)) return false;
+        vistos.add(clave);
+        return true;
+    });
+};
+
 // Íconos del mockup (trazo, 24px). Se definen aquí y crecen bloque a bloque.
 const ICONOS = {
     scan: <path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16" />,
@@ -41,13 +53,30 @@ const Icono = ({ nombre }) => (
  * Inicio del alumno para <768px. Recibe los datos ya consultados por el
  * Dashboard (nada de fetches duplicados) y pinta el diseño del mockup.
  *
- * Bloque 1: identidad (avatar + saludo + fecha + chips de plan/nivel).
+ * Bloques: identidad (1), clase de hoy (2), clases disponibles (3)…
  */
-const InicioMobile = ({ usuario, membresia, nivelFuerza, reservas = [] }) => {
+const InicioMobile = ({
+    usuario,
+    membresia,
+    nivelFuerza,
+    reservas = [],
+    clasesPorDia = {},
+    proximosDias = [],
+    onReservar,
+}) => {
     const navigate = useNavigate();
 
     // "Hoy" en el calendario CHILENO (misma fuente que el Dashboard).
     const hoy = hoyChileStr();
+
+    // Día elegido en "Clases disponibles". Arranca en el primer día con clases
+    // (igual que el acordeón del Dashboard); se fija cuando llegan los datos.
+    const [diaSeleccionado, setDiaSeleccionado] = useState(null);
+    useEffect(() => {
+        if (diaSeleccionado) return;
+        const primero = proximosDias.find((d) => (clasesPorDia[d.fecha] || []).length > 0);
+        if (primero) setDiaSeleccionado(primero.fecha);
+    }, [proximosDias, clasesPorDia, diaSeleccionado]);
 
     const nombre = (usuario || 'Atleta').trim();
     const primerNombre = nombre.split(/\s+/)[0] || 'Atleta';
@@ -69,6 +98,11 @@ const InicioMobile = ({ usuario, membresia, nivelFuerza, reservas = [] }) => {
     // Asistió: un único estado global para la pantalla (como el mockup), tomado
     // de la reserva de hoy. La barra inferior (bloque futuro) leerá el mismo.
     const asistioHoy = reservaHoy?.asistio === true;
+
+    // Clases del día elegido: deduplicadas (varias sedes comparten disciplina y
+    // hora) y ordenadas por horario, como la rejilla del Dashboard.
+    const clasesDelDia = agruparClases(clasesPorDia[diaSeleccionado] || [])
+        .sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || ''));
 
     // "Reservar otra clase": baja al bloque "Clases disponibles" (la rejilla del
     // dashboard reutilizada). Si ese bloque aún no existe, abre Mis Reservas.
@@ -127,6 +161,70 @@ const InicioMobile = ({ usuario, membresia, nivelFuerza, reservas = [] }) => {
                     <button type="button" onClick={() => navigate('/alumno/mis-reservas')}>Mis reservas</button>
                     <button type="button" onClick={irAReservar}>Reservar otra clase</button>
                 </div>
+
+                {/* ── Clases disponibles: rejilla del Dashboard adaptada a móvil.
+                    Es el ancla de "Reservar otra clase" (#ub-clases). ── */}
+                <section className="card sec" id="ub-clases" aria-label="Clases disponibles">
+                    <div className="head">
+                        <h2>Clases disponibles</h2>
+                    </div>
+
+                    {proximosDias.length > 0 && (
+                        <div className="days" role="tablist" aria-label="Elige el día">
+                            {proximosDias.map((d) => {
+                                const n = (clasesPorDia[d.fecha] || []).length;
+                                const activo = d.fecha === diaSeleccionado;
+                                return (
+                                    <button
+                                        key={d.fecha}
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={activo}
+                                        className={`day${activo ? ' on' : ''}`}
+                                        onClick={() => setDiaSeleccionado(d.fecha)}
+                                    >
+                                        <span className="dn">{d.nombreDia.substring(0, 3)}</span>
+                                        <span className="dd">{d.diaNum}</span>
+                                        <span className={`dc${n ? ' has' : ''}`}>{n || '–'}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    <div className="clases">
+                        {clasesDelDia.length === 0 ? (
+                            <p className="vacio">Sin clases programadas este día.</p>
+                        ) : (
+                            clasesDelDia.map((clase) => {
+                                const cupos = (clase.cupo_maximo || 0) - (clase.asistentes_confirmados || 0);
+                                const libre = cupos > 0;
+                                return (
+                                    <div className="clase" key={clase.id}>
+                                        <div className="ci">
+                                            <span className="ch">{horaCorta(clase.hora_inicio)}</span>
+                                            <span className="cd">{clase.disciplina_nombre || 'Clase'}</span>
+                                            <span className="cc">{clase.coach_nombre ? `Con ${clase.coach_nombre}` : 'Coach por confirmar'}</span>
+                                        </div>
+                                        <div className="cq">
+                                            <span className={`cupos${libre ? ' ok' : ' no'}`}>
+                                                {libre ? `${cupos} cupos` : 'Lleno'}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                className="res"
+                                                disabled={!libre}
+                                                onClick={() => onReservar && onReservar(clase)}
+                                            >
+                                                {libre ? 'Reservar' : 'Lleno'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
+                </section>
             </div>
         </div>
     );
