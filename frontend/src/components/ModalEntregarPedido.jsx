@@ -57,7 +57,7 @@ const ModalEntregarPedido = ({ codigoInicial = '', onCerrar, onEntregado }) => {
     return (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
             onClick={onCerrar}>
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full shadow-2xl"
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full max-h-[90dvh] overflow-y-auto md:max-h-none shadow-2xl"
                 onClick={(e) => e.stopPropagation()}>
                 <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
                     <h3 className="font-bold text-zinc-100">📦 Entregar pedido</h3>

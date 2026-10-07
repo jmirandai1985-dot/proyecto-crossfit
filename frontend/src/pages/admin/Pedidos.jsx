@@ -350,7 +350,7 @@ const AdminPedidos = () => {
                 {confirmar && (
                     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
                         onClick={() => setConfirmar(null)}>
-                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-md w-full shadow-2xl"
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-md w-full max-h-[90dvh] overflow-y-auto md:max-h-none shadow-2xl"
                             onClick={(e) => e.stopPropagation()}>
                             <div className="p-4 border-b border-zinc-800">
                                 <h3 className="font-bold text-zinc-100">Confirmar cambio de estado</h3>
@@ -395,7 +395,7 @@ const AdminPedidos = () => {
                 {rechazar && (
                     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
                         onClick={() => setRechazar(null)}>
-                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-md w-full shadow-2xl"
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-md w-full max-h-[90dvh] overflow-y-auto md:max-h-none shadow-2xl"
                             onClick={(e) => e.stopPropagation()}>
                             <div className="p-4 border-b border-zinc-800">
                                 <h3 className="font-bold text-zinc-100">
@@ -454,7 +454,7 @@ const AdminPedidos = () => {
                 {comprobante && (
                     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
                         onClick={() => setComprobante(null)}>
-                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-auto shadow-2xl"
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-2xl w-full max-h-[90dvh] overflow-auto shadow-2xl"
                             onClick={(e) => e.stopPropagation()}>
                             <div className="p-4 border-b border-zinc-800 flex justify-between items-center">
                                 <h3 className="font-bold text-zinc-100">

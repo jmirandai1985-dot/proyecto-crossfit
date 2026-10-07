@@ -159,7 +159,7 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-screen overflow-y-auto">
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90dvh] md:max-h-screen overflow-y-auto">
                 <div className="bg-blue-900 text-white px-6 py-4 rounded-t-lg">
                     <h2 className="text-xl font-bold">{esEdicion ? 'Editar Producto' : 'Nuevo Producto'}</h2>
                 </div>

@@ -123,7 +123,7 @@ export const RecomendacionModal = ({ fila, onClose, contactoTxt, renovacionTxt, 
                 role="dialog"
                 aria-modal="true"
                 aria-label={`Recomendación para ${nombre}`}
-                className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl"
+                className="w-full max-w-lg max-h-[90dvh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Header: alumno */}

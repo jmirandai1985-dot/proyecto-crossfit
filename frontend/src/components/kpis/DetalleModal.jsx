@@ -60,7 +60,7 @@ export const DetalleModal = ({ titulo, subtitulo, explicacion, calculo, lectura,
                 role="dialog"
                 aria-modal="true"
                 aria-label={`Detalle: ${titulo}`}
-                className="w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl"
+                className="w-full max-w-5xl max-h-[90dvh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Header */}
