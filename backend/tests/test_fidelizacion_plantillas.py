@@ -220,12 +220,12 @@ def _anotar_riesgo(db, escenario, nivel="CRITICO", probabilidad=98.97):
 # ══════════════════════════════════════════════════════════════════════════════
 # A. Reglas puras (sin BD)
 # ══════════════════════════════════════════════════════════════════════════════
-def test_a1_el_catalogo_cubre_las_cinco_situaciones():
+def test_a1_el_catalogo_cubre_las_seis_situaciones():
     """Una entrada por SITUACIÓN, ids únicos, campos completos y el patrón que sale del catálogo."""
     ids = [p["id"] for p in svc.PLANTILLAS]
 
-    assert ids == [svc.P_VENCIMIENTO, svc.P_INACTIVIDAD_7_14, svc.P_INACTIVIDAD_15_30,
-                   svc.P_INACTIVIDAD_MAS_30, svc.P_RIESGO_ALTO,
+    assert ids == [svc.P_VENCIMIENTO, svc.P_PLAN_SIN_USAR, svc.P_INACTIVIDAD_7_14,
+                   svc.P_INACTIVIDAD_15_30, svc.P_INACTIVIDAD_MAS_30, svc.P_RIESGO_ALTO,
                    # Fase 2: los dos correos del grupo `beneficios` (uno por tipo de regalo).
                    svc.P_BENEFICIO_DESCUENTO, svc.P_BENEFICIO_CLASES_GRATIS]
     assert len(ids) == len(set(ids)), "dos plantillas con el mismo id"
@@ -236,7 +236,7 @@ def test_a1_el_catalogo_cubre_las_cinco_situaciones():
         assert p["label"] and p["descripcion"] and p["requiere"] and p["tipo_envio"]
         assert p["grupo"] in dict(svc.GRUPOS)
         assert p["tipo_envio"] in (svc.TIPO_INACTIVIDAD, svc.TIPO_VENCIMIENTO,
-                                   svc.TIPO_RIESGO_ALTO,
+                                   svc.TIPO_RIESGO_ALTO, svc.TIPO_PLAN_SIN_USAR,
                                    svc.P_BENEFICIO_DESCUENTO, svc.P_BENEFICIO_CLASES_GRATIS)
         # Los correos de un regalo no se pueden armar sólo con el alumno: están declarados
         # como los que necesitan los datos del beneficio.
