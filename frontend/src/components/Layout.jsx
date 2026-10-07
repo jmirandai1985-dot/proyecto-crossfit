@@ -1,58 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import {
-    ChartColumn, Users, Clock, Eye, SquareCheck, QrCode, CreditCard,
-    Dumbbell, ShoppingCart, ShoppingBag, Heart, TrendingUp, FileText, Bell, Settings,
-} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
+// Fuente única de menús por rol + registro de íconos (los comparte la barra
+// inferior del alumno que llega en un paso posterior). Ver config/menu.js.
+import { getMenuItems, COACH_SUBTABS } from '../config/menu';
+import { MENU_ICONS } from '../config/menuIcons';
 // N-2: campana de notificaciones del alumno (contador de no leídas + panel).
 import CampanaNotificaciones from './CampanaNotificaciones';
-
-// ─── Iconos SVG inline ───────────────────────────────────────────────────
-const icons = {
-    home: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-        </svg>
-    ),
-    calendar: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-        </svg>
-    ),
-    dumbbell: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-    ),
-    settings: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-    ),
-    chart: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-        </svg>
-    ),
-    asistencia: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-        </svg>
-    ),
-    qr: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm10 3h3v3h-3v-3zm4 0h2v2h-2v-2zm-4 4h2v2h-2v-2zm4-4h2v2h-2v-2z" />
-        </svg>
-    ),
-    logout: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-        </svg>
-    ),
-};
 
 const Layout = ({ children }) => {
     const { usuario, rol, logout } = useAuth();
@@ -90,81 +45,11 @@ const Layout = ({ children }) => {
         return () => { cancelado = true; };
     }, [rol, reintentoEsPrueba]);
 
-    const coachSubTabs = [
-        { key: 'resumen', label: '📊 Resumen', path: '/coach/dashboard?tab=resumen' },
-        { key: 'clases', label: '📅 Clases', path: '/coach/dashboard?tab=clases' },
-        { key: 'alumnos', label: '👥 Alumnos & RMs', path: '/coach/dashboard?tab=alumnos' },
-        { key: 'asistencia', label: '📋 Asistencia', path: '/coach/dashboard?tab=asistencia' },
-        { key: 'progreso', label: '📈 Progreso', path: '/coach/dashboard?tab=progreso' },
-        { key: 'riesgo', label: '⚠️ Riesgo', path: '/coach/dashboard?tab=riesgo' },
-    ];
-
     const isCoachDashboard = location.pathname === '/coach/dashboard';
 
-    const getMenuItems = () => {
-        if (rol === 'alumno') {
-            const itemsAlumno = [
-                { label: 'Inicio', path: '/alumno/dashboard', icon: icons.home },
-                { label: 'Planes', path: '/alumno/solicitar-plan', icon: icons.settings },
-                { label: 'Mis Reservas', path: '/alumno/mis-reservas', icon: icons.calendar },
-                { label: 'Pizarra de RMs', path: '/alumno/rms', icon: icons.dumbbell },
-                { label: 'Evolución', path: '/alumno/evolucion', icon: icons.home },
-                { label: 'Performance Hub', path: '/alumno/performance-hub', icon: icons.dumbbell },
-                { label: 'Mi Progreso', path: '/alumno/mi-progreso', icon: icons.chart },
-                { label: 'Bazar', path: '/alumno/bazar', icon: icons.dumbbell },
-                { label: 'Mis Pedidos', path: '/alumno/mis-pedidos', icon: icons.calendar },
-                { label: 'Mi Historial', path: '/alumno/mi-historial', icon: icons.chart },
-                { label: 'Ajustes', path: '/alumno/ajustes', icon: icons.settings },
-            ];
-            // Alumno nuevo en plan de prueba: solo Clases (Inicio) + Planes.
-            // N-6: restringido salvo confirmación explícita de que NO es de prueba
-            // (`false`). `null` (cargando) y el error también restringen: ante la
-            // duda, el alumno ve menos, nunca más.
-            if (esPrueba !== false) {
-                return itemsAlumno.filter((i) => i.label === 'Inicio' || i.label === 'Planes');
-            }
-            return itemsAlumno;
-        } else if (rol === 'coach') {
-            return [
-                { label: 'Dashboard', path: '/coach/dashboard', icon: icons.home },
-                { label: 'Gestión de Clases', path: '/coach/gestion-clases', icon: icons.calendar },
-                // Mesón del Bazar: entregar un pedido con el código de retiro del
-                // alumno (mismo modal que el admin; sin listados ni montos).
-                { label: 'Entregar pedido', path: '/coach/entregar-pedido', icon: icons.qr },
-            ];
-        } else if (rol === 'administrador' || rol === 'admin') {
-            return [
-                { label: 'Dashboard', path: '/admin/dashboard', icon: <ChartColumn className="w-5 h-5" /> },
-                { label: 'Alumnos', path: '/admin/alumnos', icon: <Users className="w-5 h-5" /> },
-                { label: 'Pendientes', path: '/admin/alumnos-pendientes', icon: <Clock className="w-5 h-5" /> },
-                { label: 'Coaches', path: '/admin/coaches', icon: <Users className="w-5 h-5" /> },
-                { label: 'Supervisión', path: '/admin/supervision-clases', icon: <Eye className="w-5 h-5" /> },
-                { label: 'Asistencia', path: '/admin/asistencia', icon: <SquareCheck className="w-5 h-5" /> },
-                { label: 'Mi QR', path: '/admin/mi-qr', icon: <QrCode className="w-5 h-5" /> },
-
-                // ── CATÁLOGO ──
-                { type: 'section', label: 'CATÁLOGO' },
-                { label: 'Planes', path: '/admin/planes', icon: <CreditCard className="w-5 h-5" /> },
-                { label: 'Disciplinas', path: '/admin/disciplinas', icon: <Dumbbell className="w-5 h-5" /> },
-                { label: 'Bazar', path: '/admin/bazar', icon: <ShoppingCart className="w-5 h-5" /> },
-                { label: 'Pedidos', path: '/admin/pedidos', icon: <ShoppingBag className="w-5 h-5" /> },
-
-                // ── ANÁLISIS ──
-                { type: 'section', label: 'ANÁLISIS' },
-                { label: 'Fidelización', path: '/admin/fidelizacion', icon: <Heart className="w-5 h-5" /> },
-                { label: 'KPIs', path: '/admin/kpis', icon: <TrendingUp className="w-5 h-5" /> },
-                { label: 'Reportes', path: '/admin/reportes', icon: <FileText className="w-5 h-5" /> },
-
-                // ── SISTEMA ──
-                { type: 'section', label: 'SISTEMA' },
-                { label: 'Notificaciones', path: '/admin/notificaciones', icon: <Bell className="w-5 h-5" /> },
-                { label: 'Configuración', path: '/admin/configuracion', icon: <Settings className="w-5 h-5" /> },
-            ];
-        }
-        return [];
-    };
-
-    const menuItems = getMenuItems();
+    // Menú del rol desde la fuente única (config/menu.js). El alumno en plan de
+    // prueba queda restringido (fail-closed) según `esPrueba`.
+    const menuItems = getMenuItems(rol, { esPrueba });
     const isActive = (path) => location.pathname === path;
 
     return (
@@ -228,14 +113,14 @@ const Layout = ({ children }) => {
                                     }`}
                             >
                                 <span className={`${isActive(item.path) ? 'text-orange-500' : 'text-zinc-500'}`}>
-                                    {item.icon}
+                                    {MENU_ICONS[item.icon]}
                                 </span>
                                 {sidebarOpen && <span>{item.label}</span>}
                             </Link>
                             {/* Coach sub-tabs under Dashboard */}
                             {rol === 'coach' && item.label === 'Dashboard' && sidebarOpen && isCoachDashboard && (
                                 <div className="ml-6 mt-1 space-y-0.5 border-l-2 border-orange-500/40 pl-2">
-                                    {coachSubTabs.map((sub) => (
+                                    {COACH_SUBTABS.map((sub) => (
                                         <Link
                                             key={sub.key}
                                             to={sub.path}
@@ -252,7 +137,7 @@ const Layout = ({ children }) => {
                             {/* Always show sub-tabs when coach is on dashboard path */}
                             {rol === 'coach' && item.label === 'Dashboard' && sidebarOpen && !isCoachDashboard && (
                                 <div className="ml-6 mt-1 space-y-0.5 border-l-2 border-zinc-700 pl-2">
-                                    {coachSubTabs.map((sub) => (
+                                    {COACH_SUBTABS.map((sub) => (
                                         <Link
                                             key={sub.key}
                                             to={sub.path}
@@ -283,7 +168,7 @@ const Layout = ({ children }) => {
                         onClick={logout}
                         className="w-full flex items-center gap-3 px-3 py-2.5 text-base text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                     >
-                        <span className="text-red-500">{icons.logout}</span>
+                        <span className="text-red-500">{MENU_ICONS.logout}</span>
                         {sidebarOpen && <span>Cerrar Sesión</span>}
                     </button>
                     <button
