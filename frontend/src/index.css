@@ -649,3 +649,32 @@ td {
     color: #d4d4d8 !important;
     /* zinc-300 */
 }
+
+/* ============================================================================
+   RESPONSIVE / TÁCTIL (PASO 1)
+   ============================================================================ */
+
+/* iOS: al enfocar un input con font-size < 16px, Safari hace ZOOM automático
+   (y descuadra el layout). En ≤640px forzamos 16px en los campos. */
+@media (max-width: 640px) {
+
+    input,
+    select,
+    textarea {
+        font-size: 16px !important;
+    }
+}
+
+/* Objetivos táctiles ≥44px SOLO en dispositivos de puntero GRUESO (touch).
+   @media (pointer: coarse) NO se activa con mouse (pointer: fine), así que el
+   escritorio queda EXACTAMENTE igual. Cubre botones, tabs/links de navegación
+   (los sub-tabs del coach dentro de <nav>), el botón de la campana, etc. */
+@media (pointer: coarse) {
+
+    button,
+    [role="button"],
+    nav a {
+        min-height: 44px;
+        min-width: 44px;
+    }
+}

@@ -12,6 +12,9 @@ import CampanaNotificaciones from './CampanaNotificaciones';
 const Layout = ({ children }) => {
     const { usuario, rol, logout } = useAuth();
     const [sidebarOpen, setSidebarOpen] = useState(true);
+    // Drawer off-canvas para <md (arranca CERRADO). En >=md la barra es estática
+    // (igual que hoy) y `sidebarOpen` controla el COLAPSAR de escritorio.
+    const [mobileOpen, setMobileOpen] = useState(false);
     // ── N-6: `esPrueba` arranca en null = "todavía no sé". ──
     // Mientras no haya dato (o si la consulta falla) el menú del alumno queda
     // RESTRINGIDO: un chequeo de permisos no puede ABRIR el acceso cuando falla.
@@ -45,6 +48,19 @@ const Layout = ({ children }) => {
         return () => { cancelado = true; };
     }, [rol, reintentoEsPrueba]);
 
+    // El drawer debe cerrarse AL NAVEGAR (cambia la ruta).
+    useEffect(() => {
+        setMobileOpen(false);
+    }, [location.pathname]);
+
+    // ... y con la tecla Escape (accesibilidad).
+    useEffect(() => {
+        if (!mobileOpen) return;
+        const onKey = (e) => { if (e.key === 'Escape') setMobileOpen(false); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [mobileOpen]);
+
     const isCoachDashboard = location.pathname === '/coach/dashboard';
 
     // Menú del rol desde la fuente única (config/menu.js). El alumno en plan de
@@ -53,11 +69,21 @@ const Layout = ({ children }) => {
     const isActive = (path) => location.pathname === path;
 
     return (
-        <div className="flex h-screen bg-zinc-950">
-            {/* Sidebar */}
+        <div className="flex h-[100dvh] bg-zinc-950">
+            {/* Backdrop del drawer (solo <md; en escritorio no existe) */}
+            {mobileOpen && (
+                <div
+                    className="fixed inset-0 z-40 bg-black/60 md:hidden"
+                    onClick={() => setMobileOpen(false)}
+                    aria-hidden="true"
+                />
+            )}
+
+            {/* Sidebar: drawer off-canvas en <md (arranca cerrado); estática en >=md */}
             <div
-                className={`${sidebarOpen ? 'w-64' : 'w-20'
-                    } bg-zinc-900 border-r border-zinc-800 transition-all duration-300 flex flex-col shadow-sm`}
+                className={`fixed md:static inset-y-0 left-0 z-50 w-64 ${sidebarOpen ? 'md:w-64' : 'md:w-20'
+                    } bg-zinc-900 border-r border-zinc-800 transition-transform md:transition-all duration-300 flex flex-col shadow-sm ${mobileOpen ? 'translate-x-0' : '-translate-x-full'
+                    } md:translate-x-0`}
             >
                 {/* Logo */}
                 <div className="p-5 border-b border-zinc-800">
@@ -69,6 +95,17 @@ const Layout = ({ children }) => {
                                 <p className="text-[10px] text-zinc-400">CrossFit Maipú</p>
                             </div>
                         )}
+                        {/* Cerrar el drawer (solo <md) */}
+                        <button
+                            type="button"
+                            onClick={() => setMobileOpen(false)}
+                            aria-label="Cerrar menú"
+                            className="md:hidden ml-auto p-2 rounded-lg text-zinc-400 hover:bg-zinc-800"
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
                     </div>
                 </div>
 
@@ -157,7 +194,8 @@ const Layout = ({ children }) => {
                 </nav>
 
                 {/* User & Logout */}
-                <div className="p-4 border-t border-zinc-800 space-y-3">
+                <div className="p-4 border-t border-zinc-800 space-y-3"
+                    style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
                     {sidebarOpen && (
                         <div className="px-2">
                             <p className="text-sm font-medium text-zinc-100 truncate">{usuario || 'Usuario'}</p>
@@ -173,7 +211,7 @@ const Layout = ({ children }) => {
                     </button>
                     <button
                         onClick={() => setSidebarOpen(!sidebarOpen)}
-                        className="w-full flex items-center justify-center py-2 text-zinc-500 hover:bg-zinc-800 rounded-lg transition-colors text-xs"
+                        className="w-full hidden md:flex items-center justify-center py-2 text-zinc-500 hover:bg-zinc-800 rounded-lg transition-colors text-xs"
                     >
                         {sidebarOpen ? '◀ Colapsar' : '▶'}
                     </button>
@@ -183,13 +221,25 @@ const Layout = ({ children }) => {
             {/* Main Content */}
             <div className="flex-1 flex flex-col overflow-hidden">
                 {/* Header */}
-                <header className="relative z-30 bg-zinc-900 border-b border-zinc-800">
-                    <div className="flex items-center justify-between px-6 py-3">
-                        <div className="flex items-center gap-2">
+                <header className="relative z-30 bg-zinc-900 border-b border-zinc-800"
+                    style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+                    <div className="flex items-center justify-between px-3 md:px-6 py-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                            {/* Hamburguesa: abre el drawer en <md (en escritorio no existe) */}
+                            <button
+                                type="button"
+                                onClick={() => { setSidebarOpen(true); setMobileOpen(true); }}
+                                aria-label="Abrir menú"
+                                className="md:hidden shrink-0 -ml-1 p-2 rounded-lg text-zinc-300 hover:bg-zinc-800"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                                </svg>
+                            </button>
                             <img src="/imgs/logo.png" alt="Urban Box" className="h-7 w-7 object-contain" />
-                            <h1 className="text-lg font-bold text-white">URBAN BOX</h1>
+                            <h1 className="text-lg font-bold text-white truncate">URBAN BOX</h1>
                         </div>
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2 md:gap-4 shrink-0">
                             {/* N-2/B4: campana del alumno, del ADMIN y del COACH.
                                 Al alumno le entran los avisos de sus planes/pedidos;
                                 al admin, los del box (p. ej. pedidos nuevos del Bazar);
@@ -197,12 +247,20 @@ const Layout = ({ children }) => {
                                 desde Supervisión (B3) y que lo llevan a su grilla. */}
                             {(rol === 'alumno' || rol === 'administrador' || rol === 'admin' || rol === 'coach')
                                 && <CampanaNotificaciones />}
-                            <span className="text-sm text-zinc-400">
+                            {/* Fecha: larga en >=md; corta en <md (no desborda). */}
+                            <span className="hidden md:inline text-sm text-zinc-400">
                                 {new Date().toLocaleDateString('es-CL', {
                                     weekday: 'long',
                                     year: 'numeric',
                                     month: 'long',
                                     day: 'numeric',
+                                })}
+                            </span>
+                            <span className="md:hidden text-sm text-zinc-400">
+                                {new Date().toLocaleDateString('es-CL', {
+                                    weekday: 'short',
+                                    day: 'numeric',
+                                    month: 'short',
                                 })}
                             </span>
                             {sidebarOpen && (
@@ -215,21 +273,21 @@ const Layout = ({ children }) => {
                 </header>
 
                 {/* Page Content */}
-                <main className="flex-1 overflow-auto p-6 bg-zinc-950">
+                <main className="flex-1 overflow-auto p-4 md:p-6 bg-zinc-950">
                     {/* Fondo decorativo sutil — solo en dashboards (marca de agua) */}
                     {location.pathname.endsWith('/dashboard') && (
                         <>
                             {rol === 'administrador' && (
                                 <img src="/imgs/silueta-gym-3.png" alt=""
-                                    className="pointer-events-none fixed -right-12 top-24 w-80 opacity-10 invert z-0 select-none" />
+                                    className="hidden md:block pointer-events-none fixed -right-12 top-24 w-80 opacity-10 invert z-0 select-none" />
                             )}
                             {rol === 'coach' && (
                                 <img src="/imgs/silueta-gym-4.png" alt=""
-                                    className="pointer-events-none fixed -left-10 bottom-8 w-80 opacity-10 invert z-0 select-none" />
+                                    className="hidden md:block pointer-events-none fixed -left-10 bottom-8 w-80 opacity-10 invert z-0 select-none" />
                             )}
                             {rol === 'alumno' && (
                                 <img src="/imgs/silueta-gym-5.png" alt=""
-                                    className="pointer-events-none fixed -right-10 bottom-8 w-80 opacity-10 invert z-0 select-none" />
+                                    className="hidden md:block pointer-events-none fixed -right-10 bottom-8 w-80 opacity-10 invert z-0 select-none" />
                             )}
                         </>
                     )}
