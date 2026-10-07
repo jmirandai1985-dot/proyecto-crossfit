@@ -8,10 +8,11 @@ situación venía de un snapshot viejo de `kpis_populate` y la recomendación de
 nº de la situación se refresca EN VIVO al servir el panel, así nunca discrepan.
 
   A. PURAS (sin BD): la aritmética en días CALENDARIO de Chile (0 = vence hoy, nunca
-     negativo, hora de Chile) y el refresco del fragmento "plan vence en N días".
+     negativo, hora de Chile) y que la SITUACIÓN diga la FECHA ("plan vigente hasta DD/MM"),
+     que no envejece (antes decía un nº de días que quedaba viejo en el snapshot).
   B. SERVICIO contra TEST (escribe y RESTAURA): el escenario de #165 — una suscripción
-     vigente a 3 días — da el MISMO nº en la función, en la recomendación (plantilla) y
-     en el lote que usa el panel.
+     vigente a 3 días — da el MISMO nº en la función, en la recomendación (plantilla), en el
+     lote que usa el panel y en la fecha que imprime la situación EN VIVO.
 
 Correr:
     ENVIRONMENT=test py -3.12 -m pytest tests/test_dias_vencimiento_unico.py -q --noconftest
@@ -29,7 +30,7 @@ if str(_BACKEND) not in sys.path:
 
 from app.services import fidelizacion_plantillas as svc                    # noqa: E402
 from app.services import plan_vencimiento as pv                            # noqa: E402
-from app.utils.santiago import SANTIAGO, fecha_chile                       # noqa: E402
+from app.utils.santiago import SANTIAGO, fecha_chile, hoy_santiago               # noqa: E402
 
 TENANT_ID = 1
 DIAS = 3
@@ -66,17 +67,24 @@ def test_a4_usa_el_dia_de_chile_no_de_utc():
     assert pv.dias_hasta(utc, HOY) == 3
 
 
-def test_a5_refrescar_dias_reemplaza_el_numero():
-    m = "20 días sin asistir · plan vence en 7 días"
-    assert pv.refrescar_dias_plan(m, 3) == "20 días sin asistir · plan vence en 3 días"
+def _fecha_plan(dias):
+    """La fecha "DD/MM" que `motivo_situacion` imprime para un plan a `dias` días de hoy."""
+    vence = hoy_santiago() + timedelta(days=dias)
+    return f"{vence.day:02d}/{vence.month:02d}"
 
 
-def test_a6_refrescar_dias_singular_y_bordes():
-    assert pv.refrescar_dias_plan("plan vence en 5 días", 1) == "plan vence en 1 día"
-    # Sin fragmento, o sin un nº vigente, el texto queda IGUAL (no se inventa nada).
-    assert pv.refrescar_dias_plan("7 días sin asistir", 3) == "7 días sin asistir"
-    assert pv.refrescar_dias_plan("plan vence en 7 días", None) == "plan vence en 7 días"
-    assert pv.refrescar_dias_plan(None, 3) is None
+def test_a5_la_situacion_dice_la_fecha_no_un_numero_que_envejece():
+    """La situación imprime la FECHA (estable), nunca un nº de días que quede viejo."""
+    m = pv.motivo_situacion(20, 7)
+    assert m == f"20 días sin asistir · plan vigente hasta {_fecha_plan(7)}"
+    assert "plan vigente hasta" in m
+    assert "vence en" not in m
+
+
+def test_a6_singular_y_sin_plan():
+    assert pv.motivo_situacion(1, 1) == \
+        f"1 día sin asistir · plan vigente hasta {_fecha_plan(1)}"
+    assert pv.motivo_situacion(None, None) == "0 días sin asistir · sin plan vigente"
 
 
 def test_a7_situacion_y_recomendacion_comparten_la_misma_funcion():
@@ -88,6 +96,12 @@ def test_a7_situacion_y_recomendacion_comparten_la_misma_funcion():
     assert kpis.plan_vencimiento.dias_hasta is pv.dias_hasta
     assert populate.plan_vencimiento.dias_hasta is pv.dias_hasta
     assert ml_features.dias_hasta is pv.dias_hasta
+
+
+def test_a8_kpis_usa_la_misma_motivo_situacion():
+    """El panel arma la situación EN VIVO con ESA función (no una copia)."""
+    import app.api.v1.kpis as kpis
+    assert kpis.plan_vencimiento.motivo_situacion is pv.motivo_situacion
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -176,14 +190,14 @@ def test_b1_todas_las_superficies_dan_el_mismo_numero(db, escenario):
     assert lote[alumno.id] == DIAS
 
 
-def test_b2_la_situacion_se_refresca_al_mismo_numero(db, escenario):
-    """El snapshot viejo ("7 días") se corrige al nº VIGENTE ("3 días") al servir el panel."""
+def test_b2_la_situacion_imprime_hoy_mas_el_mismo_numero(db, escenario):
+    """El nº del plan (3) alimenta la situación EN VIVO: 'plan vigente hasta <hoy+3>'."""
     dias = pv.dias_para_vencer_lote(db, TENANT_ID, [escenario["alumno_id"]]).get(
         escenario["alumno_id"])
     assert dias == DIAS
-    viejo = "20 días sin asistir · plan vence en 7 días"
-    assert pv.refrescar_dias_plan(viejo, dias) == "20 días sin asistir · plan vence en 3 días"
-    # Y el panel usa ESA función (no una copia).
+    vence = hoy_santiago() + timedelta(days=DIAS)
+    assert (pv.motivo_situacion(20, dias)
+            == f"20 días sin asistir · plan vigente hasta {vence.day:02d}/{vence.month:02d}")
+    # Y el panel usa ESA MISMA función (no una copia).
     import app.api.v1.kpis as kpis
-    assert kpis.plan_vencimiento.refrescar_dias_plan(viejo, dias) == \
-        "20 días sin asistir · plan vence en 3 días"
+    assert kpis.plan_vencimiento.motivo_situacion is pv.motivo_situacion
