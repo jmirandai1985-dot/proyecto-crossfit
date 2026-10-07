@@ -172,12 +172,17 @@ def test_d_dia_ml_invalido_exit_2_nunca_llama(monkeypatch, mails, hoy, valor):
 
 
 # ── El plan del día (función pura): el calendario del job ─────────────────────
-def test_e_dia_cualquiera_solo_los_kpis_diarios(monkeypatch, mails, capsys, hoy):
+def test_e_dia_cualquiera_kpis_diarios_y_predicciones(monkeypatch, mails, capsys, hoy):
     hoy(date(2026, 9, 5))
     visto = doble_http(monkeypatch)
 
     assert kp.main() == kp.EXIT_OK
-    assert _rutas(visto) == ["/api/v1/kpis/populate/daily?fecha=2026-09-04"]
+    # Las predicciones se refrescan TODOS los días (alimentan Fidelización), no sólo
+    # el día 1: un día corriente son 2 llamadas: daily + predictions.
+    assert _rutas(visto) == [
+        "/api/v1/kpis/populate/daily?fecha=2026-09-04",
+        "/api/v1/kpis/populate/predictions",
+    ]
     assert visto[0]["metodo"] == "POST"
     assert visto[0]["headers"]["x-n8n-api-key"] == CLAVE_FALSA
     assert visto[0]["headers"]["accept"] == "application/json"
@@ -185,7 +190,7 @@ def test_e_dia_cualquiera_solo_los_kpis_diarios(monkeypatch, mails, capsys, hoy)
     assert "sin correo" in capsys.readouterr().out
 
 
-def test_f_dia_1_agrega_el_mes_cerrado_y_las_predicciones(monkeypatch, mails, hoy):
+def test_f_dia_1_agrega_el_mes_cerrado(monkeypatch, mails, hoy):
     hoy(date(2026, 10, 1))
     visto = doble_http(monkeypatch, por_defecto=(200, OK_MENSUAL))
 
@@ -261,7 +266,7 @@ def test_i_un_5xx_se_reintenta_hasta_lograr(monkeypatch, mails, capsys, hoy):
     visto = doble_http(monkeypatch, [(500, "{}"), _http_error(503), (200, OK_DIARIO)])
 
     assert kp.main() == kp.EXIT_OK
-    assert len(visto) == 3                    # 1 intento + 2 reintentos
+    assert len(visto) == 4                    # daily: 1 intento + 2 reintentos; predictions: 1
     assert esperas == [5, 10]                 # la espera se duplica y está acotada
     assert mails == []
     assert "intento 1/3" in capsys.readouterr().out
@@ -273,7 +278,7 @@ def test_i2_un_5xx_sostenido_sale_3_con_alerta(monkeypatch, mails, hoy):
     visto = doble_http(monkeypatch, por_defecto=(502, '{"detail": "bad gateway"}'))
 
     assert kp.main() == kp.EXIT_LLAMADA
-    assert len(visto) == 2                    # acotado: no reintenta para siempre
+    assert len(visto) == 4                    # cada llamada se acota: no reintenta para siempre
     assert mails[0][0] == "[ALERTA] KPIs y ML PROD: llamadas con error"
     assert "HTTP 502" in _texto(mails[0]) and "KPIs diarios" in _texto(mails[0])
 
@@ -285,7 +290,7 @@ def test_j_un_4xx_no_se_reintenta(monkeypatch, mails, capsys, hoy):
     visto = doble_http(monkeypatch, por_defecto=_http_error(401, '{"detail": "no autorizado"}'))
 
     assert kp.main() == kp.EXIT_LLAMADA
-    assert len(visto) == 1
+    assert len(visto) == 2                    # daily + predictions: 4xx sin reintento cada una
     assert "4xx: sin reintento" in capsys.readouterr().out
     assert "HTTP 401" in _texto(mails[0])
 
@@ -296,7 +301,7 @@ def test_i3_un_timeout_de_red_se_reintenta(monkeypatch, mails, hoy):
     visto = doble_http(monkeypatch, [TimeoutError("timed out"), (200, OK_DIARIO)])
 
     assert kp.main() == kp.EXIT_OK
-    assert len(visto) == 2
+    assert len(visto) == 3
     assert mails == []
 
 
@@ -373,7 +378,7 @@ def test_n2_dry_run_se_apaga_con_cero(monkeypatch, mails, hoy):
     visto = doble_http(monkeypatch)
 
     assert kp.main() == kp.EXIT_OK
-    assert len(visto) == 1
+    assert len(visto) == 2
 
 
 # ── Guards de config y del contrato con `alertas` ────────────────────────────
@@ -423,7 +428,7 @@ def test_r_sin_las_variables_de_correo_el_run_avisa_pero_corre(monkeypatch, caps
     visto = doble_http(monkeypatch)
 
     assert kp.main() == kp.EXIT_OK
-    assert len(visto) == 1
+    assert len(visto) == 2
     assert "AVISO (config)" in capsys.readouterr().out
 
 

@@ -1522,15 +1522,19 @@ workflows de la instancia, no de los JSON del repo):
 2. El reentrenamiento pasaba el **día 1**; el job nuevo lo corre los **días 15 y
    último** (lo pedido), y mantiene el encadenado del workflow viejo: después de
    entrenar se refrescan las predicciones (si no, las predicciones quedarían hechas con
-   el modelo anterior).
+   el modelo anterior). Además, las **predicciones ahora se refrescan TODOS los días**
+   (no sólo el día 1): el panel de Fidelización consume el snapshot `predictions_churn`,
+   y con el snapshot mensual las recomendaciones quedaban viejas durante todo el mes
+   (el job diario ya alcanza para que la "situación en vivo" nunca quede desactualizada
+   más de un día).
 
 ### Qué hace `maintenance/kpis_cloud.py`
 
 | Cuándo (día de Chile) | Llamadas, en orden |
 |---|---|
-| **todos los días** | `POST /api/v1/kpis/populate/daily?fecha=<ayer>` |
-| **día 1** | + `POST /api/v1/kpis/populate/monthly?year=<año>&month=<mes anterior>` + `POST /api/v1/kpis/populate/predictions` |
-| **día 15** y **último del mes** | + `POST /api/v1/ml/reentrenar` → `POST /api/v1/segmentacion/reentrenar` → `POST /api/v1/kpis/populate/predictions` |
+| **todos los días** | `POST /api/v1/kpis/populate/daily?fecha=<ayer>` → `POST /api/v1/kpis/populate/predictions` |
+| **día 1** | + `POST /api/v1/kpis/populate/monthly?year=<año>&month=<mes anterior>` |
+| **día 15** y **último del mes** | + `POST /api/v1/ml/reentrenar` → `POST /api/v1/segmentacion/reentrenar`, y las predicciones (que ya van todos los días) al final |
 
 Decisiones que importan:
 
@@ -1539,6 +1543,10 @@ Decisiones que importan:
 - **El "día" es el de Chile** (`TZ`, default `America/Santiago`): el cron va en UTC y el
   día del mes se calcula con el calendario local (`zoneinfo`). Los `fecha`/`year`/`month`
   viajan **explícitos**, así el resultado no depende del huso del servidor de la API.
+- **Las predicciones van TODOS los días** (no sólo el día 1): el snapshot
+  `predictions_churn` alimenta el panel de Fidelización; rehacerlo una vez al mes dejaba
+  las recomendaciones viejas hasta 30 días. En los días de reentrenamiento van **después**
+  de entrenar (usan el modelo nuevo) y el KPI diario (`daily`) siempre sale primero.
 - **Nada de la app**: sólo HTTP con `urllib` de la stdlib y el header `X-N8N-API-Key`. No
   se importa `app.*`, no hay SQLAlchemy ni acceso a la base.
 - **Reintentos acotados**: 5xx, timeouts y cortes de red se reintentan
@@ -1620,13 +1628,16 @@ no manda nada. Las alertas de las notificaciones siguen siendo las de n8n.
   `enviar_email` mockeado ⇒ **no sale ningún correo**. Cubre: sin URL/clave ⇒ exit 2 sin
   llamar (y con el MOTIVO en el correo), `http://` a host remoto ⇒ exit 2, `DIA_ML` fuera de
   rango ⇒ exit 2, el plan de cada día (5, 1, 15, 28/30/31 y febrero), el orden de las
-  llamadas, que el día 1 NO reentrena y el 15 NO toca el mes, 5xx reintentado con espera
+  llamadas (entrenar antes de predecir y las predicciones SIEMPRE al final), que las
+  predicciones salen TODOS los días, que el día 1 NO reentrena y el 15 NO toca el mes,
+  5xx reintentado con espera
   duplicada y acotada, 4xx sin reintento, timeout reintentado, un fallo que NO aborta el
   resto, `parcial` ⇒ exit 5, `DRY_RUN`, y que ni el log ni el correo puedan filtrar la clave
   (ni en el mensaje de un error de red ni en el cuerpo de un 500).
 - Smoke **real contra TEST** (`KPIS_API_URL=http://localhost:8001`, la clave de TEST del
-  contenedor, `DRY_RUN=0`): un día corriente ⇒ 1 llamada, `HTTP 200 {"status": "ok",
-  "accion": "daily_kpis upsert", "fecha": "2026-09-28"}`, exit 0 y sin correo. El plan del
+  contenedor, `DRY_RUN=0`): un día corriente ⇒ **2 llamadas** (`daily` + `predictions`),
+  `HTTP 200 {"status": "ok", "accion": "daily_kpis upsert", "fecha": "2026-09-28"}` y el
+  refresh de predicciones, exit 0 y sin correo. El plan del
   día 15 (forzado) ⇒ **4/4 ok en 87 s** con los endpoints reales: `ml/reentrenar`
   (`modelos_vigentes` con churn de 665 KB), `segmentacion/reentrenar` (`n_alumnos=415`,
   `silhouette=0.3998`, `k=5`) y `kpis/populate/predictions` (full refresh).

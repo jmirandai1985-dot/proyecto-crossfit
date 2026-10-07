@@ -31,8 +31,11 @@ del repo son copias de referencia y pueden estar viejos):
 Qué hace (un solo Cron Job DIARIO; el "día 1 / 15 / último" lo decide este script, no
 el cron, porque un cron de Render no sabe expresar "último día del mes"):
   * **todos los días**   → POST /kpis/populate/daily (con `fecha=ayer` en hora de Chile)
-  * **día 1**            → + POST /kpis/populate/monthly (último mes CERRADO) + predictions
-  * **días 15 y último** → + POST /ml/reentrenar + POST /segmentacion/reentrenar + predictions
+                            + POST /kpis/populate/predictions (refresca el snapshot de churn
+                            que consume Fidelización; antes lo hacía SÓLO el día 1)
+  * **día 1**            → + POST /kpis/populate/monthly (último mes CERRADO)
+  * **días 15 y último** → + POST /ml/reentrenar + POST /segmentacion/reentrenar; las predicciones
+                            (que ya van todos los días) salen al final, con el modelo recién entrenado
 
 Principios
 ----------
@@ -265,12 +268,16 @@ def plan_del_dia(hoy: date, dia_ml: int = DIA_ML_DEFECTO) -> list:
     parte que más fácil se rompe y la que no se puede probar contra PROD; así los
     tests fijan día 1, día 15, último día (incluido febrero) y un día cualquiera.
 
-    Reglas (mismas que los 4 workflows de n8n que reemplaza):
-      · todos los días: el KPI del día anterior (`fecha=ayer` en hora de Chile);
-      · día 1: además el KPI del mes anterior (ya cerrado) y las predicciones;
-      · día `dia_ml` (15) y ÚLTIMO del mes: reentrenar modelos, reentrenar la
-        segmentación y refrescar las predicciones con el modelo nuevo (el orden
-        importa: entrenar antes de predecir).
+    Reglas (mismas que los 4 workflows de n8n que reemplaza, con dos ajustes pedidos):
+      · todos los días: el KPI del día anterior (`fecha=ayer` en hora de Chile) y las
+        predicciones. El panel de Fidelización se alimenta del snapshot
+        `predictions_churn`: refrescarlo sólo el día 1 dejaba un mes entero con
+        recomendaciones viejas, así que ahora se recalcula TODOS los días;
+      · día 1: además el KPI del mes anterior (ya cerrado);
+      · día `dia_ml` (15) y ÚLTIMO del mes: reentrenar modelos y reentrenar la
+        segmentación. Las predicciones van SIEMPRE al final, así en los días de
+        reentrenamiento usan el modelo recién entrenado (el orden importa: entrenar
+        antes de predecir).
 
     Los `params` viajan explícitos para que el resultado NO dependa del huso del
     servidor: el día/mes lo decide este proceso, con el calendario de Chile.
@@ -292,14 +299,6 @@ def plan_del_dia(hoy: date, dia_ml: int = DIA_ML_DEFECTO) -> list:
             "params": {"year": anio, "month": mes},
             "porque": f"el mes anterior ({anio}-{mes:02d}) ya cerró: es el KPI mensual",
         })
-        pasos.append({
-            "nombre": "Predicciones (churn + forecast)",
-            "metodo": "POST",
-            "ruta": RUTA_PREDICTIONS,
-            "params": {},
-            "porque": "el workflow mensual de n8n actualizaba las predicciones el día 1",
-        })
-
     if hoy.day == dia_ml or es_ultimo_dia(hoy):
         pasos.append({
             "nombre": "Reentrenar modelos ML",
@@ -315,13 +314,19 @@ def plan_del_dia(hoy: date, dia_ml: int = DIA_ML_DEFECTO) -> list:
             "params": {},
             "porque": "en n8n la segmentación K-Means no la corría ningún workflow",
         })
-        pasos.append({
-            "nombre": "Predicciones (con el modelo recién entrenado)",
-            "metodo": "POST",
-            "ruta": RUTA_PREDICTIONS,
-            "params": {},
-            "porque": "el workflow viejo encadenaba predicciones después de entrenar",
-        })
+
+    # SIEMPRE al final: las predicciones se refrescan TODOS los días (el panel de
+    # Fidelización se alimenta del snapshot `predictions_churn`; recalcularlo sólo el
+    # día 1 dejaba las recomendaciones viejas durante todo el mes). En los días de
+    # reentrenamiento van DESPUÉS de entrenar, así usan el modelo recién entrenado.
+    pasos.append({
+        "nombre": "Predicciones (churn + forecast)",
+        "metodo": "POST",
+        "ruta": RUTA_PREDICTIONS,
+        "params": {},
+        "porque": ("refresca el snapshot de churn que consume Fidelización; en los días "
+                   "de ML usa el modelo recién entrenado"),
+    })
 
     return pasos
 
