@@ -5,6 +5,8 @@ import api from '../../services/api';
 // TZ Chile: "hoy" y el calendario de la semana salen de utils/fecha.js (el navegador
 // puede estar en otra zona: con la fecha local, entre 20:00 y 23:59 CLT ya era mañana).
 import { hoyChileStr, fechaSolaAInstante } from '../../utils/fecha';
+// Inicio móvil (<768px): réplica del mockup urban-box-inicio-pulido-1.
+import InicioMobile from './InicioMobile';
 
 // Helper: group classes by unique (disciplina, hora_inicio, hora_fin)
 const AGRUPAR_CLASES = (clases) => {
@@ -248,6 +250,19 @@ const AlumnoDashboard = () => {
 
     return (
         <Layout>
+            {/* ─── <768px: Inicio rediseñado (mockup). ───────────────────
+                La versión ≥768px NO cambia (regla de oro): el layout
+                original queda bajo `hidden md:block`. */}
+            <div className="md:hidden">
+                <InicioMobile
+                    usuario={usuario}
+                    membresia={membresia}
+                    nivelFuerza={nivelFuerza}
+                />
+            </div>
+
+            {/* ─── ≥768px: layout original (intacto) ──────────────────── */}
+            <div className="hidden md:block">
             <div className="max-w-6xl mx-auto space-y-4">
 
                 {/* ─── MENSAJE DE ERROR ──────────────────────────────── */}
@@ -785,6 +800,7 @@ const AlumnoDashboard = () => {
                     );
                 })()
                 }
+            </div>
             </div>
         </Layout>
     );

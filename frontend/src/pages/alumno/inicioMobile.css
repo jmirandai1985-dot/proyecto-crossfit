@@ -1,0 +1,141 @@
+/* ============================================================================
+   INICIO DEL ALUMNO — MOBILE (<768px)
+   Réplica del mockup "urban-box-inicio-pulido-1 (2).html".
+
+   Todo se acota bajo `.ub-inicio` para NO tocar:
+     - el tema zinc/emerald del resto de la app, ni
+     - la versión ≥768px (regla de oro: pixel-idéntica).
+   Las fuentes Barlow / Barlow Condensed se cargan en index.html y solo se
+   aplican aquí (familia local a `.ub-inicio`).
+
+   Paleta del mockup: bg #0e0f12 · panel #1a1b21 · línea #2a2c35 · texto #f3efe8 ·
+   naranja #ea7630 · oro #e6b54e · azul #6ea8ff · verde #3ddc97.
+   Radios: 26 / 16 / 10.
+   ============================================================================ */
+
+.ub-inicio {
+    /* Variables del mockup, locales a la pantalla */
+    --ub-bg: #0e0f12;
+    --ub-panel: #1a1b21;
+    --ub-line: #2a2c35;
+    --ub-text: #f3efe8;
+    --ub-muted: #a9abb5;
+    --ub-orange: #ea7630;
+    --ub-gold: #e6b54e;
+    --ub-blue: #6ea8ff;
+    --ub-ok: #3ddc97;
+    --ub-r-lg: 26px;
+    --ub-r-md: 16px;
+    --ub-r-sm: 10px;
+    --ub-cond: 'Barlow Condensed', 'Roboto Condensed', 'Arial Narrow', sans-serif;
+    --ub-body: 'Barlow', 'Roboto', system-ui, sans-serif;
+
+    font-family: var(--ub-body);
+    background: var(--ub-bg);
+    color: var(--ub-text);
+
+    /* Sangra los márgenes del <main> del Layout (16px) para que el fondo del
+       mockup cubra toda la pantalla móvil; el padding lo repone. */
+    margin: -16px;
+    padding: 16px 0 calc(124px + env(safe-area-inset-bottom));
+    min-height: 100dvh;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ub-inicio * {
+    box-sizing: border-box;
+}
+
+/* Columna centrada (máx. 430px, como el mockup) */
+.ub-inicio .ub-col {
+    max-width: 430px;
+    margin: 0 auto;
+    padding: 0 16px;
+}
+
+.ub-inicio button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    cursor: pointer;
+}
+
+.ub-inicio button:active {
+    transform: scale(.97);
+}
+
+.ub-inicio :focus-visible {
+    outline: 2px solid var(--ub-orange);
+    outline-offset: 3px;
+}
+
+.ub-inicio .i {
+    width: 24px;
+    height: 24px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    flex: none;
+}
+
+/* ── Identidad: avatar + saludo + fecha + chips de plan/nivel ── */
+.ub-inicio .who {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 10px 0 16px;
+}
+
+.ub-inicio .avatar {
+    width: 54px;
+    height: 54px;
+    border-radius: 50%;
+    background: var(--ub-text);
+    color: #111;
+    display: grid;
+    place-items: center;
+    font-family: var(--ub-cond);
+    font-weight: 800;
+    font-size: 28px;
+    flex: none;
+}
+
+.ub-inicio .who h1 {
+    font-family: var(--ub-cond);
+    font-weight: 700;
+    font-size: 30px;
+    line-height: 1;
+}
+
+.ub-inicio .who p {
+    font-size: 14px;
+    color: var(--ub-muted);
+    margin-top: 2px;
+}
+
+.ub-inicio .chips {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+
+.ub-inicio .pill {
+    font-size: 13px;
+    font-weight: 700;
+    border-radius: 999px;
+    padding: 3px 11px;
+}
+
+.ub-inicio .pill.plan {
+    color: var(--ub-blue);
+    background: #1b2540;
+}
+
+.ub-inicio .pill.lvl {
+    color: #2b1f05;
+    background: var(--ub-gold);
+}
