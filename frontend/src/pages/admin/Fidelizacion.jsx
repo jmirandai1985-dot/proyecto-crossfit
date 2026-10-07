@@ -648,8 +648,8 @@ const Fidelizacion = () => {
                                                                         <button
                                                                             type="button"
                                                                             onClick={() => setDetalleReco(p)}
-                                                                            title={`Recomendación del modelo: ${p.recomendacion}`}
-                                                                            aria-label={`Ver la recomendación del modelo para ${p.alumno_nombre || `alumno #${p.usuario_id}`}`}
+                                                                            title={`Recomendación (situación de hoy): ${p.recomendacion}${p.desactualizada ? ' · refrescando el modelo…' : ''}`}
+                                                                            aria-label={`Ver la recomendación para ${p.alumno_nombre || `alumno #${p.usuario_id}`}`}
                                                                             className="shrink-0 rounded p-0.5 text-zinc-400 hover:bg-zinc-700/60 hover:text-orange-400"
                                                                         >
                                                                             <Eye className="h-3.5 w-3.5" />
@@ -660,7 +660,7 @@ const Fidelizacion = () => {
                                                                     {sug.plantilla ? sug.label : sug.motivo}
                                                                 </div>
                                                                 <div className="text-[11px] leading-snug text-zinc-500 line-clamp-1">
-                                                                    {sug.plantilla ? sug.motivo : `Modelo: ${estiloReco(p.recomendacion_codigo).etiqueta}`}
+                                                                    {sug.plantilla ? sug.motivo : `Situación: ${estiloReco(p.recomendacion_codigo).etiqueta}`}
                                                                 </div>
                                                             </div>
                                                         );

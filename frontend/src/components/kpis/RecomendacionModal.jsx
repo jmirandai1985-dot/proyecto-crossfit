@@ -22,6 +22,7 @@ const ETIQUETA_CONTACTO = {
     acompanamiento: 'Acompañamiento',
     bienvenida: 'Bienvenida',
     activacion: 'Activación',
+    plan_sin_usar: 'Plan sin usar',
     bienvenida_activacion: 'Bienvenida y activación',
     confirmacion_renovacion: 'Confirmación de renovación',
     confirmacion_plan: 'Confirmación de plan',
@@ -151,13 +152,19 @@ export const RecomendacionModal = ({ fila, onClose, contactoTxt, renovacionTxt }
                         <p className="mt-1 text-sm text-zinc-200">{fila.motivo || '—'}</p>
                     </div>
 
-                    {/* Recomendación completa */}
+                    {/* Recomendación completa. La calcula el backend EN VIVO (misma regla
+                        que el populate): lo que se ve es la situación de HOY, no el snapshot. */}
                     <div className={`rounded-lg border-l-4 bg-zinc-800/40 p-3 ${estilo.borde}`}>
                         <p className={`text-[10px] font-semibold uppercase tracking-wide ${estilo.texto}`}>
                             {estilo.etiqueta}
                         </p>
                         <p className="mt-1 text-sm leading-relaxed text-zinc-200">
                             {fila.recomendacion || 'Sin recomendación calculada.'}
+                        </p>
+                        <p className="mt-1 text-[11px] text-zinc-500">
+                            Situación calculada hoy{fila.desactualizada
+                                ? ' · el snapshot del modelo quedó atrás y se está refrescando'
+                                : ''}
                         </p>
                     </div>
 
