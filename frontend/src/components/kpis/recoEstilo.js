@@ -4,11 +4,12 @@
  * Fuente única: la usan la tabla de KPIs (columna "Recomendación") y el modal
  * de detalle (components/kpis/RecomendacionModal.jsx).
  *
- * ⚠️ Los códigos los emite el backend (kpis_populate.RECO_CODIGOS): si agrega
+ * ⚠️ Los códigos los emite el backend (churn_service.RECO_CODIGOS): si agrega
  * uno nuevo, acá debe existir su entrada (si no, se usa RECO_ESTILO_DEFAULT).
  */
 export const RECO_ESTILO = {
     sin_plan: { borde: 'border-red-500', texto: 'text-red-200', etiqueta: 'Contacto personal' },
+    plan_sin_usar: { borde: 'border-fuchsia-500', texto: 'text-fuchsia-200', etiqueta: 'Plan sin usar' },
     critico_con_plan: { borde: 'border-rose-500', texto: 'text-rose-200', etiqueta: 'Crítico con plan' },
     caida_reciente: { borde: 'border-amber-500', texto: 'text-amber-200', etiqueta: 'Caída reciente' },
     alto_sin_causa_clara: { borde: 'border-orange-500', texto: 'text-orange-200', etiqueta: 'Chequeo preventivo' },

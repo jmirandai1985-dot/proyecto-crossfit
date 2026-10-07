@@ -501,6 +501,30 @@ def enviar_email_vencimiento_plan(alumno: dict, fecha_vencimiento) -> bool:
     return _enviar(correo, asunto, html, alumno.get("id"), tipo="vencimiento")
 
 
+def render_email_plan_sin_usar(nombre: str, plan: str, dias_desde_inicio: int) -> tuple:
+    """Renderiza (asunto, html) del correo del alumno que activó su plan y no vino nunca.
+
+    Fuente ÚNICA del copy: la usan el envío real y el preview del panel de Fidelización, así el
+    correo que ve el admin es EXACTAMENTE el que se manda.
+
+    El tono es de AYUDA, no de reclamo: el alumno ya pagó y todavía no arrancó, así que el mensaje
+    ofrece agendar la primera sesión (nunca "te extrañamos", que daría por hecho que ya vino).
+    """
+    primer_nombre = nombre.split()[0]
+    plan = plan or "tu plan"
+    titulo = "Tu plan ya está activo"
+    saludo = (f"Hola {primer_nombre}, activaste el plan <strong>{plan}</strong> hace "
+              f"<strong>{dias_desde_inicio} días</strong> y todavía no reservaste tu primera "
+              "clase.")
+    cuerpo = ("Tu plan ya está corriendo, así que no dejes pasar los días sin estrenarlo: la "
+              "primera clase es la que rompe la inercia. Elige el horario que mejor te acomode y "
+              "reserva ahora —el equipo te espera para arrancar con el pie derecho.")
+    url = url_frontend("/alumno/mis-reservas")
+    html = _template(titulo, saludo, cuerpo, "Reservar mi primera clase", url)
+    asunto = f"Tu plan {plan} te está esperando, {primer_nombre} 🏋️"
+    return asunto, html
+
+
 def render_email_fidelizacion(nombre: str, dias_ausente: int) -> tuple:
     """Renderiza (asunto, html) del correo de inactividad.
 

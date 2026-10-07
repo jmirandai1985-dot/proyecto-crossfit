@@ -111,108 +111,9 @@ def _dias_inactividad(hoy, ultima, created_at):
     return max(0, (hoy - referencia).days)
 
 
-def _plural_dias(n) -> str:
-    """'día' si n == 1, 'días' en cualquier otro caso (motivos legibles)."""
-    return "día" if n == 1 else "días"
-
-
-# ── Recomendación de acción (texto empático + código para la UI) ─────────────
-# Los textos viven acá (un solo lugar) y el código es estable para que el
-# frontend pueda colorear/filtrar sin parsear el texto.
-RECO_SIN_PLAN = (
-    "Alumno sin actividad y sin plan vigente. Te recomendamos contactarlo "
-    "personalmente para indagar qué está pasando —podría ser tiempo, motivación "
-    "o un tema económico. Si es económico, considera ofrecerle una alternativa "
-    "(clase de cortesía, descuento temporal) para facilitar que vuelva."
-)
-RECO_CRITICO_CON_PLAN = (
-    "Su plan está activo pero las señales de riesgo son críticas. Contáctalo con "
-    "prioridad: no lo trates como un recordatorio más —preguntale cómo está de "
-    "verdad y si algo del box (horario, clima, precio, lesión) le está jugando "
-    "en contra."
-)
-RECO_CAIDA_RECIENTE = (
-    "Su asistencia bajó fuerte aunque su plan sigue activo. Es un buen momento "
-    "para un mensaje cercano preguntando cómo está y si el horario le sigue "
-    "acomodando —a veces alcanza con ajustar la rutina."
-)
-RECO_ALTO_SIN_CAUSA = (
-    "El modelo detecta un riesgo alto para este alumno, aunque no hay una señal "
-    "específica clara (como caída de asistencia o vencimiento próximo). Vale la "
-    "pena un chequeo preventivo: preguntale cómo va todo, por las dudas."
-)
-RECO_RENOVACION_PROXIMA = (
-    "Su plan vence pronto y sigue entrenando con normalidad. Es buen momento "
-    "para mandarle el recordatorio de renovación antes de que se le pase la fecha."
-)
-RECO_MEDIO_SIN_SENALES = (
-    "El modelo marca un riesgo medio para este alumno, sin una señal puntual "
-    "(ni caída de asistencia ni vencimiento próximo). No es urgente, pero "
-    "conviene un seguimiento amable: preguntale cómo va y si necesita algo."
-)
-RECO_SIN_ACCION = "Todo en orden, sin acción necesaria."
-
-RECO_CODIGOS = ("sin_plan", "critico_con_plan", "caida_reciente",
-                "alto_sin_causa_clara", "renovacion_proxima",
-                "medio_sin_senales", "sin_accion")
-
-
-def _recomendacion_churn(nivel, tiene_suscripcion, dias_para_vencer,
-                         asis_30, asis_90) -> tuple:
-    """(texto, código) de la recomendación (gana la PRIMERA regla que aplica).
-
-      1. CRITICO/ALTO/MEDIO sin plan vigente -> contacto personal (posible tema económico)
-      2. CRITICO con plan vigente            -> contacto prioritario (plan activo, señales fuertes)
-      3. ALTO/MEDIO con plan y caída fuerte  -> mensaje cercano (revisar rutina/horario)
-      4. ALTO con plan, sin señales claras   -> chequeo preventivo (nunca "todo en orden")
-      5. Vence en <=7 días y BAJO/MEDIO      -> recordatorio de renovación
-      6. MEDIO con plan, sin señales claras  -> seguimiento amable (no urgente)
-      7. Resto                               -> "Todo en orden..." (sólo BAJO)
-
-    "Caída fuerte" = asistencias 30d < asistencias 90d / 3 (ritmo reciente por
-    debajo de un tercio del histórico trimestral). Proxy explícito, sin queries.
-
-    Orden de prioridad: las reglas con señal accionable concreta van primero
-    (#3 caída, #5 vencimiento próximo) y recién después los "sin señal clara"
-    (#4 ALTO, #6 MEDIO): así un MEDIO que vence en 7 días recibe el recordatorio
-    de renovación y no el mensaje genérico.
-
-    Cobertura: la #1 agarra a TODO no-BAJO sin plan vigente, la #2/#4 a todo
-    ALTO/CRITICO con plan y la #6 a todo MEDIO con plan -> la #7 ("Todo en
-    orden") sólo puede contener alumnos BAJO.
-
-    ⚠️ BORDE CONOCIDO (regla literal a propósito, ver consigna):
-      - Con asistencias_90d == 0 el proxy de la #3 da `0 < 0` = False -> no la
-        dispara: un ALTO con plan cae a la #4 y un MEDIO con plan a la #6.
-    """
-    if nivel in ("CRITICO", "ALTO", "MEDIO") and not tiene_suscripcion:
-        return RECO_SIN_PLAN, "sin_plan"
-
-    if nivel == "CRITICO" and tiene_suscripcion:
-        return RECO_CRITICO_CON_PLAN, "critico_con_plan"
-
-    caida_reciente = asis_30 < (asis_90 / 3)
-    if nivel in ("ALTO", "MEDIO") and tiene_suscripcion and caida_reciente:
-        return RECO_CAIDA_RECIENTE, "caida_reciente"
-
-    # Un ALTO con plan activo nunca debe leerse como "todo en orden": si no hubo
-    # caída de asistencia (#3) ni vencimiento próximo, se recomienda chequeo
-    # preventivo. "Sin causa clara" es explícito: lo detecta el modelo, no una
-    # señal accionable puntual.
-    if nivel == "ALTO" and tiene_suscripcion:
-        return RECO_ALTO_SIN_CAUSA, "alto_sin_causa_clara"
-
-    if (dias_para_vencer is not None and dias_para_vencer <= 7
-            and nivel in ("BAJO", "MEDIO")):
-        return RECO_RENOVACION_PROXIMA, "renovacion_proxima"
-
-    # Un MEDIO con plan activo, sin caída (#3) ni vencimiento próximo (#5) -las
-    # señales accionables ya se evaluaron- tampoco es "todo en orden": toca un
-    # seguimiento amable, sin urgencia.
-    if nivel == "MEDIO" and tiene_suscripcion:
-        return RECO_MEDIO_SIN_SENALES, "medio_sin_senales"
-
-    return RECO_SIN_ACCION, "sin_accion"
+# La recomendación (textos + código + regla `recomendacion_churn`) y la definición de
+# "plan sin usar" viven en `app.services.churn_service`: UNA sola definición que comparten
+# este populate, el recalculo por alumno y el servido en vivo de `GET /kpis/churn`.
 
 
 def _conteos_asistencias(db, tenant_id, ids, dias, fecha_ref) -> dict:
@@ -752,7 +653,7 @@ def populate_predictions(
         PredictionsChurn.tenant_id == tenant_id).delete()
 
     criticos = altos = medios = 0
-    recos = {codigo: 0 for codigo in RECO_CODIGOS}
+    recos = {codigo: 0 for codigo in churn_service.RECO_CODIGOS}
 
     # Con modelo ML se calculan las features de TODOS los alumnos de una vez
     # (`build_features` = 5 queries agregadas; `features_alumno` sería ~6 por
@@ -778,12 +679,19 @@ def populate_predictions(
         probs_ml = dict(zip(df_ml["usuario_id"],
                             modelo_churn.predict_proba(X_ml)[:, 1]))
 
+    # IDs de TODOS los alumnos del box (una vez): los comparten el cálculo de
+    # "plan sin usar" y las ventanas de asistencia de la rama heurística.
+    ids_alumnos = [a.id for a in alumnos]
+    # Alumnos con plan vigente SIN USAR (comprado, vigente y sin ninguna
+    # asistencia desde que arrancó): alimenta la recomendación "plan_sin_usar".
+    # UNA definición (`churn_service`), en 2 queries para todo el box (sin N+1).
+    plan_sin_usar_ids = churn_service.plan_sin_usar_lote(db, tenant_id, ids_alumnos, hoy)
+
     # Ventanas de asistencia para la recomendación en la rama heurística: la
     # rama ML ya las trae gratis en `contexto_ml` (build_features las calcula),
     # pero la heurística no. Son 2 queries agregadas CONSTANTES (no por alumno).
     conteos_30 = conteos_90 = {}
     if probs_ml is None and alumnos:
-        ids_alumnos = [a.id for a in alumnos]
         conteos_30 = _conteos_asistencias(db, tenant_id, ids_alumnos, 30, hoy)
         conteos_90 = _conteos_asistencias(db, tenant_id, ids_alumnos, 90, hoy)
 
@@ -847,12 +755,13 @@ def populate_predictions(
         elif nivel == "MEDIO":
             medios += 1
 
-        # Recomendación empática/accionable: MISMA lógica en ambas ramas.
-        # `tiene_suscripcion_activa` == `dias_para_vencer is not None`
+        # Recomendación empática/accionable: MISMA lógica en ambas ramas (vive en
+        # `churn_service`, la comparten este populate, el recálculo por alumno y el
+        # servido en vivo). `tiene_suscripcion_activa` == `dias_para_vencer is not None`
         # (en ml/features.py: "tiene_suscripcion_activa": vence_date is not None).
-        recomendacion, reco_codigo = _recomendacion_churn(
+        recomendacion, reco_codigo = churn_service.recomendacion_churn(
             nivel, dias_para_vencer is not None, dias_para_vencer,
-            asis_30, asis_90)
+            asis_30, asis_90, es_plan_sin_usar=alumno.id in plan_sin_usar_ids)
         recos[reco_codigo] += 1
 
         db.add(PredictionsChurn(

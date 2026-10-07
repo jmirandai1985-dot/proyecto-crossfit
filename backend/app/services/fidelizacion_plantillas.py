@@ -63,6 +63,9 @@ from app.models.plan import Plan
 from app.models.predictions_churn import PredictionsChurn
 from app.models.suscripcion import Suscripcion
 from app.services import beneficios_service
+# "Plan sin usar" (plan vigente y sin estrenar): la MISMA definición que la recomendación del
+# churn (`churn_service.es_plan_sin_usar`), para que la sugerencia y el panel no diverjan.
+from app.services import churn_service
 from app.services import email_service
 # ÚNICA definición de "días para vencer el plan vigente": la comparte con la situación del BI
 # (kpis_populate) para que la columna "Recomendación" y el "Motivo" nunca digan nº distintos.
@@ -85,6 +88,8 @@ P_INACTIVIDAD_15_30: Final[str] = "inactividad_15_30"
 P_INACTIVIDAD_MAS_30: Final[str] = "inactividad_mas_30"
 P_RIESGO_ALTO: Final[str] = "riesgo_alto"
 P_VENCIMIENTO: Final[str] = "vencimiento"
+# Plan vigente COMPRADO y todavía sin estrenar (el alumno activó el plan y no vino nunca).
+P_PLAN_SIN_USAR: Final[str] = "plan_sin_usar"
 # Los dos correos de la Fase 2 (grupo `beneficios`): no nacen de una situación del alumno
 # sino de un REGALO concreto, así que su id ES el tipo del beneficio que anuncian
 # (`beneficios_service.TIPOS`): el log de correos queda agrupado por tipo de regalo, que es
@@ -114,6 +119,7 @@ NIVELES_RIESGO_ALTO: Final[tuple] = ("ALTO", "CRITICO")
 TIPO_INACTIVIDAD: Final[str] = "inactividad"
 TIPO_RIESGO_ALTO: Final[str] = "riesgo_alto"
 TIPO_VENCIMIENTO: Final[str] = "vencimiento"
+TIPO_PLAN_SIN_USAR: Final[str] = "plan_sin_usar"
 
 # Regla que devuelve `sugerir()` cuando HOY no hay nada que reclamarle al alumno.
 REGLA_SIN_SITUACION: Final[str] = "sin_situacion"
@@ -174,6 +180,34 @@ def _contexto_vencimiento(db: Session, alumno) -> dict:
     return {
         "plan": plan.nombre,
         "fecha_expiracion": vence,
+        "dias_restantes": dias_hasta(suscripcion.fecha_expiracion),
+        "suscripcion_id": suscripcion.id,
+    }
+
+
+def _contexto_plan_sin_usar(db: Session, alumno) -> dict:
+    """Plan vigente que el alumno COMPRÓ y todavía no estrenó (o error claro si no).
+
+    Criterio 5 (sin filtrar por comercial) + ninguna asistencia DESDE que arrancó el plan + el
+    margen mínimo ya cumplido: la MISMA definición que la categoría `plan_sin_usar` de la
+    recomendación del churn (`churn_service.es_plan_sin_usar`). Si el alumno ya estrenó el plan
+    (o lo activó hace muy poco), el envío se rechaza y el error dice por qué.
+    """
+    fila = churn_service.plan_sin_usar(db, alumno, solo_comercial=False)
+    if fila is None:
+        if not tiene_membresia_vigente(db, alumno):
+            raise PlantillaSinDatos(
+                "Este alumno no tiene una membresía vigente: el aviso de \"plan sin usar\" es "
+                "para un plan que sigue activo y todavía no se estrenó.")
+        raise PlantillaSinDatos(
+            "Este alumno ya estrenó su plan (o lo activó hace muy poco): el aviso de \"plan "
+            "sin usar\" es para un plan vigente que nunca se usó.")
+    suscripcion, plan = fila
+    inicio = fecha_chile(suscripcion.fecha_inicio)
+    return {
+        "plan": plan.nombre,
+        "fecha_inicio": inicio,
+        "dias_desde_inicio": (hoy_santiago() - inicio).days if inicio else 0,
         "dias_restantes": dias_hasta(suscripcion.fecha_expiracion),
         "suscripcion_id": suscripcion.id,
     }
@@ -311,6 +345,11 @@ def _render_vencimiento(alumno, contexto) -> tuple:
         alumno.nombre, contexto["plan"], contexto["fecha_expiracion"])
 
 
+def _render_plan_sin_usar(alumno, contexto) -> tuple:
+    return email_service.render_email_plan_sin_usar(
+        alumno.nombre, contexto["plan"], contexto["dias_desde_inicio"])
+
+
 # ── Los correos del grupo `beneficios` (Fase 2) ───────────────────────────────
 def _contexto_beneficio(db: Session, alumno, datos) -> dict:
     """Datos del REGALO que anuncia el correo (no del alumno): tipo, valor y vigencia.
@@ -375,6 +414,18 @@ PLANTILLAS: Final[tuple] = (
         "requiere": "Una membresía vigente (si no tiene, el envío se rechaza).",
         "_contexto": _contexto_vencimiento,
         "_render": _render_vencimiento,
+    },
+    {
+        "id": P_PLAN_SIN_USAR,
+        "label": "Plan sin usar (activó el plan y no vino)",
+        "descripcion": "El empujón para el que compró un plan y todavía no estrenó ninguna "
+                       "clase: lo ayuda a agendar su primera sesión.",
+        "grupo": GRUPO_GESTION,
+        "tipo_envio": TIPO_PLAN_SIN_USAR,
+        "requiere": "Un plan vigente sin ninguna asistencia desde que arrancó (y ya pasó el "
+                    "margen mínimo).",
+        "_contexto": _contexto_plan_sin_usar,
+        "_render": _render_plan_sin_usar,
     },
     {
         "id": P_INACTIVIDAD_7_14,
@@ -568,12 +619,14 @@ def _sugerir_con(datos: dict) -> dict:
 
       1. `vencimiento`         plan vigente que vence en ≤ `DIAS_RENOVACION_SUGERIDA` días: es el
                                único caso con fecha límite y el alumno todavía está pagando.
-      2. `inactividad_mas_30`  sin plan vigente (su plan ya venció) o más de
+      2. `plan_sin_usar`       plan vigente que todavía no estrenó ninguna clase: un plan pago
+                               esperando (la MISMA definición que la recomendación del churn).
+      3. `inactividad_mas_30`  sin plan vigente (su plan ya venció) o más de
                                `DIAS_INACTIVIDAD_LARGA` días sin entrenar: el mensaje de fondo.
-      3. `riesgo_alto`         el modelo lo marca ALTO/CRÍTICO: paga hoy, pero se va.
-      4. `inactividad_15_30`   entre 15 y 30 días sin entrenar.
-      5. `inactividad_7_14`    el resto de los inactivos.
-      6. (ninguna)             menos de `DIAS_TEMPRANA_MIN` días: no se inventa un correo.
+      4. `riesgo_alto`         el modelo lo marca ALTO/CRÍTICO: paga hoy, pero se va.
+      5. `inactividad_15_30`   entre 15 y 30 días sin entrenar.
+      6. `inactividad_7_14`    el resto de los inactivos.
+      7. (ninguna)             menos de `DIAS_TEMPRANA_MIN` días: no se inventa un correo.
 
     `plantilla: None` (con `regla="sin_situacion"`) es una respuesta legítima, no un error: el
     alumno que entrenó ayer no necesita que nadie lo vaya a buscar.
@@ -594,6 +647,20 @@ def _sugerir_con(datos: dict) -> dict:
 
     if dias_para_vencer is not None and dias_para_vencer <= DIAS_RENOVACION_SUGERIDA:
         return _sugerida(P_VENCIMIENTO, f"Su plan vence en {dias_para_vencer} día(s).", contexto)
+    # Plan sin usar: compró un plan vigente y todavía no estrenó ninguna clase. Va DESPUÉS de
+    # vencimiento (si está por vencer, el aviso con fecha manda) y ANTES de inactividad: un plan
+    # pago esperando es lo más concreto que hay para ofrecer. Misma definición que el churn.
+    if fila is not None:
+        suscripcion_psu, plan_psu = fila
+        inicio_psu = fecha_chile(suscripcion_psu.fecha_inicio)
+        if churn_service.es_plan_sin_usar(True, inicio_psu, datos["ultima_asistencia"]):
+            contexto["plan_sin_usar"] = True
+            dias_plan = (hoy_santiago() - inicio_psu).days if inicio_psu else dias
+            return _sugerida(
+                P_PLAN_SIN_USAR,
+                f"Activó el plan {plan_psu.nombre} hace {dias_plan} día(s) y no registra "
+                "asistencias.",
+                contexto)
     if fila is None:
         return _sugerida(P_INACTIVIDAD_MAS_30, "No tiene un plan vigente.", contexto)
     if dias > DIAS_INACTIVIDAD_LARGA:
