@@ -8,6 +8,9 @@ import { getEstadoColor, getEstadoDisplay, esActiva } from '../../utils/estadoRe
 const DIAS_NOMBRES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
+// Clave de sesión: recuerda la última disciplina elegida mientras dure la sesión.
+const CLAVE_FILTRO_DISCIPLINA = 'misReservas.disciplina';
+
 const formatearFecha = (fechaStr) => {
     if (!fechaStr) return '—';
     const d = new Date(fechaStr + 'T12:00:00');
@@ -26,6 +29,11 @@ const MisReservas = () => {
     const [mensaje, setMensaje] = useState(null);
     const navigate = useNavigate();
     const [boxPublicId, setBoxPublicId] = useState(null);
+    // Filtro por disciplina (arriba de la lista). Arranca con lo último elegido
+    // en esta sesión (sessionStorage); si esa disciplina ya no existe, cae a 'Todas'.
+    const [disciplinaFiltro, setDisciplinaFiltro] = useState(
+        () => sessionStorage.getItem(CLAVE_FILTRO_DISCIPLINA) || 'Todas'
+    );
 
     // public_id del box para el botón "Escanear QR" (endpoint accesible a
     // cualquier usuario logueado, incluido el alumno).
@@ -112,8 +120,27 @@ const MisReservas = () => {
         }
     };
 
-    const reservasActivas = reservas.filter(esActiva);
-    const reservasHistorial = reservas.filter((r) => !esActiva(r));
+    // ── Filtro por disciplina (MÓVIL) ───────────────────────────────────
+    // El filtro se pinta sólo en <768px (regla de oro: ≥768px igual que hoy).
+    // El estado vive en sessionStorage para "recordar" la última disciplina
+    // elegida mientras dure la sesión. No duplica nada del backend: se agrupa
+    // por `disciplina_nombre` y el estado sigue saliendo de `estado_visible`.
+    const disciplinaDe = (r) => r.disciplina_nombre || 'Sin disciplina';
+    const disciplinas = Array.from(new Set(reservas.map(disciplinaDe)))
+        .sort((a, b) => a.localeCompare(b, 'es'));
+    // Si lo recordado ya no existe en los datos, se ignora (cae a 'Todas').
+    const filtroEfectivo = disciplinaFiltro === 'Todas' || disciplinas.includes(disciplinaFiltro)
+        ? disciplinaFiltro
+        : 'Todas';
+    const coincideFiltro = (r) => filtroEfectivo === 'Todas' || disciplinaDe(r) === filtroEfectivo;
+
+    const cambiarFiltro = (d) => {
+        setDisciplinaFiltro(d);
+        try { sessionStorage.setItem(CLAVE_FILTRO_DISCIPLINA, d); } catch { /* sessionStorage no disponible */ }
+    };
+
+    const reservasActivas = reservas.filter((r) => esActiva(r) && coincideFiltro(r));
+    const reservasHistorial = reservas.filter((r) => !esActiva(r) && coincideFiltro(r));
 
     return (
         <Layout>
@@ -165,25 +192,62 @@ const MisReservas = () => {
                     </div>
                 )}
 
+                {/* Filtro por disciplina (sólo móvil <768px) */}
+                {!loading && disciplinas.length > 1 && (
+                    <div className="md:hidden flex gap-2 overflow-x-auto pb-1" data-testid="filtro-disciplina">
+                        {['Todas', ...disciplinas].map((d) => (
+                            <button
+                                key={d}
+                                type="button"
+                                onClick={() => cambiarFiltro(d)}
+                                aria-pressed={filtroEfectivo === d}
+                                className={`shrink-0 inline-flex items-center justify-center min-h-11 px-4 rounded-full border text-sm font-semibold transition-colors ${filtroEfectivo === d
+                                    ? 'bg-emerald-500 text-white border-emerald-500'
+                                    : 'bg-white text-gray-700 border-gray-300 hover:border-emerald-400'
+                                    }`}
+                            >
+                                {d}
+                            </button>
+                        ))}
+                    </div>
+                )}
+
                 {/* Lista de reservas */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                     {loading ? (
                         <div className="flex items-center justify-center py-16">
                             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-500"></div>
                         </div>
-                    ) : reservas.length === 0 ? (
+                    ) : (reservasActivas.length === 0 && reservasHistorial.length === 0) ? (
                         <div className="text-center py-16 px-4">
                             <p className="text-5xl mb-4">📅</p>
-                            <p className="text-lg font-medium text-gray-700">No tienes reservas activas</p>
-                            <p className="text-sm text-gray-500 mt-1">
-                                Reserva una clase desde el Dashboard para empezar
-                            </p>
-                            <a
-                                href="/alumno/dashboard"
-                                className="inline-block mt-4 px-6 py-2.5 bg-emerald-500 text-white rounded-xl font-medium text-sm hover:bg-emerald-600 transition-colors"
-                            >
-                                📋 Ver clases disponibles
-                            </a>
+                            {reservas.length === 0 ? (
+                                <>
+                                    <p className="text-lg font-medium text-gray-700">No tienes reservas activas</p>
+                                    <p className="text-sm text-gray-500 mt-1">
+                                        Reserva una clase desde el Dashboard para empezar
+                                    </p>
+                                    <a
+                                        href="/alumno/dashboard"
+                                        className="inline-block mt-4 px-6 py-2.5 bg-emerald-500 text-white rounded-xl font-medium text-sm hover:bg-emerald-600 transition-colors"
+                                    >
+                                        📋 Ver clases disponibles
+                                    </a>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="text-lg font-medium text-gray-700">
+                                        No hay reservas de “{filtroEfectivo}”.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={() => cambiarFiltro('Todas')}
+                                        className="inline-block mt-4 px-6 py-2.5 bg-emerald-500 text-white rounded-xl font-medium text-sm hover:bg-emerald-600 transition-colors"
+                                    >
+                                        Ver todas
+                                    </button>
+                                </>
+                            )}
                         </div>
                     ) : (
                         <div className="divide-y divide-gray-100">
