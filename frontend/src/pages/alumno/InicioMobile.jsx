@@ -90,6 +90,7 @@ const InicioMobile = ({
     usuario,
     membresia,
     nivelFuerza,
+    nivelGimnastico,
     reservas = [],
     clasesPorDia = {},
     proximosDias = [],
@@ -205,6 +206,14 @@ const InicioMobile = ({
     const dotsN = (!ilimitado && creditos > 0) ? Math.min(creditos, 20) : 0;
     // Oferta de renovación (Espacio B): pocos créditos o pocos días.
     const mostrarRenovacion = activa && (diasRestantes <= 7 || (!ilimitado && creditos <= 4));
+
+    // ── Bloque "Mis marcas" ──
+    const marcaFuerza = (nivelFuerza?.top_rms || [])[0] || null;
+    const [marcaNum, marcaUnit = 'kg'] = String(marcaFuerza?.valor || '').split(/\s+/);
+    const nivelF = nivelFuerza?.nivel && nivelFuerza.nivel.toLowerCase() !== 'sin datos'
+        ? capitalizar(nivelFuerza.nivel.toLowerCase()) : null;
+    const nivelG = nivelGimnastico?.nivel && nivelGimnastico.nivel.toLowerCase() !== 'sin datos'
+        ? capitalizar(nivelGimnastico.nivel.toLowerCase()) : null;
 
     // Clases del día elegido: deduplicadas (varias sedes comparten disciplina y
     // hora) y ordenadas por horario, como la rejilla del Dashboard.
@@ -335,6 +344,26 @@ const InicioMobile = ({
                             <button type="button" onClick={() => navigate('/alumno/solicitar-plan')}>Renovar</button>
                         </div>
                     )}
+                </section>
+
+                {/* -- Mis marcas (fuerza/gimnastico). Sin calculadora de discos -- */}
+                <section className="card sec" aria-label="Mis marcas">
+                    <div className="head">
+                        <h2>Mis marcas</h2>
+                        <button type="button" className="link" onClick={() => navigate('/alumno/performance-hub')}>Ver Performance Hub</button>
+                    </div>
+                    <div className="m1">
+                        <div>
+                            <small>Fuerza</small>
+                            <b>{marcaFuerza ? marcaFuerza.movimiento : 'Sin registros'}</b>
+                            {nivelF && <span className="pill lvl">{nivelF}</span>}
+                        </div>
+                        {marcaFuerza && <div className="goldnum">{marcaNum}<em>{marcaUnit}</em></div>}
+                    </div>
+                    <div className="m2">
+                        <span>Gimnástico: {nivelG ? nivelG.toLowerCase() : 'sin datos'}</span>
+                        <button type="button" className="addbtn" onClick={() => navigate('/alumno/rms')}>Registrar RMs</button>
+                    </div>
                 </section>
 
                 {/* ── Clases disponibles: rejilla del Dashboard adaptada a móvil.

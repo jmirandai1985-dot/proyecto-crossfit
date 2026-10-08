@@ -607,3 +607,74 @@
     white-space: nowrap;
 }
 
+/* ── Enlaces de cabecera (Ver Performance Hub / Ver todo) ── */
+.ub-inicio .head .link {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--ub-orange);
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 0 0 12px;
+}
+
+/* ── Mis marcas ── */
+.ub-inicio .m1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+
+.ub-inicio .m1 small {
+    font-size: 14px;
+    color: var(--ub-muted);
+}
+
+.ub-inicio .m1 b {
+    display: block;
+    font-size: 16px;
+    margin: 2px 0 7px;
+}
+
+.ub-inicio .goldnum {
+    font-family: var(--ub-cond);
+    font-weight: 800;
+    line-height: 1;
+    color: var(--ub-gold);
+    font-size: 44px;
+}
+
+.ub-inicio .goldnum em {
+    font-style: normal;
+    font-size: .45em;
+    margin-left: 3px;
+}
+
+.ub-inicio .m2 {
+    margin-top: 14px;
+    border: 1.5px dashed #3a3d48;
+    border-radius: var(--ub-r-md);
+    padding: 8px 8px 8px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.ub-inicio .m2 span {
+    font-size: 14.5px;
+    color: var(--ub-muted);
+}
+
+.ub-inicio .addbtn {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--ub-blue);
+    background: #17213a;
+    border-radius: 999px;
+    min-height: 44px;
+    padding: 0 16px;
+    white-space: nowrap;
+}
+
