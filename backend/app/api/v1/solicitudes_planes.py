@@ -29,6 +29,9 @@ from app.core.config import settings
 # El fin de mes de un plan se escribe EN HORA DE CHILE (23:59:59 del último día, ver la regla en
 # `app/utils/santiago.py`): una sola definición para este flujo y la compra de emergencia.
 from app.utils.santiago import ahora_santiago, fin_de_plan_chile, hoy_santiago
+# Los créditos que se guardan en la suscripción salen de UNA regla compartida: un plan ilimitado
+# queda sin créditos (`NULL` = "∞" en el front), un plan con cupo guarda sus clases.
+from app.utils.planes import creditos_de_plan
 from app.services.auditoria_service import registrar_auditoria
 from app.services import churn_service
 # F2: el descuento vigente del alumno se aplica al SOLICITAR un plan. La aritmética (`desglose`)
@@ -367,8 +370,14 @@ def aprobar_solicitud(
         usuario_id=solicitud.alumno_id,
         plan_id=solicitud.plan_id,
         estado="activo",
-        creditos_totales=plan.creditos if plan.creditos else 999,
-        creditos_disponibles=plan.creditos if plan.creditos else 999,
+        # Los créditos los define UNA regla compartida (`app/utils/planes.creditos_de_plan`): un
+        # plan ilimitado queda SIN créditos (`NULL` = lo que el front pinta como "∞") y un plan con
+        # cupo guarda sus clases. Acá vivía el centinela viejo `or 999`: en PROD los ilimitados
+        # tienen `creditos = 0`, así que el panel del box mostraba "999 créditos" en vez de ∞ (bug
+        # de producción del 2026-10-08 con el alumno 533: el plan King Kong era el correcto, el
+        # número no).
+        creditos_totales=creditos_de_plan(plan),
+        creditos_disponibles=creditos_de_plan(plan),
         fecha_inicio=ahora,
         fecha_expiracion=expiracion,
     )

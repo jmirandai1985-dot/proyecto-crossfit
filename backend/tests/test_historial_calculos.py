@@ -9,6 +9,9 @@ Qué fija este archivo:
   C. "racha (meses al 100%)" sólo cuenta meses COMPLETOS: la caminata arranca en el mes
      anterior, así que el mes en curso nunca suma.
   D. Casos borde: alumno nuevo (sin plan ni asistencia), meses sin plan y mes en curso.
+  E. Una suscripción SIN `fecha_inicio` (las altas de prueba del landing la dejaban NULL —bug
+     de prod del 2026-10-08—): el inicio real cae al `created_at` de la fila, el orden de Pagos
+     no compara `None` con `date` y ninguna sección se cae por eso.
 
 Correr (aislado):
     cd backend && py -3.12 -m pytest tests/test_historial_calculos.py -q --noconftest
@@ -125,3 +128,77 @@ def test_d_un_mes_en_el_hueco_queda_sin_plan():
 def test_d2_una_suscripcion_pendiente_no_es_mes_con_plan():
     pendiente = [_Sus(_dt(2026, 3, 1), _dt(2026, 3, 31), estado="pendiente")]
     assert svc.suscripcion_del_mes(pendiente, 2026, 3) is None
+
+
+# ── E. Suscripción SIN `fecha_inicio` (bug de prod del 2026-10-08, alumno 533) ────────────────
+class _SusSinInicio:
+    """La "Prueba" del landing: `fecha_inicio` NULL y su `created_at` como único instante.
+
+    Es la fila que quedó en prod (`POST /alumnos/registro` no escribía `fecha_inicio`, y la
+    columna es NULLABLE y sin default): el panel del Historial respondía 500 en `resumen`,
+    `membresias` y `pagos`.
+    """
+
+    def __init__(self, creada, fin, estado="activo"):
+        self.fecha_inicio = None
+        self.fecha_expiracion = fin
+        self.created_at = creada
+        self.estado = estado
+
+
+class _SusRota:
+    """Ni `fecha_inicio` ni `created_at`: un dato roto no puede tumbar el panel."""
+
+    fecha_inicio = None
+    fecha_expiracion = None
+    created_at = None
+    estado = "activo"
+
+
+class _Alumno:
+    """El alta del usuario: `_primer_mes` la mira como piso del historial."""
+
+    def __init__(self, alta):
+        self.created_at = alta
+
+
+def test_e_sin_fecha_de_inicio_manda_el_created_at():
+    creada, fin = _dt(2026, 10, 8), _dt(2026, 10, 15)
+    assert svc._fecha_inicio_suscripcion(_SusSinInicio(creada, fin)) == creada
+
+    con_fecha = _Sus(_dt(2026, 9, 1), _dt(2026, 9, 30))      # con su propia fecha no se toca
+    con_fecha.created_at = _dt(2026, 8, 20)
+    assert svc._fecha_inicio_suscripcion(con_fecha) == _dt(2026, 9, 1)
+    assert svc._fecha_inicio_suscripcion(_SusRota()) is None
+
+
+def test_e2_un_primer_mes_sin_fecha_de_inicio_no_revienta():
+    """`_primer_mes` hacía `fecha_chile(None).year` -> AttributeError -> 500 en el panel."""
+    alumno = _Alumno(_dt(2026, 10, 1))                       # el alta del usuario
+    rota = [_SusSinInicio(_dt(2026, 10, 8), _dt(2026, 10, 15), estado="vencido")]
+
+    assert svc._primer_mes(alumno, rota) == (2026, 10)       # gana la más vieja de las dos
+    assert svc._primer_mes(alumno, [_SusRota()]) == (2026, 10)     # sólo queda el alta
+    assert svc._primer_mes(_Alumno(None), [_SusRota()]) is None    # sin fechas: ningún mes
+
+
+def test_e3_el_mes_con_plan_usa_el_created_at_y_descarta_lo_roto():
+    creada, fin = _dt(2026, 10, 8), _dt(2026, 10, 15)
+    sus = _SusSinInicio(creada, fin, estado="vencido")
+
+    assert svc.suscripcion_del_mes([sus], 2026, 10) is sus   # cubre el mes en que nació
+    assert svc.suscripcion_del_mes([sus], 2026, 9) is None    # antes de nacer: sin plan
+    assert svc.suscripcion_del_mes([_SusRota()], 2026, 10) is None
+
+
+def test_e4_el_orden_de_pagos_aguanta_una_fila_sin_fecha():
+    """El `sort` de Pagos comparaba `None` con `date` -> TypeError -> 500 en `?seccion=pagos`."""
+    def item(fecha, tipo="membresia"):
+        return {"fecha": fecha, "tipo": tipo}
+
+    ordenado = svc._orden_pagos([item(None), item(date(2026, 10, 8)),
+                                 item(date(2026, 9, 1), "bazar")])
+
+    # Del más nuevo al más viejo y, al final, la fila sin fecha (sin inventarle un día).
+    assert [i["fecha"] for i in ordenado] == [date(2026, 10, 8), date(2026, 9, 1), None]
+    assert svc._orden_pagos([]) == []

@@ -19,6 +19,11 @@ las cancelaciones:
      suspendida por el box. Fija el total pagado, el % de asistencia (la cancelación TARDE
      cuenta como falta) y el promedio semanal, y compara "mes con plan" contra el predicado SQL
      compartido (`sql_suscripcion_vigente`). Al final borra todo lo que creó.
+  D. SUSCRIPCIÓN SIN `fecha_inicio` (regresión del bug de prod del 2026-10-08): un alumno cuya
+     membresía de prueba tiene `fecha_inicio` NULL —así la dejaba el alta del landing— no puede
+     tumbar NINGUNA de las 7 secciones del panel: el inicio real de esa membresía es su
+     `created_at`. También fija que el 500 no era "no hay filas" (un alumno vacío siempre
+     respondió bien) ni el orden: la fila sin fecha es la MÁS VIEJA, no la más nueva.
 
 No usa el servidor: habla con la MISMA rama TEST por `SessionLocal` (igual que la parte
 in-process de `test_bi_mrr_vivo.py`). El guard `is_test_db_url` falla CERRADO: si el proceso no
@@ -669,3 +674,164 @@ def test_c5_la_racha_del_panel_ignora_el_mes_en_curso(db, alumno_test):
 
     resumen = svc.panel(db, alumno_test, TENANT_ID, seccion="resumen")["datos"]
     assert resumen["asistencia"]["racha_meses_100"] == esperado
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# D. Suscripción SIN `fecha_inicio` (bug de prod del 2026-10-08, alumno 533)
+# ══════════════════════════════════════════════════════════════════════════════
+COBRADO_SIN_INICIO = 29000      # lo cobrado por la membresía que NO tiene fecha de inicio
+
+
+@pytest.fixture
+def escenario_sin_inicio(db):
+    """Alumno temporal con la membresía de PRUEBA sin `fecha_inicio` (NULL en la BD).
+
+    Es la fila que dejaba `POST /alumnos/registro` antes del arreglo (bug de prod del
+    2026-10-08, alumno 533): esa alta no escribía `fecha_inicio` y, en la BD real, la columna es
+    NULLABLE y SIN default (el modelo la declara NOT NULL, pero manda el esquema), así que el
+    INSERT con NULL reproduce el caso exacto. Escribe en TEST y BORRA todo al salir.
+
+    El alumno lleva DOS suscripciones que cuentan (la rota, de hace dos meses, y una vigente en
+    el mes en curso) para que el panel tenga que ordenarlas y contarlas JUNTAS: el 500 no era
+    "no hay suscripciones" —un alumno vacío siempre respondió bien—, era el NULL. Y las fechas
+    van ancladas a MESES ("el 1° del mes de hace dos") para que el resultado no dependa del día
+    del mes en que se corra el test.
+    """
+    from app.utils.santiago import hoy_santiago
+
+    hoy = hoy_santiago()
+    mes_2atras = _mes_menos(hoy.year, hoy.month, 2)
+    creada = datetime.combine(svc._rango_mes(*mes_2atras)[0], time(12, 0), tzinfo=SANTIAGO)
+    vence = creada + timedelta(days=7)
+    alumno_id, plan_id = None, None
+    sufijo = f"{datetime.now():%Y%m%d%H%M%S}"
+
+    try:
+        alumno_id = db.execute(text("""
+            INSERT INTO usuarios (tenant_id, rut, nombre, correo, password_hash, rol, activo,
+                                  estado, created_at)
+            VALUES (:t, :r, 'Alumno Sin Inicio TEST', :c, 'x', 'alumno', true, 'activo', :alta)
+            RETURNING id"""),
+            {"t": TENANT_ID, "r": f"97{sufijo[-8:]}-7", "c": f"sininicio.{sufijo}@test.local",
+             "alta": creada}).scalar()
+
+        plan_id = db.execute(text("""
+            INSERT INTO planes (tenant_id, nombre, creditos, es_ilimitado, precio_clp,
+                                duracion_dias, activo)
+            VALUES (:t, :n, 12, false, :p, 30, true) RETURNING id"""),
+            {"t": TENANT_ID, "n": f"Plan Sin Inicio TEST {sufijo}", "p": PRECIO_PLAN}).scalar()
+
+        # La suscripción del bug: `fecha_inicio` NULL y su `created_at` como único instante.
+        rota_id = db.execute(text("""
+            INSERT INTO suscripciones (tenant_id, usuario_id, plan_id, estado, creditos_totales,
+                                       creditos_disponibles, fecha_inicio, fecha_expiracion,
+                                       created_at)
+            VALUES (:t, :u, :p, CAST('vencido' AS estado_suscripcion), 1, 1, NULL, :f, :c)
+            RETURNING id"""),
+            {"t": TENANT_ID, "u": alumno_id, "p": plan_id, "f": vence, "c": creada}).scalar()
+
+        vigente_id = db.execute(text("""
+            INSERT INTO suscripciones (tenant_id, usuario_id, plan_id, estado, creditos_totales,
+                                       creditos_disponibles, fecha_inicio, fecha_expiracion)
+            VALUES (:t, :u, :p, CAST('activo' AS estado_suscripcion), 12, 3, :i, :f)
+            RETURNING id"""),
+            {"t": TENANT_ID, "u": alumno_id, "p": plan_id,
+             "i": datetime.combine(date(hoy.year, hoy.month, 1), time(12, 0), tzinfo=SANTIAGO),
+             "f": datetime.combine(hoy + timedelta(days=10), time(12, 0),
+                                   tzinfo=SANTIAGO)}).scalar()
+
+        # El cobro de la membresía sin fecha de inicio: su pago sólo tiene el `created_at`.
+        db.execute(text("""
+            INSERT INTO transacciones_financieras (tenant_id, tipo, categoria, monto, descripcion,
+                                                   referencia_tipo, referencia_id, fecha)
+            VALUES (:t, 'ingreso', 'membresia', :m, 'Cobro de la prueba sin fecha de inicio',
+                    'suscripcion', :r, :f)"""),
+            {"t": TENANT_ID, "m": COBRADO_SIN_INICIO, "r": rota_id, "f": creada})
+
+        db.commit()
+        yield {"alumno_id": alumno_id, "creada": creada, "vence": vence,
+               "mes_2atras": mes_2atras, "rota_id": rota_id, "vigente_id": vigente_id}
+    finally:
+        db.rollback()
+        try:
+            if alumno_id:
+                db.execute(text("DELETE FROM transacciones_financieras "
+                                "WHERE referencia_tipo = 'suscripcion' AND referencia_id IN "
+                                "(SELECT id FROM suscripciones WHERE usuario_id = :a)"),
+                           {"a": alumno_id})
+                db.execute(text("DELETE FROM suscripciones WHERE usuario_id = :a"),
+                           {"a": alumno_id})
+                db.execute(text("DELETE FROM usuarios WHERE id = :a"), {"a": alumno_id})
+            if plan_id:
+                db.execute(text("DELETE FROM planes WHERE id = :p"), {"p": plan_id})
+            db.commit()
+        except Exception as e:      # el borrado no debe tapar el fallo real del test
+            db.rollback()
+            print(f"\n[WARN] no se pudo limpiar el escenario sin fecha de inicio: {e}")
+
+
+def test_d1_ninguna_seccion_se_cae_con_una_suscripcion_sin_fecha_inicio(db, escenario_sin_inicio):
+    """Regresión del 500 del alumno 533: `fecha_inicio` NULL no puede tumbar el panel.
+
+    `resumen` y `membresias` morían en `_primer_mes` (`None.year` -> AttributeError) y `pagos`
+    en su ordenamiento (comparar `None` con `date` -> TypeError). Se piden las 7 secciones: el
+    bug no era de una pestaña, era el dato.
+    """
+    for seccion, _nombre in svc.SECCIONES:
+        panel = svc.panel(db, escenario_sin_inicio["alumno_id"], TENANT_ID, seccion=seccion)
+        assert panel["seccion"] == seccion
+        assert panel["datos"] is not None
+
+
+def test_d2_el_inicio_real_cae_al_created_at_de_la_suscripcion(db, escenario_sin_inicio):
+    datos = svc.panel(db, escenario_sin_inicio["alumno_id"], TENANT_ID,
+                      seccion="membresias")["datos"]
+
+    # La membresía sin `fecha_inicio` muestra la fecha de su `created_at`, no un hueco.
+    rota = next(s for s in datos["suscripciones"]
+                if s["id"] == escenario_sin_inicio["rota_id"])
+    assert rota["fecha_inicio"] == escenario_sin_inicio["creada"].date()
+    assert rota["fecha_expiracion"] == escenario_sin_inicio["vence"].date()
+
+    # Y ordena como la MÁS VIEJA: sin fecha no es "la más nueva" (un `DESC` la ponía primera).
+    assert [s["id"] for s in datos["suscripciones"]] == [escenario_sin_inicio["vigente_id"],
+                                                         escenario_sin_inicio["rota_id"]]
+
+
+def test_d3_el_resumen_cuenta_los_meses_del_created_at(db, escenario_sin_inicio):
+    """El mes de la membresía sin fecha es el de su `created_at`: ni se pierde ni se inventa."""
+    mes_2atras = escenario_sin_inicio["mes_2atras"]
+    resumen = svc.panel(db, escenario_sin_inicio["alumno_id"], TENANT_ID,
+                        seccion="resumen")["datos"]
+
+    assert resumen["membresia"]["meses_como_alumno"] == 3
+    assert resumen["membresia"]["meses_con_plan"] == 2      # hace dos meses (la rota) + el actual
+    assert resumen["membresia"]["meses_sin_plan"] == 1      # el mes pasado queda en el hueco
+    assert resumen["membresia"]["actual"]["plan"].startswith("Plan Sin Inicio TEST")
+
+    de_membresias = svc.panel(db, escenario_sin_inicio["alumno_id"], TENANT_ID,
+                              seccion="membresias")["datos"]
+    assert de_membresias["resumen"]["primer_mes"] == {"anio": mes_2atras[0],
+                                                      "mes": mes_2atras[1]}
+    # Del más nuevo al más viejo: mes en curso (vigente), el hueco y el de hace dos (la rota).
+    assert [i["con_plan"] for i in de_membresias["items"]] == [True, False, True]
+
+
+def test_d4_el_pago_de_la_membresia_sin_fecha_usa_el_created_at(db, escenario_sin_inicio):
+    datos = svc.panel(db, escenario_sin_inicio["alumno_id"], TENANT_ID, seccion="pagos")["datos"]
+
+    rota = next(i for i in datos["items"]
+                if i["referencia_id"] == escenario_sin_inicio["rota_id"])
+    assert rota["fecha"] == escenario_sin_inicio["creada"].date()
+    assert rota["monto_clp"] == COBRADO_SIN_INICIO
+
+    # Las DOS membresías que cuentan (la de prueba, ya cobrada, y la vigente), sin Bazar.
+    assert datos["totales"]["pagos"] == 2
+    assert datos["totales"]["total_clp"] == COBRADO_SIN_INICIO
+    assert datos["totales"]["membresias_clp"] == COBRADO_SIN_INICIO
+    assert datos["totales"]["bazar_clp"] == 0
+    # Del más nuevo al más viejo: la vigente está en el mes en curso y la rota dos meses atrás.
+    fechas = [i["fecha"] for i in datos["items"]]
+    assert fechas == sorted(fechas, reverse=True), fechas
+    assert datos["totales"]["ultimo_pago"] == fechas[0]

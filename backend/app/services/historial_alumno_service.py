@@ -207,15 +207,21 @@ def suscripcion_del_mes(suscripciones: list, anio: int, mes: int):
     corresponde a la mayor parte del mes.
     """
     primero, ultimo = _rango_mes(anio, mes)
-    vigentes = [
-        s for s in suscripciones
-        if s.estado not in ESTADOS_SUSCRIPCION_NUNCA_VIGENTES
-        and fecha_chile(s.fecha_inicio) <= ultimo
-        and fecha_chile(s.fecha_expiracion) >= primero
-    ]
+    vigentes = []
+    for s in suscripciones:
+        if s.estado in ESTADOS_SUSCRIPCION_NUNCA_VIGENTES:
+            continue
+        inicio = _como_fecha(_fecha_inicio_suscripcion(s))
+        fin = _como_fecha(getattr(s, "fecha_expiracion", None))
+        # Sin inicio (o sin fin) no se puede AFIRMAR que cubriera ese mes: se descarta la fila en
+        # vez de inventarle una fecha (comparar `None` con `date` era un TypeError -> 500).
+        if inicio is None or fin is None:
+            continue
+        if inicio <= ultimo and fin >= primero:
+            vigentes.append(s)
     if not vigentes:
         return None
-    return max(vigentes, key=lambda s: _tz(s.fecha_inicio))
+    return max(vigentes, key=lambda s: _tz(_fecha_inicio_suscripcion(s)))
 
 
 def _meses_entre(desde: tuple, hasta: tuple) -> list:
@@ -246,6 +252,17 @@ def _como_fecha(valor):
     if isinstance(valor, datetime):
         return fecha_chile(valor)
     return valor
+
+
+def _fecha_inicio_suscripcion(s):
+    """Inicio REAL de una suscripción: su `fecha_inicio` y, si es NULL, su `created_at`.
+
+    `suscripciones.fecha_inicio` es NULLABLE en la BD (las altas de prueba del landing no la
+    escribían —`POST /alumnos/registro`—, bug de prod del 2026-10-08 en el alumno 533), así que un
+    `NULL` no puede tumbar el panel: el instante en que la fila nació (`created_at`) es el mismo
+    que se usa como inicio cuando falta. Devuelve `None` si no hay ninguna de las dos fechas.
+    """
+    return getattr(s, "fecha_inicio", None) or getattr(s, "created_at", None)
 
 
 def inicio_actividad(created_at=None, primera_suscripcion=None, primera_asistencia=None):
@@ -459,7 +476,9 @@ def _suscripciones(db: Session, alumno_id: int, tenant_id: int) -> list:
         db.query(Suscripcion)
         .filter(Suscripcion.tenant_id == tenant_id,
                 Suscripcion.usuario_id == alumno_id)
-        .order_by(Suscripcion.fecha_inicio.desc(), Suscripcion.id.desc())
+        # `nullslast`: en Postgres un `DESC` pone los NULL PRIMERO y una suscripción sin fecha de
+        # inicio no es "la más nueva" (mismo criterio que `_primer_mes` / `suscripcion_del_mes`).
+        .order_by(Suscripcion.fecha_inicio.desc().nullslast(), Suscripcion.id.desc())
         .all()
     )
 
@@ -481,7 +500,12 @@ def _primer_mes(alumno, suscripciones: list):
         f = fecha_chile(alumno.created_at)
         candidatos.append((f.year, f.month))
     for s in suscripciones:
-        f = fecha_chile(s.fecha_inicio)
+        # `_fecha_inicio_suscripcion`: con `fecha_inicio` NULL (altas de prueba antiguas) se usa
+        # el `created_at`; una fila sin ninguna de las dos no aporta mes — no se inventa una
+        # fecha (antes esto era un `AttributeError` y dejaba el panel en 500).
+        f = _como_fecha(_fecha_inicio_suscripcion(s))
+        if f is None:
+            continue
         candidatos.append((f.year, f.month))
     return min(candidatos) if candidatos else None
 
@@ -558,7 +582,7 @@ def _seccion_membresias(db, alumno, tenant_id, pagina, por_pagina, **_kw) -> dic
                 "plan_id": s.plan_id,
                 "plan": planes[s.plan_id].nombre if s.plan_id in planes else None,
                 "estado": _valor(s.estado),
-                "fecha_inicio": fecha_chile(s.fecha_inicio),
+                "fecha_inicio": _como_fecha(_fecha_inicio_suscripcion(s)),
                 "fecha_expiracion": fecha_chile(s.fecha_expiracion),
                 "precio_clp": planes[s.plan_id].precio_clp if s.plan_id in planes else None,
                 "creditos_totales": s.creditos_totales,
@@ -619,12 +643,27 @@ def _transacciones_por_suscripcion(db: Session, tenant_id: int, ids) -> dict:
     return por_suscripcion
 
 
+def _orden_pagos(items: list) -> list:
+    """Los pagos del más nuevo al más viejo, con las filas SIN fecha al final. PURA (sin BD).
+
+    `fecha` debería estar SIEMPRE (ver `_items_pagos`), pero un dato ausente no puede tumbar la
+    sección: comparar `None` con un `date` es un TypeError (era el 500 de `?seccion=pagos`). Las
+    filas sin fecha se hunden al final SIN inventarles un día, y el desempate del mismo día sigue
+    siendo por tipo.
+    """
+    return sorted(items,
+                  key=lambda i: (i["fecha"] is not None, i["fecha"] or date.min, i["tipo"]),
+                  reverse=True)
+
+
 def _items_pagos(db: Session, alumno_id: int, tenant_id: int) -> list:
     """Membresías (por lo COBRADO, regla 4) + Bazar, del más nuevo al más viejo.
 
     `fecha` es SIEMPRE `date`: mezclar `datetime` y `date` en el mismo `sort` es un TypeError
     en Python (y `fecha_pedido`/`fecha_inicio` son timestamptz). La fecha del pago de una
-    membresía es el INICIO de la membresía (el monto, en cambio, es el de sus transacciones).
+    membresía es el INICIO de la membresía (el monto, en cambio, es el de sus transacciones);
+    si esa `fecha_inicio` es NULL (altas de prueba antiguas) manda el `created_at` de la fila
+    (`_fecha_inicio_suscripcion`), que es el mismo instante.
     """
     items = []
 
@@ -648,7 +687,7 @@ def _items_pagos(db: Session, alumno_id: int, tenant_id: int) -> list:
         items.append({
             "tipo": "membresia",
             "referencia_id": suscripcion.id,
-            "fecha": fecha_chile(suscripcion.fecha_inicio),
+            "fecha": _como_fecha(_fecha_inicio_suscripcion(suscripcion)),
             "detalle": plan.nombre,
             "monto_clp": cobrado,
             # Lo que VALE el plan, para que el descuento se vea sin inventar un número.
@@ -682,8 +721,7 @@ def _items_pagos(db: Session, alumno_id: int, tenant_id: int) -> list:
             "estado": pedido.estado,
         })
 
-    items.sort(key=lambda i: (i["fecha"], i["tipo"]), reverse=True)
-    return items
+    return _orden_pagos(items)
 
 
 def _seccion_pagos(db, alumno, tenant_id, pagina, por_pagina, **_kw) -> dict:
@@ -695,6 +733,10 @@ def _seccion_pagos(db, alumno, tenant_id, pagina, por_pagina, **_kw) -> dict:
 
     por_anio = {}
     for item in items:
+        if item["fecha"] is None:
+            # Sin fecha no se le puede asignar un año sin inventarlo: la fila sigue en `items`
+            # (una suscripción sin `fecha_inicio` ni `created_at` es un dato roto, no un pago).
+            continue
         fila = por_anio.setdefault(
             item["fecha"].year,
             {"anio": item["fecha"].year, "membresias": 0, "bazar": 0})
@@ -710,7 +752,8 @@ def _seccion_pagos(db, alumno, tenant_id, pagina, por_pagina, **_kw) -> dict:
             "bazar_clp": bazar,
             "descuentos_clp": descuentos,
             "pagos": len(items),
-            "ultimo_pago": items[0]["fecha"] if items else None,
+            # El último pago es la fecha más nueva CON fecha (las filas sin fecha no lo son).
+            "ultimo_pago": next((i["fecha"] for i in items if i["fecha"] is not None), None),
         },
         "por_anio": [por_anio[a] for a in sorted(por_anio, reverse=True)],
         "paginado": {k: v for k, v in paginado.items() if k != "items"},

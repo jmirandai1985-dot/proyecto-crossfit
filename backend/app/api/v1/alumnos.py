@@ -212,6 +212,12 @@ def registrar_alumno_nuevo(
     # La suscripción "Prueba" nace ACTIVA (no "pendiente"): el crédito de prueba
     # queda usable de inmediato y el gate de acceso limitado (require_full_access)
     # empieza a aplicar sin intervención del admin.
+    # `fecha_inicio` se escribe SIEMPRE y EXPLÍCITA: en la BD real la columna es NULLABLE y SIN
+    # default (aunque el modelo la declare NOT NULL —deriva de esquema—), así que omitirla guarda
+    # NULL y el Historial del alumno se caía en 500 al leerla (`None.year` en `historial_alumno_
+    # service`): el alta del landing rompía el panel del box. Mismo criterio que el alta del admin
+    # (`usuarios.py`): inicio = ahora, vence a los 7 días.
+    ahora_prueba = datetime.utcnow()
     suscripcion = Suscripcion(
         tenant_id=datos.tenant_id,
         usuario_id=usuario.id,
@@ -219,7 +225,8 @@ def registrar_alumno_nuevo(
         estado="activo",
         creditos_totales=1,
         creditos_disponibles=1,
-        fecha_expiracion=datetime.utcnow() + timedelta(days=7),
+        fecha_inicio=ahora_prueba,
+        fecha_expiracion=ahora_prueba + timedelta(days=7),
     )
     db.add(suscripcion)
     db.commit()

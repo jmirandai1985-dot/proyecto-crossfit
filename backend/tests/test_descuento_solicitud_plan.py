@@ -321,3 +321,46 @@ def test_b6_el_historial_del_alumno_muestra_el_beneficio(cliente, tokens, escena
     assert item["tipo_label"] == svc.etiqueta(svc.TIPO_DESCUENTO)
     assert item["avisado_por_correo"] is False, "este regalo se dio sin correo"
 
+
+def test_b7_el_plan_ilimitado_no_aprueba_con_creditos_999(cliente, tokens, db, escenario):
+    """Regresión del bug de producción del 2026-10-08 (alumno 533, plan "King Kong").
+
+    En PROD los planes ilimitados están cargados con `creditos = 0` + `es_ilimitado = true`. Al
+    aprobar, el box guardaba el centinela heredado `plan.creditos or 999` y el panel del alumno
+    mostraba "999 créditos" en un plan sin cupo. La suscripción tiene que quedar SIN créditos —
+    `NULL` es lo que el front pinta como "∞" (`Alumnos.jsx`, `PanelHistorial.jsx`)—.
+    """
+    db.execute(text("UPDATE planes SET creditos = 0, es_ilimitado = true WHERE id = :p"),
+               {"p": escenario["plan_id"]})
+    db.commit()
+    creada = _solicitar(cliente, escenario["token_alumno"], escenario["alumno_id"],
+                        escenario["plan_id"]).json()
+
+    aprobada = cliente.put(f"/api/v1/solicitudes/{creada['id']}/aprobar", headers=tokens["admin"])
+
+    assert aprobada.status_code == 200, aprobada.text
+    fila = db.execute(text(
+        "SELECT creditos_totales, creditos_disponibles FROM suscripciones "
+        "WHERE usuario_id = :a ORDER BY id DESC LIMIT 1"),
+        {"a": escenario["alumno_id"]}).first()
+    assert fila is not None, "aprobar la solicitud debe crear la suscripción del alumno"
+    assert fila.creditos_totales is None, \
+        f"un plan ilimitado no tiene cupo: {fila.creditos_totales} no es un número de clases"
+    assert fila.creditos_disponibles is None, \
+        f"un plan ilimitado no tiene cupo: {fila.creditos_disponibles} no es un número de clases"
+
+
+def test_b8_el_plan_con_cupo_guarda_sus_clases(cliente, tokens, db, escenario):
+    """Control: un plan CON cupo guarda sus clases tal cual (el arreglo no lo volvió "ilimitado")."""
+    creada = _solicitar(cliente, escenario["token_alumno"], escenario["alumno_id"],
+                        escenario["plan_id"]).json()
+
+    aprobada = cliente.put(f"/api/v1/solicitudes/{creada['id']}/aprobar", headers=tokens["admin"])
+
+    assert aprobada.status_code == 200, aprobada.text
+    fila = db.execute(text(
+        "SELECT creditos_totales, creditos_disponibles FROM suscripciones "
+        "WHERE usuario_id = :a ORDER BY id DESC LIMIT 1"),
+        {"a": escenario["alumno_id"]}).first()
+    assert fila.creditos_totales == CLASES_PLAN and fila.creditos_disponibles == CLASES_PLAN
+
