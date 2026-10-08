@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import AvisoCarga from '../../components/AvisoCarga';
+import BotonVolver from '../../components/BotonVolver';
 import api from '../../services/api';
 // H-03: valor/etiqueta de cada RM desde la fuente única (utils/rm.js).
 import { valorRM, etiquetaValorRM } from '../../utils/rm';
@@ -175,9 +176,12 @@ const Evolucion = () => {
                 {/* P1: si la API falló, banner con Reintentar (antes se veía "vacío") */}
                 <AvisoCarga secciones={erroresCarga} onReintentar={cargarTodo} />
 
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-800">📈 Evolución</h1>
-                    <p className="text-gray-500 mt-1">Sigue tu progreso en el tiempo</p>
+                <div className="max-md:flex max-md:items-start max-md:gap-2">
+                    <BotonVolver />
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-800">📈 Evolución</h1>
+                        <p className="text-gray-500 mt-1">Sigue tu progreso en el tiempo</p>
+                    </div>
                 </div>
 
                 {/* ============================================================ */}

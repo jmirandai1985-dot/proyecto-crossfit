@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Layout from '../../components/Layout';
+import BotonVolver from '../../components/BotonVolver';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 // H-03: categoría/valor/formato de un RM desde la fuente única (utils/rm.js).
@@ -267,11 +268,14 @@ const PizarraRMs = () => {
             <div className="max-w-6xl mx-auto space-y-6">
                 {/* Header */}
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between">
-                    <div>
-                        <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                            💪 Pizarra de RMs
-                        </h1>
-                        <p className="text-gray-500 mt-1">Tus récords personales por movimiento</p>
+                    <div className="max-md:flex max-md:items-start max-md:gap-2">
+                        <BotonVolver />
+                        <div>
+                            <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                                💪 Pizarra de RMs
+                            </h1>
+                            <p className="text-gray-500 mt-1">Tus récords personales por movimiento</p>
+                        </div>
                     </div>
                     <button
                         onClick={() => { resetForm(); setRmEditando(null); setShowRMModal(true); }}

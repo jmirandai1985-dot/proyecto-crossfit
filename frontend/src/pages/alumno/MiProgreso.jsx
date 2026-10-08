@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Layout from '../../components/Layout';
 import AvisoCarga from '../../components/AvisoCarga';
+import BotonVolver from '../../components/BotonVolver';
 import api from '../../services/api';
 
 // ─── Niveles de hito (1/3/6/12 meses consecutivos) ───────────────────────────
@@ -67,6 +68,7 @@ const MiProgreso = () => {
         <Layout>
             <div className="max-w-6xl mx-auto">
                 <div className="flex items-center gap-3 mb-6">
+                    <BotonVolver />
                     <span className="text-3xl">📈</span>
                     <div>
                         <h1 className="text-2xl font-bold text-gray-800">Mi Progreso</h1>

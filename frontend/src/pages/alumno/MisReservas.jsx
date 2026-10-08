@@ -3,6 +3,7 @@ import { QrCode } from 'lucide-react';
 import Layout from '../../components/Layout';
 import api from '../../services/api';
 import { getEstadoColor, getEstadoDisplay, esActiva } from '../../utils/estadoReserva';
+import BotonVolver from '../../components/BotonVolver';
 import EscanerQR from '../../components/EscanerQR';
 
 const DIAS_NOMBRES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -146,9 +147,12 @@ const MisReservas = () => {
         <Layout>
             <div className="max-w-4xl mx-auto space-y-6">
                 {/* Título */}
-                <div>
-                    <h1 className="text-3xl font-bold text-gray-900">📋 Mis Reservas</h1>
-                    <p className="text-gray-600 mt-1">Consulta y administra tus clases reservadas</p>
+                <div className="max-md:flex max-md:items-start max-md:gap-2">
+                    <BotonVolver />
+                    <div>
+                        <h1 className="text-3xl font-bold text-gray-900">📋 Mis Reservas</h1>
+                        <p className="text-gray-600 mt-1">Consulta y administra tus clases reservadas</p>
+                    </div>
                 </div>
 
                 {/* Tarjeta destacada: escanear QR para marcar asistencia */}

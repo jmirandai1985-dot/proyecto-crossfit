@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Layout from '../../components/Layout';
 import AvisoCarga from '../../components/AvisoCarga';
+import BotonVolver from '../../components/BotonVolver';
 import api from '../../services/api';
 // TZ Chile: la fecha del pedido (instante) se muestra en horario chileno.
 import { fmtFechaChile } from '../../utils/fecha';
@@ -91,6 +92,7 @@ const MisPedidos = () => {
         <Layout>
             <div className="max-w-4xl mx-auto space-y-6">
                 <div className="flex items-center gap-3">
+                    <BotonVolver />
                     <span className="text-3xl">📋</span>
                     <div>
                         <h1 className="text-2xl font-bold text-gray-800">Mis Pedidos</h1>

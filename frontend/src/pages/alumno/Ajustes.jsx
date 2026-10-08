@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../../components/Layout';
+import BotonVolver from '../../components/BotonVolver';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 
@@ -111,9 +112,12 @@ const Ajustes = () => {
         <Layout>
             <div className="max-w-2xl mx-auto space-y-6">
                 {/* Título */}
-                <div>
-                    <h1 className="text-3xl font-bold text-gray-900">⚙️ Ajustes</h1>
-                    <p className="text-gray-600 mt-1">Actualiza tus datos de contacto y medidas. El resto de tu ficha (nombre, correo, género y fecha de nacimiento) lo administra el box.</p>
+                <div className="max-md:flex max-md:items-start max-md:gap-2">
+                    <BotonVolver />
+                    <div>
+                        <h1 className="text-3xl font-bold text-gray-900">⚙️ Ajustes</h1>
+                        <p className="text-gray-600 mt-1">Actualiza tus datos de contacto y medidas. El resto de tu ficha (nombre, correo, género y fecha de nacimiento) lo administra el box.</p>
+                    </div>
                 </div>
 
                 {/* Mensajes */}

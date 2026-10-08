@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import Layout from '../../components/Layout';
 import AvisoCarga from '../../components/AvisoCarga';
+import BotonVolver from '../../components/BotonVolver';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 // H-03: la categoría/valor de un RM salen de una única fuente (utils/rm.js).
@@ -168,6 +169,7 @@ const PerformanceHub = () => {
                 <AvisoCarga secciones={erroresCarga} onReintentar={cargarTodo} />
 
                 <div className="flex items-center gap-3 mb-6">
+                    <BotonVolver />
                     <span className="text-3xl">🏆</span>
                     <div><h1 className="text-2xl font-bold text-gray-800">Performance Hub</h1><p className="text-sm text-gray-500">Perfil completo de atleta basado en tus RMs</p></div>
                 </div>

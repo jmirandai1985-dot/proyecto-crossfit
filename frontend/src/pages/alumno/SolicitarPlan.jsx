@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../../components/Layout';
+import BotonVolver from '../../components/BotonVolver';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { fmtFechaChile } from '../../utils/fecha';
@@ -274,6 +275,7 @@ const SolicitarPlan = () => {
 
                 {/* ─── TÍTULO ─────────────────────────────────────── */}
                 <div className="flex items-center gap-3">
+                    <BotonVolver />
                     <span className="text-3xl">💳</span>
                     <div>
                         <h1 className="text-2xl font-bold text-gray-800">Solicitar Plan</h1>

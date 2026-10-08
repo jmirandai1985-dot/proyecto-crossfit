@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import AvisoCarga from '../../components/AvisoCarga';
+import BotonVolver from '../../components/BotonVolver';
 import api from '../../services/api';
 import { urlArchivo } from '../../utils/imagen';
 
@@ -105,6 +106,7 @@ const Bazar = () => {
         <Layout>
             <div className="max-w-4xl mx-auto space-y-6">
                 <div className="flex items-center gap-3">
+                    <BotonVolver />
                     <span className="text-3xl">🛍️</span>
                     <div>
                         <h1 className="text-2xl font-bold text-gray-800">Bazar</h1>
