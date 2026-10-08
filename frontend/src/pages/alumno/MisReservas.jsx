@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { QrCode } from 'lucide-react';
 import Layout from '../../components/Layout';
 import api from '../../services/api';
+import { getEstadoColor, getEstadoDisplay, esActiva } from '../../utils/estadoReserva';
 
 const DIAS_NOMBRES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
@@ -13,61 +14,9 @@ const formatearFecha = (fechaStr) => {
     return `${DIAS_NOMBRES[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]}`;
 };
 
-const TRADUCIR_ESTADO = {
-    confirmada: 'Confirmada',
-    confirmed: 'Confirmada',
-    completada: 'Completada',
-    completed: 'Completada',
-    no_asistio: 'No asistió',
-    no_show: 'No asistió',
-    cancelled: 'Cancelada',
-    cancelada: 'Cancelada',
-    pending: 'Pendiente',
-    pendiente: 'Pendiente',
-    descontada: 'Descontada',
-};
-
-const COLORES_ESTADO = {
-    confirmada: 'bg-green-100 text-green-700 border-green-300',
-    confirmed: 'bg-green-100 text-green-700 border-green-300',
-    completada: 'bg-gray-100 text-gray-600 border-gray-300',
-    completed: 'bg-gray-100 text-gray-600 border-gray-300',
-    no_asistio: 'bg-red-100 text-red-700 border-red-300',
-    no_show: 'bg-red-100 text-red-700 border-red-300',
-    cancelled: 'bg-red-50 text-red-500 border-red-200',
-    cancelada: 'bg-red-50 text-red-500 border-red-200',
-    pending: 'bg-yellow-100 text-yellow-700 border-yellow-300',
-    pendiente: 'bg-yellow-100 text-yellow-700 border-yellow-300',
-    descontada: 'bg-gray-100 text-gray-600 border-gray-300',
-};
-
-const ESTADOS_ACTIVOS = ['confirmada', 'confirmed'];
-
-const getEstadoEfectivo = (reserva) => {
-    const estado = (reserva.estado || '').toLowerCase();
-    // Solo evaluar si es confirmada/confirmed
-    if (estado === 'confirmada' || estado === 'confirmed') {
-        if (reserva.clase_fecha && reserva.hora_fin) {
-            const ahora = new Date();
-            const finClase = new Date(reserva.clase_fecha + 'T' + reserva.hora_fin);
-            const diffHoras = (ahora - finClase) / (1000 * 60 * 60);
-            if (diffHoras >= 24) {
-                return 'descontada';
-            }
-        }
-    }
-    return estado;
-};
-
-const getEstadoDisplay = (estado) => {
-    const key = estado?.toLowerCase() || '';
-    return TRADUCIR_ESTADO[key] || estado || 'Desconocido';
-};
-
-const getEstadoColor = (estado) => {
-    const key = estado?.toLowerCase() || '';
-    return COLORES_ESTADO[key] || 'bg-gray-100 text-gray-600 border-gray-200';
-};
+// El estado VISIBLE de cada reserva lo calcula el backend (`estado_visible`, el
+// MISMO criterio que el Historial del alumno) y se traduce en
+// `utils/estadoReserva.js`: un único origen, sin el hack de las 24 h ("Descontada").
 
 const MisReservas = () => {
     const [reservas, setReservas] = useState([]);
@@ -101,11 +50,10 @@ const MisReservas = () => {
             const data = response.data;
             const reservasList = Array.isArray(data) ? data : [];
 
-            // Ordenar: primero confirmadas (activas), luego historial
-            const ordenEstado = { confirmada: 0, confirmed: 0, pendiente: 1, pending: 1 };
+            // Ordenar: primero las activas (futuras, `reservada`), luego el historial.
             reservasList.sort((a, b) => {
-                const ordenA = (ordenEstado[a.estado?.toLowerCase()] !== undefined) ? ordenEstado[a.estado?.toLowerCase()] : 2;
-                const ordenB = (ordenEstado[b.estado?.toLowerCase()] !== undefined) ? ordenEstado[b.estado?.toLowerCase()] : 2;
+                const ordenA = esActiva(a) ? 0 : 1;
+                const ordenB = esActiva(b) ? 0 : 1;
                 if (ordenA !== ordenB) return ordenA - ordenB;
                 // Si mismo grupo, ordenar por fecha descendente (más reciente primero)
                 return (b.clase_fecha || '').localeCompare(a.clase_fecha || '');
@@ -164,8 +112,8 @@ const MisReservas = () => {
         }
     };
 
-    const reservasActivas = reservas.filter(r => ESTADOS_ACTIVOS.includes(getEstadoEfectivo(r)));
-    const reservasHistorial = reservas.filter(r => !ESTADOS_ACTIVOS.includes(getEstadoEfectivo(r)));
+    const reservasActivas = reservas.filter(esActiva);
+    const reservasHistorial = reservas.filter((r) => !esActiva(r));
 
     return (
         <Layout>
@@ -241,7 +189,6 @@ const MisReservas = () => {
                         <div className="divide-y divide-gray-100">
                             {/* Activas primero */}
                             {reservasActivas.map((reserva) => {
-                                const estadoEf = getEstadoEfectivo(reserva);
                                 return (
                                     <div key={reserva.id} className="p-5 hover:bg-green-50 transition-colors border-l-4 border-l-green-500">
                                         <div className="flex items-start justify-between">
@@ -250,8 +197,8 @@ const MisReservas = () => {
                                                     <h3 className="font-bold text-gray-900">
                                                         🏋️ {reserva.disciplina_nombre || 'Clase'}
                                                     </h3>
-                                                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${getEstadoColor(estadoEf)}`}>
-                                                        {getEstadoDisplay(estadoEf)}
+                                                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${getEstadoColor(reserva.estado_visible)}`}>
+                                                        {getEstadoDisplay(reserva.estado_visible)}
                                                     </span>
                                                 </div>
                                                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
@@ -294,8 +241,8 @@ const MisReservas = () => {
                                                 <h3 className="font-bold text-gray-800">
                                                     🏋️ {reserva.disciplina_nombre || 'Clase'}
                                                 </h3>
-                                                <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${getEstadoColor(reserva.estado)}`}>
-                                                    {getEstadoDisplay(reserva.estado)}
+                                                <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${getEstadoColor(reserva.estado_visible)}`}>
+                                                    {getEstadoDisplay(reserva.estado_visible)}
                                                 </span>
                                             </div>
                                             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-500">
@@ -307,11 +254,6 @@ const MisReservas = () => {
                                                 {reserva.hora_inicio && (
                                                     <span className="flex items-center gap-1">
                                                         🕐 {reserva.hora_inicio} - {reserva.hora_fin || '—'}
-                                                    </span>
-                                                )}
-                                                {reserva.asistio !== null && reserva.asistio !== undefined && (
-                                                    <span className="flex items-center gap-1">
-                                                        {reserva.asistio ? '✅ Asistió' : '❌ No asistió'}
                                                     </span>
                                                 )}
                                             </div>

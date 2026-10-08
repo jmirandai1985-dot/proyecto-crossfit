@@ -21,6 +21,9 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Qu
 # N-9: trazabilidad de las reservas que el staff crea en nombre de un alumno.
 from app.services.auditoria_service import registrar_auditoria
 from app.services import churn_service
+# El estado VISIBLE de una reserva ("Mis Reservas") es el MISMO que usa el Historial del
+# alumno: una sola definición (`estado_asistencia`), para no volver a tener dos criterios.
+from app.services.historial_alumno_service import estado_asistencia
 """
 Router de endpoints para gestión de Reservas
 """
@@ -564,6 +567,33 @@ def obtener_asistencia_mes(
     }
 
 
+def _item_reserva(reserva: Reserva, clase: Clase, disciplina_nombre) -> dict:
+    """Serializa UNA reserva para el listado de `GET /reservas`.
+
+    Incluye `estado_visible`: la MISMA clasificación que el Historial del alumno
+    (`historial_alumno_service.estado_asistencia`) -> asistio | falto | cancelada |
+    cancelada_tarde | reservada. Así "Mis Reservas" y el Historial nunca vuelven a
+    mostrar dos criterios distintos para la misma reserva. El `estado` crudo (el de
+    la BD) se conserva intacto: este cambio NO lo toca.
+    """
+    return {
+        "id": reserva.id,
+        "tenant_id": reserva.tenant_id,
+        "clase_id": reserva.clase_id,
+        "alumno_id": reserva.alumno_id,
+        "asistio": reserva.asistio,
+        "tokens_gastados": reserva.tokens_gastados,
+        "estado": reserva.estado,
+        "estado_visible": estado_asistencia(reserva, clase),
+        "fecha_reserva": str(reserva.fecha_reserva) if reserva.fecha_reserva else None,
+        "created_at": str(reserva.created_at) if reserva.created_at else None,
+        "disciplina_nombre": disciplina_nombre,
+        "clase_fecha": str(clase.fecha) if clase.fecha else None,
+        "hora_inicio": clase.hora_inicio,
+        "hora_fin": clase.hora_fin,
+    }
+
+
 @router.get("")
 def listar_reservas(
     tenant_id: Optional[int] = None,
@@ -578,8 +608,9 @@ def listar_reservas(
     Lista reservas del tenant con paginación y filtros opcionales.
     Incluye datos de la clase asociada (disciplina, fecha, horario).
 
-    NOTA: Usa columnas explícitas (with_entities) en vez de .add_columns()
-    para evitar el patrón frágil de acceso row.ModelName que causó bugs previos.
+    NOTA: Carga las entidades ORM (Reserva, Clase) y arma cada fila con
+    `_item_reserva` — así se reutiliza `estado_asistencia` y se evita el patrón
+    frágil de acceso row.ModelName que causó bugs previos.
 
     🔒 SEGURIDAD: tenant_id del token. Si se filtra por usuario, se requiere
     que sea el propio alumno o staff del box.
@@ -597,20 +628,13 @@ def listar_reservas(
         # Alumno sin filtro: listar solo sus propias reservas.
         usuario_id = current_user["usuario_id"]
 
-    # ── Construir query con columnas explícitas ──
+    # ── Construir query ──
+    # Se cargan las entidades ORM (Reserva, Clase) + el nombre de la disciplina: así el
+    # estado VISIBLE se calcula con la MISMA función que el Historial (`estado_asistencia`),
+    # pasándole objetos reales en vez de reconstruir la lógica con columnas sueltas.
     query = db.query(
-        Reserva.id,
-        Reserva.tenant_id,
-        Reserva.clase_id,
-        Reserva.alumno_id,
-        Reserva.asistio,
-        Reserva.tokens_gastados,
-        Reserva.estado,
-        Reserva.fecha_reserva,
-        Reserva.created_at,
-        Clase.fecha.label('clase_fecha'),
-        Clase.hora_inicio,
-        Clase.hora_fin,
+        Reserva,
+        Clase,
         Disciplina.nombre.label('disciplina_nombre'),
     ).join(
         Clase, Reserva.clase_id == Clase.id
@@ -628,28 +652,8 @@ def listar_reservas(
 
     rows = query.offset(skip).limit(limit).all()
 
-    # ── Construir respuesta con acceso directo a columnas ──
-    # Resultado son named tuples, cada columna es un atributo directo (row.columna)
-    # NO hay anidamiento row.ModelName — eso se elimina con columnas explícitas
-    result = []
-    for r in rows:
-        result.append({
-            "id": r.id,
-            "tenant_id": r.tenant_id,
-            "clase_id": r.clase_id,
-            "alumno_id": r.alumno_id,
-            "asistio": r.asistio,
-            "tokens_gastados": r.tokens_gastados,
-            "estado": r.estado,
-            "fecha_reserva": str(r.fecha_reserva) if r.fecha_reserva else None,
-            "created_at": str(r.created_at) if r.created_at else None,
-            "disciplina_nombre": r.disciplina_nombre,
-            "clase_fecha": str(r.clase_fecha) if r.clase_fecha else None,
-            "hora_inicio": r.hora_inicio,
-            "hora_fin": r.hora_fin,
-        })
-
-    return result
+    return [_item_reserva(reserva, clase, disciplina_nombre)
+            for reserva, clase, disciplina_nombre in rows]
 
 
 @router.get("/{reserva_id}", response_model=ReservaResponse)
