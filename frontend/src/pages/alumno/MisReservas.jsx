@@ -5,12 +5,14 @@ import api from '../../services/api';
 import { getEstadoColor, getEstadoDisplay, esActiva } from '../../utils/estadoReserva';
 import BotonVolver from '../../components/BotonVolver';
 import EscanerQR from '../../components/EscanerQR';
+import FiltroDisciplina from '../../components/FiltroDisciplina';
+import { useFiltroDisciplina } from '../../hooks/useFiltroDisciplina';
+import {
+    CLAVE_FILTRO_RESERVAS, filtrarPorDisciplina,
+} from '../../utils/filtroDisciplina';
 
 const DIAS_NOMBRES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-
-// Clave de sesión: recuerda la última disciplina elegida mientras dure la sesión.
-const CLAVE_FILTRO_DISCIPLINA = 'misReservas.disciplina';
 
 const formatearFecha = (fechaStr) => {
     if (!fechaStr) return '—';
@@ -31,11 +33,6 @@ const MisReservas = () => {
     const [boxPublicId, setBoxPublicId] = useState(null);
     // Overlay del lector QR (abre la cámara de inmediato al tocar "Escanear QR").
     const [escanerAbierto, setEscanerAbierto] = useState(false);
-    // Filtro por disciplina (arriba de la lista). Arranca con lo último elegido
-    // en esta sesión (sessionStorage); si esa disciplina ya no existe, cae a 'Todas'.
-    const [disciplinaFiltro, setDisciplinaFiltro] = useState(
-        () => sessionStorage.getItem(CLAVE_FILTRO_DISCIPLINA) || 'Todas'
-    );
 
     // public_id del box para el botón "Escanear QR" (endpoint accesible a
     // cualquier usuario logueado, incluido el alumno).
@@ -123,25 +120,18 @@ const MisReservas = () => {
 
     // ── Filtro por disciplina (MÓVIL) ───────────────────────────────────
     // El filtro se pinta sólo en <768px (regla de oro: ≥768px igual que hoy).
-    // El estado vive en sessionStorage para "recordar" la última disciplina
-    // elegida mientras dure la sesión. No duplica nada del backend: se agrupa
-    // por `disciplina_nombre` y el estado sigue saliendo de `estado_visible`.
-    const disciplinaDe = (r) => r.disciplina_nombre || 'Sin disciplina';
-    const disciplinas = Array.from(new Set(reservas.map(disciplinaDe)))
-        .sort((a, b) => a.localeCompare(b, 'es'));
-    // Si lo recordado ya no existe en los datos, se ignora (cae a 'Todas').
-    const filtroEfectivo = disciplinaFiltro === 'Todas' || disciplinas.includes(disciplinaFiltro)
-        ? disciplinaFiltro
-        : 'Todas';
-    const coincideFiltro = (r) => filtroEfectivo === 'Todas' || disciplinaDe(r) === filtroEfectivo;
+    // El estado, el recordado de la sesión y el criterio viven en el MISMO módulo
+    // que usa el Inicio móvil (`hooks/useFiltroDisciplina` + `utils/filtroDisciplina`),
+    // así que las dos pantallas no pueden divergir. No duplica nada del backend:
+    // se agrupa por `disciplina_nombre` y el estado sigue saliendo de `estado_visible`.
+    const {
+        disponibles: disciplinas,
+        filtro: filtroEfectivo,
+        cambiar: cambiarFiltro,
+    } = useFiltroDisciplina(reservas, CLAVE_FILTRO_RESERVAS);
 
-    const cambiarFiltro = (d) => {
-        setDisciplinaFiltro(d);
-        try { sessionStorage.setItem(CLAVE_FILTRO_DISCIPLINA, d); } catch { /* sessionStorage no disponible */ }
-    };
-
-    const reservasActivas = reservas.filter((r) => esActiva(r) && coincideFiltro(r));
-    const reservasHistorial = reservas.filter((r) => !esActiva(r) && coincideFiltro(r));
+    const reservasActivas = filtrarPorDisciplina(reservas, filtroEfectivo).filter((r) => esActiva(r));
+    const reservasHistorial = filtrarPorDisciplina(reservas, filtroEfectivo).filter((r) => !esActiva(r));
 
     return (
         <Layout>
@@ -196,23 +186,14 @@ const MisReservas = () => {
                 )}
 
                 {/* Filtro por disciplina (sólo móvil <768px) */}
-                {!loading && disciplinas.length > 1 && (
-                    <div className="md:hidden flex gap-2 overflow-x-auto pb-1" data-testid="filtro-disciplina">
-                        {['Todas', ...disciplinas].map((d) => (
-                            <button
-                                key={d}
-                                type="button"
-                                onClick={() => cambiarFiltro(d)}
-                                aria-pressed={filtroEfectivo === d}
-                                className={`shrink-0 inline-flex items-center justify-center min-h-11 px-4 rounded-full border text-sm font-semibold transition-colors ${filtroEfectivo === d
-                                    ? 'bg-emerald-500 text-white border-emerald-500'
-                                    : 'bg-white text-gray-700 border-gray-300 hover:border-emerald-400'
-                                    }`}
-                            >
-                                {d}
-                            </button>
-                        ))}
-                    </div>
+                {!loading && (
+                    <FiltroDisciplina
+                        variante="claro"
+                        disciplinas={disciplinas}
+                        valor={filtroEfectivo}
+                        onCambiar={cambiarFiltro}
+                        testid="filtro-disciplina"
+                    />
                 )}
 
                 {/* Lista de reservas */}

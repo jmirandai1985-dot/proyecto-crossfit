@@ -9,7 +9,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test:click": "node scripts/click-test.mjs",
-    "test:reservas": "node scripts/test-estado-reserva.mjs"
+    "test:reservas": "node scripts/test-estado-reserva.mjs",
+    "test:filtro": "node scripts/test-filtro-disciplina.mjs"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.3.0",

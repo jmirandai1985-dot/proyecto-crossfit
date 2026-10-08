@@ -301,6 +301,41 @@
 }
 
 /* ── Clases disponibles: lista de clases del día ── */
+/* ── Clases disponibles: filtro por disciplina (chips) ── */
+/* Fila con scroll horizontal, igual que los chips de "Mis Reservas": con muchas
+   disciplinas la lista se hace larga y los chips no deben romper la tarjeta.
+   Cada chip mide ≥44px de alto (objetivo táctil del mockup). */
+.ub-inicio .filtro {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    padding-bottom: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;              /* la barra no debe robarle alto al chip */
+}
+
+.ub-inicio .filtro::-webkit-scrollbar {
+    display: none;
+}
+
+.ub-inicio .filtro button {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1.5px solid var(--ub-line);
+    border-radius: 999px;
+    color: var(--ub-muted);
+    font-size: 14px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.ub-inicio .filtro button.on {
+    border-color: var(--ub-orange);
+    background: rgba(234, 118, 48, .12);
+    color: var(--ub-text);
+}
+
 .ub-inicio .clases {
     display: flex;
     flex-direction: column;

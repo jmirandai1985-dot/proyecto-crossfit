@@ -8,6 +8,11 @@ import { urlArchivo } from '../../utils/imagen';
 import { MENU_BY_ROL } from '../../config/menu';
 import { MENU_ICONS } from '../../config/menuIcons';
 import EscanerQR from '../../components/EscanerQR';
+// Chips de filtro por disciplina: el MISMO componente (y la misma lógica) que
+// usa "Mis Reservas", para no duplicar el control ni su criterio.
+import FiltroDisciplina from '../../components/FiltroDisciplina';
+import { useFiltroDisciplina } from '../../hooks/useFiltroDisciplina';
+import { CLAVE_FILTRO_INICIO, filtrarPorDisciplina } from '../../utils/filtroDisciplina';
 // Estilos del "Inicio" móvil (mockup urban-box-inicio-pulido-1), acotados a
 // `.ub-inicio`. Se construye por bloques; este archivo crece bloque a bloque.
 import './inicioMobile.css';
@@ -253,6 +258,20 @@ const InicioMobile = ({
     const clasesDelDia = agruparClases(clasesPorDia[diaSeleccionado] || [])
         .sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || ''));
 
+    // ── Filtro por disciplina de "Clases disponibles" ──
+    // Filtra la LISTA del día elegido (con varias disciplinas la lista se hace
+    // larguísima). La rejilla de 7 días NO se filtra: cada día sigue mostrando
+    // el TOTAL de clases que trae `clasesPorDia` (por eso se filtra una copia).
+    // La última disciplina elegida se recuerda mientras dure la sesión, con el
+    // mismo mecanismo que "Mis Reservas" (chips y lógica compartidos).
+    const {
+        disponibles: disciplinasClases,
+        filtro: filtroClases,
+        cambiar: cambiarFiltroClases,
+        mostrar: mostrarFiltroClases,
+    } = useFiltroDisciplina(clasesDelDia, CLAVE_FILTRO_INICIO);
+    const clasesFiltradas = filtrarPorDisciplina(clasesDelDia, filtroClases);
+
     // "Reservar otra clase": baja al bloque "Clases disponibles" (la rejilla del
     // dashboard reutilizada). Si ese bloque aún no existe, abre Mis Reservas.
     const irAReservar = () => {
@@ -429,11 +448,26 @@ const InicioMobile = ({
                         </div>
                     )}
 
+                    {/* Filtro por disciplina del día elegido, sobre la MISMA lista
+                        filtrada de abajo. Si hay una sola disciplina no se pinta:
+                        "Todas" y esa disciplina darían la misma lista. */}
+                    {mostrarFiltroClases && (
+                        <FiltroDisciplina
+                            variante="ub"
+                            disciplinas={disciplinasClases}
+                            valor={filtroClases}
+                            onCambiar={cambiarFiltroClases}
+                            testid="ub-filtro-disciplina"
+                        />
+                    )}
+
                     <div className="clases">
                         {clasesDelDia.length === 0 ? (
                             <p className="vacio">Sin clases programadas este día.</p>
+                        ) : clasesFiltradas.length === 0 ? (
+                            <p className="vacio">No hay clases de {filtroClases} este día.</p>
                         ) : (
-                            clasesDelDia.map((clase) => {
+                            clasesFiltradas.map((clase) => {
                                 const cupos = (clase.cupo_maximo || 0) - (clase.asistentes_confirmados || 0);
                                 const libre = cupos > 0;
                                 return (
