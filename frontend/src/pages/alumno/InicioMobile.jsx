@@ -58,6 +58,17 @@ const diasDeLaSemana = (hoyStr) => {
 // 'YYYY-MM-DD' de un valor de fecha (a veces llega con hora ISO).
 const soloFecha = (v) => (v ? String(v).slice(0, 10) : '');
 
+// "31 de diciembre" en el calendario de Chile (para "Vence el ...").
+const fechaLargaCortaChile = (valor) => {
+    if (!valor) return '';
+    const s = String(valor);
+    const d = s.length === 10 ? new Date(`${s}T12:00:00Z`) : new Date(s);
+    if (isNaN(d.getTime())) return '';
+    return new Intl.DateTimeFormat('es-CL', {
+        timeZone: 'America/Santiago', day: 'numeric', month: 'long',
+    }).format(d);
+};
+
 // Íconos del mockup (trazo, 24px). Se definen aquí y crecen bloque a bloque.
 const ICONOS = {
     scan: <path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16" />,
@@ -180,6 +191,21 @@ const InicioMobile = ({
         ? `Racha de ${racha} ${racha === 1 ? 'mes' : 'meses'} consecutivos al 100%`
         : 'Completa un mes al 100% para iniciar tu racha';
 
+    // ── Bloque "Plan y créditos" ──
+    const creditosTxt = ilimitado ? '∞' : String(creditos);
+    const venceFmt = fechaLargaCortaChile(membresia?.fecha_vencimiento);
+    const expTexto = !activa ? 'Sin plan activo'
+        : diasRestantes > 0 ? (venceFmt ? `Vence el ${venceFmt}` : 'Plan activo')
+            : 'Vence hoy';
+    const exp2Texto = !activa ? 'Renuévalo para reservar'
+        : diasRestantes > 1 ? `Quedan ${diasRestantes} días`
+            : diasRestantes === 1 ? 'Queda 1 día'
+                : 'Vence hoy';
+    // Puntos = créditos restantes (tope 20, como el mockup). Ilimitado no lleva.
+    const dotsN = (!ilimitado && creditos > 0) ? Math.min(creditos, 20) : 0;
+    // Oferta de renovación (Espacio B): pocos créditos o pocos días.
+    const mostrarRenovacion = activa && (diasRestantes <= 7 || (!ilimitado && creditos <= 4));
+
     // Clases del día elegido: deduplicadas (varias sedes comparten disciplina y
     // hora) y ordenadas por horario, como la rejilla del Dashboard.
     const clasesDelDia = agruparClases(clasesPorDia[diaSeleccionado] || [])
@@ -269,6 +295,46 @@ const InicioMobile = ({
                         <Icono nombre="flame" />
                         <span>{rachaTexto}</span>
                     </div>
+                </section>
+
+                {/* -- Plan y creditos -- */}
+                <section className="card sec" aria-label="Plan y créditos">
+                    <div className="ph">
+                        <div>
+                            <small>Créditos restantes</small>
+                            <div className="cnum">{creditosTxt}</div>
+                        </div>
+                        <div className="pr">
+                            {plan && <span className="pill plan">{plan}</span>}
+                            <span className="exp">{expTexto}</span>
+                            <span className="exp2">{exp2Texto}</span>
+                        </div>
+                    </div>
+                    {dotsN > 0 && (
+                        <div className="dots" aria-hidden="true">
+                            {Array.from({ length: dotsN }).map((_, i) => <i key={i} />)}
+                        </div>
+                    )}
+                    <p className="pace">
+                        {!activa
+                            ? 'Sin plan activo: activa uno para volver a reservar.'
+                            : ilimitado
+                                ? 'Plan ilimitado: reserva las clases que quieras.'
+                                : creditos <= 0
+                                    ? 'Sin créditos. Renueva tu plan para reservar.'
+                                    : diasRestantes < 7
+                                        ? 'Quedan pocos días: usa los créditos que puedas.'
+                                        : <>Para usarlos todos, necesitas unas <b>{porSemana} clases por semana</b>.</>}
+                    </p>
+                    {mostrarRenovacion && (
+                        <div className="ctx">
+                            <div>
+                                <b>Renueva esta semana</b>
+                                <span>No te quedes sin clases: revisa los planes.</span>
+                            </div>
+                            <button type="button" onClick={() => navigate('/alumno/solicitar-plan')}>Renovar</button>
+                        </div>
+                    )}
                 </section>
 
                 {/* ── Clases disponibles: rejilla del Dashboard adaptada a móvil.

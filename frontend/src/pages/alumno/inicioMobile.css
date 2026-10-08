@@ -508,3 +508,102 @@
     height: 20px;
 }
 
+/* ── Plan y créditos ── */
+.ub-inicio .ph {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 10px;
+}
+
+.ub-inicio .ph small {
+    font-size: 14px;
+    color: var(--ub-muted);
+}
+
+.ub-inicio .cnum {
+    font-family: var(--ub-cond);
+    font-weight: 800;
+    font-size: 52px;
+    line-height: .95;
+}
+
+.ub-inicio .pr {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    text-align: right;
+}
+
+.ub-inicio .exp {
+    font-size: 14.5px;
+    font-weight: 600;
+}
+
+.ub-inicio .exp2 {
+    font-size: 13.5px;
+    color: var(--ub-muted);
+}
+
+.ub-inicio .dots {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 14px 0 12px;
+}
+
+.ub-inicio .dots i {
+    width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--ub-panel) 0 3px, var(--ub-orange) 3.6px);
+}
+
+.ub-inicio .pace {
+    font-size: 14.5px;
+    color: var(--ub-muted);
+    line-height: 1.35;
+}
+
+.ub-inicio .pace b {
+    color: var(--ub-text);
+}
+
+/* Renovación (Espacio B del mockup): pocos créditos o pocos días */
+.ub-inicio .ctx {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 14px;
+    border: 1.5px solid var(--ub-orange);
+    border-radius: var(--ub-r-md);
+    padding: 12px 14px;
+}
+
+.ub-inicio .ctx div {
+    flex: 1;
+}
+
+.ub-inicio .ctx b {
+    display: block;
+    font-size: 15px;
+    line-height: 1.2;
+}
+
+.ub-inicio .ctx span {
+    font-size: 13px;
+    color: var(--ub-muted);
+}
+
+.ub-inicio .ctx button {
+    font-size: 14px;
+    font-weight: 700;
+    color: #160b03;
+    background: var(--ub-orange);
+    border-radius: var(--ub-r-sm);
+    min-height: 44px;
+    padding: 0 16px;
+    white-space: nowrap;
+}
+
