@@ -71,8 +71,12 @@ def obtener_mi_membresia(
     return {
         "activa": True,
         "plan_nombre": plan.nombre if plan else "Plan",
-        "clases_totales": suscripcion.creditos_totales or (16 if plan and not plan.es_ilimitado else 999),
-        "clases_disponibles": suscripcion.creditos_disponibles or (16 if plan and not plan.es_ilimitado else 999),
+        # Los valores REALES de la fila, tal cual: pueden ser NULL (el "∞" de los
+        # planes ilimitados y el "—" de una fila sin cupo cargado). Antes se
+        # inventaban números acá —`or 999` para ilimitados y `or 16` para planes
+        # con cupo—, así que un NULL se pintaba como "999 créditos" o "16".
+        "clases_totales": suscripcion.creditos_totales,
+        "clases_disponibles": suscripcion.creditos_disponibles,
         "clases_usadas": usadas,
         "es_ilimitado": plan.es_ilimitado if plan else False,
         "dias_restantes": dias_restantes,

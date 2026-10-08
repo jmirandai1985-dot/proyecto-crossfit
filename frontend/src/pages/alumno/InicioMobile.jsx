@@ -222,7 +222,13 @@ const InicioMobile = ({
         : 'Completa un mes al 100% para iniciar tu racha';
 
     // ── Bloque "Plan y créditos" ──
-    const creditosTxt = ilimitado ? '∞' : String(creditos);
+    // "∞" con plan ilimitado (la fila puede venir en NULL: así están las
+    // suscripciones ilimitadas de PROD) y "—" si el cupo no está cargado (NULL en
+    // un plan CON cupo). Es el mismo rótulo que usan el Historial del alumno y la
+    // ficha del coach; nunca un 0 inventado, porque NULL no significa "sin créditos".
+    const cupoDesconocido = membresia?.clases_disponibles === null
+        || membresia?.clases_disponibles === undefined;
+    const creditosTxt = ilimitado ? '∞' : cupoDesconocido ? '—' : String(creditos);
     const venceFmt = fechaLargaCortaChile(membresia?.fecha_vencimiento);
     const expTexto = !activa ? 'Sin plan activo'
         : diasRestantes > 0 ? (venceFmt ? `Vence el ${venceFmt}` : 'Plan activo')
