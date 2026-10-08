@@ -399,3 +399,112 @@
 .ub-inicio[data-checked="1"] .pend {
     display: none !important;
 }
+
+/* ── Tu semana: círculos L–D + meta semanal + racha ── */
+.ub-inicio .wk {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+}
+
+.ub-inicio .wk .day {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #8b8e9a;
+}
+
+.ub-inicio .wk .circ {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    font-size: 14.5px;
+    border: 2px solid transparent;
+    color: #c7c9d1;
+    background: #23242b;
+}
+
+.ub-inicio .wk .day.att .circ {
+    background: var(--ub-ok);
+    color: #06281a;
+}
+
+.ub-inicio .wk .day.att .circ .i {
+    width: 19px;
+    height: 19px;
+    stroke-width: 3;
+}
+
+.ub-inicio .wk .day.today {
+    color: var(--ub-text);
+}
+
+.ub-inicio .wk .day.today .circ {
+    border-color: var(--ub-orange);
+}
+
+.ub-inicio[data-checked="1"] .wk .day.today .circ {
+    background: var(--ub-ok);
+    border-color: var(--ub-ok);
+    color: #06281a;
+}
+
+.ub-inicio .goal {
+    margin-top: 16px;
+}
+
+.ub-inicio .goal .gl {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 14.5px;
+    margin-bottom: 8px;
+}
+
+.ub-inicio .goal .gl b {
+    font-size: 14.5px;
+}
+
+.ub-inicio .goal .gl span {
+    color: var(--ub-muted);
+}
+
+.ub-inicio .segs {
+    display: grid;
+    gap: 6px;
+}
+
+.ub-inicio .segs i {
+    height: 8px;
+    border-radius: 4px;
+    background: #2b2d35;
+}
+
+.ub-inicio .segs i.f {
+    background: var(--ub-orange);
+}
+
+.ub-inicio[data-checked="1"] .segs i.n {
+    background: var(--ub-orange);
+}
+
+.ub-inicio .streak {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    font-size: 14.5px;
+    font-weight: 600;
+}
+
+.ub-inicio .streak .i {
+    color: var(--ub-orange);
+    width: 20px;
+    height: 20px;
+}
+
