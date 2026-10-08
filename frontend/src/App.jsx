@@ -1,52 +1,67 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import { DASHBOARD_MAP, ROLES_ADMIN, ROLES_COACH, ROLES_ALUMNO } from './config/roles';
 
-// ─── Pages ──────────────────────────────────────────────────────────────
+// ─── Pages públicas (EAGER) ───────────────────────────────────────────────
+// Se quedan en el bundle inicial: son la primera pantalla para quien aún no
+// inició sesión (landing con clase de prueba, login, reset de contraseña).
+// Mantenerlas eager evita un spinner extra justo en la entrada.
 import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
-import AdminDashboard from './pages/admin/Dashboard';
-import AdminAlumnos from './pages/admin/Alumnos';
-import AdminHistorialAlumno from './pages/admin/HistorialAlumno';
-import AdminCoaches from './pages/admin/Coaches';
-import AdminClases from './pages/admin/Clases';
-import AdminBazar from './pages/admin/Bazar';
+
+// ─── Pages por rol (LAZY) ─────────────────────────────────────────────────
+// Cada pantalla se importa dinámicamente => chunk propio, cargado SOLO al
+// entrar a esa ruta. Así el alumno no descarga el código de admin/coach (ni
+// al revés). El <Suspense> de más abajo muestra un spinner mientras llega el
+// chunk de la ruta pedida y, ya cargado, se comporta igual que antes.
+//
+// · Familia ADMIN
+const AdminDashboard = lazy(() => import('./pages/admin/Dashboard'));
+const AdminAlumnos = lazy(() => import('./pages/admin/Alumnos'));
+const AdminHistorialAlumno = lazy(() => import('./pages/admin/HistorialAlumno'));
+const AdminCoaches = lazy(() => import('./pages/admin/Coaches'));
+const AdminClases = lazy(() => import('./pages/admin/Clases'));
+const AdminBazar = lazy(() => import('./pages/admin/Bazar'));
 // Pedidos del Bazar: revisar comprobantes y avanzar el estado (pendiente → validado → entregado).
-import AdminPedidos from './pages/admin/Pedidos';
-import AdminReportes from './pages/admin/Reportes';
-import AdminSupervisionClases from './pages/admin/SupervisionClases';
-import AdminConfiguracion from './pages/admin/Configuracion';
-import AdminNotificaciones from './pages/admin/Notificaciones';
-import AdminFidelizacion from './pages/admin/Fidelizacion';
-import AdminKpis from './pages/admin/Kpis';
-import AdminPlanes from './pages/admin/Planes';
-import AdminAlumnosPendientes from './pages/admin/AdminAlumnosPendientes';
-import AdminDisciplinas from './pages/admin/Disciplinas';
-import AdminAsistencia from './pages/admin/Asistencia';
-import AdminMiQr from './pages/admin/MiQr';
-import CoachDashboard from './pages/coach/DashboardCoach';
-import CoachPizarra from './pages/coach/Pizarra';
-import CoachGenerarClases from './pages/coach/GenerarClases';
-import CoachGestionClases from './pages/coach/GestionClases';
+const AdminPedidos = lazy(() => import('./pages/admin/Pedidos'));
+const AdminReportes = lazy(() => import('./pages/admin/Reportes'));
+const AdminSupervisionClases = lazy(() => import('./pages/admin/SupervisionClases'));
+const AdminConfiguracion = lazy(() => import('./pages/admin/Configuracion'));
+const AdminNotificaciones = lazy(() => import('./pages/admin/Notificaciones'));
+const AdminFidelizacion = lazy(() => import('./pages/admin/Fidelizacion'));
+const AdminKpis = lazy(() => import('./pages/admin/Kpis'));
+const AdminPlanes = lazy(() => import('./pages/admin/Planes'));
+const AdminAlumnosPendientes = lazy(() => import('./pages/admin/AdminAlumnosPendientes'));
+const AdminDisciplinas = lazy(() => import('./pages/admin/Disciplinas'));
+const AdminAsistencia = lazy(() => import('./pages/admin/Asistencia'));
+const AdminMiQr = lazy(() => import('./pages/admin/MiQr'));
+// · Familia COACH
+const CoachDashboard = lazy(() => import('./pages/coach/DashboardCoach'));
+const CoachPizarra = lazy(() => import('./pages/coach/Pizarra'));
+const CoachGenerarClases = lazy(() => import('./pages/coach/GenerarClases'));
+const CoachGestionClases = lazy(() => import('./pages/coach/GestionClases'));
 // Código de retiro del Bazar: el coach entrega pedidos con el código del alumno
 // (misma pantalla/modal que usa el admin), sin ver listados ni montos.
-import CoachEntregarPedido from './pages/coach/EntregarPedido';
-import AlumnoDashboard from './pages/alumno/Dashboard';
-import AlumnoMisReservas from './pages/alumno/MisReservas';
-import AlumnoPizarraRMs from './pages/alumno/PizarraRMs';
-import RankingAsistencia from './pages/tv/RankingAsistencia';
-import AsistenciaQr from './pages/AsistenciaQr';
-import AlumnoAjustes from './pages/alumno/Ajustes';
-import AlumnoSolicitarPlan from './pages/alumno/SolicitarPlan';
-import AlumnoEvolucion from './pages/alumno/Evolucion';
-import AlumnoBazar from './pages/alumno/Bazar';
-import AlumnoMisPedidos from './pages/alumno/MisPedidos';
-import AlumnoPerformanceHub from './pages/alumno/PerformanceHub';
-import AlumnoMiProgreso from './pages/alumno/MiProgreso';
-import AlumnoMiHistorial from './pages/alumno/MiHistorial';
+const CoachEntregarPedido = lazy(() => import('./pages/coach/EntregarPedido'));
+// · Familia ALUMNO
+const AlumnoDashboard = lazy(() => import('./pages/alumno/Dashboard'));
+const AlumnoMisReservas = lazy(() => import('./pages/alumno/MisReservas'));
+const AlumnoPizarraRMs = lazy(() => import('./pages/alumno/PizarraRMs'));
+const AlumnoAjustes = lazy(() => import('./pages/alumno/Ajustes'));
+const AlumnoSolicitarPlan = lazy(() => import('./pages/alumno/SolicitarPlan'));
+const AlumnoEvolucion = lazy(() => import('./pages/alumno/Evolucion'));
+const AlumnoBazar = lazy(() => import('./pages/alumno/Bazar'));
+const AlumnoMisPedidos = lazy(() => import('./pages/alumno/MisPedidos'));
+const AlumnoPerformanceHub = lazy(() => import('./pages/alumno/PerformanceHub'));
+const AlumnoMiProgreso = lazy(() => import('./pages/alumno/MiProgreso'));
+const AlumnoMiHistorial = lazy(() => import('./pages/alumno/MiHistorial'));
+// · Páginas públicas de acceso directo (TV y check-in por QR): fuera del
+//   primer render, así que también van perezosas.
+const RankingAsistencia = lazy(() => import('./pages/tv/RankingAsistencia'));
+const AsistenciaQr = lazy(() => import('./pages/AsistenciaQr'));
 
 // ─── Spinner compartido ────────────────────────────────────────────────
 const LoadingScreen = () => (
@@ -82,6 +97,8 @@ function App() {
   return (
     <Router>
       <AuthProvider>
+        {/* Suspense: hace de fallback mientras se descarga el chunk de la ruta lazy. */}
+        <Suspense fallback={<LoadingScreen />}>
         <Routes>
 
           {/* ── /landing → Landing pública de registro (clase de prueba) ── */}
@@ -161,6 +178,7 @@ function App() {
           <Route path="*" element={<RootRedirect />} />
 
         </Routes>
+        </Suspense>
       </AuthProvider>
     </Router>
   );
