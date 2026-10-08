@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 // TZ Chile: "hoy" en el calendario chileno (no el del navegador), misma fuente
 // que el Dashboard (utils/fecha.js): así la reserva de hoy coincide con las clases.
 import { hoyChileStr, fechaSolaAInstante } from '../../utils/fecha';
 import api from '../../services/api';
+import { urlArchivo } from '../../utils/imagen';
+import { MENU_BY_ROL } from '../../config/menu';
+import { MENU_ICONS } from '../../config/menuIcons';
 // Estilos del "Inicio" móvil (mockup urban-box-inicio-pulido-1), acotados a
 // `.ub-inicio`. Se construye por bloques; este archivo crece bloque a bloque.
 import './inicioMobile.css';
@@ -69,11 +72,19 @@ const fechaLargaCortaChile = (valor) => {
     }).format(d);
 };
 
+// Precio en CLP ("$100.000") desde el `precio` (numérico) del producto.
+const precioCLP = (v) => {
+    const n = Number(v);
+    if (!isFinite(n)) return '';
+    return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+};
+
 // Íconos del mockup (trazo, 24px). Se definen aquí y crecen bloque a bloque.
 const ICONOS = {
     scan: <path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16" />,
     check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
     flame: <path d="M12 22c4 0 7-2.8 7-7 0-3-1.8-5-3-6.5-.5 1.5-1.5 2.5-2.5 3 0-4-1.5-7-4.5-9.5C9 7 5 10.5 5 15c0 4.2 3 7 7 7Z" />,
+    tee: <path d="M8 3 3 6l2 4 3-1v11h8V9l3 1 2-4-5-3a4 4 0 0 1-8 0Z" />,
 };
 
 const Icono = ({ nombre }) => (
@@ -97,25 +108,35 @@ const InicioMobile = ({
     onReservar,
 }) => {
     const navigate = useNavigate();
+    const location = useLocation();
 
-    // Datos complementarios del bloque "Tu semana": la lista de reservas
-    // (incluye asistencias pasadas, que el hero no necesita) y el resumen de
-    // asistencia (racha). Vive dentro de InicioMobile (solo móvil <768px); el
-    // escritorio ≥768px no cambia.
+    // Datos complementarios del Inicio móvil (solo <768px): reservas de la
+    // semana, resumen de asistencia (racha), productos del Bazar y public_id
+    // del box (para el FAB de asistencia). El escritorio ≥768px no cambia.
     const [reservasSemana, setReservasSemana] = useState([]);
     const [resumenAsistencia, setResumenAsistencia] = useState(null);
+    const [productos, setProductos] = useState([]);
+    const [boxPublicId, setBoxPublicId] = useState(null);
     useEffect(() => {
         let cancelado = false;
         Promise.allSettled([
             api.get('/api/v1/reservas'),
             api.get('/api/v1/asistencia/mi-resumen'),
-        ]).then(([rReservas, rResumen]) => {
+            api.get('/api/v1/productos?activo=true'),
+            api.get('/api/v1/tenants/me/public-id'),
+        ]).then(([rReservas, rResumen, rProductos, rPublicId]) => {
             if (cancelado) return;
             if (rReservas.status === 'fulfilled' && Array.isArray(rReservas.value.data)) {
                 setReservasSemana(rReservas.value.data);
             }
             if (rResumen.status === 'fulfilled') {
                 setResumenAsistencia(rResumen.value.data);
+            }
+            if (rProductos.status === 'fulfilled' && Array.isArray(rProductos.value.data)) {
+                setProductos(rProductos.value.data);
+            }
+            if (rPublicId.status === 'fulfilled') {
+                setBoxPublicId(rPublicId.value.data?.public_id || null);
             }
         });
         return () => { cancelado = true; };
@@ -214,6 +235,15 @@ const InicioMobile = ({
         ? capitalizar(nivelFuerza.nivel.toLowerCase()) : null;
     const nivelG = nivelGimnastico?.nivel && nivelGimnastico.nivel.toLowerCase() !== 'sin datos'
         ? capitalizar(nivelGimnastico.nivel.toLowerCase()) : null;
+
+    // ── Bloque "Barra inferior": items desde config/menu.js ──
+    const itemMenu = (label) => MENU_BY_ROL.alumno.find((i) => i.label === label);
+    const navInicio = itemMenu('Inicio');
+    const navReservas = itemMenu('Mis Reservas');
+    const navMarcas = itemMenu('Pizarra de RMs');
+    const navPerfil = itemMenu('Ajustes');
+    // FAB: escanea el QR del box (public_id); si no está, va a Mis Reservas.
+    const irAAsistencia = () => navigate(boxPublicId ? `/asistencia/qr/${boxPublicId}` : '/alumno/mis-reservas');
 
     // Clases del día elegido: deduplicadas (varias sedes comparten disciplina y
     // hora) y ordenadas por horario, como la rejilla del Dashboard.
@@ -429,7 +459,63 @@ const InicioMobile = ({
                         )}
                     </div>
                 </section>
+
+                {/* -- Tienda Urban Box (vista rapida): productos reales del Bazar -- */}
+                <section className="sec" aria-label="Tienda Urban Box">
+                    <div className="head">
+                        <h2>Tienda Urban Box</h2>
+                        <button type="button" className="link" onClick={() => navigate('/alumno/bazar')}>Ver todo</button>
+                    </div>
+                    {productos.length > 0 ? (
+                        <div className="shop">
+                            {productos.slice(0, 5).map((p) => (
+                                <div className="prod" key={p.id}>
+                                    <div className="img">
+                                        {p.imagen_url
+                                            ? <img src={urlArchivo(p.imagen_url)} alt={p.nombre || 'Producto'} />
+                                            : <Icono nombre="tee" />}
+                                    </div>
+                                    <b>{p.nombre}</b>
+                                    <span>{precioCLP(p.precio)}</span>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <p className="vacio">El box aún no publicó productos.</p>
+                    )}
+                </section>
             </div>
+
+            {/* -- Barra inferior: Inicio - Reservas - FAB - Marcas - Perfil -- */}
+            <nav className="ub-nav" aria-label="Navegación del alumno">
+                {navInicio && (
+                    <button type="button" className={`t${location.pathname === navInicio.path ? ' on' : ''}`} onClick={() => navigate(navInicio.path)}>
+                        {MENU_ICONS[navInicio.icon]}<span>Inicio</span>
+                    </button>
+                )}
+                {navReservas && (
+                    <button type="button" className={`t${location.pathname === navReservas.path ? ' on' : ''}`} onClick={() => navigate(navReservas.path)}>
+                        {MENU_ICONS[navReservas.icon]}<span>Reservas</span>
+                    </button>
+                )}
+                <div className="mid">
+                    <button type="button" className="fab" aria-label="Marcar asistencia" onClick={irAAsistencia}>
+                        <span className="pend"><Icono nombre="scan" /></span>
+                        <span className="done"><Icono nombre="check" /></span>
+                    </button>
+                    <span className="pend">Marcar</span><span className="done">Asististe</span>
+                </div>
+                {navMarcas && (
+                    <button type="button" className={`t${location.pathname === navMarcas.path ? ' on' : ''}`} onClick={() => navigate(navMarcas.path)}>
+                        {MENU_ICONS[navMarcas.icon]}<span>Marcas</span>
+                    </button>
+                )}
+                {navPerfil && (
+                    <button type="button" className={`t${location.pathname === navPerfil.path ? ' on' : ''}`} onClick={() => navigate(navPerfil.path)}>
+                        {MENU_ICONS[navPerfil.icon]}<span>Perfil</span>
+                    </button>
+                )}
+            </nav>
         </div>
     );
 };
