@@ -7,6 +7,7 @@ import api from '../../services/api';
 import { urlArchivo } from '../../utils/imagen';
 import { MENU_BY_ROL } from '../../config/menu';
 import { MENU_ICONS } from '../../config/menuIcons';
+import EscanerQR from '../../components/EscanerQR';
 // Estilos del "Inicio" móvil (mockup urban-box-inicio-pulido-1), acotados a
 // `.ub-inicio`. Se construye por bloques; este archivo crece bloque a bloque.
 import './inicioMobile.css';
@@ -117,6 +118,8 @@ const InicioMobile = ({
     const [resumenAsistencia, setResumenAsistencia] = useState(null);
     const [productos, setProductos] = useState([]);
     const [boxPublicId, setBoxPublicId] = useState(null);
+    // Overlay del lector QR (abre la cámara de inmediato al tocar "Marcar").
+    const [escanerAbierto, setEscanerAbierto] = useState(false);
     useEffect(() => {
         let cancelado = false;
         Promise.allSettled([
@@ -243,7 +246,7 @@ const InicioMobile = ({
     const navMarcas = itemMenu('Pizarra de RMs');
     const navPerfil = itemMenu('Ajustes');
     // FAB: escanea el QR del box (public_id); si no está, va a Mis Reservas.
-    const irAAsistencia = () => navigate(boxPublicId ? `/asistencia/qr/${boxPublicId}` : '/alumno/mis-reservas');
+    const irAAsistencia = () => setEscanerAbierto(true);
 
     // Clases del día elegido: deduplicadas (varias sedes comparten disciplina y
     // hora) y ordenadas por horario, como la rejilla del Dashboard.
@@ -516,6 +519,14 @@ const InicioMobile = ({
                     </button>
                 )}
             </nav>
+
+            {/* Lector QR: overlay con la cámara (abre al tocar el FAB "Marcar"). */}
+            {escanerAbierto && (
+                <EscanerQR
+                    onCerrar={() => setEscanerAbierto(false)}
+                    publicIdFallback={boxPublicId}
+                />
+            )}
         </div>
     );
 };

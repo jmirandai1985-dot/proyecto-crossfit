@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { QrCode } from 'lucide-react';
 import Layout from '../../components/Layout';
 import api from '../../services/api';
 import { getEstadoColor, getEstadoDisplay, esActiva } from '../../utils/estadoReserva';
+import EscanerQR from '../../components/EscanerQR';
 
 const DIAS_NOMBRES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
@@ -27,8 +27,9 @@ const MisReservas = () => {
     const [error, setError] = useState('');
     const [cancelando, setCancelando] = useState(null);
     const [mensaje, setMensaje] = useState(null);
-    const navigate = useNavigate();
     const [boxPublicId, setBoxPublicId] = useState(null);
+    // Overlay del lector QR (abre la cámara de inmediato al tocar "Escanear QR").
+    const [escanerAbierto, setEscanerAbierto] = useState(false);
     // Filtro por disciplina (arriba de la lista). Arranca con lo último elegido
     // en esta sesión (sessionStorage); si esa disciplina ya no existe, cae a 'Todas'.
     const [disciplinaFiltro, setDisciplinaFiltro] = useState(
@@ -43,10 +44,9 @@ const MisReservas = () => {
             .catch(() => setBoxPublicId(null));
     }, []);
 
-    const irAEscanearQr = () => {
-        if (!boxPublicId) return;
-        navigate(`/asistencia/qr/${boxPublicId}`);
-    };
+    // Abre el LECTOR con la cámara de inmediato (sin pantalla intermedia).
+    // El `public_id` del box ya no es requisito: el QR escaneado lo trae.
+    const irAEscanearQr = () => setEscanerAbierto(true);
 
     const fetchReservas = useCallback(async () => {
         setLoading(true);
@@ -167,9 +167,8 @@ const MisReservas = () => {
                     <button
                         type="button"
                         onClick={irAEscanearQr}
-                        disabled={!boxPublicId}
-                        title={!boxPublicId ? 'No se pudo obtener el QR del box' : 'Abrir escáner de asistencia'}
-                        className="w-full sm:w-auto shrink-0 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm shadow-md hover:shadow-lg transition-all"
+                        title="Abrir el escáner de asistencia"
+                        className="w-full sm:w-auto shrink-0 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm shadow-md hover:shadow-lg transition-all"
                     >
                         <QrCode size={18} />
                         Escanear QR para Marcar Asistencia
@@ -341,6 +340,14 @@ const MisReservas = () => {
                     </div>
                 )}
             </div>
+
+            {/* Lector QR: overlay con la cámara (abre al tocar "Escanear QR"). */}
+            {escanerAbierto && (
+                <EscanerQR
+                    onCerrar={() => setEscanerAbierto(false)}
+                    publicIdFallback={boxPublicId}
+                />
+            )}
         </Layout>
     );
 };
