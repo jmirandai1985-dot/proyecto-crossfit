@@ -748,7 +748,11 @@ const PanelHistorial = ({ alumnoId = null }) => {
                 </div>
             )}
 
-            <div className="flex gap-2 overflow-x-auto pb-1" data-testid="historial-tabs">
+            {/* Tabs del historial. En móvil (<768px): scroll horizontal (swipe),
+                cada pestaña con alto táctil ≥44px y sin encogerse (shrink-0) para
+                que el texto no se corte ni se monten unas con otras. En ≥768px
+                se ve EXACTAMENTE igual que hoy (variantes `max-md:`). */}
+            <div className="flex gap-2 overflow-x-auto pb-1 max-md:snap-x" data-testid="historial-tabs">
                 {secciones.map((s) => (
                     <button
                         key={s.id}
@@ -757,7 +761,7 @@ const PanelHistorial = ({ alumnoId = null }) => {
                         disabled={!s.disponible}
                         title={s.disponible ? undefined : (s.motivo || 'No disponible')}
                         onClick={() => irASeccion(s.id)}
-                        className={`px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap transition ${
+                        className={`max-md:shrink-0 max-md:inline-flex max-md:items-center max-md:justify-center max-md:min-h-11 max-md:snap-start px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap transition ${
                             seccion === s.id
                                 ? 'bg-orange-500/20 text-orange-300 ring-1 ring-orange-500/40'
                                 : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
