@@ -13,6 +13,7 @@ import ModalEnviarCorreo from '../../components/ModalEnviarCorreo';
 import BeneficioModal from '../../components/BeneficioModal';
 import BeneficiosPanel from '../../components/BeneficiosPanel';
 import { TabBar } from '../../components/kpis/TabBar';
+import FidelizacionMovil from './FidelizacionMovil';
 import { Eye, TriangleAlert, Users, Sparkles, Gift, Mail } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
@@ -563,8 +564,35 @@ const Fidelizacion = () => {
                         </div>
 
 
+                        {/* Vista MÓVIL (<768px): tarjetas COMPACTAS con acordeón (una sola
+                            abierta a la vez). Reemplaza a la tabla en el teléfono; en
+                            >=768px no se muestra (regla de oro: el escritorio no cambia).
+                            Las acciones y los modales son los mismos de abajo. */}
+                        <div data-testid="panel-accion-movil"
+                            className="md:hidden rounded-lg bg-zinc-900 shadow overflow-hidden">
+                            <div className="border-b border-zinc-800 px-4 py-3">
+                                <h2 className="text-base font-bold text-zinc-100">
+                                    🎯 Panel de Acción y Fidelización ({prediccionesFiltradas.length} alumnos)
+                                </h2>
+                                <p className="mt-0.5 text-[11px] text-zinc-500">
+                                    Toca un alumno para ver el arquetipo, el motivo completo, la
+                                    recomendación y las acciones.
+                                </p>
+                            </div>
+                            <FidelizacionMovil
+                                alumnos={prediccionesFiltradas}
+                                sugerencias={sugerencias}
+                                onVerFicha={verDetalleAlumno}
+                                onVerRecomendacion={setDetalleReco}
+                                onEnviarCorreo={enviarCorreoManual}
+                                onDarBeneficio={darBeneficio}
+                            />
+                        </div>
+
+                        {/* Vista de ESCRITORIO (>=768px): la tabla de siempre, sin cambios. */}
                         {/* Tabla de acción y fidelización */}
-                        <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
+                        <div data-testid="panel-accion-escritorio"
+                            className="hidden md:block bg-zinc-900 rounded-lg shadow overflow-hidden">
                             <div className="px-6 py-4 border-b border-zinc-800">
                                 <h2 className="text-lg font-bold text-zinc-100">
                                     🎯 Panel de Acción y Fidelización ({prediccionesFiltradas.length} alumnos)
