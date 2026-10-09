@@ -10,7 +10,8 @@ conectadas y que ninguna filtre lo que no debe.
   * alumno (`pages/alumno/MisPedidos.jsx`): código destacado + QR del código + quién
     entregó y cuándo;
   * coach: entrada propia ("Entregar pedido") que usa EL MISMO modal, sin listados ni
-    montos (no pide /pedidos ni /productos);
+    montos (no pide /pedidos ni /productos); esa entrada NO se declara en Layout.jsx
+    sino en la FUENTE ÚNICA del menú (`config/menu.js`), que Layout consume;
   * el modal compartido (`components/ModalEntregarPedido.jsx`) es el único que llama a
     `POST /api/v1/pedidos/entregar`.
 
@@ -51,7 +52,17 @@ def test_el_coach_tiene_su_pantalla_y_usa_el_mismo_modal():
     app = _fuente("frontend/src/App.jsx")
     assert "CoachEntregarPedido" in app
     assert 'path="entregar-pedido"' in app
-    assert "'/coach/entregar-pedido'" in _fuente("frontend/src/components/Layout.jsx")
+    # La entrada del coach NO vive en Layout.jsx: vive en la FUENTE ÚNICA del menú
+    # (`config/menu.js`, consumida por Layout vía `getMenuItems`). La aserción vieja
+    # exigía el literal en Layout.jsx, que es justo lo que la fuente única evita
+    # (el menú ya no está duplicado en ningún componente).
+    menu = _fuente("frontend/src/config/menu.js")
+    assert "label: 'Entregar pedido'" in menu
+    assert "path: '/coach/entregar-pedido'" in menu
+    layout = _fuente("frontend/src/components/Layout.jsx")
+    assert "from '../config/menu'" in layout      # el sidebar sale de la fuente única
+    assert "getMenuItems(" in layout              # ...y la usa para armar el menú
+    assert "'/coach/entregar-pedido'" not in layout   # sin lista duplicada
 
 
 def test_el_modal_compartido_llama_al_endpoint_de_entrega():
