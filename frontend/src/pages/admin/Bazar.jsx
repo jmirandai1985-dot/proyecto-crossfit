@@ -21,7 +21,12 @@ const THUMB_BG = [
     'rgba(14,165,233,0.15)',
 ];
 
-const Bazar = () => {
+const Bazar = ({ sinLayout = false }) => {
+    // POR QUÉ EXISTE `sinLayout`: esta MISMA pantalla es la pestaña "Catálogo" de la
+    // sección Bazar del Dashboard admin móvil (<768px), donde ya hay Layout. Con
+    // `sinLayout` el cuerpo se renderiza tal cual (sin sidebar/header) para no anidar
+    // dos shells; en la ruta /admin/bazar (escritorio incluido) sigue igual que siempre.
+    const Marco = sinLayout ? React.Fragment : Layout;
     const { tenant_id } = useAuth();
     const [productos, setProductos] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -206,19 +211,19 @@ const Bazar = () => {
 
     if (loading) {
         return (
-            <Layout>
+            <Marco>
                 <div className="flex items-center justify-center h-96">
                     <div className="text-center">
                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto mb-4"></div>
                         <p className="text-zinc-400">Cargando inventario...</p>
                     </div>
                 </div>
-            </Layout>
+            </Marco>
         );
     }
 
     return (
-        <Layout>
+        <Marco>
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
                 {/* ── Header: título + buscador + Agregar ── */}
                 <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
@@ -438,7 +443,7 @@ const Bazar = () => {
                     productoEditar={productoEditar}
                 />
             </div>
-        </Layout>
+        </Marco>
     );
 };
 

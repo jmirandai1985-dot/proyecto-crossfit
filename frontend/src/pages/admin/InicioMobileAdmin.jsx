@@ -26,6 +26,9 @@ import {
 // Vista previa del aviso de retiro: la petición viaja CON PLAZO. Sin esto, una petición
 // que no responde dejaba el modal girando para siempre (bug de PROD: ver utils/avisoRetiro.js).
 import { cargarPreviewAviso } from '../../utils/avisoRetiro';
+// Secciones del Bazar móvil (pestañas "Catálogo" | "Entregar pedido"): única definición
+// de cuáles son, cuál arranca y qué pestaña abre cada acceso rápido.
+import { TABS_BAZAR, TAB_INICIAL, etiquetaTab, tabDelAcceso } from '../../utils/bazarMovil';
 // Enlace de contacto del alumno: wa.me armado desde el teléfono cargado (o nada).
 import { enlaceWhatsapp } from '../../utils/whatsapp';
 // Corte por franjas de "Asistencia de hoy" (cálculo puro, con test aislado propio).
@@ -36,6 +39,12 @@ import {
 // Estilos del Dashboard móvil del admin (mockup admin-mobile-mockup.html), acotados a
 // `.ub-admin`: NO alcanzan la versión ≥768px ni el tema del resto del panel.
 import './inicioMobileAdmin.css';
+
+// La pestaña "Catálogo" ES la pantalla de Bazar que ya existía (publicar/editar
+// productos). Se carga PEREZOSA —mismo code-splitting por rol que usa App.jsx— para no
+// arrastrar el inventario al chunk del dashboard. `sinLayout` porque ya estamos dentro
+// del shell del panel (ver pages/admin/Bazar.jsx).
+const BazarCatalogo = React.lazy(() => import('./Bazar'));
 
 // Íconos del mockup (trazo 24px). Se definen acá y crecen bloque a bloque.
 const ICONOS = {
@@ -208,14 +217,16 @@ const InicioMobileAdmin = () => {
     // Vouchers pendientes: el MISMO listado que alimenta la pantalla Pendientes.
     const [vouchers, setVouchers] = useState([]);
 
-    // ── G. "Pedidos listos para entrega" (indicador del Bazar + pantalla) ────
-    // El indicador y la pantalla usan el MISMO listado que la pantalla Pedidos del
-    // admin (`GET /pedidos?estado=validado`): validados que aún nadie retiró.
+    // ── G. Bazar (indicador en el acceso rápido + pantalla con DOS pestañas) ──
+    // El indicador y la lista usan el MISMO listado que la pantalla Pedidos del admin
+    // (`GET /pedidos?estado=validado`): validados que aún nadie retiró.
     const [pedidos, setPedidos] = useState([]);
     const [pedidosError, setPedidosError] = useState('');
     const [listaPedidos, setListaPedidos] = useState(false);   // pantalla abierta
     const [pedidosCargando, setPedidosCargando] = useState(false);
     const [informados, setInformados] = useState({});          // {pedido_id: fecha}
+    // Pestaña activa del Bazar: 'catalogo' (la pantalla de productos, default) | 'entrega'.
+    const [bazarTab, setBazarTab] = useState(TAB_INICIAL);
     // Vista previa del aviso al comprador: { pedido, cargando, preview, error, enviando }.
     const [aviso, setAviso] = useState(null);
 
@@ -620,10 +631,16 @@ const InicioMobileAdmin = () => {
     /** Tocar un nombre lleva a la FICHA del alumno (Historial), igual que el buscador. */
     const irAFicha = (alumnoId) => navigate(`/admin/alumnos/${alumnoId}/historial`);
 
-    // ── G. "Pedidos listos para entrega": pantalla + aviso MANUAL al comprador ─
+    // ── G. Bazar: pantalla con pestañas + aviso MANUAL al comprador ──────────
     const hayPedidos = pedidos.length > 0;
 
-    const abrirPedidos = async () => {
+    /**
+     * Abre la sección Bazar en la pestaña que corresponda al acceso usado:
+     * `acceso` = 'icono' (el ícono del acceso rápido -> Catálogo, la pantalla de siempre)
+     * o 'badge' (el pulso con la cantidad -> Entregar pedido).
+     */
+    const abrirBazar = async (acceso = 'icono') => {
+        setBazarTab(tabDelAcceso(acceso));
         setListaPedidos(true);
         setPedidosCargando(true);
         const [rPedidos, rTraza] = await Promise.allSettled([
@@ -646,7 +663,7 @@ const InicioMobileAdmin = () => {
         setPedidosCargando(false);
     };
 
-    const cerrarPedidos = () => {
+    const cerrarBazar = () => {
         setListaPedidos(false);
         setAviso(null);
     };
@@ -757,7 +774,7 @@ const InicioMobileAdmin = () => {
                         <span className="ico"><Icono nombre="heart" /></span>Fidelización
                     </button>
                     <button type="button" className={`app a-baz${hayPedidos ? ' alive' : ''}`}
-                        onClick={abrirPedidos} data-testid="app-bazar"
+                        onClick={() => abrirBazar('icono')} data-testid="app-bazar"
                         aria-label={hayPedidos
                             ? `Bazar: ${pedidos.length} ${pedidos.length === 1 ? 'pedido listo' : 'pedidos listos'} para entrega`
                             : 'Bazar'}>
@@ -766,7 +783,21 @@ const InicioMobileAdmin = () => {
                         {hayPedidos && <span className="pulse" />}
                         <span className="ico">
                             <Icono nombre="cart" />
-                            {hayPedidos && <span className="tag">{pedidos.length}</span>}
+                            {/* El ÍCONO abre el Catálogo (la pantalla que se había
+                                perdido); el BADGE con la cantidad es un atajo directo a
+                                "Entregar pedido" (lo que el pulso anuncia). La vía
+                                accesible son las DOS pestañas de la pantalla, no este
+                                atajo: por eso el badge va con aria-hidden. */}
+                            {hayPedidos && (
+                                <span className="tag" title="Ver los pedidos por entregar"
+                                    aria-hidden="true"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        abrirBazar('badge');
+                                    }}>
+                                    {pedidos.length}
+                                </span>
+                            )}
                         </span>Bazar
                     </button>
                 </nav>
@@ -1241,57 +1272,96 @@ const InicioMobileAdmin = () => {
                     </section>
                 </>
             )}
-            {/* ── Pantalla completa: pedidos listos para entrega (G) ─────── */}
+            {/* ── Pantalla completa: sección Bazar (G) ──────────────────────
+                DOS pestañas de la MISMA sección: "Catálogo" (la pantalla de Bazar de
+                siempre: publicar/editar productos) y "Entregar pedido" (pedidos
+                validados sin retirar + aviso al comprador). El acceso rápido entra por
+                Catálogo; el badge con la cantidad entra por "Entregar pedido". */}
             {listaPedidos && (
-                <section className="screen" aria-label="Pedidos listos para entrega">
+                <section className="screen" aria-label="Bazar">
                     <div className="s-head">
-                        <button type="button" className="icon-btn" onClick={cerrarPedidos}
+                        <button type="button" className="icon-btn" onClick={cerrarBazar}
                             aria-label="Volver">←</button>
                         <div className="s-title">
-                            <h3>Pedidos listos para entrega</h3>
-                            <small>
-                                {pedidos.length} {pedidos.length === 1
-                                    ? 'pedido esperando retiro'
-                                    : 'pedidos esperando retiro'}
-                            </small>
+                            {bazarTab === 'catalogo' ? (
+                                <>
+                                    <h3>Bazar</h3>
+                                    <small>Publicá y editá los productos del catálogo</small>
+                                </>
+                            ) : (
+                                <>
+                                    <h3>Pedidos listos para entrega</h3>
+                                    <small>
+                                        {pedidos.length} {pedidos.length === 1
+                                            ? 'pedido esperando retiro'
+                                            : 'pedidos esperando retiro'}
+                                    </small>
+                                </>
+                            )}
                         </div>
                     </div>
 
-                    <div className="results">
-                        {pedidosError ? (
-                            <p className="empty-line" role="alert">⚠️ {pedidosError}</p>
-                        ) : pedidosCargando ? (
-                            <p className="hint">Cargando…</p>
-                        ) : pedidos.length === 0 ? (
-                            <p className="hint">No hay pedidos esperando retiro.</p>
-                        ) : pedidos.map((p) => (
-                            <article className="orow" key={p.id}>
-                                {/* Tocar el pedido abre la pantalla de Pedidos (donde se
-                                    gestiona y se entrega), no la ficha del alumno. */}
-                                <button type="button" className="or-head" onClick={irAPedido}>
-                                    <span className="o-name">{p.alumno_nombre || 'Alumno'}</span>
-                                    <span className="pr-go" aria-hidden="true">›</span>
-                                </button>
-                                <p className="o-prod">{textoProducto(p)}</p>
-                                <div className="o-code">
-                                    <small>Código de retiro</small>
-                                    <b>{codigoRetiro(p)}</b>
-                                </div>
-                                <p className="o-espera">{textoEspera(p)}</p>
-                                <div className="pr-foot">
-                                    <button type="button" className="btn soft small"
-                                        onClick={() => abrirAviso(p)}>
-                                        Avisar al comprador
-                                    </button>
-                                    {informados[p.id] && (
-                                        <span className="pr-note">
-                                            {textoInformado(informados[p.id])}
-                                        </span>
-                                    )}
-                                </div>
-                            </article>
+                    <div className="tabs" role="tablist" aria-label="Secciones del Bazar">
+                        {TABS_BAZAR.map((t) => (
+                            <button key={t.id} type="button" role="tab"
+                                id={`bazar-tab-${t.id}`}
+                                aria-selected={bazarTab === t.id}
+                                aria-controls={`bazar-panel-${t.id}`}
+                                className={`tab${bazarTab === t.id ? ' on' : ''}`}
+                                data-testid={`bazar-tab-${t.id}`}
+                                onClick={() => setBazarTab(t.id)}>
+                                {etiquetaTab(t.id, pedidos.length)}
+                            </button>
                         ))}
                     </div>
+
+                    {bazarTab === 'catalogo' ? (
+                        <div className="bazar-cat" role="tabpanel" id="bazar-panel-catalogo"
+                            aria-labelledby="bazar-tab-catalogo" data-testid="bazar-catalogo">
+                            {/* La pantalla de Bazar de SIEMPRE, sin cambios; se monta sin
+                                el shell porque ya estamos dentro de él (`sinLayout`). */}
+                            <React.Suspense fallback={<p className="hint">Cargando catálogo…</p>}>
+                                <BazarCatalogo sinLayout />
+                            </React.Suspense>
+                        </div>
+                    ) : (
+                        <div className="results" role="tabpanel" id="bazar-panel-entrega"
+                            aria-labelledby="bazar-tab-entrega">
+                            {pedidosError ? (
+                                <p className="empty-line" role="alert">⚠️ {pedidosError}</p>
+                            ) : pedidosCargando ? (
+                                <p className="hint">Cargando…</p>
+                            ) : pedidos.length === 0 ? (
+                                <p className="hint">No hay pedidos esperando retiro.</p>
+                            ) : pedidos.map((p) => (
+                                <article className="orow" key={p.id}>
+                                    {/* Tocar el pedido abre la pantalla de Pedidos (donde se
+                                        gestiona y se entrega), no la ficha del alumno. */}
+                                    <button type="button" className="or-head" onClick={irAPedido}>
+                                        <span className="o-name">{p.alumno_nombre || 'Alumno'}</span>
+                                        <span className="pr-go" aria-hidden="true">›</span>
+                                    </button>
+                                    <p className="o-prod">{textoProducto(p)}</p>
+                                    <div className="o-code">
+                                        <small>Código de retiro</small>
+                                        <b>{codigoRetiro(p)}</b>
+                                    </div>
+                                    <p className="o-espera">{textoEspera(p)}</p>
+                                    <div className="pr-foot">
+                                        <button type="button" className="btn soft small"
+                                            onClick={() => abrirAviso(p)}>
+                                            Avisar al comprador
+                                        </button>
+                                        {informados[p.id] && (
+                                            <span className="pr-note">
+                                                {textoInformado(informados[p.id])}
+                                            </span>
+                                        )}
+                                    </div>
+                                </article>
+                            ))}
+                        </div>
+                    )}
                 </section>
             )}
             {/* ── Hoja inferior: vista previa del aviso de retiro (G) ─────── */}

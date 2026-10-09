@@ -920,6 +920,40 @@
     line-height: 1.5;
 }
 
+/* ── Bazar: pestañas de la sección (Catálogo | Entregar pedido) ────────────
+   El badge del acceso rápido es un atajo; la vía accesible son estas pestañas. */
+.ub-admin .tabs {
+    display: flex;
+    gap: 8px;
+    padding: 0 16px 10px;
+}
+
+.ub-admin .tabs .tab {
+    flex: 1;
+    min-height: 40px;
+    border-radius: var(--ub-r-md);
+    background: var(--ub-surface);
+    border: 1px solid var(--ub-line);
+    color: var(--ub-muted);
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+}
+
+.ub-admin .tabs .tab.on {
+    background: var(--ub-surface2);
+    border-color: var(--ub-blue);
+    color: var(--ub-text);
+}
+
+/* Pestaña "Catálogo": la pantalla de Bazar de siempre, con su propio scroll
+   (el `.screen` es una columna flex: este panel ocupa el resto). */
+.ub-admin .bazar-cat {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+}
+
 .ub-admin .student {
     background: var(--ub-surface);
     border: 1px solid var(--ub-line);
