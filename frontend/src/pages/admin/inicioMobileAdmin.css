@@ -828,10 +828,31 @@
     to { transform: none; }
 }
 
-/* ── Buscador de alumnos (pantalla completa) ────────────────────────────── */
+/* ── Capa raíz de los overlays móviles (portal a <body>) ────────────────────
+   Vive fuera del contexto de apilado del Layout (`relative z-10`) para poder
+   pasar por encima del header (z-30): sin esto el buscador quedaba DETRÁS del
+   header. El z-index de esta capa es el que compite con el header; los de
+   adentro ordenan los overlays ENTRE sí (scrim 40, sheet 41, screen 50,
+   light 60, toast 70). No pinta nada por sí sola (sus hijos son `fixed`):
+   sólo presta las variables y la fuente, así que se anulan el fondo, el
+   sangrado y el padding de `.ub-admin`. */
+.ub-admin.ub-capa {
+    position: relative;
+    z-index: 50;
+    margin: 0;
+    padding: 0;
+    min-height: 0;
+    background: none;
+}
+
+/* ── Buscador de alumnos / pantallas completas ──────────────────────────────
+   Arranca JUSTO debajo del header (que sigue a la vista): `--ub-capa-top` lo
+   mide el componente con el alto REAL del header, así el input queda siempre
+   visible sin hacer scroll. Sin medición (0px) ocupa todo: nunca se esconde. */
 .ub-admin .screen {
     position: fixed;
     inset: 0;
+    top: var(--ub-capa-top, 0px);
     background: var(--ub-bg);
     z-index: 50;
     display: flex;
@@ -842,7 +863,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: calc(14px + env(safe-area-inset-top)) 16px 14px;
+    padding: 14px 16px;
 }
 
 .ub-admin .s-head .icon-btn {

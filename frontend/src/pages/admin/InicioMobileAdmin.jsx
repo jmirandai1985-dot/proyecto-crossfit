@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
@@ -35,6 +36,34 @@ const ICONOS = {
 
 const Icono = ({ nombre }) => (
     <svg viewBox="0 0 24 24" aria-hidden="true">{ICONOS[nombre]}</svg>
+);
+
+/**
+ * Capa de overlays del dashboard móvil, montada en <body> (portal).
+ *
+ * POR QUÉ EXISTE (bug 10/08/2026: "el buscador queda tapado por el header"):
+ * este componente se pinta dentro de `<main>` → `<div className="relative z-10">`
+ * del Layout, y ese `z-index:10` crea un CONTEXTO DE APILADO que queda por debajo
+ * del header (`relative z-30`). Consecuencia: un `position:fixed; z-index:50>` de
+ * acá adentro no puede tapar el header NUNCA (el z-index es relativo a su contexto),
+ * así que la franja superior de la pantalla completa —la barra con la flecha y el
+ * input de búsqueda— quedaba escondida detrás del header y no había scroll que la
+ * salvara (la capa es `fixed`).
+ *
+ * El portal saca la capa de ese contexto (queda al nivel de `#root`, z-index 50 >
+ * 30 del header) y `md:hidden` la borra en ≥768px: la regla de oro no se toca y,
+ * de paso, un overlay abierto en <768px ya no puede "filtrarse" al escritorio al
+ * agrandar la ventana.
+ *
+ * `top` (alto REAL del header, medido con el DOM) deja la pantalla completa JUSTO
+ * debajo del header: el input queda siempre visible, sin scroll.
+ */
+const CapaMovil = ({ top = 0, children }) => createPortal(
+    <div className="ub-admin ub-capa md:hidden"
+        style={{ '--ub-capa-top': `${top}px` }}>
+        {children}
+    </div>,
+    document.body,
 );
 
 /** "$186.000" (o "" si el valor no es un número: nunca "$NaN"). */
@@ -296,6 +325,24 @@ const InicioMobileAdmin = () => {
     const [resultados, setResultados] = useState([]);
     const [buscando, setBuscando] = useState(false);
     const [errorBusqueda, setErrorBusqueda] = useState('');
+    // Alto REAL del header del Layout (incluye la safe-area del iPhone): la pantalla
+    // completa se ancla debajo para que el input no quede nunca escondido.
+    const [altoHeader, setAltoHeader] = useState(0);
+
+    useEffect(() => {
+        if (!buscador) return;
+        const medir = () => {
+            const header = document.querySelector('header');
+            setAltoHeader(header ? Math.round(header.getBoundingClientRect().height) : 0);
+        };
+        medir();
+        window.addEventListener('resize', medir);
+        window.addEventListener('orientationchange', medir);
+        return () => {
+            window.removeEventListener('resize', medir);
+            window.removeEventListener('orientationchange', medir);
+        };
+    }, [buscador]);
 
     // Búsqueda con retardo (350 ms): no se dispara una consulta por cada tecla. Se pide
     // `con_membresia=true` para que el MISMO listado de Alumnos traiga plan, vencimiento,
@@ -613,6 +660,11 @@ const InicioMobileAdmin = () => {
                 </section>
             </div>
 
+            {/* ── Capas del móvil (hojas, comprobante, toast y pantallas) ──
+                Van por PORTAL a <body>: dentro de `<main>` el contexto de apilado
+                del Layout (`relative z-10`) queda por debajo del header (z-30) y el
+                buscador aparecía detrás del header. Ver `CapaMovil`. */}
+            <CapaMovil top={altoHeader}>
             {/* ── Hoja inferior: revisar el comprobante (C) ─────────────── */}
             {revision && (
                 <>
@@ -838,6 +890,7 @@ const InicioMobileAdmin = () => {
                     </div>
                 </section>
             )}
+            </CapaMovil>
         </div>
     );
 };
