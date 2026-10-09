@@ -149,35 +149,45 @@ def wa_link(whatsapp) -> str:
     return f"https://wa.me/{digitos}"
 
 
-def contacto_del_box(tenant_id=None) -> str:
+def contacto_del_box(tenant_id=None, db=None) -> str:
     """El WhatsApp/teléfono del box desde la CONFIGURACIÓN DEL NEGOCIO (o `""`).
 
-    Único lector de `configuracion_negocio.whatsapp` en los correos. Abre una sesión
-    corta y la cierra: el template y `_enviar` no reciben una `Session` (mismo criterio
-    que `_registrar_envio`). Un box sin fila de configuración, sin número, o una DB con
-    problemas devuelven `""`: el correo sale igual, con el fallback que no promete nada.
+    Único lector de `configuracion_negocio.whatsapp` en los correos. Por defecto abre una
+    sesión corta y la cierra: el template y `_enviar` no reciben una `Session` (mismo
+    criterio que `_registrar_envio`). Un box sin fila de configuración, sin número, o una
+    DB con problemas devuelven `""`: el correo sale igual, con el fallback que no promete
+    nada.
+
+    `db` (OPCIONAL) = reutilizar una sesión que YA existe. Es obligatorio desde un
+    endpoint: abrir una SEGUNDA conexión mientras el request tiene la suya tomada deja al
+    handler esperando un checkout del pool (con Neon detrás del pooler, el preview del
+    aviso de retiro se quedaba "Pendiente" sin responder). El llamador sigue siendo el
+    dueño de `db`: acá NUNCA se cierra.
     """
     if not tenant_id:
         return ""
     try:
-        from app.db.database import SessionLocal
         from app.models.configuracion import ConfiguracionNegocio
-        db = SessionLocal()
+        propia = db is None
+        if propia:
+            from app.db.database import SessionLocal
+            db = SessionLocal()
         try:
             config = (db.query(ConfiguracionNegocio)
                         .filter(ConfiguracionNegocio.tenant_id == tenant_id)
                         .first())
             return (getattr(config, "whatsapp", None) or "").strip()
         finally:
-            db.close()
+            if propia:
+                db.close()
     except Exception as e:
         logger.warning(f"No se pudo leer el contacto del box: {e}")
         return ""
 
 
-def bloque_contacto(tenant_id=None) -> str:
+def bloque_contacto(tenant_id=None, db=None) -> str:
     """La llamada a la acción del pie: responder el correo y, si hay, el WhatsApp del box."""
-    numero = contacto_del_box(tenant_id)
+    numero = contacto_del_box(tenant_id, db=db)
     link = wa_link(numero)
     if not link:
         return (f'<p style="color:#71717a;font-size:13px;line-height:1.6;'
@@ -189,17 +199,20 @@ def bloque_contacto(tenant_id=None) -> str:
         f'WhatsApp {_escape_html(numero)}</a>.</p>')
 
 
-def render_con_contacto(html: str, tenant_id=None) -> str:
+def render_con_contacto(html: str, tenant_id=None, db=None) -> str:
     """Reemplaza el placeholder de contacto por el del box REAL (idempotente).
 
     Se usa en los DOS caminos del correo: `_enviar` (lo que sale de verdad) y el preview
     (`fidelizacion_plantillas.render`), así el admin ve exactamente lo que se manda.
     Sin el placeholder no se toca la BD (y volver a pasar el html ya resuelto no hace nada).
+
+    `db` (OPCIONAL): sesión del request para resolver el contacto SIN abrir una segunda
+    conexión. Ver `contacto_del_box` (desde un endpoint SIEMPRE hay que pasarla).
     """
     html = html or ""
     if PLACEHOLDER_CONTACTO not in html:
         return html
-    return html.replace(PLACEHOLDER_CONTACTO, bloque_contacto(tenant_id))
+    return html.replace(PLACEHOLDER_CONTACTO, bloque_contacto(tenant_id, db=db))
 
 
 def _tenant_de_alumno(alumno_id):

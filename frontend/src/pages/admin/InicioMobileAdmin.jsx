@@ -23,6 +23,9 @@ import {
     esListoParaEntrega, codigoRetiro, textoProducto, textoEspera,
     textoInformado, mapaInformados,
 } from '../../utils/pedidosEntrega';
+// Vista previa del aviso de retiro: la petición viaja CON PLAZO. Sin esto, una petición
+// que no responde dejaba el modal girando para siempre (bug de PROD: ver utils/avisoRetiro.js).
+import { cargarPreviewAviso } from '../../utils/avisoRetiro';
 // Enlace de contacto del alumno: wa.me armado desde el teléfono cargado (o nada).
 import { enlaceWhatsapp } from '../../utils/whatsapp';
 // Corte por franjas de "Asistencia de hoy" (cálculo puro, con test aislado propio).
@@ -654,17 +657,18 @@ const InicioMobileAdmin = () => {
     // Vista previa NO editable del aviso de retiro: el HTML lo arma el backend con los
     // datos reales del pedido (misma función que el envío). Es un correo ADICIONAL a la
     // campana automática `pedido_validado`, no la reemplaza ni la duplica.
+    //
+    // La petición va CON PLAZO y siempre termina en un desenlace: si el backend no
+    // responde a tiempo, la hoja muestra el motivo + "Reintentar" (nunca se queda en
+    // "Armando el correo…"). Es un GET sin efectos secundarios: reintentar es seguro.
     const abrirAviso = async (pedido) => {
         setAviso({ pedido, cargando: true, preview: null, error: '', enviando: false });
-        try {
-            const res = await api.get(`/api/v1/pedidos/${pedido.id}/aviso-retiro/preview`);
-            setAviso({ pedido, cargando: false, preview: res.data, error: '', enviando: false });
-        } catch (err) {
-            setAviso({
-                pedido, cargando: false, preview: null, enviando: false,
-                error: err.response?.data?.detail || 'No se pudo armar el correo',
-            });
-        }
+        const res = await cargarPreviewAviso(
+            () => api.get(`/api/v1/pedidos/${pedido.id}/aviso-retiro/preview`));
+        setAviso({
+            pedido, cargando: false, enviando: false,
+            preview: res.preview, error: res.error,
+        });
     };
 
     const enviarAviso = async () => {
@@ -1311,9 +1315,15 @@ const InicioMobileAdmin = () => {
                             {aviso.cargando ? (
                                 <p className="empty-line">Armando el correo…</p>
                             ) : (aviso.error || !aviso.preview) ? (
-                                <p className="empty-line" role="alert">
-                                    ⚠️ {aviso.error || 'No se pudo armar el correo'}
-                                </p>
+                                /* Sin respuesta o con error: se ve el motivo y se puede
+                                   reintentar (el GET no tiene efectos: es seguro). */
+                                <div className="empty-line" role="alert">
+                                    <span>⚠️ {aviso.error || 'No se pudo armar el correo'}</span>
+                                    <button type="button" className="btn soft small"
+                                        onClick={() => abrirAviso(aviso.pedido)}>
+                                        Reintentar
+                                    </button>
+                                </div>
                             ) : (
                                 <>
                                     <div className="mail-meta">

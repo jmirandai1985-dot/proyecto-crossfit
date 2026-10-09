@@ -541,8 +541,9 @@ def preview_correo_contacto(
 
     from app.services.email_service import render_email_fidelizacion, render_con_contacto
     asunto, html = render_email_fidelizacion(alumno.nombre, dias)
-    # Mismo pie que el envío real (el contacto del box de este tenant).
-    html = render_con_contacto(html, current_user["tenant_id"])
+    # Mismo pie que el envío real (el contacto del box de este tenant), con la MISMA
+    # conexión del request: ver email_service.contacto_del_box.
+    html = render_con_contacto(html, current_user["tenant_id"], db=db)
 
     return {
         "destinatario": alumno.correo,

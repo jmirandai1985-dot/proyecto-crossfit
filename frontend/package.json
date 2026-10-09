@@ -15,7 +15,8 @@
     "test:franjas": "node scripts/test-franjas-asistencia.mjs",
     "test:whatsapp": "node scripts/test-whatsapp.mjs",
     "test:prueba": "node scripts/test-prueba-alumnos.mjs",
-    "test:retiro": "node scripts/test-pedidos-retiro.mjs"
+    "test:retiro": "node scripts/test-pedidos-retiro.mjs",
+    "test:aviso": "node scripts/test-aviso-preview.mjs"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.3.0",

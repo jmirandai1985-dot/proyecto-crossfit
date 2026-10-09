@@ -787,8 +787,10 @@ def render(db: Session, alumno, plantilla_id, datos=None) -> dict:
     asunto, html = p["_render"](alumno, armado)
     # El pie con el contacto del box se resuelve ACÁ y no en el envío: el preview del modal
     # tiene que mostrar el mismo pie que va a recibir el alumno (si el box cargó su WhatsApp,
-    # el admin lo ve antes de aprobar el envío).
-    html = email_service.render_con_contacto(html, getattr(alumno, "tenant_id", None))
+    # el admin lo ve antes de aprobar el envío). Se reutiliza la `db` del request: una segunda
+    # conexión acá es lo que colgaba el preview (ver email_service.contacto_del_box).
+    html = email_service.render_con_contacto(
+        html, getattr(alumno, "tenant_id", None), db=db)
     return {
         "plantilla": p["id"],
         "label": p["label"],

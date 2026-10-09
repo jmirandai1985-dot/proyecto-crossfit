@@ -963,12 +963,27 @@ def preview_aviso_retiro(
 
     Usa la MISMA función de render que el envío real, así el modal del panel móvil no
     puede mostrar un correo distinto del que sale. Sólo admin del box.
+
+    REGLA DE ORO (panel móvil): esta respuesta no puede quedarse sin salir. El render
+    reutiliza la conexión del request (`db=db`) —abrir una segunda sesión acá dejaba al
+    handler esperando un checkout del pool— y cualquier fallo se convierte en un 502 con
+    mensaje: el modal muestra ese texto y ofrece Reintentar en vez de girar para siempre.
     """
     pedido, alumno, nombre_producto = _pedido_para_avisar(db, current_user, pedido_id)
 
-    asunto, html = render_email_aviso_retiro(
-        alumno.nombre, nombre_producto, pedido.cantidad, pedido.codigo_retiro)
-    html = render_con_contacto(html, current_user["tenant_id"])
+    try:
+        asunto, html = render_email_aviso_retiro(
+            alumno.nombre, nombre_producto, pedido.cantidad, pedido.codigo_retiro)
+        html = render_con_contacto(html, current_user["tenant_id"], db=db)
+    except Exception as exc:  # noqa: BLE001 - el modal necesita un motivo, no un cuelgue
+        logger.exception(
+            "No se pudo armar la vista previa del aviso de retiro (pedido=%s)",
+            pedido_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=("No se pudo armar la vista previa del correo. "
+                    "Reintentá en unos segundos."),
+        ) from exc
 
     return {
         "pedido_id": pedido.id,

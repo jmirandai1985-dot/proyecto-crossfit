@@ -459,7 +459,9 @@ def preview_invitacion_prueba(
         asunto, html = render_email_clase_prueba(alumno.nombre, dias)
     else:
         asunto, html = render_email_contratar_plan(alumno.nombre)
-    html = render_con_contacto(html, current_user["tenant_id"])
+    # El pie del box se resuelve con la MISMA conexión del request (ver
+    # email_service.contacto_del_box): abrir otra dejaba al handler esperando el pool.
+    html = render_con_contacto(html, current_user["tenant_id"], db=db)
 
     return {
         "alumno_id": alumno.id,
