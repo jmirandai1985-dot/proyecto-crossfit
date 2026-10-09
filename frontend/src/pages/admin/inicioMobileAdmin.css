@@ -1,0 +1,1004 @@
+/* ============================================================================
+   DASHBOARD DEL ADMIN — MOBILE (<768px)
+   Réplica del mockup `mockup/admin-mobile-mockup.html` conectada a datos REALES.
+
+   Regla de oro: en ≥768px el admin queda EXACTAMENTE igual que hoy. Todo lo de
+   este archivo vive bajo `.ub-admin`, que se monta dentro de un contenedor
+   `md:hidden`: nada de acá puede alcanzar la versión de escritorio ni el tema
+   zinc/emerald del resto del panel.
+
+   Las fuentes Barlow / Barlow Condensed ya se cargan en index.html (se usan en
+   `.ub-inicio` y acá). Paleta del mockup: bg #0c0e12 · surface #161a21 ·
+   surface2 #1e232c · línea #272d38 · texto #eceef2 · azul #3b72f6 ·
+   teal #2dd4bf · ámbar #f5a524 · rojo #f0594f · violeta #9b7bff.
+   Radios: 20 / 16 / 12 / 8.
+   ============================================================================ */
+
+.ub-admin {
+    --ub-bg: #0c0e12;
+    --ub-surface: #161a21;
+    --ub-surface2: #1e232c;
+    --ub-line: #272d38;
+    --ub-text: #eceef2;
+    --ub-muted: #8d95a4;
+    --ub-blue: #3b72f6;
+    --ub-teal: #2dd4bf;
+    --ub-amber: #f5a524;
+    --ub-red: #f0594f;
+    --ub-violet: #9b7bff;
+    --ub-r-xl: 20px;
+    --ub-r-lg: 16px;
+    --ub-r-md: 12px;
+    --ub-r-sm: 8px;
+    --ub-cond: 'Barlow Condensed', 'Roboto Condensed', 'Arial Narrow', sans-serif;
+    --ub-body: 'Barlow', 'Roboto', system-ui, sans-serif;
+
+    font-family: var(--ub-body);
+    background: var(--ub-bg);
+    color: var(--ub-text);
+
+    /* Sangra los márgenes del <main> del Layout (16px) para que el fondo del
+       mockup cubra toda la pantalla móvil; el padding lo repone. */
+    margin: -16px;
+    padding: 12px 0 calc(28px + env(safe-area-inset-bottom));
+    min-height: 100dvh;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ub-admin * {
+    box-sizing: border-box;
+}
+
+.ub-admin .col {
+    max-width: 430px;
+    margin: 0 auto;
+    padding: 0 16px;
+}
+
+.ub-admin button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    cursor: pointer;
+}
+
+.ub-admin button:active {
+    transform: scale(.97);
+}
+
+.ub-admin :focus-visible {
+    outline: 2px solid var(--ub-blue);
+    outline-offset: 3px;
+}
+
+.ub-admin svg {
+    width: 22px;
+    height: 22px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    flex: none;
+}
+
+.ub-admin .num {
+    font-family: var(--ub-cond);
+    font-weight: 700;
+}
+
+/* ── KPIs (4 tarjetas) ───────────────────────────────────────────────────── */
+.ub-admin .kpis {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+.ub-admin .kpi {
+    position: relative;
+    text-align: left;
+    border-radius: var(--ub-r-xl);
+    padding: 12px 12px 10px;
+    min-height: 96px;
+    background: var(--ub-surface);
+    border: 1px solid var(--ub-line);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.ub-admin .kpi::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(120% 90% at 100% 0%, var(--tint, transparent), transparent 60%);
+    opacity: .22;
+    pointer-events: none;
+}
+
+.ub-admin .kpi-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+}
+
+.ub-admin .chip {
+    width: 30px;
+    height: 30px;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    background: var(--tint);
+    color: #0b0d11;
+}
+
+.ub-admin .chip svg {
+    width: 18px;
+    height: 18px;
+    stroke-width: 2.2;
+}
+
+.ub-admin .kpi-label {
+    font-size: 13px;
+    color: var(--ub-muted);
+    line-height: 1.1;
+}
+
+.ub-admin .kpi-val {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 6px;
+}
+
+.ub-admin .kpi-val b {
+    font-size: 34px;
+    line-height: .95;
+    letter-spacing: .2px;
+}
+
+.ub-admin .kpi-val b.money {
+    font-size: 27px;
+}
+
+.ub-admin .kpi-sub {
+    font-size: 12px;
+    color: var(--ub-muted);
+    margin-top: 3px;
+    position: relative;
+}
+
+.ub-admin .kpi-sub em {
+    font-style: normal;
+    color: var(--tint);
+}
+
+.ub-admin .k-activos { --tint: var(--ub-teal); }
+.ub-admin .k-venc { --tint: var(--ub-amber); }
+.ub-admin .k-vouch { --tint: var(--ub-blue); }
+.ub-admin .k-caja { --tint: var(--ub-violet); }
+
+.ub-admin .kpi.alive {
+    border-color: rgba(59, 114, 246, .6);
+}
+
+.ub-admin .pulse {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--ub-blue);
+    box-shadow: 0 0 0 0 rgba(59, 114, 246, .7);
+    animation: ub-pulse 2s infinite;
+}
+
+@keyframes ub-pulse {
+    70% { box-shadow: 0 0 0 9px rgba(59, 114, 246, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(59, 114, 246, 0); }
+}
+
+/* "s/d" + motivo: el KPI que no pudo leer jamás muestra un 0 falso. */
+.ub-admin .kpi-error {
+    position: relative;
+    font-size: 11.5px;
+    color: var(--ub-red);
+    margin-top: 3px;
+}
+
+/* ── Accesos rápidos (Alumnos / Fidelización / Bazar) ───────────────────── */
+.ub-admin .apps {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.ub-admin .app {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 6px;
+    border-radius: var(--ub-r-lg);
+    background: var(--ub-surface);
+    border: 1px solid var(--ub-line);
+    font-size: 13px;
+    color: var(--ub-text);
+}
+
+.ub-admin .app .ico {
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+    display: grid;
+    place-items: center;
+    color: #0b0d11;
+}
+
+.ub-admin .a-search .ico { background: linear-gradient(145deg, #7ea6ff, var(--ub-blue)); }
+.ub-admin .a-fid .ico { background: linear-gradient(145deg, #ff9f8f, var(--ub-red)); }
+.ub-admin .a-baz .ico { background: linear-gradient(145deg, #ffd27a, var(--ub-amber)); }
+
+/* ── Tarjetas ───────────────────────────────────────────────────────────── */
+.ub-admin .card {
+    background: var(--ub-surface);
+    border: 1px solid var(--ub-line);
+    border-radius: var(--ub-r-xl);
+    padding: 14px;
+    margin-top: 12px;
+}
+
+.ub-admin .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.ub-admin .card-head h2 {
+    font-size: 16px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ub-admin .badge {
+    min-width: 24px;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 99px;
+    font-size: 13px;
+    font-weight: 600;
+    display: inline-grid;
+    place-items: center;
+    background: var(--ub-blue);
+    color: #fff;
+}
+
+.ub-admin .badge.ok {
+    background: var(--ub-surface2);
+    color: var(--ub-muted);
+}
+
+.ub-admin .link {
+    font-size: 13px;
+    color: var(--ub-blue);
+    font-weight: 600;
+    min-height: 32px;
+    padding: 0 4px;
+}
+
+/* ── Filas de voucher ───────────────────────────────────────────────────── */
+.ub-admin .vrow {
+    display: grid;
+    grid-template-columns: 44px 1fr auto;
+    gap: 12px;
+    align-items: center;
+    width: 100%;
+    text-align: left;
+    padding: 10px;
+    border-radius: var(--ub-r-lg);
+    background: var(--ub-surface2);
+}
+
+.ub-admin .vrow + .vrow {
+    margin-top: 8px;
+}
+
+.ub-admin .mini {
+    width: 44px;
+    height: 52px;
+    border-radius: 7px;
+    background: #eef0f3;
+    padding: 6px 5px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    position: relative;
+    overflow: hidden;
+}
+
+.ub-admin .mini i {
+    display: block;
+    height: 3px;
+    border-radius: 2px;
+    background: #c5cad3;
+}
+
+.ub-admin .mini i:first-child { background: #3a9d6b; width: 55%; }
+.ub-admin .mini i:nth-child(3) { width: 70%; }
+.ub-admin .mini i:nth-child(4) { width: 45%; }
+
+.ub-admin .vrow .n {
+    font-weight: 600;
+    font-size: 15px;
+    line-height: 1.15;
+}
+
+.ub-admin .vrow .p {
+    font-size: 12.5px;
+    color: var(--ub-muted);
+    margin-top: 2px;
+}
+
+.ub-admin .vrow .m {
+    text-align: right;
+}
+
+.ub-admin .vrow .m b {
+    font-size: 20px;
+    display: block;
+    line-height: 1;
+}
+
+.ub-admin .vrow .m span {
+    font-size: 12px;
+    color: var(--ub-blue);
+    font-weight: 600;
+}
+
+.ub-admin .empty-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ub-muted);
+    font-size: 14px;
+    padding: 4px 0;
+}
+
+.ub-admin .empty-line svg {
+    color: var(--ub-teal);
+    width: 18px;
+    height: 18px;
+}
+
+/* ── Tarjeta "Asistencia de hoy" ────────────────────────────────────────── */
+.ub-admin .att {
+    border-color: rgba(45, 212, 191, .35);
+    background: linear-gradient(180deg, rgba(45, 212, 191, .08), var(--ub-surface) 55%);
+}
+
+.ub-admin .live {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    color: var(--ub-teal);
+    font-weight: 600;
+}
+
+.ub-admin .live::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--ub-teal);
+}
+
+.ub-admin .seg {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    background: var(--ub-bg);
+    border-radius: var(--ub-r-md);
+    padding: 3px;
+    margin-bottom: 6px;
+}
+
+.ub-admin .seg button {
+    height: 34px;
+    border-radius: 9px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--ub-muted);
+}
+
+.ub-admin .seg button[aria-selected="true"] {
+    background: var(--ub-surface2);
+    color: var(--ub-text);
+}
+
+.ub-admin .now-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--ub-teal);
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+.ub-admin .slot-sum {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12.5px;
+    color: var(--ub-muted);
+    margin: 2px 2px 4px;
+}
+
+.ub-admin .class {
+    display: grid;
+    grid-template-columns: 54px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 9px 0;
+}
+
+.ub-admin .class + .class {
+    border-top: 1px solid var(--ub-line);
+}
+
+.ub-admin .class .hour {
+    font-family: var(--ub-cond);
+    font-weight: 600;
+    font-size: 25px;
+    line-height: 1;
+}
+
+.ub-admin .class.current .hour {
+    color: var(--ub-teal);
+}
+
+.ub-admin .class .name {
+    font-size: 14.5px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ub-admin .class .name span {
+    color: var(--ub-muted);
+    font-weight: 400;
+}
+
+.ub-admin .class .name span.nocoach {
+    color: var(--ub-amber);
+}
+
+.ub-admin .class .sub {
+    font-size: 12.5px;
+    color: var(--ub-muted);
+    margin-top: 1px;
+}
+
+.ub-admin .bar {
+    height: 5px;
+    border-radius: 9px;
+    background: var(--ub-bg);
+    margin-top: 6px;
+    overflow: hidden;
+}
+
+.ub-admin .bar i {
+    display: block;
+    height: 100%;
+    border-radius: 9px;
+    background: var(--ub-teal);
+}
+
+.ub-admin .bar i.mid { background: var(--ub-amber); }
+.ub-admin .bar i.low { background: var(--ub-blue); }
+
+.ub-admin .att-btn {
+    min-width: 76px;
+    height: 36px;
+    padding: 0 12px;
+    border-radius: var(--ub-r-md);
+    background: rgba(45, 212, 191, .16);
+    color: var(--ub-teal);
+    font-size: 13.5px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+}
+
+.ub-admin .att-btn.done {
+    background: var(--ub-surface2);
+    color: var(--ub-muted);
+}
+
+.ub-admin .att-btn svg {
+    width: 16px;
+    height: 16px;
+    stroke-width: 2.4;
+}
+
+/* ── Botones ────────────────────────────────────────────────────────────── */
+.ub-admin .btn {
+    height: 46px;
+    border-radius: var(--ub-r-md);
+    font-weight: 600;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.ub-admin .btn.primary { background: var(--ub-blue); color: #fff; }
+.ub-admin .btn.ghost { border: 1px solid var(--ub-line); color: var(--ub-muted); }
+.ub-admin .btn.wa { background: rgba(45, 212, 191, .14); color: var(--ub-teal); }
+.ub-admin .btn.soft { background: var(--ub-surface2); }
+
+.ub-admin .btn:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+}
+
+/* ── Hojas inferiores (bottom sheets) ───────────────────────────────────── */
+.ub-admin .scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .58);
+    z-index: 40;
+}
+
+.ub-admin .sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    max-height: 90dvh;
+    background: var(--ub-surface);
+    border-radius: 24px 24px 0 0;
+    z-index: 41;
+    display: flex;
+    flex-direction: column;
+    animation: ub-sheet-in .24s ease;
+}
+
+@keyframes ub-sheet-in {
+    from { transform: translateY(102%); }
+    to { transform: none; }
+}
+
+.ub-admin .sheet-grab {
+    width: 40px;
+    height: 4px;
+    border-radius: 9px;
+    background: var(--ub-line);
+    margin: 10px auto 2px;
+    flex: none;
+}
+
+.ub-admin .sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 16px 8px;
+}
+
+.ub-admin .sheet-head h3 {
+    font-size: 17px;
+    font-weight: 600;
+}
+
+.ub-admin .sheet-head small {
+    color: var(--ub-muted);
+    font-size: 13px;
+    display: block;
+    margin-top: 2px;
+}
+
+.ub-admin .sheet-body {
+    overflow-y: auto;
+    padding: 0 16px 8px;
+}
+
+.ub-admin .sheet-foot {
+    padding: 10px 16px calc(18px + env(safe-area-inset-bottom));
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 10px;
+    border-top: 1px solid var(--ub-line);
+}
+
+.ub-admin .sheet-foot.una { grid-template-columns: 1fr; }
+
+.ub-admin .roll label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 50px;
+    border-top: 1px solid var(--ub-line);
+    font-size: 15px;
+    cursor: pointer;
+}
+
+.ub-admin .roll label:first-child {
+    border-top: 0;
+}
+
+.ub-admin .roll input {
+    width: 22px;
+    height: 22px;
+    accent-color: var(--ub-teal);
+}
+
+.ub-admin .close-x {
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--ub-r-md);
+    background: var(--ub-surface2);
+    color: var(--ub-text);
+}
+
+/* ── Comprobante (voucher) ──────────────────────────────────────────────── */
+.ub-admin .receipt {
+    position: relative;
+    border-radius: var(--ub-r-lg);
+    background: #f1f3f6;
+    color: #1b2230;
+    padding: 16px;
+    cursor: zoom-in;
+    overflow: hidden;
+    width: 100%;
+}
+
+.ub-admin .receipt .r-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.ub-admin .receipt .tick {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: #2fa56a;
+    display: grid;
+    place-items: center;
+    color: #fff;
+}
+
+.ub-admin .receipt .tick svg {
+    width: 17px;
+    height: 17px;
+    stroke-width: 2.6;
+}
+
+.ub-admin .receipt .r-top b {
+    font-size: 15px;
+    display: block;
+}
+
+.ub-admin .receipt .r-top small {
+    font-size: 12px;
+    color: #6a7384;
+}
+
+.ub-admin .receipt .r-amt {
+    font-family: var(--ub-cond);
+    font-weight: 700;
+    font-size: 38px;
+    line-height: 1;
+    margin: 2px 0 12px;
+}
+
+.ub-admin .receipt dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 7px 14px;
+    font-size: 13px;
+}
+
+.ub-admin .receipt dt { color: #6a7384; }
+.ub-admin .receipt dd { text-align: right; font-weight: 600; }
+
+.ub-admin .receipt .zoom {
+    position: absolute;
+    right: 10px;
+    top: 10px;
+    background: rgba(27, 34, 48, .08);
+    border-radius: 8px;
+    padding: 4px 8px;
+    font-size: 11.5px;
+    color: #4b5567;
+    font-weight: 600;
+}
+
+/* Documento real (imagen/pdf del comprobante subido por el alumno) */
+.ub-admin .doc {
+    border-radius: var(--ub-r-md);
+    background: #fff;
+    overflow: hidden;
+    margin-bottom: 12px;
+    display: grid;
+    place-items: center;
+    min-height: 160px;
+}
+
+.ub-admin .doc img {
+    width: 100%;
+    display: block;
+}
+
+.ub-admin .doc iframe {
+    width: 100%;
+    height: 55dvh;
+    border: 0;
+}
+
+.ub-admin .info {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin: 12px 0 6px;
+}
+
+.ub-admin .info div {
+    background: var(--ub-surface2);
+    border-radius: var(--ub-r-md);
+    padding: 9px 11px;
+}
+
+.ub-admin .info small {
+    display: block;
+    color: var(--ub-muted);
+    font-size: 12px;
+}
+
+.ub-admin .info b {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.ub-admin .info .wide { grid-column: 1 / -1; }
+
+/* ── Ampliación a pantalla completa ─────────────────────────────────────── */
+.ub-admin .light {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: rgba(0, 0, 0, .88);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    overflow: auto;
+}
+
+.ub-admin .light .receipt {
+    width: 100%;
+    cursor: zoom-out;
+    padding: 22px;
+}
+
+.ub-admin .light .receipt .r-amt { font-size: 44px; }
+.ub-admin .light .receipt dl { font-size: 15px; }
+
+/* ── Toast ──────────────────────────────────────────────────────────────── */
+.ub-admin .toast {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: 18px;
+    background: var(--ub-text);
+    color: #0b0c0e;
+    padding: 12px 14px;
+    border-radius: var(--ub-r-md);
+    font-size: 14px;
+    font-weight: 500;
+    z-index: 70;
+    animation: ub-toast-in .2s ease;
+}
+
+.ub-admin .toast.error {
+    background: var(--ub-red);
+    color: #fff;
+}
+
+@keyframes ub-toast-in {
+    from { transform: translateY(160%); }
+    to { transform: none; }
+}
+
+/* ── Buscador de alumnos (pantalla completa) ────────────────────────────── */
+.ub-admin .screen {
+    position: fixed;
+    inset: 0;
+    background: var(--ub-bg);
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+}
+
+.ub-admin .s-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: calc(14px + env(safe-area-inset-top)) 16px 14px;
+}
+
+.ub-admin .s-head .icon-btn {
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--ub-r-md);
+    background: var(--ub-surface);
+    border: 1px solid var(--ub-line);
+    flex: none;
+}
+
+.ub-admin .search {
+    flex: 1;
+    height: 48px;
+    border-radius: var(--ub-r-md);
+    background: var(--ub-surface);
+    border: 1px solid var(--ub-line);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+    color: var(--ub-muted);
+    min-width: 0;
+}
+
+.ub-admin .search input {
+    flex: 1;
+    background: none;
+    border: 0;
+    color: var(--ub-text);
+    font: inherit;
+    font-size: 16px;
+    outline: none;
+    min-width: 0;
+}
+
+.ub-admin .results {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 16px calc(20px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.ub-admin .hint {
+    color: var(--ub-muted);
+    font-size: 14px;
+    text-align: center;
+    padding: 36px 20px;
+    line-height: 1.5;
+}
+
+.ub-admin .student {
+    background: var(--ub-surface);
+    border: 1px solid var(--ub-line);
+    border-radius: var(--ub-r-xl);
+    padding: 14px;
+}
+
+.ub-admin .st-top {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.ub-admin .avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--ub-surface2);
+    display: grid;
+    place-items: center;
+    font-weight: 600;
+    color: var(--ub-muted);
+    flex: none;
+}
+
+.ub-admin .st-name {
+    font-weight: 600;
+    font-size: 16px;
+    min-width: 0;
+}
+
+.ub-admin .st-plan {
+    font-size: 13px;
+    color: var(--ub-muted);
+    margin-top: 1px;
+}
+
+.ub-admin .state {
+    margin-left: auto;
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 99px;
+    white-space: nowrap;
+}
+
+.ub-admin .state.ok { background: rgba(45, 212, 191, .14); color: var(--ub-teal); }
+.ub-admin .state.warn { background: rgba(245, 165, 36, .16); color: var(--ub-amber); }
+.ub-admin .state.bad { background: rgba(240, 89, 79, .16); color: var(--ub-red); }
+
+.ub-admin .st-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.ub-admin .st-grid div {
+    background: var(--ub-surface2);
+    border-radius: var(--ub-r-sm);
+    padding: 8px 10px;
+}
+
+.ub-admin .st-grid small {
+    display: block;
+    font-size: 12px;
+    color: var(--ub-muted);
+}
+
+.ub-admin .st-grid b {
+    font-family: var(--ub-cond);
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.ub-admin .st-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.ub-admin .st-actions.una {
+    grid-template-columns: 1fr;
+}
+
+.ub-admin .wa-link {
+    text-decoration: none;
+}
+
+.ub-admin .note {
+    font-size: 12.5px;
+    color: var(--ub-muted);
+    margin-top: 10px;
+    text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ub-admin *,
+    .ub-admin *::before,
+    .ub-admin *::after {
+        animation: none !important;
+        transition: none !important;
+    }
+}

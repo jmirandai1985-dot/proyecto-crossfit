@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
+// Dashboard MÓVIL (<768px) del admin: réplica del mockup admin-mobile-mockup.html
+// conectada a datos reales. Conviven por CSS (`md:hidden` / `hidden md:block`), igual
+// que el Inicio del alumno: en ≥768px esta pantalla queda EXACTAMENTE como hoy.
+import InicioMobileAdmin from './InicioMobileAdmin';
 import api from '../../services/api';
 import { fmtFechaChile, toChileFechaStr, horaChileStr } from '../../utils/fecha';
 import AdminTarjetaAlumnosPrueba from '../../components/AdminTarjetaAlumnosPrueba';
@@ -367,7 +371,12 @@ const AdminDashboard = () => {
     if (loading) {
         return (
             <Layout>
-                <div className="flex items-center justify-center h-96">
+                {/* <768px: el dashboard móvil ya tiene su propio estado de carga
+                    (nunca un spinner a pantalla completa que tape los KPIs). */}
+                <div className="md:hidden">
+                    <InicioMobileAdmin />
+                </div>
+                <div className="hidden md:flex items-center justify-center h-96">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900 mx-auto mb-4" />
                     <p className="text-zinc-400">Cargando...</p>
                 </div>
@@ -377,7 +386,14 @@ const AdminDashboard = () => {
 
     return (
         <Layout>
-            <div className="space-y-6">
+            {/* Vista MÓVIL (<768px): resume el día y enlaza a las pantallas que ya
+                existen. No se monta en ≥768px (regla de oro: el escritorio no cambia). */}
+            <div className="md:hidden">
+                <InicioMobileAdmin />
+            </div>
+
+            {/* Vista de ESCRITORIO (≥768px): el dashboard de siempre, sin cambios. */}
+            <div className="hidden md:block space-y-6">
                 <div className="flex items-center justify-between">
                     <div>
                         <h1 className="text-3xl font-bold text-zinc-100">Dashboard Administrativo</h1>
