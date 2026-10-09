@@ -3,6 +3,11 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
+// Modal COMPARTIDO de entrega por código de retiro: lo usan el admin de escritorio
+// (Pedidos) y el coach, y es el ÚNICO que llama al endpoint de entrega del backend. La
+// pestaña "Entregar pedido" del panel móvil lo reusa tal cual: no duplica la llamada
+// ni el manejo de errores (404 código inexistente / 409 sin validar o ya entregado).
+import ModalEntregarPedido from '../../components/ModalEntregarPedido';
 // Voucher privado: el blob se pide CON token (el mismo hook que usan el Dashboard
 // ≥768px y Pendientes). Sin él, la URL pública /static/uploads/... no sirve.
 import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
@@ -19,10 +24,17 @@ import {
     textoEstadoPrueba, tonoEstadoPrueba, textoAlta, textoEnPrueba,
 } from '../../utils/pruebaAlumnos';
 // Pedidos listos para entrega (Bazar): qué fila se lista y qué dice cada una.
+// OJO: el CÓDIGO DE RETIRO no se muestra en la tarjeta —es la prueba de que el pedido
+// es de quien lo retira, así que el admin se lo PIDE al alumno y lo escribe—.
 import {
-    esListoParaEntrega, codigoRetiro, textoProducto, textoEspera,
+    esListoParaEntrega, textoProducto, textoEspera,
     textoInformado, mapaInformados,
 } from '../../utils/pedidosEntrega';
+// Entrega por código desde esta pantalla: cuándo se puede validar y qué se confirma
+// en voz alta con el alumno (el POST lo hace el modal compartido, ver arriba).
+import {
+    MSG_CODIGO_REQUERIDO, puedeValidar, codigoParaValidar, resumenEntrega,
+} from '../../utils/entregaMovil';
 // Vista previa del aviso de retiro: la petición viaja CON PLAZO. Sin esto, una petición
 // que no responde dejaba el modal girando para siempre (bug de PROD: ver utils/avisoRetiro.js).
 import { cargarPreviewAviso } from '../../utils/avisoRetiro';
@@ -229,6 +241,13 @@ const InicioMobileAdmin = () => {
     const [bazarTab, setBazarTab] = useState(TAB_INICIAL);
     // Vista previa del aviso al comprador: { pedido, cargando, preview, error, enviando }.
     const [aviso, setAviso] = useState(null);
+    // Entrega por CÓDIGO DE RETIRO: el admin lo ESCRIBE (la tarjeta del pedido no lo
+    // muestra: el código es del alumno), el botón abre el modal compartido y la última
+    // entrega queda a la vista para confirmarla en voz alta.
+    const [codigoEntrega, setCodigoEntrega] = useState('');
+    const [entregaAbierta, setEntregaAbierta] = useState(false);
+    const [ayudaCodigo, setAyudaCodigo] = useState('');
+    const [ultimaEntrega, setUltimaEntrega] = useState(null);
 
     const cargarKpis = useCallback(async () => {
         setCargando(true);
@@ -635,18 +654,15 @@ const InicioMobileAdmin = () => {
     const hayPedidos = pedidos.length > 0;
 
     /**
-     * Abre la sección Bazar en la pestaña que corresponda al acceso usado:
-     * `acceso` = 'icono' (el ícono del acceso rápido -> Catálogo, la pantalla de siempre)
-     * o 'badge' (el pulso con la cantidad -> Entregar pedido).
+     * Lista de pedidos validados sin retirar + la traza de los avisos manuales: UNA
+     * definición, compartida por el abrir de la pantalla y el refresco tras una entrega
+     * (el pedido entregado deja de estar "esperando retiro" y desaparece de la lista).
+     * La traza alimenta el "Informado hace X" de todas las filas con UNA sola llamada.
      */
-    const abrirBazar = async (acceso = 'icono') => {
-        setBazarTab(tabDelAcceso(acceso));
-        setListaPedidos(true);
+    const cargarPedidos = useCallback(async () => {
         setPedidosCargando(true);
         const [rPedidos, rTraza] = await Promise.allSettled([
             api.get('/api/v1/pedidos', { params: { estado: 'validado' } }),
-            // Traza de los avisos manuales (por PEDIDO): alimenta el "Informado hace X"
-            // de todas las filas con UNA sola llamada.
             api.get('/api/v1/auditoria', {
                 params: { accion: 'EMAIL_MANUAL', entidad: 'pedido', limit: 200 },
             }),
@@ -661,11 +677,46 @@ const InicioMobileAdmin = () => {
         }
         setInformados(rTraza.status === 'fulfilled' ? mapaInformados(rTraza.value.data) : {});
         setPedidosCargando(false);
+    }, []);
+
+    /**
+     * Abre la sección Bazar en la pestaña que corresponda al acceso usado:
+     * `acceso` = 'icono' (el ícono del acceso rápido -> Catálogo, la pantalla de siempre)
+     * o 'badge' (el pulso con la cantidad -> Entregar pedido).
+     */
+    const abrirBazar = async (acceso = 'icono') => {
+        setBazarTab(tabDelAcceso(acceso));
+        setListaPedidos(true);
+        await cargarPedidos();
+    };
+
+    /**
+     * "Validar y entregar": el admin escribe el código que el alumno le muestra y el
+     * modal COMPARTIDO (el único que llama al endpoint de entrega) lo valida y cierra.
+     * Sin código no se abre nada —no hay qué validar— y el motivo queda en pantalla.
+     */
+    const abrirEntrega = (texto) => {
+        const codigo = codigoParaValidar(texto ?? codigoEntrega);
+        if (!puedeValidar(codigo)) {
+            setAyudaCodigo(MSG_CODIGO_REQUERIDO);
+            return;
+        }
+        setAyudaCodigo('');
+        setCodigoEntrega(codigo);
+        setEntregaAbierta(true);
+    };
+
+    /** Entrega OK: se confirma en pantalla, se limpia el campo y se refresca la lista. */
+    const alEntregar = async (datos) => {
+        setUltimaEntrega(datos);
+        setCodigoEntrega('');
+        await cargarPedidos();
     };
 
     const cerrarBazar = () => {
         setListaPedidos(false);
         setAviso(null);
+        setEntregaAbierta(false);
     };
 
     /** Tocar un pedido lleva a la pantalla de PEDIDOS (no a la ficha del alumno). */
@@ -1327,6 +1378,40 @@ const InicioMobileAdmin = () => {
                     ) : (
                         <div className="results" role="tabpanel" id="bazar-panel-entrega"
                             aria-labelledby="bazar-tab-entrega">
+                            {/* El mesón: el admin PIDE el código y lo escribe —la tarjeta no
+                                lo muestra, es la prueba de que el pedido es de quien retira—.
+                                El botón abre el modal COMPARTIDO de entrega (el mismo del
+                                admin de escritorio y del coach), que valida contra el backend
+                                y cierra el pedido. Sin código no se abre: no hay qué validar. */}
+                            <form className="valida"
+                                onSubmit={(e) => { e.preventDefault(); abrirEntrega(); }}>
+                                <label htmlFor="bazar-codigo">
+                                    Código que muestra el alumno
+                                </label>
+                                <div className="valida-row">
+                                    <input id="bazar-codigo" type="text"
+                                        value={codigoEntrega}
+                                        onChange={(e) => {
+                                            setCodigoEntrega(e.target.value);
+                                            if (ayudaCodigo) setAyudaCodigo('');
+                                        }}
+                                        placeholder="UB-4827" autoComplete="off"
+                                        autoCapitalize="characters" spellCheck={false}
+                                        data-testid="bazar-codigo" />
+                                    <button type="submit" className="btn primary"
+                                        data-testid="bazar-validar">
+                                        Validar y entregar
+                                    </button>
+                                </div>
+                                {ayudaCodigo && (
+                                    <p className="aviso" role="alert">⚠️ {ayudaCodigo}</p>
+                                )}
+                                {ultimaEntrega && (
+                                    <p className="ok">
+                                        ✅ Entregado: {resumenEntrega(ultimaEntrega)}
+                                    </p>
+                                )}
+                            </form>
                             {pedidosError ? (
                                 <p className="empty-line" role="alert">⚠️ {pedidosError}</p>
                             ) : pedidosCargando ? (
@@ -1342,10 +1427,10 @@ const InicioMobileAdmin = () => {
                                         <span className="pr-go" aria-hidden="true">›</span>
                                     </button>
                                     <p className="o-prod">{textoProducto(p)}</p>
-                                    <div className="o-code">
-                                        <small>Código de retiro</small>
-                                        <b>{codigoRetiro(p)}</b>
-                                    </div>
+                                    {/* El CÓDIGO no se muestra: es la prueba de que quien
+                                        retira es el dueño. Se lo pide al alumno y se
+                                        escribe en el campo de arriba ("Validar y
+                                        entregar"). */}
                                     <p className="o-espera">{textoEspera(p)}</p>
                                     <div className="pr-foot">
                                         <button type="button" className="btn soft small"
@@ -1367,8 +1452,12 @@ const InicioMobileAdmin = () => {
             {/* ── Hoja inferior: vista previa del aviso de retiro (G) ─────── */}
             {aviso && (
                 <>
-                    <div className="scrim" onClick={() => setAviso(null)} />
-                    <section className="sheet" aria-label="Vista previa del aviso">
+                    {/* `.sobre`: esta hoja se abre DESDE la pantalla completa del Bazar
+                        (`.screen`, z-index 50) y sin su propio escalón quedaba DETRÁS
+                        (el estado se actualizaba y el DOM existía, pero no se veía).
+                        Ver el escalón de overlays en inicioMobileAdmin.css. */}
+                    <div className="scrim sobre" onClick={() => setAviso(null)} />
+                    <section className="sheet sobre" aria-label="Vista previa del aviso">
                         <div className="sheet-grab" />
                         <div className="sheet-head">
                             <div>
@@ -1422,6 +1511,34 @@ const InicioMobileAdmin = () => {
                 </>
             )}
             </CapaMovil>
+
+            {/* ── Entrega por CÓDIGO de retiro: el modal COMPARTIDO ─────────────
+                Es el MISMO componente que usan el admin de escritorio (Pedidos) y el
+                coach, y el ÚNICO que llama al endpoint de entrega del backend: acá no se
+                duplica ni la llamada ni el manejo de 404 (código inexistente) / 409
+                (sin validar o ya entregado), que el backend ya devuelve con su texto.
+
+                Va por PORTAL a <body> y FUERA de `.ub-admin` a propósito:
+                  * este panel tiene su propio reset de `button` (`background: none;
+                    border: 0`) SIN capas, y en Tailwind v4 las utilidades van dentro de
+                    `@layer utilities`: el reset le ganaría y le borraría los colores al
+                    modal (dejaría de verse igual que en el escritorio);
+                  * `.ub-capa-entrega` le da su propio escalón (z-index 55) para quedar
+                    por encima de la capa móvil (50) sin depender del orden del DOM;
+                  * `md:hidden` evita que se filtre al escritorio si la ventana crece
+                    (el dashboard móvil entero vive dentro de un `md:hidden`). */}
+            {entregaAbierta && createPortal(
+                <div className="ub-capa-entrega md:hidden">
+                    <ModalEntregarPedido
+                        codigoInicial={codigoEntrega}
+                        etiquetaAccion="Validar y entregar"
+                        onCerrar={() => setEntregaAbierta(false)}
+                        onEntregado={alEntregar}
+                    />
+                </div>,
+                document.body,
+            )}
+
         </div>
     );
 };

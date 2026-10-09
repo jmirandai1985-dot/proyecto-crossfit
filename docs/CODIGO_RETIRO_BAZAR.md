@@ -16,7 +16,8 @@ cuándo entregó.
 2. El alumno lo muestra: código destacado + QR en "Mis Pedidos"
 
 3. El mesón lo ingresa o lo escanea (admin en /admin/pedidos, coach en
-   /coach/entregar-pedido → mismo modal)
+   /coach/entregar-pedido, o el admin en el dashboard móvil → Bazar →
+   "Entregar pedido": los tres usan EL MISMO modal)
         └─► el pedido pasa a "entregado" con entregado_por + entregado_en
         └─► campana del alumno: "Tu pedido de X xN fue entregado"
 
@@ -77,6 +78,13 @@ mesones escanean el mismo código a la vez, **uno** entrega y el otro recibe el 
 | `/admin/pedidos` (admin) | ✅ por fila + en el modal | ✅ con comprobante | ✅ |
 | `/coach/entregar-pedido` (coach) | sólo lo ingresa/escanea | ❌ | ❌ |
 | `/alumno/mis-pedidos` (dueño) | ✅ destacado + QR | sus pedidos | ✅ |
+| dashboard móvil → Bazar → «Entregar pedido» | ❌ **no se muestra**: el admin lo pide y lo escribe | ✅ validados sin retirar | ❌ |
+
+En el panel **móvil** el código no se pinta a propósito: si el admin ya lo tiene a la vista,
+"validar" deja de probar identidad (el código es la prueba de que quien retira es el dueño).
+La tarjeta muestra alumno, producto y cuánto lleva esperando; el mesón **pide** el código y
+lo escribe en el campo "Código que muestra el alumno" → **Validar y entregar** (mismo modal
+compartido). Cuando el pedido se entrega, desaparece solo de la lista.
 
 `GET /pedidos` sigue siendo el endpoint de **staff** (coach incluido) y no se tocó: la
 restricción del coach es de pantalla (su panel no pide la lista ni pinta montos), como

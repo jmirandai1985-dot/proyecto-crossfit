@@ -19,10 +19,14 @@ import api from '../services/api';
  *
  * Props:
  *   * `codigoInicial`: pre-carga el código (el admin entrega uno de la tabla);
+ *   * `etiquetaAccion`: rótulo del botón que valida y entrega (por defecto "Entregar";
+ *     el panel móvil lo llama "Validar y entregar", que es lo que hace realmente);
  *   * `onCerrar`: cierra el modal;
  *   * `onEntregado(datos)`: avisa a la pantalla que la entrega salió bien (refrescos).
  */
-const ModalEntregarPedido = ({ codigoInicial = '', onCerrar, onEntregado }) => {
+const ModalEntregarPedido = ({
+    codigoInicial = '', etiquetaAccion = 'Entregar', onCerrar, onEntregado,
+}) => {
     const [codigo, setCodigo] = useState(codigoInicial || '');
     const [entregando, setEntregando] = useState(false);
     const [error, setError] = useState('');
@@ -86,7 +90,7 @@ const ModalEntregarPedido = ({ codigoInicial = '', onCerrar, onEntregado }) => {
                         />
                         <button type="submit" disabled={entregando}
                             className="rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed px-5 py-3 text-sm font-bold text-white transition-colors">
-                            {entregando ? 'Entregando…' : 'Entregar'}
+                            {entregando ? 'Entregando…' : etiquetaAccion}
                         </button>
                     </div>
                     {error && (

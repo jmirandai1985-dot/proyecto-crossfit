@@ -829,14 +829,30 @@
     to { transform: none; }
 }
 
+/* ── Hoja abierta DESDE una pantalla completa (`.screen`, z-index 50) ────────
+   Bug de PROD (09/09/2026: "el aviso responde 200 pero el modal no aparece"):
+   la hoja del aviso y su scrim son 41/40 y la pantalla del Bazar es 50, así que
+   —estando los tres en el MISMO contexto de apilado (`.ub-capa`)— la pantalla
+   TAPABA la hoja. El estado se actualizaba y el DOM existía, pero no se veía: el
+   preview llegaba 200 y en pantalla no pasaba nada.
+
+   Una hoja abierta desde una pantalla completa necesita su propio escalón: scrim
+   52 y hoja 53, ENCIMA de la pantalla (50) y debajo del lightbox (60). El `.sobre`
+   es explícito a propósito: no se depende del orden del DOM, que es justo lo que
+   hace impredecible un empate de z-index. Las hojas que se abren desde la página
+   base (comprobante, correo manual) no lo llevan: ahí 41 ya está arriba. */
+.ub-admin .scrim.sobre { z-index: 52; }
+
+.ub-admin .sheet.sobre { z-index: 53; }
+
 /* ── Capa raíz de los overlays móviles (portal a <body>) ────────────────────
    Vive fuera del contexto de apilado del Layout (`relative z-10`) para poder
    pasar por encima del header (z-30): sin esto el buscador quedaba DETRÁS del
    header. El z-index de esta capa es el que compite con el header; los de
    adentro ordenan los overlays ENTRE sí (scrim 40, sheet 41, screen 50,
-   light 60, toast 70). No pinta nada por sí sola (sus hijos son `fixed`):
-   sólo presta las variables y la fuente, así que se anulan el fondo, el
-   sangrado y el padding de `.ub-admin`. */
+   hoja-sobre-pantalla 52/53, light 60, toast 70). No pinta nada por sí sola
+   (sus hijos son `fixed`): sólo presta las variables y la fuente, así que se
+   anulan el fondo, el sangrado y el padding de `.ub-admin`. */
 .ub-admin.ub-capa {
     position: relative;
     z-index: 50;
@@ -844,6 +860,18 @@
     padding: 0;
     min-height: 0;
     background: none;
+}
+
+/* ── Capa del modal COMPARTIDO de entrega (portal a <body>) ─────────────────
+   No lleva `.ub-admin` a propósito: el modal es Tailwind puro (lo comparten el
+   admin de escritorio y el coach) y este panel le aplicaría su reset de `button`
+   (`background: none; border: 0`), que —al ser CSS sin capas— le gana a
+   `@layer utilities` de Tailwind v4 y le borraría los colores. Su z-index (55) lo
+   deja por encima de la capa móvil (50) y debajo del lightbox (60), así que no
+   depende del orden del DOM. El `md:hidden` lo pone el componente. */
+.ub-capa-entrega {
+    position: relative;
+    z-index: 55;
 }
 
 /* ── Buscador de alumnos / pantallas completas ──────────────────────────────
@@ -1265,26 +1293,72 @@
     color: var(--ub-muted);
 }
 
-.ub-admin .o-code {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    margin-top: 10px;
+/* Panel "Validar y entregar" (pestaña Entregar pedido): el admin ESCRIBE el
+   código que el alumno le muestra —el panel no lo tiene "de antemano", es la
+   prueba de identidad— y el botón abre el modal COMPARTIDO que valida y cierra
+   la entrega. Va `sticky` arriba: la lista de pedidos puede ser larga y el campo
+   tiene que estar a mano igual (es la acción del mesón). */
+.ub-admin .valida {
+    position: sticky;
+    top: 0;
+    z-index: 1;
     background: var(--ub-surface2);
-    border-radius: var(--ub-r-sm);
-    padding: 8px 10px;
+    border: 1px solid var(--ub-line);
+    border-radius: var(--ub-r-md);
+    padding: 12px;
 }
 
-.ub-admin .o-code small {
-    font-size: 12px;
+.ub-admin .valida label {
+    display: block;
+    font-size: 12.5px;
     color: var(--ub-muted);
+    margin-bottom: 8px;
 }
 
-.ub-admin .o-code b {
+.ub-admin .valida-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+}
+
+.ub-admin .valida input {
+    width: 100%;
+    min-width: 0;
+    height: 46px;
+    background: var(--ub-bg);
+    border: 1px solid var(--ub-line);
+    border-radius: var(--ub-r-md);
+    padding: 0 12px;
     font-family: var(--ub-cond);
     font-size: 20px;
     font-weight: 700;
-    letter-spacing: 1px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    text-align: center;
+    color: var(--ub-text);
+    outline: none;
+}
+
+.ub-admin .valida input::placeholder {
+    color: var(--ub-muted);
+    letter-spacing: 2px;
+}
+
+.ub-admin .valida .btn {
+    padding: 0 14px;
+    white-space: nowrap;
+}
+
+.ub-admin .valida .aviso {
+    margin: 8px 0 0;
+    font-size: 12.5px;
+    color: var(--ub-red);
+}
+
+.ub-admin .valida .ok {
+    margin: 8px 0 0;
+    font-size: 12.5px;
+    color: var(--ub-teal);
 }
 
 .ub-admin .o-espera {

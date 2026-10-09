@@ -2,9 +2,14 @@
  * pedidosEntrega — pantalla "Pedidos listos para entrega" (admin móvil <768px).
  *
  * POR QUÉ EXISTE: la pantalla muestra los pedidos VALIDADOS que aún nadie retiró, con
- * el código de retiro y cuánto llevan esperando, y permite avisarles por correo. Las
- * reglas de esa fila (qué es "listo para entrega", qué dice cada texto) van acá para
- * que sean UNA definición testeable y no literales sueltos en el JSX.
+ * cuánto llevan esperando, y permite avisarles por correo. Las reglas de esa fila (qué es
+ * "listo para entrega", qué dice cada texto) van acá para que sean UNA definición
+ * testeable y no literales sueltos en el JSX.
+ *
+ * OJO: el CÓDIGO DE RETIRO no se muestra acá. Es la prueba de que el pedido es de quien
+ * lo retira, así que el panel no lo tiene "de antemano": el admin se lo pide al alumno y
+ * lo escribe (ver `utils/entregaMovil.js` y `components/ModalEntregarPedido.jsx`). El
+ * código SÍ se usa para decidir qué fila se lista: un validado sin código no se entrega.
  *
  * Los DATOS son los del endpoint que ya existía (`GET /pedidos?estado=validado`).
  */
@@ -17,9 +22,6 @@ export const esListoParaEntrega = (pedido) => Boolean(
     && pedido.codigo_retiro
     && !pedido.entregado_en,
 );
-
-/** Código de retiro para mostrar (nunca vacío: el placeholder del panel si falta). */
-export const codigoRetiro = (pedido) => pedido?.codigo_retiro || 'UB-XXXX';
 
 /** "Botella x2" (o sólo el nombre si es 1 unidad / no hay dato de cantidad). */
 export const textoProducto = (pedido) => {

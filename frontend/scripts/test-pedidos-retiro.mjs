@@ -2,7 +2,7 @@
 // qué pedido se lista, qué dice cada fila y cómo se arma el mapa de avisos enviados.
 //   Ejecutar:  node scripts/test-pedidos-retiro.mjs
 import {
-    esListoParaEntrega, codigoRetiro, textoProducto, textoEspera,
+    esListoParaEntrega, textoProducto, textoEspera,
     textoInformado, mapaInformados,
 } from '../src/utils/pedidosEntrega.js';
 
@@ -28,8 +28,7 @@ eq(esListoParaEntrega({ estado: 'validado', codigo_retiro: null, entregado_en: n
 eq(esListoParaEntrega(null), false, 'sin pedido -> false (no rompe)');
 
 // ── Textos de la fila ────────────────────────────────────────────────────────
-eq(codigoRetiro({ codigo_retiro: 'UB-7K3M' }), 'UB-7K3M', 'muestra el código real');
-eq(codigoRetiro({}), 'UB-XXXX', 'sin código usa el placeholder del panel');
+// (El CÓDIGO no se formatea ni se muestra acá: es del alumno. Ver test-entrega-movil.)
 eq(textoProducto({ producto_nombre: 'Botella', cantidad: 2 }), 'Botella x2', 'producto + cantidad');
 eq(textoProducto({ producto_nombre: 'Botella', cantidad: 1 }), 'Botella', 'cantidad 1 no se escribe');
 eq(textoProducto({}), 'Producto', 'sin nombre no queda en blanco');
