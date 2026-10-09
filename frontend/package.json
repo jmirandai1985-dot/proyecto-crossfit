@@ -13,7 +13,8 @@
     "test:filtro": "node scripts/test-filtro-disciplina.mjs",
     "test:rotulo": "node scripts/test-rotulo-creditos.mjs",
     "test:franjas": "node scripts/test-franjas-asistencia.mjs",
-    "test:whatsapp": "node scripts/test-whatsapp.mjs"
+    "test:whatsapp": "node scripts/test-whatsapp.mjs",
+    "test:prueba": "node scripts/test-prueba-alumnos.mjs"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.3.0",

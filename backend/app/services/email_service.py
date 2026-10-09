@@ -1141,3 +1141,112 @@ def send_alerta_stock_bajo(producto_nombre: str, stock_actual: int,
         f"{correo_admin} ({producto_nombre}, stock={stock_actual})")
     return ok
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  CORREOS MANUALES del panel (los dispara un HUMANO, no el scheduler)
+#
+#  Regla común de los tres:
+#    * se REGISTRAN con un `tipo` PROPIO (`*_manual`), distinto del que usa la
+#      alerta automática equivalente: el índice único parcial
+#      `uq_notif_alumno_tipo_dia (alumno_id, tipo, dia_chile)` los mantiene en
+#      carriles separados, así que un envío manual NUNCA bloquea ni cuenta como
+#      alerta del scheduler (y al revés);
+#    * `registrar` NO tiene default: la fila de `notificaciones_enviadas` la
+#      escribe el endpoint con `_reclamar_envio` ANTES de mandar (dedupe atómico
+#      del día); si `email_service` registrara, habría DOS filas por envío.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def render_email_clase_prueba(nombre: str, dias_inscrito: int) -> tuple:
+    """Invitación a USAR el crédito de prueba (alumno 🟡: aún no toma la clase).
+
+    `dias_inscrito` son días de CHILE desde el alta (0 = hoy). El asunto y el HTML
+    son los MISMOS que manda el envío real: el preview del panel no puede derivar.
+    """
+    asunto = "🎟️ Tu clase de prueba sigue disponible"
+    titulo = "Tu clase de prueba te espera"
+    saludo = f"¡Hola, {nombre}!"
+    cuando = ("hoy mismo" if dias_inscrito <= 0
+              else f"hace {dias_inscrito} día{'s' if dias_inscrito != 1 else ''}")
+    cuerpo = (
+        f"<p>Te inscribiste {cuando} y todavía tienes tu "
+        "<strong>clase de prueba gratis</strong> disponible (1 crédito, sin costo).</p>"
+        "<p>Reserva el horario que más te acomode y ven a conocer el box: "
+        "te acompañamos durante toda tu primera clase.</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Reservar mi clase de prueba",
+                     url_frontend("/alumno/mis-reservas"))
+    return asunto, html
+
+
+def render_email_contratar_plan(nombre: str) -> tuple:
+    """Invitación a CONTRATAR un plan (alumno 🔵: ya tomó la prueba, sin plan)."""
+    asunto = "🏆 ¿Seguimos entrenando con nosotros?"
+    titulo = "Tu clase de prueba fue el primer paso"
+    saludo = f"¡Hola, {nombre}!"
+    cuerpo = (
+        "<p>¡Ya tomaste tu clase de prueba y esperamos que te haya gustado!</p>"
+        "<p>Elige el plan que más te acomode, paga y sube tu comprobante: el equipo "
+        "activa tu membresía para que sigas entrenando sin cortar el ritmo.</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Elegir mi plan",
+                     url_frontend("/alumno/solicitar-plan"))
+    return asunto, html
+
+
+def render_email_aviso_retiro(nombre: str, producto: str, cantidad: int,
+                              codigo: str) -> tuple:
+    """Recordatorio MANUAL de retiro del Bazar (pedido validado, sin retirar).
+
+    Es ADICIONAL a la campana automática `pedido_validado` (que ya viaja al alumno
+    al validar): esto es un correo con el código, no la reemplaza ni la duplica.
+    """
+    asunto = f"🎁 {nombre}, tu pedido te espera en el box"
+    titulo = "Tu pedido está listo para retirar"
+    saludo = f"¡Hola, {nombre}!"
+    cuerpo = (
+        f"<p><strong>{producto}</strong> x{cantidad} ya está validado y te espera "
+        "en el mesón del box.</p>"
+        "<p>Muestra este código al retirarlo:</p>"
+        f"<p style=\"text-align:center;font-size:26px;font-weight:bold;"
+        f"letter-spacing:2px;color:#09090b;margin:16px 0;\">{codigo}</p>"
+        "<p>Si ya lo retiraste, ignora este correo.</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Ver mis pedidos",
+                     url_frontend("/alumno/mis-pedidos"))
+    return asunto, html
+
+
+def send_clase_prueba(nombre: str, correo: str, dias_inscrito: int,
+                      registrar: bool) -> bool:
+    """Manda la invitación a usar el crédito de prueba (tipo `prueba_clase_manual`)."""
+    if not correo:
+        return False
+    asunto, html = render_email_clase_prueba(nombre, dias_inscrito)
+    ok = _enviar(correo, asunto, html, None,
+                 tipo="prueba_clase_manual", registrar=registrar)
+    logger.info(f"[prueba_clase_manual] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    return ok
+
+
+def send_contratar_plan(nombre: str, correo: str, registrar: bool) -> bool:
+    """Manda la invitación a contratar plan (tipo `prueba_plan_manual`)."""
+    if not correo:
+        return False
+    asunto, html = render_email_contratar_plan(nombre)
+    ok = _enviar(correo, asunto, html, None,
+                 tipo="prueba_plan_manual", registrar=registrar)
+    logger.info(f"[prueba_plan_manual] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    return ok
+
+
+def send_aviso_retiro(nombre: str, correo: str, producto: str, cantidad: int,
+                      codigo: str, registrar: bool) -> bool:
+    """Manda el recordatorio de retiro (tipo `pedido_recordatorio_manual`)."""
+    if not correo:
+        return False
+    asunto, html = render_email_aviso_retiro(nombre, producto, cantidad, codigo)
+    ok = _enviar(correo, asunto, html, None,
+                 tipo="pedido_recordatorio_manual", registrar=registrar)
+    logger.info(f"[pedido_recordatorio_manual] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    return ok
+

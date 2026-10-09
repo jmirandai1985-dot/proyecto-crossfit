@@ -11,6 +11,13 @@ import { horaChileStr, hoyChileStr } from '../../utils/fecha';
 // Cupo de créditos del alumno: la MISMA regla que el resto del panel (ilimitado -> ∞,
 // cupo sin cargar -> —, número -> el número).
 import { rotuloCreditos } from '../../utils/rotuloCreditos';
+// Texto "hace 12 min / ayer / hace 18 días": una sola definición para el voucher,
+// el correo manual y los pedidos esperando retiro (util con test aislado propio).
+import { textoHace } from '../../utils/hace';
+// Rótulos de la tarjeta "Alumnos nuevos y en prueba" (estado, días y fecha de alta).
+import {
+    textoEstadoPrueba, tonoEstadoPrueba, textoAlta, textoEnPrueba,
+} from '../../utils/pruebaAlumnos';
 // Enlace de contacto del alumno: wa.me armado desde el teléfono cargado (o nada).
 import { enlaceWhatsapp } from '../../utils/whatsapp';
 // Corte por franjas de "Asistencia de hoy" (cálculo puro, con test aislado propio).
@@ -83,19 +90,8 @@ const fechaCorta = () => {
     return s.replace(/\./g, '').replace(',', '');
 };
 
-/** "hace 12 min" / "hace 2 h" / "ayer" — antigüedad de una solicitud pendiente. */
-const haceCuanto = (valor) => {
-    if (!valor) return '';
-    const d = new Date(valor);
-    if (isNaN(d.getTime())) return '';
-    const minutos = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000));
-    if (minutos < 1) return 'ahora';
-    if (minutos < 60) return `hace ${minutos} min`;
-    const horas = Math.round(minutos / 60);
-    if (horas < 24) return `hace ${horas} h`;
-    const dias = Math.round(horas / 24);
-    return dias === 1 ? 'ayer' : `hace ${dias} días`;
-};
+/** "hace 12 min" / "hace 2 h" / "ayer" — antigüedad (misma definición que el util). */
+const haceCuanto = (valor) => textoHace(valor);
 
 /** "05" desde 5 (para el rango "05:00 a 12:00" del mockup). */
 const dosDigitos = (n) => String(n).padStart(2, '0');
@@ -142,14 +138,19 @@ const ultimaVisita = (fecha) => {
 /**
  * Tarjeta KPI. Regla del panel: si el endpoint falló se muestra "s/d" + el motivo
  * (nunca un 0 falso, que en un panel de caja se lee como "no entró plata").
+ *
+ * `chevron` marca las que ABREN una pantalla (en vez de navegar a otra sección) y
+ * `testid` permite distinguir dos tarjetas que usan el mismo ícono.
  */
-const Kpi = ({ clase, icono, label, valor, sub, error, cargando, dinero, pulso, onClick }) => (
+const Kpi = ({ clase, icono, label, valor, sub, error, cargando, dinero, pulso, onClick,
+    chevron, testid }) => (
     <button type="button" className={`kpi ${clase}`} onClick={onClick}
-        aria-label={label} data-testid={`kpi-${icono}`}>
+        aria-label={label} data-testid={testid || `kpi-${icono}`}>
         {pulso && <span className="pulse" />}
         <span className="kpi-top">
             <span className="chip"><Icono nombre={icono} /></span>
             <span className="kpi-label">{label}</span>
+            {chevron && <span className="kpi-go" aria-hidden="true">›</span>}
         </span>
         <span>
             <span className="kpi-val">
@@ -486,6 +487,104 @@ const InicioMobileAdmin = () => {
         setConsulta('');
     };
 
+    // ── F. "Alumnos nuevos y en prueba" (tarjeta + pantalla completa) ────────
+    // Dos listados REALES: los que están EN PRUEBA (con su estado 🟡/🔵 y el correo
+    // manual) y los dados de alta en el mes en curso. Se piden juntos para que la
+    // tarjeta tenga su número y la pantalla abra con datos; al abrir se refrescan.
+    const [tarjeta, setTarjeta] = useState(false);       // pantalla abierta
+    const [enPrueba, setEnPrueba] = useState([]);
+    const [nuevosMes, setNuevosMes] = useState([]);
+    const [tarjetaCargando, setTarjetaCargando] = useState(true);
+    const [errorPrueba, setErrorPrueba] = useState('');
+    const [errorNuevos, setErrorNuevos] = useState('');
+    // Vista previa del correo manual: { alumno, cargando, preview, error, enviando }.
+    const [correo, setCorreo] = useState(null);
+
+    const cargarTarjeta = useCallback(async () => {
+        setTarjetaCargando(true);
+        const [rPrueba, rNuevos] = await Promise.allSettled([
+            api.get('/api/v1/admin/alumnos-prueba'),
+            api.get('/api/v1/admin/alumnos-nuevos'),
+        ]);
+        // Error POR SECCIÓN: si una falla, la otra se muestra igual (y el motivo va
+        // a la vista, nunca un 0 disfrazado de dato).
+        const motivo = (r) => r.reason?.response?.data?.detail
+            || (r.reason?.response?.status ? `HTTP ${r.reason.response.status}` : r.reason?.message)
+            || 'No se pudo cargar';
+
+        if (rPrueba.status === 'fulfilled') {
+            setEnPrueba(Array.isArray(rPrueba.value.data?.alumnos) ? rPrueba.value.data.alumnos : []);
+            setErrorPrueba('');
+        } else {
+            setEnPrueba([]);
+            setErrorPrueba(motivo(rPrueba));
+        }
+
+        if (rNuevos.status === 'fulfilled') {
+            setNuevosMes(Array.isArray(rNuevos.value.data?.alumnos) ? rNuevos.value.data.alumnos : []);
+            setErrorNuevos('');
+        } else {
+            setNuevosMes([]);
+            setErrorNuevos(motivo(rNuevos));
+        }
+        setTarjetaCargando(false);
+    }, []);
+
+    useEffect(() => {
+        cargarTarjeta();
+    }, [cargarTarjeta]);
+
+    const abrirTarjeta = () => {
+        setTarjeta(true);
+        cargarTarjeta();
+    };
+    const cerrarTarjeta = () => {
+        setTarjeta(false);
+        setCorreo(null);
+    };
+
+    // Vista previa NO editable: el correo lo arma el backend con los datos reales
+    // (la misma función que usa el envío, así lo que se ve es lo que sale).
+    const abrirCorreo = async (alumno) => {
+        setCorreo({ alumno, cargando: true, preview: null, error: '', enviando: false });
+        try {
+            const res = await api.get(
+                `/api/v1/admin/alumnos-prueba/${alumno.id}/invitacion/preview`);
+            setCorreo({ alumno, cargando: false, preview: res.data, error: '', enviando: false });
+        } catch (err) {
+            setCorreo({
+                alumno, cargando: false, preview: null, enviando: false,
+                error: err.response?.data?.detail || 'No se pudo armar el correo',
+            });
+        }
+    };
+
+    const enviarCorreo = async () => {
+        if (!correo?.alumno || correo.enviando) return;
+        setCorreo((c) => ({ ...c, enviando: true }));
+        try {
+            const { data } = await api.post(
+                `/api/v1/admin/alumnos-prueba/${correo.alumno.id}/invitacion`);
+            if (data?.exito) {
+                // La fila pasa a "Correo enviado hace X" con la hora REAL del envío.
+                setEnPrueba((prev) => prev.map((a) => (a.id === correo.alumno.id
+                    ? { ...a, ultimo_envio: data.enviado_en || a.ultimo_envio } : a)));
+                avisar(data.ya_enviado
+                    ? 'Ese correo ya se había enviado hoy'
+                    : `Correo enviado a ${correo.alumno.nombre}`);
+            } else {
+                avisar(data?.detalle_error || 'No se pudo enviar el correo', true);
+            }
+            setCorreo(null);
+        } catch (err) {
+            avisar(err.response?.data?.detail || 'No se pudo enviar el correo', true);
+            setCorreo((c) => (c ? { ...c, enviando: false } : c));
+        }
+    };
+
+    /** Tocar un nombre lleva a la FICHA del alumno (Historial), igual que el buscador. */
+    const irAFicha = (alumnoId) => navigate(`/admin/alumnos/${alumnoId}/historial`);
+
     return (
         <div className="ub-admin" data-testid="admin-inicio-movil">
             <div className="col">
@@ -525,6 +624,18 @@ const InicioMobileAdmin = () => {
                             ? <><em>{kpis.pagos} {kpis.pagos === 1 ? 'pago' : 'pagos'}</em> registrados</>
                             : 'caja del día'}
                         onClick={() => navigate('/admin/reportes')}
+                    />
+                    {/* Quinta tarjeta (ancho completo): abre la pantalla con los dos
+                        listados. El número es el de los que están EN PRUEBA; el pie
+                        reusa el "+N nuevos este mes" que ya trae /reportes/. */}
+                    <Kpi
+                        clase="k-prueba wide" icono="users" label="Alumnos nuevos y en prueba"
+                        valor={errorPrueba ? null : enPrueba.length}
+                        error={errorPrueba} cargando={tarjetaCargando}
+                        sub={kpis.nuevosMes != null
+                            ? <><em>+{kpis.nuevosMes}</em> nuevos este mes</>
+                            : 'toca para ver el detalle'}
+                        chevron onClick={abrirTarjeta} testid="kpi-prueba"
                     />
                 </section>
 
@@ -889,6 +1000,128 @@ const InicioMobileAdmin = () => {
                         )}
                     </div>
                 </section>
+            )}
+            {/* ── Pantalla completa: alumnos nuevos y en prueba (F) ──────── */}
+            {tarjeta && (
+                <section className="screen" aria-label="Alumnos nuevos y en prueba">
+                    <div className="s-head">
+                        <button type="button" className="icon-btn" onClick={cerrarTarjeta}
+                            aria-label="Volver">←</button>
+                        <div className="s-title">
+                            <h3>Alumnos nuevos y en prueba</h3>
+                            <small>
+                                {textoEnPrueba(enPrueba.length)}
+                                {nuevosMes.length ? ` · ${nuevosMes.length} nuevos del mes` : ''}
+                            </small>
+                        </div>
+                    </div>
+
+                    <div className="results">
+                        <h4 className="sec">En prueba</h4>
+                        {errorPrueba ? (
+                            <p className="empty-line" role="alert">⚠️ {errorPrueba}</p>
+                        ) : tarjetaCargando ? (
+                            <p className="hint">Cargando…</p>
+                        ) : enPrueba.length === 0 ? (
+                            <p className="hint">Nadie está en prueba ahora mismo.</p>
+                        ) : enPrueba.map((a) => {
+                            const tono = tonoEstadoPrueba(a.estado);
+                            return (
+                                <article className="prow" key={a.id}>
+                                    <button type="button" className="pr-head"
+                                        onClick={() => irAFicha(a.id)}>
+                                        <span className="avatar">{iniciales(a.nombre)}</span>
+                                        <span className="pr-name">{a.nombre}</span>
+                                        <span className="pr-go" aria-hidden="true">›</span>
+                                    </button>
+                                    <p className={`pr-estado ${tono.clase}`}>
+                                        <span aria-hidden="true">{tono.icono}</span>{' '}
+                                        {textoEstadoPrueba(a.estado, a.dias_inscrito)}
+                                    </p>
+                                    <div className="pr-foot">
+                                        <button type="button" className="btn soft small"
+                                            onClick={() => abrirCorreo(a)}>
+                                            Enviar correo
+                                        </button>
+                                        {/* Envío MANUAL registrado: la fila lo muestra. */}
+                                        {a.ultimo_envio && (
+                                            <span className="pr-note">
+                                                Correo enviado {textoHace(a.ultimo_envio)}
+                                            </span>
+                                        )}
+                                    </div>
+                                </article>
+                            );
+                        })}
+
+                        <h4 className="sec">Nuevos del mes</h4>
+                        {errorNuevos ? (
+                            <p className="empty-line" role="alert">⚠️ {errorNuevos}</p>
+                        ) : tarjetaCargando ? (
+                            <p className="hint">Cargando…</p>
+                        ) : nuevosMes.length === 0 ? (
+                            <p className="hint">Todavía no hay altas este mes.</p>
+                        ) : nuevosMes.map((a) => (
+                            <button type="button" className="nrow" key={a.id}
+                                onClick={() => irAFicha(a.id)}>
+                                <span className="avatar">{iniciales(a.nombre)}</span>
+                                <span className="n-name">{a.nombre}</span>
+                                <span className="n-fecha">{textoAlta(a.fecha_alta)}</span>
+                            </button>
+                        ))}
+                    </div>
+                </section>
+            )}
+            {/* ── Hoja inferior: vista previa del correo manual (F) ───────── */}
+            {correo && (
+                <>
+                    <div className="scrim" onClick={() => setCorreo(null)} />
+                    <section className="sheet" aria-label="Vista previa del correo">
+                        <div className="sheet-grab" />
+                        <div className="sheet-head">
+                            <div>
+                                <h3>Vista previa del correo</h3>
+                                <small>
+                                    {correo.alumno?.nombre}
+                                    {correo.preview?.destinatario ? ` · ${correo.preview.destinatario}` : ''}
+                                </small>
+                            </div>
+                            <button type="button" className="close-x"
+                                onClick={() => setCorreo(null)} aria-label="Cerrar">✕</button>
+                        </div>
+                        <div className="sheet-body">
+                            {correo.cargando ? (
+                                <p className="empty-line">Armando el correo…</p>
+                            ) : (correo.error || !correo.preview) ? (
+                                <p className="empty-line" role="alert">
+                                    ⚠️ {correo.error || 'No se pudo armar el correo'}
+                                </p>
+                            ) : (
+                                <>
+                                    <div className="mail-meta">
+                                        <small>Asunto</small>
+                                        <b>{correo.preview.asunto}</b>
+                                    </div>
+                                    {/* El HTML lo renderiza el backend: se muestra tal cual,
+                                        sin poder editarlo y sin ejecutar nada (sandbox=""). */}
+                                    <iframe className="mail-doc" title="Vista previa del correo"
+                                        sandbox="" srcDoc={correo.preview.html} />
+                                    <p className="note">
+                                        El mensaje lo arma Urban Box con los datos del alumno:
+                                        se envía tal cual.
+                                    </p>
+                                </>
+                            )}
+                        </div>
+                        <div className="sheet-foot una">
+                            <button type="button" className="btn primary" onClick={enviarCorreo}
+                                disabled={correo.cargando || Boolean(correo.error)
+                                    || !correo.preview || correo.enviando}>
+                                {correo.enviando ? 'Enviando…' : 'Enviar'}
+                            </button>
+                        </div>
+                    </section>
+                </>
             )}
             </CapaMovil>
         </div>

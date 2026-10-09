@@ -109,6 +109,47 @@ def _marcar_fallido(db, envio_id: int, error: str):
     db.commit()
 
 
+def reclamar_envio_manual(db, alumno_id: int, tipo: str, tenant_id: int = None):
+    """Reclama el envío MANUAL de hoy, REABRIENDO la fila si el intento anterior falló.
+
+    Diferencia con `_reclamar_envio` (el que usa el scheduler): el índice único
+    parcial bloquea por `(alumno, tipo, día chileno)`, así que una fila `fallido` del
+    mismo día dejaría al admin sin poder reintentar hasta mañana — y el panel diría
+    "ya enviado" sobre un correo que no salió. Acá:
+
+      * si la fila de hoy dice `enviado`  -> `None`: ya se mandó, no se manda de nuevo;
+      * si la fila de hoy dice `fallido`  -> se REABRE (`enviado`, fecha nueva,
+        sin motivo de error) y se devuelve su id para reintentar el envío de verdad;
+      * si no había fila -> la reclama `_reclamar_envio` (INSERT ... ON CONFLICT).
+
+    El `tipo` tiene que ser PROPIO del envío manual (los `*_manual`): es lo que
+    mantiene esta dedupe fuera del conteo de las alertas del scheduler.
+    """
+    envio_id = _reclamar_envio(db, alumno_id, tipo, tenant_id=tenant_id)
+    if envio_id is not None:
+        return envio_id
+
+    # La fila de hoy existe (por eso el INSERT no devolvió id). Si quedó `fallido`,
+    # este es el reintento del mismo día: se reabre en lugar de bloquearlo.
+    from sqlalchemy import text
+    fila = db.execute(text("""
+        UPDATE notificaciones_enviadas
+           SET estado = 'enviado', detalle_error = NULL, fecha_envio = now()
+         WHERE id = (
+             SELECT id FROM notificaciones_enviadas
+              WHERE alumno_id = :alumno_id
+                AND tipo = :tipo
+                AND dia_chile = :dia
+                AND estado = 'fallido'
+              ORDER BY id DESC
+              LIMIT 1)
+        RETURNING id
+    """), {"alumno_id": alumno_id, "tipo": tipo, "dia": hoy_santiago()})
+    db.commit()
+    return fila.scalar()
+
+
+
 def enviar_alertas_renovacion(db, tenant_id: int = 1, dias_aviso: int = 3) -> dict:
     """EMAIL 3 (send_renovacion_plan): planes que vencen en `dias_aviso` días.
 

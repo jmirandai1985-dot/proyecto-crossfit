@@ -38,6 +38,10 @@ class NotificacionEnviada(Base):
     # bienvenida | vencimiento | inactividad | cumplimiento | acompanamiento |
     # hito_racha_* | reactivacion | confirmacion_plan | confirmacion_renovacion |
     # confirmacion_pedido (VARCHAR(50) desde migración 015)
+    # Los `*_manual` (prueba_clase_manual, prueba_plan_manual,
+    # pedido_recordatorio_manual) son CORREOS MANUALES del panel móvil del admin:
+    # tipo propio a propósito, para no pisar la dedupe diaria de las alertas del
+    # scheduler (índice único parcial `uq_notif_alumno_tipo_dia`).
     tipo = Column(String(50), nullable=False)
     fecha_envio = Column(DateTime(timezone=True), server_default=func.now())
     # enviado | fallido
