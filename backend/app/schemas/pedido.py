@@ -100,6 +100,9 @@ class PedidoListItem(_PedidoTrazaRetiro):
     alumno_nombre: Optional[str] = None
     alumno_email: Optional[str] = None
     producto_nombre: Optional[str] = None
+    # Última actualización del pedido: es lo que el panel móvil usa como "desde
+    # cuándo espera retiro" (el estado pasa a `validado` en ese UPDATE).
+    updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 

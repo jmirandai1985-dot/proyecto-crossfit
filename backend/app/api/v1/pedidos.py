@@ -5,12 +5,13 @@ import io
 import logging
 from app.core.urls import url_frontend  # B.2
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import update
+from sqlalchemy import func, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.db.database import get_db
+from app.models.auditoria import Auditoria
 from app.models.pedido import Pedido
 from app.models.producto import Producto
 from app.models.usuario import Usuario
@@ -39,6 +40,16 @@ from app.services.notificaciones_panel import (
 # y consumirlo en el mesón. Toda la regla vive en el servicio (formato, unicidad por
 # box, normalización de lo que se tipea/escanea y los textos de los 409).
 from app.services import codigos_retiro
+# Recordatorio MANUAL de retiro (panel móvil): dedupe del envío humano (tipos
+# `*_manual`, reabriendo la fila del día si el intento falló) y la traza en auditoría.
+from app.services.alertas_email_service import (
+    _marcar_fallido, reclamar_envio_manual,
+)
+from app.services.auditoria_service import registrar_auditoria
+from app.services import email_service
+from app.services.email_service import (
+    render_con_contacto, render_email_aviso_retiro, send_aviso_retiro,
+)
 from app.utils.santiago import ahora_santiago
 
 logger = logging.getLogger(__name__)
@@ -321,6 +332,9 @@ def _con_nombres(db: Session, pedidos: List[Pedido]) -> List[dict]:
             "entregado_en": p.entregado_en,
             "entregado_por": p.entregado_por,
             "entregado_por_nombre": entrego.nombre if entrego else None,
+            # La última actualización es lo que el panel móvil muestra como
+            # "esperando retiro desde …" (la validación es el UPDATE que la mueve).
+            "updated_at": p.updated_at,
         })
     return items
 
@@ -843,3 +857,188 @@ def qr_retiro_pedido(
         media_type="image/svg+xml",
         headers={"Cache-Control": "private, max-age=300"},
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  RECORDATORIO MANUAL DE RETIRO (panel admin móvil <768px)
+#
+#  "Pedidos listos para entrega" = los VALIDADOS que aún nadie retiró (código de
+#  retiro generado y sin entrega): el listado sale de `GET /pedidos?estado=validado`,
+#  que ya existe.
+#
+#  El correo de acá es ADICIONAL a la campana automática `pedido_validado` (esa ya
+#  viaja al alumno al validar, con el código): NO la reemplaza ni la duplica — este
+#  flujo no escribe en `notificaciones` (la campana), sólo manda el correo y deja
+#  su traza.
+# ═══════════════════════════════════════════════════════════════════════════════
+AVISO_RETIRO_TIPO = "pedido_recordatorio_manual"
+
+
+def _pedido_del_box(db: Session, current_user: dict, pedido_id: int) -> Pedido:
+    """Pedido del box del token, o 404 (sin revelar si el id existe en otro box)."""
+    pedido = db.query(Pedido).filter(
+        Pedido.id == pedido_id,
+        Pedido.tenant_id == current_user["tenant_id"],
+    ).first()
+    if not pedido:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido con ID {pedido_id} no encontrado",
+        )
+    return pedido
+
+
+def _pedido_para_avisar(db: Session, current_user: dict, pedido_id: int):
+    """`(pedido, alumno, nombre_producto)` de un pedido que SÍ se puede recordar.
+
+    La regla es la MISMA que la del mesón (`codigos_retiro.motivo_no_entregable`):
+    un pedido `pendiente` todavía no se validó (no hay retiro que recordar) y uno
+    `entregado` ya no espera nada. El alumno sin correo corta con 400 (no falla en
+    silencio).
+    """
+    pedido = _pedido_del_box(db, current_user, pedido_id)
+    motivo = codigos_retiro.motivo_no_entregable(pedido)
+    if motivo == codigos_retiro.MOTIVO_YA_ENTREGADO:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=codigos_retiro.texto_ya_entregado(pedido),
+        )
+    if motivo is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este pedido todavía no fue validado: no hay retiro que recordar",
+        )
+    if not pedido.codigo_retiro:
+        # Datos viejos (validados antes de la migración 044) no tienen código: el
+        # correo prometería un retiro sin código, así que se corta acá.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El pedido todavía no tiene código de retiro",
+        )
+
+    alumno = db.query(Usuario).filter(Usuario.id == pedido.alumno_id).first()
+    if not alumno or not alumno.correo:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El alumno no tiene correo registrado: no hay a dónde mandar el aviso",
+        )
+    producto = db.query(Producto.nombre).filter(
+        Producto.id == pedido.producto_id).first()
+    return pedido, alumno, (producto.nombre if producto else "tu producto")
+
+
+def ultimo_aviso_manual(db: Session, tenant_id: int, pedido_ids: list) -> dict:
+    """`{pedido_id: 'YYYY-MM-DDTHH:MM:SS'}` del último aviso MANUAL de retiro.
+
+    Una sola consulta (GROUP BY) para toda la lista: alimenta el "Informado hace X" de
+    cada fila. La traza vive en `auditoria` (accion `EMAIL_MANUAL` + entidad `pedido`)
+    porque `notificaciones_enviadas` dedupea por (alumno, tipo, día) y no sabe de
+    pedidos: el aviso manual es POR PEDIDO.
+    """
+    if not pedido_ids:
+        return {}
+    filas = (
+        db.query(Auditoria.entidad_id, func.max(Auditoria.fecha))
+        .filter(
+            Auditoria.tenant_id == tenant_id,
+            Auditoria.accion == "EMAIL_MANUAL",
+            Auditoria.entidad == "pedido",
+            Auditoria.entidad_id.in_(pedido_ids),
+        )
+        .group_by(Auditoria.entidad_id)
+        .all()
+    )
+    return {pedido_id: (fecha.isoformat() if fecha else None)
+            for pedido_id, fecha in filas}
+
+
+
+@router.get("/{pedido_id}/aviso-retiro/preview")
+def preview_aviso_retiro(
+    pedido_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Vista previa del recordatorio: asunto y HTML EXACTOS (no manda ni registra).
+
+    Usa la MISMA función de render que el envío real, así el modal del panel móvil no
+    puede mostrar un correo distinto del que sale. Sólo admin del box.
+    """
+    pedido, alumno, nombre_producto = _pedido_para_avisar(db, current_user, pedido_id)
+
+    asunto, html = render_email_aviso_retiro(
+        alumno.nombre, nombre_producto, pedido.cantidad, pedido.codigo_retiro)
+    html = render_con_contacto(html, current_user["tenant_id"])
+
+    return {
+        "pedido_id": pedido.id,
+        "nombre": alumno.nombre,
+        "destinatario": alumno.correo,
+        "asunto": asunto,
+        "html": html,
+        "producto": nombre_producto,
+        "cantidad": pedido.cantidad,
+        "codigo_retiro": pedido.codigo_retiro,
+        "esperando_desde": pedido.updated_at.isoformat() if pedido.updated_at else None,
+        "informado_en": ultimo_aviso_manual(
+            db, current_user["tenant_id"], [pedido.id]).get(pedido.id),
+    }
+
+
+@router.post("/{pedido_id}/aviso-retiro")
+def enviar_aviso_retiro(
+    pedido_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Manda el recordatorio manual de retiro (uno por alumno + día).
+
+    Dedupe: `reclamar_envio_manual` con un `tipo` PROPIO del envío manual, así que no
+    toca el conteo del scheduler ni la campana automática (`pedido_validado`). Si el
+    envío de hoy ya salió, no se repite y se devuelve la hora (`ya_enviado: true`);
+    si el de hoy había FALLADO, se reintenta (se reabre esa fila).
+    """
+    pedido, alumno, nombre_producto = _pedido_para_avisar(db, current_user, pedido_id)
+    tenant_id = current_user["tenant_id"]
+
+    envio_id = reclamar_envio_manual(db, alumno.id, AVISO_RETIRO_TIPO,
+                                     tenant_id=tenant_id)
+    if envio_id is None:
+        return {
+            "exito": True,
+            "ya_enviado": True,
+            "estado": "enviado",
+            "detalle_error": None,
+            "informado_en": ultimo_aviso_manual(db, tenant_id, [pedido.id]).get(pedido.id),
+        }
+
+    exito = send_aviso_retiro(alumno.nombre, alumno.correo, nombre_producto,
+                              pedido.cantidad, pedido.codigo_retiro, registrar=False)
+
+    detalle_error = None
+    if not exito:
+        detalle_error = email_service.ULTIMO_ERROR_SMTP or (
+            "No se pudo enviar el correo (revisar SMTP y el correo del alumno).")
+        _marcar_fallido(db, envio_id, f"{AVISO_RETIRO_TIPO} FALLIDO -> {alumno.correo}")
+
+    # Traza POR PEDIDO (el "Informado hace X" de la fila) + quién lo mandó.
+    registrar_auditoria(
+        db,
+        tenant_id=tenant_id,
+        usuario_id=current_user["usuario_id"],
+        accion="EMAIL_MANUAL",
+        entidad="pedido",
+        entidad_id=pedido.id,
+        detalle={"tipo": AVISO_RETIRO_TIPO, "codigo_retiro": pedido.codigo_retiro,
+                 "exito": exito, "origen": "panel_admin_movil"},
+    )
+
+    return {
+        "exito": exito,
+        "ya_enviado": False,
+        "estado": "enviado" if exito else "fallido",
+        "detalle_error": detalle_error,
+        "informado_en": (ultimo_aviso_manual(db, tenant_id, [pedido.id]).get(pedido.id)
+                         if exito else None),
+    }
+

@@ -18,6 +18,11 @@ import { textoHace } from '../../utils/hace';
 import {
     textoEstadoPrueba, tonoEstadoPrueba, textoAlta, textoEnPrueba,
 } from '../../utils/pruebaAlumnos';
+// Pedidos listos para entrega (Bazar): qué fila se lista y qué dice cada una.
+import {
+    esListoParaEntrega, codigoRetiro, textoProducto, textoEspera,
+    textoInformado, mapaInformados,
+} from '../../utils/pedidosEntrega';
 // Enlace de contacto del alumno: wa.me armado desde el teléfono cargado (o nada).
 import { enlaceWhatsapp } from '../../utils/whatsapp';
 // Corte por franjas de "Asistencia de hoy" (cálculo puro, con test aislado propio).
@@ -92,6 +97,15 @@ const fechaCorta = () => {
 
 /** "hace 12 min" / "hace 2 h" / "ayer" — antigüedad (misma definición que el util). */
 const haceCuanto = (valor) => textoHace(valor);
+
+/**
+ * Motivo legible de una promesa rechazada (una llamada que falló).
+ * Regla del panel: el error va A LA VISTA con su motivo; nunca un 0 disfrazado de dato.
+ */
+const motivoError = (resultado) => resultado?.reason?.response?.data?.detail
+    || (resultado?.reason?.response?.status
+        ? `HTTP ${resultado.reason.response.status}` : resultado?.reason?.message)
+    || 'No se pudo cargar';
 
 /** "05" desde 5 (para el rango "05:00 a 12:00" del mockup). */
 const dosDigitos = (n) => String(n).padStart(2, '0');
@@ -191,9 +205,20 @@ const InicioMobileAdmin = () => {
     // Vouchers pendientes: el MISMO listado que alimenta la pantalla Pendientes.
     const [vouchers, setVouchers] = useState([]);
 
+    // ── G. "Pedidos listos para entrega" (indicador del Bazar + pantalla) ────
+    // El indicador y la pantalla usan el MISMO listado que la pantalla Pedidos del
+    // admin (`GET /pedidos?estado=validado`): validados que aún nadie retiró.
+    const [pedidos, setPedidos] = useState([]);
+    const [pedidosError, setPedidosError] = useState('');
+    const [listaPedidos, setListaPedidos] = useState(false);   // pantalla abierta
+    const [pedidosCargando, setPedidosCargando] = useState(false);
+    const [informados, setInformados] = useState({});          // {pedido_id: fecha}
+    // Vista previa del aviso al comprador: { pedido, cargando, preview, error, enviando }.
+    const [aviso, setAviso] = useState(null);
+
     const cargarKpis = useCallback(async () => {
         setCargando(true);
-        const [rReportes, rVencen, rVouchers, rCaja] = await Promise.allSettled([
+        const [rReportes, rVencen, rVouchers, rCaja, rPedidos] = await Promise.allSettled([
             // Alumnos activos + nuevos del mes: el MISMO /reportes/ del panel ≥768px
             // (definición única del BI: `metricas_service.alumnos_vigentes`).
             api.get('/api/v1/reportes/', { params: { tenant_id } }),
@@ -203,16 +228,13 @@ const InicioMobileAdmin = () => {
             api.get('/api/v1/solicitudes/pendientes'),
             // Caja del día (endpoint aditivo: suma la tabla de los KPIs).
             api.get('/api/v1/finanzas/resumen-hoy'),
+            // Pedidos validados sin retirar: el indicador del Bazar (y su pantalla).
+            api.get('/api/v1/pedidos', { params: { estado: 'validado' } }),
         ]);
 
-        const motivo = (r) => {
-            const detalle = r.reason?.response?.data?.detail;
-            if (detalle) return String(detalle);
-            if (r.reason?.response?.status) return `HTTP ${r.reason.response.status}`;
-            return r.reason?.message || 'No se pudo cargar';
-        };
+        const motivo = motivoError;
 
-        const errs = { activos: '', vencen: '', vouchers: '', caja: '' };
+        const errs = { activos: '', vencen: '', vouchers: '', caja: '', pedidos: '' };
         const nuevos = { activos: null, nuevosMes: null, vencen: null, caja: null, pagos: null };
 
         if (rReportes.status === 'fulfilled') {
@@ -239,6 +261,16 @@ const InicioMobileAdmin = () => {
             nuevos.pagos = rCaja.value.data?.pagos ?? null;
         } else {
             errs.caja = motivo(rCaja);
+        }
+
+        if (rPedidos.status === 'fulfilled') {
+            // Sólo los que de verdad esperan retiro (la misma regla que la pantalla).
+            setPedidos((Array.isArray(rPedidos.value.data) ? rPedidos.value.data : [])
+                .filter(esListoParaEntrega));
+            setPedidosError('');
+        } else {
+            setPedidos([]);
+            setPedidosError(motivo(rPedidos));
         }
 
         setKpis(nuevos);
@@ -585,6 +617,78 @@ const InicioMobileAdmin = () => {
     /** Tocar un nombre lleva a la FICHA del alumno (Historial), igual que el buscador. */
     const irAFicha = (alumnoId) => navigate(`/admin/alumnos/${alumnoId}/historial`);
 
+    // ── G. "Pedidos listos para entrega": pantalla + aviso MANUAL al comprador ─
+    const hayPedidos = pedidos.length > 0;
+
+    const abrirPedidos = async () => {
+        setListaPedidos(true);
+        setPedidosCargando(true);
+        const [rPedidos, rTraza] = await Promise.allSettled([
+            api.get('/api/v1/pedidos', { params: { estado: 'validado' } }),
+            // Traza de los avisos manuales (por PEDIDO): alimenta el "Informado hace X"
+            // de todas las filas con UNA sola llamada.
+            api.get('/api/v1/auditoria', {
+                params: { accion: 'EMAIL_MANUAL', entidad: 'pedido', limit: 200 },
+            }),
+        ]);
+        if (rPedidos.status === 'fulfilled') {
+            setPedidos((Array.isArray(rPedidos.value.data) ? rPedidos.value.data : [])
+                .filter(esListoParaEntrega));
+            setPedidosError('');
+        } else {
+            setPedidos([]);
+            setPedidosError(motivoError(rPedidos));
+        }
+        setInformados(rTraza.status === 'fulfilled' ? mapaInformados(rTraza.value.data) : {});
+        setPedidosCargando(false);
+    };
+
+    const cerrarPedidos = () => {
+        setListaPedidos(false);
+        setAviso(null);
+    };
+
+    /** Tocar un pedido lleva a la pantalla de PEDIDOS (no a la ficha del alumno). */
+    const irAPedido = () => navigate('/admin/pedidos');
+
+    // Vista previa NO editable del aviso de retiro: el HTML lo arma el backend con los
+    // datos reales del pedido (misma función que el envío). Es un correo ADICIONAL a la
+    // campana automática `pedido_validado`, no la reemplaza ni la duplica.
+    const abrirAviso = async (pedido) => {
+        setAviso({ pedido, cargando: true, preview: null, error: '', enviando: false });
+        try {
+            const res = await api.get(`/api/v1/pedidos/${pedido.id}/aviso-retiro/preview`);
+            setAviso({ pedido, cargando: false, preview: res.data, error: '', enviando: false });
+        } catch (err) {
+            setAviso({
+                pedido, cargando: false, preview: null, enviando: false,
+                error: err.response?.data?.detail || 'No se pudo armar el correo',
+            });
+        }
+    };
+
+    const enviarAviso = async () => {
+        if (!aviso?.pedido || aviso.enviando) return;
+        setAviso((a) => ({ ...a, enviando: true }));
+        try {
+            const { data } = await api.post(`/api/v1/pedidos/${aviso.pedido.id}/aviso-retiro`);
+            if (data?.exito) {
+                if (data.informado_en) {
+                    setInformados((prev) => ({ ...prev, [aviso.pedido.id]: data.informado_en }));
+                }
+                avisar(data.ya_enviado
+                    ? 'Ese aviso ya se había enviado hoy'
+                    : `Aviso enviado a ${aviso.pedido.alumno_nombre || 'el comprador'}`);
+            } else {
+                avisar(data?.detalle_error || 'No se pudo enviar el aviso', true);
+            }
+            setAviso(null);
+        } catch (err) {
+            avisar(err.response?.data?.detail || 'No se pudo enviar el aviso', true);
+            setAviso((a) => (a ? { ...a, enviando: false } : a));
+        }
+    };
+
     return (
         <div className="ub-admin" data-testid="admin-inicio-movil">
             <div className="col">
@@ -648,8 +752,18 @@ const InicioMobileAdmin = () => {
                         onClick={() => navigate('/admin/fidelizacion')}>
                         <span className="ico"><Icono nombre="heart" /></span>Fidelización
                     </button>
-                    <button type="button" className="app a-baz" onClick={() => navigate('/admin/bazar')}>
-                        <span className="ico"><Icono nombre="cart" /></span>Bazar
+                    <button type="button" className={`app a-baz${hayPedidos ? ' alive' : ''}`}
+                        onClick={abrirPedidos} data-testid="app-bazar"
+                        aria-label={hayPedidos
+                            ? `Bazar: ${pedidos.length} ${pedidos.length === 1 ? 'pedido listo' : 'pedidos listos'} para entrega`
+                            : 'Bazar'}>
+                        {/* Mismo pulso que "Vouchers por aprobar" + la cantidad de
+                            pedidos validados que aún nadie retiró. */}
+                        {hayPedidos && <span className="pulse" />}
+                        <span className="ico">
+                            <Icono nombre="cart" />
+                            {hayPedidos && <span className="tag">{pedidos.length}</span>}
+                        </span>Bazar
                     </button>
                 </nav>
 
@@ -1118,6 +1232,110 @@ const InicioMobileAdmin = () => {
                                 disabled={correo.cargando || Boolean(correo.error)
                                     || !correo.preview || correo.enviando}>
                                 {correo.enviando ? 'Enviando…' : 'Enviar'}
+                            </button>
+                        </div>
+                    </section>
+                </>
+            )}
+            {/* ── Pantalla completa: pedidos listos para entrega (G) ─────── */}
+            {listaPedidos && (
+                <section className="screen" aria-label="Pedidos listos para entrega">
+                    <div className="s-head">
+                        <button type="button" className="icon-btn" onClick={cerrarPedidos}
+                            aria-label="Volver">←</button>
+                        <div className="s-title">
+                            <h3>Pedidos listos para entrega</h3>
+                            <small>
+                                {pedidos.length} {pedidos.length === 1
+                                    ? 'pedido esperando retiro'
+                                    : 'pedidos esperando retiro'}
+                            </small>
+                        </div>
+                    </div>
+
+                    <div className="results">
+                        {pedidosError ? (
+                            <p className="empty-line" role="alert">⚠️ {pedidosError}</p>
+                        ) : pedidosCargando ? (
+                            <p className="hint">Cargando…</p>
+                        ) : pedidos.length === 0 ? (
+                            <p className="hint">No hay pedidos esperando retiro.</p>
+                        ) : pedidos.map((p) => (
+                            <article className="orow" key={p.id}>
+                                {/* Tocar el pedido abre la pantalla de Pedidos (donde se
+                                    gestiona y se entrega), no la ficha del alumno. */}
+                                <button type="button" className="or-head" onClick={irAPedido}>
+                                    <span className="o-name">{p.alumno_nombre || 'Alumno'}</span>
+                                    <span className="pr-go" aria-hidden="true">›</span>
+                                </button>
+                                <p className="o-prod">{textoProducto(p)}</p>
+                                <div className="o-code">
+                                    <small>Código de retiro</small>
+                                    <b>{codigoRetiro(p)}</b>
+                                </div>
+                                <p className="o-espera">{textoEspera(p)}</p>
+                                <div className="pr-foot">
+                                    <button type="button" className="btn soft small"
+                                        onClick={() => abrirAviso(p)}>
+                                        Avisar al comprador
+                                    </button>
+                                    {informados[p.id] && (
+                                        <span className="pr-note">
+                                            {textoInformado(informados[p.id])}
+                                        </span>
+                                    )}
+                                </div>
+                            </article>
+                        ))}
+                    </div>
+                </section>
+            )}
+            {/* ── Hoja inferior: vista previa del aviso de retiro (G) ─────── */}
+            {aviso && (
+                <>
+                    <div className="scrim" onClick={() => setAviso(null)} />
+                    <section className="sheet" aria-label="Vista previa del aviso">
+                        <div className="sheet-grab" />
+                        <div className="sheet-head">
+                            <div>
+                                <h3>Vista previa del aviso</h3>
+                                <small>
+                                    {aviso.pedido?.alumno_nombre}
+                                    {aviso.preview?.destinatario ? ` · ${aviso.preview.destinatario}` : ''}
+                                </small>
+                            </div>
+                            <button type="button" className="close-x"
+                                onClick={() => setAviso(null)} aria-label="Cerrar">✕</button>
+                        </div>
+                        <div className="sheet-body">
+                            {aviso.cargando ? (
+                                <p className="empty-line">Armando el correo…</p>
+                            ) : (aviso.error || !aviso.preview) ? (
+                                <p className="empty-line" role="alert">
+                                    ⚠️ {aviso.error || 'No se pudo armar el correo'}
+                                </p>
+                            ) : (
+                                <>
+                                    <div className="mail-meta">
+                                        <small>Asunto</small>
+                                        <b>{aviso.preview.asunto}</b>
+                                    </div>
+                                    {/* HTML del backend: se muestra tal cual, sin editar
+                                        y sin ejecutar nada (sandbox=""). */}
+                                    <iframe className="mail-doc" title="Vista previa del aviso"
+                                        sandbox="" srcDoc={aviso.preview.html} />
+                                    <p className="note">
+                                        Recordatorio manual de retiro: es ADICIONAL al aviso
+                                        automático que el alumno ya recibió al validarse su pedido.
+                                    </p>
+                                </>
+                            )}
+                        </div>
+                        <div className="sheet-foot una">
+                            <button type="button" className="btn primary" onClick={enviarAviso}
+                                disabled={aviso.cargando || Boolean(aviso.error)
+                                    || !aviso.preview || aviso.enviando}>
+                                {aviso.enviando ? 'Enviando…' : 'Enviar'}
                             </button>
                         </div>
                     </section>

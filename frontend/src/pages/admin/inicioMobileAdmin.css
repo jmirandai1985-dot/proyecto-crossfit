@@ -222,6 +222,7 @@
 }
 
 .ub-admin .app {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -1171,6 +1172,91 @@
     border: 0;
     border-radius: var(--ub-r-md);
     background: #fff;
+}
+
+/* El acceso rápido que abre una pantalla lleva indicador en la ESQUINA (mismo pulso
+   que "Vouchers por aprobar") y la cantidad sobre el ícono. */
+.ub-admin .app.alive {
+    border-color: rgba(59, 114, 246, .6);
+}
+
+.ub-admin .app .ico { position: relative; }
+
+.ub-admin .app .ico .tag {
+    position: absolute;
+    right: -6px;
+    bottom: -6px;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: 99px;
+    background: var(--ub-blue);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+    font-family: var(--ub-cond);
+}
+
+/* ── Filas de "Pedidos listos para entrega" ─────────────────────────────── */
+.ub-admin .orow {
+    background: var(--ub-surface);
+    border: 1px solid var(--ub-line);
+    border-radius: var(--ub-r-xl);
+    padding: 12px 14px;
+}
+
+.ub-admin .or-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    padding: 0;
+}
+
+.ub-admin .o-name {
+    font-weight: 600;
+    font-size: 16px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ub-admin .o-prod {
+    margin: 4px 0 0;
+    font-size: 13.5px;
+    color: var(--ub-muted);
+}
+
+.ub-admin .o-code {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 10px;
+    background: var(--ub-surface2);
+    border-radius: var(--ub-r-sm);
+    padding: 8px 10px;
+}
+
+.ub-admin .o-code small {
+    font-size: 12px;
+    color: var(--ub-muted);
+}
+
+.ub-admin .o-code b {
+    font-family: var(--ub-cond);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.ub-admin .o-espera {
+    margin: 8px 0 0;
+    font-size: 12.5px;
+    color: var(--ub-amber);
 }
 
 @media (prefers-reduced-motion: reduce) {
