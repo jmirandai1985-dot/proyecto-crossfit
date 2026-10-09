@@ -55,3 +55,4 @@ backend/test_altas_alumnos4.py
 # Artefactos de ML (modelos .pkl: pesados y regenerables con ml/train_*.py)
 backend/ml/artifacts/
 mockup/
+docs/capturas/
