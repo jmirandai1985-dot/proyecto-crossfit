@@ -26,6 +26,7 @@ if str(_BACKEND) not in sys.path:
 
 try:
     from app.api.v1.usuarios import _resumen_membresia   # noqa: E402
+    from app.schemas.usuario import UsuarioListItem      # noqa: E402
     from app.utils.santiago import hoy_santiago, fin_del_dia_chile, SANTIAGO  # noqa: E402
 except Exception as exc:   # pragma: no cover - entorno sin dependencias del backend
     pytest.skip(f"no se pudo importar el router de usuarios: {exc}",
@@ -160,3 +161,55 @@ def test_c5_el_valor_de_creditos_sale_tal_cual_de_la_fila():
 def test_z_fechas_del_test_son_del_calendario_chileno():
     # Ancla: los stubs usan `date`/`hoy_santiago()` del calendario de Chile.
     assert isinstance(hoy_santiago(), date)
+
+
+# ── D. Contrato de la fila enriquecida (dict -> response_model) ──────────────
+# El endpoint devuelve DICTOS (no filas del ORM) cuando se pide `con_membresia`:
+# si el shape no calzara con `UsuarioListItem`, FastAPI respondería 500. Acá se
+# arma la MISMA fila que arma `_items_con_membresia` y se valida contra el schema.
+
+def test_d1_la_fila_enriquecida_valida_contra_el_schema_de_respuesta():
+    fila = {
+        "id": 5,
+        "nombre": "Camila Soto",
+        "correo": "camila@example.cl",
+        "telefono": "+56 9 1234 5678",
+        "rol": "alumno",
+        "activo": True,
+        "estado": "activo",
+        "fechaRegistro": datetime(2026, 1, 2, tzinfo=SANTIAGO),
+        "membresia": _resumen_membresia(
+            _suscripcion(creditos_disponibles=None),
+            SimpleNamespace(nombre="Mensual full", es_ilimitado=True),
+        ),
+        "ultima_asistencia": hoy_santiago(),
+    }
+    item = UsuarioListItem.model_validate(fila).model_dump(by_alias=True)
+
+    assert item["created_at"] is not None, "`fechaRegistro` viaja como created_at (alias)"
+    assert item["membresia"]["plan_nombre"] == "Mensual full"
+    assert item["membresia"]["creditos_disponibles"] is None
+    assert item["ultima_asistencia"] == hoy_santiago()
+
+
+def test_d2_sin_membresia_la_fila_sigue_siendo_valida():
+    # Alumno sin plan activo: la ficha rápida muestra "Sin plan activo" y "—".
+    fila = {
+        "id": 6, "nombre": "Sin Plan", "correo": "x@example.cl", "telefono": None,
+        "rol": "alumno", "activo": True, "estado": "activo",
+        "fechaRegistro": datetime(2026, 1, 2, tzinfo=SANTIAGO),
+        "membresia": None, "ultima_asistencia": None,
+    }
+    item = UsuarioListItem.model_validate(fila).model_dump(by_alias=True)
+    assert item["membresia"] is None and item["ultima_asistencia"] is None
+
+
+def test_d3_el_listado_sin_el_parametro_no_trae_los_extras():
+    # El contrato viejo (fila del ORM sin `membresia`) sigue validando igual.
+    fila = {
+        "id": 7, "nombre": "Viejo Contrato", "correo": "y@example.cl",
+        "telefono": None, "rol": "alumno", "activo": True, "estado": "activo",
+        "fechaRegistro": None,
+    }
+    item = UsuarioListItem.model_validate(fila).model_dump(by_alias=True)
+    assert item["membresia"] is None and item["ultima_asistencia"] is None
