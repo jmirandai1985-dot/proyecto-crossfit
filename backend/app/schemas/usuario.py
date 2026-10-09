@@ -85,6 +85,25 @@ class UsuarioResponse(UsuarioBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+# Schema del resumen de membresía (extras OPTATIVOS del listado)
+class MembresiaResumenItem(BaseModel):
+    """Membresía VIGENTE de un alumno, para la ficha rápida del buscador móvil.
+
+    Solo se completa cuando el listado se pide con `?con_membresia=true`: el resto de
+    los consumidores (Alumnos.jsx, Coaches.jsx, ModalClase.jsx…) recibe la respuesta de
+    siempre, con estos campos en `None`, sin pagar las consultas extra.
+    """
+
+    plan_nombre: Optional[str] = None
+    # `creditos_disponibles` puede ser NULL en la BD = "cupo no cargado" (el front lo
+    # pinta con la regla compartida: ilimitado -> ∞, NULL -> —, número -> el número).
+    creditos_disponibles: Optional[int] = None
+    creditos_totales: Optional[int] = None
+    es_ilimitado: Optional[bool] = None
+    fecha_expiracion: Optional[datetime] = None
+    dias_restantes: Optional[int] = None
+
+
 # Schema simplificado para listados
 class UsuarioListItem(BaseModel):
     """Schema simplificado para listados de usuarios"""
@@ -98,5 +117,12 @@ class UsuarioListItem(BaseModel):
     # y no un badge inventado a partir de `activo`).
     estado: Optional[str] = None
     fechaRegistro: Optional[datetime] = Field(None, alias="created_at")
+    # ── Extras OPTATIVOS (solo con `?con_membresia=true`) ──────────────────────
+    # Plan/vigencia del alumno y su última asistencia registrada: los necesita la
+    # ficha rápida del buscador <768px. Aditivos y en None por defecto, así el
+    # contrato de los consumidores existentes no cambia.
+    membresia: Optional[MembresiaResumenItem] = None
+    ultima_asistencia: Optional[date] = None
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True, serialize_by_alias=True)
+

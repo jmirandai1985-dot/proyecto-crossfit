@@ -6,7 +6,7 @@ from app.core.urls import url_frontend  # B.2
 import bcrypt
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel, Field
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.models.usuario import Usuario, RolUsuario
 from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
+from app.models.asistencia import Asistencia
 from app.schemas.usuario import UsuarioCreate, UsuarioUpdate, UsuarioResponse, UsuarioListItem
 from app.core.dependencies import get_current_user, get_current_admin
 from app.core.rate_limit import limiter, LIMIT_CRITICO
@@ -26,7 +27,11 @@ from app.services.asignaciones_clases import (
 )
 from app.services.auditoria_service import registrar_auditoria
 from app.services.email_service import send_solicitud_prueba_clase
-from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
+from app.utils.santiago import (
+    hoy_santiago,          # HOY en Chile (la TZ del proceso es UTC)
+    dias_para_vencer,      # días que le quedan al plan (día de Chile, 0 = vence hoy)
+    vigente_el_dia,        # el día de vencimiento vale COMPLETO
+)
 
 router = APIRouter()
 
@@ -253,6 +258,89 @@ def obtener_usuario(
     return usuario
 
 
+# ── Extras del buscador móvil: plan/vigencia del alumno + última asistencia ────
+def _resumen_membresia(suscripcion, plan) -> Optional[dict]:
+    """Resumen de la membresía vigente (None si el alumno no tiene plan activo).
+
+    Mismas definiciones que el resto del panel: `vigente_el_dia` (el día de vencimiento
+    vale completo, hora de Chile) y `dias_para_vencer` (0 = vence hoy, nunca negativo).
+    `creditos_disponibles` se devuelve TAL CUAL (NULL incluido): "sin cupo cargado" no
+    es "0 créditos" y el front lo pinta con la regla compartida.
+    """
+    if suscripcion is None:
+        return None
+    return {
+        "plan_nombre": plan.nombre if plan else None,
+        "creditos_disponibles": suscripcion.creditos_disponibles,
+        "creditos_totales": suscripcion.creditos_totales,
+        "es_ilimitado": bool(plan.es_ilimitado) if plan else None,
+        "fecha_expiracion": suscripcion.fecha_expiracion,
+        "dias_restantes": dias_para_vencer(suscripcion.fecha_expiracion),
+    }
+
+
+def _items_con_membresia(db: Session, tenant_id: int, usuarios: list) -> List[dict]:
+    """Filas del listado + membresía vigente + última asistencia.
+
+    TRES consultas para toda la página (suscripciones, planes y asistencias de los ids
+    pedidos), no una por alumno: la ficha rápida del buscador no puede convertir el
+    listado en un N+1.
+
+    `ultima_asistencia` usa la MISMA definición que Fidelización
+    (`max(asistencias.fecha)` por alumno y tenant): un alumno que nunca asistió queda en
+    `None`, no en una fecha inventada.
+    """
+    ids = [u.id for u in usuarios]
+    vigentes, planes, ultimas = {}, {}, {}
+    if ids:
+        suscripciones = db.query(Suscripcion).filter(
+            Suscripcion.tenant_id == tenant_id,
+            Suscripcion.usuario_id.in_(ids),
+            Suscripcion.estado == "activo",
+        ).order_by(Suscripcion.fecha_expiracion.desc()).all()
+        # Ya vienen ordenadas por vencimiento desc: la primera VIGENTE de cada alumno es
+        # la que se muestra (mismo criterio que /membresias/mi-membresia).
+        for s in suscripciones:
+            if s.usuario_id in vigentes or not vigente_el_dia(s.fecha_expiracion):
+                continue
+            vigentes[s.usuario_id] = s
+
+        plan_ids = {s.plan_id for s in vigentes.values()}
+        if plan_ids:
+            planes = {
+                p.id: p for p in db.query(Plan).filter(Plan.id.in_(plan_ids)).all()
+            }
+
+        ultimas = {
+            fila[0]: fila[1]
+            for fila in db.query(
+                Asistencia.usuario_id, func.max(Asistencia.fecha)
+            ).filter(
+                Asistencia.tenant_id == tenant_id,
+                Asistencia.usuario_id.in_(ids),
+            ).group_by(Asistencia.usuario_id).all()
+        }
+
+    return [
+        {
+            "id": u.id,
+            "nombre": u.nombre,
+            "correo": u.correo,
+            "telefono": u.telefono,
+            "rol": u.rol,
+            "activo": u.activo,
+            "estado": u.estado,
+            "fechaRegistro": u.created_at,
+            "membresia": _resumen_membresia(
+                vigentes.get(u.id),
+                planes.get(vigentes[u.id].plan_id) if u.id in vigentes else None,
+            ),
+            "ultima_asistencia": ultimas.get(u.id),
+        }
+        for u in usuarios
+    ]
+
+
 @router.get("/", response_model=List[UsuarioListItem])
 def listar_usuarios(
     response: Response,
@@ -268,6 +356,10 @@ def listar_usuarios(
     estado: Optional[str] = Query(
         None, description="Filtra por estado: activo | pendiente_activacion | "
                           "rechazado | baja"),
+    con_membresia: bool = Query(
+        False, description="Agrega `membresia` (plan, cupo, vencimiento) y "
+                           "`ultima_asistencia` a cada fila. Default false: los "
+                           "listados existentes no cambian ni pagan consultas extra."),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
@@ -309,6 +401,12 @@ def listar_usuarios(
     # order_by(id): sin un orden estable, la paginación puede repetir/saltear filas.
     usuarios = query.order_by(Usuario.id).offset(skip).limit(limit).all()
     response.headers["X-Total-Count"] = str(total)
+
+    # Buscador móvil (<768px): la ficha rápida necesita plan, vencimiento, créditos y
+    # última visita. Se pide explícitamente para no cambiar (ni encarecer) el listado
+    # que ya consumen Alumnos, Coaches y el selector de clases.
+    if con_membresia:
+        return _items_con_membresia(db, tenant_id, usuarios)
 
     return usuarios
 
