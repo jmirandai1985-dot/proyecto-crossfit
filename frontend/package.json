@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "capturas": "node scripts/capturas-fidelizacion.mjs",
     "test:click": "node scripts/click-test.mjs",
     "test:reservas": "node scripts/test-estado-reserva.mjs",
     "test:filtro": "node scripts/test-filtro-disciplina.mjs",
@@ -19,6 +20,7 @@
     "test:aviso": "node scripts/test-aviso-preview.mjs",
     "test:bazar": "node scripts/test-bazar-pestanas.mjs",
     "test:entrega": "node scripts/test-entrega-movil.mjs",
+    "test:fidelizacion": "node scripts/test-fidelizacion-movil.mjs",
     "test:menu": "node scripts/test-menu.mjs"
   },
   "dependencies": {
