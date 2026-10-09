@@ -60,8 +60,10 @@ export const MENU_BY_ROL = {
         // ── ANÁLISIS ──
         { type: 'section', label: 'ANÁLISIS' },
         { label: 'Fidelización', path: '/admin/fidelizacion', icon: 'heart' },
-        { label: 'KPIs', path: '/admin/kpis', icon: 'trendingUp' },
-        { label: 'Reportes', path: '/admin/reportes', icon: 'fileText' },
+        // `tag` = marca para el menú MÓVIL (<768px): la pantalla se ve mejor en PC.
+        // No bloquea el acceso, solo avisa (y en ≥768px la barra lateral queda igual).
+        { label: 'KPIs', path: '/admin/kpis', icon: 'trendingUp', tag: 'mejor en PC' },
+        { label: 'Reportes', path: '/admin/reportes', icon: 'fileText', tag: 'mejor en PC' },
 
         // ── SISTEMA ──
         { type: 'section', label: 'SISTEMA' },

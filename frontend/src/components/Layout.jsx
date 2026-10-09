@@ -153,6 +153,14 @@ const Layout = ({ children }) => {
                                     {MENU_ICONS[item.icon]}
                                 </span>
                                 {sidebarOpen && <span>{item.label}</span>}
+                                {/* Aviso "mejor en PC" (mockup del admin móvil): SOLO en el
+                                    menú de <768px (`md:hidden`), así la barra lateral del
+                                    escritorio queda exactamente igual. No bloquea el acceso. */}
+                                {item.tag && sidebarOpen && (
+                                    <span className="md:hidden ml-auto whitespace-nowrap rounded-full border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-500">
+                                        {item.tag}
+                                    </span>
+                                )}
                             </Link>
                             {/* Coach sub-tabs under Dashboard */}
                             {rol === 'coach' && item.label === 'Dashboard' && sidebarOpen && isCoachDashboard && (

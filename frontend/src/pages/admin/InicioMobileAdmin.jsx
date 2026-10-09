@@ -6,7 +6,12 @@ import api from '../../services/api';
 // ≥768px y Pendientes). Sin él, la URL pública /static/uploads/... no sirve.
 import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
 // Hora de CHILE (el navegador puede estar en otra zona) para el reloj y la franja actual.
-import { horaChileStr } from '../../utils/fecha';
+import { horaChileStr, hoyChileStr } from '../../utils/fecha';
+// Cupo de créditos del alumno: la MISMA regla que el resto del panel (ilimitado -> ∞,
+// cupo sin cargar -> —, número -> el número).
+import { rotuloCreditos } from '../../utils/rotuloCreditos';
+// Enlace de contacto del alumno: wa.me armado desde el teléfono cargado (o nada).
+import { enlaceWhatsapp } from '../../utils/whatsapp';
 // Corte por franjas de "Asistencia de hoy" (cálculo puro, con test aislado propio).
 import {
     FRANJAS, agruparPorFranja, franjaActual, resumenFranja,
@@ -65,6 +70,45 @@ const haceCuanto = (valor) => {
 
 /** "05" desde 5 (para el rango "05:00 a 12:00" del mockup). */
 const dosDigitos = (n) => String(n).padStart(2, '0');
+
+/** Iniciales del avatar ("Camila Soto" -> "CS"), máximo 2 letras. */
+const iniciales = (nombre) => {
+    const palabras = String(nombre || '').trim().split(/\s+/).filter(Boolean);
+    if (!palabras.length) return '?';
+    if (palabras.length === 1) return palabras[0].charAt(0).toUpperCase();
+    return (palabras[0].charAt(0) + palabras[palabras.length - 1].charAt(0)).toUpperCase();
+};
+
+/** Píldora de estado del alumno en la ficha rápida (plan y días que le quedan). */
+const estadoAlumno = (membresia) => {
+    if (!membresia) return { clase: 'bad', texto: 'Sin plan' };
+    const dias = membresia.dias_restantes;
+    if (dias === null || dias === undefined) return { clase: 'warn', texto: 'Sin vencimiento' };
+    if (dias <= 0) return { clase: 'bad', texto: 'Vence hoy' };
+    if (dias <= 5) return { clase: 'warn', texto: `Vence en ${dias} d` };
+    return { clase: 'ok', texto: 'Al día' };
+};
+
+/** "31 oct" del vencimiento (o "—" si no hay dato). */
+const fechaVencimiento = (valor) => {
+    if (!valor) return '—';
+    const d = new Date(valor);
+    if (isNaN(d.getTime())) return '—';
+    return new Intl.DateTimeFormat('es-CL', {
+        timeZone: 'America/Santiago', day: 'numeric', month: 'short',
+    }).format(d).replace('.', '');
+};
+
+/** "hoy" / "ayer" / "hace 18 d" de la última asistencia (fecha del día chileno). */
+const ultimaVisita = (fecha) => {
+    const dia = fecha ? String(fecha).slice(0, 10) : '';
+    if (!dia) return '—';
+    const dias = Math.round((Date.parse(hoyChileStr()) - Date.parse(dia)) / 86400000);
+    if (!isFinite(dias) || dias < 0) return '—';
+    if (dias === 0) return 'hoy';
+    if (dias === 1) return 'ayer';
+    return `hace ${dias} d`;
+};
 
 /**
  * Tarjeta KPI. Regla del panel: si el endpoint falló se muestra "s/d" + el motivo
@@ -246,6 +290,41 @@ const InicioMobileAdmin = () => {
     const resumen = resumenFranja(visibles);
     const indiceCursando = franjaActiva === franjaReloj ? claseEnCurso(visibles, ahora) : -1;
 
+    // ── E. Buscador de alumnos (ficha rápida) ───────────────────────────────
+    const [buscador, setBuscador] = useState(false);
+    const [consulta, setConsulta] = useState('');
+    const [resultados, setResultados] = useState([]);
+    const [buscando, setBuscando] = useState(false);
+    const [errorBusqueda, setErrorBusqueda] = useState('');
+
+    // Búsqueda con retardo (350 ms): no se dispara una consulta por cada tecla. Se pide
+    // `con_membresia=true` para que el MISMO listado de Alumnos traiga plan, vencimiento,
+    // créditos y última visita (extras opt-in: el resto del panel no los paga).
+    useEffect(() => {
+        const texto = consulta.trim();
+        if (!buscador || texto.length < 2) {
+            setResultados([]);
+            setBuscando(false);
+            setErrorBusqueda('');
+            return undefined;
+        }
+        setBuscando(true);
+        const t = setTimeout(async () => {
+            try {
+                const res = await api.get('/api/v1/usuarios/', {
+                    params: { rol: 'alumno', buscar: texto, limit: 20, con_membresia: true },
+                });
+                setResultados(Array.isArray(res.data) ? res.data : []);
+                setErrorBusqueda('');
+            } catch (err) {
+                setResultados([]);
+                setErrorBusqueda(err.response?.data?.detail || 'No se pudo buscar alumnos');
+            }
+            setBuscando(false);
+        }, 350);
+        return () => clearTimeout(t);
+    }, [consulta, buscador]);
+
     const avisar = (texto, error = false) => {
         setToast({ texto, error });
         setTimeout(() => setToast(null), 2600);
@@ -350,8 +429,15 @@ const InicioMobileAdmin = () => {
         setAmpliado(false);
         setMotivoRechazo('');
     };
-    // Buscador: abre la pantalla de Alumnos que ya existe (bloque E lo trae acá).
-    const abrirBuscador = () => navigate('/admin/alumnos');
+    // Buscador: pantalla completa con ficha rápida (sin salir del Inicio).
+    const abrirBuscador = () => {
+        setBuscador(true);
+        setErrorBusqueda('');
+    };
+    const cerrarBuscador = () => {
+        setBuscador(false);
+        setConsulta('');
+    };
 
     return (
         <div className="ub-admin" data-testid="admin-inicio-movil">
@@ -669,6 +755,88 @@ const InicioMobileAdmin = () => {
 
             {toast && (
                 <div className={`toast${toast.error ? ' error' : ''}`} role="status">{toast.texto}</div>
+            )}
+
+            {/* ── Pantalla completa: buscador de alumnos (E) ─────────────── */}
+            {buscador && (
+                <section className="screen" aria-label="Buscar alumno">
+                    <div className="s-head">
+                        <button type="button" className="icon-btn" onClick={cerrarBuscador}
+                            aria-label="Volver">←</button>
+                        <label className="search">
+                            <Icono nombre="search" />
+                            <input type="search" autoFocus value={consulta}
+                                onChange={(e) => setConsulta(e.target.value)}
+                                placeholder="Nombre o correo del alumno"
+                                aria-label="Buscar alumno" />
+                        </label>
+                    </div>
+
+                    <div className="results">
+                        {errorBusqueda ? (
+                            <p className="empty-line" role="alert">⚠️ {errorBusqueda}</p>
+                        ) : consulta.trim().length < 2 ? (
+                            <p className="hint">
+                                Escribe al menos 2 letras del nombre o del correo.
+                            </p>
+                        ) : buscando ? (
+                            <p className="hint">Buscando…</p>
+                        ) : resultados.length === 0 ? (
+                            <p className="hint">Sin resultados para «{consulta.trim()}».</p>
+                        ) : (
+                            resultados.map((a) => {
+                                const m = a.membresia || null;
+                                const est = estadoAlumno(m);
+                                const wa = enlaceWhatsapp(
+                                    a.telefono,
+                                    `Hola ${String(a.nombre || '').split(' ')[0]}, te escribo de Urban Box.`,
+                                );
+                                return (
+                                    <article className="student" key={a.id}>
+                                        <div className="st-top">
+                                            <span className="avatar">{iniciales(a.nombre)}</span>
+                                            <div style={{ minWidth: 0 }}>
+                                                <div className="st-name">{a.nombre}</div>
+                                                <div className="st-plan">
+                                                    {m?.plan_nombre || 'Sin plan activo'}
+                                                </div>
+                                            </div>
+                                            <span className={`state ${est.clase}`}>{est.texto}</span>
+                                        </div>
+                                        <div className="st-grid">
+                                            <div>
+                                                <small>Vence</small>
+                                                <b>{fechaVencimiento(m?.fecha_expiracion)}</b>
+                                            </div>
+                                            <div>
+                                                <small>Créditos</small>
+                                                <b>{rotuloCreditos(m?.es_ilimitado, m?.creditos_disponibles)}</b>
+                                            </div>
+                                            <div>
+                                                <small>Última</small>
+                                                <b>{ultimaVisita(a.ultima_asistencia)}</b>
+                                            </div>
+                                        </div>
+                                        <div className={`st-actions${wa ? '' : ' una'}`}>
+                                            {/* Sin teléfono cargado el botón NO se dibuja
+                                                (no hay a dónde mandar el WhatsApp). */}
+                                            {wa && (
+                                                <a className="btn wa wa-link" href={wa}
+                                                    target="_blank" rel="noreferrer">
+                                                    WhatsApp
+                                                </a>
+                                            )}
+                                            <button type="button" className="btn soft"
+                                                onClick={() => navigate(`/admin/alumnos/${a.id}/historial`)}>
+                                                Ver perfil
+                                            </button>
+                                        </div>
+                                    </article>
+                                );
+                            })
+                        )}
+                    </div>
+                </section>
             )}
         </div>
     );
