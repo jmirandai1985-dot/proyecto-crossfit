@@ -17,7 +17,7 @@
 import { textoProducto } from './pedidosEntrega.js';
 
 /** Sin código no hay nada que validar (el botón no puede quedar "activo" en vacío). */
-export const MSG_CODIGO_REQUERIDO = 'Escribí el código que el alumno te muestra.';
+export const MSG_CODIGO_REQUERIDO = 'Escribe el código que el alumno te muestra.';
 
 /** ¿Hay algo escrito para validar? Sólo espacios NO alcanza. */
 export const puedeValidar = (codigo) => String(codigo ?? '').trim().length > 0;
