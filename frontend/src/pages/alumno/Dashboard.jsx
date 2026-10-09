@@ -5,6 +5,9 @@ import api from '../../services/api';
 // TZ Chile: "hoy" y el calendario de la semana salen de utils/fecha.js (el navegador
 // puede estar en otra zona: con la fecha local, entre 20:00 y 23:59 CLT ya era mañana).
 import { hoyChileStr, fechaSolaAInstante } from '../../utils/fecha';
+// Rótulo del cupo de créditos (NULL = cupo desconocido, nunca en blanco): una
+// sola regla para esta tarjeta y el Inicio móvil.
+import { rotuloCupo } from '../../utils/rotuloCreditos';
 // Inicio móvil (<768px): réplica del mockup urban-box-inicio-pulido-1.
 import InicioMobile from './InicioMobile';
 
@@ -380,8 +383,10 @@ const AlumnoDashboard = () => {
                                             {membresia.plan_nombre}
                                         </span>
                                     )}
+                                    {/* El cupo puede venir en NULL (plan con cupo
+                                        sin cargar): se pinta "—", no un hueco. */}
                                     <p className="text-2xl font-bold text-gray-800">
-                                        {membresia.es_ilimitado ? '♾️' : membresia.clases_disponibles}
+                                        {membresia.es_ilimitado ? '♾️' : rotuloCupo(membresia.clases_disponibles)}
                                     </p>
                                     <p className="text-[10px] text-gray-400">
                                         {membresia.es_ilimitado ? 'Plan Ilimitado' : `Vence en ${membresia.dias_restantes} día(s)`}

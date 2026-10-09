@@ -136,13 +136,17 @@ def test_ya_no_queda_ningun_centinela_en_el_archivo():
     assert "16 if" not in fuente and "else 999" not in fuente
 
 
-def test_el_front_rotula_infinito_o_guion_con_el_dato_crudo():
-    """El rótulo lo decide el front con el valor crudo: "∞" (ilimitado) o "—" (cupo NULL).
+def test_el_front_consume_la_fuente_unica_del_rotulo():
+    """El rótulo no se reimplementa en el front: sale de `utils/rotuloCreditos.js`.
 
-    Con NULL en un plan CON cupo tampoco se inventa un 0: `Number(null) || 0` daba
-    "0 créditos" y el plan sí tenía clases cargadas en `planes.creditos`.
+    Con NULL en un plan CON cupo no se inventa un 0: `Number(null) || 0` daba
+    "0 créditos" y el plan sí tenía clases cargadas en `planes.creditos`. Los
+    casos del rótulo (NULL, 0 real, ilimitado) están en
+    `frontend/scripts/test-rotulo-creditos.mjs` y el consumo en las dos pantallas
+    en `tests/test_dashboard_creditos_null_front.py`.
     """
-    fuente = (RAIZ / "frontend" / "src" / "pages" / "alumno" / "InicioMobile.jsx") \
+    inicio = (RAIZ / "frontend" / "src" / "pages" / "alumno" / "InicioMobile.jsx") \
         .read_text(encoding="utf-8")
-    assert "const cupoDesconocido = membresia?.clases_disponibles === null" in fuente
-    assert "const creditosTxt = ilimitado ? '∞' : cupoDesconocido ? '—' : String(creditos);" in fuente
+    assert "import { rotuloCreditos } from '../../utils/rotuloCreditos';" in inicio
+    assert "const creditosTxt = rotuloCreditos(ilimitado, activa ? membresia?.clases_disponibles : 0);" in inicio
+    assert "cupoDesconocido" not in inicio, "la regla ya no se copia en la pantalla"

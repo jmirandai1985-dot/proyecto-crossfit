@@ -13,6 +13,9 @@ import EscanerQR from '../../components/EscanerQR';
 import FiltroDisciplina from '../../components/FiltroDisciplina';
 import { useFiltroDisciplina } from '../../hooks/useFiltroDisciplina';
 import { CLAVE_FILTRO_INICIO, filtrarPorDisciplina } from '../../utils/filtroDisciplina';
+// Rótulo del cupo de créditos ("∞"/"—"): la MISMA regla que la tarjeta del
+// Dashboard (≥768px), para que las dos pantallas no puedan divergir.
+import { rotuloCreditos } from '../../utils/rotuloCreditos';
 // Estilos del "Inicio" móvil (mockup urban-box-inicio-pulido-1), acotados a
 // `.ub-inicio`. Se construye por bloques; este archivo crece bloque a bloque.
 import './inicioMobile.css';
@@ -222,13 +225,12 @@ const InicioMobile = ({
         : 'Completa un mes al 100% para iniciar tu racha';
 
     // ── Bloque "Plan y créditos" ──
-    // "∞" con plan ilimitado (la fila puede venir en NULL: así están las
-    // suscripciones ilimitadas de PROD) y "—" si el cupo no está cargado (NULL en
-    // un plan CON cupo). Es el mismo rótulo que usan el Historial del alumno y la
-    // ficha del coach; nunca un 0 inventado, porque NULL no significa "sin créditos".
-    const cupoDesconocido = membresia?.clases_disponibles === null
-        || membresia?.clases_disponibles === undefined;
-    const creditosTxt = ilimitado ? '∞' : cupoDesconocido ? '—' : String(creditos);
+    // El rótulo del cupo es FUENTE ÚNICA (utils/rotuloCreditos.js): "∞" con plan
+    // ilimitado y "—" si el cupo no está cargado (la fila puede venir en NULL: así
+    // están las suscripciones ilimitadas de PROD). Nunca un 0 inventado, porque
+    // NULL no significa "sin créditos". Sin plan activo el cupo vigente es 0 REAL
+    // (el endpoint devuelve 0, no NULL, cuando no hay suscripción vigente).
+    const creditosTxt = rotuloCreditos(ilimitado, activa ? membresia?.clases_disponibles : 0);
     const venceFmt = fechaLargaCortaChile(membresia?.fecha_vencimiento);
     const expTexto = !activa ? 'Sin plan activo'
         : diasRestantes > 0 ? (venceFmt ? `Vence el ${venceFmt}` : 'Plan activo')
