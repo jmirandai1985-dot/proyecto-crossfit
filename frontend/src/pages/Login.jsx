@@ -81,7 +81,7 @@ const Login = () => {
             className="relative min-h-screen flex items-center justify-center p-4"
             style={{
                 backgroundImage:
-                    "linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.6)), url(/imgs/portada.png)",
+                    "linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.6)), url(/imgs/portada.webp)",
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
                 backgroundAttachment: 'fixed',

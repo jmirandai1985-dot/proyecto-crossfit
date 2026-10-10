@@ -286,15 +286,15 @@ const Layout = ({ children }) => {
                     {location.pathname.endsWith('/dashboard') && (
                         <>
                             {rol === 'administrador' && (
-                                <img src="/imgs/silueta-gym-3.png" alt=""
+                                <img src="/imgs/silueta-gym-3.webp" alt=""
                                     className="hidden md:block pointer-events-none fixed -right-12 top-24 w-80 opacity-10 invert z-0 select-none" />
                             )}
                             {rol === 'coach' && (
-                                <img src="/imgs/silueta-gym-4.png" alt=""
+                                <img src="/imgs/silueta-gym-4.webp" alt=""
                                     className="hidden md:block pointer-events-none fixed -left-10 bottom-8 w-80 opacity-10 invert z-0 select-none" />
                             )}
                             {rol === 'alumno' && (
-                                <img src="/imgs/silueta-gym-5.png" alt=""
+                                <img src="/imgs/silueta-gym-5.webp" alt=""
                                     className="hidden md:block pointer-events-none fixed -right-10 bottom-8 w-80 opacity-10 invert z-0 select-none" />
                             )}
                         </>
