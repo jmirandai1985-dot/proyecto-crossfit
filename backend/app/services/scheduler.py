@@ -4,6 +4,7 @@ Ejecuta la lógica de generar-clases-dia a las 00:05 CLT (Chile)
 """
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from anyio import to_thread   # mismo threadpool que usa Starlette (ver _enviar_alerta)
 import pytz
 import logging
 from datetime import datetime
@@ -213,8 +214,26 @@ def _ejecutar_alerta_de_tenant(tipo: str, db, tenant_id: int):
     return getattr(alertas, nombre)(db, tenant_id=tenant_id)
 
 
-async def _enviar_alerta(tipo: str):
-    """Manda la alerta `tipo` a TODOS los tenants ACTIVOS (sin lock).
+async def _enviar_alerta(tipo: str) -> None:
+    """Manda la alerta `tipo` a TODOS los tenants ACTIVOS, en un HILO aparte.
+
+    POR QUÉ UN HILO: el envío hace consultas BLOQUEANTES a Neon y habla SMTP; los dos
+    son síncronos. Corriendo aquí mismo (hilo del event loop) el proceso quedaba
+    congelado mientras duraba: 5 alertas x N tenants = MINUTOS en los que ningún
+    usuario podía ni loguearse (Render starter: 0,5 CPU y un solo worker). Las alertas
+    de las 06:00/07:00/08:00/09:00/10:00 CLT se pisaban con la jornada de la mañana.
+
+    `to_thread.run_sync` usa el MISMO threadpool que Starlette para los endpoints
+    síncronos (`def`), cuyo tope fija `main.py`: no se agregan hilos nuevos, sólo se
+    deja de bloquear el loop. El lock (job, día) se toma en el hilo del loop ANTES de
+    esto: son dos round trips cortos, una vez al día, y así el `with` sigue cubriendo
+    el envío completo (si el lock está tomado se sale sin llegar acá).
+    """
+    await to_thread.run_sync(_enviar_alerta_bloqueante, tipo)
+
+
+def _enviar_alerta_bloqueante(tipo: str) -> None:
+    """Cuerpo real de la alerta: consultas por tenant + SMTP (corre en un hilo).
 
     Antes se ejecutaba sin `tenant_id` → siempre el box 1, así que los demás boxes no
     recibían ningún aviso. Ahora se recorre `tenants.activo=True` (igual que el cierre
@@ -322,7 +341,17 @@ async def job_cierre_mes():
         await _cierre_mes_impl()
 
 
-async def _cierre_mes_impl():
+async def _cierre_mes_impl() -> None:
+    """Cierra el MES ANTERIOR en un hilo aparte (no bloquea el event loop).
+
+    Mismo motivo que las alertas: `evaluar_mes` recorre TODOS los alumnos del box con
+    consultas bloqueantes a Neon y manda correos por SMTP. El día 1 a las 00:05 CLT
+    eso dejaba el proceso congelado mientras corría el cierre completo.
+    """
+    await to_thread.run_sync(_cierre_mes_bloqueante)
+
+
+def _cierre_mes_bloqueante() -> None:
     """Día 1 a las 00:05 CLT - cierra el MES ANTERIOR (asistencia + hitos + correos).
 
     Reemplaza el webhook de n8n `POST /api/v1/asistencia/n8n/evaluar-mes` (n8n quedó

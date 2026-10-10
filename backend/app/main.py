@@ -291,8 +291,8 @@ async def startup_event():
     try:
         from app.services.scheduler import iniciar_scheduler, set_generar_clases_callback
 
-        async def callback_generar_clases():
-            """Callback async que genera clases para HOY + 28 dÃ­as (4 semanas)"""
+        def _generar_clases_bloqueante():
+            """Genera clases para HOY + 28 dÃ­as (4 semanas)"""
             from datetime import timedelta
             from app.db.database import SessionLocal
             from app.services.generar_clases import (
@@ -312,6 +312,16 @@ async def startup_event():
                 return None
             finally:
                 db.close()
+
+        async def callback_generar_clases():
+            """Callback del scheduler: corre la generacion en un hilo aparte.
+
+            `generar_dias_incompletos` hace consultas BLOQUEANTES (Neon) para hasta 28
+            dias; en el hilo del event loop dejaba el proceso congelado mientras corria
+            el job de las 00:05 CLT. `to_thread.run_sync` usa el MISMO threadpool que
+            Starlette (el que dimensiona `main.py`).
+            """
+            return await to_thread.run_sync(_generar_clases_bloqueante)
 
         set_generar_clases_callback(callback_generar_clases)
         iniciar_scheduler()
