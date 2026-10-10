@@ -109,14 +109,25 @@ def listar_notificaciones_enviadas(
         q = q.filter(NotificacionEnviada.estado == estado)
     total = q.count()
     rows = q.order_by(NotificacionEnviada.fecha_envio.desc()).offset(skip).limit(limit).all()
+    # ── N+1 (medido 10/10/2026): antes había un SELECT por fila acá adentro ──
+    # `db.query(Usuario).filter(Usuario.id == r.alumno_id).first()` dentro del
+    # for hacía hasta `limit` (50 por defecto) consultas IDÉNTICAS de usuarios:
+    # /api/v1/notificaciones-enviadas gastaba 55 consultas por request (1 auth +
+    # 2 resumen + 1 total + 1 página + 50 usuarios). Ahora los nombres de la
+    # página entera salen en UNA sola consulta `WHERE id IN (...)` → 6.
+    # Se trae sólo (id, nombre), que es lo único que se usaba de `Usuario`.
+    ids_alumnos = {r.alumno_id for r in rows if r.alumno_id}
+    nombres = {}
+    if ids_alumnos:
+        nombres = dict(db.query(Usuario.id, Usuario.nombre).filter(
+            Usuario.id.in_(ids_alumnos)).all())
     result = []
     for r in rows:
-        alumno = (db.query(Usuario).filter(Usuario.id == r.alumno_id).first()
-                  if r.alumno_id else None)
-        # FIX cobertura: hay filas cuyo destinatario es el admin del box o un lead
-        # (alumno_id NULL). Se muestra el destinatario real en vez de "Alumno #None".
-        if alumno:
-            nombre = alumno.nombre
+        # `in nombres` (y no truthiness del valor): si la fila del alumno existe
+        # pero su `nombre` es NULL, antes se respondía ese NULL y NO se caía al
+        # destinatario_*. El orden de los fallbacks queda igual que antes.
+        if r.alumno_id in nombres:
+            nombre = nombres[r.alumno_id]
         elif r.destinatario_nombre or r.destinatario_correo:
             nombre = r.destinatario_nombre or r.destinatario_correo
         elif r.alumno_id:
