@@ -24,6 +24,25 @@ Dos cerrojos con `pg_try_advisory_lock` (NUNCA bloquean; devuelven True/False):
 
 Sin Postgres (tests con `--noconftest`) todo esto se puede doblar: el único punto
 de contacto con la BD es `_nueva_conexion()`.
+
+CAST y no `::tipo` (bug real, 2026-10)
+--------------------------------------
+Los cuatro statements usan `CAST(:x AS tipo)` y NO `:x::tipo` porque SQLAlchemy
+(2.0.25, la versión fijada en requirements) NO reconoce un bind pegado a un cast de
+Postgres: `:clave::bigint` se parsea como el parámetro `clav` y `:k::int, :d::int`
+como NINGUNO, así que el statement viajaba crudo a Postgres →
+`(psycopg2.errors.SyntaxError) syntax error at or near ":"`.
+
+Consecuencias MEDIDAS con eso:
+  · `tomar_lock_lider()` devolvía False SIEMPRE → todas las instancias quedaban en
+    standby y el scheduler NO programaba ningún job (ni las 5 alertas, ni la
+    generación diaria, ni el cierre de mes). El log mentía: decía "otra instancia ya
+    es la líder".
+  · en `lock_de_job`, el SyntaxError caía en el fail-open (`adquirido = True`), así
+    que el cerrojo (job, día) NUNCA bloqueaba: exactamente el escenario de los
+    correos duplicados del 26/09 que este módulo vino a resolver.
+Lo vigila `tests/test_scheduler_lock_sql.py` (unitario) y
+`tests/test_scheduler_lock_integracion.py` (contra TEST, de verdad).
 """
 import logging
 from contextlib import contextmanager
@@ -86,7 +105,7 @@ def tomar_lock_lider() -> bool:
         return False
     try:
         obtenido = bool(conn.execute(
-            text("SELECT pg_try_advisory_lock(:clave::bigint)"),
+            text("SELECT pg_try_advisory_lock(CAST(:clave AS bigint))"),
             {"clave": CLAVE_LIDER}).scalar())
     except Exception as e:
         logger.warning(f"[scheduler-lock] pg_try_advisory_lock(líder) falló: {e}")
@@ -113,7 +132,7 @@ def soltar_lock_lider() -> None:
         return
     conn, _conexion_lider = _conexion_lider, None
     try:
-        conn.execute(text("SELECT pg_advisory_unlock(:clave::bigint)"),
+        conn.execute(text("SELECT pg_advisory_unlock(CAST(:clave AS bigint))"),
                      {"clave": CLAVE_LIDER})
     except Exception:
         pass
@@ -158,7 +177,7 @@ def lock_de_job(job_id: str, dia=None, conexion=None):
                 return
         try:
             adquirido = bool(conn.execute(
-                text("SELECT pg_try_advisory_lock(:k::int, :d::int)"),
+                text("SELECT pg_try_advisory_lock(CAST(:k AS int), CAST(:d AS int))"),
                 {"k": clave, "d": clave2}).scalar())
         except Exception as e:
             logger.warning(
@@ -168,8 +187,9 @@ def lock_de_job(job_id: str, dia=None, conexion=None):
     finally:
         if adquirido and conn is not None:
             try:
-                conn.execute(text("SELECT pg_advisory_unlock(:k::int, :d::int)"),
-                             {"k": clave, "d": clave2})
+                conn.execute(
+                    text("SELECT pg_advisory_unlock(CAST(:k AS int), CAST(:d AS int))"),
+                    {"k": clave, "d": clave2})
             except Exception:
                 pass
         if propia and conn is not None:
