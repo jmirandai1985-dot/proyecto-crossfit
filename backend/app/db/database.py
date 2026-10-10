@@ -9,8 +9,23 @@ from sqlalchemy.pool import QueuePool
 from app.core.config import settings
 
 # Motor de base de datos
-# Pool amplio para soportar carga concurrente (tests k6 / producción):
-# pool_size=50 + max_overflow=100 => hasta 150 conexiones activas.
+# Pool DIMENSIONADO POR MEDICIÓN (2026-10), no por la teoría:
+# pool_size=10 + max_overflow=5 => 15 conexiones como tope por worker.
+#   · ANTES era pool_size=50 + max_overflow=100 (=150). El número salía del tope del
+#     threadpool de anyio que fija `main.py` (`total_tokens = 150`): "1 conexión por
+#     cada hilo posible". Pero eso es el TECHO TEÓRICO, no la concurrencia real:
+#     medido contra TEST con la app real (1 worker, como Render), un endpoint pesado
+#     (GET /api/v1/dashboard/1) sostenido por 12 clientes concurrentes usó un pico de
+#     11 conexiones, y con 30 clientes concurrentes el pico fue 14 — con 0 errores de
+#     pool en el log. 150 era capacidad muerta: en Neon cada conexión idle ocupa un
+#     slot del pooler y, si el proceso muere, deja conexiones colgadas.
+#   · Con 0,5 CPU (plan starter) el límite real es la CPU/BD, no el pool: sostener 150
+#     conexiones no aporta throughput, sólo presión sobre Neon.
+#   · RIESGO ACEPTADO Y VIGILADO: si algún día hay >15 requests BLOQUEADOS a la vez
+#     durante más de pool_timeout, el checkout falla con TimeoutError (500). Se deja
+#     `pool_timeout=10` para que falle rápido y visible, y el sondeo de carga queda
+#     documentado (ver tests/test_db_pool_config.py). La palanca si aparece es
+#     `max_overflow`, no volver a 150.
 # DECISIÓN (actualizada): pool_pre_ping=True + pool_recycle=300.
 #   - pool_pre_ping=True (estaba en False, ver abajo): la URL de runtime es el host
 #     CON "-pooler" (Neon/pgbouncer en modo transacción) y ese pooler cierra las
@@ -28,7 +43,7 @@ from app.core.config import settings
 #     60 a 10 s. Era un costo de SATURACIÓN (latencia bajo 150 conexiones), no de
 #     correctitud; apagado, el precio es servir conexiones muertas en producción.
 #     Si una corrida de k6 vuelve a mostrar TimeoutError de checkout, la palanca es
-#     el pool (pool_size / pool_timeout) o correr la prueba sin "-pooler", NO
+#     el pool (pool_size / max_overflow) o correr la prueba sin "-pooler", NO
 #     volver a apagar pre_ping en runtime.
 #   - pool_recycle=300 (5 min) complementa: recicla por tiempo las conexiones
 #     tranquilas para que el ping casi nunca encuentre una muerta.
@@ -40,8 +55,8 @@ from app.core.config import settings
 engine = create_engine(
     settings.DATABASE_URL,
     poolclass=QueuePool,
-    pool_size=50,
-    max_overflow=100,
+    pool_size=10,
+    max_overflow=5,
     pool_timeout=10,
     pool_pre_ping=True,
     pool_recycle=300,

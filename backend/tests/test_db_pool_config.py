@@ -32,6 +32,32 @@ def test_el_reciclado_por_tiempo_sigue_activo():
     assert engine.pool._recycle == 300
 
 
+def test_el_pool_no_esta_sobredimensionado():
+    """Tope chico y MEDIDO: 10 + 5 = 15 por worker (antes 50 + 100 = 150).
+
+    El sondeo con la app real dando servicio (1 worker, como Render) mostró un pico de
+    11 conexiones con 12 clientes concurrentes sobre GET /api/v1/dashboard/1 y de 14
+    con 30 clientes, sin ningún error de pool. Con 0,5 CPU no hay throughput que
+    justifique 150 y cada conexión idle ocupa un slot del pooler de Neon.
+    """
+    assert engine.pool._pool.maxsize == 10
+    assert engine.pool._max_overflow == 5
+
+
+def test_el_pool_timeout_sigue_corto():
+    """Si el pool se queda corto, que falle RÁPIDO y visible (no colgar 60s)."""
+    assert engine.pool._timeout == 10
+
+
+def test_la_razon_del_tamano_sigue_escrita():
+    """El comentario guarda la medición; sin ella, alguien lo vuelve a subir 'por las dudas'."""
+    fuente = _fuente()
+    assert "pool_size=10" in fuente
+    assert "max_overflow=5" in fuente
+    assert "pico" in fuente
+    assert "clientes concurrentes" in fuente
+
+
 def test_la_razon_de_la_decision_sigue_escrita():
     """El comentario del módulo es la única memoria de por qué no vuelve a False."""
     fuente = _fuente()
