@@ -49,9 +49,28 @@ if settings.SENTRY_DSN:
 else:
     logger.warning("SENTRY_DSN no configurado: los errores solo van al log local")
 
-# ── Aumentar threadpool de Starlette/FastAPI (default: 40 tokens) ──
-# Necesario para soportar carga concurrente alta (tests k6: 500 logins).
-# Los endpoints `def` (síncronos) se ejecutan en este pool de hilos.
+# ── Threadpool de Starlette/FastAPI (default: 40 tokens) ──
+# Los endpoints `def` (síncronos) corren en este pool, así que este número es el
+# techo de peticiones simultáneas del proceso. Estaba en 150 con la justificación
+# "1 hilo por cada conexión posible del pool de BD" (cuando el pool era 50+100).
+# Con el pool medido en 10+5 (15 conexiones) ese argumento ya no aplica, pero
+# BAJARLO NO SE SOSTIENE por medición (k6 500 logins concurrentes contra TEST,
+# 1 worker, 10/10/2026, cada usuario = 1 IP por X-Forwarded-For):
+#
+#   total_tokens   logins OK / 500   p50 de los que SÍ entraron
+#        150             89                    9,4 s
+#         60             49                    7,0 s
+#         40              2                    6,4 s
+#        60 (+ pool 20+10 en vez de 10+5)      151
+#
+# Es decir: con menos hilos entran MENOS usuarios en la ráfaga (el techo lo pone
+# la BD —15 conexiones retenidas durante el bcrypt del login—, no este número), y
+# la palanca para esa ráfaga es el POOL, no los hilos. En la banda realista
+# (12 y 30 clientes concurrentes contra /api/v1/dashboard/1) 40/60 y 150 dan lo
+# mismo dentro del ruido de Neon: p50 10-13 s y 32-39 s, 0 errores de pool, mismo
+# pico de conexiones en uso (11-14). Por eso queda en 150.
+# El test k6 de 500 logins NO pasa en ninguno de esos valores (ni pasaba antes de
+# tocar esto: lo que lo puso en rojo fue bajar el pool a 10+5, ver database.py).
 # Se aplica en el startup event porque current_default_thread_limiter()
 # requiere un event loop asyncio activo (no existe al momento del import).
 from anyio import to_thread
