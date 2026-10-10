@@ -16,6 +16,7 @@ import {
     MAX_MOTIVO_CERRADO, SIN_MOTIVO, alternarTarjeta, estaAbierta,
     motivoCorto, probabilidadTexto, resumenCerrado, textoRecomendacion, detalleAbierto,
 } from '../src/utils/fidelizacionMovil.js';
+import { readFileSync } from 'node:fs';
 
 let fallos = 0;
 const eq = (obtenido, esperado, msg) => {
@@ -116,6 +117,44 @@ eq(textoRecomendacion(null).encabezado, 'Sin correo que mandar', 'sin correo lo 
 eq(textoRecomendacion(null).principal, SIN_MOTIVO, 'y no queda en blanco');
 eq(resumenCerrado({ usuario_id: 99 }).nombre, 'Alumno #99', 'sin nombre cae al id (como la tabla)');
 eq(detalleAbierto({ usuario_id: 99 }, null).motivo, SIN_MOTIVO, 'sin motivo tampoco queda vacío');
+
+// ── E. Cada fila es una TARJETA con marco propio (y >=768px no cambia) ───────
+// Antes las filas eran texto suelto dentro de un único panel `bg-zinc-900` separadas
+// por `divide-y`: no había marco por alumno. Guard de FUENTE (sin DOM): lee el
+// componente, su CSS y la pantalla que lo monta y exige los cuatro ingredientes de
+// "tarjeta" + la regla de oro (>=768px igual que hoy).
+console.log('E. Tarjeta con marco propio (regla de oro >=768px intacta)');
+const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+const jsx = leer('../src/pages/admin/FidelizacionMovil.jsx');
+const cssFid = leer('../src/pages/admin/fidelizacionMovil.css');
+const pagina = leer('../src/pages/admin/Fidelizacion.jsx');
+
+ok(jsx.includes("import './fidelizacionMovil.css'"), 'el componente trae su CSS de tarjeta');
+ok(jsx.includes('ub-fid-card'), 'cada fila lleva la clase de tarjeta (ub-fid-card)');
+ok(!jsx.includes('bg-zinc-900'), 'la fila ya no se pinta como texto suelto (sin bg-zinc-900)');
+ok(!jsx.includes('divide-y'), 'sin divisores de lista: separa el gap entre tarjetas');
+// El panel abierto va DENTRO del mismo <li> (mismo marco), después de la fila.
+ok(jsx.indexOf('ub-fid-card') < jsx.indexOf('ub-fid-panel'),
+    'el panel abierto vive dentro del MISMO marco (mismo <li>)');
+ok(jsx.includes('data-abierta'), 'la tarjeta abierta se marca (borde/fondo de la activa)');
+
+// Los cuatro ingredientes del pedido, en el CSS.
+const tarjeta = cssFid.slice(cssFid.indexOf('.ub-fid .ub-fid-card {'));
+const bloque = tarjeta.slice(0, tarjeta.indexOf('}'));
+ok(/border-radius/.test(bloque), 'bordes redondeados');
+ok(/background:/.test(bloque), 'fondo propio (distinto del fondo de pantalla)');
+ok(/box-shadow/.test(bloque), 'relieve sutil (box-shadow)');
+ok(/gap: 12px/.test(cssFid), 'separación clara entre una tarjeta y la siguiente');
+ok(/radial-gradient/.test(cssFid), 'reutiliza la luz radial de las KPI del dashboard móvil');
+ok(!/^\s*\.ub-admin\b/m.test(cssFid),
+    'NO usa selectores .ub-admin (traía `button {background:none}` que apagaría los botones)');
+ok(cssFid.includes('.ub-fid-chevron'), 'el chevron tiene su clase (alineado dentro de la tarjeta)');
+
+// Regla de oro: en >=768px nada de esto se ve.
+ok(pagina.includes('md:hidden'), 'las tarjetas sólo se montan <768px (md:hidden)');
+ok(pagina.includes('hidden md:block'), 'la tabla de escritorio sigue oculta en móvil (hidden md:block)');
+ok(!/\bmd:(hidden|block|flex|grid|w-|p-|gap-)/.test(jsx),
+    'el componente móvil no usa breakpoints md: (nada se filtra a >=768px)');
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);

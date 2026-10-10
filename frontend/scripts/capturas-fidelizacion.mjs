@@ -49,6 +49,10 @@ const ALTO = Number(process.env.ALTO || 900);
 const OUT_DIR = process.env.OUT_DIR || join(AQUI, '..', '..', 'docs', 'capturas', 'fidelizacion-movil');
 const ABRIR_TARJETA = process.env.ABRIR_TARJETA !== '0';
 const PORT = Number(process.env.CDP_PORT || 9334);
+// Plazo de cada comando CDP. `Page.captureScreenshot` tarda más cuando la página es
+// larga (370 alumnos) y la primera pintura espera datos lentos: con el plazo fijo de
+// 20s la captura de 1280px abortaba. Se puede subir sin tocar el archivo.
+const CDP_TIMEOUT = Number(process.env.CDP_TIMEOUT_MS || 20000);
 
 const CANDIDATOS_EDGE = [
     process.env.EDGE_PATH,
@@ -122,8 +126,8 @@ const send = (method, params = {}, sessionId) => new Promise((res, rej) => {
     const mid = ++id;
     const timer = setTimeout(() => {
         pend.delete(mid);
-        rej(new Error(`CDP sin respuesta en 20s: ${method}`));
-    }, 20000);
+        rej(new Error(`CDP sin respuesta en ${CDP_TIMEOUT / 1000}s: ${method}`));
+    }, CDP_TIMEOUT);
     pend.set(mid, (m) => { clearTimeout(timer); res(m); });
     ws.send(JSON.stringify({ id: mid, method, params, ...(sessionId ? { sessionId } : {}) }));
 });

@@ -5,6 +5,9 @@ import { ArquetipoBadge } from '../../components/kpis/ArquetipoBadge';
 import {
     alternarTarjeta, estaAbierta, resumenCerrado, detalleAbierto,
 } from '../../utils/fidelizacionMovil';
+// Estilos de la tarjeta (reutiliza el lenguaje visual de las KPI del dashboard móvil).
+// Va scopeado bajo `.ub-fid`, así que NO toca la tabla de escritorio (>=768px).
+import './fidelizacionMovil.css';
 
 /**
  * Lista de alumnos de Fidelización como TARJETAS COMPACTAS con acordeón (móvil <768px).
@@ -26,6 +29,12 @@ import {
  *
  * La pantalla de ESCRITORIO (>=768px) no monta este componente: sigue con su tabla.
  */
+/**
+ * Clase de tinte de la tarjeta según el riesgo que ya trae el dato (CRITICO/ALTO/MEDIO).
+ * Sólo elige el color de la luz radial (`fidelizacionMovil.css`): no decide nada del dato.
+ */
+const nivelClase = (nivel) => String(nivel || '').toLowerCase().replace(/[^a-z]/g, '') || 'sin-dato';
+
 const FidelizacionMovil = ({
     alumnos, sugerencias, onVerFicha, onVerRecomendacion, onEnviarCorreo, onDarBeneficio,
 }) => {
@@ -41,13 +50,16 @@ const FidelizacionMovil = ({
     }
 
     return (
-        <ul className="divide-y divide-zinc-800" data-testid="lista-fidelizacion-movil">
+        <div className="ub-fid">
+        <ul className="ub-fid-lista" data-testid="lista-fidelizacion-movil">
             {alumnos.map((p) => {
                 const cerrado = resumenCerrado(p);
                 const abierto = estaAbierta(abierta, p.usuario_id);
                 const detalle = detalleAbierto(p, sugerencias?.[String(p.usuario_id)]);
                 return (
-                    <li key={p.usuario_id} className="fila-alumno bg-zinc-900"
+                    <li key={p.usuario_id}
+                        className={`ub-fid-card fila-alumno riesgo-${nivelClase(cerrado.riesgo_nivel)}`}
+                        data-abierta={abierto}
                         data-testid={`fila-alumno-${p.usuario_id}`}>
                         {/* Fila CERRADA. Es un <button> (no un div con onClick) para que
                             el teclado y los lectores de pantalla vean el acordeón: el
@@ -58,10 +70,10 @@ const FidelizacionMovil = ({
                             aria-expanded={abierto}
                             aria-controls={`ficha-movil-${p.usuario_id}`}
                             data-testid={`tarjeta-movil-${p.usuario_id}`}
-                            className="flex w-full items-center gap-3 px-4 py-3 text-left"
+                            className="ub-fid-cabecera"
                         >
-                            <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2">
+                            <div className="ub-fid-titulo">
+                                <div className="ub-fid-badges">
                                     <span className="truncate text-sm font-bold text-zinc-100">
                                         {cerrado.nombre}
                                     </span>
@@ -76,7 +88,7 @@ const FidelizacionMovil = ({
                                 </p>
                             </div>
                             <ChevronRight
-                                className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform ${abierto ? 'rotate-90' : ''}`}
+                                className={`ub-fid-chevron h-4 w-4 shrink-0 text-zinc-500 transition-transform ${abierto ? 'rotate-90' : ''}`}
                             />
                         </button>
                         {/* PANEL (abierto). Va FUERA del <button>: adentro no se
@@ -85,7 +97,7 @@ const FidelizacionMovil = ({
                             <div
                                 id={`ficha-movil-${p.usuario_id}`}
                                 data-testid={`detalle-movil-${p.usuario_id}`}
-                                className="space-y-3 border-t border-zinc-800 bg-zinc-800/40 px-4 py-3"
+                                className="ub-fid-panel"
                             >
                                 <div className="flex flex-wrap items-center gap-2">
                                     <ArquetipoBadge arquetipo={detalle.arquetipo} />
@@ -159,6 +171,7 @@ const FidelizacionMovil = ({
                 );
             })}
         </ul>
+        </div>
     );
 };
 

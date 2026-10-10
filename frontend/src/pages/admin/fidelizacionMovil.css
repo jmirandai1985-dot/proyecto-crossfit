@@ -1,0 +1,117 @@
+/* fidelizacionMovil.css — tarjetas compactas del panel de Fidelización móvil (<768px).
+ *
+ * POR QUÉ EXISTE: las filas vivían dentro de UN solo panel `bg-zinc-900` separadas por
+ * `divide-y divide-zinc-800`. Eso se leía como una lista de texto suelto (sin marco), no
+ * como una tarjeta por alumno: en el teléfono no se distinguía dónde empieza y termina
+ * cada uno.
+ *
+ * Reutiliza el MISMO lenguaje de tarjeta que las KPI del Dashboard admin móvil
+ * (`inicioMobileAdmin.css`: superficie propia, línea de 1px, radio xl de 20px, luz radial
+ * tenida y sombra sutil) pero SIN importar ese archivo: trae reglas globales bajo
+ * `.ub-admin` (`button { background: none }`, `svg { width: 22px }`) que apagarían los
+ * botones de acción (Enviar correo / Dar beneficio) y agrandarían sus iconos.
+ *
+ * Todo va scopeado bajo `.ub-fid` y el componente sólo se monta en <768px
+ * (`md:hidden` en `pages/admin/Fidelizacion.jsx`): en >=768px no llega ninguna de estas
+ * reglas, así que el escritorio queda EXACTAMENTE como estaba.
+ */
+
+.ub-fid {
+    /* Mismos valores que las tarjetas KPI del dashboard móvil.
+       La fila es superficie2 (#1e232c) y el panel abierto vuelve a la superficie base
+       (#161a21): así la tarjeta se despega del panel contenedor (bg-zinc-900) y el
+       contenido expandido sigue dentro del MISMO marco. */
+    --fid-surface: #1e232c;
+    --fid-surface-abierto: #161a21;
+    --fid-line: #313846;
+    --fid-text: #eceef2;
+    --fid-muted: #8d95a4;
+    --fid-r-xl: 20px;
+
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+}
+
+/* Lista sin viñetas: la separación entre tarjetas la da el gap, no un divisor. */
+.ub-fid .ub-fid-lista {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+/* ── La tarjeta ────────────────────────────────────────────────────────────── */
+.ub-fid .ub-fid-card {
+    position: relative;
+    border-radius: var(--fid-r-xl);
+    border: 1px solid var(--fid-line);
+    background: var(--fid-surface);
+    box-shadow:
+        0 1px 2px rgba(0, 0, 0, .5),
+        0 10px 24px -20px rgba(0, 0, 0, .95);
+    overflow: hidden;
+}
+
+/* Luz radial de las KPI, tenida por el nivel de riesgo de la tarjeta. */
+.ub-fid .ub-fid-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(120% 90% at 100% 0%,
+        var(--fid-tint, transparent), transparent 62%);
+}
+
+.ub-fid .ub-fid-card.riesgo-critico { --fid-tint: rgba(240, 89, 79, .17); }
+.ub-fid .ub-fid-card.riesgo-alto { --fid-tint: rgba(245, 165, 36, .15); }
+.ub-fid .ub-fid-card.riesgo-medio { --fid-tint: rgba(59, 114, 246, .13); }
+
+/* Abierta: el borde y el fondo cambian para que se vea que ESA tarjeta es la activa. */
+.ub-fid .ub-fid-card[data-abierta='true'] {
+    border-color: #46516b;
+    background: var(--fid-surface-abierto);
+}
+
+/* ── Fila cerrada (el <button> que despliega) ──────────────────────────────── */
+.ub-fid .ub-fid-cabecera {
+    position: relative;
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    text-align: left;
+}
+
+/* Chevron siempre alineado al centro de la fila y a la derecha. */
+.ub-fid .ub-fid-chevron {
+    flex: none;
+    align-self: center;
+    transition: transform .18s ease;
+}
+
+/* El badge de riesgo y el % no se encogen cuando el nombre es largo. */
+.ub-fid .ub-fid-cabecera > .ub-fid-titulo {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+.ub-fid .ub-fid-cabecera .ub-fid-badges {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* ── Panel abierto: mismo marco, un peldaño más oscuro ────────────────────── */
+.ub-fid .ub-fid-panel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    border-top: 1px solid var(--fid-line);
+    background: var(--fid-surface-abierto);
+    padding: 12px 16px;
+}
