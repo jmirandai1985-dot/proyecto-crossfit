@@ -1,26 +1,31 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import Layout from '../../components/Layout';
 import BotonVolver from '../../components/BotonVolver';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
-// H-03: categoría/valor/formato de un RM desde la fuente única (utils/rm.js).
+// Fase 2 (Bloque 1): catÃ¡logo y PRs desde la cachÃ© compartida (misma queryKey que
+// EvoluciÃ³n y Performance Hub) y las acciones como mutaciones que invalidan
+// `['historial-rm']` por sÃ­ solas.
+import {
+    useCrearRm, useEditarRm, useEliminarRm, useMovimientos, useRmsAlumno,
+} from '../../hooks/queries';
+// H-03: categorÃ­a/valor/formato de un RM desde la fuente Ãºnica (utils/rm.js).
 import { formatResultadoRM, normalizarCategoria } from '../../utils/rm';
-// TZ Chile: default del formulario = día chileno (no el del navegador).
+// TZ Chile: default del formulario = dÃ­a chileno (no el del navegador).
 import { hoyChileStr } from '../../utils/fecha';
 
 const CATEGORIA_META = {
-    fuerza: { label: 'FUERZA', icon: '🏋️', color: 'emerald', bgClass: 'bg-emerald-50', textClass: 'text-emerald-700', borderClass: 'border-emerald-200' },
-    gimnastico: { label: 'GIMNÁSTICO', icon: '🤸', color: 'blue', bgClass: 'bg-blue-50', textClass: 'text-blue-700', borderClass: 'border-blue-200' },
-    cardio: { label: 'CARDIO', icon: '🏃', color: 'purple', bgClass: 'bg-purple-50', textClass: 'text-purple-700', borderClass: 'border-purple-200' },
-    metabolico: { label: 'MÁQUINAS', icon: '⚙️', color: 'amber', bgClass: 'bg-amber-50', textClass: 'text-amber-700', borderClass: 'border-amber-200' },
+    fuerza: { label: 'FUERZA', icon: 'ðŸ‹ï¸', color: 'emerald', bgClass: 'bg-emerald-50', textClass: 'text-emerald-700', borderClass: 'border-emerald-200' },
+    gimnastico: { label: 'GIMNÃSTICO', icon: 'ðŸ¤¸', color: 'blue', bgClass: 'bg-blue-50', textClass: 'text-blue-700', borderClass: 'border-blue-200' },
+    cardio: { label: 'CARDIO', icon: 'ðŸƒ', color: 'purple', bgClass: 'bg-purple-50', textClass: 'text-purple-700', borderClass: 'border-purple-200' },
+    metabolico: { label: 'MÃQUINAS', icon: 'âš™ï¸', color: 'amber', bgClass: 'bg-amber-50', textClass: 'text-amber-700', borderClass: 'border-amber-200' },
 };
 
 const getCategoriaMeta = (cat) => CATEGORIA_META[cat] || CATEGORIA_META.fuerza;
 
-// ─── Formatear resultado según categoría y campos disponibles ───────
+// â”€â”€â”€ Formatear resultado segÃºn categorÃ­a y campos disponibles â”€â”€â”€â”€â”€â”€â”€
 const formatResultado = (rm, categoria) => formatResultadoRM(rm, categoria);
 
-// ─── N-8: ventana de edición de PRs (24 h; MISMA regla que valida el PUT) ───
+// â”€â”€â”€ N-8: ventana de ediciÃ³n de PRs (24 h; MISMA regla que valida el PUT) â”€â”€â”€
 const VENTANA_EDICION_PR_MS = 24 * 60 * 60 * 1000;
 
 // Milisegundos que le quedan al PR para ser editable (null si no hay dato).
@@ -39,8 +44,8 @@ const textoVentanaEdicion = (createdAt) => {
     return horas > 0 ? `${horas} h ${minutos} min` : `${minutos} min`;
 };
 
-// RM-01: `peso_kg` es el "valor" del RM (kg / reps / min / km según categoría).
-// Vive acá porque lo usan el alta y la edición (una sola regla).
+// RM-01: `peso_kg` es el "valor" del RM (kg / reps / min / km segÃºn categorÃ­a).
+// Vive acÃ¡ porque lo usan el alta y la ediciÃ³n (una sola regla).
 const valorDelFormRM = (form, cat) => cat === 'fuerza'
     ? (parseFloat(form.peso_kg) || 1)
     : cat === 'gimnastico'
@@ -52,10 +57,8 @@ const PizarraRMs = () => {
     const { usuario_id, tenant_id } = useAuth();
     const today = hoyChileStr();
 
-    const [loading, setLoading] = useState(true);
-    const [movimientos, setMovimientos] = useState([]);
-    const [rms, setRms] = useState([]);
     const [rmTab, setRmTab] = useState('todas');
+    // Errores de ACCIÃ“N (editar/borrar): los de CARGA se derivan de las consultas.
     const [fetchError, setFetchError] = useState('');
     const [showRMModal, setShowRMModal] = useState(false);
     const [rmForm, setRmForm] = useState({
@@ -73,45 +76,44 @@ const PizarraRMs = () => {
     const [rmSubmitting, setRmSubmitting] = useState(false);
     const [rmError, setRmError] = useState('');
     const [successMsg, setSuccessMsg] = useState('');
-    // N-8: PR que se está editando (null = el modal está en modo ALTA).
+    // N-8: PR que se estÃ¡ editando (null = el modal estÃ¡ en modo ALTA).
     const [rmEditando, setRmEditando] = useState(null);
     const [rmAccionando, setRmAccionando] = useState(false);
 
-    const fetchAll = useCallback(async () => {
-        setLoading(true);
-        setFetchError('');
-        try {
-            const [movRes, rmsRes] = await Promise.all([
-                api.get(`/api/v1/movimientos`),
-                api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/rms`)
-            ]);
-            setMovimientos(movRes.data || []);
-            const bestRMs = rmsRes.data || [];
-            const mappedRMs = bestRMs.map(r => ({
-                ...r,
-                // N-8: `id` es la fila REAL de historial_rm (el backend la expone
-                // junto a `created_at`), que es lo que permite editar/borrar el PR
-                // mostrado. El fallback queda por compatibilidad con clientes viejos.
-                id: r.id || r.movimiento_id,
-                tipo_rm: r.tipo_rm || 'peso',
-            }));
-            setRms(mappedRMs);
-        } catch (e) {
-            console.error('Error fetching RMs:', e);
-            setFetchError('No se pudieron cargar tus RMs. Verifica la conexión con el servidor e intenta de nuevo.');
-        }
-        setLoading(false);
-    }, [usuario_id]);
+    // Fase 2 (Bloque 1): mismas dos consultas que EvoluciÃ³n/Performance Hub, asÃ­ que
+    // entrar acÃ¡ ya no vuelve a pedir el catÃ¡logo ni los PRs. Las acciones son mutaciones
+    // que invalidan `['historial-rm']`, por eso ya no hay `fetchAll()` tras cada una.
+    const movimientosQ = useMovimientos();
+    const rmsQ = useRmsAlumno(usuario_id);
+    const crearRm = useCrearRm();
+    const editarRm = useEditarRm();
+    const eliminarRm = useEliminarRm();
 
-    useEffect(() => { fetchAll(); }, [fetchAll]);
+    const movimientos = React.useMemo(() => movimientosQ.data || [], [movimientosQ.data]);
+    const rms = React.useMemo(() => (rmsQ.data || []).map(r => ({
+        ...r,
+        // N-8: `id` es la fila REAL de historial_rm (el backend la expone junto a
+        // `created_at`), que es lo que permite editar/borrar el PR mostrado. El fallback
+        // queda por compatibilidad con clientes viejos.
+        id: r.id || r.movimiento_id,
+        tipo_rm: r.tipo_rm || 'peso',
+    })), [rmsQ.data]);
+
+    // "Cargando" sÃ³lo mientras NO hay dato: al volver a la pantalla se pinta la copia
+    // en cachÃ© al instante (antes cada montaje volvÃ­a a pedir todo).
+    const loading = movimientosQ.isPending || rmsQ.isPending;
+    // Error de CARGA derivado; `fetchError` queda para los errores de ACCIÃ“N.
+    const errorCarga = (movimientosQ.isError || rmsQ.isError)
+        ? 'No se pudieron cargar tus RMs. Verifica la conexiÃ³n con el servidor e intenta de nuevo.'
+        : '';
 
     const getCategoriaMovimiento = (movimientoId) => {
         const mov = movimientos.find(m => m.id === movimientoId);
-        // H-03: misma normalización que el resto de las pantallas (utils/rm.js).
+        // H-03: misma normalizaciÃ³n que el resto de las pantallas (utils/rm.js).
         return normalizarCategoria(mov?.categoria) || 'fuerza';
     };
 
-    // ─── Determinar qué campos mostrar según la categoría del movimiento seleccionado ──
+    // â”€â”€â”€ Determinar quÃ© campos mostrar segÃºn la categorÃ­a del movimiento seleccionado â”€â”€
     const categoriaSeleccionada = rmForm.movimiento_id ? getCategoriaMovimiento(Number(rmForm.movimiento_id)) : null;
 
     const handleRegistrarRM = async () => {
@@ -123,10 +125,10 @@ const PizarraRMs = () => {
                 tenant_id,
                 alumno_id: usuario_id,
                 movimiento_id: Number(rmForm.movimiento_id),
-                // RM-01: `peso_kg` es el "valor" del RM (kg / reps / min / km según la
-                // categoría, ver HistorialRMBase), así que NO se manda un 1 fijo: para
-                // gimnástico va el nº de repeticiones y para cardio/metabólico la métrica
-                // cargada. Antes, con 1 fijo, el nivel gimnástico daba siempre Principiante.
+                // RM-01: `peso_kg` es el "valor" del RM (kg / reps / min / km segÃºn la
+                // categorÃ­a, ver HistorialRMBase), asÃ­ que NO se manda un 1 fijo: para
+                // gimnÃ¡stico va el nÂº de repeticiones y para cardio/metabÃ³lico la mÃ©trica
+                // cargada. Antes, con 1 fijo, el nivel gimnÃ¡stico daba siempre Principiante.
                 peso_kg: valorDelFormRM(rmForm, cat),
                 fecha: rmForm.fecha || today,
                 notas: rmForm.notas || null,
@@ -137,11 +139,10 @@ const PizarraRMs = () => {
                 km: rmForm.km ? parseFloat(rmForm.km) : null,
                 calorias: rmForm.calorias ? parseInt(rmForm.calorias) : null,
             };
-            await api.post('/api/v1/historial-rm', payload);
+            await crearRm.mutateAsync(payload);
             setShowRMModal(false);
-            setSuccessMsg('🎉 RM registrado exitosamente!');
+            setSuccessMsg('ðŸŽ‰ RM registrado exitosamente!');
             setTimeout(() => setSuccessMsg(''), 3000);
-            fetchAll();
         } catch (err) {
             setRmError(err.response?.data?.detail || 'Error al registrar RM');
         } finally {
@@ -165,9 +166,9 @@ const PizarraRMs = () => {
         setRmError('');
     };
 
-    // ─── N-8: editar / borrar un PR PROPIO dentro de la ventana de 24 h ───
-    // La ventana la hace cumplir el backend (PUT /historial-rm/{id}); acá sólo
-    // se muestra el botón cuando el PR todavía está dentro del plazo.
+    // â”€â”€â”€ N-8: editar / borrar un PR PROPIO dentro de la ventana de 24 h â”€â”€â”€
+    // La ventana la hace cumplir el backend (PUT /historial-rm/{id}); acÃ¡ sÃ³lo
+    // se muestra el botÃ³n cuando el PR todavÃ­a estÃ¡ dentro del plazo.
     const esEditable = (rm) => {
         const restante = msRestantesDeEdicion(rm.created_at);
         return restante !== null && restante > 0;
@@ -202,7 +203,8 @@ const PizarraRMs = () => {
         setRmSubmitting(true);
         setRmError('');
         try {
-            await api.put(`/api/v1/historial-rm/${rmEditando.id}`, {
+            await editarRm.mutateAsync({
+                id: rmEditando.id,
                 peso_kg: valorDelFormRM(rmForm, cat),
                 fecha: rmForm.fecha || today,
                 notas: rmForm.notas || null,
@@ -214,11 +216,10 @@ const PizarraRMs = () => {
                 calorias: rmForm.calorias ? parseInt(rmForm.calorias) : null,
             });
             cerrarModalRM();
-            setSuccessMsg('✏️ PR actualizado');
+            setSuccessMsg('âœï¸ PR actualizado');
             setTimeout(() => setSuccessMsg(''), 3000);
-            fetchAll();
         } catch (err) {
-            // El motivo real lo da el backend (p. ej. 403 si venció la ventana).
+            // El motivo real lo da el backend (p. ej. 403 si venciÃ³ la ventana).
             setRmError(err.response?.data?.detail || 'No se pudo actualizar el PR');
         } finally {
             setRmSubmitting(false);
@@ -227,16 +228,15 @@ const PizarraRMs = () => {
 
     const handleBorrarRM = async (rm) => {
         const movName = movimientos.find(m => m.id === rm.movimiento_id)?.nombre || 'este PR';
-        if (!window.confirm(`¿Borrar tu PR de ${movName}? Esta acción no se puede deshacer.`)) {
+        if (!window.confirm(`Â¿Borrar tu PR de ${movName}? Esta acciÃ³n no se puede deshacer.`)) {
             return;
         }
         setRmAccionando(true);
         setFetchError('');
         try {
-            await api.delete(`/api/v1/historial-rm/${rm.id}`);
-            setSuccessMsg('🗑️ PR borrado');
+            await eliminarRm.mutateAsync(rm.id);
+            setSuccessMsg('ðŸ—‘ï¸ PR borrado');
             setTimeout(() => setSuccessMsg(''), 3000);
-            fetchAll();
         } catch (err) {
             console.error('No se pudo borrar el PR:', err);
             setFetchError(err.response?.data?.detail || 'No se pudo borrar el PR.');
@@ -249,7 +249,7 @@ const PizarraRMs = () => {
         ? rms
         : rms.filter(rm => getCategoriaMovimiento(rm.movimiento_id) === rmTab);
 
-    // ─── RENDER ────────────────────────────────────────────────────────
+    // â”€â”€â”€ RENDER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (loading) {
         return (
             <Layout>
@@ -272,9 +272,9 @@ const PizarraRMs = () => {
                         <BotonVolver />
                         <div>
                             <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                                💪 Pizarra de RMs
+                                ðŸ’ª Pizarra de RMs
                             </h1>
-                            <p className="text-gray-500 mt-1">Tus récords personales por movimiento</p>
+                            <p className="text-gray-500 mt-1">Tus rÃ©cords personales por movimiento</p>
                         </div>
                     </div>
                     <button
@@ -291,20 +291,20 @@ const PizarraRMs = () => {
                     </div>
                 )}
 
-                {fetchError && (
+                {(fetchError || errorCarga) && (
                     <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 font-medium text-sm">
-                        ❌ {fetchError}
+                        âŒ {fetchError || errorCarga}
                     </div>
                 )}
 
-                {/* Filtros por categoría */}
+                {/* Filtros por categorÃ­a */}
                 <div className="flex flex-wrap gap-2">
                     {[
-                        { key: 'todas', label: '📋 Todos', activeClass: 'bg-gray-600 text-white' },
-                        { key: 'fuerza', label: '🏋️ Fuerza', activeClass: 'bg-emerald-600 text-white' },
-                        { key: 'gimnastico', label: '🤸 Gimnástico', activeClass: 'bg-blue-600 text-white' },
-                        { key: 'cardio', label: '🏃 Cardio', activeClass: 'bg-purple-600 text-white' },
-                        { key: 'metabolico', label: '⚙️ Máquinas', activeClass: 'bg-amber-600 text-white' },
+                        { key: 'todas', label: 'ðŸ“‹ Todos', activeClass: 'bg-gray-600 text-white' },
+                        { key: 'fuerza', label: 'ðŸ‹ï¸ Fuerza', activeClass: 'bg-emerald-600 text-white' },
+                        { key: 'gimnastico', label: 'ðŸ¤¸ GimnÃ¡stico', activeClass: 'bg-blue-600 text-white' },
+                        { key: 'cardio', label: 'ðŸƒ Cardio', activeClass: 'bg-purple-600 text-white' },
+                        { key: 'metabolico', label: 'âš™ï¸ MÃ¡quinas', activeClass: 'bg-amber-600 text-white' },
                     ].map(t => (
                         <button
                             key={t.key}
@@ -319,9 +319,9 @@ const PizarraRMs = () => {
                     ))}
                 </div>
 
-                {/* La Pizarra del Día / Ranking */}
+                {/* La Pizarra del DÃ­a / Ranking */}
                 <div>
-                    <h2 className="text-lg font-bold text-gray-800 mb-4">📊 LA PIZARRA DEL DÍA</h2>
+                    <h2 className="text-lg font-bold text-gray-800 mb-4">ðŸ“Š LA PIZARRA DEL DÃA</h2>
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                         <div className="overflow-x-auto">
                             <table className="w-full">
@@ -339,12 +339,12 @@ const PizarraRMs = () => {
                                         rmsFiltrados.slice(0, 20).map((rm, idx) => {
                                             const cat = getCategoriaMovimiento(rm.movimiento_id);
                                             const meta = getCategoriaMeta(cat);
-                                            const movName = movimientos.find(m => m.id === rm.movimiento_id)?.nombre || '—';
+                                            const movName = movimientos.find(m => m.id === rm.movimiento_id)?.nombre || 'â€”';
                                             const valorDisplay = formatResultado(rm, cat);
                                             return (
                                                 <tr key={`${rm.id}-${idx}`} className="hover:bg-gray-50 transition-colors">
                                                     <td className="px-5 py-3.5 text-sm font-bold text-gray-400">#{idx + 1}</td>
-                                                    <td className="px-5 py-3.5 text-sm font-medium text-gray-800">Tú</td>
+                                                    <td className="px-5 py-3.5 text-sm font-medium text-gray-800">TÃº</td>
                                                     <td className="px-5 py-3.5 text-sm text-gray-600">{movName}</td>
                                                     <td className="px-5 py-3.5">
                                                         <span className={`inline-flex px-2.5 py-1 rounded-lg text-xs font-bold ${meta.bgClass} ${meta.textClass}`}>
@@ -358,9 +358,9 @@ const PizarraRMs = () => {
                                     ) : (
                                         <tr>
                                             <td colSpan="5" className="px-5 py-10 text-center">
-                                                <p className="text-4xl mb-3">💪</p>
-                                                <p className="text-gray-500 font-medium">No hay RMs registrados aún</p>
-                                                <p className="text-gray-400 text-sm mt-1">Registra tu primera marca usando el botón superior</p>
+                                                <p className="text-4xl mb-3">ðŸ’ª</p>
+                                                <p className="text-gray-500 font-medium">No hay RMs registrados aÃºn</p>
+                                                <p className="text-gray-400 text-sm mt-1">Registra tu primera marca usando el botÃ³n superior</p>
                                             </td>
                                         </tr>
                                     )}
@@ -370,13 +370,13 @@ const PizarraRMs = () => {
                     </div>
                 </div>
 
-                {/* Mi Evolución Reciente */}
+                {/* Mi EvoluciÃ³n Reciente */}
                 {rmsFiltrados.length > 0 && (
                     <div>
-                        <h2 className="text-lg font-bold text-gray-800 mb-1">📈 MI EVOLUCIÓN RECIENTE</h2>
-                        {/* N-8: la regla de las 24 h también se ve en la UI, no sólo en el backend. */}
+                        <h2 className="text-lg font-bold text-gray-800 mb-1">ðŸ“ˆ MI EVOLUCIÃ“N RECIENTE</h2>
+                        {/* N-8: la regla de las 24 h tambiÃ©n se ve en la UI, no sÃ³lo en el backend. */}
                         <p className="text-xs text-gray-500 mb-4">
-                            ✏️ Puedes editar o borrar un PR durante las 24 h posteriores a su registro.
+                            âœï¸ Puedes editar o borrar un PR durante las 24 h posteriores a su registro.
                         </p>
                         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                             <div className="overflow-x-auto">
@@ -393,17 +393,17 @@ const PizarraRMs = () => {
                                     <tbody className="divide-y divide-gray-100">
                                         {rmsFiltrados.slice(0, 15).map((rm, idx) => {
                                             const cat = getCategoriaMovimiento(rm.movimiento_id);
-                                            const movName = movimientos.find(m => m.id === rm.movimiento_id)?.nombre || '—';
+                                            const movName = movimientos.find(m => m.id === rm.movimiento_id)?.nombre || 'â€”';
                                             const valorDisplay = formatResultado(rm, cat);
                                             const editable = esEditable(rm);
                                             const queda = textoVentanaEdicion(rm.created_at);
                                             return (
                                                 <tr key={`hist-${rm.id}-${idx}`} className="hover:bg-gray-50 transition-colors">
-                                                    <td className="px-5 py-3.5 text-sm text-gray-500">{rm.fecha || '—'}</td>
+                                                    <td className="px-5 py-3.5 text-sm text-gray-500">{rm.fecha || 'â€”'}</td>
                                                     <td className="px-5 py-3.5 text-sm font-medium text-gray-800">{movName}</td>
                                                     <td className="px-5 py-3.5 text-sm font-bold text-emerald-600">{valorDisplay}</td>
-                                                    <td className="px-5 py-3.5 text-sm text-gray-400 italic">{rm.notas || '—'}</td>
-                                                    {/* ── N-8: sólo dentro de las 24 h posteriores al registro ── */}
+                                                    <td className="px-5 py-3.5 text-sm text-gray-400 italic">{rm.notas || 'â€”'}</td>
+                                                    {/* â”€â”€ N-8: sÃ³lo dentro de las 24 h posteriores al registro â”€â”€ */}
                                                     <td className="px-5 py-3.5 text-sm">
                                                         {editable ? (
                                                             <div className="flex flex-wrap items-center gap-2">
@@ -415,7 +415,7 @@ const PizarraRMs = () => {
                                                                     title={`Puedes editar este PR durante ${queda}`}
                                                                     className="px-2.5 py-1 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-semibold hover:bg-emerald-100 disabled:opacity-50 transition-colors"
                                                                 >
-                                                                    ✏️ Editar
+                                                                    âœï¸ Editar
                                                                 </button>
                                                                 <button
                                                                     type="button"
@@ -425,16 +425,16 @@ const PizarraRMs = () => {
                                                                     title={`Puedes borrar este PR durante ${queda}`}
                                                                     className="px-2.5 py-1 rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs font-semibold hover:bg-red-100 disabled:opacity-50 transition-colors"
                                                                 >
-                                                                    🗑️ Borrar
+                                                                    ðŸ—‘ï¸ Borrar
                                                                 </button>
                                                                 <span className="text-[11px] text-gray-400">editable {queda}</span>
                                                             </div>
                                                         ) : (
                                                             <span
                                                                 className="text-[11px] text-gray-400"
-                                                                title="Los PRs sólo se pueden editar o borrar dentro de las 24 h posteriores a su registro."
+                                                                title="Los PRs sÃ³lo se pueden editar o borrar dentro de las 24 h posteriores a su registro."
                                                             >
-                                                                🔒 fuera de las 24 h
+                                                                ðŸ”’ fuera de las 24 h
                                                             </span>
                                                         )}
                                                     </td>
@@ -449,18 +449,18 @@ const PizarraRMs = () => {
                 )}
             </div>
 
-            {/* ─── MODAL REGISTRAR / EDITAR RM ─────────────────────────── */}
+            {/* â”€â”€â”€ MODAL REGISTRAR / EDITAR RM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
             {showRMModal && (
                 <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
                         <div className="bg-emerald-600 text-white px-6 py-4 rounded-t-xl flex justify-between items-center">
                             <h2 className="text-lg font-bold">
-                                {rmEditando ? '✏️ Editar PR' : '📝 Registrar Nueva Marca'}
+                                {rmEditando ? 'âœï¸ Editar PR' : 'ðŸ“ Registrar Nueva Marca'}
                             </h2>
-                            <button onClick={cerrarModalRM} className="text-white/80 hover:text-white text-xl">✕</button>
+                            <button onClick={cerrarModalRM} className="text-white/80 hover:text-white text-xl">âœ•</button>
                         </div>
                         <div className="p-6 space-y-5">
-                            {/* Selección de movimiento por categoría */}
+                            {/* SelecciÃ³n de movimiento por categorÃ­a */}
                             <div>
                                 <label className="block text-sm font-semibold text-gray-700 mb-3">
                                     {rmEditando ? 'Movimiento (no editable):' : 'Selecciona un movimiento:'}
@@ -491,7 +491,7 @@ const PizarraRMs = () => {
                                 </div>
                             </div>
 
-                            {/* ─── Campos específicos según categoría ─────────── */}
+                            {/* â”€â”€â”€ Campos especÃ­ficos segÃºn categorÃ­a â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
                             {categoriaSeleccionada && (
                                 <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
                                     <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
@@ -527,7 +527,7 @@ const PizarraRMs = () => {
                                                 </div>
                                             </>
                                         )}
-                                        {/* Gimnástico: reps + series */}
+                                        {/* GimnÃ¡stico: reps + series */}
                                         {(categoriaSeleccionada === 'gimnastico') && (
                                             <>
                                                 <div>
@@ -577,11 +577,11 @@ const PizarraRMs = () => {
                                                 </div>
                                             </>
                                         )}
-                                        {/* Máquinas: calorias + km + vueltas */}
+                                        {/* MÃ¡quinas: calorias + km + vueltas */}
                                         {(categoriaSeleccionada === 'metabolico') && (
                                             <>
                                                 <div>
-                                                    <label className="block text-xs font-medium text-gray-600 mb-1">Calorías</label>
+                                                    <label className="block text-xs font-medium text-gray-600 mb-1">CalorÃ­as</label>
                                                     <input type="number" min="0"
                                                         value={rmForm.calorias}
                                                         onChange={e => setRmForm(p => ({ ...p, calorias: e.target.value }))}
@@ -629,7 +629,7 @@ const PizarraRMs = () => {
 
                             {rmError && (
                                 <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
-                                    ❌ {rmError}
+                                    âŒ {rmError}
                                 </div>
                             )}
 
@@ -641,7 +641,7 @@ const PizarraRMs = () => {
                                 <button onClick={rmEditando ? handleEditarRM : handleRegistrarRM}
                                     disabled={rmSubmitting || !rmForm.movimiento_id}
                                     className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-50">
-                                    {rmSubmitting ? '⏳ Guardando...' : (rmEditando ? '💾 GUARDAR CAMBIOS' : '💪 GUARDAR RM')}
+                                    {rmSubmitting ? 'â³ Guardando...' : (rmEditando ? 'ðŸ’¾ GUARDAR CAMBIOS' : 'ðŸ’ª GUARDAR RM')}
                                 </button>
                             </div>
                         </div>

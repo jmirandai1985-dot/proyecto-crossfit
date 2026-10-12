@@ -1,10 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import AvisoCarga from '../../components/AvisoCarga';
 import BotonVolver from '../../components/BotonVolver';
-import api from '../../services/api';
+// Fase 2 (Bloque 1): los datos salen de la caché compartida (mismos datos que la
+// Pizarra de RMs y el Performance Hub), no de un useEffect por pantalla.
+import {
+    useAsistenciaSemanal, useMovimientos, useProgresoDestacado, useRmDeMovimiento,
+} from '../../hooks/queries';
 // H-03: valor/etiqueta de cada RM desde la fuente única (utils/rm.js).
 import { valorRM, etiquetaValorRM } from '../../utils/rm';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
@@ -14,64 +18,52 @@ const Evolucion = () => {
     // no estaba hidratada, la pantalla pedía los datos del alumno 5 (inexistente) y
     // mostraba gráficos vacíos sin avisar. Ahora la identidad sale del AuthContext y
     // NO se consulta nada hasta tenerla.
-    const { usuario, usuario_id: authUsuarioId, tenant_id: authTenantId } = useAuth();
+    const { usuario, usuario_id: authUsuarioId } = useAuth();
     const alumnoId = authUsuarioId || usuario?.id || null;
-    const tenantId = authTenantId || usuario?.tenant_id || null;
 
-    // P1: secciones que fallaron al cargar (banner con Reintentar en vez de "vacío").
-    const [erroresCarga, setErroresCarga] = useState([]);
-
-    // ── Estado para RM ──
-    const [movimientos, setMovimientos] = useState([]);
-    const [idsConMarcas, setIdsConMarcas] = useState([]);
-    const [topMejoras, setTopMejoras] = useState([]);
+    // Fase 2 (Bloque 1): cada dato sale de su consulta compartida y la lista de fallos
+    // es DERIVADA de esas consultas (antes era un estado sincronizado a mano desde tres
+    // callbacks). El "movimiento seleccionado" sigue siendo estado de la PANTALLA.
     const [movimientoSeleccionado, setMovimientoSeleccionado] = useState('');
-    const [historialRM, setHistorialRM] = useState([]);
-    const [loadingRM, setLoadingRM] = useState(false);
 
-    // ── Estado para asistencia ──
-    const [asistenciaSemanal, setAsistenciaSemanal] = useState([]);
-    const [loadingAsistencia, setLoadingAsistencia] = useState(false);
+    const movimientosQ = useMovimientos();
+    const progresoQ = useProgresoDestacado(alumnoId);
+    const asistenciaQ = useAsistenciaSemanal();
+    const historialQ = useRmDeMovimiento(alumnoId, movimientoSeleccionado);
 
-    // ── P1: carga única con Promise.allSettled ──────────────────────────────
-    // Antes cada fetch tenía su propio `.catch(console.error)` y dejaba la lista
-    // vacía: si la API fallaba, la pantalla mostraba "sin datos" como si el alumno
-    // no tuviera historial. Ahora el fallo se acumula y se muestra en el banner.
-    const cargarTodo = useCallback(async () => {
-        if (!alumnoId) return;   // E-01: sin identidad no se consulta nada
+    // `?? []` DENTRO de un `useMemo`: la consulta mantiene la MISMA referencia mientras
+    // el dato no cambia, así que los `useMemo`/`useEffect` de abajo no se recalculan en
+    // cada render (un `|| []` suelto crearía un array nuevo cada vez).
+    const movimientos = React.useMemo(() => movimientosQ.data || [], [movimientosQ.data]);
+    const idsConMarcas = React.useMemo(
+        () => progresoQ.data?.ids_con_marcas || [], [progresoQ.data],
+    );
+    const topMejoras = React.useMemo(() => progresoQ.data?.top_mejoras || [], [progresoQ.data]);
+    const asistenciaSemanal = React.useMemo(() => asistenciaQ.data || [], [asistenciaQ.data]);
+    const historialRM = React.useMemo(() => historialQ.data || [], [historialQ.data]);
+    // "Cargando" sólo mientras NO hay dato: al volver a la pantalla se pinta la copia en
+    // caché al instante y se refresca en segundo plano (nunca una pantalla vacía falsa).
+    const loadingAsistencia = asistenciaQ.isPending;
+    const loadingRM = historialQ.isPending;
+
+    // Secciones caídas (mismo copy que antes) leídas del estado real de cada consulta.
+    const erroresCarga = React.useMemo(() => {
         const fallaron = [];
-        const [movRes, progRes, asisRes] = await Promise.allSettled([
-            api.get(`/api/v1/movimientos`),
-            api.get(`/api/v1/historial-rm/alumnos/${alumnoId}/progreso-destacado`),
-            api.get(`/api/v1/reservas/asistencia-semanal`),
-        ]);
-        if (movRes.status === 'fulfilled') {
-            setMovimientos(Array.isArray(movRes.value.data) ? movRes.value.data : []);
-        } else {
-            console.error('Error cargando movimientos:', movRes.reason);
-            fallaron.push('movimientos');
-        }
-        if (progRes.status === 'fulfilled') {
-            const data = progRes.value.data || {};
-            setIdsConMarcas(data.ids_con_marcas || []);
-            setTopMejoras(data.top_mejoras || []);
-        } else {
-            console.error('Error cargando progreso destacado:', progRes.reason);
-            fallaron.push('progreso destacado');
-        }
-        if (asisRes.status === 'fulfilled') {
-            setAsistenciaSemanal(Array.isArray(asisRes.value.data) ? asisRes.value.data : []);
-        } else {
-            console.error('Error cargando asistencia semanal:', asisRes.reason);
-            fallaron.push('asistencia semanal');
-        }
-        setErroresCarga(fallaron);
-    }, [alumnoId, tenantId]);
+        if (movimientosQ.isError) fallaron.push('movimientos');
+        if (progresoQ.isError) fallaron.push('progreso destacado');
+        if (asistenciaQ.isError) fallaron.push('asistencia semanal');
+        if (movimientoSeleccionado && historialQ.isError) fallaron.push('historial del movimiento');
+        return fallaron;
+    }, [movimientosQ.isError, progresoQ.isError, asistenciaQ.isError,
+        historialQ.isError, movimientoSeleccionado]);
 
-    useEffect(() => {
-        setLoadingAsistencia(true);
-        cargarTodo().finally(() => setLoadingAsistencia(false));
-    }, [cargarTodo]);
+    // Reintentar = volver a pedir las cuatro (el mismo botón del banner de antes).
+    const cargarTodo = () => {
+        movimientosQ.refetch();
+        progresoQ.refetch();
+        asistenciaQ.refetch();
+        historialQ.refetch();
+    };
 
     // E-03: deep-link desde Performance Hub → /alumno/evolucion?movimiento=<id>.
     // Antes el link existía pero la pantalla no leía el parámetro: se abría sin
@@ -98,28 +90,6 @@ const Evolucion = () => {
         });
         return [...conMarcas, ...sinMarcas];
     }, [movimientos, idsConMarcas]);
-
-    // ── Cargar historial del movimiento seleccionado ──
-    useEffect(() => {
-        if (!movimientoSeleccionado) {
-            setHistorialRM([]);
-            return;
-        }
-        setLoadingRM(true);
-        api.get(`/api/v1/historial-rm/alumnos/${alumnoId}/movimiento/${movimientoSeleccionado}`)
-            .then(res => {
-                const data = Array.isArray(res.data) ? res.data : [];
-                setHistorialRM(data);
-                setErroresCarga(prev => prev.filter(x => x !== 'historial del movimiento'));
-            })
-            .catch(err => {
-                console.error('Error cargando historial RM:', err);
-                setHistorialRM([]);
-                setErroresCarga(prev => prev.includes('historial del movimiento')
-                    ? prev : [...prev, 'historial del movimiento']);
-            })
-            .finally(() => setLoadingRM(false));
-    }, [movimientoSeleccionado, alumnoId, tenantId]);
 
     // ── Determinar valor Y para el gráfico según categoría ──
     const getChartData = () => {

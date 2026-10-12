@@ -29,6 +29,29 @@ export const claves = {
     // `['membresia']` = el plan/créditos del alumno (`/planes/membresia-activa`). Se
     // invalida al aprobarse un plan nuevo y al reservar/cancelar (los créditos bajan).
     membresia: ['membresia'],
+    // ── Bloque 1 parte 2: marcas (RMs), historial y plan del alumno ──
+    // `movimientos` (catálogo de ejercicios) y `rmsAlumno` los piden TRES pantallas
+    // (Pizarra de RMs, Evolución y Performance Hub): con la misma clave, la segunda
+    // que entra pinta al instante y no vuelve a pedirlos.
+    movimientos: ['movimientos'],
+    rmsAlumno: (alumnoId) => ['historial-rm', 'rms', alumnoId],
+    historialRmTodos: (limite) => ['historial-rm', 'lista', limite],
+    progresoDestacado: (alumnoId) => ['historial-rm', 'progreso', alumnoId],
+    rmDeMovimiento: (alumnoId, movimientoId) => ['historial-rm', 'movimiento', alumnoId, movimientoId],
+    nivelFuerza: (alumnoId) => ['historial-rm', 'nivel-fuerza', alumnoId],
+    nivelGimnastico: (alumnoId) => ['historial-rm', 'nivel-gimnastico', alumnoId],
+    // `planes/membresia-activa` es el plan/créditos del alumno: usa la MISMA familia
+    // `['membresia']` que ya invalidan reservar/cancelar y la aprobación del plan.
+    clasesRango: (desde, hasta, limite) => ['clases', 'rango', desde, hasta, limite],
+    wodHoy: ['wods', 'hoy'],
+    reservasConfirmadas: ['reservas', 'confirmadas'],
+    asistenciaMes: ['asistencia', 'mes'],
+    asistenciaSemanal: ['asistencia', 'semanal'],
+    planesActivos: ['planes', 'activos'],
+    miPerfil: ['alumnos', 'me'],
+    misBeneficios: (planIds) => ['beneficios', 'mios', planIds],
+    panelHistorial: (alumnoId, seccion, pagina, porPagina) =>
+        ['historial-alumno', alumnoId || 'me', seccion, pagina, porPagina],
 };
 
 // ── Colas de revisión del admin (las miran el Dashboard Y Pendientes de revisión) ──
@@ -263,3 +286,259 @@ export function useCrearPedidoBazar() {
         onSuccess: () => qc.invalidateQueries({ queryKey: ['pedidos'] }),
     });
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BLOQUE 1 parte 2 — MARCAS (RMs), HISTORIAL Y PLAN DEL ALUMNO
+// ══════════════════════════════════════════════════════════════════════════════
+// Las pantallas de marcas (Pizarra de RMs, Evolución y Performance Hub) pedían con
+// `useEffect` + `useState` los MISMOS tres datos: el catálogo de movimientos, los PRs
+// del alumno y su historial. Al ser rutas `lazy`, cada navegación entre ellas volvía a
+// pedir todo; acá comparten `queryKey`, así que la segunda pinta al instante.
+//
+// `staleTime`: el catálogo cambia cuando el box lo edita (5 min); los PRs y el
+// historial los mueve el propio alumno desde la app, así que valen 30 s (y las
+// mutaciones invalidan `['historial-rm']`). Los niveles/plan/beneficios cambian lento.
+
+export function useMovimientos() {
+    return useQuery({
+        queryKey: claves.movimientos,
+        queryFn: async () => (await api.get('/api/v1/movimientos')).data || [],
+        staleTime: 300_000,
+    });
+}
+
+export function useRmsAlumno(alumnoId) {
+    return useQuery({
+        queryKey: claves.rmsAlumno(alumnoId),
+        queryFn: async () => (await api.get(`/api/v1/historial-rm/alumnos/${alumnoId}/rms`)).data || [],
+        staleTime: 30_000,
+        enabled: Boolean(alumnoId),
+    });
+}
+
+export function useHistorialRmTodos(limite = 500) {
+    return useQuery({
+        // Sin filtro de alumno: el backend acota por JWT (el alumno recibe SÓLO los suyos).
+        queryKey: claves.historialRmTodos(limite),
+        queryFn: async () => (await api.get(`/api/v1/historial-rm?limit=${limite}`)).data || [],
+        staleTime: 30_000,
+    });
+}
+
+export function useProgresoDestacado(alumnoId) {
+    return useQuery({
+        queryKey: claves.progresoDestacado(alumnoId),
+        queryFn: async () => (await api.get(
+            `/api/v1/historial-rm/alumnos/${alumnoId}/progreso-destacado`,
+        )).data || {},
+        staleTime: 60_000,
+        enabled: Boolean(alumnoId),
+    });
+}
+
+export function useRmDeMovimiento(alumnoId, movimientoId) {
+    return useQuery({
+        queryKey: claves.rmDeMovimiento(alumnoId, movimientoId),
+        queryFn: async () => (await api.get(
+            `/api/v1/historial-rm/alumnos/${alumnoId}/movimiento/${movimientoId}`,
+        )).data || [],
+        staleTime: 30_000,
+        // Sin movimiento elegido no se consulta nada (misma condición que el useEffect).
+        enabled: Boolean(alumnoId) && Boolean(movimientoId),
+    });
+}
+
+// Nivel de atleta: las DOS consultas son del mismo bloque y la pantalla las pide
+// juntas; si una falla se trata aparte (Promise.allSettled en el Dashboard).
+export function useNivelFuerza(alumnoId) {
+    return useQuery({
+        queryKey: claves.nivelFuerza(alumnoId),
+        queryFn: async () => (await api.get(
+            `/api/v1/historial-rm/alumnos/${alumnoId}/nivel-fuerza`,
+        )).data || null,
+        staleTime: 60_000,
+        enabled: Boolean(alumnoId),
+    });
+}
+
+export function useNivelGimnastico(alumnoId) {
+    return useQuery({
+        queryKey: claves.nivelGimnastico(alumnoId),
+        queryFn: async () => (await api.get(
+            `/api/v1/historial-rm/alumnos/${alumnoId}/nivel-gimnastico`,
+        )).data || null,
+        staleTime: 60_000,
+        enabled: Boolean(alumnoId),
+    });
+}
+
+// ── Clases, WOD del día y reservas del alumno ────────────────────────────────
+export function useClasesRango(desde, hasta, limite = 500) {
+    return useQuery({
+        // Sin `solo_con_cupo`: el Dashboard del alumno muestra TODAS las clases del rango.
+        queryKey: claves.clasesRango(desde, hasta, limite),
+        queryFn: async () => (await api.get(
+            `/api/v1/clases?fecha_desde=${desde}&fecha_hasta=${hasta}&limit=${limite}`,
+        )).data || [],
+        // El horario cambia poco; el cupo lo refresca la invalidación al reservar.
+        staleTime: 60_000,
+        enabled: Boolean(desde) && Boolean(hasta),
+    });
+}
+
+export function useWodHoy() {
+    return useQuery({
+        queryKey: claves.wodHoy,
+        queryFn: async () => (await api.get('/api/v1/wods/hoy')).data || null,
+        staleTime: 5 * 60_000,
+    });
+}
+
+export function useReservasConfirmadas() {
+    return useQuery({
+        queryKey: claves.reservasConfirmadas,
+        queryFn: async () => (await api.get('/api/v1/reservas?estado=confirmada')).data || [],
+        staleTime: 30_000,
+    });
+}
+
+// Plan/créditos del alumno. Comparte la familia `['membresia']`: aprobar un plan,
+// reservar o cancelar ya la invalidan (el cupo baja), sin código extra acá.
+export function useMembresiaActiva() {
+    return useQuery({
+        queryKey: claves.membresia,
+        queryFn: async () => (await api.get('/api/v1/planes/membresia-activa')).data || null,
+        staleTime: 30_000,
+    });
+}
+
+// ── Asistencia (tarjetas del Dashboard del alumno y gráfico de Evolución) ────
+export function useAsistenciaMes() {
+    return useQuery({
+        queryKey: claves.asistenciaMes,
+        queryFn: async () => (await api.get('/api/v1/reservas/asistencia-mes')).data || null,
+        staleTime: 60_000,
+    });
+}
+
+export function useAsistenciaSemanal() {
+    return useQuery({
+        queryKey: claves.asistenciaSemanal,
+        queryFn: async () => (await api.get('/api/v1/reservas/asistencia-semanal')).data || [],
+        staleTime: 60_000,
+    });
+}
+
+// ── Planes, perfil y beneficios (Solicitar plan) ─────────────────────────────
+export function usePlanesActivos() {
+    return useQuery({
+        queryKey: claves.planesActivos,
+        // El backend puede envolver la lista (`{planes: [...]}`) o mandarla pelada:
+        // se acepta lo mismo que aceptaba la pantalla.
+        queryFn: async () => {
+            const data = (await api.get('/api/v1/planes?activo=true')).data;
+            const lista = data?.planes || data || [];
+            return Array.isArray(lista) ? lista : [];
+        },
+        staleTime: 300_000,
+    });
+}
+
+export function useMiPerfil() {
+    return useQuery({
+        queryKey: claves.miPerfil,
+        queryFn: async () => (await api.get('/api/v1/alumnos/me')).data || null,
+        staleTime: 60_000,
+    });
+}
+
+export function useMisBeneficios(planIds) {
+    return useQuery({
+        queryKey: claves.misBeneficios(planIds),
+        queryFn: async () => (await api.get('/api/v1/beneficios/mios', {
+            params: { plan_ids: planIds },
+        })).data || null,
+        // El descuento no cambia mientras el alumno elige plan.
+        staleTime: 300_000,
+        enabled: Boolean(planIds),
+    });
+}
+
+// ── Historial del alumno (`PanelHistorial`) ──────────────────────────────────
+// Lo montan el alumno (`/alumno/mi-historial`) y la ficha del box con `alumnoId`.
+export function usePanelHistorial({
+    alumnoId = null, seccion = 'resumen', pagina = 1, porPagina = 10,
+} = {}) {
+    // Sin `alumnoId` se usa la puerta del propio alumno (nunca trae la gestión del box).
+    const url = alumnoId
+        ? `/api/v1/alumnos/${alumnoId}/historial`
+        : '/api/v1/alumnos/me/historial';
+    return useQuery({
+        queryKey: claves.panelHistorial(alumnoId, seccion, pagina, porPagina),
+        queryFn: async () => (await api.get(url, {
+            params: { seccion, pagina, por_pagina: porPagina },
+        })).data,
+        staleTime: 30_000,
+        // Al cambiar de sección/página se deja el panel anterior en pantalla hasta que
+        // llega el nuevo (mismo criterio que la tabla de churn): sin parpadeo en blanco.
+        placeholderData: keepPreviousData,
+    });
+}
+
+// ── Mutaciones del alumno (Bloque 1 parte 2) ─────────────────────────────────
+// Reservar mueve la MISMA caché que las listas de reservas (Dashboard e Inicio
+// móvil), el cupo de las clases y los créditos del plan.
+export function useCrearReserva() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) => api.post('/api/v1/reservas', payload).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['reservas'] });
+            qc.invalidateQueries({ queryKey: ['clases'] });
+            qc.invalidateQueries({ queryKey: claves.membresia });
+            qc.invalidateQueries({ queryKey: ['asistencia'] });
+        },
+    });
+}
+
+// Alta/edición/borrado de un PR: todo cuelga de `['historial-rm']`, que es de donde
+// salen los PRs, el historial y las series del gráfico.
+export function useCrearRm() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) => api.post('/api/v1/historial-rm', payload).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['historial-rm'] }),
+    });
+}
+
+export function useEditarRm() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ id, ...payload }) =>
+            api.put(`/api/v1/historial-rm/${id}`, payload).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['historial-rm'] }),
+    });
+}
+
+export function useEliminarRm() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => api.delete(`/api/v1/historial-rm/${id}`).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['historial-rm'] }),
+    });
+}
+
+// Enviar la solicitud de plan mueve la cola del admin (`['solicitudes']`) y, cuando
+// la aprueben, el plan del alumno (`['membresia']`).
+export function useSolicitarPlan() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) =>
+            api.post('/api/v1/solicitudes/solicitar', payload).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['solicitudes'] });
+            qc.invalidateQueries({ queryKey: claves.membresia });
+        },
+    });
+}
+
