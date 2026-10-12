@@ -14,6 +14,13 @@ import AvisoCarga from '../../components/AvisoCarga';
 // Vista previa/descarga del voucher: la lógica del blob autenticado (y su
 // descarga forzada) vive en el hook compartido, no en cada pantalla.
 import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
+// Datos compartidos con otras pantallas, en la caché de React Query (misma queryKey:
+// lo que una pantalla ya trajo, la otra lo pinta sin volver a pedirlo).
+import { mensajeError } from '../../services/queryClient';
+import {
+    useAprobarSolicitud, useClasesHoy, useCountPendientesActivacion,
+    useRechazarSolicitud, useSolicitudesPendientes, useStatsDashboard,
+} from '../../hooks/queries';
 
 // Estilo de una clase del día (ocupación, color de barra, cupo ampliado y badge de estado).
 // Lo comparten la tarjeta y la sección "Clases de hoy": misma lectura para todas las filas.
@@ -40,18 +47,35 @@ const visualClaseHoy = (c) => {
 const AdminDashboard = () => {
     const navigate = useNavigate();
     const { tenant_id } = useAuth();
-    const [solicitudes, setSolicitudes] = useState([]);
-    const [countPendientes, setCountPendientes] = useState(0);
+    // ── Datos del dashboard en la caché compartida (React Query) ──────────────
+    // `solicitudes` y el conteo de registros usan las MISMAS queryKey que la pantalla
+    // "Pendientes de revisión": si el admin ya pasó por allá, acá se pintan al instante
+    // y no se vuelven a pedir (antes cada pantalla los pedía por su cuenta en un
+    // useEffect, así que navegar entre las dos costaba 4 requests).
+    const solicitudesQ = useSolicitudesPendientes();
+    const registrosQ = useCountPendientesActivacion();
+    const statsQ = useStatsDashboard(tenant_id);
+    // "Clases de hoy": se refresca sola cada 45 s y NO con la pestaña oculta (React
+    // Query pausa el intervalo solo), igual que el setInterval + visibility de antes.
+    const clasesHoyQ = useClasesHoy();
+    const aprobarSolicitud = useAprobarSolicitud();
+    const rechazarSolicitud = useRechazarSolicitud();
     // ── Pendientes: DOS colas distintas, cada una con su propio error ──────────
     // `countPendientes` = REGISTROS de alumnos nuevos (pendientes-activacion/count)
     // `solicitudes`     = SOLICITUDES DE PLAN con comprobante (/solicitudes/pendientes)
     // Antes la tarjeta del dashboard mostraba SOLO la primera: con 1 comprobante de
     // plan esperando revisión, el contador decía "0". Y si un endpoint fallaba, se
     // pintaba un 0 falso; ahora se muestra "s/d" + el motivo.
-    const [registrosError, setRegistrosError] = useState('');
-    const [solicitudesError, setSolicitudesError] = useState('');
-    const [stats, setStats] = useState(null);
-    const [loading, setLoading] = useState(true);
+    // Derivados de las consultas de arriba: MISMOS nombres y MISMOS textos de error que
+    // antes, así el JSX de la pantalla no cambia.
+    const solicitudes = solicitudesQ.data || [];
+    const countPendientes = registrosQ.data || 0;
+    const stats = statsQ.data ?? null;
+    const registrosError = registrosQ.error
+        ? mensajeError(registrosQ.error, 'No se pudo cargar el dato') : '';
+    const solicitudesError = solicitudesQ.error
+        ? mensajeError(solicitudesQ.error, 'No se pudieron cargar las solicitudes de plan') : '';
+    const loading = solicitudesQ.isLoading || registrosQ.isLoading || statsQ.isLoading;
     const [processingId, setProcessingId] = useState(null);
     const [msg, setMsg] = useState('');
     const [voucherModal, setVoucherModal] = useState({ open: false, solicitud_id: null, tipo: 'voucher' });
@@ -72,10 +96,14 @@ const AdminDashboard = () => {
     // Reutiliza GET /asistencia/clases-hoy (ya trae coach, estado y reservas) y filtra
     // en el front las disciplinas que EXIGEN coach (`requiere_coach`), sin hardcodear
     // CrossFit/Levantamiento. Se refresca solo cada 45s (pausado si la pestaña está oculta).
-    const [clasesHoy, setClasesHoy] = useState([]);
-    const [clasesHoyLoading, setClasesHoyLoading] = useState(true);
-    const [clasesHoyError, setClasesHoyError] = useState('');
-    const [ultimaActualizacion, setUltimaActualizacion] = useState(null);
+    // Derivados de la consulta de clases de hoy (los mismos nombres que el estado local
+    // de antes: el error se sigue mostrando como "s/d" con el motivo en el title).
+    const clasesHoy = clasesHoyQ.data || [];
+    const clasesHoyLoading = clasesHoyQ.isLoading;
+    const clasesHoyError = clasesHoyQ.error
+        ? mensajeError(clasesHoyQ.error, 'No se pudieron cargar las clases de hoy') : '';
+    const ultimaActualizacion = clasesHoyQ.dataUpdatedAt
+        ? new Date(clasesHoyQ.dataUpdatedAt) : null;
     // Detalle de una clase (modal): reservas de la clase desde /asistencia/clases/{id}/alumnos.
     const [claseDetalle, setClaseDetalle] = useState(null);
     const [detalleReservas, setDetalleReservas] = useState([]);
@@ -92,41 +120,14 @@ const AdminDashboard = () => {
     });
 
     useEffect(() => {
-        cargarSolicitudes();
-        cargarCountPendientes();
+        // Las consultas migradas a React Query (solicitudes, conteo de registros, stats
+        // y clases de hoy) se disparan solas al declarar sus hooks; acá quedan las dos
+        // que siguen con estado local. El auto-refresco de "Clases de hoy" cada 45 s lo
+        // hace `refetchInterval` del hook (y NO corre con la pestaña oculta).
         cargarFidelizacion();
-        cargarClasesHoy();
         cargarBi();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [tenant_id]);
-
-    // Auto-refresco de "Clases de hoy": cada 45s, PAUSADO cuando la pestaña está oculta
-    // (no gasta cuota de la BD ni batería si el admin no está mirando), y al volver.
-    useEffect(() => {
-        const intervalo = setInterval(() => {
-            if (!document.hidden) cargarClasesHoy();
-        }, 45000);
-        const alVolver = () => { if (!document.hidden) cargarClasesHoy(); };
-        document.addEventListener('visibilitychange', alVolver);
-        return () => {
-            clearInterval(intervalo);
-            document.removeEventListener('visibilitychange', alVolver);
-        };
-    }, [tenant_id]);
-
-    const cargarClasesHoy = async () => {
-        try {
-            const res = await api.get('/api/v1/asistencia/clases-hoy');
-            // El backend ya devuelve el día completo (admin) con coach/estado/reservas.
-            setClasesHoy((res.data || []).filter(c => c.requiere_coach));
-            setClasesHoyError('');
-            setUltimaActualizacion(new Date());
-        } catch (err) {
-            setClasesHoy([]);
-            setClasesHoyError(err?.response?.data?.detail || err?.message
-                || 'No se pudieron cargar las clases de hoy');
-        }
-        setClasesHoyLoading(false);
-    };
 
     const abrirDetalleClase = async (clase) => {
         setClaseDetalle(clase);
@@ -141,56 +142,16 @@ const AdminDashboard = () => {
         setDetalleLoading(false);
     };
 
-    const cargarStats = async () => {
-        try {
-            const res = await api.get(`/api/v1/reportes/?tenant_id=${tenant_id}`);
-            setStats(res.data);
-        } catch (e) {
-            console.error('Error cargando estadisticas del dashboard', e);
-            setStats(null);
-        }
-    };
-
-    const cargarSolicitudes = async () => {
-        // Fetch INDEPENDIENTES (antes un Promise.all): si /solicitudes/pendientes
-        // fallaba, el catch dejaba stats=null y NO se dibujaba ninguna tarjeta.
-        // Con allSettled un fallo parcial no tumba el resto de la pantalla.
-        const [sols, statsRes] = await Promise.allSettled([
-            api.get(`/api/v1/solicitudes/pendientes`),
-            api.get(`/api/v1/reportes/?tenant_id=${tenant_id}`)
-        ]);
-        if (sols.status === 'fulfilled') {
-            setSolicitudes(sols.value.data || []);
-            setSolicitudesError('');
-        } else {
-            console.error('Error cargando solicitudes pendientes', sols.reason);
-            setSolicitudes([]);
-            setSolicitudesError(sols.reason?.response?.data?.detail
-                || sols.reason?.message
-                || 'No se pudieron cargar las solicitudes de plan');
-        }
-        if (statsRes.status === 'fulfilled') {
-            setStats(statsRes.value.data);
-        } else {
-            // No se pisa un stats ya cargado por cargarStats().
-            console.error('Error cargando estadisticas del dashboard', statsRes.reason);
-        }
-        setLoading(false);
-    };
-
-    const cargarCountPendientes = async () => {
-        try {
-            const res = await api.get('/api/v1/alumnos/pendientes-activacion/count');
-            setCountPendientes(res.data?.count || 0);
-            setRegistrosError('');
-        } catch (err) {
-            // Un fallo de red NO es "no hay nada pendiente": se guarda el motivo y
-            // la tarjeta muestra "s/d" en vez de un 0 tranquilizador pero falso.
-            console.error('Error cargando el conteo de registros pendientes', err);
-            setCountPendientes(0);
-            setRegistrosError(err?.response?.data?.detail || err?.message
-                || 'No se pudo cargar el dato');
-        }
+    // Botón "Actualizar" del dashboard: refresca TODO. Lo que vive en React Query se
+    // re-pide con `refetch()` (y comparte caché con las otras pantallas); la
+    // fidelización y las tarjetas del BI siguen con su carga local.
+    const recargarDatos = () => {
+        solicitudesQ.refetch();
+        registrosQ.refetch();
+        statsQ.refetch();
+        clasesHoyQ.refetch();
+        cargarFidelizacion();
+        cargarBi();
     };
 
     // ── BI (SOLO LECTURA): "Alumnos nuevos" y "Convertidos" ───────────────────
@@ -259,7 +220,7 @@ const AdminDashboard = () => {
     const cargarFidelizacion = async () => {
         // Promise.allSettled (antes Promise.all + catch mudo): si un endpoint falla,
         // el otro se sigue mostrando y la tarjeta afectada indica el error en vez de
-        // mostrar "0" como si todo estuviera bien. Mismo patrón que cargarSolicitudes().
+        // mostrar "0" como si todo estuviera bien. Mismo patrón que las colas (React Query).
         setFidelizacionLoading(true);
         const [riesgoRes, vencRes] = await Promise.allSettled([
             api.get(`/api/v1/fidelizacion/tenant/${tenant_id}/en-riesgo`),
@@ -298,10 +259,11 @@ const AdminDashboard = () => {
         setProcessingId(id);
         setMsg('');
         try {
-            await api.put(`/api/v1/solicitudes/${id}/aprobar`);
+            await aprobarSolicitud.mutateAsync(id);
             setMsg(`✅ Solicitud #${id} aprobada. Tokens asignados.`);
             setTimeout(() => setMsg(''), 4000);
-            cargarSolicitudes();
+            // Sin `cargarSolicitudes()`: la mutación invalida las colas y React Query
+            // las refresca (acá y en Pendientes). La fidelización sigue con estado local.
             cargarFidelizacion();
         } catch (err) {
             setMsg('❌ ' + (err.response?.data?.detail || err.message));
@@ -314,10 +276,9 @@ const AdminDashboard = () => {
         setProcessingId(id);
         setMsg('');
         try {
-            await api.put(`/api/v1/solicitudes/${id}/rechazar?motivo=${encodeURIComponent(motivo)}`);
+            await rechazarSolicitud.mutateAsync({ id, motivo });
             setMsg(`✅ Solicitud #${id} rechazada.`);
             setTimeout(() => setMsg(''), 4000);
-            cargarSolicitudes();
         } catch (err) {
             setMsg('❌ ' + (err.response?.data?.detail || err.message));
             setTimeout(() => setMsg(''), 4000);
@@ -399,7 +360,7 @@ const AdminDashboard = () => {
                         <h1 className="text-3xl font-bold text-zinc-100">Dashboard Administrativo</h1>
                         <p className="text-zinc-400">Panel de gestión de membresías y fidelización</p>
                     </div>
-                    <button onClick={() => { cargarSolicitudes(); cargarCountPendientes(); cargarFidelizacion(); cargarClasesHoy(); cargarBi(); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold">
+                    <button onClick={recargarDatos} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold">
                         🔄 Recargar
                     </button>
                 </div>
@@ -689,7 +650,7 @@ const AdminDashboard = () => {
                         <div className="p-8 text-center">
                             <p className="text-red-400 text-sm">⚠️ {solicitudesError}</p>
                             <button
-                                onClick={cargarSolicitudes}
+                                onClick={() => solicitudesQ.refetch()}
                                 className="mt-3 px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors"
                             >
                                 Reintentar

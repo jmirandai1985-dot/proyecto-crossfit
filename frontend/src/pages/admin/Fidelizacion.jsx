@@ -2,7 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
+// El churn y la segmentación viven en la caché de React Query: volver a esta pantalla
+// (o buscar un término y volver) ya no vuelve a pedir lo mismo al backend.
+import { mensajeError } from '../../services/queryClient';
+import { useChurn, useMarcarGestionChurn, useSegmentacion, useSugerenciasChurn } from '../../hooks/queries';
 import AlumnoFichaModal from '../../components/AlumnoFichaModal';
 import { RiskBadge } from '../../components/kpis/RiskBadge';
 import RecomendacionModal from '../../components/kpis/RecomendacionModal';
@@ -79,12 +82,19 @@ const Fidelizacion = () => {
     const [searchParams, setSearchParams] = useSearchParams();
     // Pestaña activa: Gestión (la tabla de siempre) o Beneficios (todos los regalos del box).
     const tab = searchParams.get('tab') || 'gestion';
-    // Datos del BI (GET /kpis/churn): score, motivo, recomendación, gestión.
-    const [churn, setChurn] = useState(null);
-    // Segmentación (conteos por arquetipo) para las 6 tarjetas de abajo.
-    const [segmentacion, setSegmentacion] = useState(null);
-    const [segError, setSegError] = useState(false);
-    const [loading, setLoading] = useState(true);
+    // ── Datos del BI en la caché compartida (React Query) ─────────────────────
+    // `useChurn` ya reacciona a `buscar` (el término va en su queryKey) y conserva la
+    // tabla anterior mientras llega la nueva (`keepPreviousData`): el buscador no
+    // parpadea ni dispara una request por tecla.
+    const churnQ = useChurn(tenant_id, buscar);
+    const segQ = useSegmentacion(tenant_id);
+    const churn = churnQ.data ?? null;
+    const segmentacion = segQ.data ?? null;
+    // "Falló el fetch" se sigue distinguiendo de "respondió pero todavía no hay nada
+    // generado" (total 0): son dos avisos distintos en pantalla.
+    const segError = segQ.isError;
+    const loading = churnQ.isLoading || segQ.isLoading;
+    const marcarGestion = useMarcarGestionChurn();
     // Búsqueda server-side (nombre o correo) de la tabla: input con debounce (350ms,
     // igual que Alumnos.jsx). `buscar` es el término YA aplicado (el que viaja al
     // backend); los filtros de riesgo/arquetipo se combinan ENCIMA de su resultado.
@@ -97,7 +107,13 @@ const Fidelizacion = () => {
     // Sugerencia de plantilla por alumno (`POST /fidelizacion/sugerencias`): es la MISMA regla
     // que usa el modal de envío, así la columna "Recomendación" y la plantilla propuesta no
     // pueden decir cosas distintas.
-    const [sugerencias, setSugerencias] = useState({});
+    // Sugerencias de plantilla por alumno (`POST /fidelizacion/sugerencias`): es la MISMA
+    // regla que usa el modal de envío, así la columna "Recomendación" y la plantilla
+    // propuesta no pueden decir cosas distintas. Va en la queryKey de la lista de ids:
+    // si la lista no cambió, no se vuelve a pedir.
+    const sugerenciasQ = useSugerenciasChurn(
+        tenant_id, (churn?.predicciones || []).map((p) => p.usuario_id));
+    const sugerencias = sugerenciasQ.data || {};
     const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
     const [detalleReco, setDetalleReco] = useState(null);
     const [msg, setMsg] = useState('');
@@ -106,77 +122,14 @@ const Fidelizacion = () => {
     // del box, incluida la pestaña Bazar), reutilizando `PanelHistorial`.
     const navigate = useNavigate();
 
-    // Trae la tabla del churn (+ sugerencias de esa misma lista, en UNA petición).
-    // `spinner` sólo en la carga completa: al BUSCAR no se tapa la pantalla (sin parpadeo).
-    const cargarChurn = async (termino, { spinner = false } = {}) => {
-        if (spinner) setLoading(true);
-        try {
-            // `buscar` es server-side (nombre o correo, sin mayúsculas ni tildes).
-            const res = await api.get('/api/v1/kpis/churn', {
-                params: { buscar: termino || undefined },
-            });
-            setChurn(res.data);
-            setMsg('');
-            // La sugerencia de plantilla de TODA la tabla, en UNA petición: la columna
-            // "Recomendación" y el modal de envío salen de la MISMA regla del backend
-            // (`sugerir()`), que es la única forma de que no digan cosas distintas.
-            const ids = (res.data?.predicciones || []).map((p) => p.usuario_id).slice(0, 300);
-            if (ids.length) {
-                try {
-                    const rSug = await api.post('/api/v1/fidelizacion/sugerencias',
-                        { alumno_ids: ids });
-                    setSugerencias(rSug?.data?.sugerencias || {});
-                } catch {
-                    // Sin sugerencias la tabla sigue (esa columna queda en "—"): el panel no se
-                    // cae por una comodidad.
-                    setSugerencias({});
-                }
-            } else {
-                setSugerencias({});
-            }
-        } catch (err) {
-            setChurn(null);
-            setMsg('❌ ' + (err.response?.data?.detail || err.message || 'No se pudo cargar el panel'));
-        } finally {
-            if (spinner) setLoading(false);
-        }
+    // (La carga del churn y sus sugerencias la maneja `useChurn`/`useSugerenciasChurn`.)
+
+    // Botón "Recargar" (y el "reintentar" de la segmentación): vuelve a pedir las dos
+    // consultas del BI. React Query deduplica, así que no se dispara dos veces lo mismo.
+    const cargarFidelizacion = () => {
+        churnQ.refetch();
+        segQ.refetch();
     };
-
-    // Segmentación: opcional (si falla o no se entrenó, las tarjetas de arquetipo no se
-    // muestran y el resto del panel sigue igual). Se pide aparte: NO depende de la
-    // búsqueda. Se distingue "falló el fetch" (error) de "respondió bien pero todavía no
-    // hay nada generado" (total 0): antes un .catch(() => null) dejaba los dos casos
-    // idénticos y el bloque de las 6 tarjetas se ocultaba sin ningún aviso.
-    const cargarSegmentacion = async () => {
-        try {
-            const rSeg = await api.get('/api/v1/segmentacion');
-            setSegmentacion(rSeg?.data || null);
-            setSegError(false);
-        } catch {
-            setSegmentacion(null);
-            setSegError(true);
-        }
-    };
-
-    // Carga completa (montaje / cambio de tenant / botón Recargar): tabla + segmentación.
-    const cargarFidelizacion = async () => {
-        setLoading(true);
-        await Promise.all([cargarChurn(buscar), cargarSegmentacion()]);
-        setLoading(false);
-    };
-
-    useEffect(() => {
-        cargarFidelizacion();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [tenant_id]);
-
-    // Al cambiar el término BUSCADO (ya debounced) se re-trae SÓLO la tabla, sin spinner.
-    // La carga inicial ya la cubre el efecto de arriba (`churn` todavía es null).
-    useEffect(() => {
-        if (churn === null) return;
-        cargarChurn(buscar);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [buscar]);
 
     // Debounce del input (350ms): no dispara una request por tecla.
     useEffect(() => {
@@ -199,6 +152,10 @@ const Fidelizacion = () => {
         setAlumnoBeneficio({ fila: alumno });
     };
 
+    // El error de la carga del churn se suma al cartel de siempre (antes lo escribía
+    // `cargarChurn` con `setMsg`; ahora el error vive en la consulta).
+    const msgMostrar = msg || (churnQ.isError
+        ? `❌ ${mensajeError(churnQ.error, 'No se pudo cargar el panel')}` : '');
     // El beneficio quedó dado: se avisa en el cartel de la pantalla (la pestaña Beneficios lo
     // muestra al recargar) y se dice CÓMO se avisó al alumno.
     const beneficioDado = (resultado) => {
@@ -222,17 +179,12 @@ const Fidelizacion = () => {
         if (!alumno) return;
         setMsg(`✅ Correo enviado a ${alumno.alumno_nombre}`);
         try {
-            const { data } = await api.put(
-                `/api/v1/kpis/churn/${alumno.usuario_id}/estado`,
-                { estado_gestion: 'CONTACTADO' },
-            );
-            const { estado_anterior, ...fila } = data;
-            setChurn((prev) => (prev ? {
-                ...prev,
-                predicciones: (prev.predicciones || []).map(
-                    (p) => (p.usuario_id === alumno.usuario_id ? { ...p, ...fila } : p)),
-            } : prev));
-            setMsg(`✅ Correo enviado a ${alumno.alumno_nombre} · gestión marcada como CONTACTADO (antes ${estado_anterior || 'PENDIENTE'})`);
+            const data = await marcarGestion.mutateAsync({
+                usuarioId: alumno.usuario_id, estado: 'CONTACTADO',
+            });
+            // La fila se actualiza sola: la mutación invalida `['kpis','churn']` y React
+            // Query vuelve a traer la tabla (ya no se parchea el estado a mano).
+            setMsg(`✅ Correo enviado a ${alumno.alumno_nombre} · gestión marcada como CONTACTADO (antes ${data?.estado_anterior || 'PENDIENTE'})`);
         } catch (errPut) {
             setMsg(`✅ Correo enviado a ${alumno.alumno_nombre}. ⚠️ No se pudo marcar la gestión como CONTACTADO: ${errPut.response?.data?.detail || errPut.message}`);
         }
@@ -336,9 +288,9 @@ const Fidelizacion = () => {
 
                 <TabBar tabs={TABS} />
 
-                {msg && (
-                    <div className={`p-4 rounded-lg font-bold shadow-lg transition-all ${msg.includes('✅') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                        {msg}
+                {msgMostrar && (
+                    <div className={`p-4 rounded-lg font-bold shadow-lg transition-all ${msgMostrar.includes('✅') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                        {msgMostrar}
                     </div>
                 )}
 

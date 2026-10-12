@@ -1,12 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Layout from '../../components/Layout';
-import api from '../../services/api';
 // Vista previa del comprobante (blob autenticado): hook compartido con el Dashboard.
 import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
+// Las dos colas de esta pantalla, con la MISMA queryKey que usa el Dashboard: si el
+// admin ya pasó por la otra pantalla, acá se pinta al instante y no se vuelve a pedir.
+import { mensajeError } from '../../services/queryClient';
+import {
+    useAccionAlumnoPendiente, useAprobarSolicitud, usePendientesActivacion,
+    useRechazarSolicitud, useSolicitudesPendientes,
+} from '../../hooks/queries';
 
 const AdminAlumnosPendientes = () => {
-    const [pendientes, setPendientes] = useState([]);
-    const [loading, setLoading] = useState(true);
     const [actionId, setActionId] = useState(null);
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
@@ -20,8 +24,28 @@ const AdminAlumnosPendientes = () => {
     // que una solicitud de plan esperando aprobación del comprobante NO aparecía
     // en ninguna parte (el admin leía "No hay solicitudes pendientes" y creía que
     // no había nada que revisar). Ahora se listan las dos colas.
-    const [solicitudes, setSolicitudes] = useState([]);
-    const [solicitudesError, setSolicitudesError] = useState('');
+    // ── Las DOS colas viven en la caché compartida de React Query ─────────────
+    // Misma queryKey que usa el Dashboard: si el admin ya pasó por allá, acá se pinta
+    // al instante. `autoRefrescoMs` reemplaza el setInterval de 30 s que había antes
+    // (React Query pausa el intervalo con la pestaña oculta, igual que el visibility).
+    const regsQ = usePendientesActivacion({ autoRefrescoMs: 30000 });
+    const solsQ = useSolicitudesPendientes({ autoRefrescoMs: 30000 });
+    const pendientes = regsQ.data || [];
+    const solicitudes = solsQ.data || [];
+    const loading = regsQ.isLoading || solsQ.isLoading;
+    // Un fallo de red NO es "no hay nada pendiente": se guarda el motivo y cada cola
+    // avisa con su propio texto (antes se cargaban juntas con Promise.allSettled).
+    const errorRegistros = regsQ.error
+        ? mensajeError(regsQ.error, 'No se pudieron cargar las solicitudes') : '';
+    const solicitudesError = solsQ.error
+        ? mensajeError(solsQ.error, 'No se pudieron cargar las solicitudes de plan') : '';
+
+    // Mutaciones: al terminar invalidan las claves de las dos colas, así se refresca
+    // TODO lo que las muestra (esta pantalla y el Dashboard) sin pedirlo a mano.
+    const accionAlumno = useAccionAlumnoPendiente();
+    const aprobarSolicitud = useAprobarSolicitud();
+    const rechazarSolicitud = useRechazarSolicitud();
+
     const [solicitudActionId, setSolicitudActionId] = useState(null);
     const [rechazoPlanModal, setRechazoPlanModal] = useState(null); // solicitud
     const [motivoRechazo, setMotivoRechazo] = useState('');
@@ -29,50 +53,22 @@ const AdminAlumnosPendientes = () => {
     // /static/uploads/... no lleva token. La lógica vive en el hook compartido.
     const [voucherSolicitud, setVoucherSolicitud] = useState(null); // solicitud
 
-    const cargarPendientes = async ({ silencioso = false } = {}) => {
-        // Las DOS colas se piden en paralelo con allSettled: si una falla, la otra
-        // se sigue mostrando y la sección afectada avisa con su propio error.
-        if (!silencioso) setLoading(true);
-        const [regs, sols] = await Promise.allSettled([
-            api.get('/api/v1/alumnos/pendientes-activacion'),
-            api.get('/api/v1/solicitudes/pendientes'),
-        ]);
-        if (regs.status === 'fulfilled') {
-            setPendientes(regs.value.data || []);
-            setError('');
-        } else {
-            console.error('Error cargando registros pendientes', regs.reason);
-            setError(regs.reason?.response?.data?.detail || 'No se pudieron cargar las solicitudes');
-        }
-        if (sols.status === 'fulfilled') {
-            setSolicitudes(sols.value.data || []);
-            setSolicitudesError('');
-        } else {
-            console.error('Error cargando solicitudes de plan', sols.reason);
-            setSolicitudes([]);
-            setSolicitudesError(sols.reason?.response?.data?.detail
-                || 'No se pudieron cargar las solicitudes de plan');
-        }
-        if (!silencioso) setLoading(false);
+    // Refrescar a mano (botón): React Query deduplica y sólo re-pide lo que está viejo.
+    // Ya no hay que tocar los estados: la lista sale de `regsQ.data` / `solsQ.data`.
+    const cargarPendientes = () => {
+        regsQ.refetch();
+        solsQ.refetch();
     };
 
-    useEffect(() => {
-        cargarPendientes();
-    }, []);
-
-    // AUTO-REFRESH (30s): pueden entrar solicitudes mientras el admin tiene la
-    // pantalla abierta. Silencioso para no parpadear el spinner ni perder el foco.
-    useEffect(() => {
-        const id = setInterval(() => cargarPendientes({ silencioso: true }), 30000);
-        return () => clearInterval(id);
-    }, []);
+    // La carga inicial y el auto-refresh de 30 s los maneja React Query (ver los hooks
+    // de arriba): ya no hacen falta los dos useEffect de montaje + setInterval.
 
     const handleAccion = async (alumnoId, accion) => {
         setActionId(alumnoId);
         setMessage('');
         setError('');
         try {
-            const { data } = await api.put(`/api/v1/alumnos/${alumnoId}/${accion}`);
+            const data = await accionAlumno.mutateAsync({ alumnoId, accion });
             if (accion === 'activar') {
                 if (data?.email_enviado) {
                     setMessage('Alumno activado y credenciales enviadas por correo');
@@ -90,7 +86,8 @@ const AdminAlumnosPendientes = () => {
                 setMessage('Solicitud rechazada');
                 setCredenciales(null);
             }
-            cargarPendientes({ silencioso: true });
+            // Sin `cargarPendientes()`: la mutación ya invalidó las dos colas y React
+            // Query las refresca (también en el Dashboard, si está en la otra pestaña).
         } catch (err) {
             setError(err.response?.data?.detail || 'Ocurrió un error al procesar la solicitud');
         } finally {
@@ -105,13 +102,12 @@ const AdminAlumnosPendientes = () => {
         setError('');
         try {
             if (accion === 'aprobar') {
-                await api.put(`/api/v1/solicitudes/${id}/aprobar`);
+                await aprobarSolicitud.mutateAsync(id);
                 setMessage(`Solicitud #${id} aprobada. Plan activado y alumno notificado.`);
             } else {
-                await api.put(`/api/v1/solicitudes/${id}/rechazar?motivo=${encodeURIComponent(motivo || 'Rechazado')}`);
+                await rechazarSolicitud.mutateAsync({ id, motivo });
                 setMessage(`Solicitud #${id} rechazada.`);
             }
-            cargarPendientes({ silencioso: true });
         } catch (err) {
             setError(err.response?.data?.detail || 'Ocurrió un error al procesar la solicitud de plan');
         } finally {
@@ -139,7 +135,7 @@ const AdminAlumnosPendientes = () => {
                         </p>
                     </div>
                     <button
-                        onClick={cargarPendientes}
+                        onClick={() => cargarPendientes()}
                         className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors"
                     >
                         ⟳ Refrescar
@@ -151,9 +147,11 @@ const AdminAlumnosPendientes = () => {
                         ✅ {message}
                     </div>
                 )}
-                {error && (
+                {/* Error de una ACCIÓN (mutación) o de la carga de la cola 1: la cola 2
+                    tiene su propio cartel más abajo (`solicitudesError`). */}
+                {(error || errorRegistros) && (
                     <div className="mb-4 bg-red-500/15 border border-red-500/30 text-red-300 px-4 py-3 rounded-lg text-sm">
-                        {error}
+                        {error || errorRegistros}
                     </div>
                 )}
                 {credenciales && (
