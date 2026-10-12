@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
     AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar
 } from 'recharts';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
+import {
+    SIN_DATOS, useCrearTransaccionFinanzas, useDescargarReporteVentas, useStatsDashboard,
+    useTransaccionesFinanzas,
+} from '../../hooks/queries';
 import { DetalleModal } from '../../components/kpis/DetalleModal';
 import { hoyChileStr } from '../../utils/fecha';
 
@@ -37,45 +40,28 @@ const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'O
 
 const Reportes = () => {
     const { tenant_id } = useAuth();
-    const [reportData, setReportData] = useState(null);
+    // Mismo fallback `|| 1` que ya usaba esta pantalla en el reporte, el alta de un
+    // movimiento y el Excel: se conserva tal cual (no se cambia la petición que sale).
+    const tenantEfectivo = tenant_id || 1;
+
+    // El reporte lo trae el hook COMPARTIDO con el Dashboard (`GET /reportes/?tenant_id=`):
+    // la clave es la misma (`['reportes', tenantId]`), así que entrar acá después del panel
+    // pinta al instante y no vuelve a pedir lo mismo.
+    const { data: reporteData, isPending: loadingReporte } = useStatsDashboard(tenantEfectivo);
+    const reportData = reporteData ?? null;
+    const loading = loadingReporte;
     // Gráfico histórico abierto en el modal de detalle (null = ninguno).
     const [detalleGrafico, setDetalleGrafico] = useState(null);
-    const [loading, setLoading] = useState(true);
     const [showMovModal, setShowMovModal] = useState(false);
     const [movForm, setMovForm] = useState({ tipo: 'egreso', categoria: '', monto: '', descripcion: '', fecha: hoyChileStr(), tenant_id: tenant_id });
-    const [savingMov, setSavingMov] = useState(false);
-    const [movimientosList, setMovimientosList] = useState([]);
-    const [loadingMovs, setLoadingMovs] = useState(false);
-
-    useEffect(() => {
-        const fetchMovimientos = async () => {
-            setLoadingMovs(true);
-            try {
-                const r = await api.get(`/api/v1/finanzas/transacciones`);
-                setMovimientosList(r.data || []);
-            } catch (e) { console.error('Error movimientos', e); }
-            setLoadingMovs(false);
-        };
-        fetchMovimientos();
-    }, [tenant_id]);
-
-
-    useEffect(() => {
-        const fetchReportData = async () => {
-            try {
-                const response = await api.get(`/api/v1/reportes/?tenant_id=${tenant_id}`);
-                setReportData(response.data || null);
-            } catch (error) {
-                console.error('Error fetching reportes:', error);
-                // Fallback: no mostrar datos hardcodeados
-                setReportData(null);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchReportData();
-    }, [tenant_id]);
+    // Detalle de movimientos: lista propia (hoy no la comparte otra pantalla) que se
+    // invalida al registrar un movimiento. `SIN_DATOS` es el array vacío ESTABLE que
+    // exporta el módulo de consultas (un `|| []` nuevo en cada render rompe los memo).
+    const { data: transacciones, isPending: loadingMovs } = useTransaccionesFinanzas();
+    const movimientosList = transacciones ?? SIN_DATOS;
+    const guardarMovimiento = useCrearTransaccionFinanzas();
+    const savingMov = guardarMovimiento.isPending;
+    const descargarVentas = useDescargarReporteVentas();
 
     // Datos de los últimos 6 meses para los gráficos (desde BD real)
     const membresiaData = (reportData?.historicoMembresias || []).map(item => ({
@@ -512,20 +498,17 @@ const Reportes = () => {
                             <div className="flex gap-2 mt-5">
                                 <button onClick={async () => {
                                     if (!movForm.monto || !movForm.categoria) return;
-                                    setSavingMov(true);
                                     try {
-                                        await api.post('/api/v1/finanzas/transaccion', {
+                                        await guardarMovimiento.mutateAsync({
                                             ...movForm,
                                             monto: parseFloat(movForm.monto),
-                                            tenant_id: tenant_id || 1,
+                                            tenant_id: tenantEfectivo,
                                         });
                                         setShowMovModal(false);
-                                        setMovForm({ tipo: 'egreso', categoria: '', monto: '', descripcion: '', fecha: hoyChileStr(), tenant_id: tenant_id || 1 });
-                                        // Recargar KPIs
-                                        const resp = await api.get(`/api/v1/reportes/?tenant_id=${tenant_id || 1}`);
-                                        setReportData(resp.data || null);
+                                        setMovForm({ tipo: 'egreso', categoria: '', monto: '', descripcion: '', fecha: hoyChileStr(), tenant_id: tenantEfectivo });
+                                        // Los KPIs del reporte los refresca la propia mutación
+                                        // (invalida `['reportes']`), no hace falta pedirlos otra vez.
                                     } catch (e) { console.error(e); alert('Error al guardar'); }
-                                    setSavingMov(false);
                                 }} disabled={savingMov}
                                     className="flex-1 py-2 bg-blue-600 text-white rounded text-sm font-bold hover:bg-blue-700">
                                     {savingMov ? 'Guardando...' : '✅ Guardar'}
@@ -553,20 +536,13 @@ const Reportes = () => {
                                 // `new Date()` la última noche del mes el reporte salía
                                 // del mes siguiente (mismo bug que en Supervisión).
                                 const [anio, mes] = hoyChileStr().split('-').map(Number);
-                                const tenantIdValue = tenant_id || 1;
 
-                                const response = await api({
-                                    method: 'GET',
-                                    url: `/api/v1/reportes/monthly-sales`,
-                                    params: {
-                                        tenant_id: tenantIdValue,
-                                        mes: mes,
-                                        anio: anio
-                                    },
-                                    responseType: 'blob',
-                                    headers: {
-                                        'Accept': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-                                    }
+                                // El Excel lo trae la mutación compartida (blob + content-type):
+                                // acá sólo queda decidir si lo que llegó es el archivo o el error.
+                                const response = await descargarVentas.mutateAsync({
+                                    tenantId: tenantEfectivo,
+                                    mes,
+                                    anio,
                                 });
 
                                 const contentType = response.headers['content-type'] || '';

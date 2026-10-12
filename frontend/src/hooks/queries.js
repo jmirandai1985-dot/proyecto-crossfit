@@ -103,6 +103,14 @@ export const claves = {
     // Datos del box (`GET /tenants/me`): los usa "Mi QR" (public_id + nombre). Cuelga
     // de `['tenants','me']`, igual que el `public_id` que ya cachea `usePublicIdBox`.
     tenantMe: ['tenants', 'me'],
+    // ── Bloque 3 (parte B): Reportes & Analytics ──────────────────────────────
+    // El reporte en sí NO lleva clave nueva: `stats` (arriba) es la misma llamada
+    // (`GET /reportes/?tenant_id=`) que ya comparten el Dashboard y esta pantalla.
+    // Lo propio de Reportes son los movimientos de finanzas: un GET (plural) para
+    // el detalle y un POST (singular) para registrar uno nuevo.
+    // La clave NO lleva tenantId: el endpoint lo saca del token, igual que
+    // `coachDisciplinas` y `productos` (todos los tenants reciben sólo lo suyo).
+    transaccionesFinanzas: ['finanzas', 'transacciones'],
 };
 
 // ── Colas de revisión del admin (las miran el Dashboard Y Pendientes de revisión) ──
@@ -1207,6 +1215,55 @@ export function useEliminarProducto() {
     return useMutation({
         mutationFn: (id) => api.delete(`/api/v1/productos/${id}`).then((r) => r.data),
         onSuccess: () => qc.invalidateQueries({ queryKey: ['productos'] }),
+    });
+}
+
+// ── Bloque 3 (parte B): Reportes & Analytics ─────────────────────────────────
+// Movimientos de finanzas que muestra el detalle de Reportes. Se pide UNA vez y se
+// invalida al registrar un movimiento (abajo), así que sirve también si otra pantalla
+// empieza a mostrar la misma lista.
+export function useTransaccionesFinanzas() {
+    return useQuery({
+        queryKey: claves.transaccionesFinanzas,
+        queryFn: async () => (await api.get('/api/v1/finanzas/transacciones')).data || [],
+        // 1 min: el detalle cambia sólo cuando alguien registra un movimiento (y eso
+        // invalida la clave), así que volver a la pantalla no cuesta otra request.
+        staleTime: 60_000,
+    });
+}
+
+// Alta de un movimiento (ingreso/egreso). El payload lo arma la pantalla tal cual lo
+// mandaba antes (`...movForm`, `monto` numérico y `tenant_id`).
+// Invalida DOS prefijos: `['finanzas']` (la lista del detalle) y `['reportes']` (un
+// movimiento mueve el ingreso neto del mes, el MRR y el ARPU del reporte, y esos
+// mismos números son las tarjetas del Dashboard). Antes la pantalla volvía a pedir
+// `/reportes/` a mano después de guardar; ahora basta con invalidar el prefijo.
+export function useCrearTransaccionFinanzas() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) => api.post('/api/v1/finanzas/transaccion', payload).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['finanzas'] });
+            qc.invalidateQueries({ queryKey: ['reportes'] });
+        },
+    });
+}
+
+// Descarga del Excel de ventas del mes (`GET /reportes/monthly-sales`). NO es una
+// consulta cacheable: la respuesta es un Blob y, cuando el backend falla, un JSON de
+// error con el MISMO content-type de blob — quien llama decide (mira el content-type)
+// y muestra el `detail`. Por eso va como mutación y no invalida nada.
+export function useDescargarReporteVentas() {
+    return useMutation({
+        mutationFn: ({ tenantId, mes, anio }) => api({
+            method: 'GET',
+            url: '/api/v1/reportes/monthly-sales',
+            params: { tenant_id: tenantId, mes, anio },
+            responseType: 'blob',
+            headers: {
+                Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            },
+        }),
     });
 }
 
