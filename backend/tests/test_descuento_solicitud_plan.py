@@ -65,6 +65,48 @@ def db():
     sesion.close()
 
 
+# ── Higiene de la BD de TEST (residuo de una corrida CORTADA) ────────────────
+# Este módulo escribe en la MISMA rama TEST que ve la API y limpia por `alumno_id`
+# en el teardown del escenario. Si la corrida MUERE (timeout/kill/Ctrl+C) esa
+# limpieza no corre, y quedaban solicitudes `pending` con
+# `voucher_url='test://voucher.png'` dentro de `GET /solicitudes/pendientes`: la cola
+# de comprobantes del panel del admin, con filas que el endpoint responde 400
+# ("Origen de voucher no soportado") y que nadie puede mostrar ni aprobar.
+# El barrido va por PATRÓN (este módulo sólo crea correos
+# `descuento.<sufijo>@test.local` y planes `Plan descuento TEST <sufijo>`) y corre
+# ANTES de crear datos: una corrida cortada se limpia sola en la siguiente.
+PATRON_CORREO = "descuento.%@test.local"
+PATRON_PLAN = "Plan descuento TEST %"
+
+
+def _borrar_residuo(db) -> int:
+    """Borra el residuo de una corrida cortada. Devuelve cuántos alumnos limpió."""
+    ids = [fila[0] for fila in db.execute(
+        text("SELECT id FROM usuarios WHERE correo LIKE :p"),
+        {"p": PATRON_CORREO}).fetchall()]
+    for alumno_id in ids:
+        db.execute(text("DELETE FROM transacciones_financieras WHERE descripcion LIKE :d"),
+                   {"d": f"%(usuario #{alumno_id})%"})
+        db.execute(text("DELETE FROM notificaciones WHERE alumno_id = :a"), {"a": alumno_id})
+        # Sin CASCADE: la FK de `notificaciones_enviadas` es la que rompía el borrado.
+        db.execute(text("DELETE FROM notificaciones_enviadas WHERE alumno_id = :a"),
+                   {"a": alumno_id})
+        db.execute(text("DELETE FROM solicitudes_planes WHERE alumno_id = :a"), {"a": alumno_id})
+        db.execute(text("DELETE FROM beneficios WHERE alumno_id = :a"), {"a": alumno_id})
+        db.execute(text("DELETE FROM suscripciones WHERE usuario_id = :a"), {"a": alumno_id})
+        db.execute(text("DELETE FROM usuarios WHERE id = :a"), {"a": alumno_id})
+    db.execute(text("DELETE FROM planes WHERE nombre LIKE :p"), {"p": PATRON_PLAN})
+    db.commit()
+    return len(ids)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _sin_residuo_de_corridas_cortadas(db):
+    """Antes de crear datos: barre el residuo de una corrida cortada (ver arriba)."""
+    if _borrar_residuo(db):
+        print("\n[OK] residuo de una corrida cortada limpiado en la rama TEST\n")
+
+
 @pytest.fixture(scope="module")
 def cliente():
     """TestClient del app real (sin levantar servidor y sin correr el lifespan)."""
@@ -134,6 +176,13 @@ def escenario(db, tokens):
         db.execute(text("DELETE FROM transacciones_financieras WHERE descripcion LIKE :d"),
                    {"d": f"%(usuario #{alumno_id})%"})
         db.execute(text("DELETE FROM notificaciones WHERE alumno_id = :a"), {"a": alumno_id})
+        # `notificaciones_enviadas.alumno_id` NO tiene CASCADE: sin borrarla, el
+        # DELETE del usuario falla por FK, la limpieza se cae con un WARN y el
+        # escenario queda (alumno + solicitud pending + plan) en la rama TEST para
+        # siempre. Es la causa de que se acumularan solicitudes `test://` en la cola
+        # de comprobantes del panel.
+        db.execute(text("DELETE FROM notificaciones_enviadas WHERE alumno_id = :a"),
+                   {"a": alumno_id})
         db.execute(text("DELETE FROM solicitudes_planes WHERE alumno_id = :a"), {"a": alumno_id})
         db.execute(text("DELETE FROM beneficios WHERE alumno_id = :a"), {"a": alumno_id})
         db.execute(text("DELETE FROM suscripciones WHERE usuario_id = :a"), {"a": alumno_id})
