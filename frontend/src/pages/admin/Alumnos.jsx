@@ -4,7 +4,29 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import AlumnoFichaModal from '../../components/AlumnoFichaModal';
-import { fmtFechaChile, sumarDiasInstante } from '../../utils/fecha';
+import { fmtFechaChile, sumarDiasInstante, hoyChileStr, toChileFechaStr } from '../../utils/fecha';
+
+/**
+ * ¿La suscripción sigue vigente HOY? Se compara por DÍA CHILENO (el día de
+ * vencimiento vale completo) y con el MISMO criterio que el backend
+ * (`vigente_el_dia`): no depende de la hora del navegador ni de su zona.
+ * Una fecha de vencimiento vacía nunca está vigente.
+ */
+const suscripcionVigenteHoy = (fechaExpiracion) =>
+    Boolean(fechaExpiracion) && toChileFechaStr(fechaExpiracion) >= hoyChileStr();
+
+/**
+ * De una lista de suscripciones, la que está VIGENTE con el vencimiento más
+ * lejano (la que "manda" hoy), o `null` si ninguna lo está. Mismo criterio que
+ * el listado del backend (`/alumnos?con_membresia`): vencimiento desc y la
+ * primera vigente.
+ */
+const suscripcionVigente = (lista = []) => {
+    const vigentes = (lista || []).filter((s) => suscripcionVigenteHoy(s?.fecha_expiracion));
+    if (vigentes.length === 0) return null;
+    return vigentes.reduce((a, b) =>
+        new Date(b.fecha_expiracion) > new Date(a.fecha_expiracion) ? b : a);
+};
 
 const Alumnos = () => {
     const { tenant_id } = useAuth();
@@ -20,6 +42,11 @@ const Alumnos = () => {
     const [showModal, setShowModal] = useState(false);
     const [showVoucherModal, setShowVoucherModal] = useState(false);
     const [selectedAlumnoVoucher, setSelectedAlumnoVoucher] = useState(null);
+    // Plan VIGENTE del alumno (si lo tiene) cuando se abre el comprobante: el
+    // modal lo muestra y exige confirmación antes de crear una SEGUNDA
+    // suscripción activa sobre la que ya tiene.
+    const [planVigenteAlumno, setPlanVigenteAlumno] = useState(null);
+    const [confirmarDuplicado, setConfirmarDuplicado] = useState(false);
     const [planes, setPlanes] = useState([]);
     const [planSeleccionado, setPlanSeleccionado] = useState('');
     const [aprobandoPago, setAprobandoPago] = useState(false);
@@ -201,12 +228,34 @@ const Alumnos = () => {
         setSelectedAlumnoVoucher(alumno);
         setPlanSeleccionado('');
         setMensajeAprobacion('');
+        setPlanVigenteAlumno(null);
+        setConfirmarDuplicado(false);
         setShowVoucherModal(true);
+
+        // ¿Ya tiene un plan ACTIVO? Se consulta al ABRIR el modal (no al aprobar)
+        // para avisar y pedir confirmación antes de crear una SEGUNDA suscripción
+        // activa sobre una vigente (doble cobro / doble plan). Best-effort: si la
+        // consulta falla, el modal sigue igual y no se bloquea la aprobación.
+        api.get('/api/v1/suscripciones', {
+            params: { usuario_id: alumno.id, estado: 'activo' },
+        }).then(({ data }) => {
+            const vigente = suscripcionVigente(data);
+            if (!vigente) return;
+            const plan = planes.find((p) => p.id === vigente.plan_id);
+            setPlanVigenteAlumno({
+                plan_nombre: plan?.nombre || `Plan ID ${vigente.plan_id}`,
+                fecha_expiracion: vigente.fecha_expiracion,
+            });
+        }).catch((error) => {
+            console.error('Error al consultar la suscripción vigente:', error);
+        });
     };
 
     const closeVoucherModal = () => {
         setShowVoucherModal(false);
         setSelectedAlumnoVoucher(null);
+        setPlanVigenteAlumno(null);
+        setConfirmarDuplicado(false);
     };
 
     const handleSubmit = async (e) => {
@@ -518,6 +567,27 @@ const Alumnos = () => {
                                         <p className="text-xs text-green-700">El comprobante ha sido validado correctamente</p>
                                     </div>
                                 </div>
+                                {planVigenteAlumno && (
+                                    <div className="bg-amber-500/10 border-l-4 border-amber-500 rounded p-4 text-sm text-amber-200"
+                                        data-testid="aviso-plan-vigente">
+                                        ⚠️ Este alumno ya tiene el plan{' '}
+                                        <span className="font-bold">{planVigenteAlumno.plan_nombre}</span>{' '}
+                                        vigente hasta el {fmtFechaChile(planVigenteAlumno.fecha_expiracion)}.
+                                        <p className="text-xs mt-1 text-amber-300/80">
+                                            ¿Crear otro de todas formas? Se creará una SEGUNDA suscripción
+                                            activa sobre la que ya tiene.
+                                        </p>
+                                        <label className="mt-3 flex items-center gap-2 cursor-pointer text-amber-100">
+                                            <input
+                                                type="checkbox"
+                                                checked={confirmarDuplicado}
+                                                onChange={(e) => setConfirmarDuplicado(e.target.checked)}
+                                                data-testid="confirmar-plan-duplicado"
+                                            />
+                                            Sí, crear una nueva suscripción de todas formas
+                                        </label>
+                                    </div>
+                                )}
                                 <div>
                                     <label className="block text-sm font-medium text-zinc-300 mb-1">Seleccionar Plan</label>
                                     <select value={planSeleccionado} onChange={(e) => setPlanSeleccionado(e.target.value)} className="w-full px-3 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500">
@@ -560,9 +630,10 @@ const Alumnos = () => {
                                 <div className="flex gap-3 pt-4">
                                     <button onClick={closeVoucherModal} className="flex-1 px-4 py-2 border border-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-800/50 transition-colors font-medium">Cerrar</button>
                                     <button
-                                        disabled={aprobandoPago}
+                                        disabled={aprobandoPago || (planVigenteAlumno && !confirmarDuplicado)}
                                         onClick={async () => {
                                             if (!planSeleccionado) { setMensajeAprobacion('Debes seleccionar un plan antes de aprobar.'); return; }
+                                            if (planVigenteAlumno && !confirmarDuplicado) { setMensajeAprobacion('El alumno ya tiene un plan vigente: marca la confirmación para crear otra suscripción.'); return; }
                                             setAprobandoPago(true);
                                             setMensajeAprobacion('');
                                             try {
