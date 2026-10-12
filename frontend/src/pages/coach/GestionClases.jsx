@@ -1,17 +1,20 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
 import Layout from '../../components/Layout';
 import WodDetalleModal from '../../components/WodDetalleModal';
-import api from '../../services/api';
+import {
+    SIN_DATOS, useAccionClase, useClaseDetalle, useClasesDia, useClasesDisciplinaSemana,
+    useCoachDisciplinas, useConfirmarAsistenciaClase, useCrearWodsBatch, useDisciplinas,
+    useGuardarWod, useMarcarAsistenciaReserva, useReservasPorClase, useTodosLosWods,
+    useWodDetalle,
+} from '../../hooks/queries';
 import { horaChileStr, hoyChileStr as hoyStr, toChileFechaStr as toLocalFechaStr } from '../../utils/fecha';
 
-const API_BASE = '/api/v1';
-const TURNOS = [
-    { id: 'am', label: '🌅 Turno AM', desde: 7, hasta: 11, horas: '07:00 - 11:59' },
-    { id: 'md', label: '☀️ Turno Medio Día', desde: 12, hasta: 17, horas: '12:00 - 17:59' },
-    { id: 'pm', label: '🌆 Turno Tarde/Noche', desde: 18, hasta: 23, horas: '18:00+' },
-];
+// Los turnos AM/PM y el selector de horarios se fueron con la TAREA 4: el calendario
+// multi-día reemplazó esa grilla, pero quedaron el `TURNOS` y los `horariosSel`/
+// `horariosTurno` que ya nadie leía (se sacaron con la migración a React Query).
 
 // hoyStr() y toLocalFechaStr() se importan de src/utils/fecha.js (calendario
 // chileno), NO se redefinen acá. Antes hoyStr() usaba toISOString().split('T')[0],
@@ -89,8 +92,7 @@ function CoachClaseAcciones({ clase, coachId, onTomar, onSoltar }) {
 export default function GestionClases() {
     const navigate = useNavigate();
     const location = useLocation();
-    const { tenant_id: authTenant, usuario_id: authUserId } = useAuth();
-    const tenant_id = authTenant || parseInt(localStorage.getItem('tenant_id') || '1');
+    const { usuario_id: authUserId } = useAuth();
     const coach_id = authUserId || parseInt(localStorage.getItem('usuario_id') || '0');
 
     // Leer fecha y clase desde la URL (?fecha=YYYY-MM-DD&clase=ID)
@@ -103,27 +105,24 @@ export default function GestionClases() {
 
     const [pestana, setPestana] = useState('clases-hoy');
     const [msg, setMsg] = useState({ tipo: '', texto: '' });
-    const [loading, setLoading] = useState(false);
+    // "Clases de hoy": el día que se está mirando (si la URL trae ?fecha=, esa exacta).
+    const [fechaClases, setFechaClases] = useState(urlFecha || hoyStr());
 
-    // Planificar
+    // Planificar (estado del formulario; los DATOS vienen de las consultas de abajo).
     const [fechaPlanif, setFechaPlanif] = useState(hoyStr());
-    const [turnoActivo, setTurnoActivo] = useState(null);
-    const [disciplinas, setDisciplinas] = useState([]);
     const [disciplinaActiva, setDisciplinaActiva] = useState(null);
-    const [horariosTurno, setHorariosTurno] = useState([]);
-    const [horariosSel, setHorariosSel] = useState({});
-    const [clasesDelDia, setClasesDelDia] = useState([]);
     const [wod, setWod] = useState(null);
     const [modoEdicion, setModoEdicion] = useState(false);
-    // Punto 1 (panel Coach): detalle completo del WOD de una tarjeta (solo lectura)
-    const [wodDetalle, setWodDetalle] = useState(null);   // { wod, clase, error } | null
-    const [cargandoWodDetalle, setCargandoWodDetalle] = useState(false);
+    // Punto 1 (panel Coach): tarjeta cuyo WOD se mira en el modal (solo lectura). El WOD
+    // lo trae la consulta `useWodDetalle`, así que acá sólo se guarda CUÁL tarjeta es.
+    const [wodDetalleClase, setWodDetalleClase] = useState(null);
     const [wodForm, setWodForm] = useState({ titulo: '', calentamiento: '', fuerza_habilidad: '', wod_principal: '', tipo_metcon: '', estado: 'publicado' });
-    const [asistencia, setAsistencia] = useState([]);
     const [claseAsistencia, setClaseAsistencia] = useState(null);
+    // Marcado que tocó el usuario: la lista de alumnos sale de la consulta y esto sólo
+    // guarda los toggles de esta visita (mismo patrón que la tarjeta del Dashboard).
+    const [asistenciaOverrides, setAsistenciaOverrides] = useState({});
     const [modoEmergencia, setModoEmergencia] = useState(false);
     const [confirmarEmergencia, setConfirmarEmergencia] = useState(null); // { disciplinaNombre }
-    const [coachDisciplinas, setCoachDisciplinas] = useState([]); // disciplinas asignadas al coach
 
     // ── B4: TOMAR / SOLTAR clase desde el panel del coach ──
     // `accionClase` = { clase, accion: 'tomar'|'soltar', alcance: 'clase'|'horario',
@@ -136,209 +135,172 @@ export default function GestionClases() {
     const [tomaEmergencia, setTomaEmergencia] = useState(null);
 
     // ── TAREA 4: selección múltiple de días (semana actual) ──
-    const semanaActual = getSemanaActual();
+    const semanaActual = useMemo(() => getSemanaActual(), []);
     const [diasSeleccionados, setDiasSeleccionados] = useState(new Set([hoyStr()]));
-    const [clasesPorFecha, setClasesPorFecha] = useState({}); // { fechaStr: [clases] }
-    const [wodsPorFecha, setWodsPorFecha] = useState({}); // { fechaStr: [wods] }
 
     // ── Punto 2: ALCANCE al publicar (a qué clases se vincula el WOD) ──
     // 'hora' = solo la clase elegida (DEFAULT al entrar desde una tarjeta, 5a)
     // 'dia'  = todas las clases de esa fecha + disciplina (comportamiento viejo)
     const [alcance, setAlcance] = useState('hora');
-    // Clases por día, SOLO para mostrar cuántas se ven afectadas por cada opción.
-    // No se reutiliza clasesPorFecha: esa carga depende del selector de
-    // turno/disciplina y al entrar con ?clase=ID puede no haberse ejecutado.
-    const [clasesAlcance, setClasesAlcance] = useState({}); // { fechaStr: [clases] | null }
-    const [cargandoAlcance, setCargandoAlcance] = useState(false);
 
-    // Clase abierta desde DashboardCoach (?clase=ID) — formulario WOD pre-vinculado
-    const [claseDestino, setClaseDestino] = useState(null);
-    const [cargandoClase, setCargandoClase] = useState(false);
+    // Clase abierta con ?clase=ID (llega por la URL) o con "Publicar WOD" de una tarjeta.
+    const [claseClic, setClaseClic] = useState(null);
 
-    // Si la URL trae ?clase=ID, cargar la clase y pre-enlazar el formulario
+    // ═══ DATOS (React Query) ═══════════════════════════════════════════════════
+    // Antes cada bloque pedía lo suyo con `useEffect` + `useState` (y el calendario, 7 GET
+    // en un Promise.all por semana). Ahora cada dato es una consulta con su clave
+    // —compartida con el Dashboard del coach— y las mutaciones invalidan por prefijo.
+    const qc = useQueryClient();
+    const disciplinasQ = useDisciplinas();
+    const coachDiscQ = useCoachDisciplinas();
+    const clasesDiaQ = useClasesDia(fechaClases);
+    const clasesSemanaQ = useClasesDisciplinaSemana(
+        disciplinaActiva, semanaActual[0], semanaActual[6],
+    );
+    const wodsQ = useTodosLosWods();
+    const claseUrlQ = useClaseDetalle(urlClaseId);
+    const asistenciaQ = useReservasPorClase(claseAsistencia);
+    const wodDetalleQ = useWodDetalle(wodDetalleClase?.wod_id);
+    // El WOD publicado de la clase destino (sólo el flujo ?clase=ID): pre-carga el form.
+    const wodDestinoQ = useWodDetalle(urlClaseId ? (claseUrlQ.data?.wod_id ?? null) : null);
+
+    // Mutaciones del panel: publicar/editar WOD, marcar asistencia y tomar/soltar.
+    const guardarWodMut = useGuardarWod();
+    const crearWodsBatch = useCrearWodsBatch();
+    const marcarAsistencia = useMarcarAsistenciaReserva();
+    const confirmarAsistenciaClase = useConfirmarAsistenciaClase();
+    const accionClaseMut = useAccionClase();
+    // El botón de guardar muestra "Guardando..." con el estado REAL de la mutación.
+    const loading = guardarWodMut.isPending || crearWodsBatch.isPending;
+
+    const detalleError = (e) => e?.response?.data?.detail || e?.message || 'No se pudo cargar';
+
+    // Catálogo de disciplinas para planificar (sin Gap ni Open Box).
+    const disciplinas = useMemo(() => (disciplinasQ.data || SIN_DATOS).filter(d =>
+        d.nombre?.toLowerCase().trim() !== 'gap' && !d.es_open_box), [disciplinasQ.data]);
+    // Disciplinas ASIGNADAS al coach (el backend devuelve las del box: se filtra acá).
+    const coachDisciplinas = useMemo(() => (coachDiscQ.data || SIN_DATOS)
+        .filter(cd => cd.activo).map(cd => cd.disciplina_id), [coachDiscQ.data]);
+
+    // Clase destino: la del ?clase=ID de la URL o la tarjeta en la que se hizo clic.
+    const claseDestino = claseClic || claseUrlQ.data || null;
+    const cargandoClase = Boolean(urlClaseId) && claseUrlQ.isPending;
+
+    // "Clases de hoy" (fechaClases): la lista del día, cuáles ya tienen WOD y cuál está
+    // EN CURSO ahora (con la hora de CHILE, no la del navegador del coach).
+    const clasesDiaVista = clasesDiaQ.data || SIN_DATOS;
+    const clasesConWod = useMemo(() => clasesDiaVista.filter(c => c.wod_id), [clasesDiaVista]);
+    const claseEnCurso = useMemo(() => {
+        if (fechaClases !== hoyStr()) return null;
+        const [hh, mm] = horaChileStr().split(':').map(Number);
+        // ICU puede devolver '24:00' para la medianoche: eso son las 00:00 = 0 min.
+        const minActual = (Number.isFinite(hh) ? hh % 24 : 0) * 60 + (mm || 0);
+        const ec = clasesDiaVista.find(c => {
+            const hi = parseHora(c.hora_inicio), hf = parseHora(c.hora_fin);
+            return minActual >= hi * 60 && minActual <= hf * 60;
+        });
+        return ec?.id || null;
+    }, [clasesDiaVista, fechaClases]);
+
+    // Calendario: las clases de la semana de la disciplina activa, agrupadas por día.
+    const clasesPorFecha = useMemo(() => {
+        const porFecha = {};
+        const lista = clasesSemanaQ.data || SIN_DATOS;
+        const fechaDe = (c) => (c.fecha ? String(c.fecha).split('T')[0] : '');
+        semanaActual.forEach(f => {
+            porFecha[f] = lista.filter(c => fechaDe(c) === f);
+        });
+        return porFecha;
+    }, [clasesSemanaQ.data, semanaActual]);
+
+    // WODs por día de la semana: salen del MISMO listado del box que usa el Dashboard
+    // (el calendario pedía 7 GET, uno por día, en cada selección de disciplina).
+    const wodsPorFecha = useMemo(() => {
+        const porFecha = {};
+        const lista = wodsQ.data || SIN_DATOS;
+        const fechaDe = (w) => (w.fecha ? String(w.fecha).split('T')[0] : '');
+        semanaActual.forEach(f => {
+            porFecha[f] = lista.filter(w => fechaDe(w) === f);
+        });
+        return porFecha;
+    }, [wodsQ.data, semanaActual]);
+
+    // Detalle de un WOD en el modal (solo lectura): el objeto sale de la consulta.
+    const wodDetalle = useMemo(() => (wodDetalleClase ? {
+        wod: wodDetalleQ.data || null,
+        clase: wodDetalleClase,
+        error: wodDetalleQ.isError ? detalleError(wodDetalleQ.error) : '',
+    } : null), [wodDetalleClase, wodDetalleQ.data, wodDetalleQ.isError, wodDetalleQ.error]);
+    const cargandoWodDetalle = Boolean(wodDetalleClase) && wodDetalleQ.isPending;
+
+    // Asistencia de la clase abierta: se DERIVA de la consulta y `asistenciaOverrides`
+    // guarda sólo lo que marcó el usuario.
+    const asistencia = useMemo(() => (asistenciaQ.data || SIN_DATOS).map(r => ({
+        reserva_id: r.id,
+        alumno_id: r.alumno_id,
+        nombre: r.alumno_nombre || `#${r.alumno_id}`,
+        asistio: (r.id in asistenciaOverrides) ? asistenciaOverrides[r.id] : (r.asistio || false),
+    })), [asistenciaQ.data, asistenciaOverrides]);
+
+    // Secciones caídas: antes cada fetch empujaba su error a `msg` a mano (con un
+    // "Reintentar" distinto por bloque); ahora salen de las consultas.
+    const erroresConsultas = useMemo(() => {
+        const fallos = [];
+        if (disciplinasQ.isError) fallos.push('No se pudieron cargar las disciplinas.');
+        if (coachDiscQ.isError) {
+            fallos.push('No se pudieron cargar tus disciplinas asignadas (el modo emergencia queda deshabilitado).');
+        }
+        if (clasesDiaQ.isError) fallos.push(`No se pudieron cargar las clases del ${fechaClases}.`);
+        if (clasesSemanaQ.isError) {
+            fallos.push('No se pudieron cargar las clases de la semana (el calendario puede estar incompleto).');
+        }
+        if (wodsQ.isError) fallos.push('No se pudieron cargar los WODs de la semana.');
+        return fallos;
+    }, [disciplinasQ.isError, coachDiscQ.isError, clasesDiaQ.isError, clasesSemanaQ.isError,
+        wodsQ.isError, fechaClases]);
+    const reintentar = () => qc.invalidateQueries();
+
+    // Prefill del formulario cuando se llega con ?clase=ID: es la ÚNICA sincronización
+    // datos -> formulario que queda (los campos los edita el coach). Las tarjetas ya fijan
+    // todo en `abrirFormularioClase`, sin pasar por acá.
     useEffect(() => {
-        if (!urlClaseId) return;
-        setCargandoClase(true);
-        api.get(`${API_BASE}/clases/${urlClaseId}`)
-            .then(r => {
-                const c = r.data;
-                setClaseDestino(c);
-                if (c.disciplina_id) setDisciplinaActiva(c.disciplina_id);
-                if (c.fecha) {
-                    const fechaStr = typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha;
-                    setFechaPlanif(fechaStr);
-                    setFechaClases(fechaStr);
-                    // El día de la tarjeta queda marcado en el calendario. Sin
-                    // esto, entrando con ?clase= de OTRA fecha el alcance "solo
-                    // esta hora" apuntaba a la clase de HOY y podía pisar un WOD
-                    // real (y la franja "Días donde publicar" mostraba hoy).
-                    setDiasSeleccionados(new Set([fechaStr]));
-                }
-                setModoEmergencia(false);
-                // 5a: se entra desde una tarjeta con hora concreta => "solo esta hora"
-                setAlcance('hora');
+        if (!urlClaseId || !claseUrlQ.data) return;
+        const c = claseUrlQ.data;
+        setDisciplinaActiva(c.disciplina_id || null);
+        if (c.fecha) {
+            const fechaStr = typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha;
+            setFechaPlanif(fechaStr);
+            setFechaClases(fechaStr);
+            // El día de la tarjeta queda marcado en el calendario. Sin esto, entrando con
+            // ?clase= de OTRA fecha el alcance "solo esta hora" apuntaba a la clase de HOY
+            // y podía pisar un WOD real (y la franja "Días donde publicar" mostraba hoy).
+            setDiasSeleccionados(new Set([fechaStr]));
+        }
+        setModoEmergencia(false);
+        // 5a: se entra desde una tarjeta con hora concreta => "solo esta hora"
+        setAlcance('hora');
+    }, [urlClaseId, claseUrlQ.data]);
 
-                // Si la clase YA tiene un WOD publicado (clase.wod_id), cargar
-                // ese WOD y PRE-CARGAR el formulario en modo edición.
-                if (c.wod_id) {
-                    return api.get(`${API_BASE}/wods/${c.wod_id}`)
-                        .then(wr => {
-                            const wodData = wr.data;
-                            setWod(wodData); // hace que el guardado use PUT en vez de POST
-                            setModoEdicion(true);
-                            setWodForm({
-                                titulo: wodData.titulo || '',
-                                calentamiento: wodData.calentamiento || '',
-                                fuerza_habilidad: wodData.fuerza_habilidad || '',
-                                wod_principal: wodData.wod_principal || '',
-                                tipo_metcon: wodData.tipo_metcon || '',
-                                estado: wodData.estado || 'publicado'
-                            });
-                        })
-                        .catch(() => setMsg({ tipo: 'error', texto: 'La clase tiene un WOD pero no se pudo cargar sus datos' }));
-                }
-            })
-            .catch(() => setMsg({ tipo: 'error', texto: 'No se pudo cargar la clase indicada en la URL' }))
-            .finally(() => setCargandoClase(false));
-    }, [urlClaseId, tenant_id]);
-
-    // Clases de Hoy — si la URL trae ?fecha=, usar esa fecha exacta
-    const [fechaClases, setFechaClases] = useState(urlFecha || hoyStr());
-    const [clasesConWod, setClasesConWod] = useState([]);
-    const [clasesDiaVista, setClasesDiaVista] = useState([]);
-    const [claseEnCurso, setClaseEnCurso] = useState(null);
-
-    // Filtrar disciplinas según modo
-    const disciplinasVisibles = React.useMemo(() => {
-        if (modoEmergencia) return disciplinas; // Emergencia: mostrar TODAS
-        if (coachDisciplinas.length === 0) return disciplinas; // Aún no cargadas: mostrar todas
-        return disciplinas.filter(d => coachDisciplinas.includes(d.id)); // Normal: solo las asignadas al coach
-    }, [disciplinas, coachDisciplinas, modoEmergencia]);
-
-    // Cargar disciplinas
+    // Si esa clase YA tiene un WOD publicado, el formulario se pre-carga en modo edición.
     useEffect(() => {
-        api.get(`${API_BASE}/disciplinas/`)
-            .then(r => {
-                const data = r.data || [];
-                const filt = data.filter(d =>
-                    d.nombre?.toLowerCase().trim() !== 'gap' && !d.es_open_box
-                );
-                setDisciplinas(filt);
-            })
-            .catch(e => console.error('Error disciplinas', e));
-        // Cargar disciplinas asignadas al coach
-        api.get(`${API_BASE}/coach-disciplinas`, { params: { coach_id } })
-            .then(r => {
-                const ids = (r.data || []).filter(cd => cd.activo).map(cd => cd.disciplina_id);
-                setCoachDisciplinas(ids);
-            })
-            .catch((e) => {
-                // H-10: antes era mudo (solo vaciaba la lista) y el coach no sabia que el
-                // modo emergencia quedaba deshabilitado.
-                console.error('Error disciplinas del coach', e);
-                setCoachDisciplinas([]);
-                setMsg({ tipo: 'error', texto: 'No se pudieron cargar tus disciplinas asignadas (el modo emergencia queda deshabilitado).', retry: () => window.location.reload() });
-            });
-    }, [tenant_id, coach_id]);
-
-    const cargarClases = useCallback(async (f) => {
-        try {
-            const r = await api.get(`${API_BASE}/clases/`, { params: { fecha_desde: f, fecha_hasta: f, limit: 200 } });
-            const data = r.data || [];
-            return Array.isArray(data) ? data : (data.clases || []);
-        } catch (e) { console.error('Error clases', e); return []; }
-    }, [tenant_id]);
-
-    useEffect(() => {
-        cargarClases(fechaPlanif).then(setClasesDelDia);
-        // NO resetear la selección cuando se llegó con una clase destino
-        // (?clase=ID desde una tarjeta del dashboard, o el botón "Publicar WOD"
-        // de una clase): ese flujo YA fija disciplina + fecha, y este reset los
-        // pisaba (carrera de efectos: el coach veía 400 "disciplina_id es
-        // obligatorio para coaches" y el WOD pre-cargado desaparecía).
-        if (claseDestino) return;
-        setTurnoActivo(null); setDisciplinaActiva(null); setHorariosTurno([]);
-        setHorariosSel({}); setWod(null); setModoEdicion(false);
-    }, [fechaPlanif, cargarClases, claseDestino]);
-
-    const recargarVistaDia = useCallback(async (f) => {
-        const cls = await cargarClases(f);
-        setClasesDiaVista(cls);
-        setClasesConWod(cls.filter(c => c.wod_id));
-        if (f === hoyStr()) {
-            // Hora de CHILE (helper compartido), no la del navegador: los horarios de la
-            // grilla son hora local del box y el coach puede estar en otra zona (con el
-            // reloj local del navegador la clase "en curso" se marcaba mal).
-            const [hh, mm] = horaChileStr().split(':').map(Number);
-            // ICU puede devolver '24:00' para la medianoche: eso son las 00:00 = 0 min.
-            const minActual = (Number.isFinite(hh) ? hh % 24 : 0) * 60 + (mm || 0);
-            const ec = cls.find(c => {
-                const hi = parseHora(c.hora_inicio), hf = parseHora(c.hora_fin);
-                return minActual >= hi * 60 && minActual <= hf * 60;
-            });
-            setClaseEnCurso(ec?.id || null);
-        } else setClaseEnCurso(null);
-    }, [cargarClases]);
-
-    useEffect(() => {
-        recargarVistaDia(fechaClases);
-    }, [fechaClases, recargarVistaDia]);
-
-    const seleccionarTurno = (tId) => {
-        setTurnoActivo(tId); setDisciplinaActiva(null);
-        setHorariosTurno([]); setHorariosSel({}); setWod(null); setModoEdicion(false);
-        setAsistencia([]); setClaseAsistencia(null);
-    };
-
-    const seleccionarDisciplina = async (dId) => {
-        setDisciplinaActiva(dId); setHorariosSel({}); setWod(null); setModoEdicion(false);
-        try {
-            const turno = TURNOS.find(t => t.id === turnoActivo);
-            // TAREA 4: cargar TODA la semana para el calendario multi-día
-            const desdeSemana = semanaActual[0];
-            const hastaSemana = semanaActual[6];
-            const r = await api.get(`${API_BASE}/clases/`, { params: { disciplina_id: dId, fecha_desde: desdeSemana, fecha_hasta: hastaSemana, limit: 500 } });
-            const data = r.data || [];
-            let clasesSemana = Array.isArray(data) ? data : (data.clases || []);
-            if (turno) clasesSemana = clasesSemana.filter(c => { const hora = parseHora(c.hora_inicio); return hora >= turno.desde && hora <= turno.hasta; });
-
-            // Clases de la fecha seleccionada (comportamiento previo)
-            const clasesHoy = clasesSemana.filter(c => c.fecha === fechaPlanif);
-            setHorariosTurno(clasesHoy);
-            const sel = {}; clasesHoy.forEach(c => { sel[c.id] = false; });
-            setHorariosSel(sel);
-
-            // Agrupar por fecha para el calendario
-            const porFecha = {};
-            semanaActual.forEach(f => {
-                const fechaK = f;
-                porFecha[fechaK] = clasesSemana.filter(c => {
-                    const cf = c.fecha ? (typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha) : '';
-                    return cf === fechaK;
-                });
-            });
-            setClasesPorFecha(porFecha);
-
-            // Cargar WODs de la semana (GET /wods/?fecha= acepta fecha arbitraria)
-            const wodsSemana = {};
-            const wodsFallidos = [];  // H-10: dias cuyo GET /wods/?fecha fallo
-            await Promise.all(semanaActual.map(async (f) => {
-                try {
-                    const wr = await api.get(`${API_BASE}/wods/`, { params: { fecha: f } });
-                    wodsSemana[f] = wr.data || [];
-                } catch (e) {
-                    // H-10: antes mudo; el calendario mostraba el dia como si no tuviera WOD.
-                    console.error('Error cargando WODs del dia', f, e);
-                    wodsSemana[f] = [];
-                    wodsFallidos.push(f);
-                }
-            }));
-            setWodsPorFecha(wodsSemana);
-            if (wodsFallidos.length > 0) {
-                setMsg({ tipo: 'error', texto: `No se pudieron cargar los WODs de ${wodsFallidos.length} dia(s): ${wodsFallidos.join(', ')}.`, retry: () => seleccionarDisciplina(disciplinaActiva) });
-            }
-        } catch (e) { console.error('Error horarios', e); }
-    };
+        if (!urlClaseId || !claseUrlQ.data?.wod_id) return;
+        if (wodDestinoQ.isError) {
+            setMsg({ tipo: 'error', texto: 'La clase tiene un WOD pero no se pudo cargar sus datos' });
+            return;
+        }
+        const wodData = wodDestinoQ.data;
+        if (!wodData) return;
+        setWod(wodData); // hace que el guardado use PUT en vez de POST
+        setModoEdicion(true);
+        setWodForm({
+            titulo: wodData.titulo || '',
+            calentamiento: wodData.calentamiento || '',
+            fuerza_habilidad: wodData.fuerza_habilidad || '',
+            wod_principal: wodData.wod_principal || '',
+            tipo_metcon: wodData.tipo_metcon || '',
+            estado: wodData.estado || 'publicado'
+        });
+    }, [urlClaseId, claseUrlQ.data, wodDestinoQ.data, wodDestinoQ.isError]);
 
     // TAREA 4: toggle de día para el calendario (solo si hay clases ese día)
     const toggleDia = (fechaStr) => {
@@ -352,8 +314,6 @@ export default function GestionClases() {
         });
     };
 
-    const horarioTieneWod = (horarioId) => clasesDelDia.some(c => c.horario_base_id === horarioId && c.wod_id);
-
     const guardarWod = async () => {
         if (!wodForm.wod_principal.trim()) { setMsg({ tipo: 'error', texto: 'El WOD principal es obligatorio' }); return; }
         // Confirmación de emergencia: si el coach no está asignado a esta disciplina y modoEmergencia está activo
@@ -366,16 +326,20 @@ export default function GestionClases() {
     };
 
     const ejecutarGuardarWod = async () => {
-        setLoading(true); setMsg({ tipo: '', texto: '' });
+        setMsg({ tipo: '', texto: '' });
         const esEmergencia = modoEmergencia && disciplinaActiva && coachDisciplinas.length > 0 && !coachDisciplinas.includes(disciplinaActiva);
         try {
             const params = { disciplina_id: disciplinaActiva };
             if (esEmergencia) params.modo_emergencia = true;
             let wodRes;
             if (wod && wod.id) {
-                // Modo edición: solo actualiza el WOD existente del día
-                const r = await api.put(`${API_BASE}/wods/${wod.id}`, { ...wodForm, fecha: fechaPlanif, coach_id }, { params });
-                wodRes = r.data; setMsg({ tipo: 'exito', texto: 'WOD actualizado' + (esEmergencia ? ' (modo emergencia)' : '') });
+                // Modo edición: solo actualiza el WOD existente del día.
+                wodRes = await guardarWodMut.mutateAsync({
+                    wodId: wod.id,
+                    payload: { ...wodForm, fecha: fechaPlanif, coach_id },
+                    params,
+                });
+                setMsg({ tipo: 'exito', texto: 'WOD actualizado' + (esEmergencia ? ' (modo emergencia)' : '') });
             } else {
                 // Crear TODOS los días en UNA sola llamada: POST /wods/batch-create.
                 // El backend crea un WOD por fecha y vincula sus clases en una
@@ -403,15 +367,14 @@ export default function GestionClases() {
                 // Se OMITE la clave cuando el alcance es "todas las horas":
                 // así el endpoint mantiene su comportamiento histórico.
                 if (claseIdsAlcance && claseIdsAlcance.length > 0) body.clase_ids = claseIdsAlcance;
-                const r = await api.post(`${API_BASE}/wods/batch-create`, body, { params });
-                const batch = r.data || {};
+                const batch = await crearWodsBatch.mutateAsync({ body, params });
                 const wodsCreados = batch.wods || [];
                 if (wodsCreados.length !== diasPayload.length) {
                     throw new Error(batch.mensaje || 'La operación no se completó íntegramente');
                 }
                 wodRes = wodsCreados[wodsCreados.length - 1]?.wod || null;
                 // Mensaje HONESTO: el número de clases sale del backend
-                // (clases_vinculadas = lo que realmente se escribió), no de lo
+                // (clases_vinculadas = lo que realmente se escribió), no de
                 // que creíamos que iba a pasar.
                 const nClases = batch.clases_vinculadas ?? 0;
                 const etiquetaAlcance = alcance === 'hora'
@@ -423,44 +386,37 @@ export default function GestionClases() {
                 });
             }
             setWod(wodRes); setModoEdicion(false);
-            // El vínculo a la clase elegida YA lo hizo el backend en la misma
-            // transacción (alcance "solo esta hora" manda `clase_ids`). Antes se
-            // repetía con un POST /wods/batch que además podía vincular la clase
-            // a un WOD de OTRA fecha (el último de la tanda) y tapaba el mensaje
-            // real con "asignado a la clase #X". Ahora solo se cierra el
-            // formulario; si se entró con ?clase= se saca ese parámetro de la URL
-            // (si no, la pantalla mostraría "no se pudo cargar la clase") y se
-            // deja visible el mensaje de éxito con el número real de clases.
+            // El vínculo a la clase elegida YA lo hizo el backend en la misma transacción
+            // (alcance "solo esta hora" manda `clase_ids`). Ahora solo se cierra el
+            // formulario; si se entró con ?clase= se saca ese parámetro de la URL (si no,
+            // la pantalla mostraría "no se pudo cargar la clase") y se deja visible el
+            // mensaje de éxito con el número real de clases.
             if (claseDestino && claseDestino.id) {
                 const fechaDestino = fechaCortaDe(claseDestino) || fechaPlanif;
-                setClaseDestino(null);
+                setClaseClic(null);
                 setWod(null);
                 setModoEdicion(false);
                 if (urlClaseId) navigate(`/coach/gestion-clases?fecha=${fechaDestino}`, { replace: true });
             }
             setConfirmarEmergencia(null);
-            cargarClases(fechaPlanif).then(setClasesDelDia);
-            recargarVistaDia(fechaClases);
-            // Recargar WODs de la semana para actualizar el calendario
-            if (disciplinaActiva) seleccionarDisciplina(disciplinaActiva);
+            // Ya no hay `cargarClases`/`recargarVistaDia`/`seleccionarDisciplina` a mano:
+            // publicar o editar invalida ['wods'] y ['clases'], así que la vista del día,
+            // el calendario y el panel del Dashboard quedan al día solos.
         } catch (e) {
             setMsg({ tipo: 'error', texto: `Error: ${e.response?.data?.detail || e.message}` });
-        } finally { setLoading(false); }
+        }
     };
 
-    const cargarAsistencia = async (claseId) => {
-        try {
-            const r = await api.get(`${API_BASE}/reservas/por-clase/${claseId}`);
-            const reservas = r.data || [];
-            setAsistencia(reservas.map(r => ({ reserva_id: r.id, alumno_id: r.alumno_id, nombre: r.alumno_nombre || `#${r.alumno_id}`, asistio: r.asistio || false })));
-            setClaseAsistencia(claseId);
-        } catch (e) { console.error(e); setMsg({ tipo: 'error', texto: 'Error cargando asistencia' }); }
+    const cargarAsistencia = (claseId) => {
+        // La lista la trae `useReservasPorClase` y el spinner, su `isPending`.
+        setAsistenciaOverrides({});
+        setClaseAsistencia(claseId);
     };
 
     const toggleAsistencia = async (reservaId, valor) => {
         try {
-            await api.put(`${API_BASE}/reservas/${reservaId}/asistencia`, { asistio: valor });
-            setAsistencia(prev => prev.map(a => a.reserva_id === reservaId ? { ...a, asistio: valor } : a));
+            await marcarAsistencia.mutateAsync({ reservaId, asistio: valor });
+            setAsistenciaOverrides(prev => ({ ...prev, [reservaId]: valor }));
         } catch (e) {
             // H-10: antes solo iba a la consola y el coach no sabia que no se guardo.
             console.error('Error guardando asistencia', e);
@@ -472,10 +428,15 @@ export default function GestionClases() {
     const marcarTodos = async (valor) => {
         if (!claseAsistencia || asistencia.length === 0) return;
         try {
-            await api.post(`${API_BASE}/asistencia/clases/${claseAsistencia}/confirmar`, {
+            await confirmarAsistenciaClase.mutateAsync({
+                claseId: claseAsistencia,
                 asistencias: asistencia.map(a => ({ reserva_id: a.reserva_id, asistio: valor })),
             });
-            setAsistencia(prev => prev.map(a => ({ ...a, asistio: valor })));
+            setAsistenciaOverrides(prev => {
+                const nuevo = { ...prev };
+                asistencia.forEach(a => { nuevo[a.reserva_id] = valor; });
+                return nuevo;
+            });
             setMsg({ tipo: 'exito', texto: 'Asistencia guardada para toda la clase' });
         } catch (e) {
             console.error('Error marcando asistencia (batch)', e);
@@ -487,7 +448,7 @@ export default function GestionClases() {
     // tal como si se hubiera llegado con ?clase=ID (reutiliza el bloque claseDestino).
     const abrirFormularioClase = (clase) => {
         const fechaStr = typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha;
-        setClaseDestino(clase);
+        setClaseClic(clase);
         setDisciplinaActiva(clase.disciplina_id || null);
         setFechaPlanif(fechaStr);
         setFechaClases(fechaStr);
@@ -498,65 +459,19 @@ export default function GestionClases() {
         setModoEdicion(false);
         setWodForm({ titulo: '', calentamiento: '', fuerza_habilidad: '', wod_principal: '', tipo_metcon: '', estado: 'publicado' });
         setClaseAsistencia(null);
-        setAsistencia([]);
+        setAsistenciaOverrides({});
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
-    // Punto 1 (panel Coach): al hacer clic en una tarjeta con WOD publicado se
-    // abre el detalle completo. Reutiliza GET /wods/{id} (el mismo que ya se usa
-    // para precargar el formulario con ?clase=) SOLO para leer.
-    const verDetalleWod = async (clase) => {
+    // Punto 1 (panel Coach): al hacer clic en una tarjeta con WOD publicado se abre el
+    // detalle completo. `useWodDetalle(clase.wod_id)` ya lo tiene (o lo trae): acá sólo
+    // se marca QUÉ tarjeta se abrió.
+    const verDetalleWod = (clase) => {
         if (!clase?.wod_id) return;
-        setWodDetalle({ wod: null, clase, error: '' });
-        setCargandoWodDetalle(true);
-        try {
-            const r = await api.get(`${API_BASE}/wods/${clase.wod_id}`);
-            setWodDetalle({ wod: r.data, clase, error: '' });
-        } catch (e) {
-            setWodDetalle({
-                wod: null,
-                clase,
-                error: e.response?.data?.detail || 'No se pudo cargar el WOD publicado',
-            });
-        } finally {
-            setCargandoWodDetalle(false);
-        }
+        setWodDetalleClase(clase);
     };
 
-    // ── Punto 2: conteo de clases por día para el selector de alcance ──
-    // 1 request liviano por día marcado (GET /clases acepta disciplina_id +
-    // rango). Sirve SOLO para mostrar el impacto: el backend valida igual.
-    useEffect(() => {
-        const dias = [...diasSeleccionados].sort();
-        if (!claseDestino || !disciplinaActiva || dias.length === 0) {
-            setClasesAlcance({});
-            setCargandoAlcance(false);   // si no, la UI queda en "verificando…"
-            return;
-        }
-        let cancelado = false;
-        setCargandoAlcance(true);
-        (async () => {
-            const res = {};
-            await Promise.all(dias.map(async (f) => {
-                try {
-                    const r = await api.get(`${API_BASE}/clases/`, {
-                        params: { disciplina_id: disciplinaActiva, fecha_desde: f, fecha_hasta: f, limit: 200 },
-                    });
-                    const data = r.data || [];
-                    res[f] = Array.isArray(data) ? data : (data.clases || []);
-                } catch (e) {
-                    // Sin dato no se bloquea nada: se avisa en la UI.
-                    console.error('Error contando clases para el alcance', f, e);
-                    res[f] = null;
-                }
-            }));
-            if (!cancelado) { setClasesAlcance(res); setCargandoAlcance(false); }
-        })();
-        return () => { cancelado = true; };
-    }, [claseDestino, disciplinaActiva, diasSeleccionados]);
-
     const hoy = hoyStr();
-    const turnoLabel = TURNOS.find(t => t.id === turnoActivo);
     // Clases del día SIN WOD publicado aún (para ofrecer el CTA "Publicar WOD")
     const clasesSinWod = (clasesDiaVista || []).filter(c => !c.wod_id);
 
@@ -573,9 +488,14 @@ export default function GestionClases() {
         const d = new Date(fechaStr + 'T12:00:00');
         return `${NOMBRES_DIAS_LARGO[d.getDay()].slice(0, 3)} ${d.getDate()}`;
     };
+    // Clases por día, SOLO para mostrar cuántas se ven afectadas por cada opción de
+    // alcance. Son las MISMAS que ya trae el calendario de la disciplina activa (antes
+    // esto hacía 1 GET por día marcado, y sólo para contarlas: el backend valida igual).
+    const clasesAlcance = clasesPorFecha;
+    const cargandoAlcance = Boolean(disciplinaActiva) && clasesSemanaQ.isPending;
     // Por cada día marcado: la clase de ESA misma hora. La clase destino manda
     // en su día; null = no hay clase a esa hora; undefined = sin verificar.
-    const alcanceHoraPorDia = React.useMemo(() => {
+    const alcanceHoraPorDia = useMemo(() => {
         const m = {};
         if (!claseDestino || !horaDestino) return m;
         [...diasSeleccionados].sort().forEach((f) => {
@@ -622,8 +542,9 @@ export default function GestionClases() {
         try {
             const params = { alcance };
             if (accion === 'tomar' && modoEmergencia) params.modo_emergencia = true;
-            const r = await api.post(`${API_BASE}/clases/${clase.id}/${accion}`, null, { params });
-            const data = r.data || {};
+            const data = (await accionClaseMut.mutateAsync({
+                claseId: clase.id, accion, params,
+            })) || {};
             const cuantas = accion === 'tomar' ? (data.clases_tocadas ?? 1) : (data.clases_liberadas ?? 1);
             const detalle = alcance === 'horario'
                 ? `${cuantas} clase(s) del horario ${diaSemanaDe(fechaCortaDe(clase) || fechaClases)} ${horaCorta(clase.hora_inicio)}`
@@ -635,7 +556,7 @@ export default function GestionClases() {
                     ? `✅ ${detalle} quedó a tu nombre.`
                     : `✅ ${detalle} quedó sin coach.`,
             });
-            await recargarVistaDia(fechaClases);
+            // La invalidación de ['clases'] refresca la vista del día (y el Dashboard).
         } catch (e) {
             const status = e.response?.status;
             const detalle = e.response?.data?.detail || e.message || 'No se pudo completar la acción';
@@ -662,6 +583,18 @@ export default function GestionClases() {
                                 Reintentar
                             </button>
                         )}
+                    </div>
+                )}
+
+                {/* Secciones caídas (una consulta por bloque): banner + Reintentar */}
+                {erroresConsultas.length > 0 && (
+                    <div className="mb-4 p-3 rounded bg-red-100 text-red-800 flex flex-col sm:flex-row sm:items-center gap-3">
+                        <ul className="flex-1 list-disc list-inside text-sm">
+                            {erroresConsultas.map((e) => <li key={e}>{e}</li>)}
+                        </ul>
+                        <button onClick={reintentar} className="px-3 py-1 bg-white/70 rounded text-sm font-medium hover:bg-white">
+                            Reintentar
+                        </button>
                     </div>
                 )}
 
@@ -710,7 +643,7 @@ export default function GestionClases() {
                 {/* TOGGLE MODO EMERGENCIA */}
                 <div className="mb-4 flex items-center gap-3">
                     <button
-                        onClick={() => { setModoEmergencia(!modoEmergencia); setDisciplinaActiva(null); setHorariosTurno([]); setTurnoActivo(null); }}
+                        onClick={() => { setModoEmergencia(!modoEmergencia); setDisciplinaActiva(null); }}
                         className={`px-4 py-2 rounded-lg font-bold text-sm transition-colors ${modoEmergencia ? 'bg-red-600 text-white animate-pulse' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
                     >
                         {modoEmergencia ? '⚠️ MODO EMERGENCIA ACTIVO' : '⚠️ Modo Emergencia'}
@@ -1113,7 +1046,7 @@ export default function GestionClases() {
                         clase={wodDetalle.clase}
                         loading={cargandoWodDetalle}
                         error={wodDetalle.error}
-                        onClose={() => setWodDetalle(null)}
+                        onClose={() => setWodDetalleClase(null)}
                     />
                 )}
             </div>

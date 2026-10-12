@@ -25,6 +25,7 @@ DISCIPLINAS = "frontend/src/pages/admin/Disciplinas.jsx"
 HORARIOS = "frontend/src/pages/admin/Horarios.jsx"
 MODAL_CLASE = "frontend/src/components/ModalClase.jsx"
 GESTION = "frontend/src/pages/coach/GestionClases.jsx"
+QUERIES = "frontend/src/hooks/queries.js"
 
 
 def _fuente(relativa: str) -> str:
@@ -80,10 +81,18 @@ def test_d_modal_clase_llama_con_barra():
     assert "api.post(`/api/v1/clases`, payload)" not in f
 
 
-def test_e_gestion_clases_usa_las_rutas_con_barra():
+def test_e_el_panel_del_coach_usa_las_rutas_canonicas_con_barra():
+    # Las pantallas del coach YA NO piden con axios: las URLs viven en los hooks
+    # compartidos (`hooks/queries.js`), que es donde se guarda la ruta canónica. La barra
+    # final importa: sin ella FastAPI contesta 307 y el navegador repite la request.
+    q = _fuente(QUERIES)
+    assert "api.get('/api/v1/disciplinas/')" in q
+    assert "api.get('/api/v1/clases?fecha_desde" not in q
+    for hook in ("useClasesCoach", "useClasesDia", "useClasesDisciplinaSemana"):
+        bloque = q.split(f"export function {hook}(")[1].split("\nexport function")[0]
+        assert "api.get('/api/v1/clases/'" in bloque, (
+            f"{hook} pide el listado de clases sin la barra final (307)")
+    # Y la pantalla del coach consume los hooks, sin llamadas a mano.
     f = _fuente(GESTION)
-    assert "${API_BASE}/disciplinas/`" in f
-    assert "${API_BASE}/disciplinas`" not in f
-    # Listado de clases: SIEMPRE con barra (los `/clases/{id}` siguen igual).
-    assert "${API_BASE}/clases/`" in f
-    assert "${API_BASE}/clases`" not in f
+    assert "useDisciplinas(" in f and "useClasesDia(" in f and "useClasesDisciplinaSemana(" in f
+    assert "services/api" not in f and "API_BASE" not in f

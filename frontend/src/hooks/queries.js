@@ -6,6 +6,10 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 
+// Array vacío ESTABLE: es el fallback de las listas que devuelven las consultas. Un
+// `|| []` nuevo en cada render invalidaría los `useMemo` que dependen de esos datos.
+export const SIN_DATOS = [];
+
 export const claves = {
     solicitudesPendientes: ['solicitudes', 'pendientes'],
     pendientesActivacion: ['alumnos', 'pendientes-activacion'],
@@ -65,6 +69,8 @@ export const claves = {
     // clase). Todo `['clases']` lo mueven ampliar cupo y tomar/soltar; todo `['wods']`
     // lo mueven publicar/editar un WOD; `['reservas']` lo mueve la asistencia.
     clasesCoach: (coachId, desde, hasta) => ['clases', 'coach', coachId, desde, hasta],
+    clasesDia: (fecha, limite) => ['clases', 'dia', fecha, limite],
+    clasesDetalle: (claseId) => ['clases', 'detalle', claseId],
     clasesDisciplinaSemana: (disciplinaId, desde, hasta) =>
         ['clases', 'disciplina', disciplinaId, desde, hasta],
     wodsTodos: ['wods', 'todos'],
@@ -710,7 +716,7 @@ export function useClasesCoach(coachId, desde, hasta) {
     return useQuery({
         queryKey: claves.clasesCoach(coachId, desde, hasta),
         queryFn: async () => {
-            const data = (await api.get('/api/v1/clases', {
+            const data = (await api.get('/api/v1/clases/', {
                 params: { coach_id: coachId, fecha_desde: desde, fecha_hasta: hasta },
             })).data;
             const lista = data?.clases || data || [];
@@ -720,6 +726,32 @@ export function useClasesCoach(coachId, desde, hasta) {
         // invalidan `['clases']`); el horario en sí cambia poco.
         staleTime: 30_000,
         enabled: Boolean(coachId) && Boolean(desde) && Boolean(hasta),
+    });
+}
+
+// Clases de UN día (panel del coach: la vista del día y el detalle de la clase abierta).
+export function useClasesDia(fecha, limite = 200) {
+    return useQuery({
+        queryKey: claves.clasesDia(fecha, limite),
+        queryFn: async () => {
+            const data = (await api.get('/api/v1/clases/', {
+                params: { fecha_desde: fecha, fecha_hasta: fecha, limit: limite },
+            })).data;
+            const lista = data?.clases || data || [];
+            return Array.isArray(lista) ? lista : [];
+        },
+        staleTime: 30_000,
+        enabled: Boolean(fecha),
+    });
+}
+
+// UNA clase por id: es la que llega en `?clase=ID` desde una tarjeta del Dashboard.
+export function useClaseDetalle(claseId) {
+    return useQuery({
+        queryKey: claves.clasesDetalle(claseId),
+        queryFn: async () => (await api.get(`/api/v1/clases/${claseId}`)).data || null,
+        staleTime: 30_000,
+        enabled: Boolean(claseId),
     });
 }
 

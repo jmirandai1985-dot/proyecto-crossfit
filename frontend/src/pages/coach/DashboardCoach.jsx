@@ -1,8 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
+import {
+    SIN_DATOS, useAlumnosCoachEnRiesgo, useAlumnosDeCoach, useClasesCoach,
+    useCoachDisciplinas, useConfirmarAsistenciaClase, useContactarAlumnoCoach, useGuardarWod,
+    useHistorialRmTodos, useMarcarAsistenciaReserva, useProgresoAlumnosCoach,
+    useReservasPorClase, useRmsAlumno, useTodosLosWods,
+} from '../../hooks/queries';
 import AsistenciaClases from '../../components/AsistenciaClases';
 import AlumnoFichaCoach from '../../components/AlumnoFichaCoach';
 import PreviewEmailModal from '../../components/PreviewEmailModal';
@@ -14,31 +20,18 @@ const DashboardCoach = () => {
     const searchParams = new URLSearchParams(location.search);
     const activeTab = searchParams.get('tab') || 'resumen';
 
-    const { usuario_id, tenant_id, usuario } = useAuth();
+    const { usuario_id, usuario } = useAuth();
 
-    // Data states
-    const [clasesHoy, setClasesHoy] = useState([]);
-    const [clasesSemana, setClasesSemana] = useState([]);
-    const [alumnos, setAlumnos] = useState([]);
-    const [alumnosEnRiesgo, setAlumnosEnRiesgo] = useState([]);
-    const [wods, setWods] = useState([]);
-    const [wodHoy, setWodHoy] = useState(null);
-    const [movimientos, setMovimientos] = useState([]);
-    const [registrosRecientes, setRegistrosRecientes] = useState([]);
-    const [progresoAlumnos, setProgresoAlumnos] = useState([]);
-
-    // UI states
-    const [loading, setLoading] = useState(true);
+    // ── UI states (lo que NO viene del backend: selección, filtros y mensajes) ──
     const [selectedAlumno, setSelectedAlumno] = useState(null);
-    const [alumnoRMs, setAlumnoRMs] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
-    const [coachDisciplinas, setCoachDisciplinas] = useState([]);
     // Toggle Fase 2: "Ver todas" vs "Ver solo con WOD publicado"
     const [verSoloConWod, setVerSoloConWod] = useState(false);
     // ── Asistencia inline en tarjetas de "Mis Clases de Hoy" ──
     const [claseAsistenciaExpandida, setClaseAsistenciaExpandida] = useState(null);
-    const [asistenciaPorClase, setAsistenciaPorClase] = useState({});
-    const [cargandoAsistencia, setCargandoAsistencia] = useState(false);
+    // Marcado que tocó el usuario: la lista de alumnos sale de la consulta
+    // (`useReservasPorClase`) y esto sólo guarda los toggles de esta visita.
+    const [asistenciaOverrides, setAsistenciaOverrides] = useState({});
     const [msgAsistencia, setMsgAsistencia] = useState(null); // { claseId, texto, tipo }
     // Detalle completo del WOD de una tarjeta (grilla semanal / lista del día):
     // esas tarjetas NAVEGABAN a Gestión de Clases; ahora abren el detalle acá.
@@ -101,10 +94,7 @@ const DashboardCoach = () => {
     };
 
     const [weekRange, setWeekRange] = useState(getWeekRange);
-    // Secciones que fallaron en la última carga (banner + Reintentar, patrón de Admin).
-    const [erroresBloque, setErroresBloque] = useState([]);
-    // Umbral de dias sin asistir que usa el backend para marcar "en riesgo" (UMBRAL_ALERTA_DIAS).
-    const [umbralRiesgo, setUmbralRiesgo] = useState(7);
+    // (El banner de secciones caídas y el umbral de riesgo se DERIVAN de las consultas.)
     // Contacto por correo de los alumnos en riesgo (estado por alumno).
     const [enviandoCorreoId, setEnviandoCorreoId] = useState(null);
     const [msgContacto, setMsgContacto] = useState(null); // { id, tipo, texto }
@@ -173,257 +163,153 @@ const DashboardCoach = () => {
         });
         return grid;
     };
-    const weekGrid = buildWeekGrid();
 
-    // ---- Cargar datos ----
-    const fetchAllData = useCallback(async () => {
-        setLoading(true);
-        // Promise.allSettled (antes Promise.all + catch mudo): si un endpoint falla,
-        // el resto del dashboard se sigue mostrando y la sección caída se lista en un
-        // banner con Reintentar. Mismo patrón que cargarSolicitudes()/cargarFidelizacion()
-        // del panel Admin.
-        const [clasesRes, wodsRes, riesgoRes, movRes, coachDiscRes] = await Promise.allSettled([
-            api.get(`/api/v1/clases?coach_id=${usuario_id}&fecha_desde=${weekRange.start}&fecha_hasta=${weekRange.end}`),
-            api.get(`/api/v1/wods`),
-            api.get(`/api/v1/fidelizacion/coach/${usuario_id}/en-riesgo`),
-            api.get(`/api/v1/movimientos`),
-            api.get(`/api/v1/coach-disciplinas`)
-        ]);
-        const fallaron = [];
-        const detalle = (r) => r.reason?.response?.data?.detail
-            || r.reason?.message || 'No se pudo cargar';
+    // ═══ DATOS (React Query) ═══════════════════════════════════════════════════
+    // Antes esto era un `fetchAllData` con 5 GET + una consulta de RMs POR alumno que
+    // corría en CADA navegación al panel (la ruta es lazy). Ahora cada dato es su propia
+    // consulta, con la clave que comparte con Gestión de Clases: lo que llegó hace
+    // segundos se pinta al instante y las mutaciones invalidan por prefijo.
+    const qc = useQueryClient();
+    const clasesQ = useClasesCoach(usuario_id, weekRange.start, weekRange.end);
+    const wodsQ = useTodosLosWods();
+    const riesgoQ = useAlumnosCoachEnRiesgo(usuario_id);
+    const coachDiscQ = useCoachDisciplinas();
+    const alumnosQ = useAlumnosDeCoach(usuario_id);
+    const progresoQ = useProgresoAlumnosCoach(alumnosQ.data);
+    const rmsRecientesQ = useHistorialRmTodos(5);
+    const alumnoRmsQ = useRmsAlumno(selectedAlumno?.id);
+    const asistenciaQ = useReservasPorClase(claseAsistenciaExpandida);
 
-        // Disciplinas asignadas al coach (activo=True)
-        // H-12: se usa discIds (valor recien calculado), no el state coachDisciplinas,
-        // que en la 1ra carga todavia esta vacio y hacia que el filtro se saltee.
-        let discIds = [];
-        if (coachDiscRes.status === 'fulfilled') {
-            const coachDiscData = coachDiscRes.value.data || [];
-            discIds = coachDiscData
-                .filter(cd => cd.activo && cd.coach_id === usuario_id)
-                .map(cd => cd.disciplina_id);
-            setCoachDisciplinas(discIds);
-        } else {
-            console.error('Error cargando disciplinas del coach', coachDiscRes.reason);
-            setCoachDisciplinas([]);
-            fallaron.push(`Disciplinas del coach — ${detalle(coachDiscRes)}`);
-        }
+    // Mutaciones del panel: entregan el resultado y refrescan la caché por prefijo.
+    const guardarWod = useGuardarWod();
+    const marcarAsistencia = useMarcarAsistenciaReserva();
+    const confirmarAsistenciaClase = useConfirmarAsistenciaClase();
+    const contactarAlumno = useContactarAlumnoCoach();
 
-        // Los alumnos del coach se piden a un endpoint scoped por coach
-        // (GET /fidelizacion/coach/{id}/alumnos) — el viejo /usuarios?rol=alumno era
-        // admin-only (403 para coach). Va aislado para que un fallo acá NO bloquee al resto.
-        let alumnosData = [];
-        try {
-            const alumnosRes = await api.get(`/api/v1/fidelizacion/coach/${usuario_id}/alumnos`);
-            alumnosData = alumnosRes.data?.alumnos || [];
-        } catch (err) {
-            console.error('Error cargando alumnos (no bloquea el dashboard):', err);
-            fallaron.push(`Alumnos del coach — ${detalle({ reason: err })}`);
-        }
+    const detalleError = (e) => e?.response?.data?.detail
+        || e?.message || 'No se pudo cargar';
 
-        const clasesData = clasesRes.status === 'fulfilled' ? (clasesRes.value.data || []) : [];
-        if (clasesRes.status !== 'fulfilled') {
-            console.error('Error cargando clases', clasesRes.reason);
-            fallaron.push(`Clases de la semana — ${detalle(clasesRes)}`);
-        }
-        const wodsData = wodsRes.status === 'fulfilled' ? (wodsRes.value.data || []) : [];
-        if (wodsRes.status !== 'fulfilled') {
-            console.error('Error cargando WODs', wodsRes.reason);
-            fallaron.push(`WODs — ${detalle(wodsRes)}`);
-        }
-        const riesgoData = riesgoRes.status === 'fulfilled' ? (riesgoRes.value.data?.alumnos_alerta || []) : [];
-        if (riesgoRes.status !== 'fulfilled') {
-            console.error('Error cargando alumnos en riesgo', riesgoRes.reason);
-            fallaron.push(`Alumnos en riesgo — ${detalle(riesgoRes)}`);
-        }
-        const movimientosData = movRes.status === 'fulfilled' ? (movRes.value.data || []) : [];
-        if (movRes.status !== 'fulfilled') {
-            console.error('Error cargando movimientos', movRes.reason);
-            fallaron.push(`Movimientos — ${detalle(movRes)}`);
-        }
+    // Disciplinas ASIGNADAS al coach: el backend devuelve las del box (ignora el
+    // `coach_id` de la query), así que el filtro por coach es este de acá.
+    const coachDisciplinas = useMemo(() => (coachDiscQ.data || [])
+        .filter((cd) => cd.activo && cd.coach_id === usuario_id)
+        .map((cd) => cd.disciplina_id), [coachDiscQ.data, usuario_id]);
 
-        setAlumnos(alumnosData);
-        setAlumnosEnRiesgo(riesgoData);
-        setUmbralRiesgo(riesgoRes.status === 'fulfilled' ? (riesgoRes.value.data?.umbral_dias ?? 7) : 7);
-        setWods(wodsData);
-        setMovimientos(movimientosData);
+    // Sus clases de la semana, filtradas por sus disciplinas. H-12: el filtro usa la
+    // lista recién calculada, no un estado que en la 1ra carga todavía está vacío.
+    const clasesFiltradas = useMemo(() => {
+        const lista = clasesQ.data || SIN_DATOS;
+        return coachDisciplinas.length > 0
+            ? lista.filter((c) => coachDisciplinas.includes(c.disciplina_id))
+            : lista;
+    }, [clasesQ.data, coachDisciplinas]);
 
-        // Filtrar SOLO las disciplinas asignadas al coach (tabla coach_disciplinas activo=True)
-        const clasesFiltradas = discIds.length > 0
-            ? clasesData.filter(c => discIds.includes(c.disciplina_id))
-            : clasesData;
-
-        // Filter today's classes
-        const hoyClases = clasesFiltradas.filter(c => {
-            const fechaStr = c.fecha ? (typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha) : '';
-            return fechaStr === today;
-        });
-        setClasesHoy(hoyClases);
-
-        // Filter week classes
-        const semanaClases = clasesFiltradas.filter(c => {
-            const fechaStr = c.fecha ? (typeof c.fecha === 'string' ? c.fecha.split('T')[0] : c.fecha) : '';
-            return fechaStr >= weekRange.start && fechaStr <= weekRange.end;
-        });
-        semanaClases.sort((a, b) => {
+    const clasesHoy = useMemo(
+        () => clasesFiltradas.filter((c) => fechaISOde(c) === today),
+        [clasesFiltradas, today],
+    );
+    const clasesSemana = useMemo(() => [...clasesFiltradas]
+        .filter((c) => fechaISOde(c) >= weekRange.start && fechaISOde(c) <= weekRange.end)
+        .sort((a, b) => {
             if (a.fecha < b.fecha) return -1;
             if (a.fecha > b.fecha) return 1;
             return (a.hora_inicio || '').localeCompare(b.hora_inicio || '');
-        });
-        setClasesSemana(semanaClases);
+        }), [clasesFiltradas, weekRange.start, weekRange.end]);
 
-        // WOD of today
-        const wodActual = wodsData.find(w => {
-            const fechaWod = w.fecha ? (typeof w.fecha === 'string' ? w.fecha.split('T')[0] : w.fecha) : '';
-            return fechaWod === today && w.activo !== false;
-        });
-        setWodHoy(wodActual || null);
+    // WODs del box: el de hoy (tarjeta) y la lista completa (tab Clases y registros).
+    const wods = wodsQ.data || SIN_DATOS;
+    const wodHoy = useMemo(() => wods.find(
+        (w) => fechaISOde(w) === today && w.activo !== false,
+    ) || null, [wods, today]);
 
-        try {
-            await calcularProgresoAlumnos(alumnosData, wodsData);
-            await fetchRegistrosRecientes(wodsData);
-        } catch (error) {
-            // Un fallo acá NO debe dejar la pantalla en el spinner ni ocultar el resto.
-            console.error('Error calculando progreso/registros', error);
-            fallaron.push(`Progreso/registros — ${error?.message || 'error inesperado'}`);
-        } finally {
-            setErroresBloque(fallaron);
-            setLoading(false);
-        }
-    }, [usuario_id, tenant_id, today, weekRange.start, weekRange.end]);
+    // Alumnos, riesgo y progreso (los dos últimos son datos derivados del backend).
+    const alumnos = alumnosQ.data || SIN_DATOS;
+    const alumnosEnRiesgo = riesgoQ.data?.alumnos_alerta || SIN_DATOS;
+    const umbralRiesgo = riesgoQ.data?.umbral_dias ?? 7;
+    const progresoAlumnos = progresoQ.data || SIN_DATOS;
 
-    const calcularProgresoAlumnos = async (alumnosData, wodsData) => {
-        // Fix rendimiento N+1: lanzar TODAS las consultas de RM en paralelo
-        // (Promise.all) en vez de un for con await secuencial que bloqueaba
-        // la carga del dashboard (hasta 50 llamadas HTTP en fila).
-        const alumnos = alumnosData.slice(0, 50);
-        const resultados = await Promise.all(alumnos.map(async (alumno) => {
-            try {
-                const rmsRes = await api.get(`/api/v1/historial-rm/alumnos/${alumno.id}/rms`);
-                const rms = rmsRes.data || [];
-                return {
-                    id: alumno.id,
-                    nombre: alumno.nombre,
-                    correo: alumno.correo,
-                    telefono: alumno.telefono,
-                    total_rms: rms.length,
-                    rms: rms,
-                    estado: rms.length >= 5 ? 'activo' : rms.length > 0 ? 'iniciando' : 'sin_datos'
-                };
-            } catch {
-                return {
-                    id: alumno.id,
-                    nombre: alumno.nombre,
-                    correo: alumno.correo,
-                    telefono: alumno.telefono,
-                    total_rms: 0,
-                    rms: [],
-                    estado: 'sin_datos'
-                };
-            }
-        }));
-        setProgresoAlumnos(resultados);
-    };
-
-    const fetchRegistrosRecientes = async (wodsData) => {
-        const fuenteWods = wodsData || wods;
-        try {
-            const wodsRecientes = [...fuenteWods].sort((a, b) => {
-                const dateA = new Date(a.fecha || 0);
-                const dateB = new Date(b.fecha || 0);
-                return dateB - dateA;
-            }).slice(0, 5).map(w => ({
-                tipo: 'wod',
-                titulo: w.titulo || 'WOD',
-                fecha: w.fecha,
-                estado: w.estado,
-                id: w.id
+    // Últimos WODs + últimas marcas, mezclados por fecha (lo que antes armaba
+    // `fetchRegistrosRecientes` con un setState y un try/catch anidado).
+    const registrosRecientes = useMemo(() => {
+        const wodsRecientes = [...wods]
+            .sort((a, b) => new Date(b.fecha || 0) - new Date(a.fecha || 0))
+            .slice(0, 5)
+            .map((w) => ({
+                tipo: 'wod', titulo: w.titulo || 'WOD', fecha: w.fecha, estado: w.estado, id: w.id,
             }));
+        const rmsRecientes = (rmsRecientesQ.data || []).map((r) => ({
+            tipo: 'rm', peso: r.peso_kg, fecha: r.fecha, alumno_id: r.alumno_id, id: r.id,
+        }));
+        return [...wodsRecientes, ...rmsRecientes]
+            .sort((a, b) => new Date(b.fecha || 0) - new Date(a.fecha || 0))
+            .slice(0, 10);
+    }, [wods, rmsRecientesQ.data]);
 
-            try {
-                const rmsRes = await api.get(`/api/v1/historial-rm?limit=5`);
-                const rmsData = rmsRes.data || [];
-                const rmsRecientes = rmsData.map(r => ({
-                    tipo: 'rm',
-                    peso: r.peso_kg,
-                    fecha: r.fecha,
-                    alumno_id: r.alumno_id,
-                    id: r.id
-                }));
+    // RMs del alumno abierto en el tab Alumnos.
+    const alumnoRMs = alumnoRmsQ.data || SIN_DATOS;
 
-                const combinados = [...wodsRecientes, ...rmsRecientes];
-                combinados.sort((a, b) => {
-                    const dateA = new Date(a.fecha || 0);
-                    const dateB = new Date(b.fecha || 0);
-                    return dateB - dateA;
-                });
-                setRegistrosRecientes(combinados.slice(0, 10));
-            } catch {
-                setRegistrosRecientes(wodsRecientes);
-            }
-        } catch (error) {
-            console.error('Error fetching registros recientes:', error);
-        }
-    };
+    // Los DOS "cargando" que antes compartían el mismo `loading`: el inicial (clases) y
+    // el del panel de RMs del alumno.
+    const cargandoInicial = clasesQ.isPending;
+    const cargandoRmsAlumno = alumnoRmsQ.isPending;
 
-    useEffect(() => {
-        fetchAllData();
-    }, [fetchAllData]);
+    // Asistencia de la clase expandida (tarjeta de "Mis Clases de Hoy"): la lista sale
+    // del backend y `asistenciaOverrides` guarda sólo lo que marcó el usuario.
+    const asistenciaClase = useMemo(() => (asistenciaQ.data || SIN_DATOS).map((r) => ({
+        reserva_id: r.id,
+        alumno_id: r.alumno_id,
+        nombre: r.alumno_nombre || `#${r.alumno_id}`,
+        asistio: r.asistio || false,
+    })), [asistenciaQ.data]);
+    const asistenciaPorClase = useMemo(() => (claseAsistenciaExpandida ? {
+        [claseAsistenciaExpandida]: asistenciaClase.map((a) => (
+            a.reserva_id in asistenciaOverrides
+                ? { ...a, asistio: asistenciaOverrides[a.reserva_id] }
+                : a
+        )),
+    } : {}), [claseAsistenciaExpandida, asistenciaClase, asistenciaOverrides]);
+    const cargandoAsistencia = Boolean(claseAsistenciaExpandida) && asistenciaQ.isPending;
 
-    // ---- Alumno RMs ----
-    useEffect(() => {
-        if (selectedAlumno) {
-            const fetchAlumnoRMs = async () => {
-                setLoading(true);
-                try {
-                    const response = await api.get(`/api/v1/historial-rm/alumnos/${selectedAlumno.id}/rms`);
-                    setAlumnoRMs(response.data || []);
-                } catch (error) {
-                    console.error('Error fetching alumno RMs:', error);
-                    setAlumnoRMs([]);
-                }
-                setLoading(false);
-            };
-            fetchAlumnoRMs();
-        }
-    }, [selectedAlumno, tenant_id]);
+    // Secciones caídas: el banner con "Reintentar" (mismo patrón que el panel Admin).
+    const erroresBloque = useMemo(() => {
+        const fallos = [];
+        if (clasesQ.isError) fallos.push(`Clases de la semana — ${detalleError(clasesQ.error)}`);
+        if (wodsQ.isError) fallos.push(`WODs — ${detalleError(wodsQ.error)}`);
+        if (riesgoQ.isError) fallos.push(`Alumnos en riesgo — ${detalleError(riesgoQ.error)}`);
+        if (coachDiscQ.isError) fallos.push(`Disciplinas del coach — ${detalleError(coachDiscQ.error)}`);
+        if (alumnosQ.isError) fallos.push(`Alumnos del coach — ${detalleError(alumnosQ.error)}`);
+        if (progresoQ.isError) fallos.push(`Progreso/registros — ${detalleError(progresoQ.error)}`);
+        if (rmsRecientesQ.isError) fallos.push(`Registros recientes — ${detalleError(rmsRecientesQ.error)}`);
+        return fallos;
+    }, [clasesQ.isError, clasesQ.error, wodsQ.isError, wodsQ.error, riesgoQ.isError,
+        riesgoQ.error, coachDiscQ.isError, coachDiscQ.error, alumnosQ.isError, alumnosQ.error,
+        progresoQ.isError, progresoQ.error, rmsRecientesQ.isError, rmsRecientesQ.error]);
+
+    // "Reintentar" del banner: refetchea TODO lo que la pantalla tiene en uso.
+    const reintentar = () => qc.invalidateQueries();
+
+    // La grilla de la semana DERIVA de `clasesSemana` (arriba), así que se arma acá y no
+    // junto a su función: llamarla antes dejaría `clasesSemana` en zona muerta (TDZ).
+    const weekGrid = buildWeekGrid();
 
     // ---- Handlers ----
-    const cargarAsistenciaClase = async (claseId) => {
-        // Toggle: si ya está expandida, colapsar
+    const cargarAsistenciaClase = (claseId) => {
+        // Toggle: si ya está expandida, colapsar. La lista la trae la consulta
+        // (`useReservasPorClase`) y el spinner, su `isPending`: ya no hay setState de
+        // carga ni un array propio que se pueda quedar desincronizado.
         if (claseAsistenciaExpandida === claseId) {
             setClaseAsistenciaExpandida(null);
             return;
         }
-        setCargandoAsistencia(true);
         setMsgAsistencia(null);
-        try {
-            const r = await api.get(`/api/v1/reservas/por-clase/${claseId}`);
-            const reservas = r.data || [];
-            setAsistenciaPorClase(prev => ({
-                ...prev,
-                [claseId]: reservas.map(r => ({
-                    reserva_id: r.id,
-                    alumno_id: r.alumno_id,
-                    nombre: r.alumno_nombre || `#${r.alumno_id}`,
-                    asistio: r.asistio || false
-                }))
-            }));
-            setClaseAsistenciaExpandida(claseId);
-        } catch (e) {
-            console.error('Error cargando asistencia:', e);
-            setMsgAsistencia({ claseId, texto: 'Error al cargar la asistencia', tipo: 'error' });
-        }
-        setCargandoAsistencia(false);
+        setClaseAsistenciaExpandida(claseId);
     };
 
     const toggleAsistenciaAlumno = async (claseId, reservaId, valor) => {
         try {
-            await api.put(`/api/v1/reservas/${reservaId}/asistencia`, { asistio: valor });
-            setAsistenciaPorClase(prev => ({
-                ...prev,
-                [claseId]: (prev[claseId] || []).map(a => a.reserva_id === reservaId ? { ...a, asistio: valor } : a)
-            }));
+            await marcarAsistencia.mutateAsync({ reservaId, asistio: valor });
+            // Se refleja al instante (la consulta se refresca por invalidación).
+            setAsistenciaOverrides(prev => ({ ...prev, [reservaId]: valor }));
             setMsgAsistencia({ claseId, texto: valor ? '✅ Asistencia guardada (asistió)' : '❌ Asistencia guardada (no asistió)', tipo: 'exito' });
         } catch (e) {
             console.error('Error marcando asistencia:', e);
@@ -437,13 +323,15 @@ const DashboardCoach = () => {
         try {
             // H-11: un solo request ATOMICO (mismo endpoint que usa el tab Asistencia),
             // en vez de N PUT /reservas/{id}/asistencia en serie.
-            await api.post(`/api/v1/asistencia/clases/${claseId}/confirmar`, {
+            await confirmarAsistenciaClase.mutateAsync({
+                claseId,
                 asistencias: reservas.map(a => ({ reserva_id: a.reserva_id, asistio: valor })),
             });
-            setAsistenciaPorClase(prev => ({
-                ...prev,
-                [claseId]: (prev[claseId] || []).map(a => ({ ...a, asistio: valor }))
-            }));
+            setAsistenciaOverrides(prev => {
+                const nuevo = { ...prev };
+                reservas.forEach(a => { nuevo[a.reserva_id] = valor; });
+                return nuevo;
+            });
             setMsgAsistencia({
                 claseId,
                 texto: valor ? '✅ Todos marcados como ASISTIERON' : '❌ Todos marcados como NO ASISTIERON',
@@ -480,8 +368,12 @@ const DashboardCoach = () => {
     const confirmarEnvioCorreo = async (alumno) => {
         setEnviandoCorreoId(alumno.id);
         try {
-            const r = await api.post(`/api/v1/fidelizacion/coach/${usuario_id}/contactar/${alumno.id}`);
-            const d = r.data || {};
+            // Mismo endpoint de siempre: la mutación sólo devuelve la respuesta (el
+            // envío queda en notificaciones_enviadas y en auditoría: no hay caché que mover).
+            const d = (await contactarAlumno.mutateAsync({
+                coachId: usuario_id,
+                alumnoId: alumno.id,
+            })) || {};
             setMsgContacto({
                 id: alumno.id,
                 tipo: d.exito ? 'exito' : 'error',
@@ -504,17 +396,20 @@ const DashboardCoach = () => {
     const handlePublicarWOD = async () => {
         if (!wodHoy) return;
         try {
-            await api.put(`/api/v1/wods/${wodHoy.id}`, {
-                estado: 'publicado',
-                titulo: wodHoy.titulo,
-                descripcion: wodHoy.descripcion,
-                calentamiento: wodHoy.calentamiento,
-                fuerza_habilidad: wodHoy.fuerza_habilidad,
-                wod_principal: wodHoy.wod_principal,
-                tipo_metcon: wodHoy.tipo_metcon
+            await guardarWod.mutateAsync({
+                wodId: wodHoy.id,
+                payload: {
+                    estado: 'publicado',
+                    titulo: wodHoy.titulo,
+                    descripcion: wodHoy.descripcion,
+                    calentamiento: wodHoy.calentamiento,
+                    fuerza_habilidad: wodHoy.fuerza_habilidad,
+                    wod_principal: wodHoy.wod_principal,
+                    tipo_metcon: wodHoy.tipo_metcon
+                },
             });
-            setWodHoy({ ...wodHoy, estado: 'publicado' });
-            fetchAllData();
+            // Sin `setWodHoy` ni `fetchAllData`: invalidar ['wods'] refresca la tarjeta
+            // Y el resto de las pantallas que muestran ese WOD.
         } catch (error) {
             console.error('Error publishing WOD:', error);
             alert('Error al publicar el WOD');
@@ -555,7 +450,7 @@ const DashboardCoach = () => {
         return '❓';
     };
 
-    if (loading && !clasesHoy.length) {
+    if (cargandoInicial && !clasesHoy.length) {
         return (
             <Layout>
                 <div className="flex items-center justify-center h-64">
@@ -662,7 +557,7 @@ const DashboardCoach = () => {
                             <p className="text-xs text-gray-500 mt-1">El resto del dashboard sí está actualizado.</p>
                         </div>
                         <button
-                            onClick={fetchAllData}
+                            onClick={reintentar}
                             data-testid="banner-error-reintentar"
                             className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
                         >
@@ -1189,7 +1084,7 @@ const DashboardCoach = () => {
                                     </h2>
                                     {selectedAlumno && (
                                         <div className="space-y-3">
-                                            {loading ? (
+                                            {cargandoRmsAlumno ? (
                                                 <div className="flex justify-center py-8">
                                                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
                                                 </div>
