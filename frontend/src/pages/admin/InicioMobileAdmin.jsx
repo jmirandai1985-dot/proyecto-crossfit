@@ -11,8 +11,9 @@ import ModalEntregarPedido from '../../components/ModalEntregarPedido';
 // Voucher privado: el blob se pide CON token (el mismo hook que usan el Dashboard
 // ≥768px y Pendientes). Sin él, la URL pública /static/uploads/... no sirve.
 import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
-// Hora de CHILE (el navegador puede estar en otra zona) para el reloj y la franja actual.
-import { horaChileStr, hoyChileStr } from '../../utils/fecha';
+// Hora y fecha de CHILE (el navegador puede estar en otra zona) para el reloj, la franja
+// actual y el rótulo del día elegido en la rejilla semanal.
+import { fechaSolaAInstante, horaChileStr, hoyChileStr } from '../../utils/fecha';
 // Cupo de créditos del alumno: la MISMA regla que el resto del panel (ilimitado -> ∞,
 // cupo sin cargar -> —, número -> el número).
 import { rotuloCreditos } from '../../utils/rotuloCreditos';
@@ -46,8 +47,16 @@ import { enlaceWhatsapp } from '../../utils/whatsapp';
 // Corte por franjas de "Asistencia de hoy" (cálculo puro, con test aislado propio).
 import {
     FRANJAS, agruparPorFranja, franjaActual, resumenFranja,
-    claseEnCurso, ocupacion, horaCorta, estaMarcada,
+    claseEnCurso, ocupacion, horaCorta, estaMarcada, reservasDe,
 } from '../../utils/franjasAsistencia';
+// La SEMANA en curso (lunes a domingo) y los totales de cada día: la rejilla de
+// "Asistencia" (A3). Cálculo puro con test aislado propio (`test:semana`).
+import { clasesDeFecha, diasDeLaSemana, resumenesDeSemana } from '../../utils/semanaAsistencia';
+// Chips por disciplina de la asistencia: el MISMO control, el MISMO estado y la MISMA
+// memoria de sesión que "Clases disponibles" del Inicio del alumno (A2).
+import FiltroDisciplina from '../../components/FiltroDisciplina';
+import { useFiltroDisciplina } from '../../hooks/useFiltroDisciplina';
+import { CLAVE_FILTRO_ASISTENCIA, filtrarPorDisciplina } from '../../utils/filtroDisciplina';
 // Estilos del Dashboard móvil del admin (mockup admin-mobile-mockup.html), acotados a
 // `.ub-admin`: NO alcanzan la versión ≥768px ni el tema del resto del panel.
 import './inicioMobileAdmin.css';
@@ -111,11 +120,16 @@ const precioCLP = (v) => {
     }).format(n);
 };
 
-/** "mié 7 oct" en el calendario de Chile (la fecha que se muestra arriba de los KPIs). */
-const fechaCorta = () => {
+/**
+ * "mié 7 oct" en el calendario de Chile.
+ * Sin argumento = HOY (la fecha de arriba de los KPIs); con una fecha 'YYYY-MM-DD' =
+ * ese día (el rótulo del día elegido en la rejilla de "Asistencia").
+ */
+const fechaCorta = (valor) => {
+    const fecha = valor ? fechaSolaAInstante(valor) : new Date();
     const s = new Intl.DateTimeFormat('es-CL', {
         timeZone: 'America/Santiago', weekday: 'short', day: 'numeric', month: 'short',
-    }).format(new Date());
+    }).format(fecha);
     return s.replace(/\./g, '').replace(',', '');
 };
 
@@ -179,29 +193,38 @@ const ultimaVisita = (fecha) => {
  *
  * `chevron` marca las que ABREN una pantalla (en vez de navegar a otra sección) y
  * `testid` permite distinguir dos tarjetas que usan el mismo ícono.
+ *
+ * A1: SIN `onClick` la tarjeta es INFORMATIVA y se pinta como `<div>` — no es un botón,
+ * no lleva el cursor de enlace (`.ub-admin button { cursor: pointer }`) y el teclado no
+ * la enfoca. Con `onClick` sigue siendo el botón de siempre.
  */
 const Kpi = ({ clase, icono, label, valor, sub, error, cargando, dinero, pulso, onClick,
-    chevron, testid }) => (
-    <button type="button" className={`kpi ${clase}`} onClick={onClick}
-        aria-label={label} data-testid={testid || `kpi-${icono}`}>
-        {pulso && <span className="pulse" />}
-        <span className="kpi-top">
-            <span className="chip"><Icono nombre={icono} /></span>
-            <span className="kpi-label">{label}</span>
-            {chevron && <span className="kpi-go" aria-hidden="true">›</span>}
-        </span>
-        <span>
-            <span className="kpi-val">
-                <b className={`num${dinero ? ' money' : ''}`}>
-                    {error ? 's/d' : cargando ? '·' : dinero ? precioCLP(valor) : (valor ?? '—')}
-                </b>
+    chevron, testid }) => {
+    const Etiqueta = onClick ? 'button' : 'div';
+    return (
+        <Etiqueta
+            {...(onClick ? { type: 'button', 'aria-label': label } : {})}
+            className={`kpi ${clase}`} onClick={onClick}
+            data-testid={testid || `kpi-${icono}`}>
+            {pulso && <span className="pulse" />}
+            <span className="kpi-top">
+                <span className="chip"><Icono nombre={icono} /></span>
+                <span className="kpi-label">{label}</span>
+                {chevron && <span className="kpi-go" aria-hidden="true">›</span>}
             </span>
-            {error
-                ? <span className="kpi-error">{error}</span>
-                : <span className="kpi-sub">{sub}</span>}
-        </span>
-    </button>
-);
+            <span>
+                <span className="kpi-val">
+                    <b className={`num${dinero ? ' money' : ''}`}>
+                        {error ? 's/d' : cargando ? '·' : dinero ? precioCLP(valor) : (valor ?? '—')}
+                    </b>
+                </span>
+                {error
+                    ? <span className="kpi-error">{error}</span>
+                    : <span className="kpi-sub">{sub}</span>}
+            </span>
+        </Etiqueta>
+    );
+};
 
 /**
  * Dashboard del admin para <768px (mockup admin-mobile-mockup.html) con datos REALES.
@@ -329,12 +352,19 @@ const InicioMobileAdmin = () => {
         nombreFallback: revision ? `voucher_${revision.id}` : 'voucher',
     });
 
-    // ── D. "Asistencia de hoy" ──────────────────────────────────────────────
+    // ── D. "Asistencia" (hoy + la semana en curso) ───────────────────────────
     const [clases, setClases] = useState([]);
     const [clasesCargando, setClasesCargando] = useState(true);
     const [clasesError, setClasesError] = useState('');
     const [franja, setFranja] = useState(null);          // franja elegida (default: la del reloj)
     const [ahora, setAhora] = useState(() => horaChileStr());
+    // A3. La SEMANA (lunes a domingo): se pide APARTE porque `/asistencia/clases-hoy`
+    // sólo devuelve HOY. `diaPedido` es el día que el admin tocó en la rejilla
+    // (null = seguir al calendario).
+    const [semana, setSemana] = useState([]);
+    const [semanaCargando, setSemanaCargando] = useState(true);
+    const [semanaError, setSemanaError] = useState('');
+    const [diaPedido, setDiaPedido] = useState(null);
     const [roster, setRoster] = useState(null);          // { clase, reservas, marcada }
     const [marcados, setMarcados] = useState({});        // reserva_id -> asistió
     const [rosterCargando, setRosterCargando] = useState(false);
@@ -359,31 +389,103 @@ const InicioMobileAdmin = () => {
         cargarClases();
     }, [cargarClases]);
 
+    // A3. La semana en curso: `GET /clases` acepta rango de fechas y devuelve
+    // `asistentes_confirmados` (el contador que lee `utils/semanaAsistencia.js`).
+    // Sin generar clases (`generar` queda en false por defecto): un GET no escribe.
+    const cargarSemana = useCallback(async () => {
+        setSemanaCargando(true);
+        try {
+            const dias = diasDeLaSemana(hoyChileStr());
+            const res = await api.get('/api/v1/clases/', {
+                params: {
+                    fecha_desde: dias[0].fechaStr,
+                    fecha_hasta: dias[6].fechaStr,
+                    limit: 300,
+                },
+            });
+            const data = res.data;
+            setSemana(Array.isArray(data) ? data : (data?.clases || []));
+            setSemanaError('');
+        } catch (err) {
+            setSemana([]);
+            setSemanaError(err.response?.data?.detail || 'No se pudo cargar la semana');
+        }
+        setSemanaCargando(false);
+    }, []);
+
+    useEffect(() => {
+        cargarSemana();
+    }, [cargarSemana]);
+
     // Reloj de la tarjeta ("Ahora · 14:05") + punto de la franja actual, cada 30s.
     useEffect(() => {
         const t = setInterval(() => setAhora(horaChileStr()), 30000);
         return () => clearInterval(t);
     }, []);
 
-    // Auto-refresco de las clases: 45s, pausado con la pestaña oculta (no gastamos
-    // cuota de la BD si el admin no está mirando), igual que el panel ≥768px.
+    // Auto-refresco de la asistencia: 45s, pausado con la pestaña oculta (no gastamos
+    // cuota de la BD si el admin no está mirando), igual que el panel ≥768px. A3: se
+    // refresca también la rejilla de la semana, para que una reserva nueva se vea.
     useEffect(() => {
-        const t = setInterval(() => { if (!document.hidden) cargarClases(); }, 45000);
-        const alVolver = () => { if (!document.hidden) cargarClases(); };
+        const refrescar = () => { cargarClases(); cargarSemana(); };
+        const t = setInterval(() => { if (!document.hidden) refrescar(); }, 45000);
+        const alVolver = () => { if (!document.hidden) refrescar(); };
         document.addEventListener('visibilitychange', alVolver);
         return () => {
             clearInterval(t);
             document.removeEventListener('visibilitychange', alVolver);
         };
-    }, [cargarClases]);
+    }, [cargarClases, cargarSemana]);
 
     // La franja por defecto es la del reloj; si el admin elige otra, se respeta.
     const franjaReloj = franjaActual(ahora);
     const franjaActiva = franja || franjaReloj;
     const grupos = agruparPorFranja(clases);
-    const visibles = grupos[franjaActiva] || [];
-    const resumen = resumenFranja(visibles);
-    const indiceCursando = franjaActiva === franjaReloj ? claseEnCurso(visibles, ahora) : -1;
+    const visiblesFranja = grupos[franjaActiva] || [];
+
+    // ── A3. La semana en curso y el día que se está mirando ──────────────────
+    // `diaPedido` es lo que tocó el admin; si no tocó nada, el día elegido SIGUE al
+    // calendario (el reloj se refresca cada 30s, así que a medianoche no queda en ayer).
+    const hoy = hoyChileStr();
+    const diaAsistencia = diaPedido || hoy;
+    const esHoy = diaAsistencia === hoy;
+    // "En curso" (la clase que ya empezó, con la hora en verde) sólo tiene sentido
+    // mirando HOY y en la franja del reloj: se calcula DESPUÉS de saber si es hoy, así
+    // un índice de la franja de hoy no marca una fila de otro día.
+    const indiceCursando = esHoy && franjaActiva === franjaReloj
+        ? claseEnCurso(visiblesFranja, ahora)
+        : -1;
+    const diasSemana = diasDeLaSemana(hoy);
+    const resumenesSemana = resumenesDeSemana(semana, diasSemana);
+    // La etiqueta del día elegido ("Viernes 12"). Si el admin eligió un día y después
+    // cambió la semana (medianoche del domingo), `find` no lo encuentra: se cae al
+    // genérico en vez de mostrar "undefined".
+    const diaElegido = diasSemana.find((d) => d.fechaStr === diaAsistencia) || null;
+    // La celda de HOY usa el MISMO endpoint que las franjas cuando respondió, así el
+    // número de hoy no contradice el "Mañana + Tarde + Noche" del resumen.
+    const hoyConDato = (!clasesError && !clasesCargando) || clases.length > 0;
+    const resumenes = hoyConDato
+        ? { ...resumenesSemana, [hoy]: resumenFranja(clases) }
+        : resumenesSemana;
+
+    // Clases del día elegido: si es HOY, la franja seleccionada (como siempre); si es
+    // otro día, el día completo con la lista pelada (sin franjas, sin botón Marcar).
+    const filasDelDia = esHoy ? visiblesFranja : clasesDeFecha(semana, diaAsistencia);
+    const resumen = esHoy ? resumenFranja(visiblesFranja) : resumenFranja(filasDelDia);
+    const cargandoLista = esHoy
+        ? (!clases.length && clasesCargando)
+        : (!semana.length && semanaCargando);
+    const errorLista = esHoy ? clasesError : semanaError;
+    const reintentarLista = esHoy ? cargarClases : cargarSemana;
+
+    // ── A2. Chips por disciplina de las clases del día elegido ───────────────
+    // Mismo control, mismo hook y misma memoria de sesión que el Inicio del alumno,
+    // con clave PROPIA: el admin recuerda su última disciplina de la asistencia.
+    const {
+        disponibles: disciplinasDia, filtro: filtroDia,
+        cambiar: cambiarFiltroDia, mostrar: mostrarFiltro,
+    } = useFiltroDisciplina(filasDelDia, CLAVE_FILTRO_ASISTENCIA);
+    const visiblesDelDia = filtrarPorDisciplina(filasDelDia, filtroDia);
 
     // ── E. Buscador de alumnos (ficha rápida) ───────────────────────────────
     const [buscador, setBuscador] = useState(false);
@@ -768,22 +870,15 @@ const InicioMobileAdmin = () => {
                     {fechaCorta()} · resumen del día
                 </p>
 
-                {/* ── A. KPIs ─────────────────────────────────────────────── */}
+                {/* ── A. KPIs (A1: orden nuevo) ──────────────────────────────
+                    1) Vouchers por aprobar -> abre la pantalla completa de
+                       pendientes (`/admin/alumnos-pendientes`), no la hoja rápida.
+                    2) Vencen en 5 días -> Fidelización (sin cambios).
+                    3) Alumnos nuevos y en prueba -> su pantalla (sin cambios).
+                    4) Ingresos de hoy -> INFORMATIVA: ya no navega a Reportes.
+                    "Alumnos activos" dejó de ser tarjeta: es el subtítulo que
+                    encabeza la asistencia (ver bloque D). ───────────────────── */}
                 <section className="kpis" aria-label="Resumen del día">
-                    <Kpi
-                        clase="k-activos" icono="users" label="Alumnos activos"
-                        valor={kpis.activos} error={errores.activos} cargando={cargando}
-                        sub={kpis.nuevosMes != null
-                            ? <><em>+{kpis.nuevosMes}</em> nuevos este mes</>
-                            : 'con plan vigente'}
-                        onClick={() => navigate('/admin/reportes')}
-                    />
-                    <Kpi
-                        clase="k-venc" icono="clock" label="Vencen en 5 días"
-                        valor={kpis.vencen} error={errores.vencen} cargando={cargando}
-                        sub="membresías por vencer"
-                        onClick={() => navigate('/admin/fidelizacion')}
-                    />
                     <Kpi
                         clase={`k-vouch${hayVouchers ? ' alive' : ''}`}
                         icono="voucher" label="Vouchers por aprobar"
@@ -791,17 +886,15 @@ const InicioMobileAdmin = () => {
                         error={errores.vouchers} cargando={cargando}
                         sub={hayVouchers ? <em>Toca para revisar</em> : 'Todo al día'}
                         pulso={hayVouchers}
-                        onClick={() => abrirRevision()}
+                        chevron onClick={() => navigate('/admin/alumnos-pendientes')}
                     />
                     <Kpi
-                        clase="k-caja" icono="caja" label="Ingresos de hoy" dinero
-                        valor={kpis.caja} error={errores.caja} cargando={cargando}
-                        sub={kpis.pagos != null
-                            ? <><em>{kpis.pagos} {kpis.pagos === 1 ? 'pago' : 'pagos'}</em> registrados</>
-                            : 'caja del día'}
-                        onClick={() => navigate('/admin/reportes')}
+                        clase="k-venc" icono="clock" label="Vencen en 5 días"
+                        valor={kpis.vencen} error={errores.vencen} cargando={cargando}
+                        sub="membresías por vencer"
+                        onClick={() => navigate('/admin/fidelizacion')}
                     />
-                    {/* Quinta tarjeta (ancho completo): abre la pantalla con los dos
+                    {/* Tercera tarjeta (ancho completo): abre la pantalla con los dos
                         listados. El número es el de los que están EN PRUEBA; el pie
                         reusa el "+N nuevos este mes" que ya trae /reportes/. */}
                     <Kpi
@@ -812,6 +905,16 @@ const InicioMobileAdmin = () => {
                             ? <><em>+{kpis.nuevosMes}</em> nuevos este mes</>
                             : 'toca para ver el detalle'}
                         chevron onClick={abrirTarjeta} testid="kpi-prueba"
+                    />
+                    {/* Cuarta tarjeta (ancho completo): la caja del día. OJO (A1): es
+                        INFORMATIVA —antes abría Reportes—, así que va como `<div>`
+                        (sin cursor de enlace y sin foco de teclado). */}
+                    <Kpi
+                        clase="k-caja wide" icono="caja" label="Ingresos de hoy" dinero
+                        valor={kpis.caja} error={errores.caja} cargando={cargando}
+                        sub={kpis.pagos != null
+                            ? <><em>{kpis.pagos} {kpis.pagos === 1 ? 'pago' : 'pagos'}</em> registrados</>
+                            : 'caja del día'}
                     />
                 </section>
 
@@ -900,23 +1003,104 @@ const InicioMobileAdmin = () => {
                     )}
                 </section>
 
-                {/* ── D. "Asistencia de hoy" por franja ────────────────────── */}
+                {/* ── D. "Asistencia": HOY por franja + la semana en curso ─────
+                    A1: "Alumnos activos" dejó de ser tarjeta y es el SUBTÍTULO de
+                        esta tarjeta (el número y el "+N nuevos este mes" siguen
+                        saliendo de /reportes, como antes: sólo cambió de lugar).
+                    A3: rejilla de los 7 días (L-D) con el total de reservas y el
+                        % de ocupación de cada uno. El día elegido manda en la
+                        lista de abajo; HOY conserva las franjas y los botones
+                        "Marcar" (los otros días son de consulta: la asistencia se
+                        marca el día en que se dicta la clase).
+                    A2: chips de disciplina sobre la lista del día elegido (el
+                        MISMO control y la MISMA memoria de sesión que "Clases
+                        disponibles" del Inicio del alumno). ─────────────────── */}
                 <section className="card att" aria-labelledby="ub-asistencia" data-testid="admin-asistencia">
                     <div className="card-head">
                         <h2 id="ub-asistencia">Asistencia de hoy</h2>
                         <span className="live">Ahora · {ahora || '--:--'}</span>
                     </div>
 
-                    <div className="seg" role="tablist" aria-label="Franja del día">
-                        {FRANJAS.map((f) => (
-                            <button key={f.id} type="button" role="tab"
-                                aria-selected={f.id === franjaActiva}
-                                onClick={() => setFranja(f.id)}>
-                                {f.label}
-                                {f.id === franjaReloj && <span className="now-dot" title="Franja actual" />}
-                            </button>
-                        ))}
+                    {/* A1. "Alumnos activos" como subtítulo: informa, ya no navega (antes
+                        era una tarjeta KPI que llevaba a Reportes). Si /reportes falló se
+                        dice "s/d" con el motivo —nunca un 0 falso—. */}
+                    <p className="att-sub" data-testid="admin-activos">
+                        {errores.activos ? (
+                            <>
+                                <b className="num">s/d</b> alumnos activos
+                                <span title={errores.activos} aria-hidden="true"> ⚠️</span>
+                            </>
+                        ) : (
+                            <>
+                                <b className="num">{cargando ? '…' : kpis.activos}</b> alumnos activos
+                                {!cargando && kpis.nuevosMes != null && (
+                                    <> · <em>+{kpis.nuevosMes}</em> nuevos este mes</>
+                                )}
+                            </>
+                        )}
+                    </p>
+
+                    {/* A3. La semana en curso, de lunes a domingo: la celda muestra las
+                        reservas del día (arriba chico: letra + nº de día) y su % de
+                        ocupación. El día elegido va en verde; HOY lleva un anillo. El
+                        total de un día sin clases queda en 0 (no es un hueco). */}
+                    <div className="week" role="group" aria-label="Días de la semana"
+                        data-testid="admin-semana">
+                        {diasSemana.map((d) => {
+                            const r = resumenes[d.fechaStr]
+                                || { clases: 0, reservas: 0, ocupacion: 0 };
+                            const elegido = d.fechaStr === diaAsistencia;
+                            return (
+                                <button key={d.fechaStr} type="button"
+                                    className={`day${elegido ? ' sel' : ''}${d.fechaStr === hoy ? ' today' : ''}`}
+                                    aria-pressed={elegido}
+                                    aria-label={`${d.nombre} ${d.diaNum}: ${r.clases} ${r.clases === 1 ? 'clase' : 'clases'}, ${r.reservas} reservas, ${r.ocupacion}% de ocupación`}
+                                    onClick={() => setDiaPedido(d.fechaStr === hoy ? null : d.fechaStr)}>
+                                    <span className="dw">{d.letra}<b>{d.diaNum}</b></span>
+                                    <b className="dc num">{r.reservas}</b>
+                                    <span className="dp">{r.ocupacion}%</span>
+                                </button>
+                            );
+                        })}
                     </div>
+
+                    {esHoy ? (
+                        /* Franjas de HOY: elegir otra franja sólo cambia la lista de hoy. */
+                        <div className="seg" role="tablist" aria-label="Franja del día">
+                            {FRANJAS.map((f) => (
+                                <button key={f.id} type="button" role="tab"
+                                    aria-selected={f.id === franjaActiva}
+                                    onClick={() => setFranja(f.id)}>
+                                    {f.label}
+                                    {f.id === franjaReloj && <span className="now-dot" title="Franja actual" />}
+                                </button>
+                            ))}
+                        </div>
+                    ) : (
+                        /* Otro día: las franjas no aplican (se muestran sus clases completas). */
+                        <div className="day-head" data-testid="admin-dia-elegido">
+                            <span>
+                                <b>{diaElegido?.nombre || 'Ese día'}</b>
+                                {diaElegido ? ` ${diaElegido.diaNum}` : ''} · de consulta
+                            </span>
+                            <button type="button" className="link" onClick={() => setDiaPedido(null)}>
+                                Volver a hoy
+                            </button>
+                        </div>
+                    )}
+
+                    {/* A2. Chips de disciplina del día elegido: filtran el resumen y la
+                        lista de abajo. El control decide solo si vale la pena pintarse
+                        (con una sola disciplina no hay nada que filtrar). */}
+                    {mostrarFiltro && (
+                        <FiltroDisciplina
+                            variante="ub"
+                            disciplinas={disciplinasDia}
+                            valor={filtroDia}
+                            onCambiar={cambiarFiltroDia}
+                            testid="admin-filtro-disciplina"
+                        />
+                    )}
 
                     <div className="slot-sum">
                         <span>
@@ -928,42 +1112,56 @@ const InicioMobileAdmin = () => {
                         <span>Ocupación {resumen.ocupacion}%</span>
                     </div>
 
-                    {clasesError ? (
+                    {errorLista ? (
                         <p className="empty-line" role="alert">
-                            ⚠️ {clasesError}{' '}
-                            <button type="button" className="link" onClick={cargarClases}>Reintentar</button>
+                            ⚠️ {errorLista}{' '}
+                            <button type="button" className="link" onClick={reintentarLista}>Reintentar</button>
                         </p>
-                    ) : (!clases.length && clasesCargando) ? (
-                        <p className="empty-line">Cargando las clases de hoy…</p>
-                    ) : visibles.length === 0 ? (
-                        <p className="empty-line">No hay clases en esta franja.</p>
+                    ) : cargandoLista ? (
+                        <p className="empty-line">
+                            {esHoy ? 'Cargando las clases de hoy…' : 'Cargando la semana…'}
+                        </p>
+                    ) : visiblesDelDia.length === 0 ? (
+                        <p className="empty-line">
+                            {filasDelDia.length > 0
+                                ? `No hay clases de ${filtroDia} ese día.`
+                                : esHoy ? 'No hay clases en esta franja.' : 'No hay clases ese día.'}
+                        </p>
                     ) : (
-                        visibles.map((c, i) => {
-                            const oc = ocupacion(c.reservas_count, c.cupo_maximo);
+                        visiblesDelDia.map((c, i) => {
+                            const oc = ocupacion(reservasDe(c), c.cupo_maximo);
                             const hecha = estaMarcada(c);
+                            // El endpoint de HOY manda `coach`; `/clases` (la semana) manda
+                            // `coach_nombre`: se acepta cualquiera de los dos.
+                            const coach = c.coach || c.coach_nombre;
                             return (
                                 <div key={c.id} className={`class${i === indiceCursando ? ' current' : ''}`}>
                                     <div className="hour">{horaCorta(c.hora_inicio)}</div>
                                     <div style={{ minWidth: 0 }}>
                                         <div className="name">
                                             {c.disciplina_nombre}{' '}
-                                            <span className={c.coach ? '' : 'nocoach'}>
-                                                · {c.coach || 'Sin coach'}
+                                            <span className={coach ? '' : 'nocoach'}>
+                                                · {coach || 'Sin coach'}
                                             </span>
                                         </div>
                                         <div className="sub">
-                                            {c.reservas_count} de {c.cupo_maximo} cupos · {oc.pct}%
+                                            {reservasDe(c)} de {c.cupo_maximo} cupos · {oc.pct}%
                                         </div>
                                         <div className="bar">
                                             <i className={oc.nivel}
                                                 style={{ width: `${Math.min(oc.pct, 100)}%` }} />
                                         </div>
                                     </div>
-                                    <button type="button" className={`att-btn${hecha ? ' done' : ''}`}
-                                        onClick={() => abrirRoster(c)}
-                                        aria-label={`Marcar asistencia de ${c.disciplina_nombre} ${horaCorta(c.hora_inicio)}`}>
-                                        {hecha ? <><Icono nombre="check" />{c.reservas_count} ok</> : 'Marcar'}
-                                    </button>
+                                    {/* "Marcar" sólo HOY: en los otros días no hay asistencia
+                                        que marcar (sería un roster de una clase que no se ha
+                                        dictado). Los demás días se consultan. */}
+                                    {esHoy && (
+                                        <button type="button" className={`att-btn${hecha ? ' done' : ''}`}
+                                            onClick={() => abrirRoster(c)}
+                                            aria-label={`Marcar asistencia de ${c.disciplina_nombre} ${horaCorta(c.hora_inicio)}`}>
+                                            {hecha ? <><Icono nombre="check" />{reservasDe(c)} ok</> : 'Marcar'}
+                                        </button>
+                                    )}
                                 </div>
                             );
                         })

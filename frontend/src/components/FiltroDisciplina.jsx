@@ -2,9 +2,9 @@
  * FiltroDisciplina — chips "Todas" + cada disciplina.
  *
  * POR QUÉ EXISTE: el mismo control lo usan "Mis Reservas" (variante `claro`,
- * Tailwind) y "Clases disponibles" del Inicio móvil (variante `ub`, estilos de
- * `inicioMobile.css`). Antes estaba copiado en MisReservas; ahora es un único
- * componente y la lógica compartida vive en `utils/filtroDisciplina.js`.
+ * Tailwind) y las dos pantallas móviles que pintan clases: "Clases disponibles"
+ * del Inicio del alumno y la "Asistencia" del panel del admin (variante `ub`,
+ * estilos de `inicioMobile.css` / `inicioMobileAdmin.css`, según el ancestro).
  *
  * Reglas del mockup que respeta:
  *   · objetivos táctiles ≥44px de alto (`min-h-11` / `min-height: 44px`);

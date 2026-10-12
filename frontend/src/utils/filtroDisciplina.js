@@ -19,6 +19,9 @@ export const SIN_DISCIPLINA = 'Sin disciplina';
 // (elegir "CrossFit" en el Inicio no cambia el filtro de Mis Reservas).
 export const CLAVE_FILTRO_INICIO = 'ub-inicio.disciplina';
 export const CLAVE_FILTRO_RESERVAS = 'misReservas.disciplina';
+// (A2) Chips de "Asistencia" del panel ADMIN móvil: clave propia, así recordar una
+// disciplina en la asistencia no cambia el filtro que el admin usó en otra pantalla.
+export const CLAVE_FILTRO_ASISTENCIA = 'ub-admin.asistencia.disciplina';
 
 export const disciplinaDe = (fila) => fila?.disciplina_nombre || SIN_DISCIPLINA;
 

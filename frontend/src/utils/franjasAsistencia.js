@@ -56,10 +56,23 @@ export const agruparPorFranja = (clases) => {
 /** Franja del reloj a esa hora ('HH:MM'): la que se abre por defecto y lleva el punto. */
 export const franjaActual = (horaHHMM) => franjaDe(horaHHMM);
 
+/**
+ * Reservas de una clase, desde CUALQUIERA de las dos fuentes del panel:
+ *   · `reservas_count` — lo que devuelve `GET /asistencia/clases-hoy` (la pantalla de hoy);
+ *   · `asistentes_confirmados` — lo que devuelve `GET /clases` (la semana, ver A3).
+ * El backend NO manda los dos campos a la vez: si vinieran, manda `reservas_count`
+ * (incluso si es 0: un 0 real no debe caer al otro contador). Nunca devuelve NaN.
+ */
+export const reservasDe = (clase) => {
+    const bruto = clase?.reservas_count ?? clase?.asistentes_confirmados;
+    const n = Number(bruto);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+};
+
 /** Resumen de una franja: cantidad de clases, rango horario y ocupación (0-100). */
 export const resumenFranja = (clases) => {
     const lista = clases || [];
-    const reservas = lista.reduce((a, c) => a + (Number(c?.reservas_count) || 0), 0);
+    const reservas = lista.reduce((a, c) => a + reservasDe(c), 0);
     const cupos = lista.reduce((a, c) => a + (Number(c?.cupo_maximo) || 0), 0);
     const horas = lista.map((c) => horaDe(c?.hora_inicio)).filter((h) => h !== null);
     return {

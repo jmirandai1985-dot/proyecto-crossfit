@@ -10,7 +10,7 @@
 //   5. la barra usa los mismos umbrales del mockup (>=70 ok, >=40 medio, resto bajo)
 import {
     FRANJAS, IDS_FRANJAS, horaDe, horaCorta, franjaDe, agruparPorFranja,
-    franjaActual, resumenFranja, claseEnCurso, ocupacion, estaMarcada,
+    franjaActual, resumenFranja, claseEnCurso, ocupacion, estaMarcada, reservasDe,
 } from '../src/utils/franjasAsistencia.js';
 
 let fallos = 0;
@@ -77,6 +77,17 @@ eq(res.hasta, 9, 'y termina a las 09');
 const vacio = resumenFranja([]);
 eq(`${vacio.clases}-${vacio.reservas}-${vacio.ocupacion}`, '0-0-0', 'franja sin clases: 0, sin NaN');
 eq(vacio.desde === null && vacio.hasta === null, true, 'sin clases no hay rango horario');
+
+// Las dos fuentes de "reservas" del panel: /asistencia/clases-hoy manda `reservas_count`
+// y /clases (la semana) manda `asistentes_confirmados`. `reservasDe` lee las dos.
+eq(reservasDe({ reservas_count: 12 }), 12, 'reservas_count es el contador de la pantalla de hoy');
+eq(reservasDe({ asistentes_confirmados: 9 }), 9, 'sin reservas_count usa asistentes_confirmados (/clases)');
+eq(reservasDe({ reservas_count: 0, asistentes_confirmados: 9 }), 0,
+    'un reservas_count en 0 manda (no cae al otro contador)');
+eq(reservasDe({}), 0, 'sin contadores -> 0, sin NaN');
+eq(reservasDe(null), 0, 'clase nula -> 0, sin NaN');
+eq(resumenFranja([{ asistentes_confirmados: 4, cupo_maximo: 16 }]).ocupacion, 25,
+    'el resumen de la franja tambien entiende las filas de /clases');
 
 // ── 4. Clase en curso ────────────────────────────────────────────────────────
 const tarde = agruparPorFranja(dia).tarde;

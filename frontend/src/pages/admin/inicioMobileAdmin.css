@@ -179,7 +179,10 @@
     color: var(--tint);
 }
 
-.ub-admin .k-activos { --tint: var(--ub-teal); }
+/* A1: la tarjeta "Alumnos activos" dejó de ser un KPI (es el subtítulo de
+   "Asistencia"), así que su tinte (`.k-activos`) ya no se usa. El bloque KPI queda:
+   Vouchers por aprobar · Vencen en 5 días · Alumnos nuevos y en prueba (ancha) ·
+   Ingresos de hoy (ancha). */
 .ub-admin .k-venc { --tint: var(--ub-amber); }
 .ub-admin .k-vouch { --tint: var(--ub-blue); }
 .ub-admin .k-caja { --tint: var(--ub-violet); }
@@ -404,6 +407,140 @@
     height: 7px;
     border-radius: 50%;
     background: var(--ub-teal);
+}
+
+/* Subtítulo de la tarjeta (A1): "Alumnos activos" era una tarjeta KPI; ahora encabeza
+   la asistencia. Informa (no navega), así que se lee como texto, no como botón. */
+.ub-admin .att-sub {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 2px 2px 10px;
+    font-size: 12.5px;
+    color: var(--ub-muted);
+}
+
+.ub-admin .att-sub b {
+    font-family: var(--ub-cond);
+    font-weight: 700;
+    font-size: 17px;
+    line-height: 1;
+    color: var(--ub-text);
+}
+
+.ub-admin .att-sub em {
+    font-style: normal;
+    font-weight: 600;
+    color: var(--ub-teal);
+}
+
+/* ── A3. La semana en curso: 7 celdas (letra + día, reservas y % de ocupación) ──
+   Entra sin scroll incluso en 360px (el `.col` llega a 430px con 16px de padding) y
+   cada celda supera los 44px de alto del objetivo táctil. */
+.ub-admin .week {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    margin: 2px 0 10px;
+}
+
+.ub-admin .week button {
+    display: grid;
+    justify-items: center;
+    gap: 1px;
+    min-height: 56px;
+    padding: 5px 0 6px;
+    border-radius: var(--ub-r-sm);
+    background: var(--ub-bg);
+    color: var(--ub-muted);          /* el día que NO se mira queda en gris */
+    line-height: 1.1;
+}
+
+/* HOY lleva el anillo aunque no esté elegido: ubica al admin dentro de la semana. */
+.ub-admin .week button.today {
+    box-shadow: inset 0 0 0 1.5px rgba(45, 212, 191, .45);
+}
+
+.ub-admin .week button.sel {
+    background: rgba(45, 212, 191, .16);
+    color: var(--ub-text);
+}
+
+.ub-admin .week .dw {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 3px;
+    font-size: 10.5px;
+    font-weight: 700;
+}
+
+.ub-admin .week .dw b {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ub-text);
+}
+
+.ub-admin .week .dc {
+    font-family: var(--ub-cond);
+    font-size: 17px;
+}
+
+.ub-admin .week button.sel .dc { color: var(--ub-teal); }
+
+.ub-admin .week .dp { font-size: 10px; }
+
+/* Otro día elegido (no HOY): "Viernes 12 · de consulta" + "Volver a hoy". */
+.ub-admin .day-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 2px 2px 6px;
+    font-size: 12.5px;
+    color: var(--ub-muted);
+}
+
+.ub-admin .day-head b { color: var(--ub-text); }
+
+/* "Volver a hoy" es el único control de la fila: se le agranda el área táctil a
+   44px con márgenes negativos para que la fila no crezca. */
+.ub-admin .day-head .link {
+    min-height: 44px;
+    margin: -6px 0;
+    padding: 0 8px;
+}
+
+/* ── A2. Chips de disciplina: MISMO control que "Clases disponibles" del alumno
+   (`.ub-inicio .filtro` en inicioMobile.css), acá dentro de `.ub-admin` y con el
+   acento teal de esta tarjeta. Fila con scroll horizontal, chips de ≥44px. ── */
+.ub-admin .filtro {
+    display: flex;
+    gap: 8px;
+    margin: 2px 0 8px;
+    padding-bottom: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;              /* la barra no debe robarle alto al chip */
+}
+
+.ub-admin .filtro::-webkit-scrollbar { display: none; }
+
+.ub-admin .filtro button {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1.5px solid var(--ub-line);
+    border-radius: 999px;
+    color: var(--ub-muted);
+    font-size: 14px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.ub-admin .filtro button.on {
+    border-color: var(--ub-teal);
+    background: rgba(45, 212, 191, .12);
+    color: var(--ub-text);
 }
 
 .ub-admin .seg {
@@ -1078,7 +1215,7 @@
     text-align: center;
 }
 
-/* ── Tarjeta "Alumnos nuevos y en prueba" (5ª KPI, ancho completo) ───────── */
+/* ── Tarjeta "Alumnos nuevos y en prueba" (ancho completo; A1: 3ª del bloque, y la 4ª es "Ingresos de hoy") ───────── */
 .ub-admin .k-prueba { --tint: var(--ub-violet); }
 
 .ub-admin .kpi.wide {
