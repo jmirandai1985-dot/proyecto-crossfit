@@ -69,6 +69,28 @@ else:
 # (12 y 30 clientes concurrentes contra /api/v1/dashboard/1) 40/60 y 150 dan lo
 # mismo dentro del ruido de Neon: p50 10-13 s y 32-39 s, 0 errores de pool, mismo
 # pico de conexiones en uso (11-14). Por eso queda en 150.
+# ── MEDICIÓN POSTERIOR (11/10/2026): con el fix del login ────────────────────
+# `auth.py` YA NO retiene la conexión del pool durante el bcrypt (ver
+# tests/test_login_no_retiene_conexion_bcrypt.py), así que lo de arriba quedó
+# desactualizado: el techo de la ráfaga dejó de ser la BD. Mismo k6 de 500
+# logins y misma máquina (portátil de 4 núcleos; bcrypt cost 12 = 400 ms por
+# login medidos => 500 logins son ~200 s de CPU / 4 núcleos ≈ 50 s de pared:
+# la ráfaga es CPU-bound, así que estos números NO se trasladan 1:1 a otra CPU):
+#
+#   total_tokens   logins OK / 500   connection refused   request timeout   500 de pool
+#        150             269                150                79               2
+#         60             468                  0                32               0
+#
+# Con 150 hilos el proceso satura sus núcleos y el event loop se queda sin CPU
+# para ACEPTAR conexiones (150 "connection refused" al abrir los 500 VUs); con
+# 60 no se rechaza ninguna y entran 468. El 6% que sigue fallando son timeouts
+# de k6 (60 s): 500 logins a la vez no caben en 4 núcleos por CPU, no por la app.
+# DECISIÓN PENDIENTE: el valor sigue en 150 hasta atarlo a la CPU de la instancia
+# y re-medirlo en el Render de 0,5 CPU (bajarlo sin medir volvería al error de
+# "1 hilo por conexión"). Puerta local realista = 100 logins concurrentes:
+# 100/100 con 0 errores de pool.
+#
+
 # El test k6 de 500 logins NO pasa en ninguno de esos valores (ni pasaba antes de
 # tocar esto: lo que lo puso en rojo fue bajar el pool a 10+5, ver database.py).
 # Se aplica en el startup event porque current_default_thread_limiter()

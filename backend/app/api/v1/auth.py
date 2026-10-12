@@ -71,8 +71,23 @@ def login(
         {"correo": login_data.correo}
     ).first()
 
+    # ── El bcrypt NO puede correr con una conexión del pool en la mano ───────
+    # `db.execute(...)` abre transacción y RETIENE una conexión del pool hasta el
+    # final del request (`get_db` sólo hace `db.close()` en su `finally`), y
+    # `verify_password` es bcrypt a propósito lento (~400 ms de CPU medidos en
+    # este equipo, cost 12).
+    # MEDIDO con k6 (500 logins concurrentes, 1 worker, pool 10+5): 411/500
+    # requests morían con `QueuePool limit of size 10 overflow 5 reached`
+    # (TimeoutError -> 500) porque las 15 conexiones se agotaban HASHENADO, no
+    # consultando: la BD estaba ociosa. Arreglo: se copia la fila a un dict y se
+    # SUELTA la conexión ANTES de hashear. El login no vuelve a tocar la BD (el
+    # JWT se arma en memoria), así que cerrar la sesión acá no rompe nada; si
+    # algún día se le agrega una escritura, SQLAlchemy reabre una conexión sola.
+    fila = dict(usuario._mapping) if usuario is not None else None
+    db.close()
+
     # Verificar que el usuario existe
-    if not usuario:
+    if fila is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email o contraseña incorrectos"
@@ -81,19 +96,19 @@ def login(
     # Verificar que el usuario está habilitado. La fuente de verdad es `estado`
     # (activo es derivado; el CHECK de la migración 034 los mantiene sincronizados),
     # así el mensaje puede ser específico según el caso.
-    if usuario.estado != "activo":
+    if fila["estado"] != "activo":
         detalle = {
             "pendiente_activacion": "Tu cuenta está pendiente de activación por el box.",
             "rechazado": "Tu solicitud fue rechazada. Contacta al box.",
             "baja": "Tu cuenta está dada de baja. Contacta al box.",
-        }.get(usuario.estado, "Usuario inactivo")
+        }.get(fila["estado"], "Usuario inactivo")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=detalle
         )
 
-    # Verificar contraseña
-    if not verify_password(login_data.password, usuario.password_hash):
+    # Verificar contraseña (la BD ya quedó libre arriba: ver comentario)
+    if not verify_password(login_data.password, fila["password_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email o contraseña incorrectos"
@@ -101,11 +116,11 @@ def login(
 
     # Crear JWT token
     token_data = {
-        "usuario_id": usuario.id,
-        "tenant_id": usuario.tenant_id,
-        "correo": usuario.correo,
-        "rol": usuario.rol,
-        "nombre": usuario.nombre
+        "usuario_id": fila["id"],
+        "tenant_id": fila["tenant_id"],
+        "correo": fila["correo"],
+        "rol": fila["rol"],
+        "nombre": fila["nombre"]
     }
 
     access_token = create_access_token(data=token_data)
@@ -113,11 +128,11 @@ def login(
     return TokenResponse(
         access_token=access_token,
         token_type="bearer",
-        usuario_id=usuario.id,
-        rol=usuario.rol,
-        tenant_id=usuario.tenant_id,
-        nombre=usuario.nombre,
-        cambiar_password_al_login=bool(usuario.cambiar_password_al_login),
+        usuario_id=fila["id"],
+        rol=fila["rol"],
+        tenant_id=fila["tenant_id"],
+        nombre=fila["nombre"],
+        cambiar_password_al_login=bool(fila["cambiar_password_al_login"]),
     )
 
 
