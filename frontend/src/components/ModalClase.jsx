@@ -1,9 +1,33 @@
-import React, { useState, useEffect } from 'react';
-import api from '../services/api';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useDisciplinas, useGuardarClase, useUsuariosPorRol, SIN_DATOS } from '../hooks/queries';
+
+// Datos de ejemplo del formulario: eran el fallback del fetch a mano y se mantienen tal
+// cual (si el box todavía no tiene coaches o disciplinas cargadas, la clase se arma igual).
+const COACHES_FALLBACK = [
+    { id: 1, nombre: 'Juan Pérez' },
+    { id: 2, nombre: 'María García' },
+    { id: 3, nombre: 'Carlos López' },
+];
+const DISCIPLINAS_FALLBACK = [
+    { id: 1, nombre: 'CrossFit' },
+    { id: 2, nombre: 'Yoga' },
+    { id: 3, nombre: 'Spinning' },
+    { id: 4, nombre: 'Funcional' },
+    { id: 5, nombre: 'Pilates' },
+];
 
 const ModalClase = ({ isOpen, onClose, onSuccess, tenant_id, claseEditar }) => {
-    const [coaches, setCoaches] = useState([]);
-    const [disciplinas, setDisciplinas] = useState([]);
+    // Bloque 3 (parte A): el padrón de coaches es el MISMO `GET /usuarios/?rol=coach` que
+    // pide la pantalla de Coaches, y las disciplinas salen de la caché compartida: abrir
+    // este modal ya no dispara dos GET que otra pantalla del admin acaba de traer.
+    const { data: coachesData } = useUsuariosPorRol('coach');
+    const { data: discData } = useDisciplinas();
+    const coaches = (coachesData && coachesData.length > 0) ? coachesData : COACHES_FALLBACK;
+    const disciplinas = useMemo(() => {
+        const validas = (discData || SIN_DATOS).filter((d) => d && d.id && d.nombre);
+        return validas.length > 0 ? validas : DISCIPLINAS_FALLBACK;
+    }, [discData]);
+    const guardarClase = useGuardarClase();
     const [loading, setLoading] = useState(false);
     const [formData, setFormData] = useState({
         nombre: '',
@@ -21,9 +45,6 @@ const ModalClase = ({ isOpen, onClose, onSuccess, tenant_id, claseEditar }) => {
 
     useEffect(() => {
         if (isOpen) {
-            fetchCoaches();
-            fetchDisciplinas();
-
             if (claseEditar) {
                 // Pre-cargar datos de la clase a editar
                 setFormData({
@@ -52,50 +73,6 @@ const ModalClase = ({ isOpen, onClose, onSuccess, tenant_id, claseEditar }) => {
             setErrors({});
         }
     }, [isOpen, claseEditar]);
-
-    const fetchCoaches = async () => {
-        try {
-            const response = await api.get(`/api/v1/usuarios/?rol=coach`);
-            const coachesData = Array.isArray(response.data) ? response.data : [];
-            setCoaches(coachesData.length > 0 ? coachesData : [
-                { id: 1, nombre: 'Juan Pérez' },
-                { id: 2, nombre: 'María García' },
-                { id: 3, nombre: 'Carlos López' },
-            ]);
-        } catch (error) {
-            console.error('Error fetching coaches:', error);
-            setCoaches([
-                { id: 1, nombre: 'Juan Pérez' },
-                { id: 2, nombre: 'María García' },
-                { id: 3, nombre: 'Carlos López' },
-            ]);
-        }
-    };
-
-    const fetchDisciplinas = async () => {
-        try {
-            const response = await api.get(`/api/v1/disciplinas/`);
-            // Asegurar que cada disciplina tenga id y nombre válidos
-            const disciplinasData = Array.isArray(response.data) ? response.data : [];
-            const disciplinasValidas = disciplinasData.filter(d => d && d.id && d.nombre);
-            setDisciplinas(disciplinasValidas.length > 0 ? disciplinasValidas : [
-                { id: 1, nombre: 'CrossFit' },
-                { id: 2, nombre: 'Yoga' },
-                { id: 3, nombre: 'Spinning' },
-                { id: 4, nombre: 'Funcional' },
-                { id: 5, nombre: 'Pilates' },
-            ]);
-        } catch (error) {
-            console.error('Error fetching disciplinas:', error);
-            setDisciplinas([
-                { id: 1, nombre: 'CrossFit' },
-                { id: 2, nombre: 'Yoga' },
-                { id: 3, nombre: 'Spinning' },
-                { id: 4, nombre: 'Funcional' },
-                { id: 5, nombre: 'Pilates' },
-            ]);
-        }
-    };
 
     const validateForm = () => {
         const newErrors = {};
@@ -149,13 +126,9 @@ const ModalClase = ({ isOpen, onClose, onSuccess, tenant_id, claseEditar }) => {
                 cancelada: claseEditar?.cancelada || false,
             };
 
-            if (esEdicion) {
-                // PUT para editar
-                await api.put(`/api/v1/clases/${claseEditar.id}`, payload);
-            } else {
-                // POST para crear
-                await api.post(`/api/v1/clases/`, payload);
-            }
+            // Con `id` edita y sin `id` crea (`useGuardarClase`); la mutación invalida
+            // `['clases']`, así que el listado del admin/coach se refresca solo.
+            await guardarClase.mutateAsync({ id: claseEditar?.id, payload });
 
             setFormData({
                 nombre: '',

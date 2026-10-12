@@ -1,26 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
+import { useDisciplinas, useGuardarDisciplina, useEliminarDisciplina, SIN_DATOS } from '../../hooks/queries';
 
 const Disciplinas = () => {
     const { tenant_id } = useAuth();
-    const [items, setItems] = useState([]);
-    const [loading, setLoading] = useState(true);
+    // Bloque 3 (parte A): el catálogo sale de la caché compartida — `useDisciplinas` la
+    // usan también Clases, Horarios, Coaches y el modal de clase. Guardar o eliminar
+    // invalida el prefijo `['disciplinas']`: la tabla se refresca sola y las otras
+    // pantallas no quedan con la lista vieja.
+    const { data, isPending } = useDisciplinas();
+    const items = data || SIN_DATOS;
+    const guardar = useGuardarDisciplina();
+    const eliminar = useEliminarDisciplina();
     const [formData, setFormData] = useState({ nombre: '', requiere_coach: true, es_open_box: false, activo: true });
     const [editingId, setEditingId] = useState(null);
     const [showForm, setShowForm] = useState(false);
     const [msgError, setMsgError] = useState('');
-
-    const fetch = async () => {
-        try {
-            const r = await api.get('/api/v1/disciplinas/');
-            setItems(r.data || []);
-        } catch (e) { console.error(e); setItems([]); }
-        finally { setLoading(false); }
-    };
-
-    useEffect(() => { fetch(); }, [tenant_id]);
 
     const openNew = () => { setMsgError(''); setEditingId(null); setFormData({ nombre: '', requiere_coach: true, es_open_box: false, activo: true }); setShowForm(true); };
     const openEdit = (d) => { setEditingId(d.id); setFormData({ nombre: d.nombre, requiere_coach: d.requiere_coach ?? true, es_open_box: d.es_open_box ?? false, activo: d.activo ?? true }); setShowForm(true); };
@@ -28,14 +24,13 @@ const Disciplinas = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            if (editingId) {
-                await api.put(`/api/v1/disciplinas/${editingId}`, formData);
-            } else {
-                await api.post('/api/v1/disciplinas/', { ...formData, tenant_id });
-            }
+            // Con `id` es PUT (editar); sin `id`, POST (crear, con el tenant del form).
+            await guardar.mutateAsync({
+                id: editingId,
+                payload: editingId ? formData : { ...formData, tenant_id },
+            });
             setMsgError('');
             setShowForm(false);
-            fetch();
         } catch (error) {
             setMsgError(error.response?.data?.detail || error.message || 'No se pudo guardar la disciplina');
         }
@@ -44,12 +39,11 @@ const Disciplinas = () => {
     const handleDelete = async (id) => {
         if (!window.confirm('¿Eliminar esta disciplina?')) return;
         try {
-            await api.delete(`/api/v1/disciplinas/${id}`);
-            fetch();
+            await eliminar.mutateAsync(id);
         } catch (e) { setMsgError(e.response?.data?.detail || e.message || 'No se pudo eliminar la disciplina'); }
     };
 
-    if (loading) {
+    if (isPending) {
         return (<Layout><div className="flex items-center justify-center h-96"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div></div></Layout>);
     }
 

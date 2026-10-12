@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
 import ModalClase from '../../components/ModalClase';
+import { useClasesAdmin, useDisciplinas, useEliminarClase, SIN_DATOS } from '../../hooks/queries';
 
 const TURNOS = [
     { id: 'am', label: '🌅 Turno AM', desde: 7, hasta: 11 },
@@ -25,45 +25,28 @@ function clasesPorTurno(clases, turnoId) {
 
 const Clases = () => {
     const { tenant_id } = useAuth();
-    const [clases, setClases] = useState([]);
-    const [disciplinas, setDisciplinas] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [showModal, setShowModal] = useState(false);
-    const [claseEditar, setClaseEditar] = useState(null);
+    // Los filtros van primero: `filtroDisciplina` alimenta la clave del query de clases.
     const [filtroDisciplina, setFiltroDisciplina] = useState('');
     const [filtroTurno, setFiltroTurno] = useState('');
+    // Bloque 3 (parte A): las clases y el catálogo salen de la caché compartida. El filtro
+    // por disciplina viaja al backend (y va en la clave); el de turno se aplica acá en
+    // memoria, así que cambiar de turno NO dispara otra llamada.
+    const { data: clasesData, isPending: cargandoClases } = useClasesAdmin(filtroDisciplina);
+    const { data: discData } = useDisciplinas();
+    const disciplinas = discData || SIN_DATOS;
+    const clases = useMemo(
+        () => (filtroTurno ? clasesPorTurno(clasesData || [], filtroTurno) : (clasesData || [])),
+        [clasesData, filtroTurno],
+    );
+    const loading = cargandoClases;
+    const eliminarClase = useEliminarClase();
+    const [showModal, setShowModal] = useState(false);
+    const [claseEditar, setClaseEditar] = useState(null);
 
     // Accordion state — sets of expanded IDs (N1=disciplina, N2=turno, N3=horario)
     const [discExpanded, setDiscExpanded] = useState(new Set());
     const [turnoExpanded, setTurnoExpanded] = useState(new Set());
     const [horarioExpanded, setHorarioExpanded] = useState(new Set());
-
-    const fetchDisciplinas = useCallback(async () => {
-        try {
-            const r = await api.get('/api/v1/disciplinas/');
-            setDisciplinas(r.data || []);
-        } catch (e) { console.error(e); }
-    }, [tenant_id]);
-
-    const fetchClases = async (disciplinaId, turnoId) => {
-        setLoading(true);
-        try {
-            const params = { limit: 500 };
-            if (disciplinaId) params.disciplina_id = disciplinaId;
-            const response = await api.get('/api/v1/clases/', { params });
-            let data = response.data || [];
-            if (turnoId) {
-                const turno = TURNOS.find(t => t.id === turnoId);
-                if (turno) data = data.filter(c => { const h = parseHora(c.hora_inicio); return h >= turno.desde && h <= turno.hasta; });
-            }
-            setClases(data);
-        } catch (error) {
-            console.error('Error fetching clases:', error);
-            setClases([]);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     // Auto-expand discipline when filter changes
     useEffect(() => {
@@ -84,15 +67,6 @@ const Clases = () => {
             setTurnoExpanded(new Set());
         }
     }, [filtroDisciplina, filtroTurno, disciplinas]);
-
-    useEffect(() => {
-        fetchDisciplinas();
-        fetchClases('', '');
-    }, [tenant_id]);
-
-    useEffect(() => {
-        fetchClases(filtroDisciplina, filtroTurno);
-    }, [filtroDisciplina, filtroTurno]);
 
     const toggleDisc = (id) => {
         setDiscExpanded(prev => {
@@ -147,12 +121,13 @@ const Clases = () => {
 
     const handleEliminarClase = async (claseId) => {
         if (!window.confirm('¿Estás seguro de eliminar esta clase?')) return;
-        try { await api.delete(`/api/v1/clases/${claseId}`); fetchClases(); }
+        try { await eliminarClase.mutateAsync(claseId); }
         catch (error) { console.error('Error eliminando clase:', error); alert('Error al eliminar la clase.'); }
     };
 
     const handleModalClose = () => { setShowModal(false); setClaseEditar(null); };
-    const handleModalSuccess = () => { setShowModal(false); setClaseEditar(null); fetchClases(); };
+    // El modal guarda con `useGuardarClase`, que invalida `['clases']`: nada de refetch a mano.
+    const handleModalSuccess = () => { setShowModal(false); setClaseEditar(null); };
 
     // Group: disciplina → turno → clases
     const discMap = {};

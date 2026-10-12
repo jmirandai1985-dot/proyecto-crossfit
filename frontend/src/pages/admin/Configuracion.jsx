@@ -1,7 +1,7 @@
-import React, { useCallback, useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
+import { useConfiguracionBancaria, useGuardarConfiguracion } from '../../hooks/queries';
 import { fmtFechaChile, horaChileStr } from '../../utils/fecha';
 
 /**
@@ -37,52 +37,55 @@ const Configuracion = () => {
         // M4: tope (%) del descuento que un beneficio de Fidelización puede ofrecer.
         beneficio_descuento_max_pct: 50,
     });
-    const [loading, setLoading] = useState(true);
+    // Bloque 3 (parte A): `GET /configuracion` sale de la caché compartida `['configuracion']`
+    // (el mismo dato lo leen el Bazar del alumno y Solicitar plan para saber si el box ya
+    // tiene datos de pago). `isPending` es el spinner de carga e `isError` el aviso I5 que
+    // bloquea Guardar: escribir datos bancarios encima de lo que hay sin poder leerlo es
+    // peor que no guardar.
+    const {
+        data: configGuardada,
+        isPending: loading,
+        isError: errorDeCarga,
+        refetch: refetchConfig,
+    } = useConfiguracionBancaria(tenant_id);
+    const guardarConfig = useGuardarConfiguracion();
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState({ type: '', text: '' });
     // I4/I5: el resultado de la carga se GUARDA en el estado (antes sólo iba a
     // `console.error`). Esta pantalla ESCRIBE datos bancarios, así que el admin tiene que
     // ver que no se pudo leer lo guardado —y no poder guardar encima a ciegas.
-    const [configurado, setConfigurado] = useState(false);
-    const [errorCarga, setErrorCarga] = useState('');
-    const [updatedAt, setUpdatedAt] = useState(null);
-
-    // `useCallback` porque la usan el efecto Y el botón "Reintentar" del aviso de error:
-    // así la dependencia del efecto es la función y no hay warning de exhaustive-deps.
-    const fetchConfig = useCallback(async () => {
-        setErrorCarga('');
-        try {
-            const res = await api.get(`/api/v1/configuracion?tenant_id=${tenant_id}`);
-            const data = res.data;
-            setConfigurado(!!data.configurado);
-            setUpdatedAt(data.updated_at || null);
-            if (data.configurado) {
-                setForm({
-                    banco: data.banco || '',
-                    numero_cuenta: data.numero_cuenta || '',
-                    tipo_cuenta: data.tipo_cuenta || '',
-                    rut: data.rut || '',
-                    email_comprobantes: data.email_comprobantes || '',
-                    whatsapp: data.whatsapp || '',
-                    beneficio_descuento_max_pct: data.beneficio_descuento_max_pct ?? 50,
-                });
-            } else {
-                // Sin fila guardada el backend ya devuelve el default efectivo (50).
-                setForm((f) => ({
-                    ...f,
-                    beneficio_descuento_max_pct: data.beneficio_descuento_max_pct ?? 50,
-                }));
-            }
-        } catch (err) {
-            console.error('Error cargando config:', err);
-            setErrorCarga('No se pudieron cargar los datos bancarios guardados. Si guardas ahora, puedes sobrescribir sin ver lo que hay.');
-        }
-    }, [tenant_id]);
-
+    // `configurado` y `updatedAt` ahora DERIVAN del query (antes eran estado espejo que
+    // había que mantener a mano en cada carga y cada guardado).
+    const configurado = !!configGuardada?.configurado;
+    const updatedAt = configGuardada?.updated_at || null;
+    const errorCarga = errorDeCarga
+        ? 'No se pudieron cargar los datos bancarios guardados. Si guardas ahora, puedes sobrescribir sin ver lo que hay.'
+        : '';
+    // El formulario se rellena UNA sola vez, cuando llega la primera respuesta: un refetch en
+    // segundo plano (volver a la pestaña, invalidar al guardar) no debe pisar lo que el admin
+    // está escribiendo.
+    const formRellenado = useRef(false);
     useEffect(() => {
-        setLoading(true);
-        fetchConfig().finally(() => setLoading(false));
-    }, [fetchConfig]);
+        if (!configGuardada || formRellenado.current) return;
+        formRellenado.current = true;
+        if (configGuardada.configurado) {
+            setForm({
+                banco: configGuardada.banco || '',
+                numero_cuenta: configGuardada.numero_cuenta || '',
+                tipo_cuenta: configGuardada.tipo_cuenta || '',
+                rut: configGuardada.rut || '',
+                email_comprobantes: configGuardada.email_comprobantes || '',
+                whatsapp: configGuardada.whatsapp || '',
+                beneficio_descuento_max_pct: configGuardada.beneficio_descuento_max_pct ?? 50,
+            });
+        } else {
+            // Sin fila guardada el backend ya devuelve el default efectivo (50).
+            setForm((f) => ({
+                ...f,
+                beneficio_descuento_max_pct: configGuardada.beneficio_descuento_max_pct ?? 50,
+            }));
+        }
+    }, [configGuardada]);
 
     const handleChange = (e) => {
         setForm({ ...form, [e.target.name]: e.target.value });
@@ -108,9 +111,10 @@ const Configuracion = () => {
             } else {
                 delete payload.beneficio_descuento_max_pct;
             }
-            const res = await api.put(`/api/v1/configuracion`, payload);
-            setConfigurado(true);
-            setUpdatedAt(res.data?.updated_at || null);
+            // El hook invalida `['configuracion']`: el Bazar del alumno y Solicitar plan dejan
+            // de ver "el box aún no ha configurado sus datos de pago" apenas se guarda. Y
+            // `configurado`/`updatedAt` salen del query, así que se refrescan solos.
+            await guardarConfig.mutateAsync(payload);
             setMessage({ type: 'success', text: 'Configuración guardada exitosamente.' });
         } catch (err) {
             setMessage({ type: 'error', text: detalleDeError(err) });
@@ -156,7 +160,7 @@ const Configuracion = () => {
                     <div role="alert" data-testid="config-error-carga"
                         className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-700 bg-red-900/30 px-4 py-3 text-sm text-red-200">
                         <span>⚠️ {errorCarga}</span>
-                        <button type="button" onClick={fetchConfig}
+                        <button type="button" onClick={() => refetchConfig()}
                             data-testid="config-reintentar"
                             className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-700 transition-colors">
                             Reintentar

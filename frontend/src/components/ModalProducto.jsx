@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import api from '../services/api';
+import { useGuardarProducto } from '../hooks/queries';
 import { urlArchivo } from '../utils/imagen';
 
 const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }) => {
@@ -20,6 +20,9 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
     const [errors, setErrors] = useState({});
 
     const esEdicion = !!productoEditar;
+    // Bloque 3 (parte A): guardar invalida `['productos']`, el prefijo que comparten el
+    // inventario del admin y el Bazar del alumno.
+    const guardarProducto = useGuardarProducto();
 
     useEffect(() => {
         if (isOpen) {
@@ -105,14 +108,12 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                 if (quitarImagen) {
                     payload.imagen_url = null;
                 }
-                await api.put(`/api/v1/productos/${productoEditar.id}`, payload);
-                if (imagenArchivo) {
-                    const dataImagen = new FormData();
-                    dataImagen.append('file', imagenArchivo);
-                    await api.post(`/api/v1/productos/${productoEditar.id}/imagen`, dataImagen, {
-                        headers: { 'Content-Type': 'multipart/form-data' },
-                    });
-                }
+                // El hook hace el PUT y, si viene una foto nueva, la sube aparte.
+                await guardarProducto.mutateAsync({
+                    id: productoEditar.id,
+                    payload,
+                    imagen: imagenArchivo,
+                });
             } else {
                 // POST para crear con FormData (multipart/form-data para soportar imagen)
                 const data = new FormData();
@@ -127,9 +128,7 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                 if (imagenArchivo) {
                     data.append('file', imagenArchivo);
                 }
-                await api.post('/api/v1/productos', data, {
-                    headers: { 'Content-Type': 'multipart/form-data' },
-                });
+                await guardarProducto.mutateAsync({ payload: data });
             }
 
             setFormData({

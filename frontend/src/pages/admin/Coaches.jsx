@@ -1,22 +1,65 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
+import {
+    useCoachDisciplinas, useDesactivarUsuario, useDisciplinas, useGuardarUsuario,
+    useReemplazarCoachDisciplinas, useUsuariosPorRol, SIN_DATOS,
+} from '../../hooks/queries';
 
 const Coaches = () => {
     const { tenant_id } = useAuth();
-    const [coaches, setCoaches] = useState([]);
-    const [loading, setLoading] = useState(true);
+    // Bloque 3 (parte A): los tres GET de esta pantalla salen de la caché compartida.
+    // El padrón de coaches es el MISMO `GET /usuarios/?rol=coach` que pedía el modal de
+    // clase (antes eran dos llamadas idénticas), las disciplinas las comparten Clases,
+    // Horarios y ese mismo modal, y las relaciones coach<->disciplina también las lee el
+    // Dashboard del coach. Guardar/desactivar invalida los prefijos correspondientes.
+    const {
+        data: coachesData, isPending: cargandoCoaches, isError: errorCargaCoaches, refetch: refetchCoaches,
+    } = useUsuariosPorRol('coach');
+    const coaches = coachesData || SIN_DATOS;
+    const { data: discData, isError: errorCargaDisciplinas, refetch: refetchDisciplinas } = useDisciplinas();
+    // Sólo las activas son asignables (mismo filtro que hacía el fetch a mano).
+    const disciplinas = useMemo(
+        () => (discData ? discData.filter((d) => d.activo !== false) : SIN_DATOS),
+        [discData],
+    );
+    const {
+        data: asignacionesData, isPending: cargandoAsignaciones, isError: errorCargaAsignaciones,
+        refetch: refetchAsignaciones,
+    } = useCoachDisciplinas();
+    // Mapa coach_id -> [disciplina_id] con las asignaciones ACTIVAS (el backend también
+    // devuelve filas dadas de baja).
+    const coachDisciplinasMap = useMemo(() => {
+        const map = {};
+        (asignacionesData || []).forEach((cd) => {
+            if (cd.activo) {
+                if (!map[cd.coach_id]) map[cd.coach_id] = [];
+                map[cd.coach_id].push(cd.disciplina_id);
+            }
+        });
+        return map;
+    }, [asignacionesData]);
+    // Si las asignaciones no cargaran, guardar un coach le borraría sus disciplinas: la
+    // pantalla bloquea el guardado (mismo contrato que antes, ahora derivado del query).
+    const asignacionesListas = !cargandoAsignaciones && !errorCargaAsignaciones;
+    const errorCoaches = errorCargaCoaches ? 'No se pudieron cargar los coaches. Reintenta.' : '';
+    const errorDisciplinas = errorCargaDisciplinas ? 'No se pudieron cargar las disciplinas.' : '';
+    // El aviso de "asignaciones bloqueadas" lo dispara la pantalla (openModal/handleSubmit);
+    // si el query falló, el mensaje del query tiene prioridad.
+    const [avisoAsignaciones, setAvisoAsignaciones] = useState('');
+    // El aviso se apaga solo cuando las asignaciones ya cargaron: si el admin reintenta y la
+    // carga sale bien, el aviso deja de mostrar una traba que ya no existe.
+    const errorAsignaciones = errorCargaAsignaciones
+        ? 'No se pudieron cargar las asignaciones del coach.'
+        : (asignacionesListas ? '' : avisoAsignaciones);
+    const loading = cargandoCoaches;
+    const guardarUsuario = useGuardarUsuario();
+    const reemplazarDisciplinas = useReemplazarCoachDisciplinas();
+    const desactivarUsuario = useDesactivarUsuario();
     const [showModal, setShowModal] = useState(false);
     const [editingCoach, setEditingCoach] = useState(null);
-    const [disciplinas, setDisciplinas] = useState([]);
-    const [errorCoaches, setErrorCoaches] = useState('');
-    const [errorDisciplinas, setErrorDisciplinas] = useState('');
-    const [errorAsignaciones, setErrorAsignaciones] = useState('');
-    const [asignacionesListas, setAsignacionesListas] = useState(false);
     const [msgOperacion, setMsgOperacion] = useState(null);
     const [confirmarEliminar, setConfirmarEliminar] = useState(null);
-    const [coachDisciplinasMap, setCoachDisciplinasMap] = useState({});
     const [formData, setFormData] = useState({
         nombre: '',
         correo: '',
@@ -25,50 +68,8 @@ const Coaches = () => {
         estado: 'activo',
     });
 
-    const fetchCoaches = async () => {
-        try {
-            const response = await api.get('/api/v1/usuarios/', { params: { rol: 'coach' } });
-            setCoaches(response.data || []);
-        } catch (error) {
-            console.error('Error fetching coaches:', error); setErrorCoaches('No se pudieron cargar los coaches. Reintenta.');
-            setCoaches([]);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const fetchDisciplinas = async () => {
-        try {
-            const r = await api.get('/api/v1/disciplinas/');
-            setDisciplinas(r.data?.filter(d => d.activo !== false) || []);
-        } catch (e) { console.error(e); setErrorDisciplinas('No se pudieron cargar las disciplinas.'); }
-    };
-
-    const fetchCoachDisciplinas = async () => {
-        try {
-            const r = await api.get('/api/v1/coach-disciplinas', { params: { limit: 500 } });
-            const data = r.data || [];
-            const map = {};
-            data.forEach(cd => {
-                if (cd.activo) {
-                    if (!map[cd.coach_id]) map[cd.coach_id] = [];
-                    map[cd.coach_id].push(cd.disciplina_id);
-                }
-            });
-            setCoachDisciplinasMap(map);
-        setAsignacionesListas(true);
-        setErrorAsignaciones('');
-        } catch (e) { console.error(e); setErrorAsignaciones('No se pudieron cargar las asignaciones del coach.'); setAsignacionesListas(false); }
-    };
-
-    useEffect(() => {
-        fetchCoaches();
-        fetchDisciplinas();
-        fetchCoachDisciplinas();
-    }, [tenant_id]);
-
     const openModal = (coach = null) => {
-        if (coach && !asignacionesListas) { setErrorAsignaciones('No se pudieron cargar las asignaciones del coach: la edicion esta bloqueada hasta que carguen. Reintenta.'); return; }
+        if (coach && !asignacionesListas) { setAvisoAsignaciones('No se pudieron cargar las asignaciones del coach: la edicion esta bloqueada hasta que carguen. Reintenta.'); return; }
         if (coach) {
             setEditingCoach(coach);
             setFormData({
@@ -93,31 +94,36 @@ const Coaches = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!asignacionesListas) { setErrorAsignaciones('No se pudieron cargar las asignaciones actuales del coach. Para no borrar sus disciplinas, no se guarda. Reintenta la carga.'); return; }
+        if (!asignacionesListas) { setAvisoAsignaciones('No se pudieron cargar las asignaciones actuales del coach. Para no borrar sus disciplinas, no se guarda. Reintenta la carga.'); return; }
         setMsgOperacion(null);
         try {
             let coachId;
             if (editingCoach) {
-                await api.put(`/api/v1/usuarios/${editingCoach.id}`, {
-                    nombre: formData.nombre,
-                    correo: formData.correo,
-                    estado: formData.estado === 'activo' ? 'activo' : 'baja',
+                await guardarUsuario.mutateAsync({
+                    id: editingCoach.id,
+                    payload: {
+                        nombre: formData.nombre,
+                        correo: formData.correo,
+                        estado: formData.estado === 'activo' ? 'activo' : 'baja',
+                    },
                 });
                 coachId = editingCoach.id;
             } else {
-                const res = await api.post('/api/v1/usuarios/', {
-                    nombre: formData.nombre,
-                    correo: formData.correo,
-                    password: formData.password,
-                    rol: 'coach',
-                    rut: 'TEMP-' + Date.now().toString().slice(-7), // PLACEHOLDER temporal: RUT unico por coach (backend exige rut 7-12 chars, no lo pide el form todavia)
+                const res = await guardarUsuario.mutateAsync({
+                    payload: {
+                        nombre: formData.nombre,
+                        correo: formData.correo,
+                        password: formData.password,
+                        rol: 'coach',
+                        rut: 'TEMP-' + Date.now().toString().slice(-7), // PLACEHOLDER temporal: RUT unico por coach (backend exige rut 7-12 chars, no lo pide el form todavia)
+                    },
                 });
-                coachId = res.data.id;
+                coachId = res.id;
             }
 
-            // Asignar disciplinas en coach_disciplinas
+            // Asignar disciplinas en coach_disciplinas: reemplaza el set completo.
             if (coachId) {
-                await api.put('/api/v1/coach-disciplinas/reemplazar', {
+                await reemplazarDisciplinas.mutateAsync({
                     tenant_id: tenant_id,
                     coach_id: coachId,
                     disciplina_ids: formData.disciplina_ids,
@@ -125,8 +131,6 @@ const Coaches = () => {
             }
 
             setMsgOperacion({ tipo: 'exito', texto: 'Coach guardado' });
-            fetchCoaches();
-            fetchCoachDisciplinas();
         } catch (error) {
             setMsgOperacion({ tipo: 'error', texto: error.response?.data?.detail || error.message });
         }
@@ -136,8 +140,7 @@ const Coaches = () => {
         // NOTA: sin uso desde que la confirmacion vive en el modal propio (desactivarConfirmado). Se deja por contexto historico.
         if (!window.confirm(`¿Estás seguro de eliminar a ${coach.nombre}?`)) return;
         try {
-            await api.delete(`/api/v1/usuarios/${coach.id}`);
-            setCoaches(coaches.filter((c) => c.id !== coach.id));
+            await desactivarUsuario.mutateAsync(coach.id);
         } catch (error) {
             setMsgOperacion({ tipo: 'error', texto: error.response?.data?.detail || 'No se pudo desactivar' });
         }
@@ -175,8 +178,9 @@ const Coaches = () => {
         const coach = confirmarEliminar;
         setConfirmarEliminar(null);
         try {
-            await api.delete(`/api/v1/usuarios/${coach.id}`);
-            setCoaches(coaches.filter((c) => c.id !== coach.id));
+            // La baja la aplica el backend (estado='baja') y la mutación invalida
+            // `['usuarios']`: la tabla y el modal de clase se refrescan solos.
+            await desactivarUsuario.mutateAsync(coach.id);
             setMsgOperacion({ tipo: 'exito', texto: 'Coach desactivado' });
         } catch (error) {
             setMsgOperacion({ tipo: 'error', texto: error.response?.data?.detail || 'No se pudo desactivar el coach' });
@@ -194,19 +198,19 @@ const Coaches = () => {
                 {errorCoaches && (
                     <div className="border-l-4 rounded-lg p-4 text-sm bg-red-500/10 border-red-500 text-red-300 flex items-center justify-between gap-3">
                         <span>{errorCoaches}</span>
-                        <button onClick={fetchCoaches} className="px-3 py-1.5 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">Reintentar</button>
+                        <button onClick={() => refetchCoaches()} className="px-3 py-1.5 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">Reintentar</button>
                     </div>
                 )}
                 {errorAsignaciones && (
                     <div className="border-l-4 rounded-lg p-4 text-sm bg-orange-500/10 border-orange-500 text-orange-300 flex items-center justify-between gap-3">
                         <span>{errorAsignaciones} Mientras no carguen, la edicion de coaches esta bloqueada.</span>
-                        <button onClick={fetchCoachDisciplinas} className="px-3 py-1.5 bg-orange-500 text-white rounded text-xs font-medium hover:bg-orange-600">Reintentar</button>
+                        <button onClick={() => refetchAsignaciones()} className="px-3 py-1.5 bg-orange-500 text-white rounded text-xs font-medium hover:bg-orange-600">Reintentar</button>
                     </div>
                 )}
                 {errorDisciplinas && (
                     <div className="border-l-4 rounded-lg p-4 text-sm bg-amber-500/10 border-amber-500 text-amber-300 flex items-center justify-between gap-3">
                         <span>{errorDisciplinas}</span>
-                        <button onClick={fetchDisciplinas} className="px-3 py-1.5 bg-amber-600 text-white rounded text-xs font-medium hover:bg-amber-700">Reintentar</button>
+                        <button onClick={() => refetchDisciplinas()} className="px-3 py-1.5 bg-amber-600 text-white rounded text-xs font-medium hover:bg-amber-700">Reintentar</button>
                     </div>
                 )}
                 {msgOperacion && (

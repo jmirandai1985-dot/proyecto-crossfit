@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
+import { usePlanes, useGuardarPlan, useEliminarPlan, SIN_DATOS } from '../../hooks/queries';
 
 const TARJETAS = [
     { key: 'masculino', label: '💪 Masculino', color: 'border-zinc-800 bg-zinc-900', genero: 'masculino', soloEstudiante: false },
@@ -12,21 +12,16 @@ const TARJETAS = [
 
 const Planes = () => {
     const { tenant_id } = useAuth();
-    const [planes, setPlanes] = useState([]);
-    const [loading, setLoading] = useState(true);
+    // Bloque 3 (parte A): la lista sale de la caché compartida y las mutaciones invalidan
+    // `['planes']`, el prefijo que también cubre `planesActivos` (lo que ve el alumno al
+    // solicitar plan): guardar acá deja al día las dos pantallas.
+    const { data, isPending } = usePlanes();
+    const planes = data || SIN_DATOS;
+    const guardar = useGuardarPlan();
+    const eliminar = useEliminarPlan();
     const [formData, setFormData] = useState({ nombre: '', precio_clp: 0, creditos: 0, duracion_dias: 30, genero: 'masculino', activo: true, es_estudiante: false, requiere_certificado_estudiante: false });
     const [editingId, setEditingId] = useState(null);
     const [showForm, setShowForm] = useState(false);
-
-    const fetchPlanes = async () => {
-        try {
-            const r = await api.get('/api/v1/planes');
-            setPlanes(r.data || []);
-        } catch (e) { console.error(e); setPlanes([]); }
-        finally { setLoading(false); }
-    };
-
-    useEffect(() => { fetchPlanes(); }, [tenant_id]);
 
     const openNew = (tarjeta) => {
         setEditingId(null);
@@ -60,13 +55,15 @@ const Planes = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            if (editingId) {
-                await api.put(`/api/v1/planes/${editingId}`, { ...formData, requiere_certificado_estudiante: formData.es_estudiante });
-            } else {
-                await api.post('/api/v1/planes', { ...formData, tenant_id, requiere_certificado_estudiante: formData.es_estudiante });
-            }
+            // `requiere_certificado_estudiante` se DERIVA de `es_estudiante` (fuente única
+            // del filtrado de planes estudiantiles); el tenant sólo viaja al crear.
+            const payload = {
+                ...formData,
+                requiere_certificado_estudiante: formData.es_estudiante,
+                ...(editingId ? {} : { tenant_id }),
+            };
+            await guardar.mutateAsync({ id: editingId, payload });
             setShowForm(false);
-            fetchPlanes();
         } catch (error) {
             alert('Error: ' + (error.response?.data?.detail || error.message));
         }
@@ -75,8 +72,7 @@ const Planes = () => {
     const handleDelete = async (id) => {
         if (!window.confirm('¿Eliminar este plan?')) return;
         try {
-            await api.delete(`/api/v1/planes/${id}`);
-            fetchPlanes();
+            await eliminar.mutateAsync(id);
         } catch (e) { alert('Error: ' + (e.response?.data?.detail || e.message)); }
     };
 
@@ -91,7 +87,7 @@ const Planes = () => {
         && p.activo !== false
     );
 
-    if (loading) {
+    if (isPending) {
         return (<Layout><div className="flex items-center justify-center h-96"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900"></div></div></Layout>);
     }
 

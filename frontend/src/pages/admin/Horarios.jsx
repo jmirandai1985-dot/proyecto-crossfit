@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useMemo } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
+import { useDisciplinas, useGridSemanalHorarios, useGuardarHorarioBase, useEliminarHorarioBase, SIN_DATOS } from '../../hooks/queries';
 
 const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
 const ICONS = { 'CrossFit': '🏋️', 'Open Box': '🥊', 'Musculación': '💪', 'Levantamiento Olímpico': '🏆' };
@@ -33,27 +33,20 @@ const GridCell = React.memo(({ horaKey, dia, cell, onCellClick }) => {
 
 export default function Horarios() {
     const { tenant_id } = useAuth();
-    const [gridData, setGridData] = useState([]);
-    const [disciplinas, setDisciplinas] = useState([]);
+    // Bloque 3 (parte A): el grid y el catálogo salen de la caché compartida
+    // (`useDisciplinas` la usan también Clases, Disciplinas, Coaches y el modal de clase).
+    // Crear/editar/eliminar una franja invalida `['horarios']`: el grid se rearma solo.
+    const { data: grid, isPending: cargandoGrid } = useGridSemanalHorarios();
+    const { data: disc, isPending: cargandoDisciplinas } = useDisciplinas();
+    const gridData = grid || SIN_DATOS;
+    const disciplinas = disc || SIN_DATOS;
+    const guardar = useGuardarHorarioBase();
+    const eliminar = useEliminarHorarioBase();
     const [expandedCell, setExpandedCell] = useState(null);
-    const [loading, setLoading] = useState(true);
+    const loading = cargandoGrid || cargandoDisciplinas;
     const [showForm, setShowForm] = useState(false);
     const [formData, setFormData] = useState({ disciplina_id: '', dia_semana: 0, hora_inicio: '10:00', hora_fin: '11:00', cupo_maximo: 20 });
     const [editingId, setEditingId] = useState(null);
-
-    const fetchGrid = useCallback(async () => {
-        try {
-            const [rG, rD] = await Promise.all([
-                api.get('/api/v1/horarios/grid-semanal'),
-                api.get('/api/v1/disciplinas/')
-            ]);
-            setGridData(rG.data || []);
-            setDisciplinas(rD.data || []);
-        } catch (e) { console.error(e); setGridData([]); }
-        finally { setLoading(false); }
-    }, [tenant_id]);
-
-    useEffect(() => { fetchGrid(); }, [fetchGrid]);
 
     // Agrupar por hora_inicio para las filas del grid
     const { filas, celdasMap } = useMemo(() => {
@@ -89,20 +82,14 @@ export default function Horarios() {
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            const payload = { ...formData, tenant_id };
-            if (editingId) {
-                await api.put(`/api/v1/horarios/${editingId}`, payload);
-            } else {
-                await api.post('/api/v1/horarios', payload);
-            }
+            await guardar.mutateAsync({ id: editingId, payload: { ...formData, tenant_id } });
             setShowForm(false);
-            fetchGrid();
         } catch (error) { alert('Error: ' + (error.response?.data?.detail || error.message)); }
     };
 
     const handleDelete = async (id) => {
         if (!window.confirm('¿Eliminar este horario?')) return;
-        try { await api.delete(`/api/v1/horarios/${id}`); fetchGrid(); }
+        try { await eliminar.mutateAsync(id); }
         catch (e) { alert('Error: ' + (e.response?.data?.detail || e.message)); }
     };
 

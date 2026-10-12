@@ -85,6 +85,24 @@ export const claves = {
     alumnosCoachEnRiesgo: (coachId) => ['fidelizacion', 'coach', coachId, 'en-riesgo'],
     progresoAlumnosCoach: (ids) => ['historial-rm', 'progreso-lote', ids],
     reservasPorClase: (claseId) => ['reservas', 'por-clase', claseId],
+    // ── Bloque 3 (parte A): catálogos y CRUD del panel admin ─────────────────
+    // `usuariosRol` la piden Coaches y el modal de clase (los DOS llamaban a
+    // `GET /usuarios/?rol=coach`): misma clave = una sola entrada y una sola llamada.
+    // El rol va en la clave porque cambia la lista; el tenant lo pone el token.
+    usuariosRol: (rol) => ['usuarios', 'rol', rol],
+    // Grid semanal de horarios base: cuelga de `['horarios']` porque el CRUD de esa
+    // pantalla es el único que lo mueve.
+    gridSemanalHorarios: ['horarios', 'grid-semanal'],
+    // Listado de clases del admin (`GET /clases/`). Cuelga de `['clases']`, el prefijo
+    // que ya invalidan ampliar cupo, tomar/soltar y las acciones de clase.
+    clasesAdmin: (disciplinaId) => ['clases', 'admin', disciplinaId || 'todas'],
+    // TODOS los planes (activos e inactivos): los administra el admin. Comparte la
+    // familia `['planes']` con `planesActivos`, así que invalidar el prefijo refresca
+    // la vista del alumno y la del admin a la vez.
+    planesTodos: ['planes', 'todos'],
+    // Datos del box (`GET /tenants/me`): los usa "Mi QR" (public_id + nombre). Cuelga
+    // de `['tenants','me']`, igual que el `public_id` que ya cachea `usePublicIdBox`.
+    tenantMe: ['tenants', 'me'],
 };
 
 // ── Colas de revisión del admin (las miran el Dashboard Y Pendientes de revisión) ──
@@ -962,6 +980,233 @@ export function useContactarAlumnoCoach() {
         mutationFn: ({ coachId, alumnoId }) => api.post(
             `/api/v1/fidelizacion/coach/${coachId}/contactar/${alumnoId}`,
         ).then((r) => r.data),
+    });
+}
+
+
+// ── Bloque 3 (parte A): catálogos y CRUD del panel admin ─────────────────────
+// Acá viven las consultas y las mutaciones del CRUD del admin (disciplinas, horarios
+// base, planes, usuarios/coaches, clases, bazar y la configuración del box). Poner la
+// mutación junto a su clave evita el bug de siempre: guardar en una pantalla y que la
+// otra siga mostrando lo viejo (que es de dónde salían los `fetchX()` a mano).
+
+// Padrón por rol (`GET /usuarios/?rol=`): el rol va en la clave porque cambia la lista;
+// el tenant lo deriva el backend del token (el query param se ignora).
+export function useUsuariosPorRol(rol) {
+    return useQuery({
+        queryKey: claves.usuariosRol(rol),
+        queryFn: async () => (await api.get('/api/v1/usuarios/', {
+            params: { rol },
+        })).data || [],
+        staleTime: 60_000,
+        enabled: Boolean(rol),
+    });
+}
+
+// Grid semanal de horarios base (lunes a domingo) del box.
+export function useGridSemanalHorarios() {
+    return useQuery({
+        queryKey: claves.gridSemanalHorarios,
+        queryFn: async () => (await api.get('/api/v1/horarios/grid-semanal')).data || [],
+        staleTime: 300_000,
+    });
+}
+
+// Clases del admin (`GET /clases/`, hasta 500). El filtro por disciplina lo aplica el
+// backend (va en la clave); el recorte por turno lo hace la pantalla en memoria.
+export function useClasesAdmin(disciplinaId = '') {
+    return useQuery({
+        queryKey: claves.clasesAdmin(disciplinaId),
+        queryFn: async () => (await api.get('/api/v1/clases/', {
+            params: disciplinaId ? { limit: 500, disciplina_id: disciplinaId } : { limit: 500 },
+        })).data || [],
+        staleTime: 60_000,
+    });
+}
+
+// TODOS los planes (activos e inactivos) para administrarlos.
+export function usePlanes() {
+    return useQuery({
+        queryKey: claves.planesTodos,
+        // Igual que `usePlanesActivos`: sirve envuelto (`{planes: [...]}`) o pelado.
+        queryFn: async () => {
+            const data = (await api.get('/api/v1/planes')).data;
+            const lista = data?.planes || data || [];
+            return Array.isArray(lista) ? lista : [];
+        },
+        staleTime: 300_000,
+    });
+}
+
+// Datos del box (`GET /tenants/me`): public_id, nombre y subdominio.
+export function useTenantMe() {
+    return useQuery({
+        queryKey: claves.tenantMe,
+        queryFn: async () => (await api.get('/api/v1/tenants/me')).data || null,
+        staleTime: 300_000,
+    });
+}
+
+// ── Bloque 3 (parte A): mutaciones del CRUD del admin ────────────────────────
+// Contrato común: `{ id, payload }` -> con `id` es PUT (editar) y sin `id` es POST
+// (crear). El payload lo arma la pantalla, que es la que conoce su formulario.
+
+// Disciplinas: las miran Clases, Horarios, Coaches y el modal de clase -> por prefijo.
+export function useGuardarDisciplina() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ id, payload }) => (id
+            ? api.put(`/api/v1/disciplinas/${id}`, payload)
+            : api.post('/api/v1/disciplinas/', payload)).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: claves.disciplinas }),
+    });
+}
+
+export function useEliminarDisciplina() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => api.delete(`/api/v1/disciplinas/${id}`).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: claves.disciplinas }),
+    });
+}
+
+// Horarios base: crean/borran el grid semanal del box.
+export function useGuardarHorarioBase() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ id, payload }) => (id
+            ? api.put(`/api/v1/horarios/${id}`, payload)
+            : api.post('/api/v1/horarios', payload)).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['horarios'] }),
+    });
+}
+
+export function useEliminarHorarioBase() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => api.delete(`/api/v1/horarios/${id}`).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['horarios'] }),
+    });
+}
+
+// Clases: crear/editar/eliminar desde el modal. `['clases']` es el prefijo que comparten
+// el listado del admin, el del coach y las clases por rango: todo lo montado se refresca.
+export function useGuardarClase() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ id, payload }) => (id
+            ? api.put(`/api/v1/clases/${id}`, payload)
+            : api.post('/api/v1/clases/', payload)).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['clases'] }),
+    });
+}
+
+export function useEliminarClase() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => api.delete(`/api/v1/clases/${id}`).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['clases'] }),
+    });
+}
+
+// Planes: lo que guarda el admin es lo que ve el alumno al solicitar plan.
+export function useGuardarPlan() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ id, payload }) => (id
+            ? api.put(`/api/v1/planes/${id}`, payload)
+            : api.post('/api/v1/planes', payload)).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['planes'] }),
+    });
+}
+
+export function useEliminarPlan() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => api.delete(`/api/v1/planes/${id}`).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['planes'] }),
+    });
+}
+
+// Usuarios del box (coaches y alumnos): un hook para crear y editar. Invalida
+// `['usuarios']` entero, que es el prefijo del padrón que miran Coaches y el modal de clase.
+export function useGuardarUsuario() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ id, payload }) => (id
+            ? api.put(`/api/v1/usuarios/${id}`, payload)
+            : api.post('/api/v1/usuarios/', payload)).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['usuarios'] }),
+    });
+}
+
+// Baja de un usuario (soft delete en el backend: queda con `estado = baja`).
+export function useDesactivarUsuario() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => api.delete(`/api/v1/usuarios/${id}`).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['usuarios'] }),
+    });
+}
+
+// Disciplinas asignadas a un coach: reemplaza el set completo (no es un alta suelta), por
+// eso es un único PUT con la lista entera.
+export function useReemplazarCoachDisciplinas() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) => api.put(
+            '/api/v1/coach-disciplinas/reemplazar', payload,
+        ).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: claves.coachDisciplinas }),
+    });
+}
+
+// Configuración bancaria del box: la ESCRIBE esta pantalla y la LEEN el Bazar del alumno y
+// Solicitar plan (bloquean la transferencia si el box no tiene datos de pago cargados), así
+// que se invalida por prefijo y no por la clave exacta del tenant.
+export function useGuardarConfiguracion() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) => api.put('/api/v1/configuracion', payload).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['configuracion'] }),
+    });
+}
+
+// Productos del bazar. OJO: crear y editar NO son simétricos:
+//  - crear  -> POST /productos con FormData (multipart: la foto viaja en `file`).
+//  - editar -> PUT /productos/{id} en JSON y, si hay foto nueva, un POST aparte a
+//              /productos/{id}/imagen (un PUT JSON no puede llevar archivo). El borrado de
+//              la foto es `imagen_url: null` dentro del payload, no una llamada aparte.
+export function useGuardarProducto() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: async ({ id, payload, imagen }) => {
+            if (id) {
+                const res = await api.put(`/api/v1/productos/${id}`, payload);
+                if (imagen) {
+                    const dataImagen = new FormData();
+                    dataImagen.append('file', imagen);
+                    await api.post(`/api/v1/productos/${id}/imagen`, dataImagen, {
+                        headers: { 'Content-Type': 'multipart/form-data' },
+                    });
+                }
+                return res.data;
+            }
+            return (await api.post('/api/v1/productos', payload, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            })).data;
+        },
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['productos'] }),
+    });
+}
+
+// Baja de producto: el DELETE lo deja en `activo=false` (el registro no se borra). Lo ven el
+// inventario del admin y el Bazar del alumno, que comparten el prefijo `['productos']`.
+export function useEliminarProducto() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => api.delete(`/api/v1/productos/${id}`).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['productos'] }),
     });
 }
 

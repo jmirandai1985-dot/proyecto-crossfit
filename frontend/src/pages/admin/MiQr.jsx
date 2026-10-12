@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import Layout from '../../components/Layout';
-import api from '../../services/api';
+import { useTenantMe } from '../../hooks/queries';
 
 /**
  * "Mi QR" del panel admin: muestra el QR fijo del box (check-in de alumnos)
@@ -11,16 +11,13 @@ import api from '../../services/api';
  * la PC desde un celular en la misma red).
  */
 const MiQr = () => {
-    const [data, setData] = useState(null);
-    const [error, setError] = useState('');
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        api.get('/api/v1/tenants/me')
-            .then((r) => setData(r.data))
-            .catch((e) => setError(e.response?.data?.detail || 'No se pudo obtener el public_id del box'))
-            .finally(() => setLoading(false));
-    }, []);
+    // Bloque 3 (parte A): `GET /tenants/me` (nombre, subdominio y public_id del box) sale
+    // de la caché compartida. Es el ÚNICO consumidor de este endpoint en el front, así que
+    // esta pantalla no duplica ninguna llamada.
+    const { data, isPending: loading, error: errorQuery } = useTenantMe();
+    const error = errorQuery
+        ? (errorQuery.response?.data?.detail || 'No se pudo obtener el public_id del box')
+        : '';
 
     const base = (typeof window !== 'undefined' && window.location.origin) || '';
     const qrHref = data

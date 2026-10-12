@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
 import ModalProducto from '../../components/ModalProducto';
+import { useProductos, useEliminarProducto, useGuardarProducto, SIN_DATOS } from '../../hooks/queries';
 import { urlArchivo } from '../../utils/imagen';
 
 const FILTROS = [
@@ -28,9 +28,15 @@ const Bazar = ({ sinLayout = false }) => {
     // dos shells; en la ruta /admin/bazar (escritorio incluido) sigue igual que siempre.
     const Marco = sinLayout ? React.Fragment : Layout;
     const { tenant_id } = useAuth();
-    const [productos, setProductos] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
+    // Bloque 3 (parte A): el inventario sale de la caché compartida `['productos']`, el
+    // MISMO prefijo que usa el Bazar del alumno (`useProductos({ activo: true })`): dar de
+    // baja o reactivar un producto se ve al instante en las dos pantallas.
+    const { data: productosData, isPending: loading, error: errorQuery, refetch: refetchProductos } = useProductos();
+    const productos = productosData || SIN_DATOS;
+    const [errorMsg, setErrorMsg] = useState('');
+    const error = errorMsg || (errorQuery ? 'No se pudieron cargar los productos del bazar.' : '');
+    const eliminarProducto = useEliminarProducto();
+    const guardarProducto = useGuardarProducto();
     const [showModal, setShowModal] = useState(false);
     const [productoEditar, setProductoEditar] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
@@ -39,24 +45,6 @@ const Bazar = ({ sinLayout = false }) => {
     // INACTIVO no aparece en el Bazar del alumno: si todo el catálogo quedó
     // inactivo, el alumno ve el Bazar vacío sin ninguna pista de por qué.
     const [reactivandoId, setReactivandoId] = useState(null);
-
-    const fetchProductos = async () => {
-        try {
-            setError('');
-            const response = await api.get(`/api/v1/productos`);
-            setProductos(response.data || []);
-        } catch (error) {
-            console.error('Error fetching productos:', error);
-            setProductos([]);
-            setError(error.response?.data?.detail || 'No se pudieron cargar los productos del bazar.');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        fetchProductos();
-    }, [tenant_id]);
 
     // Producto en alerta de stock bajo: tiene umbral configurado y el stock
     // quedó en/bajo ese umbral (misma definición que usa el backend para alertar).
@@ -173,11 +161,11 @@ const Bazar = ({ sinLayout = false }) => {
     const handleEliminarProducto = async (id) => {
         if (!window.confirm('¿Estás seguro de desactivar este producto?')) return;
         try {
-            await api.delete(`/api/v1/productos/${id}`);
-            fetchProductos();
+            // El backend lo deja en activo=false y la mutación invalida `['productos']`.
+            await eliminarProducto.mutateAsync(id);
         } catch (error) {
             console.error('Error eliminando producto:', error);
-            setProductos(productos.filter((p) => p.id !== id));
+            setErrorMsg(error.response?.data?.detail || 'No se pudo desactivar el producto.');
         }
     };
 
@@ -186,13 +174,12 @@ const Bazar = ({ sinLayout = false }) => {
     // con activo=true.
     const handleReactivarProducto = async (id) => {
         setReactivandoId(id);
-        setError('');
+        setErrorMsg('');
         try {
-            await api.put(`/api/v1/productos/${id}`, { activo: true });
-            await fetchProductos();
+            await guardarProducto.mutateAsync({ id, payload: { activo: true } });
         } catch (error) {
             console.error('Error reactivando producto:', error);
-            setError(error.response?.data?.detail || 'No se pudo reactivar el producto.');
+            setErrorMsg(error.response?.data?.detail || 'No se pudo reactivar el producto.');
         } finally {
             setReactivandoId(null);
         }
@@ -206,7 +193,6 @@ const Bazar = ({ sinLayout = false }) => {
     const handleModalSuccess = () => {
         setShowModal(false);
         setProductoEditar(null);
-        fetchProductos();
     };
 
     if (loading) {
@@ -420,7 +406,7 @@ const Bazar = ({ sinLayout = false }) => {
                                             </p>
                                             {productos.length === 0 && (
                                                 <button
-                                                    onClick={error ? fetchProductos : handleNuevoProducto}
+                                                    onClick={error ? () => refetchProductos() : handleNuevoProducto}
                                                     className="mt-3 px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-bold"
                                                 >
                                                     {error ? 'Reintentar' : '+ Agregar primer producto'}
