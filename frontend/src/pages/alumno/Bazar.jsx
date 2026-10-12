@@ -1,51 +1,35 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import AvisoCarga from '../../components/AvisoCarga';
 import BotonVolver from '../../components/BotonVolver';
 import api from '../../services/api';
+import { useConfiguracionBancaria, useCrearPedidoBazar, useProductos } from '../../hooks/queries';
 import { urlArchivo } from '../../utils/imagen';
 
 const Bazar = () => {
     const { usuario_id, tenant_id } = useAuth();
-    const [productos, setProductos] = useState([]);
-    const [configBancaria, setConfigBancaria] = useState(null);
-    const [loading, setLoading] = useState(true);
     const [paso, setPaso] = useState(1); // 1=catálogo, 2=pago
     const [productoSeleccionado, setProductoSeleccionado] = useState(null);
     const [cantidad, setCantidad] = useState(1);
     const [archivoVoucher, setArchivoVoucher] = useState(null);
     const [subiendo, setSubiendo] = useState(false);
     const [mensaje, setMensaje] = useState({ type: '', text: '' });
+
+    // Catálogo y datos de transferencia en la caché de React Query (Fase 2): el
+    // catálogo comparte queryKey con el Inicio y Mis pedidos del alumno.
+    const productosQ = useProductos({ activo: true });
+    const configQ = useConfiguracionBancaria(tenant_id);
+    const crearPedido = useCrearPedidoBazar();
+    const productos = productosQ.data || [];
+    const configBancaria = configQ.data?.configurado ? configQ.data : null;
+    const loading = productosQ.isLoading || configQ.isLoading;
     // P1: si falla la carga, se avisa con banner + Reintentar (antes quedaba
     // "El box aún no publicó productos" como si el catálogo estuviera vacío).
-    const [erroresCarga, setErroresCarga] = useState([]);
-
-    const cargarTodo = useCallback(async () => {
-        const fallaron = [];
-        const [prodRes, configRes] = await Promise.allSettled([
-            api.get(`/api/v1/productos?activo=true`),
-            api.get(`/api/v1/configuracion?tenant_id=${tenant_id}`),
-        ]);
-        if (prodRes.status === 'fulfilled') {
-            setProductos(prodRes.value.data || []);
-        } else {
-            console.error('Error cargando productos del bazar:', prodRes.reason);
-            fallaron.push('productos');
-        }
-        if (configRes.status === 'fulfilled') {
-            if (configRes.value.data?.configurado) setConfigBancaria(configRes.value.data);
-        } else {
-            console.error('Error cargando los datos de transferencia:', configRes.reason);
-            fallaron.push('datos de transferencia');
-        }
-        setErroresCarga(fallaron);
-    }, [tenant_id]);
-
-    useEffect(() => {
-        setLoading(true);
-        cargarTodo().finally(() => setLoading(false));
-    }, [cargarTodo]);
+    const erroresCarga = [];
+    if (productosQ.isError) erroresCarga.push('productos');
+    if (configQ.isError) erroresCarga.push('datos de transferencia');
+    const cargarTodo = () => { productosQ.refetch(); configQ.refetch(); };
 
     const handleComprar = (producto) => {
         // Sin datos bancarios cargados no hay compra: el pedido exige subir el comprobante
@@ -80,7 +64,7 @@ const Bazar = () => {
             });
             const voucherUrl = uploadRes.data?.url || '';
 
-            await api.post('/api/v1/pedidos', {
+            await crearPedido.mutateAsync({
                 tenant_id,
                 alumno_id: usuario_id,
                 producto_id: productoSeleccionado.id,

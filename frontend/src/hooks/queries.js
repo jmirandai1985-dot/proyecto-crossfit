@@ -15,6 +15,20 @@ export const claves = {
     churn: (tenantId, buscar) => ['kpis', 'churn', tenantId, buscar || ''],
     segmentacion: (tenantId) => ['segmentacion', tenantId],
     sugerencias: (tenantId, ids) => ['fidelizacion', 'sugerencias', tenantId, ids],
+    // ── Bloque ALUMNO (Fase 2): datos que comparten varias pantallas del alumno ──
+    // Inicio, Bazar, Mis pedidos, Mis reservas y Mi progreso piden el MISMO catálogo
+    // y los mismos datos de base: con una sola queryKey, la segunda pantalla pinta al
+    // instante y no vuelve a pedirlos (antes cada una tenía su useEffect).
+    publicIdBox: ['tenants', 'me', 'public-id'],
+    productos: (activo) => ['productos', activo === undefined ? 'todos' : String(activo)],
+    configBox: (tenantId) => ['configuracion', tenantId],
+    reservasAlumno: ['reservas', 'alumno'],
+    miResumen: ['asistencia', 'mi-resumen'],
+    misHitos: ['asistencia', 'mis-hitos'],
+    misPedidos: ['pedidos', 'alumno'],
+    // `['membresia']` = el plan/créditos del alumno (`/planes/membresia-activa`). Se
+    // invalida al aprobarse un plan nuevo y al reservar/cancelar (los créditos bajan).
+    membresia: ['membresia'],
 };
 
 // ── Colas de revisión del admin (las miran el Dashboard Y Pendientes de revisión) ──
@@ -111,6 +125,71 @@ export function useSegmentacion(tenantId) {
     });
 }
 
+// ── Bloque ALUMNO (Fase 2): catálogo y datos compartidos ─────────────────────
+// Las claves están arriba; acá van los hooks. Frescura por dato: el catálogo y los
+// datos del box casi no cambian (60 s / 5 min); las reservas del alumno sí (15 s,
+// y se invalidan al reservar/cancelar).
+export function usePublicIdBox() {
+    return useQuery({
+        queryKey: claves.publicIdBox,
+        queryFn: async () => (await api.get('/api/v1/tenants/me/public-id')).data?.public_id || null,
+        staleTime: 5 * 60_000,
+    });
+}
+
+export function useProductos({ activo } = {}) {
+    return useQuery({
+        queryKey: claves.productos(activo),
+        queryFn: async () => (await api.get('/api/v1/productos', {
+            params: activo === undefined ? undefined : { activo },
+        })).data || [],
+        staleTime: 60_000,
+    });
+}
+
+export function useConfiguracionBancaria(tenantId) {
+    return useQuery({
+        queryKey: claves.configBox(tenantId),
+        queryFn: async () => (await api.get('/api/v1/configuracion', {
+            params: { tenant_id: tenantId },
+        })).data,
+        staleTime: 5 * 60_000,
+        enabled: Boolean(tenantId),
+    });
+}
+
+export function useReservasAlumno() {
+    return useQuery({
+        queryKey: claves.reservasAlumno,
+        queryFn: async () => (await api.get('/api/v1/reservas')).data || [],
+        staleTime: 15_000,
+    });
+}
+
+export function useMiResumenAsistencia() {
+    return useQuery({
+        queryKey: claves.miResumen,
+        queryFn: async () => (await api.get('/api/v1/asistencia/mi-resumen')).data || null,
+        staleTime: 60_000,
+    });
+}
+
+export function useMisHitos() {
+    return useQuery({
+        queryKey: claves.misHitos,
+        queryFn: async () => (await api.get('/api/v1/asistencia/mis-hitos')).data || null,
+        staleTime: 60_000,
+    });
+}
+
+export function useMisPedidos() {
+    return useQuery({
+        queryKey: claves.misPedidos,
+        queryFn: async () => (await api.get('/api/v1/pedidos')).data || [],
+        staleTime: 30_000,
+    });
+}
+
 // ── Mutaciones: mueven las DOS colas, así que invalidan por prefijo ──
 function useInvalidarColas() {
     const qc = useQueryClient();
@@ -158,5 +237,29 @@ export function useMarcarGestionChurn() {
         // Cambia la fila de la tabla del churn y los contadores de gestión: se refresca
         // la familia entera de esa pantalla, no sólo el término buscado de turno.
         onSuccess: () => qc.invalidateQueries({ queryKey: ['kpis', 'churn'] }),
+    });
+}
+
+// ── Mutaciones del ALUMNO ─────────────────────────────────────────────────────
+// Cancelar una reserva mueve la MISMA caché que la lista de reservas (compartida
+// por Inicio y Mis reservas) y los créditos del plan: se invalida por prefijo.
+export function useCancelarReserva() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (reservaId) => api.delete(`/api/v1/reservas/${reservaId}`).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['reservas'] });
+            // Bajar de cupo mueve el plan/créditos del alumno.
+            qc.invalidateQueries({ queryKey: claves.membresia });
+        },
+    });
+}
+
+export function useCrearPedidoBazar() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) => api.post('/api/v1/pedidos', payload).then((r) => r.data),
+        // \"Mis pedidos\" se vuelve a pintar al crear uno (misma queryKey).
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['pedidos'] }),
     });
 }

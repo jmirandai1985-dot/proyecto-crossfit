@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React from 'react';
 import Layout from '../../components/Layout';
 import AvisoCarga from '../../components/AvisoCarga';
 import BotonVolver from '../../components/BotonVolver';
-import api from '../../services/api';
+import { useMiResumenAsistencia, useMisHitos } from '../../hooks/queries';
 
 // ─── Niveles de hito (1/3/6/12 meses consecutivos) ───────────────────────────
 const NIVELES = { 1: '🔥', 3: '🔥🔥', 6: '🔥🔥🔥', 12: '🏆' };
@@ -23,37 +23,20 @@ const formatearMes = (iso) => {
 };
 
 const MiProgreso = () => {
-    const [resumen, setResumen] = useState(null);
-    const [hitos, setHitos] = useState([]);
-    const [loading, setLoading] = useState(true);
+    // Datos en la caché de React Query (Fase 2): el resumen de asistencia comparte
+    // queryKey con el Inicio móvil (`/asistencia/mi-resumen`), así que pasar por
+    // allá y volver acá no lo vuelve a pedir.
+    const resumenQ = useMiResumenAsistencia();
+    const hitosQ = useMisHitos();
+    const resumen = resumenQ.data || null;
+    const hitos = hitosQ.data?.hitos || [];
+    const loading = resumenQ.isLoading || hitosQ.isLoading;
     // P1: secciones que fallaron (banner con Reintentar; antes había un mensaje
     // genérico sin forma de reintentar).
-    const [erroresCarga, setErroresCarga] = useState([]);
-
-    const cargarTodo = useCallback(async () => {
-        setLoading(true);
-        const fallaron = [];
-        const [rResumen, rHitos] = await Promise.allSettled([
-            api.get('/api/v1/asistencia/mi-resumen'),
-            api.get('/api/v1/asistencia/mis-hitos'),
-        ]);
-        if (rResumen.status === 'fulfilled') {
-            setResumen(rResumen.value.data);
-        } else {
-            console.error('Error cargando mi resumen:', rResumen.reason);
-            fallaron.push('mi resumen');
-        }
-        if (rHitos.status === 'fulfilled') {
-            setHitos(rHitos.value.data?.hitos || []);
-        } else {
-            console.error('Error cargando mis hitos:', rHitos.reason);
-            fallaron.push('mis hitos');
-        }
-        setErroresCarga(fallaron);
-        setLoading(false);
-    }, []);
-
-    useEffect(() => { cargarTodo(); }, [cargarTodo]);
+    const erroresCarga = [];
+    if (resumenQ.isError) erroresCarga.push('mi resumen');
+    if (hitosQ.isError) erroresCarga.push('mis hitos');
+    const cargarTodo = () => { resumenQ.refetch(); hitosQ.refetch(); };
 
     if (loading) {
         return (<Layout><div className="flex items-center justify-center h-96"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500" /></div></Layout>);

@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { QrCode } from 'lucide-react';
 import Layout from '../../components/Layout';
-import api from '../../services/api';
+import { useCancelarReserva, usePublicIdBox, useReservasAlumno } from '../../hooks/queries';
 import { getEstadoColor, getEstadoDisplay, esActiva } from '../../utils/estadoReserva';
 import BotonVolver from '../../components/BotonVolver';
 import EscanerQR from '../../components/EscanerQR';
@@ -25,58 +25,35 @@ const formatearFecha = (fechaStr) => {
 // `utils/estadoReserva.js`: un único origen, sin el hack de las 24 h ("Descontada").
 
 const MisReservas = () => {
-    const [reservas, setReservas] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
     const [cancelando, setCancelando] = useState(null);
     const [mensaje, setMensaje] = useState(null);
-    const [boxPublicId, setBoxPublicId] = useState(null);
     // Overlay del lector QR (abre la cámara de inmediato al tocar "Escanear QR").
     const [escanerAbierto, setEscanerAbierto] = useState(false);
 
-    // public_id del box para el botón "Escanear QR" (endpoint accesible a
-    // cualquier usuario logueado, incluido el alumno).
-    useEffect(() => {
-        api.get('/api/v1/tenants/me/public-id')
-            .then((r) => setBoxPublicId(r.data?.public_id || null))
-            .catch(() => setBoxPublicId(null));
-    }, []);
+    // public_id del box para el botón "Escanear QR": queryKey compartida con el
+    // Inicio móvil (endpoint accesible a cualquier usuario logueado).
+    const { data: boxPublicId = null } = usePublicIdBox();
+
+    // Reservas del alumno en la caché de React Query (Fase 2). La MISMA queryKey
+    // que usa el Inicio móvil; al cancelar, la mutación invalida ['reservas'] y la
+    // lista se refresca sola (antes había que llamar a fetchReservas() a mano).
+    const reservasQ = useReservasAlumno();
+    const loading = reservasQ.isLoading;
+    const error = reservasQ.isError ? 'No se pudieron cargar tus reservas.' : '';
+    // Se ordena una COPIA: no se muta el arreglo que vive en la caché.
+    const reservas = [...(reservasQ.data || [])].sort((a, b) => {
+        // Ordenar: primero las activas (futuras, `reservada`), luego el historial.
+        const ordenA = esActiva(a) ? 0 : 1;
+        const ordenB = esActiva(b) ? 0 : 1;
+        if (ordenA !== ordenB) return ordenA - ordenB;
+        // Si mismo grupo, ordenar por fecha descendente (más reciente primero)
+        return (b.clase_fecha || '').localeCompare(a.clase_fecha || '');
+    });
+    const cancelarReserva = useCancelarReserva();
 
     // Abre el LECTOR con la cámara de inmediato (sin pantalla intermedia).
     // El `public_id` del box ya no es requisito: el QR escaneado lo trae.
     const irAEscanearQr = () => setEscanerAbierto(true);
-
-    const fetchReservas = useCallback(async () => {
-        setLoading(true);
-        setError('');
-        try {
-            const response = await api.get(
-                `/api/v1/reservas`
-            );
-            const data = response.data;
-            const reservasList = Array.isArray(data) ? data : [];
-
-            // Ordenar: primero las activas (futuras, `reservada`), luego el historial.
-            reservasList.sort((a, b) => {
-                const ordenA = esActiva(a) ? 0 : 1;
-                const ordenB = esActiva(b) ? 0 : 1;
-                if (ordenA !== ordenB) return ordenA - ordenB;
-                // Si mismo grupo, ordenar por fecha descendente (más reciente primero)
-                return (b.clase_fecha || '').localeCompare(a.clase_fecha || '');
-            });
-
-            setReservas(reservasList);
-        } catch (err) {
-            console.error('Error fetching reservas:', err);
-            setError('No se pudieron cargar tus reservas.');
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        fetchReservas();
-    }, [fetchReservas]);
 
     const handleCancelar = async (reservaId, reserva) => {
         // Calcular horas restantes hasta la clase
@@ -104,13 +81,11 @@ const MisReservas = () => {
             // P0-3: el backend responde si hubo o no reembolso (antes devolvía
             // 204 sin body y el front siempre decía "cancelada exitosamente",
             // incluso cuando el crédito NO volvía).
-            const resp = await api.delete(`/api/v1/reservas/${reservaId}`);
-            const d = resp.data || {};
+            const d = (await cancelarReserva.mutateAsync(reservaId)) || {};
             setMensaje({
                 tipo: 'exito',
                 texto: d.mensaje || 'Reserva cancelada.',
             });
-            fetchReservas();
         } catch (err) {
             setMensaje({ tipo: 'error', texto: err.response?.data?.detail || 'Error al cancelar reserva' });
         } finally {

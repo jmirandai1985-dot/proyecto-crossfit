@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React from 'react';
 import Layout from '../../components/Layout';
 import AvisoCarga from '../../components/AvisoCarga';
 import BotonVolver from '../../components/BotonVolver';
-import api from '../../services/api';
+import { useMisPedidos, useProductos } from '../../hooks/queries';
 // TZ Chile: la fecha del pedido (instante) se muestra en horario chileno.
 import { fmtFechaChile } from '../../utils/fecha';
 // El QR del código de retiro lo sirve el backend (SVG) y exige sesión: se pide como
@@ -35,40 +35,21 @@ const QrRetiro = ({ pedidoId, codigo }) => {
 };
 
 const MisPedidos = () => {
-    const [pedidos, setPedidos] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [productosMap, setProductosMap] = useState({});
+    // Datos en la caché de React Query (Fase 2): `pedidos` y el catálogo de
+    // productos comparten queryKey con el Bazar y el Inicio del alumno, así que
+    // navegar entre esas pantallas no vuelve a pedirlos.
+    const pedidosQ = useMisPedidos();
+    const productosQ = useProductos();
+    const pedidos = pedidosQ.data || [];
+    const loading = pedidosQ.isLoading || productosQ.isLoading;
+    const productosMap = {};
+    (productosQ.data || []).forEach((p) => { productosMap[p.id] = p.nombre; });
     // P1: aviso visible si la carga falla (antes quedaba "No has realizado pedidos
     // aún" aunque la API hubiera fallado).
-    const [erroresCarga, setErroresCarga] = useState([]);
-
-    const cargarTodo = useCallback(async () => {
-        const fallaron = [];
-        const [pedRes, prodRes] = await Promise.allSettled([
-            api.get(`/api/v1/pedidos`),
-            api.get(`/api/v1/productos`),
-        ]);
-        if (prodRes.status === 'fulfilled') {
-            const prodMap = {};
-            (prodRes.value.data || []).forEach(p => { prodMap[p.id] = p.nombre; });
-            setProductosMap(prodMap);
-        } else {
-            console.error('Error cargando nombres de productos:', prodRes.reason);
-            fallaron.push('nombres de productos');
-        }
-        if (pedRes.status === 'fulfilled') {
-            setPedidos(pedRes.value.data || []);
-        } else {
-            console.error('Error cargando pedidos:', pedRes.reason);
-            fallaron.push('mis pedidos');
-        }
-        setErroresCarga(fallaron);
-    }, []);
-
-    useEffect(() => {
-        setLoading(true);
-        cargarTodo().finally(() => setLoading(false));
-    }, [cargarTodo]);
+    const erroresCarga = [];
+    if (pedidosQ.isError) erroresCarga.push('mis pedidos');
+    if (productosQ.isError) erroresCarga.push('nombres de productos');
+    const cargarTodo = () => { pedidosQ.refetch(); productosQ.refetch(); };
 
     const getEstadoStyle = (estado) => {
         if (estado === 'pendiente') return 'bg-yellow-100 text-yellow-800';

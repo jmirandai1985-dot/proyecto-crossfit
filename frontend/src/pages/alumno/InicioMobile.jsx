@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 // TZ Chile: "hoy" en el calendario chileno (no el del navegador), misma fuente
 // que el Dashboard (utils/fecha.js): así la reserva de hoy coincide con las clases.
 import { hoyChileStr, fechaSolaAInstante } from '../../utils/fecha';
-import api from '../../services/api';
+import { useMiResumenAsistencia, useProductos, usePublicIdBox, useReservasAlumno } from '../../hooks/queries';
 import { urlArchivo } from '../../utils/imagen';
 import { MENU_BY_ROL } from '../../config/menu';
 import { MENU_ICONS } from '../../config/menuIcons';
@@ -122,36 +122,17 @@ const InicioMobile = ({
     // Datos complementarios del Inicio móvil (solo <768px): reservas de la
     // semana, resumen de asistencia (racha), productos del Bazar y public_id
     // del box (para el FAB de asistencia). El escritorio ≥768px no cambia.
-    const [reservasSemana, setReservasSemana] = useState([]);
-    const [resumenAsistencia, setResumenAsistencia] = useState(null);
-    const [productos, setProductos] = useState([]);
-    const [boxPublicId, setBoxPublicId] = useState(null);
+    //
+    // Fase 2 (React Query): las MISMAS queryKey que usan Bazar, Mis pedidos,
+    // Mis reservas y Mi progreso, así que navegar entre esas pantallas ya no
+    // vuelve a pedir ni el catálogo ni la racha. Claves y frescura por dato
+    // viven en `hooks/queries.js` (una sola fuente).
+    const { data: reservasSemana = [] } = useReservasAlumno();
+    const { data: resumenAsistencia = null } = useMiResumenAsistencia();
+    const { data: productos = [] } = useProductos({ activo: true });
+    const { data: boxPublicId = null } = usePublicIdBox();
     // Overlay del lector QR (abre la cámara de inmediato al tocar "Marcar").
     const [escanerAbierto, setEscanerAbierto] = useState(false);
-    useEffect(() => {
-        let cancelado = false;
-        Promise.allSettled([
-            api.get('/api/v1/reservas'),
-            api.get('/api/v1/asistencia/mi-resumen'),
-            api.get('/api/v1/productos?activo=true'),
-            api.get('/api/v1/tenants/me/public-id'),
-        ]).then(([rReservas, rResumen, rProductos, rPublicId]) => {
-            if (cancelado) return;
-            if (rReservas.status === 'fulfilled' && Array.isArray(rReservas.value.data)) {
-                setReservasSemana(rReservas.value.data);
-            }
-            if (rResumen.status === 'fulfilled') {
-                setResumenAsistencia(rResumen.value.data);
-            }
-            if (rProductos.status === 'fulfilled' && Array.isArray(rProductos.value.data)) {
-                setProductos(rProductos.value.data);
-            }
-            if (rPublicId.status === 'fulfilled') {
-                setBoxPublicId(rPublicId.value.data?.public_id || null);
-            }
-        });
-        return () => { cancelado = true; };
-    }, []);
 
     // "Hoy" en el calendario CHILENO (misma fuente que el Dashboard).
     const hoy = hoyChileStr();
