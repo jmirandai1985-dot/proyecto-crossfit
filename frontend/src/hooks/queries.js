@@ -377,9 +377,15 @@ export function useClasesRango(desde, hasta, limite = 500) {
     return useQuery({
         // Sin `solo_con_cupo`: el Dashboard del alumno muestra TODAS las clases del rango.
         queryKey: claves.clasesRango(desde, hasta, limite),
-        queryFn: async () => (await api.get(
-            `/api/v1/clases?fecha_desde=${desde}&fecha_hasta=${hasta}&limit=${limite}`,
-        )).data || [],
+        // El backend puede envolver la lista (`{clases: [...]}`) o mandarla pelada: se
+        // acepta lo mismo que aceptaba el Dashboard al leerla.
+        queryFn: async () => {
+            const data = (await api.get(
+                `/api/v1/clases?fecha_desde=${desde}&fecha_hasta=${hasta}&limit=${limite}`,
+            )).data;
+            const lista = data?.clases || data || [];
+            return Array.isArray(lista) ? lista : [];
+        },
         // El horario cambia poco; el cupo lo refresca la invalidación al reservar.
         staleTime: 60_000,
         enabled: Boolean(desde) && Boolean(hasta),
@@ -397,7 +403,12 @@ export function useWodHoy() {
 export function useReservasConfirmadas() {
     return useQuery({
         queryKey: claves.reservasConfirmadas,
-        queryFn: async () => (await api.get('/api/v1/reservas?estado=confirmada')).data || [],
+        queryFn: async () => {
+        const data = (await api.get('/api/v1/reservas?estado=confirmada')).data;
+        // Lista pelada (como la leía el Dashboard); si el backend la envuelve, la pantalla
+        // no se llena de basura.
+        return Array.isArray(data) ? data : [];
+    },
         staleTime: 30_000,
     });
 }
@@ -538,6 +549,22 @@ export function useSolicitarPlan() {
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['solicitudes'] });
             qc.invalidateQueries({ queryKey: claves.membresia });
+        },
+    });
+}
+
+// Subir un documento del alumno (comprobante de pago, certificado de estudiante) es una
+// ORDEN, no un dato cacheable: devuelve la URL privada que la solicitud manda después.
+// `privado=1` => el archivo va a la carpeta privada y sólo lo sirve el endpoint
+// autenticado del backend (nunca la URL pública de /static/uploads/).
+export function useSubirArchivoPrivado() {
+    return useMutation({
+        mutationFn: (archivo) => {
+            const formData = new FormData();
+            formData.append('file', archivo);
+            return api.post('/api/v1/upload/voucher?privado=1', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            }).then((r) => r.data?.url || r.data?.voucher_url || '');
         },
     });
 }

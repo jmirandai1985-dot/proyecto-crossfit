@@ -1,35 +1,83 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Layout from '../../components/Layout';
 import BotonVolver from '../../components/BotonVolver';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
+// Fase 2 (Bloque 1): planes, perfil, datos bancarios, descuento vigente y subida de
+// documentos salen de la caché compartida (`hooks/queries.js`), no de un `useEffect` que
+// repetía las mismas peticiones en cada montaje.
+import {
+    useConfiguracionBancaria, useMiPerfil, useMisBeneficios, usePlanesActivos,
+    useSolicitarPlan, useSubirArchivoPrivado,
+} from '../../hooks/queries';
 import { fmtFechaChile } from '../../utils/fecha';
 
 const SolicitarPlan = () => {
     const { usuario_id, tenant_id } = useAuth();
 
-    // ─── Estados ───────────────────────────────────────────────────────
-    const [planes, setPlanes] = useState([]);
-    const [configBancaria, setConfigBancaria] = useState(null);
-    const [planesFiltrados, setPlanesFiltrados] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
-    const [sexoAlumno, setSexoAlumno] = useState(null);
-    const [sinSexo, setSinSexo] = useState(false);
-    const [categoriaSeleccionada, setCategoriaSeleccionada] = useState(null);
+    // ─── Datos (React Query) ───────────────────────────────────────────
+    // Planes, perfil, datos bancarios y descuento vigente salen de la caché compartida:
+    // volver a esta pantalla ya no repite las peticiones que hacía el useEffect.
+    const planesQ = usePlanesActivos();
+    const perfilQ = useMiPerfil();
+    const configQ = useConfiguracionBancaria(tenant_id);
 
-    // Flujo: paso 1 = elegir plan, paso 2 = datos pago, paso 3 = confirmación
+    const perfil = perfilQ.data || null;
+    const sexoAlumno = perfil?.genero || null;
+    // Aviso "completa tu sexo en Ajustes": sólo cuando el perfil YA llegó sin género (si
+    // la consulta falla no se le pide al alumno arreglar algo que no está roto).
+    const sinSexo = Boolean(perfil) && !sexoAlumno;
+
+    const planes = React.useMemo(() => planesQ.data || [], [planesQ.data]);
+
+    // ─── F2: el descuento vigente del alumno (beneficio de Fidelización) ──
+    // `precios` viene del BACKEND (`/beneficios/mios?plan_ids=...`): la pantalla muestra el
+    // precio final, no lo calcula (la aritmética del descuento vive en un solo lugar y es
+    // la que se cobra). Si esto falla, la pantalla sigue igual, sin descuento anunciado.
+    const planIds = planes.map((p) => p.id).join(',');
+    const beneficiosQ = useMisBeneficios(planIds);
+    const descuento = beneficiosQ.data?.descuento_pct ? beneficiosQ.data : null;
+
+    // Datos bancarios del paso 2 (los guarda un admin en /admin/configuracion).
+    const configBancaria = configQ.data?.configurado ? configQ.data : null;
+
+    // Subir los documentos es una ORDEN (devuelve la URL privada) y enviar la solicitud
+    // mueve la cola del admin: ninguna de las dos necesita estado local.
+    const subirArchivo = useSubirArchivoPrivado();
+    const solicitarPlan = useSolicitarPlan();
+    const subiendo = subirArchivo.isPending || solicitarPlan.isPending;
+
+    // "Cargando" mientras falte el primer dato de las dos consultas del bloque (antes: un
+    // `loading` que apagaba el `finally` del fetch).
+    const loading = planesQ.isPending || perfilQ.isPending;
+    const error = planesQ.isError || perfilQ.isError
+        ? 'No se pudieron cargar los planes disponibles.'
+        : '';
+
+    // ─── Estado del flujo (1 = elegir plan, 2 = datos pago, 3 = confirmación) ───
     const [paso, setPaso] = useState(1);
     const [planSeleccionado, setPlanSeleccionado] = useState(null);
     const [archivoVoucher, setArchivoVoucher] = useState(null);
     const [archivoCertificado, setArchivoCertificado] = useState(null);
-    const [subiendo, setSubiendo] = useState(false);
     const [mensajeExito, setMensajeExito] = useState('');
     const [mensajeError, setMensajeError] = useState('');
-    // ─── F2: el descuento vigente del alumno (beneficio de Fidelización) ──
-    // `precios` viene del BACKEND (`/beneficios/mios?plan_ids=...`): la pantalla muestra el precio
-    // final, no lo calcula (la aritmética del descuento vive en un solo lugar y es la que se cobra).
-    const [descuento, setDescuento] = useState(null);
+
+    // Categoría visible: la propone el sexo del perfil y el alumno la puede cambiar. Se
+    // DERIVA de las consultas (antes se sincronizaba con un `setCategoriaSeleccionada`
+    // dentro del fetch); si el alumno elige "Todos", su elección manda.
+    const [categoriaElegida, setCategoriaElegida] = useState(null);
+    const categoriaSeleccionada = categoriaElegida !== null
+        ? categoriaElegida
+        : (sexoAlumno === 'M' ? 'masculino' : sexoAlumno === 'F' ? 'femenino' : null);
+
+    const planesFiltrados = React.useMemo(() => (
+        categoriaSeleccionada
+            ? planes.filter((p) => !p.genero || p.genero === categoriaSeleccionada)
+            : planes
+    ), [categoriaSeleccionada, planes]);
+
+    // Separar planes regulares y de estudiante
+    const planesRegulares = planesFiltrados.filter(p => !p.requiere_certificado_estudiante);
+    const planesEstudiante = planesFiltrados.filter(p => p.requiere_certificado_estudiante);
 
     /** Precio final del plan si tiene un descuento vigente (o `null`). */
     const precioConDescuento = (plan) => descuento?.precios?.[String(plan?.id)] || null;
@@ -39,75 +87,6 @@ const SolicitarPlan = () => {
         if (!descuento?.descuento_hasta) return '';
         return fmtFechaChile(descuento.descuento_hasta);
     };
-
-    // ─── Cargar configuracion bancaria ────────────────────────────────
-    useEffect(() => {
-        const fetchConfig = async () => {
-            try {
-                const res = await api.get(`/api/v1/configuracion?tenant_id=${tenant_id}`);
-                if (res.data.configurado) {
-                    setConfigBancaria(res.data);
-                }
-            } catch (err) {
-                console.error('Error cargando config bancaria:', err);
-            }
-        };
-        fetchConfig();
-    }, [tenant_id]);
-
-    // ─── Cargar perfil del alumno y planes ─────────────────────────────
-    useEffect(() => {
-        const fetchData = async () => {
-            setLoading(true);
-            setError('');
-            try {
-                const perfilRes = await api.get(`/api/v1/alumnos/me`);
-                const perfil = perfilRes.data;
-                const sexo = perfil?.genero || null;
-                setSexoAlumno(sexo);
-                setSinSexo(!sexo);
-
-                const res = await api.get(`/api/v1/planes?activo=true`);
-                const data = res.data?.planes || res.data || [];
-                const todosLosPlanes = Array.isArray(data) ? data : [];
-                setPlanes(todosLosPlanes);
-
-                // ── F2: ¿tiene un descuento vigente? Los precios finales los calcula el backend ──
-                // Si esto falla, la pantalla sigue igual (sin descuento anunciado): no se cae la
-                // compra por una comodidad.
-                try {
-                    const rBen = await api.get('/api/v1/beneficios/mios', {
-                        params: { plan_ids: todosLosPlanes.map((p) => p.id).join(',') },
-                    });
-                    setDescuento(rBen.data?.descuento_pct ? rBen.data : null);
-                } catch {
-                    setDescuento(null);
-                }
-
-                const categoriaInicial = sexo === 'M' ? 'masculino' : sexo === 'F' ? 'femenino' : null;
-                setCategoriaSeleccionada(categoriaInicial);
-            } catch (err) {
-                console.error('Error cargando datos:', err);
-                setError('No se pudieron cargar los planes disponibles.');
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchData();
-    }, [usuario_id, tenant_id]);
-
-    // ─── Filtrar planes cuando cambia la categoría ──────────────────
-    useEffect(() => {
-        if (categoriaSeleccionada) {
-            setPlanesFiltrados(planes.filter(p => !p.genero || p.genero === categoriaSeleccionada));
-        } else {
-            setPlanesFiltrados(planes);
-        }
-    }, [categoriaSeleccionada, planes]);
-
-    // Separar planes regulares y de estudiante
-    const planesRegulares = planesFiltrados.filter(p => !p.requiere_certificado_estudiante);
-    const planesEstudiante = planesFiltrados.filter(p => p.requiere_certificado_estudiante);
 
     const handleSeleccionarPlan = (plan) => {
         setPlanSeleccionado(plan);
@@ -126,35 +105,21 @@ const SolicitarPlan = () => {
         }
         if (!planSeleccionado) return;
 
-        setSubiendo(true);
         setMensajeError('');
         try {
-            // 1. Subir voucher
-            const formDataVoucher = new FormData();
-            formDataVoucher.append('file', archivoVoucher);
-            // privado=1: el comprobante va a la carpeta privada; solo lo sirve el
-            // endpoint autenticado GET /solicitudes/{id}/voucher.
-            const uploadVoucherRes = await api.post('/api/v1/upload/voucher?privado=1', formDataVoucher, {
-                headers: { 'Content-Type': 'multipart/form-data' },
-            });
-            const voucherUrl = uploadVoucherRes.data?.url || uploadVoucherRes.data?.voucher_url || '';
+            // 1. Subir voucher. privado=1: el comprobante va a la carpeta privada y sólo lo
+            // sirve el endpoint autenticado GET /solicitudes/{id}/voucher.
+            const voucherUrl = await subirArchivo.mutateAsync(archivoVoucher);
 
-            // 2. Subir certificado (si es necesario). privado=1: igual que el
-            // voucher, el certificado del alumno es un documento sensible: va a la
-            // carpeta privada y solo lo sirve GET /solicitudes/{id}/certificado
-            // (endpoint autenticado), nunca la URL pública de /static/uploads/.
+            // 2. Subir certificado (si el plan lo exige). Igual que el voucher: documento
+            // sensible, carpeta privada, servido sólo por GET /solicitudes/{id}/certificado.
             let certificadoUrl = '';
             if (planSeleccionado?.requiere_certificado_estudiante && archivoCertificado) {
-                const formDataCert = new FormData();
-                formDataCert.append('file', archivoCertificado);
-                const uploadCertRes = await api.post('/api/v1/upload/voucher?privado=1', formDataCert, {
-                    headers: { 'Content-Type': 'multipart/form-data' },
-                });
-                certificadoUrl = uploadCertRes.data?.url || uploadCertRes.data?.voucher_url || '';
+                certificadoUrl = await subirArchivo.mutateAsync(archivoCertificado);
             }
 
             // 3. Enviar solicitud
-            await api.post('/api/v1/solicitudes/solicitar', {
+            await solicitarPlan.mutateAsync({
                 tenant_id,
                 alumno_id: usuario_id,
                 plan_id: planSeleccionado.id,
@@ -166,10 +131,9 @@ const SolicitarPlan = () => {
             setMensajeExito('✅ Tu solicitud fue enviada, espera la aprobación del administrador.');
         } catch (err) {
             console.error('Error al enviar solicitud:', err);
-            const detalle = err.response?.data?.detail || 'Error al procesar la solicitud. Intenta nuevamente.';
-            setMensajeError(detalle);
-        } finally {
-            setSubiendo(false);
+            setMensajeError(
+                err.response?.data?.detail || 'Error al procesar la solicitud. Intenta nuevamente.'
+            );
         }
     };
 
@@ -316,19 +280,19 @@ const SolicitarPlan = () => {
                     <>
                         {/* ─── TOGGLE: FEMENINO / MASCULINO / TODOS ── */}
                         <div className="flex gap-2 p-1 bg-gray-100 rounded-xl w-fit mx-auto">
-                            <button onClick={() => setCategoriaSeleccionada('femenino')}
+                            <button onClick={() => setCategoriaElegida('femenino')}
                                 className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${categoriaSeleccionada === 'femenino'
                                     ? 'bg-pink-500 text-white shadow-md'
                                     : 'text-gray-600 hover:bg-pink-50 hover:text-pink-600'}`}>
                                 ♀️ Femeninos
                             </button>
-                            <button onClick={() => setCategoriaSeleccionada('masculino')}
+                            <button onClick={() => setCategoriaElegida('masculino')}
                                 className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${categoriaSeleccionada === 'masculino'
                                     ? 'bg-blue-500 text-white shadow-md'
                                     : 'text-gray-600 hover:bg-blue-50 hover:text-blue-600'}`}>
                                 ♂️ Masculinos
                             </button>
-                            <button onClick={() => setCategoriaSeleccionada(null)}
+                            <button onClick={() => setCategoriaElegida(null)}
                                 className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${categoriaSeleccionada === null
                                     ? 'bg-gray-500 text-white shadow-md'
                                     : 'text-gray-600 hover:bg-gray-200'}`}>

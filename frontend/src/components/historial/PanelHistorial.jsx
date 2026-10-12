@@ -1,6 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import api from '../../services/api';
+// Fase 2 (Bloque 1): el panel sale de la caché compartida (`usePanelHistorial`), no de un
+// `useEffect` con axios. Lo montan el alumno (`/alumno/mi-historial`) y la ficha del box.
+import { usePanelHistorial } from '../../hooks/queries';
 import { fmtFechaChile, fmtFechaCortaChile } from '../../utils/fecha';
 
 /**
@@ -692,33 +694,21 @@ const PanelHistorial = ({ alumnoId = null }) => {
     const [searchParams, setSearchParams] = useSearchParams();
     const seccion = searchParams.get('seccion') || 'resumen';
     const [pagina, setPagina] = useState(1);
-    const [panel, setPanel] = useState(null);
-    const [cargando, setCargando] = useState(true);
-    const [error, setError] = useState('');
 
-    // Sin `alumnoId` se usa la puerta del propio alumno (nunca trae la gestión del box).
-    const url = alumnoId
-        ? `/api/v1/alumnos/${alumnoId}/historial`
-        : '/api/v1/alumnos/me/historial';
+    // La URL la arma el hook: sin `alumnoId` usa la puerta del propio alumno (que nunca
+    // trae la gestión del box).
+    const {
+        data: panel, isPending, isError, error: errorConsulta, refetch,
+    } = usePanelHistorial({ alumnoId, seccion, pagina, porPagina: POR_PAGINA });
 
-    const cargar = useCallback(async () => {
-        setCargando(true);
-        setError('');
-        try {
-            const respuesta = await api.get(url, {
-                params: { seccion, pagina, por_pagina: POR_PAGINA },
-            });
-            setPanel(respuesta.data);
-        } catch (e) {
-            console.error('Historial: no se pudo cargar', e);
-            setPanel(null);
-            setError(e.response?.data?.detail || 'No se pudo cargar el historial.');
-        } finally {
-            setCargando(false);
-        }
-    }, [url, seccion, pagina]);
-
-    useEffect(() => { cargar(); }, [cargar]);
+    // "Cargando" sólo mientras NO hay nada que mostrar: al cambiar de sección o de página
+    // se sigue viendo la anterior hasta que llega la nueva (`placeholderData`), sin
+    // parpadeo en blanco. El error se DERIVA de la consulta (antes era un estado aparte
+    // que había que limpiar a mano antes de cada carga).
+    const cargando = isPending;
+    const error = isError
+        ? (errorConsulta?.response?.data?.detail || 'No se pudo cargar el historial.')
+        : '';
 
     // Cambiar de sección vuelve a la página 1 (una sección más corta daría vacío).
     const irASeccion = (id) => {
@@ -782,7 +772,7 @@ const PanelHistorial = ({ alumnoId = null }) => {
                 <div className="bg-red-500/10 border-l-4 border-red-500 rounded p-4 text-sm text-red-300"
                     data-testid="historial-error">
                     <p className="font-medium">⚠️ {error}</p>
-                    <button type="button" onClick={cargar}
+                    <button type="button" onClick={() => refetch()}
                         className="mt-2 px-3 py-1 bg-red-600 text-white rounded text-xs font-bold hover:bg-red-700">
                         Reintentar
                     </button>

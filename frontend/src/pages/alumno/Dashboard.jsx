@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
+// Fase 2 (Bloque 1): los datos del Inicio salen de la caché compartida (la misma que usan
+// Mi Progreso, Evolución y el Inicio móvil) en vez de un `useEffect` con siete peticiones.
+import {
+    useAsistenciaMes, useClasesRango, useCrearReserva, useMembresiaActiva,
+    useNivelFuerza, useNivelGimnastico, useReservasConfirmadas, useWodHoy,
+} from '../../hooks/queries';
 // TZ Chile: "hoy" y el calendario de la semana salen de utils/fecha.js (el navegador
 // puede estar en otra zona: con la fecha local, entre 20:00 y 23:59 CLT ya era mañana).
 import { hoyChileStr, fechaSolaAInstante } from '../../utils/fecha';
@@ -69,28 +74,68 @@ const getProximosDias = () => {
 const AlumnoDashboard = () => {
     const { usuario_id, tenant_id, usuario } = useAuth();
 
-    // ─── Estados ───────────────────────────────────────────────────────
-    const [loading, setLoading] = useState(true);
-    const [nivelFuerza, setNivelFuerza] = useState(null);
-    const [nivelGimnastico, setNivelGimnastico] = useState(null);
-    const [wodHoy, setWodHoy] = useState(null);
-    const [clasesPorDia, setClasesPorDia] = useState({});
-    const [reservasActivas, setReservasActivas] = useState(0);
-    const [misReservas, setMisReservas] = useState([]);  // lista completa de reservas para verificar duplicados
-    const [membresia, setMembresia] = useState(null);
-    const [asistenciaMes, setAsistenciaMes] = useState(null);
-    const [fetchError, setFetchError] = useState('');
+    // ─── Datos (React Query) ───────────────────────────────────────────
+    // Cada bloque con su clave: al volver al Inicio se pinta la copia en caché al instante
+    // y se refresca en segundo plano (antes cada montaje disparaba siete peticiones).
+    const proximosDias = getProximosDias();
+    const fechaHasta = proximosDias[proximosDias.length - 1]?.fecha || TODAY;
 
-    // Estado para modal de reserva
+    const nivelFuerzaQ = useNivelFuerza(usuario_id);
+    const nivelGimnasticoQ = useNivelGimnastico(usuario_id);
+    const wodQ = useWodHoy();
+    const clasesQ = useClasesRango(TODAY, fechaHasta);
+    const reservasQ = useReservasConfirmadas();
+    const membresiaQ = useMembresiaActiva();
+    const asistenciaQ = useAsistenciaMes();
+    const crearReserva = useCrearReserva();
+
+    const nivelFuerza = nivelFuerzaQ.data || null;
+    const nivelGimnastico = nivelGimnasticoQ.data || null;
+    const wodHoy = wodQ.data || null;
+    const membresia = membresiaQ.data || null;
+    const asistenciaMes = asistenciaQ.data || null;
+
+    // Clases agrupadas por día para el calendario de la semana (mismo agrupado que hacía
+    // el fetch: `fecha` o `fecha_clase`). En `useMemo` para no recrear el objeto en cada
+    // render: los `useEffect`/`useMemo` de abajo dependen de su referencia.
+    const clasesPorDia = React.useMemo(() => {
+        const agrupadas = {};
+        (clasesQ.data || []).forEach((clase) => {
+            const fechaClase = clase.fecha || clase.fecha_clase;
+            if (!agrupadas[fechaClase]) agrupadas[fechaClase] = [];
+            agrupadas[fechaClase].push(clase);
+        });
+        return agrupadas;
+    }, [clasesQ.data]);
+
+    // `misReservas` (detección de duplicados y hero del Inicio móvil) y `reservasActivas`
+    // (el número de la tarjeta) salen de LA MISMA consulta: antes eran dos estados
+    // paralelos que había que sincronizar a mano después de cada reserva.
+    const misReservas = reservasQ.data || [];
+    const reservasActivas = misReservas.length;
+
+    // Sólo se avisa si fallan los DOS niveles (mismo criterio y mismo copy de antes: una
+    // sola caída no rompe la pantalla, el resto de las tarjetas sigue con sus datos).
+    const fetchError = nivelFuerzaQ.isError && nivelGimnasticoQ.isError
+        ? 'No se pudieron cargar tus niveles de atleta. Verifica la conexión con el servidor.'
+        : '';
+
+    // "Cargando" = todavía no llegó el PRIMER dato de alguna consulta del bloque.
+    const loading = [
+        nivelFuerzaQ, nivelGimnasticoQ, wodQ, clasesQ, reservasQ, membresiaQ, asistenciaQ,
+    ].some((q) => q.isPending);
+
+    // ─── Estados de la pantalla (UI) ───────────────────────────────────
     const [showReservaModal, setShowReservaModal] = useState(false);
     const [claseSeleccionada, setClaseSeleccionada] = useState(null);
-    const [submitting, setSubmitting] = useState(false);
     const [errorReserva, setErrorReserva] = useState('');
+    // El botón del modal se bloquea mientras la reserva viaja (antes: `submitting` local).
+    const submitting = crearReserva.isPending;
 
-    // Estado para acordeon: día actualmente expandido (null = ninguno)
+    // Estado para día expandido (acordeón)
     const [diaExpandido, setDiaExpandido] = useState(null);
 
-    // Estado para secciones Mañana/Tarde dentro del día expandido
+    // Estado para secciones colapsables (mañana/tarde)
     const [seccionesExpandidas, setSeccionesExpandidas] = useState({ manana: false, tarde: false });
 
     // Estado para filtro por disciplina
@@ -101,80 +146,6 @@ const AlumnoDashboard = () => {
         setSeccionesExpandidas({ manana: false, tarde: false });
     }, [diaExpandido]);
 
-    const proximosDias = getProximosDias();
-    const fechaHasta = proximosDias[proximosDias.length - 1]?.fecha || TODAY;
-
-    // ─── Fetch inicial ─────────────────────────────────────────────────
-    useEffect(() => {
-        const fetchData = async () => {
-            setLoading(true);
-            setFetchError('');
-            try {
-                const [
-                    fuerzaRes,
-                    gimnRes,
-                    wodRes,
-                    clasesRes,
-                    reservasRes,
-                    membresiaRes,
-                    asistenciaMesRes
-                ] = await Promise.allSettled([
-                    api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/nivel-fuerza`),
-                    api.get(`/api/v1/historial-rm/alumnos/${usuario_id}/nivel-gimnastico`),
-                    api.get(`/api/v1/wods/hoy`),
-                    // Sin solo_con_cupo para mostrar TODAS las clases de 07:00 a 22:00
-                    api.get(`/api/v1/clases?fecha_desde=${TODAY}&fecha_hasta=${fechaHasta}&limit=500`),
-                    api.get(`/api/v1/reservas?estado=confirmada`),
-                    api.get(`/api/v1/planes/membresia-activa`),
-                    api.get(`/api/v1/reservas/asistencia-mes`)
-                ]);
-
-                if (fuerzaRes.status === 'fulfilled') setNivelFuerza(fuerzaRes.value.data);
-                if (gimnRes.status === 'fulfilled') setNivelGimnastico(gimnRes.value.data);
-                if (wodRes.status === 'fulfilled') setWodHoy(wodRes.value.data);
-
-                // Procesar clases: agrupar por fecha
-                if (clasesRes.status === 'fulfilled') {
-                    const data = clasesRes.value.data?.clases || clasesRes.value.data || [];
-                    const agrupadas = {};
-                    if (Array.isArray(data)) {
-                        data.forEach(clase => {
-                            const fechaClase = clase.fecha || clase.fecha_clase;
-                            if (!agrupadas[fechaClase]) {
-                                agrupadas[fechaClase] = [];
-                            }
-                            agrupadas[fechaClase].push(clase);
-                        });
-                    }
-                    setClasesPorDia(agrupadas);
-                }
-
-                if (reservasRes.status === 'fulfilled') {
-                    const data = reservasRes.value.data;
-                    const reservasList = Array.isArray(data) ? data : [];
-                    setMisReservas(reservasList);
-                    setReservasActivas(reservasList.length);
-                }
-                if (membresiaRes.status === 'fulfilled') {
-                    setMembresia(membresiaRes.value.data);
-                }
-                if (asistenciaMesRes.status === 'fulfilled') {
-                    setAsistenciaMes(asistenciaMesRes.value.data);
-                }
-
-                if (fuerzaRes.status === 'rejected' && gimnRes.status === 'rejected') {
-                    setFetchError('No se pudieron cargar tus niveles de atleta. Verifica la conexión con el servidor.');
-                }
-            } catch (error) {
-                console.error('Error fetching dashboard data:', error);
-                setFetchError('Error al cargar el dashboard. Intenta de nuevo más tarde.');
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchData();
-    }, [usuario_id, tenant_id, fechaHasta]);
-
     // ─── Manejar reserva ───────────────────────────────────────────────
     const handleAbrirReserva = (clase) => {
         setClaseSeleccionada(clase);
@@ -184,38 +155,17 @@ const AlumnoDashboard = () => {
 
     const handleConfirmarReserva = async () => {
         if (!claseSeleccionada) return;
-        setSubmitting(true);
         setErrorReserva('');
         try {
-            await api.post('/api/v1/reservas', {
+            // El cupo de la clase, la lista de reservas, los créditos del plan y la
+            // asistencia se refrescan SOLOS: `useCrearReserva` invalida ['reservas'],
+            // ['clases'], ['membresia'] y ['asistencia'] (una sola regla para todas las
+            // pantallas, en lugar de tres `setState` locales que los demás no veían).
+            await crearReserva.mutateAsync({
                 tenant_id,
                 alumno_id: usuario_id,
                 clase_id: claseSeleccionada.id,
                 estado: 'confirmada',
-            });
-            setReservasActivas((prev) => prev + 1);
-            // Reflejar la reserva en la lista local: el hero del Inicio móvil y la
-            // detección de duplicados se leen de `misReservas`, no vuelven a la API.
-            setMisReservas((prev) => [
-                ...prev,
-                {
-                    disciplina_nombre: claseSeleccionada.disciplina_nombre,
-                    clase_fecha: claseSeleccionada.fecha || claseSeleccionada.fecha_clase,
-                    hora_inicio: claseSeleccionada.hora_inicio,
-                    asistio: false,
-                },
-            ]);
-            // Actualizar disponibilidad en el estado local
-            setClasesPorDia((prev) => {
-                const nuevas = { ...prev };
-                Object.keys(nuevas).forEach(fecha => {
-                    nuevas[fecha] = nuevas[fecha].map((c) =>
-                        c.id === claseSeleccionada.id
-                            ? { ...c, asistentes_confirmados: (c.asistentes_confirmados || 0) + 1 }
-                            : c
-                    );
-                });
-                return nuevas;
             });
             setShowReservaModal(false);
             setClaseSeleccionada(null);
@@ -224,8 +174,6 @@ const AlumnoDashboard = () => {
             setErrorReserva(
                 error.response?.data?.detail || 'No se pudo confirmar la reserva. Intenta nuevamente.'
             );
-        } finally {
-            setSubmitting(false);
         }
     };
 
