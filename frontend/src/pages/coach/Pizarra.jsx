@@ -3,10 +3,12 @@
    disciplina_id, y el backend lo exige para el rol coach (responde 400).
    Usar /coach/gestion-clases (publica el WOD de la clase, multi-dia y con disciplina).
    Se deja el archivo y la ruta por si se retoma; si no, borrar ambos. */
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
+import {
+    useMovimientos, useCrearMovimiento, useParsearWod, useCrearWod,
+} from '../../hooks/queries';
 
 // ─── Utilidades de fechas ─────────────────────────────────────────
 const DIAS_NOMBRES = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
@@ -92,6 +94,20 @@ const HORARIOS_SEMANA = {
 const Pizarra = () => {
     const { tenant_id, usuario_id } = useAuth();
 
+    // Catálogo de movimientos (React Query): es la MISMA caché que usan el Dashboard
+    // del coach y las pantallas de marcas, así que entrar acá no lo vuelve a pedir.
+    const movimientosQ = useMovimientos();
+    const movimientosDisponibles = movimientosQ.data || [];
+
+    // Mutaciones de la pantalla: crear un movimiento a mano, parsear el texto libre y
+    // publicar el WOD. El "cargando" sale del estado de cada mutación (antes eran dos
+    // useState que se sincronizaban a mano dentro de un try/finally).
+    const crearMovimiento = useCrearMovimiento();
+    const parsearWod = useParsearWod();
+    const publicarWod = useCrearWod();
+    const procesando = parsearWod.isPending;
+    const guardando = publicarWod.isPending;
+
     // ─── Estado del selector de semana ───
     const hoy = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
     const [semanaOffset, setSemanaOffset] = useState(0);
@@ -112,7 +128,6 @@ const Pizarra = () => {
         descripcion: '',
     });
 
-    const [movimientosDisponibles, setMovimientosDisponibles] = useState([]);
     const [movimientoSeleccionado, setMovimientoSeleccionado] = useState('');
     const [movimientoPersonalizado, setMovimientoPersonalizado] = useState('');
     const [nuevoMovimiento, setNuevoMovimiento] = useState({
@@ -124,12 +139,10 @@ const Pizarra = () => {
     });
     const [movimientosAgregados, setMovimientosAgregados] = useState([]);
     const [mensaje, setMensaje] = useState(null);
-    const [guardando, setGuardando] = useState(false);
 
     // ─── Estado del parser (lado derecho) ───
     const [textoLibre, setTextoLibre] = useState('');
     const [erroresParser, setErroresParser] = useState([]);
-    const [procesando, setProcesando] = useState(false);
 
     // ─── Seleccionar día y hora ───
     const handleSeleccionarDiaHora = (fechaDate, horaStr) => {
@@ -157,18 +170,6 @@ const Pizarra = () => {
         setFechaCalculada({ fecha: fechaStr, hora_inicio: horaInicio, hora_fin: horaFin });
     };
 
-    useEffect(() => {
-        const cargarMovimientos = async () => {
-            try {
-                const response = await api.get(`/api/v1/movimientos`);
-                setMovimientosDisponibles(response.data);
-            } catch (error) {
-                console.error('Error cargando movimientos:', error);
-            }
-        };
-        cargarMovimientos();
-    }, [tenant_id]);
-
     const handleChange = (e) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
     };
@@ -184,17 +185,14 @@ const Pizarra = () => {
             return;
         }
 
-        setProcesando(true);
         setErroresParser([]);
         setMensaje(null);
 
         try {
-            const response = await api.post(`/api/v1/wods/parse`, {
+            const data = await parsearWod.mutateAsync({
                 texto: textoLibre,
                 tenant_id: parseInt(tenant_id)
             });
-
-            const data = response.data;
             const fases = data.fases || [];
             const errs = data.errores || [];
 
@@ -245,8 +243,6 @@ const Pizarra = () => {
             const detalle = error.response?.data?.detail || 'Error al conectar con el parser';
             setErroresParser([detalle]);
             setMensaje({ tipo: 'error', texto: detalle });
-        } finally {
-            setProcesando(false);
         }
     };
 
@@ -263,16 +259,14 @@ const Pizarra = () => {
                 return;
             }
             try {
-                const response = await api.post('/api/v1/movimientos', {
+                // Crear el movimiento invalida `['movimientos']`: el combo se refresca
+                // solo y ya no hace falta releer el catálogo con otro GET.
+                const nuevoMov = await crearMovimiento.mutateAsync({
                     tenant_id: parseInt(tenant_id),
                     nombre: movimientoPersonalizado.trim(),
                     descripcion: `Movimiento libre: ${movimientoPersonalizado.trim()}`,
                     activo: true
                 });
-                const nuevoMov = response.data;
-
-                const movs = await api.get(`/api/v1/movimientos`);
-                setMovimientosDisponibles(movs.data);
 
                 setMovimientosAgregados([
                     ...movimientosAgregados,
@@ -363,7 +357,6 @@ const Pizarra = () => {
             return;
         }
 
-        setGuardando(true);
         setMensaje(null);
 
         try {
@@ -399,7 +392,7 @@ const Pizarra = () => {
                 };
             }
 
-            await api.post(`/api/v1/wods`, payload);
+            await publicarWod.mutateAsync(payload);
 
             const textoEstado = estado === 'publicado' ? 'publicado' : 'guardado como borrador';
             setMensaje({ tipo: 'exito', texto: `WOD ${textoEstado} exitosamente` });
@@ -415,8 +408,6 @@ const Pizarra = () => {
         } catch (error) {
             const detalle = error.response?.data?.detail || 'Error al crear el WOD';
             setMensaje({ tipo: 'error', texto: detalle });
-        } finally {
-            setGuardando(false);
         }
     };
 

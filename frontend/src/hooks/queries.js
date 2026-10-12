@@ -59,6 +59,26 @@ export const claves = {
     misBeneficios: (planIds) => ['beneficios', 'mios', planIds],
     panelHistorial: (alumnoId, seccion, pagina, porPagina) =>
         ['historial-alumno', alumnoId || 'me', seccion, pagina, porPagina],
+    // ── Bloque 2 (partes B y C): panel del coach ──
+    // La Pizarra de WOD, el Dashboard del coach y Gestión de Clases piden LOS MISMOS
+    // datos (catálogo de movimientos, clases, WODs, disciplinas y las reservas de una
+    // clase). Todo `['clases']` lo mueven ampliar cupo y tomar/soltar; todo `['wods']`
+    // lo mueven publicar/editar un WOD; `['reservas']` lo mueve la asistencia.
+    clasesCoach: (coachId, desde, hasta) => ['clases', 'coach', coachId, desde, hasta],
+    clasesDisciplinaSemana: (disciplinaId, desde, hasta) =>
+        ['clases', 'disciplina', disciplinaId, desde, hasta],
+    wodsTodos: ['wods', 'todos'],
+    wodsFecha: (fecha) => ['wods', 'fecha', fecha],
+    wodDetalle: (wodId) => ['wods', 'detalle', wodId],
+    // El backend acota las relaciones coach↔disciplina por el token e IGNORA cualquier
+    // `coach_id` de la query (todos los coaches del box reciben la misma lista): por eso
+    // la clave no lleva coachId y las dos pantallas comparten la MISMA entrada.
+    coachDisciplinas: ['coach-disciplinas'],
+    disciplinas: ['disciplinas'],
+    alumnosCoach: (coachId) => ['fidelizacion', 'coach', coachId, 'alumnos'],
+    alumnosCoachEnRiesgo: (coachId) => ['fidelizacion', 'coach', coachId, 'en-riesgo'],
+    progresoAlumnosCoach: (ids) => ['historial-rm', 'progreso-lote', ids],
+    reservasPorClase: (claseId) => ['reservas', 'por-clase', claseId],
 };
 
 // ── Colas de revisión del admin (las miran el Dashboard Y Pendientes de revisión) ──
@@ -636,6 +656,280 @@ export function useSubirArchivoPrivado() {
                 headers: { 'Content-Type': 'multipart/form-data' },
             }).then((r) => r.data?.url || r.data?.voucher_url || '');
         },
+    });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BLOQUE 2 parte B — PIZARRA DE WOD (panel del coach)
+// ══════════════════════════════════════════════════════════════════════════════
+// El catálogo de movimientos lo comparte con el Dashboard del coach y las pantallas de
+// marcas del alumno (`useMovimientos`, arriba). Lo que faltaba eran las mutaciones:
+// antes, crear un movimiento a mano RELEÍA el catálogo con otro `api.get` para
+// refrescar el combo; invalidando `['movimientos']` eso lo resuelve React Query.
+
+// Publicar/editar un WOD mueve la lista de WODs, el "WOD de hoy" del alumno y las
+// clases que el backend vincula en la misma transacción: las dos familias juntas.
+function invalidarWodsYClases(qc) {
+    qc.invalidateQueries({ queryKey: ['wods'] });
+    qc.invalidateQueries({ queryKey: ['clases'] });
+}
+
+export function useCrearMovimiento() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) => api.post('/api/v1/movimientos', payload).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: claves.movimientos }),
+    });
+}
+
+// El parser de texto libre devuelve una PROPUESTA de movimientos (no guarda nada):
+// es una orden, no un dato cacheable, así que no invalida ninguna clave.
+export function useParsearWod() {
+    return useMutation({
+        mutationFn: (payload) => api.post('/api/v1/wods/parse', payload).then((r) => r.data),
+    });
+}
+
+export function useCrearWod() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) => api.post('/api/v1/wods', payload).then((r) => r.data),
+        onSuccess: () => invalidarWodsYClases(qc),
+    });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BLOQUE 2 parte C — DASHBOARD DEL COACH + GESTIÓN DE CLASES
+// ══════════════════════════════════════════════════════════════════════════════
+// Las dos pantallas pedían sus datos con `useEffect` + `useState` (el Dashboard, en un
+// solo `fetchAllData` de 5 GET más una consulta de RMs POR alumno). Como las rutas son
+// `lazy`, cada navegación entre ellas lo volvía a pedir TODO; acá comparten queryKey.
+
+// Clases de la semana del coach (`coach_id` = el coach logueado).
+export function useClasesCoach(coachId, desde, hasta) {
+    return useQuery({
+        queryKey: claves.clasesCoach(coachId, desde, hasta),
+        queryFn: async () => {
+            const data = (await api.get('/api/v1/clases', {
+                params: { coach_id: coachId, fecha_desde: desde, fecha_hasta: hasta },
+            })).data;
+            const lista = data?.clases || data || [];
+            return Array.isArray(lista) ? lista : [];
+        },
+        // El coach de una clase lo mueve tomar/soltar y el cupo, ampliar cupo (las dos
+        // invalidan `['clases']`); el horario en sí cambia poco.
+        staleTime: 30_000,
+        enabled: Boolean(coachId) && Boolean(desde) && Boolean(hasta),
+    });
+}
+
+// Clases de la semana de UNA disciplina (calendario multi-día y alcance al publicar).
+// Clave propia porque el `disciplina_id` cambia la respuesta: `useClasesRango` no lo lleva.
+export function useClasesDisciplinaSemana(disciplinaId, desde, hasta) {
+    return useQuery({
+        queryKey: claves.clasesDisciplinaSemana(disciplinaId, desde, hasta),
+        queryFn: async () => {
+            const data = (await api.get('/api/v1/clases/', {
+                params: {
+                    disciplina_id: disciplinaId,
+                    fecha_desde: desde,
+                    fecha_hasta: hasta,
+                    limit: 500,
+                },
+            })).data;
+            const lista = data?.clases || data || [];
+            return Array.isArray(lista) ? lista : [];
+        },
+        staleTime: 30_000,
+        enabled: Boolean(disciplinaId) && Boolean(desde) && Boolean(hasta),
+    });
+}
+
+// Listado completo de WODs del box (`GET /wods/` sin fecha): el Dashboard saca de acá
+// el WOD de hoy, "WODs esta semana" y el detalle que abre cada tarjeta.
+export function useTodosLosWods() {
+    return useQuery({
+        queryKey: claves.wodsTodos,
+        queryFn: async () => (await api.get('/api/v1/wods/')).data || [],
+        staleTime: 60_000,
+    });
+}
+
+// WODs de un día concreto (`GET /wods/?fecha=`): el calendario de la semana pide 7.
+export function useWodsDeFecha(fecha) {
+    return useQuery({
+        queryKey: claves.wodsFecha(fecha),
+        queryFn: async () => (await api.get('/api/v1/wods/', { params: { fecha } })).data || [],
+        staleTime: 60_000,
+        enabled: Boolean(fecha),
+    });
+}
+
+// Detalle de UN WOD: lo leen el modal de solo lectura y el formulario que se pre-carga
+// al entrar a Gestión de Clases con ?clase=ID.
+export function useWodDetalle(wodId) {
+    return useQuery({
+        queryKey: claves.wodDetalle(wodId),
+        queryFn: async () => (await api.get(`/api/v1/wods/${wodId}`)).data || null,
+        staleTime: 60_000,
+        enabled: Boolean(wodId),
+    });
+}
+
+// Catálogo de disciplinas del box (admin: Clases, Horarios, Coaches; coach: Gestión de
+// Clases): su propio filtro (ocultar Gap/Open Box, por ejemplo) lo pone cada pantalla.
+export function useDisciplinas() {
+    return useQuery({
+        queryKey: claves.disciplinas,
+        queryFn: async () => (await api.get('/api/v1/disciplinas/')).data || [],
+        staleTime: 300_000,
+    });
+}
+
+// Relaciones coach↔disciplina del box (ver la nota de la clave: el backend ignora
+// `coach_id`). Cada pantalla filtra lo suyo: el Dashboard por `coach_id === usuario_id`
+// y Gestión de Clases por `activo`. Antes eran DOS GET iguales con dos códigos distintos.
+export function useCoachDisciplinas() {
+    return useQuery({
+        queryKey: claves.coachDisciplinas,
+        queryFn: async () => (await api.get('/api/v1/coach-disciplinas')).data || [],
+        staleTime: 300_000,
+    });
+}
+
+// Alumnos del coach (scoped en el backend: 403 si se pide otro coach_id).
+export function useAlumnosDeCoach(coachId) {
+    return useQuery({
+        queryKey: claves.alumnosCoach(coachId),
+        queryFn: async () => (await api.get(
+            `/api/v1/fidelizacion/coach/${coachId}/alumnos`,
+        )).data?.alumnos || [],
+        staleTime: 60_000,
+        enabled: Boolean(coachId),
+    });
+}
+
+// Alumnos en riesgo de abandono + el umbral que aplicó el backend (para el texto).
+export function useAlumnosCoachEnRiesgo(coachId) {
+    return useQuery({
+        queryKey: claves.alumnosCoachEnRiesgo(coachId),
+        queryFn: async () => (await api.get(
+            `/api/v1/fidelizacion/coach/${coachId}/en-riesgo`,
+        )).data || {},
+        staleTime: 60_000,
+        enabled: Boolean(coachId),
+    });
+}
+
+// Progreso del tab Alumnos: para cada alumno, sus RMs (máximo 50). Antes eran 50 GET
+// EN SERIE en CADA navegación al panel; ahora van en paralelo y quedan en caché con la
+// lista de alumnos dentro de la clave (si cambia el listado, se recalcula).
+export function useProgresoAlumnosCoach(alumnos) {
+    const lista = (alumnos || []).slice(0, 50);
+    const ids = lista.map((a) => a.id).join(',');
+    return useQuery({
+        queryKey: claves.progresoAlumnosCoach(ids),
+        queryFn: async () => Promise.all(lista.map(async (alumno) => {
+            try {
+                const rms = (await api.get(`/api/v1/historial-rm/alumnos/${alumno.id}/rms`)).data || [];
+                return {
+                    id: alumno.id,
+                    nombre: alumno.nombre,
+                    correo: alumno.correo,
+                    telefono: alumno.telefono,
+                    total_rms: rms.length,
+                    rms,
+                    estado: rms.length >= 5 ? 'activo' : rms.length > 0 ? 'iniciando' : 'sin_datos',
+                };
+            } catch {
+                // Un alumno sin RMs (o con la consulta caída) no rompe el resto: se
+                // lista como "sin_datos", igual que hacía el for con await.
+                return {
+                    id: alumno.id,
+                    nombre: alumno.nombre,
+                    correo: alumno.correo,
+                    telefono: alumno.telefono,
+                    total_rms: 0,
+                    rms: [],
+                    estado: 'sin_datos',
+                };
+            }
+        })),
+        staleTime: 60_000,
+        enabled: lista.length > 0,
+    });
+}
+
+// Reservas de UNA clase: la misma lista la miran las DOS pantallas del coach (la
+// tarjeta expandible del Dashboard y "Tomar Asistencia" en Gestión de Clases).
+export function useReservasPorClase(claseId) {
+    return useQuery({
+        queryKey: claves.reservasPorClase(claseId),
+        queryFn: async () => (await api.get(`/api/v1/reservas/por-clase/${claseId}`)).data || [],
+        // Corta: la asistencia se marca y se desmarca todo el rato desde el panel.
+        staleTime: 15_000,
+        enabled: Boolean(claseId),
+    });
+}
+
+// Marcar/desmarcar la asistencia de UNA reserva. Mueve el detalle de la clase y los
+// contadores de asistencia: se invalidan las dos familias que lo alimentan.
+export function useMarcarAsistenciaReserva() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ reservaId, asistio }) => api.put(
+            `/api/v1/reservas/${reservaId}/asistencia`, { asistio },
+        ).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['reservas'] });
+            qc.invalidateQueries({ queryKey: ['asistencia'] });
+        },
+    });
+}
+
+// Editar el WOD de una clase (`PUT /wods/{id}`): mueve el WOD, su "WOD del día" y las
+// clases que lo comparten.
+export function useGuardarWod() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ wodId, payload, params }) => api.put(
+            `/api/v1/wods/${wodId}`, payload, { params },
+        ).then((r) => r.data),
+        onSuccess: () => invalidarWodsYClases(qc),
+    });
+}
+
+// Publicar el WOD de VARIOS días en una transacción (`POST /wods/batch-create`): el
+// backend crea un WOD por fecha y vincula sus clases de una sola vez.
+export function useCrearWodsBatch() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ body, params }) => api.post(
+            '/api/v1/wods/batch-create', body, { params },
+        ).then((r) => r.data),
+        onSuccess: () => invalidarWodsYClases(qc),
+    });
+}
+
+// Tomar/soltar una clase (`alcance`: sólo esa clase o las futuras del mismo horario;
+// `modo_emergencia` para disciplinas que el coach no dicta — queda auditado).
+export function useAccionClase() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ claseId, accion, params }) => api.post(
+            `/api/v1/clases/${claseId}/${accion}`, null, { params },
+        ).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['clases'] }),
+    });
+}
+
+// Correo de contacto a un alumno en riesgo: es una ORDEN (queda en
+// notificaciones_enviadas y en auditoría), no un dato que se cachee.
+export function useContactarAlumnoCoach() {
+    return useMutation({
+        mutationFn: ({ coachId, alumnoId }) => api.post(
+            `/api/v1/fidelizacion/coach/${coachId}/contactar/${alumnoId}`,
+        ).then((r) => r.data),
     });
 }
 
