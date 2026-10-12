@@ -2,8 +2,7 @@
  * rotuloCreditos — rótulo ÚNICO del cupo de créditos del alumno (FUENTE ÚNICA).
  *
  * Los endpoints devuelven el valor REAL de la fila (`clases_disponibles` en
- * `GET /planes/membresia-activa` y `creditos_disponibles` en
- * `GET /membresias/mi-membresia`): puede ser NULL. NULL NO significa "sin
+ * `GET /planes/membresia-activa`): puede ser NULL. NULL NO significa "sin
  * créditos", significa "el cupo no está cargado", así que no se inventa un 0 ni
  * se deja el hueco en blanco.
  *

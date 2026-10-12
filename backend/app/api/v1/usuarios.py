@@ -299,7 +299,7 @@ def _items_con_membresia(db: Session, tenant_id: int, usuarios: list) -> List[di
             Suscripcion.estado == "activo",
         ).order_by(Suscripcion.fecha_expiracion.desc()).all()
         # Ya vienen ordenadas por vencimiento desc: la primera VIGENTE de cada alumno es
-        # la que se muestra (mismo criterio que /membresias/mi-membresia).
+        # la que se muestra (vigencia por día chileno, `vigente_el_dia`).
         for s in suscripciones:
             if s.usuario_id in vigentes or not vigente_el_dia(s.fecha_expiracion):
                 continue

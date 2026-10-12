@@ -3,7 +3,7 @@
     disciplinas, planes, horarios, clases, reservas,
     coach_disciplinas, movimientos, historial_rm,
     retencion, productos, pedidos, reportes, auditoria, auth,
-    suscripciones, wods, solicitudes_planes, upload, membresias,
+    suscripciones, wods, solicitudes_planes, upload,
     notificaciones, notificaciones_enviadas, migracion,
     comprar_emergencia, fix_fechas, supervision,
     finanzas, configuracion, alumnos, asistencia, ranking, kpis,
@@ -267,8 +267,6 @@ app.include_router(solicitudes_planes.router,
                    prefix="/api/v1/solicitudes", tags=["Solicitudes Planes"])
 app.include_router(upload.router,
                    prefix="/api/v1/upload", tags=["Upload"])
-app.include_router(membresias.router,
-                   prefix="/api/v1/membresias", tags=["MembresÃ­as"])
 app.include_router(notificaciones.router,
                    prefix="/api/v1/notificaciones", tags=["Notificaciones"])
 app.include_router(notificaciones_enviadas.router,

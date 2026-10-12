@@ -164,14 +164,6 @@ async def run_tests():
         record("PUT /historial-rm propio >24h", "403+msj ventana", r.status_code,
                ok3, r.text[:120])
 
-        # Caso 4: mi-membresia con alumno_id ajeno -> 200 y datos propios
-        r = await c.get("/api/v1/membresias/mi-membresia",
-                        params={"tenant_id": 2, "alumno_id": 102}, headers=hA)
-        body = r.json()
-        ok4 = r.status_code == 200 and body.get("activa") is True
-        record("GET /mi-membresia (alumno_id ajeno ignorado)", "200 propia",
-               f"{r.status_code} activa={body.get('activa')}", ok4)
-
         # Caso 5: membresia-activa con alumno_id ajeno -> 200 y datos propios
         r = await c.get("/api/v1/planes/membresia-activa",
                         params={"tenant_id": 2, "alumno_id": 102}, headers=hA)
