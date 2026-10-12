@@ -123,19 +123,21 @@ def _programar(func, trigger, job_id, name, ahora):
     scheduler.add_job(func, trigger, **kwargs)
 
 
-def iniciar_scheduler():
-    """Inicia el scheduler con el job diario a las 00:05 CLT + alertas de email.
+LATIDO_MIN = 5
 
-    Sólo la INSTANCIA LÍDER programa jobs (lock de sesión en Postgres): con dos
-    réplicas en Render, las dos arrancaban su propio APScheduler y los correos
-    salían DUPLICADOS (08:00:09 y 08:00:10 el 26/09). La standby no agenda nada.
+# Los 7 jobs de negocio: los programa SÓLO la líder. El latido (abajo) va aparte y se
+# agenda SIEMPRE, también en standby.
+IDS_NEGOCIO = ("generar_clases_diarias", "alerta_urgencia_renovacion",
+               "alerta_renovacion", "alerta_inactividad", "alerta_ultimo_credito",
+               "alerta_sin_creditos", "cierre_mes")
+
+
+def _programar_jobs_de_negocio():
+    """Agenda los 7 jobs de negocio (sólo la líder). Idempotente: `replace_existing`.
+
+    Se vuelve a llamar cuando la instancia recupera el liderazgo. El catch-up de
+    `_programar` + el lock (job, día) cubren el hueco de los minutos sin líder.
     """
-    from app.services.scheduler_lock import tomar_lock_lider
-    if not tomar_lock_lider():
-        logger.warning(
-            "🟡 [Scheduler] Otra instancia ya es la líder (advisory lock). "
-            "Esta instancia queda en standby y NO programa jobs.")
-        return
     ahora = datetime.now(pytz.timezone("America/Santiago"))
     tz = pytz.timezone("America/Santiago")
     _programar(job_generar_clases_diarias,
@@ -168,12 +170,128 @@ def iniciar_scheduler():
                CronTrigger(day=1, hour=0, minute=5, timezone=tz),
                "cierre_mes",
                "Cierre de mes anterior: asistencia + hitos + correos", ahora)
+    return list(IDS_NEGOCIO)
+
+
+def _quitar_jobs_de_negocio():
+    """Saca los jobs de negocio de ESTA instancia (dejó de ser líder).
+
+    El latido NO se toca: sigue agendado para poder recuperar el liderazgo después.
+    `remove_job` levanta JobLookupError si el job no estaba agendado (caso normal de
+    la standby que nunca fue líder), así que va por job y a prueba de fallos.
+    """
+    quitados = []
+    for job_id in IDS_NEGOCIO:
+        try:
+            scheduler.remove_job(job_id)
+            quitados.append(job_id)
+        except Exception:
+            pass
+    return quitados
+
+
+def sincronizar_liderazgo() -> str:
+    """Un latido: comprueba el lock de VERDAD en Postgres y reacciona.
+
+    Devuelve "lider_ok" | "lider_recuperado" | "lider_nuevo" | "standby".
+
+    Por qué existe: el lock de líder se perdía sin que nadie lo notara. La conexión
+    del líder quedaba `idle in transaction` y Neon mataba la sesión a los 5 minutos
+    exactos (`idle_in_transaction_session_timeout`), liberando el lock; como
+    `es_lider()` sólo miraba la variable local, la instancia seguía disparando jobs
+    creyéndose líder, la standby nunca reintentaba y la conexión muerta no volvía al
+    pool. Ahora `tomar_lock_lider()` cierra la transacción, este latido verifica
+    contra Postgres y, si el lock se perdió, suelta los jobs y trata de recuperarlo.
+    """
+    from app.services.scheduler_lock import (es_lider, olvidar_lock_lider,
+                                             tomar_lock_lider, verificar_lock_lider)
+
+    era_lider = es_lider()
+    recuperando = False
+    if era_lider:
+        if verificar_lock_lider():
+            return "lider_ok"
+        logger.warning(
+            "⚠️ [Scheduler] esta instancia PERDIÓ el lock de líder (sesión matada "
+            "por el server, p. ej. idle_in_transaction_session_timeout); se sueltan "
+            "los jobs y se intenta recuperar")
+        olvidar_lock_lider()
+        _quitar_jobs_de_negocio()
+        recuperando = True
+
+    if not tomar_lock_lider():
+        # Standby (o se perdió el lock y otra instancia se adelantó): sin jobs.
+        if recuperando:
+            logger.warning(
+                "🟡 [Scheduler] otra instancia tomó el liderazgo; esta queda en "
+                f"standby y reintenta en el próximo latido ({LATIDO_MIN} min)")
+        return "standby"
+
+    _programar_jobs_de_negocio()
+    if recuperando:
+        logger.warning("✅ [Scheduler] liderazgo RECUPERADO: jobs re-programados")
+        return "lider_recuperado"
+    if not era_lider:
+        logger.warning(
+            "✅ [Scheduler] esta instancia pasa a liderar (la anterior soltó el "
+            "lock); jobs programados")
+        return "lider_nuevo"
+    return "lider_ok"
+
+
+async def job_vigilar_liderazgo():
+    """Latido del lock de líder (cada `LATIDO_MIN` min), fuera del event loop.
+
+    `verificar_lock_lider()` y `tomar_lock_lider()` son llamadas SÍNCRONAS a Neon:
+    van a un hilo con `to_thread.run_sync` (el mismo threadpool que dimensiona
+    main.py) para no congelar a los usuarios, igual que las alertas y el cierre de mes.
+    """
+    try:
+        return await to_thread.run_sync(sincronizar_liderazgo)
+    except Exception as e:
+        logger.error(f"❌ [Scheduler] el latido del líder falló: {e}", exc_info=True)
+        return "error"
+
+
+def _programar_latido():
+    """Agenda el latido del lock. Va SIEMPRE, también en standby (es su única salida)."""
+    scheduler.add_job(job_vigilar_liderazgo, "interval", minutes=LATIDO_MIN,
+                      id="vigilar_liderazgo", name="Latido del lock de líder",
+                      replace_existing=True, coalesce=True, max_instances=1,
+                      misfire_grace_time=GRACIA_SEG)
+
+
+def iniciar_scheduler():
+    """Inicia el scheduler con el job diario a las 00:05 CLT + alertas de email.
+
+    Sólo la INSTANCIA LÍDER programa los jobs de negocio (lock de sesión en Postgres):
+    con dos réplicas en Render, las dos arrancaban su propio APScheduler y los correos
+    salían DUPLICADOS (08:00:09 y 08:00:10 el 26/09).
+
+    La standby NO agenda jobs de negocio, pero SÍ arranca su APScheduler con el latido
+    (`job_vigilar_liderazgo`): sin el latido no podría notar que perdió el liderazgo
+    (pasaba: a los 5 min se caía la conexión del lock y nadie se enteraba) ni tomar el
+    relevo si la líder muere (antes sólo se intentaba ser líder UNA vez, al arrancar).
+    """
+    from app.services.scheduler_lock import tomar_lock_lider
+
+    if tomar_lock_lider():
+        _programar_jobs_de_negocio()
+    else:
+        logger.warning(
+            "🟡 [Scheduler] Otra instancia ya es la líder (advisory lock). "
+            f"Esta instancia queda en standby: sin jobs de negocio y reintentando "
+            f"cada {LATIDO_MIN} min.")
+    # El latido va SIEMPRE (también en standby): es lo que detecta que perdimos el
+    # liderazgo y lo que permite tomar el relevo si la líder muere.
+    _programar_latido()
     scheduler.start()
     logger.info(
         "🚀 Scheduler iniciado - generación de clases 00:05, "
         "alertas de email 06:00 / 07:00 / 08:00 / 09:00 / 10:00 CLT, "
         "cierre de mes día 1 00:05 CLT "
-        "(mantenimiento diario/mensual movido al contenedor de mantenimiento)")
+        f"(latido del lock de líder cada {LATIDO_MIN} min; "
+        "mantenimiento diario/mensual movido al contenedor de mantenimiento)")
 
 
 async def _ejecutar_alertas(tipo: str):

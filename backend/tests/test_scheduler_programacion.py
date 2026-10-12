@@ -38,7 +38,7 @@ def _ahora(h, m, dia=30, mes=9, anio=2026):
 
 
 class _SchedulerFalso:
-    """Registra los `add_job`/`start` sin arrancar nada real."""
+    """Registra los `add_job`/`start`/`remove_job` sin arrancar nada real."""
 
     def __init__(self):
         self.jobs = []
@@ -47,8 +47,14 @@ class _SchedulerFalso:
     def add_job(self, func, trigger, **kwargs):
         self.jobs.append((func, trigger, kwargs))
 
+    def remove_job(self, job_id):
+        self.jobs = [j for j in self.jobs if j[2].get("id") != job_id]
+
     def start(self):
         self.iniciado = True
+
+    def ids(self):
+        return [kw.get("id") for _, _, kw in self.jobs]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -180,16 +186,42 @@ def test_iniciar_scheduler_lider_programa_los_7_jobs(monkeypatch):
 
     assert programados == IDS_ESPERADOS
     assert falso.iniciado is True
+    # Además de los 7 de negocio, la líder agenda su latido del lock.
+    assert falso.ids() == ["vigilar_liderazgo"]
 
 
-def test_iniciar_scheduler_standby_no_programa(monkeypatch):
+def test_el_latido_del_lider_es_interval_de_latido_min(monkeypatch):
+    """El latido va con `interval` de `LATIDO_MIN` y sin solaparse consigo mismo."""
+    falso = _SchedulerFalso()
+    monkeypatch.setattr(sch, "scheduler", falso)
+
+    sch._programar_latido()
+
+    func, trigger, kw = falso.jobs[0]
+    assert func is sch.job_vigilar_liderazgo
+    assert trigger == "interval"
+    assert kw["minutes"] == sch.LATIDO_MIN == 5
+    assert kw["id"] == "vigilar_liderazgo"
+    assert kw["coalesce"] is True and kw["max_instances"] == 1
+    assert kw["replace_existing"] is True
+
+
+def test_iniciar_scheduler_standby_no_programa_jobs_de_negocio(monkeypatch):
+    """La standby ya NO sale sin arrancar: arranca para poder LATIR.
+
+    Antes la standby salía con `return` sin arrancar su APScheduler, así que no podía
+    enterarse de que la líder murió (no reintentaba el lock nunca). Ahora arranca y
+    agenda SÓLO el latido; los 7 jobs de negocio siguen siendo exclusivos de la líder.
+    """
     falso = _SchedulerFalso()
     monkeypatch.setattr(sch, "scheduler", falso)
     monkeypatch.setattr(sch, "_programar",
-                        lambda *a, **k: pytest.fail("la standby no debe programar"))
+                        lambda *a, **k: pytest.fail("la standby no programa jobs de negocio"))
     monkeypatch.setattr(sl, "tomar_lock_lider", lambda: False)
 
     sch.iniciar_scheduler()
 
-    assert falso.jobs == [] and falso.iniciado is False
+    assert falso.ids() == ["vigilar_liderazgo"]
+    assert falso.iniciado is True
+    assert not any(i in falso.ids() for i in IDS_ESPERADOS)
 

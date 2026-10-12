@@ -9,6 +9,12 @@ Postgres (`pg_try_advisory_lock`):
   · LÍDER: sólo una instancia programa jobs (`tomar_lock_lider`/`soltar_lock_lider`).
   · JOB+DÍA: cada job se corre una sola vez al día (`lock_de_job`).
 
+Y una falla más, medida (2026-10): la conexión del líder quedaba `idle in transaction`
+(el `pg_try_advisory_lock` abría transacción y nunca se cerraba) y Neon la mataba a los
+5 min exactos → el lock se perdía sin que nadie lo notara. Por eso `tomar_lock_lider()`
+commitea, `verificar_lock_lider()` le pregunta a `pg_locks` (no al `pg_try_advisory_lock`,
+que es re-entrante) y `olvidar_lock_lider()` devuelve la ranura al pool.
+
 Sin red, sin BD: `_nueva_conexion()` está doblada por una conexión falsa que
 registra el SQL y devuelve resultados programados.
 
@@ -41,6 +47,7 @@ class _FakeConn:
     def __init__(self, resultados=None):
         self.sql = []            # [(sentencia, params)]
         self.cerrada = False
+        self.commits = 0         # cuántas veces se cerró la transacción
         self._resultados = list(resultados or [])
 
     def execute(self, sentencia, params=None):
@@ -48,8 +55,18 @@ class _FakeConn:
         valor = self._resultados.pop(0) if self._resultados else True
         return _FakeResult(valor)
 
+    def commit(self):
+        self.commits += 1
+
     def close(self):
         self.cerrada = True
+
+
+class _FakeConnMuerta(_FakeConn):
+    """Conexión que el server ya mató: cualquier sentencia levanta."""
+
+    def execute(self, sentencia, params=None):
+        raise RuntimeError("server closed the connection unexpectedly")
 
 
 def _doble(monkeypatch, *conexiones):
@@ -121,6 +138,94 @@ def test_soltar_sin_ser_lider_no_hace_nada():
     """Sin lock de líder, `soltar_lock_lider()` es un no-op (no explota)."""
     sl._conexion_lider = None
     sl.soltar_lock_lider()                        # no debe levantar
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# El lock se perdía a los 5 min: commit al tomarlo + verificación REAL
+#
+# Medido contra Neon: `idle_in_transaction_session_timeout = 5min`. Al tomar el lock
+# sin commitear, la conexión del líder quedaba `idle in transaction` y el server la
+# mataba a los 300 s exactos → adiós lock, y la app seguía creyéndose líder.
+# ══════════════════════════════════════════════════════════════════════════════
+def test_tomar_lock_lider_cierra_la_transaccion(monkeypatch):
+    """Tras tomar el lock hay `commit()`: sin él la sesión queda `idle in transaction`."""
+    conn = _FakeConn([True])
+    _doble(monkeypatch, conn)
+
+    assert sl.tomar_lock_lider() is True
+
+    assert conn.commits == 1, (
+        "tomar el lock de líder tiene que commitear: si la conexión queda "
+        "idle in transaction, Neon la mata a los 5 min y se lleva el lock")
+
+
+def test_tomar_lock_lider_no_commitea_si_no_lo_obtuvo(monkeypatch):
+    """Si otra instancia es la líder se cierra la conexión: no hay nada que commitear."""
+    conn = _FakeConn([False])
+    _doble(monkeypatch, conn)
+
+    assert sl.tomar_lock_lider() is False
+    assert conn.commits == 0
+    assert conn.cerrada is True
+
+
+def test_verificar_lock_lider_pregunta_por_pg_locks(monkeypatch):
+    """La verificación real lee `pg_locks` (y NO `pg_try_advisory_lock`, re-entrante)."""
+    conn = _FakeConn([1])                          # count(*) = 1 → sigo teniéndolo
+    _doble(monkeypatch, conn)
+    assert sl.tomar_lock_lider() is True
+    conn.sql.clear()
+
+    assert sl.verificar_lock_lider() is True
+
+    sentencias = " ".join(s for s, _ in conn.sql).lower()
+    assert "pg_locks" in sentencias
+    assert "pg_try_advisory_lock" not in sentencias, (
+        "pg_try_advisory_lock es RE-ENTRANTE en la misma sesión: devolvería True "
+        "aunque el lock se hubiera perdido")
+    assert conn.sql[-1][1]["clave"] == sl.CLAVE_LIDER
+    assert conn.sql[-1][1]["clave"] < 2 ** 31, "objid es int4: la clave tiene que caber"
+    assert conn.commits == 2, (
+        "verificar tampoco puede dejar la conexión en idle in transaction")
+
+
+def test_verificar_lock_lider_da_false_si_el_lock_ya_no_esta(monkeypatch):
+    """`count(*) = 0` significa que el lock se perdió (el caso del kill a los 5 min)."""
+    conn = _FakeConn([0])
+    _doble(monkeypatch, conn)
+
+    assert sl.verificar_lock_lider() is False
+
+
+def test_verificar_lock_lider_da_false_si_la_conexion_murio(monkeypatch):
+    """Si el server mató la sesión, la verificación levanta y se traduce en False."""
+    conn = _FakeConnMuerta()
+    _doble(monkeypatch, conn)
+
+    assert sl.verificar_lock_lider() is False
+
+
+def test_verificar_lock_lider_sin_conexion_da_false():
+    """Sin haber sido líder nunca, no hay nada que verificar."""
+    sl._conexion_lider = None
+    assert sl.verificar_lock_lider() is False
+
+
+def test_olvidar_lock_lider_cierra_sin_pedir_unlock(monkeypatch):
+    """Perdido el lock no se pide unlock (daría error): se cierra y vuelve al pool.
+
+    Sin ese `close()` la conexión muerta se quedaba ocupada en el pool para siempre
+    (1 de 15 ranuras por instancia, medido).
+    """
+    conn = _FakeConn([True])
+    _doble(monkeypatch, conn)
+    assert sl.tomar_lock_lider() is True
+
+    sl.olvidar_lock_lider()
+
+    assert sl.es_lider() is False
+    assert conn.cerrada is True
+    assert not any("pg_advisory_unlock" in s for s, _ in conn.sql)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
