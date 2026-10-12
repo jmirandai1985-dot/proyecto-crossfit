@@ -23,7 +23,9 @@ def _fuente() -> str:
 
 def test_a_las_credenciales_enviadas_dependen_de_email_enviado():
     fuente = _fuente()
-    assert "await api.put(`/api/v1/alumnos/${alumnoId}/${accion}`)" in fuente
+    # La llamada se mudó al hook `useAccionAlumnoPendiente` cuando la pantalla pasó a React
+    # Query (commit 70daeec): el guard sigue exigiendo QUE se llame y en qué orden.
+    assert "await accionAlumno.mutateAsync({ alumnoId, accion })" in fuente
     i_if = fuente.index("if (data?.email_enviado) {")
     i_msg = fuente.index("setMessage('Alumno activado y credenciales enviadas por correo')")
     assert i_if < i_msg, (
