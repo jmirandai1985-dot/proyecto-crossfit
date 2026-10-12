@@ -86,6 +86,16 @@ const Fidelizacion = () => {
     // `useChurn` ya reacciona a `buscar` (el término va en su queryKey) y conserva la
     // tabla anterior mientras llega la nueva (`keepPreviousData`): el buscador no
     // parpadea ni dispara una request por tecla.
+    // ⚠️ ORDEN: `buscar` se declara ANTES de usarlo. `useChurn` lo recibe como argumento y
+    // un `const` leído antes de su declaración tira "Cannot access 'buscar' before
+    // initialization" (TDZ) al renderizar: la pantalla quedaba en el ErrorBoundary
+    // ("La app no pudo abrir esta pantalla"). El bug se veía SOLO en el build de
+    // producción porque ahí el nombre minificado (`so`/`se`) sale en el mensaje.
+    // Búsqueda server-side (nombre o correo) de la tabla: input con debounce (350ms,
+    // igual que Alumnos.jsx). `buscar` es el término YA aplicado (el que viaja al
+    // backend); los filtros de riesgo/arquetipo se combinan ENCIMA de su resultado.
+    const [searchTerm, setSearchTerm] = useState('');
+    const [buscar, setBuscar] = useState('');
     const churnQ = useChurn(tenant_id, buscar);
     const segQ = useSegmentacion(tenant_id);
     const churn = churnQ.data ?? null;
@@ -95,11 +105,6 @@ const Fidelizacion = () => {
     const segError = segQ.isError;
     const loading = churnQ.isLoading || segQ.isLoading;
     const marcarGestion = useMarcarGestionChurn();
-    // Búsqueda server-side (nombre o correo) de la tabla: input con debounce (350ms,
-    // igual que Alumnos.jsx). `buscar` es el término YA aplicado (el que viaja al
-    // backend); los filtros de riesgo/arquetipo se combinan ENCIMA de su resultado.
-    const [searchTerm, setSearchTerm] = useState('');
-    const [buscar, setBuscar] = useState('');
     // Alumno al que se le va a mandar un correo: abre el modal de envío (F1).
     const [alumnoCorreo, setAlumnoCorreo] = useState(null);
     // Alumno al que se le va a DAR un beneficio: abre el modal de la F2.
