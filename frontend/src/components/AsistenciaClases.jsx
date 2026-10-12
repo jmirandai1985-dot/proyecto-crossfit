@@ -1,6 +1,11 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import AsistenciaGrupoDisciplina from './AsistenciaGrupoDisciplina';
-import api from '../services/api';
+// Fase 2 (Bloque 2): las clases del día y el detalle de cada una salen de la caché
+// compartida (la pestaña Asistencia del coach y del admin piden lo MISMO) y confirmar la
+// asistencia es una mutación que invalida la familia `['asistencia']`.
+import {
+    useAlumnosDeClase, useAmpliarCupo, useClasesAsistenciaHoy, useConfirmarAsistenciaClase,
+} from '../hooks/queries';
 
 /**
  * Pestaña "Asistencia" (compartida coach + admin, Fase 1).
@@ -20,34 +25,48 @@ import api from '../services/api';
 const AsistenciaClases = ({ variant = 'light' } = {}) => {
     const osc = variant === 'dark';
 
-    const [clases, setClases] = useState([]);
-    const [cargando, setCargando] = useState(true);
-    const [error, setError] = useState(null);
+    // ─── Clases de hoy (React Query) ───────────────────────────────────
+    const clasesQ = useClasesAsistenciaHoy();
+    const clases = clasesQ.data || [];
+    const cargando = clasesQ.isPending;
+    const error = clasesQ.isError
+        ? (clasesQ.error?.response?.data?.detail || 'Error al cargar las clases de hoy')
+        : null;
 
+    // ─── Clase abierta ─────────────────────────────────────────────────
     const [claseSeleccionada, setClaseSeleccionada] = useState(null);
-    const [reservas, setReservas] = useState([]);
-    const [marcada, setMarcada] = useState(false);
-    const [cargandoReservas, setCargandoReservas] = useState(false);
-    const [asistencias, setAsistencias] = useState({});
-    const [confirmando, setConfirmando] = useState(false);
-    const [mensaje, setMensaje] = useState(null);
-    const [clasesMarcadas, setClasesMarcadas] = useState({});
+    const [aviso, setAviso] = useState(null);
 
-    const cargarClases = useCallback(async () => {
-        setCargando(true);
-        setError(null);
-        try {
-            const r = await api.get('/api/v1/asistencia/clases-hoy');
-            setClases(r.data || []);
-        } catch (e) {
-            setError(e.response?.data?.detail || 'Error al cargar las clases de hoy');
+    const alumnosQ = useAlumnosDeClase(claseSeleccionada?.id);
+    const reservas = useMemo(() => alumnosQ.data?.reservas || [], [alumnosQ.data]);
+    const marcada = !!alumnosQ.data?.marcada;
+    const cargandoReservas = Boolean(claseSeleccionada) && alumnosQ.isPending;
+
+    // Si el detalle de la clase falla, el aviso del modal lo dice (mismo texto de antes).
+    const mensaje = alumnosQ.isError
+        ? {
+            tipo: 'error',
+            texto: alumnosQ.error?.response?.data?.detail || 'Error al cargar los alumnos de la clase',
         }
-        setCargando(false);
-    }, []);
+        : aviso;
 
-    useEffect(() => {
-        cargarClases();
-    }, [cargarClases]);
+    const confirmarAsistencia = useConfirmarAsistenciaClase();
+    const ampliarCupoMut = useAmpliarCupo();
+    const confirmando = confirmarAsistencia.isPending;
+
+    // El marcado: la BASE es lo que dice el backend (si la clase ya fue marcada, lo
+    // guardado; si no, NINGUNO — así un clic en Confirmar no marca la clase entera por
+    // accidente) y `overrides` guarda SÓLO las decisiones del usuario. Sin estado que
+    // haya que sembrar cuando llega la respuesta.
+    const [overrides, setOverrides] = useState({});
+    const guardado = useMemo(() => {
+        const m = {};
+        reservas.forEach((a) => { m[a.reserva_id] = !!a.asistio; });
+        return m;
+    }, [reservas]);
+    const valor = (reservaId) => (
+        reservaId in overrides ? overrides[reservaId] : (marcada ? !!guardado[reservaId] : false)
+    );
 
     const formatearHora = (h) => {
         if (!h) return '';
@@ -56,71 +75,48 @@ const AsistenciaClases = ({ variant = 'light' } = {}) => {
         return h;
     };
 
-    const abrirClase = async (clase) => {
+    const abrirClase = (clase) => {
+        setAviso(null);
+        setOverrides({});   // cada clase arranca con su propio marcado
         setClaseSeleccionada(clase);
-        setMensaje(null);
-        setCargandoReservas(true);
-        try {
-            const r = await api.get(`/api/v1/asistencia/clases/${clase.id}/alumnos`);
-            const data = r.data || {};
-            const res = data.reservas || [];
-            setReservas(res);
-            setMarcada(!!data.marcada);
-            // Checks por defecto: si la clase ya fue marcada, muestro lo
-            // guardado; si no, NINGUNO pre-marcado (evita confirmar la clase entera por accidente).
-            const inicial = {};
-            res.forEach((a) => {
-                inicial[a.reserva_id] = data.marcada ? a.asistio : false;
-            });
-            setAsistencias(inicial);
-        } catch (e) {
-            setMensaje({ tipo: 'error', texto: e.response?.data?.detail || 'Error al cargar los alumnos de la clase' });
-        }
-        setCargandoReservas(false);
     };
 
     const cerrarClase = () => {
         setClaseSeleccionada(null);
-        setReservas([]);
-        setAsistencias({});
-        setMensaje(null);
+        setOverrides({});
+        setAviso(null);
     };
 
     const toggle = (reservaId) => {
-        setAsistencias((prev) => ({ ...prev, [reservaId]: !prev[reservaId] }));
+        setOverrides((prev) => ({ ...prev, [reservaId]: !valor(reservaId) }));
     };
 
-    const marcarTodos = (valor) => {
+    const marcarTodos = (valorNuevo) => {
         const nuevo = {};
-        reservas.forEach((a) => { nuevo[a.reserva_id] = valor; });
-        setAsistencias(nuevo);
+        reservas.forEach((a) => { nuevo[a.reserva_id] = valorNuevo; });
+        setOverrides(nuevo);
     };
 
     const confirmar = async () => {
         if (!claseSeleccionada) return;
-        setConfirmando(true);
-        setMensaje(null);
+        setAviso(null);
         try {
-            const ids = Object.keys(asistencias);
-            const payload = {
-                asistencias: ids.map((rid) => ({
-                    reserva_id: parseInt(rid, 10),
-                    asistio: !!asistencias[rid],
-                })),
-            };
-            const r = await api.post(
-                `/api/v1/asistencia/clases/${claseSeleccionada.id}/confirmar`,
-                payload
-            );
-            const confirmados = r.data?.confirmados ?? ids.length;
-            setMensaje({ tipo: 'exito', texto: `✅ Asistencia guardada (${confirmados} alumno(s))` });
-            setClasesMarcadas((prev) => ({ ...prev, [claseSeleccionada.id]: true }));
+            const asistencias = reservas.map((a) => ({
+                reserva_id: parseInt(a.reserva_id, 10),
+                asistio: !!valor(a.reserva_id),
+            }));
+            const r = await confirmarAsistencia.mutateAsync({
+                claseId: claseSeleccionada.id,
+                asistencias,
+            });
+            const confirmados = r?.confirmados ?? asistencias.length;
             cerrarClase();
-            cargarClases();
+            // La lista del día y el detalle de la clase se refrescan SOLOS (la mutación
+            // invalida `['asistencia']`): la misma verdad para el panel del admin.
+            setAviso({ tipo: 'exito', texto: `✅ Asistencia guardada (${confirmados} alumno(s))` });
         } catch (e) {
-            setMensaje({ tipo: 'error', texto: e.response?.data?.detail || 'Error al guardar la asistencia' });
+            setAviso({ tipo: 'error', texto: e.response?.data?.detail || 'Error al guardar la asistencia' });
         }
-        setConfirmando(false);
     };
 
     // Fase 2: agrupacion por disciplina respetando el orden del backend (dentro de
@@ -142,10 +138,8 @@ const AsistenciaClases = ({ variant = 'light' } = {}) => {
     }, [clases]);
 
     // Ampliar cupo de UNA clase puntual (el backend valida permisos y el tope +10).
-    const ampliarCupo = async (clase, extra) => {
-        const r = await api.post(`/api/v1/clases/${clase.id}/ampliar-cupo`, { cupos_extra: extra });
-        return r.data; // { cupo_maximo, cupo_original, tope, extra_disponible }
-    };
+    // Devuelve la promesa: el hijo pinta el cupo nuevo con la respuesta.
+    const ampliarCupo = (clase, extra) => ampliarCupoMut.mutateAsync({ claseId: clase.id, extra });
 
     return (
         <div className="space-y-6">
@@ -274,7 +268,7 @@ const AsistenciaClases = ({ variant = 'light' } = {}) => {
                                                 <span className={`text-xs ${osc ? 'text-zinc-500' : 'text-gray-500'}`}>Asistió</span>
                                                 <input
                                                     type="checkbox"
-                                                    checked={!!asistencias[a.reserva_id]}
+                                                    checked={valor(a.reserva_id)}
                                                     onChange={() => toggle(a.reserva_id)}
                                                     className="w-5 h-5 accent-orange-500"
                                                 />

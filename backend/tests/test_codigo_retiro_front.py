@@ -13,7 +13,7 @@ conectadas y que ninguna filtre lo que no debe.
     montos (no pide /pedidos ni /productos); esa entrada NO se declara en Layout.jsx
     sino en la FUENTE ÚNICA del menú (`config/menu.js`), que Layout consume;
   * el modal compartido (`components/ModalEntregarPedido.jsx`) es el único que llama a
-    `POST /api/v1/pedidos/entregar`.
+    `POST /api/v1/pedidos/entregar` —hoy por el hook `useEntregarPedido`—.
 
     cd backend && py -3.12 -m pytest tests/test_codigo_retiro_front.py --noconftest -q
 """
@@ -67,7 +67,11 @@ def test_el_coach_tiene_su_pantalla_y_usa_el_mismo_modal():
 
 def test_el_modal_compartido_llama_al_endpoint_de_entrega():
     fuente = _fuente("frontend/src/components/ModalEntregarPedido.jsx")
-    assert "/api/v1/pedidos/entregar" in fuente
+    # La llamada vive en el hook compartido `useEntregarPedido` (Fase 2, Bloque 2): el modal
+    # la dispara y sigue siendo el único lugar que valida el código de retiro.
+    assert "useEntregarPedido(" in fuente
+    assert "await entregarPedido.mutateAsync(limpio)" in fuente
+    assert "/api/v1/pedidos/entregar" in _fuente("frontend/src/hooks/queries.js")
     assert "onEntregado" in fuente
     # Muestra el resultado de la entrega (alumno, producto, cantidad) al mesón.
     assert "alumno_nombre" in fuente

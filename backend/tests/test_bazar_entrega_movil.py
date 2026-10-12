@@ -41,6 +41,7 @@ CSS = "frontend/src/pages/admin/inicioMobileAdmin.css"
 PEDIDOS_UTIL = "frontend/src/utils/pedidosEntrega.js"
 ENTREGA_UTIL = "frontend/src/utils/entregaMovil.js"
 MODAL = "frontend/src/components/ModalEntregarPedido.jsx"
+QUERIES = "frontend/src/hooks/queries.js"
 BACKEND_PEDIDOS = "backend/app/api/v1/pedidos.py"
 
 
@@ -143,7 +144,10 @@ def test_b3_la_validacion_la_hace_el_modal_compartido_no_se_duplica_logica():
     assert 'etiquetaAccion="Validar y entregar"' in fuente
     # 🔒 La llamada al endpoint NO se duplica: sólo vive en el modal compartido.
     assert "/api/v1/pedidos/entregar" not in fuente
-    assert "/api/v1/pedidos/entregar" in _fuente(MODAL)
+    # El POST vive ahora en el hook compartido `useEntregarPedido` (Fase 2, Bloque 2), que
+    # es el que dispara el modal: se sigue sin duplicar ni la llamada ni el 404/409.
+    assert "useEntregarPedido(" in _fuente(MODAL)
+    assert "/api/v1/pedidos/entregar" in _fuente(QUERIES)
 
 
 def test_b4_el_modal_compartido_gana_el_rotulo_y_conserva_su_default():

@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
-import api from '../services/api';
+// Fase 2 (Bloque 2): la entrega es una mutación compartida —el mesón del coach y el panel
+// del admin usan ESTE modal—, así que invalidar `['pedidos']` deja la lista del admin al
+// día apenas el coach entrega.
+import { useEntregarPedido } from '../hooks/queries';
 
 /**
  * Modal COMPARTIDO para entregar un pedido del Bazar con su CÓDIGO DE RETIRO.
@@ -28,8 +31,10 @@ const ModalEntregarPedido = ({
     codigoInicial = '', etiquetaAccion = 'Entregar', onCerrar, onEntregado,
 }) => {
     const [codigo, setCodigo] = useState(codigoInicial || '');
-    const [entregando, setEntregando] = useState(false);
     const [error, setError] = useState('');
+    // El botón se bloquea mientras la entrega viaja (antes: `entregando` local).
+    const entregarPedido = useEntregarPedido();
+    const entregando = entregarPedido.isPending;
     // Última entrega OK: se queda a la vista para confirmar en voz alta con el
     // alumno y para poder encadenar el siguiente código sin cerrar el modal.
     const [resultado, setResultado] = useState(null);
@@ -41,20 +46,17 @@ const ModalEntregarPedido = ({
             setError('Ingresa o escanea el código de retiro.');
             return;
         }
-        setEntregando(true);
         setError('');
         try {
-            const res = await api.post('/api/v1/pedidos/entregar', { codigo: limpio });
-            setResultado(res.data);
+            const datos = await entregarPedido.mutateAsync(limpio);
+            setResultado(datos);
             setCodigo('');
-            if (onEntregado) onEntregado(res.data);
+            if (onEntregado) onEntregado(datos);
         } catch (err) {
             // 404 (código de otro box o inexistente) y 409 (sin validar / ya
             // entregado) ya vienen con el texto exacto del backend.
             setResultado(null);
             setError(err.response?.data?.detail || 'No se pudo entregar el pedido');
-        } finally {
-            setEntregando(false);
         }
     };
 

@@ -12,6 +12,13 @@ export const claves = {
     countPendientesActivacion: ['alumnos', 'pendientes-activacion', 'count'],
     stats: (tenantId) => ['reportes', tenantId],
     clasesHoy: ['asistencia', 'clases-hoy'],
+    // Misma consulta del backend, pero SIN el filtro de `requiere_coach` que aplica la
+    // tarjeta del panel admin (`useClasesHoy`): clave propia para que cada pantalla
+    // reciba el dato que necesita sin pisarse.
+    clasesAsistenciaHoy: ['asistencia', 'clases-hoy', 'todas'],
+    // Detalle de UNA clase para marcar asistencia. Cuelga de `['asistencia']` para que
+    // confirmar la asistencia refresque también la clase que está abierta.
+    alumnosDeClase: (claseId) => ['asistencia', 'clase', claseId, 'alumnos'],
     churn: (tenantId, buscar) => ['kpis', 'churn', tenantId, buscar || ''],
     segmentacion: (tenantId) => ['segmentacion', tenantId],
     sugerencias: (tenantId, ids) => ['fidelizacion', 'sugerencias', tenantId, ids],
@@ -105,6 +112,69 @@ export function useClasesHoy({ autoRefrescoMs = 45_000 } = {}) {
         },
         staleTime: 30_000,
         refetchInterval: autoRefrescoMs || false,
+    });
+}
+
+// ── Asistencia del día (pestaña Asistencia: coach + admin) ───────────────────
+// La MISMA consulta del backend, pero con la lista pelada: la pestaña muestra todas las
+// clases del día de sus disciplinas. (El filtro de `requiere_coach` de `useClasesHoy` es
+// una decisión de la tarjeta del panel admin, no del dato.)
+export function useClasesAsistenciaHoy({ autoRefrescoMs = 0 } = {}) {
+    return useQuery({
+        queryKey: claves.clasesAsistenciaHoy,
+        queryFn: async () => (await api.get('/api/v1/asistencia/clases-hoy')).data || [],
+        staleTime: 30_000,
+        refetchInterval: autoRefrescoMs || false,
+    });
+}
+
+// Detalle de una clase: sus reservas y si la asistencia ya fue marcada.
+export function useAlumnosDeClase(claseId) {
+    return useQuery({
+        queryKey: claves.alumnosDeClase(claseId),
+        queryFn: async () => (await api.get(
+            `/api/v1/asistencia/clases/${claseId}/alumnos`,
+        )).data || {},
+        staleTime: 30_000,
+        enabled: Boolean(claseId),
+    });
+}
+
+// Confirmar la asistencia de una clase: mueve la lista del día Y el detalle de la clase
+// (las dos viven bajo `['asistencia']`), así que el panel del admin ve lo mismo al toque.
+export function useConfirmarAsistenciaClase() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ claseId, asistencias }) => api.post(
+            `/api/v1/asistencia/clases/${claseId}/confirmar`, { asistencias },
+        ).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['asistencia'] }),
+    });
+}
+
+// Ampliar el cupo de una clase (el backend valida permisos y el tope de +10). Cambia el
+// cupo tanto en la lista de clases como en la del día que se está mostrando.
+export function useAmpliarCupo() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ claseId, extra }) => api.post(
+            `/api/v1/clases/${claseId}/ampliar-cupo`, { cupos_extra: extra },
+        ).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['clases'] });
+            qc.invalidateQueries({ queryKey: ['asistencia'] });
+        },
+    });
+}
+
+// Entregar un pedido del Bazar con el código de retiro. Lo usan el mesón del coach y el
+// panel del admin (mismo modal): invalidar `['pedidos']` deja la lista del admin al día
+// apenas el coach entrega.
+export function useEntregarPedido() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (codigo) => api.post('/api/v1/pedidos/entregar', { codigo }).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['pedidos'] }),
     });
 }
 
