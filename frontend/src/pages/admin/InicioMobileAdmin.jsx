@@ -791,7 +791,7 @@ const InicioMobileAdmin = () => {
                         error={errores.vouchers} cargando={cargando}
                         sub={hayVouchers ? <em>Toca para revisar</em> : 'Todo al día'}
                         pulso={hayVouchers}
-                        onClick={abrirRevision}
+                        onClick={() => abrirRevision()}
                     />
                     <Kpi
                         clase="k-caja" icono="caja" label="Ingresos de hoy" dinero
@@ -997,7 +997,11 @@ const InicioMobileAdmin = () => {
                             {voucherDoc.preview.loading ? (
                                 <p className="empty-line">Cargando el comprobante…</p>
                             ) : voucherDoc.preview.error ? (
-                                <p className="empty-line" role="alert">⚠️ {voucherDoc.preview.error}</p>
+                                <div className="empty-line" role="alert" style={{ flexWrap: 'wrap' }}>
+                                    <span>⚠️ {voucherDoc.preview.error}</span>
+                                    <button type="button" className="btn ghost small"
+                                        onClick={voucherDoc.reintentar}>Reintentar</button>
+                                </div>
                             ) : voucherDoc.preview.blobUrl ? (
                                 <div className="doc" role="button" tabIndex={0}
                                     onClick={() => setAmpliado(true)}

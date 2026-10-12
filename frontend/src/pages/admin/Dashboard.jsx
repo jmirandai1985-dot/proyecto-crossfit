@@ -295,6 +295,7 @@ const AdminDashboard = () => {
         preview: voucherPreview,
         descargando: descargandoVoucher,
         descargar: descargarDocumento,
+        reintentar: reintentarVoucher,
     } = useDocumentoAutenticado({
         previewUrl: (voucherModal.open && voucherModal.solicitud_id)
             ? `/api/v1/solicitudes/${voucherModal.solicitud_id}/${esCertificado ? 'certificado' : 'voucher'}?inline=1`
@@ -763,7 +764,13 @@ const AdminDashboard = () => {
                             {voucherPreview.loading ? (
                                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500" />
                             ) : voucherPreview.error ? (
-                                <p className="text-center text-red-400 text-sm py-6">{voucherPreview.error}</p>
+                                <div className="text-center py-6 space-y-3">
+                                    <p className="text-red-400 text-sm">{voucherPreview.error}</p>
+                                    <button type="button" onClick={reintentarVoucher}
+                                        className="px-4 py-2 bg-zinc-700 text-zinc-100 rounded-lg hover:bg-zinc-600 text-sm font-bold">
+                                        Reintentar
+                                    </button>
+                                </div>
                             ) : voucherPreview.blobUrl ? (
                                 voucherPreview.mime.includes('pdf') ? (
                                     <iframe src={voucherPreview.blobUrl} className="w-full h-96" title="Documento PDF" />
