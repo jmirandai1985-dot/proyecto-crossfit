@@ -1,30 +1,36 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
+import { destinoVolver } from '../utils/navegacion';
 
 /**
- * Flecha "Volver" del header de las pantallas del alumno en MÓVIL (<768px).
+ * Flecha "Volver" del header de las pantallas móviles (<768px): las del alumno
+ * (Mi Reservas, Mi Historial, Bazar, Mis Pedidos…) y el Historial de un alumno
+ * del panel del admin.
  *
  * - Se muestra SÓLO en móvil (`md:hidden`): en ≥768px no existe (regla de oro:
  *   el escritorio se ve EXACTAMENTE igual que hoy).
  * - Tamaño táctil ≥44px (min-h-11/min-w-11) y a la izquierda del título.
- * - Navega hacia atrás en el historial; si no hay historial (p. ej. se abrió la
- *   URL directo), cae al `fallback` (Inicio del alumno).
+ * - Vuelve ATRÁS en el historial (`history.back()`), que es lo que espera quien
+ *   llegó desde otra pantalla de la app (p. ej. la ficha del Inicio móvil). Si
+ *   esta pantalla es la PRIMERA de la aplicación —se abrió el enlace directo,
+ *   se recargó la página o se pegó la URL— volver atrás sacaría al usuario de
+ *   la app, así que se cae al `fallback` que pase la pantalla.
+ *
+ * La decisión vive en `utils/navegacion.js` (`destinoVolver`), probada sin
+ * navegador en `scripts/test-boton-volver.mjs`.
  *
  * Reutilizado por: Mis Reservas, Mi Historial, Bazar, Mis Pedidos, Performance
- * Hub, RMs, Evolución, Mi Progreso, Ajustes y Solicitar Plan. Inicio NO lo usa
+ * Hub, RMs, Evolución, Mi Progreso, Ajustes y Solicitar Plan (alumno) y
+ * Historial del alumno (admin, `fallback="/admin/dashboard"`). Inicio NO lo usa
  * (es la raíz).
  */
 const BotonVolver = ({ fallback = '/alumno/dashboard', className = '' }) => {
     const navigate = useNavigate();
+    const { key } = useLocation();
 
-    const volver = () => {
-        if (typeof window !== 'undefined' && window.history.length > 1) {
-            navigate(-1);
-        } else {
-            navigate(fallback);
-        }
-    };
+    // `-1` = un paso atrás; cualquier otro valor es la ruta de respaldo.
+    const volver = () => navigate(destinoVolver(key, fallback));
 
     return (
         <button
