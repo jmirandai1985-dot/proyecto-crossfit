@@ -389,10 +389,11 @@ proyecto-crossfit/
 | GET | `/suscripciones/suscripciones` | Listar suscripciones |
 | POST | `/suscripciones/suscripciones` | Crear suscripción |
 
-### Membresías (`/membresias`)
-| Método | Ruta | Descripción |
-|--------|------|-------------|
-| GET | `/membresias/mi-membresia` | Obtener membresía activa con tokens del alumno |
+### Membresías — ELIMINADO (2026-10-12)
+`GET /membresias/mi-membresia` **ya no existe**: el router `app/api/v1/membresias.py` se
+eliminó en el commit `8c9dacc` (*chore(api): elimina el endpoint sin uso GET
+/membresias/mi-membresia*) porque no tenía ningún consumidor. El plan y los créditos del
+alumno se leen **sólo** por `GET /planes/membresia-activa` (frontend: `hooks/queries.js`).
 
 ### Disciplinas (`/disciplinas`)
 | Método | Ruta | Descripción |
