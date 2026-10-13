@@ -713,6 +713,28 @@ export function useSubirArchivoPrivado() {
     });
 }
 
+// ── Bloque 3 (alumno): Ajustes (perfil propio y contraseña) ───────────────────
+// Los dos PUT que quedaban a mano en Ajustes. Guardar el perfil mueve
+// `['alumnos','me']`, la MISMA clave que `useMiPerfil` comparte con Solicitar plan:
+// al guardar, la otra pantalla deja de mostrar el dato viejo sin que nadie tenga que
+// acordarse de refrescarla.
+export function useGuardarMiPerfil() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) => api.put('/api/v1/alumnos/me', payload).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: claves.miPerfil }),
+    });
+}
+
+// Cambiar la contraseña es una ORDEN (no mueve ningún dato cacheado), así que no
+// invalida ninguna clave: mismo criterio que `useParsearWod`.
+export function useCambiarPassword() {
+    return useMutation({
+        mutationFn: (payload) =>
+            api.put('/api/v1/usuarios/cambiar-password', payload).then((r) => r.data),
+    });
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // BLOQUE 2 parte B — PIZARRA DE WOD (panel del coach)
 // ══════════════════════════════════════════════════════════════════════════════

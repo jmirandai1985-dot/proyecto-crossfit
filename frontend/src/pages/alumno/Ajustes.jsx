@@ -1,14 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Layout from '../../components/Layout';
 import BotonVolver from '../../components/BotonVolver';
+import AvisoCarga from '../../components/AvisoCarga';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
+// Fase 2 (Bloque 3): el perfil sale de la caché compartida `['alumnos','me']` (la misma
+// que usa Solicitar plan) y los dos formularios guardan con mutaciones. Antes eran un
+// `useEffect` + `api.get`/`api.put` a mano, con los `loading`/`saving` de estado espejo.
+import { useCambiarPassword, useGuardarMiPerfil, useMiPerfil } from '../../hooks/queries';
 
 const Ajustes = () => {
     const { usuario_id } = useAuth();
 
-    const [loading, setLoading] = useState(true);
-    const [saving, setSaving] = useState(false);
+    const perfilQ = useMiPerfil();
+    const guardarPerfil = useGuardarMiPerfil();
+    const cambiarPassword = useCambiarPassword();
+
     const [mensaje, setMensaje] = useState(null);
     const [formData, setFormData] = useState({
         nombre: '',
@@ -26,33 +32,38 @@ const Ajustes = () => {
         nueva_password: '',
         confirmar_password: '',
     });
-    const [passwordSaving, setPasswordSaving] = useState(false);
     const [passwordMsg, setPasswordMsg] = useState(null);
 
+    // El formulario se rellena UNA vez por alumno, cuando llega la primera respuesta: un
+    // refetch en segundo plano (volver a la pestaña, la invalidación que dispara el
+    // propio guardado) no debe pisar lo que el alumno está escribiendo.
+    const rellenadoPara = useRef(null);
     useEffect(() => {
-        const fetchPerfil = async () => {
-            setLoading(true);
-            try {
-                const res = await api.get('/api/v1/alumnos/me');
-                const data = res.data;
-                setFormData({
-                    nombre: data.nombre || '',
-                    telefono: data.telefono || '',
-                    correo: data.correo || '',
-                    peso_kg: data.peso_kg ? String(data.peso_kg) : '',
-                    estatura_cm: data.estatura_cm ? String(data.estatura_cm) : '',
-                    genero: data.genero || '',
-                    fecha_nacimiento: data.fecha_nacimiento || '',
-                });
-            } catch (err) {
-                console.error('Error fetching perfil:', err);
-                setMensaje({ tipo: 'error', texto: 'No se pudo cargar tu perfil' });
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchPerfil();
-    }, [usuario_id]);
+        const data = perfilQ.data;
+        if (!data || rellenadoPara.current === usuario_id) return;
+        rellenadoPara.current = usuario_id;
+        setFormData({
+            nombre: data.nombre || '',
+            telefono: data.telefono || '',
+            correo: data.correo || '',
+            peso_kg: data.peso_kg ? String(data.peso_kg) : '',
+            estatura_cm: data.estatura_cm ? String(data.estatura_cm) : '',
+            genero: data.genero || '',
+            fecha_nacimiento: data.fecha_nacimiento || '',
+        });
+    }, [perfilQ.data, usuario_id]);
+
+    // P1 (igual que el resto de las pantallas del alumno): si la carga falla se avisa con
+    // banner + Reintentar. Antes el error sólo iba a `console.error` y a un cartel, y los
+    // campos quedaban vacíos como si el alumno no tuviera datos.
+    const erroresCarga = perfilQ.isError ? ['tu perfil'] : [];
+    const cargarTodo = () => perfilQ.refetch();
+
+    // Los tres "ocupado" salen de las consultas/mutaciones (antes: tres useState espejo
+    // que había que apagar en cada `finally`).
+    const loading = perfilQ.isPending;
+    const saving = guardarPerfil.isPending;
+    const passwordSaving = cambiarPassword.isPending;
 
     const handleChange = (e) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -65,7 +76,6 @@ const Ajustes = () => {
     // ─── Guardar datos personales ─────────────────────────────────────
     const handleSubmit = async (e) => {
         e.preventDefault();
-        setSaving(true);
         setMensaje(null);
         try {
             // ── N-1: sólo se envían los campos que el alumno autogestiona. ──
@@ -77,23 +87,20 @@ const Ajustes = () => {
             if (formData.peso_kg) payload.peso_kg = parseFloat(formData.peso_kg);
             if (formData.estatura_cm) payload.estatura_cm = parseInt(formData.estatura_cm);
 
-            await api.put('/api/v1/alumnos/me', payload);
+            await guardarPerfil.mutateAsync(payload);
             setMensaje({ tipo: 'exito', texto: 'Datos actualizados exitosamente' });
         } catch (err) {
             const detalle = err.response?.data?.detail || 'Error al actualizar';
             setMensaje({ tipo: 'error', texto: typeof detalle === 'string' ? detalle : detalle[0]?.msg || 'Error desconocido' });
-        } finally {
-            setSaving(false);
         }
     };
 
     // ─── Cambiar contraseña ───────────────────────────────────────────
     const handleCambiarPassword = async (e) => {
         e.preventDefault();
-        setPasswordSaving(true);
         setPasswordMsg(null);
         try {
-            await api.put('/api/v1/usuarios/cambiar-password', {
+            await cambiarPassword.mutateAsync({
                 password_actual: passwordData.password_actual,
                 nueva_password: passwordData.nueva_password,
                 confirmar_password: passwordData.confirmar_password,
@@ -103,8 +110,6 @@ const Ajustes = () => {
         } catch (err) {
             const detalle = err.response?.data?.detail || 'Error al cambiar la contraseña';
             setPasswordMsg({ tipo: 'error', texto: `❌ ${detalle}` });
-        } finally {
-            setPasswordSaving(false);
         }
     };
 
@@ -119,6 +124,10 @@ const Ajustes = () => {
                         <p className="text-gray-600 mt-1">Actualiza tus datos de contacto y medidas. El resto de tu ficha (nombre, correo, género y fecha de nacimiento) lo administra el box.</p>
                     </div>
                 </div>
+
+                {/* P1: carga fallida visible + Reintentar (antes el fallo del fetch dejaba
+                    el formulario vacío, como si el alumno no tuviera datos). */}
+                <AvisoCarga secciones={erroresCarga} onReintentar={cargarTodo} />
 
                 {/* Mensajes */}
                 {mensaje && (

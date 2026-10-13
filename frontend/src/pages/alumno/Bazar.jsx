@@ -3,8 +3,11 @@ import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import AvisoCarga from '../../components/AvisoCarga';
 import BotonVolver from '../../components/BotonVolver';
-import api from '../../services/api';
-import { useConfiguracionBancaria, useCrearPedidoBazar, useProductos } from '../../hooks/queries';
+// Fase 2 (Bloque 3): subir el comprobante es una mutación de la caché compartida (el
+// MISMO hook que usa Solicitar plan), no un `api.post` a mano dentro de la pantalla.
+import {
+    useConfiguracionBancaria, useCrearPedidoBazar, useProductos, useSubirArchivoPrivado,
+} from '../../hooks/queries';
 import { urlArchivo } from '../../utils/imagen';
 
 const Bazar = () => {
@@ -13,7 +16,6 @@ const Bazar = () => {
     const [productoSeleccionado, setProductoSeleccionado] = useState(null);
     const [cantidad, setCantidad] = useState(1);
     const [archivoVoucher, setArchivoVoucher] = useState(null);
-    const [subiendo, setSubiendo] = useState(false);
     const [mensaje, setMensaje] = useState({ type: '', text: '' });
 
     // Catálogo y datos de transferencia en la caché de React Query (Fase 2): el
@@ -21,6 +23,11 @@ const Bazar = () => {
     const productosQ = useProductos({ activo: true });
     const configQ = useConfiguracionBancaria(tenant_id);
     const crearPedido = useCrearPedidoBazar();
+    // Subir el comprobante es una ORDEN: devuelve la URL privada del archivo subido.
+    const subirArchivo = useSubirArchivoPrivado();
+    // "Ocupado" derivado de las dos mutaciones del envío (antes: un useState que había
+    // que apagar en el `finally`).
+    const subiendo = subirArchivo.isPending || crearPedido.isPending;
     const productos = productosQ.data || [];
     const configBancaria = configQ.data?.configurado ? configQ.data : null;
     const loading = productosQ.isLoading || configQ.isLoading;
@@ -53,16 +60,11 @@ const Bazar = () => {
             setMensaje({ type: 'error', text: 'Debes seleccionar un comprobante de pago.' });
             return;
         }
-        setSubiendo(true);
         setMensaje({ type: '', text: '' });
         try {
-            const formData = new FormData();
-            formData.append('file', archivoVoucher);
-            // privado=1: el comprobante del pedido va a la carpeta privada
-            const uploadRes = await api.post('/api/v1/upload/voucher?privado=1', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' },
-            });
-            const voucherUrl = uploadRes.data?.url || '';
+            // El hook sube el archivo con `privado=1` (carpeta privada, la que corresponde
+            // al comprobante de un pedido) y devuelve la URL que el pedido guarda.
+            const voucherUrl = await subirArchivo.mutateAsync(archivoVoucher);
 
             await crearPedido.mutateAsync({
                 tenant_id,
@@ -77,8 +79,6 @@ const Bazar = () => {
         } catch (err) {
             const detalle = err.response?.data?.detail || 'Error al procesar pedido.';
             setMensaje({ type: 'error', text: detalle });
-        } finally {
-            setSubiendo(false);
         }
     };
 
