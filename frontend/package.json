@@ -15,6 +15,7 @@
     "test:filtro": "node scripts/test-filtro-disciplina.mjs",
     "test:rotulo": "node scripts/test-rotulo-creditos.mjs",
     "test:franjas": "node scripts/test-franjas-asistencia.mjs",
+    "test:asistencia-franjas": "node scripts/test-asistencia-franjas.mjs",
     "test:semana": "node scripts/test-semana-asistencia.mjs",
     "test:volver": "node scripts/test-boton-volver.mjs",
     "test:whatsapp": "node scripts/test-whatsapp.mjs",

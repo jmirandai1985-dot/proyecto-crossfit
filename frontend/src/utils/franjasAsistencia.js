@@ -6,6 +6,12 @@
  * curso. Ese corte es un CÁLCULO (no depende del navegador ni de la red), así que vive
  * acá —puro y compartido— para poder probarlo aislado.
  *
+ * Lo usan DOS pantallas que muestran lo mismo y no pueden contradecirse:
+ *   · el Inicio móvil del admin (<768px), con la franja del reloj elegida por el admin;
+ *   · la pestaña Asistencia (`AsistenciaClases franjas`) en <768px, que dibuja las franjas
+ *     una debajo de la otra (mockup 6b). En ≥768px esa pestaña sigue con el acordeón por
+ *     disciplina: el corte por franja es SOLO la vista de teléfono.
+ *
  * Reglas:
  *   · Las horas son las del backend, que ya vienen en hora de CHILE (America/Santiago):
  *     acá NO se convierte nada, solo se lee la hora del string "HH:MM[:SS]".
@@ -112,3 +118,42 @@ export const ocupacion = (reservas, cupoMaximo) => {
 
 /** ¿La clase ya tiene la asistencia marcada? (badge "N ok" del botón Marcar). */
 export const estaMarcada = (clase) => Boolean(clase?.marcada);
+
+// ── La fila de la lista móvil por franja (mockup 6b) ─────────────────────────
+
+/**
+ * Estado de la fila, en el orden en que se decide:
+ *   · 'hecha'     — la asistencia ya está marcada (lo dice el backend: `marcada`);
+ *   · 'en-curso'  — el backend la marca `estado === 'en_curso'` (hora de CHILE, una sola
+ *                   definición en `clases_service.estado_clase`): el front NO lee el reloj;
+ *   · 'pendiente' — el resto (todavía no empieza, o ya terminó y quedó sin marcar).
+ */
+export const ESTADOS_FILA = {
+    hecha: 'Hecha',
+    'en-curso': 'En curso',
+    pendiente: 'Pendiente',
+};
+
+export const estadoFila = (clase) => {
+    if (estaMarcada(clase)) return 'hecha';
+    if (clase?.estado === 'en_curso') return 'en-curso';
+    return 'pendiente';
+};
+
+/** Etiqueta del estado (nunca `undefined`: un estado desconocido se lee "Pendiente"). */
+export const etiquetaEstado = (estado) => ESTADOS_FILA[estado] || ESTADOS_FILA.pendiente;
+
+/**
+ * El progreso de la clase como lo escribe el mockup 6b:
+ *   · marcada   -> "12/12 presentes"
+ *   · pendiente -> "9/14 marcados"
+ * Son los CONFIRMADOS sobre el CUPO de la clase (no las reservas: en esta fila importa
+ * cuánta asistencia falta marcar). Sin cupo cargado cae a "N presentes/marcados": nunca
+ * aparece un "/0" ni un NaN. `cupo` permite pasar el cupo ya ampliado en esta visita.
+ */
+export const textoProgreso = (clase, cupo) => {
+    const confirmados = Number(clase?.asistentes_confirmados) || 0;
+    const tope = Number(cupo ?? clase?.cupo_maximo) || 0;
+    const palabra = estadoFila(clase) === 'hecha' ? 'presentes' : 'marcados';
+    return tope > 0 ? `${confirmados}/${tope} ${palabra}` : `${confirmados} ${palabra}`;
+};

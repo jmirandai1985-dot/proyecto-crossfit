@@ -1289,9 +1289,12 @@ const DashboardCoach = () => {
                             </div>
                         )}
 
-                        {/* ── TAB: ASISTENCIA ── */}
+                        {/* ── TAB: ASISTENCIA ──
+                            `franjas`: en el teléfono (<768px) las clases del día van por
+                            franja (Mañana/Tarde/Noche, mockup 6b); en tablet/escritorio
+                            sigue el acordeón por disciplina, igual que el panel del admin. */}
                         {activeTab === 'asistencia' && (
-                            <AsistenciaClases />
+                            <AsistenciaClases franjas />
                         )}
                     </div>
                 </div>

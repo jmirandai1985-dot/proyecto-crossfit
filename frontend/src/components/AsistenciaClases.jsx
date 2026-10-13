@@ -1,5 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import AsistenciaGrupoDisciplina from './AsistenciaGrupoDisciplina';
+import AsistenciaFranja from './AsistenciaFranja';
+// El corte por franja (Mañana/Tarde/Noche) vive en un util compartido con test propio:
+// el Inicio móvil del admin y esta pestaña no pueden decir cosas distintas del mismo día.
+import { FRANJAS, agruparPorFranja } from '../utils/franjasAsistencia';
 // Fase 2 (Bloque 2): las clases del día y el detalle de cada una salen de la caché
 // compartida (la pestaña Asistencia del coach y del admin piden lo MISMO) y confirmar la
 // asistencia es una mutación que invalida la familia `['asistencia']`.
@@ -21,8 +25,14 @@ import {
  * Prop:
  *   variant — 'light' (default, paneles claros, usado en el Dashboard Coach)
  *             | 'dark' (paneles zinc, usado en el panel de Administración)
+ *   franjas — false (default): el acordeón por disciplina, en cualquier ancho.
+ *             true: en <768px las clases del día se agrupan por franja (Mañana/Tarde/
+ *             Noche) al estilo del mockup 6b, con la fila compacta por clase; en ≥768px
+ *             (tablet y escritorio) sigue EXACTAMENTE el acordeón por disciplina.
+ *             Lo pide el coach (`DashboardCoach`, ?tab=asistencia) y NO el admin: su
+ *             pestaña Asistencia monta el componente sin la prop y no cambia nada.
  */
-const AsistenciaClases = ({ variant = 'light' } = {}) => {
+const AsistenciaClases = ({ variant = 'light', franjas = false } = {}) => {
     const osc = variant === 'dark';
 
     // ─── Clases de hoy (React Query) ───────────────────────────────────
@@ -137,6 +147,16 @@ const AsistenciaClases = ({ variant = 'light' } = {}) => {
         return [...m.entries()].map(([disciplina, items]) => ({ disciplina, clases: items }));
     }, [clases]);
 
+    // Vista de teléfono (mockup 6b): las MISMAS clases del día repartidas por franja. El
+    // corte lo hace el util compartido y acá sólo se eligen las franjas con clases (una
+    // franja vacía no se dibuja: en el teléfono cada bloque ocupa media pantalla).
+    // Sin `useMemo`: `clases` es un array nuevo en cada render, así que memorizar el corte
+    // no ahorraría nada (mismo caso que `grupos`, ver el lint del archivo).
+    const porFranja = franjas ? agruparPorFranja(clases) : null;
+    const franjasConClases = porFranja
+        ? FRANJAS.filter((f) => (porFranja[f.id] || []).length > 0)
+        : [];
+
     // Ampliar cupo de UNA clase puntual (el backend valida permisos y el tope +10).
     // Devuelve la promesa: el hijo pinta el cupo nuevo con la respuesta.
     const ampliarCupo = (clase, extra) => ampliarCupoMut.mutateAsync({ claseId: clase.id, extra });
@@ -170,20 +190,40 @@ const AsistenciaClases = ({ variant = 'light' } = {}) => {
                     </p>
                 </div>
             ) : (
-                <div className="space-y-4">
-                    {grupos.map((grupo) => (
-                        <AsistenciaGrupoDisciplina
-                            key={grupo.disciplina}
-                            grupo={grupo}
-                            osc={osc}
-                            abierta={estaAbierta(grupo.disciplina)}
-                            onToggle={() => toggleGrupo(grupo.disciplina)}
-                            onAbrir={abrirClase}
-                            formatearHora={formatearHora}
-                            onAmpliarCupo={ampliarCupo}
-                        />
-                    ))}
-                </div>
+                <>
+                    {/* <768px (sólo con `franjas`): las clases del día por franja (mockup 6b). */}
+                    {franjas && (
+                        <div className="md:hidden space-y-5" data-testid="asistencia-franjas">
+                            {franjasConClases.map((f) => (
+                                <AsistenciaFranja
+                                    key={f.id}
+                                    franja={f}
+                                    clases={porFranja[f.id]}
+                                    osc={osc}
+                                    formatearHora={formatearHora}
+                                    onAbrir={abrirClase}
+                                    onAmpliarCupo={ampliarCupo}
+                                />
+                            ))}
+                        </div>
+                    )}
+
+                    {/* ≥768px (y siempre que no se pida `franjas`): el acordeón por disciplina. */}
+                    <div className={franjas ? 'hidden md:block space-y-4' : 'space-y-4'}>
+                        {grupos.map((grupo) => (
+                            <AsistenciaGrupoDisciplina
+                                key={grupo.disciplina}
+                                grupo={grupo}
+                                osc={osc}
+                                abierta={estaAbierta(grupo.disciplina)}
+                                onToggle={() => toggleGrupo(grupo.disciplina)}
+                                onAbrir={abrirClase}
+                                formatearHora={formatearHora}
+                                onAmpliarCupo={ampliarCupo}
+                            />
+                        ))}
+                    </div>
+                </>
             )}
 
 
