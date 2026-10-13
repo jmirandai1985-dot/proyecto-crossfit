@@ -48,10 +48,15 @@ const Layout = ({ children }) => {
         return () => { cancelado = true; };
     }, [rol, reintentoEsPrueba]);
 
-    // El drawer debe cerrarse AL NAVEGAR (cambia la ruta).
+    // El drawer debe cerrarse AL NAVEGAR: cambia la RUTA **o** cambia el QUERY.
+    // El `?tab=` navega sin tocar el pathname (sub-pestañas del Dashboard del coach y,
+    // en el panel del admin, las de KPIs/Fidelización: `components/kpis/TabBar.jsx` usa
+    // `setSearchParams`). Con sólo `location.pathname` en las deps, en el teléfono el
+    // drawer se quedaba ABIERTO encima del contenido: el panel de atrás sí cambiaba,
+    // pero no se veía, así que el ítem parecía muerto.
     useEffect(() => {
         setMobileOpen(false);
-    }, [location.pathname]);
+    }, [location.pathname, location.search]);
 
     // ... y con la tecla Escape (accesibilidad).
     useEffect(() => {
@@ -67,6 +72,10 @@ const Layout = ({ children }) => {
     // prueba queda restringido (fail-closed) según `esPrueba`.
     const menuItems = getMenuItems(rol, { esPrueba });
     const isActive = (path) => location.pathname === path;
+    // Sub-pestaña ACTIVA del Dashboard del coach. Sólo se marca estando en
+    // `/coach/dashboard`: en cualquier otra ruta `currentTab` cae en su default
+    // ('resumen') y resaltaría una pestaña que no corresponde.
+    const subtabActiva = (key) => isCoachDashboard && currentTab === key;
 
     return (
         <div className="flex h-[100dvh] bg-zinc-950">
@@ -162,31 +171,22 @@ const Layout = ({ children }) => {
                                     </span>
                                 )}
                             </Link>
-                            {/* Coach sub-tabs under Dashboard */}
-                            {rol === 'coach' && item.label === 'Dashboard' && sidebarOpen && isCoachDashboard && (
-                                <div className="ml-6 mt-1 space-y-0.5 border-l-2 border-orange-500/40 pl-2">
+                            {/* Sub-pestañas del Dashboard del coach (Resumen, Clases,
+                                Alumnos & RMs, Asistencia, Progreso y Riesgo). Son
+                                <Link> a la MISMA ruta cambiando el query (`?tab=`):
+                                el contenido lo elige `DashboardCoach` con `activeTab`
+                                (no hay rutas hijas por pestaña). Antes había DOS bloques
+                                casi iguales (uno por si estaba o no en el dashboard) y el
+                                segundo traía el resaltado de la activa cableado en `false`:
+                                una sola lista, con `subtabActiva`, mantiene los dos casos
+                                diciendo lo mismo. */}
+                            {rol === 'coach' && item.label === 'Dashboard' && sidebarOpen && (
+                                <div className={`ml-6 mt-1 space-y-0.5 border-l-2 pl-2 ${isCoachDashboard ? 'border-orange-500/40' : 'border-zinc-700'}`}>
                                     {COACH_SUBTABS.map((sub) => (
                                         <Link
                                             key={sub.key}
                                             to={sub.path}
-                                            className={`block px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${currentTab === sub.key
-                                                ? 'bg-orange-500/20 text-orange-400'
-                                                : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
-                                                }`}
-                                        >
-                                            {sub.label}
-                                        </Link>
-                                    ))}
-                                </div>
-                            )}
-                            {/* Always show sub-tabs when coach is on dashboard path */}
-                            {rol === 'coach' && item.label === 'Dashboard' && sidebarOpen && !isCoachDashboard && (
-                                <div className="ml-6 mt-1 space-y-0.5 border-l-2 border-zinc-700 pl-2">
-                                    {COACH_SUBTABS.map((sub) => (
-                                        <Link
-                                            key={sub.key}
-                                            to={sub.path}
-                                            className={`block px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${false
+                                            className={`block px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${subtabActiva(sub.key)
                                                 ? 'bg-orange-500/20 text-orange-400'
                                                 : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
                                                 }`}
