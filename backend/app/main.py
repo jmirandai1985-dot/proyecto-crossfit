@@ -8,7 +8,7 @@
     comprar_emergencia, fix_fechas, supervision,
     finanzas, configuracion, alumnos, asistencia, ranking, kpis,
     kpis_populate, ml, segmentacion, historial_alumno, fidelizacion_plantillas,
-    beneficios
+    beneficios, marketing
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -255,6 +255,9 @@ app.include_router(productos.router, prefix="/api/v1/productos",
                    tags=["Bazar - Productos"])
 app.include_router(pedidos.router, prefix="/api/v1/pedidos",
                    tags=["Bazar - Pedidos"])
+# Avisos de marketing: el carrusel "Novedades del box" del Inicio del alumno.
+app.include_router(marketing.router, prefix="/api/v1/marketing",
+                   tags=["Marketing"])
 app.include_router(reportes.router, prefix="/api/v1/reportes",
                    tags=["Reportes Excel"])
 app.include_router(

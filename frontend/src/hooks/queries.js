@@ -36,6 +36,12 @@ export const claves = {
     // instante y no vuelve a pedirlos (antes cada una tenía su useEffect).
     publicIdBox: ['tenants', 'me', 'public-id'],
     productos: (activo) => ['productos', activo === undefined ? 'todos' : String(activo)],
+    // Avisos del carrusel "Novedades del box". DOS claves porque son DOS vistas del
+    // mismo dato: la lista completa del admin (con su filtro) y los vigentes que
+    // pinta el Inicio del alumno. Las dos cuelgan de `['marketing']`, así que
+    // publicar o borrar un aviso refresca las dos sin que nadie lo recuerde.
+    avisosMarketing: (filtro) => ['marketing', 'avisos', 'admin', filtro || 'todos'],
+    avisosMarketingVigentes: ['marketing', 'avisos', 'vigentes'],
     configBox: (tenantId) => ['configuracion', tenantId],
     reservasAlumno: ['reservas', 'alumno'],
     miResumen: ['asistencia', 'mi-resumen'],
@@ -1396,6 +1402,84 @@ export function useCrearSuscripcion() {
             qc.invalidateQueries({ queryKey: ['membresia'] });
             qc.invalidateQueries({ queryKey: ['reportes'] });
         },
+    });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BLOQUE 2 (MARKETING) — los avisos del carrusel "Novedades del box"
+// ══════════════════════════════════════════════════════════════════════════════
+// Un aviso se publica UNA vez y lo miran DOS pantallas muy distintas: la tabla del
+// panel Marketing del admin (con su filtro) y el carrusel del Inicio del alumno.
+// Por eso toda mutación invalida el prefijo `['marketing']` completo: no hay que
+// acordarse de refrescar ninguna de las dos.
+//
+// Los helpers de payload (FormData del POST, JSON del PUT, validación espejo del
+// backend) viven en `utils/avisosMarketing.js`: es JS puro y `scripts/test-marketing.mjs`
+// los prueba sin navegador.
+
+export function useAvisosMarketing(filtro = 'todos') {
+    return useQuery({
+        queryKey: claves.avisosMarketing(filtro),
+        queryFn: async () => (await api.get('/api/v1/marketing', {
+            params: { filtro },
+        })).data || [],
+        staleTime: 30_000,
+    });
+}
+
+// Lo que pinta el carrusel del Inicio del alumno: SÓLO los vigentes hoy, ya
+// ordenados por el backend (fijados primero). Sin avisos, la sección no se dibuja.
+export function useAvisosMarketingVigentes({ enabled = true } = {}) {
+    return useQuery({
+        queryKey: claves.avisosMarketingVigentes,
+        queryFn: async () => (await api.get('/api/v1/marketing/vigentes')).data || [],
+        staleTime: 5 * 60_000,
+        enabled,
+    });
+}
+
+// Crear y editar NO son simétricos (mismo criterio que los productos del Bazar):
+//  - crear  -> POST /marketing multipart (el flyer viaja en `file`).
+//  - editar -> PUT /marketing/{id} en JSON y, si hay flyer NUEVO, un POST aparte a
+//              /marketing/{id}/imagen (un PUT JSON no puede llevar archivo).
+export function useGuardarAvisoMarketing() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: async ({ id, formData, payload, imagen }) => {
+            if (id) {
+                const res = await api.put(`/api/v1/marketing/${id}`, payload);
+                if (imagen) {
+                    const dataImagen = new FormData();
+                    dataImagen.append('file', imagen);
+                    await api.post(`/api/v1/marketing/${id}/imagen`, dataImagen, {
+                        headers: { 'Content-Type': 'multipart/form-data' },
+                    });
+                }
+                return res.data;
+            }
+            return (await api.post('/api/v1/marketing', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            })).data;
+        },
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['marketing'] }),
+    });
+}
+
+// Quitar el flyer (la tarjeta vuelve a pintarse con el color de su tipo).
+export function useQuitarFlyerAviso() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => api.delete(`/api/v1/marketing/${id}/imagen`).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['marketing'] }),
+    });
+}
+
+// Eliminar el aviso: sale del carrusel al instante (y el backend borra su flyer).
+export function useEliminarAviso() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => api.delete(`/api/v1/marketing/${id}`).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['marketing'] }),
     });
 }
 

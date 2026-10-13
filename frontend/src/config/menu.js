@@ -56,6 +56,10 @@ export const MENU_BY_ROL = {
         { label: 'Disciplinas', path: '/admin/disciplinas', icon: 'dumbbellLc' },
         { label: 'Bazar', path: '/admin/bazar', icon: 'shoppingCart' },
         { label: 'Pedidos', path: '/admin/pedidos', icon: 'shoppingBag' },
+        // Marketing: los avisos del carrusel "Novedades del box" del Inicio del
+        // alumno (promociones, colaboraciones, avisos del box y eventos). Las
+        // tarjetas de producto nuevo las genera el Bazar solo (días de anuncio).
+        { label: 'Marketing', path: '/admin/marketing', icon: 'megaphone' },
 
         // ── ANÁLISIS ──
         { type: 'section', label: 'ANÁLISIS' },

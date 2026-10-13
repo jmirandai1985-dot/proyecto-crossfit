@@ -1,8 +1,6 @@
 """
 Router de endpoints para gestión de Productos
 """
-import os
-import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -13,62 +11,18 @@ from app.schemas.producto import (
     ProductoUpdate, ProductoResponse, ProductoListItem
 )
 from app.core.dependencies import get_current_admin, get_current_user, require_full_access
-from app.core.file_validation import validar_archivo, EXTENSIONES_IMAGEN
+# La subida de imágenes PÚBLICAS vive en un módulo compartido: la usan la foto del
+# producto (acá) y el flyer de un aviso de marketing (app/api/v1/marketing.py), con
+# los MISMOS chequeos y el MISMO destino (app/services/storage.py).
+from app.core.imagenes_publicas import guardar_imagen_publica
 from app.services import storage
 
 # FIX 1: catálogo de movimientos restringido para alumnos de prueba
 router = APIRouter(dependencies=[Depends(require_full_access)])
 
-# Las fotos del Bazar son PÚBLICAS: las guarda la capa ÚNICA de almacenamiento
-# (app/services/storage.py) en app/static/uploads/ (dev/TEST) o en el prefijo
-# publico/ del bucket de R2 (PROD, con URL absoluta). Antes se escribían a mano en
-# el disco EFÍMERO del contenedor y la URL se DESCARTABA (no había columna).
-ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
-MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
 
-
-async def _guardar_imagen_publica(file: UploadFile) -> str:
-    """Valida la imagen subida y la guarda como archivo PÚBLICO. Devuelve su URL.
-
-    Chequeos de siempre: tipo declarado, tamaño máximo y contenido real por magic
-    bytes (el content-type lo declara el cliente y es spoofeable: rechaza ejecutables
-    disfrazados de imagen).
-    """
-    # Validar tipo de contenido declarado (chequeo primario)
-    if file.content_type not in ALLOWED_CONTENT_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Tipo de archivo no permitido: {file.content_type}. Use JPG, PNG, WEBP o GIF."
-        )
-
-    # Leer contenido y validar tamaño
-    contenido = await file.read()
-    if len(contenido) > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El archivo supera el tamaño máximo permitido de 5 MB."
-        )
-
-    extension = os.path.splitext(file.filename or "")[1].lower()
-    if not validar_archivo(
-        extension, contenido,
-        content_type=file.content_type, permitidas=EXTENSIONES_IMAGEN
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El contenido del archivo no coincide con una imagen válida (JPG, PNG, WEBP o GIF)."
-        )
-
-    # Nombre único: evita colisiones y no se puede adivinar la URL
-    nombre_archivo = f"{uuid.uuid4().hex}{extension}"
-    try:
-        return storage.guardar_publico(contenido, nombre_archivo)
-    except storage.ErrorAlmacenamiento:
-        # Guardado fallido (p. ej. R2 inaccesible): mejor un error claro que guardar
-        # una URL que apunte a un archivo que no existe.
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="No se pudo guardar la imagen. Vuelve a intentarlo en unos segundos.")
+# Las fotos del Bazar son PÚBLICAS y las guarda `app/core/imagenes_publicas.py`
+# (capa ÚNICA de almacenamiento: disco en dev/TEST, bucket público de R2 en PROD).
 
 
 @router.post("", response_model=ProductoResponse, status_code=status.HTTP_201_CREATED)
@@ -95,7 +49,7 @@ async def crear_producto(
 
     # Imagen opcional: se valida y se guarda con la capa ÚNICA de almacenamiento
     # (disco en dev/TEST, bucket público de R2 en PROD). Sin archivo queda NULL.
-    imagen_url = (await _guardar_imagen_publica(file)
+    imagen_url = (await guardar_imagen_publica(file)
                   if file and file.filename else None)
 
     db_producto = Producto(
@@ -143,7 +97,7 @@ async def subir_imagen_producto(
 
     # Primero se guarda la NUEVA: si el guardado falla (503) la foto vieja sigue
     # intacta y el producto no queda sin imagen.
-    url_nueva = await _guardar_imagen_publica(file)
+    url_nueva = await guardar_imagen_publica(file)
     url_previa = producto.imagen_url
 
     producto.imagen_url = url_nueva

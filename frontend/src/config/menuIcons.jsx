@@ -1,6 +1,7 @@
 import {
     ChartColumn, Users, Clock, Eye, SquareCheck, QrCode, CreditCard,
     Dumbbell, ShoppingCart, ShoppingBag, Heart, TrendingUp, FileText, Bell, Settings,
+    Megaphone,
 } from 'lucide-react';
 
 // ─── Registro ÚNICO de íconos del menú ──────────────────────────────────────
@@ -68,4 +69,6 @@ export const MENU_ICONS = {
     bell: <Bell className="w-5 h-5" />,
     // Dumbbell (lucide) para admin/Disciplinas (distinto del inline del alumno).
     dumbbellLc: <Dumbbell className="w-5 h-5" />,
+    // Marketing (admin): el carrusel de avisos del Inicio del alumno.
+    megaphone: <Megaphone className="w-5 h-5" />,
 };

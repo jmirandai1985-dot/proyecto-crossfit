@@ -25,6 +25,8 @@ const AdminHistorialAlumno = lazy(() => import('./pages/admin/HistorialAlumno'))
 const AdminCoaches = lazy(() => import('./pages/admin/Coaches'));
 const AdminClases = lazy(() => import('./pages/admin/Clases'));
 const AdminBazar = lazy(() => import('./pages/admin/Bazar'));
+// Marketing: los avisos del carrusel "Novedades del box" del Inicio del alumno.
+const AdminMarketing = lazy(() => import('./pages/admin/Marketing'));
 // Pedidos del Bazar: revisar comprobantes y avanzar el estado (pendiente → validado → entregado).
 const AdminPedidos = lazy(() => import('./pages/admin/Pedidos'));
 const AdminReportes = lazy(() => import('./pages/admin/Reportes'));
@@ -138,6 +140,7 @@ function App() {
             <Route path="planes" element={<AdminPlanes />} />
             <Route path="disciplinas" element={<AdminDisciplinas />} />
             <Route path="bazar" element={<AdminBazar />} />
+            <Route path="marketing" element={<AdminMarketing />} />
             <Route path="pedidos" element={<AdminPedidos />} />
             <Route path="reportes" element={<AdminReportes />} />
             <Route path="configuracion" element={<AdminConfiguracion />} />

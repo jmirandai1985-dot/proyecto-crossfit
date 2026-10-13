@@ -97,6 +97,17 @@ def fin_del_dia_chile(dia: date) -> datetime:
     return datetime.combine(dia, time(23, 59, 59), tzinfo=SANTIAGO)
 
 
+def inicio_del_dia_chile(dia: date) -> datetime:
+    """El primer instante de ese día en Chile: 00:00:00 tz-aware.
+
+    Espejo de `fin_del_dia_chile()`, para las VIGENCIAS que empiezan (no terminan)
+    en un día calendario: los avisos de marketing (`vigente_desde`). Sin esto, la
+    ventana se armaba con la TZ del proceso y un aviso que empieza "hoy" quedaba
+    invisible hasta las 03:00 hora de Chile.
+    """
+    return datetime.combine(dia, time(0, 0, 0), tzinfo=SANTIAGO)
+
+
 def fin_de_mes_chile(desde: date | None = None) -> datetime:
     """23:59:59 hora de Chile del ÚLTIMO día del mes de `desde` (default: hoy en Chile).
 
