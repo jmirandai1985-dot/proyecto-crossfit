@@ -9,9 +9,14 @@ from alembic import context
 # access to the values within the .ini file in use.
 config = context.config
 
-# URL real de la BD desde la config de la app (settings):
-#   ENVIRONMENT no definido → .env      (BD activa / producción)
-#   ENVIRONMENT=test        → .env.test (branch TEST aislada)
+# URL real de la BD desde la config de la app (settings).
+# ⚠️ FAIL-SAFE (app/core/config.py:153): qué archivo se carga depende de ENVIRONMENT:
+#   ENVIRONMENT=production      → .env      (BD REAL / PROD)
+#   cualquier otro valor o nada → .env.test (rama TEST de Neon)
+# O sea: por DEFECTO alembic apunta a TEST. Para operar sobre PROD hay que declararlo:
+#   $env:ENVIRONMENT="production"; py -3.12 -m alembic current -v    # sólo lectura
+#   $env:ENVIRONMENT="production"; py -3.12 -m alembic upgrade head  # aplica
+# (El default al revés fue el que dejó el incidente del 2026-09-26.)
 # El alembic.ini trae un placeholder; sin esto alembic no conecta a la BD real.
 # MIGRACIONES: usar SIEMPRE la conexión DIRECTA (DIRECT_URL, sin pooler) para
 # que el DDL/Alter no choque con el pooler de Neon. Fallback a DATABASE_URL.
