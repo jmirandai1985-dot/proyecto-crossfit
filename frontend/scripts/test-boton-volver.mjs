@@ -9,6 +9,9 @@
 //   2. cualquier navegación dentro de la app SÍ lo tiene (`key` propia)
 //   3. sin key (o vacía) se cae al respaldo: lo seguro es no volver
 //   4. el destino de "atrás" es el `-1` que entiende el router
+//   5. COBERTURA (auditoría Bloque 2): toda pantalla del alumno que cuelga de una
+//      ruta —menos la raíz, el Inicio— monta la flecha, y la raíz no la monta
+import { readdirSync, readFileSync } from 'node:fs';
 import {
     CLAVE_PRIMERA_UBICACION, VOLVER_ATRAS, puedeVolverAtras, destinoVolver,
 } from '../src/utils/navegacion.js';
@@ -22,6 +25,18 @@ const eq = (obtenido, esperado, msg) => {
         console.log(`  FAIL  ${msg}  (esperado: ${esperado} · obtenido: ${obtenido})`);
     }
 };
+// Igual que `eq` pero para condiciones (cobertura de las pantallas, contrato del
+// componente).
+const ok = (cond, msg) => {
+    if (cond) {
+        console.log('  PASS  ' + msg);
+    } else {
+        fallos++;
+        console.log('  FAIL  ' + msg);
+    }
+};
+const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+
 
 const INICIO_ALUMNO = '/alumno/dashboard';
 const INICIO_ADMIN = '/admin/dashboard';
@@ -54,6 +69,83 @@ eq(destinoVolver(undefined, INICIO_ADMIN), INICIO_ADMIN, 'sin key manda el respa
 eq(VOLVER_ATRAS, -1, '-1 es "un paso atrás" en navigate()');
 eq(typeof destinoVolver('abc123', INICIO_ALUMNO), 'number', 'volver atrás se pasa como número, no como ruta');
 eq(typeof destinoVolver(CLAVE_PRIMERA_UBICACION, INICIO_ALUMNO), 'string', 'el respaldo es una ruta');
+
+// ── 5. Cobertura: toda pantalla del alumno dibuja la flecha (menos la raíz) ──
+// La auditoría encontró las 10 pantallas del alumno con la flecha y ninguna sin
+// ella. Esto lo deja fijado: si alguien agrega una pantalla nueva y se olvida de la
+// flecha (o le borra el import), salta acá y no en el móvil del box.
+const APP = leer('../src/App.jsx');
+
+// Los `import()` de las páginas van SIN extensión (`import('./pages/alumno/Dashboard')`):
+// se normaliza a `.jsx` para poder leer el archivo.
+const conExtension = (p) => (/\.[a-z]+$/i.test(p) ? p : p + '.jsx');
+
+// Componentes lazy -> archivo, tal como los declara App.jsx.
+const LAZY = new Map(
+    [...APP.matchAll(/const (\w+) = lazy\(\(\) => import\('\.\/([^']+)'\)\)/g)]
+        .map((m) => [m[1], conExtension(m[2])]),
+);
+
+// Rutas hijas de `/alumno/*` (el bloque es plano: 11 pantallas y un comodín que
+// redirige al Inicio). Se corta en el `</Route>` que cierra el bloque.
+const abre = APP.indexOf('path="/alumno/*"');
+const bloque = abre === -1 ? '' : APP.slice(abre, APP.indexOf('</Route>', abre));
+const RUTAS_ALUMNO = [...bloque.matchAll(/path="([^"]+)"\s+element=\{<(\w+)\s*\/>/g)]
+    .map((m) => ({ ruta: m[1], archivo: LAZY.get(m[2]) || '' }))
+    .filter((r) => r.archivo.startsWith('pages/alumno/'));
+
+// La raíz del alumno sale de la fuente de verdad de los dashboards, no del texto de
+// App.jsx: `/alumno/dashboard` -> la pantalla `dashboard`.
+const inicio = leer('../src/config/roles.js').match(/alumno:\s*'([^']+)'/);
+eq(inicio?.[1], INICIO_ALUMNO, 'roles.js apunta el inicio del alumno a /alumno/dashboard');
+const RUTA_RAIZ = (inicio?.[1] || '').split('/').filter(Boolean).pop() || '';
+
+ok(RUTAS_ALUMNO.length === 11, `App.jsx tiene las 11 pantallas del alumno (vistas: ${RUTAS_ALUMNO.length})`);
+ok(RUTAS_ALUMNO.every((r) => r.ruta && r.archivo), 'cada ruta del alumno apunta a una pantalla lazy conocida');
+ok(RUTAS_ALUMNO.some((r) => r.ruta === RUTA_RAIZ), `la raíz (${RUTA_RAIZ}) es una de las rutas del alumno`);
+
+for (const { ruta, archivo } of RUTAS_ALUMNO) {
+    const nombre = archivo.replace('pages/alumno/', '');
+    const rel = '../src/' + archivo;
+    let src = '';
+    // Si el import lazy no resuelve a un archivo real, `src` queda vacío y se reporta
+    // como fallo en vez de reventar el script.
+    try {
+        src = leer(rel);
+    } catch {
+        src = '';
+    }
+    const importa = /from\s+['"][^'"]*components\/BotonVolver['"]/.test(src);
+    const dibuja = /<BotonVolver\s*\/>/.test(src);
+    ok(!!src, `${nombre}: el import lazy de App.jsx apunta a un archivo existente`);
+    if (ruta === RUTA_RAIZ) {
+        ok(!dibuja && !importa, `${nombre}: es la RAÍZ (${ruta}) y NO lleva flecha Volver`);
+    } else {
+        ok(importa, `${nombre}: importa BotonVolver desde components/`);
+        ok(dibuja, `${nombre}: dibuja <BotonVolver /> en el encabezado`);
+    }
+}
+
+// Ningún archivo de pages/alumno se queda afuera: o está ruteado, o es el Inicio
+// móvil (que cuelga del Dashboard y no es una pantalla aparte).
+const SIN_RUTA = { 'InicioMobile.jsx': 'Inicio móvil, dentro de Dashboard (la raíz)' };
+const ARCHIVOS = readdirSync(new URL('../src/pages/alumno/', import.meta.url))
+    .filter((n) => n.endsWith('.jsx'))
+    .sort();
+const ruteados = new Set(RUTAS_ALUMNO.map((r) => r.archivo.replace('pages/alumno/', '')));
+for (const n of ARCHIVOS) {
+    ok(ruteados.has(n) || n in SIN_RUTA, `pages/alumno/${n}: ruteado o declarado en SIN_RUTA`);
+}
+ok(ARCHIVOS.length === ruteados.size + Object.keys(SIN_RUTA).length,
+    `pages/alumno: ${ARCHIVOS.length} archivos = ${ruteados.size} ruteados + ${Object.keys(SIN_RUTA).length} sin ruta`);
+
+// ── 5b. El componente conserva el contrato visual y su respaldo ──────────────
+const COMP = leer('../src/components/BotonVolver.jsx');
+ok(/md:hidden/.test(COMP), 'BotonVolver: se oculta en ≥768px (md:hidden) — el escritorio no cambia');
+ok(/min-h-11/.test(COMP) && /min-w-11/.test(COMP), 'BotonVolver: objetivo táctil de 44px (min-h-11/min-w-11)');
+ok(/aria-label="Volver"/.test(COMP), 'BotonVolver: tiene aria-label="Volver"');
+ok(/destinoVolver\(key, fallback\)/.test(COMP), 'BotonVolver: la decisión sigue en destinoVolver()');
+ok(/fallback = '\/alumno\/dashboard'/.test(COMP), 'BotonVolver: el respaldo por defecto es el Inicio del alumno');
 
 console.log(fallos === 0 ? '\nTodos los chequeos pasaron.' : `\n${fallos} chequeo(s) fallaron.`);
 process.exit(fallos === 0 ? 0 : 1);
