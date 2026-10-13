@@ -10,7 +10,7 @@ from app.db.database import Base
 
 class Auditoria(Base):
     """
-    Modelo de AuditorÃ­a
+    Modelo de Auditoría
     Registra todas las acciones realizadas en el sistema
     """
     __tablename__ = "auditoria"
@@ -29,7 +29,7 @@ class Auditoria(Base):
     fecha = Column(TIMESTAMP(timezone=True),
                    nullable=False, server_default=func.now())
 
-    # Ãndices para bÃºsquedas
+    # Índices para búsquedas
     __table_args__ = (
         Index('ix_auditoria_tenant_id', 'tenant_id'),
         Index('ix_auditoria_usuario_id', 'usuario_id'),

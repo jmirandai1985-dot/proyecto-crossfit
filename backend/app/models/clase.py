@@ -13,7 +13,7 @@ from app.db.database import Base
 class Clase(Base):
     """
     Modelo de Clase
-    Representa una clase especÃ­fica en una fecha y hora determinada
+    Representa una clase específica en una fecha y hora determinada
     """
     __tablename__ = "clases"
 
@@ -55,7 +55,7 @@ class Clase(Base):
     cupo_original = Column(Integer, nullable=True)  # snapshot al generar; techo = cupo_original + 10
     asistentes_confirmados = Column(Integer, nullable=False, default=0)
     cancelada = Column(Boolean, nullable=False, default=False)
-    # WOD asociado a esta clase (FK â†’ wods.id)
+    # WOD asociado a esta clase (FK → wods.id)
     wod_id = Column(Integer, ForeignKey(
         "wods.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True),
@@ -66,7 +66,7 @@ class Clase(Base):
     # Relaciones
     wod = relationship("Wod", foreign_keys=[wod_id], lazy="joined")
 
-    # Ãndices para bÃºsquedas
+    # Índices para búsquedas
     __table_args__ = (
         Index('ix_clases_tenant_id', 'tenant_id'),
         Index('ix_clases_fecha', 'fecha'),

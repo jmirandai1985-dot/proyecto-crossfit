@@ -1,7 +1,7 @@
 ﻿"""
 Modelo SQLAlchemy para la tabla transacciones_financieras.
 Registra ingresos y egresos reales del box.
-Creada 2026-07-25 desde cero (sin histÃ³rico retroactivo).
+Creada 2026-07-25 desde cero (sin histórico retroactivo).
 """
 from sqlalchemy import Column, Integer, String, Numeric, Date, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import TIMESTAMP

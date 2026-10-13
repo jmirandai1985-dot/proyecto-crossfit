@@ -12,10 +12,10 @@ import sys
 # (definido en _run_tests_orchestrator.py)
 
 
-# â”€â”€ SEGURIDAD: Verificar que ENVIRONMENT sea 'test' â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── SEGURIDAD: Verificar que ENVIRONMENT sea 'test' ───────────────
 # Si alguien ejecuta este script directamente sin ENVIRONMENT=test,
-# config.py cargarÃ­a .env (producciÃ³n) y borrarÃ­a datos reales.
-# Esta verificaciÃ³n ocurre ANTES de cualquier import que cargue config.
+# config.py cargaría .env (producción) y borraría datos reales.
+# Esta verificación ocurre ANTES de cualquier import que cargue config.
 ENV = os.environ.get("ENVIRONMENT", "")
 if ENV != "test":
     print("="*60)
@@ -26,7 +26,7 @@ if ENV != "test":
     print("="*60)
     sys.exit(1)
 
-# MUST be set before any app import (redundante pero explÃ­cito)
+# MUST be set before any app import (redundante pero explícito)
 os.environ["ENVIRONMENT"] = "test"
 
 _config = importlib.import_module("app.core.config")
@@ -98,7 +98,7 @@ setup_engine.dispose()
 Base.metadata.create_all(bind=create_engine(_setup_url))
 print("Tables created (schema public reseteado via directa + create_all limpio)")
 
-# â”€â”€ MIGRACIONES POST-CREATE (BD nueva puede no tener columnas migradas) â”€â”€
+# ── MIGRACIONES POST-CREATE (BD nueva puede no tener columnas migradas) ──
 # Son idempotentes; el mismo ALTER/CREATE existe en sync_test_from_prod.py
 with engine.connect() as conn:
     conn.execute(text(
@@ -180,7 +180,7 @@ try:
     else:
         print("\n=== CUENTAS DEL INSTITUTO: no hay ninguna en TEST (nada que conservar)")
 
-    # â”€â”€ 1. LIMPIAR TODO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 1. LIMPIAR TODO ───────────────────────────────────
     print("\n=== LIMPIANDO datos anteriores...")
     # Orden inverso de FK
     db.execute(text("DELETE FROM solicitudes_planes"))
@@ -201,7 +201,7 @@ try:
     db.flush()
     print("   LIMPIEZA COMPLETA.")
 
-    # â”€â”€ 2. FECHAS DINÃMICAS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 2. FECHAS DINÁMICAS ───────────────────────────────
     ahora = datetime.now(timezone.utc)
     hoy = date.today()
     print(f"\n   Fecha actual: {hoy}")
@@ -211,13 +211,13 @@ try:
     _HASH = importlib.import_module("app.core.security").get_password_hash("Test1234!")
     print("   Password hash bcrypt generado para usuarios seed ('Test1234!')")
 
-    # â”€â”€ 3. TENANT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 3. TENANT ─────────────────────────────────────────
     db.add(Tenant(id=1, nombre="Box Test", subdomain="test-box",
                   public_id=str(uuid.uuid4())))
     db.flush()
     print("   Tenant 1")
 
-    # â”€â”€ 4. USUARIOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 4. USUARIOS ───────────────────────────────────────
     db.add(Usuario(id=999, tenant_id=1, rut="99.999.999-9",
                    nombre="Alumno Test",
                    correo="at@t.com", password_hash=_HASH, rol="alumno",
@@ -258,7 +258,7 @@ try:
     db.flush()
     print("   Alumno Dinero 1012")
 
-    # â”€â”€ 5. MOVIMIENTOS (con categorÃ­as) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 5. MOVIMIENTOS (con categorías) ───────────────────
     mov_data = [
         ("Clean", "fuerza"), ("Snatch", "fuerza"),
         ("Deadlift", "fuerza"), ("Back Squat", "fuerza"),
@@ -275,15 +275,15 @@ try:
         mov_ids[nombre] = m.id
     print(f"   {len(mov_data)} movimientos con categorias")
 
-    # â”€â”€ 6. PLAN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 6. PLAN ───────────────────────────────────────────
     db.add(Plan(id=1, tenant_id=1, nombre="Plan Test",
                 precio_clp=0, creditos=50,
                 duracion_dias=30, activo=True, genero="unisex"))
     db.flush()
     print("   Plan 1")
 
-    # â”€â”€ 7. SUSCRIPCIÃ“N (una sola, siempre) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # Asegurar que solo exista UNA suscripciÃ³n activa
+    # ── 7. SUSCRIPCIÓN (una sola, siempre) ────────────────
+    # Asegurar que solo exista UNA suscripción activa
     db.execute(text("DELETE FROM suscripciones WHERE usuario_id = 999"))
     db.flush()
     db.add(Suscripcion(tenant_id=1, usuario_id=999, plan_id=1,
@@ -296,7 +296,7 @@ try:
     assert count == 1, f"Esperaba exactamente 1 suscripcion activa, hay {count}"
     print("   Suscripcion activa (50 creditos) [OK: exactamente 1]")
 
-    # â”€â”€ 8. DISCIPLINAS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 8. DISCIPLINAS ─────────────────────────────────────
     disc_data = [
         (1, "CrossFit"), (2, "Open Box"), (3,
                                            "Musculación"), (4, "Levantamiento Olímpico"),
@@ -309,7 +309,7 @@ try:
     db.flush()
     print(f"   {len(disc_data)} disciplinas activas + Gap (activa)")
 
-    # â”€â”€ 8b. COACH-DISCIPLINA (coach 1000 asignado a CrossFit disc 1) â”€â”€
+    # ── 8b. COACH-DISCIPLINA (coach 1000 asignado a CrossFit disc 1) ──
     CoachDisciplina = importlib.import_module(
         "app.models.coach_disciplina").CoachDisciplina
     db.add(CoachDisciplina(tenant_id=1, coach_id=1000, disciplina_id=1, activo=True))
@@ -317,7 +317,7 @@ try:
     print("   Coach 1000 asignado a CrossFit (disc 1)")
     db.flush()
 
-    # â”€â”€ 9. HORARIO BASE (UNO por disciplina activa) â”€â”€â”€â”€â”€â”€
+    # ── 9. HORARIO BASE (UNO por disciplina activa) ──────
     # Regla de negocio: el seed genera 1 horario por disciplina.
     # En produccion real, un box puede tener multiples turnos por disciplina.
     # Eso es una decision de negocio separada, no del seed de test.
@@ -343,10 +343,10 @@ try:
     db.flush()
     print(f"   {len(horario_data)} horario(s) base (1 por disciplina)")
 
-    # â”€â”€ 10. CLASES (hoy + maÃ±ana para tests de reserva futura) â”€
+    # ── 10. CLASES (hoy + mañana para tests de reserva futura) ─
     class_counter = 1
-    # Saltar domingos: la operaciÃ³n estÃ¡ cerrada los domingos (test_c16 lo verifica).
-    # Si "maÃ±ana" es domingo, usar el lunes siguiente para la clase futura.
+    # Saltar domingos: la operación está cerrada los domingos (test_c16 lo verifica).
+    # Si "mañana" es domingo, usar el lunes siguiente para la clase futura.
     manana = hoy + timedelta(days=1)
     if manana.weekday() == 6:  # Sunday
         manana = manana + timedelta(days=1)
@@ -373,7 +373,7 @@ try:
     print(
         f"   {total_clases} clase(s) ({', '.join(str(f) for f in fechas_clases)}, {len(horario_data)} disciplinas c/u)")
 
-    # â”€â”€ 11. WOD PUBLICADO PARA HOY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 11. WOD PUBLICADO PARA HOY ────────────────────────
     clean_id = mov_ids.get("Clean", 1)
     wod = Wod(tenant_id=1, fecha=hoy, titulo="WOD Test",
               descripcion="WOD de prueba para tests",

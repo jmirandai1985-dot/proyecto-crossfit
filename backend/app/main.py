@@ -99,7 +99,7 @@ from anyio import to_thread
 
 app = FastAPI(
     title="Box CrossFit Platform API",
-    description="API REST para gestiÃ³n multi-tenant de boxes de CrossFit",
+    description="API REST para gestión multi-tenant de boxes de CrossFit",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
@@ -113,8 +113,8 @@ def _expand_threadpool():
     except Exception:
         pass
 
-# ---- CONFIGURACIÃ“N DE CORS - SOLO ORÃGENES CONFIGURADOS (no "*") ----
-# Los orÃ­genes permitidos vienen de .env (CORS_ORIGINS / FRONTEND_URL).
+# ---- CONFIGURACIÓN DE CORS - SOLO ORÍGENES CONFIGURADOS (no "*") ----
+# Los orígenes permitidos vienen de .env (CORS_ORIGINS / FRONTEND_URL).
 _cors_origins = settings.cors_origins_list
 # B.2: se agrega FRONTEND_URL saneada (una env var con espacios/salto rompía el origin).
 _frontend_saneado = url_frontend()
@@ -153,7 +153,7 @@ async def unhandled_exception_handler(request, exc):
         status_code=500, content={"detail": "Error interno del servidor"})
 
 
-# Montar directorio de archivos estÃ¡ticos para servir imÃ¡genes de productos
+# Montar directorio de archivos estáticos para servir imágenes de productos
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(os.path.join(_static_dir, "uploads"), exist_ok=True)
 app.mount("/static", StaticFiles(directory=_static_dir), name="static")
@@ -167,9 +167,9 @@ async def root():
 @app.get("/debug/db-url")
 async def debug_db_url():
     """Endpoint de seguridad: usado por conftest.py para verificar que el servidor
-    NO estÃ© apuntando a producciÃ³n.
+    NO esté apuntando a producción.
     - En TEST: devuelve {"is_safe": true, "branch": <id del endpoint TEST>}
-    - En PRODUCCIÃ“N: devuelve 404 para no exponer informaciÃ³n de infraestructura
+    - En PRODUCCIÓN: devuelve 404 para no exponer información de infraestructura
     Nunca expone la URL completa ni credenciales."""
     # Criterio ÚNICO con el resto de los guards: `is_test_db_url` aplica además el
     # DENYLIST de PROD (PROD_BRANCH_ID), así este endpoint no podría "mentir" si el
@@ -179,7 +179,7 @@ async def debug_db_url():
     if is_test_db_url(url):
         branch = next((b for b in TEST_BRANCH_IDS if b in url), None)
         return {"is_safe": True, "is_test": True, "branch": branch}
-    # En producciÃ³n o cualquier otro entorno, no revelar informaciÃ³n
+    # En producción o cualquier otro entorno, no revelar información
     from fastapi import HTTPException
     raise HTTPException(status_code=404, detail="Not found")
 
@@ -217,7 +217,7 @@ async def sentry_debug():
     raise ValueError("Test de captura de errores /sentry-debug")
 
 
-# ---- INCLUSIÃ“N DE TODOS LOS ROUTERS CON SUS PREFIJOS CORRECTOS ----
+# ---- INCLUSIÓN DE TODOS LOS ROUTERS CON SUS PREFIJOS CORRECTOS ----
 app.include_router(
     usuarios.router, prefix="/api/v1/usuarios", tags=["Usuarios"])
 app.include_router(tenants.router, prefix="/api/v1/tenants", tags=["Tenants"])
@@ -244,13 +244,13 @@ app.include_router(
 app.include_router(coach_disciplinas.router,
                    prefix="/api/v1/coach-disciplinas", tags=["Coach-Disciplinas"])
 
-# MÃ³dulos corregidos con el nombre del recurso en el prefijo (Evita errores 500 y 404)
+# Módulos corregidos con el nombre del recurso en el prefijo (Evita errores 500 y 404)
 app.include_router(movimientos.router,
                    prefix="/api/v1/movimientos", tags=["RMs - Movimientos"])
 app.include_router(historial_rm.router,
                    prefix="/api/v1/historial-rm", tags=["RMs - Historial"])
 app.include_router(
-    retencion.router, prefix="/api/v1/retencion", tags=["RetenciÃ³n"])
+    retencion.router, prefix="/api/v1/retencion", tags=["Retención"])
 app.include_router(productos.router, prefix="/api/v1/productos",
                    tags=["Bazar - Productos"])
 app.include_router(pedidos.router, prefix="/api/v1/pedidos",
@@ -261,8 +261,8 @@ app.include_router(marketing.router, prefix="/api/v1/marketing",
 app.include_router(reportes.router, prefix="/api/v1/reportes",
                    tags=["Reportes Excel"])
 app.include_router(
-    auditoria.router, prefix="/api/v1/auditoria", tags=["AuditorÃ­a"])
-app.include_router(auth.router, prefix="/api/v1/auth", tags=["AutenticaciÃ³n"])
+    auditoria.router, prefix="/api/v1/auditoria", tags=["Auditoría"])
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["Autenticación"])
 app.include_router(suscripciones.router, prefix="/api/v1",
                    tags=["Suscripciones"])
 app.include_router(wods.router, tags=["WODs"])
@@ -275,7 +275,7 @@ app.include_router(notificaciones.router,
 app.include_router(notificaciones_enviadas.router,
                    prefix="/api/v1/notificaciones-enviadas", tags=["Notificaciones Enviadas"])
 app.include_router(migracion.router,
-                   prefix="/api/v1/migracion", tags=["MigraciÃ³n"])
+                   prefix="/api/v1/migracion", tags=["Migración"])
 app.include_router(comprar_emergencia.router,
                    prefix="/api/v1/planes", tags=["Compra Emergencia"])
 app.include_router(fix_fechas.router,
@@ -285,14 +285,14 @@ app.include_router(supervision.router,
 app.include_router(finanzas.router,
                    prefix="/api/v1/finanzas", tags=["Finanzas"])
 app.include_router(configuracion.router,
-                   prefix="/api/v1/configuracion", tags=["ConfiguraciÃ³n"])
+                   prefix="/api/v1/configuracion", tags=["Configuración"])
 # Historial del alumno: MISMO prefijo y ANTES que `alumnos.router`, para que
 # `/api/v1/alumnos/me/historial` (literal) se resuelva antes que cualquier ruta con
 # `{alumno_id}` y "me" nunca se intente parsear como int.
 app.include_router(historial_alumno.router, prefix="/api/v1/alumnos",
                    tags=["Alumnos - Historial"])
 app.include_router(alumnos.router, prefix="/api/v1/alumnos",
-                   tags=["Alumnos - Registro y ActivaciÃ³n"])
+                   tags=["Alumnos - Registro y Activación"])
 app.include_router(asistencia.router, prefix="/api/v1/asistencia",
                    tags=["Asistencia y Hitos"])
 app.include_router(ranking.router, prefix="/api/v1/ranking",
@@ -310,8 +310,8 @@ async def startup_event():
     import logging
     logger = logging.getLogger("uvicorn.startup")
 
-    logger.info("ðŸš€ Iniciando Box CrossFit Platform API...")
-    logger.info("ðŸ“– DocumentaciÃ³n disponible en: http://localhost:8000/docs")
+    logger.info("🚀 Iniciando Box CrossFit Platform API...")
+    logger.info("📖 Documentación disponible en: http://localhost:8000/docs")
 
     # ── B.3: aviso de configuración de correo/URLs (no aborta el arranque) ────
     _problemas_cfg = problemas_de_config()
@@ -334,7 +334,7 @@ async def startup_event():
         from app.services.scheduler import iniciar_scheduler, set_generar_clases_callback
 
         def _generar_clases_bloqueante():
-            """Genera clases para HOY + 28 dÃ­as (4 semanas)"""
+            """Genera clases para HOY + 28 días (4 semanas)"""
             from datetime import timedelta
             from app.db.database import SessionLocal
             from app.services.generar_clases import (
@@ -344,13 +344,13 @@ async def startup_event():
             fecha_hasta = hoy + timedelta(days=DIAS_ANTICIPACION)
             db = SessionLocal()
             try:
-                # Generar para tenant_id=1 (principal) en rango de 7 dÃ­as
+                # Generar para tenant_id=1 (principal) en rango de 7 días
                 resultado = generar_dias_incompletos(
                     db, tenant_id=1, fecha_desde=hoy, fecha_hasta=fecha_hasta)
                 return resultado
             except Exception as e:
                 logger.error(
-                    f"âŒ [Callback Scheduler] Error: {e}", exc_info=True)
+                    f"❌ [Callback Scheduler] Error: {e}", exc_info=True)
                 return None
             finally:
                 db.close()
@@ -368,9 +368,9 @@ async def startup_event():
         set_generar_clases_callback(callback_generar_clases)
         iniciar_scheduler()
     except Exception as e:
-        logger.error(f"âŒ Error al iniciar scheduler: {e}")
+        logger.error(f"❌ Error al iniciar scheduler: {e}")
 
-    # â”€â”€ 2. Ejecutar generaciÃ³n inmediata al iniciar (para desarrollo) â”€â”€
+    # ── 2. Ejecutar generación inmediata al iniciar (para desarrollo) ──
     try:
         from datetime import timedelta
         from app.db.database import SessionLocal
@@ -392,16 +392,16 @@ async def startup_event():
                 resultado = generar_dias_incompletos(
                     db, tenant_id=1, fecha_desde=hoy, fecha_hasta=fecha_hasta)
                 logger.info(
-                    f"ðŸ”„ [Startup] Se generaron {resultado['creadas']} clases faltantes para HOY + 28 dÃ­as (4 semanas)")
+                    f"🔄 [Startup] Se generaron {resultado['creadas']} clases faltantes para HOY + 28 días (4 semanas)")
             else:
                 logger.info(
-                    f"âœ… [Startup] Rango completo, no es necesario generar clases")
+                    f"✅ [Startup] Rango completo, no es necesario generar clases")
         finally:
             db.close()
     except Exception as e:
-        logger.error(f"âŒ Error al generar clases en startup: {e}")
+        logger.error(f"❌ Error al generar clases en startup: {e}")
 
-    # â”€â”€ 3. Crear movimientos de CrossFit de prueba si no existen â”€â”€
+    # ── 3. Crear movimientos de CrossFit de prueba si no existen ──
     try:
         from app.db.database import SessionLocal
         from app.models.movimiento import Movimiento
@@ -412,7 +412,7 @@ async def startup_event():
             movimientos_lista = [
                 ("Clean (Cargada)", "fuerza"),
                 ("Snatch (Arrancada)", "fuerza"),
-                ("Jerk (EnviÃ³n)", "fuerza"),
+                ("Jerk (Envión)", "fuerza"),
                 ("Thruster", "fuerza"),
                 ("Deadlift (Peso Muerto)", "fuerza"),
                 ("Front Squat (Sentadilla Frontal)", "fuerza"),
@@ -431,8 +431,8 @@ async def startup_event():
                 ("Single Unders / SU (Saltos simples)", "gimnastico"),
                 ("Pistol Squat", "gimnastico"),
                 ("Burpees", "metabolico"),
-                ("Wall Balls (Lanzamiento de balÃ³n)", "metabolico"),
-                ("Box Jumps (Saltos al cajÃ³n)", "gimnastico"),
+                ("Wall Balls (Lanzamiento de balón)", "metabolico"),
+                ("Box Jumps (Saltos al cajón)", "gimnastico"),
                 ("Box Jump Over", "gimnastico"),
                 ("Dumbbell Snatch", "fuerza"),
                 ("Kettlebell Swing", "fuerza"),
@@ -455,24 +455,24 @@ async def startup_event():
                         db.add(movimiento)
                     db.commit()
                     logger.info(
-                        f"âœ… Creados {len(movimientos_lista)} movimientos de prueba")
+                        f"✅ Creados {len(movimientos_lista)} movimientos de prueba")
                 else:
                     logger.info(
-                        f"âœ… {existing_count} movimientos ya existen, saltando seed")
+                        f"✅ {existing_count} movimientos ya existen, saltando seed")
             else:
                 logger.warning(
-                    "âš ï¸ No se encontrÃ³ tenant con id=1, no se crearon movimientos")
+                    "⚠️ No se encontró tenant con id=1, no se crearon movimientos")
         finally:
             db.close()
     except Exception as e:
-        logger.error(f"âŒ Error al crear movimientos de prueba: {e}")
+        logger.error(f"❌ Error al crear movimientos de prueba: {e}")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     import logging
     logger = logging.getLogger("uvicorn.shutdown")
-    logger.info("ðŸ›‘ Cerrando Box CrossFit Platform API...")
+    logger.info("🛑 Cerrando Box CrossFit Platform API...")
 
     from app.services.scheduler import detener_scheduler
     detener_scheduler()

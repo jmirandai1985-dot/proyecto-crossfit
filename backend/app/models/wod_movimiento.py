@@ -12,7 +12,7 @@ from app.db.database import Base
 class WodMovimiento(Base):
     """
     Modelo pivote WodMovimiento
-    Relaciona un WOD con un Movimiento, incluyendo parÃ¡metros del ejercicio
+    Relaciona un WOD con un Movimiento, incluyendo parámetros del ejercicio
     """
     __tablename__ = "wod_movimientos"
 
@@ -36,7 +36,7 @@ class WodMovimiento(Base):
     wod = relationship("Wod", back_populates="movimientos")
     movimiento = relationship("Movimiento")
 
-    # Ãndices para bÃºsquedas
+    # Índices para búsquedas
     __table_args__ = (
         Index('ix_wod_movimientos_wod_id', 'wod_id'),
         Index('ix_wod_movimientos_movimiento_id', 'movimiento_id'),

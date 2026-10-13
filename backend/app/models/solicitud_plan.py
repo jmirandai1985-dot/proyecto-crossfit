@@ -1,5 +1,5 @@
 ﻿"""
-Modelo de Solicitud de Plan (pendiente de aprobaciÃ³n admin)
+Modelo de Solicitud de Plan (pendiente de aprobación admin)
 """
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
 from sqlalchemy.sql import func

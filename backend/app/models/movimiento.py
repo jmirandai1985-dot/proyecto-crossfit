@@ -27,7 +27,7 @@ class Movimiento(Base):
     updated_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now(), onupdate=func.now())
 
-    # Ãndices para bÃºsquedas
+    # Índices para búsquedas
     __table_args__ = (
         Index('ix_movimientos_tenant_id', 'tenant_id'),
         Index('ix_movimientos_nombre', 'nombre'),

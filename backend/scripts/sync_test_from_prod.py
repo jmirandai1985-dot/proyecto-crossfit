@@ -1,6 +1,6 @@
 ﻿"""
 SYNC PROD -> TEST (TEST y PROD en proyectos Neon separados desde 2026-09-23).
-IDEMPOTENTE: TRUNCATE + copia todos los datos desde PRODUCCIÃ“N.
+IDEMPOTENTE: TRUNCATE + copia todos los datos desde PRODUCCIÓN.
 Preserva tablas custom (transacciones_financieras) mediante backup/restore.
 Incluye migraciones post-sync (requiere_coach, es_estudiante, coach_disciplinas, cobertura_emergencia).
 """
@@ -18,7 +18,7 @@ sys.path.insert(0, BACKEND_DIR)
 # usuarios de prueba del seed de la suite (999/1000/1001/1010) NO sobreviven:
 # despues del sync, TEST es una copia de PROD (usuarios reales incluidos).
 
-# â”€â”€ SEGURIDAD: Verificar ENVIRONMENT â”€â”€
+# ── SEGURIDAD: Verificar ENVIRONMENT ──
 ENV = os.environ.get("ENVIRONMENT", "")
 if ENV != "test":
     print("="*60)
@@ -29,7 +29,7 @@ if ENV != "test":
 
 os.environ["ENVIRONMENT"] = "test"
 
-# â”€â”€ URLs â”€â”€
+# ── URLs ──
 # TEST: se obtiene de settings (carga .env.test)
 _config_mod = importlib.import_module("app.core.config")
 settings = _config_mod.settings
@@ -82,7 +82,7 @@ print(f"BD de TEST : {_solo_host(URL_TEST)}")
 print(f"BD de PROD : {_solo_host(URL_PROD)}")
 print("="*60)
 
-# â”€â”€ CONECTAR â”€â”€
+# ── CONECTAR ──
 c_prod = psycopg2.connect(URL_PROD)
 c_test = psycopg2.connect(URL_TEST)
 c_test.autocommit = True
@@ -153,7 +153,7 @@ else:
     print("=" * 60)
     sys.exit(1)
 
-# â”€â”€ 1. RESPALDAR tablas custom â”€â”€
+# ── 1. RESPALDAR tablas custom ──
 print("\n[BACKUP] Respaldo transacciones_financieras...")
 try:
     cur_test.execute(
@@ -164,7 +164,7 @@ except Exception as e:
     print(f"  No hay datos para respaldar: {e}")
     backup_tx = []
 
-# â”€â”€ 2. TRUNCATE CASCADE TEST â”€â”€
+# ── 2. TRUNCATE CASCADE TEST ──
 print("\nTRUNCATE CASCADE TEST...")
 cur_test.execute("""
     TRUNCATE TABLE
@@ -183,7 +183,7 @@ cur_test.execute("ALTER TABLE disciplinas ADD COLUMN IF NOT EXISTS requiere_coac
 cur_test.execute("ALTER TABLE planes ADD COLUMN IF NOT EXISTS es_estudiante BOOLEAN NOT NULL DEFAULT false")
 cur_test.execute("ALTER TABLE planes ADD COLUMN IF NOT EXISTS requiere_certificado_estudiante BOOLEAN NOT NULL DEFAULT false")
 
-# â”€â”€ 3. COPIAR PRODâ†’TEST (tablas estÃ¡ndar) â”€â”€
+# ── 3. COPIAR PROD→TEST (tablas estándar) ──
 print("\nCopiando PROD->TEST...")
 TABLAS = [
     ("tenants", None),
@@ -219,7 +219,7 @@ for tabla, columnas in TABLAS:
 
 c_test.commit()
 
-# â”€â”€ 3b. RESINCRONIZAR SECUENCIAS SERIAL (fix: auto-generacion de clases despues del sync) â”€â”€
+# ── 3b. RESINCRONIZAR SECUENCIAS SERIAL (fix: auto-generacion de clases despues del sync) ──
 # Al copiar IDs explicitos desde PROD, las secuencias SERIAL de TEST quedan sin
 # sincronizar. Si luego la app intenta insertar (ej. auto-generar clases para
 # fechas recientes), choca con IDs ya existentes (UniqueViolation).
@@ -257,7 +257,7 @@ for tabla, seq in SECUENCIAS.items():
         # Ignorar secuencias/tablas que no existen en este schema
         pass
 
-# â”€â”€ 4. RESTAURAR tablas custom â”€â”€
+# ── 4. RESTAURAR tablas custom ──
 print("\n[RESTORE] Restaurando transacciones_financieras...")
 if backup_tx:
     for row in backup_tx:
@@ -271,9 +271,9 @@ if backup_tx:
     c_test.commit()
     print(f"  {len(backup_tx)} transacciones restauradas")
 else:
-    print("  Sin datos para restaurar (tabla estaba vacÃ­a)")
+    print("  Sin datos para restaurar (tabla estaba vacía)")
 
-# â”€â”€ 5. MIGRACIONES POST-SYNC (antes eran _apply_migrations_post_sync.py) â”€â”€
+# ── 5. MIGRACIONES POST-SYNC (antes eran _apply_migrations_post_sync.py) ──
 print("\n[MIGRACIONES POST-SYNC]...")
 
 # 5a. requiere_coach on disciplinas
@@ -323,7 +323,7 @@ print("[OK] cobertura_emergencia table")
 c_test.commit()
 print("[OK] Migraciones post-sync aplicadas")
 
-# â”€â”€ 6. VERIFICACION â”€â”€
+# ── 6. VERIFICACION ──
 print("\nVERIFICACION:")
 for tabla in ["tenants", "movimientos", "disciplinas", "planes", "horarios",
               "usuarios", "suscripciones", "productos", "clases", "reservas",
