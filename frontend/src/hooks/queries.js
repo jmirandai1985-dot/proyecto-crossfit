@@ -531,7 +531,7 @@ export function useClasesRango(desde, hasta, limite = 500) {
         // acepta lo mismo que aceptaba el Dashboard al leerla.
         queryFn: async () => {
             const data = (await api.get(
-                `/api/v1/clases?fecha_desde=${desde}&fecha_hasta=${hasta}&limit=${limite}`,
+                `/api/v1/clases/?fecha_desde=${desde}&fecha_hasta=${hasta}&limit=${limite}`,
             )).data;
             const lista = data?.clases || data || [];
             return Array.isArray(lista) ? lista : [];
