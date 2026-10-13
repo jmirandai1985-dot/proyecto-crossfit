@@ -57,3 +57,42 @@ queda visible en `/health.config_problemas` para no perderlo de vista.
 docker exec box-crossfit-backend-1 python -m pytest tests/test_email_config_prod.py -q   # 8 passed
 docker exec box-crossfit-backend-1 python -m pytest tests/test_email_header_saneo.py -q  # 48 passed
 ```
+
+## Rotación del app password de Gmail (runbook)
+
+`GMAIL_SMTP_APP_PASSWORD` es una **app password** de la cuenta
+`urban.training.box.2026@gmail.com` (16 caracteres; se pega sin espacios). Es revocable e
+independiente de la contraseña de la cuenta: rotarla **no** cambia la clave del correo ni la 2FA.
+
+Dónde vive el valor (inventario 2026-10-13 — ninguna copia está versionada):
+
+| Ubicación | Rol |
+|---|---|
+| Render → Web Service `box-crossfit` → Environment → `GMAIL_SMTP_APP_PASSWORD` | el valor que usa PROD (`sync: false` en `render.yaml`: nunca se versiona) |
+| `backend/.env` y `backend/.env.test` (git-ignored) | copias de trabajo locales |
+| `backend/backups/.env.test.bak-*` (git-ignored) | 2 backups viejos del `.env.test` |
+
+Verificado el 2026-10-13: el valor **no** aparece en ningún archivo versionado
+(`git grep` = 0 coincidencias), **no** está en ninguna revisión del historial
+(`git log --all -S` = 0 commits) y **no** aparece en `backend/logs/`, en los dumps
+`backend/backups/*.sql`, ni en `n8n/`, `docs/` o `frontend/`.
+
+Si se filtra, el orden importa (rotar antes de revocar deja PROD sin poder enviar correo
+entre los pasos 1 y 2):
+
+1. Crear la app password nueva en <https://myaccount.google.com/apppasswords> con la cuenta
+   `urban.training.box.2026@gmail.com` (requiere 2FA activa) → nombre `box-crossfit-render`.
+   La vieja sigue viva hasta terminar el paso 3.
+2. Reemplazar el valor: Render → `box-crossfit` → Environment → `GMAIL_SMTP_APP_PASSWORD`
+   = la nueva, **sin espacios ni saltos** → Save (el redeploy la toma). Y en local:
+   `backend/.env` + `backend/.env.test`; borrar (o actualizar) los
+   `backend/backups/.env.test.bak-*`.
+3. Verificar: `Invoke-RestMethod https://box-crossfit.onrender.com/health` →
+   `config_ok=true` y `config_problemas=[]`; después, un correo real
+   (ver "Cómo verificar (día 1)").
+4. Revocar la app password vieja en la misma página de Google.
+
+⚠️ Los mismos `.env` locales guardan otros secretos (`DATABASE_URL`/`DIRECT_URL` de PROD,
+`JWT_SECRET_KEY`, `RESEND_API_KEY`, `REACTIVACION_OPT_OUT_SECRET`, `SENTRY_DSN`): si lo que se
+filtró fue el archivo completo y no sólo la clave de correo, hay que rotar esos también.
+
