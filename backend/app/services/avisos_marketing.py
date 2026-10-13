@@ -323,11 +323,15 @@ def sincronizar_producto(db, producto: Producto, creado_por: int | None = None,
     Toda la perilla del admin es `productos.dias_anuncio`:
       * 0 → se QUITA el aviso (no se anuncia) y se devuelve None;
       * >0 y no hay aviso → se crea, con la ventana que empieza HOY (día de Chile);
-      * >0 y el aviso YA ESTÁ VIGENTE → se le actualizan título, texto y foto (el
-        producto pudo cambiar de nombre o de imagen) y se RESPETA su ventana: si
-        guardar el producto reiniciara el plazo, editar el stock todos los días
-        mantendría el anuncio para siempre;
-      * >0 y el aviso está vencido o programado → se le reabre la ventana desde hoy.
+      * >0 y el aviso ya existe → se RELANZA: la ventana se vuelve a contar desde hoy
+        con los días que el admin acaba de guardar (más días = anuncio más largo,
+        menos días = más corto) y el contenido se refresca, porque título, texto y
+        foto son del producto y pudieron cambiar.
+
+    El relanzado es una DECISIÓN del admin, no un efecto de guardar el producto: la
+    ruta sólo llama al sync cuando `dias_anuncio` viene en el payload, así que editar
+    el stock, el precio o el nombre sin tocar los días deja la ventana como estaba
+    (si no, cada edición relanzaría el anuncio desde hoy).
 
     Lo llaman POST /productos y PUT /productos/{id}: el aviso es DERIVADO del
     producto y no se toca a mano (la API del admin rechaza ese tipo).
@@ -347,6 +351,13 @@ def sincronizar_producto(db, producto: Producto, creado_por: int | None = None,
         return None
 
     hoy = fecha_chile(ahora)
+    # La ventana se recalcula SIEMPRE desde hoy (darle 7 días a un aviso que estaba
+    # por vencer lo deja con 7 días completos por delante). Lo que evita que el
+    # anuncio se estire solo es la PUERTA de la ruta: sin `dias_anuncio` en el
+    # payload, el sync ni siquiera se llama.
+    desde = inicio_del_dia_chile(hoy)
+    hasta = _fin_de_ventana(hoy, dias)
+
     if aviso is None:
         aviso = AvisoMarketing(
             tenant_id=producto.tenant_id,
@@ -358,8 +369,8 @@ def sincronizar_producto(db, producto: Producto, creado_por: int | None = None,
             titulo=producto.nombre,
             texto=TEXTO_PRODUCTO,
             imagen_url=producto.imagen_url,
-            vigente_desde=inicio_del_dia_chile(hoy),
-            vigente_hasta=_fin_de_ventana(hoy, dias),
+            vigente_desde=desde,
+            vigente_hasta=hasta,
             # Un aviso automático nunca va fijado arriba: el carrusel lo ordena por
             # fecha y lo que el admin fija a mano sigue mandando.
             fijado_arriba=False,
@@ -367,14 +378,14 @@ def sincronizar_producto(db, producto: Producto, creado_por: int | None = None,
         )
         db.add(aviso)
     else:
-        # El contenido se refresca SIEMPRE (nombre, foto y texto son del producto).
+        # El contenido se refresca SIEMPRE (nombre, foto y texto son del producto) y
+        # la ventana se relanza con los días recién guardados.
         aviso.tipo = TIPO_PRODUCTO_BAZAR
         aviso.titulo = producto.nombre
         aviso.texto = TEXTO_PRODUCTO
         aviso.imagen_url = producto.imagen_url
-        if not esta_vigente(aviso.vigente_desde, aviso.vigente_hasta, ahora):
-            aviso.vigente_desde = inicio_del_dia_chile(hoy)
-            aviso.vigente_hasta = _fin_de_ventana(hoy, dias)
+        aviso.vigente_desde = desde
+        aviso.vigente_hasta = hasta
 
     db.commit()
     db.refresh(aviso)

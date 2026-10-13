@@ -17,8 +17,9 @@ from app.core.dependencies import get_current_admin, get_current_user, require_f
 from app.core.imagenes_publicas import guardar_imagen_publica
 from app.services import storage
 # El aviso `producto_bazar` del carrusel del Inicio es DERIVADO del producto: lo
-# crea/actualiza/quita `sincronizar_producto` cada vez que el admin guarda el
-# producto con `dias_anuncio` (Bloque 3).
+# crea/RELANZA/quita `sincronizar_producto` cada vez que el admin guarda el producto
+# con `dias_anuncio` (Bloque 3). Guardar los días es lo que relanza la ventana desde
+# hoy; el sync sólo se llama si ese campo viene en el payload.
 from app.services import avisos_marketing as avisos
 
 # FIX 1: catálogo de movimientos restringido para alumnos de prueba
@@ -218,9 +219,9 @@ def actualizar_producto(
         storage.borrar_publico(imagen_previa)
 
     # Días de anuncio: si el admin los tocó, el aviso del carrusel se recalcula en
-    # el MISMO guardado (crear, actualizar la foto/nombre o quitarlo con 0). El
-    # sync NO corre en cada PUT a propósito: reabriría la ventana de un anuncio ya
-    # terminado cada vez que alguien edita el stock.
+    # el MISMO guardado (crear, relanzar la ventana con esos días o quitarlo con 0).
+    # El sync NO corre en cada PUT a propósito: guardar el stock (o el precio, o el
+    # nombre) sin tocar los días no puede relanzar el anuncio desde hoy.
     if "dias_anuncio" in update_data:
         avisos.sincronizar_producto(db, producto,
                                     creado_por=current_user["usuario_id"])

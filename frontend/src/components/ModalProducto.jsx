@@ -269,6 +269,7 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                         <p className="text-xs text-gray-500 mt-1">
                             Con días &gt; 0 el producto se anuncia en el carrusel "Novedades del box" del
                             Inicio del alumno (con su foto y su precio). 0 = no se anuncia.
+                            Al guardar, el anuncio se relanza desde hoy con estos días.
                         </p>
                     </div>
 

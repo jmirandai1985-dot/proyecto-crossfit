@@ -8,9 +8,11 @@ QUÉ CUIDA ESTE TEST
 
   * la VENTANA cuenta HOY como el primer día (1 día = sólo hoy hasta las 23:59:59
     de Chile). Si contara desde mañana, "anunciar 1 día" no anunciaría nada;
-  * editar un producto NO puede REINICIAR el anuncio: si cada guardado reabriera la
-    ventana, un admin que toca el stock todos los días tendría el producto
-    anunciado para siempre y no habría forma de que caducara;
+  * guardar "días de anuncio" RELANZA el aviso desde hoy con esos días (el mismo
+    valor u otro, más días o menos): es la decisión explícita del admin. Lo que no
+    puede pasar es que el anuncio se relance solo, así que la ruta sólo llama al sync
+    cuando `dias_anuncio` viene en el payload: editar el stock (o el precio, o el
+    nombre) sin tocarlo deja la ventana exactamente como estaba;
   * el "flyer" de este aviso ES la foto del producto (`imagen_url` compartida):
     borrar el aviso NO puede borrar el archivo, o el producto se queda sin foto en
     el Bazar. Es el error silencioso más caro de este bloque;
@@ -200,9 +202,10 @@ def test_la_ventana_cuenta_hoy_como_el_primer_dia():
     assert fecha_chile(siete.vigente_hasta) == HOY + timedelta(days=6)
 
 
-# ── 4. Editar el producto no puede estirar un anuncio en curso ──────────────
+# ── 4. Guardar los días relanza la ventana desde hoy ────────────────────────
 
-def test_un_aviso_vigente_conserva_su_ventana_y_refresca_su_contenido():
+def test_guardar_los_dias_relanza_la_ventana_y_refresca_el_contenido():
+    """Aunque el aviso estuviera VIGENTE: los 30 días recién guardados arrancan hoy."""
     db = _SesionFalsa(aviso=_aviso(titulo="Polera vieja",
                                    imagen_url="/static/uploads/vieja.png"))
     servicio.sincronizar_producto(
@@ -211,11 +214,19 @@ def test_un_aviso_vigente_conserva_su_ventana_y_refresca_su_contenido():
         ahora=AHORA)
 
     aviso = db.consulta.fila
-    assert fecha_chile(aviso.vigente_hasta) == HOY + timedelta(days=4), \
-        "editar el producto NO puede reiniciar el plazo"
+    assert fecha_chile(aviso.vigente_desde) == HOY, "el aviso se relanza desde hoy"
+    assert fecha_chile(aviso.vigente_hasta) == HOY + timedelta(days=29)
+    # El contenido también se refresca: es del producto, que pudo cambiar.
     assert aviso.titulo == "Polera Urban Box v2"
     assert aviso.imagen_url == "/static/uploads/nueva.png"
     assert db.commits == 1
+
+
+def test_guardar_menos_dias_acorta_el_anuncio_que_estaba_vigente():
+    """La otra mitad de la regla: el relanzado también puede ACORTAR."""
+    db = _SesionFalsa(aviso=_aviso())          # vigente hasta HOY + 4
+    servicio.sincronizar_producto(db, _producto(dias_anuncio=2), ahora=AHORA)
+    assert fecha_chile(db.consulta.fila.vigente_hasta) == HOY + timedelta(days=1)
 
 
 def test_un_aviso_vencido_se_reabre_desde_hoy():
@@ -261,9 +272,8 @@ def _llamadas_al_sync(fuente: str) -> int:
 def test_crear_y_editar_un_producto_sincronizan_su_aviso():
     fuente = PRODUCTOS_PY.read_text(encoding="utf-8-sig")
     assert "from app.services import avisos_marketing as avisos" in fuente
-    # DOS llamadas: la del POST (producto recién creado) y la del PUT, que además
-    # está guardada por `if "dias_anuncio" in update_data` para no reabrir un
-    # anuncio viejo cada vez que alguien edita el stock.
+    # DOS llamadas: la del POST (producto recién creado) y la del PUT, que además va
+    # DENTRO de la puerta `dias_anuncio in update_data` (el test de abajo lo fija).
     assert _llamadas_al_sync(fuente) == 2
     assert "avisos.sincronizar_producto(db, db_producto," in fuente
     assert "avisos.sincronizar_producto(db, producto," in fuente
@@ -271,6 +281,21 @@ def test_crear_y_editar_un_producto_sincronizan_su_aviso():
     # El Form y el modelo llevan la columna (sin ella, el guardado la pierde).
     assert "dias_anuncio: Optional[int] = Form(None)" in fuente
     assert "dias_anuncio=max(int(dias_anuncio or 0), 0)" in fuente
+
+
+def test_editar_sin_tocar_los_dias_no_relanza_el_anuncio():
+    """La ÚNICA puerta del relanzado: sin `dias_anuncio` en el payload el sync del PUT
+    ni corre, así que editar el stock, el precio o el nombre deja la ventana intacta."""
+    fuente = PRODUCTOS_PY.read_text(encoding="utf-8-sig")
+    puertas = [nodo for nodo in ast.walk(ast.parse(fuente))
+               if isinstance(nodo, ast.If)
+               and ast.unparse(nodo.test) == "'dias_anuncio' in update_data"]
+    assert len(puertas) == 1, "el PUT tiene que tener UNA sola puerta"
+    # Y la llamada del PUT está ADENTRO de la puerta (no al lado, ni en un `else`).
+    assert _llamadas_al_sync(ast.unparse(puertas[0]).strip()) == 1
+    # El campo sólo llega al dict si el cliente lo mandó: es lo que hace que "no lo
+    # toqué" sea distinguible de "lo guardé con el mismo valor".
+    assert "model_dump(exclude_unset=True)" in fuente
 
 
 def test_el_aviso_de_un_producto_no_se_edita_desde_marketing():
