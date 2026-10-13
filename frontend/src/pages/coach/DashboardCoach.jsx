@@ -521,7 +521,7 @@ const DashboardCoach = () => {
                                 <p className="text-2xl font-bold text-gray-900 mt-1">{wodHoy ? (wodHoy.estado === 'publicado' ? 'Publicado' : 'Borrador') : 'Sin WOD'}</p>
                                 <p className="text-xs text-gray-500 mt-1">{wodHoy?.titulo || 'Crea el WOD — Clic para ver'}</p>
                             </div>
-                            <div className={`${wodHoy?.estado === 'publicado' ? 'bg-orange-500' : 'bg-gray-500'} w-12 h-12 rounded-lg flex items-center justify-center text-xl`}>💪</div>
+                            <div className={`${wodHoy?.estado === 'publicado' ? 'bg-orange-500' : 'bg-zinc-700'} w-12 h-12 rounded-lg flex items-center justify-center text-xl`}>💪</div>
                         </div>
                     </button>
                     <button onClick={() => navigate('/coach/dashboard?tab=riesgo')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
@@ -614,7 +614,7 @@ const DashboardCoach = () => {
                                                             {msgAsistencia?.claseId === clase.id && (
                                                                 <div className={`mb-3 px-3 py-2 rounded-md text-sm font-medium ${msgAsistencia.tipo === 'exito'
                                                                     ? 'bg-green-100 text-green-800 border border-green-300'
-                                                                    : 'bg-red-100 text-red-800 border border-red-300'
+                                                                    : 'bg-red-100 text-red-500 border border-red-500/30'
                                                                     }`}>
                                                                     {msgAsistencia.texto}
                                                                 </div>
@@ -652,8 +652,8 @@ const DashboardCoach = () => {
                                                                                 key={a.reserva_id}
                                                                                 onClick={() => toggleAsistenciaAlumno(clase.id, a.reserva_id, !a.asistio)}
                                                                                 className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${a.asistio
-                                                                                    ? 'bg-emerald-100 text-emerald-800 border-emerald-400 hover:bg-emerald-200'
-                                                                                    : 'bg-red-100 text-red-800 border-red-400 hover:bg-red-200'
+                                                                                    ? 'bg-emerald-100 text-emerald-700 border-emerald-400 hover:bg-emerald-500/20'
+                                                                                    : 'bg-red-100 text-red-500 border-red-500/40 hover:bg-red-500/20'
                                                                                     }`}
                                                                             >
                                                                                 <span>{a.nombre}</span>
@@ -686,7 +686,7 @@ const DashboardCoach = () => {
                                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Acción</th>
                                                 </tr>
                                             </thead>
-                                            <tbody className="divide-y divide-gray-200">
+                                            <tbody className="divide-y divide-zinc-800">
                                                 {progresoAlumnos.slice(0, 5).map((alumno) => (
                                                     <tr key={alumno.id} className="hover:bg-gray-50">
                                                         <td className="px-4 py-3 text-sm font-medium text-gray-900">{alumno.nombre}</td>
@@ -772,13 +772,13 @@ const DashboardCoach = () => {
                                     <div className="flex items-center gap-2">
                                         <button
                                             onClick={irSemanaAnterior}
-                                            className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors"
+                                            className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-zinc-600 transition-colors"
                                         >
                                             ◀ Semana anterior
                                         </button>
                                         <button
                                             onClick={irSemanaSiguiente}
-                                            className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors"
+                                            className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-zinc-600 transition-colors"
                                         >
                                             Semana siguiente ▶
                                         </button>
@@ -796,7 +796,7 @@ const DashboardCoach = () => {
                                     <button
                                         onClick={() => setVerSoloConWod(false)}
                                         className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${!verSoloConWod
-                                            ? 'bg-white text-gray-900 shadow-sm ring-1 ring-gray-200'
+                                            ? 'bg-white text-gray-900 shadow-sm ring-1 ring-zinc-600'
                                             : 'text-gray-500 hover:text-gray-700'
                                             }`}
                                     >
@@ -805,7 +805,7 @@ const DashboardCoach = () => {
                                     <button
                                         onClick={() => setVerSoloConWod(true)}
                                         className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${verSoloConWod
-                                            ? 'bg-white text-gray-900 shadow-sm ring-1 ring-gray-200'
+                                            ? 'bg-white text-gray-900 shadow-sm ring-1 ring-zinc-600'
                                             : 'text-gray-500 hover:text-gray-700'
                                             }`}
                                     >
@@ -864,8 +864,8 @@ const DashboardCoach = () => {
                                                                         ? abrirDetalleWod({ ...clase, fecha: clase.fecha || date }, wod)
                                                                         : irAGestionClases({ ...clase, fecha: clase.fecha || date }))}
                                                                     className={`w-full px-4 py-3 flex items-center gap-3 text-left transition-colors ${wod
-                                                                        ? 'bg-green-50/50 hover:bg-green-100'
-                                                                        : 'bg-yellow-50/50 hover:bg-yellow-100'
+                                                                        ? 'bg-green-50 hover:bg-green-100'
+                                                                        : 'bg-yellow-50 hover:bg-yellow-100'
                                                                         }`}
                                                                 >
                                                                     <span className="text-lg font-bold text-gray-800 w-14 shrink-0">
@@ -913,7 +913,7 @@ const DashboardCoach = () => {
                                     <table className="w-full border-collapse min-w-[900px]">
                                         <thead>
                                             <tr>
-                                                <th className="bg-gray-800 text-white px-3 py-3 text-sm font-bold uppercase sticky left-0 z-10 min-w-[90px]">
+                                                <th className="bg-zinc-800 text-white px-3 py-3 text-sm font-bold uppercase sticky left-0 z-10 min-w-[90px]">
                                                     Horario
                                                 </th>
                                                 {DAYS.map((day, i) => {
@@ -921,7 +921,7 @@ const DashboardCoach = () => {
                                                     return (
                                                         <th
                                                             key={day}
-                                                            className={`px-3 py-3 text-sm font-bold uppercase text-center min-w-[130px] ${isToday ? 'bg-orange-600 text-white ring-2 ring-orange-300 shadow-inner' : 'bg-gray-800 text-white'
+                                                            className={`px-3 py-3 text-sm font-bold uppercase text-center min-w-[130px] ${isToday ? 'bg-orange-600 text-white ring-2 ring-orange-500/40 shadow-inner' : 'bg-zinc-800 text-white'
                                                                 }`}
                                                         >
                                                             <div className="text-base">{day}</div>
@@ -934,7 +934,7 @@ const DashboardCoach = () => {
                                         </thead>
                                         <tbody>
                                             {SCHEDULE_HOURS.map(hour => (
-                                                <tr key={hour} className="border-b border-gray-200 hover:bg-gray-50/50">
+                                                <tr key={hour} className="border-b border-gray-200 hover:bg-gray-50">
                                                     <td className="sticky left-0 bg-white border-r border-gray-200 px-3 py-3 text-base font-bold text-gray-700 whitespace-nowrap z-10">
                                                         {hour}
                                                     </td>
@@ -1136,7 +1136,7 @@ const DashboardCoach = () => {
                                         { key: 'todos', label: 'Todos', dot: 'bg-zinc-300' },
                                         { key: 'activo', label: 'Progresando', dot: 'bg-green-500' },
                                         { key: 'iniciando', label: 'Iniciando', dot: 'bg-orange-500' },
-                                        { key: 'sin_datos', label: 'Sin datos', dot: 'bg-gray-400' },
+                                        { key: 'sin_datos', label: 'Sin datos', dot: 'bg-zinc-500' },
                                     ].map((op) => {
                                         const cuenta = op.key === 'todos'
                                             ? progresoAlumnos.length
@@ -1148,7 +1148,7 @@ const DashboardCoach = () => {
                                                 data-testid={`filtro-progreso-${op.key}`}
                                                 onClick={() => setFiltroProgreso(op.key)}
                                                 aria-pressed={activo}
-                                                className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm transition-colors ${activo ? 'border-zinc-900 bg-zinc-900 text-white font-semibold' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'}`}
+                                                className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm transition-colors ${activo ? 'border-zinc-900 bg-zinc-900 text-white font-semibold' : 'border-gray-200 bg-white text-gray-700 hover:border-zinc-600'}`}
                                             >
                                                 <span className={`w-3 h-3 rounded-full ${op.dot}`}></span>
                                                 {op.label}
@@ -1165,7 +1165,7 @@ const DashboardCoach = () => {
                                 )}
                                 <div className="overflow-x-auto">
                                     <table className="w-full">
-                                        <thead className="bg-gray-800 text-white">
+                                        <thead className="bg-zinc-800 text-white">
                                             <tr>
                                                 <th className="px-6 py-3 text-left text-sm font-medium">Alumno</th>
                                                 <th className="px-6 py-3 text-left text-sm font-medium">Total RMs</th>
@@ -1175,7 +1175,7 @@ const DashboardCoach = () => {
                                                 <th className="px-6 py-3 text-left text-sm font-medium">Acción</th>
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-gray-200">
+                                        <tbody className="divide-y divide-zinc-800">
                                             {progresoFiltrado.map((alumno, index) => {
                                                 const topRM = alumno.rms?.reduce((max, r) => (r.peso_kg > (max?.peso_kg || 0) ? r : max), null);
                                                 return (
@@ -1189,7 +1189,7 @@ const DashboardCoach = () => {
                                                                 <div className="w-24 bg-gray-200 rounded-full h-2">
                                                                     <div
                                                                         className={`h-2 rounded-full ${alumno.estado === 'activo' ? 'bg-green-500 w-full' :
-                                                                            alumno.estado === 'iniciando' ? 'bg-orange-500 w-1/3' : 'bg-gray-300 w-1/6'
+                                                                            alumno.estado === 'iniciando' ? 'bg-orange-500 w-1/3' : 'bg-zinc-500 w-1/6'
                                                                             }`}
                                                                     ></div>
                                                                 </div>
@@ -1245,8 +1245,8 @@ const DashboardCoach = () => {
                                                         <p className="font-bold text-gray-900">{alumno.nombre}</p>
                                                         <p className="text-sm text-gray-600 mt-1">
                                                             🕐 {alumno.tiene_historial === false
-                                                                ? <span className="font-semibold text-red-600">Sin actividad registrada</span>
-                                                                : <>Sin entrenar: <span className="font-semibold text-red-600">{alumno.dias_ausente} días</span></>}
+                                                                ? <span className="font-semibold text-red-500">Sin actividad registrada</span>
+                                                                : <>Sin entrenar: <span className="font-semibold text-red-500">{alumno.dias_ausente} días</span></>}
                                                         </p>
                                                         <p className="text-xs text-gray-500 mt-1">Última asistencia: {alumno.ultima_asistencia || 'Nunca'}</p>
                                                         {alumno.correo && <p className="text-xs text-gray-500">📧 {alumno.correo}</p>}
@@ -1271,7 +1271,7 @@ const DashboardCoach = () => {
                                                     <button
                                                         data-testid="btn-ver-perfil"
                                                         onClick={() => setFichaAlumnoId(alumno.id)}
-                                                        className="px-3 py-2 bg-white border border-red-300 text-red-600 rounded text-sm font-medium hover:bg-red-50 transition-colors"
+                                                        className="px-3 py-2 bg-white border border-red-500/30 text-red-500 rounded text-sm font-medium hover:bg-red-500/10 transition-colors"
                                                     >
                                                         Ver Perfil
                                                     </button>

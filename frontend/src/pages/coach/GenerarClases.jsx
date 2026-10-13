@@ -70,7 +70,7 @@ const GenerarClases = () => {
                         <div className="mt-4 space-y-3">
                             <div className={`p-4 rounded-lg border text-sm ${resultado.creadas > 0
                                 ? 'bg-green-50 border-green-200 text-green-700'
-                                : 'bg-blue-50 border-blue-200 text-blue-700'
+                                : 'bg-blue-500/10 border-blue-500/40 text-blue-700'
                                 }`}>
                                 <p className="font-medium">
                                     {resultado.creadas > 0 ? '✅' : 'ℹ️'} {resultado.message}

@@ -56,7 +56,7 @@ function CoachClaseAcciones({ clase, coachId, onTomar, onSoltar }) {
     const libre = clase.coach_id == null;
     const texto = mia ? '👤 Tú' : libre ? '⚠️ Sin coach'
         : `👤 ${clase.coach_nombre || `Coach #${clase.coach_id}`}`;
-    const color = mia ? 'text-emerald-700' : libre ? 'text-red-600 font-bold' : 'text-gray-600';
+    const color = mia ? 'text-emerald-700' : libre ? 'text-red-500 font-bold' : 'text-gray-600';
     return (
         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
             <span
@@ -80,7 +80,7 @@ function CoachClaseAcciones({ clase, coachId, onTomar, onSoltar }) {
                     type="button"
                     data-testid={`soltar-clase-${clase.id}`}
                     onClick={() => onSoltar(clase)}
-                    className="px-2.5 py-1 bg-gray-200 text-gray-700 rounded text-xs font-bold hover:bg-gray-300"
+                    className="px-2.5 py-1 bg-gray-200 text-gray-700 rounded text-xs font-bold hover:bg-zinc-600"
                 >
                     Soltar
                 </button>
@@ -576,10 +576,10 @@ export default function GestionClases() {
             <div className="p-6 max-w-6xl mx-auto">
                 <h1 className="text-2xl font-bold mb-4">Gestión de Clases</h1>
                 {msg.texto && (
-                    <div className={`mb-4 p-3 rounded flex items-center justify-between gap-3 ${msg.tipo === 'error' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
+                    <div className={`mb-4 p-3 rounded flex items-center justify-between gap-3 ${msg.tipo === 'error' ? 'bg-red-100 text-red-500' : 'bg-green-100 text-green-800'}`}>
                         <span>{msg.texto}</span>
                         {msg.retry && (
-                            <button onClick={msg.retry} className="px-3 py-1 bg-white/70 rounded text-sm font-medium hover:bg-white">
+                            <button onClick={msg.retry} className="px-3 py-1 bg-zinc-800 rounded text-sm font-medium hover:bg-zinc-700">
                                 Reintentar
                             </button>
                         )}
@@ -588,11 +588,11 @@ export default function GestionClases() {
 
                 {/* Secciones caídas (una consulta por bloque): banner + Reintentar */}
                 {erroresConsultas.length > 0 && (
-                    <div className="mb-4 p-3 rounded bg-red-100 text-red-800 flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div className="mb-4 p-3 rounded bg-red-100 text-red-500 flex flex-col sm:flex-row sm:items-center gap-3">
                         <ul className="flex-1 list-disc list-inside text-sm">
                             {erroresConsultas.map((e) => <li key={e}>{e}</li>)}
                         </ul>
-                        <button onClick={reintentar} className="px-3 py-1 bg-white/70 rounded text-sm font-medium hover:bg-white">
+                        <button onClick={reintentar} className="px-3 py-1 bg-zinc-800 rounded text-sm font-medium hover:bg-zinc-700">
                             Reintentar
                         </button>
                     </div>
@@ -607,7 +607,7 @@ export default function GestionClases() {
                         </p>
                         <button
                             onClick={() => navigate('/coach/gestion-clases')}
-                            className="mt-3 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors"
+                            className="mt-3 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-zinc-600 transition-colors"
                         >
                             ← Volver a Gestión de Clases
                         </button>
@@ -617,7 +617,7 @@ export default function GestionClases() {
                 {/* MODAL DE CONFIRMACIÓN MODO EMERGENCIA */}
                 {confirmarEmergencia && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-                        <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md mx-4 border-2 border-red-400">
+                        <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md mx-4 border-2 border-red-500/40">
                             <div className="text-4xl mb-4 text-center">⚠️</div>
                             <h2 className="text-xl font-bold text-center mb-3 text-red-700">Cobertura de Emergencia</h2>
                             <p className="text-gray-700 text-center mb-4">
@@ -628,7 +628,7 @@ export default function GestionClases() {
                             </p>
                             <div className="flex gap-3 justify-center">
                                 <button onClick={() => setConfirmarEmergencia(null)}
-                                    className="px-5 py-2 rounded-lg bg-gray-200 text-gray-700 font-medium hover:bg-gray-300">
+                                    className="px-5 py-2 rounded-lg bg-gray-200 text-gray-700 font-medium hover:bg-zinc-600">
                                     Cancelar
                                 </button>
                                 <button onClick={ejecutarGuardarWod} disabled={loading}
@@ -644,19 +644,19 @@ export default function GestionClases() {
                 <div className="mb-4 flex items-center gap-3">
                     <button
                         onClick={() => { setModoEmergencia(!modoEmergencia); setDisciplinaActiva(null); }}
-                        className={`px-4 py-2 rounded-lg font-bold text-sm transition-colors ${modoEmergencia ? 'bg-red-600 text-white animate-pulse' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
+                        className={`px-4 py-2 rounded-lg font-bold text-sm transition-colors ${modoEmergencia ? 'bg-red-600 text-white animate-pulse' : 'bg-gray-200 text-gray-600 hover:bg-zinc-600'}`}
                     >
                         {modoEmergencia ? '⚠️ MODO EMERGENCIA ACTIVO' : '⚠️ Modo Emergencia'}
                     </button>
                     {modoEmergencia && (
-                        <span className="text-xs text-red-600 font-medium">
+                        <span className="text-xs text-red-500 font-medium">
                             Puedes operar sobre clases de CUALQUIER disciplina. Las acciones quedarán auditadas.
                         </span>
                     )}
                 </div>
 
                 {/* BREADCRUMB DE ALTO CONTRASTE */}
-                <nav className="flex items-center gap-1 mb-4 text-sm bg-gray-800 text-white px-4 py-2 rounded-lg">
+                <nav className="flex items-center gap-1 mb-4 text-sm bg-zinc-800 text-white px-4 py-2 rounded-lg">
                     <button onClick={() => navigate('/coach')} className="text-white font-semibold hover:text-emerald-300 transition-colors">Dashboard Coach</button>
                     <span className="text-gray-400">›</span>
                     <span className="text-emerald-300 font-bold">Gestión de Clases</span>
@@ -664,7 +664,7 @@ export default function GestionClases() {
 
                 {/* ═══ FLUJO DESDE ?clase=ID: FORMULARIO WOD PRE-VINCULADO ═══ */}
                 {claseDestino && (
-                    <div className="border border-emerald-300 bg-emerald-50 rounded-xl p-6 mb-6">
+                    <div className="border border-emerald-400 bg-emerald-50 rounded-xl p-6 mb-6">
                         <h2 className="text-xl font-bold text-gray-900 mb-1">📝 Publicar Entrenamiento</h2>
                         <p className="text-sm text-gray-600 mb-4">
                             Clase #{claseDestino.id} — {claseDestino.disciplina_nombre || 'Clase'} · {fechaPlanif} · {claseDestino.hora_inicio ? String(claseDestino.hora_inicio).substring(0, 5) : ''} - {claseDestino.hora_fin ? String(claseDestino.hora_fin).substring(0, 5) : ''}
@@ -694,7 +694,7 @@ export default function GestionClases() {
                                             className={`px-2 py-1.5 rounded-lg text-xs font-medium transition-all border
                                                 ${deshabilitado ? 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
                                                     : seleccionado ? 'bg-emerald-600 text-white border-emerald-700'
-                                                        : yaTieneWod ? 'bg-orange-100 text-orange-800 border-orange-300'
+                                                        : yaTieneWod ? 'bg-orange-100 text-orange-700 border-orange-300'
                                                             : 'bg-white text-gray-700 border-gray-300 hover:border-emerald-400'}`}
                                         >
                                             <span className="block font-bold">{nombreDia.slice(0, 3)}</span>
@@ -714,7 +714,7 @@ export default function GestionClases() {
 
                         {/* ── PUNTO 2: ALCANCE — a qué clases se publica este WOD ── */}
                         {modoEdicion ? (
-                            <div className="mb-4 p-3 rounded-lg border border-amber-300 bg-amber-50 text-xs text-amber-900">
+                            <div className="mb-4 p-3 rounded-lg border border-amber-300 bg-amber-50 text-xs text-amber-800">
                                 ⚠️ Esta clase ya tiene un WOD publicado: al actualizarlo se actualiza
                                 <strong> para todas las clases que lo comparten</strong>. El alcance solo se
                                 elige cuando el WOD es nuevo.
@@ -730,7 +730,7 @@ export default function GestionClases() {
                                         data-testid="alcance-hora"
                                         data-cargando={cargandoAlcance ? '1' : '0'}
                                         onClick={() => setAlcance('hora')}
-                                        className={`text-left p-3 rounded-lg border-2 transition-all bg-white ${alcance === 'hora' ? 'border-emerald-600 ring-2 ring-emerald-200' : 'border-gray-200 hover:border-emerald-300'}`}
+                                        className={`text-left p-3 rounded-lg border-2 transition-all bg-white ${alcance === 'hora' ? 'border-emerald-600 ring-2 ring-emerald-500/30' : 'border-gray-200 hover:border-emerald-300'}`}
                                     >
                                         <span className="block text-sm font-bold text-gray-900">
                                             🔵 Solo esta hora ({horaDestino || 'sin hora'})
@@ -746,7 +746,7 @@ export default function GestionClases() {
                                         data-testid="alcance-dia"
                                         data-cargando={cargandoAlcance ? '1' : '0'}
                                         onClick={() => setAlcance('dia')}
-                                        className={`text-left p-3 rounded-lg border-2 transition-all bg-white ${alcance === 'dia' ? 'border-orange-500 ring-2 ring-orange-200' : 'border-gray-200 hover:border-orange-300'}`}
+                                        className={`text-left p-3 rounded-lg border-2 transition-all bg-white ${alcance === 'dia' ? 'border-orange-500 ring-2 ring-orange-500/30' : 'border-gray-200 hover:border-orange-300'}`}
                                     >
                                         <span className="block text-sm font-bold text-gray-900">
                                             🟠 Todas las horas del día
@@ -879,7 +879,7 @@ export default function GestionClases() {
                                                                     verDetalleWod(c);
                                                                 }
                                                             }}
-                                                            className={`border rounded-lg p-4 cursor-pointer hover:border-emerald-400 hover:shadow-sm transition-all ${enCurso ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' : 'bg-white border-gray-200'}`}>
+                                                            className={`border rounded-lg p-4 cursor-pointer hover:border-emerald-400 hover:shadow-sm transition-all ${enCurso ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500/30' : 'bg-white border-gray-200'}`}>
                                                             <div className="flex items-center justify-between mb-2">
                                                                 <div className="flex items-center gap-3">
                                                                     <span className="font-bold text-lg">{c.hora_inicio?.slice(0, 5)}</span>
@@ -922,7 +922,7 @@ export default function GestionClases() {
                                         </div>
                                         {asistencia.map(a => (
                                             <button key={a.reserva_id} onClick={() => toggleAsistencia(a.reserva_id, !a.asistio)}
-                                                className={`px-3 py-2 rounded text-sm font-medium m-1 ${a.asistio ? 'bg-emerald-100 text-emerald-800 border border-emerald-400' : 'bg-red-100 text-red-800 border border-red-400'}`}>
+                                                className={`px-3 py-2 rounded text-sm font-medium m-1 ${a.asistio ? 'bg-emerald-100 text-emerald-700 border border-emerald-400' : 'bg-red-100 text-red-500 border border-red-500/40'}`}>
                                                 {a.nombre}: {a.asistio ? '✅ ASISTIÓ' : '❌ FALTA'}
                                             </button>
                                         ))}
@@ -937,7 +937,7 @@ export default function GestionClases() {
                 {accionClase && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
                         onClick={() => { if (!accionClase.cargando) setAccionClase(null); }}>
-                        <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full border-2 border-emerald-300"
+                        <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full border-2 border-emerald-400"
                             onClick={(e) => e.stopPropagation()}>
                             <h2 className="text-lg font-bold mb-1">
                                 {accionClase.accion === 'tomar' ? '✋ Tomar clase' : '🖐️ Soltar clase'}
@@ -958,7 +958,7 @@ export default function GestionClases() {
                                 <button type="button" data-testid="alcance-clase"
                                     onClick={() => setAccionClase((p) => ({ ...p, alcance: 'clase' }))}
                                     disabled={accionClase.cargando}
-                                    className={`w-full text-left p-3 rounded-lg border-2 transition-all ${accionClase.alcance === 'clase' ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' : 'border-gray-200 hover:border-emerald-300'}`}>
+                                    className={`w-full text-left p-3 rounded-lg border-2 transition-all ${accionClase.alcance === 'clase' ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500/30' : 'border-gray-200 hover:border-emerald-300'}`}>
                                     <span className="block text-sm font-bold text-gray-900">Sólo esta clase</span>
                                     <span className="block text-xs text-gray-600 mt-0.5">
                                         {diaSemanaDe(fechaCortaDe(accionClase.clase))} {fechaCortaDe(accionClase.clase)} — 1 clase.
@@ -970,7 +970,7 @@ export default function GestionClases() {
                                     className={`w-full text-left p-3 rounded-lg border-2 transition-all ${!accionClase.clase.horario_base_id
                                         ? 'border-gray-200 bg-gray-50 cursor-not-allowed opacity-60'
                                         : accionClase.alcance === 'horario'
-                                            ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-200'
+                                            ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-500/30'
                                             : 'border-gray-200 hover:border-orange-300'}`}>
                                     <span className="block text-sm font-bold text-gray-900">
                                         Todos los {diaSemanaDe(fechaCortaDe(accionClase.clase))} {horaCorta(accionClase.clase.hora_inicio)}
@@ -984,7 +984,7 @@ export default function GestionClases() {
                             </div>
 
                             {accionClase.error && (
-                                <div className="mb-4 p-3 rounded text-sm bg-red-100 text-red-800 border-l-4 border-red-500"
+                                <div className="mb-4 p-3 rounded text-sm bg-red-100 text-red-500 border-l-4 border-red-500"
                                     data-testid="accion-clase-error">
                                     {accionClase.error}
                                 </div>
@@ -1000,7 +1000,7 @@ export default function GestionClases() {
                                         : accionClase.accion === 'tomar' ? '✅ Tomar' : 'Soltar'}
                                 </button>
                                 <button onClick={() => setAccionClase(null)} disabled={accionClase.cargando}
-                                    className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 disabled:opacity-50">
+                                    className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-zinc-600 disabled:opacity-50">
                                     Cancelar
                                 </button>
                             </div>
@@ -1012,7 +1012,7 @@ export default function GestionClases() {
                 {tomaEmergencia && (
                     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-60"
                         onClick={() => setTomaEmergencia(null)}>
-                        <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full border-2 border-red-400"
+                        <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md mx-4 w-full border-2 border-red-500/40"
                             onClick={(e) => e.stopPropagation()}>
                             <h2 className="text-lg font-bold text-red-700 mb-2">⚠️ Cobertura de emergencia</h2>
                             <p className="text-sm text-gray-700 mb-3" data-testid="emergencia-detalle">
@@ -1031,7 +1031,7 @@ export default function GestionClases() {
                                     ✅ Sí, cubrir como emergencia
                                 </button>
                                 <button onClick={() => setTomaEmergencia(null)}
-                                    className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300">
+                                    className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-zinc-600">
                                     Cancelar
                                 </button>
                             </div>

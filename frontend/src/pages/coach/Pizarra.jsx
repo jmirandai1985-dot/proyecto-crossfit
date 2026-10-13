@@ -428,7 +428,7 @@ const Pizarra = () => {
                         ? 'bg-green-100 text-green-800 border border-green-300'
                         : mensaje.tipo === 'warning'
                             ? 'bg-yellow-100 text-yellow-800 border border-yellow-300'
-                            : 'bg-red-100 text-red-800 border border-red-300'
+                            : 'bg-red-100 text-red-500 border border-red-500/30'
                         }`}>
                         {mensaje.texto}
                     </div>
@@ -473,7 +473,7 @@ const Pizarra = () => {
                                 <div
                                     key={idx}
                                     className={`rounded-xl border-2 p-4 transition-all ${esHoy
-                                        ? 'border-orange-400 bg-orange-50/40 shadow-sm'
+                                        ? 'border-orange-300 bg-orange-50 shadow-sm'
                                         : 'border-gray-200 hover:border-gray-300'
                                         } ${diaSeleccionado && esMismoDia(fechaDate, diaSeleccionado) ? 'ring-2 ring-orange-500' : ''}`}
                                 >
@@ -501,7 +501,7 @@ const Pizarra = () => {
                                                     key={hora}
                                                     onClick={() => handleSeleccionarDiaHora(fechaDate, hora)}
                                                     className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${seleccionado
-                                                        ? 'bg-orange-500 text-white shadow-md ring-2 ring-orange-300'
+                                                        ? 'bg-orange-500 text-white shadow-md ring-2 ring-orange-500/40'
                                                         : 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-orange-100 hover:text-orange-700 hover:border-orange-200'
                                                         }`}
                                                 >
@@ -710,7 +710,7 @@ const Pizarra = () => {
 
                         {erroresParser.length > 0 && (
                             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                                <p className="text-sm font-semibold text-red-800 mb-2">
+                                <p className="text-sm font-semibold text-red-500 mb-2">
                                     ⚠️ {erroresParser.length} error(es):
                                 </p>
                                 <ul className="list-disc list-inside space-y-1">
@@ -718,7 +718,7 @@ const Pizarra = () => {
                                         <li key={idx} className="text-sm text-red-700">{err}</li>
                                     ))}
                                 </ul>
-                                <p className="text-xs text-red-600 mt-2">
+                                <p className="text-xs text-red-500 mt-2">
                                     Corrige el texto y vuelve a presionar "Procesar Texto"
                                 </p>
                             </div>
@@ -766,7 +766,7 @@ const Pizarra = () => {
                                     </div>
                                     <button
                                         onClick={() => eliminarMovimiento(m.key)}
-                                        className="ml-3 p-2 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
+                                        className="ml-3 p-2 text-red-500 hover:bg-red-500/20 rounded-lg transition-colors"
                                         title="Eliminar movimiento"
                                     >
                                         ✕
@@ -782,7 +782,7 @@ const Pizarra = () => {
                     <button
                         onClick={() => crearWod('draft')}
                         disabled={guardando || !fechaCalculada}
-                        className="px-6 py-3 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors font-medium disabled:opacity-50"
+                        className="px-6 py-3 bg-gray-200 text-gray-800 rounded-lg hover:bg-zinc-600 transition-colors font-medium disabled:opacity-50"
                     >
                         {guardando ? 'Guardando...' : 'Guardar como Borrador'}
                     </button>
