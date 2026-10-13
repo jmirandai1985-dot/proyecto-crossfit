@@ -11,8 +11,9 @@
 //   4. el destino de "atrás" es el `-1` que entiende el router
 //   5. COBERTURA (auditoría Bloque 2): toda pantalla del alumno que cuelga de una
 //      ruta —menos la raíz, el Inicio— monta la flecha, y la raíz no la monta
-//   6. la misma regla en el panel del COACH (auditoría Bloque 2): sus 5 pantallas
-//      menos el Dashboard del coach, que es la raíz del rol
+//   6. la misma regla en el panel del COACH (auditoría Bloque 2): sus pantallas menos
+//      el Dashboard del coach, que es la raíz del rol. Eran 5 y son 3 desde el Bloque 5
+//      (Pizarra y Generar Clases se retiraron: ya no tienen ruta)
 import { readdirSync, readFileSync } from 'node:fs';
 import {
     CLAVE_PRIMERA_UBICACION, VOLVER_ATRAS, puedeVolverAtras, destinoVolver,
@@ -157,7 +158,8 @@ const inicioCoach = leer('../src/config/roles.js').match(/coach:\s*'([^']+)'/);
 eq(inicioCoach?.[1], INICIO_COACH, 'roles.js apunta el inicio del coach a /coach/dashboard');
 const RUTA_RAIZ_COACH = (inicioCoach?.[1] || '').split('/').filter(Boolean).pop() || '';
 
-ok(RUTAS_COACH.length === 5, `App.jsx tiene las 5 pantallas del coach (vistas: ${RUTAS_COACH.length})`);
+ok(RUTAS_COACH.length === 3,
+    `App.jsx tiene las 3 pantallas del coach (vistas: ${RUTAS_COACH.length}; Bloque 5: Pizarra y Generar Clases se retiraron)`);
 ok(RUTAS_COACH.every((r) => r.ruta && r.archivo), 'cada ruta del coach apunta a una pantalla lazy conocida');
 ok(RUTAS_COACH.some((r) => r.ruta === RUTA_RAIZ_COACH), `la raíz (${RUTA_RAIZ_COACH}) es una de las rutas del coach`);
 
@@ -183,7 +185,10 @@ for (const { ruta, archivo } of RUTAS_COACH) {
 
 // Ningún archivo de pages/coach se queda afuera: o está ruteado, o es una pantalla
 // a la que se le retiró la ruta (Bloque 5: quedan vivas pero ya no se navegan).
-const SIN_RUTA_COACH = {};
+const SIN_RUTA_COACH = {
+    'Pizarra.jsx': 'deprecada y rota (400 sin disciplina_id) · el modal "Publicar WOD" la reemplaza',
+    'GenerarClases.jsx': 'pega a un endpoint admin-only (403 para el coach)',
+};
 const ARCHIVOS_COACH = readdirSync(new URL('../src/pages/coach/', import.meta.url))
     .filter((n) => n.endsWith('.jsx'))
     .sort();

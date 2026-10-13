@@ -41,9 +41,8 @@ const AdminDisciplinas = lazy(() => import('./pages/admin/Disciplinas'));
 const AdminAsistencia = lazy(() => import('./pages/admin/Asistencia'));
 const AdminMiQr = lazy(() => import('./pages/admin/MiQr'));
 // · Familia COACH
+// Pizarra y Generar Clases ya no se importan: sin ruta no hay chunk que bajar (Bloque 5).
 const CoachDashboard = lazy(() => import('./pages/coach/DashboardCoach'));
-const CoachPizarra = lazy(() => import('./pages/coach/Pizarra'));
-const CoachGenerarClases = lazy(() => import('./pages/coach/GenerarClases'));
 const CoachGestionClases = lazy(() => import('./pages/coach/GestionClases'));
 // Código de retiro del Bazar: el coach entrega pedidos con el código del alumno
 // (misma pantalla/modal que usa el admin), sin ver listados ni montos.
@@ -153,12 +152,15 @@ function App() {
           {/* ── Rutas de Coach ──────────────────────────────────── */}
           <Route path="/coach/*" element={<ProtectedRoute roles={ROLES_COACH} />}>
             <Route path="dashboard" element={<CoachDashboard />} />
-            <Route path="pizarra" element={<CoachPizarra />} />
-            <Route path="generar-clases" element={<CoachGenerarClases />} />
             <Route path="gestion-clases" element={<CoachGestionClases />} />
             {/* Mesón del Bazar: entrega con el código de retiro del alumno. */}
             <Route path="entregar-pedido" element={<CoachEntregarPedido />} />
-            <Route path="*" element={<Navigate to="/coach/dashboard" />} />
+            {/* Bloque 5: `pizarra` (daba 400 sin disciplina_id; la reemplaza el modal
+                "Publicar WOD") y `generar-clases` (pegaba a un endpoint admin-only, 403
+                para el coach) ya no tienen ruta. Los archivos quedan en el repo, pero no
+                hay URL a la que llegar; el comodín usa `replace` para que un enlace viejo
+                guardado en el teléfono no deje un ida-y-vuelta en el historial. */}
+            <Route path="*" element={<Navigate to="/coach/dashboard" replace />} />
           </Route>
 
           {/* ── Rutas de Alumno ─────────────────────────────────── */}

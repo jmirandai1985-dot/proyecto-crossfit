@@ -18,6 +18,7 @@
     "test:asistencia-franjas": "node scripts/test-asistencia-franjas.mjs",
     "test:semana": "node scripts/test-semana-asistencia.mjs",
     "test:volver": "node scripts/test-boton-volver.mjs",
+    "test:rutas-coach": "node scripts/test-rutas-coach.mjs",
     "test:whatsapp": "node scripts/test-whatsapp.mjs",
     "test:prueba": "node scripts/test-prueba-alumnos.mjs",
     "test:retiro": "node scripts/test-pedidos-retiro.mjs",

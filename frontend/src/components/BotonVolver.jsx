@@ -23,8 +23,9 @@ import { destinoVolver } from '../utils/navegacion';
  * Reutilizado por: Mis Reservas, Mi Historial, Bazar, Mis Pedidos, Performance
  * Hub, RMs, Evolución, Mi Progreso, Ajustes y Solicitar Plan (alumno), el
  * Historial del alumno (admin, `fallback="/admin/dashboard"`) y las pantallas
- * del coach que no son su Inicio —Pizarra de WOD, Generar Clases, Gestión de
- * Clases y Entregar pedido— con `fallback="/coach/dashboard"`.
+ * del coach que no son su Inicio —Gestión de Clases y Entregar pedido— con
+ * `fallback="/coach/dashboard"`. (La Pizarra de WOD y Generar Clases también
+ * la llevaban hasta el Bloque 5; hoy no están ruteadas, así que no se navegan.)
  * NO lo usan las raíces de cada panel (el Inicio del alumno, el del admin y el
  * Dashboard del coach): ahí no hay "atrás" y la flecha no iría a ningún lado.
  */
