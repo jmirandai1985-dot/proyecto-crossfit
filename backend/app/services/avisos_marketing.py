@@ -16,9 +16,10 @@ del alumno. Este módulo es el ÚNICO lugar donde vive:
   * la VALIDACIÓN por tipo (Colaboración exige el nombre del aliado, Evento exige
     la fecha) y la normalización que APAGA los campos que no aplican al tipo.
 
-Los tres consumidores (pantalla Marketing del admin, el Bazar al publicar un
-producto y el carrusel del alumno) pasan por acá: si cada uno armara su propia
-ventana, un aviso se vería en una pantalla y no en la otra.
+Los cuatro consumidores (pantalla Marketing del admin, el aviso rápido del coach en
+la Gestión de Clases, el Bazar al publicar un producto y el carrusel del alumno)
+pasan por acá: si cada uno armara su propia ventana, un aviso se vería en una
+pantalla y no en la otra.
 
 Las funciones puras (`rango_vigencia`, `esta_vigente`, `normalizar`, `validar`) no
 tocan la BD y se prueban aisladas.
@@ -28,12 +29,13 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import or_
 
 from app.models.aviso_marketing import (
-    TIPOS_EDITABLES, TIPO_COLABORACION, TIPO_EVENTO, TIPO_PRODUCTO_BAZAR,
-    AvisoMarketing,
+    TIPOS_EDITABLES, TIPO_AVISO, TIPO_COLABORACION, TIPO_EVENTO,
+    TIPO_PRODUCTO_BAZAR, AvisoMarketing,
 )
 from app.models.producto import Producto
 from app.utils.santiago import (
-    ahora_santiago, fecha_chile, fin_del_dia_chile, inicio_del_dia_chile,
+    ahora_santiago, fecha_chile, fin_del_dia_chile, hoy_santiago,
+    inicio_del_dia_chile,
 )
 
 # ── Filtros de la lista del admin ───────────────────────────────────────────
@@ -390,3 +392,71 @@ def sincronizar_producto(db, producto: Producto, creado_por: int | None = None,
     db.commit()
     db.refresh(aviso)
     return serializar(aviso, producto, ahora)
+
+
+# ── El aviso rápido del coach (Bloque 3 — Gestión de Clases) ────────────────
+# El coach publica desde su panel de clases un aviso que el alumnado ve HOY en su
+# Inicio del alumno. Escribe UNA caja de texto (mockup "Aviso rápido") y el resto lo
+# fija el backend —no la pantalla—: así un coach no puede publicar de paso una
+# Promoción de un mes, una Colaboración con aliado ni un Evento con fecha.
+
+TITULO_RAPIDO_MAX = 60
+
+
+def ventana_de_hoy(ahora: datetime | None = None) -> tuple[date, date]:
+    """Los dos días del aviso rápido: HOY en Chile, dos veces (el día que se publica).
+
+    Se devuelve como par `(desde, hasta)` porque es lo que come `rango_vigencia`:
+    la ventana arranca a las 00:00 y cierra a las 23:59:59, así que el aviso dura el
+    día COMPLETO y desaparece solo a medianoche (sin que nadie lo despublica).
+    """
+    hoy = fecha_chile(ahora) if ahora is not None else hoy_santiago()
+    return hoy, hoy
+
+
+def titulo_desde_texto(texto: str | None, tope: int = TITULO_RAPIDO_MAX) -> str:
+    """El título del aviso rápido SALE del mensaje (el coach escribe una sola caja).
+
+    La tarjeta del carrusel dibuja título y texto por separado, así que un aviso
+    rápido necesita un título: se usa la PRIMERA FRASE ("Trae calcetas. Hay cuerda"
+    -> "Trae calcetas") y, si no entra en `tope`, se recorta en la palabra anterior
+    (nunca al medio de una palabra) y se marca con "…".
+    """
+    # Los saltos de línea y los espacios de más no llegan a la tarjeta: se aplanan.
+    plano = " ".join((texto or "").split())
+    if not plano:
+        return ""
+    cortes = [posicion for posicion in (plano.find(c) for c in ".!?;")
+              if posicion != -1]
+    if cortes:
+        plano = plano[:min(cortes)].strip()
+    if len(plano) <= tope:
+        return plano
+    recorte = plano[:tope].rstrip()
+    ultimo_espacio = recorte.rfind(" ")
+    if ultimo_espacio > 0:
+        recorte = recorte[:ultimo_espacio]
+    return f"{recorte}…"
+
+
+def payload_aviso_rapido(texto: str, ahora: datetime | None = None) -> dict:
+    """El payload de `crear()` del aviso rápido: tipo `aviso`, HOY y nada más.
+
+    Todo lo que el coach NO elige se fija ACÁ: el tipo (`aviso`), la ventana (HOY,
+    día de Chile), `fijado_arriba=False` y sin flyer (`imagen_url`). El título se
+    DERIVA del mensaje. Una Promoción, una Colaboración o un Evento llevan
+    fechas/aliado y siguen siendo del admin.
+    """
+    desde, hasta = ventana_de_hoy(ahora)
+    mensaje = (texto or "").strip()
+    return {
+        "tipo": TIPO_AVISO,
+        "titulo": titulo_desde_texto(mensaje),
+        "texto": mensaje,
+        "nombre_aliado": None,
+        "fecha_evento": None,
+        "vigente_desde": desde,
+        "vigente_hasta": hasta,
+        "fijado_arriba": False,
+        "imagen_url": None,
+    }

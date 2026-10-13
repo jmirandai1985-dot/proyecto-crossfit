@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import Layout from '../../components/Layout';
 import WodDetalleModal from '../../components/WodDetalleModal';
 import BotonVolver from '../../components/BotonVolver';
+import ModalAvisoRapido from '../../components/ModalAvisoRapido';
 import {
     SIN_DATOS, useAccionClase, useClaseDetalle, useClasesDia, useClasesDisciplinaSemana,
     useCoachDisciplinas, useConfirmarAsistenciaClase, useCrearWodsBatch, useDisciplinas,
@@ -117,6 +118,10 @@ export default function GestionClases() {
     // Punto 1 (panel Coach): tarjeta cuyo WOD se mira en el modal (solo lectura). El WOD
     // lo trae la consulta `useWodDetalle`, así que acá sólo se guarda CUÁL tarjeta es.
     const [wodDetalleClase, setWodDetalleClase] = useState(null);
+    // Bloque 3 (panel Coach): publicar el "aviso rápido" del día sin salir de acá. El
+    // modal escribe en avisos_marketing con el tipo `aviso` y ventana de HOY —esos dos
+    // los fija el backend, no el coach— así que acá sólo se guarda si está abierto.
+    const [modalAvisoRapido, setModalAvisoRapido] = useState(false);
     const [wodForm, setWodForm] = useState({ titulo: '', calentamiento: '', fuerza_habilidad: '', wod_principal: '', tipo_metcon: '', estado: 'publicado' });
     const [claseAsistencia, setClaseAsistencia] = useState(null);
     // Marcado que tocó el usuario: la lista de alumnos sale de la consulta y esto sólo
@@ -829,6 +834,23 @@ export default function GestionClases() {
                                     <input type="date" value={fechaClases} min={hoy} onChange={e => { setFechaClases(e.target.value); setClaseAsistencia(null); }} className="border rounded px-3 py-1" />
                                     {fechaClases === hoy && <span className="text-emerald-600 text-sm font-medium">• Hoy</span>}
                                 </div>
+                                {/* Bloque 3: el aviso rápido del coach. Publica en
+                                    avisos_marketing con tipo `aviso` y ventana de HOY (lo
+                                    fija el backend): es un mensaje operativo del día, no
+                                    contenido de marketing del admin. */}
+                                <button
+                                    type="button"
+                                    data-testid="abrir-aviso-rapido"
+                                    onClick={() => setModalAvisoRapido(true)}
+                                    className="w-full flex items-center gap-3 text-left rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-2.5 mb-4 hover:border-amber-500 transition-colors"
+                                >
+                                    <span className="w-7 h-7 rounded-lg bg-amber-500 text-zinc-900 flex items-center justify-center flex-none" aria-hidden="true">📣</span>
+                                    <span className="flex-1">
+                                        <span className="block text-[12.5px] font-semibold text-gray-800">+ Aviso rápido para hoy</span>
+                                        <span className="block text-[10px] text-gray-500">Ej. "Trae calcetas, hay cuerda"</span>
+                                    </span>
+                                </button>
+
                                 {clasesDiaVista.length === 0 ? (
                                     <div className="text-center py-12 text-gray-400">
                                         <div className="text-4xl mb-3">📅</div>
@@ -1054,6 +1076,19 @@ export default function GestionClases() {
                         loading={cargandoWodDetalle}
                         error={wodDetalle.error}
                         onClose={() => setWodDetalleClase(null)}
+                    />
+                )}
+
+                {/* Bloque 3: aviso rápido del día (el mensaje lo escribe el coach acá
+                    mismo; el backend le pone tipo `aviso` y ventana de HOY). */}
+                {modalAvisoRapido && (
+                    <ModalAvisoRapido
+                        isOpen={modalAvisoRapido}
+                        onClose={() => setModalAvisoRapido(false)}
+                        onSuccess={() => setMsg({
+                            tipo: 'exito',
+                            texto: 'Aviso rápido publicado: ya aparece en el Inicio de los alumnos.',
+                        })}
                     />
                 )}
             </div>

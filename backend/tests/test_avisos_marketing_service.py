@@ -18,8 +18,9 @@ caros son silenciosos y NO se ven en la pantalla del admin:
   * las REGLAS por tipo (Colaboración pide aliado, Evento pide fecha) y el apagado
     de los campos que no aplican: un aliado guardado dentro de una Promoción
     reaparece si después alguien cambia el tipo.
-  * el TENANT y quién puede escribir: todas las mutaciones son del ADMIN y el
-    tenant sale del TOKEN (un aviso de un box no se ve ni se toca desde otro).
+  * el TENANT y quién puede escribir: todas las mutaciones son del ADMIN —salvo el
+    aviso rápido del coach, que trae sus propios límites— y el tenant sale del TOKEN
+    (un aviso de un box no se ve ni se toca desde otro).
 
     cd backend && py -3.12 -m pytest tests/test_avisos_marketing_service.py -q --noconftest
 """
@@ -391,6 +392,11 @@ def test_eliminar_un_aviso_sin_flyer_no_pide_borrar_nada():
 
 MUTACIONES = ("post", "put", "patch", "delete")
 
+# La ÚNICA mutación que no es del admin: el aviso rápido del coach (Bloque 3), que se
+# prueba aparte en la sección 8. Se escribe con nombre y apellido para que abrir otra
+# mutación obligue a romper este test A PROPÓSITO, no por descuido.
+AVISO_RAPIDO = ("post", "/aviso-rapido")
+
 
 def _rutas() -> list:
     """`[(metodo, ruta, nodo_funcion, nodo_decorador)]` de `@router.<metodo>(...)`."""
@@ -415,7 +421,7 @@ def test_las_mutaciones_del_carrusel_son_solo_del_admin():
     rutas = _rutas()
     assert rutas, "el router no declara ninguna ruta"
     for metodo, ruta, nodo, decorador in rutas:
-        if metodo in MUTACIONES:
+        if metodo in MUTACIONES and (metodo, ruta) != AVISO_RAPIDO:
             assert "get_current_admin" in ast.unparse(nodo), \
                 f"{metodo.upper()} {ruta}"
             assert "require_full_access" in ast.unparse(decorador), \
@@ -458,4 +464,100 @@ def test_el_flyer_comparte_el_camino_de_la_foto_del_producto():
         encoding="utf-8-sig")
     assert "validar_archivo" in core
     assert "storage.guardar_publico" in core
+
+
+# ── 8. El aviso rápido del coach (Bloque 3 — Gestión de Clases) ─────────────
+# El coach publica desde su panel de clases un aviso que el alumnado ve HOY en su
+# Inicio. Escribe UNA caja de texto, así que lo único que puede elegir es el mensaje:
+# el tipo, la ventana, el título y la falta de flyer los fija el backend. Si esos
+# límites vivieran en la pantalla, un coach podría publicar de paso una Promoción de
+# un mes o un Evento, que son contenido del admin.
+
+ESQUEMAS = RAIZ / "app" / "schemas" / "aviso_marketing.py"
+
+
+def _ruta(metodo: str, ruta: str):
+    """El `(nodo_funcion, nodo_decorador)` de `@router.<metodo>(ruta)`."""
+    for metodo_ruta, ruta_declarada, nodo, decorador in _rutas():
+        if (metodo_ruta, ruta_declarada) == (metodo, ruta):
+            return nodo, decorador
+    raise AssertionError(f"{metodo.upper()} {ruta} no existe en el router")
+
+
+def _campos_de_la_clase(nombre: str) -> list[str]:
+    """Los campos ANOTADOS de una clase Pydantic del esquema, en orden."""
+    arbol = ast.parse(ESQUEMAS.read_text(encoding="utf-8-sig"))
+    for nodo in ast.walk(arbol):
+        if isinstance(nodo, ast.ClassDef) and nodo.name == nombre:
+            return [campo.target.id for campo in nodo.body
+                    if isinstance(campo, ast.AnnAssign)]
+    raise AssertionError(f"{nombre} no está declarada en el esquema")
+
+
+def test_el_aviso_rapido_lo_publica_el_coach_con_permiso_completo():
+    nodo, decorador = _ruta(*AVISO_RAPIDO)
+    assert "get_current_coach" in ast.unparse(nodo)
+    # Un alumno en plan de prueba tampoco entra: los avisos los lee el alumnado.
+    assert "require_full_access" in ast.unparse(decorador)
+
+
+def test_el_aviso_rapido_solo_lleva_el_mensaje():
+    """Sin tipo ni fechas en el payload, el coach no elige QUÉ publica."""
+    assert _campos_de_la_clase("AvisoRapidoCrear") == ["texto"]
+
+
+def test_el_aviso_rapido_no_sube_flyer_ni_llega_fijado():
+    """JSON y sin `file`/`Form`: el aviso rápido no lleva imagen ni va fijado arriba."""
+    nodo, _ = _ruta(*AVISO_RAPIDO)
+    fuente = ast.unparse(nodo)
+    assert "payload_aviso_rapido(" in fuente, \
+        "el tipo, la ventana y el flyer los fija el servicio"
+    for prohibido in ("UploadFile", "File(", "Form(", "fijado_arriba"):
+        assert prohibido not in fuente, prohibido
+
+
+def test_la_ventana_del_aviso_rapido_es_el_dia_de_chile():
+    desde, hasta = servicio.ventana_de_hoy()
+    assert desde == hasta == hoy_santiago()
+
+
+def test_el_titulo_del_aviso_rapido_sale_del_mensaje():
+    assert servicio.titulo_desde_texto("Trae calcetas") == "Trae calcetas"
+    # La PRIMERA frase es el título; el resto sigue siendo el texto de la tarjeta.
+    assert servicio.titulo_desde_texto(
+        "Trae calcetas. Hay cuerda y saltos") == "Trae calcetas"
+    assert servicio.titulo_desde_texto("  Trae\n  calcetas  ") == "Trae calcetas"
+    # Sin puntuación no hay "primera frase": el título es el mensaje completo.
+    assert servicio.titulo_desde_texto(
+        "Trae calcetas, hoy hay cuerda") == "Trae calcetas, hoy hay cuerda"
+    assert servicio.titulo_desde_texto(None) == ""
+
+
+def test_el_titulo_del_aviso_rapido_se_recorta_por_palabra():
+    titulo = servicio.titulo_desde_texto("calcetas " * 20)
+    assert titulo.endswith("…")
+    # +1 = los puntos suspensivos que marcan el recorte.
+    assert len(titulo) <= servicio.TITULO_RAPIDO_MAX + 1
+    assert titulo[:-1].split()[-1] == "calcetas", "no corta una palabra al medio"
+
+
+def test_el_aviso_rapido_es_un_aviso_comun_de_hoy():
+    """El payload que arma el backend entra por `crear()` sin sorpresas."""
+    datos = servicio.payload_aviso_rapido("Trae calcetas, hoy hay cuerda")
+    assert servicio.validar(datos) == []
+    assert datos["tipo"] == TIPO_AVISO
+    assert datos["vigente_desde"] == datos["vigente_hasta"] == hoy_santiago()
+    assert datos["fijado_arriba"] is False
+    assert datos["imagen_url"] is None
+    assert datos["titulo"] and datos["texto"] == "Trae calcetas, hoy hay cuerda"
+
+
+def test_el_aviso_rapido_dura_el_dia_completo_y_no_se_fija_arriba():
+    """No le roba el primer lugar a lo que el admin fijó a mano."""
+    datos = servicio.payload_aviso_rapido("Trae calcetas")
+    assert _aviso(**datos).fijado_arriba is False
+    desde, hasta = servicio.rango_vigencia(datos["vigente_desde"],
+                                           datos["vigente_hasta"])
+    assert desde < hasta, "la ventana queda abierta todo el día"
+    assert fecha_chile(hasta) == hoy_santiago()
 

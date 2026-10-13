@@ -6,6 +6,11 @@ QUIÉN PUEDE QUÉ
   * `GET /marketing` (lista con filtro) y TODAS las mutaciones: sólo el ADMIN del
     box (`get_current_admin`, tenant del token). Publicar contenido que ve todo el
     alumnado no puede quedar al alcance de un alumno.
+  * `POST /marketing/aviso-rapido`: el COACH (o el admin) desde la Gestión de
+    Clases. Es la ÚNICA mutación abierta a un coach y con los límites puestos en el
+    backend: tipo `aviso` FIJO, ventana HOY (día de Chile), sin flyer y sin fijar
+    arriba (`app/services/avisos_marketing.py: payload_aviso_rapido`). Una
+    Promoción, una Colaboración o un Evento siguen siendo del admin.
   * `GET /marketing/vigentes`: cualquier usuario autenticado. Es lo que pinta el
     carrusel del Inicio del alumno <768px, así que NO lleva el candado de
     `require_full_access` (un alumno en plan de prueba también entra a su Inicio;
@@ -21,13 +26,13 @@ from fastapi import (APIRouter, Depends, File, Form, HTTPException, Query,
                      UploadFile, status)
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import (get_current_admin, get_current_user,
-                                   require_full_access)
+from app.core.dependencies import (get_current_admin, get_current_coach,
+                                   get_current_user, require_full_access)
 from app.core.imagenes_publicas import guardar_imagen_publica
 from app.db.database import get_db
 from app.models.aviso_marketing import TIPO_PRODUCTO_BAZAR, AvisoMarketing
 from app.schemas.aviso_marketing import (AvisoMarketingActualizar,
-                                         AvisoMarketingOut)
+                                         AvisoMarketingOut, AvisoRapidoCrear)
 from app.services import avisos_marketing as servicio
 from app.services import storage
 
@@ -135,6 +140,28 @@ async def crear_aviso(
                            if file and file.filename else None)
 
     return servicio.crear(db, tenant_id, datos,
+                          creado_por=current_user["usuario_id"])
+
+
+@router.post("/aviso-rapido", response_model=AvisoMarketingOut,
+             status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_full_access)])
+def publicar_aviso_rapido(
+    aviso_data: AvisoRapidoCrear,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
+):
+    """El aviso del día que el COACH publica desde la Gestión de Clases. Única
+    mutación de este router que no es del admin (JSON: no lleva flyer).
+
+    El payload trae SÓLO el mensaje; el tipo, la ventana y el título los arma
+    `servicio.payload_aviso_rapido` (tipo `aviso`, HOY en día de Chile, sin flyer y
+    sin fijar arriba). `require_full_access` deja fuera a un alumno en plan de prueba:
+    los avisos los lee el alumnado, no cualquier cuenta autenticada.
+    """
+    # 🔒 SEGURIDAD: tenant_id del token JWT (no hay Form/query que lo pise).
+    datos = servicio.payload_aviso_rapido(aviso_data.texto)
+    return servicio.crear(db, current_user["tenant_id"], datos,
                           creado_por=current_user["usuario_id"])
 
 

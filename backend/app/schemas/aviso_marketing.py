@@ -44,6 +44,18 @@ class AvisoMarketingActualizar(AvisoMarketingCrear):
     """
 
 
+class AvisoRapidoCrear(BaseModel):
+    """Lo que manda el modal "Aviso rápido" del coach (POST /marketing/aviso-rapido).
+
+    Sólo el MENSAJE. El tipo (`aviso`), la ventana (HOY, día de Chile) y el título
+    (derivado del propio mensaje) los fija el backend —`app/services/avisos_marketing.py:
+    payload_aviso_rapido`—: sin tipo ni fechas en el payload, desde el panel del coach
+    NO se puede publicar una Promoción de un mes, una Colaboración ni un Evento, que
+    son contenido del admin. Tampoco lleva flyer.
+    """
+    texto: str = Field(..., min_length=1, max_length=1000)
+
+
 class AvisoMarketingOut(BaseModel):
     """La fila como la consumen la pantalla del admin y el carrusel del alumno."""
     id: int

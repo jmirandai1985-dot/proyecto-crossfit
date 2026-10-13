@@ -1483,3 +1483,18 @@ export function useEliminarAviso() {
     });
 }
 
+// El aviso rápido del COACH (publicar desde la Gestión de Clases): la única mutación
+// de avisos que NO nace en el panel del admin. Va por JSON y con un payload de un solo
+// campo (`{ texto }`): el tipo, la ventana de HOY y el título los fija el backend
+// (`app/services/avisos_marketing.py: payload_aviso_rapido`). Invalida el MISMO
+// prefijo `['marketing']` que el resto: con eso el carrusel del alumno y la tabla del
+// admin se refrescan solos.
+export function usePublicarAvisoRapido() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) => api.post('/api/v1/marketing/aviso-rapido', payload)
+            .then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['marketing'] }),
+    });
+}
+

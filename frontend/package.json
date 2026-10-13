@@ -32,6 +32,7 @@
     "test:alumnos-movil": "node scripts/test-alumnos-movil.mjs",
     "test:title": "node scripts/test-admin-sin-title.mjs",
     "test:marketing": "node scripts/test-marketing.mjs",
+    "test:aviso-rapido": "node scripts/test-aviso-rapido.mjs",
     "test:encoding": "node scripts/test-encoding.mjs"
   },
   "dependencies": {

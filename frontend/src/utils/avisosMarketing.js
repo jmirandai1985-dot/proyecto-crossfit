@@ -5,6 +5,10 @@
 // "Promoción" se cambiara en un solo lado, el botón del admin y la tarjeta del
 // alumno dejarían de coincidir: por eso vive acá y no en cada pantalla.
 //
+// El TERCER consumidor es el aviso rápido del coach (bloque 3, Gestión de Clases):
+// reusa de acá la validación del mensaje y la vista previa del título (sección del
+// final), pero NO elige tipo ni vigencia — eso lo fija el backend.
+//
 // Los `id` son ESPEJO del CHECK `ck_avisos_marketing_tipo` del backend
 // (`app/models/aviso_marketing.py`) y los colores, del mockup
 // `mockup/carrusel-marketing.html`.
@@ -455,5 +459,58 @@ export function contarPorEstado(avisos, ahora = new Date()) {
         if (aviso.fijado_arriba) conteo.fijados += 1;
     }
     return conteo;
+}
+
+// ── El aviso rápido del COACH (bloque 3, Gestión de Clases móvil) ────────────
+// El coach escribe UNA caja de texto y publica un aviso que el alumnado ve HOY en su
+// Inicio. Tipo (`aviso`), ventana (HOY, día de Chile) y título NO se eligen acá: los
+// fija el backend en `POST /marketing/aviso-rapido`
+// (`app/services/avisos_marketing.py: payload_aviso_rapido`). Por eso acá sólo hay
+// validación espejo (para no mandar un POST vacío) y la vista previa del título.
+
+// ESPEJO del `max_length=1000` del esquema `AvisoRapidoCrear` del backend.
+export const MAX_TEXTO_RAPIDO = 1000;
+// ESPEJO de `TITULO_RAPIDO_MAX` (`app/services/avisos_marketing.py`).
+export const MAX_TITULO_RAPIDO = 60;
+
+export function avisoRapidoVacio() {
+    return { texto: '' };
+}
+
+export function validarAvisoRapido(datos) {
+    const errores = {};
+    const texto = (datos?.texto || '').trim();
+    if (!texto) {
+        errores.texto = 'Escribe el aviso que verán hoy los alumnos.';
+    } else if (texto.length > MAX_TEXTO_RAPIDO) {
+        errores.texto = `El aviso no puede pasar de ${MAX_TEXTO_RAPIDO} caracteres.`;
+    }
+    return errores;
+}
+
+// El cuerpo del POST: JSON y SÓLO el mensaje. A propósito NO lleva `tipo`,
+// `vigente_desde`, `vigente_hasta` ni `fijado_arriba`: si el payload pudiera
+// mandarlos, desde el panel del coach se podría publicar una Promoción de un mes o
+// un Evento con fecha, que son contenido del admin.
+export function payloadAvisoRapido(datos) {
+    return { texto: (datos?.texto || '').trim() };
+}
+
+// La vista previa del título que va a derivar el backend: MISMA regla que
+// `titulo_desde_texto` (primera frase, recorte por palabra y "…"), para que el coach
+// vea cómo quedará la tarjeta antes de publicar. Si la regla cambia allá, cambia acá.
+export function tituloRapidoDeTexto(texto, tope = MAX_TITULO_RAPIDO) {
+    // Saltos de línea y espacios de más no llegan a la tarjeta: se aplanan.
+    const plano = (texto || '').split(/\s+/).filter(Boolean).join(' ');
+    if (!plano) return '';
+    const cortes = ['.', '!', '?', ';']
+        .map((signo) => plano.indexOf(signo))
+        .filter((posicion) => posicion !== -1);
+    let recorte = cortes.length ? plano.slice(0, Math.min(...cortes)).trim() : plano;
+    if (recorte.length <= tope) return recorte;
+    recorte = recorte.slice(0, tope).replace(/\s+$/, '');
+    const ultimoEspacio = recorte.lastIndexOf(' ');
+    if (ultimoEspacio > 0) recorte = recorte.slice(0, ultimoEspacio);
+    return `${recorte}…`;
 }
 
