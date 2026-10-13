@@ -7,35 +7,26 @@
  * EXACTAMENTE los 4 datos que el coach necesita: teléfono, antigüedad
  * (fecha de alta), plan actual y créditos/vencimiento reales.
  * Sin datos financieros.
+ *
+ * El dato lo trae `useFichaAlumnoCoach` (caché compartida, Bloque 6): reabrir la ficha pinta
+ * al instante lo último visto y revalida en segundo plano; "Reintentar" es un `refetch`.
  */
-import React, { useEffect, useState } from 'react';
-import api from '../services/api';
+import React from 'react';
+import { useFichaAlumnoCoach } from '../hooks/queries';
 import { fmtFechaChile } from '../utils/fecha';
 
 const fmtFecha = (f) => (f ? fmtFechaChile(f) : '—');
 
 const AlumnoFichaCoach = ({ alumnoId, coachId, onClose }) => {
-    const [ficha, setFicha] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
-
-    const cargar = async () => {
-        setLoading(true);
-        setError('');
-        try {
-            const r = await api.get(`/api/v1/fidelizacion/coach/${coachId}/alumno/${alumnoId}/ficha`);
-            setFicha(r.data);
-        } catch (e) {
-            setError(e.response?.data?.detail || 'No se pudo cargar la ficha del alumno.');
-            setFicha(null);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        if (alumnoId) cargar();
-    }, [alumnoId, coachId]);
+    // El dato sale de la caché compartida (Bloque 6): volver a abrir la ficha pinta al
+    // instante lo último visto mientras React Query revalida en segundo plano.
+    const fichaQ = useFichaAlumnoCoach(coachId, alumnoId);
+    const ficha = fichaQ.data || null;
+    // `isPending` = primera carga (todavía no hay dato); una revalidación no la esconde.
+    const cargando = Boolean(alumnoId) && fichaQ.isPending;
+    const error = fichaQ.isError
+        ? (fichaQ.error?.response?.data?.detail || 'No se pudo cargar la ficha del alumno.')
+        : '';
 
     if (!alumnoId) return null;
 
@@ -56,22 +47,22 @@ const AlumnoFichaCoach = ({ alumnoId, coachId, onClose }) => {
                 </div>
 
                 <div className="p-5 space-y-4">
-                    {loading && (
+                    {cargando && (
                         <div className="flex justify-center py-8">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
                         </div>
                     )}
 
-                    {!loading && error && (
+                    {!cargando && error && (
                         <div className="bg-red-500/10 border-l-4 border-red-500 rounded p-3 text-sm text-red-300">
                             <p className="font-medium">⚠️ {error}</p>
-                            <button onClick={cargar} className="mt-2 px-3 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">
+                            <button onClick={() => fichaQ.refetch()} className="mt-2 px-3 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">
                                 Reintentar
                             </button>
                         </div>
                     )}
 
-                    {!loading && !error && ficha && (
+                    {!cargando && !error && ficha && (
                         <>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="bg-zinc-800/60 rounded-lg p-3">

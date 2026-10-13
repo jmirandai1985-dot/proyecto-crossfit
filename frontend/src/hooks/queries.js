@@ -93,6 +93,13 @@ export const claves = {
     disciplinas: ['disciplinas'],
     alumnosCoach: (coachId) => ['fidelizacion', 'coach', coachId, 'alumnos'],
     alumnosCoachEnRiesgo: (coachId) => ['fidelizacion', 'coach', coachId, 'en-riesgo'],
+    // Los DOS modales que monta el Dashboard del coach (Bloque 6): la ficha acotada del
+    // alumno (P2) y el preview del correo de inactividad (P1). Cuelgan de `['fidelizacion']`,
+    // la familia de las dos listas de arriba, así que refrescar la familia las alcanza.
+    fichaAlumnoCoach: (coachId, alumnoId) =>
+        ['fidelizacion', 'coach', coachId, 'alumno', alumnoId, 'ficha'],
+    previewContactoCoach: (coachId, alumnoId) =>
+        ['fidelizacion', 'coach', coachId, 'contactar', alumnoId, 'preview'],
     progresoAlumnosCoach: (ids) => ['historial-rm', 'progreso-lote', ids],
     reservasPorClase: (claseId) => ['reservas', 'por-clase', claseId],
     // ── Bloque 3 (parte A): catálogos y CRUD del panel admin ─────────────────
@@ -1028,6 +1035,41 @@ export function useAccionClase() {
             `/api/v1/clases/${claseId}/${accion}`, null, { params },
         ).then((r) => r.data),
         onSuccess: () => qc.invalidateQueries({ queryKey: ['clases'] }),
+    });
+}
+
+// ── Bloque 6: los dos modales del Dashboard del coach ────────────────────────
+// Los dos pedían su dato en un `useEffect` con `api.get` a mano: cada apertura del modal
+// volvía a pedirlo. Ahora viven en la caché compartida (una entrada por alumno).
+
+// Ficha acotada del alumno (P2): UN endpoint coach-scoped con los 4 datos que el coach
+// puede ver (teléfono, alta, plan y créditos). No se reusa la del admin porque aquella
+// pega a endpoints admin-only: un coach recibiría 403.
+export function useFichaAlumnoCoach(coachId, alumnoId) {
+    return useQuery({
+        queryKey: claves.fichaAlumnoCoach(coachId, alumnoId),
+        queryFn: async () => (await api.get(
+            `/api/v1/fidelizacion/coach/${coachId}/alumno/${alumnoId}/ficha`,
+        )).data || null,
+        // Igual que el useEffect que reemplaza: la ficha se pide cuando hay alumno elegido.
+        // Sin `staleTime` (el default 0) cada apertura revalida, y la caché sirve para
+        // pintar la última ficha al instante mientras llega la respuesta nueva.
+        enabled: Boolean(alumnoId),
+    });
+}
+
+// Vista previa del correo de inactividad ANTES de mandarlo: el asunto y el HTML los
+// renderiza el BACKEND con la MISMA función del envío real (`render_email_fidelizacion`),
+// así que es un GET sin efectos secundarios (no registra ni manda nada) y se puede cachear
+// por alumno. El envío (`useContactarAlumnoCoach`) no invalida a propósito: sólo escribe en
+// notificaciones_enviadas y auditoría, no mueve ninguno de los datos que estas claves miran.
+export function usePreviewContactoCoach(coachId, alumnoId) {
+    return useQuery({
+        queryKey: claves.previewContactoCoach(coachId, alumnoId),
+        queryFn: async () => (await api.get(
+            `/api/v1/fidelizacion/coach/${coachId}/contactar/${alumnoId}/preview`,
+        )).data || null,
+        enabled: Boolean(alumnoId),
     });
 }
 

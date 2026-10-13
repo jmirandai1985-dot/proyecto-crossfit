@@ -15,6 +15,10 @@
 // Los demás admins (Dashboard, Kpis, SupervisionClases, InicioMobileAdmin, Pedidos y
 // Notificaciones) siguen con `api.*`: son las pantallas PENDIENTES. No están en la lista
 // de arriba, pero se informa cuántas quedan para que el número no engañe.
+//
+// Los modales que monta el Dashboard del COACH tienen su propia guarda hermana
+// (`test-coach-sin-api.mjs`), igual que el panel del alumno tiene la suya: este archivo
+// sólo mira el panel del admin.
 import { readFileSync } from 'node:fs';
 
 const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');

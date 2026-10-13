@@ -6,32 +6,22 @@
  * exactamente lo que se manda (sin riesgo de que el preview "derive").
  * Se pinta en un <iframe sandbox=""> para tener fidelidad total del HTML del
  * correo sin ejecutar nada.
+ *
+ * El preview lo trae `usePreviewContactoCoach` (caché compartida, Bloque 6): el GET es el
+ * mismo que hacía el `useEffect` de antes, ahora con una entrada por alumno.
  */
-import React, { useEffect, useState } from 'react';
-import api from '../services/api';
+import React from 'react';
+import { usePreviewContactoCoach } from '../hooks/queries';
 
 const PreviewEmailModal = ({ alumnoId, coachId, onClose, onConfirmar, enviando }) => {
-    const [preview, setPreview] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
-
-    const cargar = async () => {
-        setLoading(true);
-        setError('');
-        try {
-            const r = await api.get(`/api/v1/fidelizacion/coach/${coachId}/contactar/${alumnoId}/preview`);
-            setPreview(r.data);
-        } catch (e) {
-            setError(e.response?.data?.detail || 'No se pudo generar la vista previa del correo.');
-            setPreview(null);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        if (alumnoId) cargar();
-    }, [alumnoId, coachId]);
+    // El preview lo trae `usePreviewContactoCoach` (Bloque 6): es el MISMO GET sin efectos
+    // secundarios de antes, cacheado por alumno y revalidado al abrir el modal.
+    const previewQ = usePreviewContactoCoach(coachId, alumnoId);
+    const preview = previewQ.data || null;
+    const loading = Boolean(alumnoId) && previewQ.isPending;
+    const error = previewQ.isError
+        ? (previewQ.error?.response?.data?.detail || 'No se pudo generar la vista previa del correo.')
+        : '';
 
     if (!alumnoId) return null;
 
@@ -58,7 +48,7 @@ const PreviewEmailModal = ({ alumnoId, coachId, onClose, onConfirmar, enviando }
                     {!loading && error && (
                         <div className="bg-red-500/10 border-l-4 border-red-500 rounded p-3 text-sm text-red-300">
                             <p className="font-medium">⚠️ {error}</p>
-                            <button onClick={cargar} className="mt-2 px-3 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">
+                            <button onClick={() => previewQ.refetch()} className="mt-2 px-3 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">
                                 Reintentar
                             </button>
                         </div>
