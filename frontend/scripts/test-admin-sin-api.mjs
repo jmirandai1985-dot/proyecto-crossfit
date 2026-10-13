@@ -88,6 +88,23 @@ for (const clave of [
     ok(new RegExp(clave).test(queries), `queries.js declara la clave ${clave.replace(':', '')}`);
 }
 
+// Componentes de PRESENTACIÓN del rediseño móvil: no usan hooks (reciben los datos por
+// props de la pantalla que los monta), pero tampoco pueden llamar a la API por su cuenta.
+const PRESENTACION_MOVIL = [
+    '../src/pages/admin/AlumnosMovil.jsx',
+];
+
+console.log('\n== 2b. Los componentes moviles no llaman a la API a mano ==');
+for (const rel of PRESENTACION_MOVIL) {
+    const src = leer(rel);
+    const nombre = rel.replace('../src/', '');
+    const directa = src.match(LLAMADA_DIRECTA);
+    ok(!IMPORT_API.test(src), `${nombre}: no importa services/api ni axios`);
+    ok(!directa, directa
+        ? `${nombre}: llamada directa -> ${directa[0].trim()}`
+        : `${nombre}: sin llamadas api.*`);
+}
+
 console.log('\n== 3. Aviso: admins TODAVIA por migrar (informativo, no es fallo) ==');
 const conApi = PENDIENTES.filter((rel) => LLAMADA_DIRECTA.test(leer(rel)));
 console.log(`  INFO  ${conApi.length} de ${PENDIENTES.length} pantallas admin siguen con api.*:`);

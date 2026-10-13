@@ -1,0 +1,274 @@
+/* alumnosMovil.css — tarjetas con acordeón del padrón de alumnos en móvil (<768px).
+ *
+ * POR QUÉ EXISTE: en el teléfono la tabla de 8 columnas obliga a scroll horizontal y las
+ * acciones quedan fuera de la pantalla; además las filas vivían separadas sólo por
+ * `divide-y`, así que no se distinguía dónde empieza y termina cada alumno. Acá cada
+ * alumno es una tarjeta con marco propio y sus acciones dentro.
+ *
+ * Reutiliza el MISMO lenguaje de tarjeta que las KPI del Dashboard admin móvil
+ * (`inicioMobileAdmin.css`) y el panel de Fidelización móvil (`fidelizacionMovil.css`):
+ * superficie propia, línea de 1px, radio xl de 20px, luz radial tenida y sombra sutil.
+ * NO importa esos archivos: traen reglas globales bajo `.ub-admin` (`button
+ * { background: none }`, `svg { width: 22px }`) que apagarían los botones de acción y
+ * agrandarían sus iconos.
+ *
+ * Todo va scopeado bajo `.ub-alu` y el componente sólo se monta en <768px (`md:hidden` en
+ * `pages/admin/Alumnos.jsx`): en >=768px no llega ninguna de estas reglas, así que la
+ * tabla de escritorio queda EXACTAMENTE como estaba.
+ */
+
+.ub-alu {
+    /* Mismos valores que las tarjetas KPI del dashboard móvil.
+       La tarjeta es superficie2 (#1e232c) y el panel abierto vuelve a la superficie base
+       (#161a21): así la tarjeta se despega del panel contenedor (bg-zinc-900) y el
+       contenido expandido sigue dentro del MISMO marco. */
+    --alu-surface: #1e232c;
+    --alu-surface-abierto: #161a21;
+    --alu-line: #313846;
+
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+}
+
+/* Lista sin viñetas: la separación entre tarjetas la da el gap, no un divisor. */
+.ub-alu .ub-alu-lista {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+/* Padrón sin filas: el mismo texto que dejaba la tabla en su celda vacía. */
+.ub-alu .ub-alu-vacio {
+    margin: 0;
+    padding: 32px 12px;
+    text-align: center;
+    font-size: .875rem;
+    color: #8d95a4;
+}
+
+/* ── La tarjeta ────────────────────────────────────────────────────────────── */
+.ub-alu .ub-alu-card {
+    position: relative;
+    border-radius: 20px;
+    border: 1px solid var(--alu-line);
+    background: var(--alu-surface);
+    box-shadow:
+        0 1px 2px rgba(0, 0, 0, .5),
+        0 10px 24px -20px rgba(0, 0, 0, .95);
+    overflow: hidden;
+}
+
+/* Luz radial de las KPI, tenida por el estado REAL del registro (data-estado, que sale de
+   `utils/alumnos.estadoDe`): verde activo, ámbar pendiente, rojo rechazado/baja. */
+.ub-alu .ub-alu-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(120% 90% at 100% 0%,
+        var(--alu-tint, transparent), transparent 62%);
+}
+
+.ub-alu .ub-alu-card[data-estado='activo'] { --alu-tint: rgba(34, 197, 94, .13); }
+.ub-alu .ub-alu-card[data-estado='pendiente_activacion'] { --alu-tint: rgba(245, 165, 36, .15); }
+.ub-alu .ub-alu-card[data-estado='rechazado'],
+.ub-alu .ub-alu-card[data-estado='baja'] { --alu-tint: rgba(240, 89, 79, .13); }
+
+/* Abierta: el borde y el fondo cambian para que se vea que ESA tarjeta es la activa. */
+.ub-alu .ub-alu-card[data-abierta='true'] {
+    border-color: #46516b;
+    background: var(--alu-surface-abierto);
+}
+
+/* ── Fila cerrada (el <button> que despliega) ──────────────────────────────── */
+.ub-alu .ub-alu-cabecera {
+    position: relative;
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    text-align: left;
+}
+
+/* El chevron no se encoge cuando el nombre es largo. */
+.ub-alu .ub-alu-chevron {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    color: #8d95a4;
+    transition: transform .18s ease;
+}
+
+.ub-alu .ub-alu-chevron.abierto {
+    transform: rotate(90deg);
+}
+
+/* El nombre cede el espacio (puntos suspensivos) antes que la píldora de estado. */
+.ub-alu .ub-alu-cabecera > .ub-alu-titulo {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.ub-alu .ub-alu-fila {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.ub-alu .ub-alu-nombre {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: .875rem;
+    font-weight: 700;
+    color: #eceef2;
+}
+
+/* La píldora del estado: el color lo trae `badgeEstado` (utils/alumnos), el MISMO de la
+   tabla. Acá sólo se ajusta el tamaño para el teléfono. */
+.ub-alu .ub-alu-badge {
+    flex: none;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: .625rem;
+    font-weight: 600;
+}
+
+/* Plan y créditos: las mismas dos columnas de la tabla, en una línea con su rótulo. */
+.ub-alu .ub-alu-plan {
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    margin-top: 6px;
+}
+
+.ub-alu .ub-alu-dato {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    min-width: 0;
+}
+
+.ub-alu .ub-alu-etiqueta {
+    font-size: .625rem;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #8d95a4;
+}
+
+.ub-alu .ub-alu-valor {
+    font-size: .75rem;
+    font-weight: 600;
+    color: #c8cdd8;
+}
+
+/* ── Panel abierto: mismo marco, un peldaño más oscuro ────────────────────── */
+.ub-alu .ub-alu-panel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    border-top: 1px solid var(--alu-line);
+    background: var(--alu-surface-abierto);
+    padding: 12px 16px;
+}
+
+/* El contacto: rótulo a la izquierda (Correo / Teléfono / Fecha Registro) y el dato a la
+   derecha, en dos columnas alineadas. Un correo largo se parte en vez de desbordar. */
+.ub-alu .ub-alu-datos {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 10px;
+    margin: 0;
+}
+
+.ub-alu .ub-alu-datos dt {
+    font-size: .625rem;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #8d95a4;
+}
+
+.ub-alu .ub-alu-datos dd {
+    margin: 0;
+    font-size: .75rem;
+    color: #c8cdd8;
+    overflow-wrap: anywhere;
+}
+
+/* ── Las 5 acciones de la fila de escritorio ───────────────────────────────── */
+/* Dos columnas de botones con alto de dedo (44px) y la baja a lo ancho: en el teléfono
+   las acciones de la tabla quedaban fuera de la pantalla y el toque necesita superficie
+   (el color de cada acción es el de su equivalente del panel: morado del comprobante,
+   verde de la ficha, índigo del historial, azul de editar y rojo de eliminar). */
+.ub-alu .ub-alu-acciones {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.ub-alu .ub-alu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 0 10px;
+    border-radius: 12px;
+    border: 1px solid var(--alu-line);
+    font-size: .75rem;
+    font-weight: 700;
+    color: #eceef2;
+    background: #262c37;
+    transition: filter .15s ease;
+}
+
+.ub-alu .ub-alu-btn svg {
+    flex: none;
+    width: 14px;
+    height: 14px;
+}
+
+.ub-alu .ub-alu-btn:active {
+    filter: brightness(1.25);
+}
+
+.ub-alu .ub-alu-btn.voucher {
+    border-color: rgba(147, 51, 234, .45);
+    background: rgba(147, 51, 234, .18);
+    color: #e9d5ff;
+}
+
+.ub-alu .ub-alu-btn.ficha {
+    border-color: rgba(16, 185, 129, .4);
+    background: rgba(16, 185, 129, .16);
+    color: #a7f3d0;
+}
+
+.ub-alu .ub-alu-btn.historial {
+    border-color: rgba(99, 102, 241, .4);
+    background: rgba(99, 102, 241, .16);
+    color: #c7d2fe;
+}
+
+.ub-alu .ub-alu-btn.editar {
+    border-color: rgba(59, 130, 246, .4);
+    background: rgba(59, 130, 246, .16);
+    color: #bfdbfe;
+}
+
+/* La baja ocupa la fila completa: no se toca por accidente al lado de otra acción. */
+.ub-alu .ub-alu-btn.eliminar {
+    grid-column: 1 / -1;
+    border-color: rgba(239, 68, 68, .4);
+    background: rgba(239, 68, 68, .14);
+    color: #fecaca;
+}

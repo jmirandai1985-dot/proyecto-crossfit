@@ -53,12 +53,19 @@ export const nombrePlan = (planes = [], planId) => {
 };
 
 /**
- * Badge del estado REAL del registro. `estado` es la fuente de verdad (el flag
- * `activo` es derivado y el backend garantiza que no se desincronicen).
- * El texto y las clases son los que pinta el panel desde siempre.
+ * Clave del estado REAL del registro: `estado` es la fuente de verdad (el flag
+ * `activo` es derivado y el backend garantiza que no se desincronicen). La usa la
+ * vista móvil para elegir el tinte de la tarjeta, sin volver a decidir nada.
+ */
+export const estadoDe = (usuario) =>
+    usuario?.estado || (usuario?.activo ? 'activo' : 'baja');
+
+/**
+ * Badge del estado: el texto y las clases son las que pinta el panel desde siempre.
+ * Es la misma píldora en la tabla de escritorio y en las tarjetas del teléfono.
  */
 export const badgeEstado = (usuario) => {
-    const est = usuario?.estado || (usuario?.activo ? 'activo' : 'baja');
+    const est = estadoDe(usuario);
     return {
         texto: est === 'pendiente_activacion' ? 'pendiente' : est,
         clase: est === 'activo' ? 'bg-green-100 text-green-800'

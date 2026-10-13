@@ -3,6 +3,9 @@ import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import AlumnoFichaModal from '../../components/AlumnoFichaModal';
+// Vista MÓVIL del padrón (<768px): tarjetas con acordeón. La tabla de escritorio no
+// cambia; las dos vistas comparten los datos y las reglas (`utils/alumnos*`).
+import AlumnosMovil from './AlumnosMovil';
 import { fmtFechaChile, sumarDiasInstante } from '../../utils/fecha';
 import {
     SIN_DATOS, useAlumnosPaginados, useBeneficiosAlumno, useCrearSuscripcion,
@@ -293,7 +296,26 @@ const Alumnos = () => {
                         />
                     </div>
 
-                    <div className="overflow-x-auto">
+                    {/* Vista MÓVIL (<768px): el padrón como TARJETAS con acordeón.
+                        Reemplaza a la tabla en el teléfono; en >=768px no se muestra
+                        (regla de oro: el escritorio no cambia). Los modales y los
+                        manejadores NO se duplican: son los mismos de abajo y acá sólo
+                        se avisa por callback. */}
+                    <div data-testid="padron-movil" className="md:hidden">
+                        <AlumnosMovil
+                            alumnos={alumnos}
+                            suscripciones={suscripciones}
+                            planes={planes}
+                            onVoucher={openVoucherModal}
+                            onFicha={(alumno) => setFichaAlumnoId(alumno.id)}
+                            onHistorial={(alumno) => navigate(`/admin/alumnos/${alumno.id}/historial`)}
+                            onEditar={(alumno) => openModal(alumno)}
+                            onEliminar={handleDelete}
+                        />
+                    </div>
+
+                    {/* Vista de ESCRITORIO (>=768px): la tabla de siempre, sin cambios. */}
+                    <div className="overflow-x-auto hidden md:block">
                         <table className="w-full">
                             <thead className="bg-blue-900 text-white">
                                 <tr>
