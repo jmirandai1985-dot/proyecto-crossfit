@@ -3,6 +3,8 @@
 // Lo comparten la pantalla Marketing del admin (bloque 2) y el carrusel
 // "Novedades del box" del Inicio del alumno (bloque 4).
 //   Ejecutar:  node scripts/test-marketing.mjs
+import { readFileSync } from 'node:fs';
+
 import {
     TIPOS_AVISO, TIPOS_EDITABLES, TIPO_POR_DEFECTO, DIAS_VIGENCIA_POR_DEFECTO,
     tipoDe, etiquetaTipo, acentoDeTipo, esTipoEditable,
@@ -155,6 +157,21 @@ eq(mensajeDeError({ response: { data: { detail: 'El título es obligatorio.' } }
 eq(mensajeDeError({ response: { data: { detail: [{ msg: 'a' }, { msg: 'b' }] } } }),
     'a b', 'una lista de Pydantic se une');
 eq(mensajeDeError({}) !== '', true, 'sin detalle hay mensaje por defecto');
+
+// ── 10. El Bazar anuncia el producto (Bloque 3) ─────────────────────────────
+// El aviso del producto es DERIVADO: el admin sólo elige los días de anuncio en
+// el modal del producto y el backend crea/actualiza/quita el aviso. Estos
+// chequeos son de FUENTE (hay un modal y una tabla, no una función pura) para
+// que nadie borre el campo sin darse cuenta de que apaga el anuncio.
+console.log('== 10. Días de anuncio del Bazar ==');
+const modalProducto = readFileSync(new URL('../src/components/ModalProducto.jsx', import.meta.url), 'utf8');
+const bazar = readFileSync(new URL('../src/pages/admin/Bazar.jsx', import.meta.url), 'utf8');
+eq(modalProducto.includes("data.append('dias_anuncio'"), true, 'el POST manda los días de anuncio');
+eq(modalProducto.includes('dias_anuncio: parseInt(formData.dias_anuncio || 0)'), true, 'el PUT manda los días de anuncio');
+eq(modalProducto.includes("dias_anuncio: '0'"), true, 'sin días, el formulario arranca en 0');
+eq(modalProducto.includes('errors.dias_anuncio'), true, 'el formulario valida los días');
+eq(bazar.includes('p.dias_anuncio > 0'), true, 'el inventario marca los productos anunciados');
+eq(bazar.includes('Anunciado en el Inicio'), true, '... con un chip legible');
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);

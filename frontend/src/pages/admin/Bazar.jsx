@@ -337,6 +337,14 @@ const Bazar = ({ sinLayout = false }) => {
                                                         {p.descripcion && (
                                                             <div className="text-[11.5px] text-zinc-500 mt-0.5">{p.descripcion}</div>
                                                         )}
+                                                        {/* Anunciado en el Inicio del alumno: son los
+                                                            días de anuncio que mantiene el aviso del
+                                                            carrusel "Novedades del box" (Bloque 3). */}
+                                                        {p.dias_anuncio > 0 && (
+                                                            <div className="text-[10.5px] text-blue-400 font-bold mt-0.5">
+                                                                📣 Anunciado en el Inicio ({p.dias_anuncio} día{p.dias_anuncio === 1 ? '' : 's'})
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </td>

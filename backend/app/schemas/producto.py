@@ -23,6 +23,11 @@ class ProductoBase(BaseModel):
     # /static/uploads/<archivo>; en PROD a la URL absoluta del bucket público de R2.
     imagen_url: Optional[str] = Field(
         None, max_length=500, description="URL pública de la imagen del producto")
+    # Días de anuncio en el carrusel del Inicio del alumno (0 = no anunciar, y con 0
+    # se quita el aviso). El aviso lo mantiene el backend: título, precio y foto
+    # salen del producto.
+    dias_anuncio: int = Field(
+        0, ge=0, le=365, description="Días que se anuncia el producto en el Inicio")
     activo: bool = Field(True, description="Indica si el producto está activo")
 
 
@@ -39,6 +44,9 @@ class ProductoUpdate(BaseModel):
     stock: Optional[int] = Field(None, ge=0)
     stock_minimo: Optional[int] = Field(
         None, ge=0, description="Umbral de stock bajo (NULL = alerta desactivada)")
+    # Días de anuncio del producto en el carrusel del Inicio (0 = quitar el aviso).
+    dias_anuncio: Optional[int] = Field(
+        None, ge=0, le=365, description="Días de anuncio en el Inicio (0 = sin aviso)")
     # Imagen del producto: se sube por POST /productos/{id}/imagen (multipart) y
     # acá se puede QUITAR mandando null. En la respuesta viene resuelta.
     imagen_url: Optional[str] = Field(
@@ -71,6 +79,9 @@ class ProductoListItem(BaseModel):
     # PUT /productos/{id} al reponer por encima del umbral. Lo consume el panel
     # admin Bazar para mostrar el estado de alerta en la tabla.
     alerta_stock_enviada: bool = False
+    # Días de anuncio en el carrusel del Inicio del alumno (0 = no se anuncia). Lo
+    # usa la tabla del admin para mostrar el chip "Anunciado en el Inicio".
+    dias_anuncio: int = 0
     activo: bool
 
     model_config = ConfigDict(from_attributes=True)

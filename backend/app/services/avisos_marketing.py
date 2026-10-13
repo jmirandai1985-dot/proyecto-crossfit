@@ -23,16 +23,17 @@ ventana, un aviso se vería en una pantalla y no en la otra.
 Las funciones puras (`rango_vigencia`, `esta_vigente`, `normalizar`, `validar`) no
 tocan la BD y se prueban aisladas.
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import or_
 
 from app.models.aviso_marketing import (
-    TIPOS_EDITABLES, TIPO_COLABORACION, TIPO_EVENTO, AvisoMarketing,
+    TIPOS_EDITABLES, TIPO_COLABORACION, TIPO_EVENTO, TIPO_PRODUCTO_BAZAR,
+    AvisoMarketing,
 )
 from app.models.producto import Producto
 from app.utils.santiago import (
-    ahora_santiago, fin_del_dia_chile, inicio_del_dia_chile,
+    ahora_santiago, fecha_chile, fin_del_dia_chile, inicio_del_dia_chile,
 )
 
 # ── Filtros de la lista del admin ───────────────────────────────────────────
@@ -278,9 +279,103 @@ def eliminar(db, aviso: AvisoMarketing) -> str | None:
 
     El archivo se borra DESPUÉS del commit y best-effort: si el almacenamiento
     falla, el aviso ya no está (que es lo que pidió el admin) y lo único que queda
-    es un archivo huérfano, no un aviso visible.
+    es un archivo huérfano, no un aviso visible. Para un aviso `producto_bazar`
+    devuelve None: su "flyer" es la foto del producto (ver `url_a_borrar`).
     """
-    flyer = aviso.imagen_url
+    flyer = url_a_borrar(aviso)
     db.delete(aviso)
     db.commit()
     return flyer
+
+
+def url_a_borrar(aviso: AvisoMarketing) -> str | None:
+    """La URL del flyer a borrar del almacenamiento, o None si NO hay que borrarla.
+
+    Un aviso `producto_bazar` NO tiene flyer propio: su `imagen_url` ES la foto del
+    producto (la tarjeta del alumno la muestra). Borrarla dejaría al producto SIN
+    imagen en el Bazar, así que para ese tipo siempre devuelve None.
+    """
+    if aviso.tipo == TIPO_PRODUCTO_BAZAR:
+        return None
+    return aviso.imagen_url
+
+
+# ── El aviso automático del Bazar (Bloque 3) ────────────────────────────────
+# El párrafo de la tarjeta es FIJO: la tarjeta ya muestra el nombre y el precio
+# reales del producto, así que el texto sólo dice dónde comprarlo (el mockup
+# escribe exactamente eso).
+TEXTO_PRODUCTO = "Disponible en el Bazar"
+
+
+def _fin_de_ventana(desde: date, dias: int) -> datetime:
+    """Último instante de la ventana de `dias` días CONTANDO hoy como el primero.
+
+    1 día = sólo hoy (hasta las 23:59:59 de Chile); 7 días = hoy y los 6 que
+    siguen. Nunca menos de un día (`dias` <= 0 no llega acá).
+    """
+    return fin_del_dia_chile(desde + timedelta(days=max(int(dias), 1) - 1))
+
+
+def sincronizar_producto(db, producto: Producto, creado_por: int | None = None,
+                         ahora: datetime | None = None) -> dict | None:
+    """Crea, actualiza o quita el aviso `producto_bazar` de un producto del Bazar.
+
+    Toda la perilla del admin es `productos.dias_anuncio`:
+      * 0 → se QUITA el aviso (no se anuncia) y se devuelve None;
+      * >0 y no hay aviso → se crea, con la ventana que empieza HOY (día de Chile);
+      * >0 y el aviso YA ESTÁ VIGENTE → se le actualizan título, texto y foto (el
+        producto pudo cambiar de nombre o de imagen) y se RESPETA su ventana: si
+        guardar el producto reiniciara el plazo, editar el stock todos los días
+        mantendría el anuncio para siempre;
+      * >0 y el aviso está vencido o programado → se le reabre la ventana desde hoy.
+
+    Lo llaman POST /productos y PUT /productos/{id}: el aviso es DERIVADO del
+    producto y no se toca a mano (la API del admin rechaza ese tipo).
+    """
+    ahora = ahora or ahora_santiago()
+    dias = int(producto.dias_anuncio or 0)
+    aviso = db.query(AvisoMarketing).filter(
+        AvisoMarketing.tenant_id == producto.tenant_id,
+        AvisoMarketing.producto_id == producto.id,
+    ).first()
+
+    if dias <= 0:
+        if aviso is None:
+            return None
+        db.delete(aviso)
+        db.commit()
+        return None
+
+    hoy = fecha_chile(ahora)
+    if aviso is None:
+        aviso = AvisoMarketing(
+            tenant_id=producto.tenant_id,
+            tipo=TIPO_PRODUCTO_BAZAR,
+            # El vínculo con el producto: es lo que hace que la tarjeta muestre su
+            # foto, su nombre y su precio REALES (y lo que respeta el único
+            # `uq_avisos_marketing_producto`). Sin esto el aviso quedaría suelto.
+            producto_id=producto.id,
+            titulo=producto.nombre,
+            texto=TEXTO_PRODUCTO,
+            imagen_url=producto.imagen_url,
+            vigente_desde=inicio_del_dia_chile(hoy),
+            vigente_hasta=_fin_de_ventana(hoy, dias),
+            # Un aviso automático nunca va fijado arriba: el carrusel lo ordena por
+            # fecha y lo que el admin fija a mano sigue mandando.
+            fijado_arriba=False,
+            creado_por=creado_por,
+        )
+        db.add(aviso)
+    else:
+        # El contenido se refresca SIEMPRE (nombre, foto y texto son del producto).
+        aviso.tipo = TIPO_PRODUCTO_BAZAR
+        aviso.titulo = producto.nombre
+        aviso.texto = TEXTO_PRODUCTO
+        aviso.imagen_url = producto.imagen_url
+        if not esta_vigente(aviso.vigente_desde, aviso.vigente_hasta, ahora):
+            aviso.vigente_desde = inicio_del_dia_chile(hoy)
+            aviso.vigente_hasta = _fin_de_ventana(hoy, dias)
+
+    db.commit()
+    db.refresh(aviso)
+    return serializar(aviso, producto, ahora)

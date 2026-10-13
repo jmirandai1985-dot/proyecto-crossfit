@@ -209,7 +209,12 @@ const Marketing = () => {
                                                     {aviso.fijado_arriba && (
                                                         <span className="ml-2 text-[10.5px] text-orange-400 font-bold">★ Fijado</span>
                                                     )}
-                                                    <div className="text-zinc-100 font-semibold mt-1.5">{aviso.titulo}</div>
+                                                    {/* Un aviso automático muestra el nombre ACTUAL del
+                                                        producto: el título guardado puede haber quedado
+                                                        viejo si el producto se renombró. */}
+                                                    <div className="text-zinc-100 font-semibold mt-1.5">
+                                                        {automatico ? (aviso.producto_nombre || aviso.titulo) : aviso.titulo}
+                                                    </div>
                                                     {aviso.texto && (
                                                         <div className="text-zinc-500 text-[12.5px] mt-0.5 line-clamp-2">{aviso.texto}</div>
                                                     )}

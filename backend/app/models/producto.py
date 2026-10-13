@@ -33,6 +33,12 @@ class Producto(Base):
     # foto (la UI muestra el placeholder). En dev/TEST es /static/uploads/<archivo>
     # y en PROD la URL absoluta del bucket público de R2 (app/services/storage.py).
     imagen_url = Column(String(500), nullable=True)
+    # dias_anuncio: cuántos días se anuncia este producto en el carrusel
+    # "Novedades del box" del Inicio del alumno (migración 049). 0 = no anunciar
+    # (el default) y con 0 también se QUITA el aviso que tuviera. Mientras es > 0,
+    # `services.avisos_marketing.sincronizar_producto()` mantiene el aviso
+    # `producto_bazar` del producto (título, precio y foto salen de acá).
+    dias_anuncio = Column(Integer, nullable=False, default=0)
     activo = Column(Boolean, nullable=False, default=True)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())

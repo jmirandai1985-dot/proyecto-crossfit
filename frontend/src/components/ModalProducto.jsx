@@ -10,6 +10,7 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
         precio: '',
         stock: '',
         stock_minimo: '',
+        dias_anuncio: '0',
         activo: true,
     });
     const [imagenArchivo, setImagenArchivo] = useState(null);
@@ -35,6 +36,9 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                     stock: productoEditar.stock !== undefined ? String(productoEditar.stock) : '',
                     stock_minimo: (productoEditar.stock_minimo !== undefined && productoEditar.stock_minimo !== null)
                         ? String(productoEditar.stock_minimo) : '',
+                    // Días de anuncio: se precargan para que el admin vea si el
+                    // producto está anunciado (y por cuánto) al abrirlo.
+                    dias_anuncio: String(productoEditar.dias_anuncio ?? 0),
                     activo: productoEditar.activo !== undefined ? productoEditar.activo : true,
                 });
             } else {
@@ -45,6 +49,7 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                     precio: '',
                     stock: '',
                     stock_minimo: '',
+                    dias_anuncio: '0',
                     activo: true,
                 });
             }
@@ -79,6 +84,11 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
         if (formData.stock !== '' && parseInt(formData.stock) < 0) newErrors.stock = 'Stock no puede ser negativo';
         if (formData.stock_minimo !== '' && formData.stock_minimo !== undefined
             && parseInt(formData.stock_minimo) < 0) newErrors.stock_minimo = 'El stock mínimo no puede ser negativo';
+        // Días de anuncio en el Inicio del alumno (0 = no anunciar).
+        if (formData.dias_anuncio !== '' && formData.dias_anuncio !== undefined
+            && parseInt(formData.dias_anuncio) < 0) newErrors.dias_anuncio = 'Los días no pueden ser negativos';
+        if (formData.dias_anuncio !== '' && formData.dias_anuncio !== undefined
+            && parseInt(formData.dias_anuncio) > 365) newErrors.dias_anuncio = 'Máximo 365 días';
 
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
@@ -100,6 +110,9 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                     stock: parseInt(formData.stock),
                     stock_minimo: (formData.stock_minimo === '' || formData.stock_minimo === undefined)
                         ? null : parseInt(formData.stock_minimo),
+                    // Días de anuncio en el carrusel del Inicio: el backend crea,
+                    // actualiza o quita el aviso del producto con este número.
+                    dias_anuncio: parseInt(formData.dias_anuncio || 0),
                     activo: formData.activo,
                 };
                 // La foto se QUITA mandando imagen_url: null explícito. El PUT es
@@ -124,6 +137,8 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                 if (formData.stock_minimo !== '' && formData.stock_minimo !== undefined) {
                     data.append('stock_minimo', parseInt(formData.stock_minimo));
                 }
+                // Días de anuncio en el carrusel "Novedades del box" del Inicio.
+                data.append('dias_anuncio', parseInt(formData.dias_anuncio || 0));
                 data.append('activo', formData.activo);
                 if (imagenArchivo) {
                     data.append('file', imagenArchivo);
@@ -137,6 +152,7 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                 precio: '',
                 stock: '',
                 stock_minimo: '',
+                dias_anuncio: '0',
                 activo: true,
             });
             setImagenArchivo(null);
@@ -233,6 +249,26 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }
                         {errors.stock_minimo && <p className="text-xs text-red-600 mt-1">{errors.stock_minimo}</p>}
                         <p className="text-xs text-gray-500 mt-1">
                             Recibirás un correo automático cuando el stock baje a este valor. Vacío = alerta desactivada.
+                        </p>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Días de anuncio en el Inicio
+                        </label>
+                        <input
+                            type="number"
+                            value={formData.dias_anuncio}
+                            onChange={(e) => setFormData({ ...formData, dias_anuncio: e.target.value })}
+                            className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 ${errors.dias_anuncio ? 'border-red-500' : 'border-gray-300'}`}
+                            min="0"
+                            max="365"
+                            placeholder="0"
+                        />
+                        {errors.dias_anuncio && <p className="text-xs text-red-600 mt-1">{errors.dias_anuncio}</p>}
+                        <p className="text-xs text-gray-500 mt-1">
+                            Con días &gt; 0 el producto se anuncia en el carrusel "Novedades del box" del
+                            Inicio del alumno (con su foto y su precio). 0 = no se anuncia.
                         </p>
                     </div>
 

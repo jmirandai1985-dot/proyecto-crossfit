@@ -25,7 +25,7 @@ from app.core.dependencies import (get_current_admin, get_current_user,
                                    require_full_access)
 from app.core.imagenes_publicas import guardar_imagen_publica
 from app.db.database import get_db
-from app.models.aviso_marketing import AvisoMarketing
+from app.models.aviso_marketing import TIPO_PRODUCTO_BAZAR, AvisoMarketing
 from app.schemas.aviso_marketing import (AvisoMarketingActualizar,
                                          AvisoMarketingOut)
 from app.services import avisos_marketing as servicio
@@ -54,6 +54,20 @@ def _sin_errores(datos: dict) -> None:
     if errores:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail=" ".join(errores))
+
+
+def _solo_manuales(aviso: AvisoMarketing) -> None:
+    """400 si el aviso es de un producto del Bazar: ese lo mantiene el Bazar.
+
+    Su título, su precio y su foto salen del PRODUCTO, así que editarlo a mano
+    dejaría el carrusel mostrando algo distinto de lo que hay en la tienda. Sus
+    días de anuncio se cambian desde el Bazar (PUT /productos/{id}).
+    """
+    if aviso.tipo == TIPO_PRODUCTO_BAZAR:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=("El aviso de un producto del Bazar se administra desde el Bazar: "
+                    "edita el producto y sus días de anuncio."))
 
 
 @router.get("/vigentes", response_model=List[AvisoMarketingOut])
@@ -135,6 +149,7 @@ def actualizar_aviso(
     """Edita un aviso del box (reemplaza los campos editables). Sólo admin."""
     # 🔒 SEGURIDAD: tenant_id del token; el aviso tiene que ser del mismo box.
     aviso = _aviso_del_box(db, aviso_id, current_user["tenant_id"])
+    _solo_manuales(aviso)
     try:
         return servicio.actualizar(db, aviso, aviso_data.model_dump())
     except ValueError as error:
@@ -158,11 +173,12 @@ async def subir_flyer(
     archivo VIEJO se borra del almacenamiento (no queda huérfano).
     """
     aviso = _aviso_del_box(db, aviso_id, current_user["tenant_id"])
+    _solo_manuales(aviso)
 
     # Primero se guarda el NUEVO: si el guardado falla (503) el flyer viejo sigue
     # intacto y el aviso no queda sin imagen.
     url_nueva = await guardar_imagen_publica(file)
-    url_previa = aviso.imagen_url
+    url_previa = servicio.url_a_borrar(aviso)
 
     aviso.imagen_url = url_nueva
     db.commit()
@@ -184,7 +200,8 @@ def quitar_flyer(
 ):
     """Quita el flyer de un aviso: la tarjeta vuelve a pintarse con su color. Sólo admin."""
     aviso = _aviso_del_box(db, aviso_id, current_user["tenant_id"])
-    url_previa = aviso.imagen_url
+    _solo_manuales(aviso)
+    url_previa = servicio.url_a_borrar(aviso)
 
     aviso.imagen_url = None
     db.commit()

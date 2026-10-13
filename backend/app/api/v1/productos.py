@@ -16,6 +16,10 @@ from app.core.dependencies import get_current_admin, get_current_user, require_f
 # los MISMOS chequeos y el MISMO destino (app/services/storage.py).
 from app.core.imagenes_publicas import guardar_imagen_publica
 from app.services import storage
+# El aviso `producto_bazar` del carrusel del Inicio es DERIVADO del producto: lo
+# crea/actualiza/quita `sincronizar_producto` cada vez que el admin guarda el
+# producto con `dias_anuncio` (Bloque 3).
+from app.services import avisos_marketing as avisos
 
 # FIX 1: catálogo de movimientos restringido para alumnos de prueba
 router = APIRouter(dependencies=[Depends(require_full_access)])
@@ -33,6 +37,7 @@ async def crear_producto(
     tenant_id: Optional[int] = Form(None),
     descripcion: Optional[str] = Form(None),
     stock_minimo: Optional[int] = Form(None),
+    dias_anuncio: Optional[int] = Form(None),
     activo: bool = Form(True),
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
@@ -60,12 +65,18 @@ async def crear_producto(
         stock=stock,
         stock_minimo=stock_minimo,
         imagen_url=imagen_url,
+        dias_anuncio=max(int(dias_anuncio or 0), 0),
         activo=activo,
     )
 
     db.add(db_producto)
     db.commit()
     db.refresh(db_producto)
+
+    # El aviso del carrusel del Inicio sale del MISMO guardado: con días de anuncio
+    # (>0) se crea/actualiza; con 0 no se anuncia (y se quita el que hubiera).
+    avisos.sincronizar_producto(db, db_producto,
+                               creado_por=current_user["usuario_id"])
 
     return db_producto
 
@@ -205,6 +216,14 @@ def actualizar_producto(
     # huérfano, se borra DESPUÉS de que el cambio quedó guardado en la BD.
     if imagen_previa and producto.imagen_url is None:
         storage.borrar_publico(imagen_previa)
+
+    # Días de anuncio: si el admin los tocó, el aviso del carrusel se recalcula en
+    # el MISMO guardado (crear, actualizar la foto/nombre o quitarlo con 0). El
+    # sync NO corre en cada PUT a propósito: reabriría la ventana de un anuncio ya
+    # terminado cada vez que alguien edita el stock.
+    if "dias_anuncio" in update_data:
+        avisos.sincronizar_producto(db, producto,
+                                    creado_por=current_user["usuario_id"])
 
     return producto
 
