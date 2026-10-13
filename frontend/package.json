@@ -26,7 +26,8 @@
     "test:fidelizacion": "node scripts/test-fidelizacion-movil.mjs",
     "test:menu": "node scripts/test-menu.mjs",
     "test:recarga": "node scripts/test-recarga-chunk.mjs",
-    "test:admin-api": "node scripts/test-admin-sin-api.mjs"
+    "test:admin-api": "node scripts/test-admin-sin-api.mjs",
+    "test:alumnos": "node scripts/test-alumnos.mjs"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.3.0",

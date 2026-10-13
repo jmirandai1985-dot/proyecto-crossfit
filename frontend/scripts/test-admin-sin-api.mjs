@@ -9,17 +9,17 @@
 //   1. que no importen `services/api` (ni axios directo),
 //   2. que no quede ninguna llamada `api.get/post/put/delete/patch(...)` ni `api({...})`,
 //   3. que sí importen `../hooks/queries` (una migración a medias se nota enseguida).
-// Además comprueba que `queries.js` siga exportando los hooks de Reportes: borrar uno
-// sería un runtime error, no un error de build.
+// Además comprueba que `queries.js` siga exportando los hooks que usan las pantallas
+// migradas: borrar uno sería un runtime error, no un error de build.
 //
-// Los demás admins (Dashboard, Kpis, SupervisionClases, InicioMobileAdmin, Pedidos,
-// Notificaciones y Alumnos) siguen con `api.*`: son las pantallas PENDIENTES. No están
-// en la lista de arriba, pero se informa cuántas quedan para que el número no engañe.
+// Los demás admins (Dashboard, Kpis, SupervisionClases, InicioMobileAdmin, Pedidos y
+// Notificaciones) siguen con `api.*`: son las pantallas PENDIENTES. No están en la lista
+// de arriba, pero se informa cuántas quedan para que el número no engañe.
 import { readFileSync } from 'node:fs';
 
 const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
-// Bloque 3 parte A (7 archivos) + parte B (Reportes).
+// Bloque 3 parte A (7 archivos) + parte B (Reportes) + A5.1 (padrón de alumnos).
 const MIGRADOS = [
     '../src/pages/admin/Coaches.jsx',
     '../src/pages/admin/Clases.jsx',
@@ -27,6 +27,7 @@ const MIGRADOS = [
     '../src/pages/admin/Bazar.jsx',
     '../src/pages/admin/MiQr.jsx',
     '../src/pages/admin/Reportes.jsx',
+    '../src/pages/admin/Alumnos.jsx',
     '../src/components/ModalClase.jsx',
     '../src/components/ModalProducto.jsx',
 ];
@@ -38,7 +39,6 @@ const PENDIENTES = [
     '../src/pages/admin/InicioMobileAdmin.jsx',
     '../src/pages/admin/Pedidos.jsx',
     '../src/pages/admin/Notificaciones.jsx',
-    '../src/pages/admin/Alumnos.jsx',
 ];
 
 // `api.` / `api(` sin confundirse con las rutas de la API ('/api/v1/...') ni con un
@@ -75,10 +75,18 @@ const queries = leer('../src/hooks/queries.js');
 for (const hook of [
     'useStatsDashboard', 'useTransaccionesFinanzas', 'useCrearTransaccionFinanzas',
     'useDescargarReporteVentas', 'useGuardarUsuario', 'useEliminarProducto',
+    // A5.1: el padrón de alumnos y el comprobante de pago.
+    'useAlumnosPaginados', 'useSuscripcionesActivas', 'useSuscripcionesAlumno',
+    'useBeneficiosAlumno', 'useCrearSuscripcion',
 ]) {
     ok(new RegExp(`export function ${hook}\\b`).test(queries), `queries.js exporta ${hook}`);
 }
 ok(/transaccionesFinanzas:/.test(queries), 'queries.js declara la clave transaccionesFinanzas');
+for (const clave of [
+    'alumnosPaginados:', 'suscripcionesActivas:', 'suscripcionesAlumno:', 'beneficiosAlumno:',
+]) {
+    ok(new RegExp(clave).test(queries), `queries.js declara la clave ${clave.replace(':', '')}`);
+}
 
 console.log('\n== 3. Aviso: admins TODAVIA por migrar (informativo, no es fallo) ==');
 const conApi = PENDIENTES.filter((rel) => LLAMADA_DIRECTA.test(leer(rel)));

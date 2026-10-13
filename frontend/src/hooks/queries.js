@@ -5,6 +5,10 @@
 // quién más usa ese dato.
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
+// Los params del padrón de alumnos (rol, limit, skip, buscar) se arman con la misma
+// función pura que valida `scripts/test-alumnos.mjs`: el request del escritorio y el de
+// la vista móvil del padrón son exactamente el mismo.
+import { paramsAlumnos } from '../utils/alumnos';
 
 // Array vacío ESTABLE: es el fallback de las listas que devuelven las consultas. Un
 // `|| []` nuevo en cada render invalidaría los `useMemo` que dependen de esos datos.
@@ -111,6 +115,24 @@ export const claves = {
     // La clave NO lleva tenantId: el endpoint lo saca del token, igual que
     // `coachDisciplinas` y `productos` (todos los tenants reciben sólo lo suyo).
     transaccionesFinanzas: ['finanzas', 'transacciones'],
+    // ── A5: padrón de alumnos (misma tabla en escritorio y en móvil) ─────────
+    // El padrón paginado cuelga de `['usuarios']`, el prefijo que YA invalidan
+    // `useGuardarUsuario` y `useDesactivarUsuario`: crear, editar o dar de baja un
+    // alumno refresca la tabla sin que la pantalla vuelva a pedirla a mano. El rol,
+    // el tamaño de página, la página y el término de búsqueda van en la clave porque
+    // cambian el resultado; el tenant lo pone el token.
+    alumnosPaginados: (rol, porPagina, pagina, buscar) =>
+        ['usuarios', 'alumnos', rol, porPagina, pagina, buscar || ''],
+    // Suscripciones ACTIVAS del box (`GET /suscripciones?estado=activo`): de acá salen
+    // la columna "Plan Activo", los créditos de cada fila y el "¿ya tiene plan?" del
+    // comprobante. Familia propia `['suscripciones']` (distinta de `['membresia']`,
+    // que es la puerta del propio alumno).
+    suscripcionesActivas: ['suscripciones', 'activas'],
+    // Las de UN alumno: la consulta que hace el comprobante al abrirse.
+    suscripcionesAlumno: (usuarioId) => ['suscripciones', 'alumno', usuarioId],
+    // Descuento vigente del alumno y precio final de cada plan (lo calcula el backend).
+    // Cuelga de `['beneficios']`, la familia que ya usa `useMisBeneficios`.
+    beneficiosAlumno: (alumnoId, planIds) => ['beneficios', 'alumno', alumnoId, planIds],
 };
 
 // ── Colas de revisión del admin (las miran el Dashboard Y Pendientes de revisión) ──
@@ -1264,6 +1286,94 @@ export function useDescargarReporteVentas() {
                 Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             },
         }),
+    });
+}
+
+// ── A5: padrón de alumnos (tabla del admin, escritorio y móvil) ──────────────
+// Devuelve `{ lista, total }`: el total sin paginar viene en el header X-Total-Count y
+// es el que alimentan el pie ("Mostrando A-B de N") y el cálculo de páginas.
+export function useAlumnosPaginados({
+    rol = 'alumno', porPagina = 25, pagina = 1, buscar = '',
+} = {}) {
+    return useQuery({
+        queryKey: claves.alumnosPaginados(rol, porPagina, pagina, buscar),
+        queryFn: async () => {
+            const resp = await api.get('/api/v1/usuarios/', {
+                params: paramsAlumnos({ rol, porPagina, pagina, buscar }),
+            });
+            return {
+                lista: resp.data || [],
+                total: Number(resp.headers?.['x-total-count'] ?? 0),
+            };
+        },
+        staleTime: 30_000,
+        // Al cambiar de página o al buscar, la tabla anterior se queda en pantalla hasta
+        // que llega la nueva (mismo criterio que el historial del alumno y el churn).
+        placeholderData: keepPreviousData,
+    });
+}
+
+// Suscripciones ACTIVAS del box (`GET /suscripciones?estado=activo`).
+export function useSuscripcionesActivas() {
+    return useQuery({
+        queryKey: claves.suscripcionesActivas,
+        queryFn: async () => (await api.get('/api/v1/suscripciones', {
+            params: { estado: 'activo' },
+        })).data || [],
+        staleTime: 60_000,
+    });
+}
+
+// Suscripciones de UN alumno: alimenta el aviso "ya tiene un plan vigente" del
+// comprobante, que se consulta al ABRIR el modal (una suscripción pudo crearse desde la
+// app mientras el admin miraba otra pantalla). Por eso SIN `staleTime`: cada apertura
+// vuelve a preguntar, y el modal se desmonta al cerrarse.
+export function useSuscripcionesAlumno(usuarioId) {
+    return useQuery({
+        queryKey: claves.suscripcionesAlumno(usuarioId),
+        queryFn: async () => (await api.get('/api/v1/suscripciones', {
+            params: { usuario_id: usuarioId, estado: 'activo' },
+        })).data || [],
+        staleTime: 0,
+        enabled: Boolean(usuarioId),
+    });
+}
+
+// Beneficios del alumno (`GET /beneficios/alumno/{id}?plan_ids=`): el descuento vigente
+// y el precio final de cada plan, calculados por el BACKEND. El comprobante los usa para
+// avisar antes de asignar y para precargar lo que hay que cobrar.
+// Sin alumno o sin planes en el catálogo la consulta no sale (el modal simplemente no
+// muestra el aviso: no se cae la aprobación).
+export function useBeneficiosAlumno(alumnoId, planIds) {
+    return useQuery({
+        queryKey: claves.beneficiosAlumno(alumnoId, planIds),
+        queryFn: async () => (await api.get(`/api/v1/beneficios/alumno/${alumnoId}`, {
+            params: { plan_ids: planIds },
+        })).data || null,
+        // El descuento no cambia mientras el admin elige el plan (igual que `useMisBeneficios`).
+        staleTime: 300_000,
+        enabled: Boolean(alumnoId && planIds),
+    });
+}
+
+// Aprobación de un comprobante: crea la suscripción del alumno. El payload lo arma la
+// pantalla tal cual lo mandaba antes (inicio/expiracion con `sumarDiasInstante`).
+// Invalida la lista de activas (el padrón pasa a mostrar el plan nuevo al instante:
+// antes esa columna quedaba vieja hasta recargar), `['membresia']` (los créditos de esa
+// puerta) y `['reportes']` (un plan nuevo mueve el MRR y el ingreso del reporte, que son
+// las tarjetas del Dashboard: mismo criterio que `useCrearTransaccionFinanzas`).
+// NO invalida `['suscripciones','alumno',…]` a propósito: el aviso de "plan vigente" es
+// la foto del momento en que se abrió el comprobante; refrescarlo en medio de la
+// aprobación haría parpadear el aviso justo antes de cerrarse solo.
+export function useCrearSuscripcion() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) => api.post('/api/v1/suscripciones', payload).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: claves.suscripcionesActivas });
+            qc.invalidateQueries({ queryKey: ['membresia'] });
+            qc.invalidateQueries({ queryKey: ['reportes'] });
+        },
     });
 }
 

@@ -1,44 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import AlumnoFichaModal from '../../components/AlumnoFichaModal';
-import { fmtFechaChile, sumarDiasInstante, hoyChileStr, toChileFechaStr } from '../../utils/fecha';
-
-/**
- * ¿La suscripción sigue vigente HOY? Se compara por DÍA CHILENO (el día de
- * vencimiento vale completo) y con el MISMO criterio que el backend
- * (`vigente_el_dia`): no depende de la hora del navegador ni de su zona.
- * Una fecha de vencimiento vacía nunca está vigente.
- */
-const suscripcionVigenteHoy = (fechaExpiracion) =>
-    Boolean(fechaExpiracion) && toChileFechaStr(fechaExpiracion) >= hoyChileStr();
-
-/**
- * De una lista de suscripciones, la que está VIGENTE con el vencimiento más
- * lejano (la que "manda" hoy), o `null` si ninguna lo está. Mismo criterio que
- * el listado del backend (`/alumnos?con_membresia`): vencimiento desc y la
- * primera vigente.
- */
-const suscripcionVigente = (lista = []) => {
-    const vigentes = (lista || []).filter((s) => suscripcionVigenteHoy(s?.fecha_expiracion));
-    if (vigentes.length === 0) return null;
-    return vigentes.reduce((a, b) =>
-        new Date(b.fecha_expiracion) > new Date(a.fecha_expiracion) ? b : a);
-};
+import { fmtFechaChile, sumarDiasInstante } from '../../utils/fecha';
+import {
+    SIN_DATOS, useAlumnosPaginados, useBeneficiosAlumno, useCrearSuscripcion,
+    useDesactivarUsuario, useGuardarUsuario, usePlanesActivos,
+    useSuscripcionesActivas, useSuscripcionesAlumno,
+} from '../../hooks/queries';
+// Las reglas del padrón (¿la suscripción está vigente HOY?, badge del estado, params del
+// listado paginado, tramos de la paginación) viven en `utils/alumnos`: las comparte la
+// tabla de escritorio con la vista móvil del padrón (A5) y no pueden divergir.
+import {
+    badgeEstado, nombrePlan, paginaFueraDeRango, paginaValida, rangoMostrado,
+    suscripcionDeAlumno, suscripcionVigente,
+} from '../../utils/alumnos';
 
 const Alumnos = () => {
     const { tenant_id } = useAuth();
-    const [alumnos, setAlumnos] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
+    // Lo que viaja al backend es ESTE término (debounce de 350 ms): una request por
+    // tecla haría parpadear la tabla y contaría de más al servidor.
+    const [busqueda, setBusqueda] = useState('');
     // PAGINACION REAL: el endpoint acepta limit/skip y devuelve el total (sin paginar)
     // en el header X-Total-Count. La busqueda tambien es server-side (`buscar`) porque
     // con paginacion, filtrar en el cliente solo alcanzaria la pagina actual.
     const [porPagina, setPorPagina] = useState(25);
     const [pagina, setPagina] = useState(1);
-    const [totalAlumnos, setTotalAlumnos] = useState(0);
-    const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [showVoucherModal, setShowVoucherModal] = useState(false);
     const [selectedAlumnoVoucher, setSelectedAlumnoVoucher] = useState(null);
@@ -47,20 +36,50 @@ const Alumnos = () => {
     // suscripción activa sobre la que ya tiene.
     const [planVigenteAlumno, setPlanVigenteAlumno] = useState(null);
     const [confirmarDuplicado, setConfirmarDuplicado] = useState(false);
-    const [planes, setPlanes] = useState([]);
     const [planSeleccionado, setPlanSeleccionado] = useState('');
-    const [aprobandoPago, setAprobandoPago] = useState(false);
     const [mensajeAprobacion, setMensajeAprobacion] = useState('');
-    const [suscripciones, setSuscripciones] = useState([]);
-    // ─── F2: el estado de beneficios del alumno que se está aprobando ──
-    // Trae el descuento vigente y el precio final de cada plan (lo calcula el backend): el panel
-    // avisa ANTES de asignar y precarga lo que hay que cobrar.
-    const [beneficioAlumno, setBeneficioAlumno] = useState(null);
     const [editingAlumno, setEditingAlumno] = useState(null);
     const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
     const [searchParams, setSearchParams] = useSearchParams();
     // Navegación al Historial del alumno (`/admin/alumnos/:id/historial`).
     const navigate = useNavigate();
+
+    // ── Datos (React Query) ─────────────────────────────────────────────────────
+    // El padrón paginado: la página, el tamaño y el término de búsqueda van en la CLAVE
+    // de la consulta, así que cambiar de página o buscar es un DATO más, no un efecto
+    // que vuelva a pedir a mano. `placeholderData` deja la tabla anterior en pantalla
+    // mientras llega la nueva (sin parpadeo).
+    const { data: datos, isPending: cargandoAlumnos } = useAlumnosPaginados({
+        porPagina, pagina, buscar: busqueda,
+    });
+    const alumnos = datos?.lista ?? SIN_DATOS;
+    const totalAlumnos = datos?.total ?? 0;
+
+    // Planes ACTIVOS del box: los comparten la tabla (columna Plan Activo), el
+    // comprobante (select + precio) y el resto del panel (`usePlanesActivos`).
+    const { data: planesData } = usePlanesActivos();
+    const planes = planesData ?? SIN_DATOS;
+
+    // Suscripciones ACTIVAS del box: de acá salen "Plan Activo" y los créditos de la fila.
+    const { data: suscripcionesData } = useSuscripcionesActivas();
+    const suscripciones = suscripcionesData ?? SIN_DATOS;
+
+    // ─── F2: el estado de beneficios del alumno que se está aprobando ──
+    // Trae el descuento vigente y el precio final de cada plan (lo calcula el backend): el panel
+    // avisa ANTES de asignar y precarga lo que hay que cobrar.
+    const planIds = planes.map((p) => p.id).join(',');
+    const { data: beneficioData } = useBeneficiosAlumno(selectedAlumnoVoucher?.id, planIds);
+    const beneficioAlumno = beneficioData ?? null;
+
+    // Suscripciones del alumno del comprobante: alimenta el aviso de plan ya vigente.
+    const { data: suscripcionesAlumnoData } = useSuscripcionesAlumno(selectedAlumnoVoucher?.id);
+
+    // ── Mutaciones ──────────────────────────────────────────────────────────────
+    // Crear/editar y dar de baja invalidan `['usuarios']`, así que la tabla se refresca
+    // sola: ya no hace falta el `await fetchAlumnos()` que remataba cada acción.
+    const guardarUsuario = useGuardarUsuario();
+    const desactivarUsuario = useDesactivarUsuario();
+    const crearSuscripcion = useCrearSuscripcion();
 
     // ?alumno_id=<id>: deep-link desde Notificaciones -> abre la ficha de ESE
     // alumno. AlumnoFichaModal se auto-carga por API, asi que no depende de que
@@ -81,90 +100,35 @@ const Alumnos = () => {
         estado: 'activo',
     });
 
-    const fetchAlumnos = async () => {
-        try {
-            const response = await api.get('/api/v1/usuarios/', {
-                params: {
-                    rol: 'alumno',
-                    limit: porPagina,
-                    skip: (pagina - 1) * porPagina,
-                    buscar: searchTerm.trim() || undefined,
-                },
-            });
-            const lista = response.data || [];
-            const total = Number(response.headers?.['x-total-count'] ?? 0);
-            // Si la pagina pedida quedo FUERA DE RANGO (p. ej. borraste el ultimo de
-            // la ultima pagina, o el patron de busqueda encogio el total) se
-            // retrocede al ultimo tramo valido en vez de mostrar una tabla vacia.
-            const paginasServidor = Math.max(1, Math.ceil(total / porPagina));
-            if (pagina > paginasServidor) {
-                setPagina(paginasServidor);
-                return;
-            }
-            setAlumnos(lista);
-            setTotalAlumnos(total);
-        } catch (error) {
-            console.error('Error fetching alumnos:', error);
-            setAlumnos([]);
-            setTotalAlumnos(0);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    // Refetch al cambiar de pagina o al buscar (debounce de 350ms en la busqueda
-    // para no disparar una request por tecla).
+    // El término de búsqueda viaja al backend con un retardo de 350 ms (y sin retardo al
+    // vaciar la caja): la misma espera de antes, ahora sin volver a pedir la tabla a mano.
     useEffect(() => {
-        const timer = setTimeout(fetchAlumnos, searchTerm ? 350 : 0);
+        const timer = setTimeout(() => setBusqueda(searchTerm.trim()), searchTerm ? 350 : 0);
         return () => clearTimeout(timer);
-    }, [tenant_id, pagina, searchTerm, porPagina]);
+    }, [searchTerm]);
 
+    // Si la página pedida quedó FUERA DE RANGO (se borró el último de la última, o la
+    // búsqueda encogió el total) se retrocede al último tramo válido en vez de mostrar una
+    // tabla vacía: la misma regla que tenía el fetch manual, disparada cuando llega el total
+    // del servidor. Sin datos (cargando o error) no se toca la página que eligió el admin.
     useEffect(() => {
-        const fetchSuscripciones = async () => {
-            try {
-                const response = await api.get(`/api/v1/suscripciones?estado=activo`);
-                setSuscripciones(response.data || []);
-            } catch (error) {
-                console.error('Error fetching suscripciones:', error);
-            }
-        };
-        fetchSuscripciones();
-    }, [tenant_id]);
+        if (!datos || !paginaFueraDeRango(pagina, datos.total, porPagina)) return;
+        setPagina(paginaValida(pagina, datos.total, porPagina));
+    }, [datos, pagina, porPagina]);
 
+    // ¿El alumno del comprobante ya tiene un plan ACTIVO? Se consulta al ABRIR el modal (no
+    // al aprobar) para avisar y pedir confirmación antes de crear una SEGUNDA suscripción
+    // activa sobre una vigente (doble cobro / doble plan). Best-effort: si la consulta falla
+    // no se setea nada y el modal sigue igual (no se bloquea la aprobación).
     useEffect(() => {
-        const fetchPlanes = async () => {
-            try {
-                const response = await api.get(`/api/v1/planes?activo=true`);
-                setPlanes(response.data || []);
-            } catch (error) {
-                console.error('Error fetching planes:', error);
-            }
-        };
-        fetchPlanes();
-    }, [tenant_id]);
-
-    // ─── F2: beneficios del alumno cuando se abre la aprobación del pago ───────────────
-    // Se piden los precios de TODOS los planes de una vez (con el descuento del alumno puesto):
-    // el aviso y el precio precargado salen del backend, no de una cuenta del navegador.
-    useEffect(() => {
-        const traerBeneficios = async () => {
-            if (!selectedAlumnoVoucher?.id || planes.length === 0) {
-                setBeneficioAlumno(null);
-                return;
-            }
-            try {
-                const { data } = await api.get(
-                    `/api/v1/beneficios/alumno/${selectedAlumnoVoucher.id}`,
-                    { params: { plan_ids: planes.map((p) => p.id).join(',') } },
-                );
-                setBeneficioAlumno(data);
-            } catch {
-                // Sin esta info el panel sigue igual (sin aviso): no se cae la aprobación.
-                setBeneficioAlumno(null);
-            }
-        };
-        traerBeneficios();
-    }, [selectedAlumnoVoucher, planes]);
+        if (!selectedAlumnoVoucher) return;
+        const vigente = suscripcionVigente(suscripcionesAlumnoData);
+        if (!vigente) return;
+        setPlanVigenteAlumno({
+            plan_nombre: nombrePlan(planes, vigente.plan_id),
+            fecha_expiracion: vigente.fecha_expiracion,
+        });
+    }, [suscripcionesAlumnoData, selectedAlumnoVoucher, planes]);
 
     /** Plan elegido en la aprobación del pago (o `undefined`). */
     const planElegido = planes.find((p) => p.id === parseInt(planSeleccionado));
@@ -173,27 +137,14 @@ const Alumnos = () => {
     const precioConBeneficio = (plan) =>
         beneficioAlumno?.precios?.[String(plan?.id)] || null;
 
-    // La busqueda y el total los resuelve el backend (server-side).
-    const totalPaginas = Math.max(1, Math.ceil(totalAlumnos / porPagina));
-    const desde = totalAlumnos === 0 ? 0 : (pagina - 1) * porPagina + 1;
-    const hasta = (pagina - 1) * porPagina + alumnos.length;
+    // La busqueda y el total los resuelve el backend (server-side): el tramo que muestra el
+    // pie lo calcula `rangoMostrado` (misma fórmula de siempre, cubierta por `test:alumnos`).
+    const { totalPaginas, desde, hasta } = rangoMostrado({
+        total: totalAlumnos, porPagina, pagina, enPagina: alumnos.length,
+    });
 
-    // Badge del estado REAL del registro. `estado` es la fuente de verdad (el flag
-    // `activo` es derivado y el backend garantiza que no se desincronicen).
-    const badgeEstado = (u) => {
-        const est = u.estado || (u.activo ? 'activo' : 'baja');
-        return {
-            texto: est === 'pendiente_activacion' ? 'pendiente' : est,
-            clase: est === 'activo' ? 'bg-green-100 text-green-800'
-                : est === 'pendiente_activacion' ? 'bg-amber-100 text-amber-800'
-                    : est === 'rechazado' ? 'bg-red-100 text-red-800'
-                        : 'bg-zinc-700 text-zinc-300',
-        };
-    };
-
-    const getSuscripcionAlumno = (alumnoId) => {
-        return suscripciones.find(s => s.usuario_id === alumnoId) || null;
-    };
+    // La suscripción de una fila: mismo criterio (y mismo badge) que la vista móvil.
+    const getSuscripcionAlumno = (alumnoId) => suscripcionDeAlumno(suscripciones, alumnoId);
 
     // Formato de fecha es-CL usado en toda la tabla (created_at viene del API).
     const fmtFecha = (v) => {
@@ -231,24 +182,9 @@ const Alumnos = () => {
         setPlanVigenteAlumno(null);
         setConfirmarDuplicado(false);
         setShowVoucherModal(true);
-
-        // ¿Ya tiene un plan ACTIVO? Se consulta al ABRIR el modal (no al aprobar)
-        // para avisar y pedir confirmación antes de crear una SEGUNDA suscripción
-        // activa sobre una vigente (doble cobro / doble plan). Best-effort: si la
-        // consulta falla, el modal sigue igual y no se bloquea la aprobación.
-        api.get('/api/v1/suscripciones', {
-            params: { usuario_id: alumno.id, estado: 'activo' },
-        }).then(({ data }) => {
-            const vigente = suscripcionVigente(data);
-            if (!vigente) return;
-            const plan = planes.find((p) => p.id === vigente.plan_id);
-            setPlanVigenteAlumno({
-                plan_nombre: plan?.nombre || `Plan ID ${vigente.plan_id}`,
-                fecha_expiracion: vigente.fecha_expiracion,
-            });
-        }).catch((error) => {
-            console.error('Error al consultar la suscripción vigente:', error);
-        });
+        // El "¿ya tiene un plan ACTIVO?" lo resuelve la consulta `useSuscripcionesAlumno`
+        // (arranca al quedar puesto `selectedAlumnoVoucher`) y lo aplica el efecto de
+        // arriba, que además deja el aviso listo antes de que el admin pueda aprobar.
     };
 
     const closeVoucherModal = () => {
@@ -260,25 +196,18 @@ const Alumnos = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (editingAlumno) {
-            try {
-                await api.put(`/api/v1/usuarios/${editingAlumno.id}`, {
-                    nombre: formData.nombre,
-                    correo: formData.correo,
-                    telefono: formData.telefono,
-                    // `estado` es la fuente de verdad: se manda él y el backend deriva `activo`.
-                    estado: formData.estado === 'activo' ? 'activo' : 'baja',
-                });
-                await fetchAlumnos();
-                closeModal();
-            } catch (error) {
-                console.error('Error al actualizar usuario:', error);
-                alert('Error al actualizar: ' + (error.response?.data?.detail || 'Intenta nuevamente'));
+        // Un solo hook para las dos caras del formulario: con `id` es PUT (editar) y sin
+        // `id` es el alta. La mutación invalida `['usuarios']`, así que el padrón se
+        // refresca solo (antes cada rama terminaba con un `await fetchAlumnos()`).
+        const payload = editingAlumno
+            ? {
+                nombre: formData.nombre,
+                correo: formData.correo,
+                telefono: formData.telefono,
+                // `estado` es la fuente de verdad: se manda él y el backend deriva `activo`.
+                estado: formData.estado === 'activo' ? 'activo' : 'baja',
             }
-            return;
-        }
-        try {
-            await api.post('/api/v1/usuarios/', {
+            : {
                 nombre: formData.nombre,
                 correo: formData.correo,
                 telefono: formData.telefono,
@@ -286,30 +215,33 @@ const Alumnos = () => {
                 rol: formData.rol,
                 rut: formData.rut,
                 tenant_id: tenant_id,
-            });
-            await fetchAlumnos();
+            };
+        try {
+            await guardarUsuario.mutateAsync({ id: editingAlumno?.id, payload });
             closeModal();
         } catch (error) {
-            console.error('Error al crear usuario:', error);
-            alert('Error al crear usuario: ' + (error.response?.data?.detail || 'Intenta nuevamente'));
+            console.error('Error al guardar usuario:', error);
+            alert((editingAlumno ? 'Error al actualizar: ' : 'Error al crear usuario: ')
+                + (error.response?.data?.detail || 'Intenta nuevamente'));
         }
     };
 
     const handleDelete = async (alumno) => {
         if (!window.confirm(`¿Estás seguro de eliminar a ${alumno.nombre}?`)) return;
         try {
-            await api.delete(`/api/v1/usuarios/${alumno.id}`);
-            // Refetch (no un filtro local): el total del padron y el tramo
-            // "Mostrando A-B de N" los manda el servidor; filtrar en el cliente
-            // dejaria el pie mintiendo y la pagina con una fila de menos.
-            await fetchAlumnos();
+            // La baja invalida `['usuarios']`: el servidor vuelve a mandar el padrón y con
+            // el total recalculado (filtrar en el cliente dejaría el pie "Mostrando A-B de
+            // N" mintiendo y la página con una fila de menos).
+            await desactivarUsuario.mutateAsync(alumno.id);
         } catch (error) {
             console.error('Error al eliminar alumno:', error);
             alert('Error al eliminar: ' + (error.response?.data?.detail || 'Intenta nuevamente'));
         }
     };
 
-    if (loading) {
+    // La primera carga del padrón: mismo spinner que antes, pero sólo mientras no haya
+    // NINGUNA página en caché (al cambiar de página se sigue viendo la tabla anterior).
+    if (cargandoAlumnos) {
         return (
             <Layout>
                 <div className="flex items-center justify-center h-96">
@@ -392,8 +324,8 @@ const Alumnos = () => {
                                                 {(() => {
                                                     const sus = getSuscripcionAlumno(alumno.id);
                                                     if (!sus) return <span className="text-zinc-500">Sin plan</span>;
-                                                    const plan = planes.find(p => p.id === sus.plan_id);
-                                                    return <span className="px-2 py-1 bg-blue-500/20 text-blue-300 rounded-full text-xs font-medium">{plan ? plan.nombre : `Plan ID ${sus.plan_id}`}</span>;
+                                                    // El nombre del plan lo resuelve `nombrePlan` (utils/alumnos), igual que la vista móvil.
+                                                    return <span className="px-2 py-1 bg-blue-500/20 text-blue-300 rounded-full text-xs font-medium">{nombrePlan(planes, sus.plan_id)}</span>;
                                                 })()}
                                             </td>
                                             <td className="px-6 py-4 text-sm text-zinc-400">
@@ -630,11 +562,10 @@ const Alumnos = () => {
                                 <div className="flex gap-3 pt-4">
                                     <button onClick={closeVoucherModal} className="flex-1 px-4 py-2 border border-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-800/50 transition-colors font-medium">Cerrar</button>
                                     <button
-                                        disabled={aprobandoPago || (planVigenteAlumno && !confirmarDuplicado)}
+                                        disabled={crearSuscripcion.isPending || (planVigenteAlumno && !confirmarDuplicado)}
                                         onClick={async () => {
                                             if (!planSeleccionado) { setMensajeAprobacion('Debes seleccionar un plan antes de aprobar.'); return; }
                                             if (planVigenteAlumno && !confirmarDuplicado) { setMensajeAprobacion('El alumno ya tiene un plan vigente: marca la confirmación para crear otra suscripción.'); return; }
-                                            setAprobandoPago(true);
                                             setMensajeAprobacion('');
                                             try {
                                                 const plan = planes.find((p) => p.id === parseInt(planSeleccionado));
@@ -642,7 +573,7 @@ const Alumnos = () => {
                                                 // dia chileno N dias despues (sin aritmetica de calendario del navegador).
                                                 const fechaInicio = new Date();
                                                 const fechaExpiracion = sumarDiasInstante(fechaInicio, plan?.duracion_dias || 30);
-                                                await api.post('/api/v1/suscripciones', {
+                                                await crearSuscripcion.mutateAsync({
                                                     tenant_id: tenant_id,
                                                     usuario_id: selectedAlumnoVoucher.id,
                                                     plan_id: parseInt(planSeleccionado),
@@ -657,13 +588,11 @@ const Alumnos = () => {
                                             } catch (error) {
                                                 console.error('Error al crear suscripción:', error);
                                                 setMensajeAprobacion('Error al crear la suscripción. Intenta nuevamente.');
-                                            } finally {
-                                                setAprobandoPago(false);
                                             }
                                         }}
                                         className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
-                                        {aprobandoPago ? 'Aprobando...' : 'Aprobar Pago'}
+                                        {crearSuscripcion.isPending ? 'Aprobando...' : 'Aprobar Pago'}
                                     </button>
                                 </div>
                             </div>
