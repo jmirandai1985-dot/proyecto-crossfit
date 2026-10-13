@@ -435,6 +435,15 @@
     color: var(--ub-teal);
 }
 
+/* A5.3. El motivo del error de KPIs, SIEMPRE visible: antes vivía en el `title=` del ⚠️ y
+   en un teléfono (sin hover) no se leía. Calcado del `.kpi-error` de las KPI (11.5px y el
+   mismo rojo): el aviso se lee igual en toda la pantalla. */
+.ub-admin .att-err {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--ub-red);
+}
+
 /* ── A3. La semana en curso: 7 celdas (letra + día, reservas y % de ocupación) ──
    Entra sin scroll incluso en 360px (el `.col` llega a 430px con 16px de padding) y
    cada celda supera los 44px de alto del objetivo táctil. */
@@ -573,6 +582,18 @@
     background: var(--ub-teal);
     margin-left: 6px;
     vertical-align: middle;
+}
+
+/* A5.3. "ahora" al lado del punto: la franja que corresponde al reloj se explica con
+   TEXTO visible (el `title=` no existe en táctil). Va chico y en teal, pegado al rótulo de
+   la franja, así se lee como anotación y no como parte del nombre. */
+.ub-admin .now {
+    margin-left: 1px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    color: var(--ub-teal);
+    white-space: nowrap;
 }
 
 .ub-admin .slot-sum {
@@ -1377,6 +1398,16 @@
    que "Vouchers por aprobar") y la cantidad sobre el ícono. */
 .ub-admin .app.alive {
     border-color: rgba(59, 114, 246, .6);
+}
+
+/* A5.3. Los pedidos que esperan retiro también se dicen con TEXTO bajo el rótulo del
+   acceso (el badge con el número queda como atajo): el `title=` que lo explicaba no se
+   lee en un teléfono. */
+.ub-admin .app-sub {
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--ub-blue);
 }
 
 .ub-admin .app .ico { position: relative; }

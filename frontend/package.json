@@ -28,7 +28,8 @@
     "test:recarga": "node scripts/test-recarga-chunk.mjs",
     "test:admin-api": "node scripts/test-admin-sin-api.mjs",
     "test:alumnos": "node scripts/test-alumnos.mjs",
-    "test:alumnos-movil": "node scripts/test-alumnos-movil.mjs"
+    "test:alumnos-movil": "node scripts/test-alumnos-movil.mjs",
+    "test:title": "node scripts/test-admin-sin-title.mjs"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.3.0",

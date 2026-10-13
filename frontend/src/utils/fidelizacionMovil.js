@@ -25,6 +25,14 @@ export const MAX_MOTIVO_CERRADO = 68;
 /** Qué se muestra cuando el alumno no tiene motivo registrado (igual que la tabla: '—'). */
 export const SIN_MOTIVO = '—';
 
+/* ── A5.3. Lo que explican las DOS acciones de la tarjeta abierta ─────────────
+   En un teléfono no hay hover: un `title=` no se lee NUNCA, así que esta copia se
+   pinta como TEXTO visible debajo de cada botón. Vive acá (y no dentro del JSX) por
+   lo mismo que las reglas de arriba: una sola definición para la pantalla y para la
+   guarda de fuente (`scripts/test-admin-sin-title.mjs`). */
+export const AYUDA_ENVIAR_CORREO = 'Eliges la plantilla y ves el correo exacto antes de mandarlo';
+export const AYUDA_DAR_BENEFICIO = 'Regalas clases o un descuento (y le avisas por correo si quieres)';
+
 /**
  * La regla del acordeón. Devuelve el id que debe quedar abierto:
  *  · el id tocado si estaba cerrada o si la abierta era OTRA (cierra la anterior),

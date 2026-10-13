@@ -3,6 +3,7 @@ import { ChevronRight, Eye, Gift, Mail, UserRound } from 'lucide-react';
 import { RiskBadge } from '../../components/kpis/RiskBadge';
 import { ArquetipoBadge } from '../../components/kpis/ArquetipoBadge';
 import {
+    AYUDA_DAR_BENEFICIO, AYUDA_ENVIAR_CORREO,
     alternarTarjeta, estaAbierta, resumenCerrado, detalleAbierto,
 } from '../../utils/fidelizacionMovil';
 // Estilos de la tarjeta (reutiliza el lenguaje visual de las KPI del dashboard móvil).
@@ -145,25 +146,40 @@ const FidelizacionMovil = ({
                                         </p>
                                     )}
                                 </div>
+                                {/* A5.3: cada acción con su explicación SIEMPRE visible. En un
+                                    teléfono no hay hover, así que lo que antes vivía en el
+                                    `title=` (y no se leía nunca) ahora va como texto debajo
+                                    del botón; la copia sale del util para no repetirla. El
+                                    contenedor (y su `flex-wrap`) queda igual que antes. */}
                                 <div className="flex flex-wrap gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => onEnviarCorreo(p)}
-                                        title="Elegir plantilla y ver el correo exacto antes de mandarlo"
-                                        data-testid={`enviar-correo-movil-${p.usuario_id}`}
-                                        className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700"
-                                    >
-                                        <Mail className="h-3.5 w-3.5" /> Enviar correo
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => onDarBeneficio(p)}
-                                        title="Regalar clases o un descuento (y avisarle por correo si quieres)"
-                                        data-testid={`dar-beneficio-movil-${p.usuario_id}`}
-                                        className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700"
-                                    >
-                                        <Gift className="h-3.5 w-3.5" /> Dar beneficio
-                                    </button>
+                                    <div className="flex min-w-0 flex-1 basis-[140px] flex-col items-start gap-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => onEnviarCorreo(p)}
+                                            data-testid={`enviar-correo-movil-${p.usuario_id}`}
+                                            className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700"
+                                        >
+                                            <Mail className="h-3.5 w-3.5" /> Enviar correo
+                                        </button>
+                                        <span className="text-[10.5px] leading-snug text-zinc-400"
+                                            data-testid={`ayuda-enviar-correo-movil-${p.usuario_id}`}>
+                                            {AYUDA_ENVIAR_CORREO}
+                                        </span>
+                                    </div>
+                                    <div className="flex min-w-0 flex-1 basis-[140px] flex-col items-start gap-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => onDarBeneficio(p)}
+                                            data-testid={`dar-beneficio-movil-${p.usuario_id}`}
+                                            className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700"
+                                        >
+                                            <Gift className="h-3.5 w-3.5" /> Dar beneficio
+                                        </button>
+                                        <span className="text-[10.5px] leading-snug text-zinc-400"
+                                            data-testid={`ayuda-dar-beneficio-movil-${p.usuario_id}`}>
+                                            {AYUDA_DAR_BENEFICIO}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
                         )}

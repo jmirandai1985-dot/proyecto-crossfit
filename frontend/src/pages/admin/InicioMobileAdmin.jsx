@@ -943,7 +943,7 @@ const InicioMobileAdmin = () => {
                                 accesible son las DOS pestañas de la pantalla, no este
                                 atajo: por eso el badge va con aria-hidden. */}
                             {hayPedidos && (
-                                <span className="tag" title="Ver los pedidos por entregar"
+                                <span className="tag"
                                     aria-hidden="true"
                                     onClick={(e) => {
                                         e.stopPropagation();
@@ -953,6 +953,11 @@ const InicioMobileAdmin = () => {
                                 </span>
                             )}
                         </span>Bazar
+                        {/* A5.3: lo que antes sólo decía el `title=` del badge va como TEXTO
+                            visible (en un teléfono no hay hover y el aviso desaparecía). */}
+                        {hayPedidos && (
+                            <span className="app-sub">{pedidos.length} por entregar</span>
+                        )}
                     </button>
                 </nav>
 
@@ -1028,7 +1033,10 @@ const InicioMobileAdmin = () => {
                         {errores.activos ? (
                             <>
                                 <b className="num">s/d</b> alumnos activos
-                                <span title={errores.activos} aria-hidden="true"> ⚠️</span>
+                                {/* A5.3: el motivo del error es TEXTO visible —antes sólo
+                                    aparecía en el hover del ⚠️, imposible en táctil— y se
+                                    anuncia, como los demás avisos de la pantalla. */}
+                                <span className="att-err" role="alert">⚠️ {errores.activos}</span>
                             </>
                         ) : (
                             <>
@@ -1072,7 +1080,14 @@ const InicioMobileAdmin = () => {
                                     aria-selected={f.id === franjaActiva}
                                     onClick={() => setFranja(f.id)}>
                                     {f.label}
-                                    {f.id === franjaReloj && <span className="now-dot" title="Franja actual" />}
+                                    {f.id === franjaReloj && (
+                                        /* A5.3: la franja del reloj se marca con texto
+                                           visible ("ahora" junto al punto), no con un
+                                           title= que en el teléfono no se lee. */
+                                        <span className="now">
+                                            <span className="now-dot" />ahora
+                                        </span>
+                                    )}
                                 </button>
                             ))}
                         </div>
