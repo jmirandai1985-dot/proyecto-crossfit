@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Layout from '../../components/Layout';
+import BotonVolver from '../../components/BotonVolver';
 import api from '../../services/api';
 
 const GenerarClases = () => {
@@ -29,11 +30,17 @@ const GenerarClases = () => {
     return (
         <Layout>
             <div className="max-w-4xl mx-auto space-y-6">
-                <div>
-                    <h1 className="text-3xl font-bold text-gray-900">⚡ Generar Clases del Día</h1>
-                    <p className="text-gray-600 mt-1">
-                        Crea todas las clases de un día desde el horario base semanal. No duplica si ya existen.
-                    </p>
+                {/* Título. En móvil (<768px) lleva delante la flecha "Volver"
+                    (fallback: el Inicio del coach); en ≥768px el botón queda
+                    oculto (md:hidden) y el título se ve igual que siempre. */}
+                <div className="max-md:flex max-md:items-start max-md:gap-2">
+                    <BotonVolver fallback="/coach/dashboard" />
+                    <div>
+                        <h1 className="text-3xl font-bold text-gray-900">⚡ Generar Clases del Día</h1>
+                        <p className="text-gray-600 mt-1">
+                            Crea todas las clases de un día desde el horario base semanal. No duplica si ya existen.
+                        </p>
+                    </div>
                 </div>
 
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">

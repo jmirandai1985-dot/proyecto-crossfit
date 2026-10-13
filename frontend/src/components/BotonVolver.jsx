@@ -21,9 +21,12 @@ import { destinoVolver } from '../utils/navegacion';
  * navegador en `scripts/test-boton-volver.mjs`.
  *
  * Reutilizado por: Mis Reservas, Mi Historial, Bazar, Mis Pedidos, Performance
- * Hub, RMs, Evolución, Mi Progreso, Ajustes y Solicitar Plan (alumno) y
- * Historial del alumno (admin, `fallback="/admin/dashboard"`). Inicio NO lo usa
- * (es la raíz).
+ * Hub, RMs, Evolución, Mi Progreso, Ajustes y Solicitar Plan (alumno), el
+ * Historial del alumno (admin, `fallback="/admin/dashboard"`) y las pantallas
+ * del coach que no son su Inicio —Pizarra de WOD, Generar Clases, Gestión de
+ * Clases y Entregar pedido— con `fallback="/coach/dashboard"`.
+ * NO lo usan las raíces de cada panel (el Inicio del alumno, el del admin y el
+ * Dashboard del coach): ahí no hay "atrás" y la flecha no iría a ningún lado.
  */
 const BotonVolver = ({ fallback = '/alumno/dashboard', className = '' }) => {
     const navigate = useNavigate();

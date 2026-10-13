@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import Layout from '../../components/Layout';
 // El MISMO modal que usa el admin: una sola pantalla de entrega para todo el box.
 import ModalEntregarPedido from '../../components/ModalEntregarPedido';
+import BotonVolver from '../../components/BotonVolver';
 
 /**
  * Panel del COACH — "Entregar pedido" (mesón del Bazar).
@@ -22,6 +23,9 @@ const CoachEntregarPedido = () => {
         <Layout>
             <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
                 <div className="flex items-start gap-3">
+                    {/* Flecha "Volver" sólo en móvil (<768px): en ≥768px se
+                        oculta (md:hidden) y el título queda igual que siempre. */}
+                    <BotonVolver fallback="/coach/dashboard" />
                     <span className="text-3xl">📦</span>
                     <div>
                         <h1 className="text-2xl font-extrabold text-zinc-100">

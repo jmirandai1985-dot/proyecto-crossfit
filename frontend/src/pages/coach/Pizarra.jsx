@@ -5,6 +5,7 @@
    Se deja el archivo y la ruta por si se retoma; si no, borrar ambos. */
 import React, { useState, useMemo } from 'react';
 import Layout from '../../components/Layout';
+import BotonVolver from '../../components/BotonVolver';
 import { useAuth } from '../../context/AuthContext';
 import {
     useMovimientos, useCrearMovimiento, useParsearWod, useCrearWod,
@@ -416,10 +417,15 @@ const Pizarra = () => {
     return (
         <Layout>
             <div className="max-w-6xl mx-auto space-y-6">
-                {/* Título */}
-                <div>
-                    <h1 className="text-3xl font-bold text-gray-900">Pizarra de WOD</h1>
-                    <p className="text-gray-600 mt-1">Selecciona día y horario para crear el entrenamiento</p>
+                {/* Título. En móvil (<768px) lleva delante la flecha "Volver"
+                    (fallback: el Inicio del coach); en ≥768px el botón queda
+                    oculto (md:hidden) y el título se ve igual que siempre. */}
+                <div className="max-md:flex max-md:items-start max-md:gap-2">
+                    <BotonVolver fallback="/coach/dashboard" />
+                    <div>
+                        <h1 className="text-3xl font-bold text-gray-900">Pizarra de WOD</h1>
+                        <p className="text-gray-600 mt-1">Selecciona día y horario para crear el entrenamiento</p>
+                    </div>
                 </div>
 
                 {/* Mensaje */}

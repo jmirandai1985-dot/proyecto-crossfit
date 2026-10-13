@@ -11,6 +11,8 @@
 //   4. el destino de "atrás" es el `-1` que entiende el router
 //   5. COBERTURA (auditoría Bloque 2): toda pantalla del alumno que cuelga de una
 //      ruta —menos la raíz, el Inicio— monta la flecha, y la raíz no la monta
+//   6. la misma regla en el panel del COACH (auditoría Bloque 2): sus 5 pantallas
+//      menos el Dashboard del coach, que es la raíz del rol
 import { readdirSync, readFileSync } from 'node:fs';
 import {
     CLAVE_PRIMERA_UBICACION, VOLVER_ATRAS, puedeVolverAtras, destinoVolver,
@@ -40,6 +42,7 @@ const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
 const INICIO_ALUMNO = '/alumno/dashboard';
 const INICIO_ADMIN = '/admin/dashboard';
+const INICIO_COACH = '/coach/dashboard';
 
 // ── 1. La clave de la primera ubicación (enlace directo / recarga) ───────────
 eq(CLAVE_PRIMERA_UBICACION, 'default', 'React Router marca la primera ubicación con "default"');
@@ -138,6 +141,58 @@ for (const n of ARCHIVOS) {
 }
 ok(ARCHIVOS.length === ruteados.size + Object.keys(SIN_RUTA).length,
     `pages/alumno: ${ARCHIVOS.length} archivos = ${ruteados.size} ruteados + ${Object.keys(SIN_RUTA).length} sin ruta`);
+
+// ── 6. Cobertura del panel COACH: la misma regla, con la raíz de su rol ──────
+// El coach navega con el cajón lateral (no tiene barra inferior), así que sus
+// pantallas necesitan la flecha igual que las del alumno. Su raíz —el Dashboard,
+// DASHBOARD_MAP.coach— NO la lleva: ahí no hay "atrás" y la flecha no iría a
+// ningún lado (misma regla que el Inicio del alumno y el del admin).
+const abreCoach = APP.indexOf('path="/coach/*"');
+const bloqueCoach = abreCoach === -1 ? '' : APP.slice(abreCoach, APP.indexOf('</Route>', abreCoach));
+const RUTAS_COACH = [...bloqueCoach.matchAll(/path="([^"]+)"\s+element=\{<(\w+)\s*\/>/g)]
+    .map((m) => ({ ruta: m[1], archivo: LAZY.get(m[2]) || '' }))
+    .filter((r) => r.archivo.startsWith('pages/coach/'));
+
+const inicioCoach = leer('../src/config/roles.js').match(/coach:\s*'([^']+)'/);
+eq(inicioCoach?.[1], INICIO_COACH, 'roles.js apunta el inicio del coach a /coach/dashboard');
+const RUTA_RAIZ_COACH = (inicioCoach?.[1] || '').split('/').filter(Boolean).pop() || '';
+
+ok(RUTAS_COACH.length === 5, `App.jsx tiene las 5 pantallas del coach (vistas: ${RUTAS_COACH.length})`);
+ok(RUTAS_COACH.every((r) => r.ruta && r.archivo), 'cada ruta del coach apunta a una pantalla lazy conocida');
+ok(RUTAS_COACH.some((r) => r.ruta === RUTA_RAIZ_COACH), `la raíz (${RUTA_RAIZ_COACH}) es una de las rutas del coach`);
+
+for (const { ruta, archivo } of RUTAS_COACH) {
+    const nombre = archivo.replace('pages/coach/', '');
+    let src = '';
+    try {
+        src = leer('../src/' + archivo);
+    } catch {
+        src = '';
+    }
+    const importa = /from\s+['"][^'"]*components\/BotonVolver['"]/.test(src);
+    // La flecha del coach cae a SU Inicio, no al del alumno.
+    const dibuja = /<BotonVolver\s+fallback="\/coach\/dashboard"\s*\/>/.test(src);
+    ok(!!src, `coach/${nombre}: el import lazy de App.jsx apunta a un archivo existente`);
+    if (ruta === RUTA_RAIZ_COACH) {
+        ok(!dibuja && !importa, `coach/${nombre}: es la RAÍZ (${ruta}) y NO lleva flecha Volver`);
+    } else {
+        ok(importa, `coach/${nombre}: importa BotonVolver desde components/`);
+        ok(dibuja, `coach/${nombre}: dibuja <BotonVolver fallback="/coach/dashboard" />`);
+    }
+}
+
+// Ningún archivo de pages/coach se queda afuera: o está ruteado, o es una pantalla
+// a la que se le retiró la ruta (Bloque 5: quedan vivas pero ya no se navegan).
+const SIN_RUTA_COACH = {};
+const ARCHIVOS_COACH = readdirSync(new URL('../src/pages/coach/', import.meta.url))
+    .filter((n) => n.endsWith('.jsx'))
+    .sort();
+const ruteadosCoach = new Set(RUTAS_COACH.map((r) => r.archivo.replace('pages/coach/', '')));
+for (const n of ARCHIVOS_COACH) {
+    ok(ruteadosCoach.has(n) || n in SIN_RUTA_COACH, `pages/coach/${n}: ruteado o declarado en SIN_RUTA_COACH`);
+}
+ok(ARCHIVOS_COACH.length === ruteadosCoach.size + Object.keys(SIN_RUTA_COACH).length,
+    `pages/coach: ${ARCHIVOS_COACH.length} archivos = ${ruteadosCoach.size} ruteados + ${Object.keys(SIN_RUTA_COACH).length} sin ruta`);
 
 // ── 5b. El componente conserva el contrato visual y su respaldo ──────────────
 const COMP = leer('../src/components/BotonVolver.jsx');

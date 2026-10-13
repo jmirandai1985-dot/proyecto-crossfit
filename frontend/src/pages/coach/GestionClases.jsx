@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
 import Layout from '../../components/Layout';
 import WodDetalleModal from '../../components/WodDetalleModal';
+import BotonVolver from '../../components/BotonVolver';
 import {
     SIN_DATOS, useAccionClase, useClaseDetalle, useClasesDia, useClasesDisciplinaSemana,
     useCoachDisciplinas, useConfirmarAsistenciaClase, useCrearWodsBatch, useDisciplinas,
@@ -574,7 +575,13 @@ export default function GestionClases() {
     return (
         <Layout>
             <div className="p-6 max-w-6xl mx-auto">
-                <h1 className="text-2xl font-bold mb-4">Gestión de Clases</h1>
+                {/* Título. En móvil (<768px) lleva delante la flecha "Volver"
+                    (fallback: el Inicio del coach); en ≥768px el botón queda
+                    oculto (md:hidden) y el título se ve igual que siempre. */}
+                <div className="max-md:flex max-md:items-center max-md:gap-2 mb-4">
+                    <BotonVolver fallback="/coach/dashboard" />
+                    <h1 className="text-2xl font-bold">Gestión de Clases</h1>
+                </div>
                 {msg.texto && (
                     <div className={`mb-4 p-3 rounded flex items-center justify-between gap-3 ${msg.tipo === 'error' ? 'bg-red-100 text-red-500' : 'bg-green-100 text-green-800'}`}>
                         <span>{msg.texto}</span>
