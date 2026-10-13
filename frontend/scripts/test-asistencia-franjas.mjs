@@ -9,7 +9,10 @@
 //   3. el estado de cada fila ("Hecha" / "En curso" / "Pendiente") sale del BACKEND: la
 //      vista móvil no lee el reloj del navegador
 //   4. la fila no pierde ninguna acción: se marca la asistencia y se amplía el cupo
-import { readFileSync } from 'node:fs';
+//   5. (Bloque 6) el tope +10 NO quedó copiado en ninguna pantalla: el acordeón del admin y
+//      la Supervisión también consumen el util, y el refactor calcula IGUAL que la copia
+//      vieja salvo los 2 casos en que esa copia contradecía al backend
+import { readdirSync, readFileSync } from 'node:fs';
 import {
     MAX_CUPOS_EXTRA, cupoOriginal, cupoTope, cupoActual, extraDisponible, extraMaximo,
     acotarExtra,
@@ -103,6 +106,68 @@ eq((DASH.match(/<AsistenciaClases/g) || []).length, 1,
 const ADMIN = leer('../src/pages/admin/Asistencia.jsx');
 ok(/<AsistenciaClases variant="dark" \/>/.test(ADMIN), 'el admin monta el componente igual que antes');
 eq(/franjas/.test(ADMIN), false, 'el admin NO pide franjas: su pantalla no cambia');
+
+// ── 5. Dedup del +10: la copia local se fue (Bloque 6) ──────────────────────
+console.log('== 5. El tope +10 no está copiado: lo consumen las 3 pantallas ==');
+const GRUPO = leer('../src/components/AsistenciaGrupoDisciplina.jsx');
+const ROW = leer('../src/components/SupervisionClaseRow.jsx');
+for (const [nombre, src] of [['AsistenciaGrupoDisciplina', GRUPO], ['SupervisionClaseRow', ROW]]) {
+    ok(/from '\.\.\/utils\/cuposClase'/.test(src), `${nombre}: el tope +10 sale del util`);
+    eq(/const cupoOriginal|const cupoTope/.test(src), false, `${nombre}: no vuelve a definir la regla`);
+    eq(/cupos\[clase\.id\] \?\? clase\.cupo_maximo/.test(src), false,
+        `${nombre}: el cupo mostrado sale de cupoActual()`);
+    eq(/Math\.min\(10,/.test(src), false,
+        `${nombre}: el 10 del input sale de extraMaximo()/acotarExtra()`);
+    ok(/extraDisponible\(clase, cupos\)/.test(src), `${nombre}: el "quedan N" sale de extraDisponible()`);
+}
+// La regla vive en UN solo archivo de `src/`: si alguien la vuelve a copiar, se ve acá.
+const FUENTES = [];
+const recorrer = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+        if (e.isDirectory()) recorrer(new URL(e.name + '/', dir));
+        else if (/\.(js|jsx)$/.test(e.name)) FUENTES.push(new URL(e.name, dir));
+    }
+};
+recorrer(new URL('../src/', import.meta.url));
+const DEFINEN = FUENTES
+    .filter((u) => /const cupo(Original|Tope) = /.test(readFileSync(u, 'utf8')))
+    .map((u) => u.pathname.split('/src/').pop());
+eq(DEFINEN.join(', '), 'utils/cuposClase.js', 'la regla del tope se define SÓLO en utils/cuposClase.js');
+
+// Antes/después: la cuenta que estaba copiada en los dos archivos, tal cual era.
+const topeViejo = (c) => (c.cupo_original ?? c.cupo_maximo) + 10;
+const actualViejo = (clase, cupos) => (cupos[clase.id] ?? clase.cupo_maximo);
+const libreViejo = (clase, cupos) => topeViejo(clase) - actualViejo(clase, cupos);
+// Clases como las que manda el backend (el original casi siempre viene y es > 0).
+const CASOS = [
+    { id: 1, cupo_original: 16, cupo_maximo: 16, cupos: {} },
+    { id: 2, cupo_original: 16, cupo_maximo: 20, cupos: {} },
+    { id: 3, cupo_original: 16, cupo_maximo: 26, cupos: {} },
+    { id: 4, cupo_original: null, cupo_maximo: 12, cupos: {} },
+    { id: 5, cupo_original: 10, cupo_maximo: 10, cupos: { 5: 14 } },
+];
+for (const c of CASOS) {
+    const etiqueta = `original ${JSON.stringify(c.cupo_original)} / cupo ${JSON.stringify(c.cupo_maximo)}`;
+    eq(cupoTope(c), topeViejo(c), `tope igual que la copia vieja (${etiqueta})`);
+    eq(cupoActual(c, c.cupos), actualViejo(c, c.cupos), `cupo mostrado igual que la copia vieja (${etiqueta})`);
+    eq(extraDisponible(c, c.cupos), libreViejo(c, c.cupos), `"quedan N" igual que la copia vieja (${etiqueta})`);
+    eq(extraMaximo(c, c.cupos), Math.min(10, libreViejo(c, c.cupos)),
+        `input "cupos extra" igual que la copia vieja (${etiqueta})`);
+}
+// Las 2 únicas divergencias, y las dos acercan la pantalla al backend:
+//   · `cupo_original: 0` -> la copia lo tomaba como original (techo 10); el backend hace `or`
+//     y lo lee como el cupo actual, que es lo que mide el util.
+eq(cupoTope({ cupo_original: 0, cupo_maximo: 16 }), 26,
+    'un original 0 mide desde el cupo actual (regla del backend)');
+eq(topeViejo({ cupo_original: 0, cupo_maximo: 16 }), 10,
+    'así calculaba la copia vieja: el bug que este refactor cierra');
+//   · un cupo ya pasado del tope -> quedan 0 (el botón queda deshabilitado en el tope) en vez
+//     de un negativo que dejaba abrir el panel y comerse un 409 del backend.
+const PASADO = { id: 9, cupo_original: 16, cupo_maximo: 30 };
+eq(extraDisponible(PASADO, {}), 0, 'pasado el tope quedan 0 (no negativo)');
+eq(libreViejo(PASADO, {}), -4, 'la copia vieja daba -4: el botón seguía ofreciendo ampliar');
+// Sin cupos cargados (clase vieja) tampoco hay NaN: 0 + 10.
+eq(cupoTope({}), 10, 'sin cupos, el tope es 10 (la copia vieja daba NaN)');
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);

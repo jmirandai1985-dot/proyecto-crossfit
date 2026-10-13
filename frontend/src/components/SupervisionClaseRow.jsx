@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { acotarExtra, cupoActual, cupoOriginal, cupoTope, extraDisponible, extraMaximo } from '../utils/cuposClase';
 
 /**
  * Fila de UNA clase puntual del dia para el panel de Supervision (admin, dark).
@@ -10,9 +11,11 @@ import React, { useState } from 'react';
  *   clase        -> item de GET /api/v1/clases/ (cupo_maximo, cupo_original,
  *                   asistentes_confirmados, cancelada, coach_nombre...)
  *   onAmpliarCupo -> async (clase, extra) => { cupo_maximo, cupo_original, tope, extra_disponible }
+ *
+ * La regla del cupo ampliable (tope +10 sobre el original) sale de `utils/cuposClase`: antes
+ * vivía copiada acá y la copia leía `cupo_original: 0` como "el techo es 10", cuando el
+ * backend hace `or` y lo lee como el cupo actual (el util es el espejo del backend).
  */
-const cupoOriginal = (c) => (c.cupo_original ?? c.cupo_maximo);
-const cupoTope = (c) => cupoOriginal(c) + 10;
 const fmtHora = (h) => (h ? String(h).slice(0, 5) : '');
 
 const SupervisionClaseRow = ({ clase, onAmpliarCupo }) => {
@@ -22,8 +25,8 @@ const SupervisionClaseRow = ({ clase, onAmpliarCupo }) => {
     const [cupos, setCupos] = useState({});
     const [msg, setMsg] = useState(null);
 
-    const cupoActual = cupos[clase.id] ?? clase.cupo_maximo;
-    const libre = cupoTope(clase) - cupoActual;
+    const cupo = cupoActual(clase, cupos);
+    const libre = extraDisponible(clase, cupos);
     const enTope = libre === 0;
 
     const abrir = () => {
@@ -60,7 +63,7 @@ const SupervisionClaseRow = ({ clase, onAmpliarCupo }) => {
                     {fmtHora(clase.hora_inicio)}-{fmtHora(clase.hora_fin)}
                 </span>
                 <span className="text-xs text-zinc-400">
-                    {clase.asistentes_confirmados || 0}/{cupoActual} confirmados
+                    {clase.asistentes_confirmados || 0}/{cupo} confirmados
                 </span>
                 {clase.cancelada && (
                     <span className="text-xs px-1.5 py-0.5 rounded bg-red-500/20 text-red-300">Cancelada</span>
@@ -100,9 +103,9 @@ const SupervisionClaseRow = ({ clase, onAmpliarCupo }) => {
                     <input
                         type="number"
                         min="1"
-                        max={Math.min(10, libre)}
+                        max={extraMaximo(clase, cupos)}
                         value={extra}
-                        onChange={(e) => setExtra(Math.max(1, Math.min(Math.min(10, libre), parseInt(e.target.value || '1', 10))))}
+                        onChange={(e) => setExtra(acotarExtra(e.target.value, clase, cupos))}
                         className="w-14 px-2 py-0.5 rounded text-xs border bg-zinc-900 border-zinc-700 text-zinc-100"
                     />
                     <button
