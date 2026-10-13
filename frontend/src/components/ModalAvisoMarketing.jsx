@@ -1,37 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useGuardarAvisoMarketing, useQuitarFlyerAviso } from '../hooks/queries';
+import IconoTipoAviso from './IconoTipoAviso';
 import { urlArchivo } from '../utils/imagen';
 import {
     TIPOS_EDITABLES, avisoVacio, aFormulario, validarAviso,
     hayErrores, construirFormData, payloadEdicion, mensajeDeError, tinteDeAcento,
 } from '../utils/avisosMarketing';
-
-// Los íconos de los 4 tipos: los MISMOS dibujos del mockup
-// (`mockup/carrusel-marketing.html`), inline para no depender de nada nuevo.
-const ICONOS = {
-    disco: (
-        <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3.2" />
-        </svg>
-    ),
-    mancuernas: (
-        <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M4 7h4l2.5 7L8 19H4z" /><path d="M20 7h-4l-2.5 7L16 19h4z" /><path d="M10.5 14h3" />
-        </svg>
-    ),
-    megafono: (
-        <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z" />
-            <path d="M15 9a3 3 0 0 1 0 6M18 6a7 7 0 0 1 0 12" />
-        </svg>
-    ),
-    barra: (
-        <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="5" cy="7" r="2.3" /><circle cx="19" cy="7" r="2.3" />
-            <path d="M7.3 7h9.4M3 14h18M7 14v6M17 14v6M10 20h4" />
-        </svg>
-    ),
-};
 
 const CAMPO = 'w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 focus:border-orange-500 focus:outline-none';
 const ETIQUETA = 'block text-[12px] text-zinc-400 mb-1.5';
@@ -156,7 +130,7 @@ const ModalAvisoMarketing = ({ isOpen, onClose, onSuccess, avisoEditar }) => {
                                         aria-pressed={activo}
                                     >
                                         <span style={{ color: activo ? '#fff' : tipo.acento }}>
-                                            {ICONOS[tipo.icono]}
+                                            <IconoTipoAviso tipo={tipo.id} />
                                         </span>
                                         {tipo.label}
                                     </button>

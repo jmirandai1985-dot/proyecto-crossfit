@@ -12,6 +12,8 @@ import {
     estadoVigencia, estaVigente, resumenVigencia, contarPorEstado,
     hoyISO, sumarDiasISO, avisoVacio, aFormulario, validarAviso, hayErrores,
     construirFormData, payloadEdicion, mensajeDeError, tinteDeAcento,
+    agruparParaCarrusel, tituloDeGrupo, tituloDeTarjeta, textoDeTarjeta,
+    precioDeTarjeta, fotoDeTarjeta, tieneFlyer, PIE_PRODUCTO, MAX_MINIATURAS,
 } from '../src/utils/avisosMarketing.js';
 
 let fallos = 0;
@@ -172,6 +174,72 @@ eq(modalProducto.includes("dias_anuncio: '0'"), true, 'sin días, el formulario 
 eq(modalProducto.includes('errors.dias_anuncio'), true, 'el formulario valida los días');
 eq(bazar.includes('p.dias_anuncio > 0'), true, 'el inventario marca los productos anunciados');
 eq(bazar.includes('Anunciado en el Inicio'), true, '... con un chip legible');
+
+// ── 11. El carrusel del Inicio (Bloque 4) ───────────────────────────────────
+// El backend ya manda los vigentes ordenados; lo que se prueba acá es el ARMADO
+// de las tarjetas (agrupación de productos), los textos y los colores.
+console.log('== 11. Las tarjetas del carrusel ==');
+const aviso = (id, tipo, extra = {}) => ({ id, tipo, titulo: `Título ${id}`, texto: `Texto ${id}`, ...extra });
+
+eq(agruparParaCarrusel([]).length, 0, 'sin avisos no hay tarjetas');
+eq(agruparParaCarrusel(undefined).length, 0, 'sin datos no rompe');
+const soloManuales = agruparParaCarrusel([aviso(1, 'promocion'), aviso(2, 'evento')]);
+eq(soloManuales.length, 2, 'dos avisos manuales -> dos tarjetas');
+eq(soloManuales.every((t) => t.clase === 'aviso'), true, '... y ninguna agrupada');
+// Un producto solo: tarjeta propia (foto + nombre + precio).
+const unProducto = agruparParaCarrusel([aviso(1, 'promocion'), aviso(9, 'producto_bazar')]);
+eq(unProducto.length, 2, 'un producto -> una tarjeta aparte');
+eq(unProducto[1].clase, 'producto', '... con su propia plantilla');
+// Dos o más: UNA tarjeta que los agrupa al final, después de los manuales.
+const productos = [aviso(9, 'producto_bazar'), aviso(10, 'producto_bazar'), aviso(11, 'producto_bazar'), aviso(12, 'producto_bazar'), aviso(13, 'producto_bazar')];
+const agrupado = agruparParaCarrusel([aviso(1, 'promocion'), ...productos]);
+eq(agrupado.length, 2, 'los productos se agrupan en UNA tarjeta');
+eq(agrupado[0].aviso.tipo, 'promocion', 'los avisos del admin van primero');
+eq(agrupado[1].clase, 'productos', '... y la tienda al final');
+eq(agrupado[1].avisos.length, 5, 'la tarjeta lleva los 5 productos');
+eq(agrupado[1].extra, 5 - MAX_MINIATURAS, 'el "+N" cuenta los que no caben');
+eq(agruparParaCarrusel(productos.slice(0, 3))[0].extra, 0, 'con 3 no hay "+N"');
+eq(tituloDeGrupo(4), 'Llegaron 4 productos nuevos', 'el título del grupo');
+eq(agruparParaCarrusel([aviso(9, 'producto_bazar')])[0].clase, 'producto', 'un solo producto no se agrupa');
+
+console.log('== 12. Los textos de la tarjeta ==');
+const producto = { tipo: 'producto_bazar', titulo: 'Título guardado', texto: 'x', producto_nombre: 'Polera Urban Box', producto_precio: 12990, producto_imagen_url: '/static/uploads/p.png' };
+eq(tituloDeTarjeta(producto), 'Polera Urban Box', 'el producto muestra el nombre ACTUAL del producto');
+eq(tituloDeTarjeta({ tipo: 'producto_bazar', titulo: 'Sólo guardado' }), 'Sólo guardado', 'sin producto resuelto cae en el título');
+eq(tituloDeTarjeta(aviso(1, 'promocion')), 'Título 1', 'un aviso manual usa su título');
+eq(textoDeTarjeta(producto), '', 'el producto no lleva párrafo (lleva precio)');
+eq(textoDeTarjeta({ tipo: 'promocion', texto: '20% off' }), '20% off', 'los avisos manuales sí');
+eq(precioDeTarjeta(producto), '$12.990', 'el precio en pesos');
+eq(precioDeTarjeta(aviso(1, 'promocion')), '', 'un aviso manual no tiene precio');
+eq(precioDeTarjeta({ tipo: 'producto_bazar' }), '', 'sin precio no inventa un número');
+eq(PIE_PRODUCTO, 'Disponible en el Bazar', 'el pie del producto (el del mockup)');
+eq(fotoDeTarjeta(producto), '/static/uploads/p.png', 'la foto del producto');
+eq(fotoDeTarjeta({ tipo: 'producto_bazar' }), null, 'sin foto, la tarjeta usa el placeholder');
+eq(fotoDeTarjeta(aviso(1, 'promocion')), null, 'un aviso manual no tiene foto de producto');
+eq(tieneFlyer({ imagen_url: '/static/uploads/f.png' }), true, 'un aviso con flyer ofrece verlo');
+eq(tieneFlyer({ imagen_url: null }), false, 'sin flyer no hay botón');
+
+console.log('== 13. Colores y plantillas por tipo ==');
+const tokens = ['acento', 'fondo', 'tagFondo', 'tagTexto', 'titulo', 'detalle', 'icono'];
+eq(TIPOS_AVISO.every((t) => tokens.every((k) => typeof t[k] === 'string' && t[k])), true,
+    'cada tipo trae sus tokens visuales (la tarjeta del alumno y el botón del admin usan los mismos)');
+eq(TIPOS_AVISO.every((t) => t.fondo.startsWith('linear-gradient(145deg')), true, 'los 5 fondos del mockup');
+eq(tipoDe('aviso').tagTexto, '#1a1608', 'la etiqueta ámbar lleva texto oscuro');
+eq(tipoDe('evento').detalle, '#b9a3f5', 'el acento del evento');
+eq(tipoDe('producto_bazar').detalle, '#6f95ff', 'el acento de la tienda');
+
+// ── 14. El carrusel está montado en el Inicio del alumno ────────────────────
+console.log('== 14. Montaje en el Inicio del alumno (<768px) ==');
+const carrusel = readFileSync(new URL('../src/components/CarruselMarketing.jsx', import.meta.url), 'utf8');
+const inicio = readFileSync(new URL('../src/pages/alumno/InicioMobile.jsx', import.meta.url), 'utf8');
+eq(inicio.includes("import CarruselMarketing from '../../components/CarruselMarketing'"), true,
+    'el Inicio móvil importa el carrusel');
+eq(inicio.includes('<CarruselMarketing />'), true, '... y lo dibuja');
+eq(carrusel.includes('if (!tarjetas.length) return null;'), true,
+    'sin avisos vigentes la sección no se dibuja (nunca un carrusel vacío)');
+eq(carrusel.includes("useAvisosMarketingVigentes()"), true, 'los avisos salen del endpoint de vigentes');
+eq(carrusel.includes('cm-flyer'), true, 'el flyer se abre en un overlay');
+eq(carrusel.includes('cm-punto'), true, 'los puntos de posición');
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);

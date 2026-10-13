@@ -8,6 +8,9 @@ import { urlArchivo } from '../../utils/imagen';
 import { MENU_BY_ROL } from '../../config/menu';
 import { MENU_ICONS } from '../../config/menuIcons';
 import EscanerQR from '../../components/EscanerQR';
+// Carrusel "Novedades del box": los avisos de marketing del box (Bloque 4). Se
+// dibuja sólo si hay avisos vigentes hoy; si no, no ocupa lugar.
+import CarruselMarketing from '../../components/CarruselMarketing';
 // Chips de filtro por disciplina: el MISMO componente (y la misma lógica) que
 // usa "Mis Reservas", para no duplicar el control ni su criterio.
 import FiltroDisciplina from '../../components/FiltroDisciplina';
@@ -318,6 +321,12 @@ const InicioMobile = ({
                     <button type="button" onClick={() => navigate('/alumno/mis-reservas')}>Mis reservas</button>
                     <button type="button" onClick={irAReservar}>Reservar otra clase</button>
                 </div>
+
+                {/* ── Novedades del box: el carrusel de avisos de marketing ──
+                    Va entre las acciones de la reserva y "Tu semana": es lo primero
+                    que el alumno ve después de su clase y no empuja la reserva de hoy.
+                    Si no hay avisos vigentes, el componente no dibuja nada. */}
+                <CarruselMarketing />
 
                 {/* -- Tu semana: circulos L-D derivados de /api/v1/reservas + racha -- */}
                 <section className="card sec" aria-label="Tu semana">

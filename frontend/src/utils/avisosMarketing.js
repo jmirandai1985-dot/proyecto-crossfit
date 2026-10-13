@@ -23,6 +23,12 @@ export const TIPOS_AVISO = [
         tag: 'Promoción',
         acento: '#d9472e',
         icono: 'disco',
+        // Tokens visuales de la tarjeta del carrusel (mockup, 145deg).
+        fondo: 'linear-gradient(145deg, #2c1410, #1a0e0c)',
+        tagFondo: '#d9472e',
+        tagTexto: '#fff',
+        titulo: '#f6e8e5',
+        detalle: '#e8a08f',
     },
     {
         id: 'colaboracion',
@@ -30,6 +36,12 @@ export const TIPOS_AVISO = [
         tag: 'Colaboración',
         acento: '#2f6b52',
         icono: 'mancuernas',
+        fondo: 'linear-gradient(145deg, #1a2420, #101715)',
+        tagFondo: '#2f6b52',
+        tagTexto: '#eafff2',
+        titulo: '#e9f3ee',
+        // El verde de la marca del aliado.
+        detalle: '#6fbf98',
     },
     {
         id: 'aviso',
@@ -39,6 +51,12 @@ export const TIPOS_AVISO = [
         tag: 'Aviso del box',
         acento: '#e8a93b',
         icono: 'megafono',
+        fondo: 'linear-gradient(145deg, #231f14, #15130d)',
+        tagFondo: '#e8a93b',
+        // Ámbar: el texto de la etiqueta va OSCURO (contraste del mockup).
+        tagTexto: '#1a1608',
+        titulo: '#f4edd8',
+        detalle: '#e8a93b',
     },
     {
         id: 'evento',
@@ -46,6 +64,11 @@ export const TIPOS_AVISO = [
         tag: 'Evento',
         acento: '#7a5fc9',
         icono: 'barra',
+        fondo: 'linear-gradient(145deg, #1c1824, #111017)',
+        tagFondo: '#7a5fc9',
+        tagTexto: '#f2eeff',
+        titulo: '#ece8f5',
+        detalle: '#b9a3f5',
     },
     {
         id: 'producto_bazar',
@@ -53,6 +76,12 @@ export const TIPOS_AVISO = [
         tag: 'Nuevo en la tienda',
         acento: '#3b72f6',
         icono: 'carrito',
+        fondo: 'linear-gradient(145deg, #1a1d26, #101217)',
+        tagFondo: '#3b72f6',
+        tagTexto: '#eaf0ff',
+        titulo: '#e8ecfa',
+        // El azul del precio y del "Ver todo en el Bazar".
+        detalle: '#6f95ff',
     },
 ];
 
@@ -64,6 +93,11 @@ export const TIPO_POR_DEFECTO = {
     tag: 'Aviso',
     acento: '#d9472e',
     icono: 'disco',
+    fondo: 'linear-gradient(145deg, #2c1410, #1a0e0c)',
+    tagFondo: '#d9472e',
+    tagTexto: '#fff',
+    titulo: '#f6e8e5',
+    detalle: '#e8a08f',
 };
 
 // Los 4 que el admin puede crear/editar (espejo de TIPOS_EDITABLES del backend).
@@ -195,6 +229,80 @@ export function resumenVigencia(aviso, ahora = new Date()) {
     if (estado === 'programado') return `Desde ${formatearFechaCorta(aviso.vigente_desde)}`;
     return 'Vencido';
 }
+
+// ── El carrusel del Inicio del alumno (Bloque 4) ────────────────────────────
+// El backend ya devuelve los avisos VIGENTES y ordenados (fijados primero y
+// después el más nuevo). Acá sólo se decide CÓMO se dibujan:
+//   * los avisos que escribió el admin, en ese orden;
+//   * y al final las novedades de la tienda: el aviso de un producto suelto si
+//     hay uno, o UNA tarjeta que los agrupa si hay varios (el mockup dibuja
+//     "Llegaron poleras y polerones" con miniaturas y un "+N" cuando no caben).
+
+export const MAX_MINIATURAS = 3;
+
+export function agruparParaCarrusel(avisos) {
+    const lista = avisos || [];
+    const manuales = lista.filter((aviso) => aviso?.tipo !== 'producto_bazar');
+    const productos = lista.filter((aviso) => aviso?.tipo === 'producto_bazar');
+
+    const tarjetas = manuales.map((aviso) => ({ clase: 'aviso', aviso }));
+    if (productos.length === 1) {
+        tarjetas.push({ clase: 'producto', aviso: productos[0] });
+    } else if (productos.length > 1) {
+        tarjetas.push({
+            clase: 'productos',
+            avisos: productos,
+            extra: Math.max(productos.length - MAX_MINIATURAS, 0),
+        });
+    }
+    return tarjetas;
+}
+
+export function tituloDeGrupo(cantidad) {
+    return `Llegaron ${cantidad} productos nuevos`;
+}
+
+// El título de una tarjeta. Un aviso de producto muestra el nombre ACTUAL del
+// producto: el que quedó guardado en el aviso puede estar viejo si el admin lo
+// renombró en el Bazar (la tarjeta se dibuja desde el JOIN, no desde el título).
+export function tituloDeTarjeta(aviso) {
+    if (aviso?.tipo === 'producto_bazar') {
+        return aviso.producto_nombre || aviso.titulo || '';
+    }
+    return aviso?.titulo || '';
+}
+
+// El párrafo de la tarjeta: los productos no llevan (muestran su precio).
+export function textoDeTarjeta(aviso) {
+    if (aviso?.tipo === 'producto_bazar') return '';
+    return aviso?.texto || '';
+}
+
+// El precio REAL del producto, en pesos ("$12.990"). Vacío en los otros tipos.
+export function precioDeTarjeta(aviso) {
+    if (aviso?.tipo !== 'producto_bazar' || aviso.producto_precio == null) return '';
+    const numero = Number(aviso.producto_precio);
+    if (!Number.isFinite(numero)) return '';
+    return new Intl.NumberFormat('es-CL', {
+        style: 'currency', currency: 'CLP', maximumFractionDigits: 0,
+    }).format(numero);
+}
+
+// El texto chico bajo el precio (el mockup escribe exactamente esto).
+export const PIE_PRODUCTO = 'Disponible en el Bazar';
+
+// La foto del producto (NULL = la tarjeta dibuja el placeholder).
+export function fotoDeTarjeta(aviso) {
+    if (aviso?.tipo !== 'producto_bazar') return null;
+    return aviso.producto_imagen_url || null;
+}
+
+// ¿Hay flyer que mostrar en el modal "Toca para ver el flyer"? Sólo los avisos
+// manuales lo tienen: el de un producto muestra su foto en la tarjeta.
+export function tieneFlyer(aviso) {
+    return Boolean(aviso?.imagen_url);
+}
+
 
 // ── El formulario del admin ────────────────────────────────────────────────
 // Todo lo que el modal necesita para armar el payload vive acá, para que las
