@@ -33,9 +33,8 @@ const CoachEntregarPedido = () => {
                         </h1>
                         <p className="mt-1 text-sm text-zinc-400">
                             Pídele al alumno su <strong className="text-zinc-200">código de
-                            retiro</strong> (o que muestre el QR) y escanéalo o escríbelo
-                            acá. Con eso el sistema cierra la entrega y el alumno recibe
-                            el aviso en su campana.
+                            retiro</strong> y escríbelo acá: el sistema cierra la entrega y
+                            el alumno recibe el aviso en su campana.
                         </p>
                     </div>
                 </div>
@@ -46,7 +45,7 @@ const CoachEntregarPedido = () => {
                         onClick={() => setAbierto(true)}
                         className="w-full rounded-xl bg-orange-500 hover:bg-orange-600 px-5 py-3.5 text-sm font-bold text-white transition-colors"
                     >
-                        📷 Abrir pantalla de entrega
+                        📦 Abrir pantalla de entrega
                     </button>
                 )}
 
@@ -73,6 +72,9 @@ const CoachEntregarPedido = () => {
 
             {abierto && (
                 <ModalEntregarPedido
+                    // El coach NO tiene lector de cámara acá (Bloque B): el modal le dice
+                    // "ingresa el código" a secas. El admin sigue con su texto de siempre.
+                    mencionarEscaneo={false}
                     onCerrar={() => setAbierto(false)}
                     onEntregado={(datos) => setUltima(datos)}
                 />

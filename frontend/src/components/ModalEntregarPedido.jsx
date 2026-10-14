@@ -24,11 +24,16 @@ import { useEntregarPedido } from '../hooks/queries';
  *   * `codigoInicial`: pre-carga el código (el admin entrega uno de la tabla);
  *   * `etiquetaAccion`: rótulo del botón que valida y entrega (por defecto "Entregar";
  *     el panel móvil lo llama "Validar y entregar", que es lo que hace realmente);
+ *   * `mencionarEscaneo`: true (default) → el texto dice "ingresa **o escanea**", que es
+ *     lo que el mesón ve hoy. La pantalla del coach lo pasa en false mientras NO exista
+ *     lector de cámara en el modal (Bloque B): prometer un escaneo que no está es peor
+ *     que no ofrecerlo. Con la prop ausente el DOM es EXACTAMENTE el de siempre.
  *   * `onCerrar`: cierra el modal;
  *   * `onEntregado(datos)`: avisa a la pantalla que la entrega salió bien (refrescos).
  */
 const ModalEntregarPedido = ({
-    codigoInicial = '', etiquetaAccion = 'Entregar', onCerrar, onEntregado,
+    codigoInicial = '', etiquetaAccion = 'Entregar', mencionarEscaneo = true,
+    onCerrar, onEntregado,
 }) => {
     const [codigo, setCodigo] = useState(codigoInicial || '');
     const [error, setError] = useState('');
@@ -43,7 +48,9 @@ const ModalEntregarPedido = ({
         evento.preventDefault();
         const limpio = (codigo || '').trim();
         if (!limpio) {
-            setError('Ingresa o escanea el código de retiro.');
+            setError(mencionarEscaneo
+                ? 'Ingresa o escanea el código de retiro.'
+                : 'Ingresa el código de retiro.');
             return;
         }
         setError('');
@@ -75,7 +82,8 @@ const ModalEntregarPedido = ({
 
                 <form onSubmit={enviar} className="p-4 space-y-3">
                     <p className="text-sm text-zinc-400">
-                        Ingresa o escanea el <strong className="text-zinc-200">código de retiro</strong>{' '}
+                        Ingresa{mencionarEscaneo ? ' o escanea' : ''} el{' '}
+                        <strong className="text-zinc-200">código de retiro</strong>{' '}
                         que el alumno muestra en su celular (formato{' '}
                         <span className="font-mono">UB-XXXX</span>).
                     </p>
