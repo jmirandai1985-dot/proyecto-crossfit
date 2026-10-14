@@ -4,15 +4,18 @@ import { useQueryClient } from '@tanstack/react-query';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import {
-    SIN_DATOS, useAlumnosCoachEnRiesgo, useAlumnosDeCoach, useClasesCoach,
-    useCoachDisciplinas, useConfirmarAsistenciaClase, useContactarAlumnoCoach, useGuardarWod,
-    useHistorialRmTodos, useMarcarAsistenciaReserva, useProgresoAlumnosCoach,
-    useReservasPorClase, useRmsAlumno, useTodosLosWods,
+    SIN_DATOS, useAlumnosCoachEnRiesgo, useAlumnosDeCoach, useClasesAsistenciaHoy,
+    useClasesCoach, useCoachDisciplinas, useContactarAlumnoCoach, useHistorialRmTodos,
+    useProgresoAlumnosCoach, useReservasPorClase, useRmsAlumno, useTodosLosWods,
 } from '../../hooks/queries';
 import AsistenciaClases from '../../components/AsistenciaClases';
 import AlumnoFichaCoach from '../../components/AlumnoFichaCoach';
 import PreviewEmailModal from '../../components/PreviewEmailModal';
 import WodDetalleModal from '../../components/WodDetalleModal';
+// Bloque C: el Resumen del mockup (#pantalla-resumen) y sus dos modales.
+import ResumenCoach from '../../components/ResumenCoach';
+import ModalPublicarWod from '../../components/ModalPublicarWod';
+import ModalAgregarSinReserva from '../../components/ModalAgregarSinReserva';
 
 const DashboardCoach = () => {
     const navigate = useNavigate();
@@ -27,12 +30,13 @@ const DashboardCoach = () => {
     const [searchTerm, setSearchTerm] = useState('');
     // Toggle Fase 2: "Ver todas" vs "Ver solo con WOD publicado"
     const [verSoloConWod, setVerSoloConWod] = useState(false);
-    // ── Asistencia inline en tarjetas de "Mis Clases de Hoy" ──
-    const [claseAsistenciaExpandida, setClaseAsistenciaExpandida] = useState(null);
-    // Marcado que tocó el usuario: la lista de alumnos sale de la consulta
-    // (`useReservasPorClase`) y esto sólo guarda los toggles de esta visita.
-    const [asistenciaOverrides, setAsistenciaOverrides] = useState({});
-    const [msgAsistencia, setMsgAsistencia] = useState(null); // { claseId, texto, tipo }
+    // ── Modales del Resumen (Bloque C) ──
+    // "Publicar WOD" (formulario manual o archivo de la semana) y el walk-in ("+ Agregar
+    // alumno sin reserva"). Los dos ESCRIBEN, así que el Resumen muestra después lo que
+    // contestó el backend (`msgPublicado`) en vez de suponerlo.
+    const [modalWod, setModalWod] = useState(false);
+    const [claseSinReserva, setClaseSinReserva] = useState(null);
+    const [msgPublicado, setMsgPublicado] = useState(null);
     // Detalle completo del WOD de una tarjeta (grilla semanal / lista del día):
     // esas tarjetas NAVEGABAN a Gestión de Clases; ahora abren el detalle acá.
     const [wodDetalle, setWodDetalle] = useState(null);       // { wod, clase }
@@ -178,12 +182,12 @@ const DashboardCoach = () => {
     const progresoQ = useProgresoAlumnosCoach(alumnosQ.data);
     const rmsRecientesQ = useHistorialRmTodos(5);
     const alumnoRmsQ = useRmsAlumno(selectedAlumno?.id);
-    const asistenciaQ = useReservasPorClase(claseAsistenciaExpandida);
+    // Clases de HOY con lo que sabe el módulo de Asistencia (estado, marcada y
+    // reservas_count): es la MISMA consulta que usa la pestaña Asistencia, así que la
+    // tarjeta del Resumen y esa pestaña no pueden decir cosas distintas del mismo día.
+    const asistenciaHoyQ = useClasesAsistenciaHoy();
 
     // Mutaciones del panel: entregan el resultado y refrescan la caché por prefijo.
-    const guardarWod = useGuardarWod();
-    const marcarAsistencia = useMarcarAsistenciaReserva();
-    const confirmarAsistenciaClase = useConfirmarAsistenciaClase();
     const contactarAlumno = useContactarAlumnoCoach();
 
     const detalleError = (e) => e?.response?.data?.detail
@@ -228,22 +232,13 @@ const DashboardCoach = () => {
     const umbralRiesgo = riesgoQ.data?.umbral_dias ?? 7;
     const progresoAlumnos = progresoQ.data || SIN_DATOS;
 
-    // Últimos WODs + últimas marcas, mezclados por fecha (lo que antes armaba
-    // `fetchRegistrosRecientes` con un setState y un try/catch anidado).
-    const registrosRecientes = useMemo(() => {
-        const wodsRecientes = [...wods]
-            .sort((a, b) => new Date(b.fecha || 0) - new Date(a.fecha || 0))
-            .slice(0, 5)
-            .map((w) => ({
-                tipo: 'wod', titulo: w.titulo || 'WOD', fecha: w.fecha, estado: w.estado, id: w.id,
-            }));
-        const rmsRecientes = (rmsRecientesQ.data || []).map((r) => ({
-            tipo: 'rm', peso: r.peso_kg, fecha: r.fecha, alumno_id: r.alumno_id, id: r.id,
-        }));
-        return [...wodsRecientes, ...rmsRecientes]
-            .sort((a, b) => new Date(b.fecha || 0) - new Date(a.fecha || 0))
-            .slice(0, 10);
-    }, [wods, rmsRecientesQ.data]);
+    // Cuántos alumnos tienen ALGUNA marca cargada: es el "12 con RMs" del KPI. Sale del
+    // progreso por alumno (`total_rms`) y no de la lista de RMs recientes, que viene
+    // limitada a los últimos 5 y contaría de menos.
+    const alumnosConRms = useMemo(
+        () => progresoAlumnos.filter((a) => (a.total_rms || 0) > 0).length,
+        [progresoAlumnos],
+    );
 
     // RMs del alumno abierto en el tab Alumnos.
     const alumnoRMs = alumnoRmsQ.data || SIN_DATOS;
@@ -253,22 +248,30 @@ const DashboardCoach = () => {
     const cargandoInicial = clasesQ.isPending;
     const cargandoRmsAlumno = alumnoRmsQ.isPending;
 
-    // Asistencia de la clase expandida (tarjeta de "Mis Clases de Hoy"): la lista sale
-    // del backend y `asistenciaOverrides` guarda sólo lo que marcó el usuario.
-    const asistenciaClase = useMemo(() => (asistenciaQ.data || SIN_DATOS).map((r) => ({
-        reserva_id: r.id,
-        alumno_id: r.alumno_id,
-        nombre: r.alumno_nombre || `#${r.alumno_id}`,
-        asistio: r.asistio || false,
-    })), [asistenciaQ.data]);
-    const asistenciaPorClase = useMemo(() => (claseAsistenciaExpandida ? {
-        [claseAsistenciaExpandida]: asistenciaClase.map((a) => (
-            a.reserva_id in asistenciaOverrides
-                ? { ...a, asistio: asistenciaOverrides[a.reserva_id] }
-                : a
-        )),
-    } : {}), [claseAsistenciaExpandida, asistenciaClase, asistenciaOverrides]);
-    const cargandoAsistencia = Boolean(claseAsistenciaExpandida) && asistenciaQ.isPending;
+    // Las clases de hoy cruzadas con lo que sabe Asistencia (estado, `marcada`,
+    // `reservas_count`): el Resumen muestra el MISMO dato que la pestaña Asistencia.
+    const asistenciaHoyPorId = useMemo(() => {
+        const mapa = new Map();
+        for (const c of (asistenciaHoyQ.data || SIN_DATOS)) mapa.set(c.id, c);
+        return mapa;
+    }, [asistenciaHoyQ.data]);
+    const clasesHoyConAsistencia = useMemo(
+        () => clasesHoy.map((c) => ({ ...c, ...(asistenciaHoyPorId.get(c.id) || {}) })),
+        [clasesHoy, asistenciaHoyPorId],
+    );
+    // La "próxima clase" del mockup: la primera de hoy que no está realizada (la que está
+    // EN CURSO o la siguiente); si ya no queda ninguna, la última del día.
+    const proximaClase = useMemo(() => {
+        const porDelante = clasesHoyConAsistencia.filter((c) => c.estado !== 'realizada');
+        return porDelante[0] || clasesHoyConAsistencia[clasesHoyConAsistencia.length - 1] || null;
+    }, [clasesHoyConAsistencia]);
+    // Los 3 números de la tarjeta (con reserva / ya marcaron / faltan): salen de las
+    // reservas de ESA clase con su `asistio` por alumno — nunca de un contador de cobros.
+    const reservasProximaQ = useReservasPorClase(proximaClase?.id);
+    const reservasProxima = useMemo(
+        () => (reservasProximaQ.data || SIN_DATOS), [reservasProximaQ.data],
+    );
+    const cargandoReservasProxima = Boolean(proximaClase) && reservasProximaQ.isPending;
 
     // Secciones caídas: el banner con "Reintentar" (mismo patrón que el panel Admin).
     const erroresBloque = useMemo(() => {
@@ -293,60 +296,6 @@ const DashboardCoach = () => {
     const weekGrid = buildWeekGrid();
 
     // ---- Handlers ----
-    const cargarAsistenciaClase = (claseId) => {
-        // Toggle: si ya está expandida, colapsar. La lista la trae la consulta
-        // (`useReservasPorClase`) y el spinner, su `isPending`: ya no hay setState de
-        // carga ni un array propio que se pueda quedar desincronizado.
-        if (claseAsistenciaExpandida === claseId) {
-            setClaseAsistenciaExpandida(null);
-            return;
-        }
-        setMsgAsistencia(null);
-        setClaseAsistenciaExpandida(claseId);
-    };
-
-    const toggleAsistenciaAlumno = async (claseId, reservaId, valor) => {
-        try {
-            await marcarAsistencia.mutateAsync({ reservaId, asistio: valor });
-            // Se refleja al instante (la consulta se refresca por invalidación).
-            setAsistenciaOverrides(prev => ({ ...prev, [reservaId]: valor }));
-            setMsgAsistencia({ claseId, texto: valor ? '✅ Asistencia guardada (asistió)' : '❌ Asistencia guardada (no asistió)', tipo: 'exito' });
-        } catch (e) {
-            console.error('Error marcando asistencia:', e);
-            setMsgAsistencia({ claseId, texto: 'Error al guardar la asistencia', tipo: 'error' });
-        }
-    };
-
-    const marcarTodosAsistencia = async (claseId, valor) => {
-        const reservas = asistenciaPorClase[claseId] || [];
-        if (reservas.length === 0) return;
-        try {
-            // H-11: un solo request ATOMICO (mismo endpoint que usa el tab Asistencia),
-            // en vez de N PUT /reservas/{id}/asistencia en serie.
-            await confirmarAsistenciaClase.mutateAsync({
-                claseId,
-                asistencias: reservas.map(a => ({ reserva_id: a.reserva_id, asistio: valor })),
-            });
-            setAsistenciaOverrides(prev => {
-                const nuevo = { ...prev };
-                reservas.forEach(a => { nuevo[a.reserva_id] = valor; });
-                return nuevo;
-            });
-            setMsgAsistencia({
-                claseId,
-                texto: valor ? '✅ Todos marcados como ASISTIERON' : '❌ Todos marcados como NO ASISTIERON',
-                tipo: 'exito'
-            });
-        } catch (e) {
-            console.error('Error marcando asistencia (batch)', e);
-            setMsgAsistencia({
-                claseId,
-                texto: e.response?.data?.detail || 'Error al marcar la asistencia en lote',
-                tipo: 'error'
-            });
-        }
-    };
-
     // Contacto por CORREO (reemplaza el viejo WhatsApp/wa.me: decision confirmada).
     // P1: el boton NO envia directo -> abre el PREVIEW del correo (asunto + cuerpo
     // reales, renderizados por el backend). El envio sale desde "Confirmar envío".
@@ -393,29 +342,6 @@ const DashboardCoach = () => {
         }
     };
 
-    const handlePublicarWOD = async () => {
-        if (!wodHoy) return;
-        try {
-            await guardarWod.mutateAsync({
-                wodId: wodHoy.id,
-                payload: {
-                    estado: 'publicado',
-                    titulo: wodHoy.titulo,
-                    descripcion: wodHoy.descripcion,
-                    calentamiento: wodHoy.calentamiento,
-                    fuerza_habilidad: wodHoy.fuerza_habilidad,
-                    wod_principal: wodHoy.wod_principal,
-                    tipo_metcon: wodHoy.tipo_metcon
-                },
-            });
-            // Sin `setWodHoy` ni `fetchAllData`: invalidar ['wods'] refresca la tarjeta
-            // Y el resto de las pantallas que muestran ese WOD.
-        } catch (error) {
-            console.error('Error publishing WOD:', error);
-            alert('Error al publicar el WOD');
-        }
-    };
-
     const progresoFiltrado = filtroProgreso === 'todos'
         ? progresoAlumnos
         : progresoAlumnos.filter(a => a.estado === filtroProgreso);
@@ -429,14 +355,6 @@ const DashboardCoach = () => {
     // H-08: X/Y publicados debe contar los WODs realmente publicados (no los borradores)
     const wodsPublicados = new Set((wods || []).filter(w => w.estado === 'publicado').map(w => w.id));
     const clasesConWodPublicado = clasesSemana.filter(c => c.wod_id && wodsPublicados.has(c.wod_id)).length;
-
-    const formatFecha = (fechaStr) => {
-        if (!fechaStr) return '';
-        const d = new Date(fechaStr + 'T12:00:00');
-        const dias = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-        const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-        return `${dias[d.getDay()]} ${d.getDate()} ${meses[d.getMonth()]}`;
-    };
 
     const getProgresoColor = (estado) => {
         if (estado === 'activo') return 'text-green-600 bg-green-50 border-green-300';
@@ -569,194 +487,33 @@ const DashboardCoach = () => {
                 {/* ─── CONTENIDO BASADO EN URL (sin pestañas internas duplicadas) ─── */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" data-testid="coach-dashboard-content">
                     <div className="p-6">
-                        {/* ─── TAB: RESUMEN ─── */}
+                        {/* ─── TAB: RESUMEN (mockup #pantalla-resumen) ─── */}
                         {activeTab === 'resumen' && (
-                            <div className="space-y-6">
-                                {/* (Fase 1) Bloque "WOD del Día" duplicado eliminado — la tarjeta superior
-                                    ya muestra el estado e invita a ver Mis WODs (abre ?tab=wods). */}
-
-                                {/* Clases de Hoy */}
-                                <div>
-                                    <h3 className="text-lg font-bold text-gray-900 mb-3">📅 Mis Clases de Hoy</h3>
-                                    {clasesHoy.length > 0 ? (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                            {clasesHoy.map((clase) => (
-                                                <div key={clase.id} className="p-4 bg-white rounded-lg border border-gray-200 hover:border-orange-300 transition-colors">
-                                                    <div className="flex justify-between items-start">
-                                                        <div>
-                                                            <p className="font-semibold text-gray-900">{clase.disciplina_nombre || 'Clase'}</p>
-                                                            <p className="text-sm text-gray-600">⏰ {clase.hora_inicio} - {clase.hora_fin}</p>
-                                                            <p className="text-sm text-gray-600">👥 {clase.asistentes_confirmados || 0}/{clase.cupo_maximo || 0} alumnos</p>
-                                                        </div>
-                                                        <div className="flex flex-col sm:flex-row gap-2">
-                                                            <button
-                                                                onClick={() => navigate(`/coach/gestion-clases?clase=${clase.id}`)}
-                                                                className="px-3 py-1 bg-emerald-600 text-white rounded text-xs font-medium hover:bg-emerald-700 transition-colors"
-                                                            >
-                                                                📝 Publicar {getTerminoDisciplina(clase.disciplina_nombre)}
-                                                            </button>
-                                                            <button
-                                                                onClick={() => cargarAsistenciaClase(clase.id)}
-                                                                className={`px-3 py-1 rounded text-xs font-medium transition-colors ${claseAsistenciaExpandida === clase.id
-                                                                    ? 'bg-orange-600 text-white'
-                                                                    : 'bg-orange-500 text-white hover:bg-orange-600'
-                                                                    }`}
-                                                            >
-                                                                {claseAsistenciaExpandida === clase.id ? '▼ Cerrar Asistencia' : '📋 Asistencia'}
-                                                            </button>
-                                                        </div>
-                                                    </div>
-
-                                                    {/* Panel de asistencia expandible inline */}
-                                                    {claseAsistenciaExpandida === clase.id && (
-                                                        <div className="mt-4 p-3 bg-orange-50 rounded-lg border border-orange-200">
-                                                            {/* Feedback visual de guardado */}
-                                                            {msgAsistencia?.claseId === clase.id && (
-                                                                <div className={`mb-3 px-3 py-2 rounded-md text-sm font-medium ${msgAsistencia.tipo === 'exito'
-                                                                    ? 'bg-green-100 text-green-800 border border-green-300'
-                                                                    : 'bg-red-100 text-red-500 border border-red-500/30'
-                                                                    }`}>
-                                                                    {msgAsistencia.texto}
-                                                                </div>
-                                                            )}
-
-                                                            {cargandoAsistencia ? (
-                                                                <div className="flex items-center justify-center py-6">
-                                                                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-orange-500"></div>
-                                                                </div>
-                                                            ) : (asistenciaPorClase[clase.id] || []).length === 0 ? (
-                                                                <p className="text-sm text-gray-500 text-center py-4">
-                                                                    Sin alumnos reservados en esta clase
-                                                                </p>
-                                                            ) : (
-                                                                <>
-                                                                    {/* Botones "marcar todos" */}
-                                                                    <div className="flex gap-2 mb-3">
-                                                                        <button
-                                                                            onClick={() => marcarTodosAsistencia(clase.id, true)}
-                                                                            className="px-3 py-1.5 bg-emerald-500 text-white rounded text-xs font-bold hover:bg-emerald-600 transition-colors"
-                                                                        >
-                                                                            ✅ Todos ASISTIERON
-                                                                        </button>
-                                                                        <button
-                                                                            onClick={() => marcarTodosAsistencia(clase.id, false)}
-                                                                            className="px-3 py-1.5 bg-red-500 text-white rounded text-xs font-bold hover:bg-red-600 transition-colors"
-                                                                        >
-                                                                            ❌ Todos FALTA
-                                                                        </button>
-                                                                    </div>
-                                                                    {/* Lista de alumnos con toggle individual */}
-                                                                    <div className="space-y-2 max-h-64 overflow-y-auto">
-                                                                        {(asistenciaPorClase[clase.id] || []).map(a => (
-                                                                            <button
-                                                                                key={a.reserva_id}
-                                                                                onClick={() => toggleAsistenciaAlumno(clase.id, a.reserva_id, !a.asistio)}
-                                                                                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${a.asistio
-                                                                                    ? 'bg-emerald-100 text-emerald-700 border-emerald-400 hover:bg-emerald-500/20'
-                                                                                    : 'bg-red-100 text-red-500 border-red-500/40 hover:bg-red-500/20'
-                                                                                    }`}
-                                                                            >
-                                                                                <span>{a.nombre}</span>
-                                                                                <span>{a.asistio ? '✅ ASISTIÓ' : '❌ FALTA'}</span>
-                                                                            </button>
-                                                                        ))}
-                                                                    </div>
-                                                                </>
-                                                            )}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <p className="text-gray-500 text-sm">No tienes clases programadas para hoy</p>
-                                    )}
-                                </div>
-
-                                {/* Alumnos en Progreso */}
-                                <div>
-                                    <h3 className="text-lg font-bold text-gray-900 mb-3">📈 Alumnos con Más RMs</h3>
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full">
-                                            <thead className="bg-gray-50">
-                                                <tr>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Alumno</th>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">RMs</th>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Progreso</th>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Acción</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-zinc-800">
-                                                {progresoAlumnos.slice(0, 5).map((alumno) => (
-                                                    <tr key={alumno.id} className="hover:bg-gray-50">
-                                                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{alumno.nombre}</td>
-                                                        <td className="px-4 py-3 text-sm text-gray-600">{alumno.total_rms}</td>
-                                                        <td className="px-4 py-3">
-                                                            <span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full border ${getProgresoColor(alumno.estado)}`}>
-                                                                {getProgresoIcon(alumno.estado)}
-                                                                {alumno.estado === 'activo' ? 'Progresando' : alumno.estado === 'iniciando' ? 'Iniciando' : 'Sin datos'}
-                                                            </span>
-                                                        </td>
-                                                        <td className="px-4 py-3">
-                                                            <button
-                                                                onClick={() => { setSelectedAlumno(alumno); navigate('/coach/dashboard?tab=alumnos'); }}
-                                                                className="text-xs text-orange-500 hover:text-orange-700 font-medium"
-                                                            >
-                                                                Ver RMs
-                                                            </button>
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                                {progresoAlumnos.length === 0 && (
-                                                    <tr>
-                                                        <td colSpan="4" className="px-4 py-6 text-center text-gray-500 text-sm">
-                                                            No hay datos de alumnos disponibles
-                                                        </td>
-                                                    </tr>
-                                                )}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-
-                                {/* Registros Recientes */}
-                                <div>
-                                    <h3 className="text-lg font-bold text-gray-900 mb-3">🕐 Registros Recientes</h3>
-                                    <div className="space-y-2">
-                                        {registrosRecientes.slice(0, 5).map((reg, idx) => (
-                                            <div key={idx} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                                                <span className="text-lg">{reg.tipo === 'wod' ? '💪' : '🏋️'}</span>
-                                                <div className="flex-1">
-                                                    {reg.tipo === 'wod' ? (
-                                                        <p className="text-sm font-medium text-gray-900">WOD: {reg.titulo}</p>
-                                                    ) : (
-                                                        <p className="text-sm font-medium text-gray-900">RM: {reg.peso} kg</p>
-                                                    )}
-                                                    <p className="text-xs text-gray-500">{reg.fecha ? formatFecha(reg.fecha) : ''}</p>
-                                                </div>
-                                                <span className={`text-xs px-2 py-1 rounded-full ${reg.tipo === 'wod' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
-                                                    {reg.tipo === 'wod' ? 'WOD' : 'RM'}
-                                                </span>
-                                            </div>
-                                        ))}
-                                        {registrosRecientes.length === 0 && (
-                                            <p className="text-gray-500 text-sm text-center py-4">No hay registros recientes</p>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {alumnosEnRiesgo.length > 0 && (
-                                    <div className="bg-red-50 border-l-4 border-red-500 rounded-lg p-4">
-                                        <div className="flex items-start gap-3">
-                                            <span className="text-2xl">⚠️</span>
-                                            <div>
-                                                <p className="font-bold text-gray-900">{alumnosEnRiesgo.length} alumno(s) en riesgo de abandono</p>
-                                                <p className="text-sm text-gray-600 mt-1">Llevan más de {umbralRiesgo} días sin entrenar. Revisa la pestaña de Riesgo para contactarlos.</p>
-                                            </div>
-                                        </div>
+                            <>
+                                {msgPublicado && (
+                                    <div className="mb-3 rounded-xl border border-emerald-700/60 bg-emerald-900/20 px-4 py-3 text-sm text-emerald-100"
+                                        data-testid="resumen-publicado">
+                                        {msgPublicado}
                                     </div>
                                 )}
-                            </div>
+                                <ResumenCoach
+                                    clasesHoy={clasesHoyConAsistencia}
+                                    alumnosActivos={alumnos.length}
+                                    alumnosConRms={alumnosConRms}
+                                    wodHoy={wodHoy}
+                                    enRiesgo={alumnosEnRiesgo.length}
+                                    umbralRiesgo={umbralRiesgo}
+                                    proximaClase={proximaClase}
+                                    reservasProxima={reservasProxima}
+                                    cargandoReservas={cargandoReservasProxima}
+                                    onPublicarWod={() => setModalWod(true)}
+                                    onAgregarSinReserva={(clase) => setClaseSinReserva(clase)}
+                                    onAbrirAsistencia={() => navigate('/coach/dashboard?tab=asistencia')}
+                                    onAbrirClase={irAGestionClases}
+                                    onIrA={(tab) => navigate('/coach/dashboard?tab=' + tab)}
+                                    onAbrirDetalleWod={(clase, wod) => abrirDetalleWod(clase, wod)}
+                                />
+                            </>
                         )}
 
                         {/* ─── TAB: CLASES (Fusión Fase 2: Clases + Mis WODs con toggle) ─── */}
@@ -1294,7 +1051,7 @@ const DashboardCoach = () => {
                             franja (Mañana/Tarde/Noche, mockup 6b); en tablet/escritorio
                             sigue el acordeón por disciplina, igual que el panel del admin. */}
                         {activeTab === 'asistencia' && (
-                            <AsistenciaClases franjas />
+                            <AsistenciaClases franjas permitirSinReserva />
                         )}
                     </div>
                 </div>
@@ -1332,6 +1089,36 @@ const DashboardCoach = () => {
                                 setWodDetalle(null);
                                 irAGestionClases(c);
                             },
+                        }}
+                    />
+                )}
+
+                {/* Walk-in del Resumen: es el MISMO modal del detalle de Asistencia. */}
+                {claseSinReserva && (
+                    <ModalAgregarSinReserva
+                        clase={claseSinReserva}
+                        onCerrar={() => setClaseSinReserva(null)}
+                        onAgregado={(alumno) => {
+                            setClaseSinReserva(null);
+                            setMsgPublicado(alumno.cargo === 'credito'
+                                ? `✅ ${alumno.nombre} agregado como presente (se le descontó 1 crédito).`
+                                : `✅ ${alumno.nombre} agregado como presente sin cargo (queda en su historial).`);
+                        }}
+                    />
+                )}
+
+                {/* "Publicar WOD": formulario manual (con el aviso del día) o archivo semanal. */}
+                {modalWod && (
+                    <ModalPublicarWod
+                        clase={proximaClase || clasesHoy[0] || null}
+                        onCerrar={() => setModalWod(false)}
+                        onPublicado={(datos) => {
+                            setModalWod(false);
+                            setMsgPublicado(datos.origen === 'archivo'
+                                ? `✅ Semana programada: ${datos.dias} día(s) en ${datos.clases} clase(s)`
+                                  + (datos.avisos ? ` y ${datos.avisos} aviso(s) con fecha.` : '.')
+                                : `✅ WOD publicado en ${datos.clases} clase(s)`
+                                  + (datos.aviso ? ' y aviso de hoy publicado.' : '.'));
                         }}
                     />
                 )}
