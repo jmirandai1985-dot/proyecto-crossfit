@@ -71,6 +71,9 @@ def test_b_el_dashboard_del_coach_consume_los_hooks():
     for prohibido in PROHIBIDO + ["useEffect(", "useCallback("]:
         assert prohibido not in f, f"DashboardCoach todavía usa {prohibido}"
     # Una consulta por dato, con las claves que comparte con Gestión de Clases.
+    # (2026-10-14: se actualizan las líneas del Resumen de Asistencia del panel —la
+    # `claseAsistenciaExpandida` y sus derivados se fueron con el Resumen viejo en `0a1225e`,
+    # y el detalle de asistencia por clase ahora cuelga de la PRÓXIMA clase del día.)
     for linea in ("const clasesQ = useClasesCoach(usuario_id, weekRange.start, weekRange.end);",
                   "const wodsQ = useTodosLosWods();",
                   "const riesgoQ = useAlumnosCoachEnRiesgo(usuario_id);",
@@ -79,22 +82,19 @@ def test_b_el_dashboard_del_coach_consume_los_hooks():
                   "const progresoQ = useProgresoAlumnosCoach(alumnosQ.data);",
                   "const rmsRecientesQ = useHistorialRmTodos(5);",
                   "const alumnoRmsQ = useRmsAlumno(selectedAlumno?.id);",
-                  "const asistenciaQ = useReservasPorClase(claseAsistenciaExpandida);",
+                  "const reservasProximaQ = useReservasPorClase(proximaClase?.id);",
                   "const reintentar = () => qc.invalidateQueries();"):
         assert linea in f, f"falta: {linea}"
     # Los valores del backend se DERIVAN (antes cada uno era un useState propio).
-    for derivado in ("const clasesFiltradas = useMemo(() => {",
+    for derivado in ("const clasesFiltradas = useMemo(() => (",
                      "const coachDisciplinas = useMemo(",
                      "const clasesHoy = useMemo(",
                      "const clasesSemana = useMemo(",
                      "const wodHoy = useMemo(",
-                     "const registrosRecientes = useMemo(",
-                     "const asistenciaClase = useMemo(",
-                     "const asistenciaPorClase = useMemo(",
                      "const erroresBloque = useMemo(",
                      "const cargandoInicial = clasesQ.isPending;",
                      "const cargandoRmsAlumno = alumnoRmsQ.isPending;",
-                     "const cargandoAsistencia = Boolean(claseAsistenciaExpandida) && asistenciaQ.isPending;"):
+                     "const cargandoReservasProxima = Boolean(proximaClase) && reservasProximaQ.isPending;"):
         assert derivado in f, f"falta derivar: {derivado}"
     # Ni la carga ni el banner se sincronizan a mano; "Reintentar" refetchea las consultas.
     assert "onClick={reintentar}" in f
@@ -162,8 +162,9 @@ def test_d_las_mutaciones_y_las_claves_se_comparten_entre_las_dos_pantallas():
         assert "useReservasPorClase(" in pantalla
         assert "useCoachDisciplinas(" in pantalla
         assert "useTodosLosWods(" in pantalla
-    for uso in ("await marcarAsistencia.mutateAsync({ reservaId, asistio: valor })",
-                "await confirmarAsistenciaClase.mutateAsync({"):
+    # El contacto por correo del panel (la única mutación que queda en el Dashboard: marcar
+    # asistencia se fue con el Resumen viejo, ahora se hace en la pestaña Asistencia).
+    for uso in ("await contactarAlumno.mutateAsync({",):
         assert uso in dash, f"el Dashboard no usa {uso}"
     for uso in ("await guardarWodMut.mutateAsync({",
                 "await crearWodsBatch.mutateAsync({ body, params })",

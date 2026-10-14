@@ -141,8 +141,25 @@ def listar_clases(
         conditions.append("c.disciplina_id = :disciplina_id")
         query_params["disciplina_id"] = disciplina_id
     if coach_id is not None:
+        # ── "MIS clases" = las TRES formas en que una clase puede ser del coach ──
+        #   1. me la asignaron a mí (`clases.coach_id`: el admin desde Supervisión, o yo al
+        #      tomarla con `alcance=clase`);
+        #   2. el HORARIO recurrente me tiene vigente (`horarios_coach`: cubre las clases
+        #      ya generadas de ese horario);
+        #   3. es de una disciplina que dicto (`coach_disciplinas`): el "pool" que puedo
+        #      tomar aunque todavía no tenga coach.
+        # ANTES sólo miraba (3). Consecuencia real: una clase que el admin me asignaba —o
+        # que yo mismo tomaba— de una disciplina que no estaba en mi lista NO aparecía en
+        # mi propio panel (200 OK con lista vacía). Reportado en PROD (2026-10-14): la
+        # coach no tenía clases de su única disciplina (Gap, sin horarios cargados) y sus
+        # clases asignadas no se contaban → "Clases hoy / Alumnos activos / En riesgo" en 0.
+        # El subquery de disciplinas lleva `tenant_id` para no cruzar boxes.
         conditions.append(
-            "c.disciplina_id IN (SELECT disciplina_id FROM coach_disciplinas WHERE coach_id = :coach_id AND activo = true)")
+            "(c.coach_id = :coach_id"
+            " OR hco.coach_id = :coach_id"
+            " OR c.disciplina_id IN (SELECT disciplina_id FROM coach_disciplinas"
+            " WHERE coach_id = :coach_id AND activo = true"
+            " AND tenant_id = c.tenant_id))")
         query_params["coach_id"] = coach_id
     if fecha is not None:
         conditions.append("c.fecha = :fecha")

@@ -204,14 +204,28 @@ const DashboardCoach = () => {
         .filter((cd) => cd.activo && cd.coach_id === usuario_id)
         .map((cd) => cd.disciplina_id), [coachDiscQ.data, usuario_id]);
 
-    // Sus clases de la semana, filtradas por sus disciplinas. H-12: el filtro usa la
-    // lista recién calculada, no un estado que en la 1ra carga todavía está vacío.
-    const clasesFiltradas = useMemo(() => {
-        const lista = clasesQ.data || SIN_DATOS;
-        return coachDisciplinas.length > 0
-            ? lista.filter((c) => coachDisciplinas.includes(c.disciplina_id))
-            : lista;
-    }, [clasesQ.data, coachDisciplinas]);
+    // Sus clases: lo MÍO, con los tres caminos que aplica el backend (`GET /clases/?coach_id=`).
+    // H-12: el filtro usa la lista recién calculada, no un estado que en la 1ra carga todavía
+    // está vacío. Y ojo con el `else` que había antes: con la lista de disciplinas VACÍA el
+    // panel mostraba TODAS las clases del box (el coach veía clases que no eran suyas). Ahora
+    // ve sólo lo suyo —misma regla que el backend— y lo suyo no se pierde cuando una clase
+    // me la asignaron a mí (`coach_id`) aunque su disciplina no esté en mi lista.
+    const esMiClase = (c) => coachDisciplinas.includes(c.disciplina_id)
+        || c.coach_id === usuario_id
+        || c.horario_coach_id === usuario_id;
+    const clasesFiltradas = useMemo(() => (clasesQ.data || SIN_DATOS).filter(esMiClase),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [clasesQ.data, coachDisciplinas, usuario_id]);
+
+    // ¿El coach tiene ALGÚN vínculo con clases (alguna disciplina activa o alguna clase
+    // asignada a él)? Si no tiene ninguno, los 0 del Resumen son REALES por falta de
+    // asignación —no un error de red ni de filtro— y el Resumen lo dice en pantalla en vez
+    // de mostrar un 0 mudo (el caso que llegó de PROD).
+    const sinAsignaciones = useMemo(
+        () => coachDisciplinas.length === 0 && !(clasesQ.data || SIN_DATOS)
+            .some((c) => c.coach_id === usuario_id || c.horario_coach_id === usuario_id),
+        [coachDisciplinas, clasesQ.data, usuario_id],
+    );
 
     const clasesHoy = useMemo(
         () => clasesFiltradas.filter((c) => fechaISOde(c) === today),
@@ -448,6 +462,7 @@ const DashboardCoach = () => {
                                 )}
                                 <ResumenCoach
                                     clasesHoy={clasesHoyConAsistencia}
+                                    sinAsignaciones={sinAsignaciones}
                                     alumnosActivos={alumnos.length}
                                     alumnosConRms={alumnosConRms}
                                     wodHoy={wodHoy}

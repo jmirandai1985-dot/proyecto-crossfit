@@ -41,6 +41,9 @@ import {
  *   enRiesgo/umbralRiesgo  alumnos sin entrenar y el umbral en días,
  *   proximaClase      la clase EN CURSO o la próxima de hoy (null si ya no queda),
  *   reservasProxima   reservas de esa clase: `asistio` → los 3 números del mockup,
+ *   sinAsignaciones   el coach todavía NO tiene disciplinas ni clases asignadas: los 0 son
+ *                     reales por falta de asignación, así que la pantalla lo dice en vez
+ *                     de mostrar un 0 mudo (el caso que llegó de PROD),
  *   onPublicarWod · onAgregarSinReserva(clase) · onAbrirAsistencia · onAbrirClase(clase)
  *   · onIrA(tab) · onAbrirDetalleWod(clase, wod).
  */
@@ -60,8 +63,8 @@ const BADGE = {
 const ResumenCoach = ({
     clasesHoy = [], alumnosActivos = 0, alumnosConRms = 0, wodHoy = null,
     enRiesgo = 0, umbralRiesgo = 7, proximaClase = null, reservasProxima = [],
-    cargandoReservas = false, onPublicarWod, onAgregarSinReserva, onAbrirAsistencia,
-    onAbrirClase, onIrA, onAbrirDetalleWod,
+    cargandoReservas = false, sinAsignaciones = false, onPublicarWod, onAgregarSinReserva,
+    onAbrirAsistencia, onAbrirClase, onIrA, onAbrirDetalleWod,
 }) => {
     const asistentesHoy = clasesHoy.reduce(
         (total, c) => total + (c.asistentes_confirmados ?? 0), 0);
@@ -87,7 +90,11 @@ const ResumenCoach = ({
                     data-testid="kpi-clases-hoy" className={KPI_TOCABLE}>
                     <p className="text-[10px] uppercase tracking-wide text-zinc-500">Clases hoy</p>
                     <p className="mt-1 text-2xl font-bold text-zinc-100">{clasesHoy.length}</p>
-                    <p className="text-[10.5px] text-zinc-400">{asistentesHoy} asistentes</p>
+                    {/* Si el coach no tiene NADA asignado, el 0 no se explica solo: acá
+                        arriba es donde primero se mira cuando "todo está en 0". */}
+                    <p className="text-[10.5px] text-zinc-400">{sinAsignaciones
+                        ? 'Sin clases asignadas'
+                        : `${asistentesHoy} asistentes`}</p>
                 </button>
 
                 <button type="button" onClick={() => onIrA && onIrA('alumnos')}
@@ -173,8 +180,11 @@ const ResumenCoach = ({
                     Mis clases de hoy
                 </p>
                 {clasesHoy.length === 0 ? (
-                    <p className="rounded-[9px] border border-zinc-800 bg-zinc-900 px-3 py-4 text-center text-[12px] text-zinc-400">
-                        No tienes clases programadas para hoy.
+                    <p className="rounded-[9px] border border-zinc-800 bg-zinc-900 px-3 py-4 text-center text-[12px] text-zinc-400"
+                        data-testid="resumen-sin-clases">
+                        {sinAsignaciones
+                            ? 'Todavía no tienes clases asignadas: pídele al admin que te asigne tus disciplinas u horarios.'
+                            : 'No tienes clases programadas para hoy. Si esperabas tener, revisa con el admin que tus disciplinas y horarios estén cargados.'}
                     </p>
                 ) : (
                     <div className="space-y-2">

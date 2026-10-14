@@ -34,8 +34,25 @@ HOY = date.today()
 
 
 def _one(sql, **params):
+    """SELECT: conexión de sólo lectura."""
     with engine.connect() as c:
         return c.execute(text(sql), params).first()
+
+
+def _one_commit(sql, **params):
+    """INSERT ... RETURNING: COMMITEA la fila.
+
+    ⚠️ Para escribir no sirve `_one`: `engine.connect()` sin commit hace ROLLBACK al cerrar,
+    así que la clase/coach recién creado no existiría para la API (usa otra conexión) y los
+    tests fallaban con "Clase no encontrada" en vez de probar tomar/soltar.
+    """
+    c = engine.connect()
+    try:
+        fila = c.execute(text(sql), params).first()
+        c.commit()
+        return fila
+    finally:
+        c.close()
 
 
 def _all(sql, **params):
@@ -81,7 +98,7 @@ def _horario_con_coach(tenant_id=None):
 
 
 def _crear_clase(fecha, horario):
-    fila = _one(
+    fila = _one_commit(
         "INSERT INTO clases (tenant_id, horario_base_id, disciplina_id, fecha, "
         "hora_inicio, hora_fin, cupo_maximo, cupo_original, asistentes_confirmados, "
         "cancelada) VALUES (:t, :h, :d, :f, :hi, :hf, :c, :c, 0, false) "
@@ -457,7 +474,7 @@ def test_asignar_un_coach_de_otra_disciplina_marca_emergencia():
 
 def _crear_coach_temporal(horario):
     """Coach de prueba (activo) asignado a la disciplina del horario."""
-    fila = _one(
+    fila = _one_commit(
         "INSERT INTO usuarios (tenant_id, rut, nombre, correo, password_hash, "
         "rol, activo, estado, acepta_correo_reactivacion, cambiar_password_al_login) "
         "VALUES (:t, :rut, 'zz_test_coach_b6', :correo, 'x', 'coach', true, "

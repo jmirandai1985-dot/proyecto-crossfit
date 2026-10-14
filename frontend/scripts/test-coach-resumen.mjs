@@ -116,5 +116,25 @@ ok(/Ingresa\{mencionarEscaneo \? ' o escanea' : ''\}/.test(MODAL_ENTREGA),
     'el modal compone el texto según la prop (por defecto, el de siempre)');
 ok(/mencionarEscaneo = true/.test(MODAL_ENTREGA), 'la prop arranca en true: el admin queda igual');
 
+console.log('== 7. El 0 del panel explica la causa (bug de PROD) ==');
+// En PROD el panel mostraba Clases hoy / Alumnos activos / En riesgo en 0 con las requests
+// en 200 OK, sin decir por qué. Dos arreglos: (a) lo MÍO no se pierde aunque su disciplina no
+// esté en mi lista (la clase me la asignó el admin o la tomé yo), y (b) cuando el coach no
+// tiene NADA asignado, la pantalla lo dice en vez de mostrar un 0 mudo.
+ok(/const esMiClase = \(c\) => coachDisciplinas\.includes\(c\.disciplina_id\)/.test(DASH),
+    'el filtro local reconoce las clases de mis disciplinas');
+ok(/c\.coach_id === usuario_id/.test(DASH) && /c\.horario_coach_id === usuario_id/.test(DASH),
+    'y también las que me asignaron a mí y las de mi horario vigente (coach_id / horario_coach_id)');
+eq(/coachDisciplinas\.length > 0[\s\S]{0,90}: lista;/.test(DASH), false,
+    'sin el "si no tengo disciplinas muestro TODAS las clases del box"');
+ok(/const sinAsignaciones = useMemo/.test(DASH) && /sinAsignaciones=\{sinAsignaciones\}/.test(DASH),
+    'el Resumen recibe si el coach no tiene nada asignado');
+ok(/sinAsignaciones = false/.test(RESUMEN), 'la prop arranca en false (nadie queda en el estado vacío)');
+ok(/Sin clases asignadas/.test(RESUMEN), 'el KPI de clases lo dice cuando no hay nada asignado');
+ok(/data-testid="resumen-sin-clases"/.test(RESUMEN), 'la lista "Mis clases de hoy" tiene su estado vacío');
+ok(/pídele al admin que te asigne tus disciplinas u horarios/.test(RESUMEN),
+    'el estado vacío dice qué hacer (y a quién pedírselo)');
+
+
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);
