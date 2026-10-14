@@ -1,4 +1,7 @@
 import React from 'react';
+import {
+    etiquetaEstado, estadoFila, horaCorta, reservasDe, textoProgreso,
+} from '../utils/franjasAsistencia';
 
 /**
  * Resumen del panel del coach (mockup `#pantalla-resumen`).
@@ -8,30 +11,58 @@ import React from 'react';
  * MISMA tarjeta del teléfono, sin inventar un layout de PC (si algún día se quiere uno, se
  * decide antes, no acá).
  *
+ * LO QUE SE VE ES EL MOCKUP, CAMPO POR CAMPO (`#pantalla-resumen`), en este orden:
+ *   1. el grid 2x2: Clases hoy · Alumnos activos · WOD del día (con el botón inline
+ *      "+ Publicar WOD") · En riesgo;
+ *   2. la tarjeta ANCHA de Asistencia (ocupa las 2 columnas): los 3 números —con reserva /
+ *      ya marcaron / faltan—, clickeable, con "+ Agregar alumno sin reserva" adentro;
+ *   3. "Mis clases de hoy": una fila por clase, con su barra de color y su badge de estado.
+ *
  * LA REGLA DE NEGOCIO QUE ORDENA LA PANTALLA (y su copy): el alumno RESERVA y marca su
  * propia asistencia; el coach revisa y corrige a quien falte. El crédito se descuenta al
  * RESERVAR (`POST /reservas`), no cuando el coach marca: por eso la tarjeta de Asistencia
  * habla de "con reserva / ya marcaron / faltan" —nunca de cobros— y el único botón de
  * corrección es "Agregar alumno sin reserva", que dice ahí mismo si descuenta el crédito.
  *
+ * LOS ESTADOS NO SE RE-IMPLEMENTAN ACÁ: salen de `utils/franjasAsistencia` (`estadoFila`,
+ * `etiquetaEstado` y `textoProgreso`), los mismos que usa la pestaña Asistencia —"12/12
+ * presentes", "9/14 marcados", "Hecha" / "En curso" / "Pendiente"—, para que las dos
+ * pantallas que muestran el mismo día no puedan decir cosas distintas.
+ *
+ * OJO CON LA SKIN (`src/index.css`): reescribe `bg-emerald-500` a NARANJA con `!important`,
+ * así que la barra verde de "Hecha" va con `bg-green-500` (que la skin no toca y es el verde
+ * del mockup) y los badges usan tonos 300/950, que tampoco aparecen en la skin.
+ *
  * Props (todo lo que necesita ya lo tiene el Dashboard: acá no se piden datos):
  *   clasesHoy         clases de hoy del coach (con `estado`, `marcada` y `reservas_count`
  *                     cuando el backend de Asistencia los trae),
  *   alumnosActivos    alumnos del coach · alumnosConRms los que tienen alguna marca,
- *   wodHoy            WOD de hoy (null = sin publicar),
+ *   wodHoy            WOD de hoy (sin publicar o en borrador = "Sin publicar"),
  *   enRiesgo/umbralRiesgo  alumnos sin entrenar y el umbral en días,
  *   proximaClase      la clase EN CURSO o la próxima de hoy (null si ya no queda),
  *   reservasProxima   reservas de esa clase: `asistio` → los 3 números del mockup,
  *   onPublicarWod · onAgregarSinReserva(clase) · onAbrirAsistencia · onAbrirClase(clase)
  *   · onIrA(tab) · onAbrirDetalleWod(clase, wod).
  */
+// Barra de la fila y badge del estado, con los colores del mockup: verde la hecha, roja la
+// que está en curso y ámbar la que todavía no parte.
+const BARRA = {
+    hecha: 'bg-green-500',
+    'en-curso': 'bg-red-500',
+    pendiente: 'bg-amber-500',
+};
+const BADGE = {
+    hecha: 'text-emerald-300 bg-emerald-950/60',
+    'en-curso': 'text-red-200 bg-red-950/60',
+    pendiente: 'text-amber-200 bg-amber-950/60',
+};
+
 const ResumenCoach = ({
     clasesHoy = [], alumnosActivos = 0, alumnosConRms = 0, wodHoy = null,
     enRiesgo = 0, umbralRiesgo = 7, proximaClase = null, reservasProxima = [],
     cargandoReservas = false, onPublicarWod, onAgregarSinReserva, onAbrirAsistencia,
     onAbrirClase, onIrA, onAbrirDetalleWod,
 }) => {
-    const hora = (h) => (h ? String(h).slice(0, 5) : '');
     const asistentesHoy = clasesHoy.reduce(
         (total, c) => total + (c.asistentes_confirmados ?? 0), 0);
 
@@ -40,21 +71,17 @@ const ResumenCoach = ({
     const yaMarcaron = reservasProxima.filter((r) => r.asistio).length;
     const faltan = Math.max(conReserva - yaMarcaron, 0);
 
-    const KPI = 'rounded-xl border border-zinc-800 bg-zinc-900 p-3 text-left transition-colors';
-    const KPI_TOCABLE = `${KPI} hover:border-zinc-700 active:bg-zinc-800`;
+    // El KPI del WOD: publicado muestra su título; sin WOD —o en borrador— dice
+    // "Sin publicar", que es lo que al coach le queda por hacer ese día.
+    const wodPublicado = Boolean(wodHoy && wodHoy.estado === 'publicado');
 
-    const estadoDe = (clase) => {
-        if (clase?.marcada) {
-            return { texto: 'Hecha', color: 'text-emerald-300 bg-emerald-900/30', barra: 'bg-emerald-500' };
-        }
-        if (clase?.estado === 'en_curso') {
-            return { texto: 'En curso', color: 'text-red-200 bg-red-900/40', barra: 'bg-red-500' };
-        }
-        return { texto: 'Pendiente', color: 'text-amber-200 bg-amber-900/30', barra: 'bg-amber-500' };
-    };
+    // Radios del mockup: .kpi/.item 9px, .badge 6px, el botón del walk-in 7px.
+    const KPI = 'rounded-[9px] border border-zinc-800 bg-zinc-900 p-3 text-left transition-colors';
+    const KPI_TOCABLE = `${KPI} hover:border-zinc-700 active:bg-zinc-800`;
 
     return (
         <div className="mx-auto max-w-2xl space-y-3" data-testid="coach-resumen">
+            {/* ── 1. Grid 2x2 del mockup ── */}
             <div className="grid grid-cols-2 gap-2.5">
                 <button type="button" onClick={() => onIrA && onIrA('clases')}
                     data-testid="kpi-clases-hoy" className={KPI_TOCABLE}>
@@ -77,12 +104,12 @@ const ResumenCoach = ({
                             : onIrA && onIrA('clases'))}
                         className="flex-1 px-3 pb-2 pt-3 text-left">
                         <p className="text-[10px] uppercase tracking-wide text-zinc-500">WOD del día</p>
-                        <p className={`mt-1 text-[15px] font-bold ${wodHoy ? 'text-zinc-100' : 'text-amber-300'}`}>
-                            {wodHoy ? (wodHoy.titulo || 'Publicado') : 'Sin publicar'}
+                        <p className={`mt-1 text-[15px] font-bold ${wodPublicado ? 'text-zinc-100' : 'text-amber-300'}`}>
+                            {wodPublicado ? (wodHoy.titulo || 'Publicado') : 'Sin publicar'}
                         </p>
                     </button>
                     <button type="button" onClick={onPublicarWod} data-testid="abrir-publicar-wod"
-                        className="mx-3 mb-3 rounded-md border-[1.5px] border-amber-600 bg-amber-500 px-2 py-2 text-[10.5px] font-bold text-amber-950 hover:bg-amber-400">
+                        className="mx-3 mb-3 rounded-md border-[1.5px] border-[#a68318] bg-[#e8a93b] px-2 py-2 text-[10.5px] font-bold text-[#1a1608] hover:bg-[#f0b64f]">
                         + Publicar WOD
                     </button>
                 </div>
@@ -96,16 +123,17 @@ const ResumenCoach = ({
                     <p className="text-[10.5px] text-zinc-400">Sin asistir {umbralRiesgo}+ días</p>
                 </button>
             </div>
-
-            {/* ── Asistencia · próxima clase (la tarjeta ancha del mockup) ── */}
-            <div className="rounded-xl border border-amber-900/60 bg-gradient-to-br from-zinc-900 to-zinc-950"
+            {/* ── 2. La tarjeta ANCHA de Asistencia (ocupa las 2 columnas) ──
+                Los hex son los del mockup (degradado cálido + borde #4a3a1a): van como valores
+                arbitrarios a propósito, para que la skin no los reescriba. */}
+            <div className="rounded-[9px] border border-[#4a3a1a] bg-[linear-gradient(145deg,#231f14,#15130d)]"
                 data-testid="tarjeta-asistencia">
                 {proximaClase ? (
                     <>
                         <button type="button" onClick={onAbrirAsistencia}
                             className="block w-full px-3 pb-2 pt-3 text-left">
                             <p className="text-[10px] uppercase tracking-wide text-zinc-500">
-                                Asistencia · próxima clase, {hora(proximaClase.hora_inicio)}{' '}
+                                Asistencia · próxima clase, {horaCorta(proximaClase.hora_inicio)}{' '}
                                 {proximaClase.disciplina_nombre}
                             </p>
                             <div className="mt-1 flex items-baseline gap-4">
@@ -123,15 +151,13 @@ const ResumenCoach = ({
                                 </span>
                             </div>
                             <p className="mt-1 text-[10.5px] text-zinc-400">
-                                {cargandoReservas
-                                    ? 'Cargando la asistencia…'
-                                    : 'Toca para ver quiénes faltan. El alumno marca al llegar; tú sólo corriges.'}
+                                {cargandoReservas ? 'Cargando la asistencia…' : 'Toca para ver quiénes faltan'}
                             </p>
                         </button>
                         <button type="button"
                             onClick={() => onAgregarSinReserva && onAgregarSinReserva(proximaClase)}
                             data-testid="resumen-agregar-sin-reserva"
-                            className="mx-3 mb-3 flex w-[calc(100%-1.5rem)] items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-amber-900/70 px-3 py-2.5 text-[11px] font-semibold text-amber-100 hover:border-amber-600">
+                            className="mx-3 mb-3 flex w-[calc(100%-1.5rem)] items-center justify-center gap-1.5 rounded-[7px] border-[1.5px] border-dashed border-[#4a3a1a] px-3 py-2.5 text-[11px] font-semibold text-[#d9c9a3] hover:border-[#8a6a2a] hover:text-[#eadfc8]">
                             + Agregar alumno sin reserva
                         </button>
                     </>
@@ -141,37 +167,39 @@ const ResumenCoach = ({
                     </p>
                 )}
             </div>
-
-            {/* ── Mis clases de hoy (mismas filas del mockup) ── */}
+            {/* ── 3. Mis clases de hoy (las mismas filas del mockup) ── */}
             <div>
                 <p className="mb-2 px-0.5 text-[11px] uppercase tracking-wide text-zinc-500">
                     Mis clases de hoy
                 </p>
                 {clasesHoy.length === 0 ? (
-                    <p className="rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-4 text-center text-[12px] text-zinc-400">
+                    <p className="rounded-[9px] border border-zinc-800 bg-zinc-900 px-3 py-4 text-center text-[12px] text-zinc-400">
                         No tienes clases programadas para hoy.
                     </p>
                 ) : (
                     <div className="space-y-2">
                         {clasesHoy.map((clase) => {
-                            const est = estadoDe(clase);
+                            const estado = estadoFila(clase);
+                            // El progreso lo escribe el MISMO helper de la pestaña Asistencia
+                            // ("12/12 presentes" / "9/14 marcados"): el tope son las reservas de
+                            // esa clase (los que se esperan), no el cupo nominal.
+                            const esperados = reservasDe(clase);
                             return (
                                 <button key={clase.id} type="button"
                                     onClick={() => onAbrirClase && onAbrirClase(clase)}
                                     data-testid={`clase-hoy-${clase.id}`}
-                                    className="flex w-full items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-left hover:border-zinc-700">
-                                    <span className={`h-8 w-1 flex-none rounded ${est.barra}`} />
+                                    className="flex w-full items-center gap-3 rounded-[9px] border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-left hover:border-zinc-700">
+                                    <span className={`h-8 w-1 flex-none rounded ${BARRA[estado]}`} />
                                     <span className="flex-1">
                                         <span className="block text-[13px] font-semibold text-zinc-100">
-                                            {hora(clase.hora_inicio)} · {clase.disciplina_nombre}
+                                            {horaCorta(clase.hora_inicio)} · {clase.disciplina_nombre || 'Clase'}
                                         </span>
                                         <span className="block text-[10.5px] text-zinc-400">
-                                            {clase.reservas_count ?? clase.asistentes_confirmados ?? 0} con reserva
-                                            {' '}(cupo {clase.cupo_maximo ?? '—'})
+                                            {textoProgreso(clase, esperados > 0 ? esperados : undefined)}
                                         </span>
                                     </span>
-                                    <span className={`flex-none rounded px-2 py-1 text-[9.5px] font-bold ${est.color}`}>
-                                        {est.texto}
+                                    <span className={`flex-none rounded-[6px] px-2 py-1 text-[9.5px] font-bold ${BADGE[estado]}`}>
+                                        {etiquetaEstado(estado)}
                                     </span>
                                 </button>
                             );

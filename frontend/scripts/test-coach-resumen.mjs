@@ -6,12 +6,16 @@
 //      la tarjeta ancha de Asistencia con los 3 números y "Mis clases de hoy";
 //   2. los dos botones inline abren los modales REALES (+ Publicar WOD y + Agregar sin
 //      reserva) y no navegan a otra pantalla;
-//   3. la regla de negocio está en el copy: el alumno marca, el coach corrige; el crédito
+//   3. las filas hablan como el mockup y como la pestaña Asistencia: el progreso y el estado
+//      salen de `utils/franjasAsistencia`, no de una copia propia ("12/12 presentes",
+//      "9/14 marcados", "Hecha" / "En curso" / "Pendiente");
+//   4. la regla de negocio sigue en el copy: el alumno marca, el coach corrige; el crédito
 //      se descuenta al RESERVAR (nunca "a medianoche", que no es lo que hace el backend);
-//   4. mobile-first: el contenido se limita y se centra (no hay layout de PC inventado);
-//   5. el Resumen viejo (marcado inline dentro de la tarjeta) ya no está, y el bloque
-//      nuevo no dejó variables huérfanas de ese código;
-//   6. Bloque B: el coach NO promete escaneo (ni la página ni el modal), y el admin sigue
+//   5. mobile-first: el contenido se limita y se centra (no hay layout de PC inventado);
+//   6. EL RESUMEN VIEJO NO EXISTE: el panel de tarjetas grandes que se pintaba en TODAS las
+//      pestañas —encima del Resumen nuevo— se eliminó completo (ni "WODs esta semana" ni
+//      sus botones), y el panel claro ya no envuelve al Resumen;
+//   7. Bloque B: el coach NO promete escaneo (ni la página ni el modal), y el admin sigue
 //      igual (la prop del modal arranca en true).
 import { readFileSync } from 'node:fs';
 
@@ -20,6 +24,15 @@ const RESUMEN = leer('../src/components/ResumenCoach.jsx');
 const DASH = leer('../src/pages/coach/DashboardCoach.jsx');
 const ENTREGA = leer('../src/pages/coach/EntregarPedido.jsx');
 const MODAL_ENTREGA = leer('../src/components/ModalEntregarPedido.jsx');
+
+// El Dashboard documenta en COMENTARIOS por qué se eliminó el Resumen viejo (los nombres
+// aparecen ahí a propósito, para que nadie los reviva), así que las búsquedas de "no debe
+// quedar ningún resto" se hacen sobre el código SIN comentarios: lo que importa es que no
+// quede MARKUP en pantalla.
+const sinComentarios = (src) => src
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+const DASH_CODIGO = sinComentarios(DASH);
 
 let fallos = 0;
 const eq = (obtenido, esperado, msg) => {
@@ -52,9 +65,17 @@ ok(/data-testid="resumen-agregar-sin-reserva"/.test(RESUMEN) && /onAgregarSinRes
 ok(/data-testid="tarjeta-asistencia"/.test(RESUMEN), 'la tarjeta ancha está');
 ok(/Mis clases de hoy/.test(RESUMEN), 'la lista "Mis clases de hoy" está');
 
-console.log('== 3. La regla de negocio en el copy ==');
-ok(/El alumno marca al llegar; tú sólo corriges\./.test(RESUMEN),
-    'la tarjeta dice que el alumno marca y el coach corrige');
+console.log('== 3. Los textos y los estados son los del mockup ==');
+ok(/Toca para ver quiénes faltan/.test(RESUMEN),
+    'la tarjeta invita a ver quiénes faltan (el texto del mockup, sin adornos agregados)');
+ok(/from '\.\.\/utils\/franjasAsistencia'/.test(RESUMEN),
+    'el Resumen usa los helpers de la pestaña Asistencia, no una copia propia');
+ok(/estadoFila\(clase\)/.test(RESUMEN) && /etiquetaEstado\(estado\)/.test(RESUMEN),
+    'el badge de cada fila sale de estadoFila/etiquetaEstado (Hecha / En curso / Pendiente)');
+ok(/textoProgreso\(clase, esperados > 0 \? esperados : undefined\)/.test(RESUMEN),
+    'el progreso de cada fila es "12/12 presentes" / "9/14 marcados" (mismo helper)');
+ok(/const esperados = reservasDe\(clase\)/.test(RESUMEN),
+    'el tope del progreso sale de las reservas de ESA clase, no del cupo nominal');
 eq(/medianoche/i.test(RESUMEN) || /medianoche/i.test(DASH), false,
     'el Resumen NO dice que el crédito se descuente a medianoche (se descuenta al reservar)');
 ok(/se le descontó 1 crédito/.test(DASH), 'el aviso del walk-in dice que descontó el crédito');
@@ -73,6 +94,20 @@ for (const muerto of ['claseAsistenciaExpandida', 'asistenciaOverrides', 'regist
     'cargarAsistenciaClase', 'marcarTodosAsistencia', 'handlePublicarWOD']) {
     eq(new RegExp(`\\b${muerto}\\b`).test(DASH), false, `sin código muerto del Resumen viejo: ${muerto}`);
 }
+
+console.log('== 5b. El Resumen viejo se eliminó por completo (una sola versión en pantalla) ==');
+for (const viejo of ['WODs esta semana', 'Publicar WOD de Hoy', 'Ir a Gestión de Clases',
+    'Alumnos Activos', 'Clases Hoy']) {
+    eq(DASH_CODIGO.includes(viejo), false, `sin restos del Resumen viejo: "${viejo}"`);
+}
+eq(/clasesConWodPublicado|wodsPublicados/.test(DASH_CODIGO), false,
+    'sin los contadores del KPI "WODs esta semana"');
+eq(/grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4/.test(DASH_CODIGO), false,
+    'sin la fila de tarjetas grandes: los KPIs son sólo el grid 2x2 de ResumenCoach');
+ok(/activeTab === 'resumen'[\s\S]{0,60}\? ''/.test(DASH),
+    'el panel claro ya no envuelve al Resumen (va sobre el fondo oscuro del Layout)');
+ok(/\{fechaCortaHoy\} · \{usuario \|\| 'Coach'\}/.test(DASH),
+    'el encabezado dice "fecha · coach", como el hdr del mockup');
 
 console.log('== 6. Bloque B: el coach no promete escaneo ==');
 ok(/mencionarEscaneo=\{false\}/.test(ENTREGA), 'la pantalla del coach apaga la mención del escaneo');

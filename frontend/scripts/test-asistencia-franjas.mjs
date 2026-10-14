@@ -61,7 +61,7 @@ eq(acotarExtra('4', { cupo_original: 16, cupo_maximo: 22 }, {}), 4,
 // ── 2. La pestaña: franjas en el teléfono, acordeón en el resto ─────────────
 console.log('== 2. AsistenciaClases (prop `franjas`) ==');
 const CLASES = leer('../src/components/AsistenciaClases.jsx');
-ok(/const AsistenciaClases = \(\{ variant = 'light', franjas = false \} = \{\}\)/.test(CLASES),
+ok(/const AsistenciaClases = \(\{ variant = 'light', franjas = false, permitirSinReserva = false \} = \{\}\)/.test(CLASES),
     'la prop `franjas` es opcional y por defecto false: nadie más cambia de vista');
 ok(/className="md:hidden space-y-5" data-testid="asistencia-franjas"/.test(CLASES),
     'la lista por franja existe SÓLO en <768px (md:hidden)');
@@ -99,7 +99,9 @@ eq(/from '\.\.\/hooks\/queries'|api\./.test(FRANJA), false,
 // ── 4. Quién pide la vista por franja (y quién NO) ──────────────────────────
 console.log('== 4. Coach sí, admin no ==');
 const DASH = leer('../src/pages/coach/DashboardCoach.jsx');
-ok(/activeTab === 'asistencia' && \(\s*<AsistenciaClases franjas \/>/.test(DASH),
+// El coach pide la vista por franja (y el walk-in del teléfono): entre el `&& (` y el
+// montaje hay un comentario largo, así que se permite texto en el medio.
+ok(/activeTab === 'asistencia' && \([\s\S]{0,400}<AsistenciaClases franjas permitirSinReserva \/>/.test(DASH),
     'el Dashboard del coach pide la vista por franja');
 eq((DASH.match(/<AsistenciaClases/g) || []).length, 1,
     'la pestaña Asistencia se monta UNA vez en el dashboard del coach');

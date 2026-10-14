@@ -82,6 +82,11 @@ const DashboardCoach = () => {
     };
 
     const today = toLocalDateStr(new Date());
+    // El "mar, 13 oct" del encabezado del mockup (`#pantalla-resumen`). Es SÓLO para mostrar:
+    // `today` sigue siendo el ISO que se compara con las fechas del backend.
+    const fechaCortaHoy = new Date().toLocaleDateString('es-CL', {
+        weekday: 'short', day: 'numeric', month: 'short',
+    });
 
     const getWeekRange = () => {
         const now = new Date();
@@ -352,9 +357,10 @@ const DashboardCoach = () => {
 
     // ---- Stats ----
 
-    // H-08: X/Y publicados debe contar los WODs realmente publicados (no los borradores)
-    const wodsPublicados = new Set((wods || []).filter(w => w.estado === 'publicado').map(w => w.id));
-    const clasesConWodPublicado = clasesSemana.filter(c => c.wod_id && wodsPublicados.has(c.wod_id)).length;
+    // H-08 se contaba acá (`wodsPublicados` / `clasesConWodPublicado`) para el "X/Y con WOD
+    // publicado" de la tarjeta "WODs esta semana" del Resumen viejo: la tarjeta y sus dos
+    // contadores se eliminaron en el rediseño del mockup (#pantalla-resumen). `clasesSemana`
+    // se sigue usando en la pestaña Clases.
 
     const getProgresoColor = (estado) => {
         if (estado === 'activo') return 'text-green-600 bg-green-50 border-green-300';
@@ -384,86 +390,24 @@ const DashboardCoach = () => {
     return (
         <Layout>
             <div className="space-y-6">
-                {/* Header — sin botón de crear WOD, solo informativo */}
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between">
-                    <div>
-                        <h1 className="text-3xl font-bold text-gray-900">Dashboard Coach</h1>
-                        <p className="text-gray-600 mt-1">Bienvenido, {usuario || 'Coach'} — {today}</p>
-                    </div>
-                    <div className="mt-4 md:mt-0 flex gap-2">
-                        {/* PUNTO DE ENTRADA ÚNICO (TAREA 6): publicar WOD de la clase de hoy */}
-                        {clasesHoy.length > 0 && (
-                            <button
-                                onClick={() => navigate(`/coach/gestion-clases?clase=${clasesHoy[0].id}`)}
-                                className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-bold flex items-center gap-2 animate-pulse"
-                            >
-                                <span>📝</span> Publicar WOD de Hoy
-                            </button>
-                        )}
-                        <button
-                            onClick={() => navigate('/coach/gestion-clases')}
-                            className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm font-medium flex items-center gap-2"
-                        >
-                            <span>📋</span> Ir a Gestión de Clases
-                        </button>
-                    </div>
+                {/* Encabezado de la pantalla (mockup `#pantalla-resumen`: título + fecha · coach).
+                    ANTES VIVÍA ACÁ EL "RESUMEN VIEJO": este h1 en gris + una fila de tarjetas
+                    grandes (Clases Hoy / Alumnos Activos / WOD del Día / Alumnos en Riesgo /
+                    WODs esta semana). Ese bloque NO estaba detrás del switch de pestañas, así
+                    que se pintaba en TODAS las pestañas —encima del Resumen nuevo— y en
+                    producción se veían las dos versiones del Resumen a la vez. Se eliminó
+                    completo, con sus dos botones ("Publicar WOD de Hoy" e "Ir a Gestión de
+                    Clases"): los KPIs viven ahora en el grid 2x2 de `ResumenCoach`, que es la
+                    única fuente, y el acceso a Gestión de Clases sigue en la navegación. */}
+                <div>
+                    <h1 className="text-3xl font-bold text-white">Dashboard Coach</h1>
+                    <p className="mt-1 text-sm text-zinc-400">{fechaCortaHoy} · {usuario || 'Coach'}</p>
                 </div>
 
-                {/* Stats Cards — ahora clickeables, cada una navega a su pantalla */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <button onClick={() => navigate('/coach/dashboard?tab=clases')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
-                        <div className="flex items-start justify-between">
-                            <div>
-                                <p className="text-sm font-medium text-gray-500">Clases Hoy</p>
-                                <p className="text-2xl font-bold text-gray-900 mt-1">{clasesHoy.length}</p>
-                                <p className="text-xs text-gray-500 mt-1">{clasesHoy.reduce((sum, c) => sum + (c.asistentes_confirmados || 0), 0)} asistentes — Clic para ver</p>
-                            </div>
-                            <div className="bg-blue-500 w-12 h-12 rounded-lg flex items-center justify-center text-xl">📅</div>
-                        </div>
-                    </button>
-                    <button onClick={() => navigate('/coach/dashboard?tab=alumnos')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
-                        <div className="flex items-start justify-between">
-                            <div>
-                                <p className="text-sm font-medium text-gray-500">Alumnos Activos</p>
-                                {/* Depende de GET /fidelizacion/coach/{id}/alumnos, que ahora filtra por estado='activo' (H-05). */}
-                                <p className="text-2xl font-bold text-gray-900 mt-1">{alumnos.length}</p>
-                                <p className="text-xs text-gray-500 mt-1">{progresoAlumnos.filter(a => a.total_rms > 0).length} con RMs — Clic para ver</p>
-                            </div>
-                            <div className="bg-green-500 w-12 h-12 rounded-lg flex items-center justify-center text-xl">👥</div>
-                        </div>
-                    </button>
-                    <button onClick={() => navigate('/coach/dashboard?tab=clases')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
-                        <div className="flex items-start justify-between">
-                            <div>
-                                <p className="text-sm font-medium text-gray-500">WOD del Día</p>
-                                <p className="text-2xl font-bold text-gray-900 mt-1">{wodHoy ? (wodHoy.estado === 'publicado' ? 'Publicado' : 'Borrador') : 'Sin WOD'}</p>
-                                <p className="text-xs text-gray-500 mt-1">{wodHoy?.titulo || 'Crea el WOD — Clic para ver'}</p>
-                            </div>
-                            <div className={`${wodHoy?.estado === 'publicado' ? 'bg-orange-500' : 'bg-zinc-700'} w-12 h-12 rounded-lg flex items-center justify-center text-xl`}>💪</div>
-                        </div>
-                    </button>
-                    <button onClick={() => navigate('/coach/dashboard?tab=riesgo')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left">
-                        <div className="flex items-start justify-between">
-                            <div>
-                                <p className="text-sm font-medium text-gray-500">Alumnos en Riesgo</p>
-                                <p className="text-2xl font-bold text-gray-900 mt-1">{alumnosEnRiesgo.length}</p>
-                                <p className="text-xs text-gray-500 mt-1">{alumnosEnRiesgo.length > 0 ? 'Requieren atención — Clic para ver' : 'Todos activos'}</p>
-                            </div>
-                            <div className={`${alumnosEnRiesgo.length > 0 ? 'bg-red-500' : 'bg-emerald-500'} w-12 h-12 rounded-lg flex items-center justify-center text-xl`}>⚠️</div>
-                        </div>
-                    </button>
-                    <button onClick={() => navigate('/coach/dashboard?tab=clases')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-all cursor-pointer text-left col-span-1">
-                        <div className="flex items-start justify-between">
-                            <div>
-                                <p className="text-sm font-medium text-gray-500">WODs esta semana</p>
-                                <p className="text-2xl font-bold text-gray-900 mt-1">{clasesConWodPublicado}/{clasesSemana.length} con WOD publicado</p>
-                                <p className="text-xs text-gray-500 mt-1">Clic para ver Clases y WODs</p>
-                            </div>
-                            <div className="bg-orange-500 w-12 h-12 rounded-lg flex items-center justify-center text-xl">💪</div>
-                        </div>
-                    </button>
-                </div>
-
+                {/* Acá vivían las 4 tarjetas grandes del Resumen viejo (ver el comentario de
+                    arriba): "Clases Hoy", "Alumnos Activos", "WOD del Día", "Alumnos en
+                    Riesgo" y "WODs esta semana". Sus números son los del grid 2x2 de
+                    ResumenCoach y no se repiten en pantalla. */}
                 {erroresBloque.length > 0 && (
                     <div className="bg-red-50 border-l-4 border-red-500 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center gap-3" data-testid="banner-error-dashboard">
                         <span className="text-2xl">⚠️</span>
@@ -485,8 +429,14 @@ const DashboardCoach = () => {
                 )}
 
                 {/* ─── CONTENIDO BASADO EN URL (sin pestañas internas duplicadas) ─── */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" data-testid="coach-dashboard-content">
-                    <div className="p-6">
+                {/* El Resumen es la pantalla OSCURA del mockup: se pinta directo sobre el fondo
+                    del Layout (zinc-950), sin el panel claro que siguen usando las pestañas
+                    viejas (Clases / Alumnos & RMs / Progreso / Riesgo / Asistencia). */}
+                <div className={activeTab === 'resumen'
+                    ? ''
+                    : 'overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm'}
+                    data-testid="coach-dashboard-content">
+                    <div className={activeTab === 'resumen' ? '' : 'p-6'}>
                         {/* ─── TAB: RESUMEN (mockup #pantalla-resumen) ─── */}
                         {activeTab === 'resumen' && (
                             <>
