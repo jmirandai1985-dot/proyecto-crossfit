@@ -37,6 +37,7 @@
     "test:marketing": "node scripts/test-marketing.mjs",
     "test:aviso-rapido": "node scripts/test-aviso-rapido.mjs",
     "test:coach-subtabs": "node scripts/test-coach-subtabs.mjs",
+    "test:walkin": "node scripts/test-walkin.mjs",
     "test:encoding": "node scripts/test-encoding.mjs"
   },
   "dependencies": {

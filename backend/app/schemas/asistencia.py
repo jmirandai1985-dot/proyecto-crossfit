@@ -24,8 +24,36 @@ class ReservaAsistenciaItem(BaseModel):
     asistio: bool
 
 
-class ClaseAsistenciaResponse(BaseModel):
-    """Clase del día (desde la hora actual) para el panel de marcado."""
+class PresenteSinReservaRequest(BaseModel):
+    """Body del "agregar sin reserva" del coach (walk-in).
+
+    El alumno va en el body; la CLASE va en la URL (`/asistencia/clases/{id}/sin-reserva`),
+    que es la que valida rol, tenant y disciplina del coach.
+    """
+    alumno_id: int = Field(..., gt=0)
+
+
+class AlumnoElegible(BaseModel):
+    """Un alumno del box tal como lo necesita el modal "Agregar alumno sin reserva".
+
+    `puede_reservar` es el MISMO predicado que aplica `POST /reservas` (plan que da
+    acceso hoy + créditos): con True la pantalla usa la reserva normal (descuenta 1
+    crédito); con False usa el registro de presencia sin cargo.
+    """
+    alumno_id: int
+    nombre: str
+    plan_vigente: bool = False
+    creditos: Optional[int] = None      # None + plan_vigente=True -> ilimitado
+    ilimitado: bool = False
+    puede_reservar: bool = False
+    ya_presente: bool = False           # ya tiene reserva viva en ESTA clase
+
+
+class ElegiblesSinReservaResponse(BaseModel):
+    """Lista de alumnos activos del box para el modal del walk-in."""
+    clase_id: int
+    alumnos: List[AlumnoElegible] = []
+
     id: int
     fecha: str
     hora_inicio: str

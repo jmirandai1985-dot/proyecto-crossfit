@@ -27,6 +27,9 @@ export const claves = {
     // Detalle de UNA clase para marcar asistencia. Cuelga de `['asistencia']` para que
     // confirmar la asistencia refresque también la clase que está abierta.
     alumnosDeClase: (claseId) => ['asistencia', 'clase', claseId, 'alumnos'],
+    // Alumnos del box que se pueden agregar SIN reserva a una clase (walk-in). Cuelga de
+    // `['asistencia']` por el mismo motivo: agregar a alguien refresca la lista y la clase.
+    alumnosElegibles: (claseId) => ['asistencia', 'clase', claseId, 'elegibles'],
     churn: (tenantId, buscar) => ['kpis', 'churn', tenantId, buscar || ''],
     segmentacion: (tenantId) => ['segmentacion', tenantId],
     sugerencias: (tenantId, ids) => ['fidelizacion', 'sugerencias', tenantId, ids],
@@ -998,6 +1001,40 @@ export function useMarcarAsistenciaReserva() {
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['reservas'] });
             qc.invalidateQueries({ queryKey: ['asistencia'] });
+        },
+    });
+}
+
+// Los alumnos del box que se pueden agregar a una clase SIN reserva ("+ Agregar alumno
+// sin reserva" del panel del coach). Trae, por alumno, el MISMO predicado que aplica
+// `POST /reservas` (`puede_reservar` = plan que da acceso hoy + créditos) y si ya está en
+// la clase (`ya_presente`): eso es lo que decide si el walk-in le descuenta un crédito o
+// queda sin cargo, sin que la pantalla tenga que adivinar ni leer mensajes de error.
+export function useAlumnosElegiblesClase(claseId) {
+    return useQuery({
+        queryKey: claves.alumnosElegibles(claseId),
+        queryFn: async () => (
+            await api.get(`/api/v1/asistencia/clases/${claseId}/elegibles`)
+        ).data?.alumnos || [],
+        staleTime: 30_000,
+        enabled: Boolean(claseId),
+    });
+}
+
+// Walk-in SIN CARGO (`tokens_gastados = 0`): el camino del alumno que no tiene plan
+// vigente con créditos. El camino CON créditos NO pasa por acá —usa `useCrearReserva` +
+// `useMarcarAsistenciaReserva`, donde el crédito se descuenta y queda auditado—, así que
+// esta mutación nunca mueve dinero.
+export function usePresenteSinReserva() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ claseId, alumnoId }) => api.post(
+            `/api/v1/asistencia/clases/${claseId}/sin-reserva`, { alumno_id: alumnoId },
+        ).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['asistencia'] });
+            qc.invalidateQueries({ queryKey: ['reservas'] });
+            qc.invalidateQueries({ queryKey: ['clases'] });
         },
     });
 }

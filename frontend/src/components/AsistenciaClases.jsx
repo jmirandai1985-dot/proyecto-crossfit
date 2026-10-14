@@ -10,6 +10,9 @@ import { FRANJAS, agruparPorFranja } from '../utils/franjasAsistencia';
 import {
     useAlumnosDeClase, useAmpliarCupo, useClasesAsistenciaHoy, useConfirmarAsistenciaClase,
 } from '../hooks/queries';
+// Walk-in del coach ("+ Agregar alumno sin reserva"): reserva normal si el alumno tiene
+// créditos, presencia sin cargo si no. El admin NO lo monta (ver la prop).
+import ModalAgregarSinReserva from './ModalAgregarSinReserva';
 
 /**
  * Pestaña "Asistencia" (compartida coach + admin, Fase 1).
@@ -31,8 +34,13 @@ import {
  *             (tablet y escritorio) sigue EXACTAMENTE el acordeón por disciplina.
  *             Lo pide el coach (`DashboardCoach`, ?tab=asistencia) y NO el admin: su
  *             pestaña Asistencia monta el componente sin la prop y no cambia nada.
+ *   permitirSinReserva — false (default): agrega el botón "+ Agregar alumno sin reserva"
+ *             dentro del detalle de la clase, que abre `ModalAgregarSinReserva` (el
+ *             walk-in: reserva normal si el alumno tiene créditos, presencia sin cargo si
+ *             no). Lo pide el coach; el admin monta el componente sin la prop, así que su
+ *             pestaña Asistencia queda EXACTAMENTE igual (mismo DOM).
  */
-const AsistenciaClases = ({ variant = 'light', franjas = false } = {}) => {
+const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReserva = false } = {}) => {
     const osc = variant === 'dark';
 
     // ─── Clases de hoy (React Query) ───────────────────────────────────
@@ -46,6 +54,8 @@ const AsistenciaClases = ({ variant = 'light', franjas = false } = {}) => {
     // ─── Clase abierta ─────────────────────────────────────────────────
     const [claseSeleccionada, setClaseSeleccionada] = useState(null);
     const [aviso, setAviso] = useState(null);
+    // Walk-in: el modal "Agregar alumno sin reserva" de la clase abierta (sólo coach).
+    const [modalSinReserva, setModalSinReserva] = useState(false);
 
     const alumnosQ = useAlumnosDeClase(claseSeleccionada?.id);
     const reservas = useMemo(() => alumnosQ.data?.reservas || [], [alumnosQ.data]);
@@ -95,6 +105,7 @@ const AsistenciaClases = ({ variant = 'light', franjas = false } = {}) => {
         setClaseSeleccionada(null);
         setOverrides({});
         setAviso(null);
+        setModalSinReserva(false);
     };
 
     const toggle = (reservaId) => {
@@ -317,6 +328,22 @@ const AsistenciaClases = ({ variant = 'light', franjas = false } = {}) => {
                                     ))}
                                 </ul>
                             )}
+
+                            {/* Walk-in del coach: se ofrece DESPUÉS de la lista de reservas
+                                ("reviso a quien falta y lo agrego"), igual que el mockup. */}
+                            {permitirSinReserva && (
+                                <button
+                                    type="button"
+                                    onClick={() => setModalSinReserva(true)}
+                                    data-testid="agregar-sin-reserva"
+                                    className={`mt-4 flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-2.5 text-sm font-semibold transition-colors ${osc
+                                        ? 'border-zinc-700 text-amber-200 hover:border-amber-500/60'
+                                        : 'border-gray-300 text-gray-600 hover:border-orange-400 hover:text-orange-600'
+                                        }`}
+                                >
+                                    ➕ Agregar alumno sin reserva
+                                </button>
+                            )}
                         </div>
                         <div className={`px-6 py-4 border-t flex justify-end gap-2 ${osc ? 'border-zinc-800' : 'border-gray-200'}`}>
                             <button
@@ -337,6 +364,25 @@ const AsistenciaClases = ({ variant = 'light', franjas = false } = {}) => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Walk-in ("+ Agregar alumno sin reserva"): sólo con la prop, así la pestaña
+                Asistencia del ADMIN queda idéntica. El aviso de resultado reusa el mismo
+                bloque `mensaje` que ya muestra "Asistencia guardada". */}
+            {permitirSinReserva && modalSinReserva && claseSeleccionada && (
+                <ModalAgregarSinReserva
+                    clase={claseSeleccionada}
+                    onCerrar={() => setModalSinReserva(false)}
+                    onAgregado={(alumno) => {
+                        setModalSinReserva(false);
+                        setAviso({
+                            tipo: 'exito',
+                            texto: alumno.cargo === 'credito'
+                                ? `✅ ${alumno.nombre} agregado como presente (se le descontó 1 crédito).`
+                                : `✅ ${alumno.nombre} agregado como presente sin cargo (queda en su historial).`,
+                        });
+                    }}
+                />
             )}
         </div>
     );

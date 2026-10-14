@@ -19,7 +19,8 @@ Seguridad: tenant_id SIEMPRE del token JWT (patrón del resto de la API).
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
-from sqlalchemy import func
+from sqlalchemy import func, update
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -27,16 +28,19 @@ from app.core.rate_limit import limiter
 from app.core.dependencies import (
     get_current_user, get_current_coach, verificar_coach_disciplina,
 )
-from app.core.estados import no_cancelada   # "viva" = NOT IN (cancelled, cancelada)
+from app.core.estados import da_acceso_hoy, no_cancelada   # "viva" = NOT IN (cancelled, cancelada)
 from app.services import churn_service
+from app.services.auditoria_service import registrar_auditoria
 from app.models.clase import Clase
 from app.models.reserva import Reserva
+from app.models.suscripcion import Suscripcion
 from app.models.tenant import Tenant
 from app.models.usuario import Usuario, RolUsuario
 from app.models.coach_disciplina import CoachDisciplina
 from app.models.disciplina import Disciplina
 from app.utils.santiago import ahora_santiago, hoy_santiago, SANTIAGO
-from app.schemas.asistencia import ConfirmarAsistenciaRequest
+from app.schemas.asistencia import (ConfirmarAsistenciaRequest,
+                                    PresenteSinReservaRequest)
 from app.services import asistencia_service as svc
 from app.services.clases_service import estado_clase   # estado de la clase (realizada/en curso/…)
 
@@ -309,6 +313,280 @@ def confirmar_asistencia(
         "via": via,
     }
 
+
+# ── Staff: walk-in ("+ Agregar alumno sin reserva") ──────────────────────────
+# El Resumen del coach agrega a alguien que NO reservó y lo deja presente. Hay DOS
+# caminos y cada uno tiene UNA sola fuente de verdad:
+#
+#   * el alumno TIENE plan vigente con créditos → la pantalla usa lo que YA existe
+#     (`POST /reservas` del staff —descuenta 1 crédito y lo audita— y
+#     `PUT /reservas/{id}/asistencia` para dejarlo presente). Acá no se reimplementa
+#     nada de dinero.
+#   * el alumno NO tiene plan/créditos → `POST /clases/{id}/sin-reserva` registra la
+#     PRESENCIA SIN CARGO (`tokens_gastados = 0`): no se le cobra y su historial lo
+#     muestra con 0 créditos, que es la verdad (`historial_alumno_service`).
+#
+# `GET /clases/{id}/elegibles` existe para que el modal NO adivine la rama: entrega
+# `puede_reservar` con el MISMO predicado que aplica `POST /reservas` (plan que da
+# acceso hoy + créditos), así el coach ve de antemano si le va a descontar el crédito.
+VIA_SIN_CARGO = "sin_cargo"   # `asistencia_via` (String(10)) del camino sin cobro
+
+
+def _planes_que_dan_acceso(db: Session, tenant_id: int, alumno_ids) -> dict:
+    """El mejor plan vigente de cada alumno, en UNA consulta (sin N+1).
+
+    "Mejor" es el MISMO orden que usa `POST /reservas` para elegir la membresía que va
+    a consumir: más créditos primero y, a igualdad, el que vence más tarde
+    (`creditos_disponibles.desc().nulls_last()`, `fecha_expiracion DESC`).
+    """
+    mejores = {}
+    if not alumno_ids:
+        return mejores
+    filas = db.query(Suscripcion).filter(
+        Suscripcion.tenant_id == tenant_id,
+        Suscripcion.usuario_id.in_(list(alumno_ids)),
+        da_acceso_hoy(Suscripcion.estado, Suscripcion.fecha_expiracion),
+    ).order_by(
+        Suscripcion.creditos_disponibles.desc().nulls_last(),
+        Suscripcion.fecha_expiracion.desc(),
+    ).all()
+    for s in filas:
+        mejores.setdefault(s.usuario_id, s)   # el primero ya es el mejor
+    return mejores
+
+
+def _puede_reservar(plan) -> bool:
+    """¿`POST /reservas` aceptaría a este alumno? (el predicado, no una copia).
+
+    Plan que da acceso hoy + créditos. `creditos_disponibles = NULL` es un plan
+    ILIMITADO (no un 0): la reserva sólo corta con `<= 0` cuando el número existe.
+    """
+    if plan is None:
+        return False
+    return plan.creditos_disponibles is None or plan.creditos_disponibles > 0
+
+
+@router.get("/clases/{clase_id}/elegibles")
+def alumnos_elegibles_clase(
+    clase_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
+    modo_emergencia: bool = Query(
+        False, description="Modo cobertura de emergencia"),
+):
+    """Alumnos activos del box para el modal "Agregar alumno sin reserva".
+
+    Lista a TODOS los alumnos activos del box, no sólo a los que ya entrenaron con
+    este coach: el caso de uso es justamente alguien que NO está en la clase (la otra
+    lista, `GET /fidelizacion/coach/{id}/alumnos`, sale de las reservas del coach y por
+    eso nunca incluiría a quien nunca ha reservado). El `verificar_coach_disciplina` de
+    más abajo es el mismo candado que usa `/clases/{id}/alumnos`: un coach sólo abre
+    esta lista para clases de sus disciplinas.
+
+    La búsqueda por nombre la hace la pantalla (el box tiene decenas de alumnos y la
+    lista viaja completa una sola vez); si algún día crece, el lugar para filtrar es
+    acá.
+    """
+    tenant_id = current_user["tenant_id"]
+
+    clase = db.query(Clase).filter(
+        Clase.id == clase_id, Clase.tenant_id == tenant_id).first()
+    if not clase:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Clase no encontrada")
+
+    if current_user.get("rol") == "coach" and clase.disciplina_id:
+        verificar_coach_disciplina(
+            coach_id=current_user["usuario_id"],
+            disciplina_id=clase.disciplina_id,
+            db=db,
+            modo_emergencia=modo_emergencia,
+            clase_id=clase_id,
+            accion="ver_alumnos_elegibles",
+            tenant_id=tenant_id,
+        )
+
+    alumnos = db.query(Usuario.id, Usuario.nombre).filter(
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == RolUsuario.alumno,
+        Usuario.activo.is_(True),
+        Usuario.estado == "activo",
+    ).order_by(Usuario.nombre.asc()).all()
+
+    planes = _planes_que_dan_acceso(db, tenant_id, [a.id for a in alumnos])
+    presentes = {
+        fila[0] for fila in db.query(Reserva.alumno_id).filter(
+            Reserva.clase_id == clase_id,
+            Reserva.tenant_id == tenant_id,
+            no_cancelada(Reserva.estado),
+        ).all()
+    }
+
+    def _fila(a) -> dict:
+        plan = planes.get(a.id)
+        return {
+            "alumno_id": a.id,
+            "nombre": a.nombre,
+            "plan_vigente": plan is not None,
+            "creditos": plan.creditos_disponibles if plan is not None else None,
+            "ilimitado": plan is not None and plan.creditos_disponibles is None,
+            "puede_reservar": _puede_reservar(plan),
+            "ya_presente": a.id in presentes,
+        }
+
+    return {
+        "clase_id": clase_id,
+        "alumnos": [_fila(a) for a in alumnos],
+    }
+
+
+@router.post("/clases/{clase_id}/sin-reserva", status_code=status.HTTP_201_CREATED)
+def registrar_presente_sin_reserva(
+    clase_id: int,
+    body: PresenteSinReservaRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
+    modo_emergencia: bool = Query(
+        False, description="Modo cobertura de emergencia"),
+):
+    """Deja PRESENTE a un alumno que no reservó, SIN cobrarle crédito (walk-in).
+
+    Reglas, y por qué cada una:
+
+      * MISMO DÍA de la clase (hasta las 23:59 de Chile): idéntico a `confirmar` y a
+        `PUT /reservas/{id}/asistencia`. La asistencia es del día; el pasado no se
+        reescribe ni con este atajo.
+      * el alumno no puede tener ya una reserva VIVA en esa clase (400, el mismo texto
+        que `POST /reservas`): su presencia se marca sobre esa reserva, no se duplica.
+      * el alumno NO puede tener plan vigente con créditos (409): en ese caso el camino
+        correcto es la reserva normal, que SÍ descuenta el crédito. Sin este candado,
+        un clic de más le regalaría la clase al box.
+      * el aforo se toma con el MISMO `UPDATE ... WHERE asistentes < cupo_maximo` de
+        `POST /reservas` (atómico: sin overbooking ni carrera) y cuenta para
+        `asistentes_confirmados`, igual que una reserva.
+      * `tokens_gastados = 0`: no se le cobra nada. Es la verdad que muestra su
+        historial ("0 créditos"), no un descuento escondido.
+    """
+    tenant_id = current_user["tenant_id"]
+
+    clase = db.query(Clase).filter(
+        Clase.id == clase_id, Clase.tenant_id == tenant_id).first()
+    if not clase:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Clase no encontrada")
+    if clase.cancelada:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La clase fue cancelada por el box")
+    if clase.fecha != hoy_santiago():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="La asistencia solo se puede marcar o corregir el mismo día de la clase "
+                   "(hasta las 23:59 hora de Chile).")
+
+    rol = current_user.get("rol", "")
+    if rol == "coach" and clase.disciplina_id:
+        verificar_coach_disciplina(
+            coach_id=current_user["usuario_id"],
+            disciplina_id=clase.disciplina_id,
+            db=db,
+            modo_emergencia=modo_emergencia,
+            clase_id=clase_id,
+            accion="asistencia_sin_reserva",
+            tenant_id=tenant_id,
+        )
+
+    alumno = db.query(Usuario).filter(
+        Usuario.id == body.alumno_id,
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == RolUsuario.alumno,
+    ).first()
+    if not alumno:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Alumno no encontrado")
+
+    ya_esta = db.query(Reserva).filter(
+        Reserva.clase_id == clase_id,
+        Reserva.alumno_id == alumno.id,
+        no_cancelada(Reserva.estado),
+    ).first()
+    if ya_esta:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El alumno ya tiene una reserva activa para esta clase")
+
+    plan = _planes_que_dan_acceso(db, tenant_id, [alumno.id]).get(alumno.id)
+    if _puede_reservar(plan):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=("Este alumno tiene plan vigente con créditos: agrégalo como reserva "
+                    "normal (se le descuenta 1 crédito) en vez de presencia sin cargo."))
+
+    # Aforo ATÓMICO (mismo patrón que POST /reservas): si la clase se llenó entre la
+    # lectura y este UPDATE, rowcount=0 -> 400 y NO se escribe la presencia.
+    try:
+        resultado = db.execute(
+            update(Clase)
+            .where(Clase.id == clase.id)
+            .where(Clase.asistentes_confirmados < Clase.cupo_maximo)
+            .values(asistentes_confirmados=Clase.asistentes_confirmados + 1)
+        )
+    except DBAPIError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Alta demanda, intenta de nuevo")
+    if resultado.rowcount == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Clase sin cupos disponibles")
+
+    reserva = Reserva(
+        tenant_id=tenant_id,
+        clase_id=clase_id,
+        alumno_id=alumno.id,
+        asistio=True,              # el punto del walk-in: entra PRESENTE
+        tokens_gastados=0,         # sin cargo
+        estado="confirmada",
+        asistencia_marcada_por=current_user["usuario_id"],
+        asistencia_marcada_at=ahora_santiago(),
+        asistencia_via=VIA_SIN_CARGO,
+    )
+    db.add(reserva)
+    db.commit()
+    db.refresh(reserva)
+
+    # ── Presencia marcada -> su situación de churn cambió -> recalc (segundo plano). ──
+    churn_service.programar_recalculo(background_tasks, tenant_id, alumno.id)
+
+    # Trazabilidad: dar por presente a alguien que no reservó es una acción sensible del
+    # box (mueve el aforo y la asistencia sin cobro): mismo criterio que la reserva "en
+    # nombre de" de N-9.
+    registrar_auditoria(
+        db,
+        tenant_id=tenant_id,
+        usuario_id=current_user["usuario_id"],
+        accion="CREATE",
+        entidad="reserva",
+        entidad_id=reserva.id,
+        detalle={
+            "alumno_id": alumno.id,
+            "clase_id": clase_id,
+            "origen": "sin_reserva",
+            "tokens_gastados": 0,
+            "creada_por_rol": rol,
+        },
+    )
+
+    return {
+        "reserva_id": reserva.id,
+        "alumno_id": alumno.id,
+        "nombre": alumno.nombre,
+        "asistio": True,
+        "cargo": "sin_cargo",
+    }
 
 
 # ── Alumno: resumen y hitos ──────────────────────────────────────────────────
