@@ -38,6 +38,7 @@
     "test:aviso-rapido": "node scripts/test-aviso-rapido.mjs",
     "test:coach-subtabs": "node scripts/test-coach-subtabs.mjs",
     "test:walkin": "node scripts/test-walkin.mjs",
+    "test:publicar-wod": "node scripts/test-publicar-wod.mjs",
     "test:encoding": "node scripts/test-encoding.mjs"
   },
   "dependencies": {

@@ -1063,6 +1063,38 @@ export function useCrearWodsBatch() {
     });
 }
 
+// La VISTA PREVIA del archivo semanal del coach (Bloque D): sube el .xlsx y el backend
+// devuelve los días que SÍ se pueden programar + los errores del archivo. No escribe nada
+// (el guardado es `useProgramarSemana`), así que este POST se puede repetir sin miedo
+// mientras el coach corrige la planilla.
+export function usePrevisualizarSemana() {
+    return useMutation({
+        mutationFn: (archivo) => {
+            const datos = new FormData();
+            datos.append('archivo', archivo);
+            return api.post('/api/v1/wods/semana-archivo', datos, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            }).then((r) => r.data);
+        },
+    });
+}
+
+// "Programar semana": publica los días revisados (1 WOD por día + el aviso de cada día)
+// en UNA transacción. Mueve los WODs, las clases que los llevan y el carrusel de avisos
+// del alumno, así que invalida las tres familias en un solo lugar.
+export function useProgramarSemana() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ body, params }) => api.post(
+            '/api/v1/wods/programar-semana', body, { params },
+        ).then((r) => r.data),
+        onSuccess: () => {
+            invalidarWodsYClases(qc);
+            qc.invalidateQueries({ queryKey: ['marketing'] });
+        },
+    });
+}
+
 // Tomar/soltar una clase (`alcance`: sólo esa clase o las futuras del mismo horario;
 // `modo_emergencia` para disciplinas que el coach no dicta — queda auditado).
 export function useAccionClase() {

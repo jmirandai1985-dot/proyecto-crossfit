@@ -439,6 +439,31 @@ def titulo_desde_texto(texto: str | None, tope: int = TITULO_RAPIDO_MAX) -> str:
     return f"{recorte}…"
 
 
+def payload_aviso_de_fecha(texto: str, fecha: date) -> dict:
+    """El payload de un aviso para UN día concreto (el archivo semanal del coach).
+
+    Es el MISMO aviso del box (tipo `aviso`, sin flyer, sin fijar arriba) que el aviso
+    rápido, pero con la ventana de ESE día en lugar de HOY: el aviso del miércoles se ve el
+    miércoles y desaparece solo a medianoche, sin que nadie lo despublica. La ventana la
+    arma `rango_vigencia` (00:00 → 23:59:59 del día, hora de Chile) — la única definición
+    de ventana del proyecto, no una nueva — y el título sale del mensaje con la misma regla
+    (`titulo_desde_texto`).
+    """
+    desde, hasta = rango_vigencia(fecha, fecha)
+    mensaje = (texto or "").strip()
+    return {
+        "tipo": TIPO_AVISO,
+        "titulo": titulo_desde_texto(mensaje),
+        "texto": mensaje,
+        "nombre_aliado": None,
+        "fecha_evento": None,
+        "vigente_desde": desde,
+        "vigente_hasta": hasta,
+        "fijado_arriba": False,
+        "imagen_url": None,
+    }
+
+
 def payload_aviso_rapido(texto: str, ahora: datetime | None = None) -> dict:
     """El payload de `crear()` del aviso rápido: tipo `aviso`, HOY y nada más.
 

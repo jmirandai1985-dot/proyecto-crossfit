@@ -109,6 +109,38 @@ class WodBatchCreateRequest(BaseModel):
     clase_ids: Optional[List[int]] = None
 
 
+class DiaSemanaWod(BaseModel):
+    """Un día del archivo semanal del coach (mockup `#modal-wod`).
+
+    Espeja las columnas del .xlsx: la vista previa devuelve estos campos y "Programar
+    semana" manda de vuelta lo que el coach revisó, así que la pantalla nunca reinterpreta
+    la planilla.
+    """
+    fecha: date
+    calentamiento: Optional[str] = None
+    musculacion: Optional[str] = None
+    wod_nombre: str
+    wod_tipo: Optional[str] = None
+    wod_descripcion: str
+    aviso: Optional[str] = None
+
+
+class SemanaWodRequest(BaseModel):
+    """Body de POST /wods/programar-semana.
+
+    `clase_ids` repite el ALCANCE de `batch-create`: None = todas las clases de esa fecha +
+    disciplina (el caso del archivo, que publica el día completo); [ids] = sólo esas.
+    """
+    dias: List[DiaSemanaWod]
+    clase_ids: Optional[List[int]] = None
+
+
+class SemanaArchivoResponse(BaseModel):
+    """Vista previa del .xlsx: los días que se pueden programar y lo que falló."""
+    dias: List[DiaSemanaWod] = []
+    errores: List[str] = []
+
+
 class WodUpdate(BaseModel):
     titulo: Optional[str] = None
     descripcion: Optional[str] = None

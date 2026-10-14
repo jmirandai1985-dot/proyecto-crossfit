@@ -2,7 +2,7 @@
 Router de endpoints para gestión de WODs (Workout of the Day)
 """
 import re
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.db.database import get_db
@@ -13,6 +13,9 @@ from app.models.wod_movimiento import WodMovimiento
 from app.models.movimiento import Movimiento
 from app.models.clase import Clase
 from app.models.coach_disciplina import CoachDisciplina
+from app.models.aviso_marketing import AvisoMarketing
+from app.services import avisos_marketing as avisos
+from app.services import wod_semana
 from app.schemas import wod as schemas
 from app.schemas.wod_parse import WodParseRequest, WodParseResponse, MovimientoParseado, DebugInfo, FaseInfo, FaseMovimiento
 from datetime import date
@@ -1346,4 +1349,174 @@ def crear_wods_batch(
         # "seleccion" = solo las clases pedidas · "dia_completo" = todas las del día
         "alcance": alcance,
         "wods": creados,
+    }
+
+
+# ──────────────────────────────────────────────
+# ENDPOINTS: LA SEMANA DEL ARCHIVO DEL COACH (Bloque D)
+# ──────────────────────────────────────────────
+
+@router.post("/semana-archivo", response_model=schemas.SemanaArchivoResponse)
+async def previsualizar_semana(
+    archivo: UploadFile = File(..., description="Planilla .xlsx, una fila por día"),
+    current_user: dict = Depends(get_current_coach),
+):
+    """Vista previa del archivo semanal del coach: NO escribe nada.
+
+    Devuelve los días VÁLIDOS **y** los errores del archivo, juntos: la pantalla muestra la
+    vista previa y, si hay filas malas, exactamente cuál y por qué. Los errores no se
+    "arreglan" en silencio porque el coach programaría días que nunca se publicaron.
+
+    El formato (orden de columnas, celdas combinadas, filas vacías, `wod_tipo` → "Otro")
+    vive en `services/wod_semana.py`, que es puro y tiene test propio sin base de datos.
+    """
+    if not (archivo.filename or "").lower().endswith(".xlsx"):
+        raise HTTPException(
+            status_code=400,
+            detail="El archivo tiene que ser Excel (.xlsx), con una fila por día.")
+    try:
+        dias, errores = wod_semana.leer_archivo(await archivo.read())
+    except wod_semana.ArchivoInvalido as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"dias": dias, "errores": errores}
+
+
+@router.post("/programar-semana")
+def programar_semana(
+    body: schemas.SemanaWodRequest,
+    disciplina_id: int = Query(
+        None, description="Disciplina de la semana (OBLIGATORIA para coaches)"),
+    modo_emergencia: bool = Query(
+        False, description="Modo cobertura de emergencia"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
+):
+    """Publica la semana que el coach revisó en la vista previa.
+
+    DOS COSAS, EN UNA TRANSACCIÓN:
+      * un WOD por día (misma construcción que `POST /wods` y `batch-create`, vía
+        `_crear_wod_obj`), vinculado a las clases de ESA fecha + disciplina —o sólo a
+        `clase_ids`, si el alcance es una hora puntual—;
+      * el aviso de cada día que traiga texto, con la ventana de ESE día de Chile
+        (`payload_aviso_de_fecha` → `rango_vigencia`). El aviso se inserta en la MISMA
+        transacción (`db.add`) y no con `avisos.crear()`, que commitea por dentro: si un día
+        falla, no puede quedar media semana publicada.
+
+    EL WOD DE CADA DÍA SE VE SOLO ESE DÍA porque lleva su `fecha` (el alumno lee el WOD de
+    hoy, `GET /wods/hoy`): no hay ningún job nuevo que "publique" a medianoche — es cómo
+    funciona el WOD desde antes.
+    """
+    tenant_id = current_user["tenant_id"]
+    coach_id = current_user["usuario_id"]
+    rol = current_user.get("rol", "")
+
+    if not body.dias:
+        raise HTTPException(status_code=400, detail="No hay días para programar")
+
+    # ── Permisos: el MISMO filtro de POST /wods y batch-create (no uno nuevo) ──
+    if rol == "coach":
+        if not disciplina_id:
+            raise HTTPException(
+                status_code=400, detail="disciplina_id es obligatorio para coaches")
+        verificar_coach_disciplina(
+            coach_id, disciplina_id, db,
+            modo_emergencia=modo_emergencia,
+            accion="programar_semana", tenant_id=tenant_id)
+
+    # ── Alcance opcional (misma semántica de `clase_ids` en batch-create) ──
+    clases_alcance = []
+    if body.clase_ids is not None:
+        ids_pedidos = list(dict.fromkeys(int(i) for i in body.clase_ids))
+        if not ids_pedidos:
+            raise HTTPException(
+                status_code=400,
+                detail="clase_ids no puede ser una lista vacía: omitilo para "
+                       "programar el día completo")
+        if len(ids_pedidos) > 200:
+            raise HTTPException(
+                status_code=400, detail="clase_ids excede el máximo de 200 clases")
+        # 🔒 SEGURIDAD: el filtro sale del token; una clase de otro box no se encuentra.
+        clases_alcance = db.query(Clase).filter(
+            Clase.tenant_id == tenant_id, Clase.id.in_(ids_pedidos)).all()
+        ids_encontrados = {c.id for c in clases_alcance}
+        ajenos = [i for i in ids_pedidos if i not in ids_encontrados]
+        if ajenos:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Clase(s) no encontrada(s) en tu gimnasio: {ajenos}")
+
+    # El aviso de cada día, indexado por fecha (sólo los que traen texto).
+    avisos_por_fecha = {
+        d.fecha: d.aviso.strip() for d in body.dias if (d.aviso or "").strip()
+    }
+
+    dias_creados = []
+    clases_total = 0
+    avisos_creados = 0
+    try:
+        payloads = wod_semana.payloads_de_semana([d.model_dump() for d in body.dias])
+        for crudo in payloads:
+            wd = schemas.WodCreate(**crudo)
+            nueva_wod = _crear_wod_obj(db, tenant_id, wd)
+
+            if clases_alcance:
+                clases_dia = [
+                    c for c in clases_alcance
+                    if c.fecha == wd.fecha and c.disciplina_id == disciplina_id
+                ]
+                if not clases_dia:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(f"Ninguna de las clases seleccionadas es del {wd.fecha} "
+                                f"en esa disciplina: no se programó nada."))
+            else:
+                clases_dia = db.query(Clase).filter(
+                    Clase.tenant_id == tenant_id,
+                    Clase.fecha == wd.fecha,
+                    Clase.disciplina_id == disciplina_id,
+                ).all()
+
+            ids_clase = []
+            for clase in clases_dia:
+                clase.wod_id = nueva_wod.id
+                if clase.coach_id is None:
+                    clase.coach_id = coach_id
+                ids_clase.append(clase.id)
+            clases_total += len(ids_clase)
+
+            texto_aviso = avisos_por_fecha.get(wd.fecha)
+            if texto_aviso:
+                datos = avisos.normalizar(
+                    avisos.payload_aviso_de_fecha(texto_aviso, wd.fecha))
+                problemas = avisos.validar(datos)
+                if problemas:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(f"El aviso del {wd.fecha} no es válido: "
+                                f"{' '.join(problemas)}"))
+                db.add(AvisoMarketing(
+                    tenant_id=tenant_id, creado_por=coach_id, **datos))
+                avisos_creados += 1
+
+            dias_creados.append({
+                "fecha": str(wd.fecha),
+                "wod_id": nueva_wod.id,
+                "titulo": nueva_wod.titulo,
+                "clase_ids": ids_clase,
+                "aviso": bool(texto_aviso),
+            })
+
+        db.commit()
+    except Exception:
+        # Un día malo = NADA publicado (nunca media semana a medias).
+        db.rollback()
+        raise
+
+    return {
+        "mensaje": (f"{len(dias_creados)} día(s) programados en {clases_total} clase(s)"
+                    + (f" · {avisos_creados} aviso(s) con fecha" if avisos_creados else "")),
+        "dias": len(dias_creados),
+        "clases_vinculadas": clases_total,
+        "avisos": avisos_creados,
+        "creados": dias_creados,
     }

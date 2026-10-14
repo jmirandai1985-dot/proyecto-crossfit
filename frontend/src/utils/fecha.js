@@ -81,3 +81,20 @@ export function sumarDiasInstante(desde, dias) {
     return new Date(base.getTime() + (Number(dias) || 0) * 24 * 60 * 60 * 1000);
 }
 
+/**
+ * Los 7 días (lunes→domingo) de la semana EN CURSO a la que pertenece `fechaStr`.
+ *
+ * Es la MISMA regla que ya usa la grilla del panel del coach (`DashboardCoach`): la semana
+ * empieza el LUNES y termina el domingo. Se calcula sobre la fecha anclada a mediodía UTC
+ * (`fechaSolaAInstante`), así que ni el reloj ni la zona del navegador la corren un día.
+ * La usa el modal "Publicar WOD" con "Aplicar a: la semana".
+ */
+export function semanaEnCurso(fechaStr) {
+    const base = fechaSolaAInstante(fechaStr || hoyChileStr());
+    const diaSemana = base.getUTCDay();          // 0=domingo … 6=sábado
+    const hastaLunes = (diaSemana + 6) % 7;      // lunes → 0
+    const lunes = base.getTime() - hastaLunes * 86400000;
+    return Array.from({ length: 7 }, (_, i) =>
+        new Date(lunes + i * 86400000).toISOString().slice(0, 10));
+}
+
