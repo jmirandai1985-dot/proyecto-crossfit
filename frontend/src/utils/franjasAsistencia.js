@@ -75,6 +75,27 @@ export const reservasDe = (clase) => {
     return Number.isFinite(n) && n > 0 ? n : 0;
 };
 
+/**
+ * Los TRES números del mockup 6b por clase: los que reservaron, los que YA marcaron y los
+ * que faltan. Fuente de cada uno:
+ *   · conReserva — `reservas_count` del backend (reservas vigentes de la clase);
+ *   · yaMarcaron — `marcados_count` del backend (`asistio = true`: el MISMO dato con el que
+ *     la tarjeta ancha del Resumen del coach cuenta el "ya marcaron");
+ *   · faltan      — la resta (nunca negativa): no viaja por la API para no tener dos cuentas.
+ * Los dos conteos se acotan (nunca NaN, nunca "ya marcaron > con reserva") porque son de
+ * requests distintos y una clase puede cambiar entre una y otra.
+ */
+export const contadoresDe = (conReserva, yaMarcaron) => {
+    const reservas = Math.max(Number(conReserva) || 0, 0);
+    const marcados = Math.min(Math.max(Number(yaMarcaron) || 0, 0), reservas);
+    return { conReserva: reservas, yaMarcaron: marcados, faltan: reservas - marcados };
+};
+
+/** Los mismos 3 números, desde una fila de `GET /asistencia/clases-hoy`. */
+export const contadoresClase = (clase) => contadoresDe(
+    reservasDe(clase), clase?.marcados_count,
+);
+
 /** Resumen de una franja: cantidad de clases, rango horario y ocupación (0-100). */
 export const resumenFranja = (clases) => {
     const lista = clases || [];

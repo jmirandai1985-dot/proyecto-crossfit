@@ -10,10 +10,13 @@
 //   5. la barra usa los mismos umbrales del mockup (>=70 ok, >=40 medio, resto bajo)
 //   6. la fila de la lista móvil por franja (mockup 6b): "Hecha" gana, "En curso" lo dice
 //      el BACKEND (`estado === 'en_curso'`, hora de Chile) y el progreso no divide por 0
+//   7. los 3 números de la fila (con reserva / ya marcaron / faltan) salen de los contadores
+//      del backend, se acotan y "faltan" es la resta (nunca negativa)
 import {
     FRANJAS, IDS_FRANJAS, horaDe, horaCorta, franjaDe, agruparPorFranja,
     franjaActual, resumenFranja, claseEnCurso, ocupacion, estaMarcada, reservasDe,
     ESTADOS_FILA, estadoFila, etiquetaEstado, textoProgreso,
+    contadoresDe, contadoresClase,
 } from '../src/utils/franjasAsistencia.js';
 
 let fallos = 0;
@@ -140,6 +143,33 @@ eq(textoProgreso({ asistentes_confirmados: 3, cupo_maximo: 0 }), '3 marcados',
 eq(textoProgreso({}), '0 marcados', 'sin datos -> 0 marcados, sin NaN');
 eq(textoProgreso({ asistentes_confirmados: 5, cupo_maximo: 16 }, 20), '5/20 marcados',
     'el cupo ampliado en esta visita es el que manda');
+
+// ── 7. Los 3 números de la fila (con reserva / ya marcaron / faltan) ─────────────
+// `reservas_count` = los que reservaron; `marcados_count` = los que YA se marcaron
+// presentes (`asistio = true`). "Faltan" es la resta: no viaja por la API.
+// `eq` compara con `===`, así que los objetos se comparan serializados.
+console.log('== 7. contadores de la clase (con reserva / ya marcaron / faltan) ==');
+const eqCuenta = (clase, esperado, msg) => eq(JSON.stringify(contadoresClase(clase)),
+    JSON.stringify(esperado), msg);
+eqCuenta({ reservas_count: 14, marcados_count: 12 },
+    { conReserva: 14, yaMarcaron: 12, faltan: 2 }, 'los 3 números de una clase con reservas');
+eqCuenta({ reservas_count: 9, asistentes_confirmados: 9, marcados_count: 9 },
+    { conReserva: 9, yaMarcaron: 9, faltan: 0 }, 'clase COMPLETA: faltan 0 (no negativo)');
+eqCuenta({ reservas_count: 9 }, { conReserva: 9, yaMarcaron: 0, faltan: 9 },
+    'sin `marcados_count` (backend viejo) faltan todos, sin NaN');
+eqCuenta({ reservas_count: 3, marcados_count: 9 },
+    { conReserva: 3, yaMarcaron: 3, faltan: 0 },
+    '`marcados_count` mayor que las reservas se acota (nunca "ya marcaron > con reserva")');
+eqCuenta({}, { conReserva: 0, yaMarcaron: 0, faltan: 0 },
+    'clase sin contadores -> tres ceros (no NaN)');
+eqCuenta(null, { conReserva: 0, yaMarcaron: 0, faltan: 0 }, 'clase nula -> ceros');
+eq(JSON.stringify(contadoresDe('14', 'x')), JSON.stringify({ conReserva: 14, yaMarcaron: 0, faltan: 14 }),
+    'lo que no es número no rompe la cuenta');
+eq(JSON.stringify(contadoresDe(-3, -1)), JSON.stringify({ conReserva: 0, yaMarcaron: 0, faltan: 0 }),
+    'negativos -> 0');
+// El "con reserva" es el MISMO que el de `reservasDe` (una sola lectura de la fila).
+eq(contadoresClase({ reservas_count: 5, marcados_count: 1 }).conReserva,
+    reservasDe({ reservas_count: 5 }), 'el "con reserva" de la fila no tiene una cuenta propia');
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);

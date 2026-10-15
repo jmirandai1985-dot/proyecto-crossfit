@@ -251,13 +251,21 @@ def test_clase_que_no_es_de_hoy_da_403(staff, alumno_sin_plan):
 
 
 def test_coach_de_otra_disciplina_da_403(clase, alumno_sin_plan):
-    """(5) Un coach sólo agrega gente a clases de SUS disciplinas."""
+    """(5) Un coach sin ninguna relación con la clase no agrega gente a esa clase.
+
+    "Sin ninguna relación" es literal desde el fix del panel del coach: la clase también es
+    suya si el admin se la ASIGNÓ (`clases.coach_id`), aunque su disciplina no esté en su
+    lista — en ese caso el endpoint SÍ lo deja (lo cubre
+    `test_asistencia_clases_hoy.py::test_la_clase_asignada_de_otra_disciplina_se_ve_y_se_puede_marcar`).
+    Acá se elige, por eso, un coach que no dicta la disciplina **y** no es el coach asignado.
+    """
     coach = _one(
         "SELECT co.id, co.tenant_id, co.correo, co.rol::text AS rol FROM usuarios co "
         "WHERE co.tenant_id = :t AND co.rol::text = 'coach' AND co.activo = true "
         "AND NOT EXISTS (SELECT 1 FROM coach_disciplinas cd WHERE cd.coach_id = co.id "
         "   AND cd.disciplina_id = :d AND cd.activo = true) "
-        "ORDER BY co.id LIMIT 1", t=TENANT_ID, d=clase.disciplina_id)
+        "AND co.id <> COALESCE((SELECT cl.coach_id FROM clases cl WHERE cl.id = :c), -1) "
+        "ORDER BY co.id LIMIT 1", t=TENANT_ID, d=clase.disciplina_id, c=clase.id)
     if coach is None:
         pytest.skip("TEST no tiene un coach de otra disciplina")
     r = requests.post(f"{BASE}/asistencia/clases/{clase.id}/sin-reserva",

@@ -154,6 +154,10 @@ def listar_clases(
         # coach no tenía clases de su única disciplina (Gap, sin horarios cargados) y sus
         # clases asignadas no se contaban → "Clases hoy / Alumnos activos / En riesgo" en 0.
         # El subquery de disciplinas lleva `tenant_id` para no cruzar boxes.
+        # ⚠️ Estas 3 vías están espejadas en `clases_service.condicion_mis_clases` (la versión
+        # ORM que usa `/asistencia/clases-hoy` y los candados de la pestaña Asistencia): si
+        # cambia una, cambia la otra — `tests/test_asistencia_clases_hoy.py` comprueba que los
+        # dos endpoints devuelven el MISMO conjunto para el mismo coach.
         conditions.append(
             "(c.coach_id = :coach_id"
             " OR hco.coach_id = :coach_id"

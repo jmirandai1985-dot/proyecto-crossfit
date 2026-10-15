@@ -93,6 +93,14 @@ ok(/data-testid=\{`franja-cupo-\$\{clase\.id\}`\}/.test(FRANJA),
     'y el coach tampoco pierde "+ cupo" en el teléfono');
 ok(/Sin reservas/.test(FRANJA),
     'una clase sin reservas no inventa un estado (mismo criterio que el acordeón)');
+ok(/contadoresClase\(clase\)/.test(FRANJA),
+    'los 3 números de la fila salen del util (`contadoresClase`), no de una cuenta propia');
+ok(/con reserva · \{contadores\.yaMarcaron\} ya/.test(FRANJA) && /faltan/.test(FRANJA),
+    'la fila dice "con reserva / ya marcaron / faltan" (los 3 números del mockup)');
+ok(/data-testid=\{`franja-contadores-\$\{clase\.id\}`\}/.test(FRANJA),
+    'los contadores de cada clase son identificables');
+ok(/conReservas && \(/.test(FRANJA),
+    'una clase sin reservas no muestra tres ceros (el badge ya dice "Sin reservas")');
 eq(/from '\.\.\/hooks\/queries'|api\./.test(FRANJA), false,
     'es presentación pura: recibe los datos y los callbacks por props');
 

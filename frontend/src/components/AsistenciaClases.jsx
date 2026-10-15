@@ -17,9 +17,10 @@ import ModalAgregarSinReserva from './ModalAgregarSinReserva';
 /**
  * Pestaña "Asistencia" (compartida coach + admin, Fase 1).
  *
- * Muestra las clases del día actual (America/Santiago) desde la hora en
- * adelante. El backend filtra por rol: el coach ve solo sus disciplinas
- * asignadas; el admin/administrador ve TODAS las clases del tenant.
+ * Muestra TODAS las clases del día actual (America/Santiago) —pasadas, en curso y por
+ * venir—. El backend filtra por rol: el coach ve las suyas (las tres vías de "mis clases":
+ * asignadas a él, de su horario vigente o de una disciplina que dicta, igual que su
+ * Resumen); el admin/administrador ve TODAS las clases del tenant.
  * Al abrir una clase, lista las reservas con checks PRE-MARCADOS (si la clase
  * aún no fue marcada) y un botón único "Confirmar" que envía el batch a
  * POST /api/v1/asistencia/clases/{id}/confirmar (el backend registra la marca
@@ -30,8 +31,9 @@ import ModalAgregarSinReserva from './ModalAgregarSinReserva';
  *             | 'dark' (paneles zinc, usado en el panel de Administración)
  *   franjas — false (default): el acordeón por disciplina, en cualquier ancho.
  *             true: en <768px las clases del día se agrupan por franja (Mañana/Tarde/
- *             Noche) al estilo del mockup 6b, con la fila compacta por clase; en ≥768px
- *             (tablet y escritorio) sigue EXACTAMENTE el acordeón por disciplina.
+ *             Noche) al estilo del mockup 6b, con la fila compacta por clase (y sus
+ *             contadores "con reserva / ya marcaron / faltan"); en ≥768px (tablet y
+ *             escritorio) sigue EXACTAMENTE el acordeón por disciplina.
  *             Lo pide el coach (`DashboardCoach`, ?tab=asistencia) y NO el admin: su
  *             pestaña Asistencia monta el componente sin la prop y no cambia nada.
  *   permitirSinReserva — false (default): agrega el botón "+ Agregar alumno sin reserva"
@@ -177,8 +179,8 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
             <div>
                 <h2 className={`text-2xl font-bold ${osc ? 'text-zinc-100' : 'text-gray-900'}`}>📋 Asistencia de Hoy</h2>
                 <p className={`mt-1 ${osc ? 'text-zinc-400' : 'text-gray-600'}`}>
-                    Clases del día (hora de Chile) desde el horario actual. Confirma la
-                    asistencia de cada clase con un clic.
+                    Clases de HOY (hora de Chile): las que ya pasaron, la que está en curso y
+                    las que vienen. Confirma la asistencia de cada clase con un clic.
                 </p>
             </div>
 
@@ -195,9 +197,9 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
             ) : clases.length === 0 ? (
                 <div className={`text-center py-16 rounded-xl shadow-sm border ${osc ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-gray-100'}`}>
                     <p className="text-5xl mb-4">📭</p>
-                    <p className={`text-xl font-bold ${osc ? 'text-zinc-200' : 'text-gray-700'}`}>Sin clases pendientes</p>
+                    <p className={`text-xl font-bold ${osc ? 'text-zinc-200' : 'text-gray-700'}`}>Sin clases hoy</p>
                     <p className={`text-sm mt-2 ${osc ? 'text-zinc-500' : 'text-gray-500'}`}>
-                        No hay clases de hoy desde este horario en tus disciplinas.
+                        No hay clases de hoy en tus clases asignadas ni en tus disciplinas.
                     </p>
                 </div>
             ) : (

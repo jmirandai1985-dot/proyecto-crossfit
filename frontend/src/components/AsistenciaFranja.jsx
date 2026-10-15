@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-    estadoFila, etiquetaEstado, reservasDe, textoProgreso,
+    contadoresClase, estadoFila, etiquetaEstado, reservasDe, textoProgreso,
 } from '../utils/franjasAsistencia';
 import { acotarExtra, cupoActual, cupoOriginal, cupoTope, extraMaximo } from '../utils/cuposClase';
 
@@ -20,6 +20,11 @@ import { acotarExtra, cupoActual, cupoOriginal, cupoTope, extraMaximo } from '..
  * Acciones: "Marcar" abre el modal de siempre (mismo `onAbrir` que el acordeón) y
  * "+ cupo" amplía el cupo de esa clase con el tope de `utils/cuposClase` (+10 sobre el
  * cupo original), igual que en escritorio: en el teléfono no se pierde ninguna.
+ *
+ * La fila muestra además los TRES números del mockup por clase (con reserva / ya marcaron /
+ * faltan), calculados por `contadoresClase` desde los contadores que manda el backend
+ * (`reservas_count` y `marcados_count`): la misma cuenta que hace la tarjeta ancha del
+ * Resumen del coach, sin duplicar la fórmula.
  *
  * Props: franja {id,label}, clases[], osc, formatearHora, onAbrir, onAmpliarCupo.
  */
@@ -116,6 +121,7 @@ const AsistenciaFranja = ({ franja, clases, osc, formatearHora, onAbrir, onAmpli
             {clases.map((clase) => {
                 const estado = estadoFila(clase);
                 const conReservas = reservasDe(clase) > 0;
+                const contadores = contadoresClase(clase);
                 const cupo = cupoActual(clase, cupos);
                 const libre = extraMaximo(clase, cupos);
                 const enCurso = estado === 'en-curso';
@@ -185,6 +191,20 @@ const AsistenciaFranja = ({ franja, clases, osc, formatearHora, onAbrir, onAmpli
                         >
                             Marcar
                         </button>
+
+                        {/* Los 3 números del mockup, por clase: con reserva / ya marcaron /
+                            faltan. Van en su PROPIA línea (basis-full) porque entre el estado,
+                            "+ cupo" y "Marcar" no queda ancho en el teléfono. Sólo con
+                            reservas: en una clase vacía el badge ya dice "Sin reservas" y tres
+                            ceros serían ruido. */}
+                        {conReservas && (
+                            <p
+                                data-testid={`franja-contadores-${clase.id}`}
+                                className={`basis-full text-[11px] ${osc ? 'text-zinc-400' : 'text-gray-500'}`}
+                            >
+                                {contadores.conReserva} con reserva · {contadores.yaMarcaron} ya marcaron · {contadores.faltan} faltan
+                            </p>
+                        )}
 
                         {abierto === clase.id && (
                             <div className={`w-full mt-1 p-3 rounded-lg border flex flex-wrap items-center gap-3 ${osc ? 'bg-zinc-800/60 border-zinc-700' : 'bg-gray-50 border-gray-200'}`}>

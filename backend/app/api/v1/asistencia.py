@@ -2,7 +2,9 @@
 Router del sistema de Asistencia + Hitos (Fase 1 y 2).
 
 Coach (marcado de asistencia):
-  GET  /clases-hoy                 — clases del día (Santiago) desde la hora actual
+  GET  /clases-hoy                 — TODAS las clases de hoy (Santiago) que son del coach
+                                     (pasadas, en curso y por venir), con los contadores de
+                                     cada una; el admin ve el día completo del box
   GET  /clases/{clase_id}/alumnos  — reservas de la clase con datos del alumno
   POST /clases/{clase_id}/confirmar— confirmación BATCH (1 click) con auditoría
 
@@ -36,29 +38,72 @@ from app.models.reserva import Reserva
 from app.models.suscripcion import Suscripcion
 from app.models.tenant import Tenant
 from app.models.usuario import Usuario, RolUsuario
-from app.models.coach_disciplina import CoachDisciplina
 from app.models.disciplina import Disciplina
 from app.utils.santiago import ahora_santiago, hoy_santiago, SANTIAGO
 from app.schemas.asistencia import (ConfirmarAsistenciaRequest,
                                     PresenteSinReservaRequest)
 from app.services import asistencia_service as svc
-from app.services.clases_service import estado_clase   # estado de la clase (realizada/en curso/…)
+# `estado_clase` = estado de la clase (realizada/en curso/…) y `condicion_mis_clases` = la
+# definición ÚNICA de "esta clase es del coach" (las 3 vías), compartida con /clases?coach_id=.
+from app.services.clases_service import (
+    condicion_mis_clases, es_mi_clase, estado_clase,
+)
 
 router = APIRouter()
 
 
-# ── Coach: clases del día desde la hora actual ───────────────────────────────
+def _exigir_alcance_coach(db, current_user: dict, clase, modo_emergencia: bool,
+                          accion: str, tenant_id: int) -> None:
+    """Candado del coach en la pestaña Asistencia: sólo SUS clases (o cobertura de emergencia).
+
+    "Suya" es la MISMA definición que le arma la lista del día
+    (`clases_service.es_mi_clase` = asignada a él, de su horario vigente o de una disciplina
+    que dicta): si el panel le muestra la clase, tiene que poder abrirla y marcarla. Sin
+    esto, la clase que le asignaron de otra disciplina aparecería en su pantalla y el clic
+    caería en un 403.
+
+    Cuando la clase NO es suya, se aplica el candado histórico por disciplina
+    (`verificar_coach_disciplina`), que además es el que registra la cobertura de emergencia.
+    El admin/administrador y las clases sin disciplina pasan sin chequeo (como antes).
+    """
+    if current_user.get("rol") != "coach" or not clase.disciplina_id:
+        return
+    if es_mi_clase(db, tenant_id, current_user["usuario_id"], clase.id):
+        return
+    verificar_coach_disciplina(
+        coach_id=current_user["usuario_id"],
+        disciplina_id=clase.disciplina_id,
+        db=db,
+        modo_emergencia=modo_emergencia,
+        clase_id=clase.id,
+        accion=accion,
+        tenant_id=tenant_id,
+    )
+
+
+# ── Coach: TODO su día (pasadas, en curso y por venir) ───────────────────────
 @router.get("/clases-hoy")
 def clases_hoy(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_coach),
 ):
-    """Clases del día actual (America/Santiago) para coach solo desde la hora actual y sus disciplinas asignadas;
-    admin/administrador: el dia completo (corrige que antes el admin no veia las clases del dia ya pasadas)."""
+    """Clases del día actual (America/Santiago) para el coach/admin.
+
+    El COACH ve TODAS las clases de HOY que son suyas —pasadas, en curso y por venir—:
+    es la misma pantalla con la que después marca la asistencia, así que recortar por
+    hora escondía trabajo real (una clase de la mañana sin marcar desaparecía al mediodía)
+    y una clase de las primeras horas nunca aparece si el coach entra más tarde.
+
+    "Suya" son las TRES vías de `GET /clases/?coach_id=` (definición única en
+    `clases_service.condicion_mis_clases`): asignada a él, de su horario vigente o de una
+    disciplina que dicta. ANTES miraba sólo sus disciplinas y, con la lista vacía,
+    devolvía [] — el coach con clases asignadas veía su pestaña Asistencia vacía.
+
+    El admin/administrador ve el día completo del box (no cambia).
+    """
     tenant_id = current_user["tenant_id"]
     rol = current_user.get("rol", "")
     hoy = hoy_santiago()
-    ahora = ahora_santiago().time()
 
     query = db.query(Clase).filter(
         Clase.tenant_id == tenant_id,
@@ -67,18 +112,7 @@ def clases_hoy(
     )
 
     if rol == "coach":
-        # El coach ve solo lo que resta del dia (desde ahora). Admin/administrador
-        # ven el dia completo: necesitan ver las clases de la manana para revisar
-        # quien marco QR, aunque la hora ya haya pasado.
-        query = query.filter(Clase.hora_inicio >= ahora)
-        disc_ids = [r[0] for r in db.query(CoachDisciplina.disciplina_id).filter(
-            CoachDisciplina.coach_id == current_user["usuario_id"],
-            CoachDisciplina.tenant_id == tenant_id,
-            CoachDisciplina.activo == True,
-        ).all()]
-        if not disc_ids:
-            return []
-        query = query.filter(Clase.disciplina_id.in_(disc_ids))
+        query = query.filter(condicion_mis_clases(current_user["usuario_id"]))
 
     clases = query.order_by(Clase.hora_inicio.asc()).all()
 
@@ -115,6 +149,20 @@ def clases_hoy(
         }
         marcadas = con_reservas - con_pendientes
 
+    # Contadores por clase de la fila de la pestaña Asistencia (mockup 6b: "con reserva /
+    # ya marcaron / faltan"): `reservas_count` son los que reservaron y `marcados_count`
+    # los que YA se marcaron PRESENTES (`asistio = true` — el mismo dato que pinta la
+    # tarjeta ancha del Resumen del coach, así las dos pantallas no pueden discrepar).
+    # "Faltan" NO viaja: es la resta (reservas menos marcados) y la hace el front con UNA
+    # sola cuenta en `utils/franjasAsistencia`, para no tener dos definiciones.
+    marcados_count = {}
+    if ids:
+        marcados_count = dict(db.query(Reserva.clase_id, func.count(Reserva.id)).filter(
+            Reserva.clase_id.in_(ids),
+            no_cancelada(Reserva.estado),
+            Reserva.asistio.is_(True),
+        ).group_by(Reserva.clase_id).all())
+
     disc_ids_set = {c.disciplina_id for c in clases if c.disciplina_id}
     disc_map, disc_req = {}, {}
     if disc_ids_set:
@@ -147,6 +195,7 @@ def clases_hoy(
             "cupo_original": c.cupo_original,
             "asistentes_confirmados": c.asistentes_confirmados,
             "reservas_count": counts.get(c.id, 0),
+            "marcados_count": marcados_count.get(c.id, 0),
             "marcada": c.id in marcadas,
             "estado": estado_clase(c.fecha, c.hora_inicio, c.hora_fin, c.cancelada, ahora_dt),
         }
@@ -177,17 +226,9 @@ def alumnos_clase(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Clase no encontrada")
 
-    # 🔒 FIX 2: coach solo ve reservas de clases de disciplinas asignadas.
-    if current_user.get("rol") == "coach" and clase.disciplina_id:
-        verificar_coach_disciplina(
-            coach_id=current_user["usuario_id"],
-            disciplina_id=clase.disciplina_id,
-            db=db,
-            modo_emergencia=modo_emergencia,
-            clase_id=clase_id,
-            accion="ver_asistencia",
-            tenant_id=tenant_id,
-        )
+    # 🔒 FIX 2: el coach sólo abre reservas de SUS clases (las 3 vías de "mis clases").
+    _exigir_alcance_coach(db, current_user, clase, modo_emergencia,
+                          "ver_asistencia", tenant_id)
 
     reservas = db.query(Reserva).filter(
         Reserva.clase_id == clase_id,
@@ -252,17 +293,9 @@ def confirmar_asistencia(
             detail="La asistencia solo se puede marcar o corregir el mismo día de la clase "
                    "(hasta las 23:59 hora de Chile).")
 
-    # 🔒 Coach solo opera en disciplinas asignadas (admin/administrador bypass).
-    if current_user.get("rol") == "coach" and clase.disciplina_id:
-        verificar_coach_disciplina(
-            coach_id=current_user["usuario_id"],
-            disciplina_id=clase.disciplina_id,
-            db=db,
-            modo_emergencia=modo_emergencia,
-            clase_id=clase_id,
-            accion="confirmar_asistencia",
-            tenant_id=tenant_id,
-        )
+    # 🔒 El coach sólo marca SUS clases (admin/administrador bypass).
+    _exigir_alcance_coach(db, current_user, clase, modo_emergencia,
+                          "confirmar_asistencia", tenant_id)
 
     if not body.asistencias:
         raise HTTPException(
@@ -379,9 +412,8 @@ def alumnos_elegibles_clase(
     Lista a TODOS los alumnos activos del box, no sólo a los que ya entrenaron con
     este coach: el caso de uso es justamente alguien que NO está en la clase (la otra
     lista, `GET /fidelizacion/coach/{id}/alumnos`, sale de las reservas del coach y por
-    eso nunca incluiría a quien nunca ha reservado). El `verificar_coach_disciplina` de
-    más abajo es el mismo candado que usa `/clases/{id}/alumnos`: un coach sólo abre
-    esta lista para clases de sus disciplinas.
+    eso nunca incluiría a quien nunca ha reservado). El candado de más abajo es el mismo
+    que usa `/clases/{id}/alumnos`: un coach sólo abre esta lista para SUS clases.
 
     La búsqueda por nombre la hace la pantalla (el box tiene decenas de alumnos y la
     lista viaja completa una sola vez); si algún día crece, el lugar para filtrar es
@@ -396,16 +428,9 @@ def alumnos_elegibles_clase(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Clase no encontrada")
 
-    if current_user.get("rol") == "coach" and clase.disciplina_id:
-        verificar_coach_disciplina(
-            coach_id=current_user["usuario_id"],
-            disciplina_id=clase.disciplina_id,
-            db=db,
-            modo_emergencia=modo_emergencia,
-            clase_id=clase_id,
-            accion="ver_alumnos_elegibles",
-            tenant_id=tenant_id,
-        )
+    # 🔒 El coach sólo agrega gente a SUS clases (mismo candado de la pestaña Asistencia).
+    _exigir_alcance_coach(db, current_user, clase, modo_emergencia,
+                          "ver_alumnos_elegibles", tenant_id)
 
     alumnos = db.query(Usuario.id, Usuario.nombre).filter(
         Usuario.tenant_id == tenant_id,
@@ -486,17 +511,12 @@ def registrar_presente_sin_reserva(
             detail="La asistencia solo se puede marcar o corregir el mismo día de la clase "
                    "(hasta las 23:59 hora de Chile).")
 
+    # 🔒 El coach sólo agrega gente a SUS clases (mismo candado de la pestaña Asistencia).
+    _exigir_alcance_coach(db, current_user, clase, modo_emergencia,
+                          "asistencia_sin_reserva", tenant_id)
+    # El rol va a la auditoría de más abajo (`creada_por_rol`): coach = agregó a alguien sin
+    # cargo, admin = lo hizo el box.
     rol = current_user.get("rol", "")
-    if rol == "coach" and clase.disciplina_id:
-        verificar_coach_disciplina(
-            coach_id=current_user["usuario_id"],
-            disciplina_id=clase.disciplina_id,
-            db=db,
-            modo_emergencia=modo_emergencia,
-            clase_id=clase_id,
-            accion="asistencia_sin_reserva",
-            tenant_id=tenant_id,
-        )
 
     alumno = db.query(Usuario).filter(
         Usuario.id == body.alumno_id,
