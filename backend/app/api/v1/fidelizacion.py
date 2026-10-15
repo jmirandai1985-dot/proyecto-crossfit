@@ -4,7 +4,7 @@ Analiza asistencias y detecta alumnos en riesgo de abandono
 """
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
-from sqlalchemy import func, distinct, or_
+from sqlalchemy import func
 from datetime import date, datetime
 from typing import List, Optional
 import pandas as pd
@@ -15,14 +15,15 @@ from app.models.usuario import Usuario, RolUsuario
 from app.models.asistencia import Asistencia
 from app.models.reserva import Reserva
 from app.models.clase import Clase
-from app.models.coach_disciplina import CoachDisciplina
 from app.core.dependencies import get_current_admin, get_current_coach
 # Vigencia de un plan y "hoy": SIEMPRE en hora de Chile (un plan vale hasta las 23:59:59 de su
 # último día; `date.today()` de noche en UTC ya es mañana). `dia_chile` es el cast SQL del día.
-from app.core.estados import dia_chile, no_cancelada, vigente_hoy
+from app.core.estados import dia_chile, vigente_hoy
 from app.utils.santiago import dias_para_vencer, fecha_chile, hoy_santiago
 from app.services.auditoria_service import registrar_auditoria
 from app.services import churn_service
+# "Mis alumnos" del coach: UNA sola definición (el alcance de las dos pestañas del panel).
+from app.services.clases_service import alumnos_del_coach
 
 router = APIRouter()
 
@@ -265,6 +266,10 @@ def enviar_campana_email(
 
 # ─────────────────────────────────────────
 # ENDPOINT 4: Alumnos en riesgo de un coach específico
+# Mismo alcance que ENDPOINT 4b (Alumnos): los DOS usan `alumnos_del_coach`
+# (services/clases_service.py). Antes esto miraba SÓLO `clases.coach_id` y la
+# pestaña "En Riesgo" del panel quedaba vacía para todo coach que dicta por
+# disciplina u horario, aunque "Alumnos" le mostrara cientos.
 # ─────────────────────────────────────────
 @router.get("/coach/{coach_id}/en-riesgo")
 def alumnos_coach_en_riesgo(
@@ -276,8 +281,11 @@ def alumnos_coach_en_riesgo(
 ):
     """
     Obtiene alumnos en riesgo (días sin asistir > umbral) para un coach específico.
-    Un alumno "es de un coach" si tiene al menos una reserva en una clase 
-    donde clases.coach_id coincide con ese coach.
+    Un alumno "es de un coach" si tiene al menos una reserva viva (no cancelada) en
+    una clase que es suya: asignada (`clases.coach_id`), de un horario que dicta
+    vigente esa fecha, o de una disciplina que tiene activa. Es EXACTAMENTE la misma
+    definición que la pestaña Alumnos (`alumnos_del_coach`), así que las dos pantallas
+    no pueden mostrar universos distintos.
     Coach/admin del box (un coach solo puede consultar su propio coach_id).
     """
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
@@ -288,16 +296,7 @@ def alumnos_coach_en_riesgo(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Solo puedes consultar los alumnos en riesgo de tus propias clases",
         )
-    alumnos_coach = db.query(
-        distinct(Reserva.alumno_id)
-    ).join(
-        Clase, Reserva.clase_id == Clase.id
-    ).filter(
-        Clase.coach_id == coach_id,
-        Clase.tenant_id == tenant_id,
-    ).all()
-
-    alumno_ids = [r[0] for r in alumnos_coach]
+    alumno_ids = alumnos_del_coach(db, tenant_id, coach_id)
 
     if not alumno_ids:
         return {
@@ -377,12 +376,12 @@ def alumnos_coach_en_riesgo(
 
 # ─────────────────────────────────────────
 # ENDPOINT 4b: Alumnos de un coach (dashboard coach)
-# Un alumno "es del coach" si tiene al menos una reserva ACTIVA (no cancelada)
-# en una clase donde el coach es el asignado (clases.coach_id) O en una clase
-# de alguna de las disciplinas que tiene asignadas (coach_disciplinas activo).
-# Esto sigue el mismo enfoque "por disciplina" de la grilla del coach (las
-# clases pueden no tener coach_id explícito y aun así pertenecer al coach por
-# disciplina). Coach solo su propio id; admin puede consultar cualquiera.
+# Un alumno "es del coach" si tiene al menos una reserva viva (no cancelada) en
+# una clase del coach, y eso lo define `alumnos_del_coach`
+# (services/clases_service.py): clases.coach_id, un horario que dicta vigente esa
+# fecha, o una disciplina que tiene activa. Es la MISMA definición que ENDPOINT 4
+# (En Riesgo), así que las dos pestañas del panel no pueden divergir.
+# Coach solo su propio id; admin puede consultar cualquiera.
 # ─────────────────────────────────────────
 @router.get("/coach/{coach_id}/alumnos")
 def alumnos_de_coach(
@@ -398,31 +397,7 @@ def alumnos_de_coach(
             detail="Solo puedes consultar los alumnos de tus propias clases/disciplinas",
         )
 
-    disc_ids = [
-        r[0] for r in db.query(CoachDisciplina.disciplina_id).filter(
-            CoachDisciplina.tenant_id == tenant_id,
-            CoachDisciplina.coach_id == coach_id,
-            CoachDisciplina.activo == True,
-        ).all()
-    ]
-
-    filtro_clase = [Clase.tenant_id == tenant_id]
-    if disc_ids:
-        filtro_clase.append(or_(
-            Clase.coach_id == coach_id,
-            Clase.disciplina_id.in_(disc_ids),
-        ))
-    else:
-        filtro_clase.append(Clase.coach_id == coach_id)
-
-    filas = db.query(distinct(Reserva.alumno_id)).join(
-        Clase, Reserva.clase_id == Clase.id
-    ).filter(
-        no_cancelada(Reserva.estado),
-        *filtro_clase,
-    ).all()
-
-    alumno_ids = [r[0] for r in filas]
+    alumno_ids = alumnos_del_coach(db, tenant_id, coach_id)
 
     if not alumno_ids:
         return {"coach_id": coach_id, "total_alumnos": 0, "alumnos": []}

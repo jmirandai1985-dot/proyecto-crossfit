@@ -23,19 +23,27 @@ Regla (hora de CHILE, `America/Santiago`; nunca la TZ del proceso ni la de UTC):
 Para un día o un mes YA CERRADOS (todas las fechas < hoy) la definición se reduce a
 "no cancelada": por eso los meses cerrados no cambian de número al aplicar este criterio.
 
-El módulo también aloja la otra definición que varios endpoints tienen que compartir:
-**"MIS clases"** (`condicion_mis_clases` / `es_mi_clase`, las TRES vías por las que una
-clase puede ser de un coach). Está acá por el mismo motivo: si cada endpoint la escribe a
-su manera, el panel del coach y la pestaña Asistencia dejan de decir lo mismo.
+El módulo también aloja las OTRAS dos definiciones que varios endpoints tienen que compartir:
+
+  * **"MIS clases"** (`condicion_mis_clases` / `es_mi_clase`, las TRES vías por las que una
+    clase puede ser de un coach). Está acá por el mismo motivo: si cada endpoint la escribe
+    a su manera, el panel del coach y la pestaña Asistencia dejan de decir lo mismo.
+  * **"MIS alumnos"** (`alumnos_del_coach`, los `alumno_id` del coach). Mismo motivo y mismo
+    bug, un día después (2026-10-15): `/fidelizacion/coach/{id}/en-riesgo` definía "alumno
+    del coach" mirando SÓLO `clases.coach_id`, así que un coach que dicta POR DISCIPLINA
+    veía su pestaña "En Riesgo" vacía (total_alumnos = 0) mientras la pestaña de al lado
+    (Alumnos) le mostraba cientos: las dos pantallas del MISMO panel se contradecían.
 """
 from datetime import date, datetime, time
 
-from sqlalchemy import exists, or_, select
+from sqlalchemy import distinct, exists, or_, select
 
 from shared.estados import ZONA_CHILE, sql_hoy_chile
+from app.core.estados import no_cancelada
 from app.models.clase import Clase
 from app.models.coach_disciplina import CoachDisciplina
 from app.models.horario_coach import HorarioCoach
+from app.models.reserva import Reserva
 from app.utils.santiago import SANTIAGO, ahora_santiago
 
 # Etiquetas del estado de una clase (una sola lista para la API y el frontend).
@@ -151,4 +159,46 @@ def es_mi_clase(db, tenant_id: int, coach_id: int, clase_id: int) -> bool:
         Clase.tenant_id == tenant_id,
         condicion_mis_clases(coach_id),
     ).first() is not None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# "MIS alumnos" (el alcance de un coach en fidelización): UNA sola definición
+# ─────────────────────────────────────────────────────────────────────────────
+def query_alumnos_del_coach(db, tenant_id: int, coach_id: int):
+    """Consulta ORM de los `alumno_id` que son "del coach" (SIN ejecutarla).
+
+    POR QUÉ EXISTE: `/fidelizacion/coach/{id}/alumnos` y `.../en-riesgo` —dos pestañas del
+    MISMO panel— definían "alumno del coach" cada una a su manera: la de "en riesgo" miraba
+    SÓLO `clases.coach_id`, así que un coach que dicta POR DISCIPLINA (o por horario) veía
+    "🎉 Ningún alumno está en riesgo" mientras la pestaña Alumnos le mostraba cientos. Medido
+    en la BD de PROD el 2026-10-15 (3 coaches, alumnos activos): coach 531 → 0 en riesgo vs 260
+    en Alumnos; coach 10 → 0 vs 251; y hasta un coach CON clases asignadas divergía por las
+    que sólo llegan por disciplina/horario: coach 7 → 221 vs 248. Ahora los dos endpoints usan
+    ESTA consulta, y como se apoya en `condicion_mis_clases`, el alcance de "mis alumnos" es
+    exactamente el de "mis clases" (las TRES vías, no una): los 3 coaches dan A=B.
+
+    Criterio (el que ya usaba la pestaña Alumnos, que era la que funcionaba):
+
+      * la reserva está VIVA — `no_cancelada` (ni `cancelled` ni `cancelada`), y
+      * la clase es del coach por alguna de las TRES vías de `condicion_mis_clases`.
+
+    Devuelve la `Query` sin ejecutarla para que un test pueda compilar su SQL sin base de
+    datos (y para que el endpoint que la necesite encadenar pueda seguir filtrando).
+    """
+    return db.query(distinct(Reserva.alumno_id)).join(
+        Clase, Reserva.clase_id == Clase.id
+    ).filter(
+        Clase.tenant_id == tenant_id,
+        no_cancelada(Reserva.estado),
+        condicion_mis_clases(coach_id),
+    )
+
+
+def alumnos_del_coach(db, tenant_id: int, coach_id: int) -> list:
+    """`alumno_id` de los alumnos que son del coach (la consulta de arriba, ejecutada).
+
+    ⚠️ Son ids de QUIÉN RESERVÓ en mis clases, sin filtrar `rol` ni `estado` del usuario: el
+    filtro de "alumno activo" lo hace cada endpoint (es idéntico en los dos, y a propósito).
+    """
+    return [fila[0] for fila in query_alumnos_del_coach(db, tenant_id, coach_id).all()]
 
