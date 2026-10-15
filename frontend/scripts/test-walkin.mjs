@@ -86,5 +86,35 @@ ok(/Clase\.asistentes_confirmados < Clase\.cupo_maximo/.test(API), 'toma el afor
 ok(/alumno_id: int = Field\(\.\.\., gt=0\)/.test(leer('../../backend/app/schemas/asistencia.py')),
     'el body del walk-in es sólo `{ alumno_id }`');
 
+console.log('== 6. Bloque 2: la confirmación es lo único que ejecuta el descuento ==');
+ok(/const \[confirmando, setConfirmando\] = useState\(null\)/.test(MODAL),
+    'el modal tiene el paso de confirmación como estado propio');
+ok(/onClick=\{\(\) => setConfirmando\(a\)\}/.test(MODAL),
+    'tocar un nombre SÓLO abre la tarjeta (todavía no llama a `agregar`)');
+eq(/onClick=\{\(\) => agregar\(a\)\}/.test(MODAL), false,
+    'no queda ningún click que agregue directo (era el descuento de un toque)');
+ok(/const confirmar = \(\) => \{\s*if \(confirmando\) agregar\(confirmando\);/.test(MODAL),
+    '`Confirmar` es el único camino a `agregar` (los endpoints de siempre)');
+ok(/data-testid="cancelar-token"/.test(MODAL) && /data-testid="confirmar-token-btn"/.test(MODAL),
+    'la tarjeta tiene Cancelar y Confirmar');
+ok(/const cancelar = \(\) => \{\s*if \(ocupado\) return;\s*setError\(''\);\s*setConfirmando\(null\);/.test(MODAL),
+    'Cancelar vuelve a la lista sin escribir nada');
+ok(/Se le descontará 1 token del plan a \$\{a\.nombre\}/.test(MODAL),
+    'con créditos, la tarjeta dice qué token se le descuenta y a quién');
+ok(/Su plan es ILIMITADO: no se le descuenta cupo de clases\./.test(MODAL),
+    'con plan ilimitado (creditos NULL) promete la verdad: sin descuento de cupo');
+ok(/'Ilimitado · no se le descuenta cupo'/.test(MODAL),
+    'la pista de la lista tampoco promete un descuento que no ocurre');
+ok(/Se ha descontado un token del plan de \$\{a\.nombre\}/.test(MODAL)
+    && /mensaje: mensajeExito\(alumno\)/.test(MODAL),
+    'el toast posterior nace en el modal y viaja en `onAgregado` (una sola fuente de texto)');
+ok(/<Toast texto=\{toast\} \/>/.test(ASIST) && /setToast\(alumno\.mensaje\)/.test(ASIST),
+    'el detalle de Asistencia pinta ese texto como toast');
+ok(/<Toast texto=\{toastWalkin\} \/>/.test(DASH) && /setToastWalkin\(alumno\.mensaje\)/.test(DASH),
+    'y el Resumen del coach también');
+const TOAST = leer('../src/components/Toast.jsx');
+ok(/const Toast = \(\{ texto/.test(TOAST) && /role="status"/.test(TOAST),
+    'el toast es un componente compartido y se anuncia (role="status")');
+
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);

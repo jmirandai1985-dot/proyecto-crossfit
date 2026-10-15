@@ -16,6 +16,8 @@ import WodDetalleModal from '../../components/WodDetalleModal';
 import ResumenCoach from '../../components/ResumenCoach';
 import ModalPublicarWod from '../../components/ModalPublicarWod';
 import ModalAgregarSinReserva from '../../components/ModalAgregarSinReserva';
+// Bloque 2: el walk-in avisa con un toast (el texto lo arma el modal en `alumno.mensaje`).
+import Toast from '../../components/Toast';
 
 const DashboardCoach = () => {
     const navigate = useNavigate();
@@ -41,6 +43,9 @@ const DashboardCoach = () => {
     const [claseWod, setClaseWod] = useState(null);
     const [claseSinReserva, setClaseSinReserva] = useState(null);
     const [msgPublicado, setMsgPublicado] = useState(null);
+    // Bloque 2: el walk-in ahora avisa con un toast (el texto lo escribió el modal pegado a la
+    // rama que ejecutó). `msgPublicado` queda para "qué contestó el backend" al publicar WOD.
+    const [toastWalkin, setToastWalkin] = useState(null);
     // Detalle completo del WOD de una tarjeta (grilla semanal / lista del día):
     // esas tarjetas NAVEGABAN a Gestión de Clases; ahora abren el detalle acá.
     const [wodDetalle, setWodDetalle] = useState(null);       // { wod, clase }
@@ -1066,12 +1071,16 @@ const DashboardCoach = () => {
                         onCerrar={() => setClaseSinReserva(null)}
                         onAgregado={(alumno) => {
                             setClaseSinReserva(null);
-                            setMsgPublicado(alumno.cargo === 'credito'
-                                ? `✅ ${alumno.nombre} agregado como presente (se le descontó 1 crédito).`
-                                : `✅ ${alumno.nombre} agregado como presente sin cargo (queda en su historial).`);
+                            // Bloque 2: el modal ya pidió confirmación; acá sólo se muestra su
+                            // texto (descontó token / ilimitado / sin cargo) como toast.
+                            setToastWalkin(alumno.mensaje);
+                            setTimeout(() => setToastWalkin(null), 2600);
                         }}
                     />
                 )}
+
+                {/* Bloque 2: toast del walk-in (sobrevive al cierre del modal). */}
+                <Toast texto={toastWalkin} />
 
                 {/* "Publicar WOD": formulario manual (con el aviso del día) o archivo semanal. */}
                 {modalWod && (

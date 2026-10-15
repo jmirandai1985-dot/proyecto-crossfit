@@ -13,6 +13,8 @@ import {
 // Walk-in del coach ("+ Agregar alumno sin reserva"): reserva normal si el alumno tiene
 // créditos, presencia sin cargo si no. El admin NO lo monta (ver la prop).
 import ModalAgregarSinReserva from './ModalAgregarSinReserva';
+// Bloque 2: el resultado del walk-in se avisa con un toast (el texto lo arma el modal).
+import Toast from './Toast';
 
 /**
  * Pestaña "Asistencia" (compartida coach + admin, Fase 1).
@@ -56,6 +58,10 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
     // ─── Clase abierta ─────────────────────────────────────────────────
     const [claseSeleccionada, setClaseSeleccionada] = useState(null);
     const [aviso, setAviso] = useState(null);
+    // Bloque 2: el walk-in avisa con un toast (el texto viaja en `alumno.mensaje`, escrito por
+    // el modal pegado a la rama que se ejecutó de verdad). `aviso` sigue siendo el bloque de
+    // "Asistencia guardada" y el error del detalle de la clase.
+    const [toast, setToast] = useState(null);
     // Walk-in: el modal "Agregar alumno sin reserva" de la clase abierta (sólo coach).
     const [modalSinReserva, setModalSinReserva] = useState(false);
 
@@ -377,15 +383,18 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
                     onCerrar={() => setModalSinReserva(false)}
                     onAgregado={(alumno) => {
                         setModalSinReserva(false);
-                        setAviso({
-                            tipo: 'exito',
-                            texto: alumno.cargo === 'credito'
-                                ? `✅ ${alumno.nombre} agregado como presente (se le descontó 1 crédito).`
-                                : `✅ ${alumno.nombre} agregado como presente sin cargo (queda en su historial).`,
-                        });
+                        // Bloque 2: el modal ya pidió confirmación y ejecutó el endpoint; acá
+                        // sólo se muestra su texto (mismo aviso para las dos ramas: el cartel
+                        // dice si descontó token, si era ilimitado o si quedó sin cargo).
+                        setToast(alumno.mensaje);
+                        setTimeout(() => setToast(null), 2600);
                     }}
                 />
             )}
+
+            {/* Bloque 2: el aviso del walk-in sobrevive al cierre del modal (por eso el toast
+                vive acá y no adentro del modal, que se desmonta). */}
+            <Toast texto={toast} />
         </div>
     );
 };

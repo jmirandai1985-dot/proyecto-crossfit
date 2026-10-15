@@ -24,6 +24,9 @@ const RESUMEN = leer('../src/components/ResumenCoach.jsx');
 const DASH = leer('../src/pages/coach/DashboardCoach.jsx');
 const ENTREGA = leer('../src/pages/coach/EntregarPedido.jsx');
 const MODAL_ENTREGA = leer('../src/components/ModalEntregarPedido.jsx');
+// Bloque 2: el aviso del walk-in pasó a ser un TOAST y el texto lo escribe el modal (pegado a
+// la rama que ejecuta), no el Resumen. Se lee el modal para seguir fijando el mismo copy.
+const MODAL_WALKIN = leer('../src/components/ModalAgregarSinReserva.jsx');
 
 // El Dashboard documenta en COMENTARIOS por qué se eliminó el Resumen viejo (los nombres
 // aparecen ahí a propósito, para que nadie los reviva), así que las búsquedas de "no debe
@@ -78,8 +81,16 @@ ok(/const esperados = reservasDe\(clase\)/.test(RESUMEN),
     'el tope del progreso sale de las reservas de ESA clase, no del cupo nominal');
 eq(/medianoche/i.test(RESUMEN) || /medianoche/i.test(DASH), false,
     'el Resumen NO dice que el crédito se descuente a medianoche (se descuenta al reservar)');
-ok(/se le descontó 1 crédito/.test(DASH), 'el aviso del walk-in dice que descontó el crédito');
-ok(/sin cargo \(queda en su historial\)/.test(DASH), 'y cuando no tiene plan, dice que quedó sin cargo');
+// Bloque 2: el aviso del walk-in ya NO se pinta como bloque del Resumen (ahí vive el "qué
+// contestó el backend" del WOD). Ahora es un TOAST y el texto sale del MODAL, que es quien
+// sabe qué rama ejecutó. El invariante es el MISMO —el coach se entera de si se descontó el
+// crédito—, sólo cambió de dueño: del Resumen al modal + `<Toast>`.
+ok(/Se ha descontado un token del plan de \$\{a\.nombre\}/.test(MODAL_WALKIN),
+    'el aviso del walk-in dice que descontó el token del plan');
+ok(/quedó presente sin cargo \(queda en su historial\)/.test(MODAL_WALKIN),
+    'y cuando no tiene plan, dice que quedó sin cargo');
+ok(/setToastWalkin\(alumno\.mensaje\)/.test(DASH) && /<Toast texto=\{toastWalkin\} \/>/.test(DASH),
+    'el Resumen muestra ese texto como toast (sobrevive al cierre del modal)');
 
 console.log('== 4. Mobile-first declarado ==');
 ok(/mx-auto max-w-2xl/.test(RESUMEN), 'el Resumen acota y centra el contenido (diseño de teléfono)');
