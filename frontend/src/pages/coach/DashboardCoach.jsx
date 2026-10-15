@@ -21,6 +21,10 @@ import Toast from '../../components/Toast';
 // Bloque 6: la flecha Volver también en el escritorio. Acá es la RAÍZ del rol, así que el
 // respaldo es su propia ruta: sin historial se queda en este Dashboard (no sale de la app).
 import BotonVolver from '../../components/BotonVolver';
+// El VALOR de un RM sale de la fuente única (utils/rm.js, H-03): pintar `peso_kg` a mano
+// mostraba "530 kg" en un Air Runner (su peso es un dummy: en la BD real hay 1,0 y 530,0).
+import { formatResultadoRM } from '../../utils/rm';
+import { fmtFechaCortaChile } from '../../utils/fecha';
 
 const DashboardCoach = () => {
     const navigate = useNavigate();
@@ -794,20 +798,41 @@ const DashboardCoach = () => {
                                     <div className="space-y-2 max-h-96 overflow-y-auto">
                                         {filteredAlumnos.length > 0 ? (
                                             filteredAlumnos.map((alumno) => (
-                                                <button
+                                                /* La fila era UN solo <button> (elegía al alumno). Con
+                                                   "Ver Perfil" adentro haría falta un botón dentro de
+                                                   otro —HTML inválido—, así que el contenedor pasa a
+                                                   ser un <div>: la tarjeta grande sigue seleccionando
+                                                   (el panel de RMs de la derecha) y el botón chico
+                                                   abre la MISMA ficha del tab Riesgo
+                                                   (`fichaAlumnoId` → `<AlumnoFichaCoach>`). */
+                                                <div
                                                     key={alumno.id}
-                                                    onClick={() => setSelectedAlumno(alumno)}
-                                                    className={`w-full p-4 text-left rounded-lg border-2 transition-colors ${selectedAlumno?.id === alumno.id
+                                                    className={`w-full p-4 rounded-lg border-2 transition-colors ${selectedAlumno?.id === alumno.id
                                                         ? 'border-orange-500 bg-orange-50'
                                                         : 'border-gray-200 hover:border-orange-300'
                                                         }`}
                                                 >
-                                                    <p className="font-medium text-gray-900">{alumno.nombre}</p>
-                                                    <p className="text-sm text-gray-600">
-                                                        {alumno.correo || 'Sin correo'}
-                                                        {alumno.telefono ? ` · ${alumno.telefono}` : ''}
-                                                    </p>
-                                                </button>
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <button
+                                                            onClick={() => setSelectedAlumno(alumno)}
+                                                            className="flex-1 min-w-0 text-left"
+                                                        >
+                                                            <p className="font-medium text-gray-900">{alumno.nombre}</p>
+                                                            <p className="text-sm text-gray-600">
+                                                                {alumno.correo || 'Sin correo'}
+                                                                {alumno.telefono ? ` · ${alumno.telefono}` : ''}
+                                                            </p>
+                                                        </button>
+                                                        <button
+                                                            data-testid="btn-ver-perfil"
+                                                            aria-label={`Ver perfil de ${alumno.nombre}`}
+                                                            onClick={() => setFichaAlumnoId(alumno.id)}
+                                                            className="shrink-0 px-3 py-2 bg-white border border-red-500/30 text-red-500 rounded text-sm font-medium hover:bg-red-500/10 transition-colors whitespace-nowrap"
+                                                        >
+                                                            Ver Perfil
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             ))
                                         ) : (
                                             <p className="text-gray-600 text-center py-4">
@@ -833,10 +858,10 @@ const DashboardCoach = () => {
                                                         <div className="flex justify-between items-center">
                                                             <div>
                                                                 <p className="font-medium text-gray-900">{rm.movimiento_nombre}</p>
-                                                                <p className="text-sm text-gray-500">{rm.fecha ? `Último: ${rm.fecha}` : ''}</p>
+                                                                <p className="text-sm text-gray-500">{rm.fecha ? `Último: ${fmtFechaCortaChile(rm.fecha)}` : ''}</p>
                                                                 {rm.notas && <p className="text-xs text-gray-400 mt-1">{rm.notas}</p>}
                                                             </div>
-                                                            <p className="text-2xl font-bold text-orange-500">{rm.peso_kg} kg</p>
+                                                            <p className="text-2xl font-bold text-orange-500 text-right">{formatResultadoRM(rm)}</p>
                                                         </div>
                                                     </div>
                                                 ))
