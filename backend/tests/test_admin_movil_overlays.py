@@ -4,13 +4,18 @@ tapado por el header" (test AISLADO: sin red, sin base de datos).
 Qué se fija, y por qué:
 
   * El header del Layout es `relative z-30` y los hijos de `<main>` se pintan
-    dentro de `<div className="relative z-10">`. Ese `z-index:10` es un CONTEXTO
-    DE APILADO: cualquier overlay del dashboard móvil es relativo a él, así que
-    un `position:fixed; z-index:50` de adentro NUNCA puede tapar el header — la
-    barra con el input de búsqueda quedaba escondida detrás (había que scrollear
-    para "encontrarla" y ni así aparecía: la capa es `fixed`).
-  * La salida es montar la capa en `<body>` con un PORTAL (`createPortal`), con
-    `md:hidden` para no existir en ≥768px (regla de oro: el escritorio no cambia).
+    dentro de un wrapper `relative`. HISTORIA: ese wrapper era
+    `<div className="relative z-10">` y ese `z-index:10` era un CONTEXTO DE
+    APILADO, así que cualquier overlay de una pantalla quedaba por debajo del
+    header aunque fuera `position:fixed; z-index:50` — la barra con el input de
+    búsqueda quedaba escondida detrás (había que scrollear para "encontrarla" y
+    ni así aparecía: la capa es `fixed`). El `z-10` ya NO está (arreglo
+    app-wide: `AUDITORIA_LAYOUT_ZINDEX_MODALES.md`) y A1 falla si alguien lo
+    vuelve a poner: la garantía que queda es el z-index de cada modal.
+  * La salida del dashboard admin sigue siendo montar la capa en `<body>` con un
+    PORTAL (`createPortal`), con `md:hidden` para no existir en ≥768px (regla de
+    oro: el escritorio no cambia). No se revierte: ya está probada en prod y es
+    lo que permite anclar la pantalla justo debajo del header.
   * La pantalla completa se ancla JUSTO debajo del header con el alto REAL
     medido en el DOM (`--ub-capa-top`): el input queda siempre visible.
   * Las hojas (scrim/sheet), el comprobante ampliado y el toast van en la MISMA
@@ -19,6 +24,7 @@ Qué se fija, y por qué:
 Correr (aislado):
     cd backend && py -3.12 -m pytest tests/test_admin_movil_overlays.py -q --noconftest
 """
+import re
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[2]          # .../proyecto-crossfit
@@ -27,19 +33,44 @@ MOVIL = "frontend/src/pages/admin/InicioMobileAdmin.jsx"
 CSS = "frontend/src/pages/admin/inicioMobileAdmin.css"
 LAYOUT = "frontend/src/components/Layout.jsx"
 
+# Overlays de UNA línea (`fixed inset-0` + z en el mismo className) que tienen que poder tapar
+# el header. Si alguno baja de 31, el modal deja de atenuar la barra superior.
+MODALES_DE_PANTALLA = (
+    "frontend/src/components/AlumnoFichaCoach.jsx",
+    "frontend/src/components/ModalAgregarSinReserva.jsx",
+    "frontend/src/components/EscanerQR.jsx",
+    "frontend/src/pages/coach/GestionClases.jsx",
+    "frontend/src/pages/admin/SupervisionClases.jsx",
+)
+
 
 def _fuente(relativa: str) -> str:
     return (RAIZ / relativa).read_text(encoding="utf-8")
 
 
-# ── A. La causa raíz sigue siendo la misma (si cambia, revisar este fix) ──────
+# ── A. La causa raíz sigue arreglada (si vuelve, vuelve el bug) ──────────────
 
-def test_a1_el_header_es_z30_y_los_hijos_pintan_en_un_contexto_z10():
+def test_a1_el_header_es_z30_y_el_wrapper_de_los_hijos_no_crea_contexto_de_apilado():
     layout = _fuente(LAYOUT)
     assert "relative z-30" in layout          # el header
-    assert "relative z-10" in layout          # el wrapper de {children}
-    # El header y el wrapper son hermanos: el z-index de los hijos NO puede
-    # superar al del header (contexto de apilado). De ahí el portal.
+    assert 'className="relative z-10"' not in layout, (
+        "el z-10 del wrapper es un contexto de apilado: dejaría a TODOS los modales de la app "
+        "por debajo del header (ver AUDITORIA_LAYOUT_ZINDEX_MODALES.md)")
+    assert 'className="relative">{children}</div>' in layout
+    # El header y el wrapper siguen siendo hermanos: el wrapper sin z-index no atrapa a nadie.
+    assert layout.index("relative z-30") < layout.index('className="relative">{children}')
+
+
+def test_a2_los_modales_de_las_pantallas_superan_el_z_del_header():
+    """Sin contexto de apilado la garantía es el z-index de cada overlay (> 30)."""
+    for relativa in MODALES_DE_PANTALLA:
+        fuente = _fuente(relativa)
+        capa = next((ln for ln in fuente.splitlines() if "fixed inset-0" in ln), None)
+        assert capa, f"{relativa}: no se encontró el overlay `fixed inset-0`"
+        z = [int(n) for n in re.findall(r"z-\[?(\d+)\]?", capa)]
+        assert z and max(z) > 30, (
+            f"{relativa}: el overlay tiene que superar el z-30 del header, encontré {z}")
+
 
 
 # ── B. Los overlays del móvil salen por PORTAL ───────────────────────────────

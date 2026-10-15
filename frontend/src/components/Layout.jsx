@@ -324,7 +324,16 @@ const Layout = ({ children }) => {
                             )}
                         </>
                     )}
-                    <div className="relative z-10">{children}</div>
+                    {/* OJO con el z-index de este wrapper: `relative` lo mantiene por encima de
+                        las siluetas decorativas de arriba (`fixed z-0`, que van ANTES en el DOM,
+                        así que con el mismo nivel de pintado el que va después queda arriba),
+                        pero un z-index acá crea un CONTEXTO DE APILADO y deja a TODO overlay de
+                        la página atrapado por debajo del header (`relative z-30`): un modal
+                        `z-50` de una pantalla no podía atenuar la barra superior. Sin z-index,
+                        el contenido normal sigue por debajo del cajón móvil (`z-40`/`z-50`) y
+                        sólo los hijos con z POSITIVO (modales, toasts) suben por encima del
+                        header, que es lo que se espera. */}
+                    <div className="relative">{children}</div>
                 </main>
             </div>
         </div>
