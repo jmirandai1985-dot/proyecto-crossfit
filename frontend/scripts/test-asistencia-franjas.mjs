@@ -12,6 +12,8 @@
 //   5. (Bloque 6) el tope +10 NO quedó copiado en ninguna pantalla: el acordeón del admin y
 //      la Supervisión también consumen el util, y el refactor calcula IGUAL que la copia
 //      vieja salvo los 2 casos en que esa copia contradecía al backend
+//   6. (Bloque 4) arriba de las franjas hay un selector para SALTAR a Mañana/Tarde/Noche:
+//      es navegación pura (scroll a la sección), sale de `FRANJAS` y no filtra la lista
 import { readdirSync, readFileSync } from 'node:fs';
 import {
     MAX_CUPOS_EXTRA, cupoOriginal, cupoTope, cupoActual, extraDisponible, extraMaximo,
@@ -178,6 +180,28 @@ eq(extraDisponible(PASADO, {}), 0, 'pasado el tope quedan 0 (no negativo)');
 eq(libreViejo(PASADO, {}), -4, 'la copia vieja daba -4: el botón seguía ofreciendo ampliar');
 // Sin cupos cargados (clase vieja) tampoco hay NaN: 0 + 10.
 eq(cupoTope({}), 10, 'sin cupos, el tope es 10 (la copia vieja daba NaN)');
+
+// ── 6. Bloque 4: el selector de franja del teléfono ────────────────────────────────────────
+console.log('== 6. Bloque 4: saltar a una franja (navegación, no filtro) ==');
+ok(CLASES.includes("const [franjaActiva, setFranjaActiva] = useState('todas')"),
+    'el selector arranca en "Todas" (al entrar no se esconde ninguna franja)');
+ok(CLASES.includes('data-testid="selector-franja"'), 'el selector existe (es identificable)');
+ok(CLASES.includes('data-testid="franja-tab-todas"')
+    && CLASES.includes('data-testid={`franja-tab-${f.id}`}'),
+    'tiene "Todas" + una pestaña por franja');
+ok(CLASES.includes('{FRANJAS.map((f) => {'),
+    'las franjas salen de FRANJAS (la lista única del util), no de una copia local');
+ok(CLASES.includes('document.querySelector(`[data-testid="franja-${id}"]`)')
+    && CLASES.includes("scrollIntoView({ behavior: 'smooth', block: 'start' })"),
+    'salta a la sección con scrollIntoView (el data-testid que ya pinta AsistenciaFranja)');
+ok(CLASES.includes('disabled={n === 0}'),
+    'una franja sin clases no se puede elegir: su sección no existe (franjasConClases)');
+ok(CLASES.includes('const totalesFranja = (id) => (porFranja?.[id] || []).length'),
+    'el número de cada pestaña sale del MISMO agrupamiento que la sección');
+eq(CLASES.includes('clases.filter('), false,
+    'no filtra la lista: el agrupamiento y los contadores quedan intactos');
+ok(CLASES.includes('md:hidden space-y-5" data-testid="asistencia-franjas"'),
+    'el selector vive DENTRO del bloque `md:hidden`: en >=768px no existe');
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);

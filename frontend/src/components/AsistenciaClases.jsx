@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import AsistenciaGrupoDisciplina from './AsistenciaGrupoDisciplina';
 import AsistenciaFranja from './AsistenciaFranja';
 // El corte por franja (Mañana/Tarde/Noche) vive en un util compartido con test propio:
@@ -64,6 +64,11 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
     const [toast, setToast] = useState(null);
     // Walk-in: el modal "Agregar alumno sin reserva" de la clase abierta (sólo coach).
     const [modalSinReserva, setModalSinReserva] = useState(false);
+    // Bloque 4: franja elegida en el selector del teléfono ('todas' = sin saltar). Es sólo
+    // NAVEGACIÓN: no filtra la lista ni toca los contadores (el agrupamiento sigue siendo el
+    // de `franjasConClases`).
+    const [franjaActiva, setFranjaActiva] = useState('todas');
+    const selectorFranjaRef = useRef(null);
 
     const alumnosQ = useAlumnosDeClase(claseSeleccionada?.id);
     const reservas = useMemo(() => alumnosQ.data?.reservas || [], [alumnosQ.data]);
@@ -176,6 +181,27 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
         ? FRANJAS.filter((f) => (porFranja[f.id] || []).length > 0)
         : [];
 
+    // ── Bloque 4: el selector de franja (sólo teléfono, dentro del bloque de franjas) ──
+    // Cuántas clases tiene cada franja: sale del MISMO `agruparPorFranja` que dibuja las
+    // secciones, así el número del botón y el contenido de la sección no pueden diferir.
+    const totalesFranja = (id) => (porFranja?.[id] || []).length;
+    // Estilo de cada pestaña (activa / inactiva) según la skin de la pestaña.
+    const tabFranja = (activo) => `flex flex-none items-center rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${activo
+        ? (osc ? 'border-orange-500 bg-orange-500/15 text-orange-300' : 'border-orange-500 bg-orange-50 text-orange-700')
+        : (osc ? 'border-zinc-800 bg-zinc-900 text-zinc-400' : 'border-gray-200 bg-white text-gray-500')}`;
+    // Saltar a la franja: las secciones YA están agrupadas, así que esto sólo scrollea (no
+    // reordena ni esconde nada). `selectorFranjaRef` es el destino de "Todas" (volver arriba)
+    // y cada franja se busca por el `data-testid` que ya pinta `AsistenciaFranja`. Una franja
+    // sin clases no se dibuja (`franjasConClases`), así que su botón va deshabilitado: nunca
+    // se salta a una sección que no existe.
+    const irAFranja = (id) => {
+        setFranjaActiva(id);
+        const destino = id === 'todas'
+            ? selectorFranjaRef.current
+            : document.querySelector(`[data-testid="franja-${id}"]`);
+        destino?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
     // Ampliar cupo de UNA clase puntual (el backend valida permisos y el tope +10).
     // Devuelve la promesa: el hijo pinta el cupo nuevo con la respuesta.
     const ampliarCupo = (clase, extra) => ampliarCupoMut.mutateAsync({ claseId: clase.id, extra });
@@ -213,6 +239,44 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
                     {/* <768px (sólo con `franjas`): las clases del día por franja (mockup 6b). */}
                     {franjas && (
                         <div className="md:hidden space-y-5" data-testid="asistencia-franjas">
+                            {/* Bloque 4: saltar a una franja sin recorrer el día entero. Va
+                                pegado arriba (`sticky`) porque el que scrollea es el contenedor
+                                del Layout, no la ventana; en ≥768px no existe (esta rama es
+                                `md:hidden`), así que la vista de escritorio no cambia. */}
+                            <div
+                                ref={selectorFranjaRef}
+                                data-testid="selector-franja"
+                                className={`sticky top-0 z-10 -mx-1 flex gap-1.5 overflow-x-auto px-1 py-1.5 ${osc ? 'bg-zinc-950' : 'bg-white'}`}
+                            >
+                                <button
+                                    type="button"
+                                    onClick={() => irAFranja('todas')}
+                                    aria-pressed={franjaActiva === 'todas'}
+                                    data-testid="franja-tab-todas"
+                                    className={tabFranja(franjaActiva === 'todas')}
+                                >
+                                    Todas
+                                    <span className="ml-1.5 opacity-70">{clases.length}</span>
+                                </button>
+                                {FRANJAS.map((f) => {
+                                    const n = totalesFranja(f.id);
+                                    return (
+                                        <button
+                                            key={f.id}
+                                            type="button"
+                                            onClick={() => irAFranja(f.id)}
+                                            disabled={n === 0}
+                                            title={n === 0 ? `Sin clases en la franja ${f.label}` : undefined}
+                                            aria-pressed={franjaActiva === f.id}
+                                            data-testid={`franja-tab-${f.id}`}
+                                            className={`${tabFranja(franjaActiva === f.id)} disabled:opacity-40 disabled:cursor-not-allowed`}
+                                        >
+                                            {f.label}
+                                            <span className="ml-1.5 opacity-70">{n}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
                             {franjasConClases.map((f) => (
                                 <AsistenciaFranja
                                     key={f.id}
