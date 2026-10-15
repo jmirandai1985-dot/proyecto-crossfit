@@ -15,6 +15,10 @@ const Layout = ({ children }) => {
     // Drawer off-canvas para <md (arranca CERRADO). En >=md la barra es estática
     // (igual que hoy) y `sidebarOpen` controla el COLAPSAR de escritorio.
     const [mobileOpen, setMobileOpen] = useState(false);
+    // ¿Estamos en >=768px? La MISMA barra es drawer off-canvas (<md) o estática (>=md), y el
+    // `aria-hidden`/`inert` de abajo sólo valen para el caso drawer: en escritorio el menú se
+    // VE, así que sacarlo del foco dejaría el panel muerto para el teclado.
+    const [esEscritorio, setEsEscritorio] = useState(false);
     // ── N-6: `esPrueba` arranca en null = "todavía no sé". ──
     // Mientras no haya dato (o si la consulta falla) el menú del alumno queda
     // RESTRINGIDO: un chequeo de permisos no puede ABRIR el acceso cuando falla.
@@ -66,6 +70,23 @@ const Layout = ({ children }) => {
         return () => window.removeEventListener('keydown', onKey);
     }, [mobileOpen]);
 
+    // El breakpoint `md` de Tailwind, leído por JS: las clases (`md:static`, `md:translate-x-0`)
+    // y esta bandera tienen que decir lo mismo. Un solo Layout montado → un solo listener.
+    useEffect(() => {
+        const mq = window.matchMedia('(min-width: 768px)');
+        const on = (e) => setEsEscritorio(e.matches);
+        on(mq);
+        mq.addEventListener('change', on);
+        return () => mq.removeEventListener('change', on);
+    }, []);
+
+    // Drawer CERRADO en móvil: el panel no desaparece del DOM, se traslada con
+    // `-translate-x-full` (sigue fuera de pantalla). Para el ojo está oculto, pero para el
+    // teclado y el lector de pantalla NO: sus enlaces seguían en el árbol de foco y un Tab
+    // entraba a ítems invisibles (auditoría Bloque 8). `inert` corta las dos vías de una:
+    // sin foco y sin anuncio. En >=768px nunca aplica (la barra es estática y visible).
+    const drawerOculto = !esEscritorio && !mobileOpen;
+
     const isCoachDashboard = location.pathname === '/coach/dashboard';
 
     // Menú del rol desde la fuente única (config/menu.js). El alumno en plan de
@@ -88,11 +109,15 @@ const Layout = ({ children }) => {
                 />
             )}
 
-            {/* Sidebar: drawer off-canvas en <md (arranca cerrado); estática en >=md */}
+            {/* Sidebar: drawer off-canvas en <md (arranca cerrado); estática en >=md.
+                Cerrado (sólo en <md) queda `inert` + `aria-hidden`: fuera de pantalla y
+                fuera del árbol de foco/lector (`drawerOculto`). */}
             <div
                 className={`fixed md:static inset-y-0 left-0 z-50 w-64 ${sidebarOpen ? 'md:w-64' : 'md:w-20'
                     } bg-zinc-900 border-r border-zinc-800 transition-transform md:transition-all duration-300 flex flex-col shadow-sm ${mobileOpen ? 'translate-x-0' : '-translate-x-full'
                     } md:translate-x-0`}
+                aria-hidden={drawerOculto ? 'true' : undefined}
+                inert={drawerOculto || undefined}
             >
                 {/* Logo */}
                 <div className="p-5 border-b border-zinc-800">
