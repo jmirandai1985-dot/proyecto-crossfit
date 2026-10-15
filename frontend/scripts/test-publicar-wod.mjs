@@ -34,9 +34,12 @@ const ok = (cond, msg) => eq(Boolean(cond), true, msg);
 console.log('== 1. Formulario manual: reusa batch-create y su alcance ==');
 ok(/useCrearWodsBatch/.test(MODAL) && /crearBatch\.mutateAsync\(\{[\s\S]*params: \{ disciplina_id/
     .test(MODAL), 'publica con POST /wods/batch-create (el endpoint de Gestión de Clases)');
-ok(/if \(alcance === 'hora'\) body\.clase_ids = \[clase\.id\]/.test(MODAL),
-    '"este horario" = sólo esta clase (`clase_ids`); el resto va sin él');
-ok(/wods: fechas\.map\(\(fecha\) => \(\{/.test(MODAL), 'un WOD por fecha de la semana');
+// Bloque 1: los horarios elegidos son los que viajan como `clase_ids` (una clase por dia);
+// "Todos los horarios" omite la clave a proposito (el backend vincula todas las clases).
+ok(MODAL.includes('if (planPublicacion.claseIds) body.clase_ids = planPublicacion.claseIds;'),
+    'los horarios elegidos = solo esas clases (`clase_ids`); "todos" va sin el');
+ok(MODAL.includes('wods: planPublicacion.fechas.map((fecha) => ({'),
+    'un WOD por cada dia que se va a publicar (los que marca la grilla)');
 ok(/fuerza_habilidad: form\.musculacion\.trim\(\)/.test(MODAL)
     && /wod_principal: form\.wod_descripcion\.trim\(\)/.test(MODAL),
     'musculación → fuerza_habilidad y descripción → wod_principal');
@@ -89,6 +92,36 @@ ok(existsSync(new URL('../../backend/tests/test_wod_semana.py', import.meta.url)
     'el parseo tiene su test puro (sin base de datos)');
 ok(/def leer_archivo/.test(SERVICIO) && /load_workbook/.test(SERVICIO),
     'el parseo usa openpyxl (ya estaba en requirements por los reportes)');
+
+
+console.log('== 6. Bloque 1: una sola UI de entrada (dias + horarios por franja) ==');
+ok(MODAL.includes('data-testid="wod-dias"') && MODAL.includes('data-testid={`wod-dia-${fecha}`}'),
+    'el modo manual trae la grilla de dias de la semana (Lun-Dom)');
+ok(MODAL.includes('const lunesDeLaSemana = useMemo(() => semanaEnCurso(fechaClase)'),
+    'la grilla es la semana en curso del util compartido (lunes a domingo)');
+ok(MODAL.includes("from '../utils/franjasAsistencia'") && MODAL.includes('franjaDe(h) === f.id'),
+    'los horarios se agrupan por franja con el util compartido (Manana/Tarde/Noche)');
+ok(MODAL.includes('data-testid="alcance-todos"'),
+    '"Todos los horarios" publica en todas las clases de cada dia (sin `clase_ids`)');
+ok(MODAL.includes('data-testid={`horario-${h}`}'),
+    'y cada horario se puede elegir por separado');
+ok(MODAL.includes('data-testid="dias-sin-horario"'),
+    'un dia marcado sin clase a ese horario avisa que NO se publica (no se crea un WOD suelto)');
+ok(MODAL.includes('clasesSemana = []'),
+    'la semana llega por prop (el panel ya la tiene): sin ella queda el horario de la clase');
+const DASH = leer('../src/pages/coach/DashboardCoach.jsx');
+const GESTION = leer('../src/pages/coach/GestionClases.jsx');
+eq((DASH.match(/<ModalPublicarWod/g) || []).length, 1,
+    'el Resumen y la pestana Clases montan el MISMO modal (una sola montura en el panel)');
+ok(DASH.includes('onClick={() => { setClaseWod(clase); setModalWod(true); }}'),
+    'el lapiz de la pestana Clases abre ESE modal con su horario');
+eq(DASH.includes('gestion-clases?fecha=${fechaISO}&clase='), false,
+    'la celda de Clases ya no manda al formulario viejo');
+ok(GESTION.includes('<ModalPublicarWod') && GESTION.includes('clase={claseDestino}'),
+    'Gestion de Clases (el ?clase=) monta el mismo modal');
+ok(GESTION.includes('{claseDestino && modoEdicion && ('),
+    'el formulario viejo queda solo para EDITAR un WOD ya publicado');
+
 
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);

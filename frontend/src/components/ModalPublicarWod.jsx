@@ -3,10 +3,21 @@ import {
     useCrearWodsBatch, usePrevisualizarSemana, useProgramarSemana, usePublicarAvisoRapido,
 } from '../hooks/queries';
 import { semanaEnCurso } from '../utils/fecha';
+// El corte Mañana/Tarde/Noche de los horarios sale del MISMO util que la pestaña Asistencia
+// (una sola definición de franja en todo el panel).
+import { FRANJAS, franjaDe } from '../utils/franjasAsistencia';
+
+// Días de la semana (0 = domingo, el índice de `Date.getUTCDay()`).
+const DIAS_CORTOS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+/** Día de la semana (0-6) de una fecha ISO 'AAAA-MM-DD' (mediodía UTC: sin líos de zona). */
+const fechaDiaDe = (iso) => {
+    const d = new Date(`${iso}T12:00:00Z`);
+    return Number.isNaN(d.getTime()) ? 0 : d.getUTCDay();
+};
 
 /**
  * Modal "Publicar WOD" del panel del coach (mockup `#modal-wod`).
- *
  * QUÉ RESUELVE: el coach publica el entrenamiento del día desde su Resumen, con el WOD
  * armado en tres partes (calentamiento, musculación, WOD) y un aviso corto opcional que el
  * alumnado ve HOY en su Inicio.
@@ -16,6 +27,17 @@ import { semanaEnCurso } from '../utils/fecha';
  *     un WOD por fecha y los vincula en la MISMA transacción. "Aplicar a" usa el `clase_ids`
  *     que ya existía: `[clase.id]` = este horario · sin `clase_ids` = todas las clases de
  *     esa fecha + disciplina. "La semana" es lo mismo sobre los 7 días lunes→domingo.
+ *
+ * BLOQUE 1 (UI de entrada unificada): el viejo formulario de Gestión de Clases publicaba con
+ * una GRILLA de días (Lun→Dom de la semana en curso) + "¿A qué horarios se publica?". Esos
+ * dos controles viven acá (pasos 4 y 5 del modo manual) en vez de una copia aparte:
+ *   · la grilla marca los días a publicar (el día de la clase viene marcado);
+ *   · los horarios se muestran agrupados por franja (Mañana / Tarde / Noche, del util
+ *     compartido `franjasAsistencia`); "Todos los horarios" = sin `clase_ids` (el backend
+ *     vincula todas las clases de cada fecha) y elegir horarios = `clase_ids` con la clase
+ *     de cada día (un día marcado sin clase a ese horario NO se publica, y se avisa).
+ * `clasesSemana` (opcional) es la semana del coach que ya tiene el panel: de ahí salen los
+ * horarios a ofrecer. Sin ella el modal sigue funcionando con el horario de la clase.
  *   * ARCHIVO (.xlsx) → `POST /wods/semana-archivo` (vista previa, no escribe) y
  *     `POST /wods/programar-semana` (1 WOD por día + el aviso de cada día, todo junto).
  *
@@ -29,10 +51,17 @@ import { semanaEnCurso } from '../utils/fecha';
  * Props: `clase` (la clase desde la que se publica: da fecha, hora, disciplina y cupo),
  * `onCerrar`, `onPublicado(datos)`.
  */
-const ModalPublicarWod = ({ clase, onCerrar, onPublicado }) => {
+const ModalPublicarWod = ({ clase, clasesSemana = [], onCerrar, onPublicado }) => {
     const [modo, setModo] = useState('manual');        // 'manual' | 'archivo'
     const [ayuda, setAyuda] = useState(false);
-    const [alcance, setAlcance] = useState('hora');    // 'hora' | 'dia' | 'semana'
+    // ── BLOQUE 1: los DOS controles del modo manual (días + horarios) ──
+    // Reemplazan al selector "Aplicar a" (Este horario / Todo el día / La semana), que ahora
+    // es la combinación de estos dos:
+    //   · `diasTocados`  null = todavía no eligió días → arranca en el día de la clase;
+    //   · `horasElegidas` null = el horario de la clase · [] = TODAS las clases de cada día ·
+    //     ['HH:MM', …] = sólo esos horarios (se traducen a `clase_ids`).
+    const [diasTocados, setDiasTocados] = useState(null);
+    const [horasTocadas, setHorasTocadas] = useState(null);
     const [form, setForm] = useState({
         calentamiento: '', musculacion: '', wod_nombre: '', wod_tipo: 'For Time',
         wod_descripcion: '', aviso: '',
@@ -49,11 +78,68 @@ const ModalPublicarWod = ({ clase, onCerrar, onPublicado }) => {
     const TIPOS = ['For Time', 'AMRAP', 'EMOM', 'Otro'];
     const fechaClase = clase?.fecha ? String(clase.fecha).split('T')[0] : '';
     const hora = (clase?.hora_inicio || '').slice(0, 5);
+    const lunesDeLaSemana = useMemo(() => semanaEnCurso(fechaClase), [fechaClase]);
+    const horaDe = (c) => String(c?.hora_inicio || '').slice(0, 5);
+    const fechaDe = (c) => String(c?.fecha || '').slice(0, 10);
 
-    // Fechas a las que aplica el formulario manual (1 o los 7 días de la semana en curso).
-    const fechas = useMemo(() => (
-        alcance === 'semana' ? semanaEnCurso(fechaClase) : [fechaClase]
-    ), [alcance, fechaClase]);
+    // Días a publicar (los que el coach marca en la grilla).
+    const fechas = useMemo(() => {
+        const base = diasTocados ?? (fechaClase ? [fechaClase] : []);
+        return [...base].sort();
+    }, [diasTocados, fechaClase]);
+
+    // Horarios de ESA disciplina en la semana en curso, agrupados por franja (Mañana/Tarde/
+    // Noche) con el util compartido. El horario de la clase siempre está, aunque la lista de
+    // la semana no lo traiga (así el modal nunca queda sin opciones).
+    const clasesDeLaDisciplina = useMemo(() => (clasesSemana || [])
+        .filter((c) => c?.disciplina_id === clase?.disciplina_id), [clasesSemana, clase]);
+    const horasPorFranja = useMemo(() => {
+        const set = new Set();
+        clasesDeLaDisciplina.forEach((c) => { const h = horaDe(c); if (h) set.add(h); });
+        if (hora) set.add(hora);
+        const horas = [...set].sort();
+        return FRANJAS
+            .map((f) => ({ ...f, horas: horas.filter((h) => franjaDe(h) === f.id) }))
+            .filter((f) => f.horas.length > 0);
+    }, [clasesDeLaDisciplina, hora]);
+    const horasElegidas = useMemo(
+        () => horasTocadas ?? (hora ? [hora] : []), [horasTocadas, hora]);
+
+    const toggleDia = (fecha) => setDiasTocados(() => {
+        const base = new Set(diasTocados ?? (fechaClase ? [fechaClase] : []));
+        if (base.has(fecha)) base.delete(fecha); else base.add(fecha);
+        return [...base];
+    });
+    const toggleHora = (h) => setHorasTocadas(() => {
+        const base = new Set(horasTocadas ?? (hora ? [hora] : []));
+        if (base.has(h)) base.delete(h); else base.add(h);
+        return [...base];
+    });
+
+    /**
+     * Qué se publica de verdad: los días marcados y, si eligió horarios, sólo las clases de
+     * ESOS horarios (sus ids van en el `clase_ids` de batch-create). Un día marcado sin
+     * ninguna clase a ese horario NO se publica (y se avisa abajo): publicar un WOD sin
+     * clases vinculadas no es lo que el coach pidió.
+     */
+    const planPublicacion = useMemo(() => {
+        if (horasElegidas.length === 0) return { fechas, claseIds: null, diasSinClase: [] };
+        const claseIds = [];
+        const diasSinClase = [];
+        const publicables = fechas.filter((fecha) => {
+            const delDia = clasesDeLaDisciplina.filter((c) => fechaDe(c) === fecha
+                && horasElegidas.includes(horaDe(c)));
+            if (delDia.length === 0) { diasSinClase.push(fecha); return false; }
+            claseIds.push(...delDia.map((c) => c.id));
+            return true;
+        });
+        return { fechas: publicables, claseIds, diasSinClase };
+    }, [fechas, horasElegidas, clasesDeLaDisciplina]);
+
+    // Etiqueta del alcance (lo que se le cuenta al coach y lo que viaja en `onPublicado`).
+    const etiquetaAlcance = horasElegidas.length === 0
+        ? (fechas.length === 1 ? `todas las clases del ${fechas[0]}` : 'todas las clases de esos días')
+        : (horasElegidas.length === 1 ? `el horario ${horasElegidas[0]}` : `${horasElegidas.length} horarios`);
 
     const setCampo = (campo) => (e) => setForm((prev) => ({ ...prev, [campo]: e.target.value }));
 
@@ -67,10 +153,18 @@ const ModalPublicarWod = ({ clase, onCerrar, onPublicado }) => {
             setError('No se pudo identificar la clase (fecha o disciplina).');
             return;
         }
+        // Bloque 1: publicar sin ninguna clase vinculada no es lo que el coach pidió, así que
+        // el caso se explica en pantalla en vez de mandar un lote vacío.
+        if (planPublicacion.fechas.length === 0) {
+            setError(horasElegidas.length === 0
+                ? 'Marca al menos un día para publicar.'
+                : `Ningún día marcado tiene clase a las ${horasElegidas.join(', ')}: no se publica nada así.`);
+            return;
+        }
         setEnviando(true);
         try {
             const body = {
-                wods: fechas.map((fecha) => ({
+                wods: planPublicacion.fechas.map((fecha) => ({
                     fecha,
                     titulo: form.wod_nombre.trim() || null,
                     calentamiento: form.calentamiento.trim() || null,
@@ -80,9 +174,10 @@ const ModalPublicarWod = ({ clase, onCerrar, onPublicado }) => {
                     estado: 'publicado',
                 })),
             };
-            // "Este horario" = sólo esta clase (el `clase_ids` de batch-create);
-            // "todo el día" y "la semana" van sin `clase_ids` a propósito.
-            if (alcance === 'hora') body.clase_ids = [clase.id];
+            // Horarios elegidos = SÓLO esas clases (`clase_ids`, una por día marcado, que es lo
+            // que el endpoint ya aceptaba); "todos los horarios" va SIN la clave a propósito
+            // (el backend vincula todas las clases de cada fecha + disciplina).
+            if (planPublicacion.claseIds) body.clase_ids = planPublicacion.claseIds;
 
             const resultado = await crearBatch.mutateAsync({
                 body, params: { disciplina_id: clase.disciplina_id },
@@ -96,7 +191,10 @@ const ModalPublicarWod = ({ clase, onCerrar, onPublicado }) => {
             }
             if (onPublicado) {
                 onPublicado({
-                    origen: 'manual', alcance, dias: fechas.length, aviso,
+                    origen: 'manual',
+                    // Rótulo del alcance para quien lo muestre (el Resumen sólo usa `origen`).
+                    alcance: horasElegidas.length === 0 ? 'dia' : 'horas',
+                    dias: planPublicacion.fechas.length, aviso,
                     clases: resultado?.clases_vinculadas ?? 0,
                 });
             }
@@ -274,23 +372,91 @@ const ModalPublicarWod = ({ clase, onCerrar, onPublicado }) => {
                                     data-testid="wod-descripcion" className={CAMPO} />
                             </label>
 
-                            <div>
-                                <span className={ETIQUETA}>Aplicar a</span>
-                                <div className="mt-1.5 flex flex-wrap gap-2" data-testid="wod-alcance">
-                                    {[['hora', 'Este horario'], ['dia', 'Todo el día'], ['semana', 'La semana']]
-                                        .map(([id, texto]) => (
-                                            <button key={id} type="button" onClick={() => setAlcance(id)}
-                                                data-testid={`alcance-${id}`}
-                                                className={tagBtn(alcance === id)}>{texto}</button>
-                                        ))}
+                            {/* ── BLOQUE 1: días + horarios (lo que antes era "Aplicar a") ── */}
+                            <div data-testid="wod-dias">
+                                <span className={ETIQUETA}>4 · Días donde publicar (semana actual)</span>
+                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                    {lunesDeLaSemana.map((fecha) => {
+                                        const marca = DIAS_CORTOS[fechaDiaDe(fecha)];
+                                        const activo = fechas.includes(fecha);
+                                        return (
+                                            <button
+                                                key={fecha}
+                                                type="button"
+                                                onClick={() => toggleDia(fecha)}
+                                                data-testid={`wod-dia-${fecha}`}
+                                                aria-pressed={activo}
+                                                className={`w-[42px] rounded-lg border px-1 py-1.5 text-center text-[10px] font-semibold transition-colors ${activo
+                                                    ? 'border-orange-500 bg-orange-500/15 text-orange-200'
+                                                    : 'border-zinc-700 text-zinc-400 hover:border-zinc-500'}`}
+                                            >
+                                                <span className="block">{marca}</span>
+                                                <span className="block text-[12px]">{Number(fecha.slice(8, 10))}</span>
+                                            </button>
+                                        );
+                                    })}
                                 </div>
+                                <div className="mt-1.5 flex gap-3 text-[10.5px] text-zinc-500">
+                                    <button type="button" data-testid="wod-dias-clase"
+                                        onClick={() => setDiasTocados(fechaClase ? [fechaClase] : [])}
+                                        className="underline hover:text-zinc-300">
+                                        Sólo el día de la clase
+                                    </button>
+                                    <button type="button" data-testid="wod-dias-semana"
+                                        onClick={() => setDiasTocados(lunesDeLaSemana)}
+                                        className="underline hover:text-zinc-300">
+                                        Toda la semana
+                                    </button>
+                                    <span>{fechas.length} día(s) marcado(s)</span>
+                                </div>
+                            </div>
+
+                            <div data-testid="wod-horarios">
+                                <span className={ETIQUETA}>5 · ¿A qué horarios se publica?</span>
+                                <div className="mt-1.5 flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        data-testid="alcance-todos"
+                                        aria-pressed={horasElegidas.length === 0}
+                                        onClick={() => setHorasTocadas([])}
+                                        className={tagBtn(horasElegidas.length === 0)}
+                                    >
+                                        Todos los horarios
+                                    </button>
+                                </div>
+                                {horasPorFranja.map((f) => (
+                                    <div key={f.id} className="mt-2">
+                                        <p className="text-[10.5px] uppercase tracking-wide text-zinc-500">
+                                            {f.label}
+                                        </p>
+                                        <div className="mt-1 flex flex-wrap gap-2">
+                                            {f.horas.map((h) => (
+                                                <button
+                                                    key={h}
+                                                    type="button"
+                                                    onClick={() => toggleHora(h)}
+                                                    data-testid={`horario-${h}`}
+                                                    aria-pressed={horasElegidas.includes(h)}
+                                                    className={tagBtn(horasElegidas.includes(h))}
+                                                >
+                                                    {h}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
                                 <p className="mt-1.5 text-[10.5px] text-zinc-500">
-                                    {alcance === 'hora'
-                                        ? `Sólo esta clase (${hora})`
-                                        : alcance === 'dia'
-                                            ? `Todas las clases del ${fechas[0]}`
-                                            : `Los 7 días de esta semana (${fechas[0]} → ${fechas[6]})`}
+                                    {horasElegidas.length === 0
+                                        ? `Se publica en TODAS las clases de ${planPublicacion.fechas.length} día(s)`
+                                        : `Se publica en ${planPublicacion.claseIds.length} clase(s) (${etiquetaAlcance})`}
                                 </p>
+                                {planPublicacion.diasSinClase.length > 0 && (
+                                    <p className="mt-1 text-[10.5px] text-amber-300"
+                                        data-testid="dias-sin-horario">
+                                        ⚠️ {planPublicacion.diasSinClase.join(', ')}: no hay clase a ese
+                                        horario — esos días no se publican.
+                                    </p>
+                                )}
                             </div>
 
                             <label className={ETIQUETA}>

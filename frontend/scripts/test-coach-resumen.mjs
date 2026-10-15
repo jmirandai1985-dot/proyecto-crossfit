@@ -88,7 +88,10 @@ ok(/grid-cols-2 gap-2\.5/.test(RESUMEN), 'los KPIs van en la grilla de 2 del moc
 console.log('== 5. Cableado y limpieza del Resumen viejo ==');
 ok(/<ResumenCoach/.test(DASH) && /activeTab === 'resumen' &&/.test(DASH), 'el Resumen está montado en su pestaña');
 ok(/<ModalPublicarWod/.test(DASH) && /<ModalAgregarSinReserva/.test(DASH), 'los dos modales están montados');
-ok(/clase=\{proximaClase \|\| clasesHoy\[0\] \|\| null\}/.test(DASH), 'el modal de WOD sabe sobre qué clase publica');
+ok(DASH.includes('clase={claseWod || proximaClase || clasesHoy[0] || null}'),
+    'el modal de WOD sabe sobre que clase publica (el lapiz de Clases elige la clase)');
+ok(DASH.includes('clasesSemana={clasesSemana}'),
+    'y le pasa la semana del coach: de ahi salen los horarios por franja');
 ok(/data-testid="resumen-publicado"/.test(DASH), 'el Resumen muestra qué contestó el backend');
 for (const muerto of ['claseAsistenciaExpandida', 'asistenciaOverrides', 'registrosRecientes',
     'cargarAsistenciaClase', 'marcarTodosAsistencia', 'handlePublicarWOD']) {

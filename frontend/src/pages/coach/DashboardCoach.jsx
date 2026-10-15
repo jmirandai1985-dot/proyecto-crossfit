@@ -35,6 +35,10 @@ const DashboardCoach = () => {
     // alumno sin reserva"). Los dos ESCRIBEN, así que el Resumen muestra después lo que
     // contestó el backend (`msgPublicado`) en vez de suponerlo.
     const [modalWod, setModalWod] = useState(false);
+    // Bloque 1: la clase sobre la que se publica. El Resumen la deja null (usa la próxima) y
+    // la pestaña Clases la setea con el horario de la celda que tocó el lápiz: las DOS entradas
+    // abren el MISMO modal.
+    const [claseWod, setClaseWod] = useState(null);
     const [claseSinReserva, setClaseSinReserva] = useState(null);
     const [msgPublicado, setMsgPublicado] = useState(null);
     // Detalle completo del WOD de una tarjeta (grilla semanal / lista del día):
@@ -710,10 +714,7 @@ const DashboardCoach = () => {
                                                                             data-testid="publicar-wod-celda"
                                                                             data-fecha={date}
                                                                             title="Publicar el WOD de esta clase"
-                                                                            onClick={() => {
-                                                                                const fechaISO = clase.fecha ? (typeof clase.fecha === 'string' ? clase.fecha.split('T')[0] : clase.fecha) : date;
-                                                                                navigate(`/coach/gestion-clases?fecha=${fechaISO}&clase=${clase.id}`);
-                                                                            }}
+                                                                            onClick={() => { setClaseWod(clase); setModalWod(true); }}
                                                                             className="w-full h-full min-h-[64px] flex flex-col items-center justify-center gap-1 rounded-lg transition-all cursor-pointer bg-zinc-800 border border-zinc-600 hover:bg-zinc-700"
                                                                         >
                                                                             <div className="text-base font-semibold text-zinc-200 leading-tight capitalize">
@@ -1075,10 +1076,12 @@ const DashboardCoach = () => {
                 {/* "Publicar WOD": formulario manual (con el aviso del día) o archivo semanal. */}
                 {modalWod && (
                     <ModalPublicarWod
-                        clase={proximaClase || clasesHoy[0] || null}
-                        onCerrar={() => setModalWod(false)}
+                        clase={claseWod || proximaClase || clasesHoy[0] || null}
+                        clasesSemana={clasesSemana}
+                        onCerrar={() => { setModalWod(false); setClaseWod(null); }}
                         onPublicado={(datos) => {
                             setModalWod(false);
+                            setClaseWod(null);
                             setMsgPublicado(datos.origen === 'archivo'
                                 ? `✅ Semana programada: ${datos.dias} día(s) en ${datos.clases} clase(s)`
                                   + (datos.avisos ? ` y ${datos.avisos} aviso(s) con fecha.` : '.')

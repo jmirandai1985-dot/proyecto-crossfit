@@ -6,6 +6,8 @@ import Layout from '../../components/Layout';
 import WodDetalleModal from '../../components/WodDetalleModal';
 import BotonVolver from '../../components/BotonVolver';
 import ModalAvisoRapido from '../../components/ModalAvisoRapido';
+// BLOQUE 1: el WOD NUEVO se publica con el MISMO modal del Resumen (una sola UI de entrada).
+import ModalPublicarWod from '../../components/ModalPublicarWod';
 import {
     SIN_DATOS, useAccionClase, useClaseDetalle, useClasesDia, useClasesDisciplinaSemana,
     useCoachDisciplinas, useConfirmarAsistenciaClase, useCrearWodsBatch, useDisciplinas,
@@ -674,15 +676,49 @@ export default function GestionClases() {
                     <span className="text-emerald-300 font-bold">Gestión de Clases</span>
                 </nav>
 
-                {/* ═══ FLUJO DESDE ?clase=ID: FORMULARIO WOD PRE-VINCULADO ═══ */}
-                {claseDestino && (
+                {/* ═══ FLUJO DESDE ?clase=ID ═══
+                    BLOQUE 1: si el WOD es NUEVO, acá no hay formulario propio: se monta el
+                    MISMO modal del Resumen y de la pestaña Clases (grilla de días + horarios
+                    por franja + archivo de la semana). El formulario de abajo queda SÓLO para
+                    EDITAR un WOD ya publicado (ahí no se eligen días ni alcance). */}
+                {claseDestino && !modoEdicion && (
+                    <ModalPublicarWod
+                        clase={claseDestino}
+                        clasesSemana={clasesSemanaQ.data || []}
+                        onCerrar={() => {
+                            // Cierra y saca el `?clase=` de la URL (si no, la pantalla seguiría
+                            // mostrando el formulario de esa clase).
+                            setClaseClic(null);
+                            setWod(null);
+                            setModoEdicion(false);
+                            if (urlClaseId) navigate(`/coach/gestion-clases?fecha=${fechaPlanif}`, { replace: true });
+                        }}
+                        onPublicado={(datos) => {
+                            setMsg({
+                                tipo: 'exito',
+                                texto: `✅ WOD publicado en ${datos.clases} clase(s)`
+                                    + (datos.dias > 1 ? ` (${datos.dias} días)` : ''),
+                            });
+                            setClaseClic(null);
+                            setWod(null);
+                            setModoEdicion(false);
+                            if (urlClaseId) navigate(`/coach/gestion-clases?fecha=${fechaPlanif}`, { replace: true });
+                        }}
+                    />
+                )}
+
+                {/* Formulario viejo: SÓLO para editar el WOD que ya tiene esta clase. */}
+                {claseDestino && modoEdicion && (
                     <div className="border border-emerald-400 bg-emerald-50 rounded-xl p-6 mb-6">
                         <h2 className="text-xl font-bold text-gray-900 mb-1">📝 Publicar Entrenamiento</h2>
                         <p className="text-sm text-gray-600 mb-4">
                             Clase #{claseDestino.id} — {claseDestino.disciplina_nombre || 'Clase'} · {fechaPlanif} · {claseDestino.hora_inicio ? String(claseDestino.hora_inicio).substring(0, 5) : ''} - {claseDestino.hora_fin ? String(claseDestino.hora_fin).substring(0, 5) : ''}
                         </p>
 
-                        {/* ── TAREA 4: CALENDARIO SEMANA (7 días, multi-selección) ── */}
+                        {/* ── TAREA 4: CALENDARIO SEMANA (7 días, multi-selección) ──
+                            Bloque 1: esto se fue al modal unificado, así que acá (que sólo se
+                            usa para EDITAR) ya no se muestra. */}
+                        {!modoEdicion && (
                         <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
                             <p className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">
                                 📅 Días donde publicar (semana actual)
@@ -723,6 +759,7 @@ export default function GestionClases() {
                                 {!disciplinaActiva && ' Selecciona un turno y disciplina para habilitar el calendario.'}
                             </p>
                         </div>
+                        )}
 
                         {/* ── PUNTO 2: ALCANCE — a qué clases se publica este WOD ── */}
                         {modoEdicion ? (
