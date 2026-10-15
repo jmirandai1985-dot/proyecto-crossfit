@@ -1,4 +1,5 @@
-// Navegación "volver atrás" de las pantallas móviles (<768px).
+// Navegación "volver atrás" de la flecha Volver (components/BotonVolver), que desde el
+// Bloque 6 se ve en TODOS los anchos: el cálculo no depende del tamaño de la pantalla.
 //
 // POR QUÉ EXISTE: la flecha "Volver" (components/BotonVolver) tiene que decidir
 // entre volver a la pantalla anterior (`history.back()`) o caer a un destino de

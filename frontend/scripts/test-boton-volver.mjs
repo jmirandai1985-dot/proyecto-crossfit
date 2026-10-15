@@ -14,6 +14,10 @@
 //   6. la misma regla en el panel del COACH (auditoría Bloque 2): sus pantallas menos
 //      el Dashboard del coach, que es la raíz del rol. Eran 5 y son 3 desde el Bloque 5
 //      (Pizarra y Generar Clases se retiraron: ya no tienen ruta)
+//   7. (Bloque 6) la flecha se ve en TODOS los anchos: el className del botón ya no lleva
+//      `md:hidden` (hasta acá sólo existía en <768px, así que en escritorio no había ningún
+//      clic para volver). Y la RAÍZ del coach —su Dashboard— la monta igual, con el respaldo
+//      en su propia ruta
 import { readdirSync, readFileSync } from 'node:fs';
 import {
     CLAVE_PRIMERA_UBICACION, VOLVER_ATRAS, puedeVolverAtras, destinoVolver,
@@ -145,9 +149,11 @@ ok(ARCHIVOS.length === ruteados.size + Object.keys(SIN_RUTA).length,
 
 // ── 6. Cobertura del panel COACH: la misma regla, con la raíz de su rol ──────
 // El coach navega con el cajón lateral (no tiene barra inferior), así que sus
-// pantallas necesitan la flecha igual que las del alumno. Su raíz —el Dashboard,
-// DASHBOARD_MAP.coach— NO la lleva: ahí no hay "atrás" y la flecha no iría a
-// ningún lado (misma regla que el Inicio del alumno y el del admin).
+// pantallas necesitan la flecha igual que las del alumno.
+// El Dashboard —la raíz del rol (DASHBOARD_MAP.coach)— es la EXCEPCIÓN que pidió el
+// usuario (Bloque 6): monta la MISMA flecha con `fallback="/coach/dashboard"`, o sea su
+// propia ruta. Sin historial dentro de la app, "volver" no lo saca de la app; con
+// historial, vuelve a la pantalla anterior.
 const abreCoach = APP.indexOf('path="/coach/*"');
 const bloqueCoach = abreCoach === -1 ? '' : APP.slice(abreCoach, APP.indexOf('</Route>', abreCoach));
 const RUTAS_COACH = [...bloqueCoach.matchAll(/path="([^"]+)"\s+element=\{<(\w+)\s*\/>/g)]
@@ -175,11 +181,12 @@ for (const { ruta, archivo } of RUTAS_COACH) {
     // La flecha del coach cae a SU Inicio, no al del alumno.
     const dibuja = /<BotonVolver\s+fallback="\/coach\/dashboard"\s*\/>/.test(src);
     ok(!!src, `coach/${nombre}: el import lazy de App.jsx apunta a un archivo existente`);
+    // Bloque 6: la MISMA flecha va en TODAS las pantallas del coach, incluida su raíz.
+    ok(importa, `coach/${nombre}: importa BotonVolver desde components/`);
+    ok(dibuja, `coach/${nombre}: dibuja <BotonVolver fallback="/coach/dashboard" />`);
     if (ruta === RUTA_RAIZ_COACH) {
-        ok(!dibuja && !importa, `coach/${nombre}: es la RAÍZ (${ruta}) y NO lleva flecha Volver`);
-    } else {
-        ok(importa, `coach/${nombre}: importa BotonVolver desde components/`);
-        ok(dibuja, `coach/${nombre}: dibuja <BotonVolver fallback="/coach/dashboard" />`);
+        ok(!/fallback="\/alumno\/dashboard"/.test(src),
+            `coach/${nombre}: es la RAÍZ (${ruta}) y su respaldo es su propio Inicio, no el del alumno`);
     }
 }
 
@@ -201,8 +208,14 @@ ok(ARCHIVOS_COACH.length === ruteadosCoach.size + Object.keys(SIN_RUTA_COACH).le
 
 // ── 5b. El componente conserva el contrato visual y su respaldo ──────────────
 const COMP = leer('../src/components/BotonVolver.jsx');
-ok(/md:hidden/.test(COMP), 'BotonVolver: se oculta en ≥768px (md:hidden) — el escritorio no cambia');
-ok(/min-h-11/.test(COMP) && /min-w-11/.test(COMP), 'BotonVolver: objetivo táctil de 44px (min-h-11/min-w-11)');
+// El ancho se mide sobre el `className` del BOTÓN, no sobre el archivo: el JSDoc menciona
+// `md:hidden` en prosa (para explicar qué cambió en el Bloque 6) y un `/md:hidden/.test(COMP)`
+// pasaba sin que la clase estuviera — la guarda no guardaba nada.
+const CLASE_BTN = (COMP.match(/className=\{`([^`]*)`\}/) || [])[1] || '';
+ok(CLASE_BTN !== '', 'BotonVolver: el className del botón se puede aislar (guarda medible)');
+ok(!/md:hidden/.test(CLASE_BTN), 'BotonVolver: la flecha se ve en TODOS los anchos (el botón ya no lleva md:hidden)');
+ok(/inline-flex/.test(CLASE_BTN) && /min-h-11/.test(CLASE_BTN) && /min-w-11/.test(CLASE_BTN),
+    'BotonVolver: objetivo táctil de 44px (min-h-11/min-w-11)');
 ok(/aria-label="Volver"/.test(COMP), 'BotonVolver: tiene aria-label="Volver"');
 ok(/destinoVolver\(key, fallback\)/.test(COMP), 'BotonVolver: la decisión sigue en destinoVolver()');
 ok(/fallback = '\/alumno\/dashboard'/.test(COMP), 'BotonVolver: el respaldo por defecto es el Inicio del alumno');

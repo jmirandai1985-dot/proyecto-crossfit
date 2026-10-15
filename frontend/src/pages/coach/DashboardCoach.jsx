@@ -18,6 +18,9 @@ import ModalPublicarWod from '../../components/ModalPublicarWod';
 import ModalAgregarSinReserva from '../../components/ModalAgregarSinReserva';
 // Bloque 2: el walk-in avisa con un toast (el texto lo arma el modal en `alumno.mensaje`).
 import Toast from '../../components/Toast';
+// Bloque 6: la flecha Volver también en el escritorio. Acá es la RAÍZ del rol, así que el
+// respaldo es su propia ruta: sin historial se queda en este Dashboard (no sale de la app).
+import BotonVolver from '../../components/BotonVolver';
 
 const DashboardCoach = () => {
     const navigate = useNavigate();
@@ -422,9 +425,17 @@ const DashboardCoach = () => {
                     completo, con sus dos botones ("Publicar WOD de Hoy" e "Ir a Gestión de
                     Clases"): los KPIs viven ahora en el grid 2x2 de `ResumenCoach`, que es la
                     única fuente, y el acceso a Gestión de Clases sigue en la navegación. */}
-                <div>
-                    <h1 className="text-3xl font-bold text-white">Dashboard Coach</h1>
-                    <p className="mt-1 text-sm text-zinc-400">{fechaCortaHoy} · {usuario || 'Coach'}</p>
+                <div className="flex items-center gap-3">
+                    {/* Bloque 6: la MISMA flecha de Gestión de Clases (44px, a la izquierda del
+                        título, visible también en ≥768px). Es la raíz del panel, así que el
+                        respaldo es esta misma ruta: sin historial dentro de la app la flecha no
+                        navega a ningún lado nuevo (antes, en escritorio, no había ningún clic
+                        para volver y sólo quedaba el cajón lateral). */}
+                    <BotonVolver fallback="/coach/dashboard" />
+                    <div>
+                        <h1 className="text-3xl font-bold text-white">Dashboard Coach</h1>
+                        <p className="mt-1 text-sm text-zinc-400">{fechaCortaHoy} · {usuario || 'Coach'}</p>
+                    </div>
                 </div>
 
                 {/* Acá vivían las 4 tarjetas grandes del Resumen viejo (ver el comentario de

@@ -301,6 +301,18 @@ const PANTALLAS = {
             { nombre: '02-movil-gestion-clases', view: M, pasos: [] },
         ],
     },
+    // Bloque 6 (RAÍZ del coach): el Dashboard también monta la flecha, con el respaldo en su
+    // propia ruta. Misma carpeta y misma correa de nombres que la pantalla anterior.
+    'volver-dashboard': {
+        ruta: '/coach/dashboard',
+        out: 'bloque6-volver-escritorio',
+        esperar: '[data-testid="btn-volver"]',
+        debeVerse: '[data-testid="btn-volver"]',
+        pasos: [
+            { nombre: '03-escritorio-dashboard', view: D, pasos: [] },
+            { nombre: '04-movil-dashboard', view: M, pasos: [] },
+        ],
+    },
 };
 
 const P = PANTALLAS[PANTALLA];
