@@ -79,6 +79,11 @@ class HistorialRMListItem(BaseModel):
     fecha: date
     notas: Optional[str]
     movimiento_nombre: Optional[str] = None
+    # H-03: la categoría NORMALIZADA del movimiento viaja con cada fila, para que ninguna
+    # pantalla tenga que adivinarla por el nombre (ahí "Sled Push" caía como `metabolico`
+    # y se perdían sus minutos).
+    categoria: Optional[str] = Field(
+        None, description="Categoría del movimiento: fuerza/gimnastico/cardio/metabolico")
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -91,6 +96,11 @@ class RMPorMovimiento(BaseModel):
     id: Optional[int] = None
     movimiento_id: int
     movimiento_nombre: str
+    # H-03: la categoría NORMALIZADA del movimiento viaja con el RM. Sin este campo la UI cae
+    # en la heurística por nombre (`frontend/src/utils/rm.js`) y un "Sled Push" -que en la BD
+    # es `cardio`- se dibujaba como `metabolico`, perdiendo sus minutos.
+    categoria: Optional[str] = Field(
+        None, description="Categoría del movimiento: fuerza/gimnastico/cardio/metabolico")
     peso_kg: float
     tipo_rm: Optional[str] = "peso"
     valor_extra: Optional[str] = None

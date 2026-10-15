@@ -23,11 +23,13 @@ from app.models.historial_rm import HistorialRM
 from app.models.movimiento import Movimiento
 from app.services.movimiento_categoria import categoria_de
 
-# Campos que viajan tal cual al schema `RMPorMovimiento` (sin `categoria`/`unidad`/
-# `valor_mostrado`, que son de presentación). El endpoint itera esta tupla en vez de escribir
+# Campos que viajan tal cual al schema `RMPorMovimiento` (sin `unidad`/`valor_mostrado`, que
+# son de presentación y se derivan acá). `categoria` SÍ viaja: es el criterio H-03 y sin él el
+# front tenía que adivinarla por el NOMBRE del movimiento, y ahí "Sled Push" (en la BD `cardio`)
+# caía como `metabolico` y perdía los minutos. El endpoint itera esta tupla en vez de escribir
 # la lista a mano.
 CAMPOS_SCHEMA: Final[tuple] = (
-    "id", "movimiento_id", "movimiento_nombre", "peso_kg", "tipo_rm", "valor_extra",
+    "id", "movimiento_id", "movimiento_nombre", "categoria", "peso_kg", "tipo_rm", "valor_extra",
     "repeticiones", "series", "minutos", "vueltas", "km", "calorias", "fecha", "notas",
     "created_at",
 )

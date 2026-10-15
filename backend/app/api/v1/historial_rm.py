@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from sqlalchemy.exc import DBAPIError
+from types import SimpleNamespace
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
@@ -287,6 +288,10 @@ def listar_historial_rm(
         HistorialRM.fecha,
         HistorialRM.notas,
         Movimiento.nombre.label('movimiento_nombre'),
+        # H-03: la categoría viaja CON la fila (misma regla que el mejor-RM-por-movimiento).
+        # Antes el front la adivinaba por el nombre y "Sled Push" (BD: `cardio`) quedaba como
+        # `metabolico`: sin minutos en el valor y en el cuadrante equivocado del gráfico.
+        Movimiento.categoria.label('categoria_mov'),
     ).join(
         Movimiento, HistorialRM.movimiento_id == Movimiento.id, isouter=True
     ).order_by(HistorialRM.fecha.desc()).offset(
@@ -313,6 +318,10 @@ def listar_historial_rm(
             "fecha": row.fecha,
             "notas": row.notas,
             "movimiento_nombre": row.movimiento_nombre,
+            # La categoría se NORMALIZA acá (BD -> alias -> nombre): el join es `isouter`, así
+            # que un movimiento borrado no rompe la fila, sólo deja la categoría al fallback.
+            "categoria": categoria_de(SimpleNamespace(
+                categoria=row.categoria_mov, nombre=row.movimiento_nombre)),
         })
     return result
 
