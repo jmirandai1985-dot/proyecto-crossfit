@@ -336,6 +336,7 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
                         <div className="px-6 py-4 overflow-y-auto">
                             {mensaje && (
                                 <div
+                                    data-testid="aviso-asistencia"
                                     className={`mb-3 px-3 py-2 rounded-md text-sm font-medium border ${
                                         mensaje.tipo === 'exito'
                                             ? (osc ? 'bg-green-500/10 text-green-400 border-green-500/30' : 'bg-green-50 text-green-700 border-green-200')
