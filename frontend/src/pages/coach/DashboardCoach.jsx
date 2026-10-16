@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import Layout from '../../components/Layout';
@@ -21,6 +21,12 @@ import WodDetalleModal from '../../components/WodDetalleModal';
 import ModalAvisoRapido from '../../components/ModalAvisoRapido';
 // Bloque C: el Resumen del mockup (#pantalla-resumen) y sus dos modales.
 import ResumenCoach from '../../components/ResumenCoach';
+// Punto 2 del reporte móvil: al coach le toca SÓLO su aviso rápido del día. El tipo es un dato
+// (no un literal suelto) y vive en el util que ya es la fuente única de los avisos.
+import { TIPO_AVISO_RAPIDO } from '../../utils/avisosMarketing';
+// Punto 5 del reporte móvil: el instante del próximo borde del día (arranque o cierre de una
+// clase), que es cuándo el panel tiene que volver a preguntar por el `estado` de las clases.
+import { proximoCambioDeClase } from '../../utils/relojClases';
 import ModalPublicarWod from '../../components/ModalPublicarWod';
 import ModalAgregarSinReserva from '../../components/ModalAgregarSinReserva';
 // Bloque 2: el walk-in avisa con un toast (el texto lo arma el modal en `alumno.mensaje`).
@@ -365,8 +371,18 @@ const DashboardCoach = () => {
     const alumnos = alumnosQ.data || SIN_DATOS;
     const alumnosEnRiesgo = riesgoQ.data?.alumnos_alerta || SIN_DATOS;
     const progresoAlumnos = progresoQ.data || SIN_DATOS;
-    // Avisos vigentes hoy (los del carrusel del alumno) para la sección del Resumen.
+    // Avisos vigentes hoy (los del carrusel del alumno). El endpoint es el mismo que alimenta
+    // el Inicio del alumno: trae TODAS las categorías (promoción, colaboración, evento, aviso
+    // del box y productos del Bazar).
     const avisosVigentes = avisosQ.data || SIN_DATOS;
+    // Punto 2 del reporte móvil: la sección "Avisos para alumnos" del Resumen mostraba las
+    // cuatro categorías mezcladas. Al coach le toca UNA: el aviso rápido del día (tipo `aviso`,
+    // el que publica + Nuevo aviso); Promoción, Colaboración y Evento son del admin desde
+    // Marketing y los alumnos los leen igual en su Inicio, pero no son cosa del coach.
+    const avisosDelCoach = useMemo(
+        () => avisosVigentes.filter((a) => a.tipo === TIPO_AVISO_RAPIDO),
+        [avisosVigentes],
+    );
 
     // RMs del alumno abierto en el tab Alumnos.
     const alumnoRMs = alumnoRmsQ.data || SIN_DATOS;
@@ -401,6 +417,44 @@ const DashboardCoach = () => {
         () => (reservasProximaQ.data || SIN_DATOS), [reservasProximaQ.data],
     );
     const cargandoReservasProxima = Boolean(proximaClase) && reservasProximaQ.isPending;
+
+    // ── Punto 5 del reporte móvil: la tarjeta grande sigue el reloj, sin recargar ──
+    // `estado` ("en curso" / "realizada") lo decide el BACKEND en hora de Chile
+    // (`clases_service.estado_clase`): el front NO lo recalcula. Lo que faltaba era VOLVER A
+    // PREGUNTAR — con una clase que termina 19:00 y otra que arranca 19:00, el panel se quedaba
+    // con el `estado` de la carga inicial y la tarjeta no cambiaba hasta recargar a mano.
+    //   · `reloj` late cada 30 s y rearma el temporizador si cambia la lista de clases;
+    //   · el BORDE (`proximoCambioDeClase`) agenda UN refetch en la hora exacta del próximo
+    //     arranque/cierre, en vez de una llamada por minuto;
+    //   · al volver a la pestaña se re-lee el reloj y se pide el estado otra vez (los timers se
+    //     pausan mientras la pestaña está en segundo plano).
+    const [reloj, setReloj] = useState(() => Date.now());
+    useEffect(() => {
+        const latido = setInterval(() => setReloj(Date.now()), 30_000);
+        const alVolver = () => {
+            if (document.hidden) return;
+            setReloj(Date.now());
+            qc.invalidateQueries({ queryKey: ['asistencia'] });
+        };
+        document.addEventListener('visibilitychange', alVolver);
+        return () => {
+            clearInterval(latido);
+            document.removeEventListener('visibilitychange', alVolver);
+        };
+    }, [qc]);
+    const proximoCambio = useMemo(
+        () => proximoCambioDeClase(clasesHoyConAsistencia, reloj),
+        [clasesHoyConAsistencia, reloj],
+    );
+    useEffect(() => {
+        if (proximoCambio === null) return undefined;
+        const falta = Math.max(proximoCambio - Date.now(), 0);
+        const enElBorde = setTimeout(() => {
+            setReloj(Date.now());
+            qc.invalidateQueries({ queryKey: ['asistencia'] });
+        }, falta);
+        return () => clearTimeout(enElBorde);
+    }, [proximoCambio, reloj, qc]);
 
     // Secciones caídas: el banner con "Reintentar" (mismo patrón que el panel Admin).
     const erroresBloque = useMemo(() => {
@@ -580,7 +634,7 @@ const DashboardCoach = () => {
                     ? ''
                     : 'overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm'}
                     data-testid="coach-dashboard-content">
-                    <div className={activeTab === 'resumen' ? '' : 'p-6'}>
+                    <div className={activeTab === 'resumen' ? '' : 'p-4 md:p-6'}>
                         {/* ─── TAB: RESUMEN (mockup #pantalla-resumen) ─── */}
                         {activeTab === 'resumen' && (
                             <>
@@ -594,11 +648,12 @@ const DashboardCoach = () => {
                                     clasesHoy={clasesHoyConAsistencia}
                                     sinAsignaciones={sinAsignaciones}
                                     wodHoy={wodHoy}
-                                    avisos={avisosVigentes}
+                                    avisos={avisosDelCoach}
                                     fechaCorta={fechaCortaHoy}
                                     proximaClase={proximaClase}
                                     reservasProxima={reservasProxima}
                                     cargandoReservas={cargandoReservasProxima}
+                                    proximoCambio={proximoCambio}
                                     onPublicarWod={() => setModalWod(true)}
                                     onAgregarSinReserva={(clase) => setClaseSinReserva(clase)}
                                     onAbrirAsistencia={() => navigate('/coach/dashboard?tab=asistencia')}
@@ -619,7 +674,12 @@ const DashboardCoach = () => {
                                             Semana: {weekRange.start} → {weekRange.end}
                                         </p>
                                     </div>
-                                    <div className="flex items-center gap-2">
+                                    {/* Punto 3 del reporte móvil: en 360px los cuatro botones no
+                                        entraban en la fila y el último quedaba cortado por el
+                                        borde del panel (`overflow-hidden`), pisándose con el de
+                                        al lado. Ahora la fila ENVUELVE (`flex-wrap`) y se alinea
+                                        a la derecha: en >=768px todo cabe igual que antes. */}
+                                    <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
                                         <button
                                             onClick={irSemanaAnterior}
                                             className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-zinc-600 transition-colors"
@@ -654,11 +714,15 @@ const DashboardCoach = () => {
                                     </div>
                                 </div>
 
-                                {/* Toggle Fase 2: "Ver todas" / "Ver solo con WOD publicado" */}
-                                <div className="inline-flex items-center gap-3 p-2 bg-gray-100 rounded-xl">
+                                {/* Toggle Fase 2: "Ver todas" / "Ver solo con WOD publicado".
+                                    Punto 3: en el teléfono ocupa la fila completa y envuelve
+                                    (los dos botones se reparten el ancho, y el rótulo largo parte
+                                    su texto en dos líneas en vez de desbordar); en >=768px queda
+                                    el chip inline de siempre. */}
+                                <div className="flex w-full flex-wrap items-center gap-2 rounded-xl bg-gray-100 p-2 md:inline-flex md:w-auto md:gap-3">
                                     <button
                                         onClick={() => setVerSoloConWod(false)}
-                                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${!verSoloConWod
+                                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all md:flex-none ${!verSoloConWod
                                             ? 'bg-white text-gray-900 shadow-sm ring-1 ring-zinc-600'
                                             : 'text-gray-500 hover:text-gray-700'
                                             }`}
@@ -667,7 +731,7 @@ const DashboardCoach = () => {
                                     </button>
                                     <button
                                         onClick={() => setVerSoloConWod(true)}
-                                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${verSoloConWod
+                                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all md:flex-none ${verSoloConWod
                                             ? 'bg-white text-gray-900 shadow-sm ring-1 ring-zinc-600'
                                             : 'text-gray-500 hover:text-gray-700'
                                             }`}
@@ -727,12 +791,12 @@ const DashboardCoach = () => {
                                                                     onClick={() => (wod
                                                                         ? abrirDetalleWod({ ...clase, fecha: clase.fecha || date }, wod)
                                                                         : abrirPublicarWod({ ...clase, fecha: clase.fecha || date }))}
-                                                                    className={`w-full px-4 py-3 flex items-center gap-3 text-left transition-colors ${wod
+                                                                    className={`w-full px-3 py-3 flex items-center gap-3 text-left transition-colors sm:px-4 ${wod
                                                                         ? 'bg-green-50 hover:bg-green-100'
                                                                         : 'bg-yellow-50 hover:bg-yellow-100'
                                                                         }`}
                                                                 >
-                                                                    <span className="text-lg font-bold text-gray-800 w-14 shrink-0">
+                                                                    <span className="text-lg font-bold text-gray-800 w-16 shrink-0">
                                                                         {clase.hora_inicio ? clase.hora_inicio.substring(0, 5) : '--:--'}
                                                                     </span>
                                                                     <div className="flex-1 min-w-0">
