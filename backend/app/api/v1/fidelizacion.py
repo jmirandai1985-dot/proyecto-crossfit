@@ -1,10 +1,9 @@
 """
 Módulo de Fidelización Inteligente
-Analiza asistencias y detecta alumnos en riesgo de abandono
+Analiza la asistencia REAL (reservas.asistio) y detecta alumnos en riesgo de abandono
 """
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from datetime import date, datetime
 from typing import List, Optional
 import pandas as pd
@@ -24,6 +23,9 @@ from app.services.auditoria_service import registrar_auditoria
 from app.services import churn_service
 # "Mis alumnos" del coach: UNA sola definición (el alcance de las dos pestañas del panel).
 from app.services.clases_service import alumnos_del_coach
+# "Última asistencia" de un alumno: UNA sola definición, y sale de `reservas.asistio`, NO de la
+# tabla `asistencias` (que nadie puebla: ver el bug "En riesgo = 251" en `asistencia_real.py`).
+from app.services.asistencia_real import ultima_asistencia_por_alumno
 
 router = APIRouter()
 
@@ -81,17 +83,14 @@ def analizar_fidelizacion(
             detail="No hay alumnos activos en este box"
         )
 
-    ultimas = db.query(
-        Asistencia.usuario_id,
-        func.max(Asistencia.fecha).label("ultima_fecha")
-    ).filter(
-        Asistencia.tenant_id == tenant_id
-    ).group_by(Asistencia.usuario_id).all()
+    # Asistencia REAL del alumno: `reservas.asistio` sobre la fecha de la clase (una sola
+    # consulta para todo el box). Antes esto leía la tabla `asistencias`, que nadie puebla:
+    # TODOS los alumnos quedaban "Nunca asistió" y entraban a la alerta.
+    mapa_asistencias = ultima_asistencia_por_alumno(
+        db, tenant_id, [a.id for a in alumnos])
 
-    mapa_asistencias = {r.usuario_id: r.ultima_fecha for r in ultimas}
-
-    # El "hoy" es el de CHILE: `Asistencia.fecha` son fechas chilenas, y de noche en UTC
-    # `date.today()` ya era mañana (el conteo de días sin entrenar se corría un día).
+    # El "hoy" es el de CHILE: las fechas del mapa son chilenas (`clases.fecha`), y de noche en
+    # UTC `date.today()` ya era mañana (el conteo de días sin entrenar se corría un día).
     hoy = hoy_santiago()
     data = []
     for alumno in alumnos:
@@ -156,7 +155,15 @@ def registrar_asistencia(
     current_user: dict = Depends(get_current_admin),
     background_tasks: BackgroundTasks = None,
 ):
-    """Registra la asistencia de un alumno al box. Solo admin (tenant del token)."""
+    """Registra la asistencia de un alumno al box. Solo admin (tenant del token).
+
+    ⚠️ Es el ÚNICO `INSERT` de la app en la tabla `asistencias` (histórica) y hoy NO lo llama
+    ninguna pantalla: el coach y el alumno marcan por `POST /asistencia/clases/{id}/confirmar`,
+    que escribe `reservas.asistio` — la fuente que usa TODO el panel. Se deja intacto a
+    propósito (no se toca el flujo de guardado): ningún cálculo de riesgo/inactividad vuelve a
+    leer `asistencias` (ver `services/asistencia_real.py`), así que un alta acá ya no puede
+    distorsionar el KPI.
+    """
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
     usuario = db.query(Usuario).filter(
@@ -323,18 +330,13 @@ def alumnos_coach_en_riesgo(
             "alumnos_alerta": []
         }
 
-    ultimas = db.query(
-        Asistencia.usuario_id,
-        func.max(Asistencia.fecha).label("ultima_fecha")
-    ).filter(
-        Asistencia.tenant_id == tenant_id,
-        Asistencia.usuario_id.in_([a.id for a in alumnos])
-    ).group_by(Asistencia.usuario_id).all()
+    # Asistencia REAL (una consulta para los alumnos del coach): `reservas.asistio` sobre la
+    # fecha de la clase. Ver `services/asistencia_real.py` (bug "En riesgo = 251").
+    mapa_asistencias = ultima_asistencia_por_alumno(
+        db, tenant_id, [a.id for a in alumnos])
 
-    mapa_asistencias = {r.usuario_id: r.ultima_fecha for r in ultimas}
-
-    # El "hoy" es el de CHILE (misma razón que en el resto del panel: `Asistencia.fecha` es una
-    # fecha chilena y `date.today()` ya era mañana de noche en UTC).
+    # El "hoy" es el de CHILE (misma razón que en el resto del panel: las fechas de asistencia
+    # son chilenas y `date.today()` ya era mañana de noche en UTC).
     hoy = hoy_santiago()
     data = []
     for alumno in alumnos:
@@ -489,11 +491,13 @@ def _alumno_para_contacto(db: Session, current_user: dict, coach_id: int,
 def _dias_inactividad_alumno(db: Session, tenant_id: int, alumno: Usuario) -> int:
     """Dias REALES de inactividad: ultima asistencia; si nunca asistio, la fecha
     de alta; minimo 1. Lo usan el preview y el envio, para que el numero que ve
-    el coach sea el mismo que sale en el correo."""
-    ultima = db.query(func.max(Asistencia.fecha)).filter(
-        Asistencia.tenant_id == tenant_id,
-        Asistencia.usuario_id == alumno.id,
-    ).scalar()
+    el coach sea el mismo que sale en el correo.
+
+    La última asistencia sale de `reservas.asistio` (la fuente real del panel: ver
+    `services/asistencia_real.py`). Leyendo la tabla `asistencias` —que nadie puebla— el
+    correo le decía al alumno "llevas N días sin entrenar" con N = días desde su alta.
+    """
+    ultima = ultima_asistencia_por_alumno(db, tenant_id, [alumno.id]).get(alumno.id)
     referencia = ultima or fecha_chile(alumno.created_at)
     return max(1, (hoy_santiago() - referencia).days) if referencia else 1
 
@@ -702,15 +706,10 @@ def alumnos_tenant_en_riesgo(
             "alumnos_alerta": []
         }
 
-    ultimas = db.query(
-        Asistencia.usuario_id,
-        func.max(Asistencia.fecha).label("ultima_fecha")
-    ).filter(
-        Asistencia.tenant_id == tenant_id,
-        Asistencia.usuario_id.in_([a.id for a in alumnos])
-    ).group_by(Asistencia.usuario_id).all()
-
-    mapa_asistencias = {r.usuario_id: r.ultima_fecha for r in ultimas}
+    # Asistencia REAL (una consulta para los alumnos del box): `reservas.asistio` sobre la
+    # fecha de la clase. Ver `services/asistencia_real.py` (bug "En riesgo = 251").
+    mapa_asistencias = ultima_asistencia_por_alumno(
+        db, tenant_id, [a.id for a in alumnos])
 
     # El "hoy" es el de CHILE (ver la nota del otro endpoint de riesgo).
     hoy = hoy_santiago()
