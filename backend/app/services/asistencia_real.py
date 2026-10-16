@@ -149,7 +149,7 @@ def sql_cte_asistencias() -> str:
     """
     return (
         "asistencias AS ("
-        "SELECT r.id AS id, r.usuario_id AS usuario_id, r.clase_id AS clase_id,"
+        "SELECT r.id AS id, r.alumno_id AS usuario_id, r.clase_id AS clase_id,"
         " r.tenant_id AS tenant_id, c.fecha AS fecha"
         " FROM reservas r JOIN clases c ON c.id = r.clase_id"
         f" WHERE r.asistio = true AND r.estado NOT IN ({lista_sql()}))"

@@ -150,6 +150,17 @@ def test_b4_el_cte_sql_es_espejo_del_predicado_y_lo_pegan_todas_las_crudas():
     assert "from shared.estados import lista_sql" in svc, (
         "la lista de cancelaciones tiene que salir de `shared.estados`, no escribirse a mano")
     assert lista_sql() == ", ".join(f"'{e}'" for e in ESTADOS_CANCELADA)
+    # El CTE tiene que leer la columna que EXISTE en `reservas` (`alumno_id`) aunque exponga
+    # el nombre histórico (`usuario_id`) que ya usaban las consultas crudas. `reservas.usuario_id`
+    # NO existe: con ese nombre, `/bloques-horarios`, `/cohortes` y la campaña de inactividad
+    # devolvían 500 (`UndefinedColumn: column r.usuario_id does not exist`) — pasó porque los
+    # guards de este archivo miran texto, no ejecutan SQL (bug encontrado al correr contra la BD).
+    assert "r.alumno_id AS usuario_id" in svc, (
+        "el CTE tiene que leer `reservas.alumno_id` (la columna real) y exponerla como "
+        "`usuario_id` (el nombre que usan las consultas crudas)")
+    assert "r.usuario_id" not in svc, (
+        "`reservas.usuario_id` NO existe: rompe `/bloques-horarios`, `/cohortes` y la "
+        "campaña de inactividad")
     for rel, veces in CTE_POR_ARCHIVO.items():
         assert _fuente(rel).count("WITH {sql_cte_asistencias()}") == veces, rel
 
