@@ -181,25 +181,32 @@ eq(libreViejo(PASADO, {}), -4, 'la copia vieja daba -4: el botón seguía ofreci
 // Sin cupos cargados (clase vieja) tampoco hay NaN: 0 + 10.
 eq(cupoTope({}), 10, 'sin cupos, el tope es 10 (la copia vieja daba NaN)');
 
-// ── 6. Bloque 4: el selector de franja del teléfono ────────────────────────────────────────
-console.log('== 6. Bloque 4: saltar a una franja (navegación, no filtro) ==');
+// ── 6. Bloque 4 + punto 1 del reporte móvil: el selector de franja del teléfono FILTRA ─────
+console.log('== 6. Punto 1: elegir una franja deja a la vista SÓLO esa franja ==');
 ok(CLASES.includes("const [franjaActiva, setFranjaActiva] = useState('todas')"),
-    'el selector arranca en "Todas" (al entrar no se esconde ninguna franja)');
+    'el selector arranca en "Todas" (al entrar se ven las tres franjas)');
 ok(CLASES.includes('data-testid="selector-franja"'), 'el selector existe (es identificable)');
 ok(CLASES.includes('data-testid="franja-tab-todas"')
     && CLASES.includes('data-testid={`franja-tab-${f.id}`}'),
     'tiene "Todas" + una pestaña por franja');
 ok(CLASES.includes('{FRANJAS.map((f) => {'),
     'las franjas salen de FRANJAS (la lista única del util), no de una copia local');
-ok(CLASES.includes('document.querySelector(`[data-testid="franja-${id}"]`)')
-    && CLASES.includes("scrollIntoView({ behavior: 'smooth', block: 'start' })"),
-    'salta a la sección con scrollIntoView (el data-testid que ya pinta AsistenciaFranja)');
+ok(/const franjasVisibles = franjaActiva === 'todas'[\s\S]{0,220}franjasConClases\.filter\(\(f\) => f\.id === franjaActiva\)/.test(CLASES),
+    'lo que se dibuja sale de `franjasVisibles`: la franja elegida (o todas)');
+ok(/\{franjasVisibles\.map\(\(f\) => \(/.test(CLASES),
+    'la lista de secciones usa `franjasVisibles` (antes dibujaba `franjasConClases` siempre)');
+eq(/scrollIntoView/.test(CLASES), false,
+    'ya no salta con scrollIntoView: la pestaña FILTRA (el pedido del punto 1)');
+eq(/selectorFranjaRef/.test(CLASES), false,
+    'el ref del salto se fue con el scroll: no quedan dos formas de recorrer la misma lista');
 ok(CLASES.includes('disabled={n === 0}'),
     'una franja sin clases no se puede elegir: su sección no existe (franjasConClases)');
 ok(CLASES.includes('const totalesFranja = (id) => (porFranja?.[id] || []).length'),
     'el número de cada pestaña sale del MISMO agrupamiento que la sección');
-eq(CLASES.includes('clases.filter('), false,
-    'no filtra la lista: el agrupamiento y los contadores quedan intactos');
+ok(/grid grid-cols-4/.test(CLASES),
+    'las 4 pestañas van en una grilla de 4 columnas iguales: ninguna se corta en 360px');
+ok(CLASES.includes('irAFranja') && /scrollTo\(\{ top: 0/.test(CLASES),
+    'al cambiar de pestaña se vuelve al tope del contenedor (el contenido es otro)');
 ok(CLASES.includes('md:hidden space-y-5" data-testid="asistencia-franjas"'),
     'el selector vive DENTRO del bloque `md:hidden`: en >=768px no existe');
 

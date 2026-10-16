@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import AsistenciaGrupoDisciplina from './AsistenciaGrupoDisciplina';
 import AsistenciaFranja from './AsistenciaFranja';
 // El corte por franja (Mañana/Tarde/Noche) vive en un util compartido con test propio:
@@ -34,8 +34,10 @@ import Toast from './Toast';
  *   franjas — false (default): el acordeón por disciplina, en cualquier ancho.
  *             true: en <768px las clases del día se agrupan por franja (Mañana/Tarde/
  *             Noche) al estilo del mockup 6b, con la fila compacta por clase (y sus
- *             contadores "con reserva / ya marcaron / faltan"); en ≥768px (tablet y
- *             escritorio) sigue EXACTAMENTE el acordeón por disciplina.
+ *             contadores "con reserva / ya marcaron / faltan") y un selector de 4 pestañas
+ *             que FILTRA la lista (deja a la vista sólo la franja elegida; "Todas" las
+ *             muestra juntas); en ≥768px (tablet y escritorio) sigue EXACTAMENTE el acordeón
+ *             por disciplina.
  *             Lo pide el coach (`DashboardCoach`, ?tab=asistencia) y NO el admin: su
  *             pestaña Asistencia monta el componente sin la prop y no cambia nada.
  *   permitirSinReserva — false (default): agrega el botón "+ Agregar alumno sin reserva"
@@ -64,11 +66,11 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
     const [toast, setToast] = useState(null);
     // Walk-in: el modal "Agregar alumno sin reserva" de la clase abierta (sólo coach).
     const [modalSinReserva, setModalSinReserva] = useState(false);
-    // Bloque 4: franja elegida en el selector del teléfono ('todas' = sin saltar). Es sólo
-    // NAVEGACIÓN: no filtra la lista ni toca los contadores (el agrupamiento sigue siendo el
-    // de `franjasConClases`).
+    // Bloque 4 + punto 1 del reporte móvil: franja elegida en el selector del teléfono.
+    // 'todas' = las tres franjas; cualquier otro valor FILTRA la lista y deja a la vista sólo
+    // esa franja. El agrupamiento y los contadores siguen saliendo de `franjasConClases` (nada
+    // se recalcula): filtrar es elegir qué secciones se dibujan.
     const [franjaActiva, setFranjaActiva] = useState('todas');
-    const selectorFranjaRef = useRef(null);
 
     const alumnosQ = useAlumnosDeClase(claseSeleccionada?.id);
     const reservas = useMemo(() => alumnosQ.data?.reservas || [], [alumnosQ.data]);
@@ -181,25 +183,28 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
         ? FRANJAS.filter((f) => (porFranja[f.id] || []).length > 0)
         : [];
 
-    // ── Bloque 4: el selector de franja (sólo teléfono, dentro del bloque de franjas) ──
+    // ── Bloque 4 + punto 1: el selector de franja (sólo teléfono, dentro del bloque de franjas) ──
     // Cuántas clases tiene cada franja: sale del MISMO `agruparPorFranja` que dibuja las
     // secciones, así el número del botón y el contenido de la sección no pueden diferir.
     const totalesFranja = (id) => (porFranja?.[id] || []).length;
-    // Estilo de cada pestaña (activa / inactiva) según la skin de la pestaña.
-    const tabFranja = (activo) => `flex flex-none items-center rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${activo
+    // Punto 1 del reporte móvil: lo que se dibuja es la franja ELEGIDA (o todas). Una franja
+    // sin clases no se dibuja nunca, así que la lista sale de `franjasConClases`.
+    const franjasVisibles = franjaActiva === 'todas'
+        ? franjasConClases
+        : franjasConClases.filter((f) => f.id === franjaActiva);
+    // Estilo de cada pestaña: dos renglones (rótulo + cuántas clases) y ancho parejo. Antes las
+    // cuatro iban en una fila `flex-none` que no entraba en 360px: el rótulo se veía apretado y
+    // la última quedaba cortada contra el borde del panel. Con la grilla de 4 columnas iguales
+    // ninguna se recorta y el número tiene su propio renglón.
+    const tabFranja = (activo) => `flex min-w-0 flex-col items-center justify-center rounded-xl border px-1 py-1.5 leading-tight transition-colors ${activo
         ? (osc ? 'border-orange-500 bg-orange-500/15 text-orange-300' : 'border-orange-500 bg-orange-50 text-orange-700')
         : (osc ? 'border-zinc-800 bg-zinc-900 text-zinc-400' : 'border-gray-200 bg-white text-gray-500')}`;
-    // Saltar a la franja: las secciones YA están agrupadas, así que esto sólo scrollea (no
-    // reordena ni esconde nada). `selectorFranjaRef` es el destino de "Todas" (volver arriba)
-    // y cada franja se busca por el `data-testid` que ya pinta `AsistenciaFranja`. Una franja
-    // sin clases no se dibuja (`franjasConClases`), así que su botón va deshabilitado: nunca
-    // se salta a una sección que no existe.
+    // Punto 1: cambiar de pestaña FILTRA (ya no salta a la sección). Como el contenido de abajo
+    // pasa a ser otro, se vuelve al tope del contenedor —el que scrollea es el `main` del
+    // Layout— para que la primera clase de la franja elegida quede a la vista.
     const irAFranja = (id) => {
         setFranjaActiva(id);
-        const destino = id === 'todas'
-            ? selectorFranjaRef.current
-            : document.querySelector(`[data-testid="franja-${id}"]`);
-        destino?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
     // Ampliar cupo de UNA clase puntual (el backend valida permisos y el tope +10).
@@ -239,14 +244,13 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
                     {/* <768px (sólo con `franjas`): las clases del día por franja (mockup 6b). */}
                     {franjas && (
                         <div className="md:hidden space-y-5" data-testid="asistencia-franjas">
-                            {/* Bloque 4: saltar a una franja sin recorrer el día entero. Va
-                                pegado arriba (`sticky`) porque el que scrollea es el contenedor
-                                del Layout, no la ventana; en ≥768px no existe (esta rama es
-                                `md:hidden`), así que la vista de escritorio no cambia. */}
+                            {/* Bloque 4 + punto 1: elegir la franja. Va pegado arriba
+                                (`sticky`) porque el que scrollea es el contenedor del Layout y
+                                en >=768px no existe (esta rama es `md:hidden`), así que la vista
+                                de escritorio no cambia. */}
                             <div
-                                ref={selectorFranjaRef}
                                 data-testid="selector-franja"
-                                className={`sticky top-0 z-10 -mx-1 flex gap-1.5 overflow-x-auto px-1 py-1.5 ${osc ? 'bg-zinc-950' : 'bg-white'}`}
+                                className={`sticky top-0 z-10 -mx-1 grid grid-cols-4 gap-1.5 px-1 py-1.5 ${osc ? 'bg-zinc-950' : 'bg-white'}`}
                             >
                                 <button
                                     type="button"
@@ -255,8 +259,8 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
                                     data-testid="franja-tab-todas"
                                     className={tabFranja(franjaActiva === 'todas')}
                                 >
-                                    Todas
-                                    <span className="ml-1.5 opacity-70">{clases.length}</span>
+                                    <span className="max-w-full truncate text-[11.5px] font-bold">Todas</span>
+                                    <span className="text-[10px] font-semibold opacity-70">{clases.length}</span>
                                 </button>
                                 {FRANJAS.map((f) => {
                                     const n = totalesFranja(f.id);
@@ -271,13 +275,13 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
                                             data-testid={`franja-tab-${f.id}`}
                                             className={`${tabFranja(franjaActiva === f.id)} disabled:opacity-40 disabled:cursor-not-allowed`}
                                         >
-                                            {f.label}
-                                            <span className="ml-1.5 opacity-70">{n}</span>
+                                            <span className="max-w-full truncate text-[11.5px] font-bold">{f.label}</span>
+                                            <span className="text-[10px] font-semibold opacity-70">{n}</span>
                                         </button>
                                     );
                                 })}
                             </div>
-                            {franjasConClases.map((f) => (
+                            {franjasVisibles.map((f) => (
                                 <AsistenciaFranja
                                     key={f.id}
                                     franja={f}
