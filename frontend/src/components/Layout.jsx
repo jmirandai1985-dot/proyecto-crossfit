@@ -88,6 +88,12 @@ const Layout = ({ children }) => {
     const drawerOculto = !esEscritorio && !mobileOpen;
 
     const isCoachDashboard = location.pathname === '/coach/dashboard';
+    // Punto 4 del reporte móvil: el cajón del COACH sigue la paleta "Energético" del rediseño
+    // (fondo #0E0E10 + acento verde-lima #D7FF4A) en vez del zinc + naranja de los paneles del
+    // admin y del alumno. Los colores del mockup viajan como valores arbitrarios de Tailwind
+    // porque `src/index.css` reescribe `.bg-orange-*` / `.text-orange-*` con `!important` (el
+    // mismo motivo que documenta `ResumenCoach`). Cerrar Sesión queda en rojo: es destructivo.
+    const esCoach = rol === 'coach';
 
     // Menú del rol desde la fuente única (config/menu.js). El alumno en plan de
     // prueba queda restringido (fail-closed) según `esPrueba`.
@@ -114,13 +120,16 @@ const Layout = ({ children }) => {
                 fuera del árbol de foco/lector (`drawerOculto`). */}
             <div
                 className={`fixed md:static inset-y-0 left-0 z-50 w-64 ${sidebarOpen ? 'md:w-64' : 'md:w-20'
-                    } bg-zinc-900 border-r border-zinc-800 transition-transform md:transition-all duration-300 flex flex-col shadow-sm ${mobileOpen ? 'translate-x-0' : '-translate-x-full'
+                    } ${esCoach
+                        ? 'bg-[#0E0E10] border-r border-[#2A2A2E]'
+                        : 'bg-zinc-900 border-r border-zinc-800'
+                    } transition-transform md:transition-all duration-300 flex flex-col shadow-sm ${mobileOpen ? 'translate-x-0' : '-translate-x-full'
                     } md:translate-x-0`}
                 aria-hidden={drawerOculto ? 'true' : undefined}
                 inert={drawerOculto || undefined}
             >
                 {/* Logo */}
-                <div className="p-5 border-b border-zinc-800">
+                <div className={`p-5 border-b ${esCoach ? 'border-[#2A2A2E]' : 'border-zinc-800'}`}>
                     <div className="flex items-center gap-3">
                         <img src="/imgs/logo.png" alt="Urban Box" className="w-10 h-10 object-contain shrink-0" />
                         {sidebarOpen && (
@@ -179,11 +188,13 @@ const Layout = ({ children }) => {
                             <Link
                                 to={item.path}
                                 className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-base ${isActive(item.path) || (rol === 'coach' && item.label === 'Dashboard' && isCoachDashboard)
-                                    ? 'bg-orange-500/20 text-orange-300 font-semibold ring-1 ring-orange-500/40'
+                                    ? (esCoach
+                                        ? 'bg-[#D7FF4A]/15 text-[#D7FF4A] font-semibold ring-1 ring-[#D7FF4A]/40'
+                                        : 'bg-orange-500/20 text-orange-300 font-semibold ring-1 ring-orange-500/40')
                                     : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
                                     }`}
                             >
-                                <span className={`${isActive(item.path) ? 'text-orange-500' : 'text-zinc-500'}`}>
+                                <span className={`${isActive(item.path) ? (esCoach ? 'text-[#D7FF4A]' : 'text-orange-500') : 'text-zinc-500'}`}>
                                     {MENU_ICONS[item.icon]}
                                 </span>
                                 {sidebarOpen && <span>{item.label}</span>}
@@ -206,13 +217,15 @@ const Layout = ({ children }) => {
                                 una sola lista, con `subtabActiva`, mantiene los dos casos
                                 diciendo lo mismo. */}
                             {rol === 'coach' && item.label === 'Dashboard' && sidebarOpen && (
-                                <div className={`ml-6 mt-1 space-y-0.5 border-l-2 pl-2 ${isCoachDashboard ? 'border-orange-500/40' : 'border-zinc-700'}`}>
+                                <div className={`ml-6 mt-1 space-y-0.5 border-l-2 pl-2 ${isCoachDashboard
+                                    ? (esCoach ? 'border-[#D7FF4A]/40' : 'border-orange-500/40')
+                                    : 'border-zinc-700'}`}>
                                     {COACH_SUBTABS.map((sub) => (
                                         <Link
                                             key={sub.key}
                                             to={sub.path}
                                             className={`block px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${subtabActiva(sub.key)
-                                                ? 'bg-orange-500/20 text-orange-400'
+                                                ? (esCoach ? 'bg-[#D7FF4A]/15 text-[#D7FF4A]' : 'bg-orange-500/20 text-orange-400')
                                                 : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
                                                 }`}
                                         >
@@ -227,7 +240,7 @@ const Layout = ({ children }) => {
                 </nav>
 
                 {/* User & Logout */}
-                <div className="p-4 border-t border-zinc-800 space-y-3"
+                <div className={`p-4 border-t space-y-3 ${esCoach ? 'border-[#2A2A2E]' : 'border-zinc-800'}`}
                     style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
                     {sidebarOpen && (
                         <div className="px-2">
