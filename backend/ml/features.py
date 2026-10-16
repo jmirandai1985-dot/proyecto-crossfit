@@ -5,7 +5,8 @@ Reusa los MISMOS criterios que `app/api/v1/kpis_populate.py`, para que lo que
 aprende el modelo coincida con lo que ya calcula el backend:
 
   - `_dias_inactividad`  -> dias_desde_ultima_asistencia (con fallback a created_at)
-  - `_ultima_asistencia` -> última fecha en la tabla `asistencias`
+  - `_ultima_asistencia` -> última fecha con asistencia REAL (`services/asistencia_real`:
+    `reservas.asistio` sobre la fecha de la clase, no la tabla histórica `asistencias`)
   - suscripción activa   -> vigente a la fecha de corte, en DÍAS DE CHILE
     (`dia_chile`: el día de vencimiento cuenta completo, igual que el resto del backend)
 
@@ -18,7 +19,6 @@ from datetime import date, timedelta
 import pandas as pd
 from sqlalchemy import func
 
-from app.models.asistencia import Asistencia
 from app.models.suscripcion import Suscripcion
 from app.core.estados import (   # los MISMOS criterios que el mantenimiento
     dia_chile,
@@ -26,6 +26,10 @@ from app.core.estados import (   # los MISMOS criterios que el mantenimiento
 )
 from app.models.plan import Plan
 from app.services.plan_vencimiento import dias_hasta   # días de Chile, UNA sola definición
+# La asistencia REAL del panel (`reservas.asistio` sobre la fecha de la clase): el modelo tiene que
+# entrenarse con lo mismo que muestra el box (`services/asistencia_real.py`).
+from app.services.asistencia_real import (asistencias_entre_por_alumno,
+                                          ultima_asistencia_por_alumno)
 
 from app.utils.santiago import fecha_chile, hoy_santiago   # el DÍA, siempre en hora de Chile
 from app.models.usuario import RolUsuario, Usuario
@@ -68,29 +72,24 @@ def label_abandonado(dias_inactivo: int, tiene_susc_activa: bool) -> bool:
 
 
 def _ultima_asistencia(db, tenant_id, usuario_id, hasta=None):
-    """Última fecha de asistencia (None si nunca fue).
+    """Última fecha de asistencia REAL (None si nunca fue).
+
+    Delega en `asistencia_real` (`reservas.asistio` sobre la fecha de la clase). Antes leía la
+    tabla histórica `asistencias`, que nadie puebla: el modelo aprendía "todos sin historial" y
+    puntuaba desde el alta.
 
     `hasta` acota la búsqueda a `fecha <= hasta`: imprescindible para calcular
     features "as-of" (si no, veríamos asistencias POSTERIORES a la fecha de
     corte = fuga de información del futuro).
     """
-    q = db.query(func.max(Asistencia.fecha)).filter(
-        Asistencia.tenant_id == tenant_id,
-        Asistencia.usuario_id == usuario_id,
-    )
-    if hasta is not None:
-        q = q.filter(Asistencia.fecha <= hasta)
-    return q.scalar()
+    return ultima_asistencia_por_alumno(
+        db, tenant_id, [usuario_id], hasta=hasta).get(usuario_id)
 
 
 def _asistencias_en_ventana(db, tenant_id, usuario_id, desde, hasta):
-    """Cuenta de asistencias en el rango [desde, hasta]."""
-    return db.query(func.count(Asistencia.id)).filter(
-        Asistencia.tenant_id == tenant_id,
-        Asistencia.usuario_id == usuario_id,
-        Asistencia.fecha >= desde,
-        Asistencia.fecha <= hasta,
-    ).scalar() or 0
+    """Cuenta de asistencias REALES en el rango [desde, hasta] (`asistencia_real`)."""
+    return asistencias_entre_por_alumno(
+        db, tenant_id, [usuario_id], desde, hasta).get(usuario_id, 0)
 
 
 def _suscripcion_activa(db, tenant_id, usuario_id, fecha_ref):
@@ -176,26 +175,15 @@ def build_features(db, tenant_id, fecha_ref=None) -> pd.DataFrame:
     ids = [a.id for a in alumnos]
 
     # 1) última asistencia por alumno (AS-OF: sólo hasta fecha_ref; sin la cota
-    #    superior se verían asistencias POSTERIORES = fuga del futuro)
-    ultimas = dict(db.query(
-        Asistencia.usuario_id, func.max(Asistencia.fecha)
-    ).filter(
-        Asistencia.tenant_id == tenant_id,
-        Asistencia.usuario_id.in_(ids),
-        Asistencia.fecha <= fecha_ref,
-    ).group_by(Asistencia.usuario_id).all())
+    #    superior se verían asistencias POSTERIORES = fuga del futuro).
+    #    Fuente: `asistencia_real` — la asistencia REAL, la misma del panel y del churn.
+    ultimas = ultima_asistencia_por_alumno(db, tenant_id, ids, hasta=fecha_ref)
 
-    # 2) conteo de asistencias por ventana (1 query por ventana)
+    # 2) conteo de asistencias por ventana (1 query por ventana, misma fuente)
     conteos = {}
     for dias in VENTANAS_DIAS:
-        conteos[dias] = dict(db.query(
-            Asistencia.usuario_id, func.count(Asistencia.id)
-        ).filter(
-            Asistencia.tenant_id == tenant_id,
-            Asistencia.usuario_id.in_(ids),
-            Asistencia.fecha >= fecha_ref - timedelta(days=dias),
-            Asistencia.fecha <= fecha_ref,
-        ).group_by(Asistencia.usuario_id).all())
+        conteos[dias] = asistencias_entre_por_alumno(
+            db, tenant_id, ids, fecha_ref - timedelta(days=dias), fecha_ref)
 
     # 3) vencimiento MÁS LEJANO entre las suscripciones VIGENTES a fecha_ref.
     #    AS-OF con FECHAS (no con `estado`, que es un snapshot mutable): ver el

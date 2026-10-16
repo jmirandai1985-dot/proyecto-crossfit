@@ -22,10 +22,12 @@ from sqlalchemy import func
 
 import ml.features as features
 from app.core.estados import dia_chile, plan_comercial   # el MISMO criterio que los features y el BI
-from app.models.asistencia import Asistencia
 from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
 from app.models.transaccion_financiera import TransaccionFinanciera
+# La asistencia REAL del panel: el label del churn se construye con lo mismo que ve el box
+# (`services/asistencia_real.py`), no con la tabla histórica `asistencias`, que nadie puebla.
+from app.services.asistencia_real import asistencias_entre_por_alumno
 from app.utils.santiago import hoy_santiago   # `fecha_ref` por defecto: HOY en Chile
 
 # ── Hiperparámetros (ajustables desde el endpoint/CLI) ──
@@ -96,14 +98,12 @@ def entrenar_churn(db, tenant_id, fecha_ref=None,
     # ── y: EVENTO FUTURO en la ventana (fecha_corte, fecha_ref] ──
     # 1) "silencio total": CERO asistencias en la ventana posterior al corte.
     #    Las features no pueden ver esta ventana -> no hay fuga posible.
-    asistencias_ventana = dict(db.query(
-        Asistencia.usuario_id, func.count(Asistencia.id)
-    ).filter(
-        Asistencia.tenant_id == tenant_id,
-        Asistencia.usuario_id.in_(ids),
-        Asistencia.fecha > fecha_corte,
-        Asistencia.fecha <= fecha_ref,
-    ).group_by(Asistencia.usuario_id).all())
+    #    Fuente: `asistencia_real` (la MISMA asistencia que ve el panel). Con la tabla histórica
+    #    vacía el label habría marcado a TODOS como abandonados.
+    #    `desde = fecha_corte + 1 día` porque el helper incluye los dos bordes y acá se pide
+    #    `fecha > fecha_corte`.
+    asistencias_ventana = asistencias_entre_por_alumno(
+        db, tenant_id, ids, fecha_corte + timedelta(days=1), fecha_ref)
 
     # 2) sin suscripción activa a HOY. Acá SÍ se usa el estado actual de
     #    `suscripciones.estado`: fecha_ref es hoy, no una fecha pasada.
