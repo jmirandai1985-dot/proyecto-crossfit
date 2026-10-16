@@ -9,6 +9,7 @@ import api from '../services/api';
 // función pura que valida `scripts/test-alumnos.mjs`: el request del escritorio y el de
 // la vista móvil del padrón son exactamente el mismo.
 import { paramsAlumnos } from '../utils/alumnos';
+import { nivelDeAtleta } from '../utils/niveles';
 
 // Array vacío ESTABLE: es el fallback de las listas que devuelven las consultas. Un
 // `|| []` nuevo en cada render invalidaría los `useMemo` que dependen de esos datos.
@@ -939,39 +940,43 @@ export function useAlumnosCoachEnRiesgo(coachId) {
     });
 }
 
-// Progreso del tab Alumnos: para cada alumno, sus RMs (máximo 50). Antes eran 50 GET
-// EN SERIE en CADA navegación al panel; ahora van en paralelo y quedan en caché con la
-// lista de alumnos dentro de la clave (si cambia el listado, se recalcula).
+// Progreso del tab Progreso: para cada alumno de la PÁGINA que se está mirando, sus RMs y su
+// nivel de atleta. Antes traía los primeros 50 de 251 ("el resto queda para la paginación
+// pendiente"); ahora recibe la página visible (25) y el corte de 50 queda como tope de
+// seguridad si alguien pide una lista más grande.
+//
+// DOS consultas por alumno, en paralelo: sus RMs (Total RMs / Top RM / Progreso) y su nivel
+// (`nivel-general`, el cálculo en vivo del backend: Principiante→Elite, o "Sin datos").
+// El nivel NO vive en el perfil del alumno (`usuarios` no tiene esa columna) ni en
+// `student_segments` (sin consumidores): `utils/niveles` deriva el menor de fuerza/gimnasia.
 export function useProgresoAlumnosCoach(alumnos) {
     const lista = (alumnos || []).slice(0, 50);
     const ids = lista.map((a) => a.id).join(',');
     return useQuery({
         queryKey: claves.progresoAlumnosCoach(ids),
         queryFn: async () => Promise.all(lista.map(async (alumno) => {
-            try {
-                const rms = (await api.get(`/api/v1/historial-rm/alumnos/${alumno.id}/rms`)).data || [];
-                return {
-                    id: alumno.id,
-                    nombre: alumno.nombre,
-                    correo: alumno.correo,
-                    telefono: alumno.telefono,
-                    total_rms: rms.length,
-                    rms,
-                    estado: rms.length >= 5 ? 'activo' : rms.length > 0 ? 'iniciando' : 'sin_datos',
-                };
-            } catch {
-                // Un alumno sin RMs (o con la consulta caída) no rompe el resto: se
-                // lista como "sin_datos", igual que hacía el for con await.
-                return {
-                    id: alumno.id,
-                    nombre: alumno.nombre,
-                    correo: alumno.correo,
-                    telefono: alumno.telefono,
-                    total_rms: 0,
-                    rms: [],
-                    estado: 'sin_datos',
-                };
-            }
+            // Los datos del padrón viajan siempre (aunque el enriquecimiento falle).
+            const base = {
+                id: alumno.id, nombre: alumno.nombre, correo: alumno.correo,
+                telefono: alumno.telefono,
+            };
+            const [rms, nivel] = await Promise.all([
+                api.get(`/api/v1/historial-rm/alumnos/${alumno.id}/rms`)
+                    .then((r) => r.data || []).catch(() => []),
+                api.get(`/api/v1/historial-rm/alumnos/${alumno.id}/nivel-general`)
+                    .then((r) => r.data || null).catch(() => null),
+            ]);
+            return {
+                ...base,
+                total_rms: rms.length,
+                rms,
+                // `null` = no se pudo calcular (sin peso/género o sin marcas): el panel lo
+                // muestra como "Sin datos" y el filtro tiene su propio bucket.
+                nivel: nivelDeAtleta(nivel),
+                nivel_fuerza: nivel?.nivel_fuerza || null,
+                nivel_gimnastico: nivel?.nivel_gimnastico || null,
+                estado: rms.length >= 5 ? 'activo' : rms.length > 0 ? 'iniciando' : 'sin_datos',
+            };
         })),
         staleTime: 60_000,
         enabled: lista.length > 0,

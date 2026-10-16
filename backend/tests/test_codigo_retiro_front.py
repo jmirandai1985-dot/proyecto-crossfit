@@ -77,3 +77,40 @@ def test_el_modal_compartido_llama_al_endpoint_de_entrega():
     assert "alumno_nombre" in fuente
     assert "producto_nombre" in fuente
     assert "cantidad" in fuente
+
+
+def test_el_meson_puede_escanear_el_qr_del_codigo_de_retiro():
+    """Parte 2.2: además de escribir el código, el mesón lo ESCANEA con la cámara.
+
+    El QR del pedido ya lo renderiza el backend (`GET /pedidos/{id}/qr.svg`) y su contenido
+    es SÓLO el código, no una URL: por eso el lector devuelve el texto y el modal lo
+    normaliza con la MISMA función que usa el teclado (`utils/pedidosEntrega`).
+    """
+    modal = _fuente("frontend/src/components/ModalEntregarPedido.jsx")
+    pantalla = _fuente("frontend/src/pages/coach/EntregarPedido.jsx")
+    escaner = _fuente("frontend/src/components/EscanerCodigoRetiro.jsx")
+    util = _fuente("frontend/src/utils/pedidosEntrega.js")
+
+    # 1. La pantalla del coach habilita el lector (el admin no lo monta: queda igual).
+    assert "permitirEscanear" in pantalla
+    assert "mencionarEscaneo={false}" not in pantalla
+    assert "permitirEscanear = false" in modal
+
+    # 2. El modal ofrece el botón + la cámara, y el input manual sigue.
+    assert 'data-testid="abrir-escaner-retiro"' in modal
+    assert "<EscanerCodigoRetiro" in modal
+    assert "normalizarCodigoRetiro(valor)" in modal
+    assert modal.count("<input") == 1
+
+    # 3. El lector es nativo (sin librerías nuevas) y siempre deja volver al teclado.
+    assert "BarcodeDetector" in escaner
+    assert "getUserMedia" in escaner
+    assert "import EscanerQR" not in escaner   # es OTRO componente: acá no se navega
+    assert "useNavigate" not in escaner
+    assert 'data-testid="escaner-volver-teclado"' in escaner
+
+    # 4. El QR del backend trae el código pelado (y el util lo normaliza).
+    assert "export const normalizarCodigoRetiro" in util
+    pedidos = _fuente("backend/app/api/v1/pedidos.py")
+    assert 'SÓLO el código ("UB-4827"), no una URL' in pedidos
+    assert 'qr_make(pedido.codigo_retiro, error="m")' in pedidos

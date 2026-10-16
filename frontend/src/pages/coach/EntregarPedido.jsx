@@ -12,6 +12,11 @@ import BotonVolver from '../../components/BotonVolver';
  * es el mismo del admin (`components/ModalEntregarPedido.jsx`) y el backend le
  * responde exactamente esos tres datos (PedidoEntregaResponse).
  *
+ * DOS FORMAS DE LEER EL CÓDIGO, LA MISMA ENTREGA: el mesón lo escribe a mano o lo
+ * ESCANEA con la cámara (`permitirEscanear`, el QR que el alumno muestra en Mis
+ * Pedidos —SVG del backend que codifica el mismo `UB-XXXX`—). El escaneo no tiene
+ * endpoint propio: completa el input y dispara la misma llamada.
+ *
  * Abre el modal al entrar (el coach viene a entregar, no a mirar) y deja el botón
  * para reabrirlo después de cada cierre, con la última entrega a la vista.
  */
@@ -33,8 +38,9 @@ const CoachEntregarPedido = () => {
                         </h1>
                         <p className="mt-1 text-sm text-zinc-400">
                             Pídele al alumno su <strong className="text-zinc-200">código de
-                            retiro</strong> y escríbelo acá: el sistema cierra la entrega y
-                            el alumno recibe el aviso en su campana.
+                            retiro</strong> y escríbelo acá — o tócalo con la cámara en
+                            <strong className="text-zinc-200"> 📷 Escanear</strong>: el sistema
+                            cierra la entrega y el alumno recibe el aviso en su campana.
                         </p>
                     </div>
                 </div>
@@ -72,9 +78,10 @@ const CoachEntregarPedido = () => {
 
             {abierto && (
                 <ModalEntregarPedido
-                    // El coach NO tiene lector de cámara acá (Bloque B): el modal le dice
-                    // "ingresa el código" a secas. El admin sigue con su texto de siempre.
-                    mencionarEscaneo={false}
+                    // El mesón puede ESCANEAR el QR del alumno o escribir el código: las dos
+                    // opciones conviven en el modal (el input manual nunca se saca).
+                    permitirEscanear
+                    mencionarEscaneo
                     onCerrar={() => setAbierto(false)}
                     onEntregado={(datos) => setUltima(datos)}
                 />

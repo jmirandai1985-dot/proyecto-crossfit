@@ -2,7 +2,7 @@
 // qué pedido se lista, qué dice cada fila y cómo se arma el mapa de avisos enviados.
 //   Ejecutar:  node scripts/test-pedidos-retiro.mjs
 import {
-    esListoParaEntrega, textoProducto, textoEspera,
+    esListoParaEntrega, normalizarCodigoRetiro, textoProducto, textoEspera,
     textoInformado, mapaInformados,
 } from '../src/utils/pedidosEntrega.js';
 
@@ -39,6 +39,18 @@ eq(textoEspera({ updated_at: haceHoras(3) }, AHORA), 'Esperando hace 3 h', 'tiem
 eq(textoEspera({ updated_at: null }, AHORA), '', 'sin fecha de validación no inventa tiempo');
 eq(textoInformado(haceHoras(0.05), AHORA), 'Informado hace 3 min', 'cuándo se le avisó');
 eq(textoInformado(null, AHORA), '', 'sin aviso -> cadena vacía (la fila no lo muestra)');
+
+// ── Normalización del código (teclado y CÁMARA) ──────────────────────────────
+// El QR del pedido trae SÓLO el código ("UB-4827", no una URL), pero el mesón también lo
+// escribe: los dos caminos pasan por la misma función antes de entregar.
+eq(normalizarCodigoRetiro('UB-4827'), 'UB-4827', 'el código del QR queda igual');
+eq(normalizarCodigoRetiro('  ub-4827 '), 'UB-4827', 'espacios y minúsculas se normalizan');
+eq(normalizarCodigoRetiro('ub 4827'), 'UB-4827', 'escrito con espacio (sin guion) también vale');
+eq(normalizarCodigoRetiro('UB4827'), 'UB-4827', 'sin guion -> con guion');
+eq(normalizarCodigoRetiro('ub-7k3m'), 'UB-7K3M', 'las letras del código van en mayúscula');
+eq(normalizarCodigoRetiro(''), '', 'vacío -> vacío (el modal muestra su error de siempre)');
+eq(normalizarCodigoRetiro(null), '', 'sin código -> vacío (no rompe)');
+eq(normalizarCodigoRetiro('OTRA-COSA'), 'OTRA-COSA', 'lo que no parece UB se manda tal cual (decide el backend)');
 
 // ── Mapa de avisos (una sola llamada de auditoría) ───────────────────────────
 const filas = [

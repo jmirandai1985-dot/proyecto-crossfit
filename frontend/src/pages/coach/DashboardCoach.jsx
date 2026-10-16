@@ -32,6 +32,17 @@ import BotonVolver from '../../components/BotonVolver';
 // mostraba "530 kg" en un Air Runner (su peso es un dummy: en la BD real hay 1,0 y 530,0).
 import { formatResultadoRM } from '../../utils/rm';
 import { fmtFechaCortaChile } from '../../utils/fecha';
+// Paginación del tab Progreso: los MISMOS helpers del padrón del admin (una sola definición
+// de "total de páginas" y de "mostrando X–Y de Z").
+import { rangoMostrado } from '../../utils/alumnos';
+// Nivel de atleta: hoy es una ESTIMACIÓN con los RMs del alumno (el perfil no tiene el campo).
+import {
+    OPCIONES_NIVEL, colorNivel, etiquetaNivelAtleta, pasaFiltroNivel,
+} from '../../utils/niveles';
+
+// Alumnos que se enriquecen por página en el tab Progreso (RMs + nivel: dos consultas por
+// alumno). 25 = el mismo tamaño de página que usa el padrón del admin.
+const POR_PAGINA_PROGRESO = 25;
 
 const DashboardCoach = () => {
     const navigate = useNavigate();
@@ -180,6 +191,13 @@ const DashboardCoach = () => {
     const [msgContacto, setMsgContacto] = useState(null); // { id, tipo, texto }
     // Filtro por nivel en el tab Progreso (100% frontend).
     const [filtroProgreso, setFiltroProgreso] = useState('todos');
+    // ── Tab Progreso (Parte 2 del pedido): buscador + nivel + paginación real ──
+    // `busquedaProgreso` filtra el padrón COMPLETO por nombre o correo; `filtroNivel` es el
+    // segundo eje (se combina con `filtroProgreso`, no lo reemplaza) y `paginaProgreso` mueve
+    // el tramo de 25 alumnos que se enriquece con RMs y nivel.
+    const [busquedaProgreso, setBusquedaProgreso] = useState('');
+    const [filtroNivel, setFiltroNivel] = useState('todos');
+    const [paginaProgreso, setPaginaProgreso] = useState(1);
     // P2: ficha del alumno (modal coach-scoped). No reusa `selectedAlumno`
     // porque ese state gobierna el panel de RMs del tab Alumnos.
     const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
@@ -258,7 +276,23 @@ const DashboardCoach = () => {
     // una y sólo se ofrecen las que este coach dicta (publicar en otra es un 403).
     const disciplinasQ = useDisciplinas();
     const alumnosQ = useAlumnosDeCoach(usuario_id);
-    const progresoQ = useProgresoAlumnosCoach(alumnosQ.data);
+    // ── Tab Progreso: buscador + filtros + PAGINACIÓN REAL ──
+    // El padrón completo (251) llega del endpoint del coach, así que buscar y paginar se hace
+    // en el cliente sobre ESA lista, y el enriquecimiento (RMs + nivel, una consulta por
+    // alumno) se pide SOLO para la página visible: antes se enriquecían siempre los primeros
+    // 50 y el resto no existía para la pantalla.
+    const alumnosProgresoBuscados = useMemo(() => {
+        const lista = alumnosQ.data || SIN_DATOS;
+        const termino = busquedaProgreso.trim().toLowerCase();
+        if (!termino) return lista;
+        return lista.filter((a) => (a.nombre || '').toLowerCase().includes(termino)
+            || (a.correo || '').toLowerCase().includes(termino));
+    }, [alumnosQ.data, busquedaProgreso]);
+    const progresoPagina = useMemo(() => {
+        const desde = (paginaProgreso - 1) * POR_PAGINA_PROGRESO;
+        return alumnosProgresoBuscados.slice(desde, desde + POR_PAGINA_PROGRESO);
+    }, [alumnosProgresoBuscados, paginaProgreso]);
+    const progresoQ = useProgresoAlumnosCoach(progresoPagina);
     const rmsRecientesQ = useHistorialRmTodos(5);
     const alumnoRmsQ = useRmsAlumno(selectedAlumno?.id);
     // Clases de HOY con lo que sabe el módulo de Asistencia (estado, marcada y
@@ -341,6 +375,7 @@ const DashboardCoach = () => {
     // el del panel de RMs del alumno.
     const cargandoInicial = clasesQ.isPending;
     const cargandoRmsAlumno = alumnoRmsQ.isPending;
+    const cargandoProgreso = progresoQ.isPending;
 
     // Las clases de hoy cruzadas con lo que sabe Asistencia (estado, `marcada`,
     // `reservas_count`): el Resumen muestra el MISMO dato que la pestaña Asistencia.
@@ -436,9 +471,21 @@ const DashboardCoach = () => {
         }
     };
 
-    const progresoFiltrado = filtroProgreso === 'todos'
-        ? progresoAlumnos
-        : progresoAlumnos.filter(a => a.estado === filtroProgreso);
+    // ── Tab Progreso: los DOS filtros se combinan (estado × nivel) sobre la página cargada,
+    // y la paginación sale del padrón ya buscado (los 251), no de los enriquecidos. ──
+    const progresoFiltrado = progresoAlumnos
+        .filter((a) => filtroProgreso === 'todos' || a.estado === filtroProgreso)
+        .filter((a) => pasaFiltroNivel(a.nivel, filtroNivel));
+    const rangoProgreso = rangoMostrado({
+        total: alumnosProgresoBuscados.length,
+        porPagina: POR_PAGINA_PROGRESO,
+        pagina: paginaProgreso,
+        enPagina: progresoPagina.length,
+    });
+    const cuentaNivel = (clave) => progresoAlumnos
+        .filter((a) => pasaFiltroNivel(a.nivel, clave)).length;
+    const irAPaginaProgreso = (delta) => setPaginaProgreso((p) => Math.max(
+        1, Math.min(p + delta, rangoProgreso.totalPaginas)));
 
     const filteredAlumnos = alumnos.filter((alumno) =>
         alumno.nombre.toLowerCase().includes(searchTerm.toLowerCase())
@@ -999,9 +1046,25 @@ const DashboardCoach = () => {
                                     <h2 className="text-xl font-bold text-gray-900">📈 Progreso de Alumnos</h2>
                                     <p className="text-sm text-gray-600 mt-1">Estado actual de RMs y actividad de cada alumno</p>
                                 </div>
-                                {/* Filtro por nivel, clickeable (100% frontend): la lista viene completa
-                                    de GET /fidelizacion/coach/{id}/alumnos; el cap de 50 es del enriquecimiento
-                                    de RMs (una consulta por alumno), no del endpoint. */}
+                                {/* ── BUSCADOR del padrón (nombre o correo) ──
+                                    Filtra los alumnos del coach COMPLETOS, no la página: con
+                                    paginación, buscar solo en la página cargada escondería justo al
+                                    que se busca. Al escribir se vuelve a la página 1. */}
+                                <input
+                                    type="search"
+                                    value={busquedaProgreso}
+                                    onChange={(e) => {
+                                        setBusquedaProgreso(e.target.value);
+                                        setPaginaProgreso(1);
+                                    }}
+                                    placeholder="Buscar por nombre o correo…"
+                                    data-testid="buscar-progreso"
+                                    aria-label="Buscar alumno"
+                                    className="w-full sm:max-w-xs px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-orange-500 focus:outline-none"
+                                />
+                                {/* Filtro por estado (Progresando / Iniciando / Sin datos), 100% frontend:
+                                    la lista viene completa de GET /fidelizacion/coach/{id}/alumnos y el
+                                    enriquecimiento (RMs + nivel, una consulta por alumno) es por PÁGINA. */}
                                 <div className="flex flex-wrap gap-2">
                                     {[
                                         { key: 'todos', label: 'Todos', dot: 'bg-zinc-300' },
@@ -1028,12 +1091,35 @@ const DashboardCoach = () => {
                                         );
                                     })}
                                 </div>
-                                {alumnos.length > progresoAlumnos.length && (
-                                    <p className="text-xs text-gray-500">
-                                        Se enriquecen los primeros {progresoAlumnos.length} de {alumnos.length} alumnos
-                                        (una consulta de RMs por alumno); el resto queda para la paginación pendiente.
-                                    </p>
-                                )}
+                                {/* ── FILTRO DE NIVEL de atleta: se COMBINA con el de estado ──
+                                    De dónde sale el nivel: del cálculo en vivo del backend con los RMs
+                                    del alumno (`GET /historial-rm/alumnos/{id}/nivel-general`, escala
+                                    Principiante→Elite). Es una ESTIMACIÓN —el perfil del alumno no tiene
+                                    campo de nivel— y se calcula por alumno al abrir su página, así que
+                                    el filtro aplica a los alumnos de la página cargada. */}
+                                <div className="flex flex-wrap gap-2" data-testid="filtro-nivel-progreso">
+                                    {OPCIONES_NIVEL.map((op) => {
+                                        const activo = filtroNivel === op.key;
+                                        return (
+                                            <button
+                                                key={op.key}
+                                                data-testid={`filtro-nivel-${op.key}`}
+                                                onClick={() => setFiltroNivel(op.key)}
+                                                aria-pressed={activo}
+                                                className={`px-3 py-1.5 rounded-full border text-sm transition-colors ${activo ? 'border-orange-500 bg-orange-50 text-orange-700 font-semibold' : 'border-gray-200 bg-white text-gray-700 hover:border-orange-300'}`}
+                                            >
+                                                {op.label}
+                                                <span className={`ml-1 text-xs ${activo ? 'text-orange-700' : 'text-gray-400'}`}>({cuentaNivel(op.key)})</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                <p className="text-xs text-gray-500" data-testid="nota-progreso">
+                                    {cargandoProgreso
+                                        ? '⏳ Cargando RMs y niveles de esta página…'
+                                        : `El buscador y la paginación recorren los ${alumnos.length} alumnos del coach; los RMs y el nivel se piden al abrir cada página (una consulta por alumno).`}
+                                </p>
                                 <div className="overflow-x-auto">
                                     <table className="w-full">
                                         <thead className="bg-zinc-800 text-white">
@@ -1051,7 +1137,18 @@ const DashboardCoach = () => {
                                                 const topRM = alumno.rms?.reduce((max, r) => (r.peso_kg > (max?.peso_kg || 0) ? r : max), null);
                                                 return (
                                                     <tr key={alumno.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{alumno.nombre}</td>
+                                                        <td className="px-6 py-4 text-sm font-medium text-gray-900">
+                                                            {alumno.nombre}
+                                                            {/* Nivel ESTIMADO con sus RMs (no hay campo en el
+                                                                perfil): fuerza y gimnasia por separado en el title. */}
+                                                            <span
+                                                                className={`ml-2 inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full border ${colorNivel(alumno.nivel)}`}
+                                                                title={`Nivel estimado con sus RMs · fuerza: ${alumno.nivel_fuerza || 'sin datos'} · gimnasia: ${alumno.nivel_gimnastico || 'sin datos'}`}
+                                                                data-testid={`nivel-alumno-${alumno.id}`}
+                                                            >
+                                                                {etiquetaNivelAtleta(alumno.nivel)}
+                                                            </span>
+                                                        </td>
                                                         <td className="px-6 py-4 text-sm">
                                                             <span className="font-bold text-lg">{alumno.total_rms}</span>
                                                         </td>
@@ -1093,10 +1190,37 @@ const DashboardCoach = () => {
                                 {progresoFiltrado.length === 0 && (
                                     <p className="text-gray-500 text-center py-8" data-testid="progreso-vacio">
                                         {progresoAlumnos.length === 0
-                                            ? 'No hay datos de progreso disponibles'
-                                            : 'Ningún alumno en este nivel'}
+                                            ? 'No hay datos de progreso en esta página'
+                                            : 'Ningún alumno de esta página cae en esos filtros'}
                                     </p>
                                 )}
+
+                                {/* ── PAGINADOR (el mismo patrón del padrón del admin) ──
+                                    La paginación recorre los alumnos BUSCADOS, así que cada tramo de
+                                    25 se enriquece al abrirse: ya no hay un "50 de 251" sin salida. */}
+                                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                                    <p className="text-xs text-gray-500" data-testid="rango-progreso">
+                                        {rangoProgreso.totalPaginas === 0
+                                            ? 'Sin alumnos para mostrar'
+                                            : `Mostrando ${rangoProgreso.desde}–${rangoProgreso.hasta} de ${alumnosProgresoBuscados.length}`}
+                                        {` · página ${paginaProgreso} de ${rangoProgreso.totalPaginas}`}
+                                        {` (${POR_PAGINA_PROGRESO} por página)`}
+                                    </p>
+                                    <div className="flex items-center gap-2">
+                                        <button type="button" data-testid="progreso-anterior"
+                                            onClick={() => irAPaginaProgreso(-1)}
+                                            disabled={paginaProgreso <= 1}
+                                            className="px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:border-zinc-600 disabled:opacity-40 disabled:cursor-not-allowed">
+                                            ◀ Anterior
+                                        </button>
+                                        <button type="button" data-testid="progreso-siguiente"
+                                            onClick={() => irAPaginaProgreso(1)}
+                                            disabled={paginaProgreso >= rangoProgreso.totalPaginas}
+                                            className="px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:border-zinc-600 disabled:opacity-40 disabled:cursor-not-allowed">
+                                            Siguiente ▶
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         )}
 

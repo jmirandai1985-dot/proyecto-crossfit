@@ -49,6 +49,22 @@ export const textoInformado = (fecha, ahora) => {
 };
 
 /**
+ * Normaliza a CÓDIGO DE RETIRO lo que llega del teclado o de la CÁMARA.
+ *
+ * El QR del pedido codifica SÓLO el código (`backend: pedidos.py: qr_retiro_pedido`, contenido
+ * "UB-4827", no una URL), así que lo esperado es exactamente eso; igual se tolera lo que un
+ * humano escribe a mano ("ub 4827", "ub4827") porque el mesón también puede tipearlo.
+ *
+ * Devuelve '' cuando no hay nada que entregar: el modal muestra su error de siempre.
+ */
+export const normalizarCodigoRetiro = (texto) => {
+    const bruto = String(texto || '').trim().toUpperCase();
+    if (!bruto) return '';
+    const m = bruto.match(/UB[\s-]*([A-Z0-9]{3,8})/);
+    return m ? `UB-${m[1]}` : bruto;
+};
+
+/**
  * `{pedido_id: fecha}` desde la traza de auditoría (`GET /auditoria?accion=...`).
  *
  * Una sola llamada llena el "Informado hace X" de TODA la lista. Se ignora lo que no

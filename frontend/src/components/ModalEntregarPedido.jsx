@@ -3,6 +3,10 @@ import React, { useState } from 'react';
 // del admin usan ESTE modal—, así que invalidar `['pedidos']` deja la lista del admin al
 // día apenas el coach entrega.
 import { useEntregarPedido } from '../hooks/queries';
+// El código que llega del teclado o de la CÁMARA se normaliza con la MISMA función
+// (`utils/pedidosEntrega`), así que "ub 4827" y el QR se entregan igual.
+import { normalizarCodigoRetiro } from '../utils/pedidosEntrega';
+import EscanerCodigoRetiro from './EscanerCodigoRetiro';
 
 /**
  * Modal COMPARTIDO para entregar un pedido del Bazar con su CÓDIGO DE RETIRO.
@@ -24,19 +28,23 @@ import { useEntregarPedido } from '../hooks/queries';
  *   * `codigoInicial`: pre-carga el código (el admin entrega uno de la tabla);
  *   * `etiquetaAccion`: rótulo del botón que valida y entrega (por defecto "Entregar";
  *     el panel móvil lo llama "Validar y entregar", que es lo que hace realmente);
- *   * `mencionarEscaneo`: true (default) → el texto dice "ingresa **o escanea**", que es
- *     lo que el mesón ve hoy. La pantalla del coach lo pasa en false mientras NO exista
- *     lector de cámara en el modal (Bloque B): prometer un escaneo que no está es peor
- *     que no ofrecerlo. Con la prop ausente el DOM es EXACTAMENTE el de siempre.
+ *   * `mencionarEscaneo`: true (default) → el texto dice "ingresa **o escanea**", que es lo
+ *     que el mesón ve hoy. Con la prop ausente el DOM es EXACTAMENTE el de siempre.
+ *   * `permitirEscanear`: false (default) → NO ofrece la cámara (el admin entrega con el
+ *     código que el alumno le dicta). La pantalla del coach lo pasa en true: ahí sí hay
+ *     lector (`components/EscanerCodigoRetiro`), lee el QR del alumno, completa el input y
+ *     dispara la MISMA entrega que el botón. El input manual sigue siempre disponible.
  *   * `onCerrar`: cierra el modal;
  *   * `onEntregado(datos)`: avisa a la pantalla que la entrega salió bien (refrescos).
  */
 const ModalEntregarPedido = ({
     codigoInicial = '', etiquetaAccion = 'Entregar', mencionarEscaneo = true,
-    onCerrar, onEntregado,
+    permitirEscanear = false, onCerrar, onEntregado,
 }) => {
     const [codigo, setCodigo] = useState(codigoInicial || '');
     const [error, setError] = useState('');
+    // Cámara abierta (sólo si `permitirEscanear`): el input manual sigue visible detrás.
+    const [escaneando, setEscaneando] = useState(false);
     // El botón se bloquea mientras la entrega viaja (antes: `entregando` local).
     const entregarPedido = useEntregarPedido();
     const entregando = entregarPedido.isPending;
@@ -44,9 +52,12 @@ const ModalEntregarPedido = ({
     // alumno y para poder encadenar el siguiente código sin cerrar el modal.
     const [resultado, setResultado] = useState(null);
 
-    const enviar = async (evento) => {
-        evento.preventDefault();
-        const limpio = (codigo || '').trim();
+    /**
+     * Cierra la entrega con ESTE código: lo escribe el mesón o lo lee la cámara, y el camino
+     * es el mismo (por eso el escaneo no tiene un endpoint ni un flujo aparte).
+     */
+    const entregar = async (valor) => {
+        const limpio = normalizarCodigoRetiro(valor);
         if (!limpio) {
             setError(mencionarEscaneo
                 ? 'Ingresa o escanea el código de retiro.'
@@ -65,6 +76,11 @@ const ModalEntregarPedido = ({
             setResultado(null);
             setError(err.response?.data?.detail || 'No se pudo entregar el pedido');
         }
+    };
+
+    const enviar = async (evento) => {
+        evento.preventDefault();
+        await entregar(codigo);
     };
 
     return (
@@ -86,8 +102,17 @@ const ModalEntregarPedido = ({
                         <strong className="text-zinc-200">código de retiro</strong>{' '}
                         que el alumno muestra en su celular (formato{' '}
                         <span className="font-mono">UB-XXXX</span>).
+                        {permitirEscanear && ' Su QR es el mismo código, así que también sirve la cámara.'}
                     </p>
                     <div className="flex gap-2">
+                        {permitirEscanear && (
+                            <button type="button" onClick={() => setEscaneando(true)}
+                                data-testid="abrir-escaner-retiro"
+                                title="Leer el QR del código de retiro con la cámara"
+                                className="flex-none rounded-xl border border-zinc-700 px-4 py-3 text-sm font-bold text-zinc-200 hover:border-orange-500 hover:text-orange-300 transition-colors">
+                                📷 Escanear
+                            </button>
+                        )}
                         <input
                             type="text"
                             value={codigo}
@@ -124,6 +149,20 @@ const ModalEntregarPedido = ({
                         </div>
                     )}
                 </form>
+
+                {/* La cámara vive FUERA del <form> (los botones del escáner no pueden
+                    disparar la entrega). Al leer un QR vuelve acá con el texto: completa el
+                    input y dispara el MISMO `entregar` que el botón de siempre. */}
+                {escaneando && (
+                    <EscanerCodigoRetiro
+                        onLeer={(texto) => {
+                            setEscaneando(false);
+                            setCodigo(normalizarCodigoRetiro(texto));
+                            entregar(texto);
+                        }}
+                        onCerrar={() => setEscaneando(false)}
+                    />
+                )}
             </div>
         </div>
     );

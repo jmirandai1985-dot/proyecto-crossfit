@@ -102,10 +102,36 @@ const ALUMNOS = [
 // Las marcas son las REALES de producción, incluido el caso que rompía la presentación:
 // "Air Runner" es categoría `metabolico` y su `peso_kg` es un DUMMY (en la BD hay 1,0 y
 // 530,0), así que la ficha tiene que mostrar los km/calorías, no "530 kg".
-const ALUMNOS_COACH = [
+// El padrón del coach: DOS alumnos para las tomas de la ficha (Bloque 5) y 30 para la pantalla
+// `progreso-coach` —con 2 no se ve la paginación ("página 1 de 2") que se quiere evidenciar.
+const ALUMNOS_COACH_BASE = [
     { id: 201, nombre: 'Alumno Demo', correo: 'demo@urbanbox.cl', telefono: '+56 9 1111 1111' },
     { id: 202, nombre: 'fanny carrasco', correo: 'fanny@urbanbox.cl', telefono: null },
 ];
+const ALUMNOS_COACH = PANTALLA === 'progreso-coach'
+    ? [
+        ...ALUMNOS_COACH_BASE,
+        ...Array.from({ length: 28 }, (_, i) => ({
+            id: 210 + i,
+            nombre: `Alumno Prueba ${i + 1}`,
+            correo: `prueba${i + 1}@urbanbox.cl`,
+            telefono: null,
+        })),
+    ]
+    : ALUMNOS_COACH_BASE;
+
+// Nivel de atleta del fixture: el backend lo calcula EN VIVO con los RMs del alumno
+// (`/historial-rm/alumnos/{id}/nivel-general`). Acá se deriva del id para que la tabla y sus
+// chips tengan variedad real y la corrida sea determinista; cada 7º alumno queda sin cálculo.
+const NIVELES_FIXTURE = ['Principiante', 'Intermedio', 'Avanzado', 'Elite'];
+const NIVEL_GENERAL_FIXTURE = (id) => {
+    const i = Number(id);
+    if (i % 7 === 0) return { nivel_fuerza: 'Sin datos', nivel_gimnastico: 'Sin datos' };
+    return {
+        nivel_fuerza: NIVELES_FIXTURE[i % NIVELES_FIXTURE.length],
+        nivel_gimnastico: NIVELES_FIXTURE[(i + 1) % NIVELES_FIXTURE.length],
+    };
+};
 // Ficha acotada del coach: mismo contrato que `/fidelizacion/coach/{id}/alumno/{id}/ficha`.
 const FICHA_COACH = {
     201: {
@@ -173,6 +199,16 @@ const fixture = (metodo, path) => {
     if (mFicha) return FICHA_COACH[mFicha[1]] || null;
     const mRms = path.match(/^\/api\/v1\/historial-rm\/alumnos\/(\d+)\/rms$/);
     if (mRms) return RMS_COACH[mRms[1]] || [];
+    // Nivel de atleta (Parte 2.1): el cálculo en vivo que alimenta el badge y el filtro.
+    const mNivel = path.match(/^\/api\/v1\/historial-rm\/alumnos\/(\d+)\/nivel-general$/);
+    if (mNivel) return NIVEL_GENERAL_FIXTURE(mNivel[1]);
+    // Entrega del Bazar (Parte 2.2): lo que ve el mesón cuando la entrega sale bien.
+    if (path === '/api/v1/pedidos/entregar' && metodo === 'POST') {
+        return {
+            pedido_id: 77, producto_nombre: 'Botella Urban Box', cantidad: 2,
+            alumno_nombre: 'fanny carrasco', codigo: 'UB-4827',
+        };
+    }
     if (path === '/api/v1/alumnos/me') {
         // N-7: la identidad (rol/tenant/id) sale de acá, no de localStorage.
         return { id: 901, nombre: 'Coach Demo', rol: 'coach', tenant_id: 1 };
@@ -203,6 +239,9 @@ const edge = spawn(EDGE, [
     '--headless=new', `--remote-debugging-port=${PORT}`,
     `--user-data-dir=${join(tmpdir(), `edge-cdp-bloque2-${process.pid}`)}`,
     '--no-first-run', '--no-default-browser-check', '--disable-gpu',
+    // Cámara simulada: el lector del código de retiro (Parte 2.2) necesita que
+    // `getUserMedia` funcione en headless; sin esto el permiso se deniega siempre.
+    '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
     '--window-size=1500,1100', 'about:blank',
 ], { stdio: 'ignore' });
 
@@ -656,6 +695,69 @@ const PANTALLAS = {
         ],
     },
 
+    // Parte 2.1 (aprobado): el tab Progreso gana BUSCADOR, filtro de NIVEL y PAGINACIÓN real
+    // (antes: los primeros 50 de 251, sin buscador y sin nivel). Tres tomas: la tabla con sus
+    // dos ejes de filtro y el paginador, la misma en escritorio, y el buscador filtrando.
+    'progreso-coach': {
+        ruta: '/coach/dashboard?tab=progreso',
+        out: 'progreso-coach',
+        esperar: '[data-testid="buscar-progreso"]',
+        pasos: [
+            { nombre: '01-movil-buscador-nivel-paginacion', view: M, pasos: [{ pausa: 1500 }] },
+            { nombre: '02-escritorio-filtros-y-rango', view: D, pasos: [{ pausa: 1500 }] },
+            {
+                nombre: '03-movil-buscando-alumno', view: M,
+                pasos: [{
+                    // Escribir en un input controlado por React: hay que usar el setter nativo
+                    // del prototipo y disparar `input` (si no, el estado no se entera).
+                    evaluar: `(() => {
+                        const input = document.querySelector('[data-testid="buscar-progreso"]');
+                        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                        setter.call(input, 'fanny');
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                        return true;
+                    })()`,
+                    pausa: 1500,
+                }],
+            },
+        ],
+    },
+
+    // Parte 2.2 (aprobado): el mesón ESCANEA el QR del código de retiro además de escribirlo.
+    // La cámara se simula con el dispositivo fake de Edge y un `BarcodeDetector` de prueba (así
+    // la lectura es determinista): 01 el modal con las dos opciones, 02 la cámara abierta con su
+    // marco, y 03 la lectura que completa el input y cierra la MISMA entrega.
+    'entrega-escaner': {
+        ruta: '/coach/entregar-pedido',
+        out: 'entrega-escaner',
+        esperar: '[data-testid="abrir-escaner-retiro"]',
+        pasos: [
+            { nombre: '01-movil-input-manual-y-escanear', view: M, pasos: [{ pausa: 1000 }] },
+            {
+                nombre: '02-movil-camara-abierta', view: M,
+                pasos: [
+                    { evaluar: 'window.BarcodeDetector = class { constructor() {} async detect() { return []; } }; true' },
+                    {
+                        sel: '[data-testid="abrir-escaner-retiro"]',
+                        luegoEsperar: '[data-testid="escaner-codigo-retiro"]', pausa: 1600,
+                    },
+                ],
+            },
+            {
+                nombre: '03-movil-lectura-y-entrega', view: M,
+                ruta: '/coach/entregar-pedido',
+                esperar: '[data-testid="abrir-escaner-retiro"]',
+                pasos: [
+                    { evaluar: "window.BarcodeDetector = class { constructor() {} async detect() { return [{ rawValue: 'UB-4827' }]; } }; true" },
+                    {
+                        sel: '[data-testid="abrir-escaner-retiro"]',
+                        luegoEsperar: '[data-testid="escaner-codigo-retiro"]', pausa: 1800,
+                    },
+                ],
+            },
+        ],
+    },
+
     // Bloque 5 (aprobado): el tab "Alumnos & RMs" gana "Ver Perfil" y la ficha del coach gana
     // la sección de RMs. Las tomas cubren las dos caras: un alumno CON marcas (fuerza, gimnasia
     // y el caso del `peso_kg` dummy de cardio/máquinas) y otro SIN marcas (el 99,5% real).
@@ -774,6 +876,9 @@ const capturar = async ({ nombre, view, pasos, esperar: esperarInicial, noDebeVe
             return false;
         }
         if (paso.sel) await click(paso.sel);
+        // `evaluar`: JS en la página (stubs de prueba, p. ej. un `BarcodeDetector` que
+        // devuelve un QR conocido, para fotografiar la lectura sin cámara real).
+        if (paso.evaluar) await evalJs(paso.evaluar);
         if (paso.luegoEsperar && !await esperar(paso.luegoEsperar)) {
             console.error(`[FALLA] ${nombre}: no apareció ${paso.luegoEsperar}`);
             await diag(nombre);

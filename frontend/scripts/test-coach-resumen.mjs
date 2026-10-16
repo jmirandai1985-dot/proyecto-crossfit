@@ -153,12 +153,26 @@ ok(/activeTab === 'resumen'[\s\S]{0,60}\? ''/.test(DASH),
 ok(/\{fechaCortaHoy\} · \{usuario \|\| 'Coach'\}/.test(DASH),
     'el encabezado dice "fecha · coach", como el hdr del mockup');
 
-console.log('== 6. Bloque B: el coach no promete escaneo ==');
-ok(/mencionarEscaneo=\{false\}/.test(ENTREGA), 'la pantalla del coach apaga la mención del escaneo');
-eq(/escánea|escanea|📷/i.test(ENTREGA), false, 'el texto del coach no menciona escanear ni la cámara');
+console.log('== 6. Parte 2.2: el coach ESCANEA el código (y sigue pudiendo escribirlo) ==');
+const ESCANER = leer('../src/components/EscanerCodigoRetiro.jsx');
+ok(/permitirEscanear/.test(ENTREGA) && !/mencionarEscaneo=\{false\}/.test(ENTREGA),
+    'la pantalla del coach habilita el lector de cámara');
+ok(/📷 Escanear/.test(ENTREGA), 'y se lo cuenta al mesón en pantalla');
 ok(/Ingresa\{mencionarEscaneo \? ' o escanea' : ''\}/.test(MODAL_ENTREGA),
     'el modal compone el texto según la prop (por defecto, el de siempre)');
-ok(/mencionarEscaneo = true/.test(MODAL_ENTREGA), 'la prop arranca en true: el admin queda igual');
+ok(/permitirEscanear = false/.test(MODAL_ENTREGA),
+    'la prop arranca en false: el admin queda igual que siempre');
+ok(/data-testid="abrir-escaner-retiro"/.test(MODAL_ENTREGA) && /<EscanerCodigoRetiro/.test(MODAL_ENTREGA),
+    'el modal ofrece el botón y monta el escáner');
+ok(/const limpio = normalizarCodigoRetiro\(valor\)/.test(MODAL_ENTREGA)
+    && /await entregarPedido\.mutateAsync\(limpio\)/.test(MODAL_ENTREGA),
+    'al leer completa el input y dispara la MISMA entrega (un solo camino)');
+ok((MODAL_ENTREGA.match(/<input/g) || []).length === 1,
+    'el input manual sigue siendo el único input: escanear no lo reemplaza');
+ok(/BarcodeDetector/.test(ESCANER) && !/jsqr|html5-qrcode|zxing/i.test(ESCANER),
+    'el lector es el nativo del navegador (sin librerías nuevas)');
+ok(/data-testid="escaner-volver-teclado"/.test(ESCANER),
+    'y siempre se puede volver al teclado desde la cámara');
 
 console.log('== 7. El 0 del panel explica la causa (bug de PROD) ==');
 // En PROD el panel mostraba Clases hoy / Alumnos activos / En riesgo en 0 con las requests
