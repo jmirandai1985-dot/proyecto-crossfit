@@ -78,6 +78,23 @@ ok(DASH.includes('SCHEDULE_HOURS') && DASH.includes('data-testid="publicar-wod-c
     'las celdas por horario siguen ahí');
 ok(DASH.includes('verSoloConWod') && /Ver solo con/.test(DASH),
     'el filtro "Ver todas / Ver solo con WOD publicado" sigue en la pestaña Clases');
+
+console.log('== 4b. Punto 3: la fila de botones envuelve en el teléfono ==');
+// Los cuatro botones de la fila superior (Semana anterior / siguiente / Excel / Aviso rápido)
+// ocupaban más que el ancho del panel en 360px: el último se cortaba contra el borde
+// (`overflow-hidden`) y se pisaba con el de al lado. Ahora la fila ENVUELVE y nada se recorta.
+ok(/<div className="flex min-w-0 flex-wrap items-center justify-end gap-2">/.test(DASH),
+    'la fila de los 4 botones usa flex-wrap (antes: flex items-center gap-2, que desbordaba)');
+ok(/data-testid="cargar-excel-semana"/.test(DASH) && /data-testid="aviso-rapido-clases"/.test(DASH),
+    'los cuatro botones siguen siendo los mismos (no cambia la función de ninguno)');
+ok(/flex w-full flex-wrap items-center gap-2 rounded-xl bg-gray-100 p-2 md:inline-flex md:w-auto md:gap-3/.test(DASH),
+    'el toggle "Ver todas / Ver solo con WOD publicado" envuelve en el teléfono y sigue inline en >=768px');
+ok(/flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all md:flex-none/.test(DASH),
+    'los dos botones del toggle se reparten el ancho sólo en <768px y el rótulo largo envuelve (sin recortarse)');
+ok(/w-full px-3 py-3 flex items-center gap-3 text-left transition-colors sm:px-4/.test(DASH),
+    'la lista de días gana aire en el teléfono (px-3) y queda igual desde sm');
+ok(/text-lg font-bold text-gray-800 w-16 shrink-0/.test(DASH),
+    'la hora de cada clase tiene más ancho (w-16) para que el resto no se comprima');
 ok(DASH.includes('onClick={() => { setClaseWod(clase); setModalWod(true); }}'),
     'el lápiz/celda de la grilla abre ESE modal con su horario');
 ok(DASH.includes('<ModalPublicarWod') && DASH.includes('clase={wodArchivo ? null : (claseWod || proximaClase || clasesHoy[0] || null)}'),
