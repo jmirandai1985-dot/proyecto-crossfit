@@ -1,6 +1,11 @@
 """
 Servicio de scheduler para generación automática de clases
 Ejecuta la lógica de generar-clases-dia a las 00:05 CLT (Chile)
+
+Además de las clases, agenda (sólo en la instancia LÍDER, con lock por job/día):
+  · las 5 alertas de email (06:00 a 10:00 CLT),
+  · el cierre de mes (día 1, 00:05 CLT),
+  · y el REENTRENAMIENTO SEMANAL del churn (lunes 04:30 CLT, ver `job_reentrenar_churn`).
 """
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -125,15 +130,21 @@ def _programar(func, trigger, job_id, name, ahora):
 
 LATIDO_MIN = 5
 
-# Los 7 jobs de negocio: los programa SÓLO la líder. El latido (abajo) va aparte y se
+# Los jobs de negocio: los programa SÓLO la líder. El latido (abajo) va aparte y se
 # agenda SIEMPRE, también en standby.
+# Eran 7; desde el 2026-10-16 son 8 (se sumó `reentrenar_churn`, el reentrenamiento
+# semanal del modelo de churn con la fuente real de asistencia).
 IDS_NEGOCIO = ("generar_clases_diarias", "alerta_urgencia_renovacion",
                "alerta_renovacion", "alerta_inactividad", "alerta_ultimo_credito",
-               "alerta_sin_creditos", "cierre_mes")
+               "alerta_sin_creditos", "cierre_mes", "reentrenar_churn")
+
+# Tenant del reentrenamiento de ML: hoy hay UN solo box, igual que
+# `app/api/v1/ml.py` y `app/api/v1/kpis_populate.py` (TENANT_ID = 1).
+TENANT_ML = 1
 
 
 def _programar_jobs_de_negocio():
-    """Agenda los 7 jobs de negocio (sólo la líder). Idempotente: `replace_existing`.
+    """Agenda los 8 jobs de negocio (sólo la líder). Idempotente: `replace_existing`.
 
     Se vuelve a llamar cuando la instancia recupera el liderazgo. El catch-up de
     `_programar` + el lock (job, día) cubren el hueco de los minutos sin líder.
@@ -170,6 +181,13 @@ def _programar_jobs_de_negocio():
                CronTrigger(day=1, hour=0, minute=5, timezone=tz),
                "cierre_mes",
                "Cierre de mes anterior: asistencia + hitos + correos", ahora)
+    # ── Reentrenamiento del modelo de churn (lunes 04:30 CLT) ──
+    # Antes sólo se reentrenaba a pedido (o con el Cron Job de Render de PROD, días 15 y
+    # último del mes); desde el 2026-10-16 la propia app lo repite todas las semanas.
+    _programar(job_reentrenar_churn,
+               CronTrigger(day_of_week="mon", hour=4, minute=30, timezone=tz),
+               "reentrenar_churn",
+               "Reentrena el churn semanalmente (asistencia real)", ahora)
     return list(IDS_NEGOCIO)
 
 
@@ -544,6 +562,75 @@ def _cierre_mes_bloqueante() -> None:
             pass
     finally:
         db.close()
+
+
+# ── Reentrenamiento semanal del churn (lunes 04:30 CLT) ──────────────────────
+def _reentrenar_churn_impl():
+    """Entrena el churn y lo persiste en `ml_modelos` (bloqueante → va en un hilo).
+
+    Fuente de la asistencia: `reservas.asistio` sobre `clases.fecha` (`ml/entrenar.py` +
+    `services/asistencia_real.py`), la MISMA que ve el panel: el modelo se entrenaba
+    contra la tabla histórica `asistencias` (que nadie puebla), así que este
+    reentrenamiento periódico es lo que mantiene el churn alineado con lo que el box
+    realmente muestra.
+
+    Devuelve el resumen del entrenamiento, o `None` si falló. Nunca propaga: un
+    reentrenamiento roto no puede tumbar el scheduler ni los correos del día.
+    """
+    from app.db.database import SessionLocal
+    from ml.entrenar import entrenar_churn
+    from ml.persistencia import guardar_modelo
+
+    db = SessionLocal()
+    try:
+        modelo, meta = entrenar_churn(db, TENANT_ML)
+        persistido = guardar_modelo(db, TENANT_ML, "churn", modelo, meta)
+        db.commit()
+        m = meta["metricas_test"]
+        cv_recall = meta.get("cross_validation", {}).get("recall", {})
+        logger.info(
+            f"✅ [Scheduler] churn reentrenado: {meta['n_alumnos']} alumnos "
+            f"({meta['n_abandonados']} abandonados) · accuracy={m['accuracy']} "
+            f"precision={m['precision']} recall={m['recall']} · "
+            f"CV recall={cv_recall.get('media')}±{cv_recall.get('std')} · "
+            f"persistido={persistido['fecha_entrenamiento']}")
+        return {"n_alumnos": meta["n_alumnos"], "n_abandonados": meta["n_abandonados"],
+                "metricas_test": m, "persistido": persistido}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ [Scheduler] no se pudo reentrenar el churn: {e}", exc_info=True)
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(e)
+        except Exception:
+            pass
+        return None
+    finally:
+        db.close()
+
+
+async def job_reentrenar_churn():
+    """Job SEMANAL: reentrena el churn con la fuente real de asistencia.
+
+    Frecuencia elegida (2026-10-16): **lunes 04:30 CLT**. El label mira 30 días de
+    asistencia, así que reentrenar cada semana deja el modelo a lo sumo 7 días atrasado,
+    el costo es un RandomForest de segundos sobre ~400 alumnos (en un hilo, sin bloquear
+    el event loop) y la hora no molesta a nadie. Con esto el modelo deja de depender de
+    un pedido manual.
+
+    En PROD el Cron Job de Render (`maintenance/kpis_cloud.py`) sigue reentrenando los
+    días 15 y último del mes: es idempotente (UPSERT en `ml_modelos`), así que el que
+    corre último deja su modelo — no hay conflicto.
+
+    Lock (job, día) igual que el resto: si otra instancia ya lo tomó, se omite.
+    """
+    from app.services.scheduler_lock import lock_de_job
+    with lock_de_job("reentrenar_churn") as puede:
+        if not puede:
+            logger.info(
+                "🔒 [Scheduler] reentrenar_churn ya lo tomó otra instancia; se omite")
+            return
+        return await to_thread.run_sync(_reentrenar_churn_impl)
 
 
 def detener_scheduler():

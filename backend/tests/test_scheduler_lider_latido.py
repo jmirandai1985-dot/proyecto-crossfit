@@ -18,7 +18,7 @@ Acá se fija, sin BD y sin correos:
   · líder con el lock vivo → no toca nada;
   · líder que perdió el lock → suelta los jobs, devuelve la ranura y RECUPERA;
   · líder que perdió el lock y otra instancia se adelantó → queda en standby;
-  · standby con el lock libre → toma el relevo y programa los 7 jobs;
+  · standby con el lock libre → toma el relevo y programa los 8 jobs;
   · standby con el lock ocupado → no programa nada (y sigue latiendo);
   · el latido corre en OTRO hilo (no puede congelar a los usuarios) y no propaga errores.
 

@@ -1,8 +1,9 @@
 """Tests de los locks por (job, día) aplicados a los jobs del scheduler.
 
-Cada job de `scheduler.py` (generar clases, las 5 alertas, cierre de mes) envuelve
-su cuerpo en `lock_de_job("...")`. Si otra instancia ya tomó ese (job, día), el
-job sale SIN hacer nada (segunda línea de defensa detrás del lock de líder).
+Cada job de `scheduler.py` (generar clases, las 5 alertas, cierre de mes y el
+reentrenamiento semanal del churn) envuelve su cuerpo en `lock_de_job("...")`. Si otra
+instancia ya tomó ese (job, día), el job sale SIN hacer nada (segunda línea de defensa
+detrás del lock de líder).
 
 Acá se fija, sin BD ni correos:
   · con lock libre (`puede=True`) → el job ejecuta su cuerpo real;
@@ -161,7 +162,7 @@ def test_cierre_mes_se_omite_si_el_lock_esta_tomado(monkeypatch):
 # Coherencia: las claves que usan los jobs están todas en el mapa
 # ══════════════════════════════════════════════════════════════════════════════
 def test_todas_las_claves_de_jobs_estan_en_el_mapa():
-    for jid in ("generar_clases_diarias", "cierre_mes",
+    for jid in ("generar_clases_diarias", "cierre_mes", "reentrenar_churn",
                 "alerta_urgencia", "alerta_renovacion", "alerta_inactividad",
                 "alerta_ultimo_credito", "alerta_sin_creditos"):
         assert jid in sl.CLAVES_JOB, f"falta la clave {jid} en CLAVES_JOB"

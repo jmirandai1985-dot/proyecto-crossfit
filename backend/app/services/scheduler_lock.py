@@ -90,6 +90,9 @@ CLAVES_JOB = {
     "alerta_ultimo_credito": 1005,
     "alerta_sin_creditos": 1006,
     "cierre_mes": 1007,
+    # Reentrenamiento semanal del churn (scheduler.py, lunes 04:30 CLT). Sin esta entrada,
+    # `_clave_job` devolvería el default 9000 y el lock no sería el de ESTE job.
+    "reentrenar_churn": 1008,
 }
 
 _conexion_lider = None
