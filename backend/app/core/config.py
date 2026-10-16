@@ -194,8 +194,11 @@ if not settings.JWT_SECRET_KEY:
 #     (abortan si la BD no es TEST, para no escribir sobre datos reales)
 #   - scripts/sync_test_from_prod.py y scripts/restaurar_backup.py (origen/destino)
 TEST_BRANCH_IDS = (
-    "ep-winter-boat-b6zpvtxu",        # TEST actual: rama recreada (2026-10-13); la credencial
-                                      # del endpoint anterior caducó a los 7 días
+    "ep-damp-base-b6mpe739",          # TEST actual: la MISMA rama, con la contraseña ROTADA
+                                      # (2026-10-16). Neon reasigna el hostname del endpoint al
+                                      # rotar la credencial: el id anterior dejó de resolver.
+    "ep-winter-boat-b6zpvtxu",        # TEST anterior: rama recreada (2026-10-13); su credencial
+                                      # quedó inválida al rotar la contraseña
     "ep-summer-river-b6c8fj2f",       # TEST anterior: rama recreada (2026-10-04), ya sin credencial
     "ep-jolly-butterfly-b6ty2z89",    # TEST anterior: Neon ya la eliminó (se conserva por historial)
 )
