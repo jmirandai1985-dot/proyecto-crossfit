@@ -73,10 +73,13 @@ const DESTINOS_TIPO = {
     emergencia: '/admin/supervision-clases',
     // Datos bancarios del box: la pantalla que los edita (sólo admin).
     config_bancaria: '/admin/configuracion',
-    // Los avisos de clase van SIEMPRE a un coach: su grilla de clases.
-    clase_asignada: '/coach/gestion-clases',
-    clase_reasignada: '/coach/gestion-clases',
-    clase_liberada: '/coach/gestion-clases',
+    // Los avisos de clase van SIEMPRE a un coach: su grilla semanal, que desde el retiro de
+    // "Gestión de Clases" es la sub-pestaña Clases del panel (`?tab=clases`). Antes apuntaban
+    // a la pantalla vieja de Gestión de Clases: esa pantalla ya no existe (menú, ruta y
+    // archivo) y el aviso tiene que llevar a un lugar que el coach reconozca.
+    clase_asignada: '/coach/dashboard?tab=clases',
+    clase_reasignada: '/coach/dashboard?tab=clases',
+    clase_liberada: '/coach/dashboard?tab=clases',
 };
 
 // Rol(es) que pueden abrir cada destino. Evita ofrecer (y seguir) un link a una
