@@ -36,7 +36,15 @@ export const MENU_BY_ROL = {
     ],
     coach: [
         { label: 'Dashboard', path: '/coach/dashboard', icon: 'home' },
-        { label: 'Gestión de Clases', path: '/coach/gestion-clases', icon: 'calendar' },
+        // NO hay ítem "Gestión de Clases": era la configuración antigua y, al tocar una clase
+        // en "Mis clases de hoy", el coach caía ahí y tardaba en cargar. Su vista semanal
+        // (grilla Lun→Dom + filtro "Ver todas / Ver solo con WOD publicado") vive DENTRO del
+        // Dashboard, en la sub-pestaña `?tab=clases` (`COACH_SUBTABS`, más abajo), y publicar
+        // o editar un WOD abre el modal unificado en la MISMA pantalla.
+        // La pantalla se retiró POR COMPLETO (menú, ruta y archivo `GestionClases.jsx`):
+        // editar un WOD publicado es un modo del mismo `ModalPublicarWod` (`PUT /wods/{id}`),
+        // la carga masiva por Excel y el aviso rápido del día son botones de la pestaña
+        // Clases, y tomar/soltar/cubrir suplencia vive en `AccionesClaseCoach`.
         // Mesón del Bazar: entregar un pedido con el código de retiro del alumno
         // (mismo modal que el admin; sin listados ni montos).
         { label: 'Entregar pedido', path: '/coach/entregar-pedido', icon: 'qr' },

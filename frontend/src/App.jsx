@@ -43,7 +43,9 @@ const AdminMiQr = lazy(() => import('./pages/admin/MiQr'));
 // · Familia COACH
 // Pizarra y Generar Clases ya no se importan: sin ruta no hay chunk que bajar (Bloque 5).
 const CoachDashboard = lazy(() => import('./pages/coach/DashboardCoach'));
-const CoachGestionClases = lazy(() => import('./pages/coach/GestionClases'));
+// Gestión de Clases se retiró POR COMPLETO (menú, ruta y archivo): su vista semanal vive
+// en la pestaña Clases, publicar/editar un WOD usa el modal del panel y tomar/soltar la
+// clase se hace desde la misma grilla. Sin ruta no hay chunk que bajar.
 // Código de retiro del Bazar: el coach entrega pedidos con el código del alumno
 // (misma pantalla/modal que usa el admin), sin ver listados ni montos.
 const CoachEntregarPedido = lazy(() => import('./pages/coach/EntregarPedido'));
@@ -152,7 +154,9 @@ function App() {
           {/* ── Rutas de Coach ──────────────────────────────────── */}
           <Route path="/coach/*" element={<ProtectedRoute roles={ROLES_COACH} />}>
             <Route path="dashboard" element={<CoachDashboard />} />
-            <Route path="gestion-clases" element={<CoachGestionClases />} />
+            {/* `gestion-clases`: retirada (menú + ruta + archivo). Todo lo que sólo vivía
+                ahí está en el panel — edición de un WOD publicado y carga masiva por Excel
+                en `ModalPublicarWod`, tomar/soltar y cubrir suplencia en la pestaña Clases. */}
             {/* Mesón del Bazar: entrega con el código de retiro del alumno. */}
             <Route path="entregar-pedido" element={<CoachEntregarPedido />} />
             {/* Bloque 5: `pizarra` (daba 400 sin disciplina_id; la reemplaza el modal

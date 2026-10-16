@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import {
-    useCrearWodsBatch, usePrevisualizarSemana, useProgramarSemana, usePublicarAvisoRapido,
+    useCrearWodsBatch, useGuardarWod, usePrevisualizarSemana, useProgramarSemana,
+    usePublicarAvisoRapido,
 } from '../hooks/queries';
-import { semanaEnCurso } from '../utils/fecha';
+import { useAuth } from '../context/AuthContext';
+import { hoyChileStr, semanaEnCurso } from '../utils/fecha';
 // El corte Mañana/Tarde/Noche de los horarios sale del MISMO util que la pestaña Asistencia
 // (una sola definición de franja en todo el panel).
 import { FRANJAS, franjaDe } from '../utils/franjasAsistencia';
@@ -51,8 +53,23 @@ const fechaDiaDe = (iso) => {
  * Props: `clase` (la clase desde la que se publica: da fecha, hora, disciplina y cupo),
  * `onCerrar`, `onPublicado(datos)`.
  */
-const ModalPublicarWod = ({ clase, clasesSemana = [], onCerrar, onPublicado }) => {
-    const [modo, setModo] = useState('manual');        // 'manual' | 'archivo'
+const ModalPublicarWod = ({
+    clase, clasesSemana = [], disciplinas = [], wodEdicion = null, soloArchivo = false,
+    onCerrar, onPublicado,
+}) => {
+    // ── MODO EDICIÓN: portado de Gestión de Clases (pantalla ya retirada) ──
+    // `wodEdicion` = el WOD que YA está publicado en la clase. El MISMO formulario se
+    // pre-carga y al guardar hace `PUT /wods/{id}`: no se crea otro WOD, que dejaría al
+    // anterior huérfano (`POST /wods/batch-create` re-apunta `clase.wod_id`). Es la razón
+    // por la que la tarjeta de una clase ya publicada abre el detalle y no el formulario.
+    const esEdicion = Boolean(wodEdicion?.id);
+    const { usuario_id: coachId } = useAuth();
+    // `soloArchivo` = la carga masiva del Excel SIN clase de por medio (el botón
+    // "+ Cargar WODs de la semana" de la pestaña Clases): arranca en la rama del archivo.
+    const [modo, setModo] = useState(soloArchivo ? 'archivo' : 'manual');  // 'manual' | 'archivo'
+    // Disciplina del flujo sin clase: `programar-semana` la exige para vincular el WOD de
+    // cada día (el backend responde 400 si un coach la omite).
+    const [disciplinaSel, setDisciplinaSel] = useState('');
     const [ayuda, setAyuda] = useState(false);
     // ── BLOQUE 1: los DOS controles del modo manual (días + horarios) ──
     // Reemplazan al selector "Aplicar a" (Este horario / Todo el día / La semana), que ahora
@@ -63,21 +80,30 @@ const ModalPublicarWod = ({ clase, clasesSemana = [], onCerrar, onPublicado }) =
     const [diasTocados, setDiasTocados] = useState(null);
     const [horasTocadas, setHorasTocadas] = useState(null);
     const [form, setForm] = useState({
-        calentamiento: '', musculacion: '', wod_nombre: '', wod_tipo: 'For Time',
-        wod_descripcion: '', aviso: '',
+        calentamiento: wodEdicion?.calentamiento || '',
+        musculacion: wodEdicion?.fuerza_habilidad || '',
+        wod_nombre: wodEdicion?.titulo || '',
+        wod_tipo: wodEdicion?.tipo_metcon || 'For Time',
+        wod_descripcion: wodEdicion?.wod_principal || '',
+        aviso: '',
     });
     const [error, setError] = useState('');
     const [previa, setPrevia] = useState(null);        // { dias, errores, nombre }
     const [enviando, setEnviando] = useState(false);
 
     const crearBatch = useCrearWodsBatch();
+    const guardarWod = useGuardarWod();
     const previsualizar = usePrevisualizarSemana();
     const programar = useProgramarSemana();
     const avisoRapido = usePublicarAvisoRapido();
 
     const TIPOS = ['For Time', 'AMRAP', 'EMOM', 'Otro'];
-    const fechaClase = clase?.fecha ? String(clase.fecha).split('T')[0] : '';
+    // Sin clase (carga masiva del Excel) la semana es la de HOY: el archivo trae sus fechas.
+    const fechaClase = clase?.fecha ? String(clase.fecha).split('T')[0] : hoyChileStr();
     const hora = (clase?.hora_inicio || '').slice(0, 5);
+    // Disciplina del flujo: la de la clase; sin clase, la que el coach elige en el modal.
+    const disciplinaEfectiva = clase?.disciplina_id
+        ?? (disciplinaSel ? Number(disciplinaSel) : null);
     const lunesDeLaSemana = useMemo(() => semanaEnCurso(fechaClase), [fechaClase]);
     const horaDe = (c) => String(c?.hora_inicio || '').slice(0, 5);
     const fechaDe = (c) => String(c?.fecha || '').slice(0, 10);
@@ -149,8 +175,35 @@ const ModalPublicarWod = ({ clase, clasesSemana = [], onCerrar, onPublicado }) =
             setError('La descripción del WOD es obligatoria.');
             return;
         }
-        if (!fechaClase || !clase?.disciplina_id) {
+        if (!fechaClase || !disciplinaEfectiva) {
             setError('No se pudo identificar la clase (fecha o disciplina).');
+            return;
+        }
+        // ── Modo edición: actualiza el WOD que YA está en la clase (`PUT /wods/{id}`) ──
+        if (esEdicion) {
+            setEnviando(true);
+            try {
+                await guardarWod.mutateAsync({
+                    wodId: wodEdicion.id,
+                    payload: {
+                        titulo: form.wod_nombre.trim() || null,
+                        calentamiento: form.calentamiento.trim() || null,
+                        fuerza_habilidad: form.musculacion.trim() || null,
+                        wod_principal: form.wod_descripcion.trim(),
+                        tipo_metcon: form.wod_tipo || 'Otro',
+                        estado: wodEdicion.estado || 'publicado',
+                        fecha: fechaClase,
+                        coach_id: coachId,
+                    },
+                    params: { disciplina_id: disciplinaEfectiva },
+                });
+                if (onPublicado) onPublicado({ origen: 'edicion', clases: 1, aviso: null });
+                onCerrar();
+            } catch (e) {
+                setError(e.response?.data?.detail || e.message || 'No se pudo actualizar el WOD');
+            } finally {
+                setEnviando(false);
+            }
             return;
         }
         // Bloque 1: publicar sin ninguna clase vinculada no es lo que el coach pidió, así que
@@ -180,7 +233,7 @@ const ModalPublicarWod = ({ clase, clasesSemana = [], onCerrar, onPublicado }) =
             if (planPublicacion.claseIds) body.clase_ids = planPublicacion.claseIds;
 
             const resultado = await crearBatch.mutateAsync({
-                body, params: { disciplina_id: clase.disciplina_id },
+                body, params: { disciplina_id: disciplinaEfectiva },
             });
 
             let aviso = null;
@@ -231,15 +284,17 @@ const ModalPublicarWod = ({ clase, clasesSemana = [], onCerrar, onPublicado }) =
     const programarSemana = async () => {
         if (!previa?.dias?.length) return;
         setError('');
-        if (!clase?.disciplina_id) {
-            setError('No se pudo identificar la disciplina de la clase.');
+        if (!disciplinaEfectiva) {
+            setError(clase?.disciplina_id
+                ? 'No se pudo identificar la disciplina de la clase.'
+                : 'Elige la disciplina de la semana que vas a programar.');
             return;
         }
         setEnviando(true);
         try {
             const resultado = await programar.mutateAsync({
                 body: { dias: previa.dias },
-                params: { disciplina_id: clase.disciplina_id },
+                params: { disciplina_id: disciplinaEfectiva },
             });
             if (onPublicado) {
                 onPublicado({
@@ -269,10 +324,16 @@ const ModalPublicarWod = ({ clase, clasesSemana = [], onCerrar, onPublicado }) =
 
                 <div className="p-4 border-b border-zinc-800 flex items-start justify-between gap-3">
                     <div>
-                        <h3 className="font-bold text-zinc-100">📝 Publicar WOD</h3>
+                        <h3 className="font-bold text-zinc-100">
+                            {esEdicion ? '✏️ Editar WOD' : '📝 Publicar WOD'}
+                        </h3>
                         <p className="mt-1 text-[12px] text-zinc-500">
-                            {hora} · {clase?.disciplina_nombre || 'Clase'} ·{' '}
-                            {clase?.reservas_count ?? clase?.asistentes_confirmados ?? 0} inscritos
+                            {esEdicion
+                                ? 'Ya está publicado en esta clase: el cambio se ve en TODAS las clases que lo llevan'
+                                : soloArchivo
+                                    ? 'Carga masiva: el Excel de la semana completa'
+                                    : `${hora} · ${clase?.disciplina_nombre || 'Clase'} · `
+                                        + `${clase?.reservas_count ?? clase?.asistentes_confirmados ?? 0} inscritos`}
                         </p>
                     </div>
                     <button type="button" onClick={onCerrar} aria-label="Cerrar"
@@ -290,7 +351,9 @@ const ModalPublicarWod = ({ clase, clasesSemana = [], onCerrar, onPublicado }) =
 
                     {modo === 'manual' ? (
                         <>
-                            <div>
+                            {/* El Excel no se ofrece al EDITAR: ese WOD ya está publicado y
+                                el archivo crea WODs NUEVOS por día (no actualiza). */}
+                            {!esEdicion && (<div>
                                 <button
                                     type="button"
                                     onClick={() => document.getElementById('wod-archivo-semana').click()}
@@ -328,7 +391,17 @@ const ModalPublicarWod = ({ clase, clasesSemana = [], onCerrar, onPublicado }) =
                                 <p className="mt-3 text-center text-[11px] text-zinc-600">
                                     — o completa manualmente —
                                 </p>
-                            </div>
+                            </div>)}
+
+                            {/* El WOD ya está vinculado a su(s) clase(s): el PUT actualiza ese
+                                MISMO WOD. El alcance (días/horarios) sólo aplica al crear. */}
+                            {esEdicion && (
+                                <div className="rounded-xl border border-amber-700/60 bg-amber-900/20 px-4 py-3 text-[11.5px] text-amber-100"
+                                    data-testid="aviso-edicion-wod">
+                                    ⚠️ Al guardar se actualiza el WOD que comparten estas clases:
+                                    no se crea otro ni se cambia su alcance.
+                                </div>
+                            )}
 
                             <label className={ETIQUETA}>
                                 1 · Calentamiento
@@ -372,7 +445,10 @@ const ModalPublicarWod = ({ clase, clasesSemana = [], onCerrar, onPublicado }) =
                                     data-testid="wod-descripcion" className={CAMPO} />
                             </label>
 
-                            {/* ── BLOQUE 1: días + horarios (lo que antes era "Aplicar a") ── */}
+                            {/* ── BLOQUE 1: días + horarios (lo que antes era "Aplicar a") ──
+                                En modo EDICIÓN no se muestran: el PUT actualiza el WOD que ya
+                                está publicado, no elige alcance (eso sólo pasa al crear). */}
+                            {!esEdicion && (<>
                             <div data-testid="wod-dias">
                                 <span className={ETIQUETA}>4 · Días donde publicar (semana actual)</span>
                                 <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -458,7 +534,11 @@ const ModalPublicarWod = ({ clase, clasesSemana = [], onCerrar, onPublicado }) =
                                     </p>
                                 )}
                             </div>
+                            </>)}
 
+                            {/* El aviso de hoy es un MENSAJE NUEVO del día (no se edita): en
+                                modo edición no se ofrece, igual que en la pantalla vieja. */}
+                            {!esEdicion && (
                             <label className={ETIQUETA}>
                                 Aviso que verán los alumnos hoy{' '}
                                 <span className="text-zinc-600">(opcional)</span>
@@ -466,21 +546,72 @@ const ModalPublicarWod = ({ clase, clasesSemana = [], onCerrar, onPublicado }) =
                                     maxLength={280} placeholder="Ej. Trae calcetas, hoy hay cuerda"
                                     data-testid="wod-aviso" className={CAMPO} />
                             </label>
+                            )}
 
                             <button type="button" onClick={publicarManual} disabled={enviando}
                                 data-testid="publicar-wod"
                                 className="w-full rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-white hover:bg-orange-600 disabled:opacity-50">
-                                {enviando ? 'Publicando…' : 'Publicar'}
+                                {enviando
+                                    ? (esEdicion ? 'Guardando…' : 'Publicando…')
+                                    : (esEdicion ? '💾 Guardar cambios' : 'Publicar')}
                             </button>
                         </>
                     ) : (
                         <>
+                            {/* Carga masiva SIN clase (el botón de la pestaña Clases): el
+                                backend exige la disciplina para vincular el WOD de cada día. */}
+                            {!clase?.disciplina_id && (
+                                <label className={ETIQUETA}>
+                                    Disciplina de la semana
+                                    <select
+                                        value={disciplinaSel}
+                                        onChange={(e) => setDisciplinaSel(e.target.value)}
+                                        data-testid="wod-disciplina-archivo"
+                                        className={CAMPO}
+                                    >
+                                        <option value="">Elige la disciplina…</option>
+                                        {disciplinas.map((d) => (
+                                            <option key={d.id} value={d.id}>{d.nombre}</option>
+                                        ))}
+                                    </select>
+                                </label>
+                            )}
+                            {/* Todavía sin archivo elegido (se entró directo a la carga
+                                masiva): el mismo botón + input de la rama manual. */}
+                            {!previa && (
+                                <div>
+                                    <button
+                                        type="button"
+                                        onClick={() => document.getElementById('wod-archivo-semana').click()}
+                                        disabled={enviando}
+                                        data-testid="cargar-archivo-semana"
+                                        className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-zinc-700 px-3 py-2.5 text-[12px] font-semibold text-sky-300 hover:border-sky-500/60 disabled:opacity-50"
+                                    >
+                                        📄 Cargar archivo con WODs de la semana
+                                    </button>
+                                    <input
+                                        id="wod-archivo-semana" type="file" accept=".xlsx" className="hidden"
+                                        onChange={elegirArchivo} data-testid="input-archivo-semana"
+                                    />
+                                    <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+                                        Excel (.xlsx), una fila por día, en este orden:{' '}
+                                        <span className="font-mono text-amber-200">
+                                            fecha | calentamiento | musculacion | wod_nombre |
+                                            wod_tipo | wod_descripcion | aviso
+                                        </span>
+                                        . El WOD de cada día se publica en TODAS las clases de esa
+                                        fecha y disciplina.
+                                    </p>
+                                </div>
+                            )}
+                            {previa && (
                             <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5">
                                 <span aria-hidden="true">✅</span>
                                 <span className="text-[11.5px] font-semibold text-sky-300">
-                                    {previa?.nombre} — {previa?.dias?.length ?? 0} días detectados
+                                    {previa.nombre} — {previa.dias?.length ?? 0} días detectados
                                 </span>
                             </div>
+                            )}
 
                             {previa?.errores?.length > 0 && (
                                 <div className="rounded-xl border border-amber-700/60 bg-amber-900/20 px-4 py-3 text-[11.5px] text-amber-100"
@@ -523,10 +654,12 @@ const ModalPublicarWod = ({ clase, clasesSemana = [], onCerrar, onPublicado }) =
                                 className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50">
                                 {enviando ? 'Programando…' : 'Programar semana'}
                             </button>
+                            {!soloArchivo && (
                             <button type="button" onClick={volverAlManual} disabled={enviando}
                                 className="w-full rounded-xl px-4 py-2 text-[12px] font-semibold text-zinc-400 hover:text-zinc-200">
                                 Cancelar y volver al formulario manual
                             </button>
+                            )}
                         </>
                     )}
                 </div>

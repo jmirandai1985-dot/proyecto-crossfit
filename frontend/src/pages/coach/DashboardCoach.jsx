@@ -5,13 +5,19 @@ import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import {
     SIN_DATOS, useAlumnosCoachEnRiesgo, useAlumnosDeCoach, useClasesAsistenciaHoy,
-    useClasesCoach, useCoachDisciplinas, useContactarAlumnoCoach, useHistorialRmTodos,
-    useProgresoAlumnosCoach, useReservasPorClase, useRmsAlumno, useTodosLosWods,
+    useClasesCoach, useCoachDisciplinas, useContactarAlumnoCoach, useDisciplinas,
+    useHistorialRmTodos, useProgresoAlumnosCoach, useReservasPorClase, useRmsAlumno,
+    useTodosLosWods,
 } from '../../hooks/queries';
 import AsistenciaClases from '../../components/AsistenciaClases';
+// Tomar / soltar / cubrir suplencia una clase: vivía en la pantalla de Gestión de Clases,
+// retirada del menú y del repo. Ahora es parte de la pestaña Clases (junto a la grilla).
+import AccionesClaseCoach from '../../components/AccionesClaseCoach';
 import AlumnoFichaCoach from '../../components/AlumnoFichaCoach';
 import PreviewEmailModal from '../../components/PreviewEmailModal';
 import WodDetalleModal from '../../components/WodDetalleModal';
+// Aviso rápido del día (el mismo modal de Marketing que usaba Gestión de Clases).
+import ModalAvisoRapido from '../../components/ModalAvisoRapido';
 // Bloque C: el Resumen del mockup (#pantalla-resumen) y sus dos modales.
 import ResumenCoach from '../../components/ResumenCoach';
 import ModalPublicarWod from '../../components/ModalPublicarWod';
@@ -48,6 +54,14 @@ const DashboardCoach = () => {
     // la pestaña Clases la setea con el horario de la celda que tocó el lápiz: las DOS entradas
     // abren el MISMO modal.
     const [claseWod, setClaseWod] = useState(null);
+    // ── Panel 0 (retiro de Gestión de Clases): las otras dos entradas del modal ──
+    // `wodEdicion` = el WOD que ya está publicado en esa clase → el modal guarda con PUT
+    // (portado de la pantalla vieja, que era su única función exclusiva).
+    const [wodEdicion, setWodEdicion] = useState(null);
+    // `wodArchivo` = carga masiva del Excel de la semana SIN clase de por medio.
+    const [wodArchivo, setWodArchivo] = useState(false);
+    // Bloque 3 del retiro: el "aviso rápido" del día, que vivía en Gestión de Clases.
+    const [modalAviso, setModalAviso] = useState(false);
     const [claseSinReserva, setClaseSinReserva] = useState(null);
     const [msgPublicado, setMsgPublicado] = useState(null);
     // Bloque 2: el walk-in ahora avisa con un toast (el texto lo escribió el modal pegado a la
@@ -69,9 +83,49 @@ const DashboardCoach = () => {
         if (!clase || !wod) return;
         setWodDetalle({ wod, clase });
     };
-    const irAGestionClases = (clase) => {
+    // ── "Gestión de Clases" fuera del menú (aprobado) ────────────────────────────
+    // Las entradas que antes NAVEGABAN a esa pantalla (la configuración antigua, la que
+    // tardaba en cargar) ahora abren el modal unificado ACÁ MISMO, con esa clase/horario
+    // como `claseDestino`: sin pantalla intermedia y sin otra ruta que bajar.
+    const abrirPublicarWod = (clase) => {
         if (!clase) return;
-        navigate(`/coach/gestion-clases?fecha=${fechaISOde(clase)}&clase=${clase.id}`);
+        // Ojo: `setClaseWod` + `setModalWod` van juntos (el modal se abre con esa clase).
+        setWodEdicion(null);
+        setWodArchivo(false);
+        setClaseWod(clase);
+        setModalWod(true);
+    };
+    // EDITAR el WOD que YA está publicado en esa clase: mismo modal, precargado
+    // (`PUT /wods/{id}`). Es la función que quedaba sólo en Gestión de Clases.
+    const abrirEditarWod = (clase, wod) => {
+        if (!clase || !wod) return;
+        setWodArchivo(false);
+        setClaseWod(clase);
+        setWodEdicion(wod);
+        setModalWod(true);
+    };
+    // CARGA MASIVA: el Excel de toda la semana, sin pasar clase por clase.
+    const abrirCargaMasiva = () => {
+        setWodEdicion(null);
+        setClaseWod(null);
+        setWodArchivo(true);
+        setModalWod(true);
+    };
+    const cerrarModalWod = () => {
+        setModalWod(false);
+        setClaseWod(null);
+        setWodEdicion(null);
+        setWodArchivo(false);
+    };
+    // Fila de "Mis clases de hoy": publicar el WOD de ESA clase. Si la clase YA tiene un WOD
+    // publicado se abre su detalle en vez del formulario: `POST /wods/batch-create` crea un
+    // WOD nuevo y re-apunta `clase.wod_id`, así que volver a publicar dejaría el anterior
+    // huérfano. Es la misma regla que ya sigue la grilla con una celda publicada.
+    const abrirClaseDeHoy = (clase) => {
+        if (!clase) return;
+        const wod = (wodsQ.data || []).find((w) => w.id === clase.wod_id) || null;
+        if (wod) { abrirDetalleWod(clase, wod); return; }
+        abrirPublicarWod(clase);
     };
 
     // ---- Terminología dinámica por disciplina ----
@@ -199,6 +253,9 @@ const DashboardCoach = () => {
     const wodsQ = useTodosLosWods();
     const riesgoQ = useAlumnosCoachEnRiesgo(usuario_id);
     const coachDiscQ = useCoachDisciplinas();
+    // Catálogo de disciplinas: la carga masiva por Excel (modal SIN clase) necesita elegir
+    // una y sólo se ofrecen las que este coach dicta (publicar en otra es un 403).
+    const disciplinasQ = useDisciplinas();
     const alumnosQ = useAlumnosDeCoach(usuario_id);
     const progresoQ = useProgresoAlumnosCoach(alumnosQ.data);
     const rmsRecientesQ = useHistorialRmTodos(5);
@@ -219,6 +276,10 @@ const DashboardCoach = () => {
     const coachDisciplinas = useMemo(() => (coachDiscQ.data || [])
         .filter((cd) => cd.activo && cd.coach_id === usuario_id)
         .map((cd) => cd.disciplina_id), [coachDiscQ.data, usuario_id]);
+
+    // Las disciplinas del coach con su NOMBRE (el modal sin clase muestra un select).
+    const disciplinasDelCoach = useMemo(() => (disciplinasQ.data || SIN_DATOS)
+        .filter((d) => coachDisciplinas.includes(d.id)), [disciplinasQ.data, coachDisciplinas]);
 
     // Sus clases: lo MÍO, con los tres caminos que aplica el backend (`GET /clases/?coach_id=`).
     // H-12: el filtro usa la lista recién calculada, no un estado que en la 1ra carga todavía
@@ -498,7 +559,7 @@ const DashboardCoach = () => {
                                     onPublicarWod={() => setModalWod(true)}
                                     onAgregarSinReserva={(clase) => setClaseSinReserva(clase)}
                                     onAbrirAsistencia={() => navigate('/coach/dashboard?tab=asistencia')}
-                                    onAbrirClase={irAGestionClases}
+                                    onAbrirClase={abrirClaseDeHoy}
                                     onIrA={(tab) => navigate('/coach/dashboard?tab=' + tab)}
                                     onAbrirDetalleWod={(clase, wod) => abrirDetalleWod(clase, wod)}
                                 />
@@ -528,11 +589,24 @@ const DashboardCoach = () => {
                                         >
                                             Semana siguiente ▶
                                         </button>
+                                        {/* Acá estaba "📋 Gestionar Clases": navegaba a la
+                                            pantalla vieja, ya retirada. La grilla de arriba ES
+                                            esa vista semanal (fusionada) y desde acá se llega
+                                            a las dos cosas que sólo vivían allá: la carga
+                                            masiva por Excel y el aviso rápido del día. */}
                                         <button
-                                            onClick={() => navigate('/coach/gestion-clases')}
-                                            className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+                                            onClick={abrirCargaMasiva}
+                                            data-testid="cargar-excel-semana"
+                                            className="px-3 py-2 rounded-lg text-sm font-bold text-zinc-900 bg-lime-300 hover:bg-lime-200 transition-colors"
                                         >
-                                            📋 Gestionar Clases
+                                            📄 + Cargar {getTerminoDisciplina('CrossFit')}s de la semana (Excel)
+                                        </button>
+                                        <button
+                                            onClick={() => setModalAviso(true)}
+                                            data-testid="aviso-rapido-clases"
+                                            className="px-3 py-2 rounded-lg text-sm font-medium bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors"
+                                        >
+                                            📣 Aviso rápido del día
                                         </button>
                                     </div>
                                 </div>
@@ -602,13 +676,14 @@ const DashboardCoach = () => {
                                                         clasesVisibles.map((clase) => {
                                                             const wod = wodDeClase(clase);
                                                             return (
+                                                                <React.Fragment key={clase.id}>
                                                                 <button
                                                                     key={clase.id}
                                                                     data-testid={wod ? 'ver-wod-lista' : 'publicar-wod-lista'}
                                                                     title={wod ? 'Ver el WOD completo' : 'Publicar WOD para esta clase'}
                                                                     onClick={() => (wod
                                                                         ? abrirDetalleWod({ ...clase, fecha: clase.fecha || date }, wod)
-                                                                        : irAGestionClases({ ...clase, fecha: clase.fecha || date }))}
+                                                                        : abrirPublicarWod({ ...clase, fecha: clase.fecha || date }))}
                                                                     className={`w-full px-4 py-3 flex items-center gap-3 text-left transition-colors ${wod
                                                                         ? 'bg-green-50 hover:bg-green-100'
                                                                         : 'bg-yellow-50 hover:bg-yellow-100'
@@ -641,6 +716,17 @@ const DashboardCoach = () => {
                                                                         {wod ? '✅' : '📝'}
                                                                     </div>
                                                                 </button>
+                                                                {/* Tomar / soltar / cubrir suplencia: se hacía en la
+                                                                    pantalla vieja y ahora vive acá, en la misma tarjeta. */}
+                                                                <div className="border-t border-gray-100 px-3 pb-2">
+                                                                    <AccionesClaseCoach
+                                                                        clase={{ ...clase, fecha: clase.fecha || date }}
+                                                                        coachId={usuario_id}
+                                                                        coachDisciplinas={coachDisciplinas}
+                                                                        onAviso={setMsgPublicado}
+                                                                    />
+                                                                </div>
+                                                                </React.Fragment>
                                                             );
                                                         })
                                                     ) : (
@@ -704,9 +790,11 @@ const DashboardCoach = () => {
                                                                 className={`p-2 text-center transition-all border-r border-zinc-700 ${dayIdx === 6 ? 'border-r-0' : ''
                                                                     }`}
                                                             >
+                                                                <div>
                                                                 {clase ? (
                                                                     wodDeClase ? (
                                                                         // Celda con WOD publicado — fondo naranja translúcido sobre dark + ícono ✅
+                                                                        <>
                                                                         <button
                                                                             data-testid="ver-wod-celda"
                                                                             title="Ver el WOD completo"
@@ -728,6 +816,17 @@ const DashboardCoach = () => {
                                                                                 ✔ Publicado
                                                                             </div>
                                                                         </button>
+                                                                        {/* Editar el WOD ya publicado: el MISMO modal del panel,
+                                                                            precargado (portado de Gestión de Clases). */}
+                                                                        <button
+                                                                            data-testid="editar-wod-celda"
+                                                                            title="Editar este WOD: el cambio se ve en TODAS las clases que lo llevan"
+                                                                            onClick={() => abrirEditarWod({ ...clase, fecha: clase.fecha || date }, wodDeClase)}
+                                                                            className="mt-1 w-full rounded-lg border border-orange-500/60 bg-zinc-900 px-2 py-1 text-[10.5px] font-semibold text-orange-200 hover:bg-orange-500/20"
+                                                                        >
+                                                                            ✏️ Editar
+                                                                        </button>
+                                                                        </>
                                                                     ) : (
                                                                         // Celda con clase sin WOD — fondo zinc-800 oscuro + texto claro legible
                                                                         <button
@@ -753,6 +852,17 @@ const DashboardCoach = () => {
                                                                         <span className="text-zinc-500 text-base italic">—</span>
                                                                     </div>
                                                                 )}
+                                                                {/* De quién es la clase y sus acciones, en la MISMA
+                                                                    grilla (antes había que ir a Gestión de Clases). */}
+                                                                {clase && (
+                                                                    <AccionesClaseCoach
+                                                                        clase={{ ...clase, fecha: clase.fecha || date }}
+                                                                        coachId={usuario_id}
+                                                                        coachDisciplinas={coachDisciplinas}
+                                                                        onAviso={setMsgPublicado}
+                                                                    />
+                                                                )}
+                                                                </div>
                                                             </td>
                                                         );
                                                     })}
@@ -778,7 +888,9 @@ const DashboardCoach = () => {
                                     )}
                                 </div>
                                 <p className="text-xs text-gray-400 text-center">
-                                    ℹ️ Clic en una celda para publicar/editar el {getTerminoDisciplina('CrossFit')} de esa clase. Para crear o editar, usa "Gestión de Clases".
+                                    ℹ️ Clic en una celda para publicar el {getTerminoDisciplina('CrossFit')} de esa clase
+                                    y en ✏️ para editarlo. Debajo de cada clase están tu estado y las acciones
+                                    (tomarla, soltarla o cubrir la suplencia).
                                 </p>
                             </div>
                         )}
@@ -1090,11 +1202,15 @@ const DashboardCoach = () => {
                         clase={wodDetalle.clase}
                         onClose={() => setWodDetalle(null)}
                         accion={{
-                            etiqueta: '✏️ Abrir en Gestión de Clases',
+                            // Portado: editar un WOD publicado YA NO sale del panel — el mismo
+                            // ModalPublicarWod se abre precargado con ese WOD y guarda con
+                            // `PUT /wods/{id}`. (Antes era la única puerta a Gestión de Clases.)
+                            etiqueta: '✏️ Editar WOD',
                             onClick: () => {
                                 const c = wodDetalle.clase;
+                                const w = wodDetalle.wod;
                                 setWodDetalle(null);
-                                irAGestionClases(c);
+                                abrirEditarWod(c, w);
                             },
                         }}
                     />
@@ -1118,21 +1234,39 @@ const DashboardCoach = () => {
                 {/* Bloque 2: toast del walk-in (sobrevive al cierre del modal). */}
                 <Toast texto={toastWalkin} />
 
-                {/* "Publicar WOD": formulario manual (con el aviso del día) o archivo semanal. */}
+                {/* "Publicar WOD": formulario manual (con el aviso del día), archivo semanal
+                    o EDICIÓN de un WOD ya publicado. UNA sola montura para todo el panel: la
+                    pestaña Clases le pasa la clase de la celda (y el WOD si ya existe) y el
+                    Resumen lo abre con la próxima clase del día. */}
                 {modalWod && (
                     <ModalPublicarWod
-                        clase={claseWod || proximaClase || clasesHoy[0] || null}
+                        clase={wodArchivo ? null : (claseWod || proximaClase || clasesHoy[0] || null)}
+                        wodEdicion={wodEdicion}
+                        soloArchivo={wodArchivo}
                         clasesSemana={clasesSemana}
-                        onCerrar={() => { setModalWod(false); setClaseWod(null); }}
+                        disciplinas={disciplinasDelCoach}
+                        onCerrar={cerrarModalWod}
                         onPublicado={(datos) => {
-                            setModalWod(false);
-                            setClaseWod(null);
+                            cerrarModalWod();
                             setMsgPublicado(datos.origen === 'archivo'
                                 ? `✅ Semana programada: ${datos.dias} día(s) en ${datos.clases} clase(s)`
                                   + (datos.avisos ? ` y ${datos.avisos} aviso(s) con fecha.` : '.')
-                                : `✅ WOD publicado en ${datos.clases} clase(s)`
-                                  + (datos.aviso ? ' y aviso de hoy publicado.' : '.'));
+                                : datos.origen === 'edicion'
+                                    ? '✅ WOD actualizado en todas las clases que lo llevan.'
+                                    : `✅ WOD publicado en ${datos.clases} clase(s)`
+                                      + (datos.aviso ? ' y aviso de hoy publicado.' : '.'));
                         }}
+                    />
+                )}
+
+                {/* Aviso rápido del día: el MISMO modal de Marketing que usaba Gestión de
+                    Clases (así el retiro de esa pantalla no se lleva la función). */}
+                {modalAviso && (
+                    <ModalAvisoRapido
+                        isOpen={modalAviso}
+                        onClose={() => setModalAviso(false)}
+                        onSuccess={() => setMsgPublicado(
+                            '✅ Aviso rápido publicado: ya aparece en el Inicio de los alumnos.')}
                     />
                 )}
             </div>
