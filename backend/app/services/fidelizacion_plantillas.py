@@ -54,11 +54,9 @@ Reglas (una definición por criterio)
 from datetime import date
 from typing import Final
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.estados import vigente_hoy   # "el plan da acceso HOY" (día chileno, inclusivo)
-from app.models.asistencia import Asistencia
 from app.models.plan import Plan
 from app.models.predictions_churn import PredictionsChurn
 from app.models.suscripcion import Suscripcion
@@ -67,6 +65,9 @@ from app.services import beneficios_service
 # churn (`churn_service.es_plan_sin_usar`), para que la sugerencia y el panel no diverjan.
 from app.services import churn_service
 from app.services import email_service
+# "¿Cuándo entrenó por última vez?": la asistencia REAL del panel (`reservas.asistio` sobre la
+# fecha de la clase) — la MISMA definición que el panel del coach y la campaña de inactividad.
+from app.services.asistencia_real import ultima_asistencia_por_alumno
 # ÚNICA definición de "días para vencer el plan vigente": la comparte con la situación del BI
 # (kpis_populate) para que la columna "Recomendación" y el "Motivo" nunca digan nº distintos.
 from app.services.plan_vencimiento import dias_hasta, suscripcion_vigente
@@ -145,10 +146,11 @@ def _referencia_actividad(db: Session, alumno) -> date | None:
     y todavía no lo estrenó); y sin plan vigente, su alta. Es la MISMA referencia que usa
     `_sugerir_con`: la sugerencia y los tramos no pueden contar días distintos.
     """
-    ultima = db.query(func.max(Asistencia.fecha)).filter(
-        Asistencia.tenant_id == alumno.tenant_id,
-        Asistencia.usuario_id == alumno.id,
-    ).scalar()
+    # Asistencia REAL (`reservas.asistio` sobre la fecha de la clase). Antes leía la tabla
+    # histórica `asistencias` —que nadie puebla—, así que TODOS los tramos de inactividad se
+    # contaban desde el plan o el alta. Ver `services/asistencia_real.py`.
+    ultima = ultima_asistencia_por_alumno(
+        db, alumno.tenant_id, [alumno.id]).get(alumno.id)
     if ultima is not None:
         return ultima
     fila = suscripcion_vigente(db, alumno)
@@ -587,10 +589,8 @@ def _datos_sugerencia(db: Session, alumnos: list) -> dict:
         return {}
     tenant_id = alumnos[0].tenant_id
 
-    asistencias = dict(db.query(Asistencia.usuario_id, func.max(Asistencia.fecha)).filter(
-        Asistencia.tenant_id == tenant_id,
-        Asistencia.usuario_id.in_(ids),
-    ).group_by(Asistencia.usuario_id).all())
+    # Asistencia REAL de toda la lista (una sola consulta agregada, sin N+1).
+    asistencias = ultima_asistencia_por_alumno(db, tenant_id, ids)
 
     # MISMO criterio que `suscripcion_vigente()`, en una consulta para todos: el orden por
     # `fecha_expiracion` desc hace que la PRIMERA fila de cada alumno sea la que se queda.

@@ -200,10 +200,18 @@ def enviar_alertas_renovacion(db, tenant_id: int = 1, dias_aviso: int = 3) -> di
 
 
 def enviar_alertas_inactividad(db, tenant_id: int = 1, umbral_dias: int = 7) -> dict:
-    """EMAIL 4 (send_alerta_inactividad): alumnos con 7+ días sin asistencia (1 envío/7 días)."""
+    """EMAIL 4 (send_alerta_inactividad): alumnos con 7+ días sin asistencia (1 envío/7 días).
+
+    La última asistencia sale de `asistencia_real.sql_cte_asistencias()` —`reservas.asistio` sobre
+    la fecha de la CLASE—: antes esta consulta leía la tabla histórica `asistencias`, que NO la
+    puebla nadie, así que sólo podía alcanzar a quien tuviera una fila de seed. El umbral, el
+    dedupe y el resto de la mecánica no cambian: lo que cambia es QUIÉN entra.
+    """
     from sqlalchemy import text
+    from app.services.asistencia_real import sql_cte_asistencias
     from app.services.email_service import send_alerta_inactividad
-    rows = db.execute(text("""
+    rows = db.execute(text(f"""
+        WITH {sql_cte_asistencias()}
         SELECT u.id, u.nombre, u.correo,
                (SELECT MAX(a.fecha) FROM asistencias a WHERE a.usuario_id = u.id) AS ultima
         FROM usuarios u

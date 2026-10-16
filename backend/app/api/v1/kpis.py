@@ -12,13 +12,13 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, or_, text as sql_text
+from sqlalchemy import or_, text as sql_text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.core.dependencies import get_current_admin, get_current_user
-from app.models.asistencia import Asistencia
+from app.core.estados import dia_chile       # el DÍA de Chile (no el de la sesión de Postgres)
 from app.models.churn_gestion import ChurnGestion
 from app.models.daily_kpis import DailyKpi
 from app.models.monthly_kpis import MonthlyKpi
@@ -29,6 +29,10 @@ from app.models.segmentacion_alumno import SegmentacionAlumno
 from app.models.usuario import Usuario
 from app.services import churn_service
 from app.services import plan_vencimiento
+# La asistencia REAL del panel (`reservas.asistio` sobre la fecha de la clase): UNA sola definición
+# para el churn servido en vivo y para las dos consultas crudas de BI (`sql_cte_asistencias()`).
+from app.services.asistencia_real import (asistencias_entre_por_alumno, sql_cte_asistencias,
+                                          ultima_asistencia_por_alumno)
 from app.services.auditoria_service import registrar_auditoria
 from app.utils.busqueda import columna_normalizada, normalizar
 from app.utils.santiago import hoy_santiago
@@ -234,47 +238,39 @@ INSIGHT_MIN_PCT = 40
 
 
 def _dias_inactividad_por_alumno(db: Session, tenant_id: int, ids: list) -> dict:
-    """{usuario_id: días sin asistir} con UNA query agregada (sin N+1).
+    """{usuario_id: días sin asistir} con 2 consultas agregadas (sin N+1).
 
-    Misma fórmula que `kpis_populate._dias_inactividad` y `ml.features`:
-    días desde la última asistencia y, si nunca asistió, desde el registro.
+    Misma fórmula que `kpis_populate._dias_inactividad` y `ml.features`: días desde la última
+    asistencia REAL (`asistencia_real`: `reservas.asistio` sobre la fecha de la clase, no la tabla
+    histórica `asistencias`) y, si nunca asistió, desde el registro del alumno.
     """
     if not ids:
         return {}
-    referencia = func.coalesce(
-        func.max(Asistencia.fecha), func.date(Usuario.created_at))
-    filas = db.query(Usuario.id, referencia).outerjoin(
-        Asistencia,
-        (Asistencia.usuario_id == Usuario.id)
-        & (Asistencia.tenant_id == Usuario.tenant_id),
-    ).filter(
+    ultimas = ultima_asistencia_por_alumno(db, tenant_id, ids)
+    altas = dict(db.query(Usuario.id, dia_chile(Usuario.created_at)).filter(
         Usuario.tenant_id == tenant_id,
         Usuario.id.in_(ids),
-    ).group_by(Usuario.id, Usuario.created_at).all()
+    ).all())
 
     hoy = hoy_santiago()
-    return {uid: max(0, (hoy - ref).days) for uid, ref in filas if ref}
+    dias = {}
+    for uid in ids:
+        referencia = ultimas.get(uid) or altas.get(uid)
+        if referencia is not None:
+            dias[uid] = max(0, (hoy - referencia).days)
+    return dias
 
 
 def _asistencias_ventana_por_alumno(db: Session, tenant_id: int, ids: list,
                                     dias: int) -> dict:
     """{usuario_id: nº de asistencias} en los últimos `dias` (UNA query agregada, sin N+1).
 
-    Misma ventana que `churn_service._conteos` (asistencias entre `hoy - dias` y HOY, en hora
-    de Chile): alimenta la detección de "caída reciente" de la recomendación servida en vivo.
+    Misma ventana que `churn_service._conteos` y MISMA fuente (`asistencia_real`: la asistencia
+    REAL, entre `hoy - dias` y HOY en días de Chile): alimenta la detección de "caída reciente"
+    de la recomendación servida en vivo, que no puede decir algo distinto del churn.
     """
-    if not ids:
-        return {}
-    desde = hoy_santiago() - timedelta(days=dias)
-    filas = db.query(
-        Asistencia.usuario_id, func.count(Asistencia.id),
-    ).filter(
-        Asistencia.tenant_id == tenant_id,
-        Asistencia.usuario_id.in_(ids),
-        Asistencia.fecha >= desde,
-        Asistencia.fecha <= hoy_santiago(),
-    ).group_by(Asistencia.usuario_id).all()
-    return {uid: n for uid, n in filas}
+    hoy = hoy_santiago()
+    return asistencias_entre_por_alumno(db, tenant_id, ids, hoy - timedelta(days=dias), hoy)
 
 
 def _generar_insight(filas: list, dias_por_alumno: dict) -> dict:
@@ -1011,17 +1007,20 @@ def get_bloques_horarios(
     """Oferta y asistencia por bloque horario (pico vs valle).
 
     - `clases` y `cupo_promedio` son REALES (tabla `clases`).
-    - `asistencias` / `asistencias_por_clase` salen del join REAL
-      `asistencias.clase_id -> clases.hora_inicio`.
-      ⚠️ Hoy `asistencias.clase_id` es NULL en el 100% de las filas (el propio
-      modelo lo documenta: "se poblarán desde reservas en una limpieza futura"),
-      así que dan 0. `cobertura` expone el alcance para que la UI distinga
-      "0 asistencias" de "sin datos": cuando el backfill corra, el promedio se
-      activa solo, sin tocar código.
+    - `asistencias` / `asistencias_por_clase` salen de la asistencia REAL
+      (`reservas.asistio` sobre la clase, ver `services/asistencia_real.py`), agrupada por la hora
+      de inicio de la clase.
+      ⚠️ Antes esto leía la tabla histórica `asistencias`, que nadie puebla: TODOS los bloques
+      daban 0 asistencias (y no se podía distinguir de "sin datos"). `cobertura` se mantiene como
+      contrato de la UI: ahora la asistencia queda asociada a su clase por construcción (100%).
     """
     tenant_id = current_user["tenant_id"]
 
-    filas = db.execute(sql_text("""
+    # La asistencia REAL entra como CTE, con la MISMA forma que la tabla histórica (`id`,
+    # `usuario_id`, `clase_id`, `tenant_id`, `fecha`): el resto de la consulta no cambia. El
+    # `presente = true` del join viejo ya no hace falta: el CTE sólo trae asistencias.
+    filas = db.execute(sql_text(f"""
+        WITH {sql_cte_asistencias()}
         SELECT EXTRACT(HOUR FROM c.hora_inicio)::int AS hora,
                COUNT(DISTINCT c.id) AS clases,
                ROUND(AVG(c.cupo_maximo), 1) AS cupo_promedio,
@@ -1030,12 +1029,12 @@ def get_bloques_horarios(
         LEFT JOIN asistencias a
                ON a.clase_id = c.id
               AND a.tenant_id = c.tenant_id
-              AND a.presente = true
         WHERE c.tenant_id = :tid AND c.cancelada = false
         GROUP BY 1 ORDER BY 1
     """), {"tid": tenant_id}).fetchall()
 
-    cobertura = db.execute(sql_text("""
+    cobertura = db.execute(sql_text(f"""
+        WITH {sql_cte_asistencias()}
         SELECT COUNT(*) AS total, COUNT(clase_id) AS con_clase
         FROM asistencias WHERE tenant_id = :tid
     """), {"tid": tenant_id}).first()
@@ -1074,15 +1073,16 @@ def get_bloques_horarios(
     return {
         "criterio": (
             "clases/cupo reales de `clases` (no canceladas); asistencias por el "
-            "join `asistencias.clase_id -> clases.hora_inicio`"),
+            "join `reservas.asistio -> clases.hora_inicio` (asistencia REAL: ver "
+            "`services/asistencia_real.py`)"),
         "cobertura": {
             "asistencias_total": total_asis,
             "con_clase": con_clase,
             "pct": round(con_clase / total_asis * 100, 1) if total_asis else 0.0,
             "nota": (
-                "Las asistencias todavía no quedan asociadas a su clase, así que el "
-                "promedio de asistencias por bloque se activará más adelante. Por "
-                "ahora se muestra la oferta real (clases y cupo)."),
+                "Toda asistencia sale de una reserva con `asistio = true` de una clase no "
+                "cancelada, así que queda asociada a su clase por construcción: el promedio por "
+                "bloque y la ocupación son reales."),
         },
         "bloques": bloques,
         "por_hora": por_hora,
@@ -1099,8 +1099,10 @@ def get_cohortes(
 
     Definición (documentada a propósito):
       - "Activo a los N días" = el alumno tiene >= 1 ASISTENCIA en la ventana
-        [alta, alta + N días]. Es la señal de retención disponible hoy (las
-        asistencias todavía no están asociadas a clase, ver /bloques-horarios).
+        [alta, alta + N días]. Es la señal de retención del box y sale de la asistencia REAL
+        (`reservas.asistio` sobre la fecha de la clase: ver `services/asistencia_real.py`), la
+        misma que ve el panel — antes leía la tabla histórica `asistencias`, que nadie puebla, así
+        que la retención de todas las cohortes daba 0%.
       - Sólo se promedian los alumnos EVALUABLES: los que ya cumplieron el
         horizonte (alta + N <= hoy). Si la cohorte es más joven,
         `retencion_pct` viene en `null` -> NO se inventa un 0% por falta de
@@ -1108,8 +1110,9 @@ def get_cohortes(
     """
     tenant_id = current_user["tenant_id"]
 
-    filas = db.execute(sql_text("""
-        WITH altas AS (
+    filas = db.execute(sql_text(f"""
+        WITH {sql_cte_asistencias()},
+        altas AS (
             SELECT id, tenant_id, created_at::date AS alta
             FROM usuarios
             WHERE tenant_id = :tid AND rol = 'alumno'

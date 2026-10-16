@@ -6,7 +6,7 @@ from app.core.urls import url_frontend  # B.2
 import bcrypt
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, func
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
@@ -17,7 +17,6 @@ from app.core.config import settings
 from app.models.usuario import Usuario, RolUsuario
 from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
-from app.models.asistencia import Asistencia
 from app.schemas.usuario import UsuarioCreate, UsuarioUpdate, UsuarioResponse, UsuarioListItem
 from app.core.dependencies import get_current_user, get_current_admin
 from app.core.rate_limit import limiter, LIMIT_CRITICO
@@ -25,6 +24,7 @@ from app.services.asignaciones_clases import (
     hay_que_liberar_coach,
     liberar_coach,
 )
+from app.services.asistencia_real import ultima_asistencia_por_alumno
 from app.services.auditoria_service import registrar_auditoria
 from app.services.email_service import send_solicitud_prueba_clase
 from app.utils.santiago import (
@@ -282,13 +282,15 @@ def _resumen_membresia(suscripcion, plan) -> Optional[dict]:
 def _items_con_membresia(db: Session, tenant_id: int, usuarios: list) -> List[dict]:
     """Filas del listado + membresía vigente + última asistencia.
 
-    TRES consultas para toda la página (suscripciones, planes y asistencias de los ids
+    TRES consultas para toda la página (suscripciones, planes y asistencia de los ids
     pedidos), no una por alumno: la ficha rápida del buscador no puede convertir el
     listado en un N+1.
 
-    `ultima_asistencia` usa la MISMA definición que Fidelización
-    (`max(asistencias.fecha)` por alumno y tenant): un alumno que nunca asistió queda en
-    `None`, no en una fecha inventada.
+    `ultima_asistencia` sale de la asistencia REAL
+    (`services/asistencia_real.ultima_asistencia_por_alumno`: `reservas.asistio` sobre la fecha de
+    la clase), la MISMA definición que usan el coach, el churn y las campañas de correo: un alumno
+    que nunca asistió queda en `None`, no en una fecha inventada. Antes leía la tabla histórica
+    `asistencias`, que nadie puebla: para el buscador TODOS eran "nunca asistió".
     """
     ids = [u.id for u in usuarios]
     vigentes, planes, ultimas = {}, {}, {}
@@ -311,15 +313,9 @@ def _items_con_membresia(db: Session, tenant_id: int, usuarios: list) -> List[di
                 p.id: p for p in db.query(Plan).filter(Plan.id.in_(plan_ids)).all()
             }
 
-        ultimas = {
-            fila[0]: fila[1]
-            for fila in db.query(
-                Asistencia.usuario_id, func.max(Asistencia.fecha)
-            ).filter(
-                Asistencia.tenant_id == tenant_id,
-                Asistencia.usuario_id.in_(ids),
-            ).group_by(Asistencia.usuario_id).all()
-        }
+        # Asistencia REAL de la página: UNA consulta agregada (`reservas.asistio` sobre la fecha
+        # de la clase) para todos los ids, sin N+1. Ver `services/asistencia_real.py`.
+        ultimas = ultima_asistencia_por_alumno(db, tenant_id, ids)
 
     return [
         {

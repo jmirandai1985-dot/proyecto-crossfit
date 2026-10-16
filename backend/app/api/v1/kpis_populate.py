@@ -26,6 +26,10 @@ from app.db.database import get_db
 from app.services import metricas_service as metricas
 from app.services import plan_vencimiento
 from app.services import churn_service
+# Asistencia REAL (`reservas.asistio` sobre la fecha de la clase): UNA sola definición
+# (`services/asistencia_real.py`) para el churn, el embudo y los features del ML.
+from app.services.asistencia_real import (asistencias_entre_por_alumno,
+                                          ultima_asistencia_por_alumno)
 from app.services.clases_service import sql_clase_realizada
 from app.models.daily_kpis import DailyKpi
 from app.models.monthly_kpis import MonthlyKpi
@@ -36,7 +40,6 @@ from app.models.suscripcion import Suscripcion
 from app.models.reserva import Reserva
 from app.models.clase import Clase
 from app.models.plan import Plan
-from app.models.asistencia import Asistencia
 from app.models.transaccion_financiera import TransaccionFinanciera
 from app.utils.santiago import fecha_chile, hoy_santiago
 
@@ -85,11 +88,13 @@ def _sum_egresos(db, tenant_id, desde, hasta):
 
 
 def _ultima_asistencia(db, tenant_id, usuario_id):
-    """Fecha de la última asistencia registrada (tabla `asistencias`)."""
-    return db.query(func.max(Asistencia.fecha)).filter(
-        Asistencia.tenant_id == tenant_id,
-        Asistencia.usuario_id == usuario_id,
-    ).scalar()
+    """Fecha de la última asistencia REAL del alumno (None si nunca fue).
+
+    Delega en `asistencia_real` (UNA sola definición de "asistió": `reservas.asistio` sobre la
+    fecha de la clase). Antes leía la tabla histórica `asistencias`, que nadie puebla: TODOS los
+    alumnos quedaban "sin asistencia" y el churn los medía desde su alta.
+    """
+    return ultima_asistencia_por_alumno(db, tenant_id, [usuario_id]).get(usuario_id)
 
 
 def _dias_inactividad(hoy, ultima, created_at):
@@ -119,19 +124,12 @@ def _dias_inactividad(hoy, ultima, created_at):
 def _conteos_asistencias(db, tenant_id, ids, dias, fecha_ref) -> dict:
     """{usuario_id: n_asistencias} en la ventana [fecha_ref - dias, fecha_ref].
 
-    Una sola query agregada (mismo criterio que `ml.features.build_features`).
-    La necesita la rama heurística, que no calcula las ventanas de asistencia.
+    Una sola query agregada y MISMA fuente que el resto del churn (`asistencia_real`: la
+    asistencia REAL sobre la fecha de la clase). La necesita la rama heurística, que no calcula
+    las ventanas de asistencia.
     """
-    if not ids:
-        return {}
-    return dict(db.query(
-        Asistencia.usuario_id, func.count(Asistencia.id)
-    ).filter(
-        Asistencia.tenant_id == tenant_id,
-        Asistencia.usuario_id.in_(ids),
-        Asistencia.fecha >= fecha_ref - timedelta(days=dias),
-        Asistencia.fecha <= fecha_ref,
-    ).group_by(Asistencia.usuario_id).all())
+    return asistencias_entre_por_alumno(
+        db, tenant_id, ids, fecha_ref - timedelta(days=dias), fecha_ref)
 
 
 # ── 1) POST /api/v1/kpis/populate/daily ──────────────────────────────────────
@@ -288,16 +286,17 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
         dia_chile(Suscripcion.fecha_inicio) <= fin,
     ).scalar() or 0
 
-    alumnos_clase_prueba_ejecutada = db.query(
-        func.count(func.distinct(Asistencia.usuario_id))
-    ).join(Suscripcion, Suscripcion.usuario_id == Asistencia.usuario_id).join(
+    # "Ejecutó" = tuvo >= 1 asistencia REAL en el período (`asistencia_real`) entre los alumnos
+    # con un plan de prueba (en cualquier momento). Antes salía de la tabla histórica
+    # `asistencias`, que nadie puebla: el embudo quedaba en 0 aunque hubiera alumnos entrenando.
+    ids_prueba = [uid for (uid,) in db.query(Suscripcion.usuario_id).join(
         Plan, Suscripcion.plan_id == Plan.id
     ).filter(
-        Asistencia.tenant_id == tenant_id,
-        Asistencia.fecha >= inicio, Asistencia.fecha <= fin,
         Suscripcion.tenant_id == tenant_id,
         Plan.nombre == PLAN_PRUEBA,
-    ).scalar() or 0
+    ).distinct().all()]
+    con_asistencia = asistencias_entre_por_alumno(db, tenant_id, ids_prueba, inicio, fin)
+    alumnos_clase_prueba_ejecutada = sum(1 for n in con_asistencia.values() if n > 0)
 
     alumnos_plan_comprado = db.query(func.count(Suscripcion.id)).join(
         Plan, Suscripcion.plan_id == Plan.id

@@ -31,16 +31,15 @@ plan": es un plan pago esperando. Es una categoria propia de `recomendacion_chur
 import logging
 from datetime import timedelta
 
-from sqlalchemy import func
-
 from app.core.estados import plan_comercial, vigente_hoy
 from app.db.database import SessionLocal
-from app.models.asistencia import Asistencia
 from app.models.plan import Plan
 from app.models.predictions_churn import PredictionsChurn
 from app.models.suscripcion import Suscripcion
 from app.models.usuario import Usuario
 from app.services import plan_vencimiento
+from app.services.asistencia_real import (asistencias_entre_por_alumno,
+                                          ultima_asistencia_por_alumno)
 from app.utils.santiago import fecha_chile, hoy_santiago
 
 logger = logging.getLogger("uvicorn")
@@ -181,11 +180,13 @@ def nivel_de_riesgo(prob: float) -> str:
 
 
 def _ultima_asistencia(db, tenant_id, usuario_id):
-    """Fecha de la ultima asistencia del alumno (o `None` si nunca asistio)."""
-    return db.query(func.max(Asistencia.fecha)).filter(
-        Asistencia.tenant_id == tenant_id,
-        Asistencia.usuario_id == usuario_id,
-    ).scalar()
+    """Fecha de la ultima asistencia REAL del alumno (o `None` si nunca asistio).
+
+    Delega en `asistencia_real` (UNA sola definicion de "asistio": `reservas.asistio` sobre la
+    fecha de la clase). Antes leia la tabla historica `asistencias`, que nadie puebla: TODOS los
+    alumnos quedaban "sin historial" y el churn los medía desde su alta.
+    """
+    return ultima_asistencia_por_alumno(db, tenant_id, [usuario_id]).get(usuario_id)
 
 
 def _dias_inactividad(db, tenant_id, usuario_id, created_at, hoy) -> int:
@@ -198,13 +199,13 @@ def _dias_inactividad(db, tenant_id, usuario_id, created_at, hoy) -> int:
 
 
 def _conteos(db, tenant_id, usuario_id, dias, hoy) -> int:
-    """Asistencias del alumno en la ventana [hoy - dias, hoy]."""
-    return db.query(func.count(Asistencia.id)).filter(
-        Asistencia.tenant_id == tenant_id,
-        Asistencia.usuario_id == usuario_id,
-        Asistencia.fecha >= hoy - timedelta(days=dias),
-        Asistencia.fecha <= hoy,
-    ).scalar() or 0
+    """Asistencias REALES del alumno en la ventana [hoy - dias, hoy] (fecha de la clase).
+
+    Misma fuente que `_ultima_asistencia` (`asistencia_real`, sin duplicar el criterio): el churn
+    del alumno no puede contar una asistencia que las pantallas no muestran.
+    """
+    return asistencias_entre_por_alumno(
+        db, tenant_id, [usuario_id], hoy - timedelta(days=dias), hoy).get(usuario_id, 0)
 
 
 # ── "Plan sin usar": plan vigente COMPRADO y todavia sin estrenar ─────────────
@@ -287,11 +288,8 @@ def plan_sin_usar_lote(db, tenant_id: int, ids, hoy=None,
     for usuario_id, fecha_inicio in consulta.all():
         inicio_por_alumno.setdefault(usuario_id, fecha_inicio)
 
-    # 2) Ultima asistencia de cada alumno (una sola query agregada).
-    ultimas = dict(
-        db.query(Asistencia.usuario_id, func.max(Asistencia.fecha))
-        .filter(Asistencia.tenant_id == tenant_id, Asistencia.usuario_id.in_(ids))
-        .group_by(Asistencia.usuario_id).all())
+    # 2) Ultima asistencia REAL de cada alumno (una sola query agregada, `reservas.asistio`).
+    ultimas = ultima_asistencia_por_alumno(db, tenant_id, ids)
 
     return {uid for uid, inicio in inicio_por_alumno.items()
             if es_plan_sin_usar(True, fecha_chile(inicio), ultimas.get(uid), hoy)}
