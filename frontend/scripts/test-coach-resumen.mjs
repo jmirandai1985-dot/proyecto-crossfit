@@ -26,6 +26,8 @@ import { readFileSync } from 'node:fs';
 const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const RESUMEN = leer('../src/components/ResumenCoach.jsx');
 const DASH = leer('../src/pages/coach/DashboardCoach.jsx');
+// Los tipos de aviso (incluido el del aviso rápido) viven en el util compartido.
+const ALMACEN_AVISOS = leer('../src/utils/avisosMarketing.js');
 const ENTREGA = leer('../src/pages/coach/EntregarPedido.jsx');
 const MODAL_ENTREGA = leer('../src/components/ModalEntregarPedido.jsx');
 // Bloque 2: el aviso del walk-in pasó a ser un TOAST y el texto lo escribe el modal (pegado a
@@ -78,12 +80,42 @@ console.log('== 1b. Avisos para alumnos (Bloque 10) ==');
 ok(/data-testid="resumen-nuevo-aviso"/.test(RESUMEN) && /onNuevoAviso/.test(RESUMEN),
     'la sección tiene "+ Nuevo aviso"');
 ok(/etiquetaTipo\(aviso\.tipo\)/.test(RESUMEN) && /resumen-lista-avisos/.test(RESUMEN),
-    'lista los avisos vigentes con el nombre de su tipo (util del carrusel)');
+    'lista los avisos con el nombre de su tipo (util del carrusel)');
 ok(/data-testid="resumen-sin-avisos"/.test(RESUMEN), 'y su estado vacío explicado');
-ok(/useAvisosMarketingVigentes/.test(DASH) && /avisos=\{avisosVigentes\}/.test(DASH),
+ok(/useAvisosMarketingVigentes/.test(DASH),
     'el panel lee GET /marketing/vigentes (abierto a cualquier sesión autenticada)');
 ok(/onNuevoAviso=\{\(\) => setModalAviso\(true\)\}/.test(DASH) && /<ModalAvisoRapido/.test(DASH),
     'y el alta es el MISMO aviso rápido (tipo `aviso` y ventana HOY: los fija el backend)');
+
+console.log('== 1c. Punto 2: al coach le toca SÓLO su aviso rápido del día ==');
+ok(/import \{ TIPO_AVISO_RAPIDO \} from '\.\.\/\.\.\/utils\/avisosMarketing'/.test(DASH),
+    'el panel importa el tipo del aviso rápido (no un literal suelto)');
+ok(/const avisosDelCoach = useMemo\(\s*\(\) => avisosVigentes\.filter\(\(a\) => a\.tipo === TIPO_AVISO_RAPIDO\)/.test(DASH),
+    'filtra los vigentes al tipo del aviso rápido: promoción/colaboración/evento quedan fuera');
+ok(/avisos=\{avisosDelCoach\}/.test(DASH),
+    'a la sección le llega `avisosDelCoach` (ya no los vigentes crudos)');
+ok(/export const TIPO_AVISO_RAPIDO = 'aviso'/.test(ALMACEN_AVISOS),
+    'TIPO_AVISO_RAPIDO vive en utils/avisosMarketing.js (espejo del backend)');
+ok(/Acá ves SÓLO tu aviso rápido del día/.test(RESUMEN),
+    'el pie de la tarjeta explica por qué no aparecen las otras categorías');
+ok(/No publicaste tu aviso rápido de hoy/.test(RESUMEN),
+    'el estado vacío habla del aviso del coach (no de "no hay avisos vigentes")');
+
+console.log('== 1d. Punto 5: la tarjeta grande cambia sola cuando pasa la hora ==');
+ok(/import \{ proximoCambioDeClase \} from '\.\.\/\.\.\/utils\/relojClases'/.test(DASH),
+    'el panel usa el reloj de clases (util puro, con su test aislado)');
+ok(/proximoCambioDeClase\(clasesHoyConAsistencia, reloj\)/.test(DASH),
+    'el borde sale de las clases de HOY y del reloj del panel');
+ok(/setInterval\(\(\) => setReloj\(Date\.now\(\)\), 30_000\)/.test(DASH),
+    'hay un latido cada 30 s que rearma el temporizador');
+ok(/invalidateQueries\(\{ queryKey: \['asistencia'\] \}\)/.test(DASH),
+    'en el borde se vuelve a preguntar por el `estado` (el que decide el backend)');
+ok(/visibilitychange/.test(DASH),
+    'al volver a la pestaña se re-lee el reloj (los timers se pausan en segundo plano)');
+ok(/proximoCambio=\{proximoCambio\}/.test(DASH) && /data-proximo-cambio=\{proximoCambio/.test(RESUMEN),
+    'el instante del próximo cambio viaja a la tarjeta como dato auditable');
+eq(/estado === 'realizada' \|\| new Date\(\)/.test(DASH), false,
+    'el front NO recalcula el estado con su propio reloj: sigue siendo el del backend');
 
 console.log('== 2. Tarjeta grande: 3 números y el walk-in ==');
 for (const t of ['con reserva', 'ya marcaron', 'faltan']) {

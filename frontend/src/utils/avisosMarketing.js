@@ -108,6 +108,12 @@ export const TIPO_POR_DEFECTO = {
 export const TIPOS_EDITABLES = TIPOS_AVISO.filter((tipo) => tipo.id !== 'producto_bazar');
 export const IDS_EDITABLES = TIPOS_EDITABLES.map((tipo) => tipo.id);
 
+// El tipo del AVISO RÁPIDO DEL DÍA: el único que publica un coach y el único que le toca ver
+// en su Dashboard (Promoción, Colaboración y Evento son contenido del admin en Marketing).
+// Espejo del `tipo` que fija el backend en `POST /marketing/aviso-rapido`
+// (`app/services/avisos_marketing.py: payload_aviso_rapido`).
+export const TIPO_AVISO_RAPIDO = 'aviso';
+
 const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
     'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 

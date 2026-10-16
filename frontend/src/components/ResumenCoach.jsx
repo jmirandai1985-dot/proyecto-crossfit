@@ -33,7 +33,9 @@ import { etiquetaTipo } from '../utils/avisosMarketing';
  *
  * Props: `clasesHoy` (con estado/marcada/reservas) · `proximaClase` (la en curso o la que
  * sigue) · `reservasProxima` (reservas de ESA clase) · `cargandoReservas` · `wodHoy` ·
- * `avisos` (los vigentes hoy) · `fechaCorta` · `sinAsignaciones` · `onPublicarWod` ·
+ * `avisos` (los avisos rápidos del coach vigentes hoy: el panel ya los filtró a tipo `aviso`)
+ * · `fechaCorta` · `proximoCambio` (epoch ms del próximo arranque/cierre de clase, para que la
+ * tarjeta grande se sepa actualizada sin recargar) · `sinAsignaciones` · `onPublicarWod` ·
  * `onAgregarSinReserva(clase)` · `onAbrirAsistencia` · `onAbrirClase(clase)` ·
  * `onAbrirDetalleWod(clase, wod)` · `onNuevoAviso`.
  */
@@ -86,7 +88,7 @@ const BADGE_ESTADO = {
 
 const ResumenCoach = ({
     clasesHoy = [], proximaClase = null, reservasProxima = [], cargandoReservas = false,
-    wodHoy = null, avisos = [], fechaCorta = '', sinAsignaciones = false,
+    wodHoy = null, avisos = [], fechaCorta = '', sinAsignaciones = false, proximoCambio = null,
     onPublicarWod, onAgregarSinReserva, onAbrirAsistencia, onAbrirClase, onAbrirDetalleWod,
     onNuevoAviso,
 }) => {
@@ -121,10 +123,14 @@ const ResumenCoach = ({
                 </p>
             </div>
 
-            {/* ── 2. La clase EN CURSO (o la próxima): el corazón de la pantalla ── */}
+            {/* ── 2. La clase EN CURSO (o la próxima): el corazón de la pantalla ──
+                `data-proximo-cambio` (punto 5 del reporte móvil) es el instante en que el panel
+                vuelve a preguntar por el `estado`: el próximo arranque o cierre de clase. Va
+                como dato para poder auditarlo desde afuera; no se pinta. */}
             {proximaClase && (
                 <div className="rounded-[28px] border-2 border-[#D7FF4A] bg-[linear-gradient(135deg,#1C1C20,#121214)] px-5 py-7 text-center sm:px-10 sm:py-9"
-                    data-testid="tarjeta-asistencia">
+                    data-testid="tarjeta-asistencia"
+                    data-proximo-cambio={proximoCambio ? new Date(proximoCambio).toISOString() : undefined}>
                     <div className="flex items-center justify-center gap-2.5">
                         <span className="h-2.5 w-2.5 rounded-full bg-[#D7FF4A]" aria-hidden="true" />
                         <span className="text-[12px] font-extrabold uppercase tracking-[0.06em] text-[#D7FF4A]">
@@ -211,8 +217,10 @@ const ResumenCoach = ({
 
             {/* ── 5. Avisos para alumnos (Bloque 10) ──
                 El coach sólo puede publicar AVISOS DEL DÍA: el resto de los tipos los elige el
-                admin en Marketing. Se listan los vigentes hoy —los mismos que ve el carrusel
-                del Inicio del alumno— leídos del endpoint abierto a cualquier sesión. */}
+                admin en Marketing. Punto 2 del reporte móvil: esta sección mostraba las cuatro
+                categorías mezcladas (promoción, colaboración, evento y aviso del box); la lista
+                que llega por props ya viene filtrada al tipo `aviso` —el aviso rápido del día—
+                desde el panel, que es donde se decide qué le toca ver al coach. */}
             <div className={TARJETA} data-testid="resumen-avisos">
                 <div className="flex items-center justify-between gap-3">
                     <p className={ROTULO}>Avisos para alumnos</p>
@@ -224,8 +232,8 @@ const ResumenCoach = ({
 
                 {avisos.length === 0 ? (
                     <p className="mt-2 text-[12px] text-zinc-500" data-testid="resumen-sin-avisos">
-                        No hay avisos vigentes hoy. El que publiques aparece en el Inicio de los
-                        alumnos y desaparece solo a medianoche.
+                        No publicaste tu aviso rápido de hoy. El que publiques aparece en el Inicio
+                        de los alumnos y desaparece solo a medianoche.
                     </p>
                 ) : (
                     <ul className="mt-3 space-y-2" data-testid="resumen-lista-avisos">
@@ -246,7 +254,8 @@ const ResumenCoach = ({
                     </ul>
                 )}
                 <p className="mt-2 text-[10.5px] text-zinc-600">
-                    Promociones, colaboraciones y eventos los publica el admin desde Marketing.
+                    Acá ves SÓLO tu aviso rápido del día. Promociones, colaboraciones y eventos los
+                    publica el admin desde Marketing (los alumnos los leen igual en su Inicio).
                     {avisos.length > 4 && ` Se muestran 4 de ${avisos.length}.`}
                 </p>
             </div>
