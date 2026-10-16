@@ -80,7 +80,9 @@ def test_b_el_dashboard_del_coach_consume_los_hooks():
                   "const riesgoQ = useAlumnosCoachEnRiesgo(usuario_id);",
                   "const coachDiscQ = useCoachDisciplinas();",
                   "const alumnosQ = useAlumnosDeCoach(usuario_id);",
-                  "const progresoQ = useProgresoAlumnosCoach(alumnosQ.data);",
+                  # Parte 2.1: el enriquecimiento (RMs + nivel) recibe la PÁGINA visible, no
+                  # "los primeros 50" del padrón como antes.
+                  "const progresoQ = useProgresoAlumnosCoach(progresoPagina);",
                   "const rmsRecientesQ = useHistorialRmTodos(5);",
                   "const alumnoRmsQ = useRmsAlumno(selectedAlumno?.id);",
                   "const reservasProximaQ = useReservasPorClase(proximaClase?.id);",
@@ -95,7 +97,13 @@ def test_b_el_dashboard_del_coach_consume_los_hooks():
                      "const erroresBloque = useMemo(",
                      "const cargandoInicial = clasesQ.isPending;",
                      "const cargandoRmsAlumno = alumnoRmsQ.isPending;",
-                     "const cargandoReservasProxima = Boolean(proximaClase) && reservasProximaQ.isPending;"):
+                     "const cargandoReservasProxima = Boolean(proximaClase) && reservasProximaQ.isPending;",
+                     # Parte 2.1 (buscador + nivel + paginación real del tab Progreso).
+                     "const cargandoProgreso = progresoQ.isPending;",
+                     "const alumnosProgresoBuscados = useMemo(",
+                     "const progresoPagina = useMemo(",
+                     "const progresoFiltrado = progresoAlumnos",
+                     "const rangoProgreso = rangoMostrado({"):
         assert derivado in f, f"falta derivar: {derivado}"
     # Ni la carga ni el banner se sincronizan a mano; "Reintentar" refetchea las consultas.
     assert "onClick={reintentar}" in f
