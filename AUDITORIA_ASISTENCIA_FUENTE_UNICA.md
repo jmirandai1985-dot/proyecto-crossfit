@@ -142,13 +142,129 @@ $env:EMAIL_MODO='real'; py -3.12 scripts/alertas_inactividad_test.py --correo tu
 
 ## 7. Pendientes
 
-1. **Credenciales de la rama TEST** para (a) correr los tests de integración con los seeds nuevos,
-   (b) medir los números reales antes/después (`SELECT count(*) FROM asistencias` contra la
-   asistencia real) y (c) disparar el correo de inactividad contra la base (la última prueba que
-   falta de la campaña).
+1. ~~**Credenciales de la rama TEST**~~ **RESUELTO (2026-10-16)**: credencial rotada, conexión
+   validada y tests de integración corridos — ver §8 (que además destapó un bug de producción que
+   sólo era visible con la base conectada). De (c) queda sólo disparar la campaña **real** de
+   inactividad (256 correos al padrón): es una decisión del negocio, no una prueba técnica.
 2. **Reentrenar el churn** (`ml/entrenar.py` / `POST /kpis/populate/predictions`): el modelo en uso
    se entrenó con la tabla vacía (features degenerados).
 3. **`.env.test` en `EMAIL_MODO=noop`** es lo que evita mandar correos por accidente: si algún día
    se quiere una campaña real, es una decisión explícita.
 4. La tabla `asistencias` sigue existiendo con su escritor (`POST /fidelizacion/registrar`). Si se
    quiere retirar del todo, es un paso aparte (migración + borrar el endpoint + el modelo).
+
+## 8. Validación contra la base TEST (2026-10-16) — credencial rotada
+
+La conexión estaba caída (`password authentication failed for user 'neondb_owner'`) porque se rotó
+la contraseña de la rama TEST. Con la credencial nueva (endpoint `ep-damp-base-b6mpe739`) se pudo
+por fin **EJECUTAR** lo que hasta acá era "escrito pero no corrido". Resultado: **un bug de
+producción** que ningún guard de texto podía ver.
+
+### 8.1 El bug que apareció al conectar: el CTE del BI leía una columna inexistente
+
+`sql_cte_asistencias()` seleccionaba `r.usuario_id`: en `reservas` esa columna **no existe** (la
+real es `alumno_id`). Toda consulta cruda que pega ese CTE fallaba con
+`UndefinedColumn: column r.usuario_id does not exist`:
+
+| consumidor | efecto |
+| --- | --- |
+| `alertas_email_service.enviar_alertas_inactividad` | **toda** la campaña de inactividad: excepción, 0 correos |
+| `kpis.py` `/bloques-horarios` (bloques + cobertura) | 500 |
+| `kpis.py` `/cohortes` | 500 |
+
+El camino ORM del helper (`ultima_asistencia_por_alumno`: coach, churn, buscador, ML, embudo)
+siempre estuvo bien; el bug vivía sólo en el **espejo SQL** del BI. Ningún guard lo veía porque
+**miran texto, no ejecutan SQL**; el fix viene con el guard que lo habría cazado.
+
+- Fix: `services/asistencia_real.py` → `r.alumno_id AS usuario_id`.
+- Guard nuevo: `test_asistencia_fuente_unica.py::test_b4` fija `r.alumno_id AS usuario_id` y la
+  ausencia de `r.usuario_id`.
+- Verificación ejecutando contra TEST: CTE = 20.654 filas; `/bloques-horarios` cobertura
+  20.654/20.654; `/cohortes` devuelve datos por mes; la consulta de la campaña devuelve 364 activos.
+
+### 8.2 También hubo que actualizar el guard de ramas
+
+`TEST_BRANCH_IDS` vive en `app/core/config.py` (no en el `.env`) y tenía el endpoint viejo: el guard
+fail-safe `is_test_db_url()` daba `False`, así que los fixtures de los tests abortaban
+("DATABASE_URL no es una rama de TEST") y `run_setup_test_db.py` / `run_tests.bat` se negaban a
+correr. Se agregó `ep-damp-base-b6mpe739` como TEST actual.
+
+El `.env.test` **no se versiona** (está en `.gitignore`): la contraseña no entra al repo. Se dejó un
+backup local del archivo anterior en `backend/backups/` (también ignorado).
+
+### 8.3 Medición antes/después (tenant 1, 409 alumnos)
+
+| métrica | ANTES (`asistencias`) | DESPUÉS (`reservas.asistio`) |
+| --- | --- | --- |
+| filas de asistencia | 24.752 | 20.654 |
+| alumnos con asistencia | 401 / 409 | 302 / 409 |
+| última fecha usada | 2026-10-05 (se cortó) | 2026-10-15 (hoy) |
+| "nunca asistió" (buscador) | 8 | 107 |
+| plan comercial vigente | 259 | 259 |
+| "plan sin usar" | 95 | **93** |
+| churn CRÍTICO / ALTO | 80 / 71 | **148 / 2** |
+| inactividad media (días) | 34,0 | 63,6 |
+| campaña inactividad (7+ días) | 356 | **256** |
+| asistencias últimos 30 días | 1.725 | 1.728 |
+
+**La tabla histórica NO estaba vacía** (a diferencia de la primera estimación): la llenan los seeds
+anuales (`scripts/seed_anual_prod.py`, `scripts/crear_usuarios_demo.py`), y para **299** de los 409
+alumnos su última fecha coincide con la real. Por eso el efecto no es "todo da 0":
+
+- **299 alumnos**: igual en ambas fuentes (los seeds escribieron las dos).
+- **2 alumnos**: fecha distinta (el legacy quedó atrás; p.ej. #230 2026-09-30 → 2026-10-08).
+- **1 alumno**: el legacy no tenía nada y la real sí.
+- **100 alumnos**: el legacy tenía fecha y la real **no**. Explicación medida: **4.101 filas legacy
+  huérfanas** (tienen `clase_id` pero ninguna reserva de ese alumno en esa clase). La FK de
+  `asistencias` apunta a `clases`, no a `reservas`, así que la fila sobrevive al borrado de la
+  reserva. De las 24.752 filas, 20.651 sí casan con una reserva `asistio=true` / `estado='confirmada'`
+  (301 alumnos): el resto son fantasmas.
+
+Consecuencia: esos 100 alumnos quedan "sin historial" para la fuente real → el churn los mide desde
+el alta (**+68 CRÍTICOS**) y la campaña deja de contarlos (**100 falsos positivos menos**).
+
+⚠️ **Corrección de mi estimación previa**: había anticipado "plan sin usar cae fuerte" y "bajan los
+CRÍTICOS falsos positivos". Con datos reales, el churn va en sentido contrario (+68 CRÍTICOS) y "plan
+sin usar" apenas se mueve (95 → 93, sólo 2 falsos positivos). El driver es exclusivamente las filas
+huérfanas. La fuente real es la **consistente** (es la que ven historial, contadores "ya marcaron",
+RMS y reservas), pero esos 100 alumnos merecen una revisión de datos antes de dar por buenos los
+correos y el panel de riesgo.
+
+### 8.4 Tests corridos con la base (antes quedaban en `skip` / gateados por el guard)
+
+| suite | resultado |
+| --- | --- |
+| `test_asistencia_fuente_unica.py` (guard) | 9 passed |
+| `test_riesgo_fuente_real.py` | 5 passed + `test_c1` (integración) **corrido a mano** con un plugin temporal que quita el `skip`: 1 passed |
+| `test_fidelizacion_plantillas.py` | 26 passed |
+| `test_pase_regreso_no_es_membresia.py` | 7 passed |
+| `test_alertas_dedupe_alumno_integracion.py` + `test_alertas_log_conteos_integracion.py` + `test_usuarios_buscador_membresia.py` | 22 passed |
+| `test_dias_vencimiento_unico.py` | 10 passed |
+| `test_plan_sin_usar.py` + `test_busqueda_fidelizacion.py` + `test_recomendacion_vivo_tabla_modal.py` + `test_kpis_frecuencia_semanal.py` | 27 passed / 5 failed (**pre-existentes**) |
+| `test_admin_prueba_nuevos.py` | 23 passed / 1 failed (**pre-existente**: `test_g3`, etiqueta JSX) |
+
+Los 6 fallos son pre-existentes (verificado: ni el código involucrado ni los tests de esos casos
+cambiaron en esta tanda):
+
+1. `test_busqueda_fidelizacion.py` (b1–b4): llama `get_predictions_churn(buscar=…, db=…,
+   current_user=…)` sin el `background_tasks` que la firma exige (la firma ya era así antes de la
+   migración; el archivo del test no se tocó).
+2. `test_kpis_frecuencia_semanal.py::test_b1`: `numeric field overflow` al escribir
+   `monthly_kpis.conversion_rate = 12.950` (259 planes comprados / 2 alumnos de prueba × 100) en una
+   columna `numeric(5,2)`. Los dos operandos y la fórmula son código que NO cambié: es un borde
+   latente del populate con los datos de este box (con la base conectada, ahora se ve).
+3. `test_admin_prueba_nuevos.py::test_g3` (JSX).
+
+Nota operativa: la suite completa se corre con `run_tests.bat`, que es **destructivo**
+(`DROP SCHEMA public CASCADE` + re-seed). Se evitó a propósito: borraba los datos reales de la rama
+que hacían falta para medir. Los tests de integración se corrieron directo con
+`py -3.12 -m pytest … --noconftest` (no levanta uvicorn ni re-siembra).
+
+### 8.5 Lo que queda
+
+- **Reentrenar el churn** (§7.2): con la fuente nueva, 70 de 409 alumnos cambian de nivel y la
+  inactividad media se duplica; el modelo en uso está desalineado.
+- **Los 100 alumnos con filas huérfanas**: revisar en PROD si esas asistencias existieron de verdad
+  (si existieron, las perdió el borrado de la reserva: es un problema de DATOS, no de código).
+- **La campaña real de inactividad** (256 correos): sin disparar. `EMAIL_MODO=noop` en TEST es lo que
+  evita mandarlos por accidente.
