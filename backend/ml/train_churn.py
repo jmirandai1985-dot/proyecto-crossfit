@@ -8,10 +8,16 @@ en `ml/persistencia.py` — las mismas que usa el endpoint
 ⚠️ Ya NO escribe en `ml/artifacts/`: el modelo se persiste como pickle en la
    tabla `ml_modelos` (BD) para sobrevivir a los reinicios/redeploys de Render.
 
-- Guard de seguridad: ENVIRONMENT=test + DATABASE_URL con 'billowing-violet-acdqud44'.
+- Guard de seguridad: ENVIRONMENT=test + `is_test_db_url(DATABASE_URL)` (la lista viva de
+  ramas de TEST en `app/core/config.py`; el id hardcodeado que estaba acá quedó obsoleto
+  cuando Neon recreó la rama, así que la CLI abortaba siempre).
+
+OJO: para el día a día ya NO hace falta correr esto a mano — el scheduler de la app
+reentrena el churn TODAS las semanas (lunes 04:30 CLT, `scheduler.job_reentrenar_churn`).
+Esta CLI queda para forzarlo en el momento.
 
 Uso (PowerShell, desde backend/):
-    $env:ENVIRONMENT="test"; python3.12 ml\\train_churn.py
+    $env:ENVIRONMENT="test"; py -3.12 ml\\train_churn.py
 """
 import os
 import sys
@@ -29,10 +35,11 @@ BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BACKEND_DIR)
 os.chdir(BACKEND_DIR)
 
-# ── GUARD 2: la URL debe ser la de TEST (billowing-violet-acdqud44) ──
-settings = importlib.import_module("app.core.config").settings
-if "billowing-violet-acdqud44" not in settings.DATABASE_URL:
-    print("ERROR: URL no es billowing-violet-acdqud44")
+# ── GUARD 2: la URL tiene que ser una rama de TEST conocida ──
+config = importlib.import_module("app.core.config")
+settings = config.settings
+if not config.is_test_db_url(settings.DATABASE_URL):
+    print("ERROR: DATABASE_URL no es una rama de TEST (¿apunta a PROD?)")
     sys.exit(1)
 
 import ml.entrenar as entrenar  # noqa: E402
