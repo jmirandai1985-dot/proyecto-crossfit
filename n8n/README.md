@@ -108,4 +108,7 @@ claves vacías (`app/api/v1/kpis_populate.py`, `app/api/v1/mantenimiento.py`).
   (duplicado del activo `1. RENOVACIÓN`).
 - `Reentrenar Modelo ML` reentrena sólo `churn` + `forecast`; **la segmentación K-Means
   (arquetipos) no la reentrena ningún workflow** → hoy es manual
-  (`POST /api/v1/segmentacion/reentrenar`).
+  (`POST /api/v1/segmentacion/reentrenar`). Ojo (2026-10-16): el **churn** además se reentrena
+  solo todas las semanas desde la propia app (scheduler interno, `job_reentrenar_churn`, lunes
+  04:30 CLT, ver `backend/app/services/scheduler.py` y `AUDITORIA_ASISTENCIA_FUENTE_UNICA.md` §9),
+  así que el workflow/Cron Job cubre sobre todo `forecast` y la segmentación.

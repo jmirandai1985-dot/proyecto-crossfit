@@ -262,9 +262,156 @@ que hacían falta para medir. Los tests de integración se corrieron directo con
 
 ### 8.5 Lo que queda
 
+> **Atendido en §9 (2026-10-16)**: lo de abajo es el estado al cierre de §8. Las decisiones del usuario
+> y su ejecución (campaña disparada, churn reentrenado y automatizado) están en §9.
+
 - **Reentrenar el churn** (§7.2): con la fuente nueva, 70 de 409 alumnos cambian de nivel y la
   inactividad media se duplica; el modelo en uso está desalineado.
 - **Los 100 alumnos con filas huérfanas**: revisar en PROD si esas asistencias existieron de verdad
   (si existieron, las perdió el borrado de la reserva: es un problema de DATOS, no de código).
-- **La campaña real de inactividad** (256 correos): sin disparar. `EMAIL_MODO=noop` en TEST es lo que
-  evita mandarlos por accidente.
+
+---
+
+## 9. Cierre de los pendientes: campaña real + churn automático (2026-10-16)
+
+Decisión del usuario (2026-10-16): la base actual es de prueba (datos generados por script; los
+únicos correos reales son 4-5 suyos), así que **se autoriza disparar la campaña de inactividad** y
+**reentrenar + automatizar** el churn. Los otros dos pendientes quedaron **cerrados sin acción**:
+el residuo del test (3 filas sueltas) y los 100 alumnos con asistencias huérfanas (planes de prueba
+que no marcaban asistencia: no hay nada real que investigar).
+
+### 9.1 La campaña de inactividad, disparada de verdad (257 correos)
+
+Script nuevo `backend/scripts/campana_inactividad_real.py`. El punto delicado:
+`email_service.modo_envio()` tiene un FAIL-SAFE —fuera de producción fuerza `noop` **aunque**
+`EMAIL_MODO=real`, para que un `.env` cruzado no mande correo real— y el script lo desactiva de
+forma explícita y acotada, compensándolo con tres guardas propias:
+
+1. `DATABASE_URL` tiene que ser de TEST (`is_test_db_url`) → si no, ABORTA sin mandar nada.
+2. `modo_envio()` tiene que dar `real` → si no, ABORTA.
+3. **Login SMTP real antes de la tanda** → si la credencial o la red fallan, ABORTA con 0 correos.
+   Importa: cada envío se reclama con el índice único (alumno, tipo, día) y un intento fallido no
+   se puede repetir el mismo día.
+
+| | |
+| --- | --- |
+| padrón (ver §8.3) | 257 alumnos con 7+ días sin asistencia (365 activos) |
+| dominios | `example.com` 255 · `urbanbox.cl` 1 · `test.local` 1 |
+| **enviados** | **257** (0 fallidos, 11,5 min) |
+| evidencia | `notificaciones_enviadas`: 257 filas `enviado` con `dia_chile = 2026-10-16` |
+
+#### El hallazgo: la campaña estaba bloqueada por 356 filas que decían `enviado` sin haber salido
+
+Al medir el padrón apareció que **256 de 257 alumnos ya estaban "contactados" en los últimos 7 días**
+(según `_ya_enviado`, que sólo mira `estado='enviado'`). Investigando: 355 filas del 11/10 + 1 del
+12/10, todas con `destinatario_correo` NULL —o sea, filas RECLAMADAS por `_reclamar_envio`— y
+**ninguna** con rastro de envío registrado.
+
+Por qué: `_reclamar_envio` inserta la fila como `enviado` ANTES de mandar el correo (así el índice
+único reparte el trabajo entre réplicas). En TEST el fail-safe fuerza `noop` y las campañas llaman a
+`send_*` con `registrar=False`: nadie baja esa fila a `simulado`. Resultado: **el job diario de las
+09:00 CLT corría contra la base de prueba, no mandaba nada, y dejaba anotado `enviado`** — suficiente
+para bloquear la campaña real 7 días.
+
+Evidencia de que esos correos no salieron: el backend de TEST corre con `ENVIRONMENT: test`
+(`docker-compose.yml`) y el fail-safe es del 02/10 (`9f97620`), anterior a esas corridas.
+
+Corrección aplicada (no destructiva: sólo el estado, 356 filas):
+
+```sql
+UPDATE notificaciones_enviadas SET estado = 'simulado', detalle_error = '<nota>'
+ WHERE tipo = 'inactividad' AND estado = 'enviado' AND destinatario_correo IS NULL
+   AND dia_chile IS NOT NULL AND dia_chile <= CURRENT_DATE;
+```
+
+Antes de aplicarla se verificó que esas filas tuvieran `destinatario_correo IS NULL` (las que pasaron
+por un envío registrado lo tienen). Con el estado corregido, el padrón volvió a 257.
+
+⚠️ **Queda un borde de código (no lo toqué)**: en modo simulado la fila reclamada debería quedar
+`simulado`, no `enviado`; hoy nadie la baja porque las campañas pasan `registrar=False`. En PROD no
+molesta (ahí el modo es real y la fila ES un envío), pero vuelve a ensuciar TEST en cada corrida.
+Fix sugerido: un `_marcar_simulado()` al lado de `_marcar_fallido()`, llamado cuando
+`es_modo_simulado()` (ojo: los tests de integración de alertas hoy esperan `enviado`).
+
+### 9.2 El churn, reentrenado (métricas antes/después)
+
+Reentrenado con el código EXACTO del job nuevo (`scheduler._reentrenar_churn_impl()`), contra la base
+TEST, tenant 1:
+
+| métrica | antes (modelo del 15/10) | después (16/10) |
+| --- | --- | --- |
+| alumnos / abandonados | 409 / 150 | 410 / 150 |
+| accuracy (split de test) | 0,9919 | 0,9756 |
+| precision (split de test) | 1,0000 | 0,9375 |
+| recall (split de test) | 0,9778 | **1,0000** |
+| matriz de confusión | `[[78,0],[1,44]]` | `[[75,3],[0,45]]` |
+| CV accuracy (5 folds) | 0,9878 | 0,9854 |
+| CV precision | 0,9869 | 0,9742 |
+| CV recall | 0,9800 | 0,9867 |
+| 2ª importancia | `dias_para_vencer_plan` 0,348 | `asistencias_ultimos_30_dias` **0,182** |
+| artefacto | 707.079 B | 547.347 B |
+
+Lectura: el modelo nuevo deja de apoyarse en `dias_para_vencer_plan` como segunda variable y sube
+mucho `asistencias_ultimos_30_dias` (la feature que la fuente vieja dejaba en 0,044): ahora mira de
+verdad la asistencia. Recall 1,0 con 3 falsos positivos (alumnos marcados en riesgo que no se
+fueron): para una campaña de retención, ese es el lado correcto del error.
+
+### 9.3 El reentrenamiento quedó automático (lunes 04:30 CLT)
+
+Mecanismo: el **scheduler de la app** (`app/services/scheduler.py`), el MISMO patrón que ya usan las
+alertas y el cierre de mes — APScheduler + lock de líder en Postgres + lock (job, día):
+
+* `job_reentrenar_churn()` → `CronTrigger(day_of_week="mon", hour=4, minute=30)`;
+* `_reentrenar_churn_impl()` entrena (`ml/entrenar.py`, fuente real) y persiste en `ml_modelos`
+  (UPSERT), en un hilo (`to_thread.run_sync`) para no bloquear el event loop;
+* si falla: rollback + log + Sentry y **no propaga** (un churn roto no puede tumbar el scheduler);
+* clave nueva `reentrenar_churn = 1008` en `scheduler_lock.CLAVES_JOB` (`IDS_NEGOCIO` pasó de 7 a 8).
+
+Frecuencia elegida: **semanal**. El label mira 30 días hacia adelante, así que el modelo queda a lo
+sumo 7 días atrasado, y el costo es un RandomForest de segundos sobre ~410 alumnos a las 04:30 CLT.
+
+Convivencia con lo que ya existía: el Cron Job de Render (`maintenance/kpis_cloud.py`, PROD) sigue
+reentrenando los días **15 y último** del mes (churn + forecast + segmentación) y n8n puede llamar a
+`POST /api/v1/ml/reentrenar` cuando se quiera. Todo es idempotente (UPSERT por `(tenant, tipo)`), así
+que el último que corre deja su modelo: no hay conflicto.
+
+Prueba de encendido (BD TEST, `ENVIRONMENT=test`):
+
+```
+iniciar_scheduler() -> es_lider: True
+jobs agendados: [alerta_inactividad, alerta_renovacion, alerta_sin_creditos,
+                 alerta_ultimo_credito, alerta_urgencia_renovacion, cierre_mes,
+                 generar_clases_diarias, reentrenar_churn, vigilar_liderazgo]
+reentrenar_churn -> 2026-10-19 04:30:00-03:00        (lunes)
+job_reentrenar_churn() -> 410 alumnos (150 abandonados), persistido OK
+detener_scheduler() -> es_lider: False               (lock liberado)
+```
+
+Extra: la CLI `ml/train_churn.py` (para reentrenar a mano) tenía un guard con la rama TEST vieja
+hardcodeada (`billowing-violet-acdqud44`), así que abortaba siempre; ahora usa `is_test_db_url()`.
+OJO: el job reentrena el MODELO; el snapshot que ve el panel (`predictions_churn`) lo refresca
+`POST /api/v1/kpis/populate/predictions` (en PROD lo corre el Cron Job todos los días; en TEST es
+manual). Si se quiere que el job semanal refresque también el snapshot, es una línea más.
+
+### 9.4 Tests
+
+| suite | resultado |
+| --- | --- |
+| `test_scheduler_programacion.py` | 12 passed (la lista de jobs pasó de 7 a 8; el test que la fija se actualizó a propósito) |
+| `test_scheduler_locks_jobs.py` | 12 passed (se agregó `reentrenar_churn` a la coherencia de `CLAVES_JOB`) |
+| `test_scheduler_lider_latido.py` | 8 passed (usa `IDS_NEGOCIO`, no una lista fija) |
+| `test_scheduler_reentrenar_churn.py` (nuevo) | 6 passed |
+| `test_asistencia_fuente_unica.py` (guard de la fuente única) | 9 passed |
+
+El test nuevo fija: registro (`IDS_NEGOCIO` + `CLAVES_JOB`), agenda SEMANAL (lunes 04:30), que el lock
+decida (libre → reentrena; tomado → no hace nada) y que el cuerpo persista con commit y no propague
+errores. Sin BD, sin sklearn y sin correo (`--noconftest`).
+
+
+
+* **Los 255 `@example.com` no existen**: Gmail acepta el sobre y el rebote llega DESPUÉS, a la
+  casilla del box. "0 fallidos" es "0 rechazos en el momento del envío", no "255 entregados".
+* Los links del correo (logo y CTA) salen de `FRONTEND_URL`/`BACKEND_PUBLIC_URL`, y en este entorno
+  apuntan a `localhost` (`--frontend-url` / `--backend-url` los pisan si se quiere una campaña con
+  URLs públicas).
+
