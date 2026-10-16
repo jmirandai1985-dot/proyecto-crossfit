@@ -164,7 +164,7 @@ depender de una cámara física apuntando a un QR impreso). No se agregó ningun
 
 ---
 
-## 4. PARTE 3 — "En riesgo = 251" (reportado, NO arreglado)
+## 4. PARTE 3 — "En riesgo = 251" (causa raíz) — ✅ RESUELTO en la Parte 4 (§8)
 
 Con el rediseño del Resumen el KPI "En riesgo" **ya no se muestra** ahí (vive en su pestaña), así
 que el número duplicado dejó de estar a la vista; el cálculo **no se tocó**.
@@ -181,9 +181,9 @@ que el número duplicado dejó de estar a la vista; el cálculo **no se tocó**.
 - Consecuencia: si el box marca asistencia sólo por reservas, `asistencias` puede quedar vacía y
   **todos** los alumnos del coach caen en "en riesgo" → `251` de `251`. Es exactamente el síntoma.
 
-**Dos caminos posibles (decisión del usuario, no se implementó ninguno):**
-(a) que el cálculo use la misma fuente que el resto del panel (`reservas.asistio` + fecha de la
-clase), o (b) que `confirmar_asistencia` escriba además su fila en `asistencias`.
+**Dos caminos posibles (decisión del usuario):** (a) que el cálculo use la misma fuente que el
+resto del panel (`reservas.asistio` + fecha de la clase), o (b) que `confirmar_asistencia` escriba
+además su fila en `asistencias`. **Se eligió (a)** y quedó implementado en §8; (b) está descartado.
 
 
 ---
@@ -198,11 +198,12 @@ clase), o (b) que `confirmar_asistencia` escriba además su fila en `asistencias
    de nivel de atleta que existe sin consumidores). Ambas son decisiones de producto + BD.
    Consecuencia actual: el filtro de nivel cubre la **página cargada** (el nivel se calcula por
    alumno, una consulta cada uno); el buscador y la paginación sí cubren los 251.
-2. **"En riesgo" (§4)**: elegir (a) cambiar la fuente del cálculo o (b) escribir `asistencias`
-   al confirmar. Nada se tocó.
-3. **Costo del enriquecimiento**: cada página del Progreso hace 2 consultas por alumno (RMs +
+2. ~~**"En riesgo" (§4)**: elegir (a) cambiar la fuente del cálculo o (b) escribir `asistencias`
+   al confirmar. Nada se tocó.~~ → **RESUELTO con la opción (a)**: ver §8.1.
+3. ~~**Costo del enriquecimiento**: cada página del Progreso hace 2 consultas por alumno (RMs +
    nivel) = 50 requests por página de 25. Si molesta en PROD, la salida correcta es un endpoint
-   batch (contadores de RM + nivel por página) en vez de N consultas.
+   batch (contadores de RM + nivel por página) en vez de N consultas.~~ → **RESUELTO**: endpoint de
+   lote `GET /historial-rm/progreso-lote` (1 request y 5 consultas por página). Ver §8.2.
 4. **Editar WOD desde el detalle** ya no sale del panel, pero el alcance de un WOD compartido
    sigue siendo "todas las clases que lo llevan" (`PUT /wods/{id}`): si algún día se quiere editar
    "sólo para esta clase", es un cambio de backend.
@@ -232,4 +233,128 @@ clase), o (b) que `confirmar_asistencia` escriba además su fila en `asistencias
 4. `feat(coach): el Resumen se rediseña alrededor de la asistencia de hoy (mockup energético)`
 5. `feat(coach): Progreso con buscador, nivel y paginación real; el mesón escanea el QR`
 6. `docs(coach): el informe de las Partes 1-3 (hallazgos, decisiones y pendientes)`
+
+---
+
+## 8. PARTE 4 — Pendientes resueltos (decisiones del usuario)
+
+Las 4 decisiones llegaron desde el usuario. Los puntos **1 y 4 eran confirmaciones** (nada que
+construir); **2 y 3 se implementaron**. Esta tanda queda **sin commitear y sin push**.
+
+### 8.1 Punto 2 — "En riesgo" lee la asistencia REAL (opción a) ✅
+
+**Relevamiento pedido antes de cambiar nada** (`git grep` de `Asistencia`/`asistencias` en
+`backend/`):
+
+* **Escritores de la tabla en la app:** UNO solo, `POST /fidelizacion/registrar`
+  (`fidelizacion.py`)… y **ninguna pantalla lo llama**: no hay `fidelizacion/registrar` en
+  `frontend/` ni en los tests (queda como integración manual/n8n). Los seeds/demo
+  (`_demo_seed_alertas.py`, `scripts/crear_usuarios_demo.py`, `scripts/seed_anual_prod.py`) son el
+  resto. Con la tabla vacía, el filtro de alerta —que incluye a los "sin historial"— metía a TODO
+  el padrón: de ahí el "251".
+* **Lectores que responden "¿hace cuánto no entrena?" (la familia del bug):** los 3 endpoints de
+  riesgo (`/analizar/{tenant_id}`, `/coach/{id}/en-riesgo`, `/tenant/{id}/en-riesgo`) y
+  `_dias_inactividad_alumno` (los días que salen en el correo de contacto del coach).
+* **Otros lectores de la misma tabla (se reportan, NO se tocaron):**
+  * `services/churn_service.py` — `_ultima_asistencia` para el churn y **"plan sin usar"**
+    (`plan_sin_usar`, `plan_sin_usar_lote`), que alimentan `predictions_churn` (data mart de BI).
+  * `services/fidelizacion_plantillas.py` — "última asistencia" de las plantillas de campaña.
+  * `services/alertas_email_service.py` — SQL crudo `MAX(a.fecha) FROM asistencias`.
+  * `api/v1/kpis.py` (+ `kpis_populate.py`) — KPIs/BI (`LEFT JOIN asistencias`); el propio código
+    ya documenta que `asistencias.clase_id` es NULL en el 100% de las filas.
+  * `api/v1/usuarios.py` — orden por última asistencia en el buscador.
+  * `services/historial_alumno_service.py` — **ya** leía `reservas.asistio` (correcto desde antes):
+    por eso el historial del alumno y el "en riesgo" decían cosas distintas.
+
+**Decisión de alcance (anotada, sin esperar respuesta):** se migra **sólo la familia del bug** (los
+3 endpoints de riesgo + los días del correo) porque los cuatro responden la MISMA pregunta con la
+MISMA tabla, y con `asistencias` vacía los tres mostraban el padrón completo como "en riesgo" —el
+del coach **y los dos del admin**; arreglar uno solo habría dejado las pantallas discrepando (el
+bug que fijó `test_coach_alumnos_alcance.py`). Los "otros lectores" quedan como estaban a
+propósito: tocarlos mueve **números de BI y de campañas** (churn, plantillas, alertas por email,
+dashboards) y eso es una decisión aparte. Consecuencia asumida: si un box no marca asistencia en
+`reservas`, esos cinco siguen viendo la tabla histórica vacía.
+
+**Implementado:** un único helper, `services/asistencia_real.py`
+(`ultima_asistencia_por_alumno`), que es la ÚNICA definición de "asistió": `MAX(clases.fecha)`
+sobre `reservas` con `asistio = true` y la reserva no cancelada — el mismo patrón que
+`admin._alumnos_con_asistencia_de_prueba`, `historial_alumno_service._inicio_actividad` y los
+contadores "ya marcaron" de `api/v1/asistencia`. Es una consulta agregada por lote (sin N+1).
+
+**El guardado NO se tocó** (pedido explícito): `POST /fidelizacion/registrar` sigue igual (único
+`INSERT` de la app en `asistencias`, ya con una advertencia en su docstring) y
+`POST /asistencia/clases/{id}/confirmar` sigue escribiendo sólo `reservas.asistio`.
+
+**Cambio de comportamiento visible (a tener presente):** donde sí haya filas en `asistencias`, los
+"días sin entrenar" pueden cambiar y, con eso, la lista de "en riesgo" del admin y la campaña de
+`POST /fidelizacion/enviar-emails` (que hoy no enviaba nada, porque omitía a todos los "sin
+historial") pasarán a incluir a los ausentes reales. Es el comportamiento correcto, pero es un
+cambio de DATOS, no sólo de código.
+
+### 8.2 Punto 3 — Progreso: endpoint de lote (RMs + nivel de la página) ✅
+
+**Antes:** la tabla del tab Progreso pedía, por cada alumno de la página (25), DOS requests (sus
+RMs + `nivel-general`) = **50 requests** y ~4 consultas cada una (~100 consultas).
+**Ahora:** `GET /historial-rm/progreso-lote?alumno_ids=1,2,…` → **1 request y 5 consultas** para
+toda la página (1 de pertenencia al box + 2 del lote de RMs + 2 del lote de niveles).
+
+Cómo se logró sin duplicar la lógica (la regla del repo: una sola definición):
+
+* `services/rms_service.py`: nuevo `mejor_rm_por_movimiento_lote()` (2 consultas con `IN (...)` y
+  `DISTINCT ON (alumno_id, movimiento_id)`) y **`mejor_rm_por_movimiento()` delega** en él (el de
+  un alumno es el lote de un id). El orden relativo de los movimientos de un alumno no cambia.
+* `services/nivel_service.py`: se extrajo el reductor PURO `nivel_desde_mejores(mejores, peso,
+  genero)` (el bucle de "el más bajo entre movimientos"); `calcular_nivel_general()` = datos +
+  reductor, y `calcular_niveles_lote()` hace 2 consultas para todo el lote (peso/género de todos +
+  mejores RMs por movimiento de todos) y aplica el MISMO reductor.
+* `schemas/historial_rm.py`: `ProgresoAlumnoLote` + `ProgresoLoteResponse` (contrato explícito).
+  Por alumno viajan `alumno_id`, `total_rms`, `rms` (mismo schema que el endpoint individual) y los
+  dos niveles — **los mismos valores** que `nivel-general`.
+* `api/v1/historial_rm.py`: `GET /progreso-lote`. ⚠️ Va **antes** de `GET /{historial_id}`: FastAPI
+  resuelve por orden de registro y ese comodín se habría comido "progreso-lote" (422). Queda fijado
+  por el guard. Sólo alumnos del box del token, candado por alumno (`_verificar_acceso_alumno`) y
+  tope de 100 ids (400 más allá).
+* `frontend/src/hooks/queries.js`: `useProgresoAlumnosCoach` hace UNA request al lote y arma las
+  MISMAS claves que antes (`total_rms`, `rms`, `nivel`, `nivel_fuerza`, `nivel_gimnastico`,
+  `estado`): **la tabla, los chips y el filtro de nivel quedan igual** —buscador, filtro y
+  paginación no se tocaron. Si el lote falla, cae al mismo modo degradado de antes (padrón con los
+  contadores en 0).
+* `frontend/scripts/capturas-bloque2.mjs`: el fixture sirve el lote (la query ahora viaja al
+  fixture; `path` sigue siendo sólo el pathname, para no romper los `path === '...'` de siempre).
+
+**Sin cambio visible:** la captura `progreso-coach` (3/3, 0 errores de consola) muestra el mismo
+buscador, los mismos chips de nivel y la misma paginación que la versión de 50 requests. Cambia el
+tráfico, no la pantalla. Nota de despliegue: el endpoint es nuevo, así que backend y frontend van
+juntos.
+
+### 8.3 Puntos 1 y 4 — confirmaciones (nada que construir)
+
+* **Punto 1 (nivel del atleta):** se queda como está. La estimación por RMs (`nivel-general` →
+  `utils/niveles` toma el menor entre fuerza y gimnasia) es correcta y consistente con lo que ya ve
+  el alumno; **no se crea ningún campo nuevo en Admin** ni se toca `student_segments`.
+* **Punto 4 (avisos del coach):** se queda como está. El coach sólo publica el "aviso rápido del
+  día" (`POST /marketing/aviso-rapido`); Promociones/Colaboraciones/Eventos siguen siendo del admin.
+
+## 9. Verificación de esta tanda (Parte 4)
+
+* Backend (aisladas, `--noconftest`): `test_riesgo_fuente_real.py` **5 passed + 1 skipped** (la
+  parte de integración queda escrita y desactivada) y `test_progreso_lote.py` **12 passed**. Los
+  guards relacionados siguen verdes: `test_react_query_bloque{1, 1p2, 1p2b, 2a, 2b, 2c}_front` (24),
+  `test_historial_calculos` + `test_rm_categoria_contrato` + `test_historial_panel_inicio` +
+  `test_alumno_ficha_modal_front` + `test_historial_admin_acceso_front` +
+  `test_tdz_declaracion_antes_de_uso_front` (44) y `test_estados_compartido` +
+  `test_pedidos_aviso_preview_failfast` + `test_usuarios_buscador_membresia` (40).
+  ⚠️ Los tests que abren conexión a Neon fallan en esta máquina por credenciales del branch TEST
+  (`password authentication failed for user 'neondb_owner'`): es el entorno, no los cambios.
+* Frontend: **31/32** `node scripts/test-*.mjs` en verde. El único rojo es `test:click`, el humo con
+  navegador + frontend levantados (falla igual sin tocar nada).
+* `oxlint`: **0 errores** (26 warnings, preexistentes). `vite build`: exit 0.
+* Capturas CDP: `progreso-coach` **3/3** con **0 errores de consola** (tabla, buscador, chips de
+  nivel y paginación renderizando con el lote).
+* Lo que NO se pudo verificar acá: la parte de BD (sin acceso al branch TEST). Lo verificado es la
+  fuente + el reductor puro + el render real de la pantalla; la integración de `asistencia_real`
+  contra la base queda escrita en el test para correrla contra TEST.
+
+
+
 
