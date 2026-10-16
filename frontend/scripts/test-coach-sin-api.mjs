@@ -63,7 +63,7 @@ const DELEGADOS = ['../src/components/ModalEntregarPedido.jsx'];
 
 // Las pantallas que el coach SÍ navega: si una desaparece o se renombra, el barrido del
 // punto 2 se queda sin cubrirla y este chequeo lo dice.
-const ESPERADAS = ['DashboardCoach.jsx', 'EntregarPedido.jsx', 'GestionClases.jsx', 'Pizarra.jsx'];
+const ESPERADAS = ['DashboardCoach.jsx', 'EntregarPedido.jsx', 'Pizarra.jsx'];
 
 const PANTALLAS = readdirSync(new URL('../src/pages/coach/', import.meta.url))
     .filter((n) => n.endsWith('.jsx'))
@@ -79,7 +79,9 @@ for (const [rel, hook] of MODALES) {
     ok(!directa, directa
         ? `${nombre}: llamada directa -> ${directa[0].trim()}`
         : `${nombre}: sin llamadas api.*`);
-    ok(new RegExp(`import \\{ ${hook} \\} from '\\.\\.\\/hooks\\/queries'`).test(src),
+    // El import puede traer MÁS de un hook en la misma línea (AlumnoFichaCoach importa
+    // `useFichaAlumnoCoach` y `useRmsAlumno` juntos): lo que importa es que el hook esté ahí.
+    ok(new RegExp(`import \\{[^}]*\\b${hook}\\b[^}]*\\} from '\\.\\.\\/hooks\\/queries'`).test(src),
         `${nombre}: usa ${hook}`);
     ok(!/use(Effect|State)\s*\(|const cargar/.test(src),
         `${nombre}: no quedó la carga a mano (ni el \`cargar\` fantasma)`);

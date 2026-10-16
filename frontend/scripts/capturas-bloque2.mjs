@@ -57,8 +57,16 @@ if (!EDGE) {
 // ── Fixtures: las respuestas de la API, con la forma real de cada endpoint ───────────────
 // La clase de hoy viaja por DOS consultas (el panel cruza las dos): `GET /clases/` es la
 // fuente de `clasesHoy` y `GET /asistencia/clases-hoy` aporta estado/marcada/reservas_count.
+// La fecha es HOY (local) y no una constante: las pantallas que filtran por "hoy" (el Resumen
+// y las franjas de Asistencia) se vaciaban solas al día siguiente de escribir el fixture —
+// con la fecha fija, el mismo harness daba OK un día y FALLA al otro. Se calcula sin
+// `toISOString()` (que es UTC: de noche devolvería mañana).
+const hoyISO = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 const CLASE = {
-    id: 777, fecha: '2026-10-15', hora_inicio: '18:00:00', hora_fin: '19:00:00',
+    id: 777, fecha: hoyISO(), hora_inicio: '18:00:00', hora_fin: '19:00:00',
     disciplina_id: 3, disciplina_nombre: 'CrossFit', cupo_maximo: 16, cupo_original: 16,
     asistentes_confirmados: 12, reservas_count: 12, coach_id: 901, estado: 'pendiente',
     marcada: false,
@@ -349,6 +357,32 @@ const MEDIR_MENU = `(() => {
 // Medición de la ficha del coach (Bloque 5): lo que hay que probar con números es que la
 // sección de RMs nueva NO empuje el modal fuera del viewport en un teléfono de alto corto
 // (375x568) — el cuerpo tiene que scrollear y el botón Cerrar quedar clickeable.
+// Medición de la fusión (pedido aprobado): prueba con números las tres cosas —
+// (a) tocar una clase en "Mis clases de hoy" abre el modal de publicar en la MISMA ruta (sin
+//     pantalla intermedia), (b) la pestaña Clases conserva la grilla semanal + el filtro "Ver
+//     solo con WOD publicado" y ya NO tiene el botón que llevaba a la pantalla vieja,
+// (c) el menú lateral del coach no ofrece "Gestión de Clases".
+const MEDIR_FUSION = `(() => {
+  const txt = (e) => e ? (e.innerText || '').replace(/\\s+/g, ' ').trim() : null;
+  const body = document.body.innerText || '';
+  const modal = document.querySelector('[data-testid="modal-publicar-wod"]');
+  const sidebar = document.querySelector('[aria-label^="Cerrar"]')?.closest('div.fixed') || null;
+  const items = sidebar ? [...sidebar.querySelectorAll('a')].map((a) => txt(a)) : [];
+  return {
+    url: location.pathname + location.search,
+    modal_publicar: !!modal,
+    modal_encabezado: txt(modal ? modal.querySelector('h3') : null),
+    modal_subtitulo: txt(modal ? modal.querySelector('h3 + p') : null),
+    celdas_publicar: document.querySelectorAll('[data-testid="publicar-wod-celda"]').length,
+    celdas_con_wod: document.querySelectorAll('[data-testid="ver-wod-celda"]').length,
+    filtro_ver_solo_con_wod: body.includes('Ver solo con'),
+    boton_gestionar_clases: body.includes('Gestionar Clases'),
+    menu_items: items,
+    menu_tiene_gestion: items.some((t) => (t || '').includes('Gestión de Clases')),
+  };
+})()`;
+
+
 const MEDIR_FICHA = `(() => {
   const rect = (e) => e ? {
     top: Math.round(e.getBoundingClientRect().top),
@@ -448,10 +482,10 @@ const PANTALLAS = {
                 pasos: [{ sel: '[data-testid="publicar-wod-celda"]', luegoEsperar: '[data-testid="modal-publicar-wod"]', pausa: 800 }],
             },
             {
-                nombre: '03-entrada-gestion-clases', view: M,
-                ruta: '/coach/gestion-clases?fecha=2026-10-15&clase=771',
-                esperar: '[data-testid="modal-publicar-wod"]',
-                pasos: [{ pausa: 800 }],
+                nombre: '03-entrada-carga-masiva', view: M,
+                ruta: '/coach/dashboard?tab=clases',
+                esperar: '[data-testid="coach-dashboard-content"]',
+                pasos: [{ sel: '[data-testid="cargar-excel-semana"]', luegoEsperar: '[data-testid="modal-publicar-wod"]', pausa: 800 }],
             },
             {
                 nombre: '04-escritorio-mismo-modal', view: D,
@@ -463,13 +497,13 @@ const PANTALLAS = {
     // con un clic). Ahora se ve en los dos anchos: estas tomas lo prueban en 1280 (el chequeo
     // es de VISIBILIDAD, no de estar en el DOM).
     volver: {
-        ruta: '/coach/gestion-clases?fecha=2026-10-15',
+        ruta: '/coach/dashboard?tab=clases',
         out: 'bloque6-volver-escritorio',
         esperar: '[data-testid="btn-volver"]',
         debeVerse: '[data-testid="btn-volver"]',
         pasos: [
-            { nombre: '01-escritorio-gestion-clases', view: D, pasos: [] },
-            { nombre: '02-movil-gestion-clases', view: M, pasos: [] },
+            { nombre: '01-escritorio-clases', view: D, pasos: [] },
+            { nombre: '02-movil-clases', view: M, pasos: [] },
         ],
     },
     // Bloque 6 (RAÍZ del coach): el Dashboard también monta la flecha, con el respaldo en su
@@ -533,6 +567,47 @@ const PANTALLAS = {
             },
         ],
     },
+    // "Gestión de Clases" fuera del menú (aprobado): su vista semanal quedó FUSIONADA en la
+    // pestaña Clases del panel y tocar una clase en "Mis clases de hoy" publica el WOD en la
+    // MISMA pantalla (la URL no cambia: no hay pantalla intermedia que cargue). Las cuatro
+    // tomas son la evidencia del pedido: (1) el toque abre el modal unificado, (2) la grilla
+    // semanal + su filtro siguen en Clases y SIN el botón viejo, (3) igual en escritorio,
+    // (4) el menú lateral del coach ya no ofrece esa pantalla.
+    'fusion-clases': {
+        ruta: '/coach/dashboard',
+        out: 'fusion-clases',
+        esperar: '[data-testid="resumen-agregar-sin-reserva"]',
+        pasos: [
+            {
+                nombre: '01-movil-toque-clase-abre-modal', view: M,
+                medir: MEDIR_FUSION,
+                pasos: [{
+                    sel: '[data-testid="clase-hoy-777"]',
+                    luegoEsperar: '[data-testid="modal-publicar-wod"]', pausa: 900,
+                }],
+            },
+            {
+                nombre: '02-movil-pestana-clases-grilla', view: M,
+                ruta: '/coach/dashboard?tab=clases',
+                esperar: '[data-testid="coach-dashboard-content"]',
+                medir: MEDIR_FUSION,
+                pasos: [{ pausa: 900 }],
+            },
+            {
+                nombre: '03-escritorio-pestana-clases-grilla', view: D,
+                ruta: '/coach/dashboard?tab=clases',
+                esperar: '[data-testid="coach-dashboard-content"]',
+                medir: MEDIR_FUSION,
+                pasos: [{ pausa: 900 }],
+            },
+            {
+                nombre: '04-movil-menu-sin-gestion', view: M,
+                medir: MEDIR_FUSION,
+                pasos: [{ sel: '[aria-label^="Abrir"]', luegoEsperar: '[aria-label^="Cerrar"]', pausa: 700 }],
+            },
+        ],
+    },
+
     // Bloque 5 (aprobado): el tab "Alumnos & RMs" gana "Ver Perfil" y la ficha del coach gana
     // la sección de RMs. Las tomas cubren las dos caras: un alumno CON marcas (fuerza, gimnasia
     // y el caso del `peso_kg` dummy de cardio/máquinas) y otro SIN marcas (el 99,5% real).

@@ -12,8 +12,8 @@
 //   5. COBERTURA (auditoría Bloque 2): toda pantalla del alumno que cuelga de una
 //      ruta —menos la raíz, el Inicio— monta la flecha, y la raíz no la monta
 //   6. la misma regla en el panel del COACH (auditoría Bloque 2): sus pantallas menos
-//      el Dashboard del coach, que es la raíz del rol. Eran 5 y son 3 desde el Bloque 5
-//      (Pizarra y Generar Clases se retiraron: ya no tienen ruta)
+//      el Dashboard del coach, que es la raíz del rol. Eran 5, son 2 desde que Pizarra y
+//      Generar Clases (Bloque 5) y Gestión de Clases (Panel 0) se retiraron: ya no tienen ruta
 //   7. (Bloque 6) la flecha se ve en TODOS los anchos: el className del botón ya no lleva
 //      `md:hidden` (hasta acá sólo existía en <768px, así que en escritorio no había ningún
 //      clic para volver). Y la RAÍZ del coach —su Dashboard— la monta igual, con el respaldo
@@ -164,8 +164,9 @@ const inicioCoach = leer('../src/config/roles.js').match(/coach:\s*'([^']+)'/);
 eq(inicioCoach?.[1], INICIO_COACH, 'roles.js apunta el inicio del coach a /coach/dashboard');
 const RUTA_RAIZ_COACH = (inicioCoach?.[1] || '').split('/').filter(Boolean).pop() || '';
 
-ok(RUTAS_COACH.length === 3,
-    `App.jsx tiene las 3 pantallas del coach (vistas: ${RUTAS_COACH.length}; Bloque 5: Pizarra y Generar Clases se retiraron)`);
+ok(RUTAS_COACH.length === 2,
+    `App.jsx tiene las 2 pantallas del coach (vistas: ${RUTAS_COACH.length}; Bloque 5: Pizarra y `
+    + 'Generar Clases; Panel 0: Gestión de Clases se retiró por completo)');
 ok(RUTAS_COACH.every((r) => r.ruta && r.archivo), 'cada ruta del coach apunta a una pantalla lazy conocida');
 ok(RUTAS_COACH.some((r) => r.ruta === RUTA_RAIZ_COACH), `la raíz (${RUTA_RAIZ_COACH}) es una de las rutas del coach`);
 

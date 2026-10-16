@@ -39,7 +39,10 @@ MODALES_DE_PANTALLA = (
     "frontend/src/components/AlumnoFichaCoach.jsx",
     "frontend/src/components/ModalAgregarSinReserva.jsx",
     "frontend/src/components/EscanerQR.jsx",
-    "frontend/src/pages/coach/GestionClases.jsx",
+    # Tomar/soltar/cubrir suplencia + el detalle del WOD: vivían en `pages/coach/
+    # GestionClases.jsx` (retirada) y ahora son componentes del panel. Sus overlays son los
+    # que tienen que tapar el header.
+    "frontend/src/components/AccionesClaseCoach.jsx",
     "frontend/src/pages/admin/SupervisionClases.jsx",
 )
 

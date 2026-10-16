@@ -6,9 +6,10 @@ Guard de fuente del FRONTEND (sin red y sin base):
   B. `DashboardCoach` consume los hooks (no le queda ninguna llamada con axios ni
      `useEffect`), deriva sus listas con `useMemo` y su "cargando"/banner de errores sale
      de las consultas.
-  C. `GestionClases` consume los hooks; le quedan SÓLO los dos `useEffect` del prefill del
-     formulario (`?clase=ID`), el calendario dejó de pedir 7 GET (usa el listado del box) y
-     se fue el estado muerto de la grilla de turnos.
+  C. Lo que vivía en `GestionClases` (retirada del repo: menú, ruta y archivo) se portó al
+     panel y sigue consumiendo los MISMOS hooks: `ModalPublicarWod` (publicar + editar el WOD
+     publicado + carga masiva por Excel) y `AccionesClaseCoach` (tomar/soltar/suplencia).
+     Ninguno de los dos pide datos a mano.
   D. Las mutaciones mueven las familias correctas y las dos pantallas comparten las MISMAS
      claves (reservas de una clase, disciplinas del coach, listado de WODs).
 
@@ -20,8 +21,8 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parents[2]          # .../proyecto-crossfit
 QUERIES = "frontend/src/hooks/queries.js"
 DASHBOARD = "frontend/src/pages/coach/DashboardCoach.jsx"
-GESTION = "frontend/src/pages/coach/GestionClases.jsx"
-
+MODAL_WOD = "frontend/src/components/ModalPublicarWod.jsx"
+ACCIONES = "frontend/src/components/AccionesClaseCoach.jsx"
 # (hook, clave que debe usar en el queryKey de su useQuery)
 HOOKS_QUERY = [
     ("useClasesCoach", "claves.clasesCoach(coachId, desde, hasta)"),
@@ -107,50 +108,39 @@ def test_b_el_dashboard_del_coach_consume_los_hooks():
     assert "await api.get(" not in f
 
 
-def test_c_gestion_de_clases_consume_los_hooks():
-    f = _fuente(GESTION)
+def test_c_lo_que_vivia_en_gestion_de_clases_usa_los_hooks():
+    """`GestionClases` se retiró por completo: sus funciones se portaron al panel y siguen
+    consumiendo los MISMOS hooks (no volvieron a pedir datos a mano)."""
+    modal = _fuente(MODAL_WOD)
+    acciones = _fuente(ACCIONES)
     for prohibido in PROHIBIDO:
-        assert prohibido not in f, f"GestionClases todavía usa {prohibido}"
-    for linea in ("const disciplinasQ = useDisciplinas();",
-                  "const coachDiscQ = useCoachDisciplinas();",
-                  "const clasesDiaQ = useClasesDia(fechaClases);",
-                  "const claseUrlQ = useClaseDetalle(urlClaseId);",
-                  "const asistenciaQ = useReservasPorClase(claseAsistencia);",
-                  "const wodDetalleQ = useWodDetalle(wodDetalleClase?.wod_id);",
-                  "const wodsQ = useTodosLosWods();",
-                  "const claseDestino = claseClic || claseUrlQ.data || null;",
-                  "const clasesConWod = useMemo(",
-                  "const claseEnCurso = useMemo(",
-                  "const clasesPorFecha = useMemo(",
-                  "const wodsPorFecha = useMemo(",
-                  "const wodDetalle = useMemo(",
-                  "const asistencia = useMemo(",
-                  "const erroresConsultas = useMemo(",
-                  "const loading = guardarWodMut.isPending || crearWodsBatch.isPending;",
-                  "const reintentar = () => qc.invalidateQueries();"):
-        assert linea in f, f"falta: {linea}"
-    # El alcance usa las clases que YA trae el calendario (antes: 1 GET por día marcado).
-    assert "const clasesAlcance = clasesPorFecha;" in f
-    assert "const cargandoAlcance = Boolean(disciplinaActiva) && clasesSemanaQ.isPending;" in f
-    # Sólo quedan los DOS useEffect del prefill del formulario (?clase=ID).
-    assert f.count("useEffect(") == 2
-    assert "if (!urlClaseId || !claseUrlQ.data) return;" in f
-    assert "if (!urlClaseId || !claseUrlQ.data?.wod_id) return;" in f
-    assert "wodsFallidos" not in f, "el calendario ya no pide un WOD por día"
-    # Banner de secciones caídas derivado de las consultas.
-    assert "{erroresConsultas.length > 0 && (" in f
-    # Estado muerto que se fue con la grilla de turnos (nadie lo leía).
-    for muerto in ("setHorariosTurno", "setHorariosSel", "setTurnoActivo",
-                   "const TURNOS", "setClasesDelDia", "horarioTieneWod",
-                   "setClasesDiaVista", "setClasesConWod", "setClaseEnCurso",
-                   "setWodDetalle(", "setAsistencia(", "setCargandoWodDetalle"):
-        assert muerto not in f, f"quedó el estado muerto {muerto}"
+        assert prohibido not in modal, f"ModalPublicarWod todavía usa {prohibido}"
+        assert prohibido not in acciones, f"AccionesClaseCoach todavía usa {prohibido}"
+    for linea in ("const crearBatch = useCrearWodsBatch();",
+                  "const guardarWod = useGuardarWod();",
+                  "const previsualizar = usePrevisualizarSemana();",
+                  "const programar = useProgramarSemana();",
+                  "const avisoRapido = usePublicarAvisoRapido();",
+                  "const esEdicion = Boolean(wodEdicion?.id);",
+                  "const planPublicacion = useMemo(",
+                  "const clasesDeLaDisciplina = useMemo("):
+        assert linea in modal, f"falta en ModalPublicarWod: {linea}"
+    for linea in ("const accionClaseMut = useAccionClase();",
+                  "const [accion, setAccion] = useState(null);",
+                  "const [suplencia, setSuplencia] = useState(null);",
+                  "const esDeOtraDisciplina = (c) => ("):
+        assert linea in acciones, f"falta en AccionesClaseCoach: {linea}"
+    # El estado llega por props (clase, WOD a editar, archivo): el modal no lo pide solo.
+    assert ("clase, clasesSemana = [], disciplinas = [], wodEdicion = null, "
+            "soloArchivo = false,") in modal
+    assert "clase, coachId, coachDisciplinas = [], onAviso" in acciones
 
 
-def test_d_las_mutaciones_y_las_claves_se_comparten_entre_las_dos_pantallas():
+def test_d_las_mutaciones_y_las_claves_se_comparten_entre_las_pantallas():
     q = _fuente(QUERIES)
     dash = _fuente(DASHBOARD)
-    gest = _fuente(GESTION)
+    modal = _fuente(MODAL_WOD)
+    acciones = _fuente(ACCIONES)
     # Marcar la asistencia de una reserva mueve el detalle de la clase (las dos pantallas).
     assert ("        onSuccess: () => {\n"
             "            qc.invalidateQueries({ queryKey: ['reservas'] });\n"
@@ -158,7 +148,7 @@ def test_d_las_mutaciones_y_las_claves_se_comparten_entre_las_dos_pantallas():
             "        },") in q
     # Tomar/soltar y ampliar cupo mueven `['clases']`.
     assert "onSuccess: () => qc.invalidateQueries({ queryKey: ['clases'] })," in q
-    for pantalla in (dash, gest):
+    for pantalla in (dash,):
         assert "useReservasPorClase(" in pantalla
         assert "useCoachDisciplinas(" in pantalla
         assert "useTodosLosWods(" in pantalla
@@ -166,8 +156,11 @@ def test_d_las_mutaciones_y_las_claves_se_comparten_entre_las_dos_pantallas():
     # asistencia se fue con el Resumen viejo, ahora se hace en la pestaña Asistencia).
     for uso in ("await contactarAlumno.mutateAsync({",):
         assert uso in dash, f"el Dashboard no usa {uso}"
-    for uso in ("await guardarWodMut.mutateAsync({",
-                "await crearWodsBatch.mutateAsync({ body, params })",
-                "await accionClaseMut.mutateAsync({"):
-        assert uso in gest, f"Gestión de Clases no usa {uso}"
+    # Lo PORTADO desde Gestión de Clases usa las mismas mutaciones que usaba allá.
+    for uso in ("await guardarWod.mutateAsync({",
+                "await crearBatch.mutateAsync({",
+                "await programar.mutateAsync({"):
+        assert uso in modal, f"ModalPublicarWod no usa {uso}"
+    assert "await accionClaseMut.mutateAsync({" in acciones, (
+        "AccionesClaseCoach no usa la mutación de tomar/soltar")
 

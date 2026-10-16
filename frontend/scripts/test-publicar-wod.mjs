@@ -46,7 +46,7 @@ ok(/fuerza_habilidad: form\.musculacion\.trim\(\)/.test(MODAL)
 ok(/'publicado'/.test(MODAL), 'el WOD sale publicado (se ve el día que le toca)');
 
 console.log('== 2. La semana sale del util compartido (lunes→domingo) ==');
-ok(/import \{ semanaEnCurso \} from '\.\.\/utils\/fecha'/.test(MODAL),
+ok(/import \{[^}]*\bsemanaEnCurso\b[^}]*\} from '\.\.\/utils\/fecha'/.test(MODAL),
     'el modal no calcula fechas: usa `utils/fecha.semanaEnCurso`');
 ok(/export function semanaEnCurso/.test(FECHA) && /lunes→domingo/.test(FECHA),
     'el util documenta y aplica la regla lunes→domingo');
@@ -110,17 +110,21 @@ ok(MODAL.includes('data-testid="dias-sin-horario"'),
 ok(MODAL.includes('clasesSemana = []'),
     'la semana llega por prop (el panel ya la tiene): sin ella queda el horario de la clase');
 const DASH = leer('../src/pages/coach/DashboardCoach.jsx');
-const GESTION = leer('../src/pages/coach/GestionClases.jsx');
 eq((DASH.match(/<ModalPublicarWod/g) || []).length, 1,
     'el Resumen y la pestana Clases montan el MISMO modal (una sola montura en el panel)');
 ok(DASH.includes('onClick={() => { setClaseWod(clase); setModalWod(true); }}'),
     'el lapiz de la pestana Clases abre ESE modal con su horario');
 eq(DASH.includes('gestion-clases?fecha=${fechaISO}&clase='), false,
     'la celda de Clases ya no manda al formulario viejo');
-ok(GESTION.includes('<ModalPublicarWod') && GESTION.includes('clase={claseDestino}'),
-    'Gestion de Clases (el ?clase=) monta el mismo modal');
-ok(GESTION.includes('{claseDestino && modoEdicion && ('),
-    'el formulario viejo queda solo para EDITAR un WOD ya publicado');
+// El modo EDICIÓN (antes: el formulario viejo de Gestión de Clases, ya retirada) vive en el
+// mismo modal: se pre-carga con el WOD publicado y guarda con `PUT /wods/{id}`.
+ok(MODAL.includes('wodEdicion') && MODAL.includes('useGuardarWod')
+    && MODAL.includes('wodId: wodEdicion.id'),
+    'editar un WOD publicado es un modo del mismo modal (PUT, sin crear otro WOD)');
+ok(DASH.includes('abrirEditarWod') && DASH.includes('wodEdicion={wodEdicion}'),
+    'el panel lo abre desde la grilla (✏️) y desde el detalle del WOD');
+ok(DASH.includes('abrirCargaMasiva') && DASH.includes('soloArchivo={wodArchivo}'),
+    'la carga masiva del Excel entra por el MISMO modal, sin clase');
 
 
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));

@@ -128,20 +128,22 @@ ok(/disabled=\{publicar\.isPending\}/.test(MODAL),
     'el botón se bloquea mientras publica (no se publica dos veces)');
 ok(/Vigente solo hoy/.test(MODAL), 'le dice al coach que el aviso dura solo el día');
 
-// ── 6. La Gestión de Clases: barra + modal montados ────────────────────────
-console.log('== 6. Gestión de Clases (panel Coach) ==');
-const GESTION = leer('../src/pages/coach/GestionClases.jsx');
-ok(/import ModalAvisoRapido from '\.\.\/\.\.\/components\/ModalAvisoRapido'/.test(GESTION),
-    'la pantalla importa el modal');
-ok(/const \[modalAvisoRapido, setModalAvisoRapido\] = useState\(false\)/.test(GESTION),
-    'la pantalla guarda si el modal está abierto');
-ok(/data-testid="abrir-aviso-rapido"/.test(GESTION), 'la barra "+ Aviso rápido para hoy" está');
-ok(/onClick=\{\(\) => setModalAvisoRapido\(true\)\}/.test(GESTION), 'la barra abre el modal');
-ok(/\{modalAvisoRapido && \(\s*\n\s*<ModalAvisoRapido/.test(GESTION),
+// ── 6. El panel del coach: barra + modal montados ──────────────────────────
+// (Vivía en Gestión de Clases, retirada del repo: el aviso rápido se portó a la pestaña
+// Clases del panel, con el MISMO modal y el mismo hook.)
+console.log('== 6. Panel del coach (pestaña Clases) ==');
+const DASH = leer('../src/pages/coach/DashboardCoach.jsx');
+ok(/import ModalAvisoRapido from '\.\.\/\.\.\/components\/ModalAvisoRapido'/.test(DASH),
+    'el panel importa el modal');
+ok(/const \[modalAviso, setModalAviso\] = useState\(false\)/.test(DASH),
+    'el panel guarda si el modal está abierto');
+ok(/data-testid="aviso-rapido-clases"/.test(DASH), 'la barra "Aviso rápido del día" está');
+ok(/onClick=\{\(\) => setModalAviso\(true\)\}/.test(DASH), 'la barra abre el modal');
+ok(/\{modalAviso && \(\s*\n\s*<ModalAvisoRapido/.test(DASH),
     'el modal se monta (y no queda invisible)');
-ok(/Aviso rápido publicado: ya aparece en el Inicio de los alumnos/.test(GESTION),
+ok(/Aviso rápido publicado: ya aparece en el Inicio de los alumnos/.test(DASH),
     'al publicar deja el aviso de éxito en la pantalla');
-eq(/api\.post\([^)]*aviso-rapido/.test(GESTION), false,
+eq(/api\.post\([^)]*aviso-rapido/.test(DASH), false,
     'la pantalla NO llama a la API por su cuenta: publica con el hook');
 
 console.log(fallos === 0 ? '\nTodos los chequeos pasaron.' : `\n${fallos} chequeo(s) fallaron.`);

@@ -28,7 +28,9 @@ const ok = (cond, msg) => eq(Boolean(cond), true, msg);
 const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
 const APP = leer('../src/App.jsx');
-const RETIRADAS = ['pizarra', 'generar-clases'];
+// Las tres que ya no tienen ruta: `gestion-clases` se sumó al retirarse por completo
+// (menú, ruta y archivo) — su vista semanal vive en la pestaña Clases del panel.
+const RETIRADAS = ['pizarra', 'generar-clases', 'gestion-clases'];
 
 // ── 1. App.jsx ya no las declara ────────────────────────────────────────────
 console.log('== 1. App.jsx: sin ruta y sin import huérfano ==');
@@ -52,10 +54,9 @@ const RUTAS_COACH = [...bloque.matchAll(/path="([^"]+)"\s+element=\{<(\w+)\s*\/>
 for (const ruta of RETIRADAS) {
     ok(!RUTAS_COACH.includes(ruta), `/coach/${ruta} ya no existe como <Route>`);
 }
-eq(RUTAS_COACH.length, 3, `el panel del coach queda con 3 rutas (vistas: ${RUTAS_COACH.join(', ')})`);
-ok(RUTAS_COACH.includes('dashboard') && RUTAS_COACH.includes('gestion-clases')
-    && RUTAS_COACH.includes('entregar-pedido'),
-    'las 3 que quedan son las que el menú sí ofrece');
+eq(RUTAS_COACH.length, 2, `el panel del coach queda con 2 rutas (vistas: ${RUTAS_COACH.join(', ')})`);
+ok(RUTAS_COACH.includes('dashboard') && RUTAS_COACH.includes('entregar-pedido'),
+    'las 2 que quedan son las que el menú ofrece (gestion-clases se retiró entera)');
 
 
 // ── 2. Nadie vuelve a enlazarlas (menú, link, navigate) ─────────────────────

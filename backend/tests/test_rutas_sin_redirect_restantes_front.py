@@ -10,7 +10,9 @@ Qué fija este archivo (guard de fuente del FRONTEND + del BACKEND, sin red y si
 
   Este archivo es el hermano de `test_rutas_sin_redirect_front.py` (T6): allí quedaron
   Coaches.jsx y SupervisionClases.jsx; acá se cierran las pantallas que faltaban —
-  Alumnos, Clases, Disciplinas, Horarios, ModalClase y GestionClases (coach)—.
+  Alumnos, Clases, Disciplinas, Horarios, ModalClase y el panel del coach—. (La antigua
+  `GestionClases.jsx` del coach se retiró por completo: la reemplazan DashboardCoach y los
+  componentes que se portaron, que se verifican abajo.)
 
   OJO CON LA MIGRACIÓN A REACT QUERY: esas pantallas ya no llaman con axios, así que una
   assertion sobre el `api.get(...)` LITERAL dentro del .jsx quedaría en rojo (o, peor,
@@ -37,7 +39,7 @@ CLASES = "frontend/src/pages/admin/Clases.jsx"
 DISCIPLINAS = "frontend/src/pages/admin/Disciplinas.jsx"
 HORARIOS = "frontend/src/pages/admin/Horarios.jsx"
 MODAL_CLASE = "frontend/src/components/ModalClase.jsx"
-GESTION = "frontend/src/pages/coach/GestionClases.jsx"
+DASHBOARD = "frontend/src/pages/coach/DashboardCoach.jsx"
 QUERIES = "frontend/src/hooks/queries.js"
 
 # Ruta del listado SIN la barra final, escrita como ruta COMPLETA (`/api/v1/clases?`) y no
@@ -128,9 +130,10 @@ def test_e_el_panel_del_coach_usa_las_rutas_canonicas_con_barra():
     for hook in ("useClasesCoach", "useClasesDia", "useClasesDisciplinaSemana"):
         assert "api.get('/api/v1/clases/'" in _bloque_hook(q, hook), (
             f"{hook} pide el listado de clases sin la barra final (307)")
-    # Y la pantalla del coach consume los hooks, sin llamadas a mano.
-    f = _sin_llamadas_a_mano(GESTION)
-    assert "useDisciplinas(" in f and "useClasesDia(" in f and "useClasesDisciplinaSemana(" in f
+    # Y el panel del coach consume los hooks, sin llamadas a mano. (Antes este chequeo
+    # apuntaba a `GestionClases.jsx`: se retiró y sus funciones viven en el panel/componentes.)
+    f = _sin_llamadas_a_mano(DASHBOARD)
+    assert "useDisciplinas(" in f and "useClasesCoach(" in f and "useTodosLosWods(" in f
 
 
 def test_f_ningun_listado_de_queries_js_quedo_sin_la_barra():

@@ -40,6 +40,7 @@
     "test:walkin": "node scripts/test-walkin.mjs",
     "test:publicar-wod": "node scripts/test-publicar-wod.mjs",
     "test:coach-resumen": "node scripts/test-coach-resumen.mjs",
+    "test:clases-coach": "node scripts/test-clases-sin-gestion.mjs",
     "test:encoding": "node scripts/test-encoding.mjs"
   },
   "dependencies": {
