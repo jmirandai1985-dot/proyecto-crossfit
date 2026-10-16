@@ -2,21 +2,25 @@
 //   Ejecutar:  node scripts/test-coach-resumen.mjs   (npm run test:coach-resumen)
 //
 // QUÉ FIJA:
-//   1. el Resumen es el del mockup: 4 KPIs (clases hoy / alumnos / WOD del día / riesgo),
-//      la tarjeta ancha de Asistencia con los 3 números y "Mis clases de hoy";
-//   2. los dos botones inline abren los modales REALES (+ Publicar WOD y + Agregar sin
-//      reserva) y no navegan a otra pantalla;
-//   3. las filas hablan como el mockup y como la pestaña Asistencia: el progreso y el estado
-//      salen de `utils/franjasAsistencia`, no de una copia propia ("12/12 presentes",
-//      "9/14 marcados", "Hecha" / "En curso" / "Pendiente");
+//   1. el Resumen es el rediseño energético del mockup (`mockup-dashboard-energetico.html`):
+//      título "Asistencia de hoy", la tarjeta grande de la clase en curso con el donut SVG
+//      (marcados vs cupo) y "Marcar asistencia", la tarjeta del WOD del día, "+ Agregar
+//      alumno sin reserva", "Avisos para alumnos", la fila horizontal con el resto de las
+//      clases del día y el gráfico de ocupación por horario;
+//   2. los dos botones inline abren los modales REALES (+ Publicar WOD, + Nuevo aviso, + Agregar
+//      sin reserva) y no navegan a otra pantalla;
+//   3. las tarjetas hablan como el mockup y como la pestaña Asistencia: el progreso y el estado
+//      salen de `utils/franjasAsistencia`, no de una copia propia ("9/14 marcados",
+//      "Hecha" / "En curso" / "Pendiente");
 //   4. la regla de negocio sigue en el copy: el alumno marca, el coach corrige; el crédito
 //      se descuenta al RESERVAR (nunca "a medianoche", que no es lo que hace el backend);
 //   5. mobile-first: el contenido se limita y se centra (no hay layout de PC inventado);
-//   6. EL RESUMEN VIEJO NO EXISTE: el panel de tarjetas grandes que se pintaba en TODAS las
-//      pestañas —encima del Resumen nuevo— se eliminó completo (ni "WODs esta semana" ni
-//      sus botones), y el panel claro ya no envuelve al Resumen;
-//   7. Bloque B: el coach NO promete escaneo (ni la página ni el modal), y el admin sigue
-//      igual (la prop del modal arranca en true).
+//   6. EL RESUMEN VIEJO NO EXISTE: el grid 2x2 de KPIs y su panel claro se eliminaron (ni
+//      "Alumnos activos" ni "En riesgo" ni "WODs esta semana" ni sus botones);
+//   7. Bloque 10: la sección de avisos lee `GET /marketing/vigentes` (abierto a cualquier
+//      sesión) y publica con el aviso rápido, que fija tipo y ventana en el backend;
+//   8. Bloque B: el coach del mesón entrega pedidos con el input manual (la página NO promete
+//      escaneo) y el admin sigue igual (la prop del modal arranca en true).
 import { readFileSync } from 'node:fs';
 
 const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -48,16 +52,40 @@ const eq = (obtenido, esperado, msg) => {
 };
 const ok = (cond, msg) => eq(Boolean(cond), true, msg);
 
-console.log('== 1. Los 4 KPIs del mockup ==');
-for (const id of ['kpi-clases-hoy', 'kpi-alumnos', 'kpi-riesgo', 'abrir-publicar-wod']) {
-    ok(RESUMEN.includes(`data-testid="${id}"`), `el KPI "${id}" está`);
+console.log('== 1. El rediseño energético (mockup dashboard-energetico) ==');
+for (const id of ['coach-resumen', 'tarjeta-asistencia', 'wod-del-dia', 'resumen-avisos',
+    'resumen-ocupacion', 'abrir-publicar-wod']) {
+    ok(RESUMEN.includes(`data-testid="${id}"`), `el bloque "${id}" está`);
 }
-ok(/WOD del día/.test(RESUMEN) && /Sin publicar/.test(RESUMEN), 'el KPI del WOD dice "Sin publicar" cuando no hay');
-ok(/asistentesHoy/.test(RESUMEN), 'KPI Clases hoy muestra los asistentes del día');
-ok(/alumnosConRms/.test(RESUMEN) && /alumnosActivos/.test(RESUMEN), 'KPI Alumnos activos muestra "N con RMs"');
-ok(/Sin asistir \{umbralRiesgo\}\+ días/.test(RESUMEN), 'KPI En riesgo dice el umbral en días');
+ok(/Asistencia de hoy/i.test(RESUMEN), 'el título dice "Asistencia de hoy"');
+ok(/programada\{clasesHoy\.length === 1 \? '' : 's'\}/.test(RESUMEN),
+    'el subtítulo cuenta cuántas clases hay programadas hoy');
+ok(/const Donut = \(/.test(RESUMEN) && /strokeDashoffset/.test(RESUMEN),
+    'el donut es SVG propio (marcados vs cupo), sin librerías');
+ok(/DE \{cupo\} CUPOS/.test(RESUMEN), 'el donut grande muestra el cupo');
+ok(/Marcar asistencia/.test(RESUMEN) && /data-testid="abrir-marcar-asistencia"/.test(RESUMEN),
+    'el botón "Marcar asistencia" del mockup está y lleva a la pestaña Asistencia');
+ok(/En curso ahora/.test(RESUMEN) && /Próxima clase/.test(RESUMEN),
+    'la tarjeta distingue la clase en curso de la que sigue');
+ok(/restoDelDia\.map/.test(RESUMEN) && /resumen-clases-hoy-scroll/.test(RESUMEN),
+    'el resto del día va en una fila horizontal scrolleable con mini-donut');
+ok(/Ocupación por horario/.test(RESUMEN) && /ocupacion\(reservasDe\(clase\), clase\.cupo_maximo\)/.test(RESUMEN),
+    'el gráfico de barras reusa el helper de ocupación compartido');
+eq(/kpi-clases-hoy|kpi-alumnos|kpi-riesgo/.test(RESUMEN), false,
+    'sin el grid 2x2 de KPIs sueltos que reemplaza el rediseño');
 
-console.log('== 2. Tarjeta de Asistencia: 3 números y el botón del walk-in ==');
+console.log('== 1b. Avisos para alumnos (Bloque 10) ==');
+ok(/data-testid="resumen-nuevo-aviso"/.test(RESUMEN) && /onNuevoAviso/.test(RESUMEN),
+    'la sección tiene "+ Nuevo aviso"');
+ok(/etiquetaTipo\(aviso\.tipo\)/.test(RESUMEN) && /resumen-lista-avisos/.test(RESUMEN),
+    'lista los avisos vigentes con el nombre de su tipo (util del carrusel)');
+ok(/data-testid="resumen-sin-avisos"/.test(RESUMEN), 'y su estado vacío explicado');
+ok(/useAvisosMarketingVigentes/.test(DASH) && /avisos=\{avisosVigentes\}/.test(DASH),
+    'el panel lee GET /marketing/vigentes (abierto a cualquier sesión autenticada)');
+ok(/onNuevoAviso=\{\(\) => setModalAviso\(true\)\}/.test(DASH) && /<ModalAvisoRapido/.test(DASH),
+    'y el alta es el MISMO aviso rápido (tipo `aviso` y ventana HOY: los fija el backend)');
+
+console.log('== 2. Tarjeta grande: 3 números y el walk-in ==');
 for (const t of ['con reserva', 'ya marcaron', 'faltan']) {
     ok(RESUMEN.includes(t), `la tarjeta muestra "${t}"`);
 }
@@ -66,20 +94,19 @@ ok(/const conReserva = proximaClase\?\.reservas_count \?\? reservasProxima\.leng
 ok(/data-testid="resumen-agregar-sin-reserva"/.test(RESUMEN) && /onAgregarSinReserva\(proximaClase\)/.test(RESUMEN),
     'el botón "+ Agregar alumno sin reserva" abre el modal con la clase próxima');
 ok(/data-testid="tarjeta-asistencia"/.test(RESUMEN), 'la tarjeta ancha está');
-ok(/Mis clases de hoy/.test(RESUMEN), 'la lista "Mis clases de hoy" está');
+ok(/restoDelDia = clasesHoy\.filter/.test(RESUMEN),
+    'el resto del día excluye la clase que ya está en la tarjeta grande');
 
 console.log('== 3. Los textos y los estados son los del mockup ==');
-ok(/Toca para ver quiénes faltan/.test(RESUMEN),
-    'la tarjeta invita a ver quiénes faltan (el texto del mockup, sin adornos agregados)');
+ok(/textoProgreso\(proximaClase, cupo \|\| undefined\)/.test(RESUMEN),
+    'la tarjeta dice el progreso con el MISMO helper de la pestaña Asistencia');
 ok(/from '\.\.\/utils\/franjasAsistencia'/.test(RESUMEN),
     'el Resumen usa los helpers de la pestaña Asistencia, no una copia propia');
 ok(/estadoFila\(clase\)/.test(RESUMEN) && /etiquetaEstado\(estado\)/.test(RESUMEN),
-    'el badge de cada fila sale de estadoFila/etiquetaEstado (Hecha / En curso / Pendiente)');
-ok(/textoProgreso\(clase, esperados > 0 \? esperados : undefined\)/.test(RESUMEN),
-    'el progreso de cada fila es "12/12 presentes" / "9/14 marcados" (mismo helper)');
+    'el badge de cada tarjeta del día sale de estadoFila/etiquetaEstado (Hecha / En curso / Pendiente)');
 ok(/const esperados = reservasDe\(clase\)/.test(RESUMEN),
     'el tope del progreso sale de las reservas de ESA clase, no del cupo nominal');
-eq(/medianoche/i.test(RESUMEN) || /medianoche/i.test(DASH), false,
+eq(/medianoche[^.]{0,60}(crédito|token|plan)|(crédito|token|plan)[^.]{0,60}medianoche/i.test(RESUMEN), false,
     'el Resumen NO dice que el crédito se descuente a medianoche (se descuenta al reservar)');
 // Bloque 2: el aviso del walk-in ya NO se pinta como bloque del Resumen (ahí vive el "qué
 // contestó el backend" del WOD). Ahora es un TOAST y el texto sale del MODAL, que es quien
@@ -93,8 +120,11 @@ ok(/setToastWalkin\(alumno\.mensaje\)/.test(DASH) && /<Toast texto=\{toastWalkin
     'el Resumen muestra ese texto como toast (sobrevive al cierre del modal)');
 
 console.log('== 4. Mobile-first declarado ==');
-ok(/mx-auto max-w-2xl/.test(RESUMEN), 'el Resumen acota y centra el contenido (diseño de teléfono)');
-ok(/grid-cols-2 gap-2\.5/.test(RESUMEN), 'los KPIs van en la grilla de 2 del mockup');
+ok(/mx-auto max-w-3xl/.test(RESUMEN), 'el Resumen acota y centra el contenido (mobile-first)');
+ok(/items-start justify-center gap-8/.test(RESUMEN),
+    'la tarjeta grande apila y centra: donut, nombre, los 3 números y el botón');
+ok(/flex gap-3 overflow-x-auto/.test(RESUMEN),
+    'las clases del día se recorren en horizontal (sin grilla de escritorio inventada)');
 
 console.log('== 5. Cableado y limpieza del Resumen viejo ==');
 ok(/<ResumenCoach/.test(DASH) && /activeTab === 'resumen' &&/.test(DASH), 'el Resumen está montado en su pestaña');
@@ -144,7 +174,7 @@ eq(/coachDisciplinas\.length > 0[\s\S]{0,90}: lista;/.test(DASH), false,
 ok(/const sinAsignaciones = useMemo/.test(DASH) && /sinAsignaciones=\{sinAsignaciones\}/.test(DASH),
     'el Resumen recibe si el coach no tiene nada asignado');
 ok(/sinAsignaciones = false/.test(RESUMEN), 'la prop arranca en false (nadie queda en el estado vacío)');
-ok(/Sin clases asignadas/.test(RESUMEN), 'el KPI de clases lo dice cuando no hay nada asignado');
+ok(/Todavía no tienes clases asignadas/.test(RESUMEN), 'el estado vacío lo dice cuando no hay nada asignado');
 ok(/data-testid="resumen-sin-clases"/.test(RESUMEN), 'la lista "Mis clases de hoy" tiene su estado vacío');
 ok(/pídele al admin que te asigne tus disciplinas u horarios/.test(RESUMEN),
     'el estado vacío dice qué hacer (y a quién pedírselo)');

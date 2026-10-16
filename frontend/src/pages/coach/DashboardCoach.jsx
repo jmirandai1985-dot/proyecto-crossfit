@@ -4,7 +4,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import {
-    SIN_DATOS, useAlumnosCoachEnRiesgo, useAlumnosDeCoach, useClasesAsistenciaHoy,
+    SIN_DATOS, useAlumnosCoachEnRiesgo, useAlumnosDeCoach, useAvisosMarketingVigentes,
+    useClasesAsistenciaHoy,
     useClasesCoach, useCoachDisciplinas, useContactarAlumnoCoach, useDisciplinas,
     useHistorialRmTodos, useProgresoAlumnosCoach, useReservasPorClase, useRmsAlumno,
     useTodosLosWods,
@@ -264,6 +265,10 @@ const DashboardCoach = () => {
     // reservas_count): es la MISMA consulta que usa la pestaña Asistencia, así que la
     // tarjeta del Resumen y esa pestaña no pueden decir cosas distintas del mismo día.
     const asistenciaHoyQ = useClasesAsistenciaHoy();
+    // Avisos vigentes hoy: los MISMOS que el carrusel del Inicio del alumno
+    // (`GET /marketing/vigentes`, abierto a cualquier sesión autenticada). Alimentan la
+    // sección "Avisos para alumnos" del Resumen; crear uno nuevo es el aviso rápido del día.
+    const avisosQ = useAvisosMarketingVigentes();
 
     // Mutaciones del panel: entregan el resultado y refrescan la caché por prefijo.
     const contactarAlumno = useContactarAlumnoCoach();
@@ -325,16 +330,9 @@ const DashboardCoach = () => {
     // Alumnos, riesgo y progreso (los dos últimos son datos derivados del backend).
     const alumnos = alumnosQ.data || SIN_DATOS;
     const alumnosEnRiesgo = riesgoQ.data?.alumnos_alerta || SIN_DATOS;
-    const umbralRiesgo = riesgoQ.data?.umbral_dias ?? 7;
     const progresoAlumnos = progresoQ.data || SIN_DATOS;
-
-    // Cuántos alumnos tienen ALGUNA marca cargada: es el "12 con RMs" del KPI. Sale del
-    // progreso por alumno (`total_rms`) y no de la lista de RMs recientes, que viene
-    // limitada a los últimos 5 y contaría de menos.
-    const alumnosConRms = useMemo(
-        () => progresoAlumnos.filter((a) => (a.total_rms || 0) > 0).length,
-        [progresoAlumnos],
-    );
+    // Avisos vigentes hoy (los del carrusel del alumno) para la sección del Resumen.
+    const avisosVigentes = avisosQ.data || SIN_DATOS;
 
     // RMs del alumno abierto en el tab Alumnos.
     const alumnoRMs = alumnoRmsQ.data || SIN_DATOS;
@@ -548,11 +546,9 @@ const DashboardCoach = () => {
                                 <ResumenCoach
                                     clasesHoy={clasesHoyConAsistencia}
                                     sinAsignaciones={sinAsignaciones}
-                                    alumnosActivos={alumnos.length}
-                                    alumnosConRms={alumnosConRms}
                                     wodHoy={wodHoy}
-                                    enRiesgo={alumnosEnRiesgo.length}
-                                    umbralRiesgo={umbralRiesgo}
+                                    avisos={avisosVigentes}
+                                    fechaCorta={fechaCortaHoy}
                                     proximaClase={proximaClase}
                                     reservasProxima={reservasProxima}
                                     cargandoReservas={cargandoReservasProxima}
@@ -560,7 +556,7 @@ const DashboardCoach = () => {
                                     onAgregarSinReserva={(clase) => setClaseSinReserva(clase)}
                                     onAbrirAsistencia={() => navigate('/coach/dashboard?tab=asistencia')}
                                     onAbrirClase={abrirClaseDeHoy}
-                                    onIrA={(tab) => navigate('/coach/dashboard?tab=' + tab)}
+                                    onNuevoAviso={() => setModalAviso(true)}
                                     onAbrirDetalleWod={(clase, wod) => abrirDetalleWod(clase, wod)}
                                 />
                             </>
@@ -772,7 +768,6 @@ const DashboardCoach = () => {
                                                     </td>
                                                     {dayDates.map((date, dayIdx) => {
                                                         const clase = weekGrid[date]?.[hour];
-                                                        const isToday = date === today;
                                                         // WOD asociado a esta clase (directamente desde el objeto clase que ahora trae wod_id)
                                                         const wodDeClase = clase ? wods.find(w => {
                                                             const fechaW = w.fecha ? (typeof w.fecha === 'string' ? w.fecha.split('T')[0] : w.fecha) : '';

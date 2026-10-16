@@ -76,10 +76,19 @@ const CLASE = {
 const CLASE_MANANA = { ...CLASE, id: 771, hora_inicio: '08:00:00', hora_fin: '09:00:00', reservas_count: 9, asistentes_confirmados: 9 };
 const CLASE_TARDE = { ...CLASE, id: 772, hora_inicio: '14:00:00', hora_fin: '15:00:00', reservas_count: 6, asistentes_confirmados: 6 };
 // El walk-in del Bloque 2 se fotografió con UNA sola clase (18:00): se mantiene tal cual y
-// sólo la pantalla `asistencia` pide las tres.
-const CLASES_HOY = () => (PANTALLA === 'asistencia'
-    ? [CLASE_MANANA, CLASE_TARDE, CLASE]
-    : [CLASE]);
+// sólo las pantallas `asistencia` y `resumen-energetico` piden las tres. La segunda va con la
+// primera EN CURSO (el estado lo pone el backend con la hora de Chile; acá se fija para que
+// la tarjeta grande del Resumen muestre el rótulo "En curso ahora" del mockup).
+const CLASES_HOY = () => {
+    if (PANTALLA === 'asistencia') return [CLASE_MANANA, CLASE_TARDE, CLASE];
+    // `fusion-clases` necesita MÁS de una clase del día: en el Resumen rediseñado las
+    // tarjetas "del resto de hoy" son las que abren el modal unificado (la clase en curso
+    // tiene su propio botón), así que con una sola no habría qué tocar.
+    if (PANTALLA === 'resumen-energetico' || PANTALLA === 'fusion-clases') {
+        return [{ ...CLASE_MANANA, estado: 'en_curso' }, CLASE_TARDE, CLASE];
+    }
+    return [CLASE];
+};
 // Un alumno por caso de la tarjeta (los cuatro textos posibles + uno ya presente).
 const ALUMNOS = [
     { alumno_id: 101, nombre: 'Luis Ramírez', plan_vigente: true, creditos: 6, ilimitado: false, puede_reservar: true, ya_presente: false },
@@ -139,10 +148,27 @@ const RMS_COACH = {
 };
 
 /** Respuesta fixture para (método, path). */
+// Avisos vigentes de hoy (`GET /marketing/vigentes`): los MISMOS que ve el carrusel del
+// alumno. Con dos cargados, la sección "Avisos para alumnos" del Resumen no sale vacía en la
+// toma (y se ve el rótulo del tipo, que sale del util compartido).
+const AVISOS_VIGENTES = [
+    {
+        id: 91, tipo: 'aviso', titulo: 'Trae calcetas',
+        texto: 'Hoy hay cuerda: trae tus calcetas y salta bien.',
+        vigente_desde: null, vigente_hasta: null, fijado_arriba: false, imagen_url: null,
+    },
+    {
+        id: 92, tipo: 'promocion', titulo: 'Bazar 2x1 en shakers',
+        texto: 'Solo por hoy, el segundo shaker va de regalo.',
+        vigente_desde: null, vigente_hasta: null, fijado_arriba: false, imagen_url: null,
+    },
+];
+
 const fixture = (metodo, path) => {
     // Bloque 5: el listado del tab Alumnos y la ficha del coach (el backend los acota al coach).
     if (/^\/api\/v1\/fidelizacion\/coach\/\d+\/alumnos$/.test(path)) return { alumnos: ALUMNOS_COACH };
     if (/^\/api\/v1\/fidelizacion\/coach\/\d+\/en-riesgo$/.test(path)) return { umbral_dias: 7, alumnos_alerta: [] };
+    if (path === '/api/v1/marketing/vigentes') return AVISOS_VIGENTES;
     const mFicha = path.match(/^\/api\/v1\/fidelizacion\/coach\/\d+\/alumno\/(\d+)\/ficha$/);
     if (mFicha) return FICHA_COACH[mFicha[1]] || null;
     const mRms = path.match(/^\/api\/v1\/historial-rm\/alumnos\/(\d+)\/rms$/);
@@ -582,7 +608,9 @@ const PANTALLAS = {
                 nombre: '01-movil-toque-clase-abre-modal', view: M,
                 medir: MEDIR_FUSION,
                 pasos: [{
-                    sel: '[data-testid="clase-hoy-777"]',
+                    // Una clase del "resto de hoy" (no la que está en la tarjeta grande): al
+                    // tocarla se abre el modal unificado con ESA clase.
+                    sel: '[data-testid="clase-hoy-772"]',
                     luegoEsperar: '[data-testid="modal-publicar-wod"]', pausa: 900,
                 }],
             },
@@ -604,6 +632,26 @@ const PANTALLAS = {
                 nombre: '04-movil-menu-sin-gestion', view: M,
                 medir: MEDIR_FUSION,
                 pasos: [{ sel: '[aria-label^="Abrir"]', luegoEsperar: '[aria-label^="Cerrar"]', pausa: 700 }],
+            },
+        ],
+    },
+
+    // Panel 1 (aprobado): el Resumen del coach se rediseña con el mockup "energético"
+    // (`mockup/mockup-dashboard-energetico.html`). Las dos tomas son la evidencia del pedido:
+    // la pantalla COMPLETA en teléfono y en escritorio (viewport alto a propósito: la página
+    // es larga —tarjeta grande + WOD + avisos + fila del resto del día + barras—).
+    'resumen-energetico': {
+        ruta: '/coach/dashboard',
+        out: 'resumen-panel-energetico',
+        esperar: '[data-testid="tarjeta-asistencia"]',
+        pasos: [
+            {
+                nombre: '01-movil-resumen-completo', view: { ancho: 390, alto: 1560 },
+                pasos: [{ pausa: 900 }],
+            },
+            {
+                nombre: '02-escritorio-resumen-completo', view: { ancho: 1280, alto: 1400 },
+                pasos: [{ pausa: 900 }],
             },
         ],
     },
