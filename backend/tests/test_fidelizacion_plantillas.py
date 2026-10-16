@@ -116,6 +116,24 @@ def tokens(db):
 
 
 # ── Escenario (escribe en TEST y RESTAURA) ────────────────────────────────────
+def _crear_clase(db, fecha):
+    """Una clase REAL de `fecha` (mínimos del esquema: el horario y la disciplina del box).
+
+    La asistencia se mide por la fecha de la CLASE (`services/asistencia_real.py`), no por la fecha
+    de la reserva: sin esta clase no se puede marcar una asistencia de verdad.
+    """
+    clase_id = db.execute(text("""
+        INSERT INTO clases (tenant_id, horario_base_id, disciplina_id, fecha,
+                            hora_inicio, hora_fin, cupo_maximo, cancelada)
+        SELECT :t, h.id, d.id, :f, '12:00', '13:00', 20, false
+        FROM (SELECT id FROM horarios WHERE tenant_id = :t ORDER BY id LIMIT 1) h,
+             (SELECT id FROM disciplinas WHERE tenant_id = :t ORDER BY id LIMIT 1) d
+        RETURNING id"""), {"t": TENANT_ID, "f": fecha}).scalar()
+    if clase_id is None:
+        pytest.skip("el box de TEST no tiene horarios/disciplinas: no se puede crear la clase")
+    return clase_id
+
+
 @pytest.fixture
 def escenario(db):
     """Alumno temporal: asistió hace `DIAS_ASISTENCIA` y su plan vence en `DIAS_VENCIMIENTO`.
@@ -129,7 +147,7 @@ def escenario(db):
     sufijo = f"{datetime.now():%Y%m%d%H%M%S%f}"
     correo = f"fidelizacion.{sufijo}@test.local"
     plan_nombre = f"Plan Fidelizacion TEST {sufijo}"
-    alumno_id = plan_id = None
+    alumno_id = plan_id = clase_id = None
     try:
         alumno_id = db.execute(text("""
             INSERT INTO usuarios (tenant_id, rut, nombre, correo, password_hash, rol, activo,
@@ -140,10 +158,14 @@ def escenario(db):
              "alta": datetime.combine(hoy - timedelta(days=60), _time(12, 0), tzinfo=SANTIAGO)}
         ).scalar()
 
+        # La asistencia se marca en `reservas.asistio` sobre la FECHA DE LA CLASE — la fuente real
+        # de todo el panel (`services/asistencia_real.py`). La tabla histórica `asistencias` ya no
+        # la lee ningún cálculo, así que el escenario tiene que sembrar una clase + su reserva.
+        clase_id = _crear_clase(db, fecha_asistencia)
         db.execute(text("""
-            INSERT INTO asistencias (tenant_id, usuario_id, fecha, clase, presente)
-            VALUES (:t, :u, :f, 'WOD', true)"""),
-            {"t": TENANT_ID, "u": alumno_id, "f": fecha_asistencia})
+            INSERT INTO reservas (tenant_id, clase_id, alumno_id, asistio, estado)
+            VALUES (:t, :c, :u, true, 'confirmada')"""),
+            {"t": TENANT_ID, "c": clase_id, "u": alumno_id})
 
         plan_id = db.execute(text("""
             INSERT INTO planes (tenant_id, nombre, creditos, es_ilimitado, precio_clp,
@@ -172,7 +194,9 @@ def escenario(db):
                        {"a": alumno_id})
             db.execute(text("DELETE FROM suscripciones WHERE usuario_id = :a"),
                        {"a": alumno_id})
-            db.execute(text("DELETE FROM asistencias WHERE usuario_id = :a"), {"a": alumno_id})
+            if clase_id:      # la asistencia REAL del escenario (reserva + su clase)
+                db.execute(text("DELETE FROM reservas WHERE clase_id = :c"), {"c": clase_id})
+                db.execute(text("DELETE FROM clases WHERE id = :c"), {"c": clase_id})
             if plan_id:
                 db.execute(text("DELETE FROM planes WHERE id = :p"), {"p": plan_id})
             if alumno_id:
@@ -191,9 +215,15 @@ def _alumno(db, escenario):
 # ── Mover los datos REALES del escenario (un test = una situación) ────────────
 # Los helpers escriben SÓLO el escenario temporal del test: su limpieza borra todo al salir.
 def _fijar_dias(db, escenario, dias):
-    """Última asistencia a `dias` días atrás (lo que decide los días de inactividad)."""
-    db.execute(text("UPDATE asistencias SET fecha = :f WHERE usuario_id = :a"),
-               {"f": hoy_santiago() - timedelta(days=dias), "a": escenario["alumno_id"]})
+    """Última asistencia a `dias` días atrás (lo que decide los días de inactividad).
+
+    Mueve la FECHA DE LA CLASE de la reserva del escenario: la asistencia se mide por
+    `clases.fecha` (`services/asistencia_real.py`), no por la fecha de la reserva.
+    """
+    db.execute(text("""
+        UPDATE clases SET fecha = :f
+        WHERE id IN (SELECT clase_id FROM reservas WHERE alumno_id = :a)"""),
+        {"f": hoy_santiago() - timedelta(days=dias), "a": escenario["alumno_id"]})
     db.commit()
 
 

@@ -138,6 +138,24 @@ def db():
     session.close()
 
 
+def _crear_clase(db, fecha):
+    """Una clase REAL de `fecha` (mínimos del esquema: el horario y la disciplina del box).
+
+    La asistencia se mide por la fecha de la CLASE (`services/asistencia_real.py`), no por la fecha
+    de la reserva: sin esta clase no se puede marcar una asistencia de verdad.
+    """
+    clase_id = db.execute(text("""
+        INSERT INTO clases (tenant_id, horario_base_id, disciplina_id, fecha,
+                            hora_inicio, hora_fin, cupo_maximo, cancelada)
+        SELECT :t, h.id, d.id, :f, '12:00', '13:00', 20, false
+        FROM (SELECT id FROM horarios WHERE tenant_id = :t ORDER BY id LIMIT 1) h,
+             (SELECT id FROM disciplinas WHERE tenant_id = :t ORDER BY id LIMIT 1) d
+        RETURNING id"""), {"t": TENANT_ID, "f": fecha}).scalar()
+    if clase_id is None:
+        pytest.skip("el box de TEST no tiene horarios/disciplinas: no se puede crear la clase")
+    return clase_id
+
+
 @pytest.fixture
 def escenario(db):
     """Alumno INACTIVO con un "Pase de regreso" VIGENTE (es_comercial=false, precio > 0).
@@ -148,7 +166,7 @@ def escenario(db):
     hoy = date.today()
     sufijo = f"{datetime.now():%Y%m%d%H%M%S%f}"
     correo = f"pase.regreso.{sufijo}@test.local"
-    alumno_id = plan_id = None
+    alumno_id = plan_id = clase_id = None
     try:
         alumno_id = db.execute(text("""
             INSERT INTO usuarios (tenant_id, rut, nombre, correo, password_hash, rol, activo,
@@ -159,11 +177,14 @@ def escenario(db):
              "alta": datetime.combine(hoy - timedelta(days=120), _time(12, 0), tzinfo=SANTIAGO)}
         ).scalar()
 
-        # Inactivo: su última asistencia es de hace 45 días.
+        # Inactivo: su última asistencia es de hace 45 días. Se marca con la fuente REAL del panel
+        # (`reservas.asistio` sobre la fecha de la clase): la tabla histórica `asistencias` ya no
+        # la lee ningún cálculo (ver `services/asistencia_real.py`).
+        clase_id = _crear_clase(db, hoy - timedelta(days=45))
         db.execute(text("""
-            INSERT INTO asistencias (tenant_id, usuario_id, fecha, clase, presente)
-            VALUES (:t, :u, :f, 'WOD', true)"""),
-            {"t": TENANT_ID, "u": alumno_id, "f": hoy - timedelta(days=45)})
+            INSERT INTO reservas (tenant_id, clase_id, alumno_id, asistio, estado)
+            VALUES (:t, :c, :u, true, 'confirmada')"""),
+            {"t": TENANT_ID, "c": clase_id, "u": alumno_id})
 
         plan_id = db.execute(text("""
             INSERT INTO planes (tenant_id, nombre, creditos, es_ilimitado, precio_clp,
@@ -189,7 +210,9 @@ def escenario(db):
                        {"a": alumno_id})
             if plan_id:
                 db.execute(text("DELETE FROM planes WHERE id = :p"), {"p": plan_id})
-            db.execute(text("DELETE FROM asistencias WHERE usuario_id = :a"), {"a": alumno_id})
+            if clase_id:      # la asistencia REAL del escenario (reserva + su clase)
+                db.execute(text("DELETE FROM reservas WHERE clase_id = :c"), {"c": clase_id})
+                db.execute(text("DELETE FROM clases WHERE id = :c"), {"c": clase_id})
             if alumno_id:
                 db.execute(text("DELETE FROM usuarios WHERE id = :a"), {"a": alumno_id})
             db.commit()

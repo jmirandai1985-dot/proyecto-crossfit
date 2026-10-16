@@ -85,12 +85,14 @@ def test_a3_el_flujo_de_guardado_no_se_toco():
 # ── B. UNA sola definición de "asistió" ───────────────────────────────────────
 def test_b1_el_helper_lee_reservas_asistio_sobre_la_fecha_de_la_clase():
     svc = _fuente(SERVICIO)
-    assert "Reserva.asistio.is_(True)" in svc
+    # El predicado vive UNA sola vez (`condicion_asistio`, 2ª tanda) y el helper lo usa.
+    assert "and_(reserva.asistio.is_(True), no_cancelada(reserva.estado))" in svc
+    assert "condicion_asistio(Reserva)" in svc
     assert "join(Clase, Reserva.clase_id == Clase.id)" in svc, (
         "la fecha tiene que ser la de la CLASE, no la de la reserva")
     assert "func.max(Clase.fecha)" in svc
     assert ".group_by(Reserva.alumno_id)" in svc     # una consulta para todo el lote
-    assert "no_cancelada(Reserva.estado)" in svc     # una clase cancelada no es una asistencia
+    assert "no_cancelada(reserva.estado)" in svc     # una clase cancelada no es una asistencia
 
 
 def test_b2_el_helper_no_importa_el_modelo_historico():

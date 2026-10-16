@@ -135,10 +135,15 @@ def test_c1_tres_consultas_para_toda_la_pagina():
 
 
 def test_c2_ultima_asistencia_usa_la_misma_definicion_que_fidelizacion():
+    """La MISMA definición que el coach, el churn y las campañas: `reservas.asistio` sobre la fecha
+    de la clase (`services/asistencia_real.py`). Antes leía la tabla histórica `asistencias`, que
+    nadie puebla, así que el buscador mostraba "nunca asistió" para TODOS."""
     fuente = _fuente("backend/app/api/v1/usuarios.py")
     helper = fuente.split("def _items_con_membresia(")[1].split('@router.get("/")')[0]
-    assert "func.max(Asistencia.fecha)" in helper
-    assert "Asistencia.tenant_id == tenant_id" in helper
+    assert "ultima_asistencia_por_alumno(db, tenant_id, ids)" in helper
+    assert "Asistencia." not in helper and "Asistencia(" not in helper, (
+        "el buscador no puede volver a leer la tabla histórica `asistencias`")
+    assert "from app.services.asistencia_real import ultima_asistencia_por_alumno" in fuente
 
 
 def test_c3_no_hay_numeros_inventados_ni_999():

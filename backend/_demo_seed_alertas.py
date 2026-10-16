@@ -5,7 +5,11 @@ Alumnos en tenant_id=1 (el tenant que consultan los endpoints manuales
   1. "Test Vence en 3 días" → jmirandai1985@gmail.com, suscripción activa, expira hoy+3.
   2. "Test Vence Hoy"       → jmirandai1985+vencahoy@gmail.com, suscripción activa, expira hoy.
   3. "Test Inactivo 7+"     → jmirandai1985+inactivo@gmail.com, suscripción activa vigente,
-                               última asistencia hace 9 días.
+                               última asistencia hace 9 días. La asistencia se siembra de VERDAD
+                               (una clase + la reserva con `asistio = true`, ver
+                               `app/services/asistencia_real.py`): la tabla histórica
+                               `asistencias` ya no la lee ningún cálculo, así que sembrarla no
+                               haría que el alumno entre a la alerta de inactividad.
 NOTA: hay UNIQUE (uq_correo_por_tenant) en (tenant_id, correo), por lo que los 3
 NO pueden compartir el string exacto. Gmail es case-insensitive en la entrega:
 variantes de mayúsculas del local-part llegan a la MISMA bandeja
@@ -23,8 +27,8 @@ from sqlalchemy import text
 from app.core.config import settings
 from app.core.security import get_password_hash
 from app.db.database import SessionLocal
-from app.models.asistencia import Asistencia
 from app.models.plan import Plan
+from app.models.reserva import Reserva
 from app.models.suscripcion import Suscripcion
 from app.models.usuario import Usuario, RolUsuario
 
@@ -35,6 +39,29 @@ if "billowing-violet-acdqud44" not in settings.DATABASE_URL:
 TENANT_ID = 1
 PASS_ADMIN = "AdminDemo123!"
 PASS_ALUMNO = "Demo123456!"
+
+
+def _sembrar_asistencia_real(db, alumno_id: int, fecha) -> None:
+    """Marca UNA asistencia como la marca el sistema: una clase real + su reserva.
+
+    La asistencia del panel es `reservas.asistio` sobre la fecha de la CLASE
+    (`app/services/asistencia_real.py`); la tabla histórica `asistencias` quedó sin lectores.
+    """
+    clase_id = db.execute(text("""
+        INSERT INTO clases (tenant_id, horario_base_id, disciplina_id, fecha,
+                            hora_inicio, hora_fin, cupo_maximo, cancelada)
+        SELECT :t, h.id, d.id, :f, '12:00', '13:00', 20, false
+        FROM (SELECT id FROM horarios WHERE tenant_id = :t ORDER BY id LIMIT 1) h,
+             (SELECT id FROM disciplinas WHERE tenant_id = :t ORDER BY id LIMIT 1) d
+        RETURNING id"""), {"t": TENANT_ID, "f": fecha}).scalar()
+    if clase_id is None:
+        print("ABORT: el box no tiene horarios/disciplinas para crear la clase de la asistencia")
+        raise SystemExit(1)
+    db.execute(text("""
+        INSERT INTO reservas (tenant_id, clase_id, alumno_id, asistio, estado)
+        VALUES (:t, :c, :u, true, 'confirmada')"""),
+        {"t": TENANT_ID, "c": clase_id, "u": alumno_id})
+
 
 db = SessionLocal()
 try:
@@ -98,10 +125,9 @@ try:
                 fecha_expiracion=exp_ts)
             db.add(sub)
             db.flush()  # INSERT único por fila (evita insertmanyvalues + enum estado_suscripcion)
-        if ultima_asis and db.query(Asistencia).filter(
-                Asistencia.usuario_id == u.id).count() == 0:
-            db.add(Asistencia(tenant_id=TENANT_ID, usuario_id=u.id,
-                              fecha=ultima_asis, clase="WOD"))
+        if ultima_asis and db.query(Reserva).filter(
+                Reserva.alumno_id == u.id).count() == 0:
+            _sembrar_asistencia_real(db, u.id, ultima_asis)
     db.commit()
 
     # ── Reporte ──
