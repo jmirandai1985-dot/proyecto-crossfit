@@ -1,7 +1,7 @@
 """
 Router de endpoints para gestión de Historial RM
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from sqlalchemy.exc import DBAPIError
@@ -16,15 +16,20 @@ from app.models.historial_rm import HistorialRM
 from app.models.movimiento import Movimiento
 from app.models.usuario import Usuario
 from app.schemas.historial_rm import (
-    HistorialRMCreate, HistorialRMUpdate, HistorialRMResponse, HistorialRMListItem, RMPorMovimiento
+    HistorialRMCreate, HistorialRMUpdate, HistorialRMResponse, HistorialRMListItem, RMPorMovimiento,
+    ProgresoAlumnoLote, ProgresoLoteResponse,
 )
 from app.services.nivel_service import (
-    obtener_nivel_fuerza, obtener_nivel_gimnastico, calcular_nivel_general
+    obtener_nivel_fuerza, obtener_nivel_gimnastico, calcular_nivel_general,
+    calcular_niveles_lote,
 )
 # H-03: criterio único de categorización de movimientos (BD -> normalización -> nombre).
 from app.services.movimiento_categoria import categoria_de
-# El "mejor RM por movimiento" tiene UNA sola definición: `app/services/rms_service.py`.
-from app.services.rms_service import CAMPOS_SCHEMA, mejor_rm_por_movimiento
+# El "mejor RM por movimiento" tiene UNA sola definición: `app/services/rms_service.py`. La
+# versión de a uno delega en la del lote, así que la ficha y la tabla del coach no divergen.
+from app.services.rms_service import (
+    CAMPOS_SCHEMA, mejor_rm_por_movimiento, mejor_rm_por_movimiento_lote,
+)
 from app.db.crossfit_ratios import CROSSFIT_RATIOS
 from app.db.crossfit_habilidades import CROSSFIT_HABILIDADES
 from app.services.nivel_service import NIVELES
@@ -37,6 +42,9 @@ ROLES_STAFF = ("coach", "admin", "administrador")
 
 # Ventana de edición de PRs (regla de negocio): 24 horas desde su creación.
 VENTANA_EDICION_PR_HORAS = 24
+
+# Tope del lote de `GET /progreso-lote` (el tab Progreso del coach pagina de a 25).
+MAX_ALUMNOS_LOTE = 100
 
 
 def _verificar_acceso_alumno(current_user: dict, alumno_id: int) -> None:
@@ -208,6 +216,66 @@ def crear_historial_rm(
         "created_at": str(db_historial.created_at),
         "updated_at": str(db_historial.updated_at),
     }
+
+
+# ⚠️ ORDEN DE RUTAS: `progreso-lote` tiene que ir ANTES de `GET /{historial_id}`. FastAPI resuelve
+# por orden de registro, y `/{historial_id}` capturaría "progreso-lote" como id (int) -> 422.
+@router.get("/progreso-lote", response_model=ProgresoLoteResponse)
+def progreso_lote(
+    alumno_ids: Optional[str] = Query(
+        None, description="ids de alumnos separados por coma (máx 100)"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """RMs + nivel de TODOS los alumnos pedidos, en UNA respuesta.
+
+    Es el enriquecimiento del tab Progreso del coach: la página visible (25 alumnos) hacía 2
+    requests POR ALUMNO (sus RMs + `nivel-general`) = 50 requests; ahora es UNA y el backend
+    resuelve la página entera en 5 consultas (1 de pertenencia al box + 2 del lote de RMs + 2 del
+    lote de niveles) en vez de ~4 por alumno.
+
+    Los datos son EXACTAMENTE los de los endpoints individuales porque reusa sus dos servicios
+    (`mejor_rm_por_movimiento` y `calcular_nivel_general`, que ahora delegan en las versiones de
+    lote): la tabla del coach no puede mostrar un RM ni un nivel distintos de los que muestran la
+    ficha del alumno y su Pizarra de RMs.
+
+    Sólo alumnos del box del token (un id de otro box no aparece en la respuesta). Un alumno sin
+    marcas viaja igual, con `total_rms = 0` y sus niveles en "Sin datos": así el frontend no
+    distingue "no lo pedí" de "no tiene marcas".
+    """
+    # 🔒 SEGURIDAD: tenant_id del token + el candado de siempre por alumno (un alumno sólo puede
+    # pedir SU progreso; el staff del box, el de cualquiera).
+    tenant_id = current_user["tenant_id"]
+    ids = [int(trozo) for trozo in str(alumno_ids or "").split(",")
+           if trozo.strip().isdigit()]
+    if not ids:
+        return {"alumnos": []}
+    if len(ids) > MAX_ALUMNOS_LOTE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"El lote admite hasta {MAX_ALUMNOS_LOTE} alumnos por request",
+        )
+    if current_user.get("rol") not in ROLES_STAFF:
+        for alumno_id in ids:
+            _verificar_acceso_alumno(current_user, alumno_id)
+
+    # Sólo alumnos del box: un id de otro tenant (o inexistente) no debe ni aparecer.
+    ids = [fila[0] for fila in db.query(Usuario.id).filter(
+        Usuario.id.in_(ids), Usuario.tenant_id == tenant_id).all()]
+
+    rms_por_alumno = mejor_rm_por_movimiento_lote(db, ids, tenant_id)
+    niveles = calcular_niveles_lote(db, ids, tenant_id)
+
+    return {"alumnos": [
+        ProgresoAlumnoLote(
+            alumno_id=alumno_id,
+            total_rms=len(rms_por_alumno.get(alumno_id, [])),
+            rms=rms_por_alumno.get(alumno_id, []),
+            nivel_fuerza=niveles.get(alumno_id, {}).get("nivel_fuerza", "Sin datos"),
+            nivel_gimnastico=niveles.get(alumno_id, {}).get("nivel_gimnastico", "Sin datos"),
+        )
+        for alumno_id in ids
+    ]}
 
 
 @router.get("/{historial_id}", response_model=HistorialRMResponse)

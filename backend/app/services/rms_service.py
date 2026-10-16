@@ -122,23 +122,51 @@ def mejor_rm_por_movimiento(db: Session, alumno_id: int, tenant_id: int) -> list
 
     Orden del resultado: primero los movimientos de fuerza/gimnasia (por `movimiento_id`) y
     después los de cardio/máquinas: es el orden que ya consumía la Pizarra de RMs.
-    """
-    base = [HistorialRM.alumno_id == alumno_id, HistorialRM.tenant_id == tenant_id]
 
+    Es el lote de UN id (`mejor_rm_por_movimiento_lote`): UNA sola definición del criterio para
+    la ficha de un alumno y para la página entera del tab Progreso del coach.
+    """
+    return mejor_rm_por_movimiento_lote(db, [alumno_id], tenant_id).get(alumno_id, [])
+
+
+def mejor_rm_por_movimiento_lote(db: Session, alumno_ids, tenant_id: int) -> dict[int, list[dict]]:
+    """`mejor_rm_por_movimiento` para VARIOS alumnos en DOS consultas (sin N+1).
+
+    Mismo criterio, mismo orden y mismas claves por alumno; lo que cambia es el alcance: un solo
+    `IN (...)` para todo el lote. Lo usa `GET /historial-rm/progreso-lote` (el tab Progreso del
+    coach enriquece la página visible —25 alumnos— con una sola request).
+
+    Un alumno sin marcas NO aparece en el dict: el que llama lo lee como `.get(id, [])`.
+    """
+    ids = [int(i) for i in (alumno_ids or []) if i is not None]
+    if not ids:
+        return {}
+
+    base = [HistorialRM.alumno_id.in_(ids), HistorialRM.tenant_id == tenant_id]
+
+    # El `distinct` es DISTINCT ON de PostgreSQL: las columnas del `distinct` tienen que ser el
+    # prefijo del `order_by` (por eso arranca en `alumno_id, movimiento_id`). El orden RELATIVO
+    # de los movimientos de un alumno queda igual que antes (por `movimiento_id`).
     por_peso = (
-        db.query(*_columnas())
+        db.query(HistorialRM.alumno_id, *_columnas())
         .join(Movimiento, HistorialRM.movimiento_id == Movimiento.id)
         .filter(*base, Movimiento.categoria.in_(CATEGORIAS_POR_PESO))
-        .order_by(HistorialRM.movimiento_id, HistorialRM.peso_kg.desc())
-        .distinct(HistorialRM.movimiento_id)
+        .order_by(HistorialRM.alumno_id, HistorialRM.movimiento_id, HistorialRM.peso_kg.desc())
+        .distinct(HistorialRM.alumno_id, HistorialRM.movimiento_id)
         .all()
     )
     por_fecha = (
-        db.query(*_columnas())
+        db.query(HistorialRM.alumno_id, *_columnas())
         .join(Movimiento, HistorialRM.movimiento_id == Movimiento.id)
         .filter(*base, Movimiento.categoria.in_(CATEGORIAS_POR_FECHA))
-        .order_by(HistorialRM.movimiento_id, HistorialRM.fecha.desc(), HistorialRM.id.desc())
-        .distinct(HistorialRM.movimiento_id)
+        .order_by(HistorialRM.alumno_id, HistorialRM.movimiento_id,
+                  HistorialRM.fecha.desc(), HistorialRM.id.desc())
+        .distinct(HistorialRM.alumno_id, HistorialRM.movimiento_id)
         .all()
     )
-    return [_fila_a_dict(f) for f in (list(por_peso) + list(por_fecha))]
+
+    por_alumno: dict = {}
+    for fila in (list(por_peso) + list(por_fecha)):
+        # `fila[0]` es el alumno (columna extra del lote); el resto son las columnas de siempre.
+        por_alumno.setdefault(fila[0], []).append(_fila_a_dict(tuple(fila)[1:]))
+    return por_alumno

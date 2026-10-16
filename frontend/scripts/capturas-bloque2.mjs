@@ -173,7 +173,7 @@ const RMS_COACH = {
     202: [],
 };
 
-/** Respuesta fixture para (método, path). */
+/** Respuesta fixture para (método, path, query). */
 // Avisos vigentes de hoy (`GET /marketing/vigentes`): los MISMOS que ve el carrusel del
 // alumno. Con dos cargados, la sección "Avisos para alumnos" del Resumen no sale vacía en la
 // toma (y se ve el rótulo del tipo, que sale del util compartido).
@@ -190,7 +190,7 @@ const AVISOS_VIGENTES = [
     },
 ];
 
-const fixture = (metodo, path) => {
+const fixture = (metodo, path, query = new URLSearchParams()) => {
     // Bloque 5: el listado del tab Alumnos y la ficha del coach (el backend los acota al coach).
     if (/^\/api\/v1\/fidelizacion\/coach\/\d+\/alumnos$/.test(path)) return { alumnos: ALUMNOS_COACH };
     if (/^\/api\/v1\/fidelizacion\/coach\/\d+\/en-riesgo$/.test(path)) return { umbral_dias: 7, alumnos_alerta: [] };
@@ -199,6 +199,19 @@ const fixture = (metodo, path) => {
     if (mFicha) return FICHA_COACH[mFicha[1]] || null;
     const mRms = path.match(/^\/api\/v1\/historial-rm\/alumnos\/(\d+)\/rms$/);
     if (mRms) return RMS_COACH[mRms[1]] || [];
+    // Progreso del coach (Parte 2.3): la página visible llega en UNA sola request, con los ids
+    // en la query (`?alumno_ids=201,202,...`). Mismo contrato que `GET /historial-rm/progreso-lote`.
+    if (path === '/api/v1/historial-rm/progreso-lote') {
+        const ids = String(query.get('alumno_ids') || '').split(',').filter(Boolean);
+        return {
+            alumnos: ids.map((id) => ({
+                alumno_id: Number(id),
+                total_rms: (RMS_COACH[id] || []).length,
+                rms: RMS_COACH[id] || [],
+                ...NIVEL_GENERAL_FIXTURE(id),
+            })),
+        };
+    }
     // Nivel de atleta (Parte 2.1): el cálculo en vivo que alimenta el badge y el filtro.
     const mNivel = path.match(/^\/api\/v1\/historial-rm\/alumnos\/(\d+)\/nivel-general$/);
     if (mNivel) return NIVEL_GENERAL_FIXTURE(mNivel[1]);
@@ -268,7 +281,14 @@ let sessionId = null;
 /** Sirve la respuesta fixture a la petición pausada: la app nunca sale a la red. */
 const responder = (p) => {
     let path = p.request.url;
-    try { path = new URL(p.request.url).pathname; } catch { /* about:blank */ }
+    // La query viaja al fixture (p.ej. `?alumno_ids=…` del lote de Progreso); `path` sigue
+    // siendo sólo el pathname, que es lo que matchean todos los `path === '...'` de arriba.
+    let query = new URLSearchParams();
+    try {
+        const url = new URL(p.request.url);
+        path = url.pathname;
+        query = url.searchParams;
+    } catch { /* about:blank */ }
     // Falla inyectada (opcional): 502 en el endpoint que matchea, con el cuerpo que devuelve
     // un proxy/instancia caída (HTML, NO el JSON con `detail` de la app). Ese detalle importa:
     // como el cuerpo no trae `detail`, la UI cae en su texto genérico — exactamente el
@@ -285,7 +305,7 @@ const responder = (p) => {
         }, sessionId).catch(() => {});
         return;
     }
-    const cuerpo = JSON.stringify(fixture(p.request.method.toUpperCase(), path));
+    const cuerpo = JSON.stringify(fixture(p.request.method.toUpperCase(), path, query));
     send('Fetch.fulfillRequest', {
         requestId: p.requestId,
         responseCode: 200,

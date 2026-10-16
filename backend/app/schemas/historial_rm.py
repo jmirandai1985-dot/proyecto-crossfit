@@ -2,7 +2,7 @@
 Esquemas Pydantic para Historial RM
 """
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime, date
 
 
@@ -115,3 +115,20 @@ class RMPorMovimiento(BaseModel):
     created_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ProgresoAlumnoLote(BaseModel):
+    """Los RMs + el nivel de UN alumno del lote (`GET /historial-rm/progreso-lote`)."""
+    alumno_id: int
+    total_rms: int
+    rms: List[RMPorMovimiento]
+    # Mismo contrato que `GET /alumnos/{id}/nivel-general`: los DOS niveles del servicio, o
+    # "Sin datos". El frontend deriva el nivel de atleta con `utils/niveles` (el menor de los dos),
+    # así que la tabla del coach y el endpoint individual no pueden pintar niveles distintos.
+    nivel_fuerza: str
+    nivel_gimnastico: str
+
+
+class ProgresoLoteResponse(BaseModel):
+    """La página visible del tab Progreso del coach, en UNA respuesta."""
+    alumnos: List[ProgresoAlumnoLote]

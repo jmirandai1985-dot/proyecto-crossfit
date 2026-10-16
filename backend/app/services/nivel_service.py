@@ -149,40 +149,23 @@ def _siguiente_nivel_gimnastico(valor, niveles, tipo):
     return {"nivel": sig_nivel, "faltante": faltante}
 
 
-def calcular_nivel_general(alumno_id, db, tenant_id):
+def nivel_desde_mejores(mejores, peso_corporal, genero) -> dict:
     """
-    Calcula el nivel general del alumno EN VIVO:
-    - nivel_fuerza: el nivel más bajo entre todos los movimientos de Grupo A,
-      recalculado con el peso_kg y genero ACTUAL del usuario
-    - nivel_gimnastico: el nivel más bajo entre todos los movimientos de Grupo B,
-      recalculado en vivo
+    Nivel de UN alumno a partir de sus mejores RMs por movimiento. FUNCIÓN PURA (sin DB).
+
+    `mejores` son `(movimiento_id, mejor peso_kg del movimiento, nombre del movimiento)`: el
+    `max(peso_kg)` por movimiento, que es la columna donde vive el RM también en gimnasia (ahí
+    el valor es la repetición, pero el orden sigue siendo por `peso_kg` — el criterio de siempre).
+
+    Es la ÚNICA definición de "nivel general": la usan el cálculo de a UN alumno
+    (`calcular_nivel_general`) y el de TODA la página del coach (`calcular_niveles_lote`), así
+    que las dos pantallas no pueden divergir.
+
+    - nivel_fuerza: el nivel más bajo entre todos los movimientos de Grupo A, recalculado con el
+      peso_kg y genero ACTUAL del usuario
+    - nivel_gimnastico: el nivel más bajo entre todos los movimientos de Grupo B, recalculado en
+      vivo
     """
-    from app.models.historial_rm import HistorialRM
-    from app.models.movimiento import Movimiento
-    from app.models.usuario import Usuario
-    from sqlalchemy import func
-
-    # 1. Obtener datos actuales del usuario
-    usuario = db.query(Usuario).filter(
-        Usuario.id == alumno_id,
-        Usuario.tenant_id == tenant_id
-    ).first()
-
-    peso_corporal = usuario.peso_kg if usuario else None
-    genero = usuario.genero if usuario else None
-
-    # 2. Obtener el mejor RM (mayor peso_kg) por movimiento
-    mejores = db.query(
-        HistorialRM.movimiento_id,
-        func.max(HistorialRM.peso_kg).label('max_peso'),
-        Movimiento.nombre
-    ).filter(
-        HistorialRM.alumno_id == alumno_id,
-        HistorialRM.tenant_id == tenant_id
-    ).join(Movimiento, HistorialRM.movimiento_id == Movimiento.id).group_by(
-        HistorialRM.movimiento_id, Movimiento.nombre
-    ).all()
-
     nivel_fuerza = None
     nivel_gimnastico = None
     detalle_fuerza = []
@@ -236,3 +219,87 @@ def calcular_nivel_general(alumno_id, db, tenant_id):
         "detalle_fuerza": detalle_fuerza,
         "detalle_gimnastico": detalle_gimnastico
     }
+
+
+def _peso_y_genero(db, alumno_id, tenant_id):
+    """`(peso_kg, genero)` ACTUALES del alumno: lo único que el nivel necesita de su perfil."""
+    from app.models.usuario import Usuario
+
+    usuario = db.query(Usuario).filter(
+        Usuario.id == alumno_id,
+        Usuario.tenant_id == tenant_id
+    ).first()
+    return (usuario.peso_kg if usuario else None,
+            usuario.genero if usuario else None)
+
+
+def _mejores_rms_lote(db, alumno_ids, tenant_id) -> dict:
+    """`{alumno_id: [(movimiento_id, max_peso, nombre), ...]}` en UNA consulta.
+
+    Es el `max(peso_kg)` por movimiento de SIEMPRE (el que usaba `calcular_nivel_general`), pero
+    para todo el lote: lo único que cambia es el `IN (...)` y que `alumno_id` viaja y agrupa.
+    """
+    from app.models.historial_rm import HistorialRM
+    from app.models.movimiento import Movimiento
+    from sqlalchemy import func
+
+    ids = [int(i) for i in (alumno_ids or []) if i is not None]
+    if not ids:
+        return {}
+
+    filas = db.query(
+        HistorialRM.alumno_id,
+        HistorialRM.movimiento_id,
+        func.max(HistorialRM.peso_kg).label('max_peso'),
+        Movimiento.nombre
+    ).filter(
+        HistorialRM.alumno_id.in_(ids),
+        HistorialRM.tenant_id == tenant_id
+    ).join(Movimiento, HistorialRM.movimiento_id == Movimiento.id).group_by(
+        HistorialRM.alumno_id, HistorialRM.movimiento_id, Movimiento.nombre
+    ).all()
+
+    por_alumno: dict = {}
+    for alumno_id, mov_id, max_peso, nombre in filas:
+        por_alumno.setdefault(alumno_id, []).append((mov_id, max_peso, nombre))
+    return por_alumno
+
+
+def calcular_nivel_general(alumno_id, db, tenant_id):
+    """Calcula el nivel general del alumno EN VIVO (fuerza y gimnástico). Propio o staff."""
+    peso_corporal, genero = _peso_y_genero(db, alumno_id, tenant_id)
+    return nivel_desde_mejores(
+        _mejores_rms_lote(db, [alumno_id], tenant_id).get(alumno_id, []),
+        peso_corporal, genero)
+
+
+def calcular_niveles_lote(db, alumno_ids, tenant_id) -> dict:
+    """`calcular_nivel_general` para VARIOS alumnos en DOS consultas (sin N+1).
+
+    Lo usa `GET /historial-rm/progreso-lote`: el tab Progreso del coach enriquece su página
+    visible (25 alumnos) con UNA request y 2 consultas, en vez de 2 requests y 2 consultas por
+    alumno. El nivel de cada alumno sale del MISMO `nivel_desde_mejores` que el de a uno, así que
+    el valor no puede divergir entre la tabla y el endpoint individual.
+
+    Un alumno sin marcas (o sin peso/género) sale igual, con "Sin datos": es un valor del nivel,
+    no una ausencia de fila.
+    """
+    from app.models.usuario import Usuario
+
+    ids = [int(i) for i in (alumno_ids or []) if i is not None]
+    if not ids:
+        return {}
+
+    # 1) Peso y género de todos (un alumno de otro box / inexistente -> (None, None)).
+    personas = {fila[0]: (fila[1], fila[2]) for fila in db.query(
+        Usuario.id, Usuario.peso_kg, Usuario.genero
+    ).filter(
+        Usuario.id.in_(ids), Usuario.tenant_id == tenant_id
+    ).all()}
+    # 2) Los mejores RMs por movimiento de todos (una sola consulta agregada).
+    mejores = _mejores_rms_lote(db, ids, tenant_id)
+
+    return {alumno_id: nivel_desde_mejores(
+        mejores.get(alumno_id, []),
+        *personas.get(alumno_id, (None, None)),
+    ) for alumno_id in ids}

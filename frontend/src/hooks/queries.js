@@ -940,13 +940,15 @@ export function useAlumnosCoachEnRiesgo(coachId) {
     });
 }
 
-// Progreso del tab Progreso: para cada alumno de la PÁGINA que se está mirando, sus RMs y su
-// nivel de atleta. Antes traía los primeros 50 de 251 ("el resto queda para la paginación
-// pendiente"); ahora recibe la página visible (25) y el corte de 50 queda como tope de
-// seguridad si alguien pide una lista más grande.
+// Progreso del tab Progreso: para cada alumno de la PÁGINA visible (25), sus RMs y su nivel de
+// atleta. UNA sola request (`GET /historial-rm/progreso-lote`): antes eran 2 POR ALUMNO —sus RMs
+// + `nivel-general`— o sea 50 requests por página. El backend resuelve el lote en 5 consultas y
+// devuelve el MISMO dato que los endpoints individuales (delegan en los mismos servicios), así
+// que la tabla, la ficha del alumno y su Pizarra de RMs no pueden divergir.
 //
-// DOS consultas por alumno, en paralelo: sus RMs (Total RMs / Top RM / Progreso) y su nivel
-// (`nivel-general`, el cálculo en vivo del backend: Principiante→Elite, o "Sin datos").
+// El corte de 50 queda como tope de seguridad si alguien pide una lista más grande (el endpoint
+// admite 100 y responde 400 más allá).
+//
 // El nivel NO vive en el perfil del alumno (`usuarios` no tiene esa columna) ni en
 // `student_segments` (sin consumidores): `utils/niveles` deriva el menor de fuerza/gimnasia.
 export function useProgresoAlumnosCoach(alumnos) {
@@ -954,30 +956,33 @@ export function useProgresoAlumnosCoach(alumnos) {
     const ids = lista.map((a) => a.id).join(',');
     return useQuery({
         queryKey: claves.progresoAlumnosCoach(ids),
-        queryFn: async () => Promise.all(lista.map(async (alumno) => {
-            // Los datos del padrón viajan siempre (aunque el enriquecimiento falle).
-            const base = {
-                id: alumno.id, nombre: alumno.nombre, correo: alumno.correo,
-                telefono: alumno.telefono,
-            };
-            const [rms, nivel] = await Promise.all([
-                api.get(`/api/v1/historial-rm/alumnos/${alumno.id}/rms`)
-                    .then((r) => r.data || []).catch(() => []),
-                api.get(`/api/v1/historial-rm/alumnos/${alumno.id}/nivel-general`)
-                    .then((r) => r.data || null).catch(() => null),
-            ]);
-            return {
-                ...base,
-                total_rms: rms.length,
-                rms,
-                // `null` = no se pudo calcular (sin peso/género o sin marcas): el panel lo
-                // muestra como "Sin datos" y el filtro tiene su propio bucket.
-                nivel: nivelDeAtleta(nivel),
-                nivel_fuerza: nivel?.nivel_fuerza || null,
-                nivel_gimnastico: nivel?.nivel_gimnastico || null,
-                estado: rms.length >= 5 ? 'activo' : rms.length > 0 ? 'iniciando' : 'sin_datos',
-            };
-        })),
+        queryFn: async () => {
+            // Si el enriquecimiento falla, el padrón viaja igual (con los contadores en cero):
+            // es la misma degradación que tenía la versión de 2 requests por alumno.
+            const lote = await api.get('/api/v1/historial-rm/progreso-lote', {
+                params: { alumno_ids: ids },
+            }).then((r) => r.data?.alumnos || []).catch(() => []);
+            const porId = new Map(lote.map((fila) => [fila.alumno_id, fila]));
+            return lista.map((alumno) => {
+                const fila = porId.get(alumno.id);
+                const rms = fila?.rms || [];
+                return {
+                    id: alumno.id, nombre: alumno.nombre, correo: alumno.correo,
+                    telefono: alumno.telefono,
+                    total_rms: fila?.total_rms ?? rms.length,
+                    rms,
+                    // `null` = no se pudo calcular (sin peso/género o sin marcas): el panel lo
+                    // muestra como "Sin datos" y el filtro tiene su propio bucket.
+                    nivel: nivelDeAtleta({
+                        nivel_fuerza: fila?.nivel_fuerza,
+                        nivel_gimnastico: fila?.nivel_gimnastico,
+                    }),
+                    nivel_fuerza: fila?.nivel_fuerza || null,
+                    nivel_gimnastico: fila?.nivel_gimnastico || null,
+                    estado: rms.length >= 5 ? 'activo' : rms.length > 0 ? 'iniciando' : 'sin_datos',
+                };
+            });
+        },
         staleTime: 60_000,
         enabled: lista.length > 0,
     });
