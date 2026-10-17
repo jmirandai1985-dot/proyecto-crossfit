@@ -208,7 +208,7 @@ const Layout = ({ children }) => {
                                 )}
                             </Link>
                             {/* Sub-pestañas del Dashboard del coach (Resumen, Clases,
-                                Alumnos & RMs, Asistencia, Progreso y Riesgo). Son
+                                Alumnos & RMs, Asistencia, Historial, Progreso y Riesgo). Son
                                 <Link> a la MISMA ruta cambiando el query (`?tab=`):
                                 el contenido lo elige `DashboardCoach` con `activeTab`
                                 (no hay rutas hijas por pestaña). Antes había DOS bloques

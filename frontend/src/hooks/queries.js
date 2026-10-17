@@ -31,6 +31,10 @@ export const claves = {
     // Alumnos del box que se pueden agregar SIN reserva a una clase (walk-in). Cuelga de
     // `['asistencia']` por el mismo motivo: agregar a alguien refresca la lista y la clase.
     alumnosElegibles: (claseId) => ['asistencia', 'clase', claseId, 'elegibles'],
+    // Historial de asistencia de UN mes (pantalla "Historial de Asistencia", coach + admin).
+    // Cuelga de `['asistencia']`: confirmar la asistencia de hoy (que invalida la familia)
+    // refresca también el mes que esté abierto en pantalla, sin claves de más.
+    historialAsistencia: (anio, mes) => ['asistencia', 'historial', anio, mes],
     churn: (tenantId, buscar) => ['kpis', 'churn', tenantId, buscar || ''],
     segmentacion: (tenantId) => ['segmentacion', tenantId],
     sugerencias: (tenantId, ids) => ['fidelizacion', 'sugerencias', tenantId, ids],
@@ -228,6 +232,26 @@ export function useAlumnosDeClase(claseId) {
         )).data || {},
         staleTime: 30_000,
         enabled: Boolean(claseId),
+    });
+}
+
+// Historial de asistencia de UN MES (pantalla "Historial de Asistencia", coach + admin).
+// UNA sola llamada trae el mes entero con cada clase y sus alumnos: abrir un día del
+// calendario NO vuelve a pedir nada. El backend filtra por rol (el coach ve sus clases, el
+// admin el box completo). `enabled` evita el request con un mes inválido (selector a medio
+// armar). El cache es largo a propósito: lo que ya pasó no cambia, y confirmar hoy invalida
+// `['asistencia']`, que es la familia de esta clave.
+export function useHistorialAsistencia(anio, mes) {
+    const a = Number(anio);
+    const m = Number(mes);
+    const valido = Number.isInteger(a) && a >= 2000 && Number.isInteger(m) && m >= 1 && m <= 12;
+    return useQuery({
+        queryKey: claves.historialAsistencia(a, m),
+        queryFn: async () => (await api.get('/api/v1/asistencia/historial', {
+            params: { anio: a, mes: m },
+        })).data || null,
+        staleTime: 60_000,
+        enabled: valido,
     });
 }
 

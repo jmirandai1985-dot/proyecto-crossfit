@@ -15,6 +15,10 @@ export const COACH_SUBTABS = [
     { key: 'clases', label: '📅 Clases', path: '/coach/dashboard?tab=clases' },
     { key: 'alumnos', label: '👥 Alumnos & RMs', path: '/coach/dashboard?tab=alumnos' },
     { key: 'asistencia', label: '📋 Asistencia', path: '/coach/dashboard?tab=asistencia' },
+    // Historial (sólo lectura): el mes entero del mismo día que se marca en 'asistencia'. Va
+    // pegado a esa pestaña porque es su "después": primero se marca, después se mira lo que
+    // quedó (quién vino, quién no y el detalle de cada bloque).
+    { key: 'historial', label: '🗓️ Historial', path: '/coach/dashboard?tab=historial' },
     { key: 'progreso', label: '📈 Progreso', path: '/coach/dashboard?tab=progreso' },
     { key: 'riesgo', label: '⚠️ Riesgo', path: '/coach/dashboard?tab=riesgo' },
 ];

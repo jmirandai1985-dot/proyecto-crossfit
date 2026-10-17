@@ -7,6 +7,10 @@ Coach (marcado de asistencia):
                                      cada una; el admin ve el día completo del box
   GET  /clases/{clase_id}/alumnos  — reservas de la clase con datos del alumno
   POST /clases/{clase_id}/confirmar— confirmación BATCH (1 click) con auditoría
+  GET  /historial?anio=&mes=       — el MES completo de SÓLO LECTURA (pantalla "Historial de
+                                     Asistencia"): contadores por clase y alumnos de cada una.
+                                     El coach ve lo suyo; el admin, el mes completo del box.
+                                     No escribe nada: marcar sigue siendo el POST de arriba.
 
 Alumno:
   GET  /mi-resumen                 — racha actual + % del mes en curso + próximo hito
@@ -18,7 +22,7 @@ eliminado en 2026-10) ahora lo dispara APScheduler
 
 Seguridad: tenant_id SIEMPRE del token JWT (patrón del resto de la API).
 """
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, update
@@ -81,6 +85,53 @@ def _exigir_alcance_coach(db, current_user: dict, clase, modo_emergencia: bool,
     )
 
 
+def _contadores_de_clases(db: Session, ids):
+    """Contadores por clase de la pestaña Asistencia (UNA sola definición).
+
+    Lo usan las dos pantallas que muestran lo mismo —`/clases-hoy` (el día) y `/historial`
+    (el mes)— para que sus números no puedan discrepar:
+
+      · `reservas_count` — reservas VIGENTES de la clase (las canceladas no cuentan);
+      · `marcados_count` — las que YA están PRESENTES (`asistio = True`: el mismo dato con el
+        que la tarjeta ancha del Resumen del coach cuenta el "ya marcaron");
+      · `marcadas` — el set de clases con la asistencia CERRADA (TODAS sus reservas vigentes
+        ya tienen su registro). La marca la escribe el Confirmar del panel (batch) y también
+        el check-in por QR del alumno: ambos setean `reservas.asistencia_marcada_at`
+        (`asistencia_via` distingue la vía). Se exige al menos una reserva vigente para que
+        una clase vacía NO cuente como marcada por vacuidad (0 reservas = "no aplica", lo
+        resuelve el front).
+
+    "Faltan" NO viaja: es una resta (reservas menos marcados, o cupo menos marcados) y la
+    hace el front con UNA sola cuenta en `utils/franjasAsistencia` / `utils/historialAsistencia`.
+    """
+    if not ids:
+        return {}, {}, set()
+    reservas_count = dict(db.query(Reserva.clase_id, func.count(Reserva.id)).filter(
+        Reserva.clase_id.in_(ids),
+        no_cancelada(Reserva.estado),
+    ).group_by(Reserva.clase_id).all())
+    marcados_count = dict(db.query(Reserva.clase_id, func.count(Reserva.id)).filter(
+        Reserva.clase_id.in_(ids),
+        no_cancelada(Reserva.estado),
+        Reserva.asistio.is_(True),
+    ).group_by(Reserva.clase_id).all())
+    ESTADOS_VIGENTES = ("confirmada", "completada")
+    con_reservas = {
+        cid for (cid,) in db.query(Reserva.clase_id).filter(
+            Reserva.clase_id.in_(ids),
+            Reserva.estado.in_(ESTADOS_VIGENTES),
+        ).distinct().all()
+    }
+    con_pendientes = {
+        cid for (cid,) in db.query(Reserva.clase_id).filter(
+            Reserva.clase_id.in_(ids),
+            Reserva.estado.in_(ESTADOS_VIGENTES),
+            Reserva.asistencia_marcada_at.is_(None),
+        ).distinct().all()
+    }
+    return reservas_count, marcados_count, con_reservas - con_pendientes
+
+
 # ── Coach: TODO su día (pasadas, en curso y por venir) ───────────────────────
 @router.get("/clases-hoy")
 def clases_hoy(
@@ -117,51 +168,10 @@ def clases_hoy(
     clases = query.order_by(Clase.hora_inicio.asc()).all()
 
     ids = [c.id for c in clases]
-    if ids:
-        counts = dict(db.query(Reserva.clase_id, func.count(Reserva.id)).filter(
-            Reserva.clase_id.in_(ids),
-            no_cancelada(Reserva.estado),
-        ).group_by(Reserva.clase_id).all())
-    else:
-        counts = {}
-
-    # "marcada" = TODAS las reservas vigentes (confirmada/completada) ya tienen su
-    # registro de asistencia. La marca la escribe el Confirmar del panel (batch)
-    # y también el check-in por QR del alumno: ambos setean
-    # reservas.asistencia_marcada_at (asistencia_via distingue la vía).
-    # Se exige al menos una reserva vigente para que una clase vacía NO cuente
-    # como marcada por vacuidad (0 reservas = "no aplica", lo resuelve el front).
-    ESTADOS_VIGENTES = ("confirmada", "completada")
-    marcadas = set()
-    if ids:
-        con_reservas = {
-            cid for (cid,) in db.query(Reserva.clase_id).filter(
-                Reserva.clase_id.in_(ids),
-                Reserva.estado.in_(ESTADOS_VIGENTES),
-            ).distinct().all()
-        }
-        con_pendientes = {
-            cid for (cid,) in db.query(Reserva.clase_id).filter(
-                Reserva.clase_id.in_(ids),
-                Reserva.estado.in_(ESTADOS_VIGENTES),
-                Reserva.asistencia_marcada_at.is_(None),
-            ).distinct().all()
-        }
-        marcadas = con_reservas - con_pendientes
-
-    # Contadores por clase de la fila de la pestaña Asistencia (mockup 6b: "con reserva /
-    # ya marcaron / faltan"): `reservas_count` son los que reservaron y `marcados_count`
-    # los que YA se marcaron PRESENTES (`asistio = true` — el mismo dato que pinta la
-    # tarjeta ancha del Resumen del coach, así las dos pantallas no pueden discrepar).
-    # "Faltan" NO viaja: es la resta (reservas menos marcados) y la hace el front con UNA
-    # sola cuenta en `utils/franjasAsistencia`, para no tener dos definiciones.
-    marcados_count = {}
-    if ids:
-        marcados_count = dict(db.query(Reserva.clase_id, func.count(Reserva.id)).filter(
-            Reserva.clase_id.in_(ids),
-            no_cancelada(Reserva.estado),
-            Reserva.asistio.is_(True),
-        ).group_by(Reserva.clase_id).all())
+    # Los contadores de la fila (reservas vigentes / ya presentes) y el set de clases con la
+    # asistencia CERRADA salen del MISMO helper que usa `/historial` (una sola definición:
+    # las dos pantallas muestran lo mismo y no pueden discrepar).
+    counts, marcados_count, marcadas = _contadores_de_clases(db, ids)
 
     disc_ids_set = {c.disciplina_id for c in clases if c.disciplina_id}
     disc_map, disc_req = {}, {}
@@ -201,6 +211,128 @@ def clases_hoy(
         }
         for c in clases
     ]
+
+
+# ── Coach + admin: HISTORIAL de un mes (sólo lectura) ────────────────────────
+@router.get("/historial")
+def historial_mes(
+    anio: int = Query(..., ge=2000, le=2100, description="Año calendario (Chile)"),
+    mes: int = Query(..., ge=1, le=12, description="Mes 1-12 del año pedido"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
+):
+    """Historial de asistencia de un MES completo (pantalla "Historial de Asistencia").
+
+    Responde el mes entero en UNA llamada: el donut de cada día de la semana, la grilla del
+    calendario y el detalle por bloque horario se dibujan con esto — abrir un día (o una
+    franja de un día) NO vuelve a pegarle a la API. Cada clase viaja con su lista de alumnos
+    (`asistio` incluido), que es lo único que el detalle diario necesita.
+
+    Alcance por rol (mismo criterio que `/clases-hoy`, para que las dos pantallas del coach
+    no puedan mostrar cosas distintas):
+      · el COACH ve las clases del mes que son SUYAS —las TRES vías de
+        `clases_service.condicion_mis_clases`: asignadas a él, de su horario vigente o de una
+        disciplina que dicta—;
+      · el admin/administrador ve el mes completo del box (sin filtro de coach).
+
+    Sólo lectura: NO escribe ni marca nada (es el espejo de lo que ya pasó). Las clases
+    CANCELADAS quedan fuera de los totales (igual que en `/clases-hoy`): una clase que no
+    ocurrió no puede bajar el porcentaje de asistencia de su día.
+
+    Los PORCENTAJES no viajan: salen de `presentes / cupos` con UNA sola cuenta en el front
+    (`utils/historialAsistencia.js`, puro y con test propio), para no tener dos definiciones
+    del mismo número. `fecha`, `hora_inicio` y `hora_fin` son los del backend, ya en hora de
+    Chile: el front no convierte nada.
+    """
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+
+    # Rango del mes pedido en fechas de calendario (Chile). El último día se calcula sin
+    # `calendar`: el día anterior al 1 del mes siguiente (o el 31 de diciembre).
+    primer_dia = date(anio, mes, 1)
+    ultimo_dia = (date(anio, 12, 31) if mes == 12
+                  else date(anio, mes + 1, 1) - timedelta(days=1))
+
+    query = db.query(Clase).filter(
+        Clase.tenant_id == tenant_id,
+        Clase.fecha >= primer_dia,
+        Clase.fecha <= ultimo_dia,
+        Clase.cancelada == False,
+    )
+    if rol == "coach":
+        query = query.filter(condicion_mis_clases(current_user["usuario_id"]))
+
+    clases = query.order_by(Clase.fecha.asc(), Clase.hora_inicio.asc()).all()
+
+    ids = [c.id for c in clases]
+    # Mismo helper que `/clases-hoy`: reservas vigentes, ya presentes y asistencia cerrada.
+    reservas_count, marcados_count, marcadas = _contadores_de_clases(db, ids)
+
+    # Las reservas del mes (sólo las vigentes) con el nombre del alumno: UNA consulta para
+    # todas las clases y UNA para los nombres, en vez de una por clase al abrir un día.
+    alumnos_por_clase = {}
+    if ids:
+        reservas = db.query(Reserva).filter(
+            Reserva.clase_id.in_(ids),
+            Reserva.tenant_id == tenant_id,
+            no_cancelada(Reserva.estado),
+        ).order_by(Reserva.created_at.asc()).all()
+        alumno_ids = {r.alumno_id for r in reservas}
+        nombres = {}
+        if alumno_ids:
+            for u in db.query(Usuario).filter(Usuario.id.in_(alumno_ids)).all():
+                nombres[u.id] = u.nombre
+        for r in reservas:
+            alumnos_por_clase.setdefault(r.clase_id, []).append({
+                "reserva_id": r.id,
+                "alumno_id": r.alumno_id,
+                "nombre": nombres.get(r.alumno_id, f"Alumno #{r.alumno_id}"),
+                "asistio": bool(r.asistio),
+            })
+
+    disc_ids = {c.disciplina_id for c in clases if c.disciplina_id}
+    disc_map = {}
+    if disc_ids:
+        disc_map = {d.id: d.nombre for d in db.query(Disciplina).filter(
+            Disciplina.id.in_(disc_ids)).all()}
+
+    coach_ids = {c.coach_id for c in clases if c.coach_id}
+    coach_map = {}
+    if coach_ids:
+        coach_map = {u.id: u.nombre for u in db.query(Usuario).filter(
+            Usuario.id.in_(coach_ids)).all()}
+
+    # El estado (realizada / en_curso / próxima) se evalúa con el MISMO instante para todas
+    # las filas, como en `/clases-hoy` (definición única de `clases_service`).
+    ahora_dt = ahora_santiago()
+
+    return {
+        "anio": anio,
+        "mes": mes,
+        "desde": str(primer_dia),
+        "hasta": str(ultimo_dia),
+        # "coach" = sólo sus clases; "box" = el mes completo (admin/administrador).
+        "alcance": "coach" if rol == "coach" else "box",
+        "clases": [
+            {
+                "id": c.id,
+                "fecha": str(c.fecha),
+                "hora_inicio": str(c.hora_inicio),
+                "hora_fin": str(c.hora_fin),
+                "disciplina_id": c.disciplina_id,
+                "disciplina_nombre": disc_map.get(c.disciplina_id, "Clase"),
+                "coach": coach_map.get(c.coach_id) if c.coach_id else None,
+                "cupo_maximo": c.cupo_maximo,
+                "cupo_original": c.cupo_original,
+                "reservas_count": reservas_count.get(c.id, 0),
+                "marcados_count": marcados_count.get(c.id, 0),
+                "marcada": c.id in marcadas,
+                "estado": estado_clase(c.fecha, c.hora_inicio, c.hora_fin, c.cancelada, ahora_dt),
+                "alumnos": alumnos_por_clase.get(c.id, []),
+            }
+            for c in clases
+        ],
+    }
 
 
 # ── Coach: reservas de una clase para marcar ─────────────────────────────────
