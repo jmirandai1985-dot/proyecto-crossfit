@@ -46,5 +46,26 @@ ok(BAZAR.includes('deepLinkAplicado.current === productoPedido'),
     'se aplica una vez por id (volver al catálogo no reabre el paso 2)');
 ok(BAZAR.includes('está agotado'), 'si el producto no tiene stock, avisa en el catálogo');
 
+const CARRUSEL = leer('../src/components/CarruselMarketing.jsx');
+
+console.log('== 3. El carrusel rota solo (Parte G) ==');
+ok(CARRUSEL.includes('setInterval('), 'programa el avance automático');
+ok(CARRUSEL.includes('}, 5500)'), 'cada ~5,5 s (dentro de los 5-6 s pedidos)');
+ok(CARRUSEL.includes('(activo + 1) % tarjetas.length'),
+    'pasa a la siguiente y vuelve al inicio al llegar al final');
+ok(CARRUSEL.includes('prefers-reduced-motion: reduce'),
+    'respeta `prefers-reduced-motion` (no anima a quien lo desactiva)');
+ok(CARRUSEL.includes('document.hidden'), 'no rota con la pestaña en segundo plano');
+ok(CARRUSEL.includes('onPointerDown={pausarPorInteraccion}')
+    && CARRUSEL.includes('onTouchStart={pausarPorInteraccion}'),
+    'tocar/deslizar a mano PAUSA la rotación (no pelea con el dedo)');
+ok(CARRUSEL.includes('setTimeout(() => setPausado(false), 10000)'),
+    'y se reanuda solo 10 s después de la última interacción');
+ok(CARRUSEL.includes('pista.scrollTo(') && !CARRUSEL.includes('.scrollIntoView('),
+    'el avance mueve SÓLO la pista (no arrastra el scroll vertical de la página)');
+ok(CARRUSEL.includes('onScroll={alDesplazar}'), 'el deslizamiento manual sigue funcionando');
+ok(CARRUSEL.includes('tarjetas.length <= 1'), 'con una sola tarjeta no rota');
+ok(CARRUSEL.includes('|| flyer ||'), 'con un flyer abierto tampoco');
+
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);

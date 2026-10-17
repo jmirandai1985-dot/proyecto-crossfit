@@ -173,6 +173,11 @@ const CarruselMarketing = () => {
     const [flyer, setFlyer] = useState(null);
     const [activo, setActivo] = useState(0);
     const pistaRef = useRef(null);
+    // Rotación automática: se PAUSA al tocar/deslizar (10 s), al pasar el mouse por encima
+    // y mientras hay un flyer abierto. Así el avance solo no pelea con el dedo del alumno.
+    const [pausado, setPausado] = useState(false);
+    const [hover, setHover] = useState(false);
+    const reanudarRef = useRef(null);
 
     // Escape cierra el flyer (el overlay del mockup se cierra tocando fuera).
     useEffect(() => {
@@ -183,8 +188,6 @@ const CarruselMarketing = () => {
         window.addEventListener('keydown', alTeclear);
         return () => window.removeEventListener('keydown', alTeclear);
     }, [flyer]);
-
-    if (!tarjetas.length) return null;
 
     const alDesplazar = () => {
         const pista = pistaRef.current;
@@ -197,18 +200,52 @@ const CarruselMarketing = () => {
     };
 
     const irA = (indice) => {
-        const tarjeta = pistaRef.current?.children?.[indice];
-        if (tarjeta?.scrollIntoView) {
-            tarjeta.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+        const pista = pistaRef.current;
+        const primera = pista?.children?.[0];
+        const tarjeta = pista?.children?.[indice];
+        // `scrollTo` sobre la PISTA (no `scrollIntoView`): el salto automático no puede
+        // arrastrar el scroll vertical de la página, solo mueve el carrusel.
+        if (pista && primera && tarjeta) {
+            pista.scrollTo({
+                left: tarjeta.offsetLeft - primera.offsetLeft,
+                behavior: 'smooth',
+            });
         }
         setActivo(indice);
     };
+
+    const pausarPorInteraccion = () => {
+        setPausado(true);
+        clearTimeout(reanudarRef.current);
+        reanudarRef.current = setTimeout(() => setPausado(false), 10000);
+    };
+
+    useEffect(() => () => clearTimeout(reanudarRef.current), []);
+
+    useEffect(() => {
+        // Con una sola tarjeta no hay a dónde rotar. Tampoco con el flyer abierto, el dedo
+        // sobre la pista o `prefers-reduced-motion` (accesibilidad).
+        if (tarjetas.length <= 1 || flyer || pausado || hover) return undefined;
+        if (typeof window === 'undefined') return undefined;
+        if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return undefined;
+        const intervalo = setInterval(() => {
+            if (document.hidden) return;   // pestaña en segundo plano: no gastar ciclos
+            irA((activo + 1) % tarjetas.length);
+        }, 5500);
+        return () => clearInterval(intervalo);
+    }, [activo, tarjetas.length, flyer, pausado, hover]);
+
+    if (!tarjetas.length) return null;
 
     return (
         <section className="cm-carrusel" aria-label="Novedades del box">
             <div className="cm-rotulo">Novedades del box</div>
 
-            <div className="cm-pista" ref={pistaRef} onScroll={alDesplazar}>
+            <div className="cm-pista" ref={pistaRef} onScroll={alDesplazar}
+                onPointerDown={pausarPorInteraccion}
+                onTouchStart={pausarPorInteraccion}
+                onMouseEnter={() => setHover(true)}
+                onMouseLeave={() => setHover(false)}>
                 {tarjetas.map((tarjeta) => {
                     if (tarjeta.clase === 'aviso') {
                         return <TarjetaAviso key={`aviso-${tarjeta.aviso.id}`}
