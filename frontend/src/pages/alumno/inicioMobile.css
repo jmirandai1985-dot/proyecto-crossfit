@@ -735,6 +735,17 @@
     border: 1px solid var(--ub-line);
     border-radius: var(--ub-r-md);
     padding: 10px 10px 14px;
+    /* Ahora la tarjeta es un <button> (abre el producto): se resetea para que se vea
+       exactamente igual que el <div> de antes. */
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ub-inicio .prod:active {
+    transform: scale(0.98);
 }
 
 .ub-inicio .prod .img {

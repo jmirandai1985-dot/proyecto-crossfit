@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import AvisoCarga from '../../components/AvisoCarga';
@@ -37,6 +38,29 @@ const Bazar = () => {
     if (productosQ.isError) erroresCarga.push('productos');
     if (configQ.isError) erroresCarga.push('datos de transferencia');
     const cargarTodo = () => { productosQ.refetch(); configQ.refetch(); };
+
+    // ── Deep link desde la Tienda del Inicio: /alumno/bazar?producto=<id> ────────
+    // Tocar la tarjeta de un producto tiene que llevar DIRECTO al paso de pago de ESE
+    // producto (antes la tarjeta no hacía nada). Se aplica UNA vez por id: volver al
+    // catálogo no reabre el paso 2. No exige datos bancarios para entrar: si faltan, el
+    // paso 2 ya muestra el aviso y el botón de enviar queda deshabilitado.
+    const [searchParams] = useSearchParams();
+    const productoPedido = Number(searchParams.get('producto'));
+    const deepLinkAplicado = useRef(null);
+    useEffect(() => {
+        if (!productoPedido || deepLinkAplicado.current === productoPedido) return;
+        const elegido = productos.find((p) => p.id === productoPedido);
+        if (!elegido) return;   // puede estar despublicado o fuera del catálogo
+        deepLinkAplicado.current = productoPedido;
+        if ((elegido.stock ?? 0) <= 0) {
+            setMensaje({ type: 'error', text: `${elegido.nombre} está agotado.` });
+            return;
+        }
+        setProductoSeleccionado(elegido);
+        setCantidad(1);
+        setPaso(2);
+        setMensaje({ type: '', text: '' });
+    }, [productoPedido, productos]);
 
     const handleComprar = (producto) => {
         // Sin datos bancarios cargados no hay compra: el pedido exige subir el comprobante
@@ -108,6 +132,13 @@ const Bazar = () => {
                         data-testid="bazar-sin-datos-bancarios">
                         ⚠️ El box <strong>todavía no cargó los datos de transferencia</strong>, así que
                         los pedidos quedan deshabilitados. Contacta al administrador.
+                    </div>
+                )}
+
+                {paso === 1 && mensaje.text && (
+                    <div className={`mb-4 rounded-xl border px-4 py-3 text-sm font-medium ${mensaje.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}
+                        role="alert">
+                        {mensaje.type === 'success' ? '✅' : '❌'} {mensaje.text}
                     </div>
                 )}
 

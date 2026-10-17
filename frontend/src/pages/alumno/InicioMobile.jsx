@@ -504,7 +504,16 @@ const InicioMobile = ({
                     {productos.length > 0 ? (
                         <div className="shop">
                             {productos.slice(0, 5).map((p) => (
-                                <div className="prod" key={p.id}>
+                                // La tarjeta lleva DIRECTO al flujo de compra de ESE producto:
+                                // el Bazar lee `?producto=<id>` y abre el paso 2 (pago). Antes
+                                // era un <div> decorativo y tocar no hacía nada.
+                                <button
+                                    type="button"
+                                    className="prod"
+                                    key={p.id}
+                                    onClick={() => navigate(`/alumno/bazar?producto=${p.id}`)}
+                                    aria-label={`Comprar ${p.nombre || 'producto'}`}
+                                >
                                     <div className="img">
                                         <ImagenProducto
                                             url={p.imagen_url}
@@ -514,7 +523,7 @@ const InicioMobile = ({
                                     </div>
                                     <b>{p.nombre}</b>
                                     <span>{precioCLP(p.precio)}</span>
-                                </div>
+                                </button>
                             ))}
                         </div>
                     ) : (
