@@ -153,8 +153,11 @@ def guardar_publico(contenido: bytes, nombre_archivo: str) -> str:
     if backend() == "local":
         _guardar_local(UPLOAD_DIR, nombre_archivo, contenido)
         return f"{PUBLIC_PREFIX}{nombre_archivo}"
+    # La URL se valida ANTES de subir: con una base inválida no se deja un objeto
+    # huérfano en el bucket (ni se guarda en la BD una URL que el navegador no carga).
+    base = _url_publica_base()
     _r2_subir(PUBLIC_KEY_PREFIX + nombre_archivo, contenido, bucket=_bucket_publico())
-    return f"{_url_publica_base()}/{PUBLIC_KEY_PREFIX}{nombre_archivo}"
+    return f"{base}/{PUBLIC_KEY_PREFIX}{nombre_archivo}"
 
 
 # ── Borrado del archivo público (mantenimiento) ───────────────────────────────
@@ -285,11 +288,33 @@ def abrir_privado(url_documento: str, etiqueta: str) -> DocumentoAbierto:
 # ── Cliente de Cloudflare R2 (S3-compatible) ─────────────────────────────────
 
 def _url_publica_base() -> str:
-    base = (getattr(settings, "STORAGE_R2_PUBLIC_BASE_URL", "") or "").rstrip("/")
+    """Base pública del bucket, normalizada a UNA sola URL.
+
+    POR QUÉ: en PROD `STORAGE_R2_PUBLIC_BASE_URL` llegó con el nombre del bucket y la
+    access key PEGADOS en la misma variable (varias líneas). Antes se usaba el valor
+    crudo, así que la BD guardaba una URL inválida
+    (`https://...r2.dev\\n\\n<bucket>\\n\\n<access-key>\\n\\n/publico/<archivo>`): el
+    navegador no podía cargarla y el producto mostraba la foto rota.
+
+    Se toma el PRIMER token (la URL) y se exige que sea http(s). Los demás tokens NO se
+    registran en el log: pueden ser credenciales.
+    """
+    crudo = (getattr(settings, "STORAGE_R2_PUBLIC_BASE_URL", "") or "").strip()
+    partes = crudo.split()
+    base = (partes[0] if partes else "").rstrip("/")
     if not base:
         raise ErrorAlmacenamiento(
             "Falta STORAGE_R2_PUBLIC_BASE_URL: sin la URL pública del bucket no se "
             "puede guardar la imagen de un producto (no se puede armar su URL).")
+    if len(partes) > 1:
+        log.warning(
+            "[storage] STORAGE_R2_PUBLIC_BASE_URL trae %d valores separados por "
+            "espacios/saltos; se usa sólo la URL base %s. El bucket y las claves van "
+            "en SUS propias variables.", len(partes), base)
+    if not base.lower().startswith(("http://", "https://")):
+        raise ErrorAlmacenamiento(
+            "STORAGE_R2_PUBLIC_BASE_URL no es una URL http(s) válida: debe ser el "
+            "dominio público del bucket (p. ej. https://pub-xxxx.r2.dev).")
     return base
 
 

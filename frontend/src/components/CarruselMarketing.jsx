@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAvisosMarketingVigentes } from '../hooks/queries';
 import IconoTipoAviso from './IconoTipoAviso';
 import { urlArchivo } from '../utils/imagen';
+// Productos del carrusel: la foto también cae al ícono si la URL no carga.
+import ImagenProducto from './ImagenProducto';
 import {
     agruparParaCarrusel, etiquetaTipo, formatearFechaEvento, fotoDeTarjeta,
     MAX_MINIATURAS, PIE_PRODUCTO, precioDeTarjeta, resumenVigencia,
@@ -102,9 +104,8 @@ const TarjetaProducto = ({ aviso }) => {
             <Remaches />
             <Etiqueta tipo={tipo} />
             <div className="cm-foto">
-                {foto
-                    ? <img src={urlArchivo(foto)} alt={tituloDeTarjeta(aviso)} />
-                    : <IconoFoto />}
+                <ImagenProducto url={foto} alt={tituloDeTarjeta(aviso)}
+                    respaldo={<IconoFoto />} />
             </div>
             <div className="cm-info">
                 <h3 className="cm-titulo" style={{ color: tipo.titulo }}>
@@ -139,9 +140,8 @@ const TarjetaProductos = ({ tarjeta, onVerBazar }) => {
             <div className="cm-minis">
                 {visibles.map((aviso) => (
                     <div className="cm-mini" key={aviso.id}>
-                        {fotoDeTarjeta(aviso)
-                            ? <img src={urlArchivo(fotoDeTarjeta(aviso))} alt={tituloDeTarjeta(aviso)} />
-                            : <IconoFoto />}
+                        <ImagenProducto url={fotoDeTarjeta(aviso)}
+                            alt={tituloDeTarjeta(aviso)} respaldo={<IconoFoto />} />
                     </div>
                 ))}
                 {tarjeta.extra > 0 && (

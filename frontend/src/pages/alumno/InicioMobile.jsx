@@ -4,7 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 // que el Dashboard (utils/fecha.js): así la reserva de hoy coincide con las clases.
 import { hoyChileStr, fechaSolaAInstante } from '../../utils/fecha';
 import { useMiResumenAsistencia, useProductos, usePublicIdBox, useReservasAlumno } from '../../hooks/queries';
-import { urlArchivo } from '../../utils/imagen';
+import ImagenProducto from '../../components/ImagenProducto';
 import { MENU_BY_ROL } from '../../config/menu';
 import { MENU_ICONS } from '../../config/menuIcons';
 import EscanerQR from '../../components/EscanerQR';
@@ -506,9 +506,11 @@ const InicioMobile = ({
                             {productos.slice(0, 5).map((p) => (
                                 <div className="prod" key={p.id}>
                                     <div className="img">
-                                        {p.imagen_url
-                                            ? <img src={urlArchivo(p.imagen_url)} alt={p.nombre || 'Producto'} />
-                                            : <Icono nombre="tee" />}
+                                        <ImagenProducto
+                                            url={p.imagen_url}
+                                            alt={p.nombre || 'Producto'}
+                                            respaldo={<Icono nombre="tee" />}
+                                        />
                                     </div>
                                     <b>{p.nombre}</b>
                                     <span>{precioCLP(p.precio)}</span>

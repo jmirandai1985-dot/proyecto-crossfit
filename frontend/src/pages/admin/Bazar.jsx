@@ -3,7 +3,9 @@ import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import ModalProducto from '../../components/ModalProducto';
 import { useProductos, useEliminarProducto, useGuardarProducto, SIN_DATOS } from '../../hooks/queries';
-import { urlArchivo } from '../../utils/imagen';
+// Foto del producto con RESPALDO: si la URL no carga (mal formada / archivo perdido),
+// se muestra el emoji de siempre en vez del ícono de imagen rota del navegador.
+import ImagenProducto from '../../components/ImagenProducto';
 
 const FILTROS = [
     { key: 'todos', label: 'Todos' },
@@ -316,22 +318,21 @@ const Bazar = ({ sinLayout = false }) => {
                                             <td className="px-4 py-3.5">
                                                 <div className="flex items-center gap-3">
                                                     {/* Foto del producto si el admin la subió (imagen_url:
-                                                        en PROD es la URL pública de R2). Sin foto se
-                                                        mantiene el cuadro de color con el emoji. */}
-                                                    {p.imagen_url ? (
-                                                        <img
-                                                            src={urlArchivo(p.imagen_url)}
-                                                            alt={p.nombre}
-                                                            className="w-[42px] h-[42px] rounded-xl object-cover flex-shrink-0 border border-zinc-700"
-                                                        />
-                                                    ) : (
-                                                        <div
-                                                            className="w-[42px] h-[42px] rounded-xl flex items-center justify-center text-lg flex-shrink-0"
-                                                            style={{ background: THUMB_BG[p.id % THUMB_BG.length] }}
-                                                        >
-                                                            {getProductoEmoji(p.nombre)}
-                                                        </div>
-                                                    )}
+                                                        en PROD es la URL pública de R2). Sin foto —o si
+                                                        la foto no carga— queda el cuadro con el emoji. */}
+                                                    <ImagenProducto
+                                                        url={p.imagen_url}
+                                                        alt={p.nombre}
+                                                        className="w-[42px] h-[42px] rounded-xl object-cover flex-shrink-0 border border-zinc-700"
+                                                        respaldo={(
+                                                            <div
+                                                                className="w-[42px] h-[42px] rounded-xl flex items-center justify-center text-lg flex-shrink-0"
+                                                                style={{ background: THUMB_BG[p.id % THUMB_BG.length] }}
+                                                            >
+                                                                {getProductoEmoji(p.nombre)}
+                                                            </div>
+                                                        )}
+                                                    />
                                                     <div>
                                                         <div className="font-bold text-zinc-100">{p.nombre}</div>
                                                         {p.descripcion && (

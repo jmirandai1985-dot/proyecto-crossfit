@@ -45,7 +45,8 @@
     "test:coach-resumen": "node scripts/test-coach-resumen.mjs",
     "test:clases-coach": "node scripts/test-clases-sin-gestion.mjs",
     "test:encoding": "node scripts/test-encoding.mjs",
-    "test:historial": "node scripts/test-historial-asistencia.mjs"
+    "test:historial": "node scripts/test-historial-asistencia.mjs",
+    "test:imagenes": "node scripts/test-imagenes-bazar.mjs"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.3.0",

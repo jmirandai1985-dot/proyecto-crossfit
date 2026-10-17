@@ -224,6 +224,37 @@ def test_r2_imagen_sin_url_publica_falla_claro(r2, monkeypatch):
     with pytest.raises(storage.ErrorAlmacenamiento) as e:
         storage.guardar_publico(PNG_1X1, "producto_10.png")
     assert "STORAGE_R2_PUBLIC_BASE_URL" in str(e.value)
+    # La URL se valida ANTES de subir: no queda un objeto huérfano en el bucket.
+    assert r2.subidas == []
+
+
+def test_r2_base_publica_multilinea_usa_solo_la_url(r2, monkeypatch, caplog):
+    """PROD llegó con bucket y access key PEGADOS en STORAGE_R2_PUBLIC_BASE_URL.
+
+    Se usa SÓLO el primer token (la URL http) y se avisa por log. Antes se guardaba
+    el valor crudo en la BD y la foto del producto quedaba rota (Bug del Bazar).
+    """
+    monkeypatch.setattr(
+        settings, "STORAGE_R2_PUBLIC_BASE_URL",
+        "https://pub-fake.r2.dev\n\nbucket-publico\n\nAKIAFALSA\n\n")
+    with caplog.at_level("WARNING", logger="app.services.storage"):
+        url = storage.guardar_publico(PNG_1X1, "producto_multilinea.png")
+
+    assert url == "https://pub-fake.r2.dev/publico/producto_multilinea.png"
+    assert not any(c.isspace() for c in url)
+    assert "tokens" in caplog.text or "valores" in caplog.text
+    # El aviso NO filtra el contenido de las otras líneas (pueden ser credenciales).
+    assert "AKIAFALSA" not in caplog.text
+    assert "bucket-publico" not in caplog.text
+
+
+def test_r2_base_publica_que_no_es_url_falla_claro(r2, monkeypatch):
+    """Un valor que no empieza con http(s) no se guarda: error claro y sin subir."""
+    monkeypatch.setattr(settings, "STORAGE_R2_PUBLIC_BASE_URL", "pub-fake.r2.dev")
+    with pytest.raises(storage.ErrorAlmacenamiento) as e:
+        storage.guardar_publico(PNG_1X1, "producto_sin_esquema.png")
+    assert "URL http(s)" in str(e.value)
+    assert r2.subidas == []
 
 
 def test_r2_objeto_inexistente_avisa_que_se_vuelva_a_subir(r2):
