@@ -71,6 +71,10 @@ ok(storage.includes('len(partes) > 1'), 'avisa si trae valores de más (sin logu
 ok(storage.includes('base = _url_publica_base()'), 'valida la base ANTES de subir el archivo');
 ok(storage.includes('if not base.lower().startswith(("http://", "https://")):'),
     'exige una URL http(s) (un valor suelto no se guarda)');
+ok(storage.includes('".webp": "image/webp"'),
+    'declara el media type de .webp (mimetypes de Python no lo conoce)');
+ok(storage.includes('ContentType=tipo_mime(clave)'),
+    'R2 sube la imagen con su tipo real (no application/octet-stream)');
 
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);

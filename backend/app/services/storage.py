@@ -119,8 +119,30 @@ if backend() == "local":
 
 # ── Guardado ─────────────────────────────────────────────────────────────────
 
-def _tipo_mime(nombre_archivo: str) -> str:
-    return mimetypes.guess_type(nombre_archivo)[0] or "application/octet-stream"
+# Extensiones de imagen con su media type EXPLÍCITO: `mimetypes` de Python no conoce
+# `.webp` (devuelve None), así que las fotos se subían a R2 como
+# `application/octet-stream`. Algunos navegadores no previsualizan una imagen con ese
+# tipo (y un voucher .webp tampoco se ve en el panel). La tabla manda sobre mimetypes.
+_TIPOS_MIME = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".pdf": "application/pdf",
+}
+
+
+def tipo_mime(nombre_archivo: str) -> str:
+    """Media type de un archivo por su extensión (webp incluido).
+
+    Público porque lo comparten la subida a R2 (ContentType del objeto) y la lectura de
+    documentos privados (FileResponse/StreamingResponse). Una sola tabla = el navegador
+    recibe el mismo tipo por las dos vías.
+    """
+    extension = os.path.splitext(nombre_archivo or "")[1].lower()
+    return _TIPOS_MIME.get(extension) or mimetypes.guess_type(nombre_archivo)[0] \
+        or "application/octet-stream"
 
 
 def _guardar_local(carpeta: str, nombre_archivo: str, contenido: bytes) -> None:
@@ -390,7 +412,7 @@ def _r2_subir(clave: str, contenido: bytes, bucket: str = None) -> None:
     cliente = _cliente_r2()
     try:
         cliente.put_object(Bucket=bucket or _bucket(), Key=clave, Body=contenido,
-                           ContentType=_tipo_mime(clave))
+                           ContentType=tipo_mime(clave))
     except Exception as e:  # botocore: ClientError / EndpointConnectionError / ...
         log.error("[storage] no se pudo subir %s a R2: %s", clave, e)
         raise ErrorAlmacenamiento(f"No se pudo subir el archivo a R2: {e}") from e

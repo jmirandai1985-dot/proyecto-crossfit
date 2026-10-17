@@ -15,8 +15,6 @@ de estudiante se sirven igual. Con la resolución y la respuesta en un solo luga
 un endpoint nuevo (p. ej. el certificado) no puede olvidarse del guard ni del
 chequeo de traversal, y no hay dos copias que se desincronicen.
 """
-import mimetypes
-
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 
@@ -52,7 +50,7 @@ def respuesta_documento(url_documento: str, etiqueta: str, inline: bool):
         raise HTTPException(status_code=404, detail=str(e)) from e
 
     nombre = documento.nombre
-    media_type = mimetypes.guess_type(nombre)[0] or "application/octet-stream"
+    media_type = storage.tipo_mime(nombre)
     # attachment = descarga forzada; inline = previsualización en el panel
     disposicion = "inline" if inline else "attachment"
     headers = {"Content-Disposition": f"{disposicion}; filename={nombre}"}

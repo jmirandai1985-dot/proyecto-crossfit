@@ -218,6 +218,29 @@ def test_r2_borrar_publico_nunca_toca_un_comprobante(r2):
     assert ("box-crossfit-uploads-test", "privado/vouchers/voucher_e.pdf") in r2.objetos
 
 
+def test_tipo_mime_reconoce_webp_y_las_imagenes_del_bazar():
+    """`mimetypes` de Python NO conoce .webp (devuelve None).
+
+    Sin esta tabla las fotos del Bazar se subían a R2 como
+    `application/octet-stream`: el navegador recibe un binario y puede no pintarlo.
+    """
+    assert storage.tipo_mime("foto.webp") == "image/webp"
+    assert storage.tipo_mime("FOTO.WEBP") == "image/webp"
+    assert storage.tipo_mime("foto.png") == "image/png"
+    assert storage.tipo_mime("foto.jpg") == "image/jpeg"
+    assert storage.tipo_mime("foto.jpeg") == "image/jpeg"
+    assert storage.tipo_mime("foto.gif") == "image/gif"
+    assert storage.tipo_mime("voucher.pdf") == "application/pdf"
+    assert storage.tipo_mime("desconocido.bin") == "application/octet-stream"
+
+
+def test_r2_webp_se_sube_con_su_media_type(r2):
+    """El objeto de R2 (y el documento privado, que usa la misma tabla) dice image/webp."""
+    storage.guardar_publico(PNG_1X1, "producto_webp.webp")
+    assert ("box-crossfit-public-test", "publico/producto_webp.webp",
+            "image/webp") in r2.subidas
+
+
 def test_r2_imagen_sin_url_publica_falla_claro(r2, monkeypatch):
     """Sin STORAGE_R2_PUBLIC_BASE_URL no se puede guardar: se avisa, no se rompe."""
     monkeypatch.setattr(settings, "STORAGE_R2_PUBLIC_BASE_URL", "")
