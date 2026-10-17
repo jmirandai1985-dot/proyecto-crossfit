@@ -24,8 +24,8 @@ const CAMPANA = leer('../src/components/CampanaNotificaciones.jsx');
 const LAYOUT = leer('../src/components/Layout.jsx');
 
 console.log('== 1. En mobile el panel se ancla al viewport (no desborda a la izquierda) ==');
-ok(/className="fixed inset-x-2 top-\[4\.5rem\][^"]*"/.test(CAMPANA),
-    'mobile: fixed + inset-x-2 (8px a cada lado, sin importar dónde esté la campana)');
+ok(/className="fixed inset-x-2 top-\[calc\(env\(safe-area-inset-top\)\+4\.5rem\)\][^"]*"/.test(CAMPANA),
+    'mobile: fixed + inset-x-2 (8px a cada lado) y debajo del header (respetando el notch)');
 ok(CAMPANA.includes('sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2'),
     'desde sm vuelve al dropdown alineado a la derecha de la campana');
 ok(CAMPANA.includes('sm:w-96'), 'en escritorio conserva el ancho de siempre');
