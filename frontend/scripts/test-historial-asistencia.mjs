@@ -16,7 +16,7 @@
 // La matemática del util se corre DE VERDAD (es puro y no importa nada).
 import { readFileSync } from 'node:fs';
 
-import { COACH_SUBTABS } from '../src/config/menu.js';
+import { COACH_SUBTABS, MENU_BY_ROL } from '../src/config/menu.js';
 import {
     DIAS_SEMANA, MESES, aniosDisponibles, calendarioDelMes, fechaLarga, mesesDelAnio,
     porcentaje, presentesDe, resumenDia, resumenPorDiaSemana, totalesDe,
@@ -36,6 +36,8 @@ const PANTALLA = leer('../src/components/HistorialAsistencia.jsx');
 const QUERIES = leer('../src/hooks/queries.js');
 const DASH = leer('../src/pages/coach/DashboardCoach.jsx');
 const ADMIN = leer('../src/pages/admin/Asistencia.jsx');
+// Pestaña propia del admin (Parte A): el historial ya no se apila debajo de Asistencia.
+const ADMIN_HISTORIAL = leer('../src/pages/admin/HistorialAsistencia.jsx');
 const CLASES = leer('../src/components/AsistenciaClases.jsx');
 const RESUMEN = leer('../src/components/ResumenCoach.jsx');
 const APP = leer('../src/App.jsx');
@@ -159,12 +161,22 @@ ok(/import HistorialAsistencia from '\.\.\/\.\.\/components\/HistorialAsistencia
     && DASH.includes('<HistorialAsistencia />'), 'y monta el componente (import + render)');
 ok(DASH.includes("activeTab === 'resumen' || activeTab === 'historial'"),
     'el Historial va sobre el fondo oscuro del Layout (como el Resumen, sin panel claro)');
-ok(/import HistorialAsistencia from '\.\.\/\.\.\/components\/HistorialAsistencia'/.test(ADMIN)
-    && ADMIN.includes('<HistorialAsistencia />'), 'la página Asistencia del admin también lo monta');
+ok(/import HistorialAsistencia from '\.\.\/\.\.\/components\/HistorialAsistencia'/.test(ADMIN_HISTORIAL)
+    && ADMIN_HISTORIAL.includes('<HistorialAsistencia />'),
+    'la pestaña Historial del admin monta el MISMO componente compartido');
+ok(ADMIN_HISTORIAL.includes('<Layout>'),
+    'y vive dentro del Layout del panel (pestaña propia, no apilada)');
+ok(!/import\s+HistorialAsistencia/.test(ADMIN) && !/<HistorialAsistencia\s*\/>/.test(ADMIN),
+    'la página Asistencia ya NO apila el historial (se separó en su pestaña)');
 ok(ADMIN.includes('<AsistenciaClases variant="dark" />'),
     'sin tocar el marcado del admin (el componente compartido sigue montado igual)');
-eq((APP.match(/path="historial"/g) || []).length, 0,
-    'no agrega una ruta nueva (el coach navega por query, como el resto de sus pestañas)');
+const itemHistorialAdmin = MENU_BY_ROL.administrador.find((i) => i.path === '/admin/historial');
+ok(itemHistorialAdmin && itemHistorialAdmin.label === 'Historial',
+    'el menú del admin tiene la entrada "Historial" -> /admin/historial');
+eq((APP.match(/path="historial"/g) || []).length, 1,
+    'la ruta del admin existe (una sola: el coach navega por query)');
+ok(APP.includes("import('./pages/admin/HistorialAsistencia')"),
+    'y la ruta carga la página propia del admin (chunk lazy)');
 
 console.log('== 6. La matemática del util, corrida de verdad ==');
 eq(porcentaje(0, 0), 0, 'sin cupos (base 0) el porcentaje es 0, no NaN');

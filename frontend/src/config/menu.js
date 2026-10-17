@@ -60,6 +60,10 @@ export const MENU_BY_ROL = {
         { label: 'Coaches', path: '/admin/coaches', icon: 'users' },
         { label: 'Supervisión', path: '/admin/supervision-clases', icon: 'eye' },
         { label: 'Asistencia', path: '/admin/asistencia', icon: 'squareCheck' },
+        // Historial de Asistencia (sólo lectura): el mes entero del box. Va como pestaña
+        // propia —igual que la sub-pestaña `?tab=historial` del coach—: en el teléfono,
+        // apilado debajo de Asistencia quedaba al final de una pantalla larga.
+        { label: 'Historial', path: '/admin/historial', icon: 'calendar' },
         { label: 'Mi QR', path: '/admin/mi-qr', icon: 'qrcode' },
 
         // ── CATÁLOGO ──

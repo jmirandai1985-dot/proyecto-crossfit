@@ -39,6 +39,10 @@ const AdminPlanes = lazy(() => import('./pages/admin/Planes'));
 const AdminAlumnosPendientes = lazy(() => import('./pages/admin/AdminAlumnosPendientes'));
 const AdminDisciplinas = lazy(() => import('./pages/admin/Disciplinas'));
 const AdminAsistencia = lazy(() => import('./pages/admin/Asistencia'));
+// Historial de Asistencia: pestaña PROPIA en el menú del admin (sólo lectura del mes).
+// Antes estaba apilada debajo de Asistencia; se separó con el mismo criterio que la
+// sub-pestaña Historial del coach. Reutiliza el componente compartido.
+const AdminHistorialAsistencia = lazy(() => import('./pages/admin/HistorialAsistencia'));
 const AdminMiQr = lazy(() => import('./pages/admin/MiQr'));
 // · Familia COACH
 // Pizarra y Generar Clases ya no se importan: sin ruta no hay chunk que bajar (Bloque 5).
@@ -137,6 +141,7 @@ function App() {
             <Route path="clases" element={<AdminClases />} />
             <Route path="supervision-clases" element={<AdminSupervisionClases />} />
             <Route path="asistencia" element={<AdminAsistencia />} />
+            <Route path="historial" element={<AdminHistorialAsistencia />} />
             <Route path="mi-qr" element={<AdminMiQr />} />
             <Route path="planes" element={<AdminPlanes />} />
             <Route path="disciplinas" element={<AdminDisciplinas />} />

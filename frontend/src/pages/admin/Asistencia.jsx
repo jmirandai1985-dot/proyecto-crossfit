@@ -1,9 +1,6 @@
 import React from 'react';
 import Layout from '../../components/Layout';
 import AsistenciaClases from '../../components/AsistenciaClases';
-// Historial del mes (SÓLO LECTURA): el "después" del marcado. Es el MISMO componente que monta
-// la pestaña Historial del coach, así que el admin y el coach miran la misma cuenta.
-import HistorialAsistencia from '../../components/HistorialAsistencia';
 
 /**
  * Página "Asistencia" del panel de Administración.
@@ -15,21 +12,19 @@ import HistorialAsistencia from '../../components/HistorialAsistencia';
  * El backend ya distingue por rol (admin ve todas las clases y registra la
  * marca con via="admin").
  *
- * Debajo va el HISTORIAL DE ASISTENCIA del mes elegido (anillos por día de la
- * semana, calendario y detalle por bloque). Vive acá —y no en una pantalla
- * aparte— porque es la otra mitad de la MISMA tarea: marcar primero, revisar
- * después. `GET /api/v1/asistencia/historial` no escribe nada y para el admin
- * devuelve todas las clases del box (`alcance: 'box'`).
+ * El HISTORIAL DE ASISTENCIA ya NO vive acá: es su propia pestaña del menú
+ * (`/admin/historial`), igual que la sub-pestaña `?tab=historial` del coach.
+ * Marcar y revisar el mes son dos tareas distintas; apiladas, en el teléfono el
+ * historial quedaba al final de una pantalla larga. El componente compartido
+ * (`components/HistorialAsistencia.jsx`) es el mismo en los dos roles.
  */
 const AdminAsistencia = () => {
     return (
         <Layout>
-            <div className="space-y-8">
-                <AsistenciaClases variant="dark" />
-                <HistorialAsistencia />
-            </div>
+            <AsistenciaClases variant="dark" />
         </Layout>
     );
 };
 
 export default AdminAsistencia;
+
