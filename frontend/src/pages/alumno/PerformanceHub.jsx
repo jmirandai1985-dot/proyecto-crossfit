@@ -142,11 +142,14 @@ const PerformanceHub = () => {
                     {tieneDatos && <span className="text-4xl font-bold" style={{ color: cfg.color }}>{data.valor}<span className="text-base font-normal text-gray-400 ml-1">{cat === 'gimnastico' ? 'reps' : cat === 'fuerza' ? 'kg' : ''}</span></span>}
                 </div>
                 {tieneDatos && chart.length >= 2 ? (
-                    <div style={{ height: 100 }}>
-                        <ResponsiveContainer width="100%" height={100}>
-                            <BarChart data={chart} margin={{ top: 5, right: 5, bottom: 5, left: 0 }}>
+                    <div style={{ height: 118 }}>
+                        <ResponsiveContainer width="100%" height={118}>
+                            {/* `tickMargin` + margen inferior: las semanas (S40, S42…) quedaban
+                                pegadas a las barras en mobile. */}
+                            <BarChart data={chart} margin={{ top: 5, right: 5, bottom: 12, left: 0 }}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
-                                <XAxis dataKey="semana" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} />
+                                <XAxis dataKey="semana" tick={{ fontSize: 9 }} tickMargin={8}
+                                    interval="preserveStartEnd" axisLine={false} tickLine={false} />
                                 <YAxis hide domain={[0, 'dataMax + 10']} />
                                 <Tooltip formatter={(v) => [`${v} ${cat === 'gimnastico' ? 'reps' : cat === 'fuerza' ? 'kg' : ''}`, cfg.label]} />
                                 <Bar dataKey="max" fill={cfg.color} radius={[3, 3, 0, 0]} />
@@ -154,9 +157,9 @@ const PerformanceHub = () => {
                         </ResponsiveContainer>
                     </div>
                 ) : tieneDatos ? (
-                    <div className="h-[100px] flex items-center justify-center text-gray-400 text-sm italic">Registra más RMs para ver tu evolución</div>
+                    <div className="h-[118px] flex items-center justify-center text-gray-400 text-sm italic">Registra más RMs para ver tu evolución</div>
                 ) : (
-                    <div className="h-[100px] flex items-center justify-center text-gray-400 text-sm">Sin registros aún</div>
+                    <div className="h-[118px] flex items-center justify-center text-gray-400 text-sm">Sin registros aún</div>
                 )}
             </div>
         );
@@ -175,16 +178,57 @@ const PerformanceHub = () => {
                 <div className="space-y-6">
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                         <div className="px-3 py-3 border-b border-gray-100"><h2 className="font-bold text-gray-800 text-xl">📋 Tus RMs</h2></div>
-                        <div className="overflow-x-auto">
+                        {/* MOBILE/TABLET (<lg): una tarjeta por RM. La tabla de 7 columnas no
+                            entra en un teléfono: "REPS" y "SER." quedaban pegadas ("REPSSER."),
+                            el movimiento se cortaba ("Snatch (Ar...") y NOTAS desaparecía al
+                            final sin indicar scroll horizontal. Desde lg vuelve la tabla. */}
+                        <ul className="lg:hidden divide-y divide-gray-100">
+                            {rms.map((rm, i) => {
+                                const mejor = Math.max(...rms.map(r => getValorNumerico(r)));
+                                const isPB = getValorNumerico(rm) === mejor;
+                                return (
+                                    <li key={rm.movimiento_id || i}>
+                                        <button type="button"
+                                            onClick={() => navigate(`/alumno/evolucion?movimiento=${rm.movimiento_id}`)}
+                                            className="w-full text-left px-3 py-3 flex items-start justify-between gap-3 hover:bg-emerald-50 transition-colors">
+                                            <span className="min-w-0">
+                                                <span className="block font-semibold text-gray-800 break-words">
+                                                    {rm.movimiento_nombre}{isPB && <span className="ml-1 text-amber-500 text-xs">⭐</span>}
+                                                </span>
+                                                <span className="block text-xs text-gray-500 mt-0.5">
+                                                    {rm.repeticiones || '—'} rep · {rm.series || '—'} ser ·{' '}
+                                                    {rm.fecha ? formatFecha(rm.fecha) : '—'}
+                                                </span>
+                                                {rm.notas && (
+                                                    <span className="block text-xs text-gray-400 italic mt-1 break-words">
+                                                        {rm.notas}
+                                                    </span>
+                                                )}
+                                            </span>
+                                            <span className="shrink-0 text-right">
+                                                <span className="block text-lg font-bold text-emerald-600">
+                                                    {getValorNumerico(rm) || '—'}
+                                                </span>
+                                                <span className="block text-[11px] text-gray-400">
+                                                    {getUnidad(rm) || '—'}
+                                                </span>
+                                            </span>
+                                        </button>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+
+                        <div className="hidden lg:block overflow-x-auto">
                             <table className="w-full" style={{ tableLayout: 'fixed' }}>
-                                <thead><tr className="text-sm text-gray-500 uppercase bg-gray-50">
-                                    <th className="px-2 py-2 text-left w-[30%]">Movimiento</th>
-                                    <th className="px-1 py-2 text-center w-[12%]">RM</th>
-                                    <th className="px-1 py-2 text-center w-[10%]">Ud.</th>
-                                    <th className="px-1 py-2 text-center w-[10%]">Reps</th>
-                                    <th className="px-1 py-2 text-center w-[10%]">Ser.</th>
-                                    <th className="px-1 py-2 text-center w-[15%]">Fecha</th>
-                                    <th className="px-2 py-2 text-left w-[13%]">Notas</th>
+                                <thead><tr className="text-xs text-gray-500 uppercase bg-gray-50">
+                                    <th className="px-2 py-2 text-left w-[26%]">Movimiento</th>
+                                    <th className="px-1 py-2 text-center w-[11%]">RM</th>
+                                    <th className="px-1 py-2 text-center w-[8%]">Ud.</th>
+                                    <th className="px-1 py-2 text-center w-[10%] whitespace-nowrap">Reps</th>
+                                    <th className="px-1 py-2 text-center w-[9%] whitespace-nowrap">Ser.</th>
+                                    <th className="px-1 py-2 text-center w-[14%]">Fecha</th>
+                                    <th className="px-2 py-2 text-left w-[22%]">Notas</th>
                                 </tr></thead>
                                 <tbody>{rms.map((rm, i) => {
                                     const mejor = Math.max(...rms.map(r => getValorNumerico(r)));
@@ -192,13 +236,13 @@ const PerformanceHub = () => {
                                     return (
                                         <tr key={rm.movimiento_id || i} onClick={() => navigate(`/alumno/evolucion?movimiento=${rm.movimiento_id}`)}
                                             className="border-t border-gray-100 hover:bg-emerald-50 cursor-pointer transition-colors">
-                                            <td className="px-2 py-1.5 font-medium text-gray-800 text-base truncate">{rm.movimiento_nombre}{isPB && <span className="ml-0.5 text-amber-500 text-xs">⭐</span>}</td>
+                                            <td className="px-2 py-1.5 font-medium text-gray-800 text-base truncate" title={rm.movimiento_nombre}>{rm.movimiento_nombre}{isPB && <span className="ml-0.5 text-amber-500 text-xs">⭐</span>}</td>
                                             <td className="px-1 py-1.5 text-center font-bold text-emerald-600 text-base">{getValorNumerico(rm) || '—'}</td>
                                             <td className="px-1 py-1.5 text-center text-gray-500 text-base">{getUnidad(rm) || '—'}</td>
                                             <td className="px-1 py-1.5 text-center text-gray-500 text-base">{rm.repeticiones || '—'}</td>
                                             <td className="px-1 py-1.5 text-center text-gray-500 text-base">{rm.series || '—'}</td>
                                             <td className="px-1 py-1.5 text-center text-gray-400 text-base">{rm.fecha ? formatFecha(rm.fecha) : '—'}</td>
-                                            <td className="px-2 py-1.5 text-gray-400 italic text-base truncate max-w-0">{rm.notas || '—'}</td>
+                                            <td className="px-2 py-1.5 text-gray-400 italic text-base truncate max-w-0" title={rm.notas || ''}>{rm.notas || '—'}</td>
                                         </tr>
                                     );
                                 })}</tbody>
