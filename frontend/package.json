@@ -44,7 +44,8 @@
     "test:publicar-wod": "node scripts/test-publicar-wod.mjs",
     "test:coach-resumen": "node scripts/test-coach-resumen.mjs",
     "test:clases-coach": "node scripts/test-clases-sin-gestion.mjs",
-    "test:encoding": "node scripts/test-encoding.mjs"
+    "test:encoding": "node scripts/test-encoding.mjs",
+    "test:historial": "node scripts/test-historial-asistencia.mjs"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.3.0",
