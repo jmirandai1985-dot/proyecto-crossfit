@@ -47,7 +47,8 @@
     "test:encoding": "node scripts/test-encoding.mjs",
     "test:historial": "node scripts/test-historial-asistencia.mjs",
     "test:imagenes": "node scripts/test-imagenes-bazar.mjs",
-    "test:inicio": "node scripts/test-inicio-alumno.mjs"
+    "test:inicio": "node scripts/test-inicio-alumno.mjs",
+    "test:campana": "node scripts/test-campana-movil.mjs"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.3.0",

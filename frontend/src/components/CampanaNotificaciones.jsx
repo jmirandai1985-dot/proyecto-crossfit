@@ -259,10 +259,16 @@ const CampanaNotificaciones = () => {
                         onClick={() => setAbierto(false)}
                         className="fixed inset-0 z-40 cursor-default"
                     />
+                    {/* En mobile el panel se ancla al VIEWPORT (fixed, de borde a borde con
+                        un margen de 8px). Antes era `absolute right-0 w-80` colgado de la
+                        campana: en un teléfono de 360px la campana está a ~50px del borde
+                        derecho, así que el panel arrancaba en x=-10 y se comía las primeras
+                        letras ("lotificaciones", "LAN APROBADO"). Desde `sm` vuelve a ser
+                        un dropdown normal, alineado a la derecha de la campana. */}
                     <div
                         role="dialog"
                         aria-label="Notificaciones"
-                        className="absolute right-0 mt-2 w-80 sm:w-96 max-h-[70vh] overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl z-50"
+                        className="fixed inset-x-2 top-[4.5rem] z-50 max-h-[70vh] overflow-y-auto overscroll-contain rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96 sm:max-w-[calc(100vw-2rem)]"
                     >
                         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
                             <p className="text-sm font-semibold text-zinc-100">
