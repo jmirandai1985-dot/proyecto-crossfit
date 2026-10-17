@@ -257,6 +257,11 @@ const InicioMobileAdmin = () => {
     // (`GET /pedidos?estado=validado`): validados que aún nadie retiró.
     const [pedidos, setPedidos] = useState([]);
     const [pedidosError, setPedidosError] = useState('');
+    // Pedidos del Bazar ESPERANDO CONFIRMACIÓN (estado "pendiente"). Antes no se pedían en
+    // esta pantalla: el alumno compraba, la campana avisaba "PEDIDO NUEVO (BAZAR)" y la
+    // tarjeta "En revisión" seguía en 0 porque sólo contaba los vouchers de plan.
+    const [pedidosPendientes, setPedidosPendientes] = useState([]);
+    const [pedidosPendientesError, setPedidosPendientesError] = useState('');
     const [listaPedidos, setListaPedidos] = useState(false);   // pantalla abierta
     const [pedidosCargando, setPedidosCargando] = useState(false);
     const [informados, setInformados] = useState({});          // {pedido_id: fecha}
@@ -274,7 +279,7 @@ const InicioMobileAdmin = () => {
 
     const cargarKpis = useCallback(async () => {
         setCargando(true);
-        const [rReportes, rVencen, rVouchers, rCaja, rPedidos] = await Promise.allSettled([
+        const [rReportes, rVencen, rVouchers, rCaja, rPedidos, rPendientes] = await Promise.allSettled([
             // Alumnos activos + nuevos del mes: el MISMO /reportes/ del panel ≥768px
             // (definición única del BI: `metricas_service.alumnos_vigentes`).
             api.get('/api/v1/reportes/', { params: { tenant_id } }),
@@ -286,6 +291,9 @@ const InicioMobileAdmin = () => {
             api.get('/api/v1/finanzas/resumen-hoy'),
             // Pedidos validados sin retirar: el indicador del Bazar (y su pantalla).
             api.get('/api/v1/pedidos', { params: { estado: 'validado' } }),
+            // Pedidos RECIÉN CREADOS por el alumno: esperan confirmación del admin y son
+            // parte de "En revisión" (misma consulta que la pantalla Pedidos, filtrada).
+            api.get('/api/v1/pedidos', { params: { estado: 'pendiente' } }),
         ]);
 
         const motivo = motivoError;
@@ -329,6 +337,14 @@ const InicioMobileAdmin = () => {
             setPedidosError(motivo(rPedidos));
         }
 
+        if (rPendientes.status === 'fulfilled') {
+            setPedidosPendientes(Array.isArray(rPendientes.value.data) ? rPendientes.value.data : []);
+            setPedidosPendientesError('');
+        } else {
+            setPedidosPendientes([]);
+            setPedidosPendientesError(motivo(rPendientes));
+        }
+
         setKpis(nuevos);
         setErrores(errs);
         setCargando(false);
@@ -339,6 +355,12 @@ const InicioMobileAdmin = () => {
     }, [cargarKpis]);
 
     const hayVouchers = vouchers.length > 0;
+    // "En revisión" = todo lo que espera una DECISIÓN del admin: el voucher de un plan y el
+    // pedido del Bazar recién creado (estado "pendiente"). Si falla cualquiera de las dos
+    // fuentes el badge dice "s/d" (no un total incompleto).
+    const hayPedidosPendientes = pedidosPendientes.length > 0;
+    const errorRevision = errores.vouchers || pedidosPendientesError;
+    const totalRevision = vouchers.length + pedidosPendientes.length;
 
     // ── C. "En revisión": revisar el comprobante y aprobar/rechazar ──────────
     const [revision, setRevision] = useState(null);      // voucher abierto (objeto)
@@ -961,13 +983,13 @@ const InicioMobileAdmin = () => {
                     </button>
                 </nav>
 
-                {/* ── C. "En revisión": vouchers por aprobar ───────────────── */}
+                {/* ── C. "En revisión": vouchers por aprobar + pedidos del Bazar nuevos ── */}
                 <section className="card" aria-labelledby="ub-revision" data-testid="admin-revision">
                     <div className="card-head">
                         <h2 id="ub-revision">
                             En revisión
-                            <span className={`badge${hayVouchers ? '' : ' ok'}`}>
-                                {errores.vouchers ? 's/d' : vouchers.length}
+                            <span className={`badge${totalRevision ? '' : ' ok'}`}>
+                                {errorRevision ? 's/d' : totalRevision}
                             </span>
                         </h2>
                         {vouchers.length > 2 && (
@@ -978,33 +1000,68 @@ const InicioMobileAdmin = () => {
                         )}
                     </div>
 
-                    {errores.vouchers ? (
-                        <p className="empty-line" role="alert">⚠️ {errores.vouchers}</p>
-                    ) : vouchers.length === 0 ? (
+                    {errorRevision ? (
+                        <p className="empty-line" role="alert">⚠️ {errorRevision}</p>
+                    ) : (!hayVouchers && !hayPedidosPendientes) ? (
                         <p className="empty-line">
                             <Icono nombre="check" />
-                            Todo al día. Los comprobantes nuevos aparecen acá.
+                            Todo al día. Los comprobantes y pedidos nuevos aparecen acá.
                         </p>
                     ) : (
-                        vouchers.slice(0, 2).map((v) => (
-                            <button key={v.id} type="button" className="vrow"
-                                onClick={() => abrirRevision(v)}
-                                aria-label={`Revisar comprobante de ${v.alumno_nombre}`}>
-                                <span className="mini" aria-hidden="true">
-                                    <i /><i /><i /><i />
-                                </span>
-                                <span>
-                                    <span className="n" style={{ display: 'block' }}>{v.alumno_nombre}</span>
-                                    <span className="p" style={{ display: 'block' }}>
-                                        {v.plan_nombre} · {haceCuanto(v.created_at)}
+                        <>
+                            {vouchers.slice(0, 2).map((v) => (
+                                <button key={v.id} type="button" className="vrow"
+                                    onClick={() => abrirRevision(v)}
+                                    aria-label={`Revisar comprobante de ${v.alumno_nombre}`}>
+                                    <span className="mini" aria-hidden="true">
+                                        <i /><i /><i /><i />
                                     </span>
-                                </span>
-                                <span className="m">
-                                    <b className="num">{precioCLP(v.precio_final ?? v.plan_precio)}</b>
-                                    <span>Revisar</span>
-                                </span>
-                            </button>
-                        ))
+                                    <span>
+                                        <span className="n" style={{ display: 'block' }}>{v.alumno_nombre}</span>
+                                        <span className="p" style={{ display: 'block' }}>
+                                            {v.plan_nombre} · {haceCuanto(v.created_at)}
+                                        </span>
+                                    </span>
+                                    <span className="m">
+                                        <b className="num">{precioCLP(v.precio_final ?? v.plan_precio)}</b>
+                                        <span>Revisar</span>
+                                    </span>
+                                </button>
+                            ))}
+
+                            {/* Pedidos del Bazar esperando confirmación: la tarjeta ya no muestra
+                                "0" cuando el alumno compró. Se revisan en la pantalla Pedidos
+                                (ahí se aprueba —se genera el código de retiro— o se rechaza). */}
+                            {pedidosPendientes.slice(0, 2).map((p) => (
+                                <button key={`pedido-${p.id}`} type="button" className="vrow"
+                                    onClick={() => navigate('/admin/pedidos')}
+                                    aria-label={`Revisar pedido de ${p.alumno_nombre || 'un alumno'}`}>
+                                    <span className="mini" aria-hidden="true">
+                                        <i /><i /><i /><i />
+                                    </span>
+                                    <span>
+                                        <span className="n" style={{ display: 'block' }}>
+                                            {p.alumno_nombre || 'Pedido del Bazar'}
+                                        </span>
+                                        <span className="p" style={{ display: 'block' }}>
+                                            Pedido del Bazar · {p.producto_nombre || 'Producto'} ·{' '}
+                                            {haceCuanto(p.fecha_pedido || p.updated_at)}
+                                        </span>
+                                    </span>
+                                    <span className="m">
+                                        <b className="num">{precioCLP(p.total)}</b>
+                                        <span>Revisar</span>
+                                    </span>
+                                </button>
+                            ))}
+
+                            {pedidosPendientes.length > 2 && (
+                                <button type="button" className="link"
+                                    onClick={() => navigate('/admin/pedidos')}>
+                                    Ver los {pedidosPendientes.length} pedidos
+                                </button>
+                            )}
+                        </>
                     )}
                 </section>
 
