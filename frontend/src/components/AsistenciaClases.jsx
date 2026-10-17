@@ -1,4 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+// Deep-link del botón "Marcar asistencia" del Resumen del coach: llega con `?clase=<id>` y esa
+// clase se abre sola (ver el efecto de más abajo). Va por query y NO por prop: la firma de este
+// componente la fijan los tests de franjas/walk-in y el admin lo monta sin argumentos.
+import { useLocation } from 'react-router-dom';
 import AsistenciaGrupoDisciplina from './AsistenciaGrupoDisciplina';
 import AsistenciaFranja from './AsistenciaFranja';
 // El corte por franja (Mañana/Tarde/Noche) vive en un util compartido con test propio:
@@ -51,7 +55,10 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
 
     // ─── Clases de hoy (React Query) ───────────────────────────────────
     const clasesQ = useClasesAsistenciaHoy();
-    const clases = clasesQ.data || [];
+    // Memorizado porque el `|| []` fabrica un array NUEVO en cada render: sin esto, el
+    // `useMemo` de `grupos` y el efecto del deep-link `?clase=` (más abajo) dependerían de un
+    // valor distinto en cada pasada (ver el lint del archivo).
+    const clases = useMemo(() => clasesQ.data || [], [clasesQ.data]);
     const cargando = clasesQ.isPending;
     const error = clasesQ.isError
         ? (clasesQ.error?.response?.data?.detail || 'Error al cargar las clases de hoy')
@@ -116,6 +123,27 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
         setClaseSeleccionada(clase);
     };
 
+    // ─── Deep-link `?clase=<id>` (el botón "Marcar asistencia" del Resumen) ────────────────
+    // Abre el detalle de la clase pedida cuando la lista del día ya llegó. El guardia es el
+    // `key` de la entrada de historial —una por navegación, incluso repitiendo la misma URL—:
+    // así un refetch (el latido del reloj invalida `['asistencia']`) no vuelve a abrir el modal
+    // que el usuario acaba de cerrar, pero volver a tocar el botón para la MISMA clase sí lo
+    // reabre. Se escriben los tres setters a mano (en vez de llamar a `abrirClase`) para que la
+    // lista de dependencias quede completa sin atar el efecto a una función nueva por render.
+    const location = useLocation();
+    const clasePedida = new URLSearchParams(location.search).get('clase');
+    const pedidoAbiertoRef = useRef(null);
+    useEffect(() => {
+        if (!clasePedida || cargando) return;
+        if (pedidoAbiertoRef.current === location.key) return;
+        const encontrada = clases.find((c) => String(c.id) === clasePedida);
+        if (!encontrada) return;
+        pedidoAbiertoRef.current = location.key;
+        setAviso(null);
+        setOverrides({});
+        setClaseSeleccionada(encontrada);
+    }, [clasePedida, location.key, cargando, clases]);
+
     const cerrarClase = () => {
         setClaseSeleccionada(null);
         setOverrides({});
@@ -176,8 +204,8 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
     // Vista de teléfono (mockup 6b): las MISMAS clases del día repartidas por franja. El
     // corte lo hace el util compartido y acá sólo se eligen las franjas con clases (una
     // franja vacía no se dibuja: en el teléfono cada bloque ocupa media pantalla).
-    // Sin `useMemo`: `clases` es un array nuevo en cada render, así que memorizar el corte
-    // no ahorraría nada (mismo caso que `grupos`, ver el lint del archivo).
+    // Sin `useMemo`: el corte de `agruparPorFranja` es barato y `clases` sólo cambia cuando
+    // llega dato nuevo, así que memorizarlo no ahorraría nada (ver el lint del archivo).
     const porFranja = franjas ? agruparPorFranja(clases) : null;
     const franjasConClases = porFranja
         ? FRANJAS.filter((f) => (porFranja[f.id] || []).length > 0)

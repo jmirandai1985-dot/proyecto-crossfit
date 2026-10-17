@@ -36,7 +36,7 @@ import { etiquetaTipo } from '../utils/avisosMarketing';
  * `avisos` (los avisos rápidos del coach vigentes hoy: el panel ya los filtró a tipo `aviso`)
  * · `fechaCorta` · `proximoCambio` (epoch ms del próximo arranque/cierre de clase, para que la
  * tarjeta grande se sepa actualizada sin recargar) · `sinAsignaciones` · `onPublicarWod` ·
- * `onAgregarSinReserva(clase)` · `onAbrirAsistencia` · `onAbrirClase(clase)` ·
+ * `onAgregarSinReserva(clase)` · `onAbrirAsistencia(clase)` · `onAbrirClase(clase)` ·
  * `onAbrirDetalleWod(clase, wod)` · `onNuevoAviso`.
  */
 
@@ -97,8 +97,13 @@ const ResumenCoach = ({
     // igual que la pestaña Asistencia.
     const conReserva = proximaClase?.reservas_count ?? reservasProxima.length;
     const yaMarcaron = reservasProxima.filter((r) => r.asistio).length;
-    const faltan = Math.max(conReserva - yaMarcaron, 0);
     const cupo = Number(proximaClase?.cupo_maximo) || 0;
+    // "Faltan" son los asientos del CUPO que todavía no tienen marca, no las reservas que no
+    // contestaron: con 16 cupos y 3 marcas faltan 13 —el número que el coach mira de reojo
+    // cuando cierra la clase— aunque sólo 4 hayan reservado. Con `conReserva - yaMarcaron` el
+    // contador bajaba a 1 mientras el donut de al lado medía contra el CUPO: dos verdades para
+    // la misma clase. Sin cupo cargado (dato viejo) se cae al cálculo contra las reservas.
+    const faltan = Math.max((cupo || conReserva) - yaMarcaron, 0);
 
     const estadoProxima = proximaClase ? estadoFila(proximaClase) : 'pendiente';
     const enCurso = estadoProxima === 'en-curso';
@@ -161,7 +166,7 @@ const ResumenCoach = ({
                         </span>
                     </div>
 
-                    <button type="button" onClick={onAbrirAsistencia}
+                    <button type="button" onClick={() => onAbrirAsistencia && onAbrirAsistencia(proximaClase)}
                         data-testid="abrir-marcar-asistencia"
                         className={`${BOTON_LIMA} mt-6 w-full max-w-xs uppercase tracking-wide py-3`}>
                         Marcar asistencia

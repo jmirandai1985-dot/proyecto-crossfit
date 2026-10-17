@@ -21,6 +21,10 @@ import WodDetalleModal from '../../components/WodDetalleModal';
 import ModalAvisoRapido from '../../components/ModalAvisoRapido';
 // Bloque C: el Resumen del mockup (#pantalla-resumen) y sus dos modales.
 import ResumenCoach from '../../components/ResumenCoach';
+// Historial de Asistencia (`?tab=historial`): el mes entero —anillos por día de la semana,
+// calendario y detalle por bloque— SÓLO LECTURA. Es el "después" de la pestaña Asistencia y el
+// MISMO componente que monta el panel del admin, así que los dos miran la misma cuenta.
+import HistorialAsistencia from '../../components/HistorialAsistencia';
 // Punto 2 del reporte móvil: al coach le toca SÓLO su aviso rápido del día. El tipo es un dato
 // (no un literal suelto) y vive en el util que ya es la fuente única de los avisos.
 import { TIPO_AVISO_RAPIDO } from '../../utils/avisosMarketing';
@@ -144,6 +148,19 @@ const DashboardCoach = () => {
         const wod = (wodsQ.data || []).find((w) => w.id === clase.wod_id) || null;
         if (wod) { abrirDetalleWod(clase, wod); return; }
         abrirPublicarWod(clase);
+    };
+
+    // "Marcar asistencia" (tarjeta grande del Resumen) abre la pestaña Asistencia CON ESA clase
+    // desplegada: el id viaja en el query (`?clase=`) y `AsistenciaClases` abre su detalle al
+    // montar (leer `hooks/queries`, pantalla `AsistenciaClases`). Va por query y NO por prop a
+    // propósito: la firma de `AsistenciaClases` está fijada por los tests de franjas/walk-in y
+    // el admin monta el mismo componente sin argumentos. El `key` de la entrada de historial es
+    // lo que permite reabrirlo si el coach vuelve a tocar el botón para la misma clase.
+    const irAMarcarAsistencia = (clase) => {
+        const id = clase?.id;
+        navigate(id
+            ? `/coach/dashboard?tab=asistencia&clase=${id}`
+            : '/coach/dashboard?tab=asistencia');
     };
 
     // ---- Terminología dinámica por disciplina ----
@@ -627,14 +644,16 @@ const DashboardCoach = () => {
                 )}
 
                 {/* ─── CONTENIDO BASADO EN URL (sin pestañas internas duplicadas) ─── */}
-                {/* El Resumen es la pantalla OSCURA del mockup: se pinta directo sobre el fondo
-                    del Layout (zinc-950), sin el panel claro que siguen usando las pestañas
-                    viejas (Clases / Alumnos & RMs / Progreso / Riesgo / Asistencia). */}
-                <div className={activeTab === 'resumen'
+                {/* El Resumen y el Historial son las pantallas OSCURAS del mockup: se pintan
+                    directo sobre el fondo del Layout (zinc-950), sin el panel claro que siguen
+                    usando las pestañas viejas (Clases / Alumnos & RMs / Progreso / Riesgo /
+                    Asistencia). */}
+                <div className={activeTab === 'resumen' || activeTab === 'historial'
                     ? ''
                     : 'overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm'}
                     data-testid="coach-dashboard-content">
-                    <div className={activeTab === 'resumen' ? '' : 'p-4 md:p-6'}>
+                    <div className={activeTab === 'resumen' || activeTab === 'historial'
+                        ? '' : 'p-4 md:p-6'}>
                         {/* ─── TAB: RESUMEN (mockup #pantalla-resumen) ─── */}
                         {activeTab === 'resumen' && (
                             <>
@@ -656,7 +675,7 @@ const DashboardCoach = () => {
                                     proximoCambio={proximoCambio}
                                     onPublicarWod={() => setModalWod(true)}
                                     onAgregarSinReserva={(clase) => setClaseSinReserva(clase)}
-                                    onAbrirAsistencia={() => navigate('/coach/dashboard?tab=asistencia')}
+                                    onAbrirAsistencia={irAMarcarAsistencia}
                                     onAbrirClase={abrirClaseDeHoy}
                                     onNuevoAviso={() => setModalAviso(true)}
                                     onAbrirDetalleWod={(clase, wod) => abrirDetalleWod(clase, wod)}
@@ -1354,6 +1373,16 @@ const DashboardCoach = () => {
                             sigue el acordeón por disciplina, igual que el panel del admin. */}
                         {activeTab === 'asistencia' && (
                             <AsistenciaClases franjas permitirSinReserva />
+                        )}
+
+                        {/* ── TAB: HISTORIAL (SÓLO LECTURA) ──
+                            El "después" de Asistencia: el mes entero del día que se marca. Un
+                            anillo por día de la semana (quién vino y quién no), el calendario día
+                            por día y el detalle de cada bloque. No marca nada —los candados viven
+                            en la pestaña Asistencia— y va sobre el fondo del Layout, como el
+                            Resumen. */}
+                        {activeTab === 'historial' && (
+                            <HistorialAsistencia />
                         )}
                     </div>
                 </div>
