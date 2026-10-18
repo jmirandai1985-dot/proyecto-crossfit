@@ -913,6 +913,34 @@ def detecciones_sql(cfg: dict) -> tuple:
     )
 
 
+def sql_reserva_imputable(reserva: str = "r", suscripcion: str = "s",
+                          clase: str = "c") -> str:
+    """Condición de A.3: ¿esta reserva pudo cobrarse de ESTA suscripción?
+
+    Una reserva creada ANTES de la suscripción no se le imputa si existía otra suscripción
+    anterior que pudo cobrarla: creada antes de la reserva y con la fecha de la reserva **y** la
+    de la clase dentro de su ventana. Es el caso 2250→2251: la reserva de la clase del 10/10 se
+    creó el 9/10 a las 22:58, antes de que existiera la 2251, y la cobró la 2250 (ya vencida).
+
+    El filtro literal `fecha_reserva >= created_at` NO alcanza: el seed/demo creó 457 reservas
+    antes de su suscripción (backfill) y las 116 suscripciones quedarían marcadas como descuadre.
+    Por eso la condición se envuelve en `NOT EXISTS`: si no hubo otra suscripción que pudiera
+    cobrarla, la reserva sigue imputándose a la actual (backfill legítimo). Una suscripción
+    `pendiente`/`rechazado` no da acceso, así que no se considera que pudiera cobrarla.
+    """
+    return (
+        f"({reserva}.fecha_reserva >= {suscripcion}.created_at OR NOT EXISTS ("
+        f"SELECT 1 FROM suscripciones sp "
+        f"WHERE sp.usuario_id = {suscripcion}.usuario_id AND sp.id <> {suscripcion}.id "
+        f"AND sp.tenant_id = {suscripcion}.tenant_id "
+        f"AND sp.created_at <= {reserva}.fecha_reserva "
+        "AND sp.estado NOT IN ('pendiente', 'rechazado') "
+        f"AND ({reserva}.fecha_reserva AT TIME ZONE '{TZ_CLT}')::date "
+        "BETWEEN sp.fecha_inicio::date AND sp.fecha_expiracion::date "
+        f"AND {clase}.fecha BETWEEN sp.fecha_inicio::date AND sp.fecha_expiracion::date))"
+    )
+
+
 def sql_descuadre_creditos(cfg: dict) -> str:
     """A.3 — descuadre de créditos por suscripción VIGENTE (una sola por alumno).
 
@@ -940,6 +968,15 @@ def sql_descuadre_creditos(cfg: dict) -> str:
     el subconjunto evaluado es determinista. `descuadre_creditos()` la lee con `sql_con_total()`:
     `revisadas` es el total real de vigentes y `escaneadas` lo que entró por el tope. Antes el tope
     se leía como conteo ("revisadas 200" con 2000 vigentes).
+
+    **Imputación de la reserva (2026-10-18)**: una reserva creada antes de la suscripción sólo se
+    imputa a ella si NO existía otra suscripción anterior que pudiera haberla cobrado (ver
+    `sql_reserva_imputable()`). Es el caso 2250→2251: la reserva del 10/10 se creó el 9/10 a las
+    22:58, antes de que existiera la 2251, y la cobró la 2250 (vencida). El filtro literal
+    `fecha_reserva >= s.created_at` solo habría marcado 116 suscripciones de seed/demo (457
+    reservas de backfill), así que la condición va envuelta en el `NOT EXISTS`. El
+    `r.tokens_gastados > 0` es hardening: una reserva walk-in (sin crédito) no cuenta para el
+    cuadre; hoy la app y el seed escriben 1 en todas las reservas con plan.
     """
     h = int(HORAS_DEVOLUCION)
     return (
@@ -949,10 +986,14 @@ def sql_descuadre_creditos(cfg: dict) -> str:
         "FROM suscripciones s JOIN usuarios u ON u.id = s.usuario_id "
         "JOIN LATERAL (SELECT count(*) AS n FROM reservas r JOIN clases c ON c.id = r.clase_id "
         f"  WHERE r.alumno_id = s.usuario_id AND {sql_viva()} "
-        "    AND c.fecha BETWEEN s.fecha_inicio::date AND s.fecha_expiracion::date) vivas ON true "
+        "    AND c.fecha BETWEEN s.fecha_inicio::date AND s.fecha_expiracion::date "
+        f"    AND {sql_reserva_imputable()} "
+        "    AND r.tokens_gastados > 0) vivas ON true "
         "JOIN LATERAL (SELECT count(*) AS n FROM reservas r JOIN clases c ON c.id = r.clase_id "
         f"  WHERE r.alumno_id = s.usuario_id AND {sql_cancelada()} "
         "    AND c.fecha BETWEEN s.fecha_inicio::date AND s.fecha_expiracion::date "
+        f"    AND {sql_reserva_imputable()} "
+        "    AND r.tokens_gastados > 0 "
         f"    AND r.updated_at > ((c.fecha + c.hora_inicio) AT TIME ZONE '{TZ_CLT}' "
         f"                        - interval '{h} hours')) tardias ON true "
         f"WHERE s.tenant_id = {int(cfg['tenant_id'])} AND s.estado = 'activo' "

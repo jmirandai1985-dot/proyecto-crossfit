@@ -1121,9 +1121,9 @@ La detección **no se silencia**: A.5(a) sigue roja, el correo sigue saliendo y 
 queda exactamente como estaba. Una fecha inválida (o con otro formato) ⇒ `ConfigError` ⇒ **exit 2**
 sin tocar la base: `_fecha_iso()` exige el patrón `AAAA-MM-DD` antes de parsear.
 
-#### A.3: cómo se mide el consumo de créditos (y por qué NO se usa `tokens_gastados`)
+#### A.3: cómo se mide el consumo de créditos (y para qué sí se usa `tokens_gastados`)
 
-`reservas.tokens_gastados` no sirve para esto: el `DELETE /reservas/{id}` de
+`reservas.tokens_gastados` no sirve para **medir** el consumo: el `DELETE /reservas/{id}` de
 `app/api/v1/reservas.py` sólo escribe `estado='cancelled'` y `updated_at=now()`, así que la columna
 queda siempre en 1 (el dump de PROD tiene la reserva 1 cancelada con `tokens_gastados=1`). Lo que sí
 refleja el consumo es `suscripciones.creditos_totales - creditos_disponibles`, y la devolución se
@@ -1140,6 +1140,21 @@ vigente por alumno (con dos, el crédito pudo salir de la otra) y la tolerancia 
 porque los dos sentidos pueden ser legítimos: hacia arriba, una cancelación en plazo que la app no
 pudo acreditar (plan ya vencido al cancelar); hacia abajo, una reserva cancelada que el staff editó
 y que ahora parece tardía. Con `DRY_RUN=1` se ve el número real y se decide la tolerancia.
+
+`tokens_gastados > 0` sí se usa como **filtro de walk-in**: una reserva sin crédito gastado no
+debe contar para el cuadre de créditos. Hoy la app (y el seed) escriben 1 en toda reserva hecha
+con plan, así que el filtro no cambia los datos actuales; queda como hardening para el día en que
+exista una reserva walk-in.
+
+**Imputación de la reserva (2026-10-18)**: una reserva creada **antes** de la suscripción sólo se
+imputa a ella si no existía otra suscripción anterior que pudiera haberla cobrado (creada antes de
+la reserva y con la fecha de la reserva **y** la de la clase dentro de su ventana). Es el caso
+2250→2251: la reserva de la clase del 10/10 se creó el 9/10 a las 22:58, antes de que existiera la
+2251, y la cobró la 2250 (ya vencida). A.3 se la atribuía a la 2251 y daba `0 gastados / 1 viva`.
+El filtro literal `fecha_reserva >= created_at` **no alcanza**: el seed/demo tiene 457 reservas
+creadas antes de su suscripción (backfill) y marcaría 116 suscripciones como descuadre. Por eso la
+condición va envuelta en `NOT EXISTS (otra suscripción que pudo cobrarla)`: el backfill legítimo
+sigue cuadrando y sólo se descarta la reserva que otra suscripción anterior pudo cobrar.
 
 **Limitación conocida**: `updated_at` es a la vez el momento de la cancelación y el de cualquier otra
 edición de esa fila. El mantenimiento **no** puede corromperlo —el paso 8 excluye cualquier forma de

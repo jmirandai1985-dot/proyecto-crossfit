@@ -798,13 +798,47 @@ def test_ag_a3_descuadre_positivo_lo_tapa_la_tolerancia(tolerancia, esperado, mo
 
 def test_ah_a3_la_consulta_usa_updated_at_y_la_regla_de_6_horas():
     """La reconstrucción del consumo se apoya en `reservas.updated_at` (el momento de la
-    cancelación) y en la MISMA regla de devolución que `reservas.py` (>= 6 h)."""
+    cancelación), en la MISMA regla de devolución que `reservas.py` (>= 6 h) y en la guardia de
+    imputación. `tokens_gastados` NO se usa como consumo (sigue saliendo de los créditos): sólo
+    filtra las reservas walk-in (`> 0`), que no gastaron crédito."""
     sql = men.sql_descuadre_creditos({"tenant_id": 1})
 
     assert "r.updated_at >" in sql and "interval '6 hours'" in sql
     assert "AT TIME ZONE 'America/Santiago'" in sql
     assert "JOIN LATERAL" in sql and sql.count("JOIN LATERAL") == 2
-    assert "tokens_gastados" not in sql                  # no sirve: siempre queda en 1
+    assert sql.count("tokens_gastados") == 2             # sólo el filtro walk-in de cada LATERAL
+    assert sql.count("r.tokens_gastados > 0") == 2
+    assert "SUM(" not in sql.upper()                     # el consumo NO sale de tokens_gastados
+    assert "(s.creditos_totales - s.creditos_disponibles)" in sql
+
+
+def test_ai_a3_reserva_anterior_a_la_suscripcion_activa_no_se_marca(monkeypatch, mails):
+    """2250→2251: la reserva se creó antes de que existiera la suscripción activa y la cobró la
+    suscripción anterior (ya vencida). A.3 no debe imputársela a la 2251.
+
+    La guardia va en las DOS LATERAL (vivas y tardías): una reserva anterior sólo se imputa a la
+    suscripción actual si NO hubo otra suscripción que pudiera cobrarla. Así el backfill/seed
+    (457 reservas anteriores a su suscripción) sigue cuadrando, pero la reserva de 2250 no se le
+    atribuye a 2251.
+    """
+    sql = men.sql_descuadre_creditos({"tenant_id": 1})
+    assert sql.count("r.fecha_reserva >= s.created_at") == 2
+    assert sql.count("NOT EXISTS (SELECT 1 FROM suscripciones sp") == 2
+    assert sql.count("sp.created_at <= r.fecha_reserva") == 2
+    assert sql.count("r.tokens_gastados > 0") == 2
+
+    # Antes del fix, la LATERAL contaba la reserva de 2250: 0 gastados vs 1 viva ⇒ descuadre -1.
+    _psql_falso(monkeypatch, _ctx(
+        a3_creditos=[["2251", "a@example.com", "8", "8", "0", "1", "0"]]))
+    assert men.main() == men.EXIT_DIAGNOSTICO
+    assert "A.3 suscripción 2251" in mails[0][1]
+    mails.clear()
+
+    # Después del fix la LATERAL devuelve 0: 0/0/0 ⇒ no es hallazgo y el run queda verde.
+    _psql_falso(monkeypatch, _ctx(
+        a3_creditos=[["2251", "a@example.com", "8", "8", "0", "0", "0"]]))
+    assert men.main() == men.EXIT_OK
+    assert mails == []
 
 
 # ── B.6/B.7: límites del plan Free en la API v2 de Neon (nunca sale a la red) ──
