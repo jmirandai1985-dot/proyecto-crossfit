@@ -35,6 +35,9 @@ const AdminConfiguracion = lazy(() => import('./pages/admin/Configuracion'));
 const AdminNotificaciones = lazy(() => import('./pages/admin/Notificaciones'));
 const AdminFidelizacion = lazy(() => import('./pages/admin/Fidelizacion'));
 const AdminKpis = lazy(() => import('./pages/admin/Kpis'));
+// "Alumnos nuevos y en prueba": la MISMA pantalla operativa del Inicio móvil,
+// ahora también alcanzable desde la tarjeta "Alumnos Nuevos" del Dashboard.
+const AdminAlumnosPrueba = lazy(() => import('./pages/admin/AlumnosPrueba'));
 const AdminPlanes = lazy(() => import('./pages/admin/Planes'));
 const AdminAlumnosPendientes = lazy(() => import('./pages/admin/AdminAlumnosPendientes'));
 const AdminDisciplinas = lazy(() => import('./pages/admin/Disciplinas'));
@@ -137,6 +140,7 @@ function App() {
             {/* Historial de UN alumno (se entra desde la tabla de Alumnos o desde la ficha). */}
             <Route path="alumnos/:alumnoId/historial" element={<AdminHistorialAlumno />} />
             <Route path="alumnos-pendientes" element={<AdminAlumnosPendientes />} />
+            <Route path="alumnos-prueba" element={<AdminAlumnosPrueba />} />
             <Route path="coaches" element={<AdminCoaches />} />
             <Route path="clases" element={<AdminClases />} />
             <Route path="supervision-clases" element={<AdminSupervisionClases />} />

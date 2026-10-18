@@ -460,11 +460,13 @@ const AdminDashboard = () => {
                     </div>
                 )}
 
-                {/* TARJETAS BI: "Alumnos nuevos" y "Convertidos". Reutilizan los
-                    endpoints de /admin/kpis (el cálculo vive en el backend, en los
-                    data marts daily_kpis/monthly_kpis): acá solo se pinta el número. */}
+                {/* TARJETAS BI: "Alumnos nuevos" y "Convertidos". El número sigue
+                    viniendo del BI (data marts daily_kpis/monthly_kpis), pero la de
+                    "Alumnos Nuevos" abre la pantalla operativa con los DOS listados
+                    (en prueba + altas del mes); antes mandaba a /admin/kpis, que no
+                    era lo que el admin esperaba al tocar la tarjeta. */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <button onClick={() => navigate('/admin/kpis')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-emerald-600 hover:shadow-md hover:border-emerald-700 transition-all cursor-pointer text-left">
+                    <button onClick={() => navigate('/admin/alumnos-prueba')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-emerald-600 hover:shadow-md hover:border-emerald-700 transition-all cursor-pointer text-left">
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos Nuevos</p>
@@ -481,7 +483,7 @@ const AdminDashboard = () => {
                                         : biNuevos.error
                                             ? `⚠️ ${biNuevos.error === 'KPI diario no encontrado' ? 'el BI todavía no publicó esos días' : biNuevos.error}`
                                             : `Registros nuevos del ${fmtFechaChile(biNuevos.fecha)}`}
-                                    {' '}— Clic para ver KPIs
+                                    {' '}— Clic para ver alumnos
                                 </p>
                             </div>
                             <span className="text-4xl">👤</span>

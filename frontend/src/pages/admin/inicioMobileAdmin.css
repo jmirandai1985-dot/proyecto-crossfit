@@ -1543,3 +1543,36 @@
         transition: none !important;
     }
 }
+
+/* ── Ruta de escritorio `/admin/alumnos-prueba` ─────────────────────────────
+   La MISMA pantalla del Inicio móvil, pero embebida en el Layout (no es una
+   capa `fixed`): se anula el sangrado de `.ub-admin` y el panel se centra como
+   una tarjeta del panel de escritorio. */
+.ub-admin.ub-pagina-prueba {
+    margin: 0;
+    padding: 0;
+    min-height: 0;
+    background: transparent;
+}
+
+.ub-admin.ub-pagina-prueba .screen.embebida {
+    position: static;
+    inset: auto;
+    top: auto;
+    max-width: 920px;
+    min-height: calc(100dvh - 160px);
+    margin: 0 auto;
+    border: 1px solid var(--ub-line);
+    border-radius: var(--ub-r-xl);
+    overflow: hidden;
+}
+
+.ub-admin.ub-pagina-prueba .screen.embebida .s-head {
+    background: var(--ub-surface);
+    border-bottom: 1px solid var(--ub-line);
+}
+
+.ub-admin.ub-pagina-prueba .screen.embebida .results {
+    padding: 16px 20px calc(24px + env(safe-area-inset-bottom));
+}
+

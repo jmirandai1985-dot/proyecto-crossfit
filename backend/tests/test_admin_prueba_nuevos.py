@@ -264,34 +264,57 @@ def test_e3_los_convertidos_no_entran_en_el_listado():
     assert '"sin_clase": sum(1 for a in listados' in endpoint
 
 
-# ── G. La pantalla móvil está cableada a los endpoints REALES ────────────────
+# ── G. La pantalla está cableada a los endpoints REALES ─────────────────────
 
 def test_g1_la_tarjeta_y_la_pantalla_usan_los_endpoints_nuevos():
-    fuente = _fuente("frontend/src/pages/admin/InicioMobileAdmin.jsx")
-    assert "api.get('/api/v1/admin/alumnos-prueba')" in fuente
-    assert "api.get('/api/v1/admin/alumnos-nuevos')" in fuente
-    assert "/invitacion/preview`)" in fuente      # vista previa (GET, sin efectos)
-    assert "/invitacion`)" in fuente              # envío (POST)
+    # El fetch vive en el hook COMPARTIDO: lo usan el Inicio móvil (<768px) y la
+    # ruta de escritorio /admin/alumnos-prueba (misma implementación, sin copias).
+    hook = _fuente("frontend/src/hooks/useAlumnosPrueba.js")
+    assert "api.get('/api/v1/admin/alumnos-prueba')" in hook
+    assert "api.get('/api/v1/admin/alumnos-nuevos')" in hook
+
+    panel = _fuente("frontend/src/components/PanelAlumnosPrueba.jsx")
+    assert "/invitacion/preview`)" in panel      # vista previa (GET, sin efectos)
+    assert "/invitacion`)" in panel              # envío (POST)
     # Las dos secciones de la pantalla completa.
-    assert ">En prueba<" in fuente
-    assert ">Nuevos del mes<" in fuente
+    assert ">En prueba<" in panel
+    assert ">Nuevos del mes<" in panel
 
 
 def test_g2_la_fila_muestra_el_envio_manual_y_lleva_a_la_ficha():
-    fuente = _fuente("frontend/src/pages/admin/InicioMobileAdmin.jsx")
-    assert "Correo enviado " in fuente and "textoHace(a.ultimo_envio)" in fuente
+    panel = _fuente("frontend/src/components/PanelAlumnosPrueba.jsx")
+    assert "Correo enviado " in panel and "textoHace(a.ultimo_envio)" in panel
     # Tocar un nombre abre la FICHA del alumno (misma ruta que el buscador).
-    assert "/admin/alumnos/${alumnoId}/historial" in fuente
+    assert "/admin/alumnos/${alumnoId}/historial" in panel
     # La vista previa se muestra en un iframe sandbox (no editable, sin scripts).
-    assert 'sandbox="" srcDoc={correo.preview.html}' in fuente
+    assert 'sandbox="" srcDoc={correo.preview.html}' in panel
 
 
 def test_g3_la_tarjeta_suma_la_quinta_kpi_sin_tocar_las_cuatro_de_antes():
     fuente = _fuente("frontend/src/pages/admin/InicioMobileAdmin.jsx")
     assert 'testid="kpi-prueba"' in fuente
-    # Las cuatro tarjetas originales siguen declaradas tal cual.
-    for etiqueta in ('label="Alumnos activos"', 'label="Vencen en 5 días"',
-                     'label="Vouchers por aprobar"', 'label="Ingresos de hoy"'):
+    # La capa móvil reusa el panel compartido (no duplica markup ni fetch).
+    assert "<PanelAlumnosPrueba" in fuente
+    assert "useAlumnosPrueba()" in fuente
+    # Las tarjetas originales siguen declaradas tal cual ("Alumnos activos" ya no
+    # es tarjeta: es el subtítulo `admin-activos` del encabezado).
+    for etiqueta in ('label="Vencen en 5 días"', 'label="Vouchers por aprobar"',
+                     'label="Ingresos de hoy"'):
         assert etiqueta in fuente
+    assert 'data-testid="admin-activos"' in fuente
     assert 'label="Alumnos nuevos y en prueba"' in fuente
+
+
+def test_g4_el_dashboard_abre_la_pantalla_y_la_ruta_existe():
+    # La tarjeta "Alumnos Nuevos" del Dashboard ya no manda a KPIs: abre la
+    # pantalla operativa con los dos listados.
+    dashboard = _fuente("frontend/src/pages/admin/Dashboard.jsx")
+    assert "navigate('/admin/alumnos-prueba')" in dashboard
+
+    app = _fuente("frontend/src/App.jsx")
+    assert "pages/admin/AlumnosPrueba" in app
+    assert 'path="alumnos-prueba"' in app
+
+    pagina = _fuente("frontend/src/pages/admin/AlumnosPrueba.jsx")
+    assert "<PanelAlumnosPrueba" in pagina and "embebido" in pagina
 

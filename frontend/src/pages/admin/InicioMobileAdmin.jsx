@@ -21,9 +21,11 @@ import { rotuloCreditos } from '../../utils/rotuloCreditos';
 // el correo manual y los pedidos esperando retiro (util con test aislado propio).
 import { textoHace } from '../../utils/hace';
 // Rótulos de la tarjeta "Alumnos nuevos y en prueba" (estado, días y fecha de alta).
-import {
-    textoEstadoPrueba, tonoEstadoPrueba, textoAlta, textoEnPrueba,
-} from '../../utils/pruebaAlumnos';
+// La pantalla y su fetch viven en componentes/hooks COMPARTIDOS: la usan el Inicio
+// móvil (<768px) y la ruta de escritorio `/admin/alumnos-prueba`.
+import PanelAlumnosPrueba from '../../components/PanelAlumnosPrueba';
+import { useAlumnosPrueba } from '../../hooks/useAlumnosPrueba';
+import { iniciales } from '../../utils/iniciales';
 // Pedidos listos para entrega (Bazar): qué fila se lista y qué dice cada una.
 // OJO: el CÓDIGO DE RETIRO no se muestra en la tarjeta —es la prueba de que el pedido
 // es de quien lo retira, así que el admin se lo PIDE al alumno y lo escribe—.
@@ -147,14 +149,6 @@ const motivoError = (resultado) => resultado?.reason?.response?.data?.detail
 
 /** "05" desde 5 (para el rango "05:00 a 12:00" del mockup). */
 const dosDigitos = (n) => String(n).padStart(2, '0');
-
-/** Iniciales del avatar ("Camila Soto" -> "CS"), máximo 2 letras. */
-const iniciales = (nombre) => {
-    const palabras = String(nombre || '').trim().split(/\s+/).filter(Boolean);
-    if (!palabras.length) return '?';
-    if (palabras.length === 1) return palabras[0].charAt(0).toUpperCase();
-    return (palabras[0].charAt(0) + palabras[palabras.length - 1].charAt(0)).toUpperCase();
-};
 
 /** Píldora de estado del alumno en la ficha rápida (plan y días que le quedan). */
 const estadoAlumno = (membresia) => {
@@ -677,102 +671,17 @@ const InicioMobileAdmin = () => {
     };
 
     // ── F. "Alumnos nuevos y en prueba" (tarjeta + pantalla completa) ────────
-    // Dos listados REALES: los que están EN PRUEBA (con su estado 🟡/🔵 y el correo
-    // manual) y los dados de alta en el mes en curso. Se piden juntos para que la
-    // tarjeta tenga su número y la pantalla abra con datos; al abrir se refrescan.
+    // El fetch y la pantalla viven en `useAlumnosPrueba` + `PanelAlumnosPrueba`:
+    // la MISMA implementación la usa la ruta de escritorio `/admin/alumnos-prueba`.
+    // Acá sólo se guarda si la capa está abierta y se refresca al abrirla.
+    const prueba = useAlumnosPrueba();
     const [tarjeta, setTarjeta] = useState(false);       // pantalla abierta
-    const [enPrueba, setEnPrueba] = useState([]);
-    const [nuevosMes, setNuevosMes] = useState([]);
-    const [tarjetaCargando, setTarjetaCargando] = useState(true);
-    const [errorPrueba, setErrorPrueba] = useState('');
-    const [errorNuevos, setErrorNuevos] = useState('');
-    // Vista previa del correo manual: { alumno, cargando, preview, error, enviando }.
-    const [correo, setCorreo] = useState(null);
-
-    const cargarTarjeta = useCallback(async () => {
-        setTarjetaCargando(true);
-        const [rPrueba, rNuevos] = await Promise.allSettled([
-            api.get('/api/v1/admin/alumnos-prueba'),
-            api.get('/api/v1/admin/alumnos-nuevos'),
-        ]);
-        // Error POR SECCIÓN: si una falla, la otra se muestra igual (y el motivo va
-        // a la vista, nunca un 0 disfrazado de dato).
-        const motivo = (r) => r.reason?.response?.data?.detail
-            || (r.reason?.response?.status ? `HTTP ${r.reason.response.status}` : r.reason?.message)
-            || 'No se pudo cargar';
-
-        if (rPrueba.status === 'fulfilled') {
-            setEnPrueba(Array.isArray(rPrueba.value.data?.alumnos) ? rPrueba.value.data.alumnos : []);
-            setErrorPrueba('');
-        } else {
-            setEnPrueba([]);
-            setErrorPrueba(motivo(rPrueba));
-        }
-
-        if (rNuevos.status === 'fulfilled') {
-            setNuevosMes(Array.isArray(rNuevos.value.data?.alumnos) ? rNuevos.value.data.alumnos : []);
-            setErrorNuevos('');
-        } else {
-            setNuevosMes([]);
-            setErrorNuevos(motivo(rNuevos));
-        }
-        setTarjetaCargando(false);
-    }, []);
-
-    useEffect(() => {
-        cargarTarjeta();
-    }, [cargarTarjeta]);
 
     const abrirTarjeta = () => {
         setTarjeta(true);
-        cargarTarjeta();
+        prueba.recargar();
     };
-    const cerrarTarjeta = () => {
-        setTarjeta(false);
-        setCorreo(null);
-    };
-
-    // Vista previa NO editable: el correo lo arma el backend con los datos reales
-    // (la misma función que usa el envío, así lo que se ve es lo que sale).
-    const abrirCorreo = async (alumno) => {
-        setCorreo({ alumno, cargando: true, preview: null, error: '', enviando: false });
-        try {
-            const res = await api.get(
-                `/api/v1/admin/alumnos-prueba/${alumno.id}/invitacion/preview`);
-            setCorreo({ alumno, cargando: false, preview: res.data, error: '', enviando: false });
-        } catch (err) {
-            setCorreo({
-                alumno, cargando: false, preview: null, enviando: false,
-                error: err.response?.data?.detail || 'No se pudo armar el correo',
-            });
-        }
-    };
-
-    const enviarCorreo = async () => {
-        if (!correo?.alumno || correo.enviando) return;
-        setCorreo((c) => ({ ...c, enviando: true }));
-        try {
-            const { data } = await api.post(
-                `/api/v1/admin/alumnos-prueba/${correo.alumno.id}/invitacion`);
-            if (data?.exito) {
-                // La fila pasa a "Correo enviado hace X" con la hora REAL del envío.
-                setEnPrueba((prev) => prev.map((a) => (a.id === correo.alumno.id
-                    ? { ...a, ultimo_envio: data.enviado_en || a.ultimo_envio } : a)));
-                avisar(data.ya_enviado
-                    ? 'Ese correo ya se había enviado hoy'
-                    : `Correo enviado a ${correo.alumno.nombre}`);
-            } else {
-                avisar(data?.detalle_error || 'No se pudo enviar el correo', true);
-            }
-            setCorreo(null);
-        } catch (err) {
-            avisar(err.response?.data?.detail || 'No se pudo enviar el correo', true);
-            setCorreo((c) => (c ? { ...c, enviando: false } : c));
-        }
-    };
-
-    /** Tocar un nombre lleva a la FICHA del alumno (Historial), igual que el buscador. */
-    const irAFicha = (alumnoId) => navigate(`/admin/alumnos/${alumnoId}/historial`);
+    const cerrarTarjeta = () => setTarjeta(false);
 
     // ── G. Bazar: pantalla con pestañas + aviso MANUAL al comprador ──────────
     const hayPedidos = pedidos.length > 0;
@@ -921,8 +830,8 @@ const InicioMobileAdmin = () => {
                         reusa el "+N nuevos este mes" que ya trae /reportes/. */}
                     <Kpi
                         clase="k-prueba wide" icono="users" label="Alumnos nuevos y en prueba"
-                        valor={errorPrueba ? null : enPrueba.length}
-                        error={errorPrueba} cargando={tarjetaCargando}
+                        valor={prueba.errorPrueba ? null : prueba.enPrueba.length}
+                        error={prueba.errorPrueba} cargando={prueba.cargando}
                         sub={kpis.nuevosMes != null
                             ? <><em>+{kpis.nuevosMes}</em> nuevos este mes</>
                             : 'toca para ver el detalle'}
@@ -1475,127 +1384,15 @@ const InicioMobileAdmin = () => {
                     </div>
                 </section>
             )}
-            {/* ── Pantalla completa: alumnos nuevos y en prueba (F) ──────── */}
+            {/* ── Pantalla completa: alumnos nuevos y en prueba (F) ────────
+                Mismo componente que la ruta de escritorio `/admin/alumnos-prueba`.
+                Acá va SIN `embebido`: se mantiene la capa fija del Inicio móvil. */}
             {tarjeta && (
-                <section className="screen" aria-label="Alumnos nuevos y en prueba">
-                    <div className="s-head">
-                        <button type="button" className="icon-btn" onClick={cerrarTarjeta}
-                            aria-label="Volver">←</button>
-                        <div className="s-title">
-                            <h3>Alumnos nuevos y en prueba</h3>
-                            <small>
-                                {textoEnPrueba(enPrueba.length)}
-                                {nuevosMes.length ? ` · ${nuevosMes.length} nuevos del mes` : ''}
-                            </small>
-                        </div>
-                    </div>
-
-                    <div className="results">
-                        <h4 className="sec">En prueba</h4>
-                        {errorPrueba ? (
-                            <p className="empty-line" role="alert">⚠️ {errorPrueba}</p>
-                        ) : tarjetaCargando ? (
-                            <p className="hint">Cargando…</p>
-                        ) : enPrueba.length === 0 ? (
-                            <p className="hint">Nadie está en prueba ahora mismo.</p>
-                        ) : enPrueba.map((a) => {
-                            const tono = tonoEstadoPrueba(a.estado);
-                            return (
-                                <article className="prow" key={a.id}>
-                                    <button type="button" className="pr-head"
-                                        onClick={() => irAFicha(a.id)}>
-                                        <span className="avatar">{iniciales(a.nombre)}</span>
-                                        <span className="pr-name">{a.nombre}</span>
-                                        <span className="pr-go" aria-hidden="true">›</span>
-                                    </button>
-                                    <p className={`pr-estado ${tono.clase}`}>
-                                        <span aria-hidden="true">{tono.icono}</span>{' '}
-                                        {textoEstadoPrueba(a.estado, a.dias_inscrito)}
-                                    </p>
-                                    <div className="pr-foot">
-                                        <button type="button" className="btn soft small"
-                                            onClick={() => abrirCorreo(a)}>
-                                            Enviar correo
-                                        </button>
-                                        {/* Envío MANUAL registrado: la fila lo muestra. */}
-                                        {a.ultimo_envio && (
-                                            <span className="pr-note">
-                                                Correo enviado {textoHace(a.ultimo_envio)}
-                                            </span>
-                                        )}
-                                    </div>
-                                </article>
-                            );
-                        })}
-
-                        <h4 className="sec">Nuevos del mes</h4>
-                        {errorNuevos ? (
-                            <p className="empty-line" role="alert">⚠️ {errorNuevos}</p>
-                        ) : tarjetaCargando ? (
-                            <p className="hint">Cargando…</p>
-                        ) : nuevosMes.length === 0 ? (
-                            <p className="hint">Todavía no hay altas este mes.</p>
-                        ) : nuevosMes.map((a) => (
-                            <button type="button" className="nrow" key={a.id}
-                                onClick={() => irAFicha(a.id)}>
-                                <span className="avatar">{iniciales(a.nombre)}</span>
-                                <span className="n-name">{a.nombre}</span>
-                                <span className="n-fecha">{textoAlta(a.fecha_alta)}</span>
-                            </button>
-                        ))}
-                    </div>
-                </section>
-            )}
-            {/* ── Hoja inferior: vista previa del correo manual (F) ───────── */}
-            {correo && (
-                <>
-                    <div className="scrim" onClick={() => setCorreo(null)} />
-                    <section className="sheet" aria-label="Vista previa del correo">
-                        <div className="sheet-grab" />
-                        <div className="sheet-head">
-                            <div>
-                                <h3>Vista previa del correo</h3>
-                                <small>
-                                    {correo.alumno?.nombre}
-                                    {correo.preview?.destinatario ? ` · ${correo.preview.destinatario}` : ''}
-                                </small>
-                            </div>
-                            <button type="button" className="close-x"
-                                onClick={() => setCorreo(null)} aria-label="Cerrar">✕</button>
-                        </div>
-                        <div className="sheet-body">
-                            {correo.cargando ? (
-                                <p className="empty-line">Armando el correo…</p>
-                            ) : (correo.error || !correo.preview) ? (
-                                <p className="empty-line" role="alert">
-                                    ⚠️ {correo.error || 'No se pudo armar el correo'}
-                                </p>
-                            ) : (
-                                <>
-                                    <div className="mail-meta">
-                                        <small>Asunto</small>
-                                        <b>{correo.preview.asunto}</b>
-                                    </div>
-                                    {/* El HTML lo renderiza el backend: se muestra tal cual,
-                                        sin poder editarlo y sin ejecutar nada (sandbox=""). */}
-                                    <iframe className="mail-doc" title="Vista previa del correo"
-                                        sandbox="" srcDoc={correo.preview.html} />
-                                    <p className="note">
-                                        El mensaje lo arma Urban Box con los datos del alumno:
-                                        se envía tal cual.
-                                    </p>
-                                </>
-                            )}
-                        </div>
-                        <div className="sheet-foot una">
-                            <button type="button" className="btn primary" onClick={enviarCorreo}
-                                disabled={correo.cargando || Boolean(correo.error)
-                                    || !correo.preview || correo.enviando}>
-                                {correo.enviando ? 'Enviando…' : 'Enviar'}
-                            </button>
-                        </div>
-                    </section>
-                </>
+                <PanelAlumnosPrueba
+                    estado={prueba}
+                    onVolver={cerrarTarjeta}
+                    onToast={avisar}
+                />
             )}
             {/* ── Pantalla completa: sección Bazar (G) ──────────────────────
                 DOS pestañas de la MISMA sección: "Catálogo" (la pantalla de Bazar de
