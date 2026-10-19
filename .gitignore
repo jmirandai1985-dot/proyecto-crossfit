@@ -33,6 +33,12 @@ backend/.env.test
 *.log
 *.txt
 
+# pytest
+.pytest_cache/
+
+# Dumps de BD (nunca versionar: pueden contener datos sensibles)
+*.dump
+
 # requirements.txt es esencial para el despliegue (no ignorar)
 !backend/requirements.txt
 !requirements.txt
