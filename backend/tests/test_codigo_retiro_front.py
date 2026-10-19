@@ -114,3 +114,34 @@ def test_el_meson_puede_escanear_el_qr_del_codigo_de_retiro():
     pedidos = _fuente("backend/app/api/v1/pedidos.py")
     assert 'SÓLO el código ("UB-4827"), no una URL' in pedidos
     assert 'qr_make(pedido.codigo_retiro, error="m")' in pedidos
+
+
+def test_el_qr_del_alumno_tiene_contraste_fijo_y_se_puede_ampliar():
+    """Parte 2: el QR del alumno se lee en el mesón (contraste + zoom).
+
+    El SVG se pinta sobre una tarjeta BLANCA y con `filter: none`, para que el
+    modo oscuro/animaciones del contenedor no inviertan ni atenúen los módulos.
+    Además el alumno puede tocarlo para abrirlo en un modal (portal) grande,
+    porque 28x28 px no siempre alcanza para el lector del mesón.
+    """
+    pagina = _fuente("frontend/src/pages/alumno/MisPedidos.jsx")
+    pedidos = _fuente("backend/app/api/v1/pedidos.py")
+
+    # 1. Backend: colores explícitos (sin fondo transparente que el tema oscuro rompa).
+    assert 'dark="#000000"' in pedidos
+    assert 'light="#ffffff"' in pedidos
+
+    # 2. Frontend: tarjeta blanca + sin filtros heredados, tanto en la miniatura
+    #    como en la versión ampliada.
+    assert pagina.count("backgroundColor: '#ffffff'") >= 3
+    assert pagina.count("filter: 'none'") >= 2
+
+    # 3. Zoom: la miniatura es un botón accesible y abre un diálogo modal.
+    assert "Ampliar el QR del código de retiro" in pagina
+    assert "createPortal" in pagina
+    assert 'role="dialog"' in pagina
+    assert 'aria-modal="true"' in pagina
+    assert "onClick={cerrar}" in pagina
+    # Escape cierra el modal y se restaura el scroll del body.
+    assert "e.key === 'Escape'" in pagina
+    assert "document.body.style.overflow = 'hidden'" in pagina

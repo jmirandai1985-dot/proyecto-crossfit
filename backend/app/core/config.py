@@ -181,12 +181,12 @@ if not settings.JWT_SECRET_KEY:
 # IDs de endpoints de Neon. Los endpoints son efímeros: al recrear una rama cambia
 # el id (ep-xxxxx-xxxxx).
 #
-# TOPOLOGÍA ACTUAL (2026-09-24): TEST y PROD son DOS RAMAS del MISMO proyecto de
-# Neon ("box-crossfit", antes "produccion2.0"):
-#   - PROD = rama principal      → PROD_BRANCH_ID
-#   - TEST = rama de desarrollo  → TEST_BRANCH_IDS
-# Por eso comparten la cuota de cómputo del proyecto (decisión consciente del
-# negocio: si TEST se agota la cuota, PROD también se cae).
+# TOPOLOGÍA ACTUAL (2026-10-18): TEST vive en el proyecto Neon NUEVO
+# "urban-training-box" (AWS US West 2 / Oregon, misma región que Render), en la
+# rama "test". PROD sigue en su proyecto histórico. Son proyectos separados:
+# ya no comparten cuota de cómputo.
+#   - TEST = rama test del proyecto nuevo → TEST_BRANCH_IDS
+#   - PROD = proyecto histórico           → PROD_BRANCH_ID (denylist)
 #
 # ⚠️ ÚNICO lugar a actualizar cuando cambie de rama. Lo consumen:
 #   - app/main.py  → GET /debug/db-url (conftest.py aborta los tests si da 404)
@@ -194,9 +194,9 @@ if not settings.JWT_SECRET_KEY:
 #     (abortan si la BD no es TEST, para no escribir sobre datos reales)
 #   - scripts/sync_test_from_prod.py y scripts/restaurar_backup.py (origen/destino)
 TEST_BRANCH_IDS = (
-    "ep-damp-base-b6mpe739",          # TEST actual: la MISMA rama, con la contraseña ROTADA
-                                      # (2026-10-16). Neon reasigna el hostname del endpoint al
-                                      # rotar la credencial: el id anterior dejó de resolver.
+    "ep-lingering-fog-arywdnbg",      # TEST actual (2026-10-18): rama test del proyecto
+                                      # nuevo "urban-training-box", US West 2 (Oregon).
+    "ep-damp-base-b6mpe739",          # TEST anterior: credencial inválida desde 2026-10-18
     "ep-winter-boat-b6zpvtxu",        # TEST anterior: rama recreada (2026-10-13); su credencial
                                       # quedó inválida al rotar la contraseña
     "ep-summer-river-b6c8fj2f",       # TEST anterior: rama recreada (2026-10-04), ya sin credencial

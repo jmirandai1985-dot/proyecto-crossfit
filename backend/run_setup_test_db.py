@@ -50,6 +50,27 @@ WodMovimiento = importlib.import_module(
 HistorialRM = importlib.import_module("app.models.historial_rm").HistorialRM
 Reserva = importlib.import_module("app.models.reserva").Reserva
 
+# ── MODELOS ANALÍTICOS / ML / DATA MARTS ────────────────────────────────────
+# `Base.metadata.create_all()` sólo crea las tablas de los modelos que fueron
+# IMPORTADOS. `app/models/__init__.py` no importa estos módulos y el seed tampoco
+# los necesita para insertar datos, así que en una rama TEST vacía faltaban 8
+# tablas que antes se heredaban de PROD: churn_gestion, daily_kpis, ml_modelos,
+# monthly_kpis, predictions_churn, predictions_forecast, segmentacion_alumnos
+# y student_segments. Con la rama nueva (proyecto urban-training-box) eso hacía
+# fallar los tests de churn/BI con "relation ... does not exist". Registrarlos
+# acá garantiza que el bootstrap del esquema quede completo.
+for _modelo_analitico in (
+    "app.models.churn_gestion",
+    "app.models.daily_kpis",
+    "app.models.ml_modelo",
+    "app.models.monthly_kpis",
+    "app.models.predictions_churn",
+    "app.models.predictions_forecast",
+    "app.models.segmentacion_alumno",
+    "app.models.student_segments",
+):
+    importlib.import_module(_modelo_analitico)
+
 # Cuentas PERMANENTES del instituto (demo.*@urbanbox.cl): este seed borra TODOS los
 # usuarios y TODOS los tenants, y `usuarios.tenant_id` es ON DELETE CASCADE, así que se
 # capturan ANTES de la limpieza y se reinsertan AL FINAL (mismos ids y claves). La lista
@@ -135,6 +156,106 @@ with engine.connect() as conn:
         "ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS voucher_url VARCHAR(500)"))
     conn.commit()
 print("[OK] Migraciones post-create aplicadas (requiere_coach, es_estudiante, coach_disciplinas, cobertura_emergencia, pedidos.voucher_url)")
+# ── DEFAULTS DE SERVIDOR (paridad con PROD) ────────────────────────────────
+# `create_all()` crea las columnas desde los modelos, pero los `default=` de
+# SQLAlchemy son defaults del ORM (Python): NO generan `DEFAULT` en PostgreSQL.
+# PROD sí tiene esos DEFAULT (los agregaron las migraciones/el esquema histórico)
+# y varios tests hacen INSERT por SQL crudo omitiendo esas columnas. En el branch
+# TEST viejo se heredaban de PROD; en el proyecto nuevo (urban-training-box, rama
+# test vacía) faltaban y los INSERT fallaban con NotNullViolation (p. ej.
+# usuarios.acepta_correo_reactivacion). Este bloque replica los 82 defaults.
+_DEFAULTS_SERVIDOR_1 = """
+ALTER TABLE asistencias ALTER COLUMN clase SET DEFAULT 'WOD'::character varying;
+ALTER TABLE asistencias ALTER COLUMN presente SET DEFAULT false;
+ALTER TABLE avisos_marketing ALTER COLUMN fijado_arriba SET DEFAULT false;
+ALTER TABLE churn_gestion ALTER COLUMN estado_gestion SET DEFAULT 'PENDIENTE'::character varying;
+ALTER TABLE clases ALTER COLUMN asistentes_confirmados SET DEFAULT 0;
+ALTER TABLE clases ALTER COLUMN cancelada SET DEFAULT false;
+ALTER TABLE clases ALTER COLUMN cupo_maximo SET DEFAULT 20;
+ALTER TABLE coach_disciplinas ALTER COLUMN activo SET DEFAULT true;
+ALTER TABLE daily_kpis ALTER COLUMN alumnos_activos SET DEFAULT 0;
+ALTER TABLE daily_kpis ALTER COLUMN alumnos_nuevos SET DEFAULT 0;
+ALTER TABLE daily_kpis ALTER COLUMN asistentes_totales SET DEFAULT 0;
+ALTER TABLE daily_kpis ALTER COLUMN cancellaciones SET DEFAULT 0;
+ALTER TABLE daily_kpis ALTER COLUMN clases_ejecutadas SET DEFAULT 0;
+ALTER TABLE daily_kpis ALTER COLUMN ingresos_bazar SET DEFAULT 0;
+ALTER TABLE daily_kpis ALTER COLUMN ingresos_membresia SET DEFAULT 0;
+ALTER TABLE daily_kpis ALTER COLUMN ingresos_total SET DEFAULT 0;
+ALTER TABLE daily_kpis ALTER COLUMN ocupacion_promedio SET DEFAULT 0;
+ALTER TABLE daily_kpis ALTER COLUMN reservas_confirmadas SET DEFAULT 0;
+ALTER TABLE disciplinas ALTER COLUMN activo SET DEFAULT true;
+ALTER TABLE disciplinas ALTER COLUMN es_open_box SET DEFAULT false;
+ALTER TABLE disciplinas ALTER COLUMN requiere_coach SET DEFAULT true;
+ALTER TABLE historial_rm ALTER COLUMN tipo_rm SET DEFAULT 'peso'::character varying;
+ALTER TABLE hitos_alumno ALTER COLUMN notificado SET DEFAULT false;
+ALTER TABLE horarios ALTER COLUMN activo SET DEFAULT true;
+ALTER TABLE horarios ALTER COLUMN cupo_maximo SET DEFAULT 15;
+ALTER TABLE monthly_kpis ALTER COLUMN alumnos_activos_inicio SET DEFAULT 0;
+ALTER TABLE monthly_kpis ALTER COLUMN alumnos_baja SET DEFAULT 0;
+ALTER TABLE monthly_kpis ALTER COLUMN alumnos_clase_prueba_ejecutada SET DEFAULT 0;
+ALTER TABLE monthly_kpis ALTER COLUMN alumnos_plan_comprado SET DEFAULT 0;
+ALTER TABLE monthly_kpis ALTER COLUMN alumnos_prueba SET DEFAULT 0;
+ALTER TABLE monthly_kpis ALTER COLUMN asistencia_promedio SET DEFAULT 0;
+ALTER TABLE monthly_kpis ALTER COLUMN churn_rate SET DEFAULT 0;
+ALTER TABLE monthly_kpis ALTER COLUMN conversion_rate SET DEFAULT 0;
+ALTER TABLE monthly_kpis ALTER COLUMN frecuencia_semanal SET DEFAULT 0;
+ALTER TABLE monthly_kpis ALTER COLUMN ingresos_bazar SET DEFAULT 0;
+ALTER TABLE monthly_kpis ALTER COLUMN ingresos_total SET DEFAULT 0;
+ALTER TABLE monthly_kpis ALTER COLUMN mrr SET DEFAULT 0;
+ALTER TABLE monthly_kpis ALTER COLUMN ocupacion_promedio SET DEFAULT 0;
+ALTER TABLE movimientos ALTER COLUMN activo SET DEFAULT true;
+ALTER TABLE movimientos ALTER COLUMN categoria SET DEFAULT 'fuerza'::character varying;
+"""
+_DEFAULTS_SERVIDOR_2 = """
+ALTER TABLE notificaciones_enviadas ALTER COLUMN estado SET DEFAULT 'enviado'::character varying;
+ALTER TABLE pedidos ALTER COLUMN estado SET DEFAULT 'pendiente'::character varying;
+ALTER TABLE planes ALTER COLUMN activo SET DEFAULT true;
+ALTER TABLE planes ALTER COLUMN duracion_dias SET DEFAULT 30;
+ALTER TABLE planes ALTER COLUMN es_comercial SET DEFAULT true;
+ALTER TABLE planes ALTER COLUMN es_estudiante SET DEFAULT false;
+ALTER TABLE planes ALTER COLUMN es_ilimitado SET DEFAULT false;
+ALTER TABLE planes ALTER COLUMN primera_clase_tomada SET DEFAULT false;
+ALTER TABLE planes ALTER COLUMN requiere_certificado_estudiante SET DEFAULT false;
+ALTER TABLE predictions_churn ALTER COLUMN probabilidad_churn SET DEFAULT 0;
+ALTER TABLE predictions_churn ALTER COLUMN riesgo_nivel SET DEFAULT 'BAJO'::character varying;
+ALTER TABLE predictions_forecast ALTER COLUMN alumnos_predicho SET DEFAULT 0;
+ALTER TABLE predictions_forecast ALTER COLUMN ingresos_predicho SET DEFAULT 0;
+ALTER TABLE predictions_forecast ALTER COLUMN intervalo_confianza SET DEFAULT 95;
+ALTER TABLE predictions_forecast ALTER COLUMN tasa_crecimiento SET DEFAULT 0;
+ALTER TABLE productos ALTER COLUMN activo SET DEFAULT true;
+ALTER TABLE productos ALTER COLUMN alerta_stock_enviada SET DEFAULT false;
+ALTER TABLE productos ALTER COLUMN dias_anuncio SET DEFAULT 0;
+ALTER TABLE productos ALTER COLUMN stock SET DEFAULT 0;
+ALTER TABLE reservas ALTER COLUMN asistio SET DEFAULT false;
+ALTER TABLE reservas ALTER COLUMN estado SET DEFAULT 'reserved'::character varying;
+ALTER TABLE reservas ALTER COLUMN tokens_gastados SET DEFAULT 0;
+ALTER TABLE retencion_alumnos ALTER COLUMN estado_plan SET DEFAULT 'activo'::character varying;
+ALTER TABLE segmentacion_alumnos ALTER COLUMN arquetipo SET DEFAULT 'ACTIVO_FIEL'::character varying;
+ALTER TABLE student_segments ALTER COLUMN asistencia_score SET DEFAULT 0;
+ALTER TABLE student_segments ALTER COLUMN fuerza_score SET DEFAULT 0;
+ALTER TABLE student_segments ALTER COLUMN gymnastica_score SET DEFAULT 0;
+ALTER TABLE student_segments ALTER COLUMN nivel SET DEFAULT 'BASICO'::character varying;
+ALTER TABLE student_segments ALTER COLUMN ready_for_upgrade SET DEFAULT false;
+ALTER TABLE student_segments ALTER COLUMN retention_score SET DEFAULT 0;
+ALTER TABLE suscripciones ALTER COLUMN es_compra_emergencia SET DEFAULT false;
+ALTER TABLE suscripciones ALTER COLUMN puede_comprar_emergencia SET DEFAULT true;
+ALTER TABLE tenants ALTER COLUMN activo SET DEFAULT true;
+ALTER TABLE usuarios ALTER COLUMN acepta_correo_reactivacion SET DEFAULT true;
+ALTER TABLE usuarios ALTER COLUMN activo SET DEFAULT true;
+ALTER TABLE usuarios ALTER COLUMN cambiar_password_al_login SET DEFAULT false;
+ALTER TABLE usuarios ALTER COLUMN estado SET DEFAULT 'activo'::character varying;
+ALTER TABLE usuarios ALTER COLUMN rol SET DEFAULT 'alumno'::rol_usuario;
+ALTER TABLE wod_movimientos ALTER COLUMN fase SET DEFAULT NULL::character varying;
+ALTER TABLE wod_movimientos ALTER COLUMN orden SET DEFAULT 1;
+ALTER TABLE wods ALTER COLUMN activo SET DEFAULT true;
+ALTER TABLE wods ALTER COLUMN estado SET DEFAULT 'draft'::estadowod;
+"""
+with engine.connect() as conn:
+    conn.execute(text(_DEFAULTS_SERVIDOR_1))
+    conn.execute(text(_DEFAULTS_SERVIDOR_2))
+    conn.commit()
+print("[OK] Defaults de servidor alineados con PROD (82 columnas)")
+
 
 # ── Alembic: alinear el stamp con el esquema recién construido ──────────────
 # `create_all()` construye el esquema desde los MODELOS (incluye las migraciones

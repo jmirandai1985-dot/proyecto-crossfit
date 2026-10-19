@@ -23,12 +23,19 @@ from app.models.plan import Plan
 security = HTTPBearer(auto_error=False)
 
 
-async def get_current_user(
+def get_current_user(
     credentials=Depends(security),
     db: Session = Depends(get_db)
 ):
     """
     Obtiene el usuario actual desde el JWT token.
+
+    IMPORTANTE (event loop): esta dependencia es `def` (síncrona) A PROPÓSITO.
+    Hace una consulta SQLAlchemy síncrona a `usuarios`; si fuera `async def`,
+    ese I/O se ejecutaría DENTRO del event loop y bloquearía todas las demás
+    peticiones mientras Neon responde. Al ser `def`, FastAPI la corre en su
+    threadpool y el loop queda libre. La firma externa (parámetros/retorno) no
+    cambia: todos los endpoints la siguen usando con `Depends(get_current_user)`.
 
     Args:
         credentials: Credenciales HTTP Bearer (token JWT)

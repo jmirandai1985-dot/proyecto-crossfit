@@ -44,6 +44,138 @@ def _inicio_fin_mes(offset_meses=0):
     return inicio, fin
 
 
+def _ocupacion_por_disciplina(db: Session, tenant_id: int, inicio_mes, fin_mes):
+    """Ocupación por disciplina del mes en UNA sola consulta.
+
+    ANTES: 1 consulta para las disciplinas + 1 consulta por CADA disciplina para
+    contar los alumnos únicos (N+1; con 3 disciplinas eran 4 viajes a Neon).
+    AHORA: dos CTE (`clases_disc` y `alumnos_disc`) + un LEFT JOIN, un solo viaje.
+
+    Los valores son EXACTAMENTE los del bloque anterior: el conteo de alumnos no
+    filtra por `sql_clase_realizada` (sólo por fecha y `reservas.asistio`), y el
+    cupo mantiene el COALESCE(cupo_maximo, 1) del KPI original.
+    """
+    filas = db.execute(sql_text("""
+        WITH clases_disc AS (
+            SELECT d.id, d.nombre,
+                   COUNT(c.id) as total_clases,
+                   COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0)), 0) as asistentes,
+                   COALESCE(SUM(COALESCE(c.cupo_maximo, 1)), 0) as cupo
+            FROM clases c
+            JOIN disciplinas d ON c.disciplina_id = d.id
+            WHERE c.tenant_id = :tid
+              AND c.fecha >= :inicio_d
+              AND c.fecha <= :fin_d
+              AND """ + sql_clase_realizada("c") + """
+            GROUP BY d.id, d.nombre
+        ),
+        alumnos_disc AS (
+            SELECT c.disciplina_id, COUNT(DISTINCT r.alumno_id) as alumnos_unicos
+            FROM reservas r
+            JOIN clases c ON r.clase_id = c.id
+            WHERE c.tenant_id = :tid
+              AND r.asistio = true
+              AND c.fecha >= :inicio_d
+              AND c.fecha <= :fin_d
+            GROUP BY c.disciplina_id
+        )
+        SELECT cd.id, cd.nombre, cd.total_clases, cd.asistentes, cd.cupo,
+               COALESCE(ad.alumnos_unicos, 0) as alumnos_unicos
+        FROM clases_disc cd
+        LEFT JOIN alumnos_disc ad ON ad.disciplina_id = cd.id
+        ORDER BY cd.id
+    """), {
+        "tid": tenant_id,
+        "inicio_d": inicio_mes.date(),
+        "fin_d": fin_mes.date(),
+    }).fetchall()
+
+    resultado = []
+    for r in filas:
+        cupo = r.cupo or 0
+        pct = round(r.asistentes / cupo * 100) if cupo > 0 else 0
+        resultado.append({
+            "id": r.id,
+            "nombre": r.nombre.strip() if r.nombre else "—",
+            "clases": r.total_clases,
+            "asistentes": r.asistentes,
+            "cupo_total": cupo,
+            "alumnos_unicos": r.alumnos_unicos,
+            "ocupacion_pct": pct,
+        })
+    return resultado
+
+
+def _historico_membresias_6m(db: Session, tenant_id: int):
+    """Altas de suscripción de los últimos 6 meses en UNA consulta.
+
+    ANTES: 6 COUNT(*) (uno por mes). AHORA: un GROUP BY por mes con el mismo
+    rango total [inicio del mes -5, fin del mes actual]. Los meses sin filas se
+    rellenan con 0, igual que antes.
+    """
+    desde, _ = _inicio_fin_mes(-5)
+    _, hasta = _inicio_fin_mes(0)
+    filas = db.execute(sql_text("""
+        SELECT date_trunc('month', fecha_inicio AT TIME ZONE 'UTC')::date AS mes,
+               COUNT(*) AS membresias
+        FROM suscripciones
+        WHERE tenant_id = :tid
+          AND fecha_inicio >= :desde
+          AND fecha_inicio <= :hasta
+        GROUP BY 1
+    """), {"tid": tenant_id, "desde": desde, "hasta": hasta}).fetchall()
+    por_mes = {r.mes: int(r.membresias or 0) for r in filas}
+
+    historico = []
+    for i in range(5, -1, -1):
+        ini, _ = _inicio_fin_mes(-i)
+        label = f"{MESES[ini.month - 1]} {ini.year}"
+        historico.append({
+            "mes": label,
+            "membresias": por_mes.get(ini.date(), 0),
+        })
+    return historico
+
+
+def _historico_ingresos_6m(db: Session, tenant_id: int):
+    """Ingresos NETOS de los últimos 6 meses en UNA consulta.
+
+    ANTES: por cada mes se llamaba `metricas.ingresos_netos`, que hacía 2 SUM
+    (ingreso y egreso) -> 12 consultas. AHORA: un GROUP BY con un CASE que
+    replica exactamente ese neto (ingreso - egreso; cualquier otro tipo suma 0).
+    """
+    desde, _ = _inicio_fin_mes(-5)
+    _, hasta = _inicio_fin_mes(0)
+    filas = db.execute(sql_text("""
+        SELECT date_trunc('month', fecha)::date AS mes,
+               COALESCE(SUM(CASE
+                   WHEN tipo = 'ingreso' THEN monto
+                   WHEN tipo = 'egreso' THEN -monto
+                   ELSE 0
+               END), 0) AS neto
+        FROM transacciones_financieras
+        WHERE tenant_id = :tid
+          AND fecha >= :desde
+          AND fecha <= :hasta
+        GROUP BY 1
+    """), {
+        "tid": tenant_id,
+        "desde": desde.date(),
+        "hasta": hasta.date(),
+    }).fetchall()
+    por_mes = {r.mes: float(r.neto or 0) for r in filas}
+
+    historico = []
+    for i in range(5, -1, -1):
+        ini, _ = _inicio_fin_mes(-i)
+        label = f"{MESES[ini.month - 1]} {ini.year}"
+        historico.append({
+            "mes": label,
+            "ingresos": por_mes.get(ini.date(), 0.0),
+        })
+    return historico
+
+
 @router.get("/monthly-sales")
 def descargar_reporte_ventas_mensual(
     tenant_id: int,
@@ -217,42 +349,9 @@ def obtener_reportes_analytics(
             db, tenant_id, inicio_mes.date(), fin_mes.date())
 
         # --- 11. OCUPACION POR DISCIPLINA ---
-        ocupacion_por_disciplina = []
-        disc_rows = db.execute(sql_text("""
-            SELECT d.id, d.nombre,
-                   COUNT(c.id) as total_clases,
-                   COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0)), 0) as asistentes,
-                   COALESCE(SUM(COALESCE(c.cupo_maximo, 1)), 0) as cupo
-            FROM clases c
-            JOIN disciplinas d ON c.disciplina_id = d.id
-            WHERE c.tenant_id = :tid
-              AND c.fecha >= :inicio_d
-              AND c.fecha <= :fin_d
-              AND """ + sql_clase_realizada("c") + """
-            GROUP BY d.id, d.nombre
-            ORDER BY d.id
-        """), {"tid": tenant_id, "inicio_d": inicio_mes.date(), "fin_d": fin_mes.date()}).fetchall()
-        for r in disc_rows:
-            cupo = r.cupo or 0
-            pct = round(r.asistentes / cupo * 100) if cupo > 0 else 0
-            # Alumnos unicos con reserva confirmada (asistio=true) en esta disciplina este mes
-            alumnos_unicos = db.execute(sql_text("""
-                SELECT COUNT(DISTINCT r.alumno_id)
-                FROM reservas r
-                JOIN clases c ON r.clase_id = c.id
-                WHERE c.tenant_id = :tid AND c.disciplina_id = :did
-                  AND r.asistio = true
-                  AND c.fecha >= :ini_d AND c.fecha <= :fin_d
-            """), {"tid": tenant_id, "did": r.id, "ini_d": inicio_mes.date(), "fin_d": fin_mes.date()}).scalar() or 0
-            ocupacion_por_disciplina.append({
-                "id": r.id,
-                "nombre": r.nombre.strip() if r.nombre else "—",
-                "clases": r.total_clases,
-                "asistentes": r.asistentes,
-                "cupo_total": cupo,
-                "alumnos_unicos": alumnos_unicos,
-                "ocupacion_pct": pct
-            })
+        # UNA consulta (CTE + LEFT JOIN): antes era 1 + N (una por disciplina).
+        ocupacion_por_disciplina = _ocupacion_por_disciplina(
+            db, tenant_id, inicio_mes, fin_mes)
 
         # --- 12. CLASES POR COACH ESTE MES ---
         clases_por_coach = []
@@ -301,31 +400,15 @@ def obtener_reportes_analytics(
                 "fecha_inicio": str(r.fecha_inicio)[:10] if r.fecha_inicio else None,
             })
         # --- 15. HISTORICO 6 MESES (suscripciones nuevas por mes) ---
-        historico_membresias = []
-        for i in range(5, -1, -1):
-            ini, _ = _inicio_fin_mes(-i)
-            label = f"{MESES[ini.month - 1]} {ini.year}"
-            cnt = db.execute(sql_text("""
-                SELECT COUNT(*) FROM suscripciones
-                WHERE tenant_id = :tid
-                  AND fecha_inicio >= :ini
-                  AND fecha_inicio <= :fin
-            """), {"tid": tenant_id, "ini": ini, "fin": (ini + timedelta(days=32)).replace(day=1) - timedelta(seconds=1)}).scalar() or 0
-            historico_membresias.append({"mes": label, "membresias": cnt})
+        # UNA consulta con GROUP BY (antes eran 6 COUNT, uno por mes).
+        historico_membresias = _historico_membresias_6m(db, tenant_id)
 
         # --- 15b. HISTORICO INGRESOS 6 MESES (desde transacciones_financieras) ---
         # FIX S12: antes hardcodeado [] con comentario desactualizado ("no existe
         # tabla de transacciones"). La tabla SI existe y es la misma fuente que
         # ingresos_mes: se agrupa por mes (ingreso - egreso) los ultimos 6 meses.
-        historico_ingresos = []
-        for i in range(5, -1, -1):
-            ini_h, fin_h = _inicio_fin_mes(-i)
-            label_h = f"{MESES[ini_h.month - 1]} {ini_h.year}"
-            historico_ingresos.append({
-                "mes": label_h,
-                "ingresos": metricas.ingresos_netos(
-                    db, tenant_id, ini_h.date(), fin_h.date()),
-            })
+        # UNA consulta con GROUP BY (antes eran 12: 2 SUM por cada mes).
+        historico_ingresos = _historico_ingresos_6m(db, tenant_id)
 
         # --- RESPUESTA COMPLETA ---
         result = {

@@ -12,7 +12,7 @@
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI
+from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
@@ -186,15 +186,14 @@ async def debug_db_url():
 
 @app.get("/health")
 async def health_check():
-    from app.db.database import engine
-    from sqlalchemy import text
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        db_status = "connected"
-    except Exception as e:
-        db_status = f"error: {str(e)}"
+    """Liveness puro: confirma que el PROCESO responde, sin tocar la BD.
 
+    POR QUÉ (fix 2026-10): este endpoint hacía `engine.connect() / SELECT 1`.
+    Render, Docker y nginx lo usan como healthcheck, así que una consulta lenta
+    o el pool de Neon saturado podían demorar/derrumbar el chequeo y, además,
+    ese I/O síncrono corría dentro del event loop. La conectividad real a la BD
+    ahora vive en `/health/db` (readiness); acá no hay I/O de red.
+    """
     # ── B.3: guard de configuración de correo/URLs ───────────────────────────
     # No aborta el arranque (preferimos que el servicio siga arriba y se vea
     # claro acá) pero deja el estado a la vista: en producción, una env var con
@@ -203,11 +202,46 @@ async def health_check():
     problemas = problemas_de_config()
     return {
         "status": "healthy",
-        "database": db_status,
+        # Explícito: este chequeo NO consultó la BD (ver /health/db).
+        "database": "not_checked",
         "environment": os.getenv("ENVIRONMENT", "development"),
         "config_ok": config_email_ok(),
         "config_problemas": problemas,
     }
+
+
+@app.get("/health/db")
+def health_db():
+    """Readiness: verifica la BD con el `SELECT 1` que antes hacía /health.
+
+    Es `def` (no `async def`) para que la consulta síncrona de SQLAlchemy corra
+    en el threadpool de FastAPI y no bloquee el event loop. Devuelve 503 si la
+    BD no responde, que es lo que un readiness probe necesita para sacar la
+    instancia de rotación.
+    """
+    from app.db.database import engine
+    from sqlalchemy import text
+
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        db_status = "connected"
+        codigo = status.HTTP_200_OK
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+        codigo = status.HTTP_503_SERVICE_UNAVAILABLE
+        logger.error("health/db: la base de datos no responde: %s", e)
+
+    return JSONResponse(
+        status_code=codigo,
+        content={
+            "status": "healthy" if codigo == status.HTTP_200_OK else "unhealthy",
+            "database": db_status,
+            "environment": os.getenv("ENVIRONMENT", "development"),
+            "config_ok": config_email_ok(),
+            "config_problemas": problemas_de_config(),
+        },
+    )
 
 
 @app.get("/sentry-debug")

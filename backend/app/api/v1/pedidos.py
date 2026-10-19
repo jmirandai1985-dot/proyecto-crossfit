@@ -851,7 +851,11 @@ def qr_retiro_pedido(
 
     qr = qr_make(pedido.codigo_retiro, error="m")
     buf = io.BytesIO()
-    qr.save(buf, kind="svg", scale=8)
+    # Colores EXPLÍCITOS: el SVG del QR se pinta sobre una tarjeta blanca en
+    # MisPedidos y se amplía en un modal. Sin `light`, segno deja el fondo
+    # transparente y en modo oscuro los módulos oscuros se perdían contra la
+    # tarjeta; con blanco/negro el contraste no depende del tema del navegador.
+    qr.save(buf, kind="svg", scale=8, dark="#000000", light="#ffffff")
     return Response(
         content=buf.getvalue(),
         media_type="image/svg+xml",

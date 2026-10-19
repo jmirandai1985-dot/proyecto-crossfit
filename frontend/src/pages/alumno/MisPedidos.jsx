@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Layout from '../../components/Layout';
 import AvisoCarga from '../../components/AvisoCarga';
 import BotonVolver from '../../components/BotonVolver';
@@ -21,16 +22,117 @@ const QrRetiro = ({ pedidoId, codigo }) => {
         previewUrl: `/api/v1/pedidos/${pedidoId}/qr.svg`,
         nombreFallback: `qr-retiro-${pedidoId}`,
     });
+    // Modal de ampliación: en el mesón el QR se escanea desde el celular del
+    // alumno y la miniatura (112 px) no siempre alcanza. Se abre a pantalla
+    // completa (portal) sobre una tarjeta BLANCA; el SVG del backend también
+    // trae fondo blanco.
+    const [ampliado, setAmpliado] = useState(false);
+
+    useEffect(() => {
+        if (!ampliado) return undefined;
+        const alEscape = (e) => { if (e.key === 'Escape') setAmpliado(false); };
+        const overflowPrevio = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        document.addEventListener('keydown', alEscape);
+        return () => {
+            document.body.style.overflow = overflowPrevio;
+            document.removeEventListener('keydown', alEscape);
+        };
+    }, [ampliado]);
+
     if (preview.loading) {
         return <div className="h-28 w-28 shrink-0 animate-pulse rounded-lg bg-gray-200" />;
     }
     if (preview.error || !preview.blobUrl) return null;
+
+    const cerrar = () => setAmpliado(false);
+
     return (
-        <img
-            src={preview.blobUrl}
-            alt={`QR del código de retiro ${codigo}`}
-            className="h-28 w-28 shrink-0 rounded-lg border border-gray-200 bg-white p-1"
-        />
+        <>
+            <button
+                type="button"
+                onClick={() => setAmpliado(true)}
+                className="group relative h-28 w-28 shrink-0 cursor-zoom-in overflow-hidden rounded-lg border border-gray-200 p-1 shadow-sm transition hover:ring-2 hover:ring-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                style={{ backgroundColor: '#ffffff' }}
+                aria-label={`Ampliar el QR del código de retiro ${codigo}`}
+                title="Toca para ampliar el QR"
+            >
+                {/* `filter: none`: el QR debe quedar negro sobre blanco, sin
+                    heredar filtros de modo oscuro/animaciones. */}
+                <img
+                    src={preview.blobUrl}
+                    alt={`QR del código de retiro ${codigo}`}
+                    className="h-full w-full object-contain"
+                    style={{ backgroundColor: '#ffffff', filter: 'none' }}
+                />
+                <span className="pointer-events-none absolute right-1 top-1 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white shadow">
+                    ⤢
+                </span>
+            </button>
+
+            {ampliado && createPortal(
+                <div
+                    className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+                    style={{ backgroundColor: 'rgba(0, 0, 0, 0.82)' }}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label={`QR del código de retiro ${codigo}`}
+                    onClick={cerrar}
+                >
+                    <div
+                        className="w-full max-w-md rounded-2xl p-5 shadow-2xl"
+                        style={{ backgroundColor: '#ffffff', color: '#18181b' }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="mb-3 flex items-start justify-between gap-3">
+                            <div>
+                                <p className="text-xs font-bold uppercase tracking-wider" style={{ color: '#047857' }}>
+                                    Código de retiro
+                                </p>
+                                <p className="text-sm" style={{ color: '#52525b' }}>
+                                    Muéstralo en el mesón para que lo escaneen.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={cerrar}
+                                className="rounded-full px-2 py-1 text-xl font-bold leading-none"
+                                style={{ backgroundColor: '#f4f4f5', color: '#18181b' }}
+                                aria-label="Cerrar QR ampliado"
+                            >
+                                ×
+                            </button>
+                        </div>
+                        <img
+                            src={preview.blobUrl}
+                            alt={`QR ampliado del código de retiro ${codigo}`}
+                            className="mx-auto block h-auto rounded-lg"
+                            style={{
+                                width: 'min(80vw, 22rem)',
+                                maxWidth: '100%',
+                                backgroundColor: '#ffffff',
+                                filter: 'none',
+                            }}
+                        />
+                        <p
+                            className="mt-4 text-center font-mono text-3xl font-black tracking-widest"
+                            style={{ color: '#065f46' }}
+                        >
+                            {codigo}
+                        </p>
+                        <button
+                            type="button"
+                            onClick={cerrar}
+                            className="mt-4 w-full rounded-xl px-4 py-3 text-sm font-bold text-white"
+                            style={{ backgroundColor: '#047857' }}
+                        >
+                            Cerrar
+                        </button>
+                    </div>
+                </div>,
+                document.body
+            )}
+        </>
     );
 };
 
