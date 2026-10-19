@@ -9,6 +9,7 @@ from app.models.transaccion_financiera import TransaccionFinanciera
 from app.core.dependencies import get_current_admin
 from app.core.rate_limit import limiter, LIMIT_CRITICO
 from app.services import churn_service
+from app.services import referidos_service
 from app.services.auditoria_service import registrar_auditoria
 from app.models.plan import Plan
 from app.utils.santiago import hoy_santiago, fin_de_plan_chile   # HOY en Chile (la TZ del proceso es UTC)
@@ -83,6 +84,21 @@ def crear_suscripcion(
         fecha_expiracion=fecha_exp,
     )
     db.add(db_sus)
+
+    # ── Fase 3b: la compra queda CONFIRMADA con esta suscripción ──
+    # `flush()` asigna el id sin commitear; `confirmar_compra` convierte el
+    # referido del invitado / consume el crédito del invitador y devuelve el
+    # precio que se debe cobrar. Suscripción, premio e ingreso van en la MISMA
+    # transacción: no puede quedar una compra sin su descuento.
+    db.flush()
+    descuento_referido = referidos_service.confirmar_compra(
+        db,
+        tenant_id=data.tenant_id,
+        usuario_id=data.usuario_id,
+        precio_lista_clp=int(plan.precio_clp or 0),
+        suscripcion_id=db_sus.id,
+    )
+
     db.commit()
     db.refresh(db_sus)
 
@@ -92,7 +108,9 @@ def crear_suscripcion(
     # Mismo criterio que solicitudes_planes (FIX 3). No aplica si el plan nuevo
     # es "Prueba". Nunca debe impedir la creación si falla.
     try:
-        from app.models.plan import Plan
+        # `Plan` está importado a nivel de módulo. Un import local acá volvía
+        # `Plan` una variable local de TODA la función y el primer uso
+        # (línea del plan principal) explotaba con UnboundLocalError.
         plan_nuevo = db.query(Plan).filter(Plan.id == data.plan_id).first()
         if plan_nuevo and plan_nuevo.nombre != "Prueba":
             sus_prueba = db.query(Suscripcion).join(
@@ -123,19 +141,26 @@ def crear_suscripcion(
             "estado": data.estado,
             "creditos_totales": data.creditos_totales,
             "creditos_disponibles": data.creditos_disponibles,
+            # Fase 3b: el descuento que se aplicó a ESTA compra (0 = sin premio).
+            "descuento_referido_clp": (descuento_referido["descuento_clp"]
+                                       if descuento_referido is not None else 0),
         },
     )
 
     # Auto-insertar ingreso en transacciones_financieras
     try:
-        from app.models.plan import Plan
         plan = db.query(Plan).filter(Plan.id == data.plan_id).first()
         if plan and plan.precio_clp > 0:
+            # Fase 3b: se registra el precio FINAL (con descuento de referido),
+            # no el de lista: el ingreso tiene que ser lo que realmente se cobró.
+            monto_facturado = (descuento_referido["precio_final_clp"]
+                               if descuento_referido is not None
+                               else plan.precio_clp)
             tx = TransaccionFinanciera(
                 tenant_id=data.tenant_id,
                 tipo='ingreso',
                 categoria='membresia',
-                monto=plan.precio_clp,
+                monto=monto_facturado,
                 descripcion=f"Suscripcion plan {plan.nombre} (usuario #{data.usuario_id})",
                 referencia_tipo='suscripcion',
                 referencia_id=db_sus.id,

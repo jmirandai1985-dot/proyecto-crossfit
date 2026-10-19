@@ -29,8 +29,13 @@ Fase 3a agrega las REGLAS DE VALIDACIÓN de un código ingresado por el invitado
 respuesta de los endpoints. El servicio sigue sin commitear: el router consulta,
 inserta y hace el commit de `referidos_aplicados`.
 
-Los descuentos NO se aplican acá: esta fase sólo registra la intención
-(`pendiente`). El cálculo y el cobro son la Fase 3b.
+Fase 3b aplica el DINERO: `confirmar_compra` se llama en el punto donde la
+compra queda confirmada (aprobación de la solicitud o alta directa de la
+suscripción), convierte el referido `pendiente` y descuenta al invitado; al
+convertirse crea el `CreditoReferido` del invitador, que se consume UNA sola vez
+en SU próxima compra. Sin configuración activa no se convierte ni se descuenta.
+Tampoco commitea: el llamador guarda suscripción, referido, crédito e ingreso en
+la misma transacción.
 """
 from __future__ import annotations
 
@@ -38,11 +43,17 @@ import re
 import secrets
 import unicodedata
 import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.models.referidos import CodigoReferido, ReferidoAplicado
+from app.models.plan import Plan
+from app.models.referidos import (CodigoReferido, ConfiguracionReferidos,
+                                  CreditoReferido, EstadoCreditoReferido,
+                                  EstadoReferido, ReferidoAplicado)
+from app.models.suscripcion import Suscripcion
 from app.models.usuario import RolUsuario, Usuario
 
 __all__ = [
@@ -64,6 +75,9 @@ __all__ = [
     "asignar_codigo_referido",
     "normalizar_codigo_ingresado",
     "motivo_codigo_invalido",
+    "calcular_descuento_clp",
+    "es_primera_compra_pagada",
+    "confirmar_compra",
     "datos_mi_codigo",
     "datos_referido_aplicado",
     "datos_configuracion",
@@ -326,4 +340,202 @@ def datos_configuracion(config: Any) -> dict:
             config.porcentaje_descuento_invitador),
         "activo": bool(config.activo),
         "configurada": True,
+    }
+
+
+# ── Fase 3b: el dinero (descuentos al confirmarse una compra) ────────────────
+
+def calcular_descuento_clp(precio_lista_clp: int, porcentaje) -> int:
+    """Descuento en CLP sobre el precio de LISTA: `round(precio * % / 100)`.
+
+    Es la MISMA aritmética de `beneficios_service.desglose`: un porcentaje
+    calculado en dos lados es un porcentaje que se desincroniza. El redondeo es
+    al peso (los montos del proyecto son enteros) y `porcentaje` puede venir como
+    `Decimal` de la BD (los porcentajes admiten 2 decimales).
+    """
+    if isinstance(precio_lista_clp, bool) or not isinstance(precio_lista_clp, int) \
+            or precio_lista_clp <= 0:
+        raise ValueError(
+            "El precio de lista tiene que ser un entero positivo "
+            f"(llegó {precio_lista_clp!r}).")
+    pct = Decimal(str(porcentaje if porcentaje is not None else 0))
+    if pct < 0 or pct > 100:
+        raise ValueError(
+            f"El porcentaje tiene que estar entre 0 y 100 (llegó {porcentaje!r}).")
+    return int(round(Decimal(precio_lista_clp) * pct / Decimal(100)))
+
+
+def es_primera_compra_pagada(db: Session, *, tenant_id: int, usuario_id: int,
+                             suscripcion_id: Optional[int] = None) -> bool:
+    """¿El alumno no tiene ninguna suscripción ANTERIOR de un plan con precio > 0?
+
+    No alcanza con contar suscripciones: el alta de alumno crea una suscripción
+    al plan "Prueba" (`precio_clp=0`) y Fidelización crea el "Pase de regreso"
+    (también gratis). Si esos contaran, NINGÚN alumno tendría una "primera
+    compra" y el descuento del referido nunca se aplicaría. La regla es la
+    compra de un plan PAGADO.
+
+    `suscripcion_id` excluye la suscripción que se acaba de crear en esta misma
+    compra (se pasa cuando ya está `flush()`eada, antes del commit).
+    """
+    consulta = db.query(Suscripcion.id).join(
+        Plan, Plan.id == Suscripcion.plan_id
+    ).filter(
+        Suscripcion.usuario_id == usuario_id,
+        Suscripcion.tenant_id == tenant_id,
+        Plan.precio_clp > 0,
+    )
+    if suscripcion_id is not None:
+        consulta = consulta.filter(Suscripcion.id != suscripcion_id)
+    return consulta.first() is None
+
+
+def _configuracion_activa(db: Session, tenant_id: int):
+    """La configuración del box SÓLO si el programa está encendido (o `None`)."""
+    return db.query(ConfiguracionReferidos).filter(
+        ConfiguracionReferidos.tenant_id == tenant_id,
+        ConfiguracionReferidos.activo.is_(True),
+    ).first()
+
+
+def _referido_pendiente(db: Session, usuario_id: int, *, bloquear: bool):
+    """El referido `pendiente` del alumno como INVITADO (uno solo por validación).
+
+    `FOR UPDATE` serializa dos compras simultáneas del mismo alumno: la segunda
+    espera el lock y, al ver la fila ya `convertido`, no la convierte dos veces.
+    """
+    consulta = db.query(ReferidoAplicado).filter(
+        ReferidoAplicado.usuario_invitado_id == usuario_id,
+        ReferidoAplicado.estado == EstadoReferido.pendiente,
+    )
+    if bloquear:
+        consulta = consulta.with_for_update()
+    return consulta.order_by(ReferidoAplicado.id).first()
+
+
+def _credito_pendiente(db: Session, *, tenant_id: int, usuario_id: int,
+                       bloquear: bool):
+    """El crédito `pendiente` MÁS VIEJO del invitador (FIFO), o `None`.
+
+    `FOR UPDATE` hace que dos compras simultáneas no consuman el mismo crédito:
+    la segunda espera y, al re-evaluar el `WHERE estado='pendiente'`, ya no lo ve.
+    """
+    consulta = db.query(CreditoReferido).filter(
+        CreditoReferido.tenant_id == tenant_id,
+        CreditoReferido.usuario_id == usuario_id,
+        CreditoReferido.estado == EstadoCreditoReferido.pendiente,
+    )
+    if bloquear:
+        consulta = consulta.with_for_update()
+    return consulta.order_by(CreditoReferido.fecha_otorgado,
+                             CreditoReferido.id).first()
+
+
+def confirmar_compra(db: Session, *, tenant_id: int, usuario_id: int,
+                     precio_lista_clp, suscripcion_id: Optional[int] = None,
+                     ahora: Optional[datetime] = None) -> Optional[dict]:
+    """Aplica los descuentos del programa al CONFIRMARSE una compra de plan.
+
+    Se llama SÓLO en el punto en que la compra ya está confirmada (aprobar la
+    solicitud o crear la suscripción desde el panel), NUNCA en un preview: escribe
+    `referidos_aplicados` y `creditos_referido`. Devuelve el desglose que el
+    llamador debe cobrar, o `None` si no había nada que aplicar. NO commitea.
+
+    Reglas (Fase 3b):
+      1. Sin configuración activa no se convierte ni se descuenta.
+      2. Invitado: sólo en su PRIMERA compra de un plan PAGADO, con un referido
+         `pendiente`. La conversión ocurre aunque el porcentaje sea 0 (el
+         invitador gana su crédito por la conversión); el descuento usa
+         `porcentaje_descuento_invitado`.
+      3. Invitador: su SIGUIENTE compra consume UN crédito `pendiente` (FIFO),
+         una sola vez, y deja el monto en `descuento_aplicado_invitador`.
+      4. No se apilan: si el alumno es invitado con primera compra Y además tiene
+         un crédito propio, gana el descuento del invitado y el crédito queda
+         pendiente para una compra futura.
+      5. Un precio no positivo (plan Prueba / Pase de regreso) no genera nada.
+    """
+    if isinstance(precio_lista_clp, bool) or not isinstance(precio_lista_clp, int) \
+            or precio_lista_clp <= 0:
+        return None
+    config = _configuracion_activa(db, tenant_id)
+    if config is None:
+        return None
+
+    momento = ahora or datetime.now(timezone.utc)
+
+    referido = None
+    if es_primera_compra_pagada(db, tenant_id=tenant_id, usuario_id=usuario_id,
+                                suscripcion_id=suscripcion_id):
+        referido = _referido_pendiente(db, usuario_id, bloquear=True)
+        # Otra compra concurrente pudo convertirlo mientras esperábamos el lock.
+        if referido is not None and referido.estado != EstadoReferido.pendiente:
+            referido = None
+
+    if referido is not None:
+        pct = Decimal(str(config.porcentaje_descuento_invitado
+                          if config.porcentaje_descuento_invitado is not None
+                          else 0))
+        descuento = calcular_descuento_clp(precio_lista_clp, pct)
+
+        referido.estado = EstadoReferido.convertido
+        referido.fecha_conversion = momento
+        referido.descuento_aplicado_invitado = Decimal(descuento)
+
+        credito_otorgado = None
+        pct_invitador = Decimal(str(config.porcentaje_descuento_invitador
+                                    if config.porcentaje_descuento_invitador is not None
+                                    else 0))
+        if pct_invitador > 0:
+            credito_otorgado = CreditoReferido(
+                tenant_id=tenant_id,
+                usuario_id=referido.usuario_invitador_id,
+                referido_aplicado_id=referido.id,
+                porcentaje=pct_invitador,
+                estado=EstadoCreditoReferido.pendiente,
+                fecha_otorgado=momento,
+            )
+            db.add(credito_otorgado)
+            db.flush()
+
+        return {
+            "origen": "referido_invitado",
+            "porcentaje": float(pct),
+            "descuento_clp": descuento,
+            "precio_lista_clp": precio_lista_clp,
+            "precio_final_clp": precio_lista_clp - descuento,
+            "referido_aplicado_id": referido.id,
+            "credito_referido_id": None,
+            "credito_otorgado_id": (credito_otorgado.id
+                                    if credito_otorgado is not None else None),
+        }
+
+    credito = _credito_pendiente(db, tenant_id=tenant_id,
+                                 usuario_id=usuario_id, bloquear=True)
+    if credito is None or credito.estado != EstadoCreditoReferido.pendiente:
+        return None
+
+    pct = Decimal(str(credito.porcentaje
+                      if credito.porcentaje is not None else 0))
+    descuento = calcular_descuento_clp(precio_lista_clp, pct)
+
+    credito.estado = EstadoCreditoReferido.usado
+    credito.fecha_usado = momento
+    credito.descuento_aplicado_clp = descuento
+    credito.suscripcion_id = suscripcion_id
+    # Snapshot en la fila del referido que originó el premio.
+    origen = db.query(ReferidoAplicado).filter(
+        ReferidoAplicado.id == credito.referido_aplicado_id
+    ).with_for_update().first()
+    if origen is not None:
+        origen.descuento_aplicado_invitador = Decimal(descuento)
+
+    return {
+        "origen": "credito_invitador",
+        "porcentaje": float(pct),
+        "descuento_clp": descuento,
+        "precio_lista_clp": precio_lista_clp,
+        "precio_final_clp": precio_lista_clp - descuento,
+        "referido_aplicado_id": credito.referido_aplicado_id,
+        "credito_referido_id": credito.id,
+        "credito_otorgado_id": None,
     }

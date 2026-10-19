@@ -31,10 +31,11 @@ from app.models.password_reset_token import PasswordResetToken
 from app.models.beneficio import Beneficio, EstadoBeneficio, TipoBeneficio
 from app.models.aviso_marketing import AvisoMarketing
 from app.models.referidos import (
-    CodigoReferido, ConfiguracionReferidos, EstadoInvitacion,
-    EstadoPromocionDetectada, EstadoReferido, Invitacion, OrigenInvitacion,
-    PeriodoPromocion, PromocionReferidos, PromocionReferidosDetectada,
-    ReferidoAplicado, TipoPremio,
+    CodigoReferido, ConfiguracionReferidos, CreditoReferido,
+    EstadoCreditoReferido, EstadoInvitacion, EstadoPromocionDetectada,
+    EstadoReferido, Invitacion, OrigenInvitacion, PeriodoPromocion,
+    PromocionReferidos, PromocionReferidosDetectada, ReferidoAplicado,
+    TipoPremio,
 )
 
 __all__ = ["Tenant", "Usuario", "RolUsuario",
@@ -49,6 +50,7 @@ __all__ = ["Tenant", "Usuario", "RolUsuario",
            "TipoBeneficio", "AvisoMarketing",
            "Invitacion", "OrigenInvitacion", "EstadoInvitacion",
            "CodigoReferido", "ReferidoAplicado", "EstadoReferido",
+           "CreditoReferido", "EstadoCreditoReferido",
            "ConfiguracionReferidos", "PromocionReferidos",
            "PeriodoPromocion", "TipoPremio", "PromocionReferidosDetectada",
            "EstadoPromocionDetectada"]

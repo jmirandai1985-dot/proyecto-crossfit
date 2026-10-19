@@ -35,6 +35,10 @@ from app.services import churn_service
 # F2: el descuento vigente del alumno se aplica al SOLICITAR un plan. La aritmética (`desglose`)
 # y el ciclo de vida del beneficio (`vigente`/`usar`) viven en su servicio, no acá.
 from app.services import beneficios_service as beneficios
+# Fase 3b: al CONFIRMARSE la compra (aprobar la solicitud) se convierten los
+# referidos y se cobra el precio con descuento. La aritmética y el estado del
+# premio viven en `referidos_service`; acá sólo se engancha el punto de cobro.
+from app.services import referidos_service as referidos
 # Avisos del PANEL (la campana): un solo módulo decide A QUIÉN y CÓMO se avisa
 # (best-effort: un aviso nunca tumba la solicitud). Ver docs/NOTIFICACIONES_PANEL.md.
 from app.services.notificaciones_panel import notificar_admins_del_tenant
@@ -42,6 +46,18 @@ from app.services.notificaciones_panel import notificar_admins_del_tenant
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
+
+
+def _precio_lista(solicitud, plan) -> int:
+    """Precio de LISTA de la compra: el snapshot (P0-4) o el precio del plan.
+
+    Es la base sobre la que se calcula cualquier descuento. Nunca el precio
+    final: un % aplicado sobre otro % sería un descuento inventado.
+    """
+    valor = (solicitud.precio_clp_snapshot
+             if solicitud.precio_clp_snapshot is not None
+             else (plan.precio_clp if plan is not None else 0))
+    return int(valor or 0)
 
 
 def _solicitud_con_guard(solicitud_id: int, db: Session, current_user: dict,
@@ -410,10 +426,41 @@ def aprobar_solicitud(
             "expirada por upgrade a plan pago"
         )
 
+    # ── Fase 3b: el referido se resuelve al CONFIRMAR la compra ──
+    # Recién acá la solicitud pasó a `approved` y la suscripción existe: es el
+    # momento de convertir el referido `pendiente` y de consumir el crédito del
+    # invitador. Si la solicitud YA trae un descuento de fidelización
+    # (`beneficio_id`), no se toca nada: no se apilan descuentos y el referido
+    # queda pendiente (esa compra ya está resuelta por el otro programa).
+    descuento_referido = None
+    if solicitud.beneficio_id is None and solicitud.precio_final_clp is None:
+        db.flush()  # asigna el id de la suscripción sin commitear
+        descuento_referido = referidos.confirmar_compra(
+            db,
+            tenant_id=solicitud.tenant_id,
+            usuario_id=solicitud.alumno_id,
+            precio_lista_clp=_precio_lista(solicitud, plan),
+            suscripcion_id=suscripcion.id,
+            ahora=ahora,
+        )
+        if (descuento_referido is not None
+                and descuento_referido["descuento_clp"] > 0):
+            # `descuento_pct` es Integer y los porcentajes de referidos admiten
+            # decimales: el % autoritativo vive en `referidos_aplicados`. Acá se
+            # guarda el precio final, que es lo que cobra el ingreso de abajo.
+            solicitud.precio_final_clp = descuento_referido["precio_final_clp"]
+
     db.commit()
 
     # ── Churn del alumno: al aprobar un plan cambia su situación -> recalc en segundo plano. ──
     churn_service.programar_recalculo(background_tasks, solicitud.tenant_id, solicitud.alumno_id)
+
+    # Precio que se cobra: el FINAL con descuento (fidelización o referido) o el de
+    # lista. Se calcula UNA vez y lo usan el ingreso y la respuesta del endpoint.
+    precio_lista = _precio_lista(solicitud, plan)
+    precio_cobrado = (solicitud.precio_final_clp
+                      if solicitud.precio_final_clp is not None
+                      else precio_lista)
 
     # ── FIX 4: registrar la transacción financiera del pago aprobado ──
     # Mismo formato que POST /suscripciones (suscripciones.py) para mantener
@@ -425,13 +472,9 @@ def aprobar_solicitud(
         # precio entre medio, la transacción quedaba por el precio nuevo
         # (reproducido en TEST: 44.000 al solicitar -> ingreso de 99.000).
         # Fallback para solicitudes históricas sin snapshot.
-        # ── F2: si la solicitud trae un descuento aplicado, se cobra el PRECIO FINAL ──
-        # (`precio_final_clp` lo calculó el beneficio sobre el precio de lista; NULL = sin regalo).
-        monto_facturado = (solicitud.precio_final_clp
-                           if solicitud.precio_final_clp is not None
-                           else (solicitud.precio_clp_snapshot
-                                 if solicitud.precio_clp_snapshot is not None
-                                 else (plan.precio_clp or 0)))
+        # ── F2/3b: si la solicitud trae un descuento aplicado (beneficio o
+        # referido), se cobra el PRECIO FINAL; NULL = sin descuento.
+        monto_facturado = precio_cobrado
         tx = TransaccionFinanciera(
             tenant_id=suscripcion.tenant_id,
             tipo="ingreso",
@@ -496,7 +539,18 @@ def aprobar_solicitud(
     except Exception as e:
         logger.warning(f"No se pudo enviar correo de confirmación de plan: {e}")
 
-    return {"status": "approved", "message": "Plan activado exitosamente"}
+    return {
+        "status": "approved",
+        "message": "Plan activado exitosamente",
+        # Fase 3b: el desglose real del cobro (auditable desde la respuesta).
+        "precio_lista_clp": precio_lista,
+        "precio_final_clp": precio_cobrado,
+        "descuento_aplicado_clp": precio_lista - precio_cobrado,
+        "descuento_referido_origen": (descuento_referido["origen"]
+                                      if descuento_referido else None),
+        "descuento_referido_pct": (descuento_referido["porcentaje"]
+                                   if descuento_referido else None),
+    }
 
 
 @router.put("/{solicitud_id}/rechazar")

@@ -1,9 +1,10 @@
 """
 Modelos SQLAlchemy del Sistema de Referidos + Invitación por correo.
 
-Fase 1: SÓLO ESQUEMA. Acá se declaran las tablas; la generación de códigos, el
-hook del alta de alumno, la detección de umbrales, las notificaciones y los
-endpoints viven en las fases siguientes.
+Fase 1 declaró el ESQUEMA; las fases siguientes agregaron la generación de
+códigos (2), los endpoints de consulta/validación/configuración (3a) y los
+descuentos reales al confirmarse una compra (3b): `CreditoReferido` es el
+beneficio pendiente del invitador para SU próxima compra.
 
 Dos funciones comparten estas tablas:
   1. Invitación por correo (admin/coach → prospecto): marketing puro, sin premio.
@@ -53,6 +54,17 @@ class EstadoReferido(str, enum.Enum):
     el invitado compra su primer plan (la detección es Fase 2)."""
     pendiente = "pendiente"
     convertido = "convertido"
+
+
+class EstadoCreditoReferido(str, enum.Enum):
+    """Ciclo de vida del crédito que gana el INVITADOR al convertirse un referido.
+
+    Nace `pendiente` (vale para su próxima compra de plan) y pasa a `usado` la
+    única vez que se aplica. No hay vencimiento: el premio se gana y se conserva
+    hasta que el invitador vuelva a comprar.
+    """
+    pendiente = "pendiente"
+    usado = "usado"
 
 
 class PeriodoPromocion(str, enum.Enum):
@@ -169,10 +181,12 @@ class ReferidoAplicado(Base):
     """La aplicación de un código por parte de un alumno invitado.
 
     `fecha_ingreso_codigo` se registra al ingresar el código (en el registro o
-    al comprar) y la fila queda `pendiente`; al comprar el primer plan pasa a
-    `convertido` y se llena `fecha_conversion`. Los descuentos se guardan como
-    snapshot de lo efectivamente aplicado a cada lado (NULL = todavía no se
-    aplicó / no aplica).
+    al comprar) y la fila queda `pendiente`; al comprar el primer plan PAGADO
+    pasa a `convertido` y se llena `fecha_conversion`. Los descuentos se guardan
+    como snapshot en CLP de lo efectivamente aplicado a cada lado
+    (`descuento_aplicado_invitado` al confirmarse la compra del invitado;
+    `descuento_aplicado_invitador` al consumirse el crédito en la compra
+    siguiente del invitador). NULL = todavía no se aplicó / no aplica.
     """
     __tablename__ = "referidos_aplicados"
 
@@ -334,3 +348,64 @@ class PromocionReferidosDetectada(Base):
         return (f"<PromocionReferidosDetectada(id={self.id}, "
                 f"promocion_id={self.promocion_id}, usuario_id={self.usuario_id}, "
                 f"periodo='{self.periodo_cumplido}', estado='{self.estado}')>")
+
+
+# ── 7. Crédito del invitador (Fase 3b) ───────────────────────────────────────
+
+class CreditoReferido(Base):
+    """Descuento GANADO por el invitador, consumible en SU próxima compra de plan.
+
+    Se crea UNA fila por referido convertido (UNIQUE `referido_aplicado_id`), con
+    el `porcentaje` CONGELADO al momento de la conversión: cambiar la
+    configuración del box después no reescribe un premio ya ganado. No vence.
+
+    El invitador ya tiene un plan activo cuando invita, así que el descuento no
+    se aplica a la compra del invitado sino a la SIGUIENTE compra del invitador:
+    `pendiente → usado` ocurre una sola vez, y en ese momento se guardan el monto
+    en pesos (`descuento_aplicado_clp`) y la suscripción que lo consumió
+    (`suscripcion_id`, SET NULL si se borra la suscripción). El monto también se
+    copia en `referidos_aplicados.descuento_aplicado_invitador`, que es el
+    snapshot del premio en la fila del referido.
+    """
+    __tablename__ = "creditos_referido"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Integer, ForeignKey(
+        "tenants.id", ondelete="CASCADE"), nullable=False)
+    # El invitador que GANÓ el crédito.
+    usuario_id = Column(Integer, ForeignKey(
+        "usuarios.id", ondelete="CASCADE"), nullable=False)
+    # El referido que lo originó: UNIQUE porque un referido paga UN premio.
+    referido_aplicado_id = Column(Integer, ForeignKey(
+        "referidos_aplicados.id", ondelete="CASCADE"), nullable=False)
+    # % del descuento, congelado al convertir (0 < porcentaje <= 100).
+    porcentaje = Column(Numeric(5, 2), nullable=False)
+    estado = Column(SQLEnum(EstadoCreditoReferido,
+                            name="estado_credito_referido"),
+                    nullable=False, server_default="pendiente",
+                    default=EstadoCreditoReferido.pendiente)
+    fecha_otorgado = Column(TIMESTAMP(timezone=True), nullable=False,
+                            server_default=func.now())
+    fecha_usado = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Lo que costó el premio, en CLP, sobre el precio de LISTA del plan comprado.
+    descuento_aplicado_clp = Column(Integer, nullable=True)
+    # La suscripción que lo consumió (auditoría del cobro).
+    suscripcion_id = Column(Integer, ForeignKey(
+        "suscripciones.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("referido_aplicado_id",
+                         name="uq_creditos_referido_referido_aplicado_id"),
+        CheckConstraint("porcentaje > 0 AND porcentaje <= 100",
+                        name="ck_creditos_referido_porcentaje"),
+        Index("ix_creditos_referido_tenant_id", "tenant_id"),
+        Index("ix_creditos_referido_usuario_id", "usuario_id"),
+        Index("ix_creditos_referido_estado", "estado"),
+        # La consulta del consumo: créditos pendientes del usuario, FIFO.
+        Index("ix_creditos_referido_usuario_estado", "usuario_id", "estado"),
+    )
+
+    def __repr__(self):
+        return (f"<CreditoReferido(id={self.id}, usuario_id={self.usuario_id}, "
+                f"referido_aplicado_id={self.referido_aplicado_id}, "
+                f"porcentaje={self.porcentaje}, estado='{self.estado}')>")
