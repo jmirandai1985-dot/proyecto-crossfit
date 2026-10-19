@@ -152,11 +152,13 @@ def _ids_por_mis_clases(headers, coach_id):
 def _horas_de_prueba():
     """(pasada, en_curso_inicio, en_curso_fin) — o None si el reloj del box lo impide.
 
-    Con "ahora" a menos de 30 minutos de la medianoche esos cortes no existen sin cambiar
-    de fecha, así que el test se saltea: preferimos no afirmar algo que no es cierto.
+    Con "ahora" a menos de 90 minutos de la medianoche la clase "pasada" cae en el día
+    anterior, así que el test se saltea: preferimos no afirmar algo que no es cierto.
     """
     ahora = ahora_santiago()
-    if ahora.hour == 0 and ahora.minute < 30:
+    # `ahora - 90 min` cruza la medianoche antes de las 01:30: a las 00:40 daría 23:10,
+    # una hora de HOY que todavía no ocurrió (antes sólo se cubría 00:00–00:29).
+    if (ahora - timedelta(minutes=90)).date() != ahora.date():
         return None
     if ahora.hour == 23 and ahora.minute > 30:
         return None
@@ -173,7 +175,7 @@ def test_el_coach_ve_todo_su_dia_no_solo_lo_que_resta():
         pytest.skip("Hace falta un coach activo en TEST")
     horas = _horas_de_prueba()
     if horas is None:
-        pytest.skip("El reloj del box está a <30 min de la medianoche: no hay 'pasada' de hoy")
+        pytest.skip("El reloj del box está a <90 min de la medianoche: la 'pasada' cae en el día anterior")
     pasada, curso_ini, curso_fin = horas
     disc_id = _disciplina_con_horarios_del_coach(coach.id)
     coach_horario = _horario_de(disc_id) if disc_id else None
