@@ -8,7 +8,7 @@
     comprar_emergencia, fix_fechas, supervision,
     finanzas, configuracion, alumnos, asistencia, ranking, kpis,
     kpis_populate, ml, segmentacion, historial_alumno, fidelizacion_plantillas,
-    beneficios, marketing
+    beneficios, marketing, referidos
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -267,6 +267,10 @@ app.include_router(fidelizacion_plantillas.router,
 # porque es la única parte de Fidelización que ESCRIBE en la cuenta del alumno.
 app.include_router(beneficios.router,
                    prefix="/api/v1/beneficios", tags=["Beneficios"])
+# Sistema de Referidos (Fase 3a): el alumno consulta/valida su código y el admin
+# configura los porcentajes. Aplicar descuentos es Fase 3b.
+app.include_router(referidos.router,
+                   prefix="/api/v1/referidos", tags=["Referidos"])
 app.include_router(disciplinas.router,
                    prefix="/api/v1/disciplinas", tags=["Disciplinas"])
 app.include_router(planes.router, prefix="/api/v1/planes", tags=["Planes"])

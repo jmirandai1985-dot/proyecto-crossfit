@@ -24,8 +24,13 @@ REGLAS QUE VIVE ESTE MÓDULO
    (alta de alumno). Si la generación falla, la excepción sube y el alta entera
    se revierte: ni alumno sin código ni código huérfano.
 
-Esta fase NO expone endpoints ni aplica descuentos: el alta del alumno es el
-único punto de escritura.
+Fase 3a agrega las REGLAS DE VALIDACIÓN de un código ingresado por el invitado
+(sin auto-referido y una sola aplicación por alumno) y los constructores de
+respuesta de los endpoints. El servicio sigue sin commitear: el router consulta,
+inserta y hace el commit de `referidos_aplicados`.
+
+Los descuentos NO se aplican acá: esta fase sólo registra la intención
+(`pendiente`). El cálculo y el cobro son la Fase 3b.
 """
 from __future__ import annotations
 
@@ -33,11 +38,11 @@ import re
 import secrets
 import unicodedata
 import uuid
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.models.referidos import CodigoReferido
+from app.models.referidos import CodigoReferido, ReferidoAplicado
 from app.models.usuario import RolUsuario, Usuario
 
 __all__ = [
@@ -47,11 +52,21 @@ __all__ = [
     "INTENTOS_DIGITOS",
     "INTENTOS_FALLBACK",
     "PATRON_CODIGO",
+    "MOTIVO_CODIGO_INEXISTENTE",
+    "MOTIVO_CODIGO_INACTIVO",
+    "MOTIVO_CODIGO_PROPIO",
+    "MOTIVO_YA_REFERIDO",
+    "MENSAJE_REFERIDO_REGISTRADO",
     "normalizar_letras",
     "dividir_nombre_completo",
     "construir_prefijo",
     "generar_codigo_referido",
     "asignar_codigo_referido",
+    "normalizar_codigo_ingresado",
+    "motivo_codigo_invalido",
+    "datos_mi_codigo",
+    "datos_referido_aplicado",
+    "datos_configuracion",
 ]
 
 # ── Formato: 1 inicial + 5 letras del apellido + 3 dígitos ───────────────────
@@ -207,3 +222,108 @@ def asignar_codigo_referido(db: Session,
     db.add(fila)
     db.flush()
     return fila
+
+
+# ── Validación de un código ingresado (Fase 3a) ──────────────────────────────
+
+# Mensajes ÚNICOS de rechazo: el router los devuelve como `detail` de un 400 y
+# los tests comprueban el texto, no un código de error inventado. El orden de
+# `motivo_codigo_invalido` define qué mensaje ve el usuario cuando hay más de
+# un problema (primero lo más básico: el código ni siquiera existe).
+MOTIVO_CODIGO_INEXISTENTE = "El código de referido no existe"
+MOTIVO_CODIGO_INACTIVO = "El código de referido está inactivo"
+MOTIVO_CODIGO_PROPIO = "No puedes usar tu propio código de referido"
+MOTIVO_YA_REFERIDO = (
+    "Ya tienes un referido aplicado: sólo puedes ser referido una vez")
+
+MENSAJE_REFERIDO_REGISTRADO = (
+    "Código de referido aplicado. El referido quedó registrado como pendiente.")
+
+
+def normalizar_codigo_ingresado(codigo: Optional[str]) -> str:
+    """El código que escribe el invitado, en la forma en que se guarda.
+
+    Los códigos se generan en MAYÚSCULAS y sin espacios, pero el alumno puede
+    escribir " jpere234 " desde el celular. Se recorta y se pasa a mayúsculas
+    ANTES de buscar en la BD: si no, un código válido parecería inexistente.
+    """
+    return (codigo or "").strip().upper()
+
+
+def motivo_codigo_invalido(*, existe: bool, activo: bool, es_propio: bool,
+                           ya_referido: bool) -> Optional[str]:
+    """Devuelve el mensaje del primer motivo de rechazo, o `None` si es válido.
+
+    Es una función PURA (sin BD): el router junta los cuatro hechos y esta
+    función decide. Así las reglas de negocio se prueban sin base de datos y el
+    orden de prioridad queda en un solo lugar:
+
+      1. no existe (incluye el código de OTRO box: no se filtra su existencia);
+      2. existe pero está inactivo;
+      3. es el código del propio alumno (anti-auto-referido);
+      4. el alumno ya tiene un referido aplicado (sólo se puede ser referido
+         una vez, aunque ese referido siga `pendiente`).
+    """
+    if not existe:
+        return MOTIVO_CODIGO_INEXISTENTE
+    if not activo:
+        return MOTIVO_CODIGO_INACTIVO
+    if es_propio:
+        return MOTIVO_CODIGO_PROPIO
+    if ya_referido:
+        return MOTIVO_YA_REFERIDO
+    return None
+
+
+def datos_mi_codigo(codigo: CodigoReferido) -> dict:
+    """Respuesta de `GET /referidos/mi-codigo` (sólo el código propio).
+
+    No incluye `usuario_id`: el alumno no necesita saber ids internos y el
+    endpoint ya garantiza que la fila es la del token.
+    """
+    return {
+        "codigo": codigo.codigo,
+        "activo": bool(codigo.activo),
+        "fecha_creacion": codigo.fecha_creacion,
+    }
+
+
+def datos_referido_aplicado(referido: ReferidoAplicado, codigo: str) -> dict:
+    """Respuesta de `POST /referidos/validar-codigo` cuando el código es válido.
+
+    `estado` sale del enum como texto (`pendiente`), que es lo que el panel
+    muestra; la fila recién creada SIEMPRE nace `pendiente` en esta fase.
+    """
+    return {
+        "valido": True,
+        "codigo": codigo,
+        "referido_id": referido.id,
+        "estado": getattr(referido.estado, "value", referido.estado),
+        "mensaje": MENSAJE_REFERIDO_REGISTRADO,
+    }
+
+
+def datos_configuracion(config: Any) -> dict:
+    """Respuesta de la configuración del box, exista la fila o no.
+
+    Sin fila se devuelven los DEFAULTS (`0%` / inactivo) y `configurada=False`,
+    SIN crear nada en la BD: leer la configuración no escribe. Con fila, los
+    `Numeric` se convierten a `float` para que el JSON sea un número y no un
+    string/Decimal.
+    """
+    if config is None:
+        return {
+            "porcentaje_descuento_invitado": 0.0,
+            "porcentaje_descuento_invitador": 0.0,
+            "activo": False,
+            "configurada": False,
+        }
+
+    return {
+        "porcentaje_descuento_invitado": float(
+            config.porcentaje_descuento_invitado),
+        "porcentaje_descuento_invitador": float(
+            config.porcentaje_descuento_invitador),
+        "activo": bool(config.activo),
+        "configurada": True,
+    }
