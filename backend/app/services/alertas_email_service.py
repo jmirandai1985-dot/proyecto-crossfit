@@ -25,8 +25,7 @@ from app.core.urls import url_frontend  # B.2
 import logging
 from datetime import timedelta
 
-from app.core.config import settings
-from app.core.estados import sql_fecha_en_chile, vigente_hoy
+from app.core.estados import sql_fecha_en_chile
 from app.utils.santiago import hoy_santiago
 
 logger = logging.getLogger("uvicorn.email")

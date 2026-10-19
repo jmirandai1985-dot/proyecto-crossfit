@@ -31,7 +31,6 @@ BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-import pytest  # noqa: E402
 
 from app.services.asistencia_service import _mes_anterior  # noqa: E402
 

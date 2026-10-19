@@ -1,5 +1,5 @@
 from app.schemas.reserva import (
-    ReservaCreate, ReservaUpdate, ReservaResponse, ReservaListItem
+    ReservaCreate, ReservaUpdate, ReservaResponse
 )
 from app.core.dependencies import get_current_user, get_current_coach, verificar_coach_disciplina
 # "Reserva cancelada" = UNA lista (`shared.estados`, la misma que usa el mantenimiento): acá se
@@ -13,7 +13,7 @@ from app.models.disciplina import Disciplina
 from app.models.clase import Clase
 from app.models.reserva import Reserva
 from app.db.database import get_db
-from typing import List, Optional
+from typing import Optional
 from sqlalchemy import func, text, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
@@ -419,7 +419,7 @@ def obtener_asistencia_semanal(
     🔒 SEGURIDAD: tenant_id del token. Si usuario_id no es el propio, se
     requiere rol coach/admin del mismo box.
     """
-    from datetime import datetime, timezone, date, timedelta
+    from datetime import date, timedelta
 
     # 🔒 SEGURIDAD: tenant_id del token + acceso al usuario.
     tenant_id = current_user["tenant_id"]
@@ -492,7 +492,7 @@ def obtener_asistencia_mes(
     🔒 SEGURIDAD: tenant_id del token. Si usuario_id no es el propio, se
     requiere rol coach/admin del mismo box.
     """
-    from datetime import datetime, timezone, date
+    from datetime import date
 
     # 🔒 SEGURIDAD: tenant_id del token + acceso al usuario.
     tenant_id = current_user["tenant_id"]
@@ -765,7 +765,7 @@ def eliminar_reserva(
 
     Solo el dueño de la reserva, coaches o admins pueden cancelarla.
     """
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime
     from app.models.suscripcion import Suscripcion
 
     # 🔒 SEGURIDAD: tenant_id del token.

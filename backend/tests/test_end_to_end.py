@@ -4,10 +4,9 @@ Cubre los 8 pasos del ciclo de vida real de un alumno en el Box CrossFit.
 Cada paso verifica con evidencia (SQL o HTTP), no solo que "no tire error".
 Usa un alumno DEDICADO (id=8888) creado ad-hoc, que se limpia al final.
 """
-import pytest
 import requests
 import psycopg2
-from datetime import date, timedelta, datetime, timezone
+from datetime import date, timedelta
 
 from tests.conftest import BASE, TENANT_ID, get_admin_token, get_coach_token
 

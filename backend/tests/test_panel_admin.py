@@ -6,9 +6,7 @@ endpoint de reportes del dashboard, y flujo de compra del bazar.
 Sigue el mismo patron que test_panel_coach.py.
 Usa usuario admin (id=1001) creado por run_setup_test_db.py.
 """
-import pytest
 import requests
-from datetime import date, timedelta
 
 from tests.conftest import BASE, TENANT_ID, get_coach_token
 

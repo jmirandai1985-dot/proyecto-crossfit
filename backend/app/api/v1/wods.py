@@ -4,7 +4,6 @@ Router de endpoints para gestión de WODs (Workout of the Day)
 import re
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from app.db.database import get_db
 from app.models.wod import Wod, EstadoWod
 from app.core.dependencies import get_current_user, get_current_coach, verificar_coach_disciplina
@@ -378,7 +377,6 @@ def buscar_movimiento_bd(db: Session, nombre: str, tenant_id: int):
 
     Retorna (Movimiento | None, error_msg | None, debug_str | None).
     """
-    import re as re_mod
     palabras_buscado = nombre.split()
 
     # Obtener TODOS los movimientos candidatos del tenant
@@ -810,7 +808,6 @@ def obtener_wod_hoy(
     🔒 SEGURIDAD: tenant_id del token. Si viene alumno_id, solo se permite
     consultarlo para sí mismo (o staff del mismo box).
     """
-    from datetime import date
     from app.models.reserva import Reserva
     from app.models.clase import Clase
     # TZ Chile: con date.today() (UTC en el contenedor) entre 20:00 y 23:59 CLT ya

@@ -20,7 +20,6 @@ BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-import pytest  # noqa: E402
 
 import app.db.database as dbmod  # noqa: E402
 import app.services.alertas_email_service as alertas  # noqa: E402

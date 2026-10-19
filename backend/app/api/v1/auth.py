@@ -18,7 +18,6 @@ from app.schemas.auth import (LoginRequest, TokenResponse,
 from app.core.security import verify_password, create_access_token, get_password_hash
 from app.core.rate_limit import limiter, LIMIT_LOGIN, LIMIT_REGISTRO, LIMIT_CRITICO
 from app.core.dependencies import get_current_user
-from app.core.config import settings
 from app.models.usuario import Usuario
 from app.models.password_reset_token import PasswordResetToken
 from app.services.email_service import send_reset_password

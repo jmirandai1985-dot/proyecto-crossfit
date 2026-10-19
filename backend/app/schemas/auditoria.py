@@ -2,7 +2,7 @@
 Esquemas Pydantic para Auditoría
 """
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, Any
+from typing import Optional
 from datetime import datetime
 
 

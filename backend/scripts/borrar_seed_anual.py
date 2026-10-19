@@ -47,11 +47,9 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import os
 import sys
-from collections import defaultdict
 from datetime import date
-from typing import Optional, Sequence
+from typing import Sequence
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")

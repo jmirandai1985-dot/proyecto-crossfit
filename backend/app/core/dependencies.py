@@ -12,8 +12,6 @@ logger = logging.getLogger(__name__)
 from app.db.database import get_db
 from app.core.security import verify_token
 from app.models.coach_disciplina import CoachDisciplina
-from app.models.disciplina import Disciplina
-from app.models.cobertura_emergencia import CoberturaEmergencia
 from app.models.suscripcion import Suscripcion
 from app.models.plan import Plan
 

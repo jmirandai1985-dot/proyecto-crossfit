@@ -13,7 +13,6 @@ import logging
 import sentry_sdk
 
 from app.db.database import get_db
-from app.core.config import settings
 from app.models.usuario import Usuario, RolUsuario
 from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion

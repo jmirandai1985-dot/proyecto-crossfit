@@ -5,8 +5,7 @@ Router de Notificaciones para alumnos
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional
-from datetime import datetime, timezone
+from typing import Optional
 
 from app.db.database import get_db
 from app.models.notificacion import Notificacion

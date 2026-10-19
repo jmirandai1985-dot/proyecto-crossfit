@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
-from datetime import datetime, date, timedelta
+from datetime import timedelta
 
 from app.db.database import get_db
 from app.models.retencion import RetencionAlumno

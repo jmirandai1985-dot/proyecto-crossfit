@@ -5,7 +5,7 @@ import logging
 import smtplib
 import sys
 from email.message import EmailMessage
-from datetime import datetime, date
+from datetime import datetime
 # `_escape_html`: el WhatsApp del box lo escribe el admin a mano y termina en el HTML del
 # correo (`bloque_contacto`) y en el preview del panel — hay que escaparlo. Se importa con
 # alias porque en este módulo `html` es el nombre de las variables con el cuerpo del correo.
@@ -1142,7 +1142,6 @@ def send_alerta_stock_bajo(producto_nombre: str, stock_actual: int,
         f"<strong>Stock mínimo:</strong> {stock_minimo}</p>"
         "<p>Repón stock o ajusta el umbral del producto para desactivar esta alerta.</p>"
     )
-    from app.core.config import settings
     url = url_frontend("/admin/bazar")
     html = _template(titulo, saludo, cuerpo, "Ir al Bazar", url)
     ok = _enviar(correo_admin, "🚨 Stock bajo en el Bazar", html,

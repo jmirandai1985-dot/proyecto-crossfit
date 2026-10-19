@@ -2,8 +2,6 @@
 Endpoint para corregir fechas de suscripciones existentes (solo admin)
 """
 from fastapi import APIRouter, Depends
-from sqlalchemy import text
-from app.db.database import engine
 from app.core.dependencies import get_current_admin
 from app.utils.santiago import fin_de_plan_chile
 

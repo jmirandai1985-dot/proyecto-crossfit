@@ -22,7 +22,7 @@ QUÉ CUIDA ESTE TEST
     cd backend && py -3.12 -m pytest tests/test_avisos_marketing_producto.py -q --noconftest
 """
 import ast
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 

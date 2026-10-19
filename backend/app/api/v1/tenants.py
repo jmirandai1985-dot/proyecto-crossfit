@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from app.core.urls import url_frontend
 
 from app.db.database import get_db
-from app.core.config import settings
 from app.models.tenant import Tenant
 from app.schemas.tenant import TenantCreate, TenantResponse
 from app.core.dependencies import get_current_admin, get_current_user

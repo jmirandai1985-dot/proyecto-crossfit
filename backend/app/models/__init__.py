@@ -33,6 +33,7 @@ from app.models.aviso_marketing import AvisoMarketing
 
 __all__ = ["Tenant", "Usuario", "RolUsuario",
            "Wod", "EstadoWod", "WodMovimiento", "Notificacion",
+           "NotificacionEnviada",
            "Movimiento", "Plan", "Suscripcion", "CoberturaEmergencia",
            "TransaccionFinanciera", "ConfiguracionNegocio",
            "Clase", "CoachDisciplina", "Disciplina", "HistorialRM",

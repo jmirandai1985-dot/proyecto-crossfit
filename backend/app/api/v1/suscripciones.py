@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Query
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, timezone

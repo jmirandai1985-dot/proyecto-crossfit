@@ -9,8 +9,7 @@ from datetime import date
 from app.db.database import get_db
 from app.models.horario_base import HorarioBase
 from app.models.disciplina import Disciplina
-from sqlalchemy import text
-from app.core.dependencies import get_current_admin, get_current_user, get_current_coach
+from app.core.dependencies import get_current_admin, get_current_user
 from app.services import asignaciones_clases as asignaciones
 from app.services.auditoria_service import registrar_auditoria
 from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)

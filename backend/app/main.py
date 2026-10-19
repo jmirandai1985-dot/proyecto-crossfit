@@ -372,7 +372,7 @@ async def startup_event():
             from datetime import timedelta
             from app.db.database import SessionLocal
             from app.services.generar_clases import (
-                DIAS_ANTICIPACION, generar_dias_incompletos, revisar_rango)
+                DIAS_ANTICIPACION, generar_dias_incompletos)
 
             hoy = hoy_santiago()
             fecha_hasta = hoy + timedelta(days=DIAS_ANTICIPACION)

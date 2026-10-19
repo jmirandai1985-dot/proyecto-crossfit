@@ -16,7 +16,6 @@ Tipos de correo:
 import logging
 from app.core.urls import url_frontend, url_backend  # B.2
 
-from app.core.config import settings
 from app.services.email_service import _template, _enviar
 
 logger = logging.getLogger("uvicorn.email")

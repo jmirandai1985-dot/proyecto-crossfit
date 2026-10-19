@@ -4,7 +4,6 @@ Modelo SQLAlchemy para la tabla tenants
 from sqlalchemy import Column, Integer, String, Boolean
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
 
 from app.db.database import Base
 

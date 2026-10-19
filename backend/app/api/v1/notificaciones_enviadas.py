@@ -2,15 +2,14 @@
 import hashlib
 from app.core.urls import url_frontend  # B.2
 import secrets
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.models.notificacion_enviada import NotificacionEnviada
 from app.models.usuario import Usuario
-from app.core.dependencies import get_current_user, get_current_admin
+from app.core.dependencies import get_current_admin
 from app.utils.santiago import fecha_chile, hoy_santiago   # fechas de Chile
 from app.services.email_service import (
     enviar_email_bienvenida,
@@ -361,7 +360,6 @@ def _reenviar_por_tipo(db: Session, reg, alumno) -> bool:
     activa, último pedido, meses del cierre, etc.), que es lo más útil para el
     destinatario. Levanta HTTPException si el tipo no es reenviable.
     """
-    from app.core.config import settings
     from app.services.email_service import (
         enviar_email_activacion_alumno, send_bienvenida_activacion, send_renovacion_plan,
         send_alerta_urgencia_renovacion, send_alerta_ultimo_credito, send_alerta_sin_creditos,

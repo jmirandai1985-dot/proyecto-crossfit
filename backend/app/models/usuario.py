@@ -4,7 +4,6 @@ Modelo SQLAlchemy para la tabla usuarios
 from sqlalchemy import Column, Integer, Float, String, Boolean, Date, ForeignKey, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
 import enum
 
 from app.db.database import Base

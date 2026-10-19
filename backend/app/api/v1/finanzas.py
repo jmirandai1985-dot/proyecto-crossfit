@@ -2,12 +2,12 @@
 Router de endpoints para transacciones financieras.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text as sql_text
 from datetime import date, datetime, timezone, timedelta
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional
 
 from app.db.database import get_db
 from app.models.transaccion_financiera import TransaccionFinanciera

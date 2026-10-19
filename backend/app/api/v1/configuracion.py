@@ -11,7 +11,7 @@ que cualquiera podía enumerar banco / cuenta / RUT / email / WhatsApp de TODOS 
 con `GET /configuracion?tenant_id=1..N` (200, sin credencial alguna). Ahora exige token,
 toma el `tenant_id` del JWT (el query param se ignora) y tiene rate limit en GET y PUT.
 """
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 import re
@@ -19,7 +19,6 @@ from typing import Literal, Optional
 
 from app.db.database import get_db
 from app.models.configuracion import ConfiguracionNegocio
-from app.models.usuario import Usuario
 from app.core.dependencies import get_current_user, get_current_admin
 from app.core.rate_limit import LIMIT_CONFIG_LECTURA, LIMIT_CRITICO, limiter
 from app.services.auditoria_service import registrar_auditoria

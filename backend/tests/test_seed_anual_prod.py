@@ -13,7 +13,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from collections import defaultdict
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 import pytest

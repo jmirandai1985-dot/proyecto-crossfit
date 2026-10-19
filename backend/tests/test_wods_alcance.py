@@ -26,12 +26,12 @@ existe en la rama) y en el teardown borra los WODs que creó (la FK
 clases.wod_id es ON DELETE SET NULL) y restaura el coach_id que el endpoint
 auto-asigna a clases que lo tenían NULL.
 """
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 import requests
 
-from tests.conftest import BASE, TENANT_ID, HOY, get_alumno_token, create_access_token
+from tests.conftest import BASE, TENANT_ID, HOY, create_access_token
 
 # Personas REALES de la rama (se resuelven en el fixture: los datos clonados no
 # tienen los ids demo 1000/1001/999 de run_setup_test_db.py).

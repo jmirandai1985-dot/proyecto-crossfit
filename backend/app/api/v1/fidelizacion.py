@@ -5,15 +5,13 @@ Analiza la asistencia REAL (reservas.asistio) y detecta alumnos en riesgo de aba
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Optional
 import pandas as pd
 from app.services.email_service import enviar_email_fidelizacion
 
 from app.db.database import get_db
 from app.models.usuario import Usuario, RolUsuario
 from app.models.asistencia import Asistencia
-from app.models.reserva import Reserva
-from app.models.clase import Clase
 from app.core.dependencies import get_current_admin, get_current_coach
 # Vigencia de un plan y "hoy": SIEMPRE en hora de Chile (un plan vale hasta las 23:59:59 de su
 # último día; `date.today()` de noche en UTC ya es mañana). `dia_chile` es el cast SQL del día.

@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from typing import ClassVar, Optional
 
 from app.db.database import get_db
-from app.core.config import settings
 from app.core.rate_limit import limiter, LIMIT_REGISTRO
 from app.models.usuario import Usuario, RolUsuario
 from app.models.plan import Plan

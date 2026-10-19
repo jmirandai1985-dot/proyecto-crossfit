@@ -32,7 +32,6 @@ está apuntando a TEST (o sea, si no definiste `ENVIRONMENT=test`), no corre nad
 Correr:
     ENVIRONMENT=test py -3.12 -m pytest tests/test_historial_alumno_service.py -q
 """
-import os
 import re
 import sys
 from datetime import date, datetime, time, timedelta

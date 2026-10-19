@@ -4,10 +4,9 @@ Router de endpoints para generación de Reportes Excel y KPIs del Dashboard
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import func, text as sql_text
+from sqlalchemy import text as sql_text
 from datetime import datetime, timezone, timedelta
 import io
-from typing import Optional
 
 import logging
 

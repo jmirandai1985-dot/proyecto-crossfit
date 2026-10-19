@@ -7,7 +7,7 @@ from sqlalchemy import text as sql_text
 from datetime import date, datetime, timedelta
 
 from app.db.database import get_db
-from typing import List, Optional
+from typing import Optional
 from pydantic import BaseModel
 from app.core.dependencies import get_current_admin, verificar_coach_disciplina
 from app.core.estados import es_cancelada   # 'cancelada' tampoco es una reserva activa

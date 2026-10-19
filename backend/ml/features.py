@@ -14,7 +14,7 @@ Uso:
     import ml.features as features
     df = features.build_features(db, tenant_id=1)          # 1 fila por alumno
 """
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pandas as pd
 from sqlalchemy import func

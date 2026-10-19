@@ -3,7 +3,6 @@ Test permanente para el endpoint de Gestion de Cupos (Tarea 3).
 Verifica que PATCH /supervision/cupo-disciplina actualiza TODOS los
 horario_base de una disciplina y rechaza valores fuera de 1-200.
 """
-import pytest
 import requests
 from tests.conftest import BASE, TENANT_ID
 

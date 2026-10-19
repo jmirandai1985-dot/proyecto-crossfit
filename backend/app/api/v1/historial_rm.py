@@ -32,7 +32,6 @@ from app.services.rms_service import (
 )
 from app.db.crossfit_ratios import CROSSFIT_RATIOS
 from app.db.crossfit_habilidades import CROSSFIT_HABILIDADES
-from app.services.nivel_service import NIVELES
 
 # FIX 1: alumnos con plan de prueba NO pueden usar RM/Performance Hub/Evolución
 router = APIRouter(dependencies=[Depends(require_full_access)])
@@ -745,7 +744,6 @@ def obtener_progreso_destacado(
     _verificar_acceso_alumno(current_user, alumno_id)
 
     from app.models.movimiento import Movimiento
-    from datetime import date
 
     # Obtener todos los movimiento_ids con registros para este alumno
     movs_con_marcas = db.query(

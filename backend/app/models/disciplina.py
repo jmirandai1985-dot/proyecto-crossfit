@@ -3,7 +3,6 @@ Modelo SQLAlchemy para la tabla disciplinas
 """
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import TIMESTAMP
-from sqlalchemy.sql import func
 
 from app.db.database import Base
 

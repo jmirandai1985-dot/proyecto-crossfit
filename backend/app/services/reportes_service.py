@@ -7,13 +7,10 @@ from datetime import datetime, date, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
-from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.chart import BarChart, PieChart, LineChart, Reference
 from openpyxl.chart.label import DataLabelList
-from openpyxl.chart.series import DataPoint
 from openpyxl.worksheet.datavalidation import DataValidation
-from openpyxl.formatting.rule import CellIsRule
 
 from app.services import metricas_service as metricas
 from app.services.clases_service import sql_clase_realizada

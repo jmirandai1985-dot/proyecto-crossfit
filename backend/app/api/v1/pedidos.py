@@ -23,7 +23,6 @@ from app.core.dependencies import (
     get_current_admin, get_current_coach, get_current_user, require_full_access,
 )
 from app.core.rate_limit import limiter, LIMIT_CODIGO_RETIRO
-from app.core.config import settings
 # El comprobante de un pedido se sirve con el MISMO helper que el voucher de una
 # solicitud de plan: dos orígenes (/static/uploads y /privado/vouchers), media type
 # real y resolución del path sin salirse de la carpeta base.

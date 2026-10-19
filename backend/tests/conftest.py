@@ -10,7 +10,6 @@ SEGURIDAD: antes de cualquier test, verifica que el SERVIDOR (no solo pytest)
 esté apuntando al branch test, no a producción.
 """
 from app.core.security import create_access_token
-import os
 import sys
 import pytest
 import requests

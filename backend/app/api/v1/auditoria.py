@@ -9,7 +9,6 @@ inyectar logs falsos y ningún módulo del frontend lo utilizaba (ver SECURITY.m
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
 from typing import List, Optional
 from datetime import datetime, date
 

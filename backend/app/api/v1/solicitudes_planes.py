@@ -6,8 +6,7 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
 from sqlalchemy import update
 from sqlalchemy.orm import Session
-from typing import List, Optional
-from datetime import datetime, timezone
+from typing import Optional
 
 from app.db.database import get_db
 from app.models.solicitud_plan import SolicitudPlan
@@ -25,7 +24,6 @@ from app.core.documentos_privados import (
     puede_ver_documento, respuesta_documento,
 )
 from app.core.rate_limit import limiter, LIMIT_CRITICO
-from app.core.config import settings
 # El fin de mes de un plan se escribe EN HORA DE CHILE (23:59:59 del último día, ver la regla en
 # `app/utils/santiago.py`): una sola definición para este flujo y la compra de emergencia.
 from app.utils.santiago import ahora_santiago, fin_de_plan_chile, hoy_santiago
@@ -40,7 +38,6 @@ from app.services import beneficios_service as beneficios
 # Avisos del PANEL (la campana): un solo módulo decide A QUIÉN y CÓMO se avisa
 # (best-effort: un aviso nunca tumba la solicitud). Ver docs/NOTIFICACIONES_PANEL.md.
 from app.services.notificaciones_panel import notificar_admins_del_tenant
-from datetime import timedelta
 
 router = APIRouter()
 

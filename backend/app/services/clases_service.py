@@ -34,7 +34,6 @@ El módulo también aloja las OTRAS dos definiciones que varios endpoints tienen
     veía su pestaña "En Riesgo" vacía (total_alumnos = 0) mientras la pestaña de al lado
     (Alumnos) le mostraba cientos: las dos pantallas del MISMO panel se contradecían.
 """
-from datetime import date, datetime, time
 
 from sqlalchemy import distinct, exists, or_, select
 

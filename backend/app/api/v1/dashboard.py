@@ -4,7 +4,7 @@ Router de endpoints para el Dashboard
 from app.schemas.dashboard import DashboardStats
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, case, text
+from sqlalchemy import func, text
 from datetime import datetime, timedelta
 from app.db.database import get_db
 from typing import Optional

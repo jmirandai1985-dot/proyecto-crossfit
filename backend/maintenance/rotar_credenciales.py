@@ -1,7 +1,6 @@
 """Aviso y recordatorio de rotación de credenciales (ACCIÓN MANUAL)."""
 import logging
 from datetime import date
-import os
 
 logger = logging.getLogger(__name__)
 

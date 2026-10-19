@@ -6,12 +6,9 @@ disciplinas, horarios, creacion de WODs, edicion, y asistencia.
 Usa datos del Coach Demo (id=1000) y Alumno Demo (id=999).
 Sigue el mismo patron que test_panel_alumno.py.
 """
-import pytest
 import requests
-import json
-from datetime import date, timedelta
 
-from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, HOY_STR, DIA_REF, DIA_REF_STR, get_coach_token, get_alumno_token
+from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, DIA_REF_STR, get_coach_token, get_alumno_token
 
 COACH_ID = 1000
 

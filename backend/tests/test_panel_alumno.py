@@ -10,8 +10,7 @@ Requisito: La API debe estar corriendo en localhost:8000.
 """
 import pytest
 import requests
-import json
-from datetime import date, timedelta
+from datetime import timedelta
 
 from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, HOY_STR, get_coach_token, get_admin_token
 

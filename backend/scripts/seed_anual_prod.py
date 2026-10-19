@@ -111,7 +111,7 @@ import random
 import sys
 from collections import Counter, defaultdict
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any, Iterable, Optional, Sequence
+from typing import Iterable, Optional, Sequence
 
 # Consola de Windows: al pipear la salida los emojis/acentos romperían con cp1252.
 try:

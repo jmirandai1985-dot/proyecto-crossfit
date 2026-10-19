@@ -3,7 +3,7 @@ Servicio de Auditoría
 Proporciona funciones para registrar acciones en el sistema
 """
 from sqlalchemy.orm import Session
-from typing import Optional, Any
+from typing import Optional
 
 from app.models.auditoria import Auditoria
 
