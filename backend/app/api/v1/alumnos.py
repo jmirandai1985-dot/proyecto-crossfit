@@ -27,6 +27,8 @@ from app.services.auditoria_service import registrar_auditoria
 # Avisos del PANEL (la campana): el alta avisa al admin del box también in-app.
 # Ver docs/NOTIFICACIONES_PANEL.md.
 from app.services.notificaciones_panel import notificar_admins_del_tenant
+# Fase 2 del Sistema de Referidos: el auto-registro del alumno le asigna su código.
+from app.services.referidos_service import asignar_codigo_referido
 from app.services.email_service import (
     enviar_email_solicitud_admin,
     send_solicitud_prueba_clase, send_bienvenida_activacion,
@@ -228,6 +230,27 @@ def registrar_alumno_nuevo(
         fecha_expiracion=ahora_prueba + timedelta(days=7),
     )
     db.add(suscripcion)
+
+    # ── Sistema de Referidos (Fase 2): código SOLO para alumnos ────────────
+    # El alta pública siempre crea `alumno`, pero se confirma el rol igual (la
+    # regla de negocio vive en el servicio). Se hace ANTES del commit y dentro
+    # de la misma transacción: si la generación falla, `rollback()` revierte
+    # usuario + suscripción + código, y no se avisa a nadie de un alta que no
+    # existió.
+    if usuario.rol == RolUsuario.alumno:
+        try:
+            asignar_codigo_referido(db, usuario)
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "Auto-registro revertido: falló la generación del código "
+                "de referido")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=("No se pudo completar el registro: falló la "
+                        "generación del código de referido"),
+            )
+
     db.commit()
 
     # ── Campana del ADMIN: el alta también avisa in-app ──

@@ -26,6 +26,8 @@ from app.services.asignaciones_clases import (
 from app.services.asistencia_real import ultima_asistencia_por_alumno
 from app.services.auditoria_service import registrar_auditoria
 from app.services.email_service import send_solicitud_prueba_clase
+# Fase 2 del Sistema de Referidos: el alta del alumno le asigna su código.
+from app.services.referidos_service import asignar_codigo_referido
 from app.utils.santiago import (
     hoy_santiago,          # HOY en Chile (la TZ del proceso es UTC)
     dias_para_vencer,      # días que le quedan al plan (día de Chile, 0 = vence hoy)
@@ -198,6 +200,25 @@ def crear_usuario(
             fecha_inicio=datetime.now(timezone.utc),
             fecha_expiracion=datetime.now(timezone.utc) + timedelta(days=7),
         ))
+
+    # ── Sistema de Referidos (Fase 2): código SOLO para alumnos ────────────
+    # Se asigna DENTRO de la misma transacción del alta: `asignar_codigo_referido`
+    # hace flush() y el commit de abajo es el único que persiste alumno +
+    # suscripción + código. Si la generación falla, se revierte TODO (no queda
+    # un alumno sin código ni un código huérfano).
+    if usuario_data.rol == RolUsuario.alumno:
+        try:
+            asignar_codigo_referido(db, db_usuario)
+        except Exception:
+            db.rollback()
+            logging.getLogger("uvicorn.usuarios").exception(
+                "Alta de alumno revertida: falló la generación del código "
+                "de referido")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=("No se pudo completar el alta: falló la generación "
+                        "del código de referido"),
+            )
 
     db.commit()
     db.refresh(db_usuario)
