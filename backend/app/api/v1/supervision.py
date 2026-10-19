@@ -40,13 +40,6 @@ from app.utils.semana import (
 router = APIRouter()
 
 
-class CoachConPertenencia(BaseModel):
-    id: int
-    nombre: str
-    pertenece: bool
-    disciplinas: List[str] = []
-
-
 @router.get("/proxima-clase-reservas")
 def proxima_clase_reservas(
     horario_base_id: int = Query(..., description="ID del horario base"),

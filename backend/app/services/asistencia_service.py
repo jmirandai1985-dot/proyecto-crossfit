@@ -50,12 +50,6 @@ def _mes_anterior(anio: int, mes: int):
     return anio, mes - 1
 
 
-def _mes_siguiente(anio: int, mes: int):
-    if mes == 12:
-        return anio + 1, 1
-    return anio, mes + 1
-
-
 def _rango_mes(anio: int, mes: int):
     ultimo = calendar.monthrange(anio, mes)[1]
     return date(anio, mes, 1), date(anio, mes, ultimo)
@@ -388,89 +382,6 @@ def evaluar_mes(db: Session, tenant_id: int, anio: int, mes: int,
 
     db.commit()
     return resumen
-
-
-def backfill_hitos(db: Session, meses: int = 12,
-                   tenant_id: int = None) -> dict:
-    """Backfill retroactivo de hitos sobre los últimos `meses` meses cerrados.
-
-    Se ejecuta UNA vez al desplegar la funcionalidad. Genera los hitos que
-    correspondan con notificado=True (NO envía correos retroactivos, para no
-    disparar una avalancha de emails). Idempotente: re-ejecutarlo no duplica
-    nada (UNIQUE(alumno_id, nivel)).
-    """
-    hoy = hoy_santiago()
-    anio_fin, mes_fin = _mes_anterior(hoy.year, hoy.month)
-
-    query_alumnos = db.query(Usuario).filter(
-        Usuario.rol == RolUsuario.alumno,
-        # T12: `estado` es la fuente de verdad (ver `evaluar_mes`, mismo criterio).
-        Usuario.estado == "activo",
-    )
-    if tenant_id is not None:
-        query_alumnos = query_alumnos.filter(Usuario.tenant_id == tenant_id)
-    alumnos = query_alumnos.all()
-
-    creados_total = 0
-    detalle = []
-    ahora = ahora_santiago()
-
-    for alumno in alumnos:
-        # Ventana de meses oldest → newest (para racha corrida).
-        ventana = []
-        a, m = anio_fin, mes_fin
-        for _ in range(meses):
-            ventana.append((a, m))
-            a, m = _mes_anterior(a, m)
-        ventana.reverse()
-
-        racha = 0
-        for a, m in ventana:
-            reservas = _reservas_mes(db, alumno.id, alumno.tenant_id, a, m)
-            if not reservas:
-                continue  # mes sin actividad → se congela
-            asistidas = sum(1 for r in reservas if r.asistio)
-            if asistidas != len(reservas):
-                racha = 0  # corte
-                continue
-            racha += 1
-            nivel = _nivel_para_racha(racha)
-            if not nivel:
-                continue
-            existente = db.query(HitoAlumno).filter(
-                HitoAlumno.alumno_id == alumno.id,
-                HitoAlumno.nivel == nivel,
-            ).first()
-            if existente:
-                continue
-            db.add(HitoAlumno(
-                tenant_id=alumno.tenant_id,
-                alumno_id=alumno.id,
-                nivel=nivel,
-                meses_consecutivos=racha,
-                mes_alcanzado=date(a, m, 1),
-                notificado=True,
-                fecha_notificacion=ahora,
-            ))
-            # flush para que las consultas siguientes vean el hito recién
-            # agregado (autoflush=False en la sesión) y no se duplique.
-            db.flush()
-            creados_total += 1
-            detalle.append({
-                "alumno_id": alumno.id,
-                "nombre": alumno.nombre,
-                "nivel": nivel,
-                "meses_consecutivos": racha,
-                "mes_alcanzado": f"{a}-{m:02d}-01",
-            })
-
-    db.commit()
-    return {
-        "hitos_creados": creados_total,
-        "alumnos_procesados": len(alumnos),
-        "ventana_meses": meses,
-        "detalle": detalle,
-    }
 
 
 # ── Vistas para el alumno ────────────────────────────────────────────────────

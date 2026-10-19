@@ -18,13 +18,6 @@ class AuditoriaBase(BaseModel):
         None, description="Detalles adicionales en JSON")
 
 
-class AuditoriaCreate(AuditoriaBase):
-    """Esquema para crear un registro de Auditoría"""
-    tenant_id: int = Field(..., gt=0, description="ID del tenant")
-    usuario_id: Optional[int] = Field(
-        None, gt=0, description="ID del usuario que realizó la acción")
-
-
 class AuditoriaResponse(AuditoriaBase):
     """Esquema de respuesta para Auditoría"""
     id: int

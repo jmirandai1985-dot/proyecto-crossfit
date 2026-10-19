@@ -176,13 +176,6 @@ def vigencias_por_horario(db: Session, tenant_id: int, horario_ids: Iterable[int
     return {f.horario_id: f for f in filas}
 
 
-def vigencia_para_fecha(db: Session, tenant_id: int, horario_id: int,
-                        fecha: date) -> Optional[HorarioCoach]:
-    """Vigencia de UN horario que cubre `fecha` (o None)."""
-    return vigencias_por_horario(
-        db, tenant_id, [horario_id], fecha).get(horario_id)
-
-
 def coach_vigente(db: Session, tenant_id: int,
                   horario_id: int) -> Optional[HorarioCoach]:
     """Fila vigente de un horario (`vigente_hasta IS NULL`), o None."""
