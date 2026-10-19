@@ -50,6 +50,11 @@ export const claves = {
     // publicar o borrar un aviso refresca las dos sin que nadie lo recuerde.
     avisosMarketing: (filtro) => ['marketing', 'avisos', 'admin', filtro || 'todos'],
     avisosMarketingVigentes: ['marketing', 'avisos', 'vigentes'],
+    // ── Fase 4: Sistema de Referidos ─────────────────────────────────────────
+    // El código propio del alumno y la configuración del box. Familia
+    // `['referidos']`: la comparten el panel del admin y la pantalla del alumno.
+    miCodigoReferido: ['referidos', 'mi-codigo'],
+    configuracionReferidos: ['referidos', 'configuracion'],
     configBox: (tenantId) => ['configuracion', tenantId],
     reservasAlumno: ['reservas', 'alumno'],
     miResumen: ['asistencia', 'mi-resumen'],
@@ -1640,6 +1645,49 @@ export function usePublicarAvisoRapido() {
         mutationFn: (payload) => api.post('/api/v1/marketing/aviso-rapido', payload)
             .then((r) => r.data),
         onSuccess: () => qc.invalidateQueries({ queryKey: ['marketing'] }),
+    });
+}
+
+
+// ── Fase 4: Sistema de Referidos ─────────────────────────────────────────────
+// El código propio lo genera el backend al activar un plan. Un 404 es un estado
+// de negocio ("todavía no tienes código"), no un fallo de red: no se reintenta
+// ni se pinta como error rojo. El 403/500 sí se reintenta como el resto.
+export function useMiCodigoReferido({ enabled = true } = {}) {
+    return useQuery({
+        queryKey: claves.miCodigoReferido,
+        queryFn: async () => (await api.get('/api/v1/referidos/mi-codigo')).data,
+        staleTime: 5 * 60_000,
+        enabled,
+        retry: (intentos, error) => error?.response?.status !== 404 && intentos < 2,
+    });
+}
+
+// Configuración del box (sólo admin). Sin fila, el backend devuelve los
+// defaults con `configurada=false`; leerla NO crea nada en la BD.
+export function useConfiguracionReferidos() {
+    return useQuery({
+        queryKey: claves.configuracionReferidos,
+        queryFn: async () => (await api.get('/api/v1/referidos/configuracion')).data,
+        staleTime: 60_000,
+    });
+}
+
+export function useGuardarConfiguracionReferidos() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) => api.put('/api/v1/referidos/configuracion', payload)
+            .then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['referidos'] }),
+    });
+}
+
+// Aplicar el código de OTRA persona (el invitado). No invalida `mi-codigo`
+// porque el código propio no cambia: el resultado se guarda en el componente.
+export function useValidarCodigoReferido() {
+    return useMutation({
+        mutationFn: (codigo) => api.post('/api/v1/referidos/validar-codigo', { codigo })
+            .then((r) => r.data),
     });
 }
 

@@ -68,6 +68,7 @@ const AlumnoMisPedidos = lazy(() => import('./pages/alumno/MisPedidos'));
 const AlumnoPerformanceHub = lazy(() => import('./pages/alumno/PerformanceHub'));
 const AlumnoMiProgreso = lazy(() => import('./pages/alumno/MiProgreso'));
 const AlumnoMiHistorial = lazy(() => import('./pages/alumno/MiHistorial'));
+const AlumnoInvitaYGana = lazy(() => import('./pages/alumno/InvitaYGana'));
 // · Páginas públicas de acceso directo (TV y check-in por QR): fuera del
 //   primer render, así que también van perezosas.
 const RankingAsistencia = lazy(() => import('./pages/tv/RankingAsistencia'));
@@ -189,6 +190,7 @@ function App() {
             <Route path="performance-hub" element={<AlumnoPerformanceHub />} />
             <Route path="mi-progreso" element={<AlumnoMiProgreso />} />
             <Route path="mi-historial" element={<AlumnoMiHistorial />} />
+            <Route path="invita-y-gana" element={<AlumnoInvitaYGana />} />
             <Route path="*" element={<Navigate to="/alumno/dashboard" />} />
           </Route>
 

@@ -52,8 +52,8 @@ const PANTALLAS = readdirSync(new URL('../src/pages/alumno/', import.meta.url))
 // pasar desapercibido.
 const ESPERADAS = [
     'Ajustes.jsx', 'Bazar.jsx', 'Dashboard.jsx', 'Evolucion.jsx', 'InicioMobile.jsx',
-    'MiHistorial.jsx', 'MiProgreso.jsx', 'MisPedidos.jsx', 'MisReservas.jsx',
-    'PerformanceHub.jsx', 'PizarraRMs.jsx', 'SolicitarPlan.jsx',
+    'InvitaYGana.jsx', 'MiHistorial.jsx', 'MiProgreso.jsx', 'MisPedidos.jsx',
+    'MisReservas.jsx', 'PerformanceHub.jsx', 'PizarraRMs.jsx', 'SolicitarPlan.jsx',
 ];
 
 // Pantallas que NO importan `hooks/queries` a propósito: Mi Historial delega todo en el

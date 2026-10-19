@@ -1,0 +1,88 @@
+// Test aislado de las utilidades puras del Sistema de Referidos (Fase 4).
+//   Ejecutar:  node scripts/test-referidos.mjs
+//
+// No navega ni llama a la API: cubre normalización del código, validación de
+// porcentajes del admin, formato es-CL, texto para compartir y traducción de
+// errores de FastAPI/Pydantic a un mensaje humano.
+import { readFileSync } from 'node:fs';
+import {
+    LARGO_MAXIMO_CODIGO, formatearPorcentajeReferido, mensajeDeError,
+    normalizarCodigoIngresado, textoCompartirReferido, validarCodigoIngresado,
+    validarPorcentajeReferido,
+} from '../src/utils/referidos.js';
+
+const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+
+let fallos = 0;
+const ok = (cond, msg) => {
+    if (cond) {
+        console.log('  PASS  ' + msg);
+    } else {
+        fallos++;
+        console.log('  FAIL  ' + msg);
+    }
+};
+
+console.log('== 1. Normalización del código ==');
+ok(normalizarCodigoIngresado('  jpere234 ') === 'JPERE234', 'recorta y pasa a mayúsculas');
+ok(normalizarCodigoIngresado(null) === '', 'null -> cadena vacía');
+ok(normalizarCodigoIngresado('ab 12') === 'AB 12', 'no borra espacios internos (igual que el backend)');
+ok(validarCodigoIngresado('').valido === false, 'código vacío inválido');
+ok(validarCodigoIngresado('   ').valido === false, 'código sólo espacios inválido');
+ok(validarCodigoIngresado(' jpere234 ').codigo === 'JPERE234', 'devuelve el código ya normalizado');
+ok(validarCodigoIngresado('A'.repeat(LARGO_MAXIMO_CODIGO)).valido === true, 'acepta el largo máximo');
+ok(validarCodigoIngresado('A'.repeat(LARGO_MAXIMO_CODIGO + 1)).valido === false, 'rechaza un carácter de más');
+
+console.log('== 2. Porcentajes del admin (0–100, 2 decimales) ==');
+for (const valido of ['0', '100', '12,5', '12.5', ' 50 ', '0.25', '100.00']) {
+    ok(validarPorcentajeReferido(valido).valido === true, `acepta ${JSON.stringify(valido)}`);
+}
+for (const invalido of ['', '   ', '-1', '101', '100.01', '12.345', 'abc', '1e2']) {
+    ok(validarPorcentajeReferido(invalido).valido === false, `rechaza ${JSON.stringify(invalido)}`);
+}
+ok(validarPorcentajeReferido('12,5').valor === 12.5, 'convierte la coma decimal a número');
+ok(validarPorcentajeReferido('100').valor === 100, 'conserva el 100 como número');
+
+console.log('== 3. Formato es-CL ==');
+ok(formatearPorcentajeReferido(12.5) === '12,5 %', '12.5 -> "12,5 %"');
+ok(formatearPorcentajeReferido(0) === '0 %', '0 -> "0 %"');
+ok(formatearPorcentajeReferido(null) === '0 %', 'null -> "0 %"');
+ok(formatearPorcentajeReferido(12.345) === '12,35 %', 'redondea a 2 decimales');
+
+console.log('== 4. Texto para compartir ==');
+const simple = textoCompartirReferido(' jpere234 ');
+ok(simple.includes('JPERE234') && !simple.includes('jpere234'), 'usa el código normalizado');
+ok(simple.includes('primer plan'), 'explica para qué sirve el código');
+const conEnlace = textoCompartirReferido('JPERE234', 'https://box.cl/landing');
+ok(conEnlace.endsWith('\nhttps://box.cl/landing'), 'agrega el enlace en una línea aparte');
+
+console.log('== 5. Errores del backend ==');
+ok(mensajeDeError({ response: { data: { detail: 'Código inexistente.' } } }) === 'Código inexistente.',
+    'usa el detail string del backend');
+ok(mensajeDeError({ response: { data: { detail: [{ msg: 'Value error, El código ya fue usado.' }] } } })
+    === 'El código ya fue usado.', 'limpia el prefijo "Value error" de Pydantic');
+ok(mensajeDeError({ response: { data: { detail: [] } } }, 'Fallback') === 'Fallback',
+    'lista vacía -> mensaje por defecto');
+ok(mensajeDeError({ message: 'Network Error' }, 'Fallback') === 'Fallback',
+    'no filtra mensajes técnicos en inglés');
+
+console.log('== 6. Montaje en la app (rutas, menú y pantallas) ==');
+const app = leer('../src/App.jsx');
+const menu = leer('../src/config/menu.js');
+const marketing = leer('../src/pages/admin/Marketing.jsx');
+const solicitarPlan = leer('../src/pages/alumno/SolicitarPlan.jsx');
+const campo = leer('../src/components/CampoReferido.jsx');
+
+ok(/InvitaYGana/.test(app) && /path="invita-y-gana"/.test(app),
+    'App.jsx registra la ruta /alumno/invita-y-gana');
+ok(/path:\s*'\/alumno\/invita-y-gana'/.test(menu) && /icon:\s*'gift'/.test(menu),
+    'menu.js muestra "Invita y Gana" con el ícono gift');
+ok(/useMiCodigoReferido\s*\(/.test(campo) === false, 'el campo no pide el código propio');
+ok(/useValidarCodigoReferido\s*\(/.test(campo), 'CampoReferido valida el código contra el backend');
+ok(/<ConfiguracionReferidos\s*\/>/.test(marketing) && /id:\s*'referidos'/.test(marketing),
+    'Marketing monta la sub-pestaña Referidos');
+ok(/<CampoReferido/.test(solicitarPlan) && /useState\(null\)/.test(solicitarPlan),
+    'SolicitarPlan monta el campo y conserva el código al cambiar de paso');
+
+console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
+process.exit(fallos === 0 ? 0 : 1);

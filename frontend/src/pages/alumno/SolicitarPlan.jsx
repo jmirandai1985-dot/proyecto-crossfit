@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Layout from '../../components/Layout';
 import BotonVolver from '../../components/BotonVolver';
+import CampoReferido from '../../components/CampoReferido';
 import { useAuth } from '../../context/AuthContext';
 // Fase 2 (Bloque 1): planes, perfil, datos bancarios, descuento vigente y subida de
 // documentos salen de la caché compartida (`hooks/queries.js`), no de un `useEffect` que
@@ -60,6 +61,10 @@ const SolicitarPlan = () => {
     const [archivoCertificado, setArchivoCertificado] = useState(null);
     const [mensajeExito, setMensajeExito] = useState('');
     const [mensajeError, setMensajeError] = useState('');
+    // Código de referido aplicado en este flujo. Vive en el padre para no perderlo
+    // al volver del paso 2 al 1 (el campo se desmonta y el backend ya no permite
+    // aplicar un segundo código).
+    const [referidoAplicado, setReferidoAplicado] = useState(null);
 
     // Categoría visible: la propone el sexo del perfil y el alumno la puede cambiar. Se
     // DERIVA de las consultas (antes se sincronizaba con un `setCategoriaSeleccionada`
@@ -368,6 +373,14 @@ const SolicitarPlan = () => {
                                 </p>
                             )}
                         </div>
+
+                        {/* Código de quien lo invitó: el backend lo deja PENDIENTE y el
+                            descuento se calcula recién al confirmar la compra. Va antes de
+                            los datos bancarios para que el alumno lo vea al decidir el monto. */}
+                        <CampoReferido
+                            aplicado={referidoAplicado}
+                            onAplicado={setReferidoAplicado}
+                        />
 
                         {/* ─── DATOS BANCARIOS PARA TRANSFERENCIA ── */}
                         <div className="bg-blue-50 rounded-xl border border-blue-200 p-5 shadow-sm">

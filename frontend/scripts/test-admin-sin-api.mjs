@@ -23,7 +23,8 @@ import { readFileSync } from 'node:fs';
 
 const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
-// Bloque 3 parte A (7 archivos) + parte B (Reportes) + A5.1 (padrón de alumnos).
+// Bloque 3 parte A (7 archivos) + parte B (Reportes) + A5.1 (padrón de alumnos)
+// + Fase 4 (Marketing y la configuración de referidos, que también usa hooks).
 const MIGRADOS = [
     '../src/pages/admin/Coaches.jsx',
     '../src/pages/admin/Clases.jsx',
@@ -32,6 +33,8 @@ const MIGRADOS = [
     '../src/pages/admin/MiQr.jsx',
     '../src/pages/admin/Reportes.jsx',
     '../src/pages/admin/Alumnos.jsx',
+    '../src/pages/admin/Marketing.jsx',
+    '../src/components/ConfiguracionReferidos.jsx',
     '../src/components/ModalClase.jsx',
     '../src/components/ModalProducto.jsx',
 ];
