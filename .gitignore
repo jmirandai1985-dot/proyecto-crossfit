@@ -62,3 +62,5 @@ backend/test_altas_alumnos4.py
 backend/ml/artifacts/
 mockup/
 docs/capturas/
+
+_notas-desarrollo/
