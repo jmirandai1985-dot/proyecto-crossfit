@@ -20,8 +20,9 @@ class Auditoria(Base):
         "tenants.id", ondelete="CASCADE"), nullable=False)
     usuario_id = Column(Integer, ForeignKey(
         "usuarios.id", ondelete="SET NULL"), nullable=True)
-    # CREATE, UPDATE, DELETE, LOGIN
-    accion = Column(String(20), nullable=False)
+    # CREATE, UPDATE, DELETE, LOGIN y acciones largas
+    # (ej. "cambiar_disciplina_horario"): VARCHAR(50), ver migración 050.
+    accion = Column(String(50), nullable=False)
     # ej: "reserva", "clase", "pedido"
     entidad = Column(String(50), nullable=False)
     entidad_id = Column(Integer, nullable=True)
