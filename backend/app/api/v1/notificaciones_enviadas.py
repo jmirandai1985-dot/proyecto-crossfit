@@ -32,7 +32,7 @@ def _registrar(db: Session, alumno_id: int, tipo: str, estado: str, detalle_erro
         tipo=tipo,
         estado=estado,
         detalle_error=detalle_error,
-        fecha_envio=datetime.utcnow(),
+        fecha_envio=datetime.now(timezone.utc),
     )
     db.add(reg)
     db.commit()
@@ -486,7 +486,7 @@ def reenviar_notificacion(
 
     reg.detalle_error = None if exito else error
     reg.estado = "enviado" if exito else "fallido"
-    reg.fecha_envio = datetime.utcnow()
+    reg.fecha_envio = datetime.now(timezone.utc)
     db.commit()
     db.refresh(reg)
     return {"id": reg.id, "estado": reg.estado, "fecha_envio": str(reg.fecha_envio),

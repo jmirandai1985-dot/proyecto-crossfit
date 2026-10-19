@@ -5,7 +5,7 @@ import logging
 import smtplib
 import sys
 from email.message import EmailMessage
-from datetime import datetime
+from datetime import datetime, timezone
 # `_escape_html`: el WhatsApp del box lo escribe el admin a mano y termina en el HTML del
 # correo (`bloque_contacto`) y en el preview del panel — hay que escaparlo. Se importa con
 # alias porque en este módulo `html` es el nombre de las variables con el cuerpo del correo.
@@ -279,7 +279,6 @@ def _registrar_envio(alumno_id, tipo, estado, detalle_error=None, mes_referencia
         from app.db.database import SessionLocal
         from app.models.notificacion_enviada import NotificacionEnviada
         from app.models.usuario import Usuario
-        from datetime import datetime
         db = SessionLocal()
         if alumno_id:
             alumno = db.query(Usuario).filter(Usuario.id == alumno_id).first()
@@ -291,7 +290,7 @@ def _registrar_envio(alumno_id, tipo, estado, detalle_error=None, mes_referencia
         # (queda con tenant NULL y no se lista, como el resto de filas huérfanas).
         reg = NotificacionEnviada(
             alumno_id=alumno_id, tipo=tipo, estado=estado,
-            detalle_error=detalle_error, fecha_envio=datetime.utcnow(),
+            detalle_error=detalle_error, fecha_envio=datetime.now(timezone.utc),
             tenant_id=tenant_id, mes_referencia=mes_referencia,
             destinatario_correo=destinatario_correo,
             destinatario_nombre=destinatario_nombre,

@@ -4,7 +4,7 @@ import string
 import secrets
 import logging
 import sentry_sdk
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel, EmailStr, Field, AliasChoices, ConfigDict, model_validator
@@ -216,7 +216,7 @@ def registrar_alumno_nuevo(
     # NULL y el Historial del alumno se caía en 500 al leerla (`None.year` en `historial_alumno_
     # service`): el alta del landing rompía el panel del box. Mismo criterio que el alta del admin
     # (`usuarios.py`): inicio = ahora, vence a los 7 días.
-    ahora_prueba = datetime.utcnow()
+    ahora_prueba = datetime.now(timezone.utc)
     suscripcion = Suscripcion(
         tenant_id=datos.tenant_id,
         usuario_id=usuario.id,

@@ -4,7 +4,7 @@ Analiza la asistencia REAL (reservas.asistio) y detecta alumnos en riesgo de aba
 """
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional
 import pandas as pd
 from app.services.email_service import enviar_email_fidelizacion
@@ -447,7 +447,7 @@ def _registrar_notificacion(db: Session, alumno: Usuario, tipo: str,
         tipo=tipo,
         estado=estado,
         detalle_error=detalle_error,
-        fecha_envio=datetime.utcnow(),
+        fecha_envio=datetime.now(timezone.utc),
     ))
     db.commit()
 
