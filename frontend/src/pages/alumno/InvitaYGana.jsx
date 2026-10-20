@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Layout from '../../components/Layout';
 import BotonVolver from '../../components/BotonVolver';
-import CampoReferido from '../../components/CampoReferido';
+import InvitarPorCorreo from '../../components/InvitarPorCorreo';
 import { useMiCodigoReferido } from '../../hooks/queries';
 import { copiarAlPortapapeles, textoCompartirReferido } from '../../utils/referidos';
 
@@ -15,8 +15,10 @@ const fechaLarga = (valor) => {
 };
 
 /**
- * "Invita y gana": el alumno ve y comparte su código, y el invitado puede
- * aplicar el código de otra persona (mismo componente que usa SolicitarPlan).
+ * "Invita y gana": el alumno ve y comparte su código, y puede invitar a un
+ * amigo por CORREO (migración 054). El componente `CampoReferido` ya no vive
+ * acá: el código de otra persona se aplica en la compra (`SolicitarPlan`), no
+ * en la pantalla del invitador.
  *
  * El código propio lo crea el backend al activarse un plan; si el alumno aún
  * no tiene fila, `GET /referidos/mi-codigo` responde 404 y acá se explica sin
@@ -25,7 +27,6 @@ const fechaLarga = (valor) => {
 const InvitaYGana = () => {
     const { data, isPending, isError, error, refetch } = useMiCodigoReferido();
     const [aviso, setAviso] = useState('');
-    const [aplicado, setAplicado] = useState(null);
 
     const codigo = data?.codigo || '';
     const activo = Boolean(data?.activo);
@@ -182,18 +183,23 @@ const InvitaYGana = () => {
                     </div>
                 )}
 
-                <CampoReferido aplicado={aplicado} onAplicado={setAplicado} />
+                {/* Sin código activo no se puede invitar: el backend rechazaría
+                    el envío. La tarjeta de arriba ya explica el motivo. */}
+                {data?.activo && <InvitarPorCorreo />}
 
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                     <h2 className="text-lg font-bold text-gray-900">¿Cómo funciona?</h2>
                     <ol className="mt-3 space-y-3 text-sm text-gray-700">
                         <li className="flex gap-3">
                             <span className="shrink-0 w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold flex items-center justify-center">1</span>
-                            <span>Comparte tu código con un amigo que quiera entrenar en el box.</span>
+                            <span>Comparte tu código por WhatsApp o envíale una invitación por correo desde acá.</span>
                         </li>
                         <li className="flex gap-3">
                             <span className="shrink-0 w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold flex items-center justify-center">2</span>
-                            <span>Tu amigo lo ingresa al comprar su primer plan.</span>
+                            <span>
+                                Tu amigo completa el formulario de la clase de prueba con tu enlace: tu
+                                código queda vinculado a su registro y lo confirma al comprar su primer plan.
+                            </span>
                         </li>
                         <li className="flex gap-3">
                             <span className="shrink-0 w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold flex items-center justify-center">3</span>

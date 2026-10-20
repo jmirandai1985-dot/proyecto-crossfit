@@ -1,24 +1,43 @@
 import React, { useState } from 'react';
 import { useValidarCodigoReferido } from '../hooks/queries';
-import { LARGO_MAXIMO_CODIGO, mensajeDeError, validarCodigoIngresado } from '../utils/referidos';
+import {
+    LARGO_MAXIMO_CODIGO, mensajeDeError, normalizarCodigoIngresado,
+    validarCodigoIngresado,
+} from '../utils/referidos';
 
 /**
  * Campo para que el INVITADO aplique el código de quien lo invitó.
  *
- * Se usa en dos lugares con la misma semántica: la pantalla "Invita y gana"
- * del alumno y el paso de compra de `SolicitarPlan`. El texto de éxito lo manda
- * el backend (`MENSAJE_REFERIDO_REGISTRADO`): acá no se inventa el estado.
+ * Se usa en el paso de compra de `SolicitarPlan`. El texto de éxito lo manda el
+ * backend (`MENSAJE_REFERIDO_REGISTRADO`): acá no se inventa el estado.
+ *
+ * `codigoSugerido` (migración 054) viene de `GET /referidos/mi-invitacion`, es
+ * decir del link `/landing?inv=<token>` con el que el alumno se registró. Sólo
+ * PRELLENA el input: aplicarlo sigue siendo un toque explícito en "Aplicar
+ * código", así el consentimiento y la fuente de verdad quedan en el backend.
  *
  * `aplicado`/`onAplicado` permiten que el padre recuerde el resultado cuando
  * este bloque se desmonta (SolicitarPlan cambia de paso y vuelve al pago).
  */
-const CampoReferido = ({ aplicado = null, onAplicado, className = '' }) => {
-    const [codigo, setCodigo] = useState('');
+const CampoReferido = ({
+    aplicado = null, onAplicado, codigoSugerido = '', className = '',
+}) => {
+    const [codigo, setCodigo] = useState(
+        () => normalizarCodigoIngresado(codigoSugerido));
+    // `tocado` evita pisar lo que el alumno ya escribió si la consulta de
+    // `mi-invitacion` resuelve DESPUÉS del montaje del campo.
+    const [tocado, setTocado] = useState(false);
     const [error, setError] = useState('');
     const [aplicadoLocal, setAplicadoLocal] = useState(null);
     const validarCodigo = useValidarCodigoReferido();
 
     const resultado = aplicado || aplicadoLocal;
+    const sugerido = normalizarCodigoIngresado(codigoSugerido);
+
+    React.useEffect(() => {
+        if (tocado || !sugerido) return;
+        setCodigo((actual) => actual || sugerido);
+    }, [sugerido, tocado]);
 
     const enviar = async (evento) => {
         evento.preventDefault();
@@ -71,6 +90,17 @@ const CampoReferido = ({ aplicado = null, onAplicado, className = '' }) => {
                 Sólo puedes usar un código.
             </p>
 
+            {sugerido && (
+                <p
+                    className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800"
+                    data-testid="referido-prellenado"
+                >
+                    Prellenamos el código de quien te invitó
+                    {' '}(<strong className="font-mono">{sugerido}</strong>).
+                    Revísalo y toca <strong>Aplicar código</strong> para usarlo.
+                </p>
+            )}
+
             <form onSubmit={enviar} className="mt-4 flex flex-col sm:flex-row gap-2">
                 <label htmlFor="codigo-referido" className="sr-only">Código de invitación</label>
                 <input
@@ -79,6 +109,7 @@ const CampoReferido = ({ aplicado = null, onAplicado, className = '' }) => {
                     type="text"
                     value={codigo}
                     onChange={(evento) => {
+                        setTocado(true);
                         setCodigo(evento.target.value);
                         if (error) setError('');
                     }}

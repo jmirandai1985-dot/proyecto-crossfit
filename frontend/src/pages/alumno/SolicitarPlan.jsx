@@ -7,8 +7,8 @@ import { useAuth } from '../../context/AuthContext';
 // documentos salen de la caché compartida (`hooks/queries.js`), no de un `useEffect` que
 // repetía las mismas peticiones en cada montaje.
 import {
-    useConfiguracionBancaria, useMiPerfil, useMisBeneficios, usePlanesActivos,
-    useSolicitarPlan, useSubirArchivoPrivado,
+    useConfiguracionBancaria, useMiInvitacion, useMiPerfil, useMisBeneficios,
+    usePlanesActivos, useSolicitarPlan, useSubirArchivoPrivado,
 } from '../../hooks/queries';
 import { fmtFechaChile } from '../../utils/fecha';
 
@@ -61,6 +61,11 @@ const SolicitarPlan = () => {
     const [archivoCertificado, setArchivoCertificado] = useState(null);
     const [mensajeExito, setMensajeExito] = useState('');
     const [mensajeError, setMensajeError] = useState('');
+    // Código de quien invitó al alumno (link `/landing?inv=<token>`). El backend
+    // devuelve `{codigo: null}` si no lo invitó nadie: sólo PRELLENA el campo de
+    // abajo, aplicarlo sigue siendo una acción explícita del alumno.
+    const miInvitacionQ = useMiInvitacion();
+
     // Código de referido aplicado en este flujo. Vive en el padre para no perderlo
     // al volver del paso 2 al 1 (el campo se desmonta y el backend ya no permite
     // aplicar un segundo código).
@@ -380,6 +385,7 @@ const SolicitarPlan = () => {
                         <CampoReferido
                             aplicado={referidoAplicado}
                             onAplicado={setReferidoAplicado}
+                            codigoSugerido={miInvitacionQ.data?.codigo || ''}
                         />
 
                         {/* ─── DATOS BANCARIOS PARA TRANSFERENCIA ── */}

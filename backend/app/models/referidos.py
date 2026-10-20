@@ -33,9 +33,14 @@ from app.db.database import Base
 # ── Enums del programa ───────────────────────────────────────────────────────
 
 class OrigenInvitacion(str, enum.Enum):
-    """Quién disparó la invitación por correo."""
+    """Quién disparó la invitación por correo.
+
+    `alumno` (migración 054) es la invitación alumno → alumno: lleva el código
+    del invitador y un token de rastreo, y es la única que da premio.
+    """
     admin = "admin"
     coach = "coach"
+    alumno = "alumno"
 
 
 class EstadoInvitacion(str, enum.Enum):
@@ -101,9 +106,19 @@ class EstadoPromocionDetectada(str, enum.Enum):
 class Invitacion(Base):
     """Una invitación enviada a un correo que todavía no es alumno.
 
-    No otorga premio: reutiliza el flujo de auto-registro (cuenta + clase de
-    prueba + contraseña al completar el registro). La fila es también la traza
-    de quién la disparó y cuándo se registró el prospecto.
+    Dos orígenes comparten la tabla:
+
+      * `admin` / `coach` → marketing puro, sin premio. Reutiliza el flujo de
+        auto-registro (cuenta + clase de prueba + contraseña) y no lleva código.
+      * `alumno` (migración 054) → invitación de un alumno a un amigo. Guarda el
+        código del invitador (`codigo_referido_id`) y un `token_rastreo` que
+        viaja en el link `/landing?inv=<token>`. Al completarse el registro la
+        fila queda `registrado` y ligada a `usuario_registrado_id`, que es lo que
+        permite prellenar el código en la compra (`GET /referidos/mi-invitacion`).
+
+    El `token_rastreo` se guarda EN CLARO a propósito: no es una credencial (no
+    autentica ni autoriza, sólo identifica el link) y así el alumno puede
+    reenviar el MISMO enlace sin regenerarlo.
     """
     __tablename__ = "invitaciones"
 
@@ -126,17 +141,30 @@ class Invitacion(Base):
     fecha_registro = Column(TIMESTAMP(timezone=True), nullable=True)
     usuario_registrado_id = Column(Integer, ForeignKey(
         "usuarios.id", ondelete="SET NULL"), nullable=True)
+    # El código del alumno que invita (NULL en admin/coach: no dan premio).
+    # SET NULL conserva la traza de la invitación si se borra el código.
+    codigo_referido_id = Column(Integer, ForeignKey(
+        "codigos_referido.id", ondelete="SET NULL"), nullable=True)
+    # Token opaco del link `/landing?inv=<token>`. Único (varios NULL están
+    # permitidos en PostgreSQL, así que admin/coach conviven sin token).
+    token_rastreo = Column(String(64), nullable=True)
 
     __table_args__ = (
+        UniqueConstraint("token_rastreo",
+                         name="uq_invitaciones_token_rastreo"),
         Index("ix_invitaciones_tenant_id", "tenant_id"),
         # Buscar/duplicar invitaciones de un correo dentro del box.
         Index("ix_invitaciones_tenant_correo", "tenant_id", "correo_prospecto"),
         Index("ix_invitaciones_estado", "estado"),
+        # "La invitación que trajo a este alumno" (prellenado del código).
+        Index("ix_invitaciones_usuario_registrado_id",
+              "usuario_registrado_id"),
     )
 
     def __repr__(self):
         return (f"<Invitacion(id={self.id}, correo='{self.correo_prospecto}', "
-                f"origen='{self.origen}', estado='{self.estado}')>")
+                f"origen='{self.origen}', estado='{self.estado}', "
+                f"token='{self.token_rastreo}')>")
 
 
 # ── 2. Código de referido (uno por alumno) ───────────────────────────────────

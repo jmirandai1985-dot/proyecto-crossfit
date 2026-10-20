@@ -54,6 +54,9 @@ export const claves = {
     // El código propio del alumno y la configuración del box. Familia
     // `['referidos']`: la comparten el panel del admin y la pantalla del alumno.
     miCodigoReferido: ['referidos', 'mi-codigo'],
+    // La invitación de OTRO alumno que trajo a este usuario (migración 054):
+    // `{codigo: null}` cuando no lo invitó nadie, sin 404.
+    miInvitacion: ['referidos', 'mi-invitacion'],
     configuracionReferidos: ['referidos', 'configuracion'],
     promocionesReferidos: ['referidos', 'promociones'],
     promocionesDetectadas: (estado) =>
@@ -1691,6 +1694,30 @@ export function useValidarCodigoReferido() {
     return useMutation({
         mutationFn: (codigo) => api.post('/api/v1/referidos/validar-codigo', { codigo })
             .then((r) => r.data),
+    });
+}
+
+// La invitación de OTRO alumno que trajo a este usuario. El backend responde
+// SIEMPRE 200 (`{codigo: null}` si no lo invitó nadie): es un estado normal, no
+// un error, así que no hace falta `retry` especial ni pintar nada en rojo.
+export function useMiInvitacion({ enabled = true } = {}) {
+    return useQuery({
+        queryKey: claves.miInvitacion,
+        queryFn: async () => (await api.get('/api/v1/referidos/mi-invitacion')).data,
+        staleTime: 5 * 60_000,
+        enabled,
+    });
+}
+
+// Invitar a un amigo por correo (migración 054). El token y el enlace los arma
+// el backend; acá sólo viaja el correo. Invalidar `['referidos']` refresca la
+// familia entera (incluida `mi-invitacion` si el alumno invitado ya se registró).
+export function useInvitarAlumno() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (correo) => api.post('/api/v1/referidos/invitaciones', { correo })
+            .then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['referidos'] }),
     });
 }
 

@@ -1,7 +1,14 @@
 import React, { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 
 export default function LandingPage() {
+  const [searchParams] = useSearchParams();
+  // Link de invitación de un alumno (`/landing?inv=<token>`). El token NO
+  // autoriza nada: el backend lo usa sólo para ligar la invitación a la cuenta
+  // nueva y poder prellenar el código en la compra. Sin token (o con uno
+  // inválido) el alta funciona exactamente igual.
+  const tokenInvitacion = (searchParams.get('inv') || '').trim();
   const [formData, setFormData] = useState({
     nombre: '',
     rut: '',
@@ -23,14 +30,19 @@ export default function LandingPage() {
     }
 
     try {
-      const res = await axios.post('/api/v1/alumnos/registro/alumno-nuevo', {
+      const payload = {
         nombre: formData.nombre,
         correo: formData.correo,
         rut: formData.rut,
         sexo: formData.genero,
         peso_kg: parseFloat(formData.peso_kg),
         estatura_cm: parseInt(formData.estatura_cm)
-      });
+      };
+      // Sólo se envía si vino en el link: el backend ignora un token inválido o
+      // ya usado y NUNCA falla el registro por eso.
+      if (tokenInvitacion) payload.token_invitacion = tokenInvitacion;
+
+      const res = await axios.post('/api/v1/alumnos/registro/alumno-nuevo', payload);
 
       // RG-04: si el envío del correo con la contraseña temporal falló, el backend
       // la devuelve en la respuesta. Hay que mostrarla: si no, el alumno no tiene
@@ -60,6 +72,12 @@ export default function LandingPage() {
         <p style={{ fontSize: '18px', color: '#ff8c00', fontWeight: 'bold' }}>
           ¡Felicidades! Acabas de tomar la mejor decisión para tu salud y rendimiento.
         </p>
+        {tokenInvitacion && (
+          <p style={{ fontSize: '16px', color: '#7dd3fc', marginTop: '12px' }}>
+            🎁 Viniste invitado por un alumno del box: completa el formulario y tu
+            código quedará vinculado a tu registro.
+          </p>
+        )}
       </section>
 
       <form onSubmit={handleSubmit} style={{ maxWidth: '500px', margin: '0 auto', background: '#1a1f3a', padding: '40px', borderRadius: '8px', border: '2px solid #ff8c00' }}>

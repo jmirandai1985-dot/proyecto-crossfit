@@ -36,6 +36,12 @@ convertirse crea el `CreditoReferido` del invitador, que se consume UNA sola vez
 en SU próxima compra. Sin configuración activa no se convierte ni se descuenta.
 Tampoco commitea: el llamador guarda suscripción, referido, crédito e ingreso en
 la misma transacción.
+
+La migración 054 suma las INVITACIONES ALUMNO → ALUMNO: armar el link
+rastreable (`enlace_invitacion`), decidir si un correo se puede invitar
+(`motivo_invitacion_rechazada`) y ligar la invitación al usuario que se
+registra (`marcar_invitacion_registrada`). El envío del correo vive en el
+router: el servicio no habla SMTP ni commitea.
 """
 from __future__ import annotations
 
@@ -49,10 +55,12 @@ from typing import Any, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
+from app.core.urls import url_frontend
 from app.models.plan import Plan
 from app.models.referidos import (CodigoReferido, ConfiguracionReferidos,
                                   CreditoReferido, EstadoCreditoReferido,
-                                  EstadoReferido, ReferidoAplicado)
+                                  EstadoInvitacion, EstadoReferido, Invitacion,
+                                  ReferidoAplicado)
 from app.models.suscripcion import Suscripcion
 from app.models.usuario import RolUsuario, Usuario
 
@@ -81,6 +89,22 @@ __all__ = [
     "datos_mi_codigo",
     "datos_referido_aplicado",
     "datos_configuracion",
+    # Invitaciones alumno → alumno (migración 054).
+    "TOKEN_INVITACION_BYTES",
+    "LIMITE_INVITACIONES_DIA",
+    "DIAS_BLOQUEO_REENVIO",
+    "MOTIVO_INVITACION_PROPIA",
+    "MOTIVO_INVITACION_YA_USUARIO",
+    "MOTIVO_INVITACION_DUPLICADA",
+    "MOTIVO_INVITACION_LIMITE",
+    "normalizar_correo_invitacion",
+    "generar_token_invitacion",
+    "enlace_invitacion",
+    "motivo_invitacion_rechazada",
+    "invitacion_pendiente_por_token",
+    "marcar_invitacion_registrada",
+    "datos_invitacion_enviada",
+    "datos_mi_invitacion",
 ]
 
 # ── Formato: 1 inicial + 5 letras del apellido + 3 dígitos ───────────────────
@@ -543,4 +567,135 @@ def confirmar_compra(db: Session, *, tenant_id: int, usuario_id: int,
         "promocion_detectada_id": credito.promocion_detectada_id,
         "credito_referido_id": credito.id,
         "credito_otorgado_id": None,
+    }
+
+
+# ── Invitaciones alumno → alumno (migración 054) ─────────────────────────────
+# Un alumno invita a un amigo por correo. La fila de `invitaciones` guarda SU
+# código y un token opaco que viaja en el link; al registrarse, el amigo queda
+# ligado a la invitación y la compra puede prellenar el código.
+
+# 24 bytes → 32 caracteres en base64url: cabe de sobra en `varchar(64)` y no es
+# adivinable (no es un id incremental).
+TOKEN_INVITACION_BYTES = 24
+# Anti-abuso por ALUMNO (no por IP: el rate limit por IP es compartido por todo
+# el box detrás del mismo NAT, y bloquearía a todos por un solo abusador).
+LIMITE_INVITACIONES_DIA = 5
+# Reenvío al MISMO correo: se bloquea dentro de esta ventana. El enlace viejo
+# sigue sirviendo, así que el bloqueo no le quita nada al invitador.
+DIAS_BLOQUEO_REENVIO = 7
+
+MOTIVO_INVITACION_PROPIA = "No puedes invitarte a ti mismo"
+MOTIVO_INVITACION_YA_USUARIO = "Ese correo ya pertenece a un usuario del box"
+MOTIVO_INVITACION_DUPLICADA = (
+    "Ya se envió una invitación a ese correo hace menos de 7 días: "
+    "reenvía el mismo enlace")
+MOTIVO_INVITACION_LIMITE = (
+    "Alcanzaste el límite de 5 invitaciones por día. Inténtalo mañana")
+
+
+def normalizar_correo_invitacion(correo: Optional[str]) -> str:
+    """El correo del amigo en la forma en que se guarda y se compara.
+
+    Igual que el resto del alta (`usuarios.correo` se guarda en minúsculas):
+    sin recortar, `" Amigo@Box.cl "` no encontraría al usuario existente y el
+    anti-abuso se podría saltar cambiando mayúsculas o espacios.
+    """
+    return (correo or "").strip().lower()
+
+
+def generar_token_invitacion() -> str:
+    """Token del link `/landing?inv=<token>` (criptográficamente aleatorio)."""
+    return secrets.token_urlsafe(TOKEN_INVITACION_BYTES)
+
+
+def enlace_invitacion(token: str) -> str:
+    """Link ABSOLUTO que recibe el amigo (una sola definición del path)."""
+    return url_frontend(f"/landing?inv={token}")
+
+
+def motivo_invitacion_rechazada(*, es_propio: bool, ya_usuario: bool,
+                                enviada_reciente: bool) -> Optional[str]:
+    """Primer motivo por el que NO se puede invitar a ese correo (o `None`).
+
+    Función PURA (sin BD), mismo criterio que `motivo_codigo_invalido`: el
+    router junta los hechos y acá queda el orden de prioridad en un solo lugar.
+    El límite diario NO está acá porque se responde 429, no 400.
+    """
+    if es_propio:
+        return MOTIVO_INVITACION_PROPIA
+    if ya_usuario:
+        return MOTIVO_INVITACION_YA_USUARIO
+    if enviada_reciente:
+        return MOTIVO_INVITACION_DUPLICADA
+    return None
+
+
+def invitacion_pendiente_por_token(db: Session, token: Optional[str],
+                                   tenant_id: int) -> Optional[Invitacion]:
+    """La invitación `enviada` con ese token en el box, o `None`.
+
+    `None` es la respuesta a un token vacío, inexistente, de otro box o YA
+    usado (`registrado`): el alta lo ignora en silencio y nunca falla por eso.
+    """
+    limpio = (token or "").strip()
+    if not limpio:
+        return None
+    return db.query(Invitacion).filter(
+        Invitacion.token_rastreo == limpio,
+        Invitacion.tenant_id == tenant_id,
+        Invitacion.estado == EstadoInvitacion.enviada,
+    ).first()
+
+
+def marcar_invitacion_registrada(invitacion: Optional[Invitacion],
+                                 usuario_id: int,
+                                 momento: Optional[datetime] = None) -> None:
+    """Liga la invitación al usuario recién creado (no commitea).
+
+    Se llama DESPUÉS del `flush()` del alta, dentro de la misma transacción:
+    si el alta falla, la invitación sigue `enviada` y el link se puede reusar.
+    """
+    if invitacion is None:
+        return
+    invitacion.estado = EstadoInvitacion.registrado
+    invitacion.fecha_registro = momento or datetime.now(timezone.utc)
+    invitacion.usuario_registrado_id = usuario_id
+
+
+def datos_invitacion_enviada(invitacion: Invitacion, codigo: str) -> dict:
+    """Respuesta de `POST /referidos/invitaciones` (el enlace se puede reenviar)."""
+    return {
+        "id": invitacion.id,
+        "correo_prospecto": invitacion.correo_prospecto,
+        "codigo": codigo,
+        "token_rastreo": invitacion.token_rastreo,
+        "enlace": enlace_invitacion(invitacion.token_rastreo),
+        "estado": getattr(invitacion.estado, "value", invitacion.estado),
+        "fecha_envio": invitacion.fecha_envio,
+    }
+
+
+def datos_mi_invitacion(invitacion: Optional[Invitacion],
+                        codigo: Optional[str],
+                        nombre_invitador: Optional[str]) -> dict:
+    """Respuesta de `GET /referidos/mi-invitacion`.
+
+    Sin invitación devuelve `codigo=None` (200, no 404): "no me invitó nadie"
+    es un estado normal del alumno y el front simplemente no prellena nada.
+    No se expone el correo del invitador: el alumno ya lo conoce y no hace
+    falta ampliar la superficie de datos personales del endpoint.
+    """
+    if invitacion is None:
+        return {
+            "codigo": None,
+            "nombre_invitador": None,
+            "estado": None,
+            "fecha_registro": None,
+        }
+    return {
+        "codigo": codigo,
+        "nombre_invitador": nombre_invitador,
+        "estado": getattr(invitacion.estado, "value", invitacion.estado),
+        "fecha_registro": invitacion.fecha_registro,
     }

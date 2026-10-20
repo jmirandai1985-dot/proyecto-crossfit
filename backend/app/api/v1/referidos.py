@@ -7,6 +7,8 @@ QUÉ RESUELVE
   * `POST /api/v1/referidos/validar-codigo`  → el invitado aplica el código de otro alumno.
   * `GET  /api/v1/referidos/configuracion`   → el admin lee los porcentajes de su box.
   * `PUT  /api/v1/referidos/configuracion`   → el admin crea/actualiza esos porcentajes.
+  * `GET  /api/v1/referidos/mi-invitacion`   → la invitación que trajo al alumno (prellenado).
+  * `POST /api/v1/referidos/invitaciones`    → el alumno invita a un amigo por correo.
 
 Fase 5 agrega las PROMOCIONES POR VOLUMEN (sólo admin):
   * `GET/POST /promociones` y `PUT/DELETE /promociones/{id}` → CRUD del premio.
@@ -41,9 +43,18 @@ DECISIONES DE DISEÑO
 6. **Tenant:** el código se busca unido al dueño y filtrando por el box del
    token. El código de otro box se comporta como inexistente (no se filtra su
    existencia entre boxes).
+7. **Invitaciones alumno → alumno (054):** el link `/landing?inv=<token>` sólo
+   IDENTIFICA la invitación: no autentica, no aplica el código y no crea el
+   referido. El invitado se registra normal, la invitación queda ligada a su
+   cuenta y `mi-invitacion` devuelve el código para PRELLENAR el campo; aplicar
+   sigue siendo un acto explícito (`validar-codigo`).
+8. **El correo no deja filas fantasma:** si el envío falla se borra la
+   invitación y se responde 502. Si quedara, el anti-abuso de 7 días impediría
+   reenviar un correo que el amigo nunca recibió.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
@@ -52,15 +63,18 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import get_current_admin, get_current_user
 from app.db.database import get_db
 from app.models.referidos import (CodigoReferido, ConfiguracionReferidos,
-                                  EstadoPromocionDetectada, EstadoReferido,
-                                  PromocionReferidos,
+                                  EstadoInvitacion, EstadoPromocionDetectada,
+                                  EstadoReferido, Invitacion,
+                                  OrigenInvitacion, PromocionReferidos,
                                   PromocionReferidosDetectada,
                                   ReferidoAplicado)
 from app.models.usuario import Usuario
 from app.schemas.referidos import (ConfiguracionReferidosOut,
                                    ConfiguracionReferidosUpdate,
-                                   ConfirmarPromocionOut, MiCodigoOut,
-                                   PromocionDetectadaOut,
+                                   ConfirmarPromocionOut,
+                                   InvitarAlumnoRequest,
+                                   InvitacionEnviadaOut, MiCodigoOut,
+                                   MiInvitacionOut, PromocionDetectadaOut,
                                    PromocionReferidosCreate,
                                    PromocionReferidosOut,
                                    PromocionReferidosUpdate,
@@ -68,8 +82,11 @@ from app.schemas.referidos import (ConfiguracionReferidosOut,
                                    ValidarCodigoRequest)
 from app.services import promociones_referidos_service as promos_svc
 from app.services import referidos_service as svc
+from app.services.email_service import send_invitacion_alumno
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 def _exigir_alumno(current_user: dict) -> None:
@@ -171,6 +188,151 @@ def validar_codigo(
     db.refresh(referido)
 
     return svc.datos_referido_aplicado(referido, codigo)
+
+
+@router.get("/mi-invitacion", response_model=MiInvitacionOut)
+def mi_invitacion(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """La invitación de OTRO alumno que trajo a este usuario, o `codigo=None`.
+
+    Es la fuente del prellenado en la compra: el alumno ve el código de quien lo
+    invitó y decide si lo aplica. NO se aplica solo; el alta de
+    `referidos_aplicados` sigue siendo explícita (`POST /validar-codigo`).
+
+    Sin invitación se responde 200 con `codigo=None` (no 404): "no me invitó
+    nadie" es un estado normal y el front simplemente no prellena el campo.
+    """
+    _exigir_alumno(current_user)
+
+    fila = (
+        db.query(Invitacion, CodigoReferido, Usuario)
+        .join(CodigoReferido,
+              CodigoReferido.id == Invitacion.codigo_referido_id)
+        .join(Usuario, Usuario.id == Invitacion.enviado_por_usuario_id)
+        .filter(
+            Invitacion.usuario_registrado_id == current_user["usuario_id"],
+            Invitacion.tenant_id == current_user["tenant_id"],
+            Invitacion.origen == OrigenInvitacion.alumno,
+        )
+        .order_by(Invitacion.id.desc())
+        .first()
+    )
+    if fila is None:
+        return svc.datos_mi_invitacion(None, None, None)
+
+    invitacion, codigo, invitador = fila
+    return svc.datos_mi_invitacion(invitacion, codigo.codigo, invitador.nombre)
+
+
+@router.post("/invitaciones", response_model=InvitacionEnviadaOut,
+             status_code=status.HTTP_201_CREATED)
+def invitar_alumno(
+    datos: InvitarAlumnoRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Envía una invitación por correo a un amigo con el código del alumno.
+
+    El código y el remitente salen del TOKEN (nunca del body). El link lleva un
+    token opaco que no autoriza nada: sólo identifica la invitación para saber
+    quién se registró desde ella.
+
+    Anti-abuso, todo por ALUMNO (no por IP, que es compartida en el box):
+      * 5 envíos por día → 429;
+      * sin reenvío al mismo correo dentro de 7 días → 400 (el enlace viejo
+        sigue sirviendo, así que no se pierde nada);
+      * se rechaza el correo propio y el de alguien que ya es usuario del box.
+
+    Si el correo NO sale, la invitación se BORRA y se responde 502: no se deja
+    una fila fantasma que después bloquee el reenvío durante 7 días.
+    """
+    _exigir_alumno(current_user)
+
+    usuario_id = current_user["usuario_id"]
+    tenant_id = current_user["tenant_id"]
+
+    codigo = _codigo_propio(db, usuario_id)
+    if not bool(codigo.activo):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=svc.MOTIVO_CODIGO_INACTIVO)
+
+    usuario = db.query(Usuario).filter(
+        Usuario.id == usuario_id,
+        Usuario.tenant_id == tenant_id,
+    ).first()
+    if usuario is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Usuario no encontrado en este box")
+
+    correo = svc.normalizar_correo_invitacion(str(datos.correo))
+
+    ahora = datetime.now(timezone.utc)
+    enviadas_ultimo_dia = db.query(func.count(Invitacion.id)).filter(
+        Invitacion.enviado_por_usuario_id == usuario_id,
+        Invitacion.tenant_id == tenant_id,
+        Invitacion.fecha_envio >= ahora - timedelta(days=1),
+    ).scalar() or 0
+    if enviadas_ultimo_dia >= svc.LIMITE_INVITACIONES_DIA:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=svc.MOTIVO_INVITACION_LIMITE)
+
+    ya_usuario = db.query(Usuario.id).filter(
+        Usuario.correo == correo,
+        Usuario.tenant_id == tenant_id,
+    ).first() is not None
+    enviada_reciente = db.query(Invitacion.id).filter(
+        Invitacion.tenant_id == tenant_id,
+        Invitacion.correo_prospecto == correo,
+        Invitacion.fecha_envio >= ahora - timedelta(
+            days=svc.DIAS_BLOQUEO_REENVIO),
+    ).first() is not None
+
+    motivo = svc.motivo_invitacion_rechazada(
+        es_propio=(correo == (usuario.correo or "").strip().lower()),
+        ya_usuario=ya_usuario,
+        enviada_reciente=enviada_reciente,
+    )
+    if motivo is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=motivo)
+
+    invitacion = Invitacion(
+        tenant_id=tenant_id,
+        origen=OrigenInvitacion.alumno,
+        enviado_por_usuario_id=usuario_id,
+        correo_prospecto=correo,
+        codigo_referido_id=codigo.id,
+        token_rastreo=svc.generar_token_invitacion(),
+        estado=EstadoInvitacion.enviada,
+        fecha_envio=ahora,
+    )
+    db.add(invitacion)
+    db.flush()
+
+    enlace = svc.enlace_invitacion(invitacion.token_rastreo)
+    try:
+        enviado = bool(send_invitacion_alumno(
+            usuario.nombre, correo, codigo.codigo, enlace,
+            tenant_id=tenant_id))
+    except Exception:
+        logger.exception("Fallo inesperado enviando la invitación de referido")
+        enviado = False
+
+    if not enviado:
+        db.delete(invitacion)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=("No pudimos enviar la invitación por correo. "
+                    "Inténtalo de nuevo en unos minutos."))
+
+    db.commit()
+    db.refresh(invitacion)
+    return svc.datos_invitacion_enviada(invitacion, codigo.codigo)
 
 
 @router.get("/configuracion", response_model=ConfiguracionReferidosOut)

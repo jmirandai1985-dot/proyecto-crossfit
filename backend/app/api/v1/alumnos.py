@@ -28,7 +28,13 @@ from app.services.auditoria_service import registrar_auditoria
 # Ver docs/NOTIFICACIONES_PANEL.md.
 from app.services.notificaciones_panel import notificar_admins_del_tenant
 # Fase 2 del Sistema de Referidos: el auto-registro del alumno le asigna su código.
-from app.services.referidos_service import asignar_codigo_referido
+# Migración 054: el link `/landing?inv=<token>` liga la invitación de un alumno
+# al usuario que se registra (para prellenar el código en la compra).
+from app.services.referidos_service import (
+    asignar_codigo_referido,
+    invitacion_pendiente_por_token,
+    marcar_invitacion_registrada,
+)
 from app.services.email_service import (
     enviar_email_solicitud_admin,
     send_solicitud_prueba_clase, send_bienvenida_activacion,
@@ -135,6 +141,11 @@ class RegistroAlumnoNuevo(BaseModel):
         description="Estatura en cm (acepta campo 'estatura' o 'estatura_cm')")
     rut: str
     tenant_id: int = 1
+    # Token del link `/landing?inv=<token>` (invitación de un alumno). Es
+    # OPCIONAL: el auto-registro directo sigue funcionando igual y un token
+    # inválido/vencido/ya usado se ignora en silencio (el alta nunca falla por
+    # eso, y la respuesta no revela si el token existía).
+    token_invitacion: Optional[str] = Field(None, max_length=64)
 
     model_config = {"populate_by_name": True}
 
@@ -175,6 +186,12 @@ def registrar_alumno_nuevo(
     if not validar_rut(datos.rut):
         raise HTTPException(status_code=400, detail="RUT inválido (formato chileno requerido)")
 
+    # ── Invitación de un ALUMNO (migración 054) ─────────────────────────────
+    # Se busca ANTES de escribir nada: si el token no existe, es de otro box o
+    # ya se usó, la invitación es `None` y el registro sigue exactamente igual.
+    invitacion = invitacion_pendiente_por_token(
+        db, datos.token_invitacion, datos.tenant_id)
+
     plan_prueba = db.query(Plan).filter(
         Plan.tenant_id == datos.tenant_id,
         Plan.nombre == "Prueba"
@@ -209,6 +226,12 @@ def registrar_alumno_nuevo(
     )
     db.add(usuario)
     db.flush()
+
+    # La invitación de un alumno queda ligada a la cuenta recién creada: es lo
+    # que permite que `GET /referidos/mi-invitacion` devuelva el código de quien
+    # lo invitó y `SolicitarPlan` lo prellene. Misma transacción del alta: si
+    # algo falla después, la invitación sigue `enviada` y el link se puede reusar.
+    marcar_invitacion_registrada(invitacion, usuario.id)
 
     # La suscripción "Prueba" nace ACTIVA (no "pendiente"): el crédito de prueba
     # queda usable de inmediato y el gate de acceso limitado (require_full_access)

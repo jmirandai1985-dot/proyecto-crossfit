@@ -8,7 +8,7 @@ Este test lo cuida SIN base de datos (`--noconftest`):
     agregado en un solo lado rompería el INSERT o la UI en silencio);
   * el CHECK anti-auto-referido está en el modelo y en la migración;
   * las FK, UNIQUE y defaults clave (incluido el código único por alumno);
-  * la 053 es la única cabeza sobre la 052 (dos heads rompen el deploy) y su
+  * la 054 es la única cabeza sobre la 053 (dos heads rompen el deploy) y su
     revision id cabe en VARCHAR(32);
   * los modelos están registrados en `app/models/__init__.py` (es lo que hace
     que `Base.metadata.create_all()` —el setup de TEST— cree las tablas).
@@ -32,9 +32,11 @@ VERSIONES = RAIZ / "alembic" / "versions"
 MIGRACION = "051_referidos_invitaciones.py"
 MIGRACION_CREDITO = "052_creditos_referido.py"
 MIGRACION_PROMOCIONES = "053_promociones_referidos.py"
+MIGRACION_INVITACIONES_ALUMNO = "054_invitaciones_alumno.py"
 
-REVISION = "053_promociones_referidos"
-REVISION_PADRE = "052_creditos_referido"
+REVISION_PROMOCIONES = "053_promociones_referidos"
+REVISION = "054_invitaciones_alumno"
+REVISION_PADRE = "053_promociones_referidos"
 
 MODELOS = {
     "invitaciones": Invitacion,
@@ -90,7 +92,7 @@ def test_columnas_de_invitaciones():
     assert _columnas(Invitacion) == [
         "id", "tenant_id", "origen", "enviado_por_usuario_id",
         "correo_prospecto", "estado", "fecha_envio", "fecha_registro",
-        "usuario_registrado_id"]
+        "usuario_registrado_id", "codigo_referido_id", "token_rastreo"]
 
 
 def test_columnas_de_codigos_referido():
@@ -146,11 +148,23 @@ def _enums_de_la_migracion() -> dict:
     return enums
 
 
+def _valores_nuevos_de_la_054() -> dict:
+    """Valores de enum que agrega la 054 (el modelo ya no es espejo de la 051)."""
+    fuente = _fuente(f"alembic/versions/{MIGRACION_INVITACIONES_ALUMNO}")
+    m = re.search(r"VALORES_NUEVOS_ORIGEN\s*=\s*\(([^)]*)\)", fuente)
+    assert m, "VALORES_NUEVOS_ORIGEN"
+    return {"origen_invitacion": tuple(re.findall(r"['\"]([^'\"]+)['\"]",
+                                                   m.group(1)))}
+
+
 def test_los_enums_del_modelo_y_la_migracion_son_el_mismo_set():
     migracion = _enums_de_la_migracion()
     assert set(migracion) == set(ENUMS_MODELO)
+    # El modelo = lo que crea la 051 + lo que agrega la 054, en ese orden.
+    nuevos = _valores_nuevos_de_la_054()
     for nombre, enum_modelo in ENUMS_MODELO.items():
-        assert tuple(e.value for e in enum_modelo) == migracion[nombre], nombre
+        assert tuple(e.value for e in enum_modelo) == \
+            migracion[nombre] + nuevos.get(nombre, ()), nombre
 
 
 def test_las_columnas_enum_apuntan_al_tipo_nativo_correcto():
@@ -233,6 +247,14 @@ def test_fk_de_invitaciones():
         ("SET NULL", "usuarios")
     assert _ondelete(Invitacion, "usuario_registrado_id") == \
         ("SET NULL", "usuarios")
+    # 054: la invitación de un alumno guarda SU código (sin borrar la traza si
+    # el código se elimina) y el token del link es único.
+    assert _ondelete(Invitacion, "codigo_referido_id") == \
+        ("SET NULL", "codigos_referido")
+    assert Invitacion.__table__.c.token_rastreo.nullable is True
+    unico = _constraint(Invitacion, "uq_invitaciones_token_rastreo",
+                        UniqueConstraint)
+    assert _columnas_de(unico) == ["token_rastreo"]
     # La invitación nace `enviada` y el envío queda fechado por la BD.
     assert Invitacion.__table__.c.estado.nullable is False
     assert Invitacion.__table__.c.fecha_envio.nullable is False
@@ -281,17 +303,29 @@ def _datos_de_la_migracion(nombre: str = MIGRACION_PROMOCIONES) -> dict:
     return datos
 
 
-def test_la_053_es_la_unica_cabeza_sobre_la_052():
+def test_la_053_sigue_siendo_la_unica_hija_de_la_052():
     datos = _datos_de_la_migracion()
-    assert datos["revision"] == REVISION
-    assert datos["down_revision"] == REVISION_PADRE
-    assert len(REVISION) <= 32, "alembic_version.version_num es VARCHAR(32)"
+    assert datos["revision"] == REVISION_PROMOCIONES
+    assert datos["down_revision"] == "052_creditos_referido"
 
-    # Cadena de las tres fases de Referidos, sin saltos ni ramas.
+    # Cadena de las fases de Referidos, sin saltos ni ramas.
     assert _datos_de_la_migracion(MIGRACION_CREDITO)["down_revision"] == \
         "051_referidos_invitaciones"
     assert _datos_de_la_migracion(MIGRACION)["down_revision"] == \
         "050_auditoria_accion_varchar50"
+
+    hijos = [archivo.stem for archivo in VERSIONES.glob("*.py")
+             if _datos_de_archivo(archivo.name)["down_revision"] ==
+             "052_creditos_referido"]
+    assert hijos == [REVISION_PROMOCIONES], \
+        f"cabezas sobre 052_creditos_referido: {hijos}"
+
+
+def test_la_054_es_la_unica_cabeza_sobre_la_053():
+    datos = _datos_de_la_migracion(MIGRACION_INVITACIONES_ALUMNO)
+    assert datos["revision"] == REVISION
+    assert datos["down_revision"] == REVISION_PADRE
+    assert len(REVISION) <= 32, "alembic_version.version_num es VARCHAR(32)"
 
     hijos = [archivo.stem for archivo in VERSIONES.glob("*.py")
              if _datos_de_archivo(archivo.name)["down_revision"] ==

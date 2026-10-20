@@ -2,8 +2,8 @@
 //   Ejecutar:  node scripts/test-referidos.mjs
 //
 // No navega ni llama a la API: cubre normalización del código, validación de
-// porcentajes del admin, formato es-CL, texto para compartir y traducción de
-// errores de FastAPI/Pydantic a un mensaje humano.
+// porcentajes del admin, formato es-CL, texto para compartir, traducción de
+// errores de FastAPI/Pydantic y el montaje de la invitación por correo (054).
 import { readFileSync } from 'node:fs';
 import {
     ETIQUETAS_ESTADO_DETECCION, LARGO_MAXIMO_CODIGO, TIPOS_PREMIO,
@@ -128,6 +128,9 @@ const menu = leer('../src/config/menu.js');
 const marketing = leer('../src/pages/admin/Marketing.jsx');
 const solicitarPlan = leer('../src/pages/alumno/SolicitarPlan.jsx');
 const campo = leer('../src/components/CampoReferido.jsx');
+const invitaGana = leer('../src/pages/alumno/InvitaYGana.jsx');
+const invitarCorreo = leer('../src/components/InvitarPorCorreo.jsx');
+const landing = leer('../src/pages/LandingPage.jsx');
 const configuracion = leer('../src/components/ConfiguracionReferidos.jsx');
 const gestion = leer('../src/components/GestionPromocionesReferidos.jsx');
 const pendientes = leer('../src/components/PendientesPromocionesReferidos.jsx');
@@ -143,6 +146,26 @@ ok(/<ConfiguracionReferidos\s*\/>/.test(marketing) && /id:\s*'referidos'/.test(m
     'Marketing monta la sub-pestaña Referidos');
 ok(/<CampoReferido/.test(solicitarPlan) && /useState\(null\)/.test(solicitarPlan),
     'SolicitarPlan monta el campo y conserva el código al cambiar de paso');
+ok(/useMiInvitacion\s*\(/.test(solicitarPlan)
+    && /codigoSugerido=\{miInvitacionQ\.data\?\.codigo/.test(solicitarPlan),
+    'SolicitarPlan prellena el código de quien invitó al alumno');
+ok(/codigoSugerido/.test(campo) && /referido-prellenado/.test(campo)
+    && /mutateAsync|enviar/.test(campo),
+    'CampoReferido prellena pero NO aplica solo (sigue habiendo botón)');
+
+// Migración 054: la invitación por correo vive en "Invita y gana" y el
+// invitado aplica el código en la compra, no en la pantalla del invitador.
+ok(!/<CampoReferido/.test(invitaGana),
+    'InvitaYGana ya NO monta CampoReferido');
+ok(/<InvitarPorCorreo\s*\/>/.test(invitaGana),
+    'InvitaYGana monta la invitación por correo');
+ok(/useInvitarAlumno\s*\(/.test(invitarCorreo)
+    && /invitacion-enviada/.test(invitarCorreo)
+    && /btn-copiar-enlace/.test(invitarCorreo),
+    'InvitarPorCorreo envía, muestra el enlace y permite copiarlo');
+ok(/useSearchParams/.test(landing) && /searchParams\.get\('inv'\)/.test(landing)
+    && /token_invitacion/.test(landing),
+    'LandingPage lee ?inv= y lo manda al alta como token_invitacion');
 
 ok(/<GestionPromocionesReferidos\s*\/>/.test(configuracion)
     && /<PendientesPromocionesReferidos\s*\/>/.test(configuracion),
@@ -159,6 +182,10 @@ ok(/promocionesReferidos:\s*\['referidos'/.test(queries)
     && /promocionesDetectadas:/.test(queries)
     && /invalidateQueries\(\{ queryKey: \['referidos'\] \}\)/.test(queries),
     'las mutaciones invalidan la familia [referidos]');
+ok(/miInvitacion:\s*\['referidos'/.test(queries)
+    && /export function useMiInvitacion/.test(queries)
+    && /export function useInvitarAlumno/.test(queries),
+    'queries.js expone mi-invitacion y el envío de invitaciones');
 
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);

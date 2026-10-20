@@ -13,7 +13,7 @@ siempre del token) ni colar campos que el contrato no define.
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import (BaseModel, ConfigDict, Field, field_validator,
+from pydantic import (BaseModel, ConfigDict, EmailStr, Field, field_validator,
                       model_validator)
 
 from app.models.referidos import PeriodoPromocion, TipoPremio
@@ -51,6 +51,53 @@ class ValidarCodigoOut(BaseModel):
     referido_id: int
     estado: str
     mensaje: str
+
+
+# ── Invitaciones alumno → alumno (migración 054) ─────────────────────────────
+
+class InvitarAlumnoRequest(BaseModel):
+    """Cuerpo de `POST /referidos/invitaciones`: el correo del amigo.
+
+    `extra="forbid"`: el invitador NO manda su código ni su `usuario_id` (salen
+    del token) ni el token del link (lo genera el backend). El máximo es el de
+    `invitaciones.correo_prospecto` (`varchar(150)`), igual que el alta.
+    """
+
+    correo: EmailStr = Field(
+        ..., max_length=150,
+        description="Correo del amigo que recibirá la invitación.")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class InvitacionEnviadaOut(BaseModel):
+    """Respuesta de `POST /referidos/invitaciones`.
+
+    `enlace` incluye el `token_rastreo`: el alumno puede reenviarlo por su
+    cuenta (WhatsApp, etc.) sin que el backend genere otra invitación.
+    """
+
+    id: int
+    correo_prospecto: str
+    codigo: str
+    token_rastreo: str
+    enlace: str
+    estado: str
+    fecha_envio: datetime
+
+
+class MiInvitacionOut(BaseModel):
+    """Respuesta de `GET /referidos/mi-invitacion`.
+
+    `codigo=None` (con el resto en `None`) significa que ningún alumno invitó a
+    este usuario: es un 200, no un 404, porque es un estado normal del alumno
+    (y el front simplemente no prellena el campo).
+    """
+
+    codigo: str | None
+    nombre_invitador: str | None = None
+    estado: str | None = None
+    fecha_registro: datetime | None = None
 
 
 class ConfiguracionReferidosUpdate(BaseModel):

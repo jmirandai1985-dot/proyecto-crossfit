@@ -821,6 +821,46 @@ def send_solicitud_prueba_clase(nombre: str, correo: str, password_temporal: str
     return ok
 
 
+def send_invitacion_alumno(nombre_invitador: str, correo: str, codigo: str,
+                           enlace: str, tenant_id: int = None) -> bool:
+    """Invitación de un ALUMNO a un amigo: código visible + link rastreable.
+
+    `enlace` ya viene armado por el router (`url_frontend('/landing?inv=...')`):
+    acá NO se reconstruye, así el token y la URL tienen una sola fuente.
+
+    Se registra como `lead` (el destinatario todavía no es alumno) para que el
+    box lo vea en /admin/notificaciones. `alumno_id` queda NULL a propósito: el
+    alumno es el REMITENTE, no el destinatario; si se pasara, `_registrar_envio`
+    guardaría el correo del invitador en vez del prospecto.
+    """
+    if not correo:
+        return False
+
+    nombre = (nombre_invitador or "").strip() or "Un alumno del box"
+    primer_nombre = nombre.split()[0]
+    codigo_seguro = _escape_html((codigo or "").strip())
+    titulo = "¡Te invitaron a entrenar con nosotros! 🔥"
+    saludo = (f"¡Hola! {_escape_html(primer_nombre)} quiere que conozcas "
+              "Urban Training Box.")
+    cuerpo = (
+        "<p>Ya entrena con nosotros y te dejó su código de referido para que "
+        "pruebes una clase sin costo.</p>"
+        f"<p><strong>Tu código de invitación:</strong> {codigo_seguro}</p>"
+        "<p>Completa el formulario de la clase de prueba desde el botón de "
+        "abajo: tu código queda vinculado a tu registro y lo verás precargado "
+        "cuando elijas tu plan (sólo tienes que confirmarlo).</p>"
+        "<p>¡Nos vemos en el box!</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Quiero mi clase de prueba", enlace)
+    ok = _enviar(correo, "¡Te invitaron a entrenar en Urban Training Box! 🔥",
+                 html, None, tipo="invitacion_referido",
+                 destinatario_nombre=None, destinatario_rol="lead",
+                 tenant_id=tenant_id)
+    logger.info(
+        f"[invitacion_referido] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    return ok
+
+
 def send_bienvenida_activacion(nombre: str, correo: str, password: str, plan_nombre: str,
                                cantidad_clases: int, fecha_vigencia: str, link_app: str,
                                tenant_id: int = None) -> bool:
