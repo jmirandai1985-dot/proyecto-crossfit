@@ -205,7 +205,7 @@ const InvitaYGana = () => {
                             <span className="shrink-0 w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold flex items-center justify-center">3</span>
                             <span>
                                 Cuando el box confirma esa compra, tu amigo recibe su descuento y tú
-                                recibes un crédito para tu próxima compra.
+                                recibes un % de descuento para tu próxima compra.
                             </span>
                         </li>
                     </ol>

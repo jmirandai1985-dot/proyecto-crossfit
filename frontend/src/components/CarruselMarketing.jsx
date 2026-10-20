@@ -90,7 +90,7 @@ const TarjetaAviso = ({ aviso, onVerFlyer }) => {
 
 // Tarjeta de UN producto nuevo: foto, nombre y precio REALES (salen del producto
 // en el Bazar, así que si el admin le cambia el precio, acá se ve al instante).
-const TarjetaProducto = ({ aviso }) => {
+const TarjetaProducto = ({ aviso, onAbrir }) => {
     const tipo = tipoDe('producto_bazar');
     const foto = fotoDeTarjeta(aviso);
     const precio = precioDeTarjeta(aviso);
@@ -103,26 +103,33 @@ const TarjetaProducto = ({ aviso }) => {
         >
             <Remaches />
             <Etiqueta tipo={tipo} />
-            <div className="cm-foto">
-                <ImagenProducto url={foto} alt={tituloDeTarjeta(aviso)}
-                    respaldo={<IconoFoto />} />
-            </div>
-            <div className="cm-info">
-                <h3 className="cm-titulo" style={{ color: tipo.titulo }}>
-                    {tituloDeTarjeta(aviso)}
-                </h3>
-                {precio && (
-                    <div className="cm-precio" style={{ color: tipo.detalle }}>{precio}</div>
-                )}
-                <p className="cm-texto">{PIE_PRODUCTO}</p>
-            </div>
+            <button
+                type="button"
+                className="cm-abrir"
+                onClick={() => onAbrir(aviso.producto_id)}
+                aria-label={`Ver ${tituloDeTarjeta(aviso)} en el Bazar`}
+            >
+                <div className="cm-foto">
+                    <ImagenProducto url={foto} alt={tituloDeTarjeta(aviso)}
+                        respaldo={<IconoFoto />} />
+                </div>
+                <div className="cm-info">
+                    <h3 className="cm-titulo" style={{ color: tipo.titulo }}>
+                        {tituloDeTarjeta(aviso)}
+                    </h3>
+                    {precio && (
+                        <div className="cm-precio" style={{ color: tipo.detalle }}>{precio}</div>
+                    )}
+                    <p className="cm-texto">{PIE_PRODUCTO}</p>
+                </div>
+            </button>
         </article>
     );
 };
 
 // Tarjeta de VARIOS productos nuevos: la que el mockup rotula "Llegaron poleras
 // y polerones" — miniaturas y un "+N" cuando no caben todas.
-const TarjetaProductos = ({ tarjeta, onVerBazar }) => {
+const TarjetaProductos = ({ tarjeta, onVerBazar, onVerProducto }) => {
     const tipo = tipoDe('producto_bazar');
     const visibles = tarjeta.avisos.slice(0, MAX_MINIATURAS);
 
@@ -139,10 +146,16 @@ const TarjetaProductos = ({ tarjeta, onVerBazar }) => {
             </h3>
             <div className="cm-minis">
                 {visibles.map((aviso) => (
-                    <div className="cm-mini" key={aviso.id}>
+                    <button
+                        type="button"
+                        className="cm-mini"
+                        key={aviso.id}
+                        onClick={() => onVerProducto(aviso.producto_id)}
+                        aria-label={`Ver ${tituloDeTarjeta(aviso)} en el Bazar`}
+                    >
                         <ImagenProducto url={fotoDeTarjeta(aviso)}
                             alt={tituloDeTarjeta(aviso)} respaldo={<IconoFoto />} />
-                    </div>
+                    </button>
                 ))}
                 {tarjeta.extra > 0 && (
                     <div className="cm-mini cm-mas" style={{ color: tipo.detalle }}>
@@ -168,6 +181,15 @@ const TarjetaProductos = ({ tarjeta, onVerBazar }) => {
  */
 const CarruselMarketing = () => {
     const navigate = useNavigate();
+    // Abre el flujo de compra del producto TOCADO (mismo deep link que las
+    // tarjetas de la Tienda). Sin id, cae al catálogo para no romper el enlace.
+    const irAProducto = (productoId) => {
+        if (productoId == null) {
+            navigate('/alumno/bazar');
+            return;
+        }
+        navigate(`/alumno/bazar?producto=${productoId}`);
+    };
     const { data } = useAvisosMarketingVigentes();
     const tarjetas = useMemo(() => agruparParaCarrusel(data), [data]);
     const [flyer, setFlyer] = useState(null);
@@ -253,10 +275,12 @@ const CarruselMarketing = () => {
                     }
                     if (tarjeta.clase === 'producto') {
                         return <TarjetaProducto key={`producto-${tarjeta.aviso.id}`}
-                                                aviso={tarjeta.aviso} />;
+                                                 aviso={tarjeta.aviso}
+                                                 onAbrir={irAProducto} />;
                     }
                     return <TarjetaProductos key="productos"
                                              tarjeta={tarjeta}
+                                             onVerProducto={irAProducto}
                                              onVerBazar={() => navigate('/alumno/bazar')} />;
                 })}
             </div>

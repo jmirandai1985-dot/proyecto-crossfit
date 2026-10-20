@@ -24,6 +24,9 @@ const ok = (cond, msg) => {
 const INICIO = leer('../src/pages/alumno/InicioMobile.jsx');
 const BAZAR = leer('../src/pages/alumno/Bazar.jsx');
 const CSS = leer('../src/pages/alumno/inicioMobile.css');
+const CARRUSEL = leer('../src/components/CarruselMarketing.jsx');
+const CSS_CARRUSEL = leer('../src/components/carruselMarketing.css');
+const RESERVAS = leer('../../backend/app/api/v1/reservas.py');
 
 console.log('== 1. La tarjeta de la Tienda abre ESE producto (Parte C) ==');
 ok(/<button[\s\S]{0,400}className="prod"/.test(INICIO),
@@ -46,8 +49,6 @@ ok(BAZAR.includes('deepLinkAplicado.current === productoPedido'),
     'se aplica una vez por id (volver al catálogo no reabre el paso 2)');
 ok(BAZAR.includes('está agotado'), 'si el producto no tiene stock, avisa en el catálogo');
 
-const CARRUSEL = leer('../src/components/CarruselMarketing.jsx');
-
 console.log('== 3. El carrusel rota solo (Parte G) ==');
 ok(CARRUSEL.includes('setInterval('), 'programa el avance automático');
 ok(CARRUSEL.includes('}, 5500)'), 'cada ~5,5 s (dentro de los 5-6 s pedidos)');
@@ -66,6 +67,46 @@ ok(CARRUSEL.includes('pista.scrollTo(') && !CARRUSEL.includes('.scrollIntoView('
 ok(CARRUSEL.includes('onScroll={alDesplazar}'), 'el deslizamiento manual sigue funcionando');
 ok(CARRUSEL.includes('tarjetas.length <= 1'), 'con una sola tarjeta no rota');
 ok(CARRUSEL.includes('|| flyer ||'), 'con un flyer abierto tampoco');
+
+console.log('== 4. "Tu clase de hoy" refleja el estado real (incluido no-show) ==');
+ok(INICIO.includes('estado_visible'),
+    'lee el estado_visible que calcula el backend (misma regla que el Historial)');
+ok(INICIO.includes("falto: 'No asististe'"),
+    'el estado `falto` tiene un rótulo propio (no reutiliza "Reserva confirmada")');
+ok(INICIO.includes("estadoHoy === 'falto'"),
+    'el hero dibuja un mensaje específico cuando el alumno no asistió');
+ok(INICIO.includes("data-estado={estadoHoy || 'sin-clase'}"),
+    'el hero expone su estado para que el CSS lo distinga');
+ok(!INICIO.includes('reservaHoy?.asistio === true'),
+    'ya no reduce la asistencia a la primera reserva del día');
+ok(INICIO.includes('const asistioHoy = reservasDeHoy.some('),
+    'la barra inferior sigue verde si asistió a ALGUNA clase de hoy');
+ok(INICIO.includes('reservasDeHoy'),
+    'separa las reservas de hoy antes de elegir la del hero');
+ok(/\.ub-inicio \.hero\[data-estado="falto"\]/.test(CSS),
+    'el CSS tiene un tratamiento visual para el no-show');
+ok(!CSS.includes('.ub-inicio[data-checked="1"] .hero'),
+    'el color del hero ya no depende de una asistencia global del día');
+ok(RESERVAS.includes('func.abs(Clase.fecha - hoy)'),
+    'el endpoint ordena por cercanía a HOY: la reserva de hoy no se pierde por el limit=100');
+
+console.log('== 5. Las tarjetas del carrusel abren SU producto ==');
+ok(CARRUSEL.includes('const irAProducto = (productoId)'),
+    'el carrusel tiene un único abridor de producto (mismo deep link que la Tienda)');
+ok(CARRUSEL.includes('navigate(`/alumno/bazar?producto=${productoId}`)'),
+    'navega al Bazar con el id del producto tocado');
+ok(CARRUSEL.includes('className="cm-abrir"'),
+    'la tarjeta de UN producto envuelve su contenido en un <button>');
+ok(CARRUSEL.includes('onClick={() => onAbrir(aviso.producto_id)}'),
+    'tocar la tarjeta de UN producto abre ESE producto');
+ok(CARRUSEL.includes('onClick={() => onVerProducto(aviso.producto_id)}'),
+    'tocar una miniatura abre ESE producto (no sólo el catálogo)');
+ok(CARRUSEL.includes('onVerProducto={irAProducto}'),
+    'las miniaturas reciben el abridor del carrusel');
+ok(/button\.cm-mini\s*\{[^}]*cursor:\s*pointer/.test(CSS_CARRUSEL),
+    'las miniaturas se ven clickeables (cursor pointer)');
+ok(/\.cm-tarjeta\.cm-producto \.cm-abrir\s*\{/.test(CSS_CARRUSEL),
+    'el botón de la tarjeta conserva el layout de foto + texto');
 
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);

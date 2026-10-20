@@ -73,6 +73,46 @@ const diasDeLaSemana = (hoyStr) => {
 // 'YYYY-MM-DD' de un valor de fecha (a veces llega con hora ISO).
 const soloFecha = (v) => (v ? String(v).slice(0, 10) : '');
 
+// Estado VISIBLE de una reserva: lo calcula el backend (`estado_visible`) con
+// la MISMA regla del Historial. El fallback mantiene la pantalla usable si una
+// respuesta antigua todavía no trae el campo.
+const estadoDeReserva = (reserva) => {
+    if (reserva?.estado_visible) return reserva.estado_visible;
+    if (reserva?.asistio === true) return 'asistio';
+    const crudo = String(reserva?.estado || '').toLowerCase();
+    return ['cancelada', 'cancelada_tarde', 'cancelled', 'canceled'].includes(crudo)
+        ? 'cancelada'
+        : 'reservada';
+};
+
+// Reserva que representa "Tu clase de hoy": la PRÓXIMA `reservada` y, si el
+// día ya terminó, la ÚLTIMA clase del día. Así una clase de la mañana a la que
+// no se asistió no tapa la de la tarde (ni al revés).
+const elegirReservaHoy = (reservasDelDia) => {
+    const ordenadas = (reservasDelDia || [])
+        .slice()
+        .sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || ''));
+    const vigentes = ordenadas.filter(
+        (r) => !['cancelada', 'cancelada_tarde'].includes(estadoDeReserva(r))
+    );
+    return vigentes.find((r) => estadoDeReserva(r) === 'reservada')
+        || vigentes[vigentes.length - 1]
+        // Si SÓLO hubo clases canceladas, se muestra la última con su estado
+        // ("Cancelada") en vez de un "Sin clases hoy" que oculta lo que pasó.
+        || ordenadas[ordenadas.length - 1]
+        || null;
+};
+
+// Rótulo del hero para cada estado visible. "falto" es el no-show: la clase ya
+// empezó y el alumno no marcó asistencia.
+const ETIQUETA_ESTADO_HOY = {
+    reservada: 'Reserva confirmada',
+    asistio: 'Asististe',
+    falto: 'No asististe',
+    cancelada: 'Cancelada',
+    cancelada_tarde: 'Cancelada',
+};
+
 // "31 de diciembre" en el calendario de Chile (para "Vence el ...").
 const fechaLargaCortaChile = (valor) => {
     if (!valor) return '';
@@ -95,6 +135,7 @@ const precioCLP = (v) => {
 const ICONOS = {
     scan: <path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16" />,
     check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
+    x: <path d="M6 6l12 12M18 6 6 18" />,
     flame: <path d="M12 22c4 0 7-2.8 7-7 0-3-1.8-5-3-6.5-.5 1.5-1.5 2.5-2.5 3 0-4-1.5-7-4.5-9.5C9 7 5 10.5 5 15c0 4.2 3 7 7 7Z" />,
     tee: <path d="M8 3 3 6l2 4 3-1v11h8V9l3 1 2-4-5-3a4 4 0 0 1-8 0Z" />,
 };
@@ -161,14 +202,17 @@ const InicioMobile = ({
         ? `Fuerza ${nivelFuerza.nivel}`
         : null;
 
-    // Reserva de HOY: la primera del día por horario (el mockup muestra una sola).
-    const reservaHoy = (Array.isArray(reservas) ? reservas : [])
-        .filter((r) => (r.clase_fecha || r.fecha) === hoy)
-        .sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || ''))[0] || null;
+    // Reservas de HOY en el calendario chileno y la que representa el hero.
+    const reservasDeHoy = (Array.isArray(reservas) ? reservas : [])
+        .filter((r) => soloFecha(r.clase_fecha || r.fecha) === hoy);
+    const reservaHoy = elegirReservaHoy(reservasDeHoy);
+    const estadoHoy = reservaHoy ? estadoDeReserva(reservaHoy) : null;
 
-    // Asistió: un único estado global para la pantalla (como el mockup), tomado
-    // de la reserva de hoy. La barra inferior (bloque futuro) leerá el mismo.
-    const asistioHoy = reservaHoy?.asistio === true;
+    // Asistió: la barra inferior y "Tu semana" se pintan verdes si el alumno
+    // asistió a ALGUNA clase de hoy, aunque el hero muestre la próxima.
+    const asistioHoy = reservasDeHoy.some(
+        (r) => r.asistio === true || estadoDeReserva(r) === 'asistio'
+    );
 
     // ── Plan y créditos (los usa "Tu semana" para el ritmo ideal y, además,
     //    el bloque "Plan y créditos") ──
@@ -291,13 +335,13 @@ const InicioMobile = ({
                 </section>
 
                 {/* ── Reserva de hoy: el único bloque naranja a pantalla completa ── */}
-                <section className="hero" aria-label="Tu clase de hoy">
+                <section className="hero" data-estado={estadoHoy || 'sin-clase'}
+                    aria-label="Tu clase de hoy">
                     <div className="hr">
                         <span>Tu clase de hoy</span>
                         {reservaHoy && (
-                            <span className="chip">
-                                <span className="pend">Reserva confirmada</span>
-                                <span className="done">Asististe</span>
+                            <span className={`chip estado-${estadoHoy}`}>
+                                {ETIQUETA_ESTADO_HOY[estadoHoy] || 'Reserva confirmada'}
                             </span>
                         )}
                     </div>
@@ -305,8 +349,18 @@ const InicioMobile = ({
                         <>
                             <div className="time">{horaCorta(reservaHoy.hora_inicio)}</div>
                             <div className="what">{reservaHoy.disciplina_nombre || 'Clase'}</div>
-                            <div className="hint pend"><Icono nombre="scan" />Al llegar, escanea el QR de la entrada con la cámara de tu celular</div>
-                            <div className="hint done"><Icono nombre="check" />Asistencia marcada</div>
+                            {estadoHoy === 'reservada' && (
+                                <div className="hint pend"><Icono nombre="scan" />Al llegar, escanea el QR de la entrada con la cámara de tu celular</div>
+                            )}
+                            {estadoHoy === 'asistio' && (
+                                <div className="hint done"><Icono nombre="check" />Asistencia marcada</div>
+                            )}
+                            {estadoHoy === 'falto' && (
+                                <div className="hint falto"><Icono nombre="x" />No registramos tu asistencia en esta clase</div>
+                            )}
+                            {(estadoHoy === 'cancelada' || estadoHoy === 'cancelada_tarde') && (
+                                <div className="hint cancelada"><Icono nombre="x" />Esta clase fue cancelada</div>
+                            )}
                         </>
                     ) : (
                         <>

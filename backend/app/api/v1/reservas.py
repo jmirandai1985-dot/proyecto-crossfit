@@ -24,6 +24,7 @@ from app.services import churn_service
 # El estado VISIBLE de una reserva ("Mis Reservas") es el MISMO que usa el Historial del
 # alumno: una sola definición (`estado_asistencia`), para no volver a tener dos criterios.
 from app.services.historial_alumno_service import estado_asistencia
+from app.utils.santiago import hoy_santiago
 """
 Router de endpoints para gestión de Reservas
 """
@@ -650,7 +651,17 @@ def listar_reservas(
     if usuario_id is not None:
         query = query.filter(Reserva.alumno_id == usuario_id)
 
-    rows = query.offset(skip).limit(limit).all()
+    # ── Orden por cercanía al día de HOY (Chile) ──
+    # Sin `order_by`, `limit=100` podía dejar fuera la reserva de hoy cuando el
+    # alumno ya tenía muchas filas. Con la distancia a hoy, la clase de hoy
+    # queda SIEMPRE dentro del límite y primero; el mismo día se ordena por
+    # horario y, ante un empate, por id (resultado estable).
+    hoy = hoy_santiago()
+    rows = query.order_by(
+        func.abs(Clase.fecha - hoy).asc(),
+        Clase.hora_inicio.asc(),
+        Reserva.id.asc(),
+    ).offset(skip).limit(limit).all()
 
     return [_item_reserva(reserva, clase, disciplina_nombre)
             for reserva, clase, disciplina_nombre in rows]

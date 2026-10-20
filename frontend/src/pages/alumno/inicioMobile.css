@@ -150,8 +150,35 @@
     transition: background .35s;
 }
 
-.ub-inicio[data-checked="1"] .hero {
+.ub-inicio .hero[data-estado="asistio"] {
     background: var(--ub-ok);
+}
+
+/* No-show: la clase ya pasó y no se marcó asistencia. Se distingue del naranja
+   de "reservada" sin convertirlo en un error rojo alarmante. */
+.ub-inicio .hero[data-estado="falto"] {
+    background: #6b3a32;
+    color: #fff1eb;
+}
+
+.ub-inicio .hero[data-estado="falto"] .hint {
+    background: rgba(0, 0, 0, .22);
+}
+
+.ub-inicio .hero .chip.estado-falto {
+    color: #ffb8a5;
+}
+
+/* Clase cancelada: se ve apagada, no como una reserva vigente. */
+.ub-inicio .hero[data-estado="cancelada"],
+.ub-inicio .hero[data-estado="cancelada_tarde"] {
+    background: #46464f;
+    color: #ececf1;
+}
+
+.ub-inicio .hero[data-estado="cancelada"] .hint,
+.ub-inicio .hero[data-estado="cancelada_tarde"] .hint {
+    background: rgba(0, 0, 0, .2);
 }
 
 .ub-inicio .hero .hr {
@@ -425,15 +452,9 @@
     color: var(--ub-muted);
 }
 
-/* Pendiente/asistió: mismo mecanismo que el mockup (un solo estado global).
-   `!important` porque las reglas de layout (.hint/.chip) son más específicas. */
-.ub-inicio:not([data-checked="1"]) .done {
-    display: none !important;
-}
-
-.ub-inicio[data-checked="1"] .pend {
-    display: none !important;
-}
+/* El hero decide qué mensaje mostrar con `data-estado`; ya no se ocultan
+   `.pend`/`.done` globalmente, porque un alumno puede haber asistido a una
+   clase y tener otra `reservada` el mismo día. */
 
 /* ── Tu semana: círculos L–D + meta semanal + racha ── */
 .ub-inicio .wk {
