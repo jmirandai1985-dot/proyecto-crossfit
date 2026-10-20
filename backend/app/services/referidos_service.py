@@ -504,6 +504,7 @@ def confirmar_compra(db: Session, *, tenant_id: int, usuario_id: int,
             "precio_lista_clp": precio_lista_clp,
             "precio_final_clp": precio_lista_clp - descuento,
             "referido_aplicado_id": referido.id,
+            "promocion_detectada_id": None,
             "credito_referido_id": None,
             "credito_otorgado_id": (credito_otorgado.id
                                     if credito_otorgado is not None else None),
@@ -522,12 +523,15 @@ def confirmar_compra(db: Session, *, tenant_id: int, usuario_id: int,
     credito.fecha_usado = momento
     credito.descuento_aplicado_clp = descuento
     credito.suscripcion_id = suscripcion_id
-    # Snapshot en la fila del referido que originó el premio.
-    origen = db.query(ReferidoAplicado).filter(
-        ReferidoAplicado.id == credito.referido_aplicado_id
-    ).with_for_update().first()
-    if origen is not None:
-        origen.descuento_aplicado_invitador = Decimal(descuento)
+    # Snapshot en la fila del referido que originó el premio. Un crédito de
+    # `descuento_extra` (Fase 5) no tiene referido: su origen es la detección
+    # confirmada y no hay `referidos_aplicados` que actualizar.
+    if credito.referido_aplicado_id is not None:
+        origen = db.query(ReferidoAplicado).filter(
+            ReferidoAplicado.id == credito.referido_aplicado_id
+        ).with_for_update().first()
+        if origen is not None:
+            origen.descuento_aplicado_invitador = Decimal(descuento)
 
     return {
         "origen": "credito_invitador",
@@ -536,6 +540,7 @@ def confirmar_compra(db: Session, *, tenant_id: int, usuario_id: int,
         "precio_lista_clp": precio_lista_clp,
         "precio_final_clp": precio_lista_clp - descuento,
         "referido_aplicado_id": credito.referido_aplicado_id,
+        "promocion_detectada_id": credito.promocion_detectada_id,
         "credito_referido_id": credito.id,
         "credito_otorgado_id": None,
     }

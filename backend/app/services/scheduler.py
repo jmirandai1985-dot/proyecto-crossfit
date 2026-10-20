@@ -5,7 +5,9 @@ Ejecuta la lógica de generar-clases-dia a las 00:05 CLT (Chile)
 Además de las clases, agenda (sólo en la instancia LÍDER, con lock por job/día):
   · las 5 alertas de email (06:00 a 10:00 CLT),
   · el cierre de mes (día 1, 00:05 CLT),
-  · y el REENTRENAMIENTO SEMANAL del churn (lunes 04:30 CLT, ver `job_reentrenar_churn`).
+  · el REENTRENAMIENTO SEMANAL del churn (lunes 04:30 CLT, ver `job_reentrenar_churn`),
+  · y la DETECCIÓN DIARIA de promociones de referidos (23:55 CLT, ver
+    `job_detectar_promociones_referidos`).
 """
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -134,9 +136,12 @@ LATIDO_MIN = 5
 # agenda SIEMPRE, también en standby.
 # Eran 7; desde el 2026-10-16 son 8 (se sumó `reentrenar_churn`, el reentrenamiento
 # semanal del modelo de churn con la fuente real de asistencia).
+# Desde la Fase 5 de Referidos son 9: se sumó `detectar_promociones_referidos`
+# (23:55 CLT), que detecta umbrales de promociones por volumen y avisa al admin.
 IDS_NEGOCIO = ("generar_clases_diarias", "alerta_urgencia_renovacion",
                "alerta_renovacion", "alerta_inactividad", "alerta_ultimo_credito",
-               "alerta_sin_creditos", "cierre_mes", "reentrenar_churn")
+               "alerta_sin_creditos", "cierre_mes", "reentrenar_churn",
+               "detectar_promociones_referidos")
 
 # Tenant del reentrenamiento de ML: hoy hay UN solo box, igual que
 # `app/api/v1/ml.py` y `app/api/v1/kpis_populate.py` (TENANT_ID = 1).
@@ -144,7 +149,7 @@ TENANT_ML = 1
 
 
 def _programar_jobs_de_negocio():
-    """Agenda los 8 jobs de negocio (sólo la líder). Idempotente: `replace_existing`.
+    """Agenda los 9 jobs de negocio (sólo la líder). Idempotente: `replace_existing`.
 
     Se vuelve a llamar cuando la instancia recupera el liderazgo. El catch-up de
     `_programar` + el lock (job, día) cubren el hueco de los minutos sin líder.
@@ -188,6 +193,14 @@ def _programar_jobs_de_negocio():
                CronTrigger(day_of_week="mon", hour=4, minute=30, timezone=tz),
                "reentrenar_churn",
                "Reentrena el churn semanalmente (asistencia real)", ahora)
+    # ── Promociones de referidos por volumen (Fase 5, 23:55 CLT) ──
+    # Se corre al cerrar el día para que los referidos convertidos de hoy ya
+    # cuenten. La detección es idempotente (UNIQUE promoción/alumno/período).
+    _programar(job_detectar_promociones_referidos,
+               CronTrigger(hour=23, minute=55, timezone=tz),
+               "detectar_promociones_referidos",
+               "Detecta umbrales de promociones de referidos y avisa al admin",
+               ahora)
     return list(IDS_NEGOCIO)
 
 
@@ -599,6 +612,57 @@ def _reentrenar_churn_impl():
     except Exception as e:
         db.rollback()
         logger.error(f"❌ [Scheduler] no se pudo reentrenar el churn: {e}", exc_info=True)
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(e)
+        except Exception:
+            pass
+        return None
+    finally:
+        db.close()
+
+
+async def job_detectar_promociones_referidos():
+    """Job diario 23:55 CLT: detecta umbrales de promociones de referidos.
+
+    El trabajo es bloqueante (consulta referidos convertidos y escribe avisos),
+    así que corre en un hilo aparte igual que las alertas. El lock (job, día)
+    evita que dos instancias detecten/notifiquen el mismo umbral; además la
+    inserción es idempotente por la UNIQUE (promoción, alumno, período).
+    """
+    from app.services.scheduler_lock import lock_de_job
+    with lock_de_job("detectar_promociones_referidos") as puede:
+        if not puede:
+            logger.info(
+                "🔒 [Scheduler] detectar_promociones_referidos ya lo tomó otra "
+                "instancia hoy; se omite")
+            return
+        return await to_thread.run_sync(_detectar_promociones_referidos_impl)
+
+
+def _detectar_promociones_referidos_impl():
+    """Cuerpo síncrono del job: detecta, commitea y avisa (best-effort)."""
+    from app.db.database import SessionLocal
+    from app.services import promociones_referidos_service as svc
+
+    db = SessionLocal()
+    try:
+        resultado = svc.detectar_y_notificar(db)
+        if resultado["nuevas"]:
+            logger.info(
+                "🎁 [Scheduler] promociones de referidos: "
+                f"{resultado['nuevas']} umbral(es) nuevo(s), "
+                f"{resultado['avisos_campana']} aviso(s) de campana, "
+                f"{resultado['correos']} correo(s)")
+        else:
+            logger.info(
+                "✅ [Scheduler] promociones de referidos: sin umbrales nuevos")
+        return resultado
+    except Exception as e:
+        db.rollback()
+        logger.error(
+            f"❌ [Scheduler] no se pudieron detectar promociones de referidos: "
+            f"{e}", exc_info=True)
         try:
             import sentry_sdk
             sentry_sdk.capture_exception(e)

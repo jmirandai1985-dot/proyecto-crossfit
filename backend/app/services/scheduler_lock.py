@@ -93,6 +93,8 @@ CLAVES_JOB = {
     # Reentrenamiento semanal del churn (scheduler.py, lunes 04:30 CLT). Sin esta entrada,
     # `_clave_job` devolvería el default 9000 y el lock no sería el de ESTE job.
     "reentrenar_churn": 1008,
+    # Detección diaria de umbrales de promociones de referidos (23:55 CLT).
+    "detectar_promociones_referidos": 1009,
 }
 
 _conexion_lider = None

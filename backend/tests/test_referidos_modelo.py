@@ -1,13 +1,14 @@
 """
-El esquema de Referidos + Invitación por correo (migración 051) es el contrato
-de la Fase 1. Este test lo cuida SIN base de datos (`--noconftest`):
+El esquema de Referidos + Invitación por correo es el contrato de las fases 1-5.
+Este test lo cuida SIN base de datos (`--noconftest`):
 
-  * las 6 tablas existen en el metadata con las columnas pedidas;
-  * los enums del modelo y los de la migración son el MISMO set (un estado
+  * las tablas del módulo existen en el metadata con las columnas pedidas,
+    incluido el snapshot del premio de Fase 5 (`promociones_referidos_detectadas`);
+  * los enums del modelo y los de la migración 051 son el MISMO set (un estado
     agregado en un solo lado rompería el INSERT o la UI en silencio);
   * el CHECK anti-auto-referido está en el modelo y en la migración;
   * las FK, UNIQUE y defaults clave (incluido el código único por alumno);
-  * la 051 es la única cabeza sobre la 050 (dos heads rompen el deploy) y su
+  * la 053 es la única cabeza sobre la 052 (dos heads rompen el deploy) y su
     revision id cabe en VARCHAR(32);
   * los modelos están registrados en `app/models/__init__.py` (es lo que hace
     que `Base.metadata.create_all()` —el setup de TEST— cree las tablas).
@@ -20,18 +21,20 @@ from pathlib import Path
 from sqlalchemy import CheckConstraint, UniqueConstraint
 
 from app.models.referidos import (
-    CodigoReferido, ConfiguracionReferidos, EstadoInvitacion,
-    EstadoPromocionDetectada, EstadoReferido, Invitacion, OrigenInvitacion,
-    PeriodoPromocion, PromocionReferidos, PromocionReferidosDetectada,
-    ReferidoAplicado, TipoPremio,
+    CodigoReferido, ConfiguracionReferidos, CreditoReferido,
+    EstadoInvitacion, EstadoPromocionDetectada, EstadoReferido, Invitacion,
+    OrigenInvitacion, PeriodoPromocion, PromocionReferidos,
+    PromocionReferidosDetectada, ReferidoAplicado, TipoPremio,
 )
 
 RAIZ = Path(__file__).resolve().parents[1]          # .../backend
 VERSIONES = RAIZ / "alembic" / "versions"
 MIGRACION = "051_referidos_invitaciones.py"
+MIGRACION_CREDITO = "052_creditos_referido.py"
+MIGRACION_PROMOCIONES = "053_promociones_referidos.py"
 
-REVISION = "051_referidos_invitaciones"
-REVISION_PADRE = "050_auditoria_accion_varchar50"
+REVISION = "053_promociones_referidos"
+REVISION_PADRE = "052_creditos_referido"
 
 MODELOS = {
     "invitaciones": Invitacion,
@@ -40,6 +43,7 @@ MODELOS = {
     "configuracion_referidos": ConfiguracionReferidos,
     "promociones_referidos": PromocionReferidos,
     "promociones_referidos_detectadas": PromocionReferidosDetectada,
+    "creditos_referido": CreditoReferido,
 }
 
 ENUMS_MODELO = {
@@ -117,8 +121,16 @@ def test_columnas_de_promociones_referidos():
 def test_columnas_de_promociones_referidos_detectadas():
     assert _columnas(PromocionReferidosDetectada) == [
         "id", "promocion_id", "usuario_id", "periodo_cumplido",
-        "fecha_deteccion", "estado", "fecha_confirmacion",
+        "nombre_promocion", "umbral_referidos_convertidos", "tipo_premio",
+        "valor_premio", "fecha_deteccion", "estado", "fecha_confirmacion",
         "confirmado_por_usuario_id"]
+
+
+def test_columnas_del_credito_con_los_dos_origenes():
+    assert _columnas(CreditoReferido) == [
+        "id", "tenant_id", "usuario_id", "referido_aplicado_id",
+        "promocion_detectada_id", "porcentaje", "estado", "fecha_otorgado",
+        "fecha_usado", "descuento_aplicado_clp", "suscripcion_id"]
 
 
 # ── 2. Enums: modelo ↔ migración ────────────────────────────────────────────
@@ -195,6 +207,26 @@ def _columnas_de(constraint) -> list:
     return [col.name for col in constraint.columns]
 
 
+def test_credito_tiene_exactamente_un_origen():
+    """Un crédito nace de UN referido O de UNA detección, nunca de ambos."""
+    assert _constraint(CreditoReferido,
+                       "uq_creditos_referido_referido_aplicado_id",
+                       UniqueConstraint)
+    assert _constraint(CreditoReferido,
+                       "uq_creditos_referido_promocion_detectada_id",
+                       UniqueConstraint)
+    check = _constraint(CreditoReferido, "ck_creditos_referido_un_origen")
+    texto = str(check.sqltext)
+    assert "referido_aplicado_id IS NOT NULL" in texto
+    assert "promocion_detectada_id IS NOT NULL" in texto
+    assert "= 1" in texto
+
+    assert _ondelete(CreditoReferido, "promocion_detectada_id") == \
+        ("CASCADE", "promociones_referidos_detectadas")
+    assert CreditoReferido.__table__.c.referido_aplicado_id.nullable is True
+    assert CreditoReferido.__table__.c.promocion_detectada_id.nullable is True
+
+
 def test_fk_de_invitaciones():
     assert _ondelete(Invitacion, "tenant_id") == ("CASCADE", "tenants")
     assert _ondelete(Invitacion, "enviado_por_usuario_id") == \
@@ -238,8 +270,8 @@ def test_fk_de_configuracion_promociones_y_detectadas():
 
 # ── 4. Migración y registro para create_all ─────────────────────────────────
 
-def _datos_de_la_migracion() -> dict:
-    fuente = _fuente(f"alembic/versions/{MIGRACION}")
+def _datos_de_la_migracion(nombre: str = MIGRACION_PROMOCIONES) -> dict:
+    fuente = _fuente(f"alembic/versions/{nombre}")
     datos = {}
     for clave in ("revision", "down_revision"):
         m = re.search(rf"^{clave}\s*(?::[^=]+)?=\s*['\"]([^'\"]+)['\"]",
@@ -249,11 +281,17 @@ def _datos_de_la_migracion() -> dict:
     return datos
 
 
-def test_la_051_es_la_unica_cabeza_sobre_la_050():
+def test_la_053_es_la_unica_cabeza_sobre_la_052():
     datos = _datos_de_la_migracion()
     assert datos["revision"] == REVISION
     assert datos["down_revision"] == REVISION_PADRE
     assert len(REVISION) <= 32, "alembic_version.version_num es VARCHAR(32)"
+
+    # Cadena de las tres fases de Referidos, sin saltos ni ramas.
+    assert _datos_de_la_migracion(MIGRACION_CREDITO)["down_revision"] == \
+        "051_referidos_invitaciones"
+    assert _datos_de_la_migracion(MIGRACION)["down_revision"] == \
+        "050_auditoria_accion_varchar50"
 
     hijos = [archivo.stem for archivo in VERSIONES.glob("*.py")
              if _datos_de_archivo(archivo.name)["down_revision"] ==
@@ -290,6 +328,12 @@ def test_defaults_del_esquema():
     assert detectada.estado.nullable is False
     assert detectada.fecha_confirmacion.nullable is True
     assert detectada.confirmado_por_usuario_id.nullable is True
+    # El premio se congela al detectar: nombre, umbral y tipo son obligatorios;
+    # el valor sólo aplica a días/porcentaje.
+    assert detectada.nombre_promocion.nullable is False
+    assert detectada.umbral_referidos_convertidos.nullable is False
+    assert detectada.tipo_premio.nullable is False
+    assert detectada.valor_premio.nullable is True
     # Los porcentajes del box son obligatorios (default 0 en la BD).
     assert ConfiguracionReferidos.__table__.c \
         .porcentaje_descuento_invitado.nullable is False

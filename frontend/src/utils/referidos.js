@@ -30,6 +30,121 @@ export function validarCodigoIngresado(codigo) {
     return { valido: true, codigo: normalizado, error: '' };
 }
 
+// ── Fase 5: promociones por volumen ─────────────────────────────────────────
+// Los ids son los del enum `TipoPremio` del backend: el panel no inventa un
+// vocabulario paralelo que después haya que traducir a mano.
+export const TIPOS_PREMIO = [
+    {
+        id: 'mes_gratis',
+        label: 'Mes gratis',
+        ayuda: 'Extiende 30 días la suscripción vigente del alumno.',
+        pideValor: false,
+    },
+    {
+        id: 'dias_gratis',
+        label: 'Días gratis',
+        ayuda: 'Extiende la suscripción vigente los días que indiques.',
+        pideValor: true,
+        unidad: 'días',
+    },
+    {
+        id: 'descuento_extra',
+        label: 'Descuento extra',
+        ayuda: 'Crédito de % para la próxima compra del alumno.',
+        pideValor: true,
+        unidad: '%',
+    },
+];
+
+export const ETIQUETAS_ESTADO_DETECCION = {
+    pendiente_confirmacion: 'Pendiente',
+    confirmado: 'Confirmada',
+    rechazado: 'Rechazada',
+};
+
+export function etiquetaTipoPremio(tipo) {
+    return TIPOS_PREMIO.find((opcion) => opcion.id === tipo)?.label || tipo || '—';
+}
+
+// Texto del premio con la misma idea que `texto_premio` del backend. La
+// autoridad sigue siendo el backend (el componente muestra `premio_texto` en
+// las filas detectadas); esto es para el formulario y la vista previa.
+export function formatearValorPremio(tipo, valor) {
+    if (tipo === 'mes_gratis') return '1 mes gratis (30 días)';
+    const numero = Number(valor);
+    if (!Number.isFinite(numero)) return '—';
+    if (tipo === 'dias_gratis') return `${numero} ${numero === 1 ? 'día' : 'días'} gratis`;
+    if (tipo === 'descuento_extra') {
+        const texto = new Intl.NumberFormat('es-CL', { maximumFractionDigits: 2 }).format(numero);
+        return `${texto} % de descuento extra`;
+    }
+    return '—';
+}
+
+/**
+ * Valida el formulario del admin y devuelve el payload EXACTO del backend.
+ * `mes_gratis` no manda valor (se normaliza a null); los otros tipos sí.
+ */
+export function validarPromocionReferido(form = {}) {
+    const errores = {};
+    const nombre = String(form.nombre ?? '').trim();
+    if (!nombre) errores.nombre = 'Escribe un nombre para la promoción.';
+    else if (nombre.length > 150) errores.nombre = 'El nombre no puede superar los 150 caracteres.';
+
+    const umbralTexto = String(form.umbral_referidos_convertidos ?? '').trim();
+    let umbral = null;
+    if (!/^\d+$/.test(umbralTexto)) {
+        errores.umbral_referidos_convertidos = 'Usa un número entero de referidos.';
+    } else {
+        umbral = Number(umbralTexto);
+        if (umbral < 1 || umbral > 10000) {
+            errores.umbral_referidos_convertidos = 'El umbral debe estar entre 1 y 10.000.';
+        }
+    }
+
+    const tipo = TIPOS_PREMIO.some((opcion) => opcion.id === form.tipo_premio)
+        ? form.tipo_premio
+        : null;
+    if (!tipo) errores.tipo_premio = 'Elige el premio de la promoción.';
+
+    let valor = null;
+    if (tipo === 'dias_gratis') {
+        const texto = String(form.valor_premio ?? '').trim();
+        if (!/^\d+$/.test(texto)) {
+            errores.valor_premio = 'Los días gratis deben ser un número entero.';
+        } else {
+            valor = Number(texto);
+            if (valor < 1 || valor > 10000) errores.valor_premio = 'Los días deben estar entre 1 y 10.000.';
+        }
+    } else if (tipo === 'descuento_extra') {
+        const porcentaje = validarPorcentajeReferido(form.valor_premio);
+        if (!porcentaje.valido) {
+            errores.valor_premio = porcentaje.error;
+        } else if (porcentaje.valor <= 0) {
+            errores.valor_premio = 'El descuento extra debe ser mayor que 0 %.';
+        } else {
+            valor = porcentaje.valor;
+        }
+    }
+
+    if (Object.keys(errores).length > 0) {
+        return { valido: false, errores, payload: null };
+    }
+
+    return {
+        valido: true,
+        errores: {},
+        payload: {
+            nombre,
+            umbral_referidos_convertidos: umbral,
+            periodo: 'mensual',
+            tipo_premio: tipo,
+            valor_premio: valor,
+            activo: Boolean(form.activo),
+        },
+    };
+}
+
 // Porcentaje del admin: 0–100, hasta 2 decimales. Se acepta coma decimal
 // ("12,5") porque es lo natural en teclados en español.
 export function validarPorcentajeReferido(valor) {

@@ -8,6 +8,15 @@ QUÉ RESUELVE
   * `GET  /api/v1/referidos/configuracion`   → el admin lee los porcentajes de su box.
   * `PUT  /api/v1/referidos/configuracion`   → el admin crea/actualiza esos porcentajes.
 
+Fase 5 agrega las PROMOCIONES POR VOLUMEN (sólo admin):
+  * `GET/POST /promociones` y `PUT/DELETE /promociones/{id}` → CRUD del premio.
+  * `GET /promociones-detectadas` → umbrales alcanzados, con el premio congelado.
+  * `POST /promociones-detectadas/{id}/confirmar` → APLICA el premio.
+  * `POST /promociones-detectadas/{id}/rechazar` → no aplica nada.
+
+El `tenant_id` sale SIEMPRE del token y una promoción/detección de otro box se
+comporta como inexistente (404), igual que el resto de los recursos del panel.
+
 DECISIONES DE DISEÑO
 --------------------
 1. **El invitado ya está registrado.** `validar-codigo` exige token y usa
@@ -37,16 +46,27 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_admin, get_current_user
 from app.db.database import get_db
 from app.models.referidos import (CodigoReferido, ConfiguracionReferidos,
-                                  EstadoReferido, ReferidoAplicado)
+                                  EstadoPromocionDetectada, EstadoReferido,
+                                  PromocionReferidos,
+                                  PromocionReferidosDetectada,
+                                  ReferidoAplicado)
 from app.models.usuario import Usuario
 from app.schemas.referidos import (ConfiguracionReferidosOut,
-                                   ConfiguracionReferidosUpdate, MiCodigoOut,
-                                   ValidarCodigoOut, ValidarCodigoRequest)
+                                   ConfiguracionReferidosUpdate,
+                                   ConfirmarPromocionOut, MiCodigoOut,
+                                   PromocionDetectadaOut,
+                                   PromocionReferidosCreate,
+                                   PromocionReferidosOut,
+                                   PromocionReferidosUpdate,
+                                   RechazarPromocionOut, ValidarCodigoOut,
+                                   ValidarCodigoRequest)
+from app.services import promociones_referidos_service as promos_svc
 from app.services import referidos_service as svc
 
 router = APIRouter()
@@ -195,3 +215,211 @@ def actualizar_configuracion(
     db.refresh(config)
 
     return svc.datos_configuracion(config)
+
+
+# ── Fase 5: promociones por volumen (sólo admin) ─────────────────────────────
+
+def _promocion_del_tenant(db: Session, tenant_id: int,
+                          promocion_id: int) -> PromocionReferidos:
+    """La promoción del box del token; la de otro box se comporta como 404."""
+    promocion = db.query(PromocionReferidos).filter(
+        PromocionReferidos.id == promocion_id,
+        PromocionReferidos.tenant_id == tenant_id,
+    ).first()
+    if promocion is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Promoción no encontrada.")
+    return promocion
+
+
+def _aplicar_datos_promocion(promocion: PromocionReferidos,
+                             datos: PromocionReferidosCreate) -> None:
+    """Copia el cuerpo validado al ORM (crear y editar comparten las reglas)."""
+    promocion.nombre = datos.nombre.strip()
+    promocion.umbral_referidos_convertidos = datos.umbral_referidos_convertidos
+    promocion.periodo = datos.periodo
+    promocion.tipo_premio = datos.tipo_premio
+    promocion.valor_premio = datos.valor_premio
+    promocion.activo = bool(datos.activo)
+
+
+def _pendientes_por_promocion(db: Session, tenant_id: int) -> dict:
+    """`{promocion_id: pendientes}` en UNA query (sin N+1 en la lista)."""
+    filas = (
+        db.query(PromocionReferidosDetectada.promocion_id,
+                 func.count(PromocionReferidosDetectada.id))
+        .join(PromocionReferidos,
+              PromocionReferidos.id == PromocionReferidosDetectada.promocion_id)
+        .filter(
+            PromocionReferidos.tenant_id == tenant_id,
+            PromocionReferidosDetectada.estado
+            == EstadoPromocionDetectada.pendiente_confirmacion,
+        )
+        .group_by(PromocionReferidosDetectada.promocion_id)
+        .all()
+    )
+    return {int(promocion_id): int(total) for promocion_id, total in filas}
+
+
+@router.get("/promociones", response_model=list[PromocionReferidosOut])
+def listar_promociones(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Todas las promociones del box, con cuántos umbrales esperan confirmación."""
+    tenant_id = current_user["tenant_id"]
+    promociones = db.query(PromocionReferidos).filter(
+        PromocionReferidos.tenant_id == tenant_id
+    ).order_by(
+        PromocionReferidos.activo.desc(),
+        PromocionReferidos.umbral_referidos_convertidos,
+        PromocionReferidos.id,
+    ).all()
+    pendientes = _pendientes_por_promocion(db, tenant_id)
+    return [promos_svc.serializar_promocion(
+        promocion, pendientes.get(promocion.id, 0)) for promocion in promociones]
+
+
+@router.post("/promociones", response_model=PromocionReferidosOut,
+             status_code=status.HTTP_201_CREATED)
+def crear_promocion(
+    datos: PromocionReferidosCreate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Crea una promoción por volumen en el box del token.
+
+    El valor del premio ya viene validado por Pydantic según el tipo
+    (`mes_gratis` sin valor, `dias_gratis` entero, `descuento_extra` 0-100 %).
+    """
+    promocion = PromocionReferidos(tenant_id=current_user["tenant_id"])
+    _aplicar_datos_promocion(promocion, datos)
+    db.add(promocion)
+    db.commit()
+    db.refresh(promocion)
+    return promos_svc.serializar_promocion(promocion)
+
+
+@router.put("/promociones/{promocion_id}",
+            response_model=PromocionReferidosOut)
+def actualizar_promocion(
+    promocion_id: int,
+    datos: PromocionReferidosUpdate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Actualiza una promoción. Los premios YA detectados conservan su snapshot."""
+    tenant_id = current_user["tenant_id"]
+    promocion = _promocion_del_tenant(db, tenant_id, promocion_id)
+    _aplicar_datos_promocion(promocion, datos)
+    db.commit()
+    db.refresh(promocion)
+    pendientes = _pendientes_por_promocion(db, tenant_id)
+    return promos_svc.serializar_promocion(
+        promocion, pendientes.get(promocion.id, 0))
+
+
+@router.delete("/promociones/{promocion_id}")
+def eliminar_promocion(
+    promocion_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Borra una promoción SIN historial. Si ya detectó umbrales, se desactiva.
+
+    Borrarla con detecciones se llevaría por CASCADE la traza de premios ya
+    ganados; el panel ofrece apagarla (`activo=false`) en ese caso.
+    """
+    tenant_id = current_user["tenant_id"]
+    promocion = _promocion_del_tenant(db, tenant_id, promocion_id)
+    detectadas = db.query(PromocionReferidosDetectada.id).filter(
+        PromocionReferidosDetectada.promocion_id == promocion.id
+    ).first()
+    if detectadas is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=("Esta promoción ya detectó umbrales y no se puede borrar: "
+                    "apágala para conservar el historial de premios."))
+    db.delete(promocion)
+    db.commit()
+    return {"status": "ok", "id": promocion_id}
+
+
+@router.get("/promociones-detectadas",
+            response_model=list[PromocionDetectadaOut])
+def listar_promociones_detectadas(
+    estado: str = "pendiente_confirmacion",
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Umbrales detectados del box. `estado=todas` incluye el historial."""
+    tenant_id = current_user["tenant_id"]
+    consulta = (
+        db.query(PromocionReferidosDetectada, Usuario)
+        .join(PromocionReferidos,
+              PromocionReferidos.id == PromocionReferidosDetectada.promocion_id)
+        .join(Usuario, Usuario.id == PromocionReferidosDetectada.usuario_id)
+        .filter(PromocionReferidos.tenant_id == tenant_id)
+    )
+    if estado != "todas":
+        valores = {opcion.value
+                   for opcion in EstadoPromocionDetectada}
+        if estado not in valores:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=("Estado inválido. Usa 'pendiente_confirmacion', "
+                        "'confirmado', 'rechazado' o 'todas'."))
+        consulta = consulta.filter(
+            PromocionReferidosDetectada.estado == estado)
+    filas = consulta.order_by(
+        PromocionReferidosDetectada.fecha_deteccion.desc(),
+        PromocionReferidosDetectada.id.desc(),
+    ).all()
+    return [promos_svc.serializar_deteccion(deteccion, alumno)
+            for deteccion, alumno in filas]
+
+
+@router.post("/promociones-detectadas/{deteccion_id}/confirmar",
+             response_model=ConfirmarPromocionOut)
+def confirmar_promocion_detectada(
+    deteccion_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Confirma el umbral y APLICA el premio congelado (extensión o crédito)."""
+    try:
+        resultado = promos_svc.confirmar_deteccion(
+            db,
+            tenant_id=current_user["tenant_id"],
+            deteccion_id=deteccion_id,
+            admin_id=current_user["usuario_id"],
+        )
+        db.commit()
+        return resultado
+    except promos_svc.ErrorPromocion as error:
+        db.rollback()
+        raise HTTPException(status_code=error.status_code,
+                            detail=error.mensaje)
+
+
+@router.post("/promociones-detectadas/{deteccion_id}/rechazar",
+             response_model=RechazarPromocionOut)
+def rechazar_promocion_detectada(
+    deteccion_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Rechaza el umbral sin aplicar ningún premio."""
+    try:
+        resultado = promos_svc.rechazar_deteccion(
+            db,
+            tenant_id=current_user["tenant_id"],
+            deteccion_id=deteccion_id,
+            admin_id=current_user["usuario_id"],
+        )
+        db.commit()
+        return resultado
+    except promos_svc.ErrorPromocion as error:
+        db.rollback()
+        raise HTTPException(status_code=error.status_code,
+                            detail=error.mensaje)

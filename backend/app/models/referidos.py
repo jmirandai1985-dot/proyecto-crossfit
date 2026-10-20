@@ -307,11 +307,15 @@ class PromocionReferidos(Base):
 class PromocionReferidosDetectada(Base):
     """Un alumno alcanzó el umbral de una promoción en un período.
 
-    La Fase 2/3 detecta el cumplimiento y crea la fila en
-    `pendiente_confirmacion`, que dispara la notificación al admin (mismo
-    patrón que `notificaciones_enviadas`). El admin la resuelve a `confirmado`
-    o `rechazado`. La UNIQUE (promoción, alumno, período) hace idempotente la
-    detección: el mismo umbral no se notifica dos veces.
+    La Fase 5 detecta el cumplimiento y crea la fila en
+    `pendiente_confirmacion`, que dispara la notificación al admin (campana +
+    correo). El admin la resuelve a `confirmado` (aplica el premio) o
+    `rechazado` (no aplica nada). La UNIQUE (promoción, alumno, período) hace
+    idempotente la detección: el mismo umbral no se notifica dos veces.
+
+    El premio se CONGELA acá al detectar (`nombre_promocion`,
+    `umbral_referidos_convertidos`, `tipo_premio`, `valor_premio`): editar o
+    desactivar la promoción después no cambia lo que el alumno ya ganó.
     """
     __tablename__ = "promociones_referidos_detectadas"
 
@@ -322,6 +326,12 @@ class PromocionReferidosDetectada(Base):
         "usuarios.id", ondelete="CASCADE"), nullable=False)
     # "YYYY-MM" del período en que se cumplió el umbral (ej. "2026-10").
     periodo_cumplido = Column(String(7), nullable=False)
+    # Snapshot del premio ganado (migración 053).
+    nombre_promocion = Column(String(150), nullable=False)
+    umbral_referidos_convertidos = Column(Integer, nullable=False)
+    tipo_premio = Column(SQLEnum(TipoPremio, name="tipo_premio_referido"),
+                         nullable=False)
+    valor_premio = Column(Numeric(10, 2), nullable=True)
     fecha_deteccion = Column(TIMESTAMP(timezone=True), nullable=False,
                              server_default=func.now())
     estado = Column(SQLEnum(EstadoPromocionDetectada,
@@ -353,32 +363,39 @@ class PromocionReferidosDetectada(Base):
 # ── 7. Crédito del invitador (Fase 3b) ───────────────────────────────────────
 
 class CreditoReferido(Base):
-    """Descuento GANADO por el invitador, consumible en SU próxima compra de plan.
+    """Descuento GANADO por un alumno, consumible en SU próxima compra de plan.
 
-    Se crea UNA fila por referido convertido (UNIQUE `referido_aplicado_id`), con
-    el `porcentaje` CONGELADO al momento de la conversión: cambiar la
-    configuración del box después no reescribe un premio ya ganado. No vence.
+    Tiene DOS orígenes posibles, y exactamente uno debe estar presente:
+      * `referido_aplicado_id`: premio del invitador al convertir un referido;
+      * `promocion_detectada_id`: premio `descuento_extra` de una promoción por
+        volumen que el admin confirmó.
+    Cada origen es UNIQUE: un referido o una detección paga UN solo crédito.
 
-    El invitador ya tiene un plan activo cuando invita, así que el descuento no
-    se aplica a la compra del invitado sino a la SIGUIENTE compra del invitador:
-    `pendiente → usado` ocurre una sola vez, y en ese momento se guardan el monto
-    en pesos (`descuento_aplicado_clp`) y la suscripción que lo consumió
-    (`suscripcion_id`, SET NULL si se borra la suscripción). El monto también se
-    copia en `referidos_aplicados.descuento_aplicado_invitador`, que es el
-    snapshot del premio en la fila del referido.
+    El `porcentaje` queda CONGELADO al otorgar el premio: cambiar la
+    configuración del box o editar la promoción después no reescribe un premio
+    ya ganado. No vence.
+
+    `pendiente → usado` ocurre una sola vez, en la SIGUIENTE compra del alumno,
+    y en ese momento se guardan el monto en pesos (`descuento_aplicado_clp`) y la
+    suscripción que lo consumió (`suscripcion_id`, SET NULL si se borra la
+    suscripción). Si el origen es un referido, el monto también se copia en
+    `referidos_aplicados.descuento_aplicado_invitador`.
     """
     __tablename__ = "creditos_referido"
 
     id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
         "tenants.id", ondelete="CASCADE"), nullable=False)
-    # El invitador que GANÓ el crédito.
+    # El alumno que GANÓ el crédito.
     usuario_id = Column(Integer, ForeignKey(
         "usuarios.id", ondelete="CASCADE"), nullable=False)
-    # El referido que lo originó: UNIQUE porque un referido paga UN premio.
+    # Origen A: el referido que lo originó (NULL si vino de una promoción).
     referido_aplicado_id = Column(Integer, ForeignKey(
-        "referidos_aplicados.id", ondelete="CASCADE"), nullable=False)
-    # % del descuento, congelado al convertir (0 < porcentaje <= 100).
+        "referidos_aplicados.id", ondelete="CASCADE"), nullable=True)
+    # Origen B: la detección confirmada que lo originó (NULL si vino de un referido).
+    promocion_detectada_id = Column(Integer, ForeignKey(
+        "promociones_referidos_detectadas.id", ondelete="CASCADE"), nullable=True)
+    # % del descuento, congelado al otorgarlo (0 < porcentaje <= 100).
     porcentaje = Column(Numeric(5, 2), nullable=False)
     estado = Column(SQLEnum(EstadoCreditoReferido,
                             name="estado_credito_referido"),
@@ -396,8 +413,14 @@ class CreditoReferido(Base):
     __table_args__ = (
         UniqueConstraint("referido_aplicado_id",
                          name="uq_creditos_referido_referido_aplicado_id"),
+        UniqueConstraint("promocion_detectada_id",
+                         name="uq_creditos_referido_promocion_detectada_id"),
         CheckConstraint("porcentaje > 0 AND porcentaje <= 100",
                         name="ck_creditos_referido_porcentaje"),
+        CheckConstraint(
+            "(referido_aplicado_id IS NOT NULL)::int + "
+            "(promocion_detectada_id IS NOT NULL)::int = 1",
+            name="ck_creditos_referido_un_origen"),
         Index("ix_creditos_referido_tenant_id", "tenant_id"),
         Index("ix_creditos_referido_usuario_id", "usuario_id"),
         Index("ix_creditos_referido_estado", "estado"),
@@ -408,4 +431,5 @@ class CreditoReferido(Base):
     def __repr__(self):
         return (f"<CreditoReferido(id={self.id}, usuario_id={self.usuario_id}, "
                 f"referido_aplicado_id={self.referido_aplicado_id}, "
+                f"promocion_detectada_id={self.promocion_detectada_id}, "
                 f"porcentaje={self.porcentaje}, estado='{self.estado}')>")

@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import GestionPromocionesReferidos from './GestionPromocionesReferidos';
+import PendientesPromocionesReferidos from './PendientesPromocionesReferidos';
 import {
     useConfiguracionReferidos, useGuardarConfiguracionReferidos,
 } from '../hooks/queries';
@@ -251,6 +253,9 @@ const ConfiguracionReferidos = () => {
                     beneficios nuevos hasta que lo vuelvas a encender.
                 </p>
             </div>
+
+            <GestionPromocionesReferidos />
+            <PendientesPromocionesReferidos />
         </div>
     );
 };

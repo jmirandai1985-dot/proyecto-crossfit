@@ -6,9 +6,10 @@
 // errores de FastAPI/Pydantic a un mensaje humano.
 import { readFileSync } from 'node:fs';
 import {
-    LARGO_MAXIMO_CODIGO, formatearPorcentajeReferido, mensajeDeError,
+    ETIQUETAS_ESTADO_DETECCION, LARGO_MAXIMO_CODIGO, TIPOS_PREMIO,
+    formatearPorcentajeReferido, formatearValorPremio, mensajeDeError,
     normalizarCodigoIngresado, textoCompartirReferido, validarCodigoIngresado,
-    validarPorcentajeReferido,
+    validarPorcentajeReferido, validarPromocionReferido,
 } from '../src/utils/referidos.js';
 
 const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -66,12 +67,71 @@ ok(mensajeDeError({ response: { data: { detail: [] } } }, 'Fallback') === 'Fallb
 ok(mensajeDeError({ message: 'Network Error' }, 'Fallback') === 'Fallback',
     'no filtra mensajes técnicos en inglés');
 
-console.log('== 6. Montaje en la app (rutas, menú y pantallas) ==');
+console.log('== 6. Promociones por volumen (Fase 5) ==');
+ok(TIPOS_PREMIO.length === 3 && TIPOS_PREMIO.some((t) => t.id === 'mes_gratis'),
+    'el panel ofrece los 3 tipos de premio del backend');
+ok(ETIQUETAS_ESTADO_DETECCION.pendiente_confirmacion === 'Pendiente',
+    'traduce el estado pendiente_confirmacion');
+
+const promoMes = validarPromocionReferido({
+    nombre: '  3 referidos = mes gratis ',
+    umbral_referidos_convertidos: '3',
+    tipo_premio: 'mes_gratis',
+    valor_premio: '99',
+    activo: true,
+});
+ok(promoMes.valido && promoMes.payload.nombre === '3 referidos = mes gratis',
+    'recorta el nombre de la promoción');
+ok(promoMes.payload.valor_premio === null, 'mes_gratis no manda valor');
+ok(promoMes.payload.periodo === 'mensual', 'el período viaja explícito');
+
+const promoDias = validarPromocionReferido({
+    nombre: 'Una semana', umbral_referidos_convertidos: '3',
+    tipo_premio: 'dias_gratis', valor_premio: '7', activo: true,
+});
+ok(promoDias.payload.valor_premio === 7, 'dias_gratis manda los días como número');
+for (const valor of ['0', '1.5', '-2', '']) {
+    ok(validarPromocionReferido({
+        nombre: 'Días', umbral_referidos_convertidos: '3',
+        tipo_premio: 'dias_gratis', valor_premio: valor, activo: true,
+    }).valido === false, `rechaza días inválidos ${JSON.stringify(valor)}`);
+}
+
+const promoDescuento = validarPromocionReferido({
+    nombre: 'Extra', umbral_referidos_convertidos: '2',
+    tipo_premio: 'descuento_extra', valor_premio: '12,5', activo: true,
+});
+ok(promoDescuento.payload.valor_premio === 12.5, 'acepta coma decimal en el %');
+for (const valor of ['0', '101', '12.345', 'abc']) {
+    ok(validarPromocionReferido({
+        nombre: 'Extra', umbral_referidos_convertidos: '2',
+        tipo_premio: 'descuento_extra', valor_premio: valor, activo: true,
+    }).valido === false, `rechaza descuento inválido ${JSON.stringify(valor)}`);
+}
+ok(validarPromocionReferido({
+    nombre: '   ', umbral_referidos_convertidos: '3',
+    tipo_premio: 'mes_gratis', activo: true,
+}).errores.nombre, 'exige nombre en la promoción');
+ok(validarPromocionReferido({
+    nombre: 'Promo', umbral_referidos_convertidos: '0',
+    tipo_premio: 'mes_gratis', activo: true,
+}).errores.umbral_referidos_convertidos, 'exige umbral mayor que 0');
+
+ok(formatearValorPremio('mes_gratis') === '1 mes gratis (30 días)', 'texto de mes gratis');
+ok(formatearValorPremio('dias_gratis', 1) === '1 día gratis', 'singular de días');
+ok(formatearValorPremio('descuento_extra', 12.5) === '12,5 % de descuento extra',
+    'porcentaje en formato es-CL');
+
+console.log('== 7. Montaje en la app (rutas, menú y pantallas) ==');
 const app = leer('../src/App.jsx');
 const menu = leer('../src/config/menu.js');
 const marketing = leer('../src/pages/admin/Marketing.jsx');
 const solicitarPlan = leer('../src/pages/alumno/SolicitarPlan.jsx');
 const campo = leer('../src/components/CampoReferido.jsx');
+const configuracion = leer('../src/components/ConfiguracionReferidos.jsx');
+const gestion = leer('../src/components/GestionPromocionesReferidos.jsx');
+const pendientes = leer('../src/components/PendientesPromocionesReferidos.jsx');
+const queries = leer('../src/hooks/queries.js');
 
 ok(/InvitaYGana/.test(app) && /path="invita-y-gana"/.test(app),
     'App.jsx registra la ruta /alumno/invita-y-gana');
@@ -83,6 +143,22 @@ ok(/<ConfiguracionReferidos\s*\/>/.test(marketing) && /id:\s*'referidos'/.test(m
     'Marketing monta la sub-pestaña Referidos');
 ok(/<CampoReferido/.test(solicitarPlan) && /useState\(null\)/.test(solicitarPlan),
     'SolicitarPlan monta el campo y conserva el código al cambiar de paso');
+
+ok(/<GestionPromocionesReferidos\s*\/>/.test(configuracion)
+    && /<PendientesPromocionesReferidos\s*\/>/.test(configuracion),
+    'ConfiguracionReferidos monta la gestión y la bandeja de umbrales');
+ok(/usePromocionesReferidos\s*\(/.test(gestion)
+    && /useGuardarPromocionReferidos\s*\(/.test(gestion)
+    && /useEliminarPromocionReferidos\s*\(/.test(gestion),
+    'la gestión usa los hooks de CRUD de promociones');
+ok(/usePromocionesDetectadas\s*\(/.test(pendientes)
+    && /useConfirmarPromocionDetectada\s*\(/.test(pendientes)
+    && /useRechazarPromocionDetectada\s*\(/.test(pendientes),
+    'la bandeja usa los hooks de detecciones');
+ok(/promocionesReferidos:\s*\['referidos'/.test(queries)
+    && /promocionesDetectadas:/.test(queries)
+    && /invalidateQueries\(\{ queryKey: \['referidos'\] \}\)/.test(queries),
+    'las mutaciones invalidan la familia [referidos]');
 
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);

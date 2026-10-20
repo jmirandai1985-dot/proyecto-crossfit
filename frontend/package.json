@@ -38,6 +38,7 @@
     "test:alumnos-movil": "node scripts/test-alumnos-movil.mjs",
     "test:title": "node scripts/test-admin-sin-title.mjs",
     "test:marketing": "node scripts/test-marketing.mjs",
+    "test:referidos": "node scripts/test-referidos.mjs",
     "test:aviso-rapido": "node scripts/test-aviso-rapido.mjs",
     "test:coach-subtabs": "node scripts/test-coach-subtabs.mjs",
     "test:walkin": "node scripts/test-walkin.mjs",

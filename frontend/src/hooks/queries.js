@@ -55,6 +55,9 @@ export const claves = {
     // `['referidos']`: la comparten el panel del admin y la pantalla del alumno.
     miCodigoReferido: ['referidos', 'mi-codigo'],
     configuracionReferidos: ['referidos', 'configuracion'],
+    promocionesReferidos: ['referidos', 'promociones'],
+    promocionesDetectadas: (estado) =>
+        ['referidos', 'promociones-detectadas', estado || 'pendiente_confirmacion'],
     configBox: (tenantId) => ['configuracion', tenantId],
     reservasAlumno: ['reservas', 'alumno'],
     miResumen: ['asistencia', 'mi-resumen'],
@@ -1688,6 +1691,65 @@ export function useValidarCodigoReferido() {
     return useMutation({
         mutationFn: (codigo) => api.post('/api/v1/referidos/validar-codigo', { codigo })
             .then((r) => r.data),
+    });
+}
+
+// ── Fase 5: promociones por volumen ─────────────────────────────────────────
+// Toda la familia `['referidos']` se invalida al crear/editar/borrar una
+// promoción o resolver un umbral: la configuración, la lista y las pendientes
+// se pintan desde el mismo backend y no queremos números viejos en ninguna.
+export function usePromocionesReferidos() {
+    return useQuery({
+        queryKey: claves.promocionesReferidos,
+        queryFn: async () => (await api.get('/api/v1/referidos/promociones')).data,
+        staleTime: 30_000,
+    });
+}
+
+export function useGuardarPromocionReferidos() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ id, payload }) => (id
+            ? api.put(`/api/v1/referidos/promociones/${id}`, payload)
+            : api.post('/api/v1/referidos/promociones', payload)).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['referidos'] }),
+    });
+}
+
+export function useEliminarPromocionReferidos() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => api.delete(`/api/v1/referidos/promociones/${id}`)
+            .then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['referidos'] }),
+    });
+}
+
+export function usePromocionesDetectadas(estado = 'pendiente_confirmacion') {
+    return useQuery({
+        queryKey: claves.promocionesDetectadas(estado),
+        queryFn: async () => (await api.get('/api/v1/referidos/promociones-detectadas', {
+            params: { estado },
+        })).data,
+        staleTime: 15_000,
+    });
+}
+
+export function useConfirmarPromocionDetectada() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => api.post(
+            `/api/v1/referidos/promociones-detectadas/${id}/confirmar`).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['referidos'] }),
+    });
+}
+
+export function useRechazarPromocionDetectada() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => api.post(
+            `/api/v1/referidos/promociones-detectadas/${id}/rechazar`).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['referidos'] }),
     });
 }
 

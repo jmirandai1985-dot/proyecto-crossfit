@@ -993,6 +993,62 @@ def send_emergencia_cobertura(admin_correo: str, admin_id: int, mensaje: str,
         tenant_id=tenant_id)
 
 
+def enviar_email_promocion_referidos_admin(
+        tenant_id: int, alumno_nombre: str, nombre_promocion: str,
+        umbral: int, premio_texto: str, periodo: str) -> bool:
+    """Avisa al admin del box que un alumno alcanzó un umbral de referidos.
+
+    Destinatario: primer admin ACTIVO del tenant (mismo patrón que
+    `enviar_email_solicitud_admin`). El correo queda registrado en
+    `notificaciones_enviadas` como destinatario ADMIN: es el canal de correo
+    del aviso que además aparece en la campana in-app. No aplica ningún premio:
+    la confirmación es manual y vive en `promociones_referidos_service`.
+    """
+    if not tenant_id:
+        return False
+    correo_admin = None
+    admin_nombre = None
+    try:
+        from app.db.database import SessionLocal
+        from app.models.usuario import Usuario, RolUsuario
+        db = SessionLocal()
+        admin = db.query(Usuario).filter(
+            Usuario.tenant_id == tenant_id,
+            Usuario.rol == RolUsuario.administrador,
+            Usuario.estado == "activo",
+        ).order_by(Usuario.id).first()
+        correo_admin = admin.correo if admin else None
+        admin_nombre = admin.nombre if admin else None
+        db.close()
+    except Exception as e:
+        logger.warning(
+            f"No se pudo obtener admin para promoción de referidos: {e}")
+
+    if not correo_admin:
+        logger.warning(
+            "No hay admin con correo para notificar una promoción de "
+            f"referidos (tenant={tenant_id})")
+        return False
+
+    titulo = "🎁 Un alumno alcanzó una promoción de referidos"
+    saludo = (f"{alumno_nombre} cumplió el umbral de la promoción "
+              f"\"{nombre_promocion}\".")
+    cuerpo = (
+        f"<p><strong>Referidos convertidos:</strong> {umbral}<br/>"
+        f"<strong>Período:</strong> {periodo}<br/>"
+        f"<strong>Premio a confirmar:</strong> {premio_texto}</p>"
+        "<p>El premio no se aplicó todavía: ingresa al panel, revisa el umbral "
+        "y confírmalo o recházalo.</p>"
+    )
+    url = url_frontend("/admin/marketing?tab=referidos")
+    html = _template(titulo, saludo, cuerpo, "Revisar promociones", url)
+    asunto = f"🎁 Promoción de referidos alcanzada: {alumno_nombre}"
+    return _enviar(
+        correo_admin, asunto, html, None, tipo="promo_referido",
+        destinatario_nombre=admin_nombre, destinatario_rol="administrador",
+        tenant_id=tenant_id)
+
+
 def send_reset_password(nombre: str, correo: str, link: str, tenant_id: int = None) -> bool:
     """Restablecimiento de contraseña — email con link de un solo uso (1 hora).
 

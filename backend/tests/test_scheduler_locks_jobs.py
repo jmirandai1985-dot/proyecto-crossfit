@@ -159,10 +159,44 @@ def test_cierre_mes_se_omite_si_el_lock_esta_tomado(monkeypatch):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Promociones de referidos (Fase 5)
+# ══════════════════════════════════════════════════════════════════════════════
+def test_deteccion_promociones_corre_con_lock(monkeypatch):
+    corridas = []
+
+    def fake_impl():
+        corridas.append("impl")
+        return {"nuevas": 0}
+
+    monkeypatch.setattr(sch, "_detectar_promociones_referidos_impl", fake_impl)
+    usados = []
+    monkeypatch.setattr(sl, "lock_de_job", _lock(True, usados))
+
+    resultado = asyncio.run(sch.job_detectar_promociones_referidos())
+
+    assert corridas == ["impl"]
+    assert usados == ["detectar_promociones_referidos"]
+    assert resultado == {"nuevas": 0}
+
+
+def test_deteccion_promociones_se_omite_si_el_lock_esta_tomado(monkeypatch):
+    def fake_impl():
+        raise AssertionError("no debía detectar: el lock ya estaba tomado")
+
+    monkeypatch.setattr(sch, "_detectar_promociones_referidos_impl", fake_impl)
+    usados = []
+    monkeypatch.setattr(sl, "lock_de_job", _lock(False, usados))
+
+    assert asyncio.run(sch.job_detectar_promociones_referidos()) is None
+    assert usados == ["detectar_promociones_referidos"]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Coherencia: las claves que usan los jobs están todas en el mapa
 # ══════════════════════════════════════════════════════════════════════════════
 def test_todas_las_claves_de_jobs_estan_en_el_mapa():
     for jid in ("generar_clases_diarias", "cierre_mes", "reentrenar_churn",
+                "detectar_promociones_referidos",
                 "alerta_urgencia", "alerta_renovacion", "alerta_inactividad",
                 "alerta_ultimo_credito", "alerta_sin_creditos"):
         assert jid in sl.CLAVES_JOB, f"falta la clave {jid} en CLAVES_JOB"

@@ -13,7 +13,10 @@ siempre del token) ni colar campos que el contrato no define.
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (BaseModel, ConfigDict, Field, field_validator,
+                      model_validator)
+
+from app.models.referidos import PeriodoPromocion, TipoPremio
 
 
 class ValidarCodigoRequest(BaseModel):
@@ -81,3 +84,119 @@ class ConfiguracionReferidosOut(BaseModel):
     porcentaje_descuento_invitador: float
     activo: bool
     configurada: bool
+
+
+# ── Fase 5: promociones por volumen ──────────────────────────────────────────
+
+class PromocionReferidosCreate(BaseModel):
+    """Cuerpo de `POST /referidos/promociones` (sólo admin).
+
+    `valor_premio` depende del tipo y se valida acá para que un valor
+    imposible nunca llegue a la BD:
+
+      * `mes_gratis`    → no usa valor (se normaliza a `None`; son 30 días);
+      * `dias_gratis`   → días enteros > 0;
+      * `descuento_extra` → porcentaje > 0 y <= 100, hasta 2 decimales.
+    """
+
+    nombre: str = Field(..., min_length=1, max_length=150)
+    umbral_referidos_convertidos: int = Field(..., ge=1, le=10_000)
+    periodo: PeriodoPromocion = PeriodoPromocion.mensual
+    tipo_premio: TipoPremio
+    valor_premio: Decimal | None = Field(None, ge=0, le=10_000)
+    activo: bool = True
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("nombre")
+    @classmethod
+    def _nombre_no_vacio(cls, valor: str) -> str:
+        """`"   "` no es un nombre: se recorta antes del mínimo."""
+        limpio = valor.strip()
+        if not limpio:
+            raise ValueError("El nombre de la promoción no puede estar vacío.")
+        return limpio
+
+    @model_validator(mode="after")
+    def _validar_valor_premio(self):
+        """Normaliza/valida `valor_premio` según `tipo_premio`."""
+        if self.tipo_premio == TipoPremio.mes_gratis:
+            self.valor_premio = None
+            return self
+        if self.valor_premio is None:
+            raise ValueError("Debes indicar el valor del premio.")
+        if -self.valor_premio.as_tuple().exponent > 2:
+            raise ValueError(
+                "El valor del premio admite como máximo 2 decimales.")
+        if self.tipo_premio == TipoPremio.dias_gratis:
+            if self.valor_premio != self.valor_premio.to_integral_value():
+                raise ValueError("Los días gratis deben ser un número entero.")
+            if self.valor_premio <= 0:
+                raise ValueError("Los días gratis deben ser mayores que 0.")
+        elif self.tipo_premio == TipoPremio.descuento_extra:
+            if self.valor_premio <= 0 or self.valor_premio > 100:
+                raise ValueError(
+                    "El descuento extra debe ser un porcentaje mayor que 0 "
+                    "y hasta 100.")
+        return self
+
+
+class PromocionReferidosUpdate(PromocionReferidosCreate):
+    """Cuerpo de `PUT /referidos/promociones/{id}` (mismos campos que crear)."""
+
+
+class PromocionReferidosOut(BaseModel):
+    """Una promoción del box tal como la muestra el panel del admin."""
+
+    id: int
+    nombre: str
+    umbral_referidos_convertidos: int
+    periodo: str
+    tipo_premio: str
+    valor_premio: float | None
+    activo: bool
+    premio_texto: str
+    detecciones_pendientes: int = 0
+
+
+class PromocionDetectadaOut(BaseModel):
+    """Un umbral alcanzado, con el premio CONGELADO al momento de detectar."""
+
+    id: int
+    promocion_id: int
+    usuario_id: int
+    alumno_nombre: str
+    alumno_correo: str | None
+    periodo_cumplido: str
+    fecha_deteccion: datetime
+    estado: str
+    fecha_confirmacion: datetime | None
+    confirmado_por_usuario_id: int | None
+    nombre_promocion: str
+    umbral_referidos_convertidos: int
+    tipo_premio: str
+    valor_premio: float | None
+    premio_texto: str
+
+
+class ConfirmarPromocionOut(BaseModel):
+    """Resultado de confirmar un umbral: qué premio REAL se aplicó."""
+
+    status: str
+    mensaje: str
+    tipo_premio: str
+    premio_texto: str
+    suscripcion_id: int | None = None
+    fecha_expiracion_anterior: datetime | None = None
+    fecha_expiracion_nueva: datetime | None = None
+    dias_extendidos: int | None = None
+    credito_referido_id: int | None = None
+    porcentaje: float | None = None
+
+
+class RechazarPromocionOut(BaseModel):
+    """Resultado de rechazar un umbral: no se aplica ningún premio."""
+
+    status: str
+    mensaje: str
+    estado: str

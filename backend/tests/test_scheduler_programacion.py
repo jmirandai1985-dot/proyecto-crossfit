@@ -167,16 +167,18 @@ def test_scheduler_real_sin_catchup_agenda_en_el_futuro(monkeypatch):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# iniciar_scheduler(): líder programa los 8 jobs; standby no programa nada
+# iniciar_scheduler(): líder programa los 9 jobs; standby no programa nada
 # ══════════════════════════════════════════════════════════════════════════════
-# 8 desde el 2026-10-16: se sumó `reentrenar_churn` (reentrenamiento semanal del churn con
-# la fuente real de asistencia). Si se agrega otro job, esta lista es el contrato.
+# 9 desde la Fase 5 de Referidos: se sumó `detectar_promociones_referidos` (23:55 CLT)
+# a los 8 que ya había (el último, `reentrenar_churn`). Si se agrega otro job, esta
+# lista es el contrato.
 IDS_ESPERADOS = ["generar_clases_diarias", "alerta_urgencia_renovacion",
                  "alerta_renovacion", "alerta_inactividad", "alerta_ultimo_credito",
-                 "alerta_sin_creditos", "cierre_mes", "reentrenar_churn"]
+                 "alerta_sin_creditos", "cierre_mes", "reentrenar_churn",
+                 "detectar_promociones_referidos"]
 
 
-def test_iniciar_scheduler_lider_programa_los_8_jobs(monkeypatch):
+def test_iniciar_scheduler_lider_programa_los_9_jobs(monkeypatch):
     falso = _SchedulerFalso()
     programados = []
     monkeypatch.setattr(sch, "scheduler", falso)
@@ -188,7 +190,7 @@ def test_iniciar_scheduler_lider_programa_los_8_jobs(monkeypatch):
 
     assert programados == IDS_ESPERADOS
     assert falso.iniciado is True
-    # Además de los 8 de negocio, la líder agenda su latido del lock.
+    # Además de los 9 de negocio, la líder agenda su latido del lock.
     assert falso.ids() == ["vigilar_liderazgo"]
 
 
@@ -208,12 +210,26 @@ def test_el_latido_del_lider_es_interval_de_latido_min(monkeypatch):
     assert kw["replace_existing"] is True
 
 
+def test_promociones_de_referidos_se_agendan_2355(monkeypatch):
+    """El job de Fase 5 corre al cerrar el día, con la función real del scheduler."""
+    falso = _SchedulerFalso()
+    monkeypatch.setattr(sch, "scheduler", falso)
+
+    sch._programar_jobs_de_negocio()
+
+    jobs = {kw.get("id"): (func, trigger) for func, trigger, kw in falso.jobs}
+    func, trigger = jobs["detectar_promociones_referidos"]
+    assert func is sch.job_detectar_promociones_referidos
+    assert "hour='23'" in str(trigger)
+    assert "minute='55'" in str(trigger)
+
+
 def test_iniciar_scheduler_standby_no_programa_jobs_de_negocio(monkeypatch):
     """La standby ya NO sale sin arrancar: arranca para poder LATIR.
 
     Antes la standby salía con `return` sin arrancar su APScheduler, así que no podía
     enterarse de que la líder murió (no reintentaba el lock nunca). Ahora arranca y
-    agenda SÓLO el latido; los 8 jobs de negocio siguen siendo exclusivos de la líder.
+    agenda SÓLO el latido; los 9 jobs de negocio siguen siendo exclusivos de la líder.
     """
     falso = _SchedulerFalso()
     monkeypatch.setattr(sch, "scheduler", falso)
