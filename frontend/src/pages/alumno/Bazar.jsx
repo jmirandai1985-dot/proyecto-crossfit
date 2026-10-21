@@ -10,6 +10,7 @@ import {
     useConfiguracionBancaria, useCrearPedidoBazar, useProductos, useSubirArchivoPrivado,
 } from '../../hooks/queries';
 import ImagenProducto from '../../components/ImagenProducto';
+import GaleriaProducto from '../../components/GaleriaProducto';
 
 const Bazar = () => {
     const { usuario_id, tenant_id } = useAuth();
@@ -177,10 +178,21 @@ const Bazar = () => {
 
                 {paso === 2 && productoSeleccionado && (
                     <div className="space-y-6 max-w-lg mx-auto">
-                        <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-5">
-                            <p className="text-xs text-emerald-600 uppercase font-semibold">Producto seleccionado</p>
-                            <h3 className="text-xl font-bold text-gray-800">{productoSeleccionado.nombre}</h3>
-                            <p className="text-lg font-bold text-emerald-600">${(productoSeleccionado.precio * cantidad).toLocaleString('es-CL')}</p>
+                        <div className="bg-emerald-50 rounded-xl border border-emerald-200 overflow-hidden">
+                            {/* Galería del producto: portada + miniaturas + visor con zoom,
+                                flechas y swipe. Las tarjetas del catálogo siguen mostrando
+                                sólo la portada (`imagen_url`). */}
+                            <GaleriaProducto
+                                imagenes={productoSeleccionado.imagenes}
+                                urlPrincipal={productoSeleccionado.imagen_url}
+                                nombre={productoSeleccionado.nombre}
+                                className="bg-gray-100 p-2"
+                            />
+                            <div className="p-5 pt-3">
+                                <p className="text-xs text-emerald-600 uppercase font-semibold">Producto seleccionado</p>
+                                <h3 className="text-xl font-bold text-gray-800">{productoSeleccionado.nombre}</h3>
+                                <p className="text-lg font-bold text-emerald-600">${(productoSeleccionado.precio * cantidad).toLocaleString('es-CL')}</p>
+                            </div>
                         </div>
 
                         <div className="flex items-center gap-3 bg-white rounded-xl border p-4">

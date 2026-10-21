@@ -20,7 +20,7 @@ from app.models.historial_rm import HistorialRM
 from app.models.horario_base import HorarioBase
 from app.models.horario_coach import HorarioCoach
 from app.models.pedido import Pedido
-from app.models.producto import Producto
+from app.models.producto import Producto, ProductoImagen
 from app.models.reserva import Reserva
 from app.models.retencion import RetencionAlumno
 from app.models.solicitud_plan import SolicitudPlan
@@ -44,7 +44,8 @@ __all__ = ["Tenant", "Usuario", "RolUsuario",
            "Movimiento", "Plan", "Suscripcion", "CoberturaEmergencia",
            "TransaccionFinanciera", "ConfiguracionNegocio",
            "Clase", "CoachDisciplina", "Disciplina", "HistorialRM",
-           "HorarioBase", "HorarioCoach", "Pedido", "Producto", "Reserva",
+           "HorarioBase", "HorarioCoach", "Pedido", "Producto",
+           "ProductoImagen", "Reserva",
            "RetencionAlumno", "SolicitudPlan", "Asistencia", "HitoAlumno",
            "Auditoria", "PasswordResetToken", "Beneficio", "EstadoBeneficio",
            "TipoBeneficio", "AvisoMarketing",

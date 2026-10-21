@@ -2,8 +2,27 @@
 Esquemas Pydantic para Producto
 """
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime
+
+
+class ProductoImagenResponse(BaseModel):
+    """Una foto de la galería del producto (migración 055)."""
+    id: int
+    producto_id: int
+    url: str
+    # 0 = portada. La galería se sirve siempre ordenada por este campo.
+    orden: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProductoImagenesOrden(BaseModel):
+    """Nuevo orden COMPLETO de la galería (todos los ids, de portada al final)."""
+    imagen_ids: List[int] = Field(
+        ..., min_length=1, max_length=5,
+        description="Ids de las fotos del producto en el orden deseado")
 
 
 class ProductoBase(BaseModel):
@@ -58,6 +77,9 @@ class ProductoResponse(ProductoBase):
     """Esquema de respuesta para Producto"""
     id: int
     tenant_id: int
+    # Galería completa, ordenada (orden=0 es la portada). `imagen_url` se mantiene
+    # como portada derivada para el carrusel y las tarjetas de siempre.
+    imagenes: List[ProductoImagenResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -72,9 +94,12 @@ class ProductoListItem(BaseModel):
     precio: float
     stock: int
     stock_minimo: Optional[int] = None
-    # URL de la foto del producto (NULL = sin foto: la UI muestra el placeholder).
-    # La consumen el Bazar del alumno y la tabla del admin.
+    # URL de la PORTADA (orden=0). Se mantiene para no cambiar el carrusel ni las
+    # tarjetas; la galería completa viene en `imagenes`.
     imagen_url: Optional[str] = None
+    # Galería del producto ordenada. El Bazar del alumno la usa en el detalle y
+    # el admin en el modal de edición.
+    imagenes: List[ProductoImagenResponse] = Field(default_factory=list)
     # Flag de "ya se avisó en este ciclo de stock bajo". Se resetea a False en
     # PUT /productos/{id} al reponer por encima del umbral. Lo consume el panel
     # admin Bazar para mostrar el estado de alerta en la tabla.

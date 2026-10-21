@@ -1387,16 +1387,42 @@ export function useGuardarConfiguracion() {
 }
 
 // Productos del bazar. OJO: crear y editar NO son simétricos:
-//  - crear  -> POST /productos con FormData (multipart: la foto viaja en `file`).
-//  - editar -> PUT /productos/{id} en JSON y, si hay foto nueva, un POST aparte a
-//              /productos/{id}/imagen (un PUT JSON no puede llevar archivo). El borrado de
-//              la foto es `imagen_url: null` dentro del payload, no una llamada aparte.
+//  - crear  -> POST /productos con FormData (multipart: 0..5 fotos en `files`,
+//              la primera es la portada). Producto y galería se crean juntos.
+//  - editar -> PUT /productos/{id} en JSON y la galería se toca con llamadas aparte
+//              (un PUT JSON no puede llevar archivo).
+//
+// `galeria` es OPCIONAL y mantiene el flujo viejo de una sola foto:
+//   { eliminar: [id...], archivos: [File...], orden: [{ id } | { nueva: indice }] }
+// Antes de tocar nada se valida el tope FINAL (existentes - eliminadas + nuevas).
+// Después se suben las fotos nuevas; si la galería está llena se libera primero
+// una de las marcadas (nunca la última) para no chocar con el tope del backend,
+// así reemplazar las 5 fotos por otras 5 funciona. Al final se borran las que
+// sobraban y se manda el orden COMPLETO. `orden` mezcla ids existentes con
+// posiciones `nueva`; el hook traduce esas posiciones a los ids que devolvió el
+// POST, en el mismo orden en que viajaron los archivos.
 export function useGuardarProducto() {
     const qc = useQueryClient();
     return useMutation({
-        mutationFn: async ({ id, payload, imagen }) => {
+        mutationFn: async ({ id, payload, imagen, galeria }) => {
             if (id) {
+                // El tope se valida ANTES del PUT: si se excede, el producto no debe
+                // quedar con los otros campos guardados y la galería sin cambios.
+                const MAX_FOTOS = 5;
+                if (galeria) {
+                    const eliminadas = (galeria.eliminar || []).length;
+                    const nuevas = (galeria.archivos || []).length;
+                    const existentes = galeria.totalExistentes
+                        ?? ((galeria.orden || []).filter((item) => item?.id).length
+                            + eliminadas);
+                    if (existentes - eliminadas + nuevas > MAX_FOTOS) {
+                        throw new Error(`Máximo ${MAX_FOTOS} fotos por producto.`);
+                    }
+                }
+
                 const res = await api.put(`/api/v1/productos/${id}`, payload);
+
+                // Compatibilidad con el flujo de una sola foto (reemplaza la portada).
                 if (imagen) {
                     const dataImagen = new FormData();
                     dataImagen.append('file', imagen);
@@ -1404,11 +1430,104 @@ export function useGuardarProducto() {
                         headers: { 'Content-Type': 'multipart/form-data' },
                     });
                 }
+
+                if (galeria) {
+                    const pendientesEliminar = [...(galeria.eliminar || [])];
+                    const pendientesSubir = [...(galeria.archivos || [])];
+                    const orden = (galeria.orden || []).filter(Boolean);
+                    // Todos los ids que YA existían (conservados + eliminados) sirven
+                    // para distinguir las fotos nuevas en la respuesta del POST.
+                    const idsExistentes = new Set([
+                        ...orden.filter((item) => item.id).map((item) => item.id),
+                        ...pendientesEliminar,
+                    ]);
+                    let total = galeria.totalExistentes ?? idsExistentes.size;
+                    const respuestas = [];
+
+                    const subir = async (archivos) => {
+                        if (!archivos.length) return;
+                        const dataImagenes = new FormData();
+                        archivos.forEach((archivo) => dataImagenes.append('files', archivo));
+                        respuestas.push((await api.post(
+                            `/api/v1/productos/${id}/imagenes`, dataImagenes,
+                            { headers: { 'Content-Type': 'multipart/form-data' } },
+                        )).data || []);
+                        total += archivos.length;
+                    };
+                    const borrar = async (imagenId) => {
+                        await api.delete(`/api/v1/productos/${id}/imagenes/${imagenId}`);
+                        total -= 1;
+                    };
+
+                    // El backend limita a 5 EN TOTAL. Si el resultado ya no cabe, se
+                    // corta ANTES de tocar nada (el modal también lo impide).
+                    if (total - pendientesEliminar.length + pendientesSubir.length > MAX_FOTOS) {
+                        throw new Error(`Máximo ${MAX_FOTOS} fotos por producto.`);
+                    }
+
+                    // Se sube de a tandas: si la galería está llena, primero se libera
+                    // UNA foto marcada (nunca la última existente) y se sube el
+                    // reemplazo. Así reemplazar las 5 fotos por otras 5 funciona sin
+                    // chocar con el tope del backend en ningún momento.
+                    while (pendientesSubir.length) {
+                        while (total >= MAX_FOTOS && pendientesEliminar.length && total > 1) {
+                            await borrar(pendientesEliminar.shift());
+                        }
+                        const cupo = MAX_FOTOS - total;
+                        if (cupo <= 0) {
+                            throw new Error(`Máximo ${MAX_FOTOS} fotos por producto.`);
+                        }
+                        await subir(pendientesSubir.splice(0, cupo));
+                    }
+                    // Ya están todas las nuevas: se borran las viejas que sobraban.
+                    while (pendientesEliminar.length) {
+                        await borrar(pendientesEliminar.shift());
+                    }
+
+                    if (orden.length) {
+                        // Los POST devuelven la galería completa y pueden venir repetidos
+                        // entre tandas: se deduplica por id y se ordena por `orden`.
+                        const porId = new Map();
+                        respuestas.flat().forEach((foto) => porId.set(foto.id, foto));
+                        const idsNuevos = [...porId.values()]
+                            .filter((foto) => !idsExistentes.has(foto.id))
+                            .sort((a, b) => ((a.orden ?? 0) - (b.orden ?? 0)) || (a.id - b.id))
+                            .map((foto) => foto.id);
+                        let siguienteNuevo = 0;
+                        const imagenIds = orden
+                            .map((item) => item.id ?? idsNuevos[siguienteNuevo++])
+                            .filter(Boolean);
+                        if (imagenIds.length !== orden.length) {
+                            throw new Error(
+                                'No se pudo restaurar el orden de las fotos. Vuelve a intentarlo.',
+                            );
+                        }
+                        await api.put(`/api/v1/productos/${id}/imagenes/orden`, {
+                            imagen_ids: imagenIds,
+                        });
+                    }
+                }
                 return res.data;
             }
-            return (await api.post('/api/v1/productos', payload, {
+
+            // El alta manda TODAS las fotos en el FormData (`files`) junto con los
+            // datos: el backend crea producto + galería de forma atómica. El bloque
+            // `galeria` queda como compatibilidad para un llamador viejo que suba
+            // las fotos restantes después del POST.
+            const creado = (await api.post('/api/v1/productos', payload, {
                 headers: { 'Content-Type': 'multipart/form-data' },
             })).data;
+
+            // Compatibilidad: un llamador viejo puede mandar los datos sin fotos y
+            // dejar los archivos en `galeria.archivos`; se suben después del POST.
+            if (galeria?.archivos?.length && creado?.id) {
+                const dataImagenes = new FormData();
+                galeria.archivos.forEach((archivo) => dataImagenes.append('files', archivo));
+                await api.post(`/api/v1/productos/${creado.id}/imagenes`, dataImagenes, {
+                    headers: { 'Content-Type': 'multipart/form-data' },
+                });
+            }
+            return creado;
         },
         onSuccess: () => qc.invalidateQueries({ queryKey: ['productos'] }),
     });
