@@ -181,12 +181,12 @@ if not settings.JWT_SECRET_KEY:
 # IDs de endpoints de Neon. Los endpoints son efímeros: al recrear una rama cambia
 # el id (ep-xxxxx-xxxxx).
 #
-# TOPOLOGÍA ACTUAL (2026-10-18): TEST vive en el proyecto Neon NUEVO
-# "urban-training-box" (AWS US West 2 / Oregon, misma región que Render), en la
-# rama "test". PROD sigue en su proyecto histórico. Son proyectos separados:
-# ya no comparten cuota de cómputo.
-#   - TEST = rama test del proyecto nuevo → TEST_BRANCH_IDS
-#   - PROD = proyecto histórico           → PROD_BRANCH_ID (denylist)
+# TOPOLOGÍA ACTUAL (2026-10-18): TEST y PROD viven en el proyecto Neon
+# "urban-training-box" (AWS US West 2 / Oregon, misma región que Render), en las
+# ramas "test" y "production". El proyecto histórico "produccion2.0" (São Paulo)
+# quedó retirado: TEST y PROD ya no comparten cuota de cómputo con él.
+#   - TEST = rama test del proyecto nuevo       → TEST_BRANCH_IDS
+#   - PROD = rama production del proyecto nuevo → PROD_BRANCH_ID (denylist)
 #
 # ⚠️ ÚNICO lugar a actualizar cuando cambie de rama. Lo consumen:
 #   - app/main.py  → GET /debug/db-url (conftest.py aborta los tests si da 404)
@@ -203,12 +203,14 @@ TEST_BRANCH_IDS = (
     "ep-jolly-butterfly-b6ty2z89",    # TEST anterior: Neon ya la eliminó (se conserva por historial)
 )
 
-# Endpoint de PROD (rama principal del mismo proyecto). Se usa como DENYLIST:
+# Endpoint de PROD (rama "production" del mismo proyecto). Se usa como DENYLIST:
 # una URL que apunte a PROD NUNCA se clasifica como TEST, ni aunque contenga un id
 # de TEST (copy/paste cruzado) ni si alguien agrega el id de PROD a la whitelist.
 # Con TEST y PROD en el MISMO proyecto, esto evita que un guard mal configurado
 # habilite escrituras sobre producción (restaurar_backup, seeders, sync, etc.).
-PROD_BRANCH_ID = "ep-nameless-sound-b6km6wyi"
+# HISTÓRICO: ep-nameless-sound-b6km6wyi (proyecto "produccion2.0", São Paulo) fue
+# el PROD hasta 2026-10-18; ya no se usa.
+PROD_BRANCH_ID = "ep-bitter-cloud-arat6wil"
 
 
 def is_test_db_url(url: str) -> bool:

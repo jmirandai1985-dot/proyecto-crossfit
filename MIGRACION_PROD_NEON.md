@@ -1,11 +1,25 @@
 # MIGRACIÓN DE PROD A UN PROYECTO NEON NUEVO
 
-**Estado:** ✅ **PROD migrado al proyecto nuevo "produccion2.0"** (2026-09-23). Falta solo el PASO 3 de Render (lo hace Jebbus).
-Última actualización: 2026-09-23.
+> **⚠️ DOCUMENTO HISTÓRICO — cerrado el 2026-10-18.**
+> Todo lo que sigue describe la migración de septiembre de 2026 al proyecto
+> **`produccion2.0`** (São Paulo), que **quedó retirado**. No usar sus URLs, ids
+> ni instrucciones para operar PROD hoy.
+>
+> **PROD real desde el 2026-10-18:** rama **`production`** del proyecto Neon
+> **`urban-training-box`** (AWS **us-west-2 / Oregon**, la misma región de Render),
+> endpoint **`ep-bitter-cloud-arat6wil`**. TEST es la rama `test` del mismo
+> proyecto (**`ep-lingering-fog-arywdnbg`**).
+>
+> Fuente de verdad del endpoint de PROD: `backend/app/core/config.py` →
+> `PROD_BRANCH_ID`. URLs completas: `backend/.env` (PROD) y `backend/.env.test`
+> (TEST). Este repo es público: acá no se escriben credenciales.
+
+**Estado (al cierre, 2026-09-23):** ✅ PROD migrado *entonces* al proyecto "produccion2.0"; sólo quedaba el PASO 3 de Render (lo hacía Jebbus).
+Última actualización: 2026-10-21.
 
 ## Contexto
 
-- PROD vive hoy en el proyecto **viejo** (`ep-withered-silence-acly7gq5`, cuenta Neon vieja): ese proyecto **agotó la cuota** y la base está inaccesible.
+- **En ese momento (2026-09):** PROD vivía en el proyecto **viejo** (`ep-withered-silence-acly7gq5`, cuenta Neon vieja): ese proyecto **agotó la cuota** y la base estaba inaccesible.
 - TEST se migró el **2026-09-23** a la cuenta nueva: `ep-odd-smoke-b6f31576` (36 tablas, `alembic 033_trim_tenants`, clases 1480 / asistencias 4101 / transacciones 478 / usuarios 115).
 - ⚠️ **ACTUALIZADO 2026-09-24 — TEST ya NO usa ese proyecto.** Ahora TEST es la rama **`ep-jolly-butterfly-b6ty2z89`** del **MISMO proyecto Neon que PROD** (ver `backend/.env.test` y la denylist `TEST_BRANCH_IDS` / `PROD_BRANCH_ID` de `backend/app/core/config.py`). El proyecto viejo `ep-odd-smoke-b6f31576` queda **pendiente de borrado** (checklist de 5 puntos antes de eliminarlo).
 - El backup de PROD más reciente disponible es **`backend/backups/neon_backup_prod_20260917_060659.sql`** (17/09/2026 06:07, 1.42 MB, 36 tablas con datos, dump completo).
@@ -96,7 +110,7 @@ Candados del modo PROD (probados):
 ## Archivos que mencionan el host VIEJO de PROD (actualizar en la migración)
 
 - `backend/.env` → `DATABASE_URL` + `DIRECT_URL` *(crítico)*
-- `docker-compose.prod.yml` → 2 comentarios (`# PRODUCCIÓN (ep-withered-silence)`)
+- `docker-compose.prod.yml` → 2 comentarios (`# PRODUCCIÓN (ep-withered-silence)`) — **ya actualizados** el 2026-10-21 a `ep-bitter-cloud-arat6wil`.
 - `backend/scripts/seed_ml_data_prod.py` (6 refs) → tiene guard propio (aborta si
   `ENVIRONMENT=test`). Revisión del 2026-09-26: **ningún script del repo tiene ya hosts de Neon
   viejos hardcodeados**; `_diag_planes_prod.py` y `_validar_segmentacion.py` siguen en pie
@@ -118,7 +132,7 @@ Candados del modo PROD (probados):
 
 ---
 
-## HECHO (2026-09-23) - resultado de la migracion
+## HECHO (2026-09-23) — HISTÓRICO: resultado de la migración a `produccion2.0`
 
 | Paso | Resultado |
 |---|---|
@@ -134,14 +148,22 @@ Notas operativas:
 - `uvicorn` **con** lifespan (el arranque normal, tambien en Render) genera las clases faltantes del rango `HOY + DIAS_ANTICIPACION` (en el dump faltan las posteriores al 15/10) y arranca el scheduler. Es el comportamiento normal de PROD: al primer arranque en Render se completaran esas clases.
 - El `preDeployCommand: alembic upgrade head` de Render sera **no-op** (ya estamos en head).
 
-## PASO 3 - VALORES EXACTOS PARA RENDER (los pega Jebbus)
+## PASO 3 - HISTÓRICO: valores que se pegaron en Render el 2026-09-23 (hoy Render usa `urban-training-box`)
 
 > El repo es publico: las URLs con credenciales NO se escriben en este archivo. Los valores completos
 > son los de `backend/.env` (PROD): `DATABASE_URL` y `DIRECT_URL`.
 
 ---
 
-## R-4 — Rotación de la credencial de TEST (rama `br-divine-dew-b6ye63xy`)
+## R-4 — HISTÓRICO: rotación de la credencial de TEST (rama `br-divine-dew-b6ye63xy`)
+
+> ⚠️ **El análisis de abajo es de la topología vieja.** En `urban-training-box`,
+> PROD y TEST son dos ramas del **mismo proyecto** y los roles de Neon son
+> *branch-scoped*: rotar una rama no cambia la otra. Ojo igual con el detalle
+> práctico: hoy ambas ramas comparten **la misma cadena** de password (se
+> duplicó al crear la rama `test`), así que hay que actualizar el `.env` que
+> corresponda al rol rotado (`backend/.env` + `.env.prod` para production,
+> `.env.test` para test) y las env vars de Render. La rotación sigue pendiente.
 
 **Motivo**: la password del rol `neondb_owner` de la rama TEST de Neon quedó expuesta en
 **texto plano en un mensaje de chat** durante la sesión de migración (2026-09-24). Hay que
