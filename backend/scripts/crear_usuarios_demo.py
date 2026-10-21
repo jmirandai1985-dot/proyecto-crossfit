@@ -40,7 +40,7 @@ INVARIANTES DEL MANTENIMIENTO que el script respeta y VERIFICA al final:
 GUARDS (mismos que `seed_anual_prod.py`):
   1. `--destino prod|test` es OBLIGATORIO (no hay default).
   2. La URL tiene que ser EXACTAMENTE la del destino: PROD = `PROD_BRANCH_ID`
-     (y aborta si el endpoint de PROD ya no es `nameless-sound`); TEST = un endpoint de
+     (y aborta si el endpoint de PROD ya no es `bitter-cloud`); TEST = un endpoint de
      `TEST_BRANCH_IDS` y NUNCA el de PROD (denylist primero).
   3. Ventana de ejecución: en PROD aborta el día 1 y el 15 (el mantenimiento ya escribe
      esos días). `--forzar-ventana` lo salta a propósito.
@@ -157,7 +157,7 @@ PLAN_EXCLUIDO = "Prueba"                  # reservado para el flujo de alumno nu
 LABEL_ASISTENCIA = "WOD"                  # `asistencias.clase` (así está el histórico)
 
 DIAS_MANTENIMIENTO = (1, 15)              # el job escribe esos días
-HOST_PROD = "nameless-sound"              # ep-nameless-sound-b6km6wyi
+HOST_PROD = "bitter-cloud"                # ep-bitter-cloud-arat6wil (rama production)
 HOST_PROD_VIEJO = "withered-silence"      # PROD ANTES del 2026-09-24 (retirado)
 
 

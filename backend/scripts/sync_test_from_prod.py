@@ -9,6 +9,7 @@ import psycopg2
 import os
 import sys
 import importlib
+from psycopg2.extras import execute_values
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(BACKEND_DIR)
@@ -69,6 +70,17 @@ if _config_mod.is_test_db_url(URL_PROD):
     sys.exit(1)
 if URL_PROD == URL_TEST:
     print("FATAL: la URL de PRODUCCION es igual a la de TEST. Abortando.")
+    sys.exit(1)
+
+# ── SEGURIDAD: guard POSITIVO de PROD ──
+# `is_test_db_url()` sólo responde "esto NO es TEST". Faltaba lo inverso:
+# confirmar que el ORIGEN es el PROD real. Sin esto, un .env apuntado a otra
+# rama o a un proyecto ajeno pasaba el filtro como "produccion" y el TRUNCATE
+# de TEST copiaba los datos equivocados (o los de nadie).
+# PROD_BRANCH_ID es el único lugar donde vive el endpoint de PROD (config.py).
+if _config_mod.PROD_BRANCH_ID not in URL_PROD:
+    print("FATAL: la URL de PRODUCCION no es el endpoint de PROD conocido "
+          f"({_config_mod.PROD_BRANCH_ID}). Abortando.")
     sys.exit(1)
 
 
@@ -169,8 +181,17 @@ print("\nTRUNCATE CASCADE TEST...")
 cur_test.execute("""
     TRUNCATE TABLE
         tenants, usuarios, movimientos, disciplinas, planes, horarios,
-        clases, reservas, historial_rm, notificaciones, productos, pedidos,
+        clases, reservas, asistencias, historial_rm, notificaciones, productos, pedidos,
         suscripciones, coach_disciplinas, cobertura_emergencia, wods, wod_movimientos,
+        horarios_coach, producto_imagenes, notificaciones_enviadas, beneficios,
+        solicitudes_planes, avisos_marketing, codigos_referido, promociones_referidos,
+        promociones_referidos_detectadas, referidos_aplicados, invitaciones,
+        creditos_referido, churn_gestion, retencion_alumnos, hitos_alumno,
+        configuracion_negocio, configuracion_referidos,
+        -- se vacian a proposito: NO se copian de PROD (ver nota antes de TABLAS)
+        auditoria, password_reset_tokens,
+        daily_kpis, monthly_kpis, ml_modelos, predictions_churn, predictions_forecast,
+        segmentacion_alumnos, student_segments,
         transacciones_financieras
     CASCADE
 """)
@@ -184,22 +205,80 @@ cur_test.execute("ALTER TABLE planes ADD COLUMN IF NOT EXISTS es_estudiante BOOL
 cur_test.execute("ALTER TABLE planes ADD COLUMN IF NOT EXISTS requiere_certificado_estudiante BOOLEAN NOT NULL DEFAULT false")
 
 # ── 3. COPIAR PROD→TEST (tablas estándar) ──
+# ORDEN = orden topologico de FK: la hija necesita el padre ya copiado.
+# Ojo: este bucle atrapa las excepciones por tabla (imprime "ERROR" y sigue) y la
+# conexion de TEST va con autocommit, asi que una falla a mitad de tabla deja una
+# copia PARCIAL. El bloque VERIFICACION compara filas TEST vs PROD y el script
+# termina con exit 1 si algo quedo distinto.
+#
+# Caso real que motivo este orden (2026-10-21): `clases.wod_id` referencia `wods`.
+# Con `wods` fuera de la lista, el INSERT de `clases` abortaba en la primera fila
+# con wod_id (8 filas de PROD apuntan a wods.id=30) y arrastraba a `reservas` y
+# `asistencias` por FK. Por eso wods/wod_movimientos van ANTES de clases.
+#
+# `wods.estado`: varchar(20) en PROD vs enum `estadowod` en TEST. Hoy el unico
+# valor de PROD es 'publicado', que existe en el enum, y Postgres castea el
+# parametro al tipo de la columna destino. Si algun dia aparece un valor que no
+# esta en el enum, la tabla falla y se ve como ERROR + exit 1 en la verificacion.
+#
+# NO se copian (quedan vacias a proposito):
+#   auditoria                  -> log de operaciones; ademas `detalle` es json en
+#                                 TEST y jsonb en PROD (riesgo de desajuste).
+#   password_reset_tokens      -> tokens de seguridad efimeros, no viajan a TEST.
+#   daily_kpis, monthly_kpis, segmentacion_alumnos, student_segments,
+#   predictions_churn, predictions_forecast
+#                              -> derivados/ML, recalculables desde los datos base.
+#   ml_modelos                 -> apunta a artefactos .pkl que TEST no tiene.
+#   horarios_base              -> no existe en el esquema de TEST.
 print("\nCopiando PROD->TEST...")
 TABLAS = [
+    # --- base ---
     ("tenants", None),
     ("movimientos", "id, tenant_id, nombre, descripcion, categoria, activo, created_at, updated_at"),
     ("disciplinas", None),
     ("planes", None),
     ("horarios", None),
     ("usuarios", None),
-    ("suscripciones", None),
+    # --- configuracion ---
+    ("configuracion_negocio", None),
+    ("configuracion_referidos", None),
+    # --- WODs y coaches (ANTES de clases: clases.wod_id -> wods) ---
+    ("wods", None),
+    ("wod_movimientos", None),
+    ("coach_disciplinas", None),
+    ("horarios_coach", None),
+    # --- catalogo ---
     ("productos", None),
+    ("producto_imagenes", None),
+    # --- agenda y asistencia ---
+    ("suscripciones", None),
     ("clases", None),
+    ("asistencias", None),
     ("reservas", None),
+    ("cobertura_emergencia", None),
     ("historial_rm", None),
     ("notificaciones", None),
+    # --- notificaciones / beneficios / planes (beneficios.notificacion_id) ---
+    ("notificaciones_enviadas", None),
+    ("beneficios", None),
+    ("solicitudes_planes", None),
+    # --- tienda ---
+    ("pedidos", None),
+    ("avisos_marketing", None),
+    # --- referidos (creditos_referido al final: depende de 3 tablas) ---
+    ("codigos_referido", None),
+    ("promociones_referidos", None),
+    ("promociones_referidos_detectadas", None),
+    ("referidos_aplicados", None),
+    ("invitaciones", None),
+    ("creditos_referido", None),
+    # --- seguimiento ---
+    ("churn_gestion", None),
+    ("retencion_alumnos", None),
+    ("hitos_alumno", None),
 ]
 
+fallos = []
 for tabla, columnas in TABLAS:
     cols = columnas or "*"
     try:
@@ -208,14 +287,14 @@ for tabla, columnas in TABLAS:
         if not rows:
             continue
         col_names = [desc[0] for desc in cur_prod.description]
-        placeholders = ",".join(["%s"] * len(col_names))
         cols_str = ",".join(col_names)
-        for row in rows:
-            cur_test.execute(
-                f"INSERT INTO {tabla} ({cols_str}) VALUES ({placeholders})", row)
+        # En lotes: 24.752 asistencias una por una contra el pooler tardan minutos.
+        execute_values(cur_test, f"INSERT INTO {tabla} ({cols_str}) VALUES %s",
+                       rows, page_size=1000)
         print(f"  {tabla}: {len(rows)}")
     except Exception as e:
         print(f"  {tabla}: ERROR {e}")
+        fallos.append((tabla, str(e)))
 
 c_test.commit()
 
@@ -223,37 +302,22 @@ c_test.commit()
 # Al copiar IDs explicitos desde PROD, las secuencias SERIAL de TEST quedan sin
 # sincronizar. Si luego la app intenta insertar (ej. auto-generar clases para
 # fechas recientes), choca con IDs ya existentes (UniqueViolation).
-# Aplicar a TODAS las tablas copiadas con IDs explicitos.
+# Se resuelve de forma generica con pg_get_serial_sequence() por tabla copiada,
+# asi no hay que mantener un dict a mano cada vez que se agrega una tabla.
 print("\n[RESYNC SECUENCIAS]...")
-SECUENCIAS = {
-    "tenants": "tenants_id_seq",
-    "usuarios": "usuarios_id_seq",
-    "movimientos": "movimientos_id_seq",
-    "disciplinas": "disciplinas_id_seq",
-    "planes": "planes_id_seq",
-    "horarios": "horarios_id_seq",
-    "clases": "clases_id_seq",
-    "reservas": "reservas_id_seq",
-    "historial_rm": "historial_rm_id_seq",
-    "notificaciones": "notificaciones_id_seq",
-    "suscripciones": "suscripciones_id_seq",
-    "productos": "productos_id_seq",
-    "pedidos": "pedidos_id_seq",
-    "wods": "wods_id_seq",
-    "wod_movimientos": "wod_movimientos_id_seq",
-    "cobertura_emergencia": "cobertura_emergencia_id_seq",
-    "coach_disciplinas": "coach_disciplinas_id_seq",
-}
-for tabla, seq in SECUENCIAS.items():
+for tabla, _columnas in TABLAS:
     try:
+        cur_test.execute("SELECT pg_get_serial_sequence(%s, 'id')", (f"public.{tabla}",))
+        seq = cur_test.fetchone()[0]
+        if not seq:
+            continue  # tabla sin id serial
         # setval con COALESCE: si la tabla esta vacia, MAX(id) es NULL -> 1
-        cur_test.execute(f"""
-            SELECT setval('{seq}',
-              COALESCE((SELECT MAX(id)+1 FROM {tabla}), 1), false)
-        """)
+        cur_test.execute(
+            f'SELECT setval(%s::regclass, COALESCE((SELECT MAX(id)+1 FROM "{tabla}"), 1), false)',
+            (seq,))
         c_test.commit()
         print(f"  [OK] {tabla} -> {seq}")
-    except Exception as e:
+    except Exception:
         # Ignorar secuencias/tablas que no existen en este schema
         pass
 
@@ -303,8 +367,10 @@ cur_test.execute("""
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
 """)
-cur_test.execute("INSERT INTO coach_disciplinas (tenant_id, coach_id, disciplina_id, activo) SELECT 1, id, 1, true FROM usuarios WHERE rol='coach' AND tenant_id=1 AND estado='activo' AND NOT EXISTS (SELECT 1 FROM coach_disciplinas cd WHERE cd.coach_id=usuarios.id AND cd.disciplina_id=1)")
-print("[OK] coach_disciplinas table + inserts")
+# Sin INSERT de relleno: coach_disciplinas ahora se copia de PROD en el bloque 3,
+# asi que TEST queda espejo exacto. Este CREATE TABLE IF NOT EXISTS es solo una
+# red de seguridad para el caso de un TEST reconstruido a mano.
+print("[OK] coach_disciplinas table")
 
 # 5d. cobertura_emergencia table
 cur_test.execute("""
@@ -324,26 +390,44 @@ c_test.commit()
 print("[OK] Migraciones post-sync aplicadas")
 
 # ── 6. VERIFICACION ──
-print("\nVERIFICACION:")
-for tabla in ["tenants", "movimientos", "disciplinas", "planes", "horarios",
-              "usuarios", "suscripciones", "productos", "clases", "reservas",
-              "historial_rm", "notificaciones"]:
+print("\nVERIFICACION (filas TEST vs PROD):")
+fallos_copiados = []
+for tabla, _columnas in TABLAS:
     try:
-        cur_test.execute(f"SELECT COUNT(*) FROM {tabla}")
-        print(f"  {tabla}: {cur_test.fetchone()[0]}")
-    except:
-        print(f"  {tabla}: ERROR")
+        cur_test.execute(f'SELECT COUNT(*) FROM "{tabla}"')
+        n_test = cur_test.fetchone()[0]
+        cur_prod.execute(f'SELECT COUNT(*) FROM "{tabla}"')
+        n_prod = cur_prod.fetchone()[0]
+        if n_test == n_prod:
+            print(f"  {tabla}: {n_test} OK")
+        else:
+            fallos_copiados.append((tabla, n_test, n_prod))
+            print(f"  {tabla}: {n_test} (PROD {n_prod}) DIFIERE")
+    except Exception as e:
+        print(f"  {tabla}: ERROR {e}")
+        fallos.append((tabla, f"verificacion: {e}"))
 
 try:
     cur_test.execute("SELECT COUNT(*) FROM transacciones_financieras")
-    print(f"  transacciones_financieras: {cur_test.fetchone()[0]}")
-except:
-    print(f"  transacciones_financieras: 0")
+    print(f"  transacciones_financieras: {cur_test.fetchone()[0]} (preservadas de TEST)")
+except Exception:
+    print("  transacciones_financieras: 0")
 
 cur_prod.close()
 c_prod.close()
 cur_test.close()
 c_test.close()
+
+if fallos or fallos_copiados:
+    print("\n" + "=" * 60)
+    print("  [FALLO] sync INCOMPLETO: TEST NO es copia fiel de PROD")
+    for tabla, err in fallos:
+        print(f"    - {tabla}: {err}")
+    for tabla, n_test, n_prod in fallos_copiados:
+        print(f"    - {tabla}: TEST={n_test} PROD={n_prod}")
+    print("  Revisar el error y volver a correr el sync (es idempotente).")
+    print("=" * 60)
+    sys.exit(1)
 
 print("\nSYNC COMPLETE")
 

@@ -15,12 +15,12 @@ GUARDS (todos deben pasar; corren ANTES de leer/escribir cualquier fila)
 1. `--destino prod|test` es OBLIGATORIO (no hay default). De él sale `ENVIRONMENT`
    (`production` / `test`) y por lo tanto qué `.env` lee `app.core.config`.
 2. La URL tiene que coincidir EXACTAMENTE con el destino:
-     * prod: el endpoint de PROD (`PROD_BRANCH_ID` = `ep-nameless-sound-b6km6wyi`,
-       host `nameless-sound`). Cualquier OTRO host aborta.
-     * test: un endpoint de TEST (`TEST_BRANCH_IDS` = `ep-jolly-butterfly-b6ty2z89`,
-       host `jolly-butterfly`) y NUNCA el de PROD (denylist).
+     * prod: el endpoint de PROD (`PROD_BRANCH_ID` = `ep-bitter-cloud-arat6wil`,
+       host `bitter-cloud`). Cualquier OTRO host aborta.
+     * test: un endpoint de TEST (`TEST_BRANCH_IDS` = `ep-lingering-fog-arywdnbg`,
+       host `lingering-fog`) y NUNCA el de PROD (denylist).
    Los ids se leen de `app.core.config` (única fuente de verdad) y además se valida
-   que el de PROD siga siendo `nameless-sound`: si Neon vuelve a recrear el endpoint,
+   que el de PROD siga siendo `bitter-cloud`: si Neon vuelve a recrear el endpoint,
    el script aborta en vez de escribir en una base que ya no es la que espera.
    ⚠️ `withered-silence` era el endpoint de PROD **viejo** (migración del 2026-09-24).
    El guard del seed anterior (`"withered-silence" in DATABASE_URL`) ya NO puede pasar:
@@ -152,7 +152,7 @@ MARCA_TS = datetime(2026, 10, 2, 4, 17, 3, 123456, tzinfo=timezone.utc)
 DIAS_MANTENIMIENTO = (1, 15)      # el job escribe esos días
 MES_PROHIBIDO = "2026-09"         # el run del 1/10 vencería todas las de septiembre
 # ── Hosts de Neon (denylist/allowlist; los ids completos salen de app.core.config) ──
-HOST_PROD = "nameless-sound"      # ep-nameless-sound-b6km6wyi (rama principal)
+HOST_PROD = "bitter-cloud"        # ep-bitter-cloud-arat6wil (rama production)
 HOST_TEST = "jolly-butterfly"     # ep-jolly-butterfly-b6ty2z89 (rama de desarrollo)
 HOST_PROD_VIEJO = "withered-silence"   # PROD ANTES del 2026-09-24 (endpoint ya retirado)
 
