@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 // Vista previa del comprobante (blob autenticado): hook compartido con el Dashboard.
 import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
@@ -11,6 +12,11 @@ import {
 } from '../../hooks/queries';
 
 const AdminAlumnosPendientes = () => {
+    const [searchParams] = useSearchParams();
+    // `?cola=solicitudes` llega desde la tarjeta "Solicitudes Pendientes" del
+    // Dashboard: la página sigue mostrando las DOS colas, pero baja hasta la de
+    // comprobantes y la resalta (antes el botón hacía scroll dentro del Dashboard).
+    const colaSolicitada = searchParams.get('cola');
     const [actionId, setActionId] = useState(null);
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
@@ -39,6 +45,15 @@ const AdminAlumnosPendientes = () => {
         ? mensajeError(regsQ.error, 'No se pudieron cargar las solicitudes') : '';
     const solicitudesError = solsQ.error
         ? mensajeError(solsQ.error, 'No se pudieron cargar las solicitudes de plan') : '';
+
+    useEffect(() => {
+        if (colaSolicitada !== 'solicitudes' || loading) return undefined;
+        const t = setTimeout(() => {
+            document.getElementById('cola-solicitudes')
+                ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 150);
+        return () => clearTimeout(t);
+    }, [colaSolicitada, loading]);
 
     // Mutaciones: al terminar invalidan las claves de las dos colas, así se refresca
     // TODO lo que las muestra (esta pantalla y el Dashboard) sin pedirlo a mano.
@@ -259,7 +274,10 @@ const AdminAlumnosPendientes = () => {
                     Cuota independiente de la anterior: /solicitudes/pendientes devuelve
                     alumno, plan, precio final (con el beneficio aplicado) y el voucher.
                     Sin esta sección la solicitud quedaba invisible para el admin. */}
-                <div className="mt-10">
+                <div id="cola-solicitudes"
+                    className={`mt-10 rounded-lg transition ${colaSolicitada === 'solicitudes'
+                        ? 'ring-2 ring-rose-500/60 ring-offset-2 ring-offset-zinc-950'
+                        : ''}`}>
                     <h2 className="text-lg font-bold text-zinc-100 mb-3">
                         🧾 Solicitudes de plan (comprobante)
                         {solicitudes.length > 0 && <span className="text-zinc-500 font-normal"> ({solicitudes.length})</span>}

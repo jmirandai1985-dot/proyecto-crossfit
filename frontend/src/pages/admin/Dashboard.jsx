@@ -7,7 +7,7 @@ import { useAuth } from '../../context/AuthContext';
 // que el Inicio del alumno: en ≥768px esta pantalla queda EXACTAMENTE como hoy.
 import InicioMobileAdmin from './InicioMobileAdmin';
 import api from '../../services/api';
-import { fmtFechaChile, toChileFechaStr, horaChileStr } from '../../utils/fecha';
+import { horaChileStr } from '../../utils/fecha';
 import AdminTarjetaAlumnosPrueba from '../../components/AdminTarjetaAlumnosPrueba';
 // Aviso REUTILIZABLE (secciones + Reintentar) para las tarjetas que pueden fallar.
 import AvisoCarga from '../../components/AvisoCarga';
@@ -18,7 +18,7 @@ import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
 // lo que una pantalla ya trajo, la otra lo pinta sin volver a pedirlo).
 import { mensajeError } from '../../services/queryClient';
 import {
-    useAprobarSolicitud, useClasesHoy, useCountPendientesActivacion,
+    useAprobarSolicitud, useAlumnosNuevosMes, useClasesHoy, useCountPendientesActivacion,
     useRechazarSolicitud, useSolicitudesPendientes, useStatsDashboard,
 } from '../../hooks/queries';
 
@@ -55,6 +55,11 @@ const AdminDashboard = () => {
     const solicitudesQ = useSolicitudesPendientes();
     const registrosQ = useCountPendientesActivacion();
     const statsQ = useStatsDashboard(tenant_id);
+    // "Alumnos nuevos de este mes": MISMA fuente que la pantalla de detalle
+    // (`GET /admin/alumnos-nuevos`), así el número de la tarjeta y la lista no
+    // pueden discrepar. Antes la tarjeta mostraba el KPI DIARIO del BI y el
+    // detalle abría el acumulado del mes.
+    const nuevosMesQ = useAlumnosNuevosMes();
     // "Clases de hoy": se refresca sola cada 45 s y NO con la pestaña oculta (React
     // Query pausa el intervalo solo), igual que el setInterval + visibility de antes.
     const clasesHoyQ = useClasesHoy();
@@ -110,13 +115,15 @@ const AdminDashboard = () => {
     const [detalleLoading, setDetalleLoading] = useState(false);
     // Fidelización — modal membresías del mes
     const [fidelizacionModal, setFidelizacionModal] = useState(null); // 'membresias'
-    // ── Tarjetas BI (data mart): "Alumnos nuevos" y "Convertidos" ─────────────
-    // Reutilizan los MISMOS endpoints de la pestaña KPIs (/api/v1/kpis/diario y
-    // /api/v1/kpis/mensual) — no se recalcula nada acá. Si el job BI todavía no
-    // publicó el día/mes, la tarjeta dice "s/d" con el motivo, nunca un 0 falso.
-    const [biNuevos, setBiNuevos] = useState({ loading: true, valor: null, fecha: '', error: '' });
+    // ── Tarjeta BI: "Convertidos" ─────────────────────────────────────────────
+    // Reutiliza el endpoint de la pestaña KPIs (/api/v1/kpis/mensual) — no se
+    // recalcula nada acá. Si el job BI todavía no publicó el mes, la tarjeta
+    // dice "s/d" con el motivo, nunca un 0 falso.
     const [biConversion, setBiConversion] = useState({
-        loading: true, valor: null, prueba: null, rate: null, periodo: '', error: '',
+        loading: true, valor: null, prueba: null, rate: null, periodo: '',
+        // Período del BI en números: la tarjeta lo pasa a /admin/alumnos-convertidos
+        // para que el detalle y el número del panel sean EXACTAMENTE el mismo mes.
+        anio: null, mes: null, error: '',
     });
 
     useEffect(() => {
@@ -150,42 +157,16 @@ const AdminDashboard = () => {
         registrosQ.refetch();
         statsQ.refetch();
         clasesHoyQ.refetch();
+        nuevosMesQ.refetch();
         cargarFidelizacion();
         cargarBi();
     };
 
-    // ── BI (SOLO LECTURA): "Alumnos nuevos" y "Convertidos" ───────────────────
-    // Mismo criterio que la pestaña KPIs: el cron `box-crossfit-kpis-ml` publica el
-    // día ANTERIOR, así que se pide ayer y, si el job todavía no corrió, se
-    // retrocede hasta 3 días. El mensual usa el ÚLTIMO MES CERRADO con datos
-    // (índice /kpis/mensual/periodos -> `default`), no el mes en curso (vacío).
+    // ── BI (SOLO LECTURA): "Convertidos" ───────────────────────────────────────
+    // Mismo criterio que la pestaña KPIs: el mensual usa el ÚLTIMO MES CERRADO
+    // con datos (índice /kpis/mensual/periodos -> `default`), no el mes en curso
+    // (vacío).
     const cargarBi = async () => {
-        setBiNuevos((prev) => ({ ...prev, loading: true }));
-        const dias = [];
-        for (let i = 1; i <= 3; i++) {
-            const d = new Date();
-            d.setDate(d.getDate() - i);
-            dias.push(toChileFechaStr(d));
-        }
-        const res = await Promise.allSettled(
-            dias.map((fecha) => api.get('/api/v1/kpis/diario', { params: { fecha } }))
-        );
-        const ok = res.find((r) => r.status === 'fulfilled');
-        if (ok) {
-            setBiNuevos({
-                loading: false,
-                valor: ok.value.data?.alumnos_nuevos ?? null,
-                fecha: ok.value.data?.fecha || '',
-                error: '',
-            });
-        } else {
-            setBiNuevos({
-                loading: false, valor: null, fecha: '',
-                error: res[0]?.reason?.response?.data?.detail
-                    || 'Sin dato del BI para los últimos días',
-            });
-        }
-
         setBiConversion((prev) => ({ ...prev, loading: true }));
         try {
             const rPer = await api.get('/api/v1/kpis/mensual/periodos');
@@ -193,6 +174,7 @@ const AdminDashboard = () => {
             if (!pedido) {
                 setBiConversion({
                     loading: false, valor: null, prueba: null, rate: null, periodo: '',
+                    anio: null, mes: null,
                     error: 'Aún no hay meses cerrados publicados por el BI',
                 });
                 return;
@@ -206,11 +188,13 @@ const AdminDashboard = () => {
                 prueba: r.data?.alumnos_prueba ?? null,
                 rate: r.data?.conversion_rate ?? null,
                 periodo: `${String(pedido.month).padStart(2, '0')}/${pedido.year}`,
+                anio: pedido.year, mes: pedido.month,
                 error: '',
             });
         } catch (err) {
             setBiConversion({
                 loading: false, valor: null, prueba: null, rate: null, periodo: '',
+                anio: null, mes: null,
                 error: err?.response?.data?.detail || err?.message
                     || 'No se pudo cargar el BI mensual',
             });
@@ -322,6 +306,20 @@ const AdminDashboard = () => {
         ? null
         : (countPendientes || 0) + solicitudes.length;
 
+    // "Alumnos nuevos de este mes": número y listado salen del MISMO endpoint que
+    // abre la tarjeta (`/admin/alumnos-nuevos`). `convertidos` viene resuelto por
+    // el backend (plan comercial vigente), no se recalcula en el cliente.
+    const nuevosMes = nuevosMesQ.data?.alumnos || [];
+    const totalNuevosMes = nuevosMesQ.data?.total ?? nuevosMes.length;
+    const convertidosNuevosMes = nuevosMes.filter((a) => a.convertido).length;
+
+    // "Alumnos en Riesgo": la tarjeta dice "> 7 días", así que el número usa
+    // EXACTAMENTE esa condición (la tabla de Fidelización la recibe por
+    // `?filtro=sin_actividad`).
+    const alumnosRiesgoSinActividad = alumnosRiesgo.filter(
+        (a) => Number(a.dias_ausente) > 7,
+    );
+
     // Resumen de "Clases de hoy" (tarjeta + encabezado de la sección):
     // X de Y realizadas + ocupación del día (reservas sobre cupos ofrecidos).
     const clasesHoyRealizadas = clasesHoy.filter(c => c.estado === 'realizada').length;
@@ -378,10 +376,10 @@ const AdminDashboard = () => {
                 {/* TARJETAS DE ESTADÍSTICAS */}
                 {stats && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-                        <button onClick={() => navigate('/admin/alumnos')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-blue-600 hover:shadow-md hover:border-blue-700 transition-all cursor-pointer text-left">
+                        <button onClick={() => navigate('/admin/alumnos?estado=activo')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-blue-600 hover:shadow-md hover:border-blue-700 transition-all cursor-pointer text-left">
                             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos Activos</p>
                             <p className="text-3xl font-bold text-blue-400 mt-1">{stats.alumnosActivos || 0}</p>
-                            <p className="text-xs text-zinc-500 mt-1">Total miembros con plan vigente — Clic para ver</p>
+                            <p className="text-xs text-zinc-500 mt-1">Total miembros con plan vigente — Clic para ver el padrón activo</p>
                         </button>
                         <button onClick={() => setFidelizacionModal('membresias')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-green-600 hover:shadow-md hover:border-green-700 transition-all cursor-pointer text-left">
                             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Membresías Mensuales</p>
@@ -411,13 +409,19 @@ const AdminDashboard = () => {
                         {/* Ventas del Bazar del mes: campo propio de /reportes/ (`ventasBazar`).
                             Es BRUTA y no recurrente: no está dentro de "Ingreso Mensual" (neto de
                             transacciones) ni del MRR. */}
-                        <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-teal-600">
+                        <button onClick={() => navigate('/admin/reportes?seccion=bazar')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-teal-600 hover:shadow-md hover:border-teal-700 transition-all cursor-pointer text-left">
                             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Ventas Bazar (mes)</p>
                             <p className="text-3xl font-bold text-teal-600 mt-1">
                                 ${(stats.ventasBazar || 0).toLocaleString('es-CL')}
                             </p>
-                            <p className="text-xs text-zinc-500 mt-1">Pedidos cobrados del mes</p>
-                        </div>
+                            <p className="text-xs text-zinc-500 mt-1">
+                                {stats.ventasBazarPedidos || 0} pedido{(stats.ventasBazarPedidos || 0) === 1 ? '' : 's'} cobrado{(stats.ventasBazarPedidos || 0) === 1 ? '' : 's'} del mes
+                                {/* Sin base comparable no se muestra 0%: se dice que no hay mes anterior. */}
+                                {stats.ventasBazarVariacion == null
+                                    ? ' · sin base anterior'
+                                    : ` · ${stats.ventasBazarVariacion > 0 ? '↑' : stats.ventasBazarVariacion < 0 ? '↓' : '='} ${Math.abs(stats.ventasBazarVariacion)}% vs mes anterior`}
+                            </p>
+                        </button>
                         <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-purple-600">
                             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide"
                                 title="Ocupacion: clases.asistentes_confirmados / clases.cupo_maximo (lugares reservados sobre cupo ofrecido). NO mide asistencia real. Puede verse 0% porque las asistencias todavia no estan vinculadas a su clase (asistencias.clase_id es NULL en toda la base).">Ocupación promedio</p>
@@ -441,7 +445,7 @@ const AdminDashboard = () => {
                                 </>
                             )}
                         </button>
-                        <button onClick={() => document.getElementById('solicitudes-pendientes')?.scrollIntoView({ behavior: 'smooth' })} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-rose-600 hover:shadow-md hover:border-rose-700 transition-all cursor-pointer text-left">
+                        <button onClick={() => navigate('/admin/alumnos-pendientes?cola=solicitudes')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-rose-600 hover:shadow-md hover:border-rose-700 transition-all cursor-pointer text-left">
                             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Solicitudes Pendientes</p>
                             {totalPendientes === null ? (
                                 <p className="text-sm font-bold text-rose-400 mt-2" title={registrosError || solicitudesError}>
@@ -460,36 +464,50 @@ const AdminDashboard = () => {
                     </div>
                 )}
 
-                {/* TARJETAS BI: "Alumnos nuevos" y "Convertidos". El número sigue
-                    viniendo del BI (data marts daily_kpis/monthly_kpis), pero la de
-                    "Alumnos Nuevos" abre la pantalla operativa con los DOS listados
-                    (en prueba + altas del mes); antes mandaba a /admin/kpis, que no
-                    era lo que el admin esperaba al tocar la tarjeta. */}
+                {/* TARJETAS: "Alumnos nuevos de este mes" (endpoint operativo, mismo
+                    número que el detalle) y "Convertidos" (BI mensual). La primera
+                    abre la pantalla con los DOS listados (en prueba + altas del mes);
+                    antes mandaba a /admin/kpis, que no era lo que el admin esperaba. */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <button onClick={() => navigate('/admin/alumnos-prueba')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-emerald-600 hover:shadow-md hover:border-emerald-700 transition-all cursor-pointer text-left">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos Nuevos</p>
-                                {biNuevos.loading ? (
+                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos nuevos de este mes</p>
+                                {nuevosMesQ.isPending ? (
                                     <p className="text-3xl font-bold text-zinc-600 mt-1">…</p>
-                                ) : biNuevos.valor === null ? (
-                                    <p className="text-sm font-bold text-amber-400 mt-2">s/d</p>
+                                ) : nuevosMesQ.isError ? (
+                                    <p className="text-sm font-bold text-amber-400 mt-2" title={mensajeError(nuevosMesQ.error, 'No se pudieron cargar las altas del mes')}>
+                                        ⚠️ s/d
+                                    </p>
                                 ) : (
-                                    <p className="text-3xl font-bold text-emerald-600 mt-1">{biNuevos.valor}</p>
+                                    <p className="text-3xl font-bold text-emerald-600 mt-1">{totalNuevosMes}</p>
                                 )}
                                 <p className="text-xs text-zinc-500 mt-1">
-                                    {biNuevos.loading
-                                        ? 'Consultando el BI…'
-                                        : biNuevos.error
-                                            ? `⚠️ ${biNuevos.error === 'KPI diario no encontrado' ? 'el BI todavía no publicó esos días' : biNuevos.error}`
-                                            : `Registros nuevos del ${fmtFechaChile(biNuevos.fecha)}`}
-                                    {' '}— Clic para ver alumnos
+                                    {nuevosMesQ.isPending
+                                        ? 'Consultando las altas del mes…'
+                                        : nuevosMesQ.isError
+                                            ? 'No se pudieron cargar las altas del mes'
+                                            : `${convertidosNuevosMes} ya compraron plan · ${totalNuevosMes - convertidosNuevosMes} aún sin plan`}
+                                    {!nuevosMesQ.isError && ' — Clic para ver el detalle'}
                                 </p>
                             </div>
                             <span className="text-4xl">👤</span>
                         </div>
                     </button>
-                    <button onClick={() => navigate('/admin/kpis')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-teal-600 hover:shadow-md hover:border-teal-700 transition-all cursor-pointer text-left">
+                    <button
+                        onClick={() => {
+                            // Si el BI ya dijo qué mes está mostrando, el detalle abre ESE
+                            // mes (mismo número que la tarjeta); si no, el detalle usa su
+                            // default (último mes cerrado).
+                            const qs = new URLSearchParams();
+                            if (biConversion.anio && biConversion.mes) {
+                                qs.set('anio', biConversion.anio);
+                                qs.set('mes', biConversion.mes);
+                            }
+                            navigate(`/admin/alumnos-convertidos${qs.toString() ? `?${qs}` : ''}`);
+                        }}
+                        className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-teal-600 hover:shadow-md hover:border-teal-700 transition-all cursor-pointer text-left"
+                    >
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Convertidos</p>
@@ -506,7 +524,7 @@ const AdminDashboard = () => {
                                         : biConversion.error
                                             ? `⚠️ ${biConversion.error}`
                                             : `Compraron plan${biConversion.periodo ? ` (${biConversion.periodo})` : ''} · Conversión prueba→plan: ${biConversion.rate}% · ${biConversion.prueba || 0} en prueba`}
-                                    {' '}— Clic para ver KPIs
+                                    {!biConversion.error && ' — Clic para ver el detalle'}
                                 </p>
                             </div>
                             <span className="text-4xl">🚀</span>
@@ -598,14 +616,14 @@ const AdminDashboard = () => {
                 {!fidelizacionLoading && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Tarjeta Alumnos en Riesgo */}
-                        <button onClick={() => navigate('/admin/fidelizacion')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-red-600 hover:shadow-md hover:border-red-700 transition-all cursor-pointer text-left">
+                        <button onClick={() => navigate('/admin/fidelizacion?filtro=sin_actividad')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-red-600 hover:shadow-md hover:border-red-700 transition-all cursor-pointer text-left">
                             <div className="flex items-center justify-between">
                                 <div>
                                     <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos en Riesgo</p>
                                     {fidelizacionError.riesgo ? (
                                         <p className="text-sm font-bold text-red-400 mt-2">⚠️ {fidelizacionError.riesgo}</p>
                                     ) : (
-                                        <p className="text-3xl font-bold text-red-700 mt-1">{alumnosRiesgo.length}</p>
+                                        <p className="text-3xl font-bold text-red-700 mt-1">{alumnosRiesgoSinActividad.length}</p>
                                     )}
                                     <p className="text-xs text-zinc-500 mt-1">Sin actividad {'>'} 7 días — Clic para ir a Fidelización</p>
                                 </div>
@@ -613,7 +631,7 @@ const AdminDashboard = () => {
                             </div>
                         </button>
                         {/* Tarjeta Vencimientos Inminentes */}
-                        <button onClick={() => navigate('/admin/fidelizacion')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-orange-600 hover:shadow-md hover:border-orange-700 transition-all cursor-pointer text-left">
+                        <button onClick={() => navigate('/admin/fidelizacion?filtro=plan_urgente')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-orange-600 hover:shadow-md hover:border-orange-700 transition-all cursor-pointer text-left">
                             <div className="flex items-center justify-between">
                                 <div>
                                     <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Vencimientos Inminentes</p>

@@ -823,7 +823,7 @@ const InicioMobileAdmin = () => {
                         clase="k-venc" icono="clock" label="Vencen en 5 días"
                         valor={kpis.vencen} error={errores.vencen} cargando={cargando}
                         sub="membresías por vencer"
-                        onClick={() => navigate('/admin/fidelizacion')}
+                        onClick={() => navigate('/admin/fidelizacion?filtro=plan_urgente')}
                     />
                     {/* Tercera tarjeta (ancho completo): abre la pantalla con los dos
                         listados. El número es el de los que están EN PRUEBA; el pie

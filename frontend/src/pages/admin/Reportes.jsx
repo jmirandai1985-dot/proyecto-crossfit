@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar
+    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
@@ -35,11 +36,21 @@ const formatCompact = (value) => {
 
 const formatCLP = (value) => `$${value.toLocaleString('es-CL')}`;
 
-// Meses reales en español
-const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+// Anclas internas del reporte: las tarjetas de KPI llevan al detalle que
+// respalda su número. Se usan tanto al entrar con `?seccion=` (Dashboard) como
+// al hacer clic en una tarjeta de esta misma pantalla.
+const SECCION_IDS = {
+    bazar: 'seccion-bazar',
+    ranking: 'ranking-planes',
+    movimientos: 'detalle-movimientos',
+    disciplinas: 'resumen-disciplinas',
+    coaches: 'clases-coach',
+    vencidos: 'planes-vencidos',
+};
 
 const Reportes = () => {
     const { tenant_id } = useAuth();
+    const navigate = useNavigate();
     // Mismo fallback `|| 1` que ya usaba esta pantalla en el reporte, el alta de un
     // movimiento y el Excel: se conserva tal cual (no se cambia la petición que sale).
     const tenantEfectivo = tenant_id || 1;
@@ -50,6 +61,29 @@ const Reportes = () => {
     const { data: reporteData, isPending: loadingReporte } = useStatsDashboard(tenantEfectivo);
     const reportData = reporteData ?? null;
     const loading = loadingReporte;
+    // El Dashboard enlaza acá con ?seccion=bazar|ranking|...: al entrar se baja
+    // hasta la tarjeta/sección del detalle en vez de dejar al admin arriba.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const seccionActiva = searchParams.get('seccion');
+    const seccionId = SECCION_IDS[seccionActiva] || null;
+    useEffect(() => {
+        if (!seccionId || loading) return undefined;
+        const t = setTimeout(() => {
+            document.getElementById(seccionId)
+                ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 150);
+        return () => clearTimeout(t);
+    }, [seccionId, loading]);
+
+    // Misma pantalla: actualizar el query param y bajar al detalle en el acto.
+    const irASeccion = (seccion) => {
+        setSearchParams({ seccion });
+        const id = SECCION_IDS[seccion];
+        if (id) {
+            setTimeout(() => document.getElementById(id)
+                ?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+        }
+    };
     // Gráfico histórico abierto en el modal de detalle (null = ninguno).
     const [detalleGrafico, setDetalleGrafico] = useState(null);
     const [showMovModal, setShowMovModal] = useState(false);
@@ -73,6 +107,16 @@ const Reportes = () => {
         mes: item.mes,
         ingresos: item.ingresos,
     }));
+
+    // Ranking de planes del mes: lo entrega `/reportes/` ya agrupado y con el
+    // MISMO criterio de compra que Convertidos (plan con precio > 0), así no
+    // cuenta pruebas ni regalos. No se recalcula en el cliente.
+    const rankingPlanes = reportData?.planesMasVendidos || [];
+    // `null` con cero altas comerciales: la tarjeta muestra "sin altas", no 0.
+    const planTop = rankingPlanes[0] || null;
+    const totalAltasRanking = rankingPlanes.reduce((acc, p) => acc + (p.altas || 0), 0);
+    // Detalle de la tarjeta "Planes Vencidos (Mes)" (mismas filas del COUNT).
+    const planesVencidos = reportData?.planesVencidosMes || [];
 
     // Degradados para AreaChart
     const degradeMembresias = (
@@ -163,19 +207,25 @@ const Reportes = () => {
 
                 {/* KPIs principales */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-blue-500">
+                    <button type="button"
+                        onClick={() => navigate('/admin/alumnos?estado=activo')}
+                        title="Ver el padrón filtrado por alumnos activos"
+                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-blue-500 transition hover:shadow-md hover:border-blue-400 cursor-pointer">
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-zinc-400 text-sm font-medium">Alumnos Activos</p>
                                 <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.alumnosActivos || 0}</p>
                                 {/* Mismo criterio que el endpoint: alumno con suscripcion vigente hoy. */}
-                                <p className="text-xs text-zinc-400 mt-2">Con suscripción vigente</p>
-                                                            </div>
+                                <p className="text-xs text-zinc-400 mt-2">Con suscripción vigente — Clic para ver</p>
+                            </div>
                             <span className="text-4xl">👥</span>
                         </div>
-                    </div>
+                    </button>
 
-                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-green-500">
+                    <button type="button"
+                        onClick={() => irASeccion('movimientos')}
+                        title="Ver el detalle de movimientos del mes"
+                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-green-500 transition hover:shadow-md hover:border-green-400 cursor-pointer">
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-zinc-400 text-sm font-medium">Ingreso Neto Mensual</p>
@@ -196,12 +246,16 @@ const Reportes = () => {
                                         {Math.abs(reportData?.crecimientoMensual ?? 0)}% vs mes anterior
                                     </p>
                                 )}
+                                <p className="text-[11px] text-zinc-500 mt-2">Clic para ver movimientos</p>
                             </div>
                             <span className="text-4xl">💰</span>
                         </div>
-                    </div>
+                    </button>
 
-                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-orange-500">
+                    <button type="button"
+                        onClick={() => irASeccion('disciplinas')}
+                        title="Ver ocupación y asistencia por disciplina"
+                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-orange-500 transition hover:shadow-md hover:border-orange-400 cursor-pointer">
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-zinc-400 text-sm font-medium"
@@ -209,41 +263,52 @@ const Reportes = () => {
                                 <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.asistenciaPromedio || 0}%</p>
                                 <p className="text-xs text-zinc-400 mt-2"
                                     title="Ocupacion: clases.asistentes_confirmados / clases.cupo_maximo (lugares reservados sobre cupo ofrecido). NO mide asistencia real. Puede verse 0% porque las asistencias todavia no estan vinculadas a su clase (asistencias.clase_id es NULL en toda la base).">Ocupación (reservas vs cupo), no asistencia real</p>
+                                <p className="text-[11px] text-zinc-500 mt-2">Clic para ver por disciplina</p>
                             </div>
                             <span className="text-4xl">📊</span>
                         </div>
-                    </div>
+                    </button>
 
-                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-purple-500">
+                    <button type="button"
+                        onClick={() => irASeccion('coaches')}
+                        title="Ver clases impartidas por coach"
+                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-purple-500 transition hover:shadow-md hover:border-purple-400 cursor-pointer">
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-zinc-400 text-sm font-medium">Clases Impartidas</p>
                                 <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.clasesImpartidas || 0}</p>
-                                <p className="text-xs text-zinc-400 mt-2">Este mes</p>
+                                <p className="text-xs text-zinc-400 mt-2">Este mes — Clic para ver por coach</p>
                             </div>
                             <span className="text-4xl">📅</span>
                         </div>
-                    </div>
+                    </button>
 
-                                        <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-indigo-500">
+                    <button type="button"
+                        onClick={() => irASeccion('ranking')}
+                        title="Ver el ranking de planes del mes"
+                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-indigo-500 transition hover:shadow-md hover:border-indigo-400 cursor-pointer">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-zinc-400 text-sm font-medium">Retención Mensual</p>
-                                {reportData?.tieneDatosRetencion ? (
+                                <p className="text-zinc-400 text-sm font-medium">Plan más vendido (Mes)</p>
+                                {planTop ? (
                                     <>
-                                        <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData.retencion}%</p>
-                                        <p className="text-xs text-green-600 mt-2">Últimos 30 días</p>
+                                        <p className="text-3xl font-bold text-zinc-100 mt-2">{planTop.altas}</p>
+                                        <p className="text-xs text-zinc-400 mt-2 truncate max-w-[180px]"
+                                            title={planTop.plan_nombre}>
+                                            {planTop.plan_nombre} · {planTop.porcentaje}% de las altas
+                                        </p>
                                     </>
                                 ) : (
                                     <>
-                                        <p className="text-2xl font-bold text-zinc-500 mt-2">Datos insuficientes</p>
-                                        <p className="text-xs text-yellow-600 mt-2">⚠️ Base de {reportData?.alumnosActivosHace30 ?? 0} de {reportData?.retencionBaseMinima ?? 5} alumnos con plan vigente hace 30 días (mínimo para calcular retención)</p>
+                                        <p className="text-2xl font-bold text-zinc-500 mt-2">Sin altas</p>
+                                        <p className="text-xs text-zinc-400 mt-2">No hay ventas de planes este mes</p>
                                     </>
                                 )}
+                                <p className="text-[11px] text-zinc-500 mt-2">Clic para ver el ranking</p>
                             </div>
-                            <span className="text-4xl">✓</span>
+                            <span className="text-4xl">🏆</span>
                         </div>
-                    </div>
+                    </button>
                 </div>
 
                 {/* Gráficos con Recharts */}
@@ -287,20 +352,31 @@ const Reportes = () => {
                     </div>
                 </div>
 
-                {/* Nuevos Alumnos / Planes Vencidos / MRR / Churn */}
+                {/* Nuevos Alumnos / Planes Vencidos / MRR / Plan más vendido */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-emerald-500">
+                    <button type="button"
+                        onClick={() => navigate('/admin/alumnos-prueba')}
+                        title="Ver los alumnos nuevos del mes y si convirtieron"
+                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-emerald-500 transition hover:shadow-md hover:border-emerald-400 cursor-pointer">
                         <p className="text-zinc-400 text-sm font-medium">Nuevos Alumnos (Mes)</p>
                         <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.nuevosAlumnosMes || 0}</p>
+                        <p className="text-[11px] text-zinc-500 mt-2">Clic para ver el detalle</p>
                         <span className="text-4xl">✨</span>
-                    </div>
-                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-red-500">
+                    </button>
+                    <button type="button"
+                        onClick={() => irASeccion('vencidos')}
+                        title="Ver los planes vencidos de este mes"
+                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-red-500 transition hover:shadow-md hover:border-red-400 cursor-pointer">
                         <p className="text-zinc-400 text-sm font-medium"
                             title="Suscripciones con estado=vencido cuya fecha_expiracion cayo en este mes. NO son cancelaciones explicitas: ese estado no existe en la base.">Planes Vencidos (Mes)</p>
                         <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.cancelacionesMes || 0}</p>
+                        <p className="text-[11px] text-zinc-500 mt-2">Clic para ver el detalle</p>
                         <span className="text-4xl">📉</span>
-                    </div>
-                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-purple-500">
+                    </button>
+                    <button type="button"
+                        onClick={() => navigate('/admin/planes')}
+                        title="Ver el catálogo de planes y sus precios"
+                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-purple-500 transition hover:shadow-md hover:border-purple-400 cursor-pointer">
                         <p className="text-zinc-400 text-sm font-medium">Ingresos Recurrentes Mensuales (MRR)</p>
                         <p className="text-3xl font-bold text-zinc-100 mt-2">{formatCompact(reportData?.mrr || 0)}</p>
                         <p className="text-xs text-zinc-400 mt-2"
@@ -315,43 +391,170 @@ const Reportes = () => {
                             {' '}(LTV = ARPU × vida promedio), así que un mes con muchos egresos también baja ese LTV.
                             {' '}El MRR, en cambio, es el precio de lista de los planes con suscripción activa vigente.
                         </p>
-                    </div>
+                        <p className="text-[11px] text-zinc-500 mt-2">Clic para ver los planes</p>
+                    </button>
                     {/* Ventas del Bazar del mes (BRUTAS): campo `ventasBazar` de /reportes/.
                         No están dentro del MRR (que es sólo planes) ni del ingreso mensual (que es
                         caja neta de transacciones): por eso van en su propia tarjeta. */}
-                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-teal-500">
+                    <button type="button" id="seccion-bazar"
+                        onClick={() => navigate('/admin/pedidos')}
+                        title="Ver los pedidos del Bazar"
+                        className={`w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-teal-500 transition hover:shadow-md hover:border-teal-400 cursor-pointer${seccionActiva === 'bazar' ? ' ring-2 ring-teal-500/60' : ''}`}>
                         <p className="text-zinc-400 text-sm font-medium"
                             title="Pedidos del bazar ya cobrados (validados o entregados) del mes en curso, por la fecha del pedido. Un pedido con el comprobante sin revisar todavía no suma.">Ventas Bazar (Mes)</p>
-                        <p className="text-3xl font-bold text-zinc-100 mt-2">{formatCompact(reportData?.ventasBazar || 0)}</p>
-                        <p className="text-xs text-zinc-400 mt-2">Pedidos cobrados (validados/entregados)</p>
-                        <span className="text-4xl">🛒</span>
-                    </div>
-                    {/* Última tarjeta de la fila (Churn). Mismo criterio que la tarjeta de
-                        Retención para el sin dato. */}
-                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-rose-500">
-                        <p className="text-zinc-400 text-sm font-medium"
-                            title="Churn de cohorte de los últimos 30 días = 100 − retención: de los alumnos vigentes hace 30 días, cuántos dejaron de estarlo. Si la base no alcanza el mínimo, no se calcula.">
-                            Tasa de Churn Mensual
+                        <p className="text-3xl font-bold text-zinc-100 mt-2">{formatCLP(reportData?.ventasBazar || 0)}</p>
+                        <p className="text-xs text-zinc-400 mt-2">
+                            {reportData?.ventasBazarPedidos || 0} pedido{(reportData?.ventasBazarPedidos || 0) === 1 ? '' : 's'} cobrado{(reportData?.ventasBazarPedidos || 0) === 1 ? '' : 's'} (validados/entregados)
                         </p>
-                        {reportData?.churnMensual === null || reportData?.churnMensual === undefined ? (
+                        {/* `null` = el mes anterior no vendió nada: no hay base comparable,
+                            así que no se muestra un 0% que parezca una caída. */}
+                        {reportData?.ventasBazarVariacion == null ? (
+                            <p className="text-xs text-zinc-500 mt-1">
+                                Sin base del mes anterior ({formatCLP(reportData?.ventasBazarMesAnterior || 0)})
+                            </p>
+                        ) : (
+                            <p className={`text-xs font-bold mt-1 ${reportData.ventasBazarVariacion > 0 ? 'text-green-500' : reportData.ventasBazarVariacion < 0 ? 'text-red-500' : 'text-zinc-500'}`}
+                                title={`Mes anterior: ${formatCLP(reportData?.ventasBazarMesAnterior || 0)}`}>
+                                {reportData.ventasBazarVariacion > 0 ? '↑' : reportData.ventasBazarVariacion < 0 ? '↓' : '='}{' '}
+                                {Math.abs(reportData.ventasBazarVariacion)}% vs mes anterior
+                            </p>
+                        )}
+                        <p className="text-[11px] text-zinc-500 mt-1">Clic para ver los pedidos</p>
+                        <span className="text-4xl">🛒</span>
+                    </button>
+                    {/* Retención (antes "Churn"): se muestra la tasa que SIGUE vigente,
+                        no la pérdida. Mismo criterio que la tarjeta del panel/dashboard. */}
+                    <button type="button"
+                        onClick={() => navigate('/admin/fidelizacion')}
+                        title="Ver el panel de fidelización y alumnos en riesgo"
+                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-emerald-500 transition hover:shadow-md hover:border-emerald-400 cursor-pointer">
+                        <p className="text-zinc-400 text-sm font-medium"
+                            title="Retención de cohorte de los últimos 30 días: de los alumnos vigentes hace 30 días, cuántos siguen vigentes hoy. Si la base no alcanza el mínimo, no se calcula.">
+                            Tasa de Retención (30 días)
+                        </p>
+                        {reportData?.tieneDatosRetencion ? (
+                            <>
+                                <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData.retencion}%</p>
+                                <p className="text-xs text-zinc-400 mt-2">
+                                    De {reportData.alumnosActivosHace30 ?? 0} alumnos vigentes hace 30 días
+                                </p>
+                            </>
+                        ) : (
                             <>
                                 <p className="text-2xl font-bold text-zinc-500 mt-2">Datos insuficientes</p>
                                 <p className="text-xs text-yellow-600 mt-2">
                                     ⚠️ Base de {reportData?.alumnosActivosHace30 ?? 0} de {reportData?.retencionBaseMinima ?? 5} alumnos con plan vigente hace 30 días
                                 </p>
                             </>
-                        ) : (
-                            <>
-                                <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData.churnMensual}%</p>
-                                <p className="text-xs text-zinc-400 mt-2">100% − retención de cohorte (30 días)</p>
-                            </>
                         )}
-                        <span className="text-4xl">🚪</span>
+                        <p className="text-[11px] text-zinc-500 mt-2">Clic para ver Fidelización</p>
+                        <span className="text-4xl">🛡️</span>
+                    </button>
+                </div>
+
+                {/* Detalle de Planes Vencidos (Mes): respalda la tarjeta del mismo
+                    nombre. Mismas filas que el COUNT `cancelacionesMes`. */}
+                <div id="planes-vencidos"
+                    className={`bg-zinc-900 rounded-lg shadow overflow-hidden${seccionActiva === 'vencidos' ? ' ring-2 ring-red-500/60' : ''}`}>
+                    <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between gap-3">
+                        <div>
+                            <h2 className="text-lg font-bold text-zinc-100">📉 Planes vencidos del mes</h2>
+                            <p className="text-xs text-zinc-500 mt-0.5">
+                                Suscripciones con estado vencido y fecha de expiración dentro del mes
+                            </p>
+                        </div>
+                        <span className="shrink-0 text-xs font-semibold text-zinc-400">
+                            {planesVencidos.length} vencimiento{planesVencidos.length === 1 ? '' : 's'}
+                        </span>
                     </div>
+                    {planesVencidos.length === 0 ? (
+                        <p className="px-6 py-8 text-center text-sm text-zinc-500">
+                            No hay planes vencidos este mes.
+                        </p>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead className="bg-zinc-800 text-zinc-300">
+                                    <tr>
+                                        <th className="px-6 py-3 text-left text-sm font-medium">Alumno</th>
+                                        <th className="px-6 py-3 text-left text-sm font-medium">Plan</th>
+                                        <th className="px-6 py-3 text-left text-sm font-medium">Precio</th>
+                                        <th className="px-6 py-3 text-left text-sm font-medium">Venció</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-zinc-800">
+                                    {planesVencidos.map((p, index) => (
+                                        <tr key={`${p.alumno_nombre}-${p.plan_nombre}-${p.fecha_expiracion}-${index}`}
+                                            className={index % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
+                                            <td className="px-6 py-3">
+                                                <p className="text-sm font-medium text-zinc-100">{p.alumno_nombre}</p>
+                                                <p className="text-xs text-zinc-500">{p.correo}</p>
+                                            </td>
+                                            <td className="px-6 py-3 text-sm text-zinc-300">{p.plan_nombre || '—'}</td>
+                                            <td className="px-6 py-3 text-sm text-zinc-300">{formatCLP(p.precio_clp || 0)}</td>
+                                            <td className="px-6 py-3 text-sm text-zinc-300">{p.fecha_expiracion || '—'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+
+
+                <div id="ranking-planes" className={`bg-zinc-900 rounded-lg shadow overflow-hidden${seccionActiva === 'ranking' ? ' ring-2 ring-indigo-500/60' : ''}`}>
+                    <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between gap-3">
+                        <div>
+                            <h2 className="text-lg font-bold text-zinc-100">🏆 Ranking de planes del mes</h2>
+                            <p className="text-xs text-zinc-500 mt-0.5">
+                                Altas de planes comerciales (precio &gt; 0) este mes
+                            </p>
+                        </div>
+                        <span className="shrink-0 text-xs font-semibold text-zinc-400">
+                            {totalAltasRanking} alta{totalAltasRanking === 1 ? '' : 's'}
+                        </span>
+                    </div>
+                    {rankingPlanes.length === 0 ? (
+                        <p className="px-6 py-8 text-center text-sm text-zinc-500">
+                            No hay ventas de planes este mes.
+                        </p>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead className="bg-zinc-800 text-zinc-300">
+                                    <tr>
+                                        <th className="px-6 py-3 text-left text-sm font-medium">#</th>
+                                        <th className="px-6 py-3 text-left text-sm font-medium">Plan</th>
+                                        <th className="px-6 py-3 text-left text-sm font-medium">Altas</th>
+                                        <th className="px-6 py-3 text-left text-sm font-medium">% del total</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-zinc-800">
+                                    {rankingPlanes.map((p, index) => (
+                                        <tr key={p.plan_nombre} className={index % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
+                                            <td className="px-6 py-3 text-sm text-zinc-500">{index + 1}</td>
+                                            <td className="px-6 py-3 text-sm font-medium text-zinc-100">{p.plan_nombre}</td>
+                                            <td className="px-6 py-3 text-sm text-zinc-300">{p.altas}</td>
+                                            <td className="px-6 py-3">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="h-2 w-32 max-w-full rounded bg-zinc-800 overflow-hidden">
+                                                        <div className="h-full rounded bg-teal-500"
+                                                            style={{ width: `${p.porcentaje}%` }} />
+                                                    </div>
+                                                    <span className="text-sm text-zinc-400">{p.porcentaje}%</span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
                 </div>
 
                 {/* Resumen de Disciplinas */}
-                <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
+                <div id="resumen-disciplinas"
+                    className={`bg-zinc-900 rounded-lg shadow overflow-hidden${seccionActiva === 'disciplinas' ? ' ring-2 ring-orange-500/60' : ''}`}>
                     <div className="px-6 py-4 border-b border-zinc-800">
                         <h2 className="text-lg font-bold text-zinc-100">Resumen de Disciplinas</h2>
                     </div>
@@ -391,14 +594,15 @@ const Reportes = () => {
 
                 {/* Coaches: clases dictadas + coberturas */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
+                    <div id="clases-coach"
+                        className={`bg-zinc-900 rounded-lg shadow overflow-hidden${seccionActiva === 'coaches' ? ' ring-2 ring-purple-500/60' : ''}`}>
                         <div className="px-6 py-4 border-b border-zinc-800">
                             <h2 className="text-lg font-bold text-zinc-100">👨‍🏫 Clases por Coach (Mes)</h2>
                         </div>
                         <div className="p-6">
                             {(reportData?.clasesPorCoach || []).length > 0 ? (
                                 <div className="space-y-3">
-                                    {reportData.clasesPorCoach.map((c, i) => (
+                                    {reportData.clasesPorCoach.map((c) => (
                                         <div key={c.id} className="flex items-center justify-between">
                                             <span className="text-sm font-medium text-zinc-300">{c.nombre}</span>
                                             <span className="text-sm font-bold text-zinc-100">{c.clases} clases</span>
@@ -422,7 +626,8 @@ const Reportes = () => {
                 </div>
 
                 {/* Detalle de Movimientos */}
-                <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
+                <div id="detalle-movimientos"
+                    className={`bg-zinc-900 rounded-lg shadow overflow-hidden${seccionActiva === 'movimientos' ? ' ring-2 ring-green-500/60' : ''}`}>
                     <div className="px-6 py-4 border-b border-zinc-800">
                         <h2 className="text-lg font-bold text-zinc-100">📋 Detalle de Movimientos</h2>
                     </div>
@@ -571,7 +776,7 @@ const Reportes = () => {
                                         const text = await error.response.data.text();
                                         const json = JSON.parse(text);
                                         errorMsg = json.detail || errorMsg;
-                                    } catch (_) { }
+                                    } catch { }
                                 }
                                 alert(`Error al descargar el reporte: ${errorMsg}`);
                             }

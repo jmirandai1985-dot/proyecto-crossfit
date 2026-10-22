@@ -88,6 +88,10 @@ const PanelAlumnosPrueba = ({
     /** Tocar un nombre lleva a la FICHA del alumno (Historial), igual que el buscador. */
     const irAFicha = (alumnoId) => navigate(`/admin/alumnos/${alumnoId}/historial`);
 
+    // Cuántos de los altas del mes YA compraron un plan: el mismo `convertido` que
+    // publica `/admin/alumnos-nuevos` y que respalda la tarjeta "Convertidos".
+    const convertidosMes = nuevosMes.filter((a) => a.convertido).length;
+
     return (
         <>
             <section className={`screen${embebido ? ' embebida' : ''}`}
@@ -97,10 +101,11 @@ const PanelAlumnosPrueba = ({
                     <button type="button" className="icon-btn" onClick={onVolver}
                         aria-label="Volver">←</button>
                     <div className="s-title">
-                        <h3>Alumnos nuevos y en prueba</h3>
+                        <h3>Alumnos nuevos, convertidos y en prueba</h3>
                         <small>
                             {textoEnPrueba(enPrueba.length)}
                             {nuevosMes.length ? ` · ${nuevosMes.length} nuevos del mes` : ''}
+                            {convertidosMes ? ` · ${convertidosMes} ya con plan` : ''}
                         </small>
                     </div>
                 </div>
@@ -143,7 +148,7 @@ const PanelAlumnosPrueba = ({
                         );
                     })}
 
-                    <h4 className="sec">Nuevos del mes</h4>
+                    <h4 className="sec">Alumnos nuevos de este mes</h4>
                     {errorNuevos ? (
                         <p className="empty-line" role="alert">⚠️ {errorNuevos}</p>
                     ) : cargando ? (
@@ -155,6 +160,21 @@ const PanelAlumnosPrueba = ({
                             onClick={() => irAFicha(a.id)}>
                             <span className="avatar">{iniciales(a.nombre)}</span>
                             <span className="n-name">{a.nombre}</span>
+                            {a.convertido ? (
+                                <span
+                                    className="n-badge"
+                                    title={`Ya compró un plan vigente${a.plan_nombre ? `: ${a.plan_nombre}` : ''}`}
+                                >
+                                    Convertido
+                                </span>
+                            ) : (
+                                <span
+                                    className="n-badge pendiente"
+                                    title="Todavía no compró un plan pagado"
+                                >
+                                    Sin plan
+                                </span>
+                            )}
                             <span className="n-fecha">{textoAlta(a.fecha_alta)}</span>
                         </button>
                     ))}

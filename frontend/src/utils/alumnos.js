@@ -81,11 +81,16 @@ export const badgeEstado = (usuario) => {
  * actual. Sin término, `buscar` viaja `undefined` para que axios no mande el param
  * (mismo request que hacía la pantalla).
  */
-export const paramsAlumnos = ({ rol = 'alumno', porPagina = 25, pagina = 1, buscar = '' } = {}) => ({
+export const paramsAlumnos = ({
+    rol = 'alumno', porPagina = 25, pagina = 1, buscar = '', estado = '',
+} = {}) => ({
     rol,
     limit: porPagina,
     skip: (Math.max(1, pagina) - 1) * porPagina,
     buscar: String(buscar || '').trim() || undefined,
+    // `estado` es el filtro server-side del padrón (`GET /usuarios/?estado=`).
+    // Sin filtro viaja `undefined` para no cambiar el request de siempre.
+    estado: String(estado || '').trim() || undefined,
 });
 
 /** Cuántas páginas tiene el padrón (el total viene del header X-Total-Count). */

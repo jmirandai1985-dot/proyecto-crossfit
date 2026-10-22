@@ -20,6 +20,11 @@ import {
     suscripcionDeAlumno, suscripcionVigente,
 } from '../../utils/alumnos';
 
+// `?estado=` que acepta `GET /usuarios/`. La tarjeta "Alumnos Activos" del
+// Dashboard llega con `?estado=activo`, así la tabla abre YA filtrada en el
+// servidor (no filtra la página actual en el cliente).
+const ESTADOS_PADRON = new Set(['activo', 'pendiente_activacion', 'rechazado', 'baja']);
+
 const Alumnos = () => {
     const { tenant_id } = useAuth();
     const [searchTerm, setSearchTerm] = useState('');
@@ -46,6 +51,16 @@ const Alumnos = () => {
     const [searchParams, setSearchParams] = useSearchParams();
     // Navegación al Historial del alumno (`/admin/alumnos/:id/historial`).
     const navigate = useNavigate();
+    // Filtro por estado que llega desde el Dashboard. Se valida: un valor
+    // desconocido en la URL no se manda al backend (allí no filtra nada).
+    const estadoSolicitado = searchParams.get('estado');
+    const estadoFiltro = ESTADOS_PADRON.has(estadoSolicitado) ? estadoSolicitado : '';
+    const quitarEstado = () => {
+        const params = new URLSearchParams(searchParams);
+        params.delete('estado');
+        setSearchParams(params, { replace: true });
+        setPagina(1);
+    };
 
     // ── Datos (React Query) ─────────────────────────────────────────────────────
     // El padrón paginado: la página, el tamaño y el término de búsqueda van en la CLAVE
@@ -53,7 +68,7 @@ const Alumnos = () => {
     // que vuelva a pedir a mano. `placeholderData` deja la tabla anterior en pantalla
     // mientras llega la nueva (sin parpadeo).
     const { data: datos, isPending: cargandoAlumnos } = useAlumnosPaginados({
-        porPagina, pagina, buscar: busqueda,
+        porPagina, pagina, buscar: busqueda, estado: estadoFiltro,
     });
     const alumnos = datos?.lista ?? SIN_DATOS;
     const totalAlumnos = datos?.total ?? 0;
@@ -263,6 +278,23 @@ const Alumnos = () => {
                 <div>
                     <h1 className="text-3xl font-bold text-zinc-100">Gestión de Alumnos</h1>
                     <p className="text-zinc-400 mt-1">Administra los miembros de tu box</p>
+                    {estadoFiltro && (
+                        <div className="mt-3 flex items-center gap-2 text-sm">
+                            <span className="text-zinc-400">Filtro activo:</span>
+                            <span className="inline-flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/15 px-3 py-1 font-medium text-blue-300">
+                                Estado: {badgeEstado(estadoFiltro).texto}
+                                <button
+                                    type="button"
+                                    onClick={quitarEstado}
+                                    className="text-blue-200 hover:text-white"
+                                    aria-label="Quitar filtro de estado"
+                                    title="Quitar filtro"
+                                >
+                                    ✕
+                                </button>
+                            </span>
+                        </div>
+                    )}
                 </div>
 
                 <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">

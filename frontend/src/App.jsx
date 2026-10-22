@@ -21,6 +21,9 @@ import ResetPassword from './pages/ResetPassword';
 // · Familia ADMIN
 const AdminDashboard = lazy(() => import('./pages/admin/Dashboard'));
 const AdminAlumnos = lazy(() => import('./pages/admin/Alumnos'));
+// Detalle de "Convertidos": mismos números del BI para el mes cerrado, con el
+// listado de alumnos que compraron plan (se abre desde la tarjeta del Dashboard).
+const AdminAlumnosConvertidos = lazy(() => import('./pages/admin/AlumnosConvertidos'));
 const AdminHistorialAlumno = lazy(() => import('./pages/admin/HistorialAlumno'));
 const AdminCoaches = lazy(() => import('./pages/admin/Coaches'));
 const AdminClases = lazy(() => import('./pages/admin/Clases'));
@@ -141,6 +144,7 @@ function App() {
             {/* Historial de UN alumno (se entra desde la tabla de Alumnos o desde la ficha). */}
             <Route path="alumnos/:alumnoId/historial" element={<AdminHistorialAlumno />} />
             <Route path="alumnos-pendientes" element={<AdminAlumnosPendientes />} />
+            <Route path="alumnos-convertidos" element={<AdminAlumnosConvertidos />} />
             <Route path="alumnos-prueba" element={<AdminAlumnosPrueba />} />
             <Route path="coaches" element={<AdminCoaches />} />
             <Route path="clases" element={<AdminClases />} />

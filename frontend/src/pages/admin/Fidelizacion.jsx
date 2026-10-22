@@ -23,6 +23,23 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 /** ISO local (YYYY-MM-DD) para comparar contra fecha_proxima_renovacion. */
 const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
+/**
+ * Días sin asistir de una fila del churn.
+ *
+ * El backend ya publica `dias_inactivo` (calculado en vivo). El fallback por
+ * `motivo` mantiene el filtro funcionando mientras conviva con un backend viejo
+ * (el motivo siempre empieza con "N días sin asistir").
+ */
+const diasSinActividad = (p) => {
+    if (p?.dias_inactivo !== null && p?.dias_inactivo !== undefined
+        && p?.dias_inactivo !== '') {
+        const directo = Number(p.dias_inactivo);
+        if (Number.isFinite(directo)) return directo;
+    }
+    const match = /^(\d+)\s+d[ií]as?\s+sin\s+asistir/i.exec(String(p?.motivo || ''));
+    return match ? Number(match[1]) : null;
+};
+
 // "14 sep 23:27" (hora local) para la fecha del modelo de segmentación.
 const MESES_HORA = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
     'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -36,7 +53,7 @@ const fmtFechaHora = (iso) => {
 
 // ── Filtros de la tabla ────────────────────────────────────────────────
 // Los activa la pestaña BI por query param (KPIs es solo lectura y manda
-// acá la lista ya enfocada): ?filtro=critico|alto|total|plan_urgente y/o
+// acá la lista ya enfocada): ?filtro=critico|alto|total|sin_actividad|plan_urgente y/o
 // ?arquetipo=CODE. Es el MISMO panel (GET /kpis/churn), filtrado client-side
 // con los datos que la fila ya trae: no hay endpoint nuevo.
 const FILTROS = {
@@ -51,6 +68,18 @@ const FILTROS = {
     total: {
         etiqueta: 'En riesgo (todos)',
         test: (p) => ['ALTO', 'CRITICO'].includes(p.riesgo_nivel),
+    },
+    sin_actividad: {
+        // Misma condición que la tarjeta "Alumnos en Riesgo" del Dashboard:
+        // más de 7 días sin asistir. `tiene_historial === false` (nunca asistió)
+        // queda fuera, igual que en la tarjeta. Usa el `dias_inactivo` EN VIVO del
+        // churn (con fallback al motivo para backends aún sin el campo).
+        etiqueta: 'Sin actividad > 7 días',
+        test: (p) => {
+            if (p?.tiene_historial === false) return false;
+            const dias = diasSinActividad(p);
+            return dias !== null && dias > 7;
+        },
     },
     plan_urgente: {
         // "Vencimientos inminentes": el plan vigente vence en ≤ 5 días. Es EXACTAMENTE el

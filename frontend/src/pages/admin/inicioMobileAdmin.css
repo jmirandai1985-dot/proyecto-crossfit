@@ -1370,6 +1370,26 @@
     white-space: nowrap;
 }
 
+/* Alta del mes que YA compró plan: mismo dato `convertido` de /admin/alumnos-nuevos. */
+.ub-admin .nrow .n-badge {
+    flex-shrink: 0;
+    border: 1px solid rgba(45, 212, 191, .45);
+    border-radius: 999px;
+    background: rgba(45, 212, 191, .14);
+    color: var(--ub-teal);
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+/* Alta del mes que AÚN no compró plan: se dice explícitamente, no se omite. */
+.ub-admin .nrow .n-badge.pendiente {
+    border-color: rgba(251, 191, 36, .45);
+    background: rgba(251, 191, 36, .12);
+    color: #fbbf24;
+}
+
 /* ── Vista previa del correo (hoja inferior) ────────────────────────────── */
 .ub-admin .mail-meta {
     background: var(--ub-surface2);

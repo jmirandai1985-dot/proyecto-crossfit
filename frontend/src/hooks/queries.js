@@ -20,6 +20,10 @@ export const claves = {
     pendientesActivacion: ['alumnos', 'pendientes-activacion'],
     countPendientesActivacion: ['alumnos', 'pendientes-activacion', 'count'],
     stats: (tenantId) => ['reportes', tenantId],
+    alumnosNuevosMes: ['admin', 'alumnos-nuevos'],
+    alumnosConvertidos: (anio, mes) => ['admin', 'alumnos-convertidos', anio, mes],
+    alumnosEnRiesgo: (tenantId) => ['fidelizacion', 'tenant', tenantId, 'en-riesgo'],
+    vencimientosInminentes: (tenantId) => ['fidelizacion', 'tenant', tenantId, 'vencimientos'],
     clasesHoy: ['asistencia', 'clases-hoy'],
     // Misma consulta del backend, pero SIN el filtro de `requiere_coach` que aplica la
     // tarjeta del panel admin (`useClasesHoy`): clave propia para que cada pantalla
@@ -153,8 +157,8 @@ export const claves = {
     // alumno refresca la tabla sin que la pantalla vuelva a pedirla a mano. El rol,
     // el tamaño de página, la página y el término de búsqueda van en la clave porque
     // cambian el resultado; el tenant lo pone el token.
-    alumnosPaginados: (rol, porPagina, pagina, buscar) =>
-        ['usuarios', 'alumnos', rol, porPagina, pagina, buscar || ''],
+    alumnosPaginados: (rol, porPagina, pagina, buscar, estado) =>
+        ['usuarios', 'alumnos', rol, porPagina, pagina, buscar || '', estado || ''],
     // Suscripciones ACTIVAS del box (`GET /suscripciones?estado=activo`): de acá salen
     // la columna "Plan Activo", los créditos de cada fila y el "¿ya tiene plan?" del
     // comprobante. Familia propia `['suscripciones']` (distinta de `['membresia']`,
@@ -203,6 +207,56 @@ export function useStatsDashboard(tenantId) {
         queryFn: async () => (await api.get(`/api/v1/reportes/?tenant_id=${tenantId}`)).data,
         // Las tarjetas del dashboard cambian lento: 1 min de staleTime evita pedirlas
         // otra vez al ir a otra pantalla y volver.
+        staleTime: 60_000,
+        enabled: Boolean(tenantId),
+    });
+}
+
+/**
+ * Altas de alumnos del MES EN CURSO con su estado de conversión (`convertido`
+ * + `plan_nombre`). Misma fuente que la pantalla `/admin/alumnos-prueba`.
+ */
+export function useAlumnosNuevosMes() {
+    return useQuery({
+        queryKey: claves.alumnosNuevosMes,
+        queryFn: async () => (await api.get('/api/v1/admin/alumnos-nuevos')).data,
+        staleTime: 60_000,
+    });
+}
+
+/** Detalle de las altas de plan de UN mes (respalda la tarjeta "Convertidos"). */
+export function useAlumnosConvertidos(anio, mes) {
+    return useQuery({
+        queryKey: claves.alumnosConvertidos(anio, mes),
+        queryFn: async () => (await api.get('/api/v1/admin/alumnos-convertidos', {
+            params: { anio, mes },
+        })).data,
+        staleTime: 60_000,
+        enabled: Number.isInteger(anio) && Number.isInteger(mes)
+            && mes >= 1 && mes <= 12,
+    });
+}
+
+/** Alumnos activos sin asistir más de `umbral` días (mismo endpoint del Dashboard). */
+export function useAlumnosEnRiesgo(tenantId) {
+    return useQuery({
+        queryKey: claves.alumnosEnRiesgo(tenantId),
+        queryFn: async () => (await api.get(
+            `/api/v1/fidelizacion/tenant/${tenantId}/en-riesgo`,
+        )).data || {},
+        staleTime: 60_000,
+        enabled: Boolean(tenantId),
+    });
+}
+
+/** Planes que vencen dentro de los próximos `diasUmbral` días. */
+export function useVencimientosInminentes(tenantId, diasUmbral = 5) {
+    return useQuery({
+        queryKey: claves.vencimientosInminentes(tenantId),
+        queryFn: async () => (await api.get(
+            `/api/v1/fidelizacion/tenant/${tenantId}/vencimientos`,
+            { params: { dias_umbral: diasUmbral } },
+        )).data || {},
         staleTime: 60_000,
         enabled: Boolean(tenantId),
     });
@@ -1596,13 +1650,13 @@ export function useDescargarReporteVentas() {
 // Devuelve `{ lista, total }`: el total sin paginar viene en el header X-Total-Count y
 // es el que alimentan el pie ("Mostrando A-B de N") y el cálculo de páginas.
 export function useAlumnosPaginados({
-    rol = 'alumno', porPagina = 25, pagina = 1, buscar = '',
+    rol = 'alumno', porPagina = 25, pagina = 1, buscar = '', estado = '',
 } = {}) {
     return useQuery({
-        queryKey: claves.alumnosPaginados(rol, porPagina, pagina, buscar),
+        queryKey: claves.alumnosPaginados(rol, porPagina, pagina, buscar, estado),
         queryFn: async () => {
             const resp = await api.get('/api/v1/usuarios/', {
-                params: paramsAlumnos({ rol, porPagina, pagina, buscar }),
+                params: paramsAlumnos({ rol, porPagina, pagina, buscar, estado }),
             });
             return {
                 lista: resp.data || [],
