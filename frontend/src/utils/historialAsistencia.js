@@ -16,6 +16,9 @@
  *     cancelación no es un ausente (el backend ya no la manda).
  *   · porcentaje = presentes ÷ CUPOS de las clases, redondeado. Con cupo 0 (dato viejo) el
  *     porcentaje es 0, no una división por cero.
+ *   · ANILLOS y TOTALES: se calculan con `clasesOcurridas` (fecha <= hoy). Una clase futura
+ *     todavía no tiene asistencia que medir y no debe inflar el denominador. El calendario y
+ *     el detalle diario sí muestran el mes completo.
  *   · las fechas son las del backend en hora de Chile ('YYYY-MM-DD'): acá NO se convierte nada
  *     (sólo se leen los componentes del string, igual que `franjasAsistencia` con las horas).
  *   · la semana empieza el LUNES (misma regla que la grilla del coach y `utils/fecha.semanaEnCurso`).
@@ -100,6 +103,27 @@ export const fechaSola = (fecha) => {
     const dd = String(d.getDate()).padStart(2, '0');
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     return `${d.getFullYear()}-${mm}-${dd}`;
+};
+
+/**
+ * Clases que YA ocurrieron a la fecha de corte (por defecto, hoy): fecha <= hoy.
+ *
+ * Los anillos y los totales de asistencia miran SÓLO estas clases: una clase futura
+ * todavía no tiene asistencia que medir y sumarla al denominador hunde el % del mes.
+ * El calendario y el detalle diario NO usan este recorte: siguen mostrando todo el mes,
+ * incluso lo que está por venir.
+ *
+ * Comparar 'YYYY-MM-DD' como texto ordena igual que las fechas (ISO 8601). Una fila sin
+ * fecha válida queda fuera: no puede contarse como ocurrida.
+ */
+export const clasesOcurridas = (clases, hoy = fechaSola()) => {
+    const corte = /^\d{4}-\d{2}-\d{2}/.test(String(hoy || ''))
+        ? String(hoy).slice(0, 10)
+        : fechaSola();
+    return (clases || []).filter((c) => {
+        const fecha = String(c?.fecha || '');
+        return /^\d{4}-\d{2}-\d{2}/.test(fecha) && fecha <= corte;
+    });
 };
 
 // ── Una clase ────────────────────────────────────────────────────────────────

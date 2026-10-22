@@ -5,8 +5,9 @@ import { useHistorialAsistencia } from '../hooks/queries';
 // Todas las cuentas (anillos, totales, grilla del calendario) viven en el util COMPARTIDO y
 // puro: la pantalla no hace aritmética propia (ver `utils/historialAsistencia.js`).
 import {
-    DIAS_SEMANA, aniosDisponibles, calendarioDelMes, fechaSola, filtrarPorHorario,
-    horariosDe, mesesDelAnio, nombreMes, resumenDia, resumenPorDiaSemana, totalesDe,
+    DIAS_SEMANA, aniosDisponibles, calendarioDelMes, clasesOcurridas, fechaSola,
+    filtrarPorHorario, horariosDe, mesesDelAnio, nombreMes, resumenDia,
+    resumenPorDiaSemana, totalesDe,
 } from '../utils/historialAsistencia';
 // El criterio de disciplina es el MISMO del resto del panel (`disciplina_nombre` que ya
 // devuelve el backend): no hay catálogo propio ni una segunda forma de comparar.
@@ -16,9 +17,10 @@ import { TODAS, disciplinasDe, filtroEfectivo, filtrarPorDisciplina } from '../u
  * "Historial de Asistencia" (coach + admin) — SÓLO LECTURA.
  *
  * Tres niveles del mismo mes, sin volver a pedir datos:
- *   1. el ANILLO de cada día de la semana (lunes→domingo): % de asistencia contra los CUPOS de
- *      ese día de la semana en el mes; al tocarlo se abren las dos listas del mockup (quiénes
- *      vinieron y quiénes no, con la cantidad de veces de cada uno);
+ *   1. el ANILLO de cada día de la semana (lunes→domingo): % de asistencia contra los CUPOS
+ *      de las clases YA OCURRIDAS de ese día de la semana en el mes; al tocarlo se abren las
+ *      dos listas del mockup (quiénes vinieron y quiénes no, con la cantidad de veces de cada
+ *      uno);
  *   2. el CALENDARIO del mes: cada día con su % y sus contadores; se elige un día para verlo;
  *   3. el DETALLE de ese día: bloque por bloque (cada clase del día) con hora, disciplina,
  *      coach y la lista de alumnos con su ✓/✗.
@@ -32,9 +34,11 @@ import { TODAS, disciplinasDe, filtroEfectivo, filtrarPorDisciplina } from '../u
  *
  * Prop:
  *   permitirFiltros — false (default): el coach sigue viendo el mes completo tal cual.
- *             true: el admin suma los selectores "Disciplina" y "Horario" y TODAS las
- *             cuentas (anillos, calendario, totales y detalle) se calculan sobre el recorte.
- *             El filtro es en memoria: el mes ya se pidió UNA vez.
+ *             true: el admin suma los selectores "Disciplina" y "Horario" y el recorte
+ *             alimenta TODAS las vistas (anillos, calendario, totales y detalle). Anillos
+ *             y totales además miran sólo clases ya ocurridas; el calendario y el detalle
+ *             del día conservan el mes entero. El filtro es en memoria: el mes ya se pidió
+ *             UNA vez.
  */
 const TARJETA = 'rounded-[18px] border border-[#2A2A2E] bg-[#18181B]';
 const ROTULO = 'text-[10.5px] font-extrabold uppercase tracking-[0.06em] text-zinc-500';
@@ -176,8 +180,11 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
     }, [anio]);
     const meses = useMemo(() => mesesDelAnio(), []);
 
-    const totalMes = useMemo(() => totalesDe(visibles), [visibles]);
-    const semana = useMemo(() => resumenPorDiaSemana(visibles), [visibles]);
+    // Anillos y totales: sólo clases ya ocurridas (fecha <= hoy). El calendario y el detalle
+    // siguen usando `visibles` completo: el mes se muestra entero, incluso lo que está por venir.
+    const ocurridas = useMemo(() => clasesOcurridas(visibles, hoy), [visibles, hoy]);
+    const totalMes = useMemo(() => totalesDe(ocurridas), [ocurridas]);
+    const semana = useMemo(() => resumenPorDiaSemana(ocurridas), [ocurridas]);
     const semanas = useMemo(
         () => calendarioDelMes(anio, mes, visibles, hoy), [anio, mes, visibles, hoy],
     );
@@ -274,15 +281,16 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                 </div>
             ) : (
                 <>
-                    {/* ── 2. Totales del mes elegido (el % es contra los CUPOS, igual que los anillos) ── */}
+                    {/* ── 2. Totales del mes elegido (sólo clases ya ocurridas; el % es contra
+                        los CUPOS, igual que los anillos) ── */}
                     <div className={`${TARJETA} flex flex-wrap items-center justify-between gap-5 p-4`}>
                         <div>
-                            <p className={ROTULO}>Totales del mes</p>
+                            <p className={ROTULO}>Totales del mes (clases ya ocurridas)</p>
                             <p className="mt-1 text-2xl font-black text-white">
                                 {nombreMes(mes)} {anio}
                             </p>
                             <p className="mt-1 text-[11.5px] text-zinc-500">
-                                {totalMes.cupos} cupos en el mes · {totalMes.cerradas} clase
+                                {totalMes.cupos} cupos en clases ya ocurridas · {totalMes.cerradas} clase
                                 {totalMes.cerradas === 1 ? '' : 's'} con la asistencia cerrada
                             </p>
                         </div>
@@ -308,14 +316,15 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                     )}
 
                     {/* ── 3. Un anillo por día de la semana (lunes→domingo) ──
-                        El % es contra los CUPOS de TODAS las clases de ese día de la semana en
-                        el mes: un martes con tres bloques no se mira contra un domingo de uno.
-                        Tocar un círculo abre sus dos listas (vinieron / no vinieron). */}
+                        El % es contra los CUPOS de las clases YA OCURRIDAS de ese día de la
+                        semana en el mes: un martes con tres bloques no se mira contra un domingo
+                        de uno. Las clases futuras no tienen asistencia que medir y no inflan el
+                        denominador. Tocar un círculo abre sus dos listas (vinieron / no vinieron). */}
                     <div className={`${TARJETA} p-4`}>
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className={ROTULO}>Asistencia por día de la semana</p>
+                            <p className={ROTULO}>Asistencia del mes por día de la semana</p>
                             <p className="text-[11px] text-zinc-500">
-                                Toca un círculo para ver quiénes vinieron y quiénes no
+                                Sólo clases ya ocurridas · Toca un círculo para ver quiénes vinieron
                             </p>
                         </div>
                         <div className="mt-4 grid grid-cols-4 gap-2 sm:grid-cols-7 sm:gap-3">
@@ -326,7 +335,7 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                                     <button key={d.clave} type="button"
                                         onClick={() => setDiaSemana(activo ? null : d.indice)}
                                         aria-pressed={activo}
-                                        title={`${d.largo}: ${d.totales.clases} clase(s)`}
+                                        title={`${d.largo}: ${d.totales.clases} clase(s) ya ocurridas`}
                                         data-testid={`historial-anillo-${d.clave}`}
                                         className={`flex flex-col items-center gap-1.5 rounded-[14px] border px-1 py-2.5 transition-colors ${
                                             activo
@@ -357,7 +366,7 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                     <p className="text-[13px] font-bold text-white">
                                         {anilloAbierto.largo} · {anilloAbierto.totales.clases} clase
-                                        {anilloAbierto.totales.clases === 1 ? '' : 's'} en {nombreMes(mes)}
+                                        {anilloAbierto.totales.clases === 1 ? '' : 's'} ya ocurridas en {nombreMes(mes)}
                                     </p>
                                     <p className="text-[11.5px] text-zinc-500">
                                         {anilloAbierto.totales.presentes} vinieron ·{' '}

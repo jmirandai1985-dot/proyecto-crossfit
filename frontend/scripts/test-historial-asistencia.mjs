@@ -18,9 +18,9 @@ import { readFileSync } from 'node:fs';
 
 import { COACH_SUBTABS, MENU_BY_ROL } from '../src/config/menu.js';
 import {
-    DIAS_SEMANA, MESES, aniosDisponibles, calendarioDelMes, filtrarPorHorario,
-    horariosDe, mesesDelAnio, porcentaje, presentesDe, resumenDia, resumenPorDiaSemana,
-    totalesDe,
+    DIAS_SEMANA, MESES, aniosDisponibles, calendarioDelMes, clasesOcurridas,
+    filtrarPorHorario, horariosDe, mesesDelAnio, porcentaje, presentesDe, resumenDia,
+    resumenPorDiaSemana, totalesDe,
 } from '../src/utils/historialAsistencia.js';
 
 const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
@@ -143,7 +143,7 @@ ok(PANTALLA.includes('sólo lectura: acá no se marca asistencia'),
     'y lo dice en pantalla (el usuario no tiene que adivinar por qué no hay botones)');
 const importados = (PANTALLA.match(/\{([^}]+)\}\s*from '\.\.\/utils\/historialAsistencia'/) || [null, ''])[1]
     .split(',').map((s) => s.trim()).filter(Boolean);
-eq(importados.length, 11, `la pantalla importa sus ${importados.length} helpers del util COMPARTIDO`);
+eq(importados.length, 12, `la pantalla importa sus ${importados.length} helpers del util COMPARTIDO`);
 for (const nombre of importados) {
     ok(new RegExp(`export const ${nombre} =`).test(UTIL), `el util exporta ${nombre} (lo que usa existe)`);
 }
@@ -213,6 +213,38 @@ eq(tot.cerradas, 0, 'una clase con reservas sin marcar NO cuenta como cerrada');
 eq(totalesDe([]).pct, 0, 'un mes sin clases no divide por cero');
 eq(totalesDe([CLASE, { ...CLASE, id: 8, marcados_count: 16, marcada: true }]).pct, 59,
     'dos clases se suman antes de sacar el % (no se promedian porcentajes)');
+
+// Corte de asistencia: los anillos/totales miran SÓLO clases ya ocurridas (fecha <= hoy).
+const FUTURA = { ...CLASE, id: 11, fecha: '2026-10-26', marcados_count: 16 };
+const PASADA = { ...CLASE, id: 12, fecha: '2026-10-19' };
+eq(clasesOcurridas([CLASE, PASADA, FUTURA], '2026-10-20').map((c) => c.id).join(','), '7,12',
+    'el corte deja las clases pasadas y excluye la futura');
+eq(clasesOcurridas([{ ...CLASE, fecha: '2026-10-20' }], '2026-10-20').length, 1,
+    'la clase de HOY sí cuenta como ocurrida (fecha <= hoy)');
+eq(clasesOcurridas([{ ...CLASE, fecha: 'sin-fecha' }], '2026-10-20').length, 0,
+    'una fila sin fecha válida no se cuenta como ocurrida');
+eq(totalesDe(clasesOcurridas([CLASE, FUTURA], '2026-10-05')).cupos, 16,
+    'los totales de asistencia no suman los cupos de una clase futura');
+const anillosCorte = resumenPorDiaSemana(clasesOcurridas([CLASE, PASADA, FUTURA], '2026-10-20'));
+eq(anillosCorte[0].totales.clases, 2, 'el anillo del lunes cuenta sólo los lunes ya ocurridos');
+eq(anillosCorte[0].totales.cupos, 32, 'y su denominador tampoco incluye la clase futura');
+const diasCorte = calendarioDelMes(2026, 10, [CLASE, PASADA, FUTURA], '2026-10-20').flat().filter(Boolean);
+eq(diasCorte.find((c) => c.dia === 26).totales.clases, 1,
+    'el calendario SÍ sigue mostrando las clases futuras del mes');
+eq(resumenDia([CLASE, PASADA, FUTURA], '2026-10-26').fichas.length, 1,
+    'y el detalle del día futuro también (no se vació el mes)');
+ok(/const ocurridas = useMemo\(\(\) => clasesOcurridas\(visibles, hoy\)/.test(PANTALLA),
+    'la pantalla aplica el corte de "ya ocurridas" sobre el recorte de filtros');
+ok(/const totalMes = useMemo\(\(\) => totalesDe\(ocurridas\)/.test(PANTALLA),
+    'los totales del mes salen de las clases ocurridas');
+ok(/const semana = useMemo\(\(\) => resumenPorDiaSemana\(ocurridas\)/.test(PANTALLA),
+    'los anillos también');
+ok(/const semanas = useMemo\(\s*\(\) => calendarioDelMes\(anio, mes, visibles, hoy\)/.test(PANTALLA),
+    'el calendario conserva TODO el mes (también los días por venir)');
+ok(/const detalle = useMemo\(\(\) => \(fecha \? resumenDia\(visibles, fecha\) : null\)/.test(PANTALLA),
+    'y el detalle del día no aplica el corte (se puede abrir un día futuro)');
+ok(PANTALLA.includes('Asistencia del mes por día de la semana'),
+    'el título aclara que los anillos agrupan el MES por día de la semana');
 
 const anillos = resumenPorDiaSemana([CLASE]);
 eq(anillos.length, 7, 'los 7 anillos se dibujan siempre (aunque el día esté vacío)');
