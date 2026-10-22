@@ -17,11 +17,14 @@ import AsistenciaClases from '../../components/AsistenciaClases';
  * Marcar y revisar el mes son dos tareas distintas; apiladas, en el teléfono el
  * historial quedaba al final de una pantalla larga. El componente compartido
  * (`components/HistorialAsistencia.jsx`) es el mismo en los dos roles.
+ *
+ * `permitirFiltroDisciplina` suma el selector "Disciplina" sobre las clases del día. El
+ * coach sigue montando el componente sin la prop: su pantalla no cambia.
  */
 const AdminAsistencia = () => {
     return (
         <Layout>
-            <AsistenciaClases variant="dark" />
+            <AsistenciaClases variant="dark" permitirFiltroDisciplina />
         </Layout>
     );
 };

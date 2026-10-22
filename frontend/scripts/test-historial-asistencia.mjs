@@ -18,8 +18,9 @@ import { readFileSync } from 'node:fs';
 
 import { COACH_SUBTABS, MENU_BY_ROL } from '../src/config/menu.js';
 import {
-    DIAS_SEMANA, MESES, aniosDisponibles, calendarioDelMes, fechaLarga, mesesDelAnio,
-    porcentaje, presentesDe, resumenDia, resumenPorDiaSemana, totalesDe,
+    DIAS_SEMANA, MESES, aniosDisponibles, calendarioDelMes, filtrarPorHorario,
+    horariosDe, mesesDelAnio, porcentaje, presentesDe, resumenDia, resumenPorDiaSemana,
+    totalesDe,
 } from '../src/utils/historialAsistencia.js';
 
 const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
@@ -142,7 +143,7 @@ ok(PANTALLA.includes('sólo lectura: acá no se marca asistencia'),
     'y lo dice en pantalla (el usuario no tiene que adivinar por qué no hay botones)');
 const importados = (PANTALLA.match(/\{([^}]+)\}\s*from '\.\.\/utils\/historialAsistencia'/) || [null, ''])[1]
     .split(',').map((s) => s.trim()).filter(Boolean);
-eq(importados.length, 9, `la pantalla importa sus ${importados.length} helpers del util COMPARTIDO`);
+eq(importados.length, 11, `la pantalla importa sus ${importados.length} helpers del util COMPARTIDO`);
 for (const nombre of importados) {
     ok(new RegExp(`export const ${nombre} =`).test(UTIL), `el util exporta ${nombre} (lo que usa existe)`);
 }
@@ -162,14 +163,14 @@ ok(/import HistorialAsistencia from '\.\.\/\.\.\/components\/HistorialAsistencia
 ok(DASH.includes("activeTab === 'resumen' || activeTab === 'historial'"),
     'el Historial va sobre el fondo oscuro del Layout (como el Resumen, sin panel claro)');
 ok(/import HistorialAsistencia from '\.\.\/\.\.\/components\/HistorialAsistencia'/.test(ADMIN_HISTORIAL)
-    && ADMIN_HISTORIAL.includes('<HistorialAsistencia />'),
-    'la pestaña Historial del admin monta el MISMO componente compartido');
+    && ADMIN_HISTORIAL.includes('<HistorialAsistencia permitirFiltros />'),
+    'la pestaña Historial del admin monta el MISMO componente con los filtros habilitados');
 ok(ADMIN_HISTORIAL.includes('<Layout>'),
     'y vive dentro del Layout del panel (pestaña propia, no apilada)');
 ok(!/import\s+HistorialAsistencia/.test(ADMIN) && !/<HistorialAsistencia\s*\/>/.test(ADMIN),
     'la página Asistencia ya NO apila el historial (se separó en su pestaña)');
-ok(ADMIN.includes('<AsistenciaClases variant="dark" />'),
-    'sin tocar el marcado del admin (el componente compartido sigue montado igual)');
+ok(ADMIN.includes('<AsistenciaClases variant="dark" permitirFiltroDisciplina />'),
+    'el admin monta Asistencia con el filtro por disciplina');
 const itemHistorialAdmin = MENU_BY_ROL.administrador.find((i) => i.path === '/admin/historial');
 ok(itemHistorialAdmin && itemHistorialAdmin.label === 'Historial',
     'el menú del admin tiene la entrada "Historial" -> /admin/historial');
@@ -253,6 +254,27 @@ eq(JSON.stringify(DIAS_SEMANA.map((d) => d.clave)),
     JSON.stringify(['lun', 'mar', 'mie', 'jue', 'vie', 'sab', 'dom']), 'los 7 días van de lunes a domingo');
 eq(MESES.length, 12, 'los meses están completos (sin huecos en el arreglo)');
 
+console.log('== 6b. Filtros del admin (disciplina + horario) ==');
+// El util sigue puro: las opciones salen de las clases que ya trajo el mes.
+const CLASE_7 = { ...CLASE, id: 9, hora_inicio: '07:00:00' };
+eq(JSON.stringify(horariosDe([CLASE, CLASE_7, { ...CLASE, id: 10 }])),
+    JSON.stringify(['07:00', '19:00']), 'los horarios salen únicos y ordenados (HH:MM)');
+eq(filtrarPorHorario([CLASE, CLASE_7], '19:00').length, 1,
+    'el filtro por horario deja sólo las clases de ese inicio');
+eq(filtrarPorHorario([CLASE, CLASE_7], '').length, 2,
+    'sin horario (opción "Todos") no recorta nada');
+ok(PANTALLA.includes('historial-filtro-disciplina') && PANTALLA.includes('historial-filtro-horario'),
+    'el Historial del admin tiene los dos selectores');
+ok(/const visibles = useMemo/.test(PANTALLA)
+    && /filtrarPorDisciplina\(clases, disciplinaEfectiva\)/.test(PANTALLA)
+    && /filtrarPorHorario\(/.test(PANTALLA),
+    'anillos, calendario, totales y detalle salen del MISMO recorte (`visibles`)');
+ok(CLASES.includes('admin-asistencia-filtro-disciplina'),
+    'la pestaña Asistencia del admin tiene el selector de disciplina');
+ok(/const visibles = useMemo/.test(CLASES)
+    && /filtrarPorDisciplina\(clases, disciplinaEfectiva\)/.test(CLASES),
+    'y el acordeón/franjas se dibujan desde ese recorte (sin request nuevo)');
+
 console.log('== 7. "Marcar asistencia" abre ESA clase (bug de la tarjeta grande) ==');
 ok(/onClick=\{\(\) => onAbrirAsistencia && onAbrirAsistencia\(proximaClase\)\}/.test(RESUMEN),
     'la tarjeta grande le pasa la clase al callback');
@@ -274,8 +296,8 @@ ok(/pedidoAbiertoRef\.current === location\.key/.test(CLASES),
     'un refetch no reabre el modal que el usuario cerró (guardia por `location.key`)');
 ok(/if \(!clasePedida \|\| cargando\) return;/.test(CLASES),
     'espera a que llegue la lista del día antes de abrir (si no, no encuentra nada)');
-ok(/const AsistenciaClases = \(\{ variant = 'light', franjas = false, permitirSinReserva = false \} = \{\}\)/
-    .test(CLASES), 'la firma del componente compartido no cambió (tests de franjas / walk-in)');
+ok(/const AsistenciaClases = \(\{\s*variant = 'light', franjas = false, permitirSinReserva = false,\s*permitirFiltroDisciplina = false,\s*\} = \{\}\)/
+    .test(CLASES), 'la firma suma el filtro del admin sin tocar las props del coach');
 
 console.log('== 8. "Faltan" se mide contra el CUPO (bug de la tarjeta grande) ==');
 const filaCupo = RESUMEN.indexOf('const cupo = Number(proximaClase?.cupo_maximo) || 0;');

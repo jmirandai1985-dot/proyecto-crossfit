@@ -86,6 +86,14 @@ export const horaCorta = (valor) => {
     return partes.length >= 2 ? `${partes[0]}:${partes[1]}` : String(valor);
 };
 
+/**
+ * Horarios de inicio presentes en el mes ('HH:MM'), únicos y ordenados: las opciones del
+ * filtro "Horario" del Historial del admin. Sale de las MISMAS clases que ya trajo el mes.
+ */
+export const horariosDe = (clases) => Array.from(new Set(
+    (clases || []).map((c) => horaCorta(c?.hora_inicio)).filter(Boolean),
+)).sort((a, b) => a.localeCompare(b));
+
 /** 'YYYY-MM-DD' de una fecha local del navegador (para marcar el día de HOY en la grilla). */
 export const fechaSola = (fecha) => {
     const d = fecha instanceof Date ? fecha : new Date();
@@ -167,6 +175,16 @@ export const fichaClase = (clase) => {
 export const clasesDelDia = (clases, fecha) => (clases || [])
     .filter((c) => c?.fecha === fecha)
     .sort((a, b) => String(a?.hora_inicio || '').localeCompare(String(b?.hora_inicio || '')));
+
+/**
+ * Clases de UN horario de inicio ('HH:MM'); sin horario devuelve todas (opción "Todos").
+ * Se compara `horaCorta` porque el backend manda 'HH:MM:SS'.
+ */
+export const filtrarPorHorario = (clases, horario) => (
+    horario
+        ? (clases || []).filter((c) => horaCorta(c?.hora_inicio) === horario)
+        : (clases || [])
+);
 
 /** Totales de un conjunto de clases (un día, un día de la semana o el mes entero). */
 export const totalesDe = (clases) => {

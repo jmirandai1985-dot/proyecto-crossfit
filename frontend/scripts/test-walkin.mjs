@@ -52,14 +52,14 @@ ok(/if \(alumno\.puede_reservar\)/.test(MODAL), 'la bifurcación mira `puede_res
 eq(/status === 409|response\?\.status/.test(MODAL), false,
     'no se adivina la rama leyendo el status de un error');
 
-console.log('== 4. Prop opcional en AsistenciaClases (el admin no cambia) ==');
-ok(/const AsistenciaClases = \(\{ variant = 'light', franjas = false, permitirSinReserva = false \} = \{\}\)/.test(ASIST),
+console.log('== 4. Prop opcional en AsistenciaClases (el walk-in sigue sólo en el coach) ==');
+ok(/const AsistenciaClases = \(\{\s*variant = 'light', franjas = false, permitirSinReserva = false,\s*permitirFiltroDisciplina = false,\s*\} = \{\}\)/.test(ASIST),
     'la prop arranca en false (DOM idéntico para quien no la pasa)');
 ok(/permitirSinReserva && \(/.test(ASIST), 'el botón "+ Agregar alumno sin reserva" está detrás de la prop');
 ok(/permitirSinReserva && modalSinReserva && claseSeleccionada && \(/.test(ASIST),
     'el modal sólo se monta con la prop');
 ok(/<AsistenciaClases franjas permitirSinReserva \/>/.test(DASH),
-    'el panel del coach la pasa; el admin no');
+    'el panel del coach la pasa; el admin no pide walk-in');
 
 const fuentes = (url) => readdirSync(url, { withFileTypes: true }).flatMap((e) =>
     (e.isDirectory() ? fuentes(new URL(e.name + '/', url)) : [new URL(e.name, url)]));

@@ -5,9 +5,12 @@ import { useHistorialAsistencia } from '../hooks/queries';
 // Todas las cuentas (anillos, totales, grilla del calendario) viven en el util COMPARTIDO y
 // puro: la pantalla no hace aritmética propia (ver `utils/historialAsistencia.js`).
 import {
-    DIAS_SEMANA, aniosDisponibles, calendarioDelMes, fechaSola, mesesDelAnio,
-    nombreMes, resumenDia, resumenPorDiaSemana, totalesDe,
+    DIAS_SEMANA, aniosDisponibles, calendarioDelMes, fechaSola, filtrarPorHorario,
+    horariosDe, mesesDelAnio, nombreMes, resumenDia, resumenPorDiaSemana, totalesDe,
 } from '../utils/historialAsistencia';
+// El criterio de disciplina es el MISMO del resto del panel (`disciplina_nombre` que ya
+// devuelve el backend): no hay catálogo propio ni una segunda forma de comparar.
+import { TODAS, disciplinasDe, filtroEfectivo, filtrarPorDisciplina } from '../utils/filtroDisciplina';
 
 /**
  * "Historial de Asistencia" (coach + admin) — SÓLO LECTURA.
@@ -26,6 +29,12 @@ import {
  * Colores: la paleta oscura del mockup (bg #0E0E10 · tarjetas #18181B · bordes #2A2A2E ·
  * acento lima #D7FF4A). No hay variante clara porque los DOS paneles que la montan (el del
  * coach y el del admin) ya son oscuros.
+ *
+ * Prop:
+ *   permitirFiltros — false (default): el coach sigue viendo el mes completo tal cual.
+ *             true: el admin suma los selectores "Disciplina" y "Horario" y TODAS las
+ *             cuentas (anillos, calendario, totales y detalle) se calculan sobre el recorte.
+ *             El filtro es en memoria: el mes ya se pidió UNA vez.
  */
 const TARJETA = 'rounded-[18px] border border-[#2A2A2E] bg-[#18181B]';
 const ROTULO = 'text-[10.5px] font-extrabold uppercase tracking-[0.06em] text-zinc-500';
@@ -123,12 +132,15 @@ const tinteDia = (totales) => {
     return 'bg-zinc-800/50';
 };
 
-const HistorialAsistencia = () => {
+const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
     const hoy = fechaSola();
     // El mes arranca en el ACTUAL (el panel del coach vive en "hoy"); el usuario lo mueve con
     // los dos selectores.
     const [anio, setAnio] = useState(() => Number(hoy.slice(0, 4)));
     const [mes, setMes] = useState(() => Number(hoy.slice(5, 7)));
+    // Filtros del admin (en memoria): disciplina y horario de inicio del mes.
+    const [filtroDisciplina, setFiltroDisciplina] = useState(TODAS);
+    const [filtroHorario, setFiltroHorario] = useState('');
     // Lo que el usuario tiene abierto: un día de la semana (el anillo) y un día del calendario.
     const [diaSemana, setDiaSemana] = useState(null);
     const [fecha, setFecha] = useState(null);
@@ -137,6 +149,22 @@ const HistorialAsistencia = () => {
     // Memorizado: el `|| []` crea un array NUEVO en cada render (mientras carga o si falla), y
     // los cálculos de abajo —que sí valen la pena memorizar— se reharían en cada pasada.
     const clases = useMemo(() => historialQ.data?.clases || [], [historialQ.data]);
+    // Opciones del mes completo: elegir una disciplina no hace desaparecer los horarios (ni al
+    // revés). Si el mes cambia y la opción ya no existe, se cae a "Todas"/"Todos".
+    const disciplinasDisponibles = useMemo(() => disciplinasDe(clases), [clases]);
+    const horariosDisponibles = useMemo(() => horariosDe(clases), [clases]);
+    const disciplinaEfectiva = filtroEfectivo(filtroDisciplina, disciplinasDisponibles);
+    const horarioEfectivo = filtroHorario && horariosDisponibles.includes(filtroHorario)
+        ? filtroHorario
+        : '';
+    // El recorte alimenta TODAS las vistas: anillos, totales, calendario y detalle. Sin la
+    // prop (coach) los dos filtros valen "Todas"/"Todos" y la lista queda igual.
+    const visibles = useMemo(
+        () => filtrarPorHorario(
+            filtrarPorDisciplina(clases, disciplinaEfectiva), horarioEfectivo,
+        ),
+        [clases, disciplinaEfectiva, horarioEfectivo],
+    );
     const error = historialQ.isError
         ? (historialQ.error?.response?.data?.detail || 'No se pudo cargar el historial del mes')
         : null;
@@ -148,12 +176,12 @@ const HistorialAsistencia = () => {
     }, [anio]);
     const meses = useMemo(() => mesesDelAnio(), []);
 
-    const totalMes = useMemo(() => totalesDe(clases), [clases]);
-    const semana = useMemo(() => resumenPorDiaSemana(clases), [clases]);
+    const totalMes = useMemo(() => totalesDe(visibles), [visibles]);
+    const semana = useMemo(() => resumenPorDiaSemana(visibles), [visibles]);
     const semanas = useMemo(
-        () => calendarioDelMes(anio, mes, clases, hoy), [anio, mes, clases, hoy],
+        () => calendarioDelMes(anio, mes, visibles, hoy), [anio, mes, visibles, hoy],
     );
-    const detalle = useMemo(() => (fecha ? resumenDia(clases, fecha) : null), [clases, fecha]);
+    const detalle = useMemo(() => (fecha ? resumenDia(visibles, fecha) : null), [visibles, fecha]);
     const anilloAbierto = diaSemana === null ? null : semana[diaSemana];
 
     // Cambiar de mes cierra lo abierto: lo elegido era de OTRO mes (y quedaría vacío).
@@ -191,6 +219,49 @@ const HistorialAsistencia = () => {
                 </div>
             </div>
 
+            {permitirFiltros && (
+                <div className={`${TARJETA} flex flex-wrap items-end gap-3 p-4`}
+                    data-testid="historial-filtros">
+                    <div>
+                        <label className={`${ROTULO} mb-1 block`} htmlFor="historial-filtro-disciplina">
+                            Disciplina
+                        </label>
+                        <select id="historial-filtro-disciplina" className={CONTROL}
+                            value={disciplinaEfectiva}
+                            onChange={(e) => {
+                                setFiltroDisciplina(e.target.value);
+                                setFecha(null);
+                            }}
+                            data-testid="historial-filtro-disciplina">
+                            <option value={TODAS}>Todas</option>
+                            {disciplinasDisponibles.map((d) => (
+                                <option key={d} value={d}>{d}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className={`${ROTULO} mb-1 block`} htmlFor="historial-filtro-horario">
+                            Horario
+                        </label>
+                        <select id="historial-filtro-horario" className={CONTROL}
+                            value={horarioEfectivo}
+                            onChange={(e) => {
+                                setFiltroHorario(e.target.value);
+                                setFecha(null);
+                            }}
+                            data-testid="historial-filtro-horario">
+                            <option value="">Todos</option>
+                            {horariosDisponibles.map((h) => (
+                                <option key={h} value={h}>{h}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <p className="text-[11px] text-zinc-500 sm:ml-auto">
+                        {visibles.length} clase{visibles.length === 1 ? '' : 's'} con los filtros
+                    </p>
+                </div>
+            )}
+
             {error && (
                 <div className="rounded-[14px] border-l-4 border-red-500 bg-red-500/10 p-4 text-sm text-red-300">
                     {error}
@@ -225,12 +296,14 @@ const HistorialAsistencia = () => {
                         </div>
                     </div>
 
-                    {clases.length === 0 && (
+                    {visibles.length === 0 && (
                         <p className="rounded-[14px] border border-[#2A2A2E] bg-[#18181B] p-4 text-[13px] text-zinc-400">
-                            {nombreMes(mes)} {anio} no tiene clases cargadas.
-                            {historialQ.data?.alcance === 'coach'
+                            {clases.length === 0
+                                ? `${nombreMes(mes)} ${anio} no tiene clases cargadas.`
+                                : 'No hay clases con los filtros elegidos.'}
+                            {clases.length === 0 && (historialQ.data?.alcance === 'coach'
                                 ? ' Probá con otro mes: acá sólo aparecen las clases tuyas.'
-                                : ' Probá con otro mes del selector.'}
+                                : ' Probá con otro mes del selector.')}
                         </p>
                     )}
 

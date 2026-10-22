@@ -15,10 +15,13 @@ import HistorialAsistencia from '../../components/HistorialAsistencia';
  * `GET /api/v1/asistencia/historial` no escribe nada y, para el admin, devuelve todas las
  * clases del box (`alcance: 'box'`). Acá no hay matemática propia: anillos, calendario y
  * totales salen del componente compartido y de `utils/historialAsistencia.js`.
+ *
+ * `permitirFiltros` habilita los selectores de disciplina y horario SÓLO en el panel del
+ * admin: el coach sigue viendo su mes completo sin controles extra.
  */
 const AdminHistorialAsistencia = () => (
     <Layout>
-        <HistorialAsistencia />
+        <HistorialAsistencia permitirFiltros />
     </Layout>
 );
 

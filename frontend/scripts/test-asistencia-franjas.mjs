@@ -63,14 +63,14 @@ eq(acotarExtra('4', { cupo_original: 16, cupo_maximo: 22 }, {}), 4,
 // ── 2. La pestaña: franjas en el teléfono, acordeón en el resto ─────────────
 console.log('== 2. AsistenciaClases (prop `franjas`) ==');
 const CLASES = leer('../src/components/AsistenciaClases.jsx');
-ok(/const AsistenciaClases = \(\{ variant = 'light', franjas = false, permitirSinReserva = false \} = \{\}\)/.test(CLASES),
+ok(/const AsistenciaClases = \(\{\s*variant = 'light', franjas = false, permitirSinReserva = false,\s*permitirFiltroDisciplina = false,\s*\} = \{\}\)/.test(CLASES),
     'la prop `franjas` es opcional y por defecto false: nadie más cambia de vista');
 ok(/className="md:hidden space-y-5" data-testid="asistencia-franjas"/.test(CLASES),
     'la lista por franja existe SÓLO en <768px (md:hidden)');
 ok(/franjas \? 'hidden md:block space-y-4' : 'space-y-4'/.test(CLASES),
-    'sin la prop el contenedor del acordeón queda igual que antes (el admin no se toca)');
-ok(/const porFranja = franjas \? agruparPorFranja\(clases\) : null/.test(CLASES),
-    'el corte sale del util compartido (`agruparPorFranja`)');
+    'sin la prop el contenedor del acordeón queda igual que antes (el coach no cambia de vista)');
+ok(/const porFranja = franjas \? agruparPorFranja\(visibles\) : null/.test(CLASES),
+    'el corte sale del util compartido (`agruparPorFranja`) sobre el recorte visible');
 ok(/FRANJAS\.filter\(\(f\) => \(porFranja\[f\.id\] \|\| \[\]\)\.length > 0\)/.test(CLASES),
     'las franjas sin clases no se dibujan (en el teléfono cada bloque ocupa media pantalla)');
 ok(/<AsistenciaFranja/.test(CLASES), 'monta el componente de franja');
@@ -116,7 +116,8 @@ ok(/activeTab === 'asistencia' && \([\s\S]{0,400}<AsistenciaClases franjas permi
 eq((DASH.match(/<AsistenciaClases/g) || []).length, 1,
     'la pestaña Asistencia se monta UNA vez en el dashboard del coach');
 const ADMIN = leer('../src/pages/admin/Asistencia.jsx');
-ok(/<AsistenciaClases variant="dark" \/>/.test(ADMIN), 'el admin monta el componente igual que antes');
+ok(/<AsistenciaClases variant="dark" permitirFiltroDisciplina \/>/.test(ADMIN),
+    'el admin monta el componente con el filtro por disciplina');
 eq(/franjas/.test(ADMIN), false, 'el admin NO pide franjas: su pantalla no cambia');
 
 // ── 5. Dedup del +10: la copia local se fue (Bloque 6) ──────────────────────

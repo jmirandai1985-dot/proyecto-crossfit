@@ -8,6 +8,11 @@ import AsistenciaFranja from './AsistenciaFranja';
 // El corte por franja (Mañana/Tarde/Noche) vive en un util compartido con test propio:
 // el Inicio móvil del admin y esta pestaña no pueden decir cosas distintas del mismo día.
 import { FRANJAS, agruparPorFranja } from '../utils/franjasAsistencia';
+// Filtro por disciplina del panel del admin: mismo criterio de datos que el resto del panel
+// (`disciplina_nombre` de cada clase), sin catálogo propio ni request extra.
+import {
+    TODAS, disciplinasDe, filtroEfectivo, filtrarPorDisciplina, hayQueFiltrar,
+} from '../utils/filtroDisciplina';
 // Fase 2 (Bloque 2): las clases del día y el detalle de cada una salen de la caché
 // compartida (la pestaña Asistencia del coach y del admin piden lo MISMO) y confirmar la
 // asistencia es una mutación que invalida la familia `['asistencia']`.
@@ -49,8 +54,15 @@ import Toast from './Toast';
  *             walk-in: reserva normal si el alumno tiene créditos, presencia sin cargo si
  *             no). Lo pide el coach; el admin monta el componente sin la prop, así que su
  *             pestaña Asistencia queda EXACTAMENTE igual (mismo DOM).
+ *   permitirFiltroDisciplina — false (default): muestra el selector "Disciplina" sobre la
+ *             lista del día (sólo si hay más de una). Lo pide el admin; el coach conserva
+ *             su pantalla sin controles extra. El filtro es en memoria: la lista del día ya
+ *             vino completa y `disciplina_nombre` es el mismo dato que agrupa el acordeón.
  */
-const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReserva = false } = {}) => {
+const AsistenciaClases = ({
+    variant = 'light', franjas = false, permitirSinReserva = false,
+    permitirFiltroDisciplina = false,
+} = {}) => {
     const osc = variant === 'dark';
 
     // ─── Clases de hoy (React Query) ───────────────────────────────────
@@ -59,6 +71,17 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
     // `useMemo` de `grupos` y el efecto del deep-link `?clase=` (más abajo) dependerían de un
     // valor distinto en cada pasada (ver el lint del archivo).
     const clases = useMemo(() => clasesQ.data || [], [clasesQ.data]);
+    // Filtro del panel del admin: las opciones salen de las MISMAS clases del día y el valor
+    // elegido se cae a "Todas" si esa disciplina ya no está (p. ej. cambió el día).
+    const [filtroDisciplina, setFiltroDisciplina] = useState(TODAS);
+    const disciplinasDisponibles = useMemo(() => disciplinasDe(clases), [clases]);
+    const disciplinaEfectiva = filtroEfectivo(filtroDisciplina, disciplinasDisponibles);
+    const visibles = useMemo(
+        () => (permitirFiltroDisciplina
+            ? filtrarPorDisciplina(clases, disciplinaEfectiva)
+            : clases),
+        [clases, permitirFiltroDisciplina, disciplinaEfectiva],
+    );
     const cargando = clasesQ.isPending;
     const error = clasesQ.isError
         ? (clasesQ.error?.response?.data?.detail || 'Error al cargar las clases de hoy')
@@ -193,20 +216,20 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
 
     const grupos = useMemo(() => {
         const m = new Map();
-        for (const c of clases) {
+        for (const c of visibles) {
             const k = c.disciplina_nombre || 'Sin disciplina';
             if (!m.has(k)) m.set(k, []);
             m.get(k).push(c);
         }
         return [...m.entries()].map(([disciplina, items]) => ({ disciplina, clases: items }));
-    }, [clases]);
+    }, [visibles]);
 
     // Vista de teléfono (mockup 6b): las MISMAS clases del día repartidas por franja. El
     // corte lo hace el util compartido y acá sólo se eligen las franjas con clases (una
     // franja vacía no se dibuja: en el teléfono cada bloque ocupa media pantalla).
     // Sin `useMemo`: el corte de `agruparPorFranja` es barato y `clases` sólo cambia cuando
     // llega dato nuevo, así que memorizarlo no ahorraría nada (ver el lint del archivo).
-    const porFranja = franjas ? agruparPorFranja(clases) : null;
+    const porFranja = franjas ? agruparPorFranja(visibles) : null;
     const franjasConClases = porFranja
         ? FRANJAS.filter((f) => (porFranja[f.id] || []).length > 0)
         : [];
@@ -241,12 +264,34 @@ const AsistenciaClases = ({ variant = 'light', franjas = false, permitirSinReser
 
     return (
         <div className="space-y-6">
-            <div>
-                <h2 className={`text-2xl font-bold ${osc ? 'text-zinc-100' : 'text-gray-900'}`}>📋 Asistencia de Hoy</h2>
-                <p className={`mt-1 ${osc ? 'text-zinc-400' : 'text-gray-600'}`}>
-                    Clases de HOY (hora de Chile): las que ya pasaron, la que está en curso y
-                    las que vienen. Confirma la asistencia de cada clase con un clic.
-                </p>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <h2 className={`text-2xl font-bold ${osc ? 'text-zinc-100' : 'text-gray-900'}`}>📋 Asistencia de Hoy</h2>
+                    <p className={`mt-1 ${osc ? 'text-zinc-400' : 'text-gray-600'}`}>
+                        Clases de HOY (hora de Chile): las que ya pasaron, la que está en curso y
+                        las que vienen. Confirma la asistencia de cada clase con un clic.
+                    </p>
+                </div>
+                {permitirFiltroDisciplina && hayQueFiltrar(disciplinasDisponibles) && (
+                    <div className="flex items-center gap-2">
+                        <label htmlFor="asistencia-filtro-disciplina"
+                            className={`text-xs font-medium ${osc ? 'text-zinc-400' : 'text-gray-500'}`}>
+                            Disciplina
+                        </label>
+                        <select id="asistencia-filtro-disciplina"
+                            data-testid="admin-asistencia-filtro-disciplina"
+                            value={disciplinaEfectiva}
+                            onChange={(e) => setFiltroDisciplina(e.target.value)}
+                            className={`rounded-lg border px-3 py-1.5 text-sm focus:outline-none ${osc
+                                ? 'border-zinc-700 bg-zinc-900 text-zinc-200 focus:border-orange-500'
+                                : 'border-gray-300 bg-white text-gray-700 focus:border-orange-500'}`}>
+                            <option value={TODAS}>Todas</option>
+                            {disciplinasDisponibles.map((d) => (
+                                <option key={d} value={d}>{d}</option>
+                            ))}
+                        </select>
+                    </div>
+                )}
             </div>
 
             {error && (
