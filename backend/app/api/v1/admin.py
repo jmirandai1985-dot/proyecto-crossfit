@@ -1,5 +1,6 @@
 """Router de endpoints de administración (tarjetas/notificaciones del panel admin)."""
-from datetime import datetime, time
+import calendar
+from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
@@ -235,16 +236,17 @@ def _alumnos_con_asistencia_de_prueba(db: Session, tenant_id: int, alumno_ids: l
     return asistieron
 
 
-def _alumnos_con_plan_vigente(db: Session, tenant_id: int, alumno_ids: list) -> set:
-    """Ids con un plan COMERCIAL vigente hoy: ya se convirtieron en clientes.
+def _planes_vigentes_por_alumno(db: Session, tenant_id: int, alumno_ids: list) -> dict:
+    """`{alumno_id: nombre_del_plan}` con el plan COMERCIAL vigente HOY de cada alumno.
 
-    `plan_comercial` deja fuera el "Pase de regreso" y el propio plan "Prueba" (un
-    regalo no es una membresía de cliente). La vigencia es el día de Chile.
+    Si un alumno tuviera más de una suscripción comercial vigente (dato anómalo),
+    gana la de `fecha_inicio` más reciente: es la que el admin espera ver en la fila.
+    `plan_comercial` deja fuera el "Pase de regreso" y el propio plan "Prueba".
     """
     if not alumno_ids:
-        return set()
+        return {}
     filas = (
-        db.query(Suscripcion.usuario_id)
+        db.query(Suscripcion.usuario_id, Plan.nombre)
         .join(Plan, Plan.id == Suscripcion.plan_id)
         .filter(
             Suscripcion.tenant_id == tenant_id,
@@ -254,9 +256,23 @@ def _alumnos_con_plan_vigente(db: Session, tenant_id: int, alumno_ids: list) -> 
             da_acceso_hoy(Suscripcion.estado, Suscripcion.fecha_expiracion,
                           Suscripcion.fecha_inicio),
         )
+        .order_by(Suscripcion.usuario_id, Suscripcion.fecha_inicio.desc(),
+                  Suscripcion.id.desc())
         .all()
     )
-    return {fila[0] for fila in filas}
+    planes = {}
+    for usuario_id, nombre_plan in filas:
+        planes.setdefault(usuario_id, nombre_plan)
+    return planes
+
+
+def _alumnos_con_plan_vigente(db: Session, tenant_id: int, alumno_ids: list) -> set:
+    """Ids con un plan COMERCIAL vigente hoy: ya se convirtieron en clientes.
+
+    Delega en `_planes_vigentes_por_alumno` para que el listado de "nuevos" y el
+    conjunto de convertidos no puedan usar criterios distintos.
+    """
+    return set(_planes_vigentes_por_alumno(db, tenant_id, alumno_ids))
 
 
 def _ultimos_envios_manuales(db: Session, alumno_ids: list, tipos=None) -> dict:
@@ -367,6 +383,10 @@ def get_alumnos_nuevos(
         .all()
     )
 
+    # Una sola consulta para todo el listado (no una por fila).
+    planes_vigentes = _planes_vigentes_por_alumno(
+        db, tenant_id, [fila.id for fila in filas])
+
     return {
         "total": len(filas),
         "desde": inicio.isoformat(),
@@ -376,7 +396,91 @@ def get_alumnos_nuevos(
             "nombre": fila.nombre,
             "correo": fila.correo,
             "fecha_alta": fila.created_at.isoformat() if fila.created_at else None,
+            # La tarjeta "Convertidos" y este listado tienen que poder cruzarse:
+            # si el alta ya contrató un plan comercial vigente, la fila lo dice.
+            "convertido": fila.id in planes_vigentes,
+            "plan_nombre": planes_vigentes.get(fila.id),
         } for fila in filas],
+    }
+
+
+
+@router.get("/alumnos-convertidos")
+def get_alumnos_convertidos(
+    anio: int,
+    mes: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Altas de plan COMERCIAL de un mes, con el detalle que respalda el KPI.
+
+    La tarjeta "Convertidos" del Dashboard sale de `monthly_kpis` y sólo muestra un
+    número. Este endpoint permite abrir una vista dedicada con las MISMAS filas que
+    cuentan ese número: suscripciones con `fecha_inicio` dentro del mes y un plan de
+    precio > 0 (la definición de compra del BI, que deja fuera la prueba y los
+    regalos). No filtra por `estado`: una compra del período sigue siendo una compra
+    aunque el plan ya haya vencido.
+
+    El mes se interpreta en hora de Chile, igual que el resto de los cortes del panel.
+    """
+    if mes < 1 or mes > 12:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mes inválido: debe estar entre 1 y 12",
+        )
+    hoy = hoy_santiago()
+    if anio < 2000 or anio > hoy.year + 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Año inválido",
+        )
+
+    desde = date(anio, mes, 1)
+    hasta = date(anio, mes, calendar.monthrange(anio, mes)[1])
+    inicio = datetime.combine(desde, time.min, tzinfo=SANTIAGO)
+    fin = datetime.combine(hasta + timedelta(days=1), time.min, tzinfo=SANTIAGO)
+
+    tenant_id = current_user["tenant_id"]
+    filas = (
+        db.query(Suscripcion, Usuario, Plan)
+        .join(Usuario, Usuario.id == Suscripcion.usuario_id)
+        .join(Plan, Plan.id == Suscripcion.plan_id)
+        .filter(
+            Suscripcion.tenant_id == tenant_id,
+            Usuario.tenant_id == tenant_id,
+            Usuario.rol == RolUsuario.alumno,
+            Plan.tenant_id == tenant_id,
+            Plan.precio_clp.isnot(None),
+            Plan.precio_clp > 0,
+            Suscripcion.fecha_inicio >= inicio,
+            Suscripcion.fecha_inicio < fin,
+        )
+        .order_by(Suscripcion.fecha_inicio.desc(), Suscripcion.id.desc())
+        .all()
+    )
+
+    alumnos = [{
+        "id": usuario.id,
+        "suscripcion_id": suscripcion.id,
+        "nombre": usuario.nombre,
+        "correo": usuario.correo,
+        "plan_nombre": plan.nombre,
+        "precio_clp": int(plan.precio_clp or 0),
+        "fecha_inicio": (suscripcion.fecha_inicio.isoformat()
+                         if suscripcion.fecha_inicio else None),
+        "fecha_expiracion": (suscripcion.fecha_expiracion.isoformat()
+                             if suscripcion.fecha_expiracion else None),
+        "estado": (suscripcion.estado.value
+                   if hasattr(suscripcion.estado, "value") else suscripcion.estado),
+    } for suscripcion, usuario, plan in filas]
+
+    return {
+        "anio": anio,
+        "mes": mes,
+        "desde": str(desde),
+        "hasta": str(hasta),
+        "total": len(alumnos),
+        "alumnos": alumnos,
     }
 
 

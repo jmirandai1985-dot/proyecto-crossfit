@@ -12,13 +12,19 @@ AHORA: 3 consultas únicas (`_ocupacion_por_disciplina`,
 `_historico_membresias_6m`, `_historico_ingresos_6m`) y el endpoint queda en
 ~19 consultas, sin importar cuántas disciplinas haya.
 
+REVISIÓN 2026-10-22 (Parte B del rediseño): se agregaron 2 bloques FIJOS —
+ranking de planes del mes (`planesMasVendidos`) y Bazar del mes anterior
+(`ventasBazarMesAnterior`/`ventasBazarVariacion`). El detalle de "Planes
+Vencidos" no sumó consulta: reemplazó al COUNT de `cancelacionesMes` (mismo
+WHERE, el número es `len(planes_vencidos_rows)`). Total: 21 fijas.
+
 Los tests de fuente + helpers falsos corren SIN red y SIN base de datos:
 
     cd backend && py -3.12 -m pytest tests/test_reportes_sin_n1.py --noconftest -q
 
 Los tests de integración usan la BD TEST (fallan cerrado si la URL no es de
 test) y se SALTAN si el branch no está disponible:
-  - cuentan las consultas reales del endpoint (deben ser ≤ 19);
+  - cuentan las consultas reales del endpoint (deben ser ≤ 21);
   - comparan los 3 bloques nuevos contra la implementación anterior (N+1).
 """
 import ast
@@ -243,7 +249,7 @@ def _contar_consultas(db, funcion):
     return resultado, consultas
 
 
-def test_el_endpoint_hace_a_lo_mas_19_consultas(db_test):
+def test_el_endpoint_hace_a_lo_mas_21_consultas(db_test):
     reportes = _reportes()
     tenant_id = _tenant_con_clases(db_test)
 
@@ -256,10 +262,13 @@ def test_el_endpoint_hace_a_lo_mas_19_consultas(db_test):
         ),
     )
 
-    # 19 = total del endpoint sin el N+1. Si la base no alcanza el mínimo de
-    # retención, `retencion_cohorte` corta antes y son 18: el tope sigue siendo 19.
-    assert len(consultas) <= 19, (
-        f"El endpoint ejecutó {len(consultas)} consultas (máximo 19).\n"
+    # 21 = 19 históricas (endpoint sin N+1) + 2 bloques FIJOS de la revisión
+    # 2026-10-22 (Parte B): ranking de planes del mes y Bazar del mes anterior.
+    # El detalle de "Planes Vencidos" no sumó: reemplazó al COUNT de
+    # `cancelacionesMes` (mismo WHERE). Si la base no alcanza el mínimo de
+    # retención, `retencion_cohorte` corta antes y son 20: el tope sigue en 21.
+    assert len(consultas) <= 21, (
+        f"El endpoint ejecutó {len(consultas)} consultas (máximo 21).\n"
         + "\n\n".join(consultas)
     )
 

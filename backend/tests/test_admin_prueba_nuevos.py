@@ -9,8 +9,8 @@ REGLA, no la consulta.
   C. El envío MANUAL no interfiere con las alertas AUTOMÁTICAS: tipos propios
      (`*_manual`), disjuntos de los del scheduler, y la fila la reclama el endpoint
      (`registrar=False` en el envío) para que no haya dos filas por correo.
-  D. `Nuevos del mes` reutiliza la MISMA definición del KPI del panel (`_inicio_fin_mes`
-     de reportes), no una copia.
+  D. La sección `Alumnos nuevos de este mes` reutiliza la MISMA definición del KPI
+     del panel (`_inicio_fin_mes` de reportes), no una copia.
   E. La asistencia se mide con `reservas.asistio` dentro de la ventana de la prueba
      (reservar NO es asistir) y el banner "prueba HOY" del escritorio queda intacto.
   F. Las 3 plantillas nuevas salen con los datos REALES (nombre, días, código) y con
@@ -183,7 +183,7 @@ def test_c3_los_senders_nuevos_usan_su_tipo_manual_y_aceptan_registrar():
         assert "registrar=registrar" in cuerpo
 
 
-# ── D. "Nuevos del mes" comparte la definición del KPI del panel ─────────────
+# ── D. "Alumnos nuevos de este mes" comparte la definición del KPI del panel ──
 
 def test_d1_el_listado_usa_los_bordes_de_mes_de_reportes():
     fuente = _fuente("backend/app/api/v1/admin.py")
@@ -278,7 +278,11 @@ def test_g1_la_tarjeta_y_la_pantalla_usan_los_endpoints_nuevos():
     assert "/invitacion`)" in panel              # envío (POST)
     # Las dos secciones de la pantalla completa.
     assert ">En prueba<" in panel
-    assert ">Nuevos del mes<" in panel
+    # Parte A.1a: el título dice el mes exacto ("Alumnos nuevos de este mes").
+    assert ">Alumnos nuevos de este mes<" in panel
+    # Parte A.1b: cada alta muestra si convirtió a plan pagado o no.
+    assert "a.convertido" in panel
+    assert "Convertido" in panel and "Sin plan" in panel
 
 
 def test_g2_la_fila_muestra_el_envio_manual_y_lleva_a_la_ficha():

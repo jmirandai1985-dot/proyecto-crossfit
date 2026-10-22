@@ -139,7 +139,8 @@ def _arquetipo_por_alumno(db: Session, tenant_id: int, ids: list) -> dict:
 
 
 def _situacion_en_vivo(db: Session, predicciones: list, dias_plan: dict,
-                       dias_inactivo: dict, hoy: date | None = None) -> dict:
+                       dias_inactivo: dict, hoy: date | None = None,
+                       historial: dict | None = None) -> dict:
     """{usuario_id: {...}} de la SITUACIÓN 100% en vivo (motivo, recomendación y fecha de
     próxima renovación de HOY). El snapshot del modelo (`predictions_churn`) sólo aporta el
     riesgo, la probabilidad y el arquetipo.
@@ -177,6 +178,12 @@ def _situacion_en_vivo(db: Session, predicciones: list, dias_plan: dict,
         salida[uid] = {
             "motivo": plan_vencimiento.motivo_situacion(
                 dias_inactivo.get(uid), dias_para_vencer),
+            # Días sin asistir de HOY: la pantalla de Fidelización filtra por este
+            # número (p. ej. `?filtro=sin_actividad`) sin tener que parsear el motivo.
+            "dias_inactivo": dias_inactivo.get(uid),
+            # False = nunca asistió. La tarjeta "sin actividad > 7 días" sólo cuenta
+            # alumnos con historial, así el número y la lista usan el mismo criterio.
+            "tiene_historial": (historial or {}).get(uid),
             "recomendacion": recomendacion,
             "recomendacion_codigo": codigo,
             "fecha_proxima_renovacion": fecha_renov,
@@ -202,6 +209,11 @@ def _fila_churn(p, nombre, correo, estado_gestion, ultimo_contacto,
         "probabilidad_churn": float(p.probabilidad_churn),
         "riesgo_nivel": p.riesgo_nivel,
         "motivo": situacion.get("motivo"),
+        # Días sin asistir de HOY (calculados en vivo). Fidelización los usa para
+        # el filtro `sin_actividad`; `None` sólo si no hay fecha de referencia.
+        "dias_inactivo": situacion.get("dias_inactivo"),
+        # False = nunca asistió; None = backend sin el dato (compatibilidad).
+        "tiene_historial": situacion.get("tiene_historial"),
         "recomendacion": situacion.get("recomendacion"),
         "recomendacion_codigo": situacion.get("recomendacion_codigo"),
         "estado_gestion": estado_gestion,
@@ -237,15 +249,20 @@ INSIGHT_MIN_CRITICOS = 3
 INSIGHT_MIN_PCT = 40
 
 
-def _dias_inactividad_por_alumno(db: Session, tenant_id: int, ids: list) -> dict:
+def _dias_inactividad_por_alumno(db: Session, tenant_id: int, ids: list,
+                                con_historial: bool = False):
     """{usuario_id: días sin asistir} con 2 consultas agregadas (sin N+1).
 
     Misma fórmula que `kpis_populate._dias_inactividad` y `ml.features`: días desde la última
     asistencia REAL (`asistencia_real`: `reservas.asistio` sobre la fecha de la clase, no la tabla
     histórica `asistencias`) y, si nunca asistió, desde el registro del alumno.
+
+    `con_historial=True` devuelve `(dias, {usuario_id: asistió_alguna_vez})`. Lo usa el GET
+    de churn para publicar `tiene_historial` sin una consulta extra: la tarjeta
+    "sin actividad > 7 días" sólo debe contar a quien tiene historial real.
     """
     if not ids:
-        return {}
+        return ({}, {}) if con_historial else {}
     ultimas = ultima_asistencia_por_alumno(db, tenant_id, ids)
     altas = dict(db.query(Usuario.id, dia_chile(Usuario.created_at)).filter(
         Usuario.tenant_id == tenant_id,
@@ -258,6 +275,8 @@ def _dias_inactividad_por_alumno(db: Session, tenant_id: int, ids: list) -> dict
         referencia = ultimas.get(uid) or altas.get(uid)
         if referencia is not None:
             dias[uid] = max(0, (hoy - referencia).days)
+    if con_historial:
+        return dias, {uid: uid in ultimas for uid in ids}
     return dias
 
 
@@ -718,13 +737,15 @@ def get_predictions_churn(
     ids = [p.usuario_id for p, _n, _c in filas]
     gestion = _gestion_por_alumno(db, tenant_id, ids)
     contactos = _ultimo_contacto_por_alumno(db, tenant_id, ids)
-    dias_inactivo = _dias_inactividad_por_alumno(db, tenant_id, ids)
+    dias_inactivo, tiene_historial = _dias_inactividad_por_alumno(
+        db, tenant_id, ids, con_historial=True)
     arquetipos = _arquetipo_por_alumno(db, tenant_id, ids)
     dias_plan = plan_vencimiento.dias_para_vencer_lote(db, tenant_id, ids)
     # SITUACIÓN en vivo (motivo/recomendación/renovación de HOY): el snapshot del modelo aporta
     # sólo riesgo/probabilidad/arquetipo. MISMA regla que el populate y el recálculo.
     situacion = _situacion_en_vivo(
-        db, [p for p, _n, _c in filas], dias_plan, dias_inactivo)
+        db, [p for p, _n, _c in filas], dias_plan, dias_inactivo,
+        historial=tiene_historial)
 
     predicciones = [
         _fila_churn(
@@ -837,9 +858,11 @@ def actualizar_estado_gestion_churn(
     contactos = _ultimo_contacto_por_alumno(db, tenant_id, [usuario_id])
     arquetipos = _arquetipo_por_alumno(db, tenant_id, [usuario_id])
     dias_plan = plan_vencimiento.dias_para_vencer_lote(db, tenant_id, [usuario_id])
-    dias_inactivo = _dias_inactividad_por_alumno(db, tenant_id, [usuario_id])
+    dias_inactivo, tiene_historial = _dias_inactividad_por_alumno(
+        db, tenant_id, [usuario_id], con_historial=True)
     # SITUACIÓN en vivo (misma que el GET): el snapshot sólo aporta riesgo/probabilidad/arquetipo.
-    situacion = _situacion_en_vivo(db, [p], dias_plan, dias_inactivo)
+    situacion = _situacion_en_vivo(
+        db, [p], dias_plan, dias_inactivo, historial=tiene_historial)
     fila = _fila_churn(p, nombre, correo, data.estado_gestion,
                        contactos.get(usuario_id),
                        arquetipos.get(usuario_id),

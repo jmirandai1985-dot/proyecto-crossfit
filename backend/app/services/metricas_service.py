@@ -110,6 +110,27 @@ def ingresos_netos(db: Session, tenant_id: int, inicio: date, fin: date) -> floa
     return float(ing) - float(egr)
 
 
+def ventas_bazar_detalle(db: Session, tenant_id: int, inicio: date, fin: date) -> dict:
+    """`{"monto": ..., "pedidos": ...}` de las ventas del Bazar cobradas en el rango.
+
+    `ventas_bazar` devuelve sólo el monto; las tarjetas necesitan además cuántos
+    pedidos lo componen para que "$225K" no sea un número sin contexto. Las dos
+    funciones usan el MISMO WHERE (una sola definición de "venta cobrada"): la de
+    monto delega acá para que no puedan divergir.
+    """
+    fila = db.execute(text(
+        "SELECT COALESCE(SUM(p.total), 0), COUNT(*) FROM pedidos p"
+        " WHERE p.tenant_id = :tid"
+        "   AND " + sql_fecha_en_chile("p.fecha_pedido") + " >= :desde"
+        "   AND " + sql_fecha_en_chile("p.fecha_pedido") + " <= :hasta"
+        "   AND p.estado IN (" + lista_sql_pago_bazar() + ")"
+    ), {"tid": tenant_id, "desde": inicio, "hasta": fin}).first()
+    return {
+        "monto": float(fila[0] or 0) if fila else 0.0,
+        "pedidos": int(fila[1] or 0) if fila else 0,
+    }
+
+
 def ventas_bazar(db: Session, tenant_id: int, inicio: date, fin: date) -> float:
     """Ventas del Bazar COBRADAS en el rango de DÍAS chilenos [inicio, fin], inclusive.
 
@@ -135,13 +156,7 @@ def ventas_bazar(db: Session, tenant_id: int, inicio: date, fin: date) -> float:
     siguiente el pedido inserta su transacción (`categoria='bazar'`), esta función y
     `ingresos_netos()` se solaparían y habría que excluir la categoría en uno de los dos.
     """
-    return float(db.execute(text(
-        "SELECT COALESCE(SUM(p.total), 0) FROM pedidos p"
-        " WHERE p.tenant_id = :tid"
-        "   AND " + sql_fecha_en_chile("p.fecha_pedido") + " >= :desde"
-        "   AND " + sql_fecha_en_chile("p.fecha_pedido") + " <= :hasta"
-        "   AND p.estado IN (" + lista_sql_pago_bazar() + ")"
-    ), {"tid": tenant_id, "desde": inicio, "hasta": fin}).scalar() or 0)
+    return ventas_bazar_detalle(db, tenant_id, inicio, fin)["monto"]
 
 
 def ocupacion_promedio(db: Session, tenant_id: int, inicio: date, fin: date) -> int:

@@ -275,14 +275,31 @@ def obtener_reportes_analytics(
         # El MES es el de CHILE (día chileno de la fecha, igual que el resto del
         # backend): comparar contra los bordes UTC del mes mandaba el plan que
         # vence el último día a las 23:59:59 de Chile al mes siguiente.
-        cancelaciones_mes = db.execute(sql_text("""
-            SELECT COUNT(*) FROM suscripciones
-            WHERE tenant_id = :tid
-              AND estado = 'vencido'
-              AND (fecha_expiracion AT TIME ZONE 'America/Santiago')::date >= :inicio_d
-              AND (fecha_expiracion AT TIME ZONE 'America/Santiago')::date <= :fin_d
+        # UNA sola consulta: estas filas son a la vez el DETALLE de la tarjeta
+        # "Planes Vencidos (Mes)" y la fuente del número (`cancelaciones_mes` =
+        # len(filas)). Al compartir el WHERE, la tarjeta y la tabla no pueden
+        # discrepar ni en el último día del mes, y el endpoint ahorra un COUNT.
+        planes_vencidos_rows = db.execute(sql_text("""
+            SELECT u.nombre AS alumno_nombre, u.correo, p.nombre AS plan_nombre,
+                   p.precio_clp, s.fecha_expiracion
+            FROM suscripciones s
+            JOIN usuarios u ON u.id = s.usuario_id
+            JOIN planes p ON p.id = s.plan_id
+            WHERE s.tenant_id = :tid
+              AND s.estado = 'vencido'
+              AND (s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date >= :inicio_d
+              AND (s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date <= :fin_d
+            ORDER BY s.fecha_expiracion DESC, u.nombre ASC
         """), {"tid": tenant_id, "inicio_d": inicio_mes.date(),
-               "fin_d": fin_mes.date()}).scalar() or 0
+               "fin_d": fin_mes.date()}).fetchall()
+        planes_vencidos_mes = [{
+            "alumno_nombre": r.alumno_nombre,
+            "correo": r.correo,
+            "plan_nombre": r.plan_nombre,
+            "precio_clp": int(r.precio_clp or 0),
+            "fecha_expiracion": str(r.fecha_expiracion)[:10] if r.fecha_expiracion else None,
+        } for r in planes_vencidos_rows]
+        cancelaciones_mes = len(planes_vencidos_mes)
 
         # --- 4. RETENCION (cohorte) ---
         # Definicion COMPARTIDA con el BI (metricas_service.retencion_cohorte):
@@ -312,8 +329,16 @@ def obtener_reportes_analytics(
         # `metricas_service.ventas_bazar` = pedidos COBRADOS (`validado`/`entregado`). Se publica
         # en su propio campo porque el Bazar no genera transaccion financiera (no esta dentro de
         # `ingresoMensual`) y no es ingreso recurrente (no esta dentro del MRR).
-        ventas_bazar_mes = metricas.ventas_bazar(
+        # El detalle agrega CUÁNTOS pedidos componen el monto y la variación contra el mes
+        # anterior, para que la tarjeta no muestre sólo un "$225K" sin contexto.
+        bazar_mes = metricas.ventas_bazar_detalle(
             db, tenant_id, inicio_mes.date(), fin_mes.date())
+        bazar_mes_ant = metricas.ventas_bazar(
+            db, tenant_id, inicio_mes_ant.date(), fin_mes_ant.date())
+        bazar_variacion = (
+            int(round(((bazar_mes["monto"] - bazar_mes_ant) / bazar_mes_ant) * 100))
+            if bazar_mes_ant > 0 else None
+        )
 
         # --- 7. ARPU (Ingresos del mes / alumnos activos) ---
         arpu = round(ingresos_mes / alumnos_activos,
@@ -398,6 +423,35 @@ def obtener_reportes_analytics(
                 "plan_nombre": r.plan_nombre,
                 "fecha_inicio": str(r.fecha_inicio)[:10] if r.fecha_inicio else None,
             })
+
+        # --- 14b. RANKING DE PLANES DEL MES ---
+        # Mismo criterio de "compra" que el detalle de Convertidos: plan con precio
+        # (> 0). Así el ranking no cuenta pruebas ni regalos como planes vendidos.
+        # Una sola consulta agrupada; el porcentaje se calcula sobre las altas
+        # comerciales del mes, no sobre `totalSuscripcionesMes` (que incluye pruebas).
+        plan_rows = db.execute(sql_text("""
+            SELECT p.nombre AS plan_nombre, COUNT(*) AS altas
+            FROM suscripciones s
+            JOIN usuarios u ON u.id = s.usuario_id
+            JOIN planes p ON p.id = s.plan_id
+            WHERE s.tenant_id = :tid
+              AND u.tenant_id = :tid
+              AND u.rol = 'alumno'
+              AND p.tenant_id = :tid
+              AND p.precio_clp IS NOT NULL
+              AND p.precio_clp > 0
+              AND s.fecha_inicio >= :inicio
+              AND s.fecha_inicio <= :fin
+            GROUP BY p.nombre
+            ORDER BY altas DESC, p.nombre ASC
+        """), {"tid": tenant_id, "inicio": inicio_mes, "fin": fin_mes}).fetchall()
+        total_altas_comerciales = sum(r.altas or 0 for r in plan_rows)
+        planes_mas_vendidos = [{
+            "plan_nombre": r.plan_nombre,
+            "altas": r.altas or 0,
+            "porcentaje": (round((r.altas / total_altas_comerciales) * 100, 1)
+                           if total_altas_comerciales else 0),
+        } for r in plan_rows]
         # --- 15. HISTORICO 6 MESES (suscripciones nuevas por mes) ---
         # UNA consulta con GROUP BY (antes eran 6 COUNT, uno por mes).
         historico_membresias = _historico_membresias_6m(db, tenant_id)
@@ -414,10 +468,16 @@ def obtener_reportes_analytics(
             # Suscripciones del mes (detalle para modal)
             "suscripcionesMes": suscripciones_mes,
             "totalSuscripcionesMes": len(suscripciones_mes),
+            # Ranking de planes comerciales (precio > 0) del mes. No incluye
+            # pruebas/regalos: la suma de `altas` puede ser menor a
+            # `totalSuscripcionesMes`.
+            "planesMasVendidos": planes_mas_vendidos,
             # Membresía / Clientes
             "alumnosActivos": alumnos_activos,
             "nuevosAlumnosMes": nuevos_alumnos_mes,
             "cancelacionesMes": cancelaciones_mes,
+            # Detalle de la tarjeta "Planes Vencidos (Mes)" (mismas filas del COUNT).
+            "planesVencidosMes": planes_vencidos_mes,
             "retencion": retencion,  # None si la base no alcanza el minimo
             "tieneDatosRetencion": retencion is not None,
             # Transparencia: base usada y umbral, para explicar el "sin dato".
@@ -433,7 +493,11 @@ def obtener_reportes_analytics(
             "ingresoMesAnterior": ingresos_mes_ant,
             # Bruto del Bazar del mes (pedidos cobrados), en su propio campo: el
             # ingresoMensual es NETO de transacciones y no lo contiene.
-            "ventasBazar": ventas_bazar_mes,
+            "ventasBazar": bazar_mes["monto"],
+            "ventasBazarPedidos": bazar_mes["pedidos"],
+            "ventasBazarMesAnterior": bazar_mes_ant,
+            # None si el mes anterior no vendió nada (no hay base comparable).
+            "ventasBazarVariacion": bazar_variacion,
             "arpu": arpu,
             "crecimientoMensual": crecimiento_mom,  # None si no hay base comparable
 
