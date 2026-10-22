@@ -408,8 +408,12 @@ const AdminDashboard = () => {
                         </div>
                         {/* Ventas del Bazar del mes: campo propio de /reportes/ (`ventasBazar`).
                             Es BRUTA y no recurrente: no está dentro de "Ingreso Mensual" (neto de
-                            transacciones) ni del MRR. */}
-                        <button onClick={() => navigate('/admin/reportes?seccion=bazar')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-teal-600 hover:shadow-md hover:border-teal-700 transition-all cursor-pointer text-left">
+                            transacciones) ni del MRR.
+                            La tarjeta abre PEDIDOS (/admin/pedidos), que es la venta REAL pedido a
+                            pedido (comprobante, estado y total). Antes iba a
+                            `/admin/reportes?seccion=bazar`, que sólo hacía scroll hasta este mismo
+                            número en el informe de métricas: un clic para volver a leer la tarjeta. */}
+                        <button onClick={() => navigate('/admin/pedidos')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-teal-600 hover:shadow-md hover:border-teal-700 transition-all cursor-pointer text-left">
                             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Ventas Bazar (mes)</p>
                             <p className="text-3xl font-bold text-teal-600 mt-1">
                                 ${(stats.ventasBazar || 0).toLocaleString('es-CL')}
