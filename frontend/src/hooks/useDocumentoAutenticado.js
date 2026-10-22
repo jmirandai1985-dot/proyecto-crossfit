@@ -32,28 +32,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '../services/api';
 import { AVISO_TIMEOUT_MS, MSG_TIMEOUT, esTimeout } from '../utils/avisoRetiro';
+// La descarga (axios con token -> blob -> URL objeto -> revoke) vive en un
+// helper sin DOM para poder probarla aislada; acá sólo se maneja el estado.
+import {
+    descargarDocumentoAutenticado,
+    detalleDeErrorBlob,
+} from '../utils/descargaAutenticada';
+
+// Se reexporta para no romper imports existentes del hook.
+export { detalleDeErrorBlob };
 
 // Estado inicial de la vista previa (también lo usa el reset al cerrar el modal).
 export const PREVIEW_INICIAL = { loading: false, blobUrl: '', error: '', mime: '' };
 
 /** Plazo máximo de la vista previa (el MISMO reloj que el aviso de retiro). */
 export const PREVIEW_TIMEOUT_MS = AVISO_TIMEOUT_MS;
-
-/**
- * Extrae el mensaje de error de una respuesta blob: con responseType 'blob'
- * axios NO parsea el JSON del error, llega como Blob.
- */
-export const detalleDeErrorBlob = async (err) => {
-    const d = err?.response?.data;
-    if (d instanceof Blob) {
-        try {
-            return JSON.parse(await d.text())?.detail || 'Error al procesar el archivo';
-        } catch {
-            // el cuerpo no era JSON
-        }
-    }
-    return d?.detail || err?.message || 'Error al procesar el archivo';
-};
 
 export function useDocumentoAutenticado({
     previewUrl = '',
@@ -132,28 +125,16 @@ export function useDocumentoAutenticado({
     // ── Descarga forzada (Content-Disposition: attachment) ───────────────────
     // La dispara el usuario con su botón, que ya muestra "Descargando…": NO lleva
     // reloj a propósito (un voucher de 5 MB en datos móviles es legítimamente lento
-    // y abortarlo sería peor que esperar).
+    // y abortarlo sería peor que esperar). El helper pide el archivo con axios
+    // (token) y revoca la URL objeto; acá sólo se maneja `descargando`.
     const descargar = useCallback(async (urlSobreescrita) => {
         const url = urlSobreescrita || downloadUrl;
         if (!url) return { ok: false, error: 'Sin documento para descargar' };
         setDescargando(true);
         try {
-            const res = await api.get(url, { responseType: 'blob' });
-            const cd = res.headers?.['content-disposition'] || '';
-            const coincide = cd.match(/filename="?([^";]+)"?/i);
-            const nombre = coincide ? coincide[1] : nombreFallback;
-            const objectUrl = URL.createObjectURL(res.data);
-            const a = document.createElement('a');
-            a.href = objectUrl;
-            a.download = nombre;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            // El revoke inmediato puede abortar la descarga en algunos navegadores.
-            setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
-            return { ok: true, nombre };
-        } catch (err) {
-            return { ok: false, error: await detalleDeErrorBlob(err) };
+            return await descargarDocumentoAutenticado({
+                cliente: api, url, nombreFallback,
+            });
         } finally {
             setDescargando(false);
         }

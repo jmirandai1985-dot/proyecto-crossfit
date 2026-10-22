@@ -291,6 +291,8 @@ const AdminDashboard = () => {
         if (!solicitud_id) return;
         const certificado = tipo === 'certificado';
         setMsg('');
+        // Descarga AUTENTICADA (axios con Bearer -> blob -> URL objeto): nunca se
+        // navega a la URL del backend, porque esa navegación no lleva el token.
         const res = await descargarDocumento(
             `/api/v1/solicitudes/${solicitud_id}/${certificado ? 'certificado' : 'voucher'}`);
         setMsg(res.ok

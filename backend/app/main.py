@@ -10,7 +10,6 @@
     kpis_populate, ml, segmentacion, historial_alumno, fidelizacion_plantillas,
     beneficios, marketing, referidos
 )
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse
@@ -25,6 +24,7 @@ from app.core.rate_limit import limiter
 from app.core.logging import setup_logger
 # B.2: helper único de URLs públicas (saneadas y validadas por entorno).
 from app.core.urls import url_frontend, problemas_de_config, config_email_ok
+from app.core.static_publico import StaticFilesSinComprobantes
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.middleware.tenant_audit import TenantAuditMiddleware
 from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
@@ -153,10 +153,13 @@ async def unhandled_exception_handler(request, exc):
         status_code=500, content={"detail": "Error interno del servidor"})
 
 
-# Montar directorio de archivos estáticos para servir imágenes de productos
+# Montar directorio de archivos estáticos para servir imágenes públicas.
+# `StaticFilesSinComprobantes` deja pasar SOLO las imágenes públicas: si el
+# nombre está referenciado en la BD como voucher/certificado/comprobante,
+# responde 404 (esos documentos se sirven únicamente por el endpoint autenticado).
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(os.path.join(_static_dir, "uploads"), exist_ok=True)
-app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+app.mount("/static", StaticFilesSinComprobantes(directory=_static_dir), name="static")
 
 
 @app.get("/")
