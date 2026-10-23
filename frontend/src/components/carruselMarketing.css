@@ -35,6 +35,12 @@
     padding-right: 1px;
 }
 
+/* Con el snap CENTRADO la primera y la última necesitan su margen de borde
+   (9% ≈ (100% − 82%) / 2) para poder quedar centradas: así se asoma la vecina
+   a los dos lados y la tarjeta nunca queda pegada al borde de la pantalla. */
+.cm-pista > .cm-tarjeta:first-child { margin-left: calc(9% - 1px); }
+.cm-pista > .cm-tarjeta:last-child { margin-right: calc(9% - 1px); }
+
 .cm-pista::-webkit-scrollbar {
     display: none;
 }
@@ -42,15 +48,47 @@
 /* ── La tarjeta (placa) ── */
 .cm-tarjeta {
     position: relative;
-    flex: 0 0 86%;
-    scroll-snap-align: start;
+    /* 82%: se asoma un trozo de la vecina a los dos lados (pista de swipe). */
+    flex: 0 0 82%;
+    scroll-snap-align: center;
     border-radius: 10px;
     border: 2px solid var(--ub-line, #2b2625);
     padding: 16px 16px 14px;
-    min-height: 150px;
+    min-height: 170px;
     overflow: hidden;
+    /* El fondo (la foto del flyer) queda DEBAJO del texto sin pelearse con el
+       z-index del resto de la página. */
+    isolation: isolate;
     color: var(--ub-text, #eee);
     font-family: var(--ub-body, 'Barlow', system-ui, sans-serif);
+}
+
+/* La foto del flyer, de fondo: apagada y con un velo que garantiza el contraste
+   del título (texto claro sobre cualquier imagen). */
+.cm-fondo {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    overflow: hidden;
+}
+
+.cm-fondo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: .35;
+    filter: saturate(.9);
+}
+
+.cm-fondo::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg,
+        rgba(0, 0, 0, .72),
+        rgba(0, 0, 0, .18) 62%,
+        rgba(0, 0, 0, .55));
 }
 
 /* Los 4 remaches de las esquinas (mismo truco del mockup: dos pseudo-elementos
@@ -72,14 +110,22 @@
 .cm-tarjeta .cm-remache.r3 { bottom: 6px; left: 6px; }
 .cm-tarjeta .cm-remache.r4 { bottom: 6px; right: 6px; }
 
-/* El cuerpo: si el texto es largo, la tarjeta no crece sin fin. */
+/* El cuerpo: si el texto es largo, la tarjeta no crece sin fin. El padding-top
+   deja libre la etiqueta flotante (que ahora va absoluta, arriba a la
+   izquierda) y el título tiene aire para dos líneas. */
 .cm-cuerpo {
-    max-height: 132px;
+    padding-top: 22px;
+    max-height: 140px;
     overflow: hidden;
 }
 
-/* Rótulo del tipo, arriba de la tarjeta. */
+/* Rótulo del tipo: pastilla FLOTANTE arriba a la izquierda (sobre la foto del
+   flyer), con sombra para despegarse del fondo. */
 .cm-tag {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    z-index: 1;
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -89,7 +135,7 @@
     letter-spacing: .04em;
     padding: 3px 9px;
     border-radius: 5px;
-    margin-bottom: 10px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .45);
 }
 
 .cm-tag svg {
@@ -107,7 +153,7 @@
 
 .cm-titulo {
     font-family: var(--ub-cond, 'Barlow Condensed', sans-serif);
-    font-size: 21px;
+    font-size: 24px;
     font-weight: 700;
     line-height: 1.1;
     margin: 0 0 5px;
@@ -155,6 +201,12 @@
     opacity: .85;
 }
 
+/* En los eventos la fecha grande se queda con la esquina: el texto no se le
+   mete debajo. */
+.cm-tarjeta[data-tipo="evento"] .cm-cuerpo {
+    padding-right: 48px;
+}
+
 /* Botón "Toca para ver el flyer". */
 .cm-ver {
     display: inline-flex;
@@ -200,13 +252,6 @@
     outline-offset: 3px;
 }
 
-.cm-tarjeta.cm-producto .cm-tag {
-    position: absolute;
-    top: 14px;
-    left: 14px;
-    margin: 0;
-}
-
 .cm-foto {
     width: 68px;
     height: 68px;
@@ -250,6 +295,12 @@
 }
 
 /* ── Tarjeta de VARIOS productos ("Llegaron N productos nuevos") ── */
+/* La etiqueta ahora flota arriba a la izquierda: el título de la tarjeta
+   agrupada arranca debajo de ella (en la de UN producto lo hace `.cm-info`). */
+.cm-tarjeta[data-tipo="producto_bazar"] > .cm-titulo {
+    padding-top: 22px;
+}
+
 .cm-minis {
     display: flex;
     gap: 8px;
@@ -364,4 +415,74 @@ button.cm-mini {
     text-align: center;
     font-size: 11.5px;
     color: var(--ub-muted, #a9abb5);
+}
+
+/* ── Tarjeta FIJA "Invita y Gana" (siempre la última del carrusel) ───────────
+   Es un <button>: se resetean los estilos nativos para que se vea como las demás
+   tarjetas y se note que se puede tocar (borde y chip dorados). */
+.cm-tarjeta.cm-referidos {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border-color: rgba(230, 181, 78, .55);
+    color: var(--ub-text, #f3efe8);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* El regalo grande, arriba a la derecha (decorativo: el CTA dice qué hace). */
+.cm-regalo {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    color: rgba(230, 181, 78, .5);
+}
+
+.cm-regalo svg { width: 26px; height: 26px; }
+
+.cm-referidos .cm-cuerpo {
+    display: block;
+    padding-top: 26px;
+    max-height: none;
+    margin-top: auto;
+    overflow: visible;
+}
+
+.cm-referidos .cm-titulo {
+    display: block;
+    font-size: 27px;
+    line-height: 1;
+    text-transform: uppercase;
+    letter-spacing: .01em;
+    margin-bottom: 4px;
+}
+
+.cm-referidos .cm-texto {
+    display: block;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+/* El CTA se ve como un botón dentro de la tarjeta (pero abre toda la tarjeta). */
+.cm-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    align-self: flex-start;
+    min-height: 30px;
+    padding: 5px 10px;
+    border-radius: 7px;
+    border: 1px solid rgba(230, 181, 78, .45);
+    background: rgba(230, 181, 78, .14);
+    font-size: 11.5px;
+    font-weight: 700;
+}
+
+.cm-chip svg { width: 12px; height: 12px; }
+
+.cm-tarjeta.cm-referidos:focus-visible {
+    outline: 2px solid var(--ub-gold, #e6b54e);
+    outline-offset: 3px;
 }

@@ -3,6 +3,9 @@ import { useNavigate, useLocation } from 'react-router-dom';
 // TZ Chile: "hoy" en el calendario chileno (no el del navegador), misma fuente
 // que el Dashboard (utils/fecha.js): así la reserva de hoy coincide con las clases.
 import { hoyChileStr, fechaSolaAInstante } from '../../utils/fecha';
+// "Buenos días / Buenas tardes / Buenas noches": el copy de la tarjeta "Tu clase
+// de hoy" según el momento del día en Chile (no el del teléfono).
+import { copyClaseHoy, momentoDelDia, saludoDelMomento } from '../../utils/momentoDia';
 import { useMiResumenAsistencia, useProductos, usePublicIdBox, useReservasAlumno } from '../../hooks/queries';
 import ImagenProducto from '../../components/ImagenProducto';
 import { MENU_BY_ROL } from '../../config/menu';
@@ -178,6 +181,15 @@ const InicioMobile = ({
     // Overlay del lector QR (abre la cámara de inmediato al tocar "Marcar").
     const [escanerAbierto, setEscanerAbierto] = useState(false);
 
+    // Momento del día (Chile) para el copy de "Tu clase de hoy". Se recalcula
+    // cada minuto: si la pantalla queda abierta, a las 12:00 el saludo cambia
+    // solo ("Buenos días" -> "Buenas tardes") sin recargar.
+    const [momento, setMomento] = useState(() => momentoDelDia());
+    useEffect(() => {
+        const reloj = setInterval(() => setMomento(momentoDelDia()), 60000);
+        return () => clearInterval(reloj);
+    }, []);
+
     // "Hoy" en el calendario CHILENO (misma fuente que el Dashboard).
     const hoy = hoyChileStr();
 
@@ -336,7 +348,12 @@ const InicioMobile = ({
 
                 {/* ── Reserva de hoy: el único bloque naranja a pantalla completa ── */}
                 <section className="hero" data-estado={estadoHoy || 'sin-clase'}
-                    aria-label="Tu clase de hoy">
+                    data-momento={momento} aria-label="Tu clase de hoy">
+                    {/* Saludo del momento (hora de Chile): la misma tarjeta se
+                        lee distinto a las 7 de la mañana y a las 10 de la noche. */}
+                    <span className="momento" data-testid="momento-dia">
+                        {saludoDelMomento(momento)}
+                    </span>
                     <div className="hr">
                         <span>Tu clase de hoy</span>
                         {reservaHoy && (
@@ -350,22 +367,22 @@ const InicioMobile = ({
                             <div className="time">{horaCorta(reservaHoy.hora_inicio)}</div>
                             <div className="what">{reservaHoy.disciplina_nombre || 'Clase'}</div>
                             {estadoHoy === 'reservada' && (
-                                <div className="hint pend"><Icono nombre="scan" />Al llegar, escanea el QR de la entrada con la cámara de tu celular</div>
+                                <div className="hint pend"><Icono nombre="scan" />{copyClaseHoy('reservada', momento)}</div>
                             )}
                             {estadoHoy === 'asistio' && (
-                                <div className="hint done"><Icono nombre="check" />Asistencia marcada</div>
+                                <div className="hint done"><Icono nombre="check" />{copyClaseHoy('asistio', momento)}</div>
                             )}
                             {estadoHoy === 'falto' && (
-                                <div className="hint falto"><Icono nombre="x" />No registramos tu asistencia en esta clase</div>
+                                <div className="hint falto"><Icono nombre="x" />{copyClaseHoy('falto', momento)}</div>
                             )}
                             {(estadoHoy === 'cancelada' || estadoHoy === 'cancelada_tarde') && (
-                                <div className="hint cancelada"><Icono nombre="x" />Esta clase fue cancelada</div>
+                                <div className="hint cancelada"><Icono nombre="x" />{copyClaseHoy('cancelada', momento)}</div>
                             )}
                         </>
                     ) : (
                         <>
                             <div className="what empty">Sin clases hoy</div>
-                            <div className="hint pend"><Icono nombre="scan" />Reserva tu próxima clase en “Clases disponibles”</div>
+                            <div className="hint pend"><Icono nombre="scan" />{copyClaseHoy(null, momento)}</div>
                         </>
                     )}
                 </section>

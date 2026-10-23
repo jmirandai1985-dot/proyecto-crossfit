@@ -14,6 +14,7 @@ import {
     construirFormData, payloadEdicion, mensajeDeError, tinteDeAcento,
     agruparParaCarrusel, tituloDeGrupo, tituloDeTarjeta, textoDeTarjeta,
     precioDeTarjeta, fotoDeTarjeta, tieneFlyer, PIE_PRODUCTO, MAX_MINIATURAS,
+    TIPO_REFERIDOS, COPY_REFERIDOS,
 } from '../src/utils/avisosMarketing.js';
 
 let fallos = 0;
@@ -240,6 +241,44 @@ eq(carrusel.includes('if (!tarjetas.length) return null;'), true,
 eq(carrusel.includes("useAvisosMarketingVigentes()"), true, 'los avisos salen del endpoint de vigentes');
 eq(carrusel.includes('cm-flyer'), true, 'el flyer se abre en un overlay');
 eq(carrusel.includes('cm-punto'), true, 'los puntos de posición');
+
+// ── 15. Rediseño "foto primero" (opción B) + tarjeta fija de Invita y Gana ──
+console.log('== 15. Carrusel opción B y la tarjeta de referidos ==');
+eq(TIPO_REFERIDOS.id, 'referidos', 'la tarjeta fija tiene su propio tipo (no es un aviso del admin)');
+eq(TIPO_REFERIDOS.acento, '#e6b54e', '... dorado, el color de Invita y Gana');
+eq(['fondo', 'tagFondo', 'tagTexto', 'titulo', 'detalle', 'tag']
+    .every((clave) => typeof TIPO_REFERIDOS[clave] === 'string' && TIPO_REFERIDOS[clave]), true,
+    '... con todos los tokens que consume la tarjeta');
+eq(TIPO_REFERIDOS.fondo.startsWith('linear-gradient(145deg'), true,
+    '... y el mismo formato de fondo que los demás tipos');
+eq(esTipoEditable('referidos'), false, 'los referidos NO se crean desde Marketing');
+eq(COPY_REFERIDOS.cta, 'Compartir mi código', 'el CTA invita a compartir el código');
+eq(/\d\s*%/.test(JSON.stringify(COPY_REFERIDOS)), false,
+    'el texto no promete porcentajes (los define Configuración → Referidos)');
+
+const cssCarrusel = readFileSync(new URL('../src/components/carruselMarketing.css', import.meta.url), 'utf8');
+eq(cssCarrusel.includes('flex: 0 0 82%'), true, 'la tarjeta ocupa 82%: se asoma la vecina');
+eq(cssCarrusel.includes('86%'), false, 'ya no queda el 86% del diseño anterior');
+eq(cssCarrusel.includes('scroll-snap-align: center'), true, 'las tarjetas se centran al deslizar');
+eq(cssCarrusel.includes('min-height: 170px'), true, 'la tarjeta es más alta (foto primero)');
+eq(cssCarrusel.includes('.cm-fondo img'), true, 'la foto del flyer va de fondo');
+eq(cssCarrusel.includes('opacity: .35'), true, '... apagada, para no tapar el texto');
+eq(cssCarrusel.includes('.cm-tarjeta.cm-referidos'), true, 'la tarjeta de referidos tiene su bloque');
+eq(cssCarrusel.includes(':first-child') && cssCarrusel.includes(':last-child'), true,
+    'la primera y la última pueden quedar centradas (margen de borde)');
+
+eq(carrusel.includes("clase: 'referidos'"), true, 'la tarjeta de referidos se agrega SIEMPRE, al final');
+eq(carrusel.includes("...agruparParaCarrusel(data), { clase: 'referidos' }"), true,
+    '... DESPUÉS de los avisos (queda como última tarjeta)');
+eq(carrusel.includes('getBoundingClientRect'), true,
+    'el centrado se calcula con la geometría real de la pista');
+eq(carrusel.includes("navigate('/alumno/invita-y-gana')"), true,
+    '... y navega a /alumno/invita-y-gana');
+eq(carrusel.includes('data-testid="carrusel-referidos"'), true,
+    'toda la tarjeta es un botón (se puede tocar y llega con teclado)');
+eq(carrusel.includes('<IconoRegalo />'), true, 'lleva el ícono de regalo');
+const app = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
+eq(app.includes('path="invita-y-gana"'), true, 'la ruta /alumno/invita-y-gana existe');
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);

@@ -89,6 +89,35 @@ export const TIPOS_AVISO = [
     },
 ];
 
+// ── La tarjeta FIJA de "Invita y Gana" (siempre la última del carrusel) ──────
+// NO es un aviso de la BD ni la crea el admin: es una tarjeta propia del Inicio
+// del alumno, con los mismos tokens visuales del carrusel. Va APARTE de
+// `TIPOS_AVISO` a propósito: así no aparece en Marketing (el admin no la puede
+// editar ni borrar) y `TIPOS_EDITABLES` sigue siendo espejo del backend.
+export const TIPO_REFERIDOS = {
+    id: 'referidos',
+    label: 'Invita y Gana',
+    tag: 'Trae a un amigo',
+    acento: '#e6b54e',
+    icono: 'regalo',
+    fondo: 'linear-gradient(145deg, #3a2c10, #1a1408 62%)',
+    tagFondo: '#e6b54e',
+    // Dorado claro: el texto de la etiqueta va OSCURO (mismo criterio que el
+    // ámbar de "Aviso del box").
+    tagTexto: '#231a05',
+    titulo: '#f8eed7',
+    detalle: '#f3cf82',
+};
+
+// El texto de la tarjeta. No promete porcentajes: el beneficio depende de la
+// configuración de referidos del box (Configuración → Referidos) y la pantalla
+// `/alumno/invita-y-gana` es la que lo explica con los datos reales.
+export const COPY_REFERIDOS = {
+    titulo: 'Invita y Gana',
+    texto: 'Comparte tu código con un amigo y que entrene con nosotros.',
+    cta: 'Compartir mi código',
+};
+
 // El fallback NUNCA debe ser undefined: un tipo nuevo en la BD (o un dato viejo)
 // no puede romper el carrusel del alumno ni la tabla del admin.
 export const TIPO_POR_DEFECTO = {

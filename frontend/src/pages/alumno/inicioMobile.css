@@ -181,6 +181,18 @@
     background: rgba(0, 0, 0, .2);
 }
 
+/* Saludo del momento del día (Chile): pequeña línea sobre el título de la
+   tarjeta, en el mismo tono apagado del texto del hero (no compite con la hora). */
+.ub-inicio .hero .momento {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    opacity: .72;
+}
+
 .ub-inicio .hero .hr {
     display: flex;
     justify-content: space-between;

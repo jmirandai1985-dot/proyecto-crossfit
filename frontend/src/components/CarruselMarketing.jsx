@@ -6,9 +6,9 @@ import { urlArchivo } from '../utils/imagen';
 // Productos del carrusel: la foto también cae al ícono si la URL no carga.
 import ImagenProducto from './ImagenProducto';
 import {
-    agruparParaCarrusel, etiquetaTipo, formatearFechaEvento, fotoDeTarjeta,
+    agruparParaCarrusel, COPY_REFERIDOS, etiquetaTipo, formatearFechaEvento, fotoDeTarjeta,
     MAX_MINIATURAS, PIE_PRODUCTO, precioDeTarjeta, resumenVigencia,
-    textoDeTarjeta, tieneFlyer, tipoDe, tituloDeGrupo, tituloDeTarjeta,
+    textoDeTarjeta, TIPO_REFERIDOS, tieneFlyer, tipoDe, tituloDeGrupo, tituloDeTarjeta,
 } from '../utils/avisosMarketing';
 import './carruselMarketing.css';
 
@@ -36,6 +36,17 @@ const IconoFlecha = () => (
     </svg>
 );
 
+// El regalo de la tarjeta "Invita y Gana" (decorativa: el texto ya lo dice).
+const IconoRegalo = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+        <path d="M20 12v9H4v-9" />
+        <rect x="2" y="7" width="20" height="5" rx="1" />
+        <path d="M12 21V7" />
+        <path d="M12 7H7.5a2.5 2.5 0 1 1 0-5C11 2 12 7 12 7Z" />
+        <path d="M12 7h4.5a2.5 2.5 0 1 0 0-5C13 2 12 7 12 7Z" />
+    </svg>
+);
+
 // La etiqueta del tipo, con el color del mockup (el de "Aviso del box" es ámbar
 // con texto oscuro, por ejemplo).
 const Etiqueta = ({ tipo }) => (
@@ -58,6 +69,13 @@ const TarjetaAviso = ({ aviso, onVerFlyer }) => {
             style={{ background: tipo.fondo }}
             data-tipo={aviso.tipo}
         >
+            {/* La foto del flyer, de fondo y apagada: da contexto sin tapar el
+                texto (el velo de `.cm-fondo::after` garantiza el contraste). */}
+            {aviso.imagen_url && (
+                <span className="cm-fondo" aria-hidden="true">
+                    <img src={urlArchivo(aviso.imagen_url)} alt="" loading="lazy" />
+                </span>
+            )}
             <Remaches />
             <Etiqueta tipo={tipo} />
             {evento && (
@@ -171,13 +189,49 @@ const TarjetaProductos = ({ tarjeta, onVerBazar, onVerProducto }) => {
     );
 };
 
+// La tarjeta FIJA de "Invita y Gana": siempre la ÚLTIMA del carrusel y la única
+// que no viene de la BD (no la crea el admin). Es un <button> de verdad —teclado
+// incluido— que abre `/alumno/invita-y-gana`, donde está el código del alumno y
+// el botón para compartir la invitación.
+const TarjetaReferidos = ({ onAbrir }) => {
+    const tipo = TIPO_REFERIDOS;
+
+    return (
+        <button
+            type="button"
+            className="cm-tarjeta cm-referidos"
+            style={{ background: tipo.fondo }}
+            onClick={onAbrir}
+            data-testid="carrusel-referidos"
+        >
+            <Remaches />
+            <span className="cm-tag" style={{ background: tipo.tagFondo, color: tipo.tagTexto }}>
+                <IconoRegalo />
+                {tipo.tag}
+            </span>
+            <span className="cm-regalo" aria-hidden="true"><IconoRegalo /></span>
+            <span className="cm-cuerpo">
+                <span className="cm-titulo" style={{ color: tipo.titulo }}>
+                    {COPY_REFERIDOS.titulo}
+                </span>
+                <span className="cm-texto">{COPY_REFERIDOS.texto}</span>
+            </span>
+            <span className="cm-chip" style={{ color: tipo.detalle }}>
+                {COPY_REFERIDOS.cta}
+                <IconoFlecha />
+            </span>
+        </button>
+    );
+};
+
 /**
  * Carrusel "Novedades del box" del Inicio del alumno (<768px).
  *
  * Los avisos los entrega el backend YA vigentes y ordenados (fijados primero y
  * después el más nuevo): acá sólo se agrupan y se dibujan con las plantillas del
- * mockup. Sin avisos vigentes la sección completa NO se dibuja (nunca un carrusel
- * vacío), que es la regla que el mockup pide en su nota final.
+ * mockup. Al final va SIEMPRE la tarjeta de "Invita y Gana", así que la sección
+ * ya no depende de que el admin publique algo. La guarda de "sin tarjetas" queda
+ * como defensa: nunca un carrusel vacío.
  */
 const CarruselMarketing = () => {
     const navigate = useNavigate();
@@ -191,7 +245,10 @@ const CarruselMarketing = () => {
         navigate(`/alumno/bazar?producto=${productoId}`);
     };
     const { data } = useAvisosMarketingVigentes();
-    const tarjetas = useMemo(() => agruparParaCarrusel(data), [data]);
+    // Al final, SIEMPRE, la tarjeta de "Invita y Gana": es del alumno, no del
+    // admin, así que el carrusel se ve aunque no haya avisos vigentes.
+    const tarjetas = useMemo(
+        () => [...agruparParaCarrusel(data), { clase: 'referidos' }], [data]);
     const [flyer, setFlyer] = useState(null);
     const [activo, setActivo] = useState(0);
     const pistaRef = useRef(null);
@@ -214,24 +271,39 @@ const CarruselMarketing = () => {
     const alDesplazar = () => {
         const pista = pistaRef.current;
         if (!pista) return;
-        // El ancho REAL de una tarjeta (86% del contenedor) + el gap de 10px de la
-        // pista: así el punto activo no depende de un porcentaje escrito a mano.
-        const ancho = pista.children[0]?.offsetWidth || 1;
-        const indice = Math.round(pista.scrollLeft / (ancho + 10));
+        // Con el snap CENTRADO la tarjeta activa es la que tiene su centro más
+        // cerca del centro de la pista (no la que empieza más cerca del borde):
+        // así el punto no depende de un ancho escrito a mano. Las cajas se miden
+        // con `getBoundingClientRect` para no depender de quién sea el
+        // `offsetParent` de la pista.
+        const caja = pista.getBoundingClientRect();
+        const medio = caja.width / 2;
+        let indice = 0;
+        let distancia = Infinity;
+        Array.from(pista.children).forEach((tarjeta, posicion) => {
+            const suya = tarjeta.getBoundingClientRect();
+            const delta = Math.abs((suya.left - caja.left + suya.width / 2) - medio);
+            if (delta < distancia) {
+                distancia = delta;
+                indice = posicion;
+            }
+        });
         setActivo(Math.max(0, Math.min(indice, tarjetas.length - 1)));
     };
 
     const irA = (indice) => {
         const pista = pistaRef.current;
-        const primera = pista?.children?.[0];
         const tarjeta = pista?.children?.[indice];
         // `scrollTo` sobre la PISTA (no `scrollIntoView`): el salto automático no puede
         // arrastrar el scroll vertical de la página, solo mueve el carrusel.
-        if (pista && primera && tarjeta) {
-            pista.scrollTo({
-                left: tarjeta.offsetLeft - primera.offsetLeft,
-                behavior: 'smooth',
-            });
+        if (pista && tarjeta) {
+            // La tarjeta queda CENTRADA: se asoma un trozo de la anterior y de la
+            // siguiente, que es la pista visual de que se puede deslizar.
+            const caja = pista.getBoundingClientRect();
+            const suya = tarjeta.getBoundingClientRect();
+            const destino = pista.scrollLeft + (suya.left - caja.left)
+                - (caja.width - suya.width) / 2;
+            pista.scrollTo({ left: Math.max(0, destino), behavior: 'smooth' });
         }
         setActivo(indice);
     };
@@ -269,6 +341,10 @@ const CarruselMarketing = () => {
                 onMouseEnter={() => setHover(true)}
                 onMouseLeave={() => setHover(false)}>
                 {tarjetas.map((tarjeta) => {
+                    if (tarjeta.clase === 'referidos') {
+                        return <TarjetaReferidos key="referidos"
+                                                 onAbrir={() => navigate('/alumno/invita-y-gana')} />;
+                    }
                     if (tarjeta.clase === 'aviso') {
                         return <TarjetaAviso key={`aviso-${tarjeta.aviso.id}`}
                                              aviso={tarjeta.aviso} onVerFlyer={setFlyer} />;
