@@ -818,40 +818,71 @@ const AdminDashboard = () => {
                 </div>
             )}
 
-            {/* MODAL MEMBRESÍAS DEL MES */}
+            {/* MODAL MEMBRESÍAS DEL MES
+                Tres capas para que el scroll no sea del modal entero: la tarjeta fija el
+                ancho y el alto, la cabecera no se mueve y SÓLO la lista scrollea. Antes
+                `overflow-auto` estaba en el panel, así que la barra nativa quedaba pegada
+                al borde y arrastraba el título al bajar. */}
             {fidelizacionModal === 'membresias' && (
-                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
-                    onClick={() => setFidelizacionModal(null)}>
-                    <div className="bg-zinc-900 rounded-xl max-w-2xl max-h-[90vh] overflow-auto shadow-2xl border border-zinc-700"
-                        onClick={e => e.stopPropagation()}>
-                        <div className="p-4 border-b border-zinc-700 flex justify-between items-center">
-                            <h3 className="font-bold text-zinc-100">📦 Membresías del Mes</h3>
-                            <button onClick={() => setFidelizacionModal(null)}
-                                className="text-zinc-400 hover:text-zinc-200 text-xl font-bold">✕</button>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-6"
+                    onClick={() => setFidelizacionModal(null)}
+                    role="presentation">
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="membresias-mes-titulo"
+                        className="flex max-h-[85dvh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-zinc-700 px-5 py-4">
+                            <div>
+                                <h3 id="membresias-mes-titulo" className="font-bold text-zinc-100">
+                                    📦 Membresías del Mes
+                                </h3>
+                                <p className="mt-0.5 text-xs text-zinc-500">
+                                    {(stats?.suscripcionesMes || []).length} suscripción
+                                    {(stats?.suscripcionesMes || []).length === 1 ? '' : 'es'}
+                                    {' '}iniciada{(stats?.suscripcionesMes || []).length === 1 ? '' : 's'}
+                                    {' '}este mes · Alumno, plan y fecha de inicio
+                                </p>
+                            </div>
+                            <button type="button" onClick={() => setFidelizacionModal(null)}
+                                aria-label="Cerrar membresías del mes"
+                                className="shrink-0 rounded-lg px-1.5 text-xl font-bold text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">
+                                ✕
+                            </button>
                         </div>
-                        <div className="p-4">
-                            {!stats?.suscripcionesMes || stats.suscripcionesMes.length === 0 ? (
-                                <p className="text-center text-zinc-500 py-6">No hay membresías vendidas este mes</p>
-                            ) : (
-                                    <table className="w-full">
-                                        <thead className="bg-zinc-800">
+                        <div className="flex min-h-0 flex-1 flex-col px-3 py-3 sm:px-4 sm:py-4">
+                            {/* Contenedor con scroll PROPIO (alto acotado por el flex y
+                                barra separada del borde). La tabla tiene mínimo de 34rem:
+                                en un teléfono scrollea en horizontal DENTRO de la tarjeta,
+                                nunca desborda el modal. */}
+                            <div className="min-h-0 w-full min-w-0 flex-1 overflow-auto rounded-lg border border-zinc-800 bg-zinc-950/40 [scrollbar-gutter:stable]">
+                                {!stats?.suscripcionesMes || stats.suscripcionesMes.length === 0 ? (
+                                    <p className="px-5 py-10 text-center text-zinc-500">
+                                        No hay membresías vendidas este mes
+                                    </p>
+                                ) : (
+                                    <table className="w-full min-w-[34rem] table-fixed text-sm">
+                                        <thead className="sticky top-0 z-10 bg-zinc-800">
                                             <tr>
-                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Alumno</th>
-                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Plan</th>
-                                                <th className="px-4 py-2 text-left text-xs font-bold text-zinc-300 uppercase">Fecha</th>
+                                                <th className="w-[46%] px-3 py-2.5 text-left text-xs font-bold uppercase text-zinc-300 sm:px-4">Alumno</th>
+                                                <th className="w-[32%] px-3 py-2.5 text-left text-xs font-bold uppercase text-zinc-300 sm:px-4">Plan</th>
+                                                <th className="w-[22%] px-3 py-2.5 text-left text-xs font-bold uppercase text-zinc-300 sm:px-4">Fecha</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-zinc-800">
                                             {(stats.suscripcionesMes || []).map((s, idx) => (
-                                                <tr key={idx}>
-                                                    <td className="px-4 py-2.5 text-sm font-medium text-zinc-100">{s.alumno_nombre}</td>
-                                                    <td className="px-4 py-2.5 text-sm text-green-400">{s.plan_nombre}</td>
-                                                    <td className="px-4 py-2.5 text-sm text-zinc-400">{s.fecha_inicio || '-'}</td>
+                                                <tr key={idx} className="hover:bg-zinc-900/60">
+                                                    <td className="break-words px-3 py-3 font-medium text-zinc-100 sm:px-4">{s.alumno_nombre}</td>
+                                                    <td className="break-words px-3 py-3 text-green-400 sm:px-4">{s.plan_nombre}</td>
+                                                    <td className="whitespace-nowrap px-3 py-3 tabular-nums text-zinc-400 sm:px-4">{s.fecha_inicio || '-'}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                     </table>
-                            )}
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
