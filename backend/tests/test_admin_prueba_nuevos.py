@@ -31,7 +31,7 @@ if str(_BACKEND) not in sys.path:
 
 try:
     from app.api.v1.admin import (          # noqa: E402
-        TIPOS_PRUEBA_MANUAL, dias_desde_inscripcion, estado_prueba,
+        TIPOS_PRUEBA_MANUAL, dias_desde_inscripcion, envio_fue_hoy, estado_prueba,
     )
     from app.services.email_service import (   # noqa: E402
         render_email_aviso_retiro, render_email_clase_prueba,
@@ -321,4 +321,48 @@ def test_g4_el_dashboard_abre_la_pantalla_y_la_ruta_existe():
 
     pagina = _fuente("frontend/src/pages/admin/AlumnosPrueba.jsx")
     assert "<PanelAlumnosPrueba" in pagina and "embebido" in pagina
+
+
+# ── H. El "último envío" del correo manual (día de CHILE) ────────────────────
+
+def test_h1_el_envio_de_hoy_se_mide_en_el_dia_chileno():
+    # 01:00 UTC del 10 = 21:00 CLT del 9: para el box el correo salió el día 9.
+    instante = datetime(2026, 8, 10, 1, 0, tzinfo=timezone.utc)
+    assert envio_fue_hoy(instante, date(2026, 8, 9)) is True
+    assert envio_fue_hoy(instante, date(2026, 8, 10)) is False
+
+
+def test_h2_acepta_el_texto_iso_que_devuelve_la_lista():
+    # `_ultimos_envios_manuales` devuelve `fecha.isoformat()` (texto).
+    assert envio_fue_hoy("2026-08-09T21:00:00+00:00", date(2026, 8, 9)) is True
+    # Un instante SIN zona se asume UTC: es lo que devuelve Postgres para una
+    # columna tz-aware leída sin zona (mismo criterio que `fecha_chile`).
+    assert envio_fue_hoy("2026-08-10T01:00:00", date(2026, 8, 9)) is True
+
+
+def test_h3_sin_dato_o_dato_ilegible_no_bloquea_el_boton():
+    assert envio_fue_hoy(None) is False
+    assert envio_fue_hoy("") is False
+    assert envio_fue_hoy("no-es-fecha") is False
+    assert envio_fue_hoy(12345) is False
+
+
+def test_h4_el_preview_dice_si_el_correo_ya_salio_hoy():
+    fuente = _fuente("backend/app/api/v1/admin.py")
+    preview = _bloque(fuente, "def preview_invitacion_prueba", "\n@router.")
+    assert '"ultimo_envio": ultimo' in preview
+    assert '"enviado_hoy": envio_fue_hoy(ultimo)' in preview
+
+
+def test_h5_el_modal_muestra_el_ultimo_envio_y_no_se_tapa():
+    panel = _fuente("frontend/src/components/PanelAlumnosPrueba.jsx")
+    # La hoja se abre DESDE una pantalla completa (`.screen`, z-index 50): sin
+    # `.sobre` la hoja (41) quedaba detrás y "no pasaba nada" aunque el GET
+    # respondiera 200 (el bug que ya se había arreglado en el aviso del Bazar).
+    assert 'className="scrim sobre"' in panel
+    assert 'className="sheet sobre"' in panel
+    # El último envío se ve ANTES de confirmar; si ya salió hoy no se reenvía.
+    assert "ultimo_envio" in panel and "enviado_hoy" in panel
+    assert "Ya enviado hoy" in panel
+    assert "Enviar de nuevo" in panel
 

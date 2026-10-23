@@ -1,6 +1,6 @@
 """Router de endpoints de administración (tarjetas/notificaciones del panel admin)."""
 import calendar
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
@@ -273,6 +273,28 @@ def _alumnos_con_plan_vigente(db: Session, tenant_id: int, alumno_ids: list) -> 
     conjunto de convertidos no puedan usar criterios distintos.
     """
     return set(_planes_vigentes_por_alumno(db, tenant_id, alumno_ids))
+
+
+def envio_fue_hoy(ultimo_envio, hoy: date | None = None) -> bool:
+    """¿El ÚLTIMO correo manual salió HOY en el calendario de CHILE?
+
+    `_ultimos_envios_manuales` devuelve el instante como texto ISO (`timestamptz`
+    leído sin zona), así que acá se aceptan las dos formas: texto y `datetime`.
+    Un envío de las 21:30 CLT es "hoy" aunque en UTC ya sea mañana.
+
+    Sin dato (o con un dato ilegible) devuelve `False`: el botón tiene que poder
+    usarse; un valor sucio no puede dejarlo bloqueado para siempre.
+    """
+    if not ultimo_envio:
+        return False
+    if isinstance(ultimo_envio, str):
+        try:
+            ultimo_envio = datetime.fromisoformat(ultimo_envio)
+        except ValueError:
+            return False
+    if not isinstance(ultimo_envio, datetime):
+        return False
+    return fecha_chile(ultimo_envio) == (hoy or hoy_santiago())
 
 
 def _ultimos_envios_manuales(db: Session, alumno_ids: list, tipos=None) -> dict:
@@ -567,6 +589,11 @@ def preview_invitacion_prueba(
     # email_service.contacto_del_box): abrir otra dejaba al handler esperando el pool.
     html = render_con_contacto(html, current_user["tenant_id"], db=db)
 
+    # El "último envío" viaja en el MISMO GET: el modal lo muestra antes de
+    # decidir (y sabe si ya salió HOY, para no ofrecer un envío que el backend
+    # va a descartar por la dedupe diaria).
+    ultimo = _ultimos_envios_manuales(db, [alumno.id]).get(alumno.id)
+
     return {
         "alumno_id": alumno.id,
         "nombre": alumno.nombre,
@@ -576,7 +603,8 @@ def preview_invitacion_prueba(
         "estado": estado,
         "tipo": TIPOS_PRUEBA_MANUAL[estado],
         "dias_inscrito": dias,
-        "ultimo_envio": _ultimos_envios_manuales(db, [alumno.id]).get(alumno.id),
+        "ultimo_envio": ultimo,
+        "enviado_hoy": envio_fue_hoy(ultimo),
     }
 
 
