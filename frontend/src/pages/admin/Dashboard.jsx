@@ -366,177 +366,69 @@ const AdminDashboard = () => {
                     </button>
                 </div>
 
-                {/* Tarjeta "Alumnos de Prueba Hoy" (solo panel admin) */}
-                <AdminTarjetaAlumnosPrueba />
-
                 {msg && (
                     <div className={`p-4 rounded-lg font-bold shadow-lg transition-all ${msg.includes('✅') ? 'bg-green-100 text-green-800' : msg.includes('❌') ? 'bg-red-100 text-red-800' : 'bg-blue-500/20 text-blue-300'}`}>
                         {msg}
                     </div>
                 )}
 
-                {/* TARJETAS DE ESTADÍSTICAS */}
+                {/* 1. OPERATIVA INMEDIATA: lo que requiere atención HOY va primero.
+                    Clases de hoy y solicitudes de plan son las dos colas accionables;
+                    Ocupación promedio se mantiene al lado de Clases porque es su KPI
+                    de apoyo (no es una métrica financiera). */}
                 {stats && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-                        <button onClick={() => navigate('/admin/alumnos?estado=activo')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-blue-600 hover:shadow-md hover:border-blue-700 transition-all cursor-pointer text-left">
-                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos Activos</p>
-                            <p className="text-3xl font-bold text-blue-400 mt-1">{stats.alumnosActivos || 0}</p>
-                            <p className="text-xs text-zinc-500 mt-1">Total miembros con plan vigente — Clic para ver el padrón activo</p>
-                        </button>
-                        <button onClick={() => setFidelizacionModal('membresias')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-green-600 hover:shadow-md hover:border-green-700 transition-all cursor-pointer text-left">
-                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Membresías Mensuales</p>
-                            <p className="text-3xl font-bold text-green-700 mt-1">{stats.totalSuscripcionesMes || 0}</p>
-                            <p className="text-xs text-zinc-500 mt-1">Suscripciones iniciadas este mes — Clic para ver detalle</p>
-                        </button>
-                        <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-amber-600">
-                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Ingreso Mensual</p>
-                            <p className="text-3xl font-bold text-amber-700 mt-1">
-                                ${(stats.ingresoMensual || 0).toLocaleString('es-CL')}
+                    <section aria-labelledby="dashboard-operativa" className="space-y-3">
+                        <div>
+                            <h2 id="dashboard-operativa" className="text-lg font-bold text-zinc-100">
+                                Operativa de hoy
+                            </h2>
+                            <p className="text-xs text-zinc-500">
+                                Clases y solicitudes de plan que requieren atención ahora
                             </p>
-                            <p className="text-xs text-zinc-500 mt-1">Ingresos del mes actual</p>
-                            {/* El MoM es de INGRESOS: antes estaba mal ubicado en la tarjeta
-                                de membresias, donde se leia como crecimiento de suscripciones. */}
-                            {stats.crecimientoMensual === null ? (
-                                <p className="text-xs font-bold text-zinc-500 mt-1"
-                                    title="Sin mes anterior comparable: el ingreso neto del mes pasado fue <= 0.">
-                                    s/d vs mes anterior (sin base comparable)
-                                </p>
-                            ) : (
-                                <p className={`text-xs font-bold mt-1 ${stats.crecimientoMensual > 0 ? 'text-green-600' : stats.crecimientoMensual < 0 ? 'text-red-600' : 'text-zinc-500'}`}>
-                                    {stats.crecimientoMensual > 0 ? '📈' : stats.crecimientoMensual < 0 ? '📉' : '='}{' '}
-                                    {Math.abs(stats.crecimientoMensual ?? 0)}% vs mes anterior
-                                </p>
-                            )}
                         </div>
-                        {/* Ventas del Bazar del mes: campo propio de /reportes/ (`ventasBazar`).
-                            Es BRUTA y no recurrente: no está dentro de "Ingreso Mensual" (neto de
-                            transacciones) ni del MRR.
-                            La tarjeta abre PEDIDOS (/admin/pedidos), que es la venta REAL pedido a
-                            pedido (comprobante, estado y total). Antes iba a
-                            `/admin/reportes?seccion=bazar`, que sólo hacía scroll hasta este mismo
-                            número en el informe de métricas: un clic para volver a leer la tarjeta. */}
-                        <button onClick={() => navigate('/admin/pedidos')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-teal-600 hover:shadow-md hover:border-teal-700 transition-all cursor-pointer text-left">
-                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Ventas Bazar (mes)</p>
-                            <p className="text-3xl font-bold text-teal-600 mt-1">
-                                ${(stats.ventasBazar || 0).toLocaleString('es-CL')}
-                            </p>
-                            <p className="text-xs text-zinc-500 mt-1">
-                                {stats.ventasBazarPedidos || 0} pedido{(stats.ventasBazarPedidos || 0) === 1 ? '' : 's'} cobrado{(stats.ventasBazarPedidos || 0) === 1 ? '' : 's'} del mes
-                                {/* Sin base comparable no se muestra 0%: se dice que no hay mes anterior. */}
-                                {stats.ventasBazarVariacion == null
-                                    ? ' · sin base anterior'
-                                    : ` · ${stats.ventasBazarVariacion > 0 ? '↑' : stats.ventasBazarVariacion < 0 ? '↓' : '='} ${Math.abs(stats.ventasBazarVariacion)}% vs mes anterior`}
-                            </p>
-                        </button>
-                        <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-purple-600">
-                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide"
-                                title="Ocupacion: clases.asistentes_confirmados / clases.cupo_maximo (lugares reservados sobre cupo ofrecido). NO mide asistencia real. Puede verse 0% porque las asistencias todavia no estan vinculadas a su clase (asistencias.clase_id es NULL en toda la base).">Ocupación promedio</p>
-                            <p className="text-3xl font-bold text-purple-700 mt-1">{stats.asistenciaPromedio || 0}%</p>
-                            <p className="text-xs text-zinc-500 mt-1">Ocupación en clases</p>
-                        </div>
-                        <button onClick={() => document.getElementById('clases-hoy')?.scrollIntoView({ behavior: 'smooth' })} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-indigo-600 hover:shadow-md hover:border-indigo-700 transition-all cursor-pointer text-left">
-                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Clases de Hoy</p>
-                            {clasesHoyLoading ? (
-                                <p className="text-3xl font-bold text-zinc-600 mt-1">…</p>
-                            ) : clasesHoyError ? (
-                                <p className="text-sm font-bold text-amber-400 mt-2" title={clasesHoyError}>⚠️ s/d</p>
-                            ) : (
-                                <>
-                                    <p className="text-3xl font-bold text-indigo-700 mt-1">
-                                        {clasesHoyRealizadas}<span className="text-lg font-semibold text-zinc-500">/{clasesHoyTotal}</span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <button onClick={() => document.getElementById('clases-hoy')?.scrollIntoView({ behavior: 'smooth' })} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-indigo-600 hover:shadow-md hover:border-indigo-700 transition-all cursor-pointer text-left">
+                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Clases de Hoy</p>
+                                {clasesHoyLoading ? (
+                                    <p className="text-3xl font-bold text-zinc-600 mt-1">…</p>
+                                ) : clasesHoyError ? (
+                                    <p className="text-sm font-bold text-amber-400 mt-2" title={clasesHoyError}>⚠️ s/d</p>
+                                ) : (
+                                    <>
+                                        <p className="text-3xl font-bold text-indigo-700 mt-1">
+                                            {clasesHoyRealizadas}<span className="text-lg font-semibold text-zinc-500">/{clasesHoyTotal}</span>
+                                        </p>
+                                        <p className="text-xs text-zinc-500 mt-1">
+                                            {clasesHoyRealizadas} de {clasesHoyTotal} realizadas · {reservasHoy}/{cuposHoy} reservas ({ocupacionHoyPct}%) — Clic para ver
+                                        </p>
+                                    </>
+                                )}
+                            </button>
+                            <button onClick={() => navigate('/admin/alumnos-pendientes?cola=solicitudes')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-rose-600 hover:shadow-md hover:border-rose-700 transition-all cursor-pointer text-left">
+                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Solicitudes Pendientes</p>
+                                {totalPendientes === null ? (
+                                    <p className="text-sm font-bold text-rose-400 mt-2" title={registrosError || solicitudesError}>
+                                        ⚠️ s/d (no se pudo consultar)
                                     </p>
-                                    <p className="text-xs text-zinc-500 mt-1">
-                                        {clasesHoyRealizadas} de {clasesHoyTotal} realizadas · {reservasHoy}/{cuposHoy} reservas ({ocupacionHoyPct}%) — Clic para ver
-                                    </p>
-                                </>
-                            )}
-                        </button>
-                        <button onClick={() => navigate('/admin/alumnos-pendientes?cola=solicitudes')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-rose-600 hover:shadow-md hover:border-rose-700 transition-all cursor-pointer text-left">
-                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Solicitudes Pendientes</p>
-                            {totalPendientes === null ? (
-                                <p className="text-sm font-bold text-rose-400 mt-2" title={registrosError || solicitudesError}>
-                                    ⚠️ s/d (no se pudo consultar)
+                                ) : (
+                                    <p className="text-3xl font-bold text-rose-700 mt-1">{totalPendientes}</p>
+                                )}
+                                {/* Desglose: son DOS colas. Antes solo se contaban los registros
+                                    y una solicitud de plan con voucher no sumaba en ninguna parte. */}
+                                <p className="text-xs text-zinc-500 mt-1">
+                                    {countPendientes || 0} registro{countPendientes === 1 ? '' : 's'} ·
+                                    {' '}{solicitudes.length} solicitud{solicitudes.length === 1 ? '' : 'es'} de plan — Clic para ver
                                 </p>
-                            ) : (
-                                <p className="text-3xl font-bold text-rose-700 mt-1">{totalPendientes}</p>
-                            )}
-                            {/* Desglose: son DOS colas. Antes solo se contaban los registros
-                                y una solicitud de plan con voucher no sumaba en ninguna parte. */}
-                            <p className="text-xs text-zinc-500 mt-1">
-                                {countPendientes || 0} registro{countPendientes === 1 ? '' : 's'} ·
-                                {' '}{solicitudes.length} solicitud{solicitudes.length === 1 ? '' : 'es'} de plan — Clic para ver
-                            </p>
-                        </button>
-                    </div>
+                            </button>
+                            <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-purple-600">
+                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide"
+                                    title="Ocupacion: clases.asistentes_confirmados / clases.cupo_maximo (lugares reservados sobre cupo ofrecido). NO mide asistencia real. Puede verse 0% porque las asistencias todavia no estan vinculadas a su clase (asistencias.clase_id es NULL en toda la base).">Ocupación promedio</p>
+                                <p className="text-3xl font-bold text-purple-700 mt-1">{stats.asistenciaPromedio || 0}%</p>
+                                <p className="text-xs text-zinc-500 mt-1">Ocupación en clases</p>
+                            </div>
+                        </div>
+                    </section>
                 )}
-
-                {/* TARJETAS: "Alumnos nuevos de este mes" (endpoint operativo, mismo
-                    número que el detalle) y "Convertidos" (BI mensual). La primera
-                    abre la pantalla con los DOS listados (en prueba + altas del mes);
-                    antes mandaba a /admin/kpis, que no era lo que el admin esperaba. */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <button onClick={() => navigate('/admin/alumnos-prueba')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-emerald-600 hover:shadow-md hover:border-emerald-700 transition-all cursor-pointer text-left">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos nuevos de este mes</p>
-                                {nuevosMesQ.isPending ? (
-                                    <p className="text-3xl font-bold text-zinc-600 mt-1">…</p>
-                                ) : nuevosMesQ.isError ? (
-                                    <p className="text-sm font-bold text-amber-400 mt-2" title={mensajeError(nuevosMesQ.error, 'No se pudieron cargar las altas del mes')}>
-                                        ⚠️ s/d
-                                    </p>
-                                ) : (
-                                    <p className="text-3xl font-bold text-emerald-600 mt-1">{totalNuevosMes}</p>
-                                )}
-                                <p className="text-xs text-zinc-500 mt-1">
-                                    {nuevosMesQ.isPending
-                                        ? 'Consultando las altas del mes…'
-                                        : nuevosMesQ.isError
-                                            ? 'No se pudieron cargar las altas del mes'
-                                            : `${convertidosNuevosMes} ya compraron plan · ${totalNuevosMes - convertidosNuevosMes} aún sin plan`}
-                                    {!nuevosMesQ.isError && ' — Clic para ver el detalle'}
-                                </p>
-                            </div>
-                            <span className="text-4xl">👤</span>
-                        </div>
-                    </button>
-                    <button
-                        onClick={() => {
-                            // Si el BI ya dijo qué mes está mostrando, el detalle abre ESE
-                            // mes (mismo número que la tarjeta); si no, el detalle usa su
-                            // default (último mes cerrado).
-                            const qs = new URLSearchParams();
-                            if (biConversion.anio && biConversion.mes) {
-                                qs.set('anio', biConversion.anio);
-                                qs.set('mes', biConversion.mes);
-                            }
-                            navigate(`/admin/alumnos-convertidos${qs.toString() ? `?${qs}` : ''}`);
-                        }}
-                        className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-teal-600 hover:shadow-md hover:border-teal-700 transition-all cursor-pointer text-left"
-                    >
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Convertidos</p>
-                                {biConversion.loading ? (
-                                    <p className="text-3xl font-bold text-zinc-600 mt-1">…</p>
-                                ) : biConversion.valor === null ? (
-                                    <p className="text-sm font-bold text-amber-400 mt-2">s/d</p>
-                                ) : (
-                                    <p className="text-3xl font-bold text-teal-600 mt-1">{biConversion.valor}</p>
-                                )}
-                                <p className="text-xs text-zinc-500 mt-1">
-                                    {biConversion.loading
-                                        ? 'Consultando el BI…'
-                                        : biConversion.error
-                                            ? `⚠️ ${biConversion.error}`
-                                            : `Compraron plan${biConversion.periodo ? ` (${biConversion.periodo})` : ''} · Conversión prueba→plan: ${biConversion.rate}% · ${biConversion.prueba || 0} en prueba`}
-                                    {!biConversion.error && ' — Clic para ver el detalle'}
-                                </p>
-                            </div>
-                            <span className="text-4xl">🚀</span>
-                        </div>
-                    </button>
-                </div>
 
                 {/* SECCIÓN "CLASES DE HOY": todas las clases del día que exigen coach, por hora,
                     con ocupación, coach y estado. Reutiliza GET /asistencia/clases-hoy; al hacer
@@ -603,56 +495,6 @@ const AdminDashboard = () => {
                         </div>
                     )}
                 </div>
-
-                {/* TARJETAS DE FIDELIZACIÓN */}
-                {/* El fallo se avisa ARRIBA y con Reintentar: las tarjetas ya muestran su
-                    motivo en vez de un 0 falso, pero sin botón el admin tenía que
-                    recargar la página entera para volver a intentar. */}
-                {!fidelizacionLoading && (
-                    <AvisoCarga
-                        secciones={[
-                            fidelizacionError.riesgo && 'alumnos en riesgo',
-                            fidelizacionError.vencimientos && 'vencimientos inminentes',
-                        ].filter(Boolean)}
-                        variante="oscura"
-                        testid="aviso-fidelizacion"
-                        onReintentar={cargarFidelizacion}
-                    />
-                )}
-                {!fidelizacionLoading && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {/* Tarjeta Alumnos en Riesgo */}
-                        <button onClick={() => navigate('/admin/fidelizacion?filtro=sin_actividad')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-red-600 hover:shadow-md hover:border-red-700 transition-all cursor-pointer text-left">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos en Riesgo</p>
-                                    {fidelizacionError.riesgo ? (
-                                        <p className="text-sm font-bold text-red-400 mt-2">⚠️ {fidelizacionError.riesgo}</p>
-                                    ) : (
-                                        <p className="text-3xl font-bold text-red-700 mt-1">{alumnosRiesgoSinActividad.length}</p>
-                                    )}
-                                    <p className="text-xs text-zinc-500 mt-1">Sin actividad {'>'} 7 días — Clic para ir a Fidelización</p>
-                                </div>
-                                <span className="text-4xl">⚠️</span>
-                            </div>
-                        </button>
-                        {/* Tarjeta Vencimientos Inminentes */}
-                        <button onClick={() => navigate('/admin/fidelizacion?filtro=plan_urgente')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-orange-600 hover:shadow-md hover:border-orange-700 transition-all cursor-pointer text-left">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Vencimientos Inminentes</p>
-                                    {fidelizacionError.vencimientos ? (
-                                        <p className="text-sm font-bold text-orange-400 mt-2">⚠️ {fidelizacionError.vencimientos}</p>
-                                    ) : (
-                                        <p className="text-3xl font-bold text-orange-700 mt-1">{vencimientos.length}</p>
-                                    )}
-                                    <p className="text-xs text-zinc-500 mt-1">Próximos 5 días — Clic para ir a Fidelización</p>
-                                </div>
-                                <span className="text-4xl">⏰</span>
-                            </div>
-                        </button>
-                    </div>
-                )}
 
                 {/* SOLICITUDES PENDIENTES */}
                 <div id="solicitudes-pendientes" className="bg-zinc-900 rounded-lg shadow overflow-hidden">
@@ -770,6 +612,216 @@ const AdminDashboard = () => {
                         </div>
                     )}
                 </div>
+
+                {/* 2. FINANCIERA Y DE NEGOCIO */}
+                {stats && (
+                    <section aria-labelledby="dashboard-negocio" className="space-y-3">
+                        <div>
+                            <h2 id="dashboard-negocio" className="text-lg font-bold text-zinc-100">
+                                Finanzas y negocio
+                            </h2>
+                            <p className="text-xs text-zinc-500">
+                                Alumnos, membresías e ingresos del mes
+                            </p>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                            <button onClick={() => navigate('/admin/alumnos?estado=activo')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-blue-600 hover:shadow-md hover:border-blue-700 transition-all cursor-pointer text-left">
+                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos Activos</p>
+                                <p className="text-3xl font-bold text-blue-400 mt-1">{stats.alumnosActivos || 0}</p>
+                                <p className="text-xs text-zinc-500 mt-1">Total miembros con plan vigente — Clic para ver el padrón activo</p>
+                            </button>
+                            <button onClick={() => setFidelizacionModal('membresias')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-green-600 hover:shadow-md hover:border-green-700 transition-all cursor-pointer text-left">
+                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Membresías Mensuales</p>
+                                <p className="text-3xl font-bold text-green-700 mt-1">{stats.totalSuscripcionesMes || 0}</p>
+                                <p className="text-xs text-zinc-500 mt-1">Suscripciones iniciadas este mes — Clic para ver detalle</p>
+                            </button>
+                            <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-amber-600">
+                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Ingreso Mensual</p>
+                                <p className="text-3xl font-bold text-amber-700 mt-1">
+                                    ${(stats.ingresoMensual || 0).toLocaleString('es-CL')}
+                                </p>
+                                <p className="text-xs text-zinc-500 mt-1">Ingresos del mes actual</p>
+                                {/* El MoM es de INGRESOS: antes estaba mal ubicado en la tarjeta
+                                    de membresias, donde se leia como crecimiento de suscripciones. */}
+                                {stats.crecimientoMensual === null ? (
+                                    <p className="text-xs font-bold text-zinc-500 mt-1"
+                                        title="Sin mes anterior comparable: el ingreso neto del mes pasado fue <= 0.">
+                                        s/d vs mes anterior (sin base comparable)
+                                    </p>
+                                ) : (
+                                    <p className={`text-xs font-bold mt-1 ${stats.crecimientoMensual > 0 ? 'text-green-600' : stats.crecimientoMensual < 0 ? 'text-red-600' : 'text-zinc-500'}`}>
+                                        {stats.crecimientoMensual > 0 ? '📈' : stats.crecimientoMensual < 0 ? '📉' : '='}{' '}
+                                        {Math.abs(stats.crecimientoMensual ?? 0)}% vs mes anterior
+                                    </p>
+                                )}
+                            </div>
+                            {/* Ventas del Bazar del mes: campo propio de /reportes/ (`ventasBazar`).
+                                Es BRUTA y no recurrente: no está dentro de "Ingreso Mensual" (neto de
+                                transacciones) ni del MRR.
+                                La tarjeta abre PEDIDOS (/admin/pedidos), que es la venta REAL pedido a
+                                pedido (comprobante, estado y total). Antes iba a
+                                `/admin/reportes?seccion=bazar`, que sólo hacía scroll hasta este mismo
+                                número en el informe de métricas: un clic para volver a leer la tarjeta. */}
+                            <button onClick={() => navigate('/admin/pedidos')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-teal-600 hover:shadow-md hover:border-teal-700 transition-all cursor-pointer text-left">
+                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Ventas Bazar (mes)</p>
+                                <p className="text-3xl font-bold text-teal-600 mt-1">
+                                    ${(stats.ventasBazar || 0).toLocaleString('es-CL')}
+                                </p>
+                                <p className="text-xs text-zinc-500 mt-1">
+                                    {stats.ventasBazarPedidos || 0} pedido{(stats.ventasBazarPedidos || 0) === 1 ? '' : 's'} cobrado{(stats.ventasBazarPedidos || 0) === 1 ? '' : 's'} del mes
+                                    {/* Sin base comparable no se muestra 0%: se dice que no hay mes anterior. */}
+                                    {stats.ventasBazarVariacion == null
+                                        ? ' · sin base anterior'
+                                        : ` · ${stats.ventasBazarVariacion > 0 ? '↑' : stats.ventasBazarVariacion < 0 ? '↓' : '='} ${Math.abs(stats.ventasBazarVariacion)}% vs mes anterior`}
+                                </p>
+                            </button>
+                        </div>
+                    </section>
+                )}
+
+                {/* 3. RETENCIÓN Y FIDELIZACIÓN: alertas tempranas, después de la
+                    operativa y de los números de negocio. */}
+                <section aria-labelledby="dashboard-retencion" className="space-y-3">
+                    <div>
+                        <h2 id="dashboard-retencion" className="text-lg font-bold text-zinc-100">
+                            Retención y fidelización
+                        </h2>
+                        <p className="text-xs text-zinc-500">
+                            Alertas tempranas para intervenir antes de perder al alumno
+                        </p>
+                    </div>
+                    {/* El fallo se avisa ARRIBA y con Reintentar: las tarjetas ya muestran su
+                    motivo en vez de un 0 falso, pero sin botón el admin tenía que
+                    recargar la página entera para volver a intentar. */}
+                {!fidelizacionLoading && (
+                    <AvisoCarga
+                        secciones={[
+                            fidelizacionError.riesgo && 'alumnos en riesgo',
+                            fidelizacionError.vencimientos && 'vencimientos inminentes',
+                        ].filter(Boolean)}
+                        variante="oscura"
+                        testid="aviso-fidelizacion"
+                        onReintentar={cargarFidelizacion}
+                    />
+                )}
+                {!fidelizacionLoading && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Tarjeta Alumnos en Riesgo */}
+                        <button onClick={() => navigate('/admin/fidelizacion?filtro=sin_actividad')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-red-600 hover:shadow-md hover:border-red-700 transition-all cursor-pointer text-left">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos en Riesgo</p>
+                                    {fidelizacionError.riesgo ? (
+                                        <p className="text-sm font-bold text-red-400 mt-2">⚠️ {fidelizacionError.riesgo}</p>
+                                    ) : (
+                                        <p className="text-3xl font-bold text-red-700 mt-1">{alumnosRiesgoSinActividad.length}</p>
+                                    )}
+                                    <p className="text-xs text-zinc-500 mt-1">Sin actividad {'>'} 7 días — Clic para ir a Fidelización</p>
+                                </div>
+                                <span className="text-4xl">⚠️</span>
+                            </div>
+                        </button>
+                        {/* Tarjeta Vencimientos Inminentes */}
+                        <button onClick={() => navigate('/admin/fidelizacion?filtro=plan_urgente')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-orange-600 hover:shadow-md hover:border-orange-700 transition-all cursor-pointer text-left">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Vencimientos Inminentes</p>
+                                    {fidelizacionError.vencimientos ? (
+                                        <p className="text-sm font-bold text-orange-400 mt-2">⚠️ {fidelizacionError.vencimientos}</p>
+                                    ) : (
+                                        <p className="text-3xl font-bold text-orange-700 mt-1">{vencimientos.length}</p>
+                                    )}
+                                    <p className="text-xs text-zinc-500 mt-1">Próximos 5 días — Clic para ir a Fidelización</p>
+                                </div>
+                                <span className="text-4xl">⏰</span>
+                            </div>
+                        </button>
+                    </div>
+                )}
+                </section>
+
+                {/* 4. CONVERSIÓN Y PROSPECTOS: el embudo de prueba a plan pagado
+                    queda al final, como seguimiento y no como operativa del día. */}
+                <section aria-labelledby="dashboard-conversion" className="space-y-3">
+                    <div>
+                        <h2 id="dashboard-conversion" className="text-lg font-bold text-zinc-100">
+                            Conversión y prospectos
+                        </h2>
+                        <p className="text-xs text-zinc-500">
+                            Alumnos de prueba del día y su paso a un plan pagado
+                        </p>
+                    </div>
+                    {/* Tarjeta "Alumnos de Prueba Hoy" (solo panel admin) */}
+                    <AdminTarjetaAlumnosPrueba />
+
+                    {/* TARJETAS: "Alumnos nuevos de este mes" (endpoint operativo, mismo
+                        número que el detalle) y "Convertidos" (BI mensual). La primera
+                        abre la pantalla con los DOS listados (en prueba + altas del mes);
+                        antes mandaba a /admin/kpis, que no era lo que el admin esperaba. */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <button onClick={() => navigate('/admin/alumnos-prueba')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-emerald-600 hover:shadow-md hover:border-emerald-700 transition-all cursor-pointer text-left">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Alumnos nuevos de este mes</p>
+                                    {nuevosMesQ.isPending ? (
+                                        <p className="text-3xl font-bold text-zinc-600 mt-1">…</p>
+                                    ) : nuevosMesQ.isError ? (
+                                        <p className="text-sm font-bold text-amber-400 mt-2" title={mensajeError(nuevosMesQ.error, 'No se pudieron cargar las altas del mes')}>
+                                            ⚠️ s/d
+                                        </p>
+                                    ) : (
+                                        <p className="text-3xl font-bold text-emerald-600 mt-1">{totalNuevosMes}</p>
+                                    )}
+                                    <p className="text-xs text-zinc-500 mt-1">
+                                        {nuevosMesQ.isPending
+                                            ? 'Consultando las altas del mes…'
+                                            : nuevosMesQ.isError
+                                                ? 'No se pudieron cargar las altas del mes'
+                                                : `${convertidosNuevosMes} ya compraron plan · ${totalNuevosMes - convertidosNuevosMes} aún sin plan`}
+                                        {!nuevosMesQ.isError && ' — Clic para ver el detalle'}
+                                    </p>
+                                </div>
+                                <span className="text-4xl">👤</span>
+                            </div>
+                        </button>
+                        <button
+                            onClick={() => {
+                                // Si el BI ya dijo qué mes está mostrando, el detalle abre ESE
+                                // mes (mismo número que la tarjeta); si no, el detalle usa su
+                                // default (último mes cerrado).
+                                const qs = new URLSearchParams();
+                                if (biConversion.anio && biConversion.mes) {
+                                    qs.set('anio', biConversion.anio);
+                                    qs.set('mes', biConversion.mes);
+                                }
+                                navigate(`/admin/alumnos-convertidos${qs.toString() ? `?${qs}` : ''}`);
+                            }}
+                            className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-teal-600 hover:shadow-md hover:border-teal-700 transition-all cursor-pointer text-left"
+                        >
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Convertidos</p>
+                                    {biConversion.loading ? (
+                                        <p className="text-3xl font-bold text-zinc-600 mt-1">…</p>
+                                    ) : biConversion.valor === null ? (
+                                        <p className="text-sm font-bold text-amber-400 mt-2">s/d</p>
+                                    ) : (
+                                        <p className="text-3xl font-bold text-teal-600 mt-1">{biConversion.valor}</p>
+                                    )}
+                                    <p className="text-xs text-zinc-500 mt-1">
+                                        {biConversion.loading
+                                            ? 'Consultando el BI…'
+                                            : biConversion.error
+                                                ? `⚠️ ${biConversion.error}`
+                                                : `Compraron plan${biConversion.periodo ? ` (${biConversion.periodo})` : ''} · Conversión prueba→plan: ${biConversion.rate}% · ${biConversion.prueba || 0} en prueba`}
+                                        {!biConversion.error && ' — Clic para ver el detalle'}
+                                    </p>
+                                </div>
+                                <span className="text-4xl">🚀</span>
+                            </div>
+                        </button>
+                    </div>
+                </section>
 
             </div>
 
