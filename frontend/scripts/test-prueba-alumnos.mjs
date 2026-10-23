@@ -4,6 +4,8 @@
 //
 // Se fija lo que el backend NO puede decidir: cómo se ESCRIBE cada estado (singular/
 // plural, el caso "hoy"), qué color lleva, y que un dato que falta no invente texto.
+import { readFileSync } from 'node:fs';
+
 import { textoHace, textoHaceCon } from '../src/utils/hace.js';
 import {
     textoEstadoPrueba, tonoEstadoPrueba, textoAlta, textoEnPrueba,
@@ -18,6 +20,7 @@ const eq = (obtenido, esperado, msg) => {
         console.log(`  FAIL  ${msg}  (esperado: ${esperado} · obtenido: ${obtenido})`);
     }
 };
+const ok = (valor, msg) => eq(!!valor, true, msg);
 
 // ── "hace X" ─────────────────────────────────────────────────────────────────
 const AHORA = Date.parse('2026-08-10T15:00:00Z');
@@ -62,6 +65,44 @@ eq(textoAlta('2026-08-08T01:00:00Z'), 'Alta 07-08',
 eq(textoAlta(null), '', 'sin fecha de alta -> vacío');
 eq(textoEnPrueba(3), '3 en prueba', 'contador de la tarjeta');
 eq(textoEnPrueba(null), '', 'sin dato -> vacío');
+
+// ── Hoja del correo SOBRE la pantalla completa (regresión del bug de mobile) ──
+// El preview se monta dentro de `.screen` (z-index 50). La hoja base es 41 y el
+// scrim 40, así que sin un escalón propio quedaban DEBAJO de la pantalla: el GET
+// respondía 200 y en el teléfono no se veía nada. No se prueba el DOM (el repo no
+// tiene jsdom): se fija la RELACIÓN de z-index que hace visible la hoja.
+console.log('Hoja de correo sobre la pantalla completa');
+
+const leerFuente = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+const panel = leerFuente('../src/components/PanelAlumnosPrueba.jsx');
+const cssAdmin = leerFuente('../src/pages/admin/inicioMobileAdmin.css');
+
+const zIndexDe = (selector) => {
+    const desde = cssAdmin.indexOf(selector);
+    if (desde < 0) return null;
+    const bloque = cssAdmin.slice(desde, cssAdmin.indexOf('}', desde));
+    const match = bloque.match(/z-index:\s*(\d+)/);
+    return match ? Number(match[1]) : null;
+};
+
+const zScrim = zIndexDe('.ub-admin .scrim {');
+const zSheet = zIndexDe('.ub-admin .sheet {');
+const zScreen = zIndexDe('.ub-admin .screen {');
+const zScrimSobre = zIndexDe('.ub-admin .scrim.sobre {');
+const zSheetSobre = zIndexDe('.ub-admin .sheet.sobre {');
+
+ok(zScreen !== null && zScreen > zSheet,
+    'la pantalla completa está por encima de una hoja base (por eso hacía falta `.sobre`)');
+ok(zScrim !== null && zSheet !== null && zSheet > zScrim,
+    'la hoja base va sobre su scrim');
+ok(zScrimSobre !== null && zScrimSobre > zScreen,
+    'el scrim de la hoja del correo supera a la pantalla (z-index propio)');
+ok(zSheetSobre !== null && zSheetSobre > zScrimSobre,
+    'la hoja del correo supera a su scrim y a la pantalla');
+ok(panel.includes('className="scrim sobre"'),
+    'el preview usa el scrim con escalón `.sobre`');
+ok(panel.includes('className="sheet sobre"'),
+    'el preview usa la hoja con escalón `.sobre`');
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);

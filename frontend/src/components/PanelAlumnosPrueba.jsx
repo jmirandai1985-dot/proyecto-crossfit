@@ -92,6 +92,15 @@ const PanelAlumnosPrueba = ({
     // publica `/admin/alumnos-nuevos` y que respalda la tarjeta "Convertidos".
     const convertidosMes = nuevosMes.filter((a) => a.convertido).length;
 
+    // Último envío manual del alumno. El preview lo trae fresco; mientras carga
+    // (o si el GET falla) se usa el que ya tenía la fila, para no perder el dato.
+    // `enviado_hoy` lo decide el backend en días de CHILE: la hoja no ofrece un
+    // envío que la dedupe diaria va a descartar.
+    const ultimoEnvio = correo?.preview?.ultimo_envio
+        || correo?.alumno?.ultimo_envio || null;
+    const enviadoHoy = Boolean(correo?.preview?.enviado_hoy);
+    const haceUltimoEnvio = textoHace(ultimoEnvio);
+
     return (
         <>
             <section className={`screen${embebido ? ' embebida' : ''}`}
@@ -184,8 +193,11 @@ const PanelAlumnosPrueba = ({
             {/* Hoja inferior: vista previa del correo manual. */}
             {correo && (
                 <>
-                    <div className="scrim" onClick={() => setCorreo(null)} />
-                    <section className="sheet" aria-label="Vista previa del correo">
+                    {/* La hoja se abre DESDE esta pantalla completa (`.screen`,
+                        z-index 50): sin `.sobre` quedaba DEBAJO y parecía que el
+                        botón no hacía nada aunque el preview respondiera 200. */}
+                    <div className="scrim sobre" onClick={() => setCorreo(null)} />
+                    <section className="sheet sobre" aria-label="Vista previa del correo">
                         <div className="sheet-grab" />
                         <div className="sheet-head">
                             <div>
@@ -207,6 +219,17 @@ const PanelAlumnosPrueba = ({
                                 </p>
                             ) : (
                                 <>
+                                    {/* Lo que ya pasó: se ve ANTES de confirmar (no
+                                        después de que el backend lo descarte). */}
+                                    {ultimoEnvio && haceUltimoEnvio && (
+                                        <p className={`envio-previo${enviadoHoy ? ' hoy' : ''}`}>
+                                            <b>{enviadoHoy ? 'Ya enviado hoy' : 'Último envío'}</b>
+                                            <span>· {haceUltimoEnvio}</span>
+                                            <em>{enviadoHoy
+                                                ? 'No se manda dos veces el mismo correo el mismo día.'
+                                                : 'Puedes reenviarlo: quedará como el envío de hoy.'}</em>
+                                        </p>
+                                    )}
                                     <div className="mail-meta">
                                         <small>Asunto</small>
                                         <b>{correo.preview.asunto}</b>
@@ -225,8 +248,10 @@ const PanelAlumnosPrueba = ({
                         <div className="sheet-foot una">
                             <button type="button" className="btn primary" onClick={enviarCorreo}
                                 disabled={correo.cargando || Boolean(correo.error)
-                                    || !correo.preview || correo.enviando}>
-                                {correo.enviando ? 'Enviando…' : 'Enviar'}
+                                    || !correo.preview || correo.enviando || enviadoHoy}>
+                                {correo.enviando ? 'Enviando…'
+                                    : enviadoHoy ? 'Enviado hoy'
+                                        : ultimoEnvio ? 'Enviar de nuevo' : 'Enviar'}
                             </button>
                         </div>
                     </section>

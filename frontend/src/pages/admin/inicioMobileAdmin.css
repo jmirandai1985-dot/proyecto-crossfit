@@ -1391,6 +1391,38 @@
 }
 
 /* ── Vista previa del correo (hoja inferior) ────────────────────────────── */
+/* "Último envío": lo que ya pasó se ve ANTES de confirmar. En ámbar cuando el
+   correo ya salió HOY (el botón queda en "Enviado hoy": la dedupe diaria del
+   backend no deja mandarlo dos veces). */
+.ub-admin .envio-previo {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--ub-line);
+    border-left: 3px solid var(--ub-muted);
+    border-radius: var(--ub-r-md);
+    background: var(--ub-surface2);
+    font-size: 13px;
+}
+
+.ub-admin .envio-previo b { font-size: 13px; }
+
+.ub-admin .envio-previo span { color: var(--ub-muted); }
+
+.ub-admin .envio-previo em {
+    flex-basis: 100%;
+    font-style: normal;
+    font-size: 12px;
+    color: var(--ub-muted);
+}
+
+.ub-admin .envio-previo.hoy { border-left-color: var(--ub-amber); }
+
+.ub-admin .envio-previo.hoy b { color: var(--ub-amber); }
+
 .ub-admin .mail-meta {
     background: var(--ub-surface2);
     border-radius: var(--ub-r-md);
