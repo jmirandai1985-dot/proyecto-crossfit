@@ -51,6 +51,7 @@
     "test:inicio": "node scripts/test-inicio-alumno.mjs",
     "test:campana": "node scripts/test-campana-movil.mjs",
     "test:pendientes": "node scripts/test-pendientes.mjs",
+    "test:membresias": "node scripts/test-membresias-modal.mjs",
     "test:revision": "node scripts/test-revision-movil.mjs",
     "test:performance": "node scripts/test-performance-movil.mjs",
     "test:momento": "node scripts/test-momento-dia.mjs"

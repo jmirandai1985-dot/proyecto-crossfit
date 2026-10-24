@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
@@ -8,6 +8,11 @@ import { useAuth } from '../../context/AuthContext';
 import InicioMobileAdmin from './InicioMobileAdmin';
 import api from '../../services/api';
 import { horaChileStr } from '../../utils/fecha';
+// Filtros del modal "Membresías del Mes": buscador por alumno, tipo de plan (con la
+// opción de sacar las pruebas) y orden por fecha. Lógica en JS puro y testeable.
+import {
+    FILTRO_PLAN_SIN_PRUEBA, FILTRO_PLAN_TODOS, filtrarMembresias, planesDe,
+} from '../../utils/membresiasMes';
 import AdminTarjetaAlumnosPrueba from '../../components/AdminTarjetaAlumnosPrueba';
 // Aviso REUTILIZABLE (secciones + Reintentar) para las tarjetas que pueden fallar.
 import AvisoCarga from '../../components/AvisoCarga';
@@ -122,6 +127,19 @@ const AdminDashboard = () => {
     const [detalleLoading, setDetalleLoading] = useState(false);
     // Fidelización — modal membresías del mes
     const [fidelizacionModal, setFidelizacionModal] = useState(null); // 'membresias'
+    // Filtros del listado de membresías: un mes normal trae 263 filas y sin buscador
+    // no había forma de encontrar a un alumno; las cuentas de "Prueba" tampoco son
+    // ventas. Se resuelven sobre los datos que el Dashboard ya tiene (sin endpoint).
+    const [busquedaMembresias, setBusquedaMembresias] = useState('');
+    const [planMembresias, setPlanMembresias] = useState(FILTRO_PLAN_TODOS);
+    const [ordenMembresias, setOrdenMembresias] = useState('reciente');
+    const suscripcionesMes = stats?.suscripcionesMes || [];
+    // La dependencia es el dato de React Query (referencia estable), no el `|| []`
+    // de arriba, que crearía un arreglo nuevo en cada render.
+    const planesMembresias = useMemo(() => planesDe(stats?.suscripcionesMes), [stats?.suscripcionesMes]);
+    const membresiasVisibles = useMemo(() => filtrarMembresias(stats?.suscripcionesMes, {
+        busqueda: busquedaMembresias, plan: planMembresias, orden: ordenMembresias,
+    }), [stats?.suscripcionesMes, busquedaMembresias, planMembresias, ordenMembresias]);
     // ── Tarjeta BI: "Convertidos" ─────────────────────────────────────────────
     // Reutiliza el endpoint de la pestaña KPIs (/api/v1/kpis/mensual) — no se
     // recalcula nada acá. Si el job BI todavía no publicó el mes, la tarjeta
@@ -918,10 +936,13 @@ const AdminDashboard = () => {
                                     📦 Membresías del Mes
                                 </h3>
                                 <p className="mt-0.5 text-xs text-zinc-500">
-                                    {(stats?.suscripcionesMes || []).length} suscripción
-                                    {(stats?.suscripcionesMes || []).length === 1 ? '' : 'es'}
-                                    {' '}iniciada{(stats?.suscripcionesMes || []).length === 1 ? '' : 's'}
-                                    {' '}este mes · Alumno, plan y fecha de inicio
+                                    {suscripcionesMes.length} suscripción
+                                    {suscripcionesMes.length === 1 ? '' : 'es'}
+                                    {' '}iniciada{suscripcionesMes.length === 1 ? '' : 's'}
+                                    {' '}este mes
+                                    {membresiasVisibles.length !== suscripcionesMes.length
+                                        && ` · ${membresiasVisibles.length} con los filtros`}
+                                    {' '}· Alumno, plan y fecha de inicio
                                 </p>
                             </div>
                             <button type="button" onClick={() => setFidelizacionModal(null)}
@@ -930,16 +951,65 @@ const AdminDashboard = () => {
                                 ✕
                             </button>
                         </div>
+                        {/* FILTROS del listado: el mes trae cientos de filas. Buscador por
+                            alumno, select de plan (con "Sin pruebas", que es lo que
+                            interesa para vender) y orden por fecha. Todo en el cliente
+                            sobre lo que ya vino en /admin/dashboard. */}
+                        <div className="flex flex-col gap-2 border-b border-zinc-800 px-3 py-2.5 sm:flex-row sm:items-center sm:px-4">
+                            <input
+                                type="search"
+                                value={busquedaMembresias}
+                                onChange={(e) => setBusquedaMembresias(e.target.value)}
+                                placeholder="Buscar alumno…"
+                                aria-label="Buscar alumno en las membresías del mes"
+                                className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-orange-500 focus:outline-none"
+                            />
+                            <div className="flex items-center gap-2">
+                                <select
+                                    value={planMembresias}
+                                    onChange={(e) => setPlanMembresias(e.target.value)}
+                                    aria-label="Filtrar por tipo de plan"
+                                    className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 focus:border-orange-500 focus:outline-none sm:flex-none"
+                                >
+                                    <option value={FILTRO_PLAN_TODOS}>Todos los planes</option>
+                                    <option value={FILTRO_PLAN_SIN_PRUEBA}>Sin pruebas</option>
+                                    {planesMembresias.map((nombre) => (
+                                        <option key={nombre} value={nombre}>{nombre}</option>
+                                    ))}
+                                </select>
+                                <button
+                                    type="button"
+                                    onClick={() => setOrdenMembresias((o) => (o === 'reciente' ? 'antigua' : 'reciente'))}
+                                    title={ordenMembresias === 'reciente'
+                                        ? 'Ordenado por fecha: más reciente primero (clic para invertir)'
+                                        : 'Ordenado por fecha: más antigua primero (clic para invertir)'}
+                                    className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                                >
+                                    {ordenMembresias === 'reciente' ? '↓ Fecha' : '↑ Fecha'}
+                                </button>
+                            </div>
+                        </div>
                         <div className="flex min-h-0 flex-1 flex-col px-3 py-3 sm:px-4 sm:py-4">
                             {/* Contenedor con scroll PROPIO (alto acotado por el flex y
                                 barra separada del borde). La tabla tiene mínimo de 34rem:
                                 en un teléfono scrollea en horizontal DENTRO de la tarjeta,
                                 nunca desborda el modal. */}
                             <div className="min-h-0 w-full min-w-0 flex-1 overflow-auto rounded-lg border border-zinc-800 bg-zinc-950/40 [scrollbar-gutter:stable]">
-                                {!stats?.suscripcionesMes || stats.suscripcionesMes.length === 0 ? (
+                                {suscripcionesMes.length === 0 ? (
                                     <p className="px-5 py-10 text-center text-zinc-500">
                                         No hay membresías vendidas este mes
                                     </p>
+                                ) : membresiasVisibles.length === 0 ? (
+                                    <div className="px-5 py-10 text-center text-zinc-500">
+                                        <p>Ninguna membresía coincide con los filtros.</p>
+                                        <button
+                                            type="button"
+                                            onClick={() => { setBusquedaMembresias(''); setPlanMembresias(FILTRO_PLAN_TODOS); }}
+                                            className="mt-3 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                                        >
+                                            Limpiar filtros
+                                        </button>
+                                    </div>
                                 ) : (
                                     <table className="w-full min-w-[34rem] table-fixed text-sm">
                                         <thead className="sticky top-0 z-10 bg-zinc-800">
@@ -950,7 +1020,10 @@ const AdminDashboard = () => {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-zinc-800">
-                                            {(stats.suscripcionesMes || []).map((s, idx) => (
+                                            {membresiasVisibles.map((s, idx) => (
+                                                // El endpoint no manda id de suscripción: la fila no
+                                                // se reordena entre renders (sale estable del filtro),
+                                                // así que `idx` sirve de key.
                                                 <tr key={idx} className="hover:bg-zinc-900/60">
                                                     <td className="break-words px-3 py-3 font-medium text-zinc-100 sm:px-4">{s.alumno_nombre}</td>
                                                     <td className="break-words px-3 py-3 text-green-400 sm:px-4">{s.plan_nombre}</td>
