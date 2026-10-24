@@ -6,11 +6,14 @@
 // errores de FastAPI/Pydantic y el montaje de la invitación por correo (054).
 import { readFileSync } from 'node:fs';
 import {
-    ETIQUETAS_ESTADO_DETECCION, LARGO_MAXIMO_CODIGO, TIPOS_PREMIO,
-    formatearPorcentajeReferido, formatearValorPremio, mensajeDeError,
-    normalizarCodigoIngresado, textoCompartirReferido, validarCodigoIngresado,
-    validarPorcentajeReferido, validarPromocionReferido,
+    ETIQUETAS_ESTADO_DETECCION, LARGO_MAXIMO_CODIGO, MAX_CTA_TARJETA,
+    MAX_TEXTO_TARJETA, MAX_TITULO_TARJETA, TARJETA_REFERIDOS_POR_DEFECTO,
+    TIPOS_PREMIO, formatearPorcentajeReferido, formatearValorPremio,
+    mensajeDeError, normalizarCodigoIngresado, textoSugeridoTarjetaReferidos,
+    textoCompartirReferido, validarCodigoIngresado, validarPorcentajeReferido,
+    validarPromocionReferido, validarTarjetaReferidos,
 } from '../src/utils/referidos.js';
+import { COPY_REFERIDOS } from '../src/utils/avisosMarketing.js';
 
 const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
@@ -122,7 +125,85 @@ ok(formatearValorPremio('dias_gratis', 1) === '1 día gratis', 'singular de día
 ok(formatearValorPremio('descuento_extra', 12.5) === '12,5 % de descuento extra',
     'porcentaje en formato es-CL');
 
-console.log('== 7. Montaje en la app (rutas, menú y pantallas) ==');
+console.log('== 7. Tarjeta fija del carrusel (migración 058) ==');
+// El copy de "Invita y Gana" lo escribe el admin, pero un campo vacío NO se
+// guarda: viaja como `null` = "usar el default de ese campo".
+const vacia = validarTarjetaReferidos({});
+ok(vacia.valido === true, 'un formulario vacío es válido (todo hereda el default)');
+ok(vacia.payload.titulo === null && vacia.payload.texto === null
+    && vacia.payload.cta === null, 'los tres textos vacíos viajan como null');
+ok(vacia.payload.visible === true, 'sin tocar la casilla la tarjeta sigue visible');
+
+const propia = validarTarjetaReferidos({
+    titulo: '  Trae a tu parcero  ',
+    texto: 'Uno gratis',
+    cta: 'Quiero el mío',
+    visible: false,
+});
+ok(propia.valido === true, 'un copy propio es válido');
+ok(propia.payload.titulo === 'Trae a tu parcero', 'recorta el título');
+ok(propia.payload.visible === false, 'respeta la tarjeta oculta');
+
+const igualAlDefault = validarTarjetaReferidos({ ...TARJETA_REFERIDOS_POR_DEFECTO, visible: true });
+ok(igualAlDefault.payload.titulo === null && igualAlDefault.payload.texto === null
+    && igualAlDefault.payload.cta === null,
+    'el texto tal cual el default se guarda como null (sigue heredando mejoras)');
+
+const larga = validarTarjetaReferidos({
+    titulo: 'a'.repeat(MAX_TITULO_TARJETA + 1),
+    texto: 'a'.repeat(MAX_TEXTO_TARJETA + 1),
+    cta: 'a'.repeat(MAX_CTA_TARJETA + 1),
+});
+ok(larga.valido === false, 'los máximos son los de la columna del backend');
+ok(Object.keys(larga.errores).join(',') === 'titulo,texto,cta', 'un error por campo');
+ok(larga.errores.titulo.includes(String(MAX_TITULO_TARJETA)),
+    'el mensaje dice el máximo del título');
+ok(validarTarjetaReferidos({ titulo: 'a'.repeat(MAX_TITULO_TARJETA) }).valido === true,
+    'el máximo exacto se acepta');
+
+// "Usar texto sugerido" sólo promete lo que el box ofrece HOY.
+ok(textoSugeridoTarjetaReferidos().texto === TARJETA_REFERIDOS_POR_DEFECTO.texto
+    && textoSugeridoTarjetaReferidos().titulo === TARJETA_REFERIDOS_POR_DEFECTO.titulo,
+    'sin configuración sugiere el copy genérico');
+ok(textoSugeridoTarjetaReferidos({ configuracion: { configurada: false } }).texto
+    === TARJETA_REFERIDOS_POR_DEFECTO.texto, 'programa sin configurar -> genérico');
+ok(textoSugeridoTarjetaReferidos({
+    configuracion: { configurada: true, activo: false, porcentaje_descuento_invitado: 20 },
+    promociones: [{ activo: true, umbral_referidos_convertidos: 3, tipo_premio: 'mes_gratis' }],
+}).texto === TARJETA_REFERIDOS_POR_DEFECTO.texto,
+    'programa apagado -> genérico (no promete un premio que no se paga)');
+
+const activa = { configurada: true, activo: true, porcentaje_descuento_invitado: 20 };
+const sugerido = textoSugeridoTarjetaReferidos({
+    configuracion: activa,
+    promociones: [{ activo: true, umbral_referidos_convertidos: 3, tipo_premio: 'mes_gratis' }],
+});
+ok(sugerido.texto.includes('20 %'), 'nombra el porcentaje del invitado');
+ok(sugerido.texto.includes('3 referidos') && sugerido.texto.includes('mes gratis'),
+    'con UNA promo activa nombra el umbral y el premio');
+ok(sugerido.titulo === TARJETA_REFERIDOS_POR_DEFECTO.titulo
+    && sugerido.cta === TARJETA_REFERIDOS_POR_DEFECTO.cta,
+    'el título y el botón siguen siendo los del sistema');
+
+const dosPromos = textoSugeridoTarjetaReferidos({
+    configuracion: activa,
+    promociones: [
+        { activo: true, umbral_referidos_convertidos: 3, tipo_premio: 'mes_gratis' },
+        { activo: true, umbral_referidos_convertidos: 5, tipo_premio: 'dias_gratis', valor_premio: 7 },
+    ],
+});
+ok(!dosPromos.texto.includes('mes gratis') && !dosPromos.texto.includes('días gratis'),
+    'con 2+ promos activas no nombra premios');
+ok(dosPromos.texto.includes('20 %'), 'pero sí conserva el porcentaje del invitado');
+
+// Un solo copy genérico: el panel, el carrusel (`COPY_REFERIDOS`) y el backend
+// (`TARJETA_REFERIDOS_*`) tienen que decir lo mismo, o "Restablecer" mentiría.
+ok(TARJETA_REFERIDOS_POR_DEFECTO.titulo === COPY_REFERIDOS.titulo
+    && TARJETA_REFERIDOS_POR_DEFECTO.texto === COPY_REFERIDOS.texto
+    && TARJETA_REFERIDOS_POR_DEFECTO.cta === COPY_REFERIDOS.cta,
+    'el default del panel es el mismo del carrusel');
+
+console.log('== 8. Montaje en la app (rutas, menú y pantallas) ==');
 const app = leer('../src/App.jsx');
 const menu = leer('../src/config/menu.js');
 const marketing = leer('../src/pages/admin/Marketing.jsx');
@@ -186,6 +267,30 @@ ok(/miInvitacion:\s*\['referidos'/.test(queries)
     && /export function useMiInvitacion/.test(queries)
     && /export function useInvitarAlumno/.test(queries),
     'queries.js expone mi-invitacion y el envío de invitaciones');
+
+// Migración 058: el copy de la tarjeta fija lo edita el admin desde Marketing →
+// Referidos. El editor vive aparte y comparte validación con el backend.
+const tarjetaMarketing = leer('../src/components/TarjetaReferidosMarketing.jsx');
+ok(/<TarjetaReferidosMarketing\s*\/>/.test(configuracion),
+    'ConfiguracionReferidos monta el editor de la tarjeta del carrusel');
+ok(/tarjetaReferidos:\s*\['referidos'/.test(queries)
+    && /export function useTarjetaReferidos/.test(queries)
+    && /export function useGuardarTarjetaReferidos/.test(queries),
+    'queries.js expone el GET y el PUT de la tarjeta');
+ok(/useTarjetaReferidos\s*\(/.test(tarjetaMarketing)
+    && /useGuardarTarjetaReferidos\s*\(/.test(tarjetaMarketing),
+    'el editor lee y guarda con esos hooks');
+ok(/validarTarjetaReferidos\s*\(/.test(tarjetaMarketing)
+    && /textoSugeridoTarjetaReferidos\s*\(/.test(tarjetaMarketing),
+    '... y valida con `validarTarjetaReferidos` (mismos máximos que el PUT)');
+ok(/data-testid="btn-guardar-tarjeta-referidos"/.test(tarjetaMarketing)
+    && /data-testid="btn-restablecer-tarjeta-referidos"/.test(tarjetaMarketing)
+    && /data-testid="btn-sugerir-tarjeta-referidos"/.test(tarjetaMarketing),
+    'tiene guardar, restablecer y usar texto sugerido');
+ok(/data-testid="tarjeta-referidos-visible"/.test(tarjetaMarketing),
+    'la visibilidad es una casilla aparte (ocultar no borra el copy)');
+ok(!/COPY_REFERIDOS/.test(tarjetaMarketing),
+    'el editor NO usa el fallback del alumno: lee el copy efectivo del backend');
 
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);

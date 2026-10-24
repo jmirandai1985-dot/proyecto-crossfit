@@ -292,6 +292,46 @@ class ConfiguracionReferidos(Base):
                 f"activo={self.activo})>")
 
 
+# ── 4b. La tarjeta FIJA del carrusel ("Invita y Gana") ───────────────────────
+
+class TarjetaReferidos(Base):
+    """Copy editable de la tarjeta fija del carrusel "Novedades del box".
+
+    Una fila por tenant (UNIQUE `tenant_id`). Sin fila se usan los textos por
+    defecto de `referidos_service` (`TARJETA_REFERIDOS_*`); con fila, cada texto
+    NULL o en blanco vuelve a ese default CAMPO POR CAMPO, así no hay que
+    backfillear nada y una mejora del copy genérico llega sola a los boxes que
+    nunca lo personalizaron.
+
+    Vive APARTE de `ConfiguracionReferidos` a propósito: el copy lo lee el
+    ALUMNO (`GET /referidos/tarjeta`) y los porcentajes son del admin; además,
+    crear una fila de copy no debe cambiar `configurada` ni encender `activo`.
+    `visible=False` oculta la tarjeta sin apagar el programa ni la ruta
+    `/alumno/invita-y-gana`.
+    """
+    __tablename__ = "tarjeta_referidos"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Integer, ForeignKey(
+        "tenants.id", ondelete="CASCADE"), nullable=False)
+    titulo = Column(String(80), nullable=True)
+    texto = Column(String(300), nullable=True)
+    cta = Column(String(40), nullable=True)
+    visible = Column(Boolean, nullable=False, server_default="true",
+                     default=True)
+    actualizado_en = Column(TIMESTAMP(timezone=True), nullable=False,
+                            server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id",
+                         name="uq_tarjeta_referidos_tenant_id"),
+    )
+
+    def __repr__(self):
+        return (f"<TarjetaReferidos(tenant_id={self.tenant_id}, "
+                f"visible={self.visible})>")
+
+
 # ── 5. Promociones por volumen (premios) ─────────────────────────────────────
 
 class PromocionReferidos(Base):

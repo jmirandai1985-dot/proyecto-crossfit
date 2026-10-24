@@ -215,6 +215,111 @@ export async function copiarAlPortapapeles(texto) {
     }
 }
 
+// ── La tarjeta FIJA del carrusel ("Invita y Gana", migración 058) ───────────
+// Los textos los edita el admin desde Marketing → Referidos. Estos máximos son
+// ESPEJO de `TARJETA_*_MAX` en `app/schemas/referidos.py` y de las columnas de
+// `tarjeta_referidos`: los tres lados tienen que decir lo mismo o el panel
+// dejaría escribir algo que el PUT rechaza con 422.
+export const MAX_TITULO_TARJETA = 80;
+export const MAX_TEXTO_TARJETA = 300;
+export const MAX_CTA_TARJETA = 40;
+
+// El copy por defecto, igual que `COPY_REFERIDOS` (`utils/avisosMarketing.js`) y
+// `TARJETA_REFERIDOS_*` del backend. El panel lo usa para la vista previa
+// mientras el admin no guardó nada.
+export const TARJETA_REFERIDOS_POR_DEFECTO = {
+    titulo: 'Invita y Gana',
+    texto: 'Comparte tu código con un amigo y que entrene con nosotros.',
+    cta: 'Compartir mi código',
+};
+
+/**
+ * Valida el formulario del copy de la tarjeta y devuelve el payload del
+ * `PUT /referidos/tarjeta`.
+ *
+ * Un campo vacío (o sólo espacios) viaja como `null` = "usar el texto por
+ * defecto de ese campo": así el botón "Restablecer" se resuelve con el MISMO
+ * endpoint, sin uno aparte. Un texto que quedó IGUAL al default también viaja
+ * como `null`, para que ese campo siga heredando las mejoras del copy genérico
+ * del backend en vez de congelar la versión que había cuando se guardó.
+ * `visible` es obligatorio en el backend, por eso se normaliza a booleano acá.
+ */
+export function validarTarjetaReferidos(form = {}) {
+    const errores = {};
+
+    const recortar = (campo, etiqueta, maximo) => {
+        const texto = String(form[campo] ?? '').trim();
+        if (texto.length > maximo) {
+            errores[campo] = `${etiqueta} no puede superar los ${maximo} caracteres.`;
+        }
+        return texto || null;
+    };
+
+    const payload = {
+        titulo: recortar('titulo', 'El título', MAX_TITULO_TARJETA),
+        texto: recortar('texto', 'El texto', MAX_TEXTO_TARJETA),
+        cta: recortar('cta', 'El botón', MAX_CTA_TARJETA),
+        visible: form.visible !== false,
+    };
+
+    for (const campo of ['titulo', 'texto', 'cta']) {
+        if (payload[campo] === TARJETA_REFERIDOS_POR_DEFECTO[campo]) {
+            payload[campo] = null;
+        }
+    }
+
+    return { valido: Object.keys(errores).length === 0, errores, payload };
+}
+
+/**
+ * Texto sugerido para la tarjeta, según lo que el box REALMENTE ofrece hoy.
+ *
+ * Reglas (pedido del box):
+ *  1. Sin configuración o con el programa apagado no se promete NADA: el
+ *     backend no aplicaría ningún beneficio.
+ *  2. Con 2+ promociones activas NO se nombra ningún premio: el alumno podría
+ *     cumplir cualquiera y la tarjeta hablaría de una sola. Las promociones
+ *     puntuales ya tienen su propia tarjeta publicada en el carrusel.
+ *  3. Con UNA promoción activa sí se nombra (umbral + premio formateado).
+ *
+ * Es una SUGERENCIA: el panel la carga en los campos y el admin la edita. Nunca
+ * se guarda sola, así un texto no queda congelado cuando cambie la promo.
+ */
+export function textoSugeridoTarjetaReferidos({ configuracion, promociones } = {}) {
+    const porDefecto = { ...TARJETA_REFERIDOS_POR_DEFECTO };
+
+    if (!configuracion?.configurada || configuracion.activo === false) {
+        return porDefecto;
+    }
+
+    const invitado = Number(configuracion.porcentaje_descuento_invitado ?? 0);
+    const activas = (Array.isArray(promociones) ? promociones : [])
+        .filter((promo) => promo && promo.activo !== false);
+
+    const partes = [];
+    if (Number.isFinite(invitado) && invitado > 0) {
+        partes.push(
+            `Comparte tu código: tu amigo recibe ${formatearPorcentajeReferido(invitado)}`
+            + ' de descuento en su primera compra.',
+        );
+    }
+
+    if (activas.length === 1) {
+        const promo = activas[0];
+        const umbral = Number(promo.umbral_referidos_convertidos);
+        if (Number.isFinite(umbral) && umbral > 0) {
+            const premio = formatearValorPremio(promo.tipo_premio, promo.valor_premio);
+            partes.push(
+                `Y cuando llegues a ${umbral} ${umbral === 1 ? 'referido' : 'referidos'},`
+                + ` tú ganas ${premio}.`,
+            );
+        }
+    }
+
+    if (partes.length === 0) return porDefecto;
+    return { ...porDefecto, texto: partes.join(' ') };
+}
+
 // FastAPI devuelve `detail` como string (404/400 de negocio) o como lista de
 // errores de Pydantic (422). El admin y el alumno merecen el mensaje del backend,
 // no un "Network Error" en inglés.

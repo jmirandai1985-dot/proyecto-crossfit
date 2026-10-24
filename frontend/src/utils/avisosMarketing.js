@@ -109,14 +109,43 @@ export const TIPO_REFERIDOS = {
     detalle: '#f3cf82',
 };
 
-// El texto de la tarjeta. No promete porcentajes: el beneficio depende de la
-// configuración de referidos del box (Configuración → Referidos) y la pantalla
-// `/alumno/invita-y-gana` es la que lo explica con los datos reales.
+// El copy por DEFECTO de la tarjeta. El admin puede cambiarlo desde
+// Marketing → Referidos (`GET/PUT /referidos/tarjeta`), así que esto es:
+//   (a) el ESPEJO de `TARJETA_REFERIDOS_*` en `app/services/referidos_service.py`
+//       (backend resuelve esos defaults y los devuelve siempre resueltos), y
+//   (b) el FALLBACK del carrusel si la consulta falla: un error de red no puede
+//       borrar la tarjeta ni dejar al alumno sin acceso a su código.
 export const COPY_REFERIDOS = {
     titulo: 'Invita y Gana',
     texto: 'Comparte tu código con un amigo y que entrene con nosotros.',
     cta: 'Compartir mi código',
 };
+
+/**
+ * Copy EFECTIVO de la tarjeta fija a partir de la respuesta del backend.
+ *
+ * El backend ya resuelve los defaults (`GET /referidos/tarjeta` nunca devuelve
+ * textos nulos), pero el carrusel se defiende igual: sin datos, con un objeto
+ * incompleto o con un valor que no es string, cae al `COPY_REFERIDOS` campo por
+ * campo. `visible` sólo es `false` si el backend lo dice EXPLÍCITAMENTE: una
+ * respuesta vieja no puede esconder la tarjeta.
+ */
+export function tarjetaReferidosDe(tarjeta) {
+    const texto = (valor, porDefecto) => (
+        typeof valor === 'string' && valor.trim() ? valor.trim() : porDefecto
+    );
+
+    if (!tarjeta || typeof tarjeta !== 'object') {
+        return { ...COPY_REFERIDOS, visible: true };
+    }
+
+    return {
+        titulo: texto(tarjeta.titulo, COPY_REFERIDOS.titulo),
+        texto: texto(tarjeta.texto, COPY_REFERIDOS.texto),
+        cta: texto(tarjeta.cta, COPY_REFERIDOS.cta),
+        visible: tarjeta.visible !== false,
+    };
+}
 
 // El fallback NUNCA debe ser undefined: un tipo nuevo en la BD (o un dato viejo)
 // no puede romper el carrusel del alumno ni la tabla del admin.

@@ -89,6 +89,11 @@ __all__ = [
     "datos_mi_codigo",
     "datos_referido_aplicado",
     "datos_configuracion",
+    # La tarjeta fija del carrusel ("Invita y Gana").
+    "TARJETA_REFERIDOS_TITULO",
+    "TARJETA_REFERIDOS_TEXTO",
+    "TARJETA_REFERIDOS_CTA",
+    "datos_tarjeta",
     # Invitaciones alumno → alumno (migración 054).
     "TOKEN_INVITACION_BYTES",
     "LIMITE_INVITACIONES_DIA",
@@ -364,6 +369,60 @@ def datos_configuracion(config: Any) -> dict:
             config.porcentaje_descuento_invitador),
         "activo": bool(config.activo),
         "configurada": True,
+    }
+
+
+# ── La tarjeta FIJA del carrusel ("Invita y Gana") ──────────────────────────
+
+# ESPEJO del `COPY_REFERIDOS` del frontend (`utils/avisosMarketing.js`): es el
+# copy genérico que ve el alumno mientras el admin no personalice nada y, además,
+# lo que pinta el carrusel si la consulta falla (la tarjeta nunca desaparece por
+# un error de red). Los `..._MAX` de `app/schemas/referidos.py` tienen que poder
+# contener estos textos: hay un test que lo verifica.
+TARJETA_REFERIDOS_TITULO = "Invita y Gana"
+TARJETA_REFERIDOS_TEXTO = (
+    "Comparte tu código con un amigo y que entrene con nosotros.")
+TARJETA_REFERIDOS_CTA = "Compartir mi código"
+
+
+def _texto_o_default(valor: Optional[str], por_defecto: str) -> str:
+    """El texto guardado (recortado) o el default; nunca una cadena en blanco."""
+    limpio = (valor or "").strip()
+    return limpio or por_defecto
+
+
+def datos_tarjeta(tarjeta: Any) -> dict:
+    """Copy EFECTIVO de la tarjeta fija del carrusel, exista la fila o no.
+
+    Sin fila: los tres textos por defecto, `visible=True` y
+    `personalizada=False`, SIN escribir en la BD (leer no crea filas). Con fila:
+    cada texto NULL o en blanco cae a su default CAMPO POR CAMPO (así el admin
+    puede personalizar sólo el texto y heredar el resto).
+
+    `personalizada` es True sólo si el box guardó al menos un texto propio
+    (`visible` no cuenta): el panel del admin lo usa para mostrar el chip
+    "Texto por defecto" y ofrecer "Restablecer".
+    """
+    if tarjeta is None:
+        return {
+            "titulo": TARJETA_REFERIDOS_TITULO,
+            "texto": TARJETA_REFERIDOS_TEXTO,
+            "cta": TARJETA_REFERIDOS_CTA,
+            "visible": True,
+            "personalizada": False,
+        }
+
+    propios = (
+        _texto_o_default(getattr(tarjeta, "titulo", None), ""),
+        _texto_o_default(getattr(tarjeta, "texto", None), ""),
+        _texto_o_default(getattr(tarjeta, "cta", None), ""),
+    )
+    return {
+        "titulo": propios[0] or TARJETA_REFERIDOS_TITULO,
+        "texto": propios[1] or TARJETA_REFERIDOS_TEXTO,
+        "cta": propios[2] or TARJETA_REFERIDOS_CTA,
+        "visible": bool(getattr(tarjeta, "visible", True)),
+        "personalizada": any(propios),
     }
 
 

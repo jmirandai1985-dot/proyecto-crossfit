@@ -133,6 +133,66 @@ class ConfiguracionReferidosOut(BaseModel):
     configurada: bool
 
 
+# ── La tarjeta FIJA del carrusel ("Invita y Gana") ──────────────────────────
+
+# Límites de los campos de la tarjeta. ESPEJO en el frontend
+# (`utils/referidos.js: MAX_*_TARJETA`) y en las columnas de `tarjeta_referidos`:
+# los tres lados tienen que decir lo mismo o un texto "válido" en el panel
+# explotaría al guardar. `test_referidos_tarjeta_unit.py` compara los defaults
+# del servicio contra estos máximos.
+TARJETA_TITULO_MAX = 80
+TARJETA_TEXTO_MAX = 300
+TARJETA_CTA_MAX = 40
+
+
+class TarjetaReferidosOut(BaseModel):
+    """Respuesta de GET/PUT `/referidos/tarjeta`.
+
+    Siempre trae el copy EFECTIVO (nunca `null`): el backend resuelve los
+    defaults, así el alumno no tiene que conocerlos. `personalizada=False`
+    significa que el box no guardó ningún texto propio (o no tiene fila).
+    """
+
+    titulo: str
+    texto: str
+    cta: str
+    visible: bool
+    personalizada: bool
+
+
+class TarjetaReferidosUpdate(BaseModel):
+    """Cuerpo de `PUT /referidos/tarjeta` (sólo admin).
+
+    `null` (o un texto en blanco) en `titulo`/`texto`/`cta` significa "volver al
+    default de ese campo": el botón "Restablecer" del panel manda los tres en
+    `null` y no hace falta un endpoint aparte. `visible` es obligatorio a
+    propósito: apagar la tarjeta es una decisión explícita, nunca un efecto
+    colateral de guardar un texto.
+    """
+
+    titulo: str | None = Field(
+        None, max_length=TARJETA_TITULO_MAX,
+        description="Título de la tarjeta; null = texto por defecto.")
+    texto: str | None = Field(
+        None, max_length=TARJETA_TEXTO_MAX,
+        description="Texto de la tarjeta; null = texto por defecto.")
+    cta: str | None = Field(
+        None, max_length=TARJETA_CTA_MAX,
+        description="Texto del botón; null = texto por defecto.")
+    visible: bool = Field(
+        ..., description="false oculta la tarjeta del carrusel (el programa sigue).")
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("titulo", "texto", "cta")
+    @classmethod
+    def _vacio_es_default(cls, valor: str | None) -> str | None:
+        """Recorta y convierte el blanco en `None` (= usar el default)."""
+        if valor is None:
+            return None
+        return valor.strip() or None
+
+
 # ── Fase 5: promociones por volumen ──────────────────────────────────────────
 
 class PromocionReferidosCreate(BaseModel):

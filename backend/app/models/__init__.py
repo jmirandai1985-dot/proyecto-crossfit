@@ -35,7 +35,7 @@ from app.models.referidos import (
     EstadoCreditoReferido, EstadoInvitacion, EstadoPromocionDetectada,
     EstadoReferido, Invitacion, OrigenInvitacion, PeriodoPromocion,
     PromocionReferidos, PromocionReferidosDetectada, ReferidoAplicado,
-    TipoPremio,
+    TarjetaReferidos, TipoPremio,
 )
 
 __all__ = ["Tenant", "Usuario", "RolUsuario",
@@ -54,4 +54,4 @@ __all__ = ["Tenant", "Usuario", "RolUsuario",
            "CreditoReferido", "EstadoCreditoReferido",
            "ConfiguracionReferidos", "PromocionReferidos",
            "PeriodoPromocion", "TipoPremio", "PromocionReferidosDetectada",
-           "EstadoPromocionDetectada"]
+           "EstadoPromocionDetectada", "TarjetaReferidos"]

@@ -62,6 +62,10 @@ export const claves = {
     // `{codigo: null}` cuando no lo invitó nadie, sin 404.
     miInvitacion: ['referidos', 'mi-invitacion'],
     configuracionReferidos: ['referidos', 'configuracion'],
+    // Copy de la tarjeta FIJA del carrusel ("Invita y Gana", migración 058).
+    // La misma clave la usan el Inicio del alumno y Marketing → Referidos: al
+    // guardar, la invalidación de `['referidos']` refresca a los dos.
+    tarjetaReferidos: ['referidos', 'tarjeta'],
     promocionesReferidos: ['referidos', 'promociones'],
     promocionesDetectadas: (estado) =>
         ['referidos', 'promociones-detectadas', estado || 'pendiente_confirmacion'],
@@ -1938,6 +1942,29 @@ export function useGuardarConfiguracionReferidos() {
     const qc = useQueryClient();
     return useMutation({
         mutationFn: (payload) => api.put('/api/v1/referidos/configuracion', payload)
+            .then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['referidos'] }),
+    });
+}
+
+// La tarjeta FIJA del carrusel "Novedades del box" (migración 058). El backend
+// devuelve el copy EFECTIVO (defaults resueltos), así que una fila inexistente
+// no es un error. La lee el alumno en su Inicio y el admin en Marketing →
+// Referidos: misma clave, misma request. `staleTime` alto porque este texto
+// cambia poquísimo; guardar invalida `['referidos']` y refresca a los dos.
+export function useTarjetaReferidos({ enabled = true } = {}) {
+    return useQuery({
+        queryKey: claves.tarjetaReferidos,
+        queryFn: async () => (await api.get('/api/v1/referidos/tarjeta')).data,
+        staleTime: 5 * 60_000,
+        enabled,
+    });
+}
+
+export function useGuardarTarjetaReferidos() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) => api.put('/api/v1/referidos/tarjeta', payload)
             .then((r) => r.data),
         onSuccess: () => qc.invalidateQueries({ queryKey: ['referidos'] }),
     });

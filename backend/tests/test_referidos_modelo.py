@@ -8,8 +8,8 @@ Este test lo cuida SIN base de datos (`--noconftest`):
     agregado en un solo lado rompería el INSERT o la UI en silencio);
   * el CHECK anti-auto-referido está en el modelo y en la migración;
   * las FK, UNIQUE y defaults clave (incluido el código único por alumno);
-  * la 054 es la única cabeza sobre la 053 (dos heads rompen el deploy) y su
-    revision id cabe en VARCHAR(32);
+  * la 054 es la única hija de la 053 y la 058 la única de la 057 (dos heads
+    rompen el deploy) y sus revision ids caben en VARCHAR(32);
   * los modelos están registrados en `app/models/__init__.py` (es lo que hace
     que `Base.metadata.create_all()` —el setup de TEST— cree las tablas).
 
@@ -24,7 +24,8 @@ from app.models.referidos import (
     CodigoReferido, ConfiguracionReferidos, CreditoReferido,
     EstadoInvitacion, EstadoPromocionDetectada, EstadoReferido, Invitacion,
     OrigenInvitacion, PeriodoPromocion, PromocionReferidos,
-    PromocionReferidosDetectada, ReferidoAplicado, TipoPremio,
+    PromocionReferidosDetectada, ReferidoAplicado, TarjetaReferidos,
+    TipoPremio,
 )
 
 RAIZ = Path(__file__).resolve().parents[1]          # .../backend
@@ -33,10 +34,13 @@ MIGRACION = "051_referidos_invitaciones.py"
 MIGRACION_CREDITO = "052_creditos_referido.py"
 MIGRACION_PROMOCIONES = "053_promociones_referidos.py"
 MIGRACION_INVITACIONES_ALUMNO = "054_invitaciones_alumno.py"
+MIGRACION_TARJETA = "058_tarjeta_referidos.py"
 
 REVISION_PROMOCIONES = "053_promociones_referidos"
 REVISION = "054_invitaciones_alumno"
 REVISION_PADRE = "053_promociones_referidos"
+REVISION_TARJETA = "058_tarjeta_referidos"
+REVISION_PADRE_TARJETA = "057_reserva_unica_viva"
 
 MODELOS = {
     "invitaciones": Invitacion,
@@ -46,6 +50,7 @@ MODELOS = {
     "promociones_referidos": PromocionReferidos,
     "promociones_referidos_detectadas": PromocionReferidosDetectada,
     "creditos_referido": CreditoReferido,
+    "tarjeta_referidos": TarjetaReferidos,
 }
 
 ENUMS_MODELO = {
@@ -80,9 +85,9 @@ def _ondelete(modelo, columna):
     return fks[0].ondelete, fks[0].column.table.name
 
 
-# ── 1. Las 6 tablas y sus columnas ──────────────────────────────────────────
+# ── 1. Las tablas del módulo y sus columnas ─────────────────────────────────
 
-def test_las_seis_tablas_existen_en_el_metadata():
+def test_las_tablas_del_modulo_existen_en_el_metadata():
     from app.db.database import Base
     for tabla in MODELOS:
         assert tabla in Base.metadata.tables, tabla
@@ -133,6 +138,23 @@ def test_columnas_del_credito_con_los_dos_origenes():
         "id", "tenant_id", "usuario_id", "referido_aplicado_id",
         "promocion_detectada_id", "porcentaje", "estado", "fecha_otorgado",
         "fecha_usado", "descuento_aplicado_clp", "suscripcion_id"]
+
+
+def test_columnas_de_la_tarjeta_del_carrusel():
+    """058: el copy editable de la tarjeta fija, una fila por box.
+
+    Los tres textos son NULL-ables a propósito (NULL = default de ESE campo) y
+    `visible` nace encendido: sin fila la tarjeta se muestra igual.
+    """
+    assert _columnas(TarjetaReferidos) == [
+        "id", "tenant_id", "titulo", "texto", "cta", "visible",
+        "actualizado_en"]
+    columnas = TarjetaReferidos.__table__.c
+    assert columnas.tenant_id.nullable is False
+    assert columnas.visible.nullable is False
+    for campo in ("titulo", "texto", "cta"):
+        assert columnas[campo].nullable is True, campo
+    assert columnas.actualizado_en.nullable is False
 
 
 # ── 2. Enums: modelo ↔ migración ────────────────────────────────────────────
@@ -209,6 +231,13 @@ def test_una_configuracion_por_box():
     assert _columnas_de(unico) == ["tenant_id"]
 
 
+def test_una_tarjeta_del_carrusel_por_box():
+    """El copy de la tarjeta es UNO por box: el upsert del PUT depende de esto."""
+    unico = _constraint(TarjetaReferidos, "uq_tarjeta_referidos_tenant_id",
+                        UniqueConstraint)
+    assert _columnas_de(unico) == ["tenant_id"]
+
+
 def test_deteccion_idempotente_por_promocion_alumno_y_periodo():
     unico = _constraint(
         PromocionReferidosDetectada,
@@ -281,6 +310,7 @@ def test_fk_de_codigos_y_referidos_aplicados():
 def test_fk_de_configuracion_promociones_y_detectadas():
     assert _ondelete(ConfiguracionReferidos, "tenant_id") == \
         ("CASCADE", "tenants")
+    assert _ondelete(TarjetaReferidos, "tenant_id") == ("CASCADE", "tenants")
     assert _ondelete(PromocionReferidos, "tenant_id") == ("CASCADE", "tenants")
     assert _ondelete(PromocionReferidosDetectada, "promocion_id") == \
         ("CASCADE", "promociones_referidos")
@@ -333,6 +363,35 @@ def test_la_054_es_la_unica_cabeza_sobre_la_053():
     assert hijos == [REVISION], f"cabezas sobre {REVISION_PADRE}: {hijos}"
 
 
+def test_la_058_es_la_unica_cabeza_sobre_la_057():
+    """La tarjeta del carrusel es una migración NUEVA, no columnas sueltas."""
+    datos = _datos_de_la_migracion(MIGRACION_TARJETA)
+    assert datos["revision"] == REVISION_TARJETA
+    assert datos["down_revision"] == REVISION_PADRE_TARJETA
+    assert len(REVISION_TARJETA) <= 32, "alembic_version.version_num es VARCHAR(32)"
+
+    hijos = [archivo.stem for archivo in VERSIONES.glob("*.py")
+             if _datos_de_archivo(archivo.name)["down_revision"] ==
+             REVISION_PADRE_TARJETA]
+    assert hijos == [REVISION_TARJETA], \
+        f"cabezas sobre {REVISION_PADRE_TARJETA}: {hijos}"
+
+
+def test_la_058_crea_la_tabla_del_modelo_en_una_base_ya_existente():
+    """TEST puede nacer de `create_all`: el upgrade tiene que ser idempotente."""
+    fuente = _fuente(f"alembic/versions/{MIGRACION_TARJETA}")
+
+    assert "tarjeta_referidos" in fuente
+    assert "uq_tarjeta_referidos_tenant_id" in fuente
+    assert "_tabla_existe" in fuente
+    # Las mismas columnas que el modelo (una migración que se olvida una
+    # columna deja el panel del admin roto sólo en PROD).
+    for columna in _columnas(TarjetaReferidos):
+        assert f'"{columna}"' in fuente, columna
+    # `visible` nace encendida: sin fila la tarjeta se muestra igual.
+    assert 'sa.text("true")' in fuente
+
+
 def _datos_de_archivo(nombre: str) -> dict:
     fuente = _fuente(f"alembic/versions/{nombre}")
     datos = {}
@@ -348,7 +407,7 @@ def test_los_modelos_estan_registrados_para_create_all():
     assert "from app.models.referidos import (" in fuente
     for nombre in ("Invitacion", "CodigoReferido", "ReferidoAplicado",
                    "ConfiguracionReferidos", "PromocionReferidos",
-                   "PromocionReferidosDetectada"):
+                   "PromocionReferidosDetectada", "TarjetaReferidos"):
         assert f'"{nombre}"' in fuente, nombre
 
 
@@ -373,3 +432,10 @@ def test_defaults_del_esquema():
         .porcentaje_descuento_invitado.nullable is False
     assert ConfiguracionReferidos.__table__.c \
         .porcentaje_descuento_invitador.nullable is False
+    # La tarjeta del carrusel nace VISIBLE y sin copy propio (todo NULL = default).
+    tarjeta = TarjetaReferidos.__table__.c
+    assert tarjeta.visible.nullable is False
+    assert tarjeta.visible.server_default is not None
+    assert tarjeta.titulo.nullable is True
+    assert tarjeta.texto.nullable is True
+    assert tarjeta.cta.nullable is True

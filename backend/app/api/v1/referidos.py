@@ -68,7 +68,7 @@ from app.models.referidos import (CodigoReferido, ConfiguracionReferidos,
                                   EstadoReferido, Invitacion,
                                   OrigenInvitacion, PromocionReferidos,
                                   PromocionReferidosDetectada,
-                                  ReferidoAplicado)
+                                  ReferidoAplicado, TarjetaReferidos)
 from app.models.usuario import Usuario
 from app.schemas.aviso_marketing import AvisoMarketingOut
 from app.schemas.referidos import (ConfiguracionReferidosOut,
@@ -82,7 +82,8 @@ from app.schemas.referidos import (ConfiguracionReferidosOut,
                                    PromocionReferidosUpdate,
                                    PublicarPromocionRequest,
                                    RechazarPromocionOut, ValidarCodigoOut,
-                                   ValidarCodigoRequest)
+                                   ValidarCodigoRequest, TarjetaReferidosOut,
+                                   TarjetaReferidosUpdate)
 from app.services import avisos_marketing as avisos_svc
 from app.services import promociones_referidos_service as promos_svc
 from app.services import referidos_service as svc
@@ -382,6 +383,62 @@ def actualizar_configuracion(
     db.refresh(config)
 
     return svc.datos_configuracion(config)
+
+
+# ── La tarjeta FIJA del carrusel ("Invita y Gana") ──────────────────────────
+# El copy de la última tarjeta de "Novedades del box". Se guarda aparte de
+# `configuracion` porque lo LEE el alumno y porque crear una fila de copy no
+# debe tocar `configurada` ni `activo` (ver el docstring del modelo).
+
+@router.get("/tarjeta", response_model=TarjetaReferidosOut)
+def obtener_tarjeta(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Copy EFECTIVO de la tarjeta fija del carrusel. Cualquier autenticado.
+
+    La lee el Inicio del alumno, por eso NO lleva `require_full_access` (un
+    alumno en plan de prueba también ve su Inicio, igual que
+    `GET /marketing/vigentes`) y NO devuelve los porcentajes del box. Sin fila
+    se responden los textos por defecto SIN crear nada: leer no escribe.
+    """
+    tarjeta = db.query(TarjetaReferidos).filter(
+        TarjetaReferidos.tenant_id == current_user["tenant_id"]
+    ).first()
+    return svc.datos_tarjeta(tarjeta)
+
+
+@router.put("/tarjeta", response_model=TarjetaReferidosOut)
+def actualizar_tarjeta(
+    datos: TarjetaReferidosUpdate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Crea o actualiza (upsert) el copy de la tarjeta fija. Sólo admin.
+
+    Un texto `null` o en blanco vuelve al default de ESE campo: el botón
+    "Restablecer" del panel manda los tres en `null`. El `tenant_id` sale
+    siempre del token, nunca del cuerpo (el schema lo prohíbe con
+    `extra="forbid"`).
+    """
+    tenant_id = current_user["tenant_id"]
+    tarjeta = db.query(TarjetaReferidos).filter(
+        TarjetaReferidos.tenant_id == tenant_id
+    ).first()
+
+    if tarjeta is None:
+        tarjeta = TarjetaReferidos(tenant_id=tenant_id)
+        db.add(tarjeta)
+
+    tarjeta.titulo = datos.titulo
+    tarjeta.texto = datos.texto
+    tarjeta.cta = datos.cta
+    tarjeta.visible = bool(datos.visible)
+
+    db.commit()
+    db.refresh(tarjeta)
+
+    return svc.datos_tarjeta(tarjeta)
 
 
 # ── Fase 5: promociones por volumen (sólo admin) ─────────────────────────────

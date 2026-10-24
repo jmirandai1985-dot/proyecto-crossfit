@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import GestionPromocionesReferidos from './GestionPromocionesReferidos';
 import PendientesPromocionesReferidos from './PendientesPromocionesReferidos';
+import TarjetaReferidosMarketing from './TarjetaReferidosMarketing';
 import {
     useConfiguracionReferidos, useGuardarConfiguracionReferidos,
 } from '../hooks/queries';
@@ -256,6 +257,7 @@ const ConfiguracionReferidos = () => {
 
             <GestionPromocionesReferidos />
             <PendientesPromocionesReferidos />
+            <TarjetaReferidosMarketing />
         </div>
     );
 };

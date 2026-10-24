@@ -14,7 +14,7 @@ import {
     construirFormData, payloadEdicion, mensajeDeError, tinteDeAcento,
     agruparParaCarrusel, tituloDeGrupo, tituloDeTarjeta, textoDeTarjeta,
     precioDeTarjeta, fotoDeTarjeta, tieneFlyer, PIE_PRODUCTO, MAX_MINIATURAS,
-    TIPO_REFERIDOS, COPY_REFERIDOS, esPromocionVinculada,
+    TIPO_REFERIDOS, COPY_REFERIDOS, esPromocionVinculada, tarjetaReferidosDe,
 } from '../src/utils/avisosMarketing.js';
 
 let fallos = 0;
@@ -268,8 +268,10 @@ eq(cssCarrusel.includes(':first-child') && cssCarrusel.includes(':last-child'), 
     'la primera y la última pueden quedar centradas (margen de borde)');
 
 eq(carrusel.includes("clase: 'referidos'"), true, 'la tarjeta de referidos se agrega SIEMPRE, al final');
-eq(carrusel.includes("...agruparParaCarrusel(data), { clase: 'referidos' }"), true,
+eq(carrusel.includes("[...base, { clase: 'referidos' }]"), true,
     '... DESPUÉS de los avisos (queda como última tarjeta)');
+eq(carrusel.includes(': base;'), true,
+    '... y si el admin la ocultó, el carrusel queda sólo con los avisos');
 eq(carrusel.includes('getBoundingClientRect'), true,
     'el centrado se calcula con la geometría real de la pista');
 eq(carrusel.includes("navigate('/alumno/invita-y-gana')"), true,
@@ -300,6 +302,29 @@ eq(carrusel.includes('onVerReferidos={irAReferidos}'), true,
     '... y el CTA apunta a Invita y Gana');
 eq(carrusel.includes('onAbrir={irAReferidos}'), true,
     'la tarjeta fija de referidos usa la misma ruta');
+
+// ── La tarjeta de "Invita y Gana": copy EDITABLE (migración 058) ──
+// El backend ya resuelve los defaults, así que esto es sólo la red de seguridad
+// del alumno: si la consulta falla o llega incompleta, la tarjeta se pinta con
+// el copy por defecto en vez de desaparecer (dejaría al alumno sin su código).
+console.log('== La tarjeta de Invita y Gana editable ==');
+eq(tarjetaReferidosDe(null).titulo, COPY_REFERIDOS.titulo, 'sin datos usa el copy por defecto');
+eq(tarjetaReferidosDe(null).visible, true, 'sin datos la tarjeta se muestra');
+const copiaParcial = tarjetaReferidosDe({ titulo: '  Trae a tu parcero  ', visible: false });
+eq(copiaParcial.titulo, 'Trae a tu parcero', 'usa el título del box (recortado)');
+eq(copiaParcial.texto, COPY_REFERIDOS.texto, 'heredan el texto por defecto campo por campo');
+eq(copiaParcial.cta, COPY_REFERIDOS.cta, '... igual que el botón');
+eq(copiaParcial.visible, false, 'se oculta sólo si el backend lo dice explícitamente');
+eq(tarjetaReferidosDe({ titulo: '   ', texto: 42 }).texto, COPY_REFERIDOS.texto,
+    'un texto en blanco y un número caen al default');
+eq(tarjetaReferidosDe({ visible: 'no' }).visible, true,
+    'un `visible` que no es booleano no esconde la tarjeta');
+eq(carrusel.includes('useTarjetaReferidos('), true,
+    'el carrusel pide la tarjeta al backend');
+eq(carrusel.includes('tarjetaReferidosDe('), true,
+    '... y la normaliza con el fallback');
+eq(carrusel.includes('errorTarjeta') && carrusel.includes('mostrarReferidos'), true,
+    'si la consulta falla la tarjeta se pinta igual');
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);

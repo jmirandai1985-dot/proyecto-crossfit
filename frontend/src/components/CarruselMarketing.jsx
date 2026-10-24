@@ -1,15 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAvisosMarketingVigentes } from '../hooks/queries';
+import { useAvisosMarketingVigentes, useTarjetaReferidos } from '../hooks/queries';
 import IconoTipoAviso from './IconoTipoAviso';
 import { urlArchivo } from '../utils/imagen';
 // Productos del carrusel: la foto también cae al ícono si la URL no carga.
 import ImagenProducto from './ImagenProducto';
 import {
-    agruparParaCarrusel, COPY_REFERIDOS, esPromocionVinculada, etiquetaTipo,
+    agruparParaCarrusel, esPromocionVinculada, etiquetaTipo,
     formatearFechaEvento, fotoDeTarjeta, MAX_MINIATURAS, PIE_PRODUCTO, precioDeTarjeta,
-    resumenVigencia, textoDeTarjeta, TIPO_REFERIDOS, tieneFlyer, tipoDe, tituloDeGrupo,
-    tituloDeTarjeta,
+    resumenVigencia, tarjetaReferidosDe, textoDeTarjeta, TIPO_REFERIDOS, tieneFlyer,
+    tipoDe, tituloDeGrupo, tituloDeTarjeta,
 } from '../utils/avisosMarketing';
 import './carruselMarketing.css';
 
@@ -204,10 +204,13 @@ const TarjetaProductos = ({ tarjeta, onVerBazar, onVerProducto }) => {
 };
 
 // La tarjeta FIJA de "Invita y Gana": siempre la ÚLTIMA del carrusel y la única
-// que no viene de la BD (no la crea el admin). Es un <button> de verdad —teclado
-// incluido— que abre `/alumno/invita-y-gana`, donde está el código del alumno y
-// el botón para compartir la invitación.
-const TarjetaReferidos = ({ onAbrir }) => {
+// cuyo copy NO viene de la BD de avisos: lo edita el admin desde Marketing →
+// Referidos (`GET/PUT /referidos/tarjeta`, migración 058) y llega acá como
+// `copy` ya resuelto. Es un <button> de verdad —teclado incluido— que abre
+// `/alumno/invita-y-gana`, donde está el código del alumno y el botón para
+// compartir la invitación. La etiqueta ("Trae a un amigo"), el dorado y el
+// destino son fijos: son el lenguaje visual del carrusel, no copy.
+const TarjetaReferidos = ({ copy, onAbrir }) => {
     const tipo = TIPO_REFERIDOS;
 
     return (
@@ -226,12 +229,12 @@ const TarjetaReferidos = ({ onAbrir }) => {
             <span className="cm-regalo" aria-hidden="true"><IconoRegalo /></span>
             <span className="cm-cuerpo">
                 <span className="cm-titulo" style={{ color: tipo.titulo }}>
-                    {COPY_REFERIDOS.titulo}
+                    {copy.titulo}
                 </span>
-                <span className="cm-texto">{COPY_REFERIDOS.texto}</span>
+                <span className="cm-texto">{copy.texto}</span>
             </span>
             <span className="cm-chip" style={{ color: tipo.detalle }}>
-                {COPY_REFERIDOS.cta}
+                {copy.cta}
                 <IconoFlecha />
             </span>
         </button>
@@ -243,9 +246,9 @@ const TarjetaReferidos = ({ onAbrir }) => {
  *
  * Los avisos los entrega el backend YA vigentes y ordenados (fijados primero y
  * después el más nuevo): acá sólo se agrupan y se dibujan con las plantillas del
- * mockup. Al final va SIEMPRE la tarjeta de "Invita y Gana", así que la sección
- * ya no depende de que el admin publique algo. La guarda de "sin tarjetas" queda
- * como defensa: nunca un carrusel vacío.
+ * mockup. Al final va la tarjeta de "Invita y Gana" (salvo que el admin la haya
+ * ocultado), así que la sección ya no depende de que el admin publique algo. La
+ * guarda de "sin tarjetas" queda como defensa: nunca un carrusel vacío.
  */
 const CarruselMarketing = () => {
     const navigate = useNavigate();
@@ -259,13 +262,25 @@ const CarruselMarketing = () => {
         navigate(`/alumno/bazar?producto=${productoId}`);
     };
     const { data } = useAvisosMarketingVigentes();
+    // Copy y visibilidad de la tarjeta fija: los edita el admin desde
+    // Marketing → Referidos (`GET /referidos/tarjeta`). Mientras carga NO se
+    // pinta (evita mostrar una tarjeta que el admin ocultó); si la consulta
+    // FALLA sí se pinta con el copy por defecto, porque un problema de red no
+    // puede dejar al alumno sin el acceso a su código.
+    const { data: tarjetaReferidos, isPending: cargandoTarjeta, isError: errorTarjeta } =
+        useTarjetaReferidos();
+    const copiaReferidos = useMemo(
+        () => tarjetaReferidosDe(tarjetaReferidos), [tarjetaReferidos]);
+    const mostrarReferidos = errorTarjeta || (!cargandoTarjeta && copiaReferidos.visible);
     // Destino de la tarjeta de referidos y del CTA de una promoción publicada
     // desde Referidos: es donde el alumno ve su código (una sola ruta para las dos).
     const irAReferidos = () => navigate('/alumno/invita-y-gana');
-    // Al final, SIEMPRE, la tarjeta de "Invita y Gana": es del alumno, no del
-    // admin, así que el carrusel se ve aunque no haya avisos vigentes.
-    const tarjetas = useMemo(
-        () => [...agruparParaCarrusel(data), { clase: 'referidos' }], [data]);
+    // Tarjeta de "Invita y Gana" al final: es del alumno, no de la BD de avisos,
+    // así que el carrusel se ve aunque no haya avisos vigentes.
+    const tarjetas = useMemo(() => {
+        const base = agruparParaCarrusel(data);
+        return mostrarReferidos ? [...base, { clase: 'referidos' }] : base;
+    }, [data, mostrarReferidos]);
     const [flyer, setFlyer] = useState(null);
     const [activo, setActivo] = useState(0);
     const pistaRef = useRef(null);
@@ -359,7 +374,8 @@ const CarruselMarketing = () => {
                 onMouseLeave={() => setHover(false)}>
                 {tarjetas.map((tarjeta) => {
                     if (tarjeta.clase === 'referidos') {
-                        return <TarjetaReferidos key="referidos" onAbrir={irAReferidos} />;
+                        return <TarjetaReferidos key="referidos" copy={copiaReferidos}
+                                                 onAbrir={irAReferidos} />;
                     }
                     if (tarjeta.clase === 'aviso') {
                         return <TarjetaAviso key={`aviso-${tarjeta.aviso.id}`}
