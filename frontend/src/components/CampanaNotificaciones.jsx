@@ -1,8 +1,12 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Bell, CheckCheck, Inbox, RefreshCw, X } from 'lucide-react';
+import { AlertTriangle, Bell, BellOff, CheckCheck, Inbox, RefreshCw, X } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import {
+    DIAS_VIGENCIA_NOTIFICACION, contarNoLeidas, filtrarVisibles, guardarOcultarLeidas,
+    leerOcultarLeidas,
+} from '../utils/notificacionesPanel';
 
 // ══════════════════════════════════════════════════════════════════════════
 //  N-2 — Campana de notificaciones del ALUMNO (Layout del panel alumno)
@@ -14,6 +18,10 @@ import { useAuth } from '../context/AuthContext';
 //    * el panel se REFRESCA AL ABRIRLO y el refresco de fondo se PAUSA mientras
 //      está abierto (no se pisa la lista que el usuario está leyendo);
 //    * marcar una leída (PUT /{id}/leer) y marcar todas (PUT /leer-todas);
+//    * LIMPIEZA DE VISTA (utils/notificacionesPanel.js): los avisos de más de 30
+//      días no se listan ni cuentan en el badge, y "Ocultar leídas" deja el panel
+//      sólo con lo pendiente (preferencia guardada en localStorage). No se borra
+//      nada: el backend no tiene DELETE de notificaciones;
 //    * estados de CARGA y de ERROR visibles, con Reintentar (sin catch mudo).
 //
 //  Endpoints: todos derivan el `alumno_id` del token JWT (notificaciones.py),
@@ -125,6 +133,8 @@ const CampanaNotificaciones = () => {
     const [cargando, setCargando] = useState(false);
     const [error, setError] = useState('');
     const [accionando, setAccionando] = useState(false);
+    // "Sólo pendientes": preferencia de la vista, no del servidor (no hay DELETE).
+    const [ocultarLeidas, setOcultarLeidas] = useState(() => leerOcultarLeidas());
     const navigate = useNavigate();
 
     // ── Contador: consulta al montar + refresco de fondo (ver el efecto de abajo) ──
@@ -132,7 +142,9 @@ const CampanaNotificaciones = () => {
         try {
             const { data } = await api.get('/api/v1/notificaciones',
                 { params: { solo_no_leidas: true } });
-            setNoLeidas(Array.isArray(data) ? data.length : 0);
+            // El backend ya filtra las leídas, pero NO las vencidas: el badge tiene
+            // que contar lo mismo que se ve al abrir el panel.
+            setNoLeidas(contarNoLeidas(Array.isArray(data) ? data : []));
             setContadorError('');
         } catch (e) {
             console.error('No se pudo consultar las notificaciones no leídas:', e);
@@ -170,7 +182,7 @@ const CampanaNotificaciones = () => {
             const { data } = await api.get('/api/v1/notificaciones');
             const lista = Array.isArray(data) ? data : [];
             setNotificaciones(lista);
-            setNoLeidas(lista.filter((n) => !n.leida).length);
+            setNoLeidas(contarNoLeidas(lista));
             setContadorError('');
         } catch (e) {
             console.error('No se pudieron cargar las notificaciones:', e);
@@ -222,6 +234,27 @@ const CampanaNotificaciones = () => {
         } finally {
             setAccionando(false);
         }
+    };
+
+    // ── Limpieza de la vista (ver utils/notificacionesPanel.js) ──
+    // Se calcula sobre lo que ya está en memoria: no hay request extra.
+    const visibles = useMemo(
+        () => filtrarVisibles(notificaciones, { ocultarLeidas }),
+        [notificaciones, ocultarLeidas],
+    );
+
+    // ¿Quedó vacío por VENCIMIENTO o sólo porque el usuario ocultó las leídas? El
+    // aviso de los 30 días sólo tiene sentido en el primer caso.
+    const todoVencido = useMemo(
+        () => notificaciones.length > 0
+            && filtrarVisibles(notificaciones, { ocultarLeidas: false }).length === 0,
+        [notificaciones],
+    );
+
+    const alternarOcultarLeidas = () => {
+        const siguiente = !ocultarLeidas;
+        setOcultarLeidas(siguiente);
+        guardarOcultarLeidas(siguiente);
     };
 
     // Ir a la pantalla del aviso (si el tipo tiene una) y cerrar el panel.
@@ -286,6 +319,26 @@ const CampanaNotificaciones = () => {
                             <div className="flex items-center gap-1">
                                 <button
                                     type="button"
+                                    onClick={alternarOcultarLeidas}
+                                    aria-pressed={ocultarLeidas}
+                                    title={ocultarLeidas
+                                        ? 'Mostrar también las leídas'
+                                        : 'Ocultar las leídas'}
+                                    aria-label={ocultarLeidas
+                                        ? 'Mostrar también las notificaciones leídas'
+                                        : 'Ocultar las notificaciones leídas'}
+                                    className={`p-1.5 rounded-lg hover:bg-zinc-800 transition-colors ${
+                                        ocultarLeidas
+                                            ? 'text-orange-400 hover:text-orange-300'
+                                            : 'text-zinc-400 hover:text-white'
+                                    }`}
+                                >
+                                    {ocultarLeidas
+                                        ? <Bell className="w-4 h-4" />
+                                        : <BellOff className="w-4 h-4" />}
+                                </button>
+                                <button
+                                    type="button"
                                     onClick={marcarTodas}
                                     disabled={accionando || noLeidas === 0}
                                     title="Marcar todas como leídas"
@@ -331,14 +384,31 @@ const CampanaNotificaciones = () => {
                             <p className="px-4 py-8 text-center text-sm text-zinc-400">
                                 Cargando notificaciones…
                             </p>
-                        ) : (!error && notificaciones.length === 0) ? (
+                        ) : (!error && visibles.length === 0) ? (
                             <div className="px-4 py-8 text-center text-sm text-zinc-400">
                                 <Inbox className="w-8 h-8 mx-auto mb-2 text-zinc-600" />
-                                No tienes notificaciones.
+                                {notificaciones.length === 0
+                                    ? 'No tienes notificaciones.'
+                                    : 'No hay notificaciones recientes.'}
+                                {todoVencido && (
+                                    <p className="mt-2 text-[11px] text-zinc-500">
+                                        Los avisos de más de {DIAS_VIGENCIA_NOTIFICACION} días
+                                        dejan de mostrarse.
+                                    </p>
+                                )}
+                                {ocultarLeidas && (
+                                    <button
+                                        type="button"
+                                        onClick={alternarOcultarLeidas}
+                                        className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-orange-400 hover:text-orange-300"
+                                    >
+                                        <Bell className="w-3.5 h-3.5" /> Ver también las leídas
+                                    </button>
+                                )}
                             </div>
                         ) : (
                             <ul className="divide-y divide-zinc-800">
-                                {notificaciones.map((n) => {
+                                {visibles.map((n) => {
                                     const destino = destinoDe(n.tipo, rol);
                                     return (
                                     <li key={n.id}
