@@ -420,17 +420,24 @@ const GestionPromocionesReferidos = () => {
                 </div>
             )}
 
-            <ModalPublicarPromocion
-                isOpen={Boolean(publicando)}
-                promocion={publicando}
-                onClose={() => setPublicando(null)}
-                onSuccess={() => setMensaje({
-                    tipo: 'exito',
-                    texto: publicando?.publicada
-                        ? 'Tarjeta actualizada en el carrusel.'
-                        : 'Promoción publicada en el carrusel.',
-                })}
-            />
+            {/* El modal se MONTA sólo cuando hay una promoción elegida (antes vivía
+                siempre montado con `promocion={null}`, y su estado inicial leía
+                `.nombre` de null: era el crash de /admin/marketing?tab=referidos).
+                Los utils ya son null-safe; esto evita además montar un diálogo sin
+                datos. */}
+            {publicando && (
+                <ModalPublicarPromocion
+                    isOpen
+                    promocion={publicando}
+                    onClose={() => setPublicando(null)}
+                    onSuccess={() => setMensaje({
+                        tipo: 'exito',
+                        texto: publicando.publicada
+                            ? 'Tarjeta actualizada en el carrusel.'
+                            : 'Promoción publicada en el carrusel.',
+                    })}
+                />
+            )}
         </div>
     );
 };

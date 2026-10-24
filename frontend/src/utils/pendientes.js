@@ -174,10 +174,17 @@ export function validarPublicacion({ titulo, texto, vigente_desde, vigente_hasta
 // Texto SUGERIDO de la tarjeta a partir de la promoción. El admin lo puede editar
 // entero: es sólo el punto de partida, para no escribir el premio a mano (y para
 // que el título y el texto no digan cosas distintas del umbral configurado).
-export function tarjetaSugerida(promocion = {}) {
-    const nombre = String(promocion.nombre ?? '').trim();
-    const premio = String(promocion.premio_texto ?? '').trim();
-    const umbral = Math.max(1, Math.floor(Number(promocion.umbral_referidos_convertidos) || 1));
+export function tarjetaSugerida(promocion) {
+    // OJO: el default `= {}` NO cubre `null` (sólo `undefined`). El modal de
+    // publicación vive MONTADO en Marketing aunque esté cerrado y recibe
+    // `promocion={publicando}` con `publicando === null`, así que sin este guard
+    // `tarjetaSugerida(null)` lanzaba "Cannot read properties of null (reading
+    // 'nombre')" al abrir /admin/marketing?tab=referidos y se caía la pantalla
+    // entera. Mismo caso para una promoción que todavía no tiene aviso publicado.
+    const datos = promocion && typeof promocion === 'object' ? promocion : {};
+    const nombre = String(datos.nombre ?? '').trim();
+    const premio = String(datos.premio_texto ?? '').trim();
+    const umbral = Math.max(1, Math.floor(Number(datos.umbral_referidos_convertidos) || 1));
     const referidos = umbral === 1 ? '1 referido convertido' : `${umbral} referidos convertidos`;
     return {
         titulo: nombre || 'Invita y gana',
@@ -191,11 +198,15 @@ export function tarjetaSugerida(promocion = {}) {
 // `publicada` dice si existe el aviso vinculado; `publicada_hasta` si sigue
 // vigente. Mismo criterio que el chip "Vigente/Vencido" de Marketing: se compara
 // sólo la fecha (el backend guarda `date`, no un instante).
-export function estadoPublicacion(promocion = {}, hoy = new Date()) {
-    if (!promocion.publicada) {
+export function estadoPublicacion(promocion, hoy = new Date()) {
+    // Igual que `tarjetaSugerida`: `null` no entra en el default del parámetro y el
+    // modal se monta cerrado con `promocion={null}`. Un chip no puede tumbar
+    // Marketing por un aviso que todavía no existe.
+    const datos = promocion && typeof promocion === 'object' ? promocion : {};
+    if (!datos.publicada) {
         return { clave: 'sin_publicar', texto: 'Sin publicar', vencida: false };
     }
-    const hasta = String(promocion.publicada_hasta ?? '').slice(0, 10);
+    const hasta = String(datos.publicada_hasta ?? '').slice(0, 10);
     const vencida = Boolean(hasta) && hasta < fechaISO(hoy);
     return vencida
         ? { clave: 'vencida', texto: 'Publicación vencida', vencida: true }
