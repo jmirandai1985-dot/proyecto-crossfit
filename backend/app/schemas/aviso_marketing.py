@@ -71,6 +71,10 @@ class AvisoMarketingOut(BaseModel):
     fijado_arriba: bool = False
     # Sólo `producto_bazar`: el vínculo con el producto real del Bazar.
     producto_id: Optional[int] = None
+    # Sólo `promocion` PUBLICADA desde Referidos (migración 056): la promoción
+    # por volumen que anuncia la tarjeta. NULL en el resto de los tipos y en una
+    # Promoción escrita a mano en la pantalla Marketing.
+    promocion_id: Optional[int] = None
     creado_en: datetime
     # Derivado (no es columna): ¿la ventana contiene AHORA, hora de Chile? Lo usa el
     # chip "Vigente/Vencido" del admin; el carrusel del alumno sólo recibe vigentes.

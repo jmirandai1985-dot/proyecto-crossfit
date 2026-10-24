@@ -336,6 +336,14 @@ export function fotoDeTarjeta(aviso) {
     return aviso.producto_imagen_url || null;
 }
 
+// ¿La tarjeta es la de una promoción PUBLICADA desde Referidos (migración 056)?
+// Se distingue de una "Promoción" escrita a mano por `promocion_id`: sólo la
+// VINCULADA lleva al alumno a `/alumno/invita-y-gana`, donde ve su código. Una
+// promoción manual es texto libre y no debe prometer un premio que no existe.
+export function esPromocionVinculada(aviso) {
+    return aviso?.promocion_id != null;
+}
+
 // ¿Hay flyer que mostrar en el modal "Toca para ver el flyer"? Sólo los avisos
 // manuales lo tienen: el de un producto muestra su foto en la tarjeta.
 export function tieneFlyer(aviso) {

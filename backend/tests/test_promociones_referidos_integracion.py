@@ -170,6 +170,36 @@ def _sin_residuo_de_corridas_cortadas(db):
         print(f"\n[OK] residuo limpiado en TEST: {len(ids)} usuarios\n")
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _promos_ajenas_apagadas(db):
+    """Apaga las promociones REALES del box mientras corre el módulo.
+
+    TEST es también el box donde se carga data a mano: una promoción activa con
+    el mismo umbral dispara SU propia detección y rompe las cuentas de este
+    módulo (`nuevas == 1`, `len(detectadas) == 1`). No se borra nada del box:
+    se apaga al entrar y se restaura al salir, incluso si el módulo falla.
+    """
+    db.rollback()
+    ids = [int(f[0]) for f in db.execute(
+        text("SELECT id FROM promociones_referidos "
+             "WHERE tenant_id = :t AND activo AND nombre NOT LIKE :p"),
+        {"t": TENANT_ID, "p": PREFIJO_PROMO}).fetchall()]
+    for promocion_id in ids:
+        db.execute(text("UPDATE promociones_referidos SET activo = false "
+                        "WHERE id = :p"), {"p": promocion_id})
+    db.commit()
+    if ids:
+        print(f"\n[OK] {len(ids)} promociones ajenas apagadas durante el módulo\n")
+    yield
+    if not ids:
+        return
+    db.rollback()
+    for promocion_id in ids:
+        db.execute(text("UPDATE promociones_referidos SET activo = true "
+                        "WHERE id = :p"), {"p": promocion_id})
+    db.commit()
+
+
 # ── Datos únicos, altas y limpieza ───────────────────────────────────────────
 
 def _sufijo() -> str:
@@ -632,6 +662,17 @@ def test_seguridad_de_promociones(cliente, db, admin_headers, escenario):
     assert listado_ajeno.status_code == 200, listado_ajeno.text
     assert promo["id"] not in [fila["id"] for fila in listado_ajeno.json()]
 
+    # Publicar (o despublicar) la promoción del box 1 desde el otro box da 404:
+    # el aviso del carrusel es del MISMO dueño que la promoción.
+    publicacion_ajena = cliente.post(
+        f"{BASE}/promociones/{promo['id']}/publicar",
+        json=_cuerpo_publicacion(), headers=headers_otro_box)
+    assert publicacion_ajena.status_code == 404, publicacion_ajena.text
+    despublicacion_ajena = cliente.delete(
+        f"{BASE}/promociones/{promo['id']}/publicar",
+        headers=headers_otro_box)
+    assert despublicacion_ajena.status_code == 404, despublicacion_ajena.text
+
     # Una detección del box 1 tampoco se puede confirmar desde el otro box.
     momento = datetime.now(timezone.utc)
     _crear_referidos_convertidos(db, escenario, alumno["id"], cuantos=3,
@@ -691,3 +732,177 @@ def test_crud_y_validacion_de_promociones(cliente, db, admin_headers, escenario)
     escenario["promos"].remove(promo["id"])
     listado = cliente.get(BASE + "/promociones", headers=admin_headers)
     assert promo["id"] not in [fila["id"] for fila in listado.json()]
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 6. Publicar la promoción en el carrusel "Novedades del box" (migración 056)
+# ══════════════════════════════════════════════════════════════════════════════
+# Publicar NO es una configuración aparte: es una TARJETA de `avisos_marketing`
+# vinculada por `promocion_id`. Lo que se fija acá es lo que ve el alumno en su
+# Inicio y lo que el panel necesita para pintar el chip "Publicada".
+
+BASE_MARKETING = "/api/v1/marketing"
+
+
+def _ventana_publicacion(desde: int = 0, hasta: int = 7) -> dict:
+    """Ventana relativa a HOY (día chileno), como la arma el modal del panel."""
+    hoy = hoy_santiago()
+    return {"vigente_desde": (hoy + timedelta(days=desde)).isoformat(),
+            "vigente_hasta": (hoy + timedelta(days=hasta)).isoformat()}
+
+
+def _cuerpo_publicacion(desde: int = 0, hasta: int = 7) -> dict:
+    cuerpo = {
+        "titulo": "3 referidos = mes gratis",
+        "texto": "Trae 3 amigos este mes y te regalamos 30 días.",
+        "fijado_arriba": True,
+    }
+    cuerpo.update(_ventana_publicacion(desde, hasta))
+    return cuerpo
+
+
+def _fila_promocion(cliente, admin_headers, promocion_id: int) -> dict:
+    """La promoción como la ve la pantalla (con sus campos de publicación)."""
+    listado = cliente.get(BASE + "/promociones", headers=admin_headers)
+    assert listado.status_code == 200, listado.text
+    return next(fila for fila in listado.json() if fila["id"] == promocion_id)
+
+
+def _tarjetas_de(db, promocion_id: int) -> int:
+    """Cuántas tarjetas del carrusel apuntan a la promoción (el índice es UNIQUE)."""
+    return int(db.execute(
+        text("SELECT count(*) FROM avisos_marketing WHERE promocion_id = :p"),
+        {"p": promocion_id}).scalar() or 0)
+
+
+def test_publicar_editar_y_despublicar_la_tarjeta(cliente, db, admin_headers,
+                                                  escenario):
+    promo = _crear_promocion(
+        cliente, admin_headers, escenario, nombre="Carrusel",
+        umbral=3, tipo_premio="mes_gratis")
+
+    # Nace SIN tarjeta: los campos de publicación vienen en None/False.
+    fila = _fila_promocion(cliente, admin_headers, promo["id"])
+    assert fila["publicada"] is False
+    assert fila["aviso_id"] is None
+    assert fila["publicada_titulo"] is None
+    assert fila["publicada_texto"] is None
+    assert fila["publicada_fijado_arriba"] is False
+
+    # Publicar crea UNA tarjeta `promocion` vinculada (tipo y vínculo los fija el
+    # backend: el cuerpo del modal no los puede cambiar).
+    publicada = cliente.post(f"{BASE}/promociones/{promo['id']}/publicar",
+                             json=_cuerpo_publicacion(), headers=admin_headers)
+    assert publicada.status_code == 200, publicada.text
+    tarjeta = publicada.json()
+    assert tarjeta["tipo"] == "promocion"
+    assert tarjeta["promocion_id"] == promo["id"]
+    assert tarjeta["titulo"] == "3 referidos = mes gratis"
+    assert tarjeta["fijado_arriba"] is True
+    assert tarjeta["vigente"] is True
+    assert _tarjetas_de(db, promo["id"]) == 1
+
+    # El panel ya sabe qué está publicado y con qué texto (el modal lo precarga).
+    fila = _fila_promocion(cliente, admin_headers, promo["id"])
+    assert fila["publicada"] is True
+    assert fila["aviso_id"] == tarjeta["id"]
+    assert fila["publicada_titulo"] == "3 referidos = mes gratis"
+    assert fila["publicada_texto"] == "Trae 3 amigos este mes y te regalamos 30 días."
+    assert fila["publicada_fijado_arriba"] is True
+
+    # Republicar EDITA la misma tarjeta: no acumula filas (el índice UNIQUE
+    # `(tenant_id, promocion_id)` lo impide) ni pierde el flyer/creado_en.
+    cuerpo = _cuerpo_publicacion()
+    cuerpo["titulo"] = "3 referidos = 1 mes gratis"
+    cuerpo["fijado_arriba"] = False
+    editada = cliente.post(f"{BASE}/promociones/{promo['id']}/publicar",
+                           json=cuerpo, headers=admin_headers)
+    assert editada.status_code == 200, editada.text
+    assert editada.json()["id"] == tarjeta["id"]
+    assert editada.json()["titulo"] == "3 referidos = 1 mes gratis"
+    assert editada.json()["fijado_arriba"] is False
+    assert _tarjetas_de(db, promo["id"]) == 1
+    fila = _fila_promocion(cliente, admin_headers, promo["id"])
+    assert fila["aviso_id"] == tarjeta["id"]
+    assert fila["publicada_titulo"] == "3 referidos = 1 mes gratis"
+    assert fila["publicada_fijado_arriba"] is False
+
+    # Despublicar BORRA la tarjeta; la promoción sigue existiendo y activa.
+    quitada = cliente.delete(f"{BASE}/promociones/{promo['id']}/publicar",
+                             headers=admin_headers)
+    assert quitada.status_code == 200, quitada.text
+    assert _tarjetas_de(db, promo["id"]) == 0
+    fila = _fila_promocion(cliente, admin_headers, promo["id"])
+    assert fila["publicada"] is False
+    assert fila["activo"] is True
+
+    # Despublicar dos veces no es un DELETE silencioso: la segunda es 404.
+    otra_vez = cliente.delete(f"{BASE}/promociones/{promo['id']}/publicar",
+                              headers=admin_headers)
+    assert otra_vez.status_code == 404, otra_vez.text
+
+
+def test_la_tarjeta_publicada_llega_al_carrusel_del_alumno(cliente, db,
+                                                          admin_headers,
+                                                          escenario):
+    """El Inicio del alumno la recibe con `promocion_id`: con eso el front sabe
+    que debe llevarlo a `/alumno/invita-y-gana` a buscar su código."""
+    alumno = _crear_usuario(cliente, admin_headers, escenario, "Alumno Carrusel")
+    promo = _crear_promocion(
+        cliente, admin_headers, escenario, nombre="Visible",
+        umbral=2, tipo_premio="dias_gratis", valor_premio=7)
+
+    publicada = cliente.post(f"{BASE}/promociones/{promo['id']}/publicar",
+                             json=_cuerpo_publicacion(), headers=admin_headers)
+    assert publicada.status_code == 200, publicada.text
+    tarjeta_id = publicada.json()["id"]
+
+    vigentes = cliente.get(BASE_MARKETING + "/vigentes", headers=_headers(alumno))
+    assert vigentes.status_code == 200, vigentes.text
+    tarjeta = next(fila for fila in vigentes.json() if fila["id"] == tarjeta_id)
+    assert tarjeta["promocion_id"] == promo["id"]
+
+    # Al despublicar desaparece también del carrusel (no queda "Vencido" colgado).
+    cliente.delete(f"{BASE}/promociones/{promo['id']}/publicar",
+                   headers=admin_headers)
+    vigentes = cliente.get(BASE_MARKETING + "/vigentes", headers=_headers(alumno))
+    assert tarjeta_id not in [fila["id"] for fila in vigentes.json()]
+
+
+
+def test_publicar_valida_el_cuerpo_y_la_promocion_apagada(cliente, db,
+                                                          admin_headers,
+                                                          escenario):
+    """Ni un texto vacío ni una ventana invertida ni una promoción apagada."""
+    promo = _crear_promocion(
+        cliente, admin_headers, escenario, nombre="Validación",
+        umbral=3, tipo_premio="mes_gratis")
+    url = f"{BASE}/promociones/{promo['id']}/publicar"
+
+    # Pydantic: `"   "` no es un título (el modal recorta, el backend no confía).
+    vacio = _cuerpo_publicacion()
+    vacio["titulo"] = "   "
+    assert cliente.post(url, json=vacio, headers=admin_headers).status_code == 422
+
+    # Las reglas del aviso son las MISMAS de Marketing, pero acá la ventana
+    # invertida la corta Pydantic (`PublicarPromocionRequest`), igual que el
+    # `model_validator` del formulario: 422 y ningún aviso creado.
+    invertida = _cuerpo_publicacion()
+    invertida.update(_ventana_publicacion(7, 1))
+    respuesta = cliente.post(url, json=invertida, headers=admin_headers)
+    assert respuesta.status_code == 422, respuesta.text
+    assert "antes de empezar" in respuesta.text
+    assert _tarjetas_de(db, promo["id"]) == 0
+
+    # Una promoción APAGADA no se publica: el alumno llegaría a un premio que el
+    # job no aplica (`detectar_promociones` filtra por `activo`).
+    cliente.put(f"{BASE}/promociones/{promo['id']}",
+                json={"nombre": promo["nombre"], "umbral_referidos_convertidos": 3,
+                      "periodo": "mensual", "tipo_premio": "mes_gratis",
+                      "valor_premio": None, "activo": False},
+                headers=admin_headers)
+    apagada = cliente.post(url, json=_cuerpo_publicacion(),
+                           headers=admin_headers)
+    assert apagada.status_code == 400, apagada.text
+    assert "apagada" in apagada.text
+    assert _tarjetas_de(db, promo["id"]) == 0
+

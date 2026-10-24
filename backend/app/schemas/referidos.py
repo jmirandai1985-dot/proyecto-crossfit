@@ -10,7 +10,7 @@ existente/activo, anti-auto-referido, una sola aplicación por alumno) viven en
 mandar un `usuario_id` para aplicar el código a otra persona (el usuario sale
 siempre del token) ni colar campos que el contrato no define.
 """
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import (BaseModel, ConfigDict, EmailStr, Field, field_validator,
@@ -204,6 +204,54 @@ class PromocionReferidosOut(BaseModel):
     activo: bool
     premio_texto: str
     detecciones_pendientes: int = 0
+    # ── Publicación en el carrusel "Novedades del box" (migración 056) ──
+    # `publicada` = existe una tarjeta vinculada a esta promoción. NO dice si está
+    # vigente hoy: `publicada_hasta` es el último instante de la ventana y el
+    # front compara (el mismo criterio que el chip "Vigente/Vencido" de Marketing).
+    publicada: bool = False
+    aviso_id: int | None = None
+    publicada_desde: datetime | None = None
+    publicada_hasta: datetime | None = None
+    # Texto ACTUAL de la tarjeta publicada. El modal de publicación lo usa para
+    # abrirse con lo que el admin escribió la vez anterior: sin esto, "Guardar
+    # cambios" arrancaría con el texto sugerido y pisaría el que ya estaba.
+    publicada_titulo: str | None = None
+    publicada_texto: str | None = None
+    publicada_fijado_arriba: bool = False
+
+
+class PublicarPromocionRequest(BaseModel):
+    """Cuerpo de `POST /referidos/promociones/{id}/publicar` (sólo admin).
+
+    Es el texto de la TARJETA del carrusel, no la configuración de la promoción:
+    el premio y el umbral ya están congelados en la fila de `promociones_referidos`
+    y la tarjeta sólo los anuncia. `tipo` no viaja: el backend fija `promocion` y
+    el vínculo (`promocion_id`) sale de la URL.
+    """
+
+    titulo: str = Field(..., min_length=1, max_length=150)
+    texto: str = Field(..., min_length=1, max_length=1000)
+    vigente_desde: date
+    vigente_hasta: date
+    fijado_arriba: bool = False
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("titulo", "texto")
+    @classmethod
+    def _sin_espacios_de_mas(cls, valor: str) -> str:
+        """`"   "` no es un texto: se recorta antes del mínimo de Pydantic."""
+        limpio = valor.strip()
+        if not limpio:
+            raise ValueError("El texto de la tarjeta no puede estar vacío.")
+        return limpio
+
+    @model_validator(mode="after")
+    def _ventana_ordenada(self):
+        """La ventana no puede terminar antes de empezar (misma regla que Marketing)."""
+        if self.vigente_hasta < self.vigente_desde:
+            raise ValueError("La vigencia no puede terminar antes de empezar.")
+        return self
 
 
 class PromocionDetectadaOut(BaseModel):

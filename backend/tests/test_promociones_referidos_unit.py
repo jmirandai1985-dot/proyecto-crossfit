@@ -7,13 +7,17 @@ infraestructura y que, si cambian, cambian el dinero de un premio:
     en octubre);
   · `mes_gratis` son 30 días y `dias_gratis` exige un entero > 0;
   · el texto del premio es el mismo en panel, campana y correo;
-  · Pydantic normaliza/valida el valor según el tipo ANTES de tocar la BD.
+  · Pydantic normaliza/valida el valor según el tipo ANTES de tocar la BD;
+  · publicar en el carrusel (migración 056) es una TARJETA vinculada: el
+    serializer no inventa título/texto/fijado cuando la promoción no está
+    publicada y el cuerpo de publicación no puede fijar `tipo` ni `promocion_id`.
 
     py -3.12 -m pytest tests/test_promociones_referidos_unit.py -q --noconftest
 """
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -22,7 +26,8 @@ BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from app.schemas.referidos import PromocionReferidosCreate       # noqa: E402
+from app.schemas.referidos import (PromocionReferidosCreate,      # noqa: E402
+                                   PublicarPromocionRequest)
 from app.services import promociones_referidos_service as svc     # noqa: E402
 
 
@@ -139,3 +144,120 @@ def test_nombre_en_blanco_y_umbral_invalido_fallan():
         PromocionReferidosCreate(
             nombre="Promo", umbral_referidos_convertidos=0,
             tipo_premio="mes_gratis")
+
+
+# ── Publicación en el carrusel (migración 056) ──────────────────────────────
+def _promo(**extra):
+    """Fila mínima de `promociones_referidos` para el serializer (sin BD)."""
+    base = dict(id=7, nombre="3 referidos = mes gratis",
+                umbral_referidos_convertidos=3, periodo="mensual",
+                tipo_premio="mes_gratis", valor_premio=None, activo=True)
+    base.update(extra)
+    return SimpleNamespace(**base)
+
+
+def test_sin_aviso_la_promocion_no_esta_publicada():
+    fila = svc.serializar_promocion(_promo())
+
+    assert fila["publicada"] is False
+    assert fila["aviso_id"] is None
+    assert fila["publicada_desde"] is None
+    assert fila["publicada_hasta"] is None
+    # El modal precarga `publicada_*`: con None sabe que debe sugerir el texto.
+    assert fila["publicada_titulo"] is None
+    assert fila["publicada_texto"] is None
+    assert fila["publicada_fijado_arriba"] is False
+
+
+def test_con_aviso_la_fila_trae_lo_que_dice_la_tarjeta():
+    aviso = SimpleNamespace(
+        id=41, titulo="3 referidos = 1 mes gratis",
+        texto="Trae 3 amigos este mes y te regalamos 30 días.",
+        fijado_arriba=True,
+        vigente_desde=datetime(2026, 10, 1, tzinfo=timezone.utc),
+        vigente_hasta=datetime(2026, 10, 31, 23, 59, 59, tzinfo=timezone.utc))
+
+    fila = svc.serializar_promocion(_promo(), 2, aviso)
+
+    assert fila["publicada"] is True
+    assert fila["aviso_id"] == 41
+    assert fila["publicada_titulo"] == aviso.titulo
+    assert fila["publicada_texto"] == aviso.texto
+    assert fila["publicada_fijado_arriba"] is True
+    assert fila["publicada_desde"] == aviso.vigente_desde
+    assert fila["publicada_hasta"] == aviso.vigente_hasta
+    # Los datos del premio no cambian por publicar.
+    assert fila["premio_texto"] == "1 mes gratis (30 días)"
+    assert fila["detecciones_pendientes"] == 2
+
+
+def test_el_cuerpo_de_publicacion_recorta_y_no_acepta_tipo():
+    datos = PublicarPromocionRequest(
+        titulo="  3 referidos = mes gratis  ",
+        texto="  Trae 3 amigos.  ",
+        vigente_desde=date(2026, 10, 1), vigente_hasta=date(2026, 10, 31))
+
+    assert datos.titulo == "3 referidos = mes gratis"
+    assert datos.texto == "Trae 3 amigos."
+    # Sin dato, la tarjeta NO se fija arriba (el default tiene que ser seguro).
+    assert datos.fijado_arriba is False
+
+    # `tipo` y `promocion_id` los fija el backend desde la URL: si el cliente los
+    # manda, se rechaza en vez de ignorarlos en silencio.
+    with pytest.raises(ValidationError):
+        PublicarPromocionRequest(
+            titulo="Tarjeta", texto="Texto", vigente_desde=date(2026, 10, 1),
+            vigente_hasta=date(2026, 10, 31), tipo="evento")
+
+
+@pytest.mark.parametrize("campo", ["titulo", "texto"])
+def test_texto_en_blanco_no_es_un_texto(campo):
+    cuerpo = {"titulo": "Tarjeta", "texto": "Texto",
+              "vigente_desde": date(2026, 10, 1),
+              "vigente_hasta": date(2026, 10, 31)}
+    cuerpo[campo] = "   "
+    with pytest.raises(ValidationError):
+        PublicarPromocionRequest(**cuerpo)
+
+
+def test_la_ventana_de_la_tarjeta_no_puede_estar_invertida():
+    """Misma regla que Marketing: el modal no puede publicar un aviso ya vencido."""
+    with pytest.raises(ValidationError):
+        PublicarPromocionRequest(
+            titulo="Tarjeta", texto="Texto", vigente_desde=date(2026, 10, 31),
+            vigente_hasta=date(2026, 10, 1))
+    # El último día de la ventana sí es válido (una tarjeta de UN día).
+    un_dia = PublicarPromocionRequest(
+        titulo="Tarjeta", texto="Texto", vigente_desde=date(2026, 10, 1),
+        vigente_hasta=date(2026, 10, 1))
+    assert un_dia.vigente_desde == un_dia.vigente_hasta
+
+
+def test_un_aviso_vinculado_no_se_convierte_en_otro_tipo():
+    """La tarjeta de la promoción no puede pasar a Evento desde Marketing: el
+    vínculo (`promocion_id`) seguiría apuntando a la promoción y el panel diría
+    "publicada" con otra cosa en el carrusel."""
+    from app.services import avisos_marketing as avisos_svc
+
+    aviso = SimpleNamespace(promocion_id=7)
+    with pytest.raises(ValueError) as error:
+        avisos_svc.actualizar(None, aviso, {
+            "tipo": "evento", "titulo": "Cumpleaños del box",
+            "texto": "Ven a celebrar", "vigente_desde": date(2026, 10, 1),
+            "vigente_hasta": date(2026, 10, 2),
+            "fecha_evento": date(2026, 10, 2)})
+
+    assert "despublica" in str(error.value)
+
+
+def test_los_topos_del_titulo_y_del_texto_son_los_del_aviso():
+    with pytest.raises(ValidationError):
+        PublicarPromocionRequest(
+            titulo="x" * 151, texto="Texto", vigente_desde=date(2026, 10, 1),
+            vigente_hasta=date(2026, 10, 31))
+    with pytest.raises(ValidationError):
+        PublicarPromocionRequest(
+            titulo="Tarjeta", texto="x" * 1001,
+            vigente_desde=date(2026, 10, 1),
+            vigente_hasta=date(2026, 10, 31))
+

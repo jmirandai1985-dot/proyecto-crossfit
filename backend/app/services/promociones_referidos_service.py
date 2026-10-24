@@ -506,8 +506,15 @@ def rechazar_deteccion(db: Session, *, tenant_id: int, deteccion_id: int,
 # ── Serialización para el panel ──────────────────────────────────────────────
 
 def serializar_promocion(promocion: PromocionReferidos,
-                         detecciones_pendientes: int = 0) -> dict:
-    """Fila de promoción para `GET/POST/PUT /referidos/promociones`."""
+                         detecciones_pendientes: int = 0,
+                         aviso=None) -> dict:
+    """Fila de promoción para `GET/POST/PUT /referidos/promociones`.
+
+    `aviso` es la tarjeta del carrusel VINCULADA (`avisos_marketing.promocion_id`,
+    migración 056) o None si la promoción no está publicada. Se pasa resuelto para
+    que la pantalla de referidos no tenga que cruzar dos endpoints: con esto pinta
+    el chip "Publicada" y el botón Publicar/Despublicar sin adivinar.
+    """
     return {
         "id": promocion.id,
         "nombre": promocion.nombre,
@@ -520,6 +527,15 @@ def serializar_promocion(promocion: PromocionReferidos,
         "premio_texto": texto_premio(promocion.tipo_premio,
                                      promocion.valor_premio),
         "detecciones_pendientes": int(detecciones_pendientes or 0),
+        "publicada": aviso is not None,
+        "aviso_id": aviso.id if aviso is not None else None,
+        "publicada_desde": aviso.vigente_desde if aviso is not None else None,
+        "publicada_hasta": aviso.vigente_hasta if aviso is not None else None,
+        # Texto de la tarjeta: el modal de publicación lo necesita para editar lo
+        # que ya está publicado en vez de reemplazarlo por el texto sugerido.
+        "publicada_titulo": aviso.titulo if aviso is not None else None,
+        "publicada_texto": aviso.texto if aviso is not None else None,
+        "publicada_fijado_arriba": bool(aviso.fijado_arriba) if aviso is not None else False,
     }
 
 

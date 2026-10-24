@@ -30,7 +30,7 @@ from sqlalchemy import or_
 
 from app.models.aviso_marketing import (
     TIPOS_EDITABLES, TIPO_AVISO, TIPO_COLABORACION, TIPO_EVENTO,
-    TIPO_PRODUCTO_BAZAR, AvisoMarketing,
+    TIPO_PRODUCTO_BAZAR, TIPO_PROMOCION, AvisoMarketing,
 )
 from app.models.producto import Producto
 from app.utils.santiago import (
@@ -167,6 +167,8 @@ def serializar(aviso: AvisoMarketing, producto: Producto | None = None,
         "vigente_hasta": aviso.vigente_hasta,
         "fijado_arriba": bool(aviso.fijado_arriba),
         "producto_id": aviso.producto_id,
+        # Vínculo con una promoción de Referidos publicada (migración 056).
+        "promocion_id": aviso.promocion_id,
         "creado_en": aviso.creado_en,
         # Derivado, para que el admin vea de un vistazo si está al aire hoy.
         "vigente": esta_vigente(aviso.vigente_desde, aviso.vigente_hasta, ahora),
@@ -242,6 +244,9 @@ def crear(db, tenant_id: int, datos: dict,
         vigente_desde=desde,
         vigente_hasta=hasta,
         fijado_arriba=bool(limpio.get("fijado_arriba", False)),
+        # Sólo lo manda el flujo de publicación de Referidos (056); el
+        # formulario "Nuevo aviso" nunca lo incluye y queda en None.
+        promocion_id=limpio.get("promocion_id"),
         creado_por=creado_por,
     )
     db.add(aviso)
@@ -262,6 +267,13 @@ def actualizar(db, aviso: AvisoMarketing, datos: dict) -> dict:
     if errores:
         raise ValueError(errores)
     limpio = normalizar(datos)
+    if aviso.promocion_id is not None and limpio["tipo"] != TIPO_PROMOCION:
+        # Un aviso VINCULADO (056) es la tarjeta de una promoción de Referidos:
+        # convertirlo en Evento dejaría el vínculo apuntando a otra cosa y la
+        # pantalla de referidos seguiría diciendo "publicada".
+        raise ValueError([
+            "Este aviso anuncia una promoción de Referidos: despublica la "
+            "promoción antes de cambiarlo a otro tipo."])
     desde, hasta = rango_vigencia(limpio["vigente_desde"], limpio["vigente_hasta"])
     aviso.tipo = limpio["tipo"]
     aviso.titulo = limpio["titulo"]

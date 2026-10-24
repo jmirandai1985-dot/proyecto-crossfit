@@ -62,6 +62,7 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_admin, get_current_user
 from app.db.database import get_db
+from app.models.aviso_marketing import TIPO_PROMOCION, AvisoMarketing
 from app.models.referidos import (CodigoReferido, ConfiguracionReferidos,
                                   EstadoInvitacion, EstadoPromocionDetectada,
                                   EstadoReferido, Invitacion,
@@ -69,6 +70,7 @@ from app.models.referidos import (CodigoReferido, ConfiguracionReferidos,
                                   PromocionReferidosDetectada,
                                   ReferidoAplicado)
 from app.models.usuario import Usuario
+from app.schemas.aviso_marketing import AvisoMarketingOut
 from app.schemas.referidos import (ConfiguracionReferidosOut,
                                    ConfiguracionReferidosUpdate,
                                    ConfirmarPromocionOut,
@@ -78,10 +80,13 @@ from app.schemas.referidos import (ConfiguracionReferidosOut,
                                    PromocionReferidosCreate,
                                    PromocionReferidosOut,
                                    PromocionReferidosUpdate,
+                                   PublicarPromocionRequest,
                                    RechazarPromocionOut, ValidarCodigoOut,
                                    ValidarCodigoRequest)
+from app.services import avisos_marketing as avisos_svc
 from app.services import promociones_referidos_service as promos_svc
 from app.services import referidos_service as svc
+from app.services import storage
 from app.services.email_service import send_invitacion_alumno
 
 router = APIRouter()
@@ -423,12 +428,34 @@ def _pendientes_por_promocion(db: Session, tenant_id: int) -> dict:
     return {int(promocion_id): int(total) for promocion_id, total in filas}
 
 
+def _avisos_por_promocion(db: Session, tenant_id: int) -> dict:
+    """`{promocion_id: aviso}` de las tarjetas publicadas, en UNA query (sin N+1)."""
+    filas = db.query(AvisoMarketing).filter(
+        AvisoMarketing.tenant_id == tenant_id,
+        AvisoMarketing.promocion_id.isnot(None),
+    ).all()
+    return {int(aviso.promocion_id): aviso for aviso in filas}
+
+
+def _aviso_de_promocion(db: Session, tenant_id: int,
+                        promocion_id: int) -> AvisoMarketing | None:
+    """La tarjeta del carrusel VINCULADA a la promoción (o None si no se publicó)."""
+    return db.query(AvisoMarketing).filter(
+        AvisoMarketing.tenant_id == tenant_id,
+        AvisoMarketing.promocion_id == promocion_id,
+    ).first()
+
+
 @router.get("/promociones", response_model=list[PromocionReferidosOut])
 def listar_promociones(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Todas las promociones del box, con cuántos umbrales esperan confirmación."""
+    """Todas las promociones del box, con cuántos umbrales esperan confirmación.
+
+    Incluye si cada una está PUBLICADA en el carrusel (migración 056): la pantalla
+    muestra el chip y el botón correcto sin pedir los avisos por separado.
+    """
     tenant_id = current_user["tenant_id"]
     promociones = db.query(PromocionReferidos).filter(
         PromocionReferidos.tenant_id == tenant_id
@@ -438,8 +465,10 @@ def listar_promociones(
         PromocionReferidos.id,
     ).all()
     pendientes = _pendientes_por_promocion(db, tenant_id)
+    avisos = _avisos_por_promocion(db, tenant_id)
     return [promos_svc.serializar_promocion(
-        promocion, pendientes.get(promocion.id, 0)) for promocion in promociones]
+        promocion, pendientes.get(promocion.id, 0),
+        avisos.get(promocion.id)) for promocion in promociones]
 
 
 @router.post("/promociones", response_model=PromocionReferidosOut,
@@ -478,7 +507,8 @@ def actualizar_promocion(
     db.refresh(promocion)
     pendientes = _pendientes_por_promocion(db, tenant_id)
     return promos_svc.serializar_promocion(
-        promocion, pendientes.get(promocion.id, 0))
+        promocion, pendientes.get(promocion.id, 0),
+        _aviso_de_promocion(db, tenant_id, promocion.id))
 
 
 @router.delete("/promociones/{promocion_id}")
@@ -502,8 +532,102 @@ def eliminar_promocion(
             status_code=status.HTTP_409_CONFLICT,
             detail=("Esta promoción ya detectó umbrales y no se puede borrar: "
                     "apágala para conservar el historial de premios."))
+    # La tarjeta publicada se va con ella (ON DELETE CASCADE, 056). Se borra por
+    # el servicio para recuperar el flyer y no dejar el archivo huérfano.
+    aviso = _aviso_de_promocion(db, tenant_id, promocion.id)
+    flyer = avisos_svc.eliminar(db, aviso) if aviso is not None else None
     db.delete(promocion)
     db.commit()
+    if flyer:
+        storage.borrar_publico(flyer)
+    return {"status": "ok", "id": promocion_id}
+
+
+# ── Publicación de una promoción en el carrusel del alumno (migración 056) ────
+# La tarjeta NO repite la configuración del premio: sólo lo anuncia y el alumno
+# la abre en `/alumno/invita-y-gana`. Por eso `tipo` y `promocion_id` los fija el
+# backend y el cuerpo lleva lo mismo que un aviso manual (título, texto y ventana).
+
+def _payload_aviso_promocion(datos: PublicarPromocionRequest,
+                             promocion: PromocionReferidos,
+                             imagen_url: str | None = None) -> dict:
+    """Payload de `avisos_marketing` armado desde el cuerpo de publicación."""
+    return {
+        "tipo": TIPO_PROMOCION,
+        "titulo": datos.titulo,
+        "texto": datos.texto,
+        "nombre_aliado": None,
+        "fecha_evento": None,
+        "vigente_desde": datos.vigente_desde,
+        "vigente_hasta": datos.vigente_hasta,
+        "fijado_arriba": datos.fijado_arriba,
+        # El flyer se sube desde Marketing (`POST /marketing/{id}/imagen`); si la
+        # tarjeta ya tenía uno, republicar NO lo pierde.
+        "imagen_url": imagen_url,
+        "promocion_id": promocion.id,
+    }
+
+
+@router.post("/promociones/{promocion_id}/publicar",
+             response_model=AvisoMarketingOut,
+             status_code=status.HTTP_200_OK)
+def publicar_promocion(
+    promocion_id: int,
+    datos: PublicarPromocionRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Publica la promoción en "Novedades del box" del Inicio del alumno.
+
+    Responde 200 (no 201) a propósito: el MISMO botón sirve para publicar y para
+    corregir la tarjeta ya publicada. Si existe, se EDITA ese aviso —no se crea
+    otro— porque el índice único `(tenant_id, promocion_id)` admite una sola
+    tarjeta por promoción y así se conserva su flyer y su `creado_en`.
+    """
+    tenant_id = current_user["tenant_id"]
+    promocion = _promocion_del_tenant(db, tenant_id, promocion_id)
+    if not promocion.activo:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=("La promoción está apagada: actívala antes de publicarla "
+                    "para que el alumno no llegue a una promoción sin premio."))
+    aviso = _aviso_de_promocion(db, tenant_id, promocion.id)
+    try:
+        if aviso is not None:
+            return avisos_svc.actualizar(
+                db, aviso, _payload_aviso_promocion(datos, promocion,
+                                                    aviso.imagen_url))
+        return avisos_svc.crear(
+            db, tenant_id, _payload_aviso_promocion(datos, promocion),
+            creado_por=current_user["usuario_id"])
+    except ValueError as error:
+        # `avisos_marketing.validar` devuelve la lista de errores: se responde 400
+        # con todos juntos, igual que `POST /marketing`.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=" ".join(error.args[0]))
+
+
+@router.delete("/promociones/{promocion_id}/publicar")
+def despublicar_promocion(
+    promocion_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Quita la tarjeta del carrusel. La promoción sigue existiendo y activa.
+
+    El aviso se BORRA (no se vence): si el admin la vuelve a publicar, arranca
+    una tarjeta nueva con la ventana que elija. El flyer se borra después del
+    commit y best-effort, igual que `DELETE /marketing/{id}`.
+    """
+    tenant_id = current_user["tenant_id"]
+    promocion = _promocion_del_tenant(db, tenant_id, promocion_id)
+    aviso = _aviso_de_promocion(db, tenant_id, promocion.id)
+    if aviso is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Esta promoción no está publicada.")
+    flyer = avisos_svc.eliminar(db, aviso)
+    if flyer:
+        storage.borrar_publico(flyer)
     return {"status": "ok", "id": promocion_id}
 
 

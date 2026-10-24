@@ -73,6 +73,14 @@ class AvisoMarketing(Base):
     # `productos.activo = False`, y el aviso se apaga al vencer su vigencia).
     producto_id = Column(Integer, ForeignKey(
         "productos.id", ondelete="CASCADE"), nullable=True)
+    # promocion_id: sólo `promocion` PUBLICADA desde Referidos (migración 056).
+    # Es el vínculo con la promoción por volumen que la tarjeta anuncia: la
+    # pantalla de referidos sabe si una promoción ya está al aire y el carrusel
+    # puede abrir directamente `/alumno/invita-y-gana`. CASCADE: un borrado duro
+    # de la promoción se lleva su tarjeta (el borrado normal es lógico,
+    # `promociones_referidos.activo = False`).
+    promocion_id = Column(Integer, ForeignKey(
+        "promociones_referidos.id", ondelete="CASCADE"), nullable=True)
     # creado_por: traza de quién publicó el aviso (SET NULL: dar de baja al
     # usuario no borra el aviso).
     creado_por = Column(Integer, ForeignKey(
@@ -94,6 +102,11 @@ class AvisoMarketing(Base):
         # el mismo aviso, no acumula). Los 4 tipos manuales van con producto_id
         # NULL y en Postgres los NULL no chocan entre sí → no se estorban.
         Index('uq_avisos_marketing_producto', 'tenant_id', 'producto_id',
+              unique=True),
+        # UNA tarjeta publicada por promoción y box (volver a publicar EDITA el
+        # mismo aviso). Los avisos manuales van con promocion_id NULL y en
+        # Postgres los NULL no chocan entre sí → no se estorban.
+        Index('uq_avisos_marketing_promocion', 'tenant_id', 'promocion_id',
               unique=True),
     )
 

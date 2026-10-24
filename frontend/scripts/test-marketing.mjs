@@ -14,7 +14,7 @@ import {
     construirFormData, payloadEdicion, mensajeDeError, tinteDeAcento,
     agruparParaCarrusel, tituloDeGrupo, tituloDeTarjeta, textoDeTarjeta,
     precioDeTarjeta, fotoDeTarjeta, tieneFlyer, PIE_PRODUCTO, MAX_MINIATURAS,
-    TIPO_REFERIDOS, COPY_REFERIDOS,
+    TIPO_REFERIDOS, COPY_REFERIDOS, esPromocionVinculada,
 } from '../src/utils/avisosMarketing.js';
 
 let fallos = 0;
@@ -279,6 +279,27 @@ eq(carrusel.includes('data-testid="carrusel-referidos"'), true,
 eq(carrusel.includes('<IconoRegalo />'), true, 'lleva el ícono de regalo');
 const app = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
 eq(app.includes('path="invita-y-gana"'), true, 'la ruta /alumno/invita-y-gana existe');
+
+// ── La tarjeta de una promoción PUBLICADA desde Referidos (migración 056) ──
+// `promocion` es también un tipo manual: la diferencia es `promocion_id`. Sólo la
+// vinculada lleva al alumno a buscar su código; una Promoción escrita a mano no
+// debe prometer un premio que el backend no va a aplicar.
+console.log('== La promoción vinculada lleva a Invita y Gana ==');
+eq(esPromocionVinculada({ tipo: 'promocion', promocion_id: 4 }), true,
+    'con promocion_id es la tarjeta vinculada');
+eq(esPromocionVinculada({ tipo: 'promocion' }), false,
+    'una Promoción escrita a mano NO se trata como vinculada');
+eq(esPromocionVinculada({ tipo: 'promocion', promocion_id: null }), false,
+    'promocion_id null = tarjeta manual');
+eq(esPromocionVinculada(null), false, 'sin aviso no explota');
+eq(carrusel.includes('esPromocionVinculada'), true,
+    'el carrusel distingue la tarjeta vinculada');
+eq(carrusel.includes('data-testid="carrusel-promo-cta"'), true,
+    'la tarjeta de la promoción tiene su CTA');
+eq(carrusel.includes('onVerReferidos={irAReferidos}'), true,
+    '... y el CTA apunta a Invita y Gana');
+eq(carrusel.includes('onAbrir={irAReferidos}'), true,
+    'la tarjeta fija de referidos usa la misma ruta');
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);

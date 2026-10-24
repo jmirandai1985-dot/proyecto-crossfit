@@ -1,12 +1,30 @@
 import React, { useMemo, useState } from 'react';
 import {
-    useEliminarPromocionReferidos, useGuardarPromocionReferidos,
-    usePromocionesReferidos, SIN_DATOS,
+    useDespublicarPromocionReferidos, useEliminarPromocionReferidos,
+    useGuardarPromocionReferidos, usePromocionesReferidos, SIN_DATOS,
 } from '../hooks/queries';
 import {
     TIPOS_PREMIO, etiquetaTipoPremio, formatearValorPremio, mensajeDeError,
     validarPromocionReferido,
 } from '../utils/referidos';
+import { estadoPublicacion } from '../utils/pendientes';
+import ModalPublicarPromocion from './ModalPublicarPromocion';
+
+// Chip de la tarjeta del carrusel: "Sin publicar" / "Publicada" / "Publicación
+// vencida". El estado lo decide el backend con el aviso vinculado (migración 056)
+// y `estadoPublicacion` sólo compara la fecha de fin.
+const CLASES_PUBLICACION = {
+    sin_publicar: 'border-zinc-700 bg-zinc-800 text-zinc-400',
+    vigente: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
+    vencida: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+};
+
+const formatearDia = (valor) => {
+    const dia = String(valor ?? '').slice(0, 10);
+    if (!dia) return '';
+    const [anio, mes, fecha] = dia.split('-');
+    return `${fecha}/${mes}/${anio}`;
+};
 
 const FORM_VACIO = {
     nombre: '',
@@ -36,12 +54,16 @@ const GestionPromocionesReferidos = () => {
     const promocionesQuery = usePromocionesReferidos();
     const guardar = useGuardarPromocionReferidos();
     const eliminar = useEliminarPromocionReferidos();
+    const despublicar = useDespublicarPromocionReferidos();
 
     const [form, setForm] = useState(FORM_VACIO);
     const [editando, setEditando] = useState(null);
     const [errores, setErrores] = useState({});
     const [mensaje, setMensaje] = useState(null);
     const [ocupadoId, setOcupadoId] = useState(null);
+    // Promoción que se está publicando/editando en el carrusel (`null` = modal
+    // cerrado). Se guarda la fila entera para que el modal abra con su texto.
+    const [publicando, setPublicando] = useState(null);
 
     const promociones = promocionesQuery.data || SIN_DATOS;
     const tipoSeleccionado = useMemo(
@@ -115,6 +137,29 @@ const GestionPromocionesReferidos = () => {
             setMensaje({
                 tipo: 'error',
                 texto: mensajeDeError(err, 'No pudimos eliminar la promoción.'),
+            });
+        } finally {
+            setOcupadoId(null);
+        }
+    };
+
+    // Quitar la tarjeta del carrusel. El backend BORRA el aviso vinculado: si se
+    // vuelve a publicar, arranca una tarjeta nueva con la ventana que se elija.
+    const quitarDelCarrusel = async (promocion) => {
+        if (!window.confirm(
+            `¿Quitar "${promocion.nombre}" del carrusel del alumno?\n\n`
+            + 'La promoción sigue activa: sólo deja de anunciarse en el Inicio.',
+        )) return;
+        setOcupadoId(promocion.id);
+        setMensaje(null);
+        try {
+            await despublicar.mutateAsync(promocion.id);
+            setMensaje({ tipo: 'exito', texto: 'Tarjeta quitada del carrusel.' });
+        } catch (err) {
+            console.error('Error despublicando la promoción:', err);
+            setMensaje({
+                tipo: 'error',
+                texto: mensajeDeError(err, 'No pudimos quitar la tarjeta del carrusel.'),
             });
         } finally {
             setOcupadoId(null);
@@ -279,13 +324,14 @@ const GestionPromocionesReferidos = () => {
                 </p>
             ) : (
                 <div className="overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-900">
-                    <table className="w-full min-w-[760px] text-sm">
+                    <table className="w-full min-w-[900px] text-sm">
                         <thead className="bg-zinc-950/70 text-[11px] uppercase tracking-wide text-zinc-500">
                             <tr>
                                 <th className="px-4 py-3 text-left">Promoción</th>
                                 <th className="px-4 py-3 text-left">Umbral</th>
                                 <th className="px-4 py-3 text-left">Premio</th>
                                 <th className="px-4 py-3 text-left">Estado</th>
+                                <th className="px-4 py-3 text-left">Carrusel</th>
                                 <th className="px-4 py-3 text-right">Acciones</th>
                             </tr>
                         </thead>
@@ -313,6 +359,42 @@ const GestionPromocionesReferidos = () => {
                                         )}
                                     </td>
                                     <td className="px-4 py-3">
+                                        <span
+                                            data-testid={`promocion-${promocion.id}-carrusel`}
+                                            className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${CLASES_PUBLICACION[estadoPublicacion(promocion).clave]}`}
+                                        >
+                                            {estadoPublicacion(promocion).texto}
+                                        </span>
+                                        {promocion.publicada && promocion.publicada_hasta && (
+                                            <p className="mt-1 text-[11px] text-zinc-500">
+                                                Hasta el {formatearDia(promocion.publicada_hasta)}
+                                            </p>
+                                        )}
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                            <button
+                                                type="button"
+                                                onClick={() => setPublicando(promocion)}
+                                                disabled={!promocion.activo || ocupadoId === promocion.id}
+                                                title={promocion.activo
+                                                    ? 'La tarjeta se muestra en el Inicio del alumno'
+                                                    : 'Activa la promoción para poder publicarla'}
+                                                className="rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-[11px] font-bold text-zinc-200 hover:border-orange-500 hover:text-orange-300 disabled:opacity-40"
+                                            >
+                                                {promocion.publicada ? 'Editar tarjeta' : 'Publicar'}
+                                            </button>
+                                            {promocion.publicada && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => quitarDelCarrusel(promocion)}
+                                                    disabled={ocupadoId === promocion.id}
+                                                    className="rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-[11px] font-bold text-zinc-400 hover:border-red-500 hover:text-red-400 disabled:opacity-50"
+                                                >
+                                                    Quitar
+                                                </button>
+                                            )}
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-3">
                                         <div className="flex justify-end gap-2">
                                             <button
                                                 type="button"
@@ -337,6 +419,18 @@ const GestionPromocionesReferidos = () => {
                     </table>
                 </div>
             )}
+
+            <ModalPublicarPromocion
+                isOpen={Boolean(publicando)}
+                promocion={publicando}
+                onClose={() => setPublicando(null)}
+                onSuccess={() => setMensaje({
+                    tipo: 'exito',
+                    texto: publicando?.publicada
+                        ? 'Tarjeta actualizada en el carrusel.'
+                        : 'Promoción publicada en el carrusel.',
+                })}
+            />
         </div>
     );
 };

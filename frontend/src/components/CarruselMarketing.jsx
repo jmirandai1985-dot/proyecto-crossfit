@@ -6,9 +6,10 @@ import { urlArchivo } from '../utils/imagen';
 // Productos del carrusel: la foto también cae al ícono si la URL no carga.
 import ImagenProducto from './ImagenProducto';
 import {
-    agruparParaCarrusel, COPY_REFERIDOS, etiquetaTipo, formatearFechaEvento, fotoDeTarjeta,
-    MAX_MINIATURAS, PIE_PRODUCTO, precioDeTarjeta, resumenVigencia,
-    textoDeTarjeta, TIPO_REFERIDOS, tieneFlyer, tipoDe, tituloDeGrupo, tituloDeTarjeta,
+    agruparParaCarrusel, COPY_REFERIDOS, esPromocionVinculada, etiquetaTipo,
+    formatearFechaEvento, fotoDeTarjeta, MAX_MINIATURAS, PIE_PRODUCTO, precioDeTarjeta,
+    resumenVigencia, textoDeTarjeta, TIPO_REFERIDOS, tieneFlyer, tipoDe, tituloDeGrupo,
+    tituloDeTarjeta,
 } from '../utils/avisosMarketing';
 import './carruselMarketing.css';
 
@@ -56,8 +57,10 @@ const Etiqueta = ({ tipo }) => (
     </span>
 );
 
-// Tarjeta de uno de los CUATRO avisos que escribe el admin.
-const TarjetaAviso = ({ aviso, onVerFlyer }) => {
+// Tarjeta de uno de los CUATRO avisos que escribe el admin. La de una promoción
+// publicada desde Referidos (`promocion_id`) suma un CTA a `/alumno/invita-y-gana`:
+// es la tarjeta que ANUNCIA el premio, y el alumno necesita su código para ganarlo.
+const TarjetaAviso = ({ aviso, onVerFlyer, onVerReferidos }) => {
     const tipo = tipoDe(aviso.tipo);
     const evento = aviso.tipo === 'evento' ? formatearFechaEvento(aviso.fecha_evento) : null;
     const pie = resumenVigencia(aviso);
@@ -94,6 +97,17 @@ const TarjetaAviso = ({ aviso, onVerFlyer }) => {
                     {tituloDeTarjeta(aviso)}
                 </h3>
                 {texto && <p className="cm-texto">{texto}</p>}
+                {esPromocionVinculada(aviso) && onVerReferidos && (
+                    <button
+                        type="button"
+                        className="cm-ver"
+                        onClick={onVerReferidos}
+                        data-testid="carrusel-promo-cta"
+                    >
+                        <IconoRegalo />
+                        Participar con mi código
+                    </button>
+                )}
                 {tieneFlyer(aviso) && (
                     <button type="button" className="cm-ver" onClick={() => onVerFlyer(aviso)}>
                         <IconoFoto />
@@ -245,6 +259,9 @@ const CarruselMarketing = () => {
         navigate(`/alumno/bazar?producto=${productoId}`);
     };
     const { data } = useAvisosMarketingVigentes();
+    // Destino de la tarjeta de referidos y del CTA de una promoción publicada
+    // desde Referidos: es donde el alumno ve su código (una sola ruta para las dos).
+    const irAReferidos = () => navigate('/alumno/invita-y-gana');
     // Al final, SIEMPRE, la tarjeta de "Invita y Gana": es del alumno, no del
     // admin, así que el carrusel se ve aunque no haya avisos vigentes.
     const tarjetas = useMemo(
@@ -342,12 +359,12 @@ const CarruselMarketing = () => {
                 onMouseLeave={() => setHover(false)}>
                 {tarjetas.map((tarjeta) => {
                     if (tarjeta.clase === 'referidos') {
-                        return <TarjetaReferidos key="referidos"
-                                                 onAbrir={() => navigate('/alumno/invita-y-gana')} />;
+                        return <TarjetaReferidos key="referidos" onAbrir={irAReferidos} />;
                     }
                     if (tarjeta.clase === 'aviso') {
                         return <TarjetaAviso key={`aviso-${tarjeta.aviso.id}`}
-                                             aviso={tarjeta.aviso} onVerFlyer={setFlyer} />;
+                                             aviso={tarjeta.aviso} onVerFlyer={setFlyer}
+                                             onVerReferidos={irAReferidos} />;
                     }
                     if (tarjeta.clase === 'producto') {
                         return <TarjetaProducto key={`producto-${tarjeta.aviso.id}`}
