@@ -26,7 +26,7 @@ from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, update
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -38,7 +38,7 @@ from app.core.estados import da_acceso_hoy, no_cancelada   # "viva" = NOT IN (ca
 from app.services import churn_service
 from app.services.auditoria_service import registrar_auditoria
 from app.models.clase import Clase
-from app.models.reserva import Reserva
+from app.models.reserva import Reserva, es_reserva_duplicada
 from app.models.suscripcion import Suscripcion
 from app.models.tenant import Tenant
 from app.models.usuario import Usuario, RolUsuario
@@ -707,7 +707,19 @@ def registrar_presente_sin_reserva(
         asistencia_via=VIA_SIN_CARGO,
     )
     db.add(reserva)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as error:
+        # Misma carrera que POST /reservas: dos marcados simultáneos del mismo
+        # alumno (dos coaches, o el coach y el admin) pasan el SELECT de
+        # duplicados a la vez; el índice único parcial de la migración 057
+        # rechaza el segundo. El rollback devuelve el aforo de ESTE request.
+        db.rollback()
+        if not es_reserva_duplicada(error):
+            raise
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El alumno ya tiene una reserva activa para esta clase")
     db.refresh(reserva)
 
     # ── Presencia marcada -> su situación de churn cambió -> recalc (segundo plano). ──

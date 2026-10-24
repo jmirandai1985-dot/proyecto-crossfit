@@ -11,13 +11,17 @@ from app.core.estados import (ESTADO_CANCELADO, da_acceso_hoy, es_cancelada,
 from app.models.usuario import Usuario
 from app.models.disciplina import Disciplina
 from app.models.clase import Clase
-from app.models.reserva import Reserva
+from app.models.reserva import Reserva, es_reserva_duplicada
 from app.db.database import get_db
 from typing import Optional
 from sqlalchemy import func, text, update
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, status
+from fastapi import (APIRouter, BackgroundTasks, Body, Depends, HTTPException,
+                     Query, Request, status)
+# Rate limit propio del alta de reservas: es el write más expuesto del alumno
+# (doble clic / reintentos del móvil) y el que mueve aforo y créditos.
+from app.core.rate_limit import limiter, LIMIT_RESERVA
 # N-9: trazabilidad de las reservas que el staff crea en nombre de un alumno.
 from app.services.auditoria_service import registrar_auditoria
 from app.services import churn_service
@@ -34,7 +38,9 @@ router = APIRouter()
 
 
 @router.post("", response_model=ReservaResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit(LIMIT_RESERVA)
 def crear_reserva(
+    request: Request,
     reserva_data: ReservaCreate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
@@ -54,6 +60,14 @@ def crear_reserva(
 
     CRÍTICO 1 (IDOR): El endpoint exige autenticación y el alumno solo puede
     reservar para sí mismo (alumno_id == usuario_id del token JWT).
+
+    ACID (fix concurrencia):
+    - la suscripción se lee con `FOR UPDATE` y el crédito se descuenta con un
+      UPDATE condicional (`creditos_disponibles > 0`): dos requests simultáneos
+      NO pueden gastar el mismo crédito dos veces;
+    - el duplicado lo garantiza el índice único parcial de la migración 057
+      (`uq_reservas_clase_alumno_viva`): si los dos requests pasan el SELECT a
+      la vez, el segundo choca contra el índice y se traduce a 400.
     """
 
     # ── N-9: quién puede reservar para quién (mismo patrón que POST /pedidos y
@@ -163,19 +177,6 @@ def crear_reserva(
             detail="Alumno no encontrado"
         )
 
-    # Verificar que no exista una reserva duplicada
-    existing = db.query(Reserva).filter(
-        Reserva.clase_id == reserva_data.clase_id,
-        Reserva.alumno_id == reserva_data.alumno_id,
-        no_cancelada(Reserva.estado)
-    ).first()
-
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El alumno ya tiene una reserva activa para esta clase"
-        )
-
     # Verificar créditos disponibles del alumno
     from app.models.suscripcion import Suscripcion
 
@@ -189,6 +190,19 @@ def crear_reserva(
     # no está en el catálogo: `planes.activo = false`). Es el MISMO criterio del SQL del
     # mantenimiento (`shared.estados.sql_suscripcion_vigente`): `pendiente`/`rechazado` NUNCA dan
     # acceso y el resto lo deciden las fechas (día de Chile, último día completo).
+    # ── CRÉDITOS (ACID): el read-modify-write se hace con LOCK de la fila ──────
+    # Antes: `SELECT` de la membresía → `creditos_disponibles -= 1` en Python →
+    # UPDATE al commitear. Dos requests simultáneos del mismo alumno leían el
+    # MISMO valor (ej. 1 crédito), los dos pasaban el `<= 0` y los dos gastaban
+    # ese único crédito: dos clases por un crédito (double-spend).
+    # Ahora, en este orden:
+    #   1. `with_for_update()` bloquea la suscripción hasta el commit/rollback:
+    #      el segundo request ESPERA y, al entrar, ya lee los créditos que dejó
+    #      el primero (READ COMMITTED + lock = valor fresco).
+    #   2. Un UPDATE **condicional** (`WHERE creditos_disponibles > 0`) es la
+    #      red final: si aun así llegara con 0, rowcount=0 → 400 y no se crea
+    #      la reserva (ni se consume el asiento/aforo).
+    #   3. El índice único de la migración 057 cierra la carrera del duplicado.
     membresia = db.query(Suscripcion).filter(
         Suscripcion.tenant_id == tenant_id,
         Suscripcion.usuario_id == reserva_data.alumno_id,
@@ -196,13 +210,36 @@ def crear_reserva(
     ).order_by(
         Suscripcion.creditos_disponibles.desc().nulls_last(),
         Suscripcion.fecha_expiracion.desc()
-    ).first()
+    ).with_for_update().first()
 
     if not membresia:
+        db.rollback()
         raise HTTPException(
             status_code=400, detail="No tienes una membresía activa")
 
+    # Verificar que no exista una reserva duplicada.
+    # VA DESPUÉS del lock de la suscripción a propósito: el alumno tiene UNA
+    # suscripción, así que ese lock serializa también el "¿ya reservó esta
+    # clase?" del MISMO alumno. El segundo request espera, y al entrar ya ve la
+    # reserva que el primero commiteó -> 400 limpio (sin gastar crédito ni
+    # asiento). El índice único de la migración 057 queda como última red para
+    # lo que no pasa por acá (scripts, n8n, otro endpoint).
+    existing = db.query(Reserva).filter(
+        Reserva.clase_id == reserva_data.clase_id,
+        Reserva.alumno_id == reserva_data.alumno_id,
+        no_cancelada(Reserva.estado)
+    ).first()
+
+    if existing:
+        # El aforo ya se incrementó arriba: se devuelve el asiento antes de salir.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El alumno ya tiene una reserva activa para esta clase"
+        )
+
     if membresia.creditos_disponibles is not None and membresia.creditos_disponibles <= 0:
+        db.rollback()
         raise HTTPException(
             status_code=400, detail="No te quedan clases disponibles. Renueva tu plan.")
 
@@ -218,12 +255,47 @@ def crear_reserva(
         estado=reserva_data.estado
     )
 
-    # Descontar token
+    # Descontar token: UPDATE condicional, NUNCA un `-= 1` en memoria.
+    # `creditos_disponibles IS NULL` = plan ilimitado: no hay nada que descontar.
+    # `synchronize_session=False`: el objeto ORM no se re-evalúa (el commit lo
+    # expira igual); el valor de verdad es el de la BD.
     if membresia.creditos_disponibles is not None:
-        membresia.creditos_disponibles -= 1
+        try:
+            descuento = db.execute(
+                update(Suscripcion)
+                .where(Suscripcion.id == membresia.id)
+                .where(Suscripcion.tenant_id == tenant_id)
+                .where(Suscripcion.creditos_disponibles > 0)
+                .values(creditos_disponibles=Suscripcion.creditos_disponibles - 1)
+                .execution_options(synchronize_session=False)
+            )
+        except DBAPIError:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Alta demanda, intenta de nuevo",
+            )
+        if descuento.rowcount == 0:
+            db.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail="No te quedan clases disponibles. Renueva tu plan.")
 
     db.add(db_reserva)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as error:
+        # Carrera del check-then-insert: los dos requests vieron "sin duplicado"
+        # y el índice único `uq_reservas_clase_alumno_viva` (migración 057)
+        # rechazó el segundo. Es un 400 de negocio, no un 500. El rollback
+        # devuelve el crédito y el asiento de ESTE request.
+        db.rollback()
+        if not es_reserva_duplicada(error):
+            raise
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El alumno ya tiene una reserva activa para esta clase",
+        )
     db.refresh(db_reserva)
 
     # ── La reserva descontó un crédito -> recalc del churn del alumno (segundo plano). ──

@@ -19,6 +19,12 @@ limiter = Limiter(key_func=get_remote_address)
 LIMIT_LOGIN = "5/minute"          # fuerza bruta de login
 LIMIT_REGISTRO = "5/hour"          # abuso de registro masivo
 LIMIT_CRITICO = "30/minute"        # cambios sensibles (pagos/aprobaciones)
+# POST /reservas: es un write del ALUMNO, no del admin, y detrás de una misma IP
+# puede estar todo un box reservando la clase de las 19:00 (NAT de la sede/WiFi
+# compartido). El límite es anti-abuso (un token filtrado no puede barrer clases
+# ni vaciar los créditos de un alumno a fuerza bruta), no una barrera para el
+# alumno: 60/min ≈ 1 por segundo y una clase entera entra sin verlo.
+LIMIT_RESERVA = "60/minute"
 # GET /configuracion: la ficha bancaria del box la leen TRES pantallas (Configuración,
 # Bazar y Solicitar plan) y detrás de una misma IP puede estar todo un box entrenando
 # (NAT de la sede/WiFi compartido). El límite es anti-abuso (un token filtrado no puede

@@ -1,11 +1,12 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Query
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel
 from app.db.database import get_db
 from app.models.suscripcion import EstadoSuscripcion, Suscripcion
 from app.models.transaccion_financiera import TransaccionFinanciera
+from app.models.usuario import Usuario
 from app.core.dependencies import get_current_admin
 from app.core.rate_limit import limiter, LIMIT_CRITICO
 from app.services import churn_service
@@ -15,6 +16,17 @@ from app.models.plan import Plan
 from app.utils.santiago import hoy_santiago, fin_de_plan_chile   # HOY en Chile (la TZ del proceso es UTC)
 
 router = APIRouter()
+
+
+# ── Idempotencia del alta manual de plan (ACID) ───────────────────────────────
+# `POST /suscripciones` es el alta MANUAL del admin (ajuste/venta en el mesón).
+# Un doble clic, dos pestañas o un reintento del móvil creaban DOS suscripciones
+# y DOS ingresos en `transacciones_financieras`: el box quedaba con el doble de
+# plata en caja y el alumno con el doble de créditos. La ventana es corta a
+# propósito: un admin SÍ puede necesitar vender el mismo plan dos veces al mismo
+# alumno (renovación) — sólo bloquea el duplicado inmediato, el que produce un
+# reintento. Mismo plan + mismo alumno + misma ventana = un solo alta.
+VENTANA_IDEMPOTENCIA = timedelta(minutes=10)
 
 
 class SuscripcionCreate(BaseModel):
@@ -45,6 +57,34 @@ def crear_suscripcion(
 ):
     # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT (el body se ignora).
     data.tenant_id = current_user["tenant_id"]
+
+    # ── Idempotencia (ACID): mismo alumno + mismo plan dentro de la ventana ──
+    # El `FOR UPDATE` sobre la fila del ALUMNO serializa dos altas simultáneas
+    # del MISMO alumno: el segundo request espera y, al entrar, ve la
+    # suscripción que el primero acaba de commitear. Sin el lock, los dos
+    # SELECT verían "no hay ninguna" y las dos altas pasarían (doble crédito,
+    # doble ingreso en caja).
+    db.query(Usuario).filter(
+        Usuario.id == data.usuario_id,
+        Usuario.tenant_id == data.tenant_id,
+    ).with_for_update().first()
+
+    gemela = db.query(Suscripcion).filter(
+        Suscripcion.tenant_id == data.tenant_id,
+        Suscripcion.usuario_id == data.usuario_id,
+        Suscripcion.plan_id == data.plan_id,
+        Suscripcion.created_at >= datetime.now(timezone.utc) - VENTANA_IDEMPOTENCIA,
+    ).order_by(Suscripcion.id.desc()).first()
+
+    if gemela is not None:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=(f"Ya existe una suscripción de este plan para este alumno "
+                    f"(#{gemela.id}) creada hace menos de "
+                    f"{int(VENTANA_IDEMPOTENCIA.total_seconds() // 60)} minutos. "
+                    "Si de verdad necesitas otra alta, espera unos minutos."),
+        )
 
     # ── Inicio: el body puede traerlo; si no, ahora (UTC, como antes). ──
     if data.fecha_inicio:

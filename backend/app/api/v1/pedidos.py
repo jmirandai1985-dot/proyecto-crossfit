@@ -442,10 +442,14 @@ def actualizar_estado_pedido(
     """
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
-    pedido = db.query(Pedido).filter(
-        Pedido.id == pedido_id,
-        Pedido.tenant_id == tenant_id
-    ).first()
+    # Bloqueo del pedido: dos admins validando/entregando a la vez se serializan
+    # (el código de retiro se genera UNA vez y la traza de entrega no se pisa).
+    pedido = (
+        db.query(Pedido)
+        .filter(Pedido.id == pedido_id, Pedido.tenant_id == tenant_id)
+        .with_for_update()
+        .first()
+    )
 
     if not pedido:
         raise HTTPException(
@@ -615,29 +619,36 @@ def actualizar_pedido(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Actualiza un pedido existente. Solo admin (tenant del token)."""
-    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
-    tenant_id = current_user["tenant_id"]
-    pedido = db.query(Pedido).filter(
-        Pedido.id == pedido_id,
-        Pedido.tenant_id == tenant_id
-    ).first()
+    """Actualiza un pedido existente: **sólo el estado**, con las reglas del Bazar.
 
-    if not pedido:
+    Solo admin (tenant del token).
+
+    ACID / fix de reglas: antes esto hacía `setattr(pedido, "estado", ...)` y se
+    saltaba TODAS las validaciones de `PUT /{id}/estado`: un `pendiente` podía
+    saltar directo a `entregado` (sin código de retiro, sin traza de quién lo
+    entregó) o un `entregado` volver a `pendiente` (devolviendo un pedido ya
+    cobrado a la cola de validación, sin tocar el stock). Ahora delega en ese
+    endpoint: mismas transiciones permitidas, mismo código de retiro al validar,
+    misma traza de entrega, mismo aviso en la campana del alumno y el mismo
+    bloqueo (`FOR UPDATE`) del pedido.
+    """
+    # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora (lo resuelve
+    # el endpoint delegado, que también exige admin).
+    datos = pedido_data.model_dump(exclude_unset=True)
+    nuevo_estado = datos.get("estado")
+    if not nuevo_estado:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Pedido con ID {pedido_id} no encontrado"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=("Sólo se puede actualizar el estado del pedido: envía "
+                    '{"estado": "validado"} (o usa PUT /{id}/estado).'),
         )
 
-    update_data = pedido_data.model_dump(exclude_unset=True)
-
-    for field, value in update_data.items():
-        setattr(pedido, field, value)
-
-    db.commit()
-    db.refresh(pedido)
-
-    return pedido
+    return actualizar_estado_pedido(
+        pedido_id=pedido_id,
+        nuevo_estado=nuevo_estado,
+        db=db,
+        current_user=current_user,
+    )
 
 
 @router.delete("/{pedido_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -647,13 +658,23 @@ def eliminar_pedido(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Elimina un pedido (solo si está en estado pendiente). Solo admin (tenant del token)."""
+    """Elimina un pedido (solo si está en estado pendiente). Solo admin (tenant del token).
+
+    ACID: el pedido se bloquea con `FOR UPDATE` y el stock se devuelve en la MISMA
+    transacción que el DELETE. Antes, dos DELETE simultáneos (doble clic, dos
+    pestañas) leían los dos el pedido `pendiente` y los dos devolvían el stock:
+    el producto quedaba con existencias de más (y un pedido ya borrado se volvía
+    a "borrar"). El segundo request ahora espera al primero, no encuentra el
+    pedido y responde 404.
+    """
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
-    pedido = db.query(Pedido).filter(
-        Pedido.id == pedido_id,
-        Pedido.tenant_id == tenant_id
-    ).first()
+    pedido = (
+        db.query(Pedido)
+        .filter(Pedido.id == pedido_id, Pedido.tenant_id == tenant_id)
+        .with_for_update()
+        .first()
+    )
 
     if not pedido:
         raise HTTPException(
@@ -667,16 +688,27 @@ def eliminar_pedido(
             detail="Solo se pueden eliminar pedidos en estado pendiente"
         )
 
-    # Restaurar stock
-    producto = db.query(Producto).filter(
-        Producto.id == pedido.producto_id
-    ).first()
+    try:
+        # El producto también se bloquea: es el mismo patrón del rechazo, para
+        # que dos devoluciones de stock del mismo producto no se pisen.
+        producto = (
+            db.query(Producto)
+            .filter(Producto.id == pedido.producto_id)
+            .with_for_update()
+            .first()
+        )
 
-    if producto:
-        producto.stock += pedido.cantidad
+        if producto:
+            producto.stock = (producto.stock or 0) + pedido.cantidad
 
-    db.delete(pedido)
-    db.commit()
+        db.delete(pedido)
+        db.commit()
+    except DBAPIError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Alta demanda, intenta de nuevo",
+        )
 
     return None
 

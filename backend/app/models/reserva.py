@@ -1,11 +1,32 @@
 ﻿"""
 Modelo SQLAlchemy para la tabla reservas
 """
-from sqlalchemy import Column, Integer, Boolean, ForeignKey, Index, String
+from sqlalchemy import Column, Integer, Boolean, ForeignKey, Index, String, text
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.sql import func
 
 from app.db.database import Base
+from shared import estados as _estados
+
+# ── Una sola reserva VIVA por (clase, alumno) ────────────────────────────────
+# El nombre vive acá porque el índice se declara acá: los endpoints que crean
+# reservas (`POST /reservas` y `POST /asistencia/clases/{id}/sin-reserva`)
+# importan `es_reserva_duplicada()` para traducir la violación a un 400 de
+# negocio en vez de un 500. Cambiar el nombre del índice obliga a tocar UN lugar.
+NOMBRE_INDICE_RESERVA_UNICA = "uq_reservas_clase_alumno_viva"
+
+
+def es_reserva_duplicada(error) -> bool:
+    """¿Este `IntegrityError` es la violación del índice único de reserva viva?
+
+    Es la ÚLTIMA red de la regla "no dos reservas vivas del mismo alumno en la
+    misma clase": dos requests simultáneos pueden pasar el `SELECT` de
+    duplicados a la vez (el check-then-insert no es atómico), y el que pierde
+    choca contra el índice parcial de la migración 057. Sin esta traducción, esa
+    carrera termina en 500.
+    """
+    mensaje = str(getattr(error, "orig", error) or error)
+    return NOMBRE_INDICE_RESERVA_UNICA in mensaje
 
 
 class Reserva(Base):
@@ -39,6 +60,18 @@ class Reserva(Base):
         Index('ix_reservas_tenant_id', 'tenant_id'),
         Index('ix_reservas_clase_id', 'clase_id'),
         Index('ix_reservas_alumno_id', 'alumno_id'),
+        # ── Migración 057: UNA sola reserva VIVA por (clase, alumno) ─────────
+        # Índice ÚNICO PARCIAL: las canceladas no entran, así el alumno puede
+        # volver a reservar la misma clase después de cancelar (y el histórico
+        # conserva sus cancelaciones). Es la red de la carrera check-then-insert
+        # de `POST /reservas` y de la presencia sin cargo de Asistencia: el que
+        # pierde recibe 400 (`es_reserva_duplicada`) en vez de crear la segunda.
+        Index(
+            NOMBRE_INDICE_RESERVA_UNICA,
+            'clase_id', 'alumno_id',
+            unique=True,
+            postgresql_where=text(f"estado NOT IN ({_estados.lista_sql()})"),
+        ),
     )
 
     def __repr__(self):
