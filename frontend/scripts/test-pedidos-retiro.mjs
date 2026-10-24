@@ -3,8 +3,11 @@
 //   Ejecutar:  node scripts/test-pedidos-retiro.mjs
 import {
     esListoParaEntrega, normalizarCodigoRetiro, textoProducto, textoEspera,
-    textoInformado, mapaInformados,
+    textoInformado, mapaInformados, contarListosParaEntrega,
 } from '../src/utils/pedidosEntrega.js';
+import {
+    ESTADOS_PEDIDO, normalizarFiltroEstado, urlPedidosPorEstado,
+} from '../src/utils/pedidosAdmin.js';
 
 let fallos = 0;
 const eq = (obtenido, esperado, msg) => {
@@ -69,6 +72,33 @@ eq(mapa[9], undefined, 'un correo manual de OTRA entidad no se cuela');
 eq(mapa[10], undefined, 'una acción que no es EMAIL_MANUAL tampoco');
 eq(Object.keys(mapaInformados(null)).length, 0, 'sin filas -> mapa vacío (no rompe)');
 eq(Object.keys(mapaInformados(undefined)).length, 0, 'sin llamada -> mapa vacío');
+
+// ── Contador del chip "Validados sin retirar" ────────────────────────────────
+// Es la MISMA regla de arriba, contada: si cambia `esListoParaEntrega`, el chip
+// cambia solo y no puede decir un número distinto al de la pantalla de entrega.
+eq(contarListosParaEntrega([
+    { estado: 'validado', codigo_retiro: 'UB-1', entregado_en: null },
+    { estado: 'validado', codigo_retiro: 'UB-2', entregado_en: '2026-08-10T12:00:00Z' },
+    { estado: 'pendiente', codigo_retiro: null, entregado_en: null },
+    { estado: 'validado', codigo_retiro: 'UB-3', entregado_en: null },
+]), 2, 'cuenta sólo los validados con código y sin entregar');
+eq(contarListosParaEntrega([]), 0, 'lista vacía -> 0');
+eq(contarListosParaEntrega(null), 0, 'consulta sin datos -> 0 (el chip no muestra NaN)');
+eq(contarListosParaEntrega(undefined), 0, 'consulta que aún no cargó -> 0');
+
+// ── Filtro por estado en la URL (?estado=validado) ───────────────────────────
+// El chip abre /admin/pedidos YA filtrado. Un valor inventado NO se manda al
+// backend: cae a "todos" en vez de provocar un 422.
+eq(ESTADOS_PEDIDO.join(','), 'pendiente,validado,entregado,rechazado',
+    'los estados del filtro son los de la tabla');
+eq(normalizarFiltroEstado('validado'), 'validado', 'un estado válido pasa tal cual');
+eq(normalizarFiltroEstado('  VALIDADO '), 'validado', 'tolera mayúsculas y espacios');
+eq(normalizarFiltroEstado('loquesea'), '', 'un estado inventado cae a "todos"');
+eq(normalizarFiltroEstado(null), '', 'sin parámetro -> "todos"');
+eq(urlPedidosPorEstado('validado'), '/admin/pedidos?estado=validado',
+    'el chip apunta a la lista filtrada');
+eq(urlPedidosPorEstado('loquesea'), '/admin/pedidos', 'un estado inválido no arma una URL rota');
+eq(urlPedidosPorEstado(''), '/admin/pedidos', 'sin estado -> la lista completa');
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);

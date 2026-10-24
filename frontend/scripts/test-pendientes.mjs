@@ -16,6 +16,10 @@ import {
     mapearColaLegacy, textoBadge, fechaISO, ventanaPublicacionSugerida,
     validarPublicacion, tarjetaSugerida, estadoPublicacion,
 } from '../src/utils/pendientes.js';
+import { readFileSync } from 'node:fs';
+
+/** Lee un archivo del repo (para comprobar el montaje en las pantallas). */
+const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
 let fallos = 0;
 const ok = (cond, msg) => {
@@ -184,6 +188,33 @@ igual(estadoPublicacion({ publicada: true, publicada_hasta: '2026-11-22T12:00:00
     'tolera una fecha con hora (serialización con timestamp)');
 igual(estadoPublicacion({ publicada: true }, hoy).clave, 'vigente',
     'publicada sin fecha de fin no se marca vencida');
+
+console.log('== 10. Lectura defensiva de `null` (crash de /admin/marketing?tab=referidos) ==');
+// El parámetro por defecto `= {}` NO cubre `null`: el modal quedaba montado con
+// `promocion={null}` y leer `.nombre` tiraba "Cannot read properties of null".
+igual(tarjetaSugerida(null).titulo, 'Invita y gana',
+    'promoción null => título por defecto (no `.nombre` de null)');
+ok(tarjetaSugerida(null).texto.startsWith('Invita a tus amigos al box'),
+    'promoción null => texto sugerido genérico');
+ok(!tarjetaSugerida(null).texto.includes('undefined'), 'el texto por defecto no filtra "undefined"');
+igual(estadoPublicacion(null, hoy),
+    { clave: 'sin_publicar', texto: 'Sin publicar', vencida: false },
+    'promoción null => chip "Sin publicar"');
+igual(estadoPublicacion(undefined, hoy).clave, 'sin_publicar', 'sin argumento sigue funcionando');
+
+console.log('== 11. Montaje en la app (chip y modal) ==');
+const leerPend = leer('../src/components/pendientes/PanelPedidos.jsx');
+const leerGestion = leer('../src/components/GestionPromocionesReferidos.jsx');
+ok(/urlPedidosPorEstado\('validado'\)/.test(leerPend),
+    'el chip "Validados sin retirar" enlaza con el filtro en la URL');
+ok(/contarListosParaEntrega\s*\(/.test(leerPend),
+    'el contador sale de la MISMA regla que la pantalla de entrega');
+ok(/🚚 Validados sin retirar/.test(leerPend) && /validadosQ\.isLoading/.test(leerPend),
+    'el chip muestra el contador (y "…" mientras carga)');
+ok(/\{publicando && \(/.test(leerGestion)
+    && /promocion=\{publicando\}/.test(leerGestion)
+    && /onClose=\{\(\) => setPublicando\(null\)\}/.test(leerGestion),
+    'el modal de publicación sólo se monta con una promoción real');
 
 console.log('');
 if (fallos > 0) {
