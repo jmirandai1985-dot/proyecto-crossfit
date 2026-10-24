@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import api from '../../services/api';
 // TZ Chile: la fecha del pedido (instante) se muestra en horario chileno.
@@ -9,6 +10,10 @@ import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
 // Mesón: entrega con el CÓDIGO DE RETIRO del alumno (mismo modal que el panel del
 // coach). El código se genera al validar; acá también se puede respaldar a mano.
 import ModalEntregarPedido from '../../components/ModalEntregarPedido';
+// El filtro por estado viaja en la URL (`?estado=validado`): el chip "Validados sin
+// retirar" de /admin/pendientes abre la lista ya filtrada y el enlace se puede
+// refrescar/compartir sin perder el filtro.
+import { normalizarFiltroEstado } from '../../utils/pedidosAdmin';
 
 /**
  * Pedidos del Bazar (panel admin).
@@ -47,11 +52,134 @@ const etiquetaDe = (estado) => ESTADOS.find((e) => e.key === estado)?.label || e
 // Filtros: '' = todos; el backend recibe `estado` solo cuando hay un filtro activo.
 const FILTROS = [{ key: '', label: 'Todos' }, ...ESTADOS.map(({ key, label }) => ({ key, label }))];
 
+/**
+ * Acciones de un pedido. Las comparten la TABLA (escritorio) y la TARJETA (mobile):
+ * si mañana cambia una regla (quién puede entregar/rechazar), se cambia en UN lugar
+ * y no queda una versión vieja en la otra vista.
+ */
+const AccionesPedido = ({
+    pedido, siguiente, accionId, onVerComprobante, onEntregar, onRechazar, onAvanzar, className,
+}) => (
+    <div className={className}>
+        {pedido.voucher_url ? (
+            <button
+                onClick={() => onVerComprobante(pedido)}
+                className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold transition-colors"
+            >
+                📎 Ver comprobante
+            </button>
+        ) : (
+            <span className="text-zinc-500 text-xs">Sin comprobante</span>
+        )}
+        {pedido.estado === 'validado' && (
+            <button
+                onClick={() => onEntregar(pedido.codigo_retiro || '')}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors"
+                title="Entregar este pedido con su código de retiro"
+            >
+                📷 Entregar
+            </button>
+        )}
+        {pedido.estado === 'pendiente' && (
+            <button
+                onClick={() => onRechazar(pedido)}
+                disabled={accionId === pedido.id}
+                className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition-colors"
+                title="Rechazar este pedido y devolver el stock"
+            >
+                ❌ Rechazar
+            </button>
+        )}
+        <button
+            onClick={() => onAvanzar(pedido)}
+            disabled={!siguiente || accionId === pedido.id}
+            className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition-colors"
+        >
+            {accionId === pedido.id ? '...'
+                : (siguiente ? ETIQUETA_ACCION[pedido.estado] : 'Completado')}
+        </button>
+    </div>
+);
+
+/**
+ * TARJETA de pedido para mobile (<768px).
+ *
+ * POR QUÉ EXISTE: la tabla tiene 8 columnas y en un teléfono había que arrastrarla
+ * en horizontal para ver el total o el código. La tarjeta deja lo importante en dos
+ * líneas fijas —total + estado, y fecha + código de retiro— y las acciones abajo,
+ * a lo ancho. En ≥768px sigue la tabla de siempre (`hidden md:block`).
+ */
+const TarjetaPedido = ({
+    pedido, accionId, onVerComprobante, onEntregar, onRechazar, onAvanzar,
+}) => {
+    const siguiente = SIGUIENTE_ESTADO[pedido.estado];
+    return (
+        <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+            {/* Línea 1: total + estado */}
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <p className="text-lg font-extrabold text-zinc-100">
+                        ${(pedido.total || 0).toLocaleString('es-CL')}
+                    </p>
+                    <p className="truncate text-[11.5px] text-zinc-500">
+                        Pedido #{pedido.id} · {pedido.cantidad} ×{' '}
+                        {pedido.producto_nombre || `Producto #${pedido.producto_id}`}
+                    </p>
+                </div>
+                <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold ${tonoDe(pedido.estado)}`}>
+                    {etiquetaDe(pedido.estado)}
+                </span>
+            </div>
+            {/* Línea 2: fecha + código de retiro */}
+            <div className="mt-2 flex items-center justify-between gap-3 border-t border-zinc-800 pt-2">
+                <span className="text-[12px] text-zinc-400">
+                    {pedido.fecha_pedido ? fmtFechaChile(pedido.fecha_pedido) : '—'}
+                </span>
+                <span className="font-mono text-[13px] font-bold tracking-wider text-orange-300">
+                    {pedido.codigo_retiro || 'Sin código'}
+                </span>
+            </div>
+            {/* Quién lo pidió (contexto, una línea) */}
+            <p className="mt-2 truncate text-[12.5px] text-zinc-300">
+                {pedido.alumno_nombre || `Alumno #${pedido.alumno_id}`}
+            </p>
+            {pedido.alumno_email && (
+                <p className="truncate text-[11px] text-zinc-500">{pedido.alumno_email}</p>
+            )}
+            {pedido.entregado_en && (
+                <p className="mt-1 text-[11px] text-zinc-500">
+                    Entregado {fmtFechaChile(pedido.entregado_en)}
+                    {pedido.entregado_por_nombre ? ` por ${pedido.entregado_por_nombre}` : ''}
+                </p>
+            )}
+            <AccionesPedido
+                pedido={pedido}
+                siguiente={siguiente}
+                accionId={accionId}
+                onVerComprobante={onVerComprobante}
+                onEntregar={onEntregar}
+                onRechazar={onRechazar}
+                onAvanzar={onAvanzar}
+                className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-3"
+            />
+        </article>
+    );
+};
+
 const AdminPedidos = () => {
     const [pedidos, setPedidos] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const [filtro, setFiltro] = useState('');
+    // El filtro VIVE en la URL: `/admin/pedidos?estado=validado` es el destino del
+    // chip "Validados sin retirar" de /admin/pendientes. Así el enlace se puede
+    // compartir o refrescar sin perder el filtro (`replace` para no llenar el
+    // historial con cada chip que se toca).
+    const [searchParams, setSearchParams] = useSearchParams();
+    const filtro = normalizarFiltroEstado(searchParams.get('estado'));
+    const cambiarFiltro = (nuevo) => {
+        const limpio = normalizarFiltroEstado(nuevo);
+        setSearchParams(limpio ? { estado: limpio } : {}, { replace: true });
+    };
     const [accionId, setAccionId] = useState(null);
     const [msg, setMsg] = useState('');
     const [comprobante, setComprobante] = useState(null);   // pedido cuyo comprobante se ve
@@ -207,7 +335,7 @@ const AdminPedidos = () => {
                         return (
                             <button
                                 key={f.key || 'todos'}
-                                onClick={() => setFiltro(f.key)}
+                                onClick={() => cambiarFiltro(f.key)}
                                 className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${activo
                                     ? 'bg-orange-500/15 border-orange-500/40 text-orange-500'
                                     : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'}`}
@@ -230,7 +358,10 @@ const AdminPedidos = () => {
                         </p>
                     </div>
                 ) : (
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                    <>
+                    {/* ESCRITORIO (≥768px): la tabla de siempre. En mobile se oculta
+                        (`md:block`) y deja lugar a las tarjetas de abajo. */}
+                    <div className="hidden bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden md:block">
                         <div className="overflow-x-auto">
                             <table className="w-full">
                                 <thead>
@@ -297,45 +428,16 @@ const AdminPedidos = () => {
                                                     )}
                                                 </td>
                                                 <td className="px-4 py-3.5">
-                                                    <div className="flex items-center justify-end gap-2">
-                                                        {p.voucher_url ? (
-                                                            <button
-                                                                onClick={() => setComprobante(p)}
-                                                                className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold transition-colors"
-                                                            >
-                                                                📎 Ver comprobante
-                                                            </button>
-                                                        ) : (
-                                                            <span className="text-zinc-500 text-xs">Sin comprobante</span>
-                                                        )}
-                                                        {p.estado === 'validado' && (
-                                                            <button
-                                                                onClick={() => abrirEntrega(p.codigo_retiro || '')}
-                                                                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors"
-                                                                title="Entregar este pedido con su código de retiro"
-                                                            >
-                                                                📷 Entregar
-                                                            </button>
-                                                        )}
-                                                        {p.estado === 'pendiente' && (
-                                                            <button
-                                                                onClick={() => abrirRechazo(p)}
-                                                                disabled={accionId === p.id}
-                                                                className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition-colors"
-                                                                title="Rechazar este pedido y devolver el stock"
-                                                            >
-                                                                ❌ Rechazar
-                                                            </button>
-                                                        )}
-                                                        <button
-                                                            onClick={() => abrirConfirmacion(p)}
-                                                            disabled={!siguiente || accionId === p.id}
-                                                            className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition-colors"
-                                                        >
-                                                            {accionId === p.id ? '...'
-                                                                : (siguiente ? ETIQUETA_ACCION[p.estado] : 'Completado')}
-                                                        </button>
-                                                    </div>
+                                                    <AccionesPedido
+                                                        pedido={p}
+                                                        siguiente={siguiente}
+                                                        accionId={accionId}
+                                                        onVerComprobante={setComprobante}
+                                                        onEntregar={abrirEntrega}
+                                                        onRechazar={abrirRechazo}
+                                                        onAvanzar={abrirConfirmacion}
+                                                        className="flex items-center justify-end gap-2"
+                                                    />
                                                 </td>
                                             </tr>
                                         );
@@ -344,6 +446,24 @@ const AdminPedidos = () => {
                             </table>
                         </div>
                     </div>
+
+                    {/* MOBILE (<768px): una tarjeta por pedido. La tabla de 8 columnas
+                        obligaba a arrastrar en horizontal; acá el total, el estado, la
+                        fecha y el código de retiro se leen sin scroll lateral. */}
+                    <div className="space-y-3 md:hidden">
+                        {pedidos.map((p) => (
+                            <TarjetaPedido
+                                key={p.id}
+                                pedido={p}
+                                accionId={accionId}
+                                onVerComprobante={setComprobante}
+                                onEntregar={abrirEntrega}
+                                onRechazar={abrirRechazo}
+                                onAvanzar={abrirConfirmacion}
+                            />
+                        ))}
+                    </div>
+                    </>
                 )}
 
                 {/* MODAL: confirmar el cambio de estado (avanzar de a un paso). */}

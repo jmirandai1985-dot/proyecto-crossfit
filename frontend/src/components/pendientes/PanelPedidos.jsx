@@ -8,6 +8,12 @@ import {
 import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
 // TZ Chile: la fecha del pedido es un instante y se muestra en horario chileno.
 import { fmtFechaChile } from '../../utils/fecha';
+// Aviso de LOGÍSTICA: cuántos validados siguen sin retirarse. Usa la MISMA
+// definición que la pantalla "Pedidos listos para entrega" (validado + código de
+// retiro + sin entregar), no una copia de la regla.
+import { contarListosParaEntrega } from '../../utils/pedidosEntrega';
+// Enlace a /admin/pedidos con el filtro en la URL (la pantalla lo lee de ahí).
+import { urlPedidosPorEstado } from '../../utils/pedidosAdmin';
 // Ventana de rechazo COMPARTIDA con las otras dos colas de la pantalla.
 import ModalMotivoRechazo from './ModalMotivoRechazo';
 
@@ -25,6 +31,12 @@ import ModalMotivoRechazo from './ModalMotivoRechazo';
  */
 const PanelPedidos = () => {
     const pedidosQ = usePedidosAdmin('pendiente');
+    // Segunda consulta, con la MISMA queryKey que usan las otras pantallas de pedidos
+    // (`['pedidos','admin','validado']`): React Query comparte la caché, así que si el
+    // admin ya miró los validados no se vuelve a pedir. No entra al badge de la
+    // pestaña: estos pedidos ya no esperan al admin, esperan al alumno.
+    const validadosQ = usePedidosAdmin('validado');
+    const sinRetirar = contarListosParaEntrega(validadosQ.data);
     const cambiarEstado = useCambiarEstadoPedido();
     const rechazarPedido = useRechazarPedido();
 
@@ -93,6 +105,22 @@ const PanelPedidos = () => {
                     {error || errorCarga}
                 </div>
             )}
+
+            {/* Aviso de LOGÍSTICA (no de aprobación): pedidos ya validados que el
+                alumno todavía no retira. No suma al badge de la pestaña —el badge
+                cuenta lo que espera al admin— y abre /admin/pedidos YA filtrado por
+                `?estado=validado`. */}
+            <div className="mb-4">
+                <Link
+                    to={urlPedidosPorEstado('validado')}
+                    title="Pedidos ya validados que el alumno todavía no retira"
+                    className="inline-flex items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-300 transition-colors hover:bg-blue-500/20 hover:text-blue-200"
+                >
+                    🚚 Validados sin retirar (
+                    {validadosQ.isLoading ? '…' : validadosQ.isError ? 's/d' : sinRetirar}
+                    )
+                </Link>
+            </div>
 
             {loading ? (
                 <div className="flex items-center justify-center py-20">

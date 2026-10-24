@@ -23,6 +23,15 @@ export const esListoParaEntrega = (pedido) => Boolean(
     && !pedido.entregado_en,
 );
 
+/**
+ * Cuántos pedidos están listos para retirar (chip "Validados sin retirar" de la
+ * pestaña Pedidos). Acepta `undefined`/`null` mientras la consulta carga: un 0 es
+ * mejor que un `NaN` en pantalla.
+ */
+export const contarListosParaEntrega = (pedidos) => (
+    Array.isArray(pedidos) ? pedidos.filter(esListoParaEntrega).length : 0
+);
+
 /** "Botella x2" (o sólo el nombre si es 1 unidad / no hay dato de cantidad). */
 export const textoProducto = (pedido) => {
     const nombre = pedido?.producto_nombre || 'Producto';
