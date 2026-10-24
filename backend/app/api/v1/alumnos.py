@@ -392,11 +392,29 @@ def activar_alumno(
 ):
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
+    # Bloqueo de fila: "Activar" es un endpoint de estado. Sin el lock, dos clics
+    # (o dos admins en dos dispositivos) leían `pendiente_activacion` a la vez y
+    # los dos generaban contraseña + correo; el segundo dejaba al alumno con una
+    # clave que ya no era la que se le envió por correo.
     usuario = db.query(Usuario).filter(
         Usuario.id == alumno_id, Usuario.tenant_id == tenant_id
-    ).first()
+    ).with_for_update().first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Alumno no encontrado")
+
+    # Guarda de estado: este endpoint ACTIVA un registro pendiente, no "revive"
+    # cualquier fila. Ya activo / rechazado / inactivo → 409 con el estado real,
+    # en vez de otra contraseña provisional, otro email y otra fila de auditoría
+    # para alguien que ya entró (o que fue rechazado y no debe volver a entrar).
+    if usuario.estado != "pendiente_activacion":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Este alumno ya no está pendiente de activación (estado: "
+                f"'{usuario.estado}'). Refresca la cola: otro administrador pudo "
+                "haberlo activado o rechazado."
+            ),
+        )
 
     password_provisional = generar_password_provisional(8)
     usuario.password_hash = hash_password(password_provisional)

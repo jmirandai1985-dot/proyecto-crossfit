@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { useAccionAlumnoPendiente, usePendientesActivacion } from '../../hooks/queries';
+// Ventana de rechazo COMPARTIDA con las otras dos colas de la pantalla.
+import ModalMotivoRechazo from './ModalMotivoRechazo';
 
 /**
  * Pestaña "Registros" de `/admin/pendientes`.
@@ -37,6 +39,8 @@ const PanelRegistros = () => {
     const [credenciales, setCredenciales] = useState(null);
 
     // ── Acciones sobre un registro (activar / rechazar) ──────────────────────
+    // Devuelve `true`/`false`: la ventana de rechazo sólo se cierra si la acción
+    // realmente se aplicó (si falla, el admin ve el error y puede reintentar).
     const handleAccion = async (alumnoId, accion) => {
         setActionId(alumnoId);
         setMessage('');
@@ -61,8 +65,10 @@ const PanelRegistros = () => {
                 setCredenciales(null);
             }
             // Sin recarga manual: la mutación ya invalidó la cola y el resumen.
+            return true;
         } catch (err) {
             setError(err.response?.data?.detail || 'Ocurrió un error al procesar la solicitud');
+            return false;
         } finally {
             setActionId(null);
         }
@@ -179,35 +185,24 @@ const PanelRegistros = () => {
                 </div>
             )}
 
-            {/* Confirmación del rechazo: el alumno NO se borra, queda 'rechazado'. */}
+            {/* Confirmación del rechazo (ventana compartida): el alumno NO se borra,
+                queda 'rechazado'. Sin motivo porque el endpoint no lo recibe. */}
             {confirmarRechazo && (
-                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
-                    <div className="bg-zinc-900 rounded-lg shadow-xl max-w-md w-full p-6">
-                        <h2 className="text-xl font-bold text-zinc-100 mb-3">Rechazar solicitud</h2>
-                        <p className="text-sm text-zinc-300 mb-5">
-                            Confirma rechazar la solicitud de {confirmarRechazo.nombre} ({confirmarRechazo.correo}).
-                            El alumno quedará con estado &quot;rechazado&quot; y sin acceso (no se borra su registro).
-                        </p>
-                        <div className="flex gap-3">
-                            <button
-                                onClick={() => setConfirmarRechazo(null)}
-                                className="flex-1 px-4 py-2 border border-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-800/50 font-medium"
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                onClick={() => {
-                                    const pend = confirmarRechazo;
-                                    setConfirmarRechazo(null);
-                                    handleAccion(pend.id, 'rechazar');
-                                }}
-                                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
-                            >
-                                Rechazar
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <ModalMotivoRechazo
+                    titulo="Rechazar solicitud"
+                    contexto={`Confirma rechazar la solicitud de ${confirmarRechazo.nombre} (${confirmarRechazo.correo}).`}
+                    ayuda={'El alumno quedará con estado "rechazado" y sin acceso (no se borra su registro).'}
+                    pedirMotivo={false}
+                    textoConfirmar="Rechazar solicitud"
+                    enviando={actionId === confirmarRechazo.id}
+                    onCancelar={() => setConfirmarRechazo(null)}
+                    onConfirmar={async () => {
+                        const pend = confirmarRechazo;
+                        // Se cierra sólo si el backend aceptó: si falla, el banner de
+                        // error queda arriba y el admin puede reintentar con el botón.
+                        if (await handleAccion(pend.id, 'rechazar')) setConfirmarRechazo(null);
+                    }}
+                />
             )}
         </div>
     );

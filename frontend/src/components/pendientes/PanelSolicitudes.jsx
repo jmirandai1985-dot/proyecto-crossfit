@@ -3,6 +3,8 @@ import { useAprobarSolicitud, useRechazarSolicitud, useSolicitudesPendientes } f
 // El comprobante se pide al endpoint AUTENTICADO (blob): /static/uploads/... se
 // sirve sin token, así que el voucher del plan NO se puede abrir por URL pública.
 import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
+// Ventana de rechazo COMPARTIDA con las otras dos colas de la pantalla.
+import ModalMotivoRechazo from './ModalMotivoRechazo';
 
 /**
  * Pestaña "Solicitudes" de `/admin/pendientes` (la COLA 2 de la pantalla vieja).
@@ -31,7 +33,6 @@ const PanelSolicitudes = () => {
 
     const [solicitudActionId, setSolicitudActionId] = useState(null);
     const [rechazoPlanModal, setRechazoPlanModal] = useState(null); // solicitud
-    const [motivoRechazo, setMotivoRechazo] = useState('');
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
     // Vista previa del comprobante (blob autenticado, revocado al cerrar).
@@ -45,6 +46,8 @@ const PanelSolicitudes = () => {
     });
 
     // ── Aprobar / rechazar una solicitud de plan ─────────────────────────────
+    // Devuelve `true` si la API aceptó la acción: la ventana de rechazo se cierra
+    // sólo con un rechazo REAL (si falla, se queda abierta con el motivo escrito).
     const handleSolicitudAccion = async (id, accion, motivo = '') => {
         setSolicitudActionId(id);
         setMessage('');
@@ -57,8 +60,10 @@ const PanelSolicitudes = () => {
                 await rechazarSolicitud.mutateAsync({ id, motivo });
                 setMessage(`Solicitud #${id} rechazada.`);
             }
+            return true;
         } catch (err) {
             setError(err.response?.data?.detail || 'Ocurrió un error al procesar la solicitud de plan');
+            return false;
         } finally {
             setSolicitudActionId(null);
         }
@@ -157,7 +162,7 @@ const PanelSolicitudes = () => {
                                                     {solicitudActionId === s.id ? '…' : '✓ Aprobar'}
                                                 </button>
                                                 <button
-                                                    onClick={() => { setRechazoPlanModal(s); setMotivoRechazo(''); }}
+                                                    onClick={() => setRechazoPlanModal(s)}
                                                     disabled={solicitudActionId === s.id}
                                                     className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-red-500/20 border border-zinc-700 hover:border-red-500/40 text-zinc-300 hover:text-red-300 text-xs font-semibold transition-colors"
                                                 >
@@ -177,47 +182,24 @@ const PanelSolicitudes = () => {
                 pide el motivo y el alumno lo ve en su panel.
             </p>
 
-            {/* MODAL RECHAZO DE SOLICITUD DE PLAN (con motivo para el alumno) */}
+            {/* MODAL RECHAZO DE SOLICITUD DE PLAN (compartido con Pedidos y Registros) */}
             {rechazoPlanModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
-                    <div className="bg-zinc-900 rounded-lg shadow-xl max-w-md w-full p-6">
-                        <h2 className="text-xl font-bold text-zinc-100 mb-3">Rechazar solicitud de plan</h2>
-                        <p className="text-sm text-zinc-300 mb-4">
-                            ¿Rechazar la solicitud #{rechazoPlanModal.id} de {rechazoPlanModal.alumno_nombre}
-                            {' '}para el plan {rechazoPlanModal.plan_nombre}? El alumno verá el motivo en su
-                            panel y podrá enviar otra solicitud.
-                        </p>
-                        <label className="block text-xs font-semibold text-zinc-400 uppercase mb-2">
-                            Motivo (se envía al alumno)
-                        </label>
-                        <textarea
-                            value={motivoRechazo}
-                            onChange={(e) => setMotivoRechazo(e.target.value)}
-                            rows={3}
-                            placeholder="Ej: el comprobante no es legible, el monto no coincide…"
-                            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-red-500"
-                        />
-                        <div className="flex gap-3 mt-5">
-                            <button
-                                onClick={() => { setRechazoPlanModal(null); setMotivoRechazo(''); }}
-                                className="flex-1 px-4 py-2 border border-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-800/50 font-medium"
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                onClick={() => {
-                                    const s = rechazoPlanModal;
-                                    setRechazoPlanModal(null);
-                                    handleSolicitudAccion(s.id, 'rechazar', motivoRechazo);
-                                }}
-                                disabled={solicitudActionId === rechazoPlanModal.id}
-                                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium"
-                            >
-                                Rechazar
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <ModalMotivoRechazo
+                    titulo="Rechazar solicitud de plan"
+                    contexto={`¿Rechazar la solicitud #${rechazoPlanModal.id} de ${rechazoPlanModal.alumno_nombre} para el plan ${rechazoPlanModal.plan_nombre}?`}
+                    ayuda="El alumno verá el motivo en su panel y podrá enviar otra solicitud."
+                    placeholder="Ej: el comprobante no es legible, el monto no coincide…"
+                    enviando={solicitudActionId === rechazoPlanModal.id}
+                    onCancelar={() => setRechazoPlanModal(null)}
+                    onConfirmar={async (motivo) => {
+                        const s = rechazoPlanModal;
+                        // Se cierra SÓLO si el backend aceptó: si falla, el admin
+                        // conserva el motivo escrito y puede reintentar.
+                        if (await handleSolicitudAccion(s.id, 'rechazar', motivo)) {
+                            setRechazoPlanModal(null);
+                        }
+                    }}
+                />
             )}
 
 

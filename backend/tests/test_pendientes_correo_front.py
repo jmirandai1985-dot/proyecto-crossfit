@@ -13,6 +13,12 @@ DESDE LA TANDA 4 estas dos colas viven en `components/pendientes/` y no en la pa
 `/admin/pendientes` (las pestañas "Registros" y "Solicitudes"). El guard apunta a los
 paneles nuevos: si alguien los mueve, esto falla y hay que reapuntarlo (no borrarlo).
 
+TANDA 5 (unificación del rechazo): la ventana es UNA sola
+(`components/pendientes/ModalMotivoRechazo.jsx`) y la usan las tres colas. Lo que este
+archivo fija ya no es "cada panel tiene su modal" sino que el rechazo SIGUE pasando por
+una confirmación y que el motivo SIGUE llegando al backend (Solicitudes) o NO se pide
+cuando el endpoint no lo recibe (Registros).
+
 Correr (aislado):
     cd backend && py -3.12 -m pytest tests/test_pendientes_correo_front.py -q --noconftest
 """
@@ -58,14 +64,24 @@ def test_b_rechazar_un_registro_nuevo_pasa_por_el_modal():
     assert "handleAccion(p.id, 'rechazar')" not in fuente, (
         "no puede quedar un camino que rechace sin confirmar")
     assert "{confirmarRechazo && (" in fuente
-    assert "Confirma rechazar la solicitud de {confirmarRechazo.nombre}" in fuente
+    # Tanda 5: el texto vive en el `contexto` de la ventana COMPARTIDA.
+    assert "Confirma rechazar la solicitud de ${confirmarRechazo.nombre}" in fuente
     assert "handleAccion(pend.id, 'rechazar')" in fuente, (
         "la acción real vive en el modal de confirmación")
+    # El endpoint `PUT /alumnos/{id}/rechazar` NO recibe motivo: la ventana
+    # compartida se usa sin textarea (pedirlo sería texto que se tira).
+    assert "<ModalMotivoRechazo" in fuente
+    assert "pedirMotivo={false}" in fuente
 
 
 def test_b_rechazar_una_solicitud_de_plan_pide_motivo():
     fuente = _fuente(SOLICITUDES)
     assert "setRechazoPlanModal(s)" in fuente
-    assert "handleSolicitudAccion(s.id, 'rechazar', motivoRechazo)" in fuente
     assert "Rechazar solicitud de plan" in fuente
-    assert "motivoRechazo" in fuente, "el alumno tiene que ver el motivo en su panel"
+    # Tanda 5: el motivo lo captura la ventana compartida y llega por `onConfirmar`.
+    assert "<ModalMotivoRechazo" in fuente
+    assert "onConfirmar={async (motivo) =>" in fuente
+    assert "handleSolicitudAccion(s.id, 'rechazar', motivo)" in fuente, (
+        "el alumno tiene que ver el motivo en su panel: viaja en la petición")
+    assert "motivoRechazo" not in fuente, (
+        "el motivo ya no vive en un estado local: es del modal compartido")

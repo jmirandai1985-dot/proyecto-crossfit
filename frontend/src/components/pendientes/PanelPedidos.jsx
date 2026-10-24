@@ -8,6 +8,8 @@ import {
 import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
 // TZ Chile: la fecha del pedido es un instante y se muestra en horario chileno.
 import { fmtFechaChile } from '../../utils/fecha';
+// Ventana de rechazo COMPARTIDA con las otras dos colas de la pantalla.
+import ModalMotivoRechazo from './ModalMotivoRechazo';
 
 /**
  * Pestaña "Pedidos" de `/admin/pendientes`.
@@ -37,7 +39,6 @@ const PanelPedidos = () => {
     const [error, setError] = useState('');
     const [comprobante, setComprobante] = useState(null);   // pedido cuyo voucher se ve
     const [rechazar, setRechazar] = useState(null);         // pedido a rechazar
-    const [motivoRechazo, setMotivoRechazo] = useState('');
 
     const { preview: comprobantePreview } = useDocumentoAutenticado({
         previewUrl: comprobante?.id ? `/api/v1/pedidos/${comprobante.id}/voucher?inline=1` : '',
@@ -60,16 +61,19 @@ const PanelPedidos = () => {
         }
     };
 
-    const confirmarRechazo = async () => {
+    // Rechazar = devolver stock + avisar al alumno con el motivo. La ventana NO se
+    // cierra antes de llamar a la API (antes sí, y si fallaba se perdía el motivo):
+    // sólo se cierra cuando el backend confirma el rechazo.
+    const confirmarRechazo = async (motivo) => {
         const pedido = rechazar;
-        setRechazar(null);
+        if (!pedido) return;
         setAccionId(pedido.id);
         setMessage('');
         setError('');
         try {
-            await rechazarPedido.mutateAsync({ pedidoId: pedido.id, motivo: motivoRechazo });
+            await rechazarPedido.mutateAsync({ pedidoId: pedido.id, motivo });
             setMessage(`Pedido #${pedido.id} rechazado. Se devolvió el stock y se avisó al alumno.`);
-            setMotivoRechazo('');
+            setRechazar(null);
         } catch (err) {
             setError(err.response?.data?.detail || 'No se pudo rechazar el pedido.');
         } finally {
@@ -164,7 +168,7 @@ const PanelPedidos = () => {
                                                     {accionId === p.id ? '…' : '✓ Validar'}
                                                 </button>
                                                 <button
-                                                    onClick={() => { setRechazar(p); setMotivoRechazo(''); }}
+                                                    onClick={() => setRechazar(p)}
                                                     disabled={accionId === p.id}
                                                     className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-red-500/20 border border-zinc-700 hover:border-red-500/40 text-zinc-300 hover:text-red-300 text-xs font-semibold transition-colors"
                                                 >
@@ -236,38 +240,18 @@ const PanelPedidos = () => {
                 </div>
             )}
 
-            {/* MODAL RECHAZO CON MOTIVO (el alumno lo recibe en su notificación) */}
+            {/* MODAL RECHAZO CON MOTIVO (compartido con Solicitudes y Registros) */}
             {rechazar && (
-                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
-                    <div className="bg-zinc-900 rounded-lg shadow-xl max-w-md w-full p-6">
-                        <h2 className="text-xl font-bold text-zinc-100 mb-3">Rechazar pedido #{rechazar.id}</h2>
-                        <p className="text-sm text-zinc-300 mb-4">
-                            Se devuelve el stock del producto y se avisa al alumno con este motivo.
-                        </p>
-                        <label className="block text-xs font-semibold text-zinc-400 uppercase mb-2">Motivo</label>
-                        <textarea
-                            value={motivoRechazo}
-                            onChange={(e) => setMotivoRechazo(e.target.value)}
-                            rows={3}
-                            placeholder="Ej: el comprobante no corresponde al monto del pedido…"
-                            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-red-500"
-                        />
-                        <div className="flex gap-3 mt-5">
-                            <button
-                                onClick={() => { setRechazar(null); setMotivoRechazo(''); }}
-                                className="flex-1 px-4 py-2 border border-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-800/50 font-medium"
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                onClick={confirmarRechazo}
-                                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
-                            >
-                                Rechazar
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <ModalMotivoRechazo
+                    titulo={`Rechazar pedido #${rechazar.id}`}
+                    contexto={`Pedido de ${rechazar.alumno_nombre || 'un alumno'} · ${rechazar.producto_nombre || 'producto del Bazar'}.`}
+                    ayuda="Se devuelve el stock del producto y se avisa al alumno con este motivo."
+                    etiqueta="Motivo"
+                    placeholder="Ej: el comprobante no corresponde al monto del pedido…"
+                    enviando={accionId === rechazar.id}
+                    onCancelar={() => setRechazar(null)}
+                    onConfirmar={confirmarRechazo}
+                />
             )}
         </div>
     );

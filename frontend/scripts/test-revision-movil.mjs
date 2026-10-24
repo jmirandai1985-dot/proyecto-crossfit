@@ -41,8 +41,11 @@ ok(MOVIL.includes('pedidosPendientes.slice(0, 2).map'),
     'lista hasta dos pedidos nuevos en la tarjeta');
 ok(/Pedido del Bazar · \{p\.producto_nombre/.test(MOVIL),
     'cada fila dice que es un pedido del Bazar (no se confunde con un voucher)');
-ok(/onClick=\{\(\) => navigate\('\/admin\/pedidos'\)\}/.test(MOVIL),
-    'tocar una fila lleva a la pantalla Pedidos (ahí se confirma o rechaza)');
+// Tanda 5: la fila del pedido abre la PESTAÑA Pedidos de la pantalla unificada
+// (misma bandeja que los vouchers, con validar/rechazar con motivo) y no la pantalla
+// suelta `/admin/pedidos`, que sigue existiendo para el resto del flujo del Bazar.
+ok(/onClick=\{\(\) => navigate\(rutaPendientes\('pedidos'\)\)\}/.test(MOVIL),
+    'tocar una fila lleva a la pestaña Pedidos (ahí se confirma o rechaza)');
 ok(MOVIL.includes('Los comprobantes y pedidos nuevos aparecen acá'),
     'el estado vacío menciona las DOS colas');
 

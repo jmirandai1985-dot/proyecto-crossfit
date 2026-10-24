@@ -944,11 +944,13 @@ const InicioMobileAdmin = () => {
                             ))}
 
                             {/* Pedidos del Bazar esperando confirmación: la tarjeta ya no muestra
-                                "0" cuando el alumno compró. Se revisan en la pantalla Pedidos
-                                (ahí se aprueba —se genera el código de retiro— o se rechaza). */}
+                                "0" cuando el alumno compró. Se revisan en la MISMA pantalla de
+                                pendientes (pestaña Pedidos: ahí se valida —se genera el código
+                                de retiro— o se rechaza con motivo), igual que los vouchers, que
+                                llevan a la pestaña Solicitudes. */}
                             {pedidosPendientes.slice(0, 2).map((p) => (
                                 <button key={`pedido-${p.id}`} type="button" className="vrow"
-                                    onClick={() => navigate('/admin/pedidos')}
+                                    onClick={() => navigate(rutaPendientes('pedidos'))}
                                     aria-label={`Revisar pedido de ${p.alumno_nombre || 'un alumno'}`}>
                                     <span className="mini" aria-hidden="true">
                                         <i /><i /><i /><i />
@@ -971,7 +973,7 @@ const InicioMobileAdmin = () => {
 
                             {pedidosPendientes.length > 2 && (
                                 <button type="button" className="link"
-                                    onClick={() => navigate('/admin/pedidos')}>
+                                    onClick={() => navigate(rutaPendientes('pedidos'))}>
                                     Ver los {pedidosPendientes.length} pedidos
                                 </button>
                             )}
