@@ -59,6 +59,10 @@ import { clasesDeFecha, diasDeLaSemana, resumenesDeSemana } from '../../utils/se
 import FiltroDisciplina from '../../components/FiltroDisciplina';
 import { useFiltroDisciplina } from '../../hooks/useFiltroDisciplina';
 import { CLAVE_FILTRO_ASISTENCIA, filtrarPorDisciplina } from '../../utils/filtroDisciplina';
+// Enlaces a la pantalla unificada "Pendientes" (Tanda 4): el deep-link viejo
+// (`/admin/alumnos-pendientes`) sigue funcionando como redirect, pero acá vamos
+// directo a la pestaña que corresponde (`?tab=`).
+import { rutaPendientes } from '../../utils/pendientes';
 // Estilos del Dashboard móvil del admin (mockup admin-mobile-mockup.html), acotados a
 // `.ub-admin`: NO alcanzan la versión ≥768px ni el tema del resto del panel.
 import './inicioMobileAdmin.css';
@@ -802,8 +806,9 @@ const InicioMobileAdmin = () => {
                 </p>
 
                 {/* ── A. KPIs (A1: orden nuevo) ──────────────────────────────
-                    1) Vouchers por aprobar -> abre la pantalla completa de
-                       pendientes (`/admin/alumnos-pendientes`), no la hoja rápida.
+                    1) Vouchers por aprobar -> abre la pantalla unificada de
+                       pendientes en la pestaña "Solicitudes" (`?tab=solicitudes`),
+                       no la hoja rápida.
                     2) Vencen en 5 días -> Fidelización (sin cambios).
                     3) Alumnos nuevos y en prueba -> su pantalla (sin cambios).
                     4) Ingresos de hoy -> INFORMATIVA: ya no navega a Reportes.
@@ -817,7 +822,7 @@ const InicioMobileAdmin = () => {
                         error={errores.vouchers} cargando={cargando}
                         sub={hayVouchers ? <em>Toca para revisar</em> : 'Todo al día'}
                         pulso={hayVouchers}
-                        chevron onClick={() => navigate('/admin/alumnos-pendientes')}
+                        chevron onClick={() => navigate(rutaPendientes('solicitudes'))}
                     />
                     <Kpi
                         clase="k-venc" icono="clock" label="Vencen en 5 días"
@@ -903,7 +908,7 @@ const InicioMobileAdmin = () => {
                         </h2>
                         {vouchers.length > 2 && (
                             <button type="button" className="link"
-                                onClick={() => navigate('/admin/alumnos-pendientes')}>
+                                onClick={() => navigate(rutaPendientes('solicitudes'))}>
                                 Ver los {vouchers.length}
                             </button>
                         )}

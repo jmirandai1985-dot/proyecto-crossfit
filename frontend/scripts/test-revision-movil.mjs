@@ -57,8 +57,10 @@ ok(API.includes('ESTADOS_VALIDOS = ["pendiente", "validado", "entregado"]'),
 console.log('== 4. "En revisión" no deja de contar los vouchers ==');
 ok(SIN_COMENTARIOS.includes('vouchers.slice(0, 2).map'),
     'los vouchers de plan se siguen listando primero');
-ok(SIN_COMENTARIOS.includes("navigate('/admin/alumnos-pendientes')"),
-    'y su acceso a la pantalla de pendientes sigue igual');
+// Tanda 4: la pantalla de pendientes es UNA con pestañas, así que el acceso apunta a
+// `rutaPendientes('solicitudes')` (helper compartido) en vez del path viejo.
+ok(SIN_COMENTARIOS.includes("navigate(rutaPendientes('solicitudes'))"),
+    'y su acceso a la pestaña Solicitudes de Pendientes sigue igual');
 
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);

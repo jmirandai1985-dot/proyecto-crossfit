@@ -19,8 +19,11 @@ import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
 import { mensajeError } from '../../services/queryClient';
 import {
     useAprobarSolicitud, useAlumnosNuevosMes, useClasesHoy, useCountPendientesActivacion,
-    useRechazarSolicitud, useSolicitudesPendientes, useStatsDashboard,
+    useRechazarSolicitud, useResumenPendientes, useSolicitudesPendientes, useStatsDashboard,
 } from '../../hooks/queries';
+// Contadores de la pantalla unificada "Pendientes" (Tanda 4): la tarjeta del
+// Dashboard, el badge del menú, la campana y la pantalla leen el MISMO resumen.
+import { normalizarResumen, rutaPendientes } from '../../utils/pendientes';
 
 // Estilo de una clase del día (ocupación, color de barra, cupo ampliado y badge de estado).
 // Lo comparten la tarjeta y la sección "Clases de hoy": misma lectura para todas las filas.
@@ -54,6 +57,10 @@ const AdminDashboard = () => {
     // useEffect, así que navegar entre las dos costaba 4 requests).
     const solicitudesQ = useSolicitudesPendientes();
     const registrosQ = useCountPendientesActivacion();
+    // Los CUATRO contadores (solicitudes, pedidos, registros, premios) en un solo
+    // request. La tarjeta usa este resumen para el total y el desglose; las listas
+    // de abajo siguen con sus hooks propios (traen las filas, no sólo el número).
+    const resumenQ = useResumenPendientes();
     const statsQ = useStatsDashboard(tenant_id);
     // "Alumnos nuevos de este mes": MISMA fuente que la pantalla de detalle
     // (`GET /admin/alumnos-nuevos`), así el número de la tarjeta y la lista no
@@ -301,12 +308,31 @@ const AdminDashboard = () => {
         setTimeout(() => setMsg(''), 4000);
     };
 
-    // Pendientes por revisar = REGISTROS de alumno nuevo + SOLICITUDES DE PLAN con
-    // comprobante (dos colas distintas). Si falló cualquiera de las dos fuentes se
-    // devuelve null y la tarjeta muestra "s/d" en vez de un total incompleto.
-    const totalPendientes = (registrosError || solicitudesError)
-        ? null
-        : (countPendientes || 0) + solicitudes.length;
+    // Pendientes por revisar = los CUATRO contadores del resumen (solicitudes de plan
+    // con comprobante, pedidos del Bazar sin validar, registros de alumno nuevo y
+    // premios de referidos). Si falló el resumen se cae al cálculo viejo (las dos
+    // colas que la pantalla ya tenía cargadas) y, si también falló alguna de esas,
+    // se devuelve null y la tarjeta muestra "s/d" en vez de un total incompleto.
+    const resumen = normalizarResumen(resumenQ.data);
+    const resumenError = resumenQ.error
+        ? mensajeError(resumenQ.error, 'No se pudieron contar los pendientes') : '';
+    const hayResumen = !!resumenQ.data && !resumenError;
+    const totalPendientes = hayResumen
+        ? resumen.total
+        : (registrosError || solicitudesError)
+            ? null
+            : (countPendientes || 0) + solicitudes.length;
+    // Desglose de la tarjeta: se muestra sólo lo que tiene algo (o el resumen completo
+    // cuando está en cero, para que la tarjeta no quede muda).
+    const desglosePendientes = [
+        { clave: 'registros', label: 'registro', plural: 'registros' },
+        { clave: 'solicitudes', label: 'solicitud de plan', plural: 'solicitudes de plan' },
+        { clave: 'pedidos', label: 'pedido', plural: 'pedidos' },
+        { clave: 'premios', label: 'premio', plural: 'premios' },
+    ].map(({ clave, label, plural }) => ({
+        clave,
+        texto: `${resumen[clave]} ${resumen[clave] === 1 ? label : plural}`,
+    }));
 
     // "Alumnos nuevos de este mes": número y listado salen del MISMO endpoint que
     // abre la tarjeta (`/admin/alumnos-nuevos`). `convertidos` viene resuelto por
@@ -404,20 +430,20 @@ const AdminDashboard = () => {
                                     </>
                                 )}
                             </button>
-                            <button onClick={() => navigate('/admin/alumnos-pendientes?cola=solicitudes')} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-rose-600 hover:shadow-md hover:border-rose-700 transition-all cursor-pointer text-left">
+                            <button onClick={() => navigate(rutaPendientes('solicitudes'))} className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-rose-600 hover:shadow-md hover:border-rose-700 transition-all cursor-pointer text-left">
                                 <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Solicitudes Pendientes</p>
                                 {totalPendientes === null ? (
-                                    <p className="text-sm font-bold text-rose-400 mt-2" title={registrosError || solicitudesError}>
+                                    <p className="text-sm font-bold text-rose-400 mt-2" title={registrosError || solicitudesError || resumenError}>
                                         ⚠️ s/d (no se pudo consultar)
                                     </p>
                                 ) : (
                                     <p className="text-3xl font-bold text-rose-700 mt-1">{totalPendientes}</p>
                                 )}
-                                {/* Desglose: son DOS colas. Antes solo se contaban los registros
-                                    y una solicitud de plan con voucher no sumaba en ninguna parte. */}
+                                {/* Desglose de la pantalla unificada: antes sólo se contaban los
+                                    registros y una solicitud de plan con voucher no sumaba en
+                                    ninguna parte (y los pedidos / premios no aparecían acá). */}
                                 <p className="text-xs text-zinc-500 mt-1">
-                                    {countPendientes || 0} registro{countPendientes === 1 ? '' : 's'} ·
-                                    {' '}{solicitudes.length} solicitud{solicitudes.length === 1 ? '' : 'es'} de plan — Clic para ver
+                                    {desglosePendientes.map((d) => d.texto).join(' · ')} — Clic para ver
                                 </p>
                             </button>
                             <div className="bg-zinc-900 rounded-lg shadow p-5 border-l-4 border-purple-600">
@@ -508,11 +534,11 @@ const AdminDashboard = () => {
                             </p>
                         </div>
                         <button
-                            onClick={() => navigate('/admin/alumnos-pendientes')}
+                            onClick={() => navigate(rutaPendientes('registros'))}
                             className="shrink-0 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold transition-colors"
-                            title="Ver también los registros de alumnos nuevos pendientes"
+                            title="Ver los registros de alumnos nuevos pendientes en la pantalla unificada"
                         >
-                            Ver registros pendientes ({countPendientes || 0})
+                            Ver registros pendientes ({resumen.registros})
                         </button>
                     </div>
                     {solicitudesError ? (

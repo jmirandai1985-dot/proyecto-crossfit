@@ -8,6 +8,10 @@ import { getMenuItems, COACH_SUBTABS } from '../config/menu';
 import { MENU_ICONS } from '../config/menuIcons';
 // N-2: campana de notificaciones del alumno (contador de no leídas + panel).
 import CampanaNotificaciones from './CampanaNotificaciones';
+// Contador de pendientes del admin (misma queryKey que la pantalla, el Dashboard y
+// la campana: un solo request para los cuatro badges, y se refresca solo cada 60 s).
+import { useResumenPendientes } from '../hooks/queries';
+import { totalPendientes, textoBadge } from '../utils/pendientes';
 
 const Layout = ({ children }) => {
     const { usuario, rol, logout } = useAuth();
@@ -98,6 +102,11 @@ const Layout = ({ children }) => {
     // Menú del rol desde la fuente única (config/menu.js). El alumno en plan de
     // prueba queda restringido (fail-closed) según `esPrueba`.
     const menuItems = getMenuItems(rol, { esPrueba });
+    // Badge del ítem "Pendientes": SOLO el admin puede pegarle al endpoint
+    // (`enabled`), porque el Layout se monta para los tres roles.
+    const esAdmin = rol === 'administrador' || rol === 'admin';
+    const pendientesQ = useResumenPendientes({ enabled: esAdmin });
+    const badgePendientes = textoBadge(totalPendientes(pendientesQ.data));
     const isActive = (path) => location.pathname === path;
     // Sub-pestaña ACTIVA del Dashboard del coach. Sólo se marca estando en
     // `/coach/dashboard`: en cualquier otra ruta `currentTab` cae en su default
@@ -198,6 +207,18 @@ const Layout = ({ children }) => {
                                     {MENU_ICONS[item.icon]}
                                 </span>
                                 {sidebarOpen && <span>{item.label}</span>}
+                                {/* Badge de "Pendientes" (solicitudes + pedidos + registros +
+                                    premios). Colapsado no se muestra: el sidebar de 80px no
+                                    tiene lugar para el número. */}
+                                {sidebarOpen && item.path === '/admin/pendientes' && badgePendientes && (
+                                    <span
+                                        aria-label={`${totalPendientes(pendientesQ.data)} pendientes`}
+                                        title={`${totalPendientes(pendientesQ.data)} pendientes`}
+                                        className="ml-auto min-w-[1.25rem] text-center rounded-full bg-orange-500 px-1.5 py-0.5 text-[11px] font-bold text-white"
+                                    >
+                                        {badgePendientes}
+                                    </span>
+                                )}
                                 {/* Aviso "mejor en PC" (mockup del admin móvil): SOLO en el
                                     menú de <768px (`md:hidden`), así la barra lateral del
                                     escritorio queda exactamente igual. No bloquea el acceso. */}

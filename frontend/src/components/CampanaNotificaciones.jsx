@@ -59,16 +59,20 @@ const ETIQUETAS_TIPO = {
 // backend no guarda URLs, así que el destino se deriva del `tipo` (igual que
 // hace la tabla de Notificaciones Enviadas con destinoNotificacion.js).
 const DESTINOS_TIPO = {
-    pedido_nuevo: '/admin/pedidos',
+    // Tanda 4: los pendientes del box viven en UNA pantalla con pestañas. Cada aviso
+    // abre la pestaña que lo resuelve (antes: pedidos -> `/admin/pedidos`, plan ->
+    // Dashboard y alta -> `/admin/alumnos-pendientes`, así que el admin aterrizaba
+    // en tres lugares distintos para hacer la misma ronda).
+    pedido_nuevo: '/admin/pendientes?tab=pedidos',
     pedido_validado: '/alumno/mis-pedidos',
     pedido_entregado: '/alumno/mis-pedidos',
-    // Planes: la solicitud pendiente se revisa en el Dashboard del admin; el
+    // Planes: la solicitud con comprobante se aprueba en la pestaña Solicitudes; el
     // alumno ve el estado de su trámite en su pantalla de solicitar plan.
-    plan_solicitado: '/admin/dashboard',
+    plan_solicitado: '/admin/pendientes?tab=solicitudes',
     aprobado: '/alumno/solicitar-plan',
     rechazado: '/alumno/solicitar-plan',
-    // Alta de alumno: la lista de alumnos del box.
-    alumno_nuevo: '/admin/alumnos-pendientes',
+    // Alta de alumno: los que se registraron solos esperan activación en Registros.
+    alumno_nuevo: '/admin/pendientes?tab=registros',
     // Cobertura de emergencia: la grilla de Supervisión (marca "emergencia").
     emergencia: '/admin/supervision-clases',
     // Datos bancarios del box: la pantalla que los edita (sólo admin).

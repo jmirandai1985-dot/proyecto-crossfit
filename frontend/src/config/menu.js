@@ -57,7 +57,11 @@ export const MENU_BY_ROL = {
     administrador: [
         { label: 'Dashboard', path: '/admin/dashboard', icon: 'adminDashboard' },
         { label: 'Alumnos', path: '/admin/alumnos', icon: 'users' },
-        { label: 'Pendientes', path: '/admin/alumnos-pendientes', icon: 'clock' },
+        // Pantalla unificada "Pendientes" (Tanda 4): solicitudes de plan, pedidos del
+        // Bazar, registros de alumnos y premios de referidos en UNA sola pantalla con
+        // cuatro pestañas (`?tab=`). `/admin/alumnos-pendientes` sigue existiendo como
+        // redirect para no romper enlaces viejos, pero el menú apunta a la nueva.
+        { label: 'Pendientes', path: '/admin/pendientes', icon: 'clock' },
         { label: 'Coaches', path: '/admin/coaches', icon: 'users' },
         { label: 'Supervisión', path: '/admin/supervision-clases', icon: 'eye' },
         { label: 'Asistencia', path: '/admin/asistencia', icon: 'squareCheck' },

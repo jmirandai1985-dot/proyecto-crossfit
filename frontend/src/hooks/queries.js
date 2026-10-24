@@ -65,6 +65,16 @@ export const claves = {
     promocionesReferidos: ['referidos', 'promociones'],
     promocionesDetectadas: (estado) =>
         ['referidos', 'promociones-detectadas', estado || 'pendiente_confirmacion'],
+    // ── Pantalla unificada "Pendientes" (Tanda 4) ────────────────────────────
+    // UNA llamada (`GET /admin/pendientes/resumen`) alimenta TODOS los badges:
+    // pestañas de la pantalla, menú lateral, campana del admin y Dashboard. Por eso
+    // la clave cuelga de `['admin', 'pendientes']`: cualquier mutación que resuelva
+    // un pendiente invalida esa familia y los cuatro números se mueven juntos.
+    resumenPendientes: ['admin', 'pendientes', 'resumen'],
+    // Listado del admin del Bazar (mismo endpoint que ya usa /admin/pedidos, pero
+    // con SU propia clave: `['pedidos', 'admin', estado]` no se mezcla con la lista
+    // paginada de la pantalla vieja ni con "Mis pedidos" del alumno).
+    pedidosAdmin: (estado) => ['pedidos', 'admin', estado || 'todos'],
     configBox: (tenantId) => ['configuracion', tenantId],
     reservasAlumno: ['reservas', 'alumno'],
     miResumen: ['asistencia', 'mi-resumen'],
@@ -354,7 +364,76 @@ export function useEntregarPedido() {
     const qc = useQueryClient();
     return useMutation({
         mutationFn: (codigo) => api.post('/api/v1/pedidos/entregar', { codigo }).then((r) => r.data),
-        onSuccess: () => qc.invalidateQueries({ queryKey: ['pedidos'] }),
+        // La entrega cambia el estado del pedido (pedidos) y puede cerrar un pendiente
+        // del contador de la pantalla unificada (`['admin', 'pendientes']`).
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['pedidos'] });
+            qc.invalidateQueries({ queryKey: ['admin', 'pendientes'] });
+        },
+    });
+}
+
+// ── Pantalla unificada "Pendientes" (Tanda 4) ────────────────────────────────
+// `GET /admin/pendientes/resumen` → {solicitudes, pedidos, registros, premios, total}.
+// Lo consumen la pantalla, el menú lateral, la campana del admin y el Dashboard: con
+// la MISMA queryKey, el primero que llega pinta los cuatro badges y los demás leen
+// de la caché (nadie pide cuatro veces lo mismo).
+//
+// `enabled` existe porque la campana se monta en el Layout de LOS TRES roles: el
+// alumno y el coach no pueden pegarle a un endpoint admin-only (403). El hook se
+// llama siempre (reglas de hooks); el que decide es el `enabled`.
+export function useResumenPendientes({ enabled = true, refetchInterval = 60_000 } = {}) {
+    return useQuery({
+        queryKey: claves.resumenPendientes,
+        queryFn: async () => (await api.get('/api/v1/admin/pendientes/resumen')).data,
+        enabled,
+        // Los pendientes son de trabajo diario: 60 s basta y no satura. La pantalla
+        // igual refresca al volver el foco (default de React Query).
+        refetchInterval: enabled ? refetchInterval : false,
+        staleTime: 15_000,
+    });
+}
+
+// Pedidos del Bazar para el admin (mismo endpoint que `/admin/pedidos`, sin paginar).
+// `estado` vacío = todos; la pestaña "Pedidos" pide sólo `pendiente`.
+export function usePedidosAdmin(estado = '') {
+    return useQuery({
+        queryKey: claves.pedidosAdmin(estado),
+        queryFn: async () => (await api.get('/api/v1/pedidos', {
+            params: estado ? { estado } : undefined,
+        })).data || [],
+        staleTime: 15_000,
+    });
+}
+
+// Avanzar el estado de un pedido (pendiente → validado → entregado). El backend
+// recibe el estado nuevo como QUERY param, igual que lo hacía `/admin/pedidos`.
+export function useCambiarEstadoPedido() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ pedidoId, nuevoEstado }) => api.put(
+            `/api/v1/pedidos/${pedidoId}/estado`, null,
+            { params: { nuevo_estado: nuevoEstado } },
+        ).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['pedidos'] });
+            qc.invalidateQueries({ queryKey: ['admin', 'pendientes'] });
+        },
+    });
+}
+
+// Rechazar un pedido pendiente (comprobante inválido). El backend devuelve el stock
+// y avisa al alumno en su campana; el motivo es obligatorio y lo escribe el admin.
+export function useRechazarPedido() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ pedidoId, motivo }) => api.post(
+            `/api/v1/pedidos/${pedidoId}/rechazar`, { motivo },
+        ).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['pedidos'] });
+            qc.invalidateQueries({ queryKey: ['admin', 'pendientes'] });
+        },
     });
 }
 
@@ -471,6 +550,9 @@ function useInvalidarColas() {
         qc.invalidateQueries({ queryKey: ['alumnos', 'pendientes-activacion'] });
         qc.invalidateQueries({ queryKey: ['solicitudes'] });
         qc.invalidateQueries({ queryKey: ['reportes'] });
+        // Pantalla unificada "Pendientes" (Tanda 4): aprobar/rechazar un registro o
+        // una solicitud mueve DOS de los cuatro contadores de los badges.
+        qc.invalidateQueries({ queryKey: ['admin', 'pendientes'] });
     };
 }
 
@@ -1940,7 +2022,12 @@ export function useConfirmarPromocionDetectada() {
     return useMutation({
         mutationFn: (id) => api.post(
             `/api/v1/referidos/promociones-detectadas/${id}/confirmar`).then((r) => r.data),
-        onSuccess: () => qc.invalidateQueries({ queryKey: ['referidos'] }),
+        // Confirmar un premio lo saca de la cola: se refresca la vista de referidos Y
+        // el contador de la pantalla unificada (pestaña "Premios").
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['referidos'] });
+            qc.invalidateQueries({ queryKey: ['admin', 'pendientes'] });
+        },
     });
 }
 
@@ -1949,7 +2036,41 @@ export function useRechazarPromocionDetectada() {
     return useMutation({
         mutationFn: (id) => api.post(
             `/api/v1/referidos/promociones-detectadas/${id}/rechazar`).then((r) => r.data),
-        onSuccess: () => qc.invalidateQueries({ queryKey: ['referidos'] }),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['referidos'] });
+            qc.invalidateQueries({ queryKey: ['admin', 'pendientes'] });
+        },
+    });
+}
+
+// ── Publicar/despublicar una promoción en el carrusel (migración 056) ────────
+// La tarjeta es un `avisos_marketing` VINCULADO a la promoción: publicar dos veces
+// EDITA la misma tarjeta (conserva el flyer y su `creado_en`), por eso el backend
+// responde 200 y no 201. Un solo botón sirve para "Publicar" y "Guardar cambios".
+export function usePublicarPromocionReferidos() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ promocionId, payload }) => api.post(
+            `/api/v1/referidos/promociones/${promocionId}/publicar`, payload,
+        ).then((r) => r.data),
+        onSuccess: () => {
+            // `['referidos']` = chip "Publicada" en la lista; `['marketing']` = la
+            // tarjeta aparece en Marketing y en el carrusel del alumno.
+            qc.invalidateQueries({ queryKey: ['referidos'] });
+            qc.invalidateQueries({ queryKey: ['marketing'] });
+        },
+    });
+}
+
+export function useDespublicarPromocionReferidos() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (promocionId) => api.delete(
+            `/api/v1/referidos/promociones/${promocionId}/publicar`).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['referidos'] });
+            qc.invalidateQueries({ queryKey: ['marketing'] });
+        },
     });
 }
 

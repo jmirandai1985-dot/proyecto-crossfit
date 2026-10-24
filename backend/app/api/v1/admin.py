@@ -16,6 +16,14 @@ from app.models.plan import Plan
 from app.models.reserva import Reserva
 from app.models.clase import Clase
 from app.models.disciplina import Disciplina
+# ── Pantalla unificada "Pendientes" (Tanda 4) ──
+# Los cuatro contadores salen de las MISMAS tablas que alimentan cada pestaña: si
+# el badge dijera 3 y la lista mostrara 2, el admin dejaría de confiar en el badge.
+from app.models.pedido import Pedido
+from app.models.solicitud_plan import SolicitudPlan
+from app.models.referidos import (EstadoPromocionDetectada,
+                                  PromocionReferidos,
+                                  PromocionReferidosDetectada)
 from app.utils.santiago import SANTIAGO, fecha_chile, hoy_santiago
 # Bordes del mes del KPI "alumnos nuevos": UNA sola definición (la de reportes).
 from app.api.v1.reportes import _inicio_fin_mes
@@ -43,6 +51,62 @@ TIPOS_PRUEBA_MANUAL = {
     "sin_clase": "prueba_clase_manual",
     "sin_plan": "prueba_plan_manual",
 }
+
+
+@router.get("/pendientes/resumen")
+def resumen_pendientes(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Contadores de las CUATRO colas de `/admin/pendientes`.
+
+    Es una sola llamada para los badges (pestañas, menú lateral, campana y
+    Dashboard): cuatro `COUNT` indexados en el box del token, sin traer filas.
+
+      * `solicitudes` → solicitudes de plan esperando revisión (`pending`);
+      * `pedidos`     → pedidos del Bazar con comprobante sin validar;
+      * `registros`   → alumnos en `pendiente_activacion`;
+      * `premios`     → umbrales de referidos por confirmar (premio ganado).
+
+    `total` es la suma: lo que el menú lateral muestra junto a "Pendientes".
+    """
+    tenant_id = current_user["tenant_id"]
+
+    solicitudes = db.query(func.count(SolicitudPlan.id)).filter(
+        SolicitudPlan.tenant_id == tenant_id,
+        SolicitudPlan.estado == "pending",
+    ).scalar() or 0
+
+    pedidos = db.query(func.count(Pedido.id)).filter(
+        Pedido.tenant_id == tenant_id,
+        Pedido.estado == "pendiente",
+    ).scalar() or 0
+
+    registros = db.query(func.count(Usuario.id)).filter(
+        Usuario.rol == RolUsuario.alumno,
+        Usuario.estado == "pendiente_activacion",
+        Usuario.tenant_id == tenant_id,
+    ).scalar() or 0
+
+    premios = (
+        db.query(func.count(PromocionReferidosDetectada.id))
+        .join(PromocionReferidos,
+              PromocionReferidos.id == PromocionReferidosDetectada.promocion_id)
+        .filter(
+            PromocionReferidos.tenant_id == tenant_id,
+            PromocionReferidosDetectada.estado
+            == EstadoPromocionDetectada.pendiente_confirmacion,
+        )
+        .scalar() or 0
+    )
+
+    contadores = {
+        "solicitudes": int(solicitudes),
+        "pedidos": int(pedidos),
+        "registros": int(registros),
+        "premios": int(premios),
+    }
+    return {**contadores, "total": sum(contadores.values())}
 
 
 @router.get("/alumnos-prueba-hoy")

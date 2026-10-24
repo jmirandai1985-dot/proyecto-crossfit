@@ -43,6 +43,11 @@ const AdminKpis = lazy(() => import('./pages/admin/Kpis'));
 const AdminAlumnosPrueba = lazy(() => import('./pages/admin/AlumnosPrueba'));
 const AdminPlanes = lazy(() => import('./pages/admin/Planes'));
 const AdminAlumnosPendientes = lazy(() => import('./pages/admin/AdminAlumnosPendientes'));
+// Pantalla unificada "Pendientes" (Tanda 4): solicitudes, pedidos, registros y
+// premios en UNA sola pantalla con cuatro pestañas. `alumnos-pendientes` queda como
+// redirect por compatibilidad (la campana y los correos apuntaban ahí).
+const AdminPendientes = lazy(() => import('./pages/admin/Pendientes'));
+
 const AdminDisciplinas = lazy(() => import('./pages/admin/Disciplinas'));
 const AdminAsistencia = lazy(() => import('./pages/admin/Asistencia'));
 // Historial de Asistencia: pestaña PROPIA en el menú del admin (sólo lectura del mes).
@@ -144,6 +149,9 @@ function App() {
             {/* Historial de UN alumno (se entra desde la tabla de Alumnos o desde la ficha). */}
             <Route path="alumnos/:alumnoId/historial" element={<AdminHistorialAlumno />} />
             <Route path="alumnos-pendientes" element={<AdminAlumnosPendientes />} />
+            {/* Pantalla unificada "Pendientes" (Tanda 4). El `?tab=` lo resuelve la
+                propia pantalla; la ruta vieja de arriba redirige acá. */}
+            <Route path="pendientes" element={<AdminPendientes />} />
             <Route path="alumnos-convertidos" element={<AdminAlumnosConvertidos />} />
             <Route path="alumnos-prueba" element={<AdminAlumnosPrueba />} />
             <Route path="coaches" element={<AdminCoaches />} />
