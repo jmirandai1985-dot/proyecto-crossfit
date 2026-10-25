@@ -15,6 +15,11 @@ Qué fija este archivo (sin red y sin base de datos):
   F. La red de la BASE: el índice único parcial `uq_reservas_clase_alumno_viva`
      (migración 057) declara lo mismo que el modelo y la app traduce su
      violación a 400 (`es_reserva_duplicada`).
+  G. `DELETE /reservas/{id}` — dos cancelaciones simultáneas de reservas DISTINTAS
+     de la MISMA clase dejan el aforo en 0, no en 1: el `- 1` es un UPDATE
+     atómico, no un read-modify-write en Python.
+  H. `DELETE /reservas/{id}` — dos devoluciones simultáneas sobre la MISMA
+     membresía devuelven los DOS créditos (`+2`), no uno.
 
 Cómo se simula Postgres sin Postgres
 ------------------------------------
@@ -26,7 +31,12 @@ Cómo se simula Postgres sin Postgres
   * `with_for_update()` **bloquea** la fila hasta el commit/rollback: el segundo
     request ESPERA y, al entrar, descarta su snapshot y lee lo que el primero
     commiteó (READ COMMITTED + lock, que es lo que hace Postgres);
-  * `commit()` aplica el índice único parcial de reservas vivas (057).
+  * un `UPDATE ... SET col = col ± 1` se aplica al valor **commiteado**, no al
+    snapshot del request: Postgres toma la fila con lock y re-lee su versión
+    actual. Por eso dos `- 1` simultáneos dejan `-2`. `_Sesion.sin_atomico`
+    apaga eso y deja el read-modify-write viejo (el bug de G y H);
+  * `commit()` aplica el índice único parcial de reservas vivas (057) y escribe
+    sólo los objetos SUCIOS, como el flush de SQLAlchemy.
 
 `_filas()` duerme `RETARDO` DESPUÉS de leer: es la ventana en la que los dos
 requests leen el mismo valor. Sin eso, los dos hilos podrían turnarse por azar y
@@ -34,9 +44,10 @@ el test pasaría sin probar nada.
 
 Dos guardas de sensibilidad apagan la protección a propósito y muestran el bug:
 con el índice apagado entra una segunda reserva viva (`test_a_meta...`) y sin el
-`FOR UPDATE` el mismo crédito paga dos clases (`test_b_meta...`). No es
-decoración: sin ellas, un test verde no diría si el verde se debe al arreglo o a
-que los dos hilos se turnaron por azar.
+`FOR UPDATE` el mismo crédito paga dos clases (`test_b_meta...`). Lo mismo con
+`sin_atomico` en G y H: con el `± 1` en Python una cancelación pisa a la otra.
+No es decoración: sin ellas, un test verde no diría si el verde se debe al
+arreglo o a que los dos hilos se turnaron por azar.
 
 Correr (aislado):
     cd backend && py -3.12 -m pytest tests/test_concurrencia_acid.py -q --noconftest
@@ -46,7 +57,7 @@ import re
 import sys
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time as hora_del_dia, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -69,10 +80,12 @@ from app.schemas.pedido import PedidoUpdate                            # noqa: E
 from app.schemas.reserva import ReservaCreate                          # noqa: E402
 from app.utils.santiago import hoy_santiago                            # noqa: E402
 from shared.estados import ESTADOS_CANCELADA                           # noqa: E402
+from app.core.estados import ESTADO_CANCELADO                          # noqa: E402
 
 RETARDO = 0.10                      # segundos de ventana de carrera tras cada lectura
 # Sólo las tablas en las que se pelea el valor: dormir en todas haría el archivo lento.
-_TABLAS_EN_DISPUTA = {"suscripciones", "reservas", "pedidos", "productos"}
+# `clases` entra por G: la ventana es "los dos leen el aforo antes de descontarlo".
+_TABLAS_EN_DISPUTA = {"suscripciones", "reservas", "pedidos", "productos", "clases"}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -119,6 +132,22 @@ class _Almacen:
             self.tablas[tabla] = [f for f in self.tablas.get(tabla, [])
                                   if f.get("id") != ident]
 
+    def sumar(self, tabla, ident, columna, delta):
+        """`SET col = col ± 1` sobre la fila COMMITEADA (lo que hace Postgres).
+
+        El `UPDATE` toma la fila con lock y re-lee su versión actual: NO aplica
+        el snapshot del request. Por eso dos `- 1` simultáneos dejan `-2` y dos
+        `+ 1`, `+2`. La guarda `WHERE col > 0` no deja bajar de cero.
+        """
+        with self._mutex:
+            for fila in self.tablas.get(tabla, []):
+                if fila.get("id") == ident:
+                    actual = fila.get(columna) or 0
+                    if delta < 0 and actual <= 0:
+                        return
+                    fila[columna] = actual + delta
+                    return
+
 
 def _fila_de(obj) -> dict:
     """Columnas de un modelo ORM, como dict (lo que el INSERT escribiría)."""
@@ -137,6 +166,20 @@ def _id_del_update(sentencia):
         if getattr(izquierda, "key", None) == "id":
             return getattr(getattr(criterio, "right", None), "value", None)
     return None
+
+
+def _salto_del_update(sentencia):
+    """(columna, +1/-1) del `SET col = col ± 1` (el patrón atómico del código).
+
+    Se lee del propio `UPDATE` en vez de adivinar por tabla: así el doble sirve
+    para el `+1` del aforo, el `-1` del crédito y el `+1` de la devolución sin
+    tener una lista de casos que se desincronice del endpoint.
+    """
+    for columna, expresion in sentencia._values.items():
+        operador = getattr(getattr(expresion, "operator", None), "__name__", "")
+        if operador in ("add", "sub"):
+            return columna.key, (1 if operador == "add" else -1)
+    raise AssertionError(f"UPDATE sin salto atómico: {sentencia}")
 
 
 class _Consulta:
@@ -193,10 +236,13 @@ class _Sesion:
     """Sesión mínima: un request = una sesión (como `get_db`)."""
 
     sin_lock = False                        # meta-tests: apaga el `FOR UPDATE`
+    sin_atomico = False                     # meta-tests: `± 1` en Python (el bug)
 
     def __init__(self, almacen):
         self.almacen = almacen
         self._copias = {}                   # (tabla, id) -> snapshot del request
+        self._originales = {}               # (tabla, id) -> cómo se leyó (para "sucio")
+        self._deltas = []                   # [(tabla, id, columna, +1/-1)] sin commitear
         self._nuevos = []                   # [(tabla, obj)] sin commitear
         self._borrados = set()              # {(tabla, id)}
         self._candados = []
@@ -207,23 +253,41 @@ class _Sesion:
     def query(self, modelo):
         return _Consulta(self, modelo.__tablename__)
 
-    def execute(self, sentencia):
+    def execute(self, sentencia, parametros=None):
+        """Los `UPDATE` del código: `SET col = col ± 1` y la transición de estado."""
+        if not hasattr(sentencia, "table"):
+            # SQL crudo (`text()`): `UPDATE reservas SET estado = 'cancelled' ...`
+            return self._cancelar_reserva(parametros or {})
         tabla = sentencia.table.name
-        copia = self._fila(tabla, _id_del_update(sentencia))
-        if tabla == "clases":
-            # `UPDATE clases SET asistentes_confirmados = +1 WHERE ... < cupo`
-            if copia.asistentes_confirmados < copia.cupo_maximo:
-                copia.asistentes_confirmados += 1
-                return SimpleNamespace(rowcount=1)
+        ident = _id_del_update(sentencia)
+        columna, delta = _salto_del_update(sentencia)
+        copia = self._fila(tabla, ident)
+        actual = getattr(copia, columna)
+        if tabla == "clases" and delta > 0:
+            # `UPDATE clases SET asistentes = +1 WHERE asistentes < cupo`
+            if actual >= copia.cupo_maximo:
+                return SimpleNamespace(rowcount=0)
+        if delta < 0 and (actual is None or actual <= 0):
+            # `WHERE col > 0`: en 0 la fila no entra (ni aforo ni crédito negativo)
             return SimpleNamespace(rowcount=0)
-        if tabla == "suscripciones":
-            # `UPDATE suscripciones SET creditos_disponibles = -1 WHERE > 0`
-            actuales = copia.creditos_disponibles
-            if actuales is not None and actuales > 0:
-                copia.creditos_disponibles = actuales - 1
-                return SimpleNamespace(rowcount=1)
+        if self.sin_atomico:
+            # Meta-test: el read-modify-write viejo, sobre el SNAPSHOT del request.
+            # Es el bug: el último commit pisa el valor del otro (-1 -> -1, no -2).
+            setattr(copia, columna, (actual or 0) + delta)
+            return SimpleNamespace(rowcount=1)
+        # El `± 1` atómico: se aplica al commitear, sobre el valor de la base.
+        self._deltas.append((tabla, ident, columna, delta))
+        return SimpleNamespace(rowcount=1)
+
+    def _cancelar_reserva(self, parametros):
+        """`UPDATE reservas SET estado=... WHERE id AND estado NOT IN (...)`: rowcount."""
+        copia = self._fila("reservas", parametros.get("rid"))
+        if getattr(copia, "tenant_id", None) != parametros.get("tid"):
             return SimpleNamespace(rowcount=0)
-        raise AssertionError(f"UPDATE inesperado sobre {tabla}")
+        if getattr(copia, "estado", None) in ESTADOS_CANCELADA:
+            return SimpleNamespace(rowcount=0)      # ya cancelada -> 409
+        copia.estado = ESTADO_CANCELADO
+        return SimpleNamespace(rowcount=1)
 
     def add(self, obj):
         if getattr(obj, "id", None) is None:
@@ -253,20 +317,38 @@ class _Sesion:
         for (tabla, ident), copia in list(self._copias.items()):
             if (tabla, ident) in self._borrados:
                 continue
-            self.almacen.guardar(tabla, dict(vars(copia)))
+            # Como el flush de SQLAlchemy: se escriben sólo los objetos SUCIOS. Una
+            # copia que este request no tocó no puede pisar el valor que commiteó el
+            # otro (eso sería el lost update del lado del doble).
+            if dict(vars(copia)) != self._originales[(tabla, ident)]:
+                self.almacen.guardar(tabla, dict(vars(copia)))
         for tabla, obj in self._nuevos:
             self.almacen.guardar(tabla, _fila_de(obj))
+        # Los `± 1` atómicos van al final y sobre el valor ya commiteado.
+        for tabla, ident, columna, delta in self._deltas:
+            self.almacen.sumar(tabla, ident, columna, delta)
         self._liberar()
         self.committed = True
 
     def rollback(self):
         self._copias.clear()
+        self._originales.clear()
         self._nuevos.clear()
         self._borrados.clear()
+        self._deltas.clear()
         self._liberar()
         self.rolled_back = True
 
     def refresh(self, obj):
+        pass
+
+    def expire(self, obj):
+        """`Session.expire`: la fila sigue en la base y el request ya no la retiene.
+
+        No hay nada que recargar en el doble: el endpoint sólo lee `clase_id` y
+        `alumno_id` después de expirar, y el `estado` nuevo ya lo escribió el
+        `UPDATE` de la reserva (el request ve su propia escritura).
+        """
         pass
 
     # ── el fondo ──
@@ -287,6 +369,7 @@ class _Sesion:
             clave = (tabla, ident)
             if clave not in self._copias:
                 self._copias[clave] = SimpleNamespace(**bruta)
+                self._originales[clave] = dict(bruta)
             salida.append(self._copias[clave])
         return salida
 
@@ -320,6 +403,8 @@ class _Sesion:
     def _olvidar(self, tabla):
         for clave in [c for c in self._copias if c[0] == tabla]:
             del self._copias[clave]
+        for clave in [c for c in self._originales if c[0] == tabla]:
+            del self._originales[clave]
 
     def _liberar(self):
         while self._candados:
@@ -422,8 +507,9 @@ HOY = hoy_santiago()
 VENCE = datetime.now(timezone.utc) + timedelta(days=10)
 
 
-def _clase(ident, cupo=10, asistentes=0):
-    return {"id": ident, "tenant_id": 1, "fecha": HOY, "cancelada": False,
+def _clase(ident, cupo=10, asistentes=0, fecha=None, hora_inicio=hora_del_dia(12, 0)):
+    return {"id": ident, "tenant_id": 1, "fecha": fecha or HOY,
+            "hora_inicio": hora_inicio, "cancelada": False,
             "cupo_maximo": cupo, "asistentes_confirmados": asistentes}
 
 
@@ -774,4 +860,126 @@ def test_f5_el_indice_deja_volver_a_reservar_despues_de_cancelar():
     with pytest.raises(IntegrityError) as exc:
         segunda.commit()
     assert es_reserva_duplicada(exc.value) is True
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  G. DELETE /reservas/{id}: el aforo de la MISMA clase (dos reservas distintas)
+# ══════════════════════════════════════════════════════════════════════════════
+# La clase se siembra MAÑANA a las 12:00: con la hora de Chile eso deja siempre
+# más de 6h de margen, así que el DELETE devuelve el crédito sin depender de la
+# hora a la que se corran los tests.
+MANANA = HOY + timedelta(days=1)
+
+
+def _sin_comentarios(texto):
+    """La fuente sin las líneas de comentario (los comentarios CITAN el bug)."""
+    return "\n".join(linea for linea in texto.splitlines()
+                     if not linea.strip().startswith("#"))
+
+
+def _cancelar(almacen, reserva_id, alumno_id):
+    """Un request de `DELETE /reservas/{id}` (el alumno dueño de la reserva)."""
+    return _con_sesion(almacen, lambda sesion: res.eliminar_reserva(
+        reserva_id=reserva_id,
+        db=sesion,
+        current_user={"tenant_id": 1, "usuario_id": alumno_id, "rol": "alumno"},
+        background_tasks=None,
+    ))
+
+
+def _dos_reservas_en_la_misma_clase():
+    """Dos alumnos con reserva viva en la clase 3 (2 asientos ocupados)."""
+    return _Almacen(
+        clases=[_clase(3, asistentes=2, fecha=MANANA)],
+        usuarios=[_alumno(42), _alumno(43)],
+        suscripciones=[_membresia(3, ident=1, usuario_id=42),
+                       _membresia(3, ident=2, usuario_id=43)],
+        reservas=[{"id": 11, "tenant_id": 1, "clase_id": 3, "alumno_id": 42,
+                   "estado": "confirmada"},
+                  {"id": 12, "tenant_id": 1, "clase_id": 3, "alumno_id": 43,
+                   "estado": "confirmada"}],
+    )
+
+
+def test_g_dos_cancelaciones_simultaneas_liberan_los_dos_asientos():
+    almacen = _dos_reservas_en_la_misma_clase()
+
+    resultados = _en_paralelo(lambda: _cancelar(almacen, 11, 42),
+                              lambda: _cancelar(almacen, 12, 43))
+
+    assert len(_exitos(resultados)) == 2, resultados
+    assert all(r["reembolsado"] is True for r in _exitos(resultados))
+
+    # DOS asientos liberados: 2 -> 0. Con read-modify-write quedaba en 1 (fantasma).
+    assert almacen.filas("clases")[0]["asistentes_confirmados"] == 0
+    assert {f["estado"] for f in almacen.filas("reservas")} == {ESTADO_CANCELADO}
+    # Cada alumno recuperó SU crédito: dos devoluciones sobre dos membresías.
+    assert [f["creditos_disponibles"] for f in almacen.filas("suscripciones")] == [4, 4]
+
+
+def test_g_meta_sin_atomico_una_cancelacion_pisa_a_la_otra(monkeypatch):
+    """Guarda de sensibilidad: con el `- 1` en Python (el bug), queda un ocupante."""
+    monkeypatch.setattr(_Sesion, "sin_atomico", True)
+    almacen = _dos_reservas_en_la_misma_clase()
+
+    resultados = _en_paralelo(lambda: _cancelar(almacen, 11, 42),
+                              lambda: _cancelar(almacen, 12, 43))
+
+    assert len(_exitos(resultados)) == 2, "el doble ya no reproduce la carrera"
+    assert almacen.filas("clases")[0]["asistentes_confirmados"] == 1
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  H. DELETE /reservas/{id}: la devolución de crédito sobre la MISMA membresía
+# ══════════════════════════════════════════════════════════════════════════════
+def _dos_reservas_del_mismo_alumno():
+    """El alumno 42 con UNA membresía y dos reservas vivas en clases distintas."""
+    return _Almacen(
+        clases=[_clase(3, asistentes=1, fecha=MANANA),
+                _clase(4, asistentes=1, fecha=MANANA)],
+        usuarios=[_alumno()],
+        suscripciones=[_membresia(5)],
+        reservas=[{"id": 11, "tenant_id": 1, "clase_id": 3, "alumno_id": 42,
+                   "estado": "confirmada"},
+                  {"id": 12, "tenant_id": 1, "clase_id": 4, "alumno_id": 42,
+                   "estado": "confirmada"}],
+    )
+
+
+def test_h_dos_devoluciones_simultaneas_suman_dos_creditos():
+    almacen = _dos_reservas_del_mismo_alumno()
+
+    resultados = _en_paralelo(lambda: _cancelar(almacen, 11, 42),
+                              lambda: _cancelar(almacen, 12, 42))
+
+    assert len(_exitos(resultados)) == 2, resultados
+    assert all(r["reembolsado"] is True for r in _exitos(resultados))
+
+    # 5 + 1 + 1: las DOS devoluciones. Con read-modify-write quedaba en 6.
+    assert almacen.filas("suscripciones")[0]["creditos_disponibles"] == 7
+    assert [f["asistentes_confirmados"] for f in almacen.filas("clases")] == [0, 0]
+
+
+def test_h_meta_sin_atomico_una_devolucion_se_pierde(monkeypatch):
+    """Guarda de sensibilidad: con el `+= 1` en Python (el bug), vuelve un crédito."""
+    monkeypatch.setattr(_Sesion, "sin_atomico", True)
+    almacen = _dos_reservas_del_mismo_alumno()
+
+    resultados = _en_paralelo(lambda: _cancelar(almacen, 11, 42),
+                              lambda: _cancelar(almacen, 12, 42))
+
+    assert len(_exitos(resultados)) == 2, "el doble ya no reproduce la carrera"
+    assert almacen.filas("suscripciones")[0]["creditos_disponibles"] == 6
+
+
+def test_g3_el_delete_no_vuelve_al_ajuste_en_memoria():
+    """La fuente del DELETE: el `± 1` lo hace la BASE, nunca el objeto de Python."""
+    bloque = _sin_comentarios(
+        _bloque(_fuente("app/api/v1/reservas.py"), "def eliminar_reserva"))
+
+    assert "asistentes_confirmados -= 1" not in bloque
+    assert "creditos_disponibles += 1" not in bloque
+    assert "asistentes_confirmados=Clase.asistentes_confirmados - 1" in bloque
+    assert "creditos_disponibles=Suscripcion.creditos_disponibles + 1" in bloque
 

@@ -895,11 +895,33 @@ def eliminar_reserva(
         )
     db.expire(reserva)
 
-    # ARREGLO 1: Obtener la clase y decrementar asistentes_confirmados
+    # ── ARREGLO 1: el aforo baja con un UPDATE ATÓMICO, no en memoria ────────
+    # Antes: `clase.asistentes_confirmados -= 1` (read-modify-write en Python).
+    # Dos cancelaciones simultáneas de reservas DISTINTAS de la MISMA clase leían
+    # el mismo asiento ocupado y la última en commitear lo reponía: una de las dos
+    # cancelaciones se perdía y el aforo quedaba con un ocupante fantasma.
+    # Mismo patrón que `POST /reservas` y `POST .../sin-reserva`: el `- 1` lo
+    # resuelve la base sobre la fila bloqueada, y `WHERE > 0` evita bajar de cero
+    # (una clase ya en 0 se queda en 0, sin excepción).
     clase = db.query(Clase).filter(Clase.id == reserva.clase_id).first()
 
-    if clase and clase.asistentes_confirmados > 0:
-        clase.asistentes_confirmados -= 1
+    if clase:
+        try:
+            db.execute(
+                update(Clase)
+                .where(Clase.id == clase.id)
+                .where(Clase.asistentes_confirmados > 0)
+                .values(asistentes_confirmados=Clase.asistentes_confirmados - 1)
+                .execution_options(synchronize_session=False)
+            )
+        except DBAPIError:
+            # El rollback deja la reserva como estaba (el estado también vuelve):
+            # el cliente puede reintentar sin perder el asiento ni el crédito.
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Alta demanda, intenta de nuevo",
+            )
 
     # ── P0-3 (auditoría Alumno, R-01): la hora de corte va en horario de CHILE ──
     # Antes se armaba `datetime(..., tzinfo=timezone.utc)` con la hora LOCAL
@@ -930,9 +952,33 @@ def eliminar_reserva(
             Suscripcion.creditos_disponibles.desc().nulls_last(),
             Suscripcion.fecha_expiracion.desc()
         ).first()
-        if membresia and membresia.creditos_disponibles is not None:
-            membresia.creditos_disponibles += 1
-            reembolsado = True
+        if membresia:
+            # ── Devolución ATÓMICA del crédito: `+ 1` lo hace la base ──────
+            # Antes: `membresia.creditos_disponibles += 1` (read-modify-write en
+            # Python). Dos cancelaciones simultáneas del MISMO alumno (dos
+            # reservas, o dos pestañas) leían el mismo saldo y la última en
+            # commitear lo reponía: una de las dos devoluciones se perdía y el
+            # alumno quedaba con un crédito menos.
+            # `IS NOT NULL` = plan ilimitado: no hay crédito que devolver
+            # (misma regla que el `is not None` de antes, ahora en la base).
+            # `rowcount` dice si de verdad se devolvió: lo que responde el
+            # endpoint (`reembolsado`) sale de la BASE, no de una suposición.
+            try:
+                devolucion = db.execute(
+                    update(Suscripcion)
+                    .where(Suscripcion.id == membresia.id)
+                    .where(Suscripcion.tenant_id == tenant_id)
+                    .where(Suscripcion.creditos_disponibles.isnot(None))
+                    .values(creditos_disponibles=Suscripcion.creditos_disponibles + 1)
+                    .execution_options(synchronize_session=False)
+                )
+            except DBAPIError:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Alta demanda, intenta de nuevo",
+                )
+            reembolsado = devolucion.rowcount > 0
 
     db.commit()
 
