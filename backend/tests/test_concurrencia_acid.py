@@ -24,6 +24,9 @@ Qué fija este archivo (sin red y sin base de datos):
      (`reservas.suscripcion_id`, migración 059) y no a "la mejor que tenga hoy";
      el fallback (reserva sin dato o plan ya sin acceso) se audita, y una
      reserva con `tokens_gastados = 0` no devuelve nada.
+  J. `PUT /reservas/{id}` — un `estado` de cancelación en el body NO evade la
+     cancelación: delega en la MISMA función del DELETE, así que devuelve el
+     crédito, libera el aforo, respeta las 6h y la idempotencia (409).
 
 Cómo se simula Postgres sin Postgres
 ------------------------------------
@@ -53,6 +56,12 @@ con el índice apagado entra una segunda reserva viva (`test_a_meta...`) y sin e
 No es decoración: sin ellas, un test verde no diría si el verde se debe al
 arreglo o a que los dos hilos se turnaron por azar.
 
+En J la guarda va al revés y no es de concurrencia: se reinstala el PUT viejo
+(`test_j7_meta...`, que sólo escribía el `estado` del body) y se comprueba que el
+crédito NO vuelve, el aforo NO baja, no se audita y el segundo PUT no da 409 —
+el bug C tal cual. Si ese meta-test deja de fallar así, los tests de J ya no
+están probando la delegación.
+
 Correr (aislado):
     cd backend && py -3.12 -m pytest tests/test_concurrencia_acid.py -q --noconftest
 """
@@ -81,8 +90,8 @@ from app.models.reserva import (                                       # noqa: E
     NOMBRE_INDICE_RESERVA_UNICA, Reserva, es_reserva_duplicada,
 )
 from app.schemas.pedido import PedidoUpdate                            # noqa: E402
-from app.schemas.reserva import ReservaCreate                          # noqa: E402
-from app.utils.santiago import hoy_santiago                            # noqa: E402
+from app.schemas.reserva import ReservaCreate, ReservaUpdate            # noqa: E402
+from app.utils.santiago import ahora_santiago, hoy_santiago            # noqa: E402
 from shared.estados import ESTADOS_CANCELADA                           # noqa: E402
 from app.core.estados import ESTADO_CANCELADO                          # noqa: E402
 
@@ -1057,9 +1066,13 @@ def test_h_meta_sin_atomico_una_devolucion_se_pierde(monkeypatch):
 
 
 def test_g3_el_delete_no_vuelve_al_ajuste_en_memoria():
-    """La fuente del DELETE: el `± 1` lo hace la BASE, nunca el objeto de Python."""
+    """La fuente de la cancelación: el `± 1` lo hace la BASE, nunca el objeto de Python.
+
+    Desde el arreglo del PUT (`estado='cancelled'` por el body), la cancelación vive en
+    `_cancelar_reserva` y la comparten DELETE y PUT: es ahí donde se mira.
+    """
     bloque = _sin_comentarios(
-        _bloque(_fuente("app/api/v1/reservas.py"), "def eliminar_reserva"))
+        _bloque(_fuente("app/api/v1/reservas.py"), "def _cancelar_reserva"))
 
     assert "asistentes_confirmados -= 1" not in bloque
     assert "creditos_disponibles += 1" not in bloque
@@ -1179,9 +1192,12 @@ def test_i4_una_reserva_sin_credito_gastado_no_devuelve_nada(monkeypatch):
 
 
 def test_i5_la_fuente_del_delete_resuelve_por_la_columna_y_audita():
-    """Guarda de la fuente: si alguien borra el dato, los tests de arriba mienten."""
-    bloque = _sin_comentarios(
-        _bloque(_fuente("app/api/v1/reservas.py"), "def eliminar_reserva"))
+    """Guarda de la fuente: si alguien borra el dato, los tests de arriba mienten.
+
+    `_cancelar_reserva` es la que resuelve el reembolso (la llaman DELETE y PUT).
+    """
+    fuente = _fuente("app/api/v1/reservas.py")
+    bloque = _sin_comentarios(_bloque(fuente, "def _cancelar_reserva"))
 
     assert "Suscripcion.id == reserva.suscripcion_id" in bloque
     assert "reserva.suscripcion_id is not None" in bloque
@@ -1190,6 +1206,10 @@ def test_i5_la_fuente_del_delete_resuelve_por_la_columna_y_audita():
     assert "tokens_gastados or 0) > 0" in bloque      # el bug B
     assert "reembolso_redirigido" in bloque           # se audita la redirección
     assert "registrar_auditoria(" in bloque
+
+    # …y el DELETE no la copia: la llama.
+    assert "_cancelar_reserva(" in _sin_comentarios(
+        _bloque(fuente, "def eliminar_reserva"))
 
 
 def test_i6_el_post_registra_la_membresia_que_cobra():
@@ -1227,4 +1247,167 @@ def test_i8_el_backfill_solo_escribe_la_reserva_con_un_unico_candidato():
     assert "min(s.id) AS suscripcion_id" in sql
     assert "k.total = 1" in sql                 # dos candidatos => queda NULL
     assert "AND r.suscripcion_id IS NULL" in sql
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  J. PUT /reservas/{id}: `estado='cancelled'` por el body NO evade la cancelación
+# ══════════════════════════════════════════════════════════════════════════════
+# El PUT hacía `setattr(reserva, "estado", "cancelled")` con el string del body. La
+# reserva quedaba cancelada —el aforo seguía ocupado y el crédito gastado— y el
+# reembolso del DELETE (aforo atómico, ventana de 6h, membresía que pagó, auditoría,
+# churn) nunca corría. Como el alumno ya no puede usar este PUT (P0-2), el que lo
+# alcanza es el staff: el box cancelaba "por el panel" y el alumno perdía la clase.
+def _clase_en_horas(horas, ident=3, asistentes=1):
+    """Una clase que empieza dentro de `horas` (hora de Chile), para la ventana de 6h."""
+    inicio = ahora_santiago() + timedelta(hours=horas)
+    return _clase(ident, asistentes=asistentes, fecha=inicio.date(),
+                  hora_inicio=hora_del_dia(inicio.hour, inicio.minute))
+
+
+def _cancelar_por_put(almacen, reserva_id=11, extra=None, rol="admin", usuario_id=9):
+    """Un request de `PUT /reservas/{id}` (staff del box 1) con el body de `extra`."""
+    datos = {"estado": "cancelled"}
+    datos.update(extra or {})
+    return _con_sesion(almacen, lambda sesion: res.actualizar_reserva(
+        reserva_id=reserva_id,
+        reserva_data=ReservaUpdate(**datos),
+        db=sesion,
+        current_user={"tenant_id": 1, "usuario_id": usuario_id, "rol": rol},
+        background_tasks=None,
+    ))
+
+
+def test_j1_el_put_que_cancela_devuelve_el_credito_y_libera_el_aforo(monkeypatch):
+    """El bug C: cancelar por PUT dejaba el asiento ocupado y el crédito gastado."""
+    auditorias = _auditorias(monkeypatch)
+    almacen = _dos_planes()             # el plan 1 pagó la reserva 11 (clase 3, 1 asiento)
+
+    resultado = _cancelar_por_put(almacen, 11)
+
+    assert resultado.estado == ESTADO_CANCELADO
+    assert almacen.filas("reservas")[0]["estado"] == ESTADO_CANCELADO
+    assert almacen.filas("clases")[0]["asistentes_confirmados"] == 0     # el aforo baja
+    assert _creditos(almacen) == [3, 5]                                  # el +1 va al que pagó
+    assert auditorias == []             # sin redirección no hay nada que auditar
+
+
+def test_j2_el_put_repetido_no_devuelve_el_credito_dos_veces(monkeypatch):
+    """Idempotencia: antes el segundo PUT volvía a "cancelar" y no protestaba."""
+    _auditorias(monkeypatch)
+    almacen = _dos_planes()
+
+    _cancelar_por_put(almacen, 11)
+    with pytest.raises(HTTPException) as error:
+        _cancelar_por_put(almacen, 11)
+
+    assert error.value.status_code == 409          # el mismo 409 del DELETE
+    assert _creditos(almacen) == [3, 5]            # UN crédito, no dos
+    assert almacen.filas("clases")[0]["asistentes_confirmados"] == 0
+
+
+def test_j3_el_put_dentro_de_las_6h_cancela_pero_no_devuelve(monkeypatch):
+    """La ventana de 6h también vale por el PUT (si no, era la puerta de atrás)."""
+    _auditorias(monkeypatch)
+    almacen = _Almacen(
+        clases=[_clase_en_horas(2)],
+        usuarios=[_alumno()],
+        suscripciones=[_membresia(2, ident=1)],
+        reservas=[_reserva(11, 3, suscripcion_id=1)],
+    )
+
+    _cancelar_por_put(almacen, 11)
+
+    assert almacen.filas("reservas")[0]["estado"] == ESTADO_CANCELADO
+    assert almacen.filas("clases")[0]["asistentes_confirmados"] == 0
+    assert _creditos(almacen) == [2]               # el crédito NO vuelve
+
+
+def test_j4_el_put_acepta_la_variante_vieja_y_guarda_la_forma_de_la_app(monkeypatch):
+    """`'cancelada'` (enum viejo) también cancela; se guarda `'cancelled'`."""
+    _auditorias(monkeypatch)
+    almacen = _dos_planes()
+
+    _cancelar_por_put(almacen, 11, extra={"estado": "cancelada"})
+
+    assert almacen.filas("reservas")[0]["estado"] == ESTADO_CANCELADO
+    assert _creditos(almacen) == [3, 5]
+
+
+def test_j5_el_put_audita_la_redireccion_del_fallback(monkeypatch):
+    """El fallback auditado del DELETE también corre cuando se cancela por el PUT."""
+    auditorias = _auditorias(monkeypatch)
+    almacen = _Almacen(
+        clases=[_clase(3, asistentes=1, fecha=MANANA)],
+        usuarios=[_alumno()],
+        # Empate EXACTO: decide el desempate `id DESC` (el plan 2).
+        suscripciones=[_membresia(4, ident=1), _membresia(4, ident=2)],
+        reservas=[_reserva(11, 3, suscripcion_id=None)],
+    )
+
+    _cancelar_por_put(almacen, 11)
+
+    assert _creditos(almacen) == [4, 5]
+    assert len(auditorias) == 1, auditorias
+    detalle = auditorias[0]["detalle"]
+    assert detalle["tipo"] == "reembolso_redirigido"
+    assert detalle["motivo"] == "sin_registro"     # la reserva no tenía `suscripcion_id`
+    assert detalle["membresia_destino_id"] == 2
+    assert detalle["reserva_id"] == 11
+
+
+def test_j6_el_alumno_sigue_sin_poder_cancelar_por_el_put():
+    """No se abrió una puerta nueva: el PUT sigue siendo del staff (P0-2)."""
+    almacen = _dos_planes()
+
+    with pytest.raises(HTTPException) as error:
+        _cancelar_por_put(almacen, 11, rol="alumno", usuario_id=42)
+
+    assert error.value.status_code == 403
+    assert almacen.filas("reservas")[0]["estado"] == "confirmada"
+    assert _creditos(almacen) == [2, 5]
+    assert almacen.filas("clases")[0]["asistentes_confirmados"] == 1
+
+
+def test_j7_meta_sin_delegacion_el_put_evade_la_cancelacion(monkeypatch):
+    """Guarda de sensibilidad: con el PUT viejo (`setattr` pelado) el bug aparece.
+
+    Es el bug C tal cual: la reserva queda cancelada, el crédito NO vuelve, el aforo NO
+    baja, la auditoría no se registra y un segundo PUT no da 409. Si este meta-test deja
+    de fallar así, los tests de arriba ya no están probando la delegación.
+    """
+    auditorias = _auditorias(monkeypatch)
+
+    def _put_viejo(reserva, *, tenant_id, current_user, db, background_tasks=None):
+        """Lo que hacía el PUT: escribir el estado del body y commitear, nada más."""
+        reserva.estado = ESTADO_CANCELADO
+        db.commit()
+        return {}
+
+    monkeypatch.setattr(res, "_cancelar_reserva", _put_viejo)
+    almacen = _dos_planes()
+
+    _cancelar_por_put(almacen, 11)
+
+    assert almacen.filas("reservas")[0]["estado"] == ESTADO_CANCELADO
+    assert _creditos(almacen) == [2, 5]                                  # el crédito, perdido
+    assert almacen.filas("clases")[0]["asistentes_confirmados"] == 1     # el asiento, ocupado
+    assert auditorias == []
+    _cancelar_por_put(almacen, 11)          # y no hay idempotencia: no explota
+
+
+def test_j8_la_fuente_del_put_delega_y_no_reimplementa_la_cancelacion():
+    """Guarda de la fuente: el PUT decide con la lista compartida y llama a la función."""
+    fuente = _fuente("app/api/v1/reservas.py")
+    put = _sin_comentarios(_bloque(fuente, "def actualizar_reserva",
+                                   hasta="\ndef _cancelar_reserva"))
+
+    assert "es_cancelada(" in put                    # la MISMA lista que el DELETE
+    assert "_cancelar_reserva(" in put               # y la MISMA función
+    assert "background_tasks=background_tasks" in put   # el churn de la devolución
+    # No reimplementa la cancelación a mano (ni deja que el body la escriba):
+    assert "asistentes_confirmados" not in put
+    assert "creditos_disponibles" not in put
+    assert "registrar_auditoria(" not in put
+    assert "with_for_update()" not in put
 

@@ -15,8 +15,8 @@ from app.services.auditoria_service import registrar_auditoria
 from app.services import churn_service
 from app.utils.santiago import ahora_santiago, fecha_chile, fin_de_plan_chile
 # Los créditos que se guardan salen de UNA regla compartida: un plan ilimitado queda sin créditos
-# (`NULL` = "∞" en el front), un plan con cupo guarda sus clases.
-from app.utils.planes import creditos_de_plan
+# (`NULL` = "∞" en el front), un plan con cupo guarda sus clases MÁS lo que le sobraba al alumno.
+from app.utils.planes import creditos_de_emergencia
 
 router = APIRouter()
 
@@ -100,19 +100,25 @@ def comprar_emergencia(
     # — antes se usaba el fin de mes, una segunda regla para el mismo campo.
     vencimiento = fin_de_plan_chile(ahora, plan.duracion_dias)
 
-    # Guardar tokens sobrantes antes de actualizar (0 o los que tenga)
-    tokens_sobrantes = suscripcion.creditos_disponibles or 0
+    # Guardar tokens sobrantes antes de actualizar (0 o los que tenga).
+    # `or 0` + `max(0, ...)`: un saldo negativo no es "sobrante" (no se arrastra deuda) y un plan
+    # ilimitado (`NULL`) no tiene número que sumar.
+    tokens_sobrantes = max(0, suscripcion.creditos_disponibles or 0)
 
     # Actualizar suscripción existente como compra emergencia
     suscripcion.es_compra_emergencia = True
     suscripcion.puede_comprar_emergencia = False
     suscripcion.fecha_compra_emergencia = ahora
     suscripcion.fecha_expiracion = vencimiento
-    # Los créditos del plan comprado, con la regla compartida (`creditos_de_plan`): un plan
-    # ilimitado (en PROD traen `creditos = 0`) queda SIN créditos (`NULL` = "∞" en el front) en vez
-    # del centinela `999` que hacía ver "999 clases" en un plan sin cupo (bug de producción del
-    # 2026-10-08, alumno 533).
-    creditos = creditos_de_plan(plan)
+    # Los créditos del plan comprado MÁS los tokens sobrantes, con la regla compartida
+    # (`creditos_de_emergencia`): un plan ilimitado (en PROD traen `creditos = 0`) queda SIN créditos
+    # (`NULL` = "∞" en el front) en vez del centinela `999` que hacía ver "999 clases" en un plan sin
+    # cupo (bug de producción del 2026-10-08, alumno 533).
+    # ── BUG (créditos): acá se guardaba `creditos_de_plan(plan)` a secas, así que los
+    # `tokens_sobrantes` —calculados justo arriba y devueltos en la respuesta— se PISABAN: la
+    # primera compra de emergencia del año tiene que ARRASTRARLOS ("acumula tokens sobrantes"),
+    # no borrarlos. Ver `creditos_de_emergencia` y `tests/test_comprar_emergencia.py`.
+    creditos = creditos_de_emergencia(plan, tokens_sobrantes)
     suscripcion.creditos_totales = creditos
     suscripcion.creditos_disponibles = creditos
 
@@ -138,7 +144,9 @@ def comprar_emergencia(
         },
     )
 
-    # Si es primera compra y tiene tokens sobrantes (deberían ser 0 pero por si acaso)
+    # Si es la primera compra del año y le sobraban tokens, se acumulan al plan nuevo
+    # (hoy el guard de arriba exige `creditos_disponibles == 0`, así que en la práctica es 0;
+    # se informa igual porque es la regla del endpoint).
     acumula = tokens_sobrantes > 0
 
     return {

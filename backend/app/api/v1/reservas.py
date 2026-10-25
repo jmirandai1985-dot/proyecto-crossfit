@@ -789,10 +789,16 @@ def actualizar_reserva(
     tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
+    background_tasks: BackgroundTasks = None,
 ):
     """
     Actualiza una reserva existente.
     Solo el dueño de la reserva, coaches o admins pueden modificarla.
+
+    ⚠️ Un `estado` de cancelación NO se escribe a mano: se delega en `_cancelar_reserva`,
+    la MISMA lógica de `DELETE /reservas/{id}` (devuelve el crédito, baja el aforo,
+    aplica la ventana de 6h, la idempotencia y la auditoría del reembolso). Antes este
+    PUT guardaba el string tal cual y la reserva quedaba cancelada SIN devolver nada.
     """
     # 🔒 SEGURIDAD: tenant_id del token.
     tenant_id = current_user["tenant_id"]
@@ -830,6 +836,31 @@ def actualizar_reserva(
 
     update_data = reserva_data.model_dump(exclude_unset=True)
 
+    # ── BUG (créditos): `estado='cancelled'` por el body EVADÍA la cancelación ──
+    # Este endpoint hacía `setattr(reserva, "estado", "cancelled")` en el loop de abajo:
+    # la reserva quedaba cancelada pero el crédito NO volvía, `asistentes_confirmados`
+    # NO bajaba, el segundo PUT no daba 409 (no había idempotencia) y el fallback del
+    # reembolso no dejaba su registro en `auditoria` — todo lo que sí hace
+    # `DELETE /reservas/{id}`. La reserva es la MISMA: se delega en su función en vez de
+    # duplicar (o de reimplementar a mano con `setattr`) el aforo atómico, el `FOR UPDATE`,
+    # el reembolso por `suscripcion_id` y el recálculo del churn. Cualquier variante que
+    # la app lee como cancelada (`estados.ESTADOS_CANCELADA`: `cancelled` y la vieja
+    # `cancelada`) entra acá, y se guarda con la forma que escribe la app.
+    if es_cancelada(update_data.get("estado")):
+        # El resto del body se ignora: cancelar es una transición COMPLETA (devolver el
+        # crédito y liberar el asiento), no un `UPDATE` de columnas sueltas. Si el body
+        # manda `asistio` o `tokens_gastados` junto al estado, mandan las reglas de la
+        # cancelación: lo contrario sería dejar que el request elija cuánto reembolsar.
+        _cancelar_reserva(
+            reserva,
+            tenant_id=tenant_id,
+            current_user=current_user,
+            db=db,
+            background_tasks=background_tasks,
+        )
+        db.refresh(reserva)
+        return reserva
+
     for field, value in update_data.items():
         setattr(reserva, field, value)
 
@@ -839,47 +870,37 @@ def actualizar_reserva(
     return reserva
 
 
-@router.delete("/{reserva_id}")
-def eliminar_reserva(
-    reserva_id: int,
-    tenant_id: Optional[int] = None,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+def _cancelar_reserva(
+    reserva: Reserva,
+    *,
+    tenant_id: int,
+    current_user: dict,
+    db: Session,
     background_tasks: BackgroundTasks = None,
-):
-    """
-    Cancela una reserva (soft delete) y DECREMENTA asistentes_confirmados.
+) -> dict:
+    """Núcleo de la cancelación de UNA reserva: la MISMA lógica para DELETE y PUT.
 
-    Política de cancelación:
-    - Si faltan >= 6 horas para la clase: cancela y DEVUELVE el crédito.
-    - Si faltan < 6 horas: cancela pero NO devuelve el crédito (penalización).
+    Vive acá (y no copiada en cada endpoint) porque `PUT /reservas/{id}` podía escribir
+    `estado='cancelled'` desde el body: la reserva quedaba cancelada pero el crédito NO
+    volvía, el aforo NO bajaba y la idempotencia y la auditoría del DELETE no corrían
+    (bug de créditos reproducido en TEST). El PUT ahora DELEGA acá; el DELETE también.
 
-    Solo el dueño de la reserva, coaches o admins pueden cancelarla.
+    Qué hace, en orden (los porqués están comentados en cada bloque):
+      1. transición de estado con UPDATE condicional -> idempotencia (409 si ya estaba);
+      2. aforo con UPDATE atómico (`- 1`, nunca por debajo de 0);
+      3. ventana de 6h en hora de Chile (dentro de la ventana no se devuelve el crédito);
+      4. reembolso del crédito a la membresía que lo pagó (`reserva.suscripcion_id`,
+         migración 059) con fallback auditado y guard `tokens_gastados > 0`;
+      5. auditoría de la redirección (después del commit) y recálculo del churn.
+
+    Recibe la reserva YA resuelta y YA autorizada (tenant + ownership): el control de
+    acceso se queda en cada endpoint, que es quien conoce su propio mensaje de error.
+    Devuelve el resumen con el que responde `DELETE /reservas/{id}`.
     """
     from datetime import datetime
     from app.models.suscripcion import Suscripcion
 
-    # 🔒 SEGURIDAD: tenant_id del token.
-    tenant_id = current_user["tenant_id"]
-
-    reserva = db.query(Reserva).filter(
-        Reserva.id == reserva_id,
-        Reserva.tenant_id == tenant_id
-    ).first()
-
-    if not reserva:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Reserva con ID {reserva_id} no encontrada"
-        )
-
-    # 🔒 IDOR: verificar ownership
-    rol = current_user.get("rol", "")
-    if rol not in ("coach", "admin", "administrador") and reserva.alumno_id != current_user.get("usuario_id"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="No puedes cancelar reservas de otro usuario",
-        )
+    reserva_id = reserva.id
 
     # ── P0-2 (auditoría Alumno, R-03): idempotencia de la cancelación ──
     # Un DELETE repetido volvía a decrementar el aforo y a DEVOLVER EL CRÉDITO
@@ -1084,3 +1105,55 @@ def eliminar_reserva(
         "horas_restantes": round(horas_restantes, 2),
         "mensaje": mensaje,
     }
+
+
+@router.delete("/{reserva_id}")
+def eliminar_reserva(
+    reserva_id: int,
+    tenant_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+    background_tasks: BackgroundTasks = None,
+):
+    """
+    Cancela una reserva (soft delete) y DECREMENTA asistentes_confirmados.
+
+    Política de cancelación:
+    - Si faltan >= 6 horas para la clase: cancela y DEVUELVE el crédito.
+    - Si faltan < 6 horas: cancela pero NO devuelve el crédito (penalización).
+
+    Solo el dueño de la reserva, coaches o admins pueden cancelarla.
+
+    La cancelación en sí (idempotencia, aforo atómico, reembolso por `suscripcion_id`
+    con fallback auditado y recálculo del churn) vive en `_cancelar_reserva`: es la
+    MISMA función que usa `PUT /reservas/{id}` cuando el body trae `estado='cancelled'`.
+    """
+    # 🔒 SEGURIDAD: tenant_id del token.
+    tenant_id = current_user["tenant_id"]
+
+    reserva = db.query(Reserva).filter(
+        Reserva.id == reserva_id,
+        Reserva.tenant_id == tenant_id
+    ).first()
+
+    if not reserva:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Reserva con ID {reserva_id} no encontrada"
+        )
+
+    # 🔒 IDOR: verificar ownership
+    rol = current_user.get("rol", "")
+    if rol not in ("coach", "admin", "administrador") and reserva.alumno_id != current_user.get("usuario_id"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No puedes cancelar reservas de otro usuario",
+        )
+
+    return _cancelar_reserva(
+        reserva,
+        tenant_id=tenant_id,
+        current_user=current_user,
+        db=db,
+        background_tasks=background_tasks,
+    )

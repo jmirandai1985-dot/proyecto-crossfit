@@ -22,7 +22,13 @@ Uso:
     Suscripcion(**..., creditos_totales=creditos_de_plan(plan),
                      creditos_disponibles=creditos_de_plan(plan))
 
-Ver `backend/tests/test_creditos_de_plan.py`.
+Y para la compra de emergencia, que además arrastra lo que le quedaba al alumno:
+
+    from app.utils.planes import creditos_de_emergencia
+
+    creditos = creditos_de_emergencia(plan, tokens_sobrantes)
+
+Ver `backend/tests/test_creditos_de_plan.py` y `backend/tests/test_comprar_emergencia.py`.
 """
 from typing import Optional
 
@@ -38,3 +44,32 @@ def creditos_de_plan(plan) -> Optional[int]:
     if plan is None or getattr(plan, "es_ilimitado", False):
         return None
     return plan.creditos
+
+
+def creditos_de_emergencia(plan, tokens_sobrantes=0) -> Optional[int]:
+    """Créditos que quedan después de una compra de emergencia: `plan + sobrantes`.
+
+    Es la otra mitad de la misma regla (`creditos_de_plan` + lo que el alumno NO alcanzó a usar):
+
+      * plan **ilimitado** → `None`: no hay un número que sumar (`NULL` = "∞" en el front);
+      * plan **con cupo** → sus clases **más** `tokens_sobrantes`;
+      * `tokens_sobrantes` `None` o negativo → cuenta como 0. Un saldo negativo no es
+        "sobrante" y no se arrastra como deuda al plan nuevo.
+
+    Por qué existe
+    --------------
+    `POST /comprar-emergencia` dice "1ra vez al año: acumula tokens sobrantes al mes
+    siguiente" y calculaba `tokens_sobrantes`… para después guardar
+    `creditos_de_plan(plan)` a secas: lo que le quedaba al alumno se **pisaba** (se
+    devolvía en la respuesta y se perdía en la base). Hoy el guard del endpoint exige
+    `creditos_disponibles == 0` (con clases disponibles no hace falta la emergencia), así
+    que el caso es defensivo; pero la cuenta tiene que ser la correcta si ese guard se
+    relaja, si el plan tiene un cupo mayor que 0 y, sobre todo, porque es la regla
+    escrita en el endpoint: no puede depender de una precondición para no destruir datos.
+
+    Ver `backend/tests/test_comprar_emergencia.py`.
+    """
+    del_plan = creditos_de_plan(plan)
+    if del_plan is None:
+        return None
+    return del_plan + max(0, tokens_sobrantes or 0)
