@@ -22,7 +22,10 @@ deciden las fechas.
      * con la ventana cerrada (vence ayer, fila `activo`) -> 400 "No tienes una membresía activa";
      * `pendiente` vigente -> 400: sacar el `activo` NO abrió la puerta a un plan sin aprobar;
      * sin créditos -> 400 "No te quedan clases disponibles";
-     * la OTRA puerta (DELETE) devuelve el crédito con el MISMO criterio de vigencia.
+     * la OTRA puerta (DELETE) devuelve el crédito con el MISMO criterio de vigencia;
+     * y lo devuelve A LA MEMBRESÍA QUE LO PAGÓ (`reservas.suscripcion_id`, migración 059):
+       se reserva con el pase, se compra una renovación y, al cancelar, el crédito vuelve
+       al pase —antes subía el saldo de la renovación, que no lo había gastado—.
 
 Correr:
     ENVIRONMENT=test py -3.12 -m pytest tests/test_pase_puede_reservar.py -q
@@ -92,7 +95,10 @@ def test_c4_las_dos_puertas_de_reservas_usan_ese_predicado_y_no_el_estado():
     puerta, y ya no hay ninguna comparación de estado escrita a mano."""
     fuente = (BACKEND / "app/api/v1/reservas.py").read_text(encoding="utf-8-sig")
 
-    assert fuente.count("da_acceso_hoy(Suscripcion.estado, Suscripcion.fecha_expiracion)") == 2, (
+    # TRES usos desde la migración 059: el POST, y en el DELETE la búsqueda por el
+    # DATO (`reserva.suscripcion_id`, la membresía que pagó) + el fallback cuando ese
+    # dato no existe (reserva anterior a la 059) o el plan ya no da acceso.
+    assert fuente.count("da_acceso_hoy(Suscripcion.estado, Suscripcion.fecha_expiracion)") == 3, (
         "las dos puertas (reservar / reembolsar) tienen que usar `da_acceso_hoy`")
     for escrito_a_mano in ('Suscripcion.estado == "activo"', "Suscripcion.estado == 'activo'"):
         assert escrito_a_mano not in fuente, f"quedó el filtro comercial: {escrito_a_mano}"
@@ -319,5 +325,49 @@ def test_b6_la_puerta_de_cancelar_devuelve_el_credito_con_el_mismo_criterio(clie
     assert r.status_code == 200, r.text
     assert r.json()["reembolsado"] is True
     assert _creditos(db, escenario["sub_id"]) == 1
+
+
+def test_b7_el_credito_vuelve_al_plan_que_lo_pago(cliente, db, escenario):
+    """Migración 059, el caso REAL: se reserva con el pase y DESPUÉS se compra otro
+    plan. Al cancelar, el crédito tiene que volver al pase —el que lo pagó— y no a
+    "la membresía vigente con más saldo" (`ORDER BY creditos_disponibles DESC,
+    fecha_expiracion DESC`), que es lo que hacía antes: el pase quedaba en 0 y el
+    plan nuevo subía un crédito que el alumno nunca gastó en él. El saldo total
+    del alumno quedaba igual; el cuadre por plan, no.
+    """
+    alumno_id = escenario["alumno_id"]
+    creada = _reservar(cliente, escenario, alumno_id)
+    assert creada.status_code == 201, creada.text
+    reserva_id = creada.json()["id"]
+    assert _creditos(db, escenario["sub_id"]) == 0
+
+    # El POST tiene que dejar registrado DE QUÉ membresía salió el crédito.
+    assert db.execute(text("SELECT suscripcion_id FROM reservas WHERE id = :r"),
+                      {"r": reserva_id}).scalar() == escenario["sub_id"], (
+        "el POST no registró qué membresía pagó (migración 059)")
+
+    # Renovación después de reservar: más créditos y vence más tarde.
+    sufijo = uuid.uuid4().hex[:12]
+    plan_id = db.execute(text("""
+        INSERT INTO planes (tenant_id, nombre, creditos, es_ilimitado, precio_clp, duracion_dias,
+                            activo, es_comercial)
+        VALUES (:t, :n, 5, false, 0, 30, false, false)
+        RETURNING id"""),
+        {"t": TENANT_ID, "n": f"Renovacion reserva TEST {sufijo}"}).scalar()
+    renovacion_id = _crear_suscripcion(db, alumno_id, plan_id,
+                                       hoy_santiago() + timedelta(days=30), creditos=5)
+    db.commit()
+    try:
+        r = cliente.delete(f"{BASE}/{reserva_id}", headers=_headers(alumno_id))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["reembolsado"] is True
+        assert _creditos(db, escenario["sub_id"]) == 1   # al pase, que lo pagó
+        assert _creditos(db, renovacion_id) == 5         # la renovación, intacta
+    finally:
+        db.rollback()
+        db.execute(text("DELETE FROM suscripciones WHERE id = :s"), {"s": renovacion_id})
+        db.execute(text("DELETE FROM planes WHERE id = :p"), {"p": plan_id})
+        db.commit()
 
 

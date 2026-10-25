@@ -209,7 +209,10 @@ def crear_reserva(
         da_acceso_hoy(Suscripcion.estado, Suscripcion.fecha_expiracion)
     ).order_by(
         Suscripcion.creditos_disponibles.desc().nulls_last(),
-        Suscripcion.fecha_expiracion.desc()
+        Suscripcion.fecha_expiracion.desc(),
+        # Desempate determinista: dos planes con el mismo saldo y el mismo
+        # vencimiento hacían que "cuál se cobra" dependiera del plan de la BD.
+        Suscripcion.id.desc()
     ).with_for_update().first()
 
     if not membresia:
@@ -251,6 +254,11 @@ def crear_reserva(
         clase_id=reserva_data.clase_id,
         alumno_id=reserva_data.alumno_id,
         asistio=reserva_data.asistio,
+        # De QUÉ plan sale el crédito (migración 059). `DELETE /reservas/{id}`
+        # devuelve el crédito A ESTA suscripción y no a "la mejor que tenga hoy":
+        # con dos planes (una renovación, un pase de regreso) adivinar movía el
+        # saldo de un plan a otro sin que el alumno hubiera hecho nada.
+        suscripcion_id=membresia.id,
         tokens_gastados=tokens_gastados,
         estado=reserva_data.estado
     )
@@ -937,21 +945,66 @@ def eliminar_reserva(
     )
     horas_restantes = (inicio_clase - ahora).total_seconds() / 3600
 
-    # Buscar membresía vigente para devolver el crédito si aplica.
+    # ── De QUÉ membresía vuelve el crédito (migración 059) ───────────────────
+    # Antes se ADIVINABA: "la membresía vigente del alumno" con `ORDER BY
+    # creditos_disponibles DESC, fecha_expiracion DESC`. Con dos planes (una
+    # renovación, un "Pase de regreso", una compra de emergencia) el crédito
+    # volvía al plan equivocado: el saldo TOTAL del alumno quedaba igual, pero el
+    # cuadre por plan no (A.3 del mantenimiento lo reporta como descuadre que no
+    # existe, y el alumno ve desaparecer un crédito del plan que pagó).
+    #
+    # Ahora manda el dato: `reserva.suscripcion_id`, que escribe `POST /reservas`.
+    # Se usa SÓLO si esa membresía todavía da acceso; si está en NULL (reserva
+    # anterior a la 059, presencia sin cargo) o si ya no lo da (venció, se
+    # rechazó, se borró), se cae al ORDER BY de siempre. Esa redirección se
+    # registra en `auditoria`: sin el registro, una devolución desviada y un
+    # descuadre real del mantenimiento se ven exactamente igual.
+    #
     # Vigencia por DÍA CHILENO (`da_acceso_hoy`): el plan del último día todavía devuelve el
     # crédito a las 21:00/23:00 CLT — antes la comparación por instante ya no lo encontraba.
     # Misma puerta que el POST: el alumno con el "Pase de regreso" (plan no comercial) también
     # recupera su crédito, porque acá tampoco decide el `estado == 'activo'` comercial (corrección C).
+    #
+    # `tokens_gastados > 0` (bug B): una reserva de presencia sin cargo
+    # (`POST /asistencia/.../sin-reserva`) NO pagó ningún crédito. Devolverle uno
+    # le REGALABA saldo al alumno, y antes pasaba cada vez que cancelaba con más
+    # de 6h de margen.
     reembolsado = False
-    if horas_restantes >= 6:
-        membresia = db.query(Suscripcion).filter(
-            Suscripcion.tenant_id == tenant_id,
-            Suscripcion.usuario_id == reserva.alumno_id,
-            da_acceso_hoy(Suscripcion.estado, Suscripcion.fecha_expiracion)
-        ).order_by(
-            Suscripcion.creditos_disponibles.desc().nulls_last(),
-            Suscripcion.fecha_expiracion.desc()
-        ).first()
+    redireccion = None
+    if horas_restantes >= 6 and (reserva.tokens_gastados or 0) > 0:
+        # 1) La membresía que PAGÓ el crédito. `with_for_update()`: la fila queda
+        #    bloqueada hasta el commit, así el `+ 1` de abajo no compite con otra
+        #    cancelación del mismo alumno ni con un consumo del POST.
+        membresia = None
+        if reserva.suscripcion_id is not None:
+            membresia = db.query(Suscripcion).filter(
+                Suscripcion.id == reserva.suscripcion_id,
+                Suscripcion.tenant_id == tenant_id,
+                Suscripcion.usuario_id == reserva.alumno_id,
+                da_acceso_hoy(Suscripcion.estado, Suscripcion.fecha_expiracion)
+            ).with_for_update().first()
+        # 2) Red de seguridad: mismo ORDER BY de siempre (+ `id` como desempate
+        #    determinista), y se anota que hubo redirección.
+        if not membresia:
+            membresia = db.query(Suscripcion).filter(
+                Suscripcion.tenant_id == tenant_id,
+                Suscripcion.usuario_id == reserva.alumno_id,
+                da_acceso_hoy(Suscripcion.estado, Suscripcion.fecha_expiracion)
+            ).order_by(
+                Suscripcion.creditos_disponibles.desc().nulls_last(),
+                Suscripcion.fecha_expiracion.desc(),
+                Suscripcion.id.desc()
+            ).first()
+            if membresia:
+                redireccion = {
+                    "motivo": ("sin_registro" if reserva.suscripcion_id is None
+                               else "membresia_original_sin_acceso"),
+                    "reserva_id": reserva_id,
+                    "alumno_id": reserva.alumno_id,
+                    "clase_id": reserva.clase_id,
+                    "membresia_original_id": reserva.suscripcion_id,
+                    "membresia_destino_id": membresia.id,
+                }
         if membresia:
             # ── Devolución ATÓMICA del crédito: `+ 1` lo hace la base ──────
             # Antes: `membresia.creditos_disponibles += 1` (read-modify-write en
@@ -982,6 +1035,27 @@ def eliminar_reserva(
 
     db.commit()
 
+    # ── La redirección queda AUDITADA (después del commit: no puede romperlo) ──
+    # Si el crédito volvió a una membresía distinta de la que lo pagó, tiene que
+    # quedar rastro de CUÁL era la original y A CUÁL fue: es el dato que permite
+    # cuadrar después (y distinguir una reserva vieja sin dato de un plan que se
+    # venció antes de la cancelación). El `try` es a propósito: la cancelación ya
+    # está commiteada y el crédito ya volvió; si falla el insert de auditoría, el
+    # alumno no puede ver un 500 por un reembolso que SÍ ocurrió.
+    if redireccion:
+        try:
+            registrar_auditoria(
+                db,
+                tenant_id=tenant_id,
+                usuario_id=current_user.get("usuario_id"),
+                accion="UPDATE",
+                entidad="reserva",
+                entidad_id=reserva_id,
+                detalle={"tipo": "reembolso_redirigido", **redireccion},
+            )
+        except Exception:  # noqa: BLE001 — ver el comentario de arriba
+            db.rollback()
+
     # ── Si se devolvió el crédito, cambió la situación -> recalc del churn (segundo plano). ──
     if reembolsado:
         churn_service.programar_recalculo(background_tasks, tenant_id, reserva.alumno_id)
@@ -994,6 +1068,11 @@ def eliminar_reserva(
     elif horas_restantes < 6:
         mensaje = ("Reserva cancelada. Faltaban menos de 6 horas para la clase, "
                    "así que el crédito NO se devuelve.")
+    elif (reserva.tokens_gastados or 0) <= 0:
+        # Bug B: la reserva no gastó crédito (presencia sin cargo). Antes caía en
+        # el mensaje del plan ilimitado y el alumno leía algo que no era cierto.
+        mensaje = ("Reserva cancelada. Esta reserva no gastó crédito: no había "
+                   "nada que devolver.")
     else:
         mensaje = ("Reserva cancelada. Tu plan es ilimitado: no había crédito "
                    "que devolver.")

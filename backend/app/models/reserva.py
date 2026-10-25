@@ -43,6 +43,20 @@ class Reserva(Base):
                            nullable=False, server_default=func.now())
     asistio = Column(Boolean, nullable=False, default=False)
     tokens_gastados = Column(Integer, nullable=False, default=0)
+    # ── QUÉ membresía pagó el crédito (migración 059) ──────────────────────
+    # `tokens_gastados` dice CUÁNTOS créditos se gastaron; esta columna dice DE
+    # QUIÉN salieron. Sin ella, `DELETE /reservas/{id}` tenía que ADIVINAR la
+    # membresía (`ORDER BY creditos_disponibles DESC, fecha_expiracion DESC`) y
+    # el crédito podía volver a un plan que no lo pagó (el saldo total del
+    # alumno daba igual, el cuadre por plan no).
+    #
+    # NULL es un valor con significado: "no había plan / no se sabe" — la
+    # presencia sin cargo (`POST /asistencia/.../sin-reserva` crea la reserva con
+    # `tokens_gastados = 0`) y las reservas anteriores a la 059 que el backfill
+    # no pudo atribuir con certeza. `SET NULL` como las demás trazas: borrar el
+    # plan no puede borrar la reserva.
+    suscripcion_id = Column(Integer, ForeignKey(
+        "suscripciones.id", ondelete="SET NULL"), nullable=True)
     estado = Column(String(20), nullable=False, default="reserved")
     # ── Auditoría de marcado de asistencia (Fase 1, sistema de Asistencia) ──
     # asistencias se soporta en reservas.asistio; estas columnas registran
@@ -60,6 +74,11 @@ class Reserva(Base):
         Index('ix_reservas_tenant_id', 'tenant_id'),
         Index('ix_reservas_clase_id', 'clase_id'),
         Index('ix_reservas_alumno_id', 'alumno_id'),
+        # ── Migración 059: la membresía que pagó el crédito ──────────────────
+        # `DELETE /reservas/{id}` resuelve la devolución por esta columna en
+        # cada cancelación (y A.3 del mantenimiento la puede cruzar para auditar
+        # los reembolsos que el fallback tuvo que redirigir).
+        Index('ix_reservas_suscripcion_id', 'suscripcion_id'),
         # ── Migración 057: UNA sola reserva VIVA por (clase, alumno) ─────────
         # Índice ÚNICO PARCIAL: las canceladas no entran, así el alumno puede
         # volver a reservar la misma clase después de cancelar (y el histórico
