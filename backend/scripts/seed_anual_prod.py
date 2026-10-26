@@ -15,13 +15,15 @@ GUARDS (todos deben pasar; corren ANTES de leer/escribir cualquier fila)
 1. `--destino prod|test` es OBLIGATORIO (no hay default). De él sale `ENVIRONMENT`
    (`production` / `test`) y por lo tanto qué `.env` lee `app.core.config`.
 2. La URL tiene que coincidir EXACTAMENTE con el destino:
-     * prod: el endpoint de PROD (`PROD_BRANCH_ID` = `ep-bitter-cloud-arat6wil`,
-       host `bitter-cloud`). Cualquier OTRO host aborta.
-     * test: un endpoint de TEST (`TEST_BRANCH_IDS` = `ep-lingering-fog-arywdnbg`,
-       host `lingering-fog`) y NUNCA el de PROD (denylist).
+     * prod: el endpoint de PROD (`PROD_BRANCH_ID` = `ep-winter-star-akwis51j`,
+       host `winter-star`). Cualquier OTRO host aborta.
+     * test: un endpoint de TEST (`TEST_BRANCH_IDS` = `ep-crimson-tooth-akhx7q2s`,
+       host `crimson-tooth`) y NUNCA el de PROD (denylist).
    Los ids se leen de `app.core.config` (única fuente de verdad) y además se valida
-   que el de PROD siga siendo `bitter-cloud`: si Neon vuelve a recrear el endpoint,
+   que el de PROD siga siendo `winter-star`: si Neon vuelve a recrear el endpoint,
    el script aborta en vez de escribir en una base que ya no es la que espera.
+   El PROD anterior (`bitter-cloud`, hasta 2026-10-24) sigue con datos reales, así
+   que se rechaza en los DOS destinos con su propio mensaje.
    ⚠️ `withered-silence` era el endpoint de PROD **viejo** (migración del 2026-09-24).
    El guard del seed anterior (`"withered-silence" in DATABASE_URL`) ya NO puede pasar:
    por eso este script no lo usa ni como host ni como confirmación.
@@ -152,8 +154,10 @@ MARCA_TS = datetime(2026, 10, 2, 4, 17, 3, 123456, tzinfo=timezone.utc)
 DIAS_MANTENIMIENTO = (1, 15)      # el job escribe esos días
 MES_PROHIBIDO = "2026-09"         # el run del 1/10 vencería todas las de septiembre
 # ── Hosts de Neon (denylist/allowlist; los ids completos salen de app.core.config) ──
-HOST_PROD = "bitter-cloud"        # ep-bitter-cloud-arat6wil (rama production)
-HOST_TEST = "jolly-butterfly"     # ep-jolly-butterfly-b6ty2z89 (rama de desarrollo)
+HOST_PROD = "winter-star"         # ep-winter-star-akwis51j (rama production, desde 2026-10-24)
+HOST_TEST = "crimson-tooth"       # ep-crimson-tooth-akhx7q2s (rama de desarrollo, desde 2026-10-24)
+HOST_PROD_ANTERIOR = "bitter-cloud"     # ep-bitter-cloud-arat6wil (PROD 2026-10-18 → 2026-10-24;
+                                        # sigue vivo con datos reales: NUNCA es destino válido)
 HOST_PROD_VIEJO = "withered-silence"   # PROD ANTES del 2026-09-24 (endpoint ya retirado)
 
 # Estacionalidad chilena: enero/febrero y julio son vacaciones; marzo y septiembre son
@@ -1316,6 +1320,9 @@ def validar_url_destino(url: str, destino: str, prod_id: str,
     if HOST_PROD_VIEJO in u:
         return (f"la URL apunta a {HOST_PROD_VIEJO}, que era el PROD viejo (endpoint "
                 f"retirado el 2026-09-24): corrige el .env antes de correr el seed")
+    if HOST_PROD_ANTERIOR in u:
+        return (f"la URL apunta a {HOST_PROD_ANTERIOR}, que era el PROD hasta el "
+                f"2026-10-24 (sigue con datos reales): corrige el .env antes de correr el seed")
     if destino == "prod":
         if prod_id not in u:
             return f"destino=prod pero la URL no es el endpoint de PROD ({prod_id})"

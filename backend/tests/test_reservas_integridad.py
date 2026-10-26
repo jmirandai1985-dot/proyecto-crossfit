@@ -198,9 +198,16 @@ def test_p03_delete_reserva_reporta_el_reembolso():
 
 
 def test_p03_ventana_de_6h_usa_la_hora_chilena():
-    """Regresión del bug de timezone: una clase mañana a las 01:00 CLT está a
-    ~7h reales (>6 => el crédito DEBE volver). Con el bug (tzinfo=UTC encima de
-    la hora local chilena) se veían ~4h y el crédito no volvía."""
+    """Regresión del bug de timezone: el backend debe calcular las horas que faltan
+    con la hora CHILENA de la clase, no leyendo esa hora local como si fuera UTC.
+
+    El bug (tzinfo=UTC encima de la hora local chilena) desplazaba el cálculo ~3-4h
+    (huso de Chile), así que un margen real de 7h se veía como 3-4h y el crédito no
+    volvía. Por eso la clase queda a las 01:00 de mañana: en la ventana nocturna
+    (18:00-01:00 CLT) el margen real ronda las 7h —el caso del reporte—, pero el
+    test NO asume eso: compara contra `horas_reales` (medido en Santiago) para
+    correr a cualquier hora del día. Un desfase de huso rompe esa comparación.
+    """
     if os.getenv("ENVIRONMENT") != "test":
         pytest.skip("inserta una clase de prueba: solo con ENVIRONMENT=test")
 
@@ -242,12 +249,17 @@ def test_p03_ventana_de_6h_usa_la_hora_chilena():
         rd = requests.delete(f"{BASE}/reservas/{rid}", headers=_h(), timeout=20)
         assert rd.status_code == 200, f"DELETE: {rd.status_code} {rd.text[:200]}"
         d = rd.json()
-        assert d["horas_restantes"] >= 6, (
+        # Lo que prueba el bug: las horas informadas tienen que ser las REALES hasta
+        # la clase (medidas en Santiago). Con el huso mal aplicado se desvían 3-4h.
+        assert d["horas_restantes"] == pytest.approx(horas_reales, abs=0.2), (
             f"la ventana de 6h no usa la hora chilena: calculó "
             f"{d['horas_restantes']}h para una clase a {horas_reales:.2f}h reales")
-        assert d["reembolsado"] is True, "no devolvió el crédito con más de 6h de margen"
+        # Lejos del borde de 6h el reembolso es determinista (cerca del borde, no).
+        if abs(horas_reales - 6) > 0.25:
+            assert d["reembolsado"] is (horas_reales > 6), (
+                f"reembolsado={d['reembolsado']} con {horas_reales:.2f}h de margen")
         creditos_despues = _creditos()
-        if creditos_antes is not None and creditos_despues is not None:
+        if d["reembolsado"] and creditos_antes is not None and creditos_despues is not None:
             assert creditos_despues == creditos_antes + 1, (
                 f"no devolvió exactamente 1 crédito: {creditos_antes} -> {creditos_despues}")
     finally:

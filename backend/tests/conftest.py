@@ -1,7 +1,8 @@
 ﻿"""
 Configuración de pytest para los tests del backend.
 Estos tests son de integración contra la API real (localhost:8000).
-Usan la base de datos Neon branch test y el alumno de prueba (id=999).
+Usan la base de datos Neon branch test y un alumno REAL de esa branch
+(`ALUMNO_ID`, ver `_resolver_alumno_test`).
 
 Para ejecutar (recomendado):
   run_tests.bat
@@ -49,10 +50,74 @@ except Exception as e:
 
 # ── Configuración compartida ──
 BASE = "http://localhost:8000/api/v1"
-ALUMNO_ID = 999      # Alumno de prueba (creado por run_setup_test_db.py)
 TENANT_ID = 1
 HOY = date.today()
 HOY_STR = str(HOY)
+
+# Alumno demo que crea el seed (`run_setup_test_db.py`, que corre `run_tests.bat`).
+ALUMNO_SEED_ID = 999
+
+
+def _resolver_alumno_test(tenant_id=TENANT_ID, seed_id=ALUMNO_SEED_ID):
+    """Usuario_id del alumno contra el que corren los tests de integración.
+
+    POR QUÉ EXISTE: `ALUMNO_ID` estaba fijo en 999. `create_access_token` firma
+    cualquier id SIN consultar la BD, así que cuando el 999 no está en la branch
+    test (branch recién creada, seed no corrido, o alguien arrancó uvicorn a mano)
+    TODOS los requests del alumno devolvían 404 "Usuario no encontrado o
+    inactivo". El test se veía roto por el endpoint cuando el que faltaba era el
+    fixture.
+
+    Orden de preferencia:
+      1. el alumno del seed (999), si existe y está activo -> suite determinista;
+      2. si no, un alumno REAL del box con membresía vigente y CRÉDITOS
+         NUMÉRICOS (`creditos_disponibles IS NOT NULL`) — los planes ilimitados
+         lo dejan en NULL y los tests comparan el descuento de 1 crédito:
+         con un ilimitado el decremento no es observable y el test moriría en un
+         `TypeError: NoneType - int`;
+      3. si no hay nada (o no hay BD), el id del seed: el test falla con el 404 de
+         siempre y el mensaje dice qué faltó.
+
+    Sólo consulta la BD con ENVIRONMENT=test (nunca en un proceso apuntado a
+    producción) y es de SÓLO LECTURA.
+    """
+    if _os.getenv("ENVIRONMENT") != "test":
+        return seed_id
+    try:
+        from sqlalchemy import text as _text
+
+        from app.db.database import SessionLocal
+
+        db = SessionLocal()
+    except Exception:
+        return seed_id
+    try:
+        existe = db.execute(_text(
+            "SELECT id FROM usuarios "
+            "WHERE id = :i AND tenant_id = :t AND estado = 'activo'"),
+            {"i": seed_id, "t": tenant_id}).first()
+        if existe is not None:
+            return int(existe.id)
+        fila = db.execute(_text(
+            "SELECT u.id FROM usuarios u "
+            "JOIN suscripciones s ON s.usuario_id = u.id "
+            "WHERE u.tenant_id = :t AND u.rol::text = 'alumno' "
+            "  AND u.estado = 'activo' "
+            "  AND s.estado = 'activo' AND s.fecha_expiracion > now() "
+            "  AND s.creditos_disponibles IS NOT NULL "
+            "  AND s.creditos_disponibles > 0 "
+            "ORDER BY (u.correo LIKE 'demo.%') DESC, "
+            "         s.creditos_disponibles DESC, u.id "
+            "LIMIT 1"),
+            {"t": tenant_id}).first()
+        return int(fila.id) if fila is not None else seed_id
+    except Exception:
+        return seed_id
+    finally:
+        db.close()
+
+
+ALUMNO_ID = _resolver_alumno_test()
 
 # ── Fecha de referencia para tests que necesitan clases CONFIRMADAS ──
 # REGLA DE NEGOCIO: los domingos NO hay clases (dia de descanso).
@@ -122,8 +187,14 @@ def health_check():
         )
     return True
 
-def get_alumno_token(alumno_id=999, tenant_id=1):
-    """Generate a valid JWT for an alumno (for tests that need auth)."""
+def get_alumno_token(alumno_id=None, tenant_id=1):
+    """Generate a valid JWT for an alumno (for tests that need auth).
+
+    Sin argumentos firma el alumno RESUELTO para la branch test (`ALUMNO_ID`), no
+    un 999 fijo: el token de un usuario inexistente pasaba la firma igual
+    (`create_access_token` no consulta la BD) y el request moría con 404.
+    """
+    alumno_id = ALUMNO_ID if alumno_id is None else alumno_id
     return create_access_token({
         "usuario_id": alumno_id,
         "tenant_id": tenant_id,

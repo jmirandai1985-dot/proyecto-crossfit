@@ -435,6 +435,28 @@
     color: var(--ub-teal);
 }
 
+/* Paridad móvil del dashboard (2026-10-25): los DOS números del subtítulo
+   ("alumnos activos" y "+N nuevos este mes") son enlaces a las MISMAS vistas
+   filtradas del panel de escritorio (`/admin/alumnos?estado=activo` y
+   `/admin/alumnos-prueba`). Se pintan como el texto que son (`.ub-admin button`
+   ya resetea fondo, borde y tipografía) y el `padding` + `margin` negativo les da
+   un objetivo táctil más alto SIN que el renglón crezca. */
+.ub-admin .att-sub .att-link {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    min-height: 32px;
+    padding: 6px 4px;
+    margin: -6px -4px;
+    border-radius: 8px;
+    text-align: left;
+}
+
+.ub-admin .att-sub .att-link:hover,
+.ub-admin .att-sub .att-link:active {
+    background: rgba(255, 255, 255, .07);
+}
+
 /* A5.3. El motivo del error de KPIs, SIEMPRE visible: antes vivía en el `title=` del ⚠️ y
    en un teléfono (sin hover) no se leía. Calcado del `.kpi-error` de las KPI (11.5px y el
    mismo rojo): el aviso se lee igual en toda la pantalla. */

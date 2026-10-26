@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
     AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -35,6 +35,24 @@ const formatCompact = (value) => {
 };
 
 const formatCLP = (value) => `$${value.toLocaleString('es-CL')}`;
+
+// Encabezado ordenable del "Detalle de Movimientos". El click va en un <button>
+// (no en el <th>) para que se pueda tocar/teclear sin perder la semántica de la
+// tabla, y `aria-sort` en el <th> anuncia el orden actual al lector de pantalla.
+const ThOrden = ({ campo, etiqueta, orden, onOrdenar }) => {
+    const activo = orden.campo === campo;
+    return (
+        <th scope="col" className="px-6 py-3 text-left text-sm font-medium"
+            aria-sort={activo ? (orden.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+            <button type="button" onClick={() => onOrdenar(campo)}
+                className="inline-flex items-center gap-1 hover:text-blue-200 transition-colors"
+                title={`Ordenar por ${etiqueta.toLowerCase()}`}>
+                {etiqueta}
+                <span aria-hidden="true">{activo ? (orden.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+            </button>
+        </th>
+    );
+};
 
 // Anclas internas del reporte: las tarjetas de KPI llevan al detalle que
 // respalda su número. Se usan tanto al entrar con `?seccion=` (Dashboard) como
@@ -93,6 +111,47 @@ const Reportes = () => {
     // exporta el módulo de consultas (un `|| []` nuevo en cada render rompe los memo).
     const { data: transacciones, isPending: loadingMovs } = useTransaccionesFinanzas();
     const movimientosList = transacciones ?? SIN_DATOS;
+    // ── Detalle de movimientos: filtro y orden EN MEMORIA ────────────────────
+    // La lista ya viene completa del hook (mes en curso): acá sólo se recorta y se
+    // ordena para leerla. No hay endpoint nuevo ni otra petición.
+    const [filtroTipo, setFiltroTipo] = useState('todos');            // todos|ingreso|egreso
+    const [filtroCategoria, setFiltroCategoria] = useState('todas');  // todas|<categoría>
+    const [ordenMovs, setOrdenMovs] = useState({ campo: 'fecha', dir: 'desc' });
+    // Las categorías salen de las filas cargadas (no de una lista fija): si mañana
+    // aparece un gasto con otra categoría, se puede filtrar sin tocar la pantalla.
+    const categoriasMovs = useMemo(() => (
+        [...new Set(movimientosList.map((m) => m.categoria).filter(Boolean))]
+            .sort((a, b) => String(a).localeCompare(String(b), 'es'))
+    ), [movimientosList]);
+    const movimientosVisibles = useMemo(() => {
+        const filas = movimientosList.filter((m) => (
+            (filtroTipo === 'todos' || m.tipo === filtroTipo)
+            && (filtroCategoria === 'todas' || m.categoria === filtroCategoria)
+        ));
+        const signo = ordenMovs.dir === 'asc' ? 1 : -1;
+        // Copia antes de ordenar: `movimientosList` puede ser el array ESTABLE de la
+        // caché (`SIN_DATOS` o el de la query) y no se debe mutar.
+        return [...filas].sort((a, b) => {
+            if (ordenMovs.campo === 'monto') {
+                return ((Number(a.monto) || 0) - (Number(b.monto) || 0)) * signo;
+            }
+            // `fecha` llega como 'YYYY-MM-DD' (`str()` de la columna DATE): se compara
+            // como fecha y no como texto para que un ISO completo no desordene.
+            const fa = Date.parse(a.fecha) || 0;
+            const fb = Date.parse(b.fecha) || 0;
+            return (fa - fb) * signo;
+        });
+    }, [movimientosList, filtroTipo, filtroCategoria, ordenMovs]);
+    const hayFiltroMovs = filtroTipo !== 'todos' || filtroCategoria !== 'todas';
+    const alternarOrdenMovs = (campo) => setOrdenMovs((o) => (
+        o.campo === campo
+            ? { campo, dir: o.dir === 'asc' ? 'desc' : 'asc' }
+            : { campo, dir: campo === 'fecha' ? 'desc' : 'asc' }
+    ));
+    const limpiarFiltrosMovs = () => {
+        setFiltroTipo('todos');
+        setFiltroCategoria('todas');
+    };
     const guardarMovimiento = useCrearTransaccionFinanzas();
     const savingMov = guardarMovimiento.isPending;
     const descargarVentas = useDescargarReporteVentas();
@@ -630,15 +689,54 @@ const Reportes = () => {
                     className={`bg-zinc-900 rounded-lg shadow overflow-hidden${seccionActiva === 'movimientos' ? ' ring-2 ring-green-500/60' : ''}`}>
                     <div className="px-6 py-4 border-b border-zinc-800">
                         <h2 className="text-lg font-bold text-zinc-100">📋 Detalle de Movimientos</h2>
+                        <p className="text-xs text-zinc-500 mt-1">
+                            Filtra por tipo o categoría y ordena tocando Fecha o Monto.
+                        </p>
+                    </div>
+                    {/* Filtros EN MEMORIA sobre la lista del mes: no hay endpoint nuevo,
+                        la lista sale del mismo hook que ya pinta la tabla. */}
+                    <div className="px-6 py-3 border-b border-zinc-800 flex flex-wrap items-end gap-3">
+                        <label className="text-xs font-medium text-zinc-400">
+                            Tipo
+                            <select value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)}
+                                className="mt-1 block w-40 rounded bg-zinc-800 border border-zinc-700 px-2 py-1.5 text-sm text-zinc-200">
+                                <option value="todos">Todos</option>
+                                <option value="ingreso">Ingresos</option>
+                                <option value="egreso">Egresos</option>
+                            </select>
+                        </label>
+                        <label className="text-xs font-medium text-zinc-400">
+                            Categoría
+                            <select value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)}
+                                className="mt-1 block w-48 rounded bg-zinc-800 border border-zinc-700 px-2 py-1.5 text-sm text-zinc-200">
+                                <option value="todas">Todas</option>
+                                {categoriasMovs.map((c) => (
+                                    <option key={c} value={c}>{c}</option>
+                                ))}
+                            </select>
+                        </label>
+                        {hayFiltroMovs && (
+                            <button type="button" onClick={limpiarFiltrosMovs}
+                                className="px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-xs font-bold text-zinc-200">
+                                Limpiar filtros
+                            </button>
+                        )}
+                        <p className="text-xs text-zinc-500 ml-auto" role="status" aria-live="polite">
+                            {loadingMovs
+                                ? 'Cargando…'
+                                : `${movimientosVisibles.length} de ${movimientosList.length} movimientos`}
+                        </p>
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full">
                             <thead className="bg-blue-900 text-white">
                                 <tr>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Fecha</th>
+                                    <ThOrden campo="fecha" etiqueta="Fecha"
+                                        orden={ordenMovs} onOrdenar={alternarOrdenMovs} />
                                     <th className="px-6 py-3 text-left text-sm font-medium">Tipo</th>
                                     <th className="px-6 py-3 text-left text-sm font-medium">Categoría</th>
-                                    <th className="px-6 py-3 text-left text-sm font-medium">Monto</th>
+                                    <ThOrden campo="monto" etiqueta="Monto"
+                                        orden={ordenMovs} onOrdenar={alternarOrdenMovs} />
                                     <th className="px-6 py-3 text-left text-sm font-medium">Descripción</th>
                                 </tr>
                             </thead>
@@ -647,7 +745,17 @@ const Reportes = () => {
                                     <tr><td colSpan={5} className="px-6 py-6 text-center text-zinc-500">Cargando movimientos...</td></tr>
                                 ) : movimientosList.length === 0 ? (
                                     <tr><td colSpan={5} className="px-6 py-6 text-center text-zinc-500">Sin movimientos este mes</td></tr>
-                                ) : movimientosList.map((m, i) => (
+                                ) : movimientosVisibles.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={5} className="px-6 py-6 text-center text-zinc-500">
+                                            Ningún movimiento del mes coincide con el filtro.
+                                            <button type="button" onClick={limpiarFiltrosMovs}
+                                                className="ml-2 font-bold text-emerald-500 hover:text-emerald-400 underline">
+                                                Quitar filtros
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ) : movimientosVisibles.map((m, i) => (
                                     <tr key={m.id} className={i % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
                                         <td className="px-6 py-3 text-sm text-zinc-300">{m.fecha}</td>
                                         <td className="px-6 py-3 text-sm">

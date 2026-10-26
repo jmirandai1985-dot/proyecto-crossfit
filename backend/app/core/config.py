@@ -105,6 +105,19 @@ class Settings(BaseSettings):
     # olvidado en PROD sería peor que un test que manda un correo de más.
     EMAIL_MODO: str = "real"
 
+    # Interruptor ÚNICO de los jobs que corren SOLOS: el APScheduler de
+    # `app/services/scheduler.py` (clases, 5 alertas de email, cierre de mes,
+    # reentrenamiento de churn, promociones de referidos) y la generación de
+    # clases del startup de `app/main.py`.
+    # Default True a propósito: PRODUCCIÓN no cambia. En TEST va en `false`
+    # (backend/.env.test) porque desde la Fase 3 de la migración su BD es un
+    # ESPEJO de PROD con datos reales: un job disparado sin que nadie lo pida
+    # altera la copia (clases nuevas, cierres de mes, filas en
+    # notificaciones_enviadas) y arruina las comparaciones contra PROD.
+    # Los correos ya estaban a salvo igual (doble candado EMAIL_MODO=noop +
+    # fail-safe fuera de producción); esto apaga el resto de la cadena.
+    SCHEDULER_ENABLED: bool = True
+
     # n8n (Sistema de Asistencia/Hitos): API key para POST /api/v1/asistencia/n8n/evaluar-mes
     # Se envía en el header `X-N8N-API-Key` y se compara con secrets.compare_digest.
     N8N_API_KEY: str = ""
@@ -181,10 +194,11 @@ if not settings.JWT_SECRET_KEY:
 # IDs de endpoints de Neon. Los endpoints son efímeros: al recrear una rama cambia
 # el id (ep-xxxxx-xxxxx).
 #
-# TOPOLOGÍA ACTUAL (2026-10-18): TEST y PROD viven en el proyecto Neon
-# "urban-training-box" (AWS US West 2 / Oregon, misma región que Render), en las
-# ramas "test" y "production". El proyecto histórico "produccion2.0" (São Paulo)
-# quedó retirado: TEST y PROD ya no comparten cuota de cómputo con él.
+# TOPOLOGÍA ACTUAL (2026-10-24): TEST y PROD viven en el proyecto Neon NUEVO
+# (AWS US West 2 / Oregon, misma región que Render), en las ramas "test" y
+# "production". Se migró desde el proyecto "urban-training-box" clonando schema y
+# datos (Fases 1-3 de MIGRACION_PROD_NEON.md): cuentan 0 diferencias contra el
+# PROD viejo, así que este es el único lugar donde vive la topología.
 #   - TEST = rama test del proyecto nuevo       → TEST_BRANCH_IDS
 #   - PROD = rama production del proyecto nuevo → PROD_BRANCH_ID (denylist)
 #
@@ -193,32 +207,56 @@ if not settings.JWT_SECRET_KEY:
 #   - run_setup_test_db.py, scripts/aplicar_overrides_test.py, ml/train_*.py
 #     (abortan si la BD no es TEST, para no escribir sobre datos reales)
 #   - scripts/sync_test_from_prod.py y scripts/restaurar_backup.py (origen/destino)
+#
+# HISTORIAL: los endpoints viejos NO se dejan en la whitelist. Todos ellos siguen
+# vivos y con DATOS REALES (o credencial inválida), así que clasificarlos como TEST
+# habilitaría escrituras destructivas (restaurar_backup hace TRUNCATE) sobre datos
+# de producción. Van a `ENDPOINTS_RETIRADOS` (denylist) para que el guard falle
+# CERRADO si alguien corre un script con un `.env` viejo.
 TEST_BRANCH_IDS = (
-    "ep-lingering-fog-arywdnbg",      # TEST actual (2026-10-18): rama test del proyecto
-                                      # nuevo "urban-training-box", US West 2 (Oregon).
+    # TEST actual (2026-10-24): rama test del proyecto nuevo. Es un espejo exacto
+    # de PROD (Fase 3), por lo que TODAVÍA no tiene los overrides de desarrollo:
+    # se restauran con `scripts/aplicar_overrides_test.py`.
+    "ep-crimson-tooth-akhx7q2s",
+)
+
+# Endpoint de PROD. Se usa como DENYLIST: una URL que apunte a PROD NUNCA se
+# clasifica como TEST, ni aunque contenga un id de TEST (copy/paste cruzado) ni si
+# alguien agrega el id de PROD a la whitelist.
+PROD_BRANCH_ID = "ep-winter-star-akwis51j"
+
+# Todos los endpoints de PROD que alguna vez tuvieron datos reales. El actual va
+# primero porque `scripts/sync_test_from_prod.py` valida el ORIGEN contra
+# `PROD_BRANCH_ID`; esta tupla es sólo la denylist ampliada de `is_test_db_url`.
+PROD_BRANCH_IDS = (
+    "ep-winter-star-akwis51j",   # PROD actual (proyecto nuevo, 2026-10-24)
+    "ep-bitter-cloud-arat6wil",  # PROD anterior (proyecto "urban-training-box",
+                                 # 2026-10-18 → 2026-10-24): sigue vivo con datos reales
+)
+
+# Endpoints retirados pero TODAVÍA accesibles con datos reales (el TEST viejo era
+# un espejo de PROD con alumnos y credenciales reales). Nunca son TEST.
+ENDPOINTS_RETIRADOS = (
+    "ep-lingering-fog-arywdnbg",      # TEST 2026-10-18 → 2026-10-24 (espejo de PROD)
     "ep-damp-base-b6mpe739",          # TEST anterior: credencial inválida desde 2026-10-18
     "ep-winter-boat-b6zpvtxu",        # TEST anterior: rama recreada (2026-10-13); su credencial
                                       # quedó inválida al rotar la contraseña
     "ep-summer-river-b6c8fj2f",       # TEST anterior: rama recreada (2026-10-04), ya sin credencial
-    "ep-jolly-butterfly-b6ty2z89",    # TEST anterior: Neon ya la eliminó (se conserva por historial)
+    "ep-jolly-butterfly-b6ty2z89",    # TEST anterior: Neon ya la eliminó
+    "ep-nameless-sound-b6km6wyi",     # PROD del proyecto "produccion2.0" (São Paulo)
+    "ep-withered-silence-acly7gq5",   # PROD anterior (agotó cuota)
 )
-
-# Endpoint de PROD (rama "production" del mismo proyecto). Se usa como DENYLIST:
-# una URL que apunte a PROD NUNCA se clasifica como TEST, ni aunque contenga un id
-# de TEST (copy/paste cruzado) ni si alguien agrega el id de PROD a la whitelist.
-# Con TEST y PROD en el MISMO proyecto, esto evita que un guard mal configurado
-# habilite escrituras sobre producción (restaurar_backup, seeders, sync, etc.).
-# HISTÓRICO: ep-nameless-sound-b6km6wyi (proyecto "produccion2.0", São Paulo) fue
-# el PROD hasta 2026-10-18; ya no se usa.
-PROD_BRANCH_ID = "ep-bitter-cloud-arat6wil"
 
 
 def is_test_db_url(url: str) -> bool:
     """True SOLO si `url` apunta a un endpoint TEST conocido y NO a PROD.
 
-    Fail-safe: False ante duda (URL vacía, desconocida, o que contenga PROD).
+    Fail-safe: False ante duda (URL vacía, desconocida, o que contenga un endpoint
+    de PROD o uno retirado que todavía guarde datos reales).
     """
     u = url or ""
-    if PROD_BRANCH_ID in u:
+    if any(branch in u for branch in PROD_BRANCH_IDS):
+        return False
+    if any(branch in u for branch in ENDPOINTS_RETIRADOS):
         return False
     return any(branch in u for branch in TEST_BRANCH_IDS)

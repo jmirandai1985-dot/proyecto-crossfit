@@ -13,6 +13,15 @@
 > Fuente de verdad del endpoint de PROD: `backend/app/core/config.py` →
 > `PROD_BRANCH_ID`. URLs completas: `backend/.env` (PROD) y `backend/.env.test`
 > (TEST). Este repo es público: acá no se escriben credenciales.
+>
+> **ACTUALIZACIÓN 2026-10-24 (Fase 4 de la migración):** PROD y TEST se movieron al
+> proyecto Neon NUEVO — PROD `ep-winter-star-akwis51j`, TEST `ep-crimson-tooth-akhx7q2s`
+> (Oregon, us-west-2). Todo lo que abajo diga `ep-bitter-cloud-arat6wil` /
+> `ep-lingering-fog-arywdnbg` está RETIRADO. URLs: `backend/.env` y `backend/.env.test`;
+> deny/allowlist: `backend/app/core/config.py` (`PROD_BRANCH_IDS`, `ENDPOINTS_RETIRADOS`,
+> `TEST_BRANCH_IDS`).
+> **PENDIENTE:** PROD y TEST comparten el password de `neondb_owner` -> rotar por rama
+> (detalle en `backend/.env`, bloque "PENDIENTE").
 
 **Estado (al cierre, 2026-09-23):** ✅ PROD migrado *entonces* al proyecto "produccion2.0"; sólo quedaba el PASO 3 de Render (lo hacía Jebbus).
 Última actualización: 2026-10-21.

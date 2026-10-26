@@ -370,77 +370,89 @@ async def startup_event():
     except Exception as e:
         logger.error("[email] no se pudo avisar el fail-safe de correo: %s", e)
 
-    # ── 1. Inicializar scheduler de generación diaria de clases ──
-    try:
-        from app.services.scheduler import iniciar_scheduler, set_generar_clases_callback
+    # ── 1-2. Jobs automáticos: scheduler + generación de clases de arranque ────
+    # `SCHEDULER_ENABLED` (config.py, default True) es el interruptor ÚNICO de lo
+    # que corre sin que el usuario lo pida. En TEST va en `false` (backend/.env.test):
+    # desde la Fase 3 de la migración su BD es un ESPEJO de PROD con datos reales, y
+    # generar clases / cerrar el mes / insertar notificaciones sin que nadie lo pida
+    # cambia la copia y hace imposible volver a compararla contra PROD. En PROD el
+    # default mantiene el comportamiento de siempre: nada cambia.
+    if not settings.SCHEDULER_ENABLED:
+        logger.warning(
+            "[startup] SCHEDULER_ENABLED=false: NO se inicia el scheduler ni se "
+            "generan clases de arranque (jobs automáticos apagados a propósito)")
+    else:
+        # ── 1. Inicializar scheduler de generación diaria de clases ──
+        try:
+            from app.services.scheduler import iniciar_scheduler, set_generar_clases_callback
 
-        def _generar_clases_bloqueante():
-            """Genera clases para HOY + 28 días (4 semanas)"""
+            def _generar_clases_bloqueante():
+                """Genera clases para HOY + 28 días (4 semanas)"""
+                from datetime import timedelta
+                from app.db.database import SessionLocal
+                from app.services.generar_clases import (
+                    DIAS_ANTICIPACION, generar_dias_incompletos)
+
+                hoy = hoy_santiago()
+                fecha_hasta = hoy + timedelta(days=DIAS_ANTICIPACION)
+                db = SessionLocal()
+                try:
+                    # Generar para tenant_id=1 (principal) en rango de 7 días
+                    resultado = generar_dias_incompletos(
+                        db, tenant_id=1, fecha_desde=hoy, fecha_hasta=fecha_hasta)
+                    return resultado
+                except Exception as e:
+                    logger.error(
+                        f"❌ [Callback Scheduler] Error: {e}", exc_info=True)
+                    return None
+                finally:
+                    db.close()
+
+            async def callback_generar_clases():
+                """Callback del scheduler: corre la generacion en un hilo aparte.
+
+                `generar_dias_incompletos` hace consultas BLOQUEANTES (Neon) para hasta 28
+                dias; en el hilo del event loop dejaba el proceso congelado mientras corria
+                el job de las 00:05 CLT. `to_thread.run_sync` usa el MISMO threadpool que
+                Starlette (el que dimensiona `main.py`).
+                """
+                return await to_thread.run_sync(_generar_clases_bloqueante)
+
+            set_generar_clases_callback(callback_generar_clases)
+            iniciar_scheduler()
+        except Exception as e:
+            logger.error(f"❌ Error al iniciar scheduler: {e}")
+
+        # ── 2. Ejecutar generación inmediata al iniciar (para desarrollo) ──
+        try:
             from datetime import timedelta
             from app.db.database import SessionLocal
             from app.services.generar_clases import (
-                DIAS_ANTICIPACION, generar_dias_incompletos)
+                DIAS_ANTICIPACION, generar_dias_incompletos, revisar_rango)
 
             hoy = hoy_santiago()
             fecha_hasta = hoy + timedelta(days=DIAS_ANTICIPACION)
             db = SessionLocal()
             try:
-                # Generar para tenant_id=1 (principal) en rango de 7 días
-                resultado = generar_dias_incompletos(
-                    db, tenant_id=1, fecha_desde=hoy, fecha_hasta=fecha_hasta)
-                return resultado
-            except Exception as e:
-                logger.error(
-                    f"❌ [Callback Scheduler] Error: {e}", exc_info=True)
-                return None
+                # Revisión del rango [hoy, hoy + DIAS_ANTICIPACION] en UNA pasada: el
+                # servicio hace DOS consultas agregadas (conteo de clases por fecha +
+                # horarios activos por día) en vez de un COUNT por día (hasta 28 x 2
+                # consultas con la latencia de Neon).
+                faltantes = revisar_rango(db, tenant_id=1, fecha_desde=hoy,
+                                          fecha_hasta=fecha_hasta)
+
+                if faltantes:
+                    resultado = generar_dias_incompletos(
+                        db, tenant_id=1, fecha_desde=hoy, fecha_hasta=fecha_hasta)
+                    logger.info(
+                        f"🔄 [Startup] Se generaron {resultado['creadas']} clases faltantes para HOY + 28 días (4 semanas)")
+                else:
+                    logger.info(
+                        f"✅ [Startup] Rango completo, no es necesario generar clases")
             finally:
                 db.close()
-
-        async def callback_generar_clases():
-            """Callback del scheduler: corre la generacion en un hilo aparte.
-
-            `generar_dias_incompletos` hace consultas BLOQUEANTES (Neon) para hasta 28
-            dias; en el hilo del event loop dejaba el proceso congelado mientras corria
-            el job de las 00:05 CLT. `to_thread.run_sync` usa el MISMO threadpool que
-            Starlette (el que dimensiona `main.py`).
-            """
-            return await to_thread.run_sync(_generar_clases_bloqueante)
-
-        set_generar_clases_callback(callback_generar_clases)
-        iniciar_scheduler()
-    except Exception as e:
-        logger.error(f"❌ Error al iniciar scheduler: {e}")
-
-    # ── 2. Ejecutar generación inmediata al iniciar (para desarrollo) ──
-    try:
-        from datetime import timedelta
-        from app.db.database import SessionLocal
-        from app.services.generar_clases import (
-            DIAS_ANTICIPACION, generar_dias_incompletos, revisar_rango)
-
-        hoy = hoy_santiago()
-        fecha_hasta = hoy + timedelta(days=DIAS_ANTICIPACION)
-        db = SessionLocal()
-        try:
-            # Revisión del rango [hoy, hoy + DIAS_ANTICIPACION] en UNA pasada: el
-            # servicio hace DOS consultas agregadas (conteo de clases por fecha +
-            # horarios activos por día) en vez de un COUNT por día (hasta 28 x 2
-            # consultas con la latencia de Neon).
-            faltantes = revisar_rango(db, tenant_id=1, fecha_desde=hoy,
-                                      fecha_hasta=fecha_hasta)
-
-            if faltantes:
-                resultado = generar_dias_incompletos(
-                    db, tenant_id=1, fecha_desde=hoy, fecha_hasta=fecha_hasta)
-                logger.info(
-                    f"🔄 [Startup] Se generaron {resultado['creadas']} clases faltantes para HOY + 28 días (4 semanas)")
-            else:
-                logger.info(
-                    f"✅ [Startup] Rango completo, no es necesario generar clases")
-        finally:
-            db.close()
-    except Exception as e:
-        logger.error(f"❌ Error al generar clases en startup: {e}")
+        except Exception as e:
+            logger.error(f"❌ Error al generar clases en startup: {e}")
 
     # ── 3. Crear movimientos de CrossFit de prueba si no existen ──
     try:

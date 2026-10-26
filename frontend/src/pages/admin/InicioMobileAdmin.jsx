@@ -999,9 +999,17 @@ const InicioMobileAdmin = () => {
                         <span className="live">Ahora · {ahora || '--:--'}</span>
                     </div>
 
-                    {/* A1. "Alumnos activos" como subtítulo: informa, ya no navega (antes
-                        era una tarjeta KPI que llevaba a Reportes). Si /reportes falló se
-                        dice "s/d" con el motivo —nunca un 0 falso—. */}
+                    {/* A1 (ajustado 2026-10-25). "Alumnos activos" sigue siendo el subtítulo
+                        que encabeza la asistencia (informa primero), pero sus DOS números
+                        vuelven a navegar con el MISMO destino que las tarjetas del panel
+                        de escritorio (paridad móvil):
+                          · "N alumnos activos" -> /admin/alumnos?estado=activo
+                          · "+N nuevos este mes" -> /admin/alumnos-prueba
+                        Antes el subtítulo era sólo texto. Van como DOS botones HERMANOS
+                        (un botón dentro de otro no es HTML válido ni se anuncia bien en
+                        lectores de pantalla) y cada uno con `aria-label`, porque el texto
+                        visible arranca con un número.
+                        Si /reportes falló se dice "s/d" con el motivo —nunca un 0 falso—. */}
                     <p className="att-sub" data-testid="admin-activos">
                         {errores.activos ? (
                             <>
@@ -1013,9 +1021,17 @@ const InicioMobileAdmin = () => {
                             </>
                         ) : (
                             <>
-                                <b className="num">{cargando ? '…' : kpis.activos}</b> alumnos activos
+                                <button type="button" className="att-link"
+                                    onClick={() => navigate('/admin/alumnos?estado=activo')}
+                                    aria-label="Ver el padrón de alumnos activos">
+                                    <b className="num">{cargando ? '…' : kpis.activos}</b> alumnos activos
+                                </button>
                                 {!cargando && kpis.nuevosMes != null && (
-                                    <> · <em>+{kpis.nuevosMes}</em> nuevos este mes</>
+                                    <button type="button" className="att-link"
+                                        onClick={() => navigate('/admin/alumnos-prueba')}
+                                        aria-label="Ver los alumnos nuevos de este mes">
+                                        · <em>+{kpis.nuevosMes}</em> nuevos este mes
+                                    </button>
                                 )}
                             </>
                         )}

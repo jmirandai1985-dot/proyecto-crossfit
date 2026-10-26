@@ -52,18 +52,27 @@ def _headers(u, rol=None):
 
 @pytest.fixture(scope="module")
 def alumno():
-    """Alumno del box 1 con membresía activa y créditos (el POST exige ambos)."""
+    """Alumno del box 1 con membresía activa y CRÉDITOS NUMÉRICOS.
+
+    Los tests comparan `creditos == antes - 1`, así que un plan ILIMITADO no
+    sirve: guarda `creditos_disponibles` en NULL y el decremento no es
+    observable. Antes se colaba uno por dos motivos a la vez —`coalesce(NULL, 1)
+    > 0` lo daba por bueno y, en Postgres, `ORDER BY creditos_disponibles DESC`
+    deja los NULL PRIMERO— y el test moría en
+    `TypeError: unsupported operand type(s) for -: 'NoneType' and 'int'`.
+    Ahora se exige el crédito numérico en el WHERE.
+    """
     a = _one(
         "SELECT u.id, u.tenant_id, u.correo, u.rol::text AS rol, "
         "s.id AS suscripcion_id, s.creditos_disponibles "
         "FROM usuarios u JOIN suscripciones s ON s.usuario_id = u.id "
         "WHERE u.tenant_id = :t AND u.rol::text = 'alumno' AND u.estado = 'activo' "
         "AND s.estado = 'activo' AND s.fecha_expiracion > now() "
-        "AND coalesce(s.creditos_disponibles, 1) > 0 "
+        "AND s.creditos_disponibles IS NOT NULL AND s.creditos_disponibles > 0 "
         "ORDER BY (u.correo LIKE '%test%') DESC, s.creditos_disponibles DESC, u.id LIMIT 1",
         t=TENANT_ID)
     if a is None:
-        pytest.skip("TEST no tiene alumno con membresía activa y créditos")
+        pytest.skip("TEST no tiene alumno con membresía activa y créditos numéricos")
     return a
 
 

@@ -82,8 +82,17 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       target: maintenance
+    # PERFIL OPCIONAL (2026-10-24): este contenedor levanta cron a las 02:30 (diario:
+    # backup, vencidos, huérfanas, health, uso de Neon) y a las 03:00 del día 1
+    # (mensual: todo + integridad + reporte + aviso de rotación) sobre la BD ACTIVA.
+    # Desde la Fase 3 de la migración (2026-10-24) la BD de TEST es un ESPEJO de PROD
+    # con datos reales, así que esos jobs ya NO deben crearse con `docker compose up -d`:
+    # escribirían en la copia (planes vencidos, huérfanas, backups) sin que nadie lo pida.
+    # Para levantarlo A PROPÓSITO:
+    #     docker compose --profile mantenimiento up -d maintenance
+    profiles: ["mantenimiento"]
     env_file:
-      # TEST/ep-jolly-butterfly-b6ty2z89 (SAFE DEFAULT) — ver cabecera del archivo.
+      # TEST/ep-crimson-tooth-akhx7q2s (SAFE DEFAULT) — ver cabecera del archivo.
       - ./backend/.env.test
     environment:
       # health_check.py usa BACKEND_URL para el ping al API.
