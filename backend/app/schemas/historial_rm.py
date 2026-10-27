@@ -48,8 +48,11 @@ class HistorialRMUpdate(BaseModel):
     calorias: Optional[int] = Field(None, ge=0)
     fecha: Optional[date] = None
     notas: Optional[str] = Field(None, max_length=500)
-    nivel_calculado: Optional[str] = Field(
-        None, max_length=50, description="Nivel calculado automáticamente")
+    # `nivel_calculado` NO va acá a propósito (FIX 2026-10-27): el PUT hace
+    # `model_dump(exclude_unset=True)` + `setattr()` sobre el modelo, así que declararlo
+    # era asignación masiva de una columna que el sistema calcula solo (un alumno podía
+    # mandarse el nivel que quisiera). La columna SIGUE en el modelo/tabla; sólo se sacó
+    # de este esquema de entrada (el nivel se lee de los endpoints de nivel).
 
 
 class HistorialRMResponse(HistorialRMBase):
