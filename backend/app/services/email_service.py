@@ -4,6 +4,7 @@ from app.core.urls import url_frontend, en_produccion  # B.2: URLs de correo san
 import logging
 import smtplib
 import sys
+import time
 from email.message import EmailMessage
 from datetime import datetime, timezone
 # `_escape_html`: el WhatsApp del box lo escribe el admin a mano y termina en el HTML del
@@ -55,6 +56,21 @@ MODO_NOOP = "noop"
 # Estado con el que se registra un envío en modo prueba: NUNCA "enviado".
 ESTADO_SIMULADO = "simulado"
 DETALLE_SIMULADO = "EMAIL_MODO=noop: el correo NO se envió (modo prueba)"
+
+# ── Ráfagas de correo (FIX 2026-10-27) ───────────────────────────────────────
+# Gmail corta la conexión cuando recibe muchos correos seguidos desde la misma
+# cuenta: el 26/09/2026 hubo 16 `Connection unexpectedly closed`
+# (`SMTPServerDisconnected`) en PROD, y cada uno se llevaba puesto a ESE
+# destinatario (el `_enviar` devolvía `False` sin reintentar).
+#   * `PAUSA_RAFAGA_S`: espaciado entre correos de una MISMA ráfaga. Lo aplican
+#     los bucles de envío masivo (`alertas_email_service`, campaña de
+#     fidelización) con `espaciar_envio()`: un envío suelto NO espera nada.
+#   * `REINTENTOS_CORTE_SMTP`: reintentos EXTRA ante `SMTPServerDisconnected`,
+#     cada uno con una conexión NUEVA (la que se cayó ya no sirve) y una pausa
+#     corta. Va dentro de `_enviar`, así que protege a todos los llamadores.
+PAUSA_RAFAGA_S = 0.4
+PAUSA_REINTENTO_S = 1.0
+REINTENTOS_CORTE_SMTP = 1
 
 
 # Aviso de fail-safe: una sola vez por proceso (ver `avisar_failsafe_una_vez`).
@@ -114,6 +130,27 @@ def modo_envio() -> str:
 def es_modo_simulado() -> bool:
     """True si los envíos NO salen de verdad (fuera de producción, `noop` o sin SMTP)."""
     return modo_envio() == MODO_NOOP
+
+
+def espaciar_envio(segundos: float = None) -> float:
+    """Pausa entre dos correos de una MISMA ráfaga. Devuelve lo que durmió.
+
+    Lo llaman los bucles de envío masivo (los 5 de `alertas_email_service` y la
+    campaña de `fidelizacion`), NO los envíos sueltos: un correo de bienvenida o
+    un reset de contraseña no tienen por qué esperar 0,4 s.
+
+    En modo prueba (`noop`) **no duerme**: no hay SMTP que cuidar y una ráfaga
+    simulada de 300 correos no puede tardar 2 minutos.
+
+    `segundos=None` usa `PAUSA_RAFAGA_S` (el default); un valor explícito sirve
+    para los tests y para algún llamador que quiera otro ritmo.
+    """
+    if es_modo_simulado():
+        return 0.0
+    pausa = PAUSA_RAFAGA_S if segundos is None else max(0.0, float(segundos))
+    if pausa:
+        time.sleep(pausa)
+    return pausa
 
 
 def avisar_failsafe_una_vez() -> None:
@@ -453,9 +490,29 @@ def _enviar(destinatario: str, asunto: str, html: str, alumno_id: int = None, ti
         msg.set_content("Este correo requiere un cliente que soporte HTML.")
         msg.add_alternative(html, subtype="html")
 
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(usuario_smtp, clave_smtp)
-            server.send_message(msg)
+        # ── Corte del servidor en medio de una ráfaga (FIX 2026-10-27) ──
+        # Gmail corta la conexión cuando recibe demasiados correos seguidos
+        # (`SMTPServerDisconnected`): el 26/09/2026 fueron 16 casos en PROD y cada
+        # uno perdía a ESE destinatario, porque el `except` de abajo devolvía
+        # `False` sin reintentar. Acá se reintenta con una conexión NUEVA (la que
+        # se cayó ya no sirve para nada) después de una pausa corta. El registro en
+        # `notificaciones_enviadas` sigue siendo UNO: el `fallido` recién se
+        # escribe si se agotan los reintentos.
+        intentos = max(1, int(REINTENTOS_CORTE_SMTP) + 1)
+        for intento in range(1, intentos + 1):
+            try:
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                    server.login(usuario_smtp, clave_smtp)
+                    server.send_message(msg)
+                break
+            except smtplib.SMTPServerDisconnected as e:
+                if intento >= intentos:
+                    raise
+                _log_seguro(
+                    f"[SMTP CORTE] destinatario={destinatario!r}: {e!r} — se "
+                    f"reintenta con una conexión nueva "
+                    f"({intento}/{intentos - 1})", "warning")
+                time.sleep(PAUSA_REINTENTO_S)
 
         _log_seguro(f"Correo enviado a {destinatario!r}: {asunto!r}", "info")
         if registrar and (alumno_id or tipo):

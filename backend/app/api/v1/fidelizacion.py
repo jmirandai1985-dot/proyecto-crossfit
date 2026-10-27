@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from datetime import date, datetime, timezone
 from typing import Optional
 import pandas as pd
-from app.services.email_service import enviar_email_fidelizacion
+from app.services.email_service import enviar_email_fidelizacion, espaciar_envio
 
 from app.db.database import get_db
 from app.models.usuario import Usuario, RolUsuario
@@ -258,6 +258,7 @@ def enviar_campana_email(
             enviados.append(alumno["correo"])
         else:
             fallidos.append(alumno["correo"])
+        espaciar_envio()   # ráfaga: espacia el próximo correo (en noop no duerme)
 
     return {
         "status": "success",

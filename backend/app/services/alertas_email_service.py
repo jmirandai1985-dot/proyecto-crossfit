@@ -156,7 +156,7 @@ def enviar_alertas_renovacion(db, tenant_id: int = 1, dias_aviso: int = 3) -> di
     que el aviso sale siempre `dias_aviso` días antes del último día del plan.
     """
     from sqlalchemy import text
-    from app.services.email_service import send_renovacion_plan
+    from app.services.email_service import send_renovacion_plan, espaciar_envio
     target = (hoy_santiago() + timedelta(days=dias_aviso)).isoformat()
     rows = db.execute(text(f"""
         SELECT DISTINCT ON (u.id) u.id, u.nombre, u.correo, s.fecha_expiracion
@@ -190,6 +190,7 @@ def enviar_alertas_renovacion(db, tenant_id: int = 1, dias_aviso: int = 3) -> di
         else:
             _marcar_fallido(db, envio_id, f"renovacion_plan FALLIDO -> {r.correo}")
             fallidos.append(r.correo)
+        espaciar_envio()   # ráfaga: espacia el próximo correo (en noop no duerme)
     logger.info(
         f"[alertas] renovación: {candidatos} candidatos, {deduplicados} deduplicados, "
         f"{len(enviados)} enviados, {len(fallidos)} fallidos")
@@ -208,7 +209,7 @@ def enviar_alertas_inactividad(db, tenant_id: int = 1, umbral_dias: int = 7) -> 
     """
     from sqlalchemy import text
     from app.services.asistencia_real import sql_cte_asistencias
-    from app.services.email_service import send_alerta_inactividad
+    from app.services.email_service import send_alerta_inactividad, espaciar_envio
     rows = db.execute(text(f"""
         WITH {sql_cte_asistencias()}
         SELECT u.id, u.nombre, u.correo,
@@ -241,6 +242,7 @@ def enviar_alertas_inactividad(db, tenant_id: int = 1, umbral_dias: int = 7) -> 
         else:
             _marcar_fallido(db, envio_id, f"inactividad FALLIDO -> {r.correo}")
             fallidos.append(r.correo)
+        espaciar_envio()   # ráfaga: espacia el próximo correo (en noop no duerme)
     logger.info(
         f"[alertas] inactividad: {candidatos} candidatos, {deduplicados} deduplicados, "
         f"{len(enviados)} enviados, {len(fallidos)} fallidos")
@@ -258,7 +260,8 @@ def enviar_alertas_urgencia(db, tenant_id: int = 1) -> dict:
     chileno de vencimiento, no el `date.today()` del proceso ni el `::date` de la sesión.
     """
     from sqlalchemy import text
-    from app.services.email_service import send_alerta_urgencia_renovacion
+    from app.services.email_service import (send_alerta_urgencia_renovacion,
+                                            espaciar_envio)
     target = hoy_santiago().isoformat()
     rows = db.execute(text(f"""
         SELECT DISTINCT ON (u.id) u.id, u.nombre, u.correo
@@ -288,6 +291,7 @@ def enviar_alertas_urgencia(db, tenant_id: int = 1) -> dict:
         else:
             _marcar_fallido(db, envio_id, f"vencimiento_inminente FALLIDO -> {r.correo}")
             fallidos.append(r.correo)
+        espaciar_envio()   # ráfaga: espacia el próximo correo (en noop no duerme)
     logger.info(
         f"[alertas] urgencia: {candidatos} candidatos, {deduplicados} deduplicados, "
         f"{len(enviados)} enviados, {len(fallidos)} fallidos")
@@ -313,7 +317,7 @@ def enviar_alertas_ultimo_credito(db, tenant_id: int = 1) -> dict:
     """EMAIL (último crédito): alumnos con EXACTAMENTE 1 crédito y días restantes
     del mes > 0. Dedupe 7 días. Tipo registrado: 'ultimo_credito'."""
     from sqlalchemy import text
-    from app.services.email_service import send_alerta_ultimo_credito
+    from app.services.email_service import send_alerta_ultimo_credito, espaciar_envio
 
     dias_restantes = _dias_restantes_mes()
     if dias_restantes <= 0:
@@ -353,6 +357,7 @@ def enviar_alertas_ultimo_credito(db, tenant_id: int = 1) -> dict:
         else:
             _marcar_fallido(db, envio_id, f"ultimo_credito FALLIDO -> {r.correo}")
             fallidos.append(r.correo)
+        espaciar_envio()   # ráfaga: espacia el próximo correo (en noop no duerme)
     logger.info(
         f"[alertas] ultimo_credito: {candidatos} candidatos, {deduplicados} deduplicados, "
         f"{len(enviados)} enviados, {len(fallidos)} fallidos")
@@ -366,7 +371,7 @@ def enviar_alertas_sin_creditos(db, tenant_id: int = 1) -> dict:
     """EMAIL (sin créditos): alumnos con 0 créditos disponibles y suscripción
     activa. Dedupe 7 días. Tipo registrado: 'sin_creditos'."""
     from sqlalchemy import text
-    from app.services.email_service import send_alerta_sin_creditos
+    from app.services.email_service import send_alerta_sin_creditos, espaciar_envio
 
     rows = db.execute(text(f"""
         SELECT DISTINCT ON (u.id) u.id, u.nombre, u.correo
@@ -397,6 +402,7 @@ def enviar_alertas_sin_creditos(db, tenant_id: int = 1) -> dict:
         else:
             _marcar_fallido(db, envio_id, f"sin_creditos FALLIDO -> {r.correo}")
             fallidos.append(r.correo)
+        espaciar_envio()   # ráfaga: espacia el próximo correo (en noop no duerme)
     logger.info(
         f"[alertas] sin_creditos: {candidatos} candidatos, {deduplicados} deduplicados, "
         f"{len(enviados)} enviados, {len(fallidos)} fallidos")
