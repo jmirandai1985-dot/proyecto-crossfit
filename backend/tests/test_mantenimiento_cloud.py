@@ -84,6 +84,12 @@ def _n_filas(n: int, estado: str = "activo") -> list:
             for i in range(n)]
 
 
+def _notif_inapp(n: int) -> list:
+    """Filas de la bandeja in-app (paso 11): id, alumno_id, tipo, leida, creada."""
+    return [[str(500 + i), "7", "recordatorio_clase", "false", "2025-01-01 10:00"]
+            for i in range(n)]
+
+
 def script_out(vencidos=0, susc=0, solic=0, users=0) -> str:
     """Salida realista de la transacción: los tags de comando + el resumen `paso|n`.
 
@@ -108,6 +114,12 @@ def script_out_purga(tokens: int = 0, notif: int = 0) -> str:
             f"tokens_reset|{tokens}\nnotificaciones|{notif}\nROLLBACK\n")
 
 
+def script_out_retencion(inapp: int = 0) -> str:
+    """Salida de la transacción de retención in-app (paso 11)."""
+    return ("BEGIN\nSET\nCREATE TABLE\nINSERT 0 0\nDO\n"
+            f"notificaciones_inapp|{inapp}\nROLLBACK\n")
+
+
 def _ctx(**kw) -> dict:
     """Estado de la base simulada. `despues='vacio'` simula que en REAL se aplicó de verdad.
 
@@ -125,9 +137,17 @@ def _ctx(**kw) -> dict:
            "a3_creditos": [], "a3_creditos_total": None, "a4a": "0", "a4b": [],
            "a5a": [], "a5b": [], "a5c": [], "a6": [], "a6_total": None,
            "cierre_pendientes": [], "aforo_resync": [], "tokens_reset": [], "notificaciones": [],
+           # Paso 11: por default el rol NO tiene el GRANT (`f`) ⇒ el run es el de siempre, con
+           # 3 transacciones. Los tests del paso 11 lo ponen en `"t"` a propósito.
+           "inapp_permiso": "f", "notificaciones_inapp": [],
+           "script_out_retencion": script_out_retencion(),
+           # A.7: la ventana de 24 h sale en 0 (nada registrado) ⇒ chequeo verde e informativo.
+           # Las 4 cifras van en el orden del SQL: total, enviadas, fallidas, desconocidas.
+           "notif_fallidas": ("0", "0", "0", "0"), "notif_fallidas_lista": [],
            "mrr": "60000", "mrr_ant": "50000", "vigentes": "60", "bajas": "2",
            "ret_base": "40", "ret_siguen": "36",
-           "cierre_rc": 0, "cierre_err": "", "purga_rc": 0, "purga_err": ""}
+           "cierre_rc": 0, "cierre_err": "", "purga_rc": 0, "purga_err": "",
+           "retencion_rc": 0, "retencion_err": ""}
     ctx.update(kw)
     return ctx
 
@@ -139,6 +159,19 @@ def _respuesta(sql: str, ctx: dict, vistas: dict) -> str:
     El orden de los `if` ES significativo: los marcadores de la Fase 7 van primero porque son
     más específicos (varias detecciones comparten fragmentos con las listas de otras fases).
     """
+    # ── A.7: ventana de 24 h de `notificaciones_enviadas` (dos consultas, marcadores propios) ──
+    # Van PRIMERO: las dos contienen `FROM notificaciones_enviadas`, que más abajo es la lista de
+    # la purga (paso 10). Sin este orden A.7 se contestaría con la lista equivocada y el chequeo
+    # pasaría siempre con 0 registradas (que es justo lo que el test tiene que poder distinguir).
+    if "FILTER (WHERE real AND estado = 'fallido')" in sql:
+        return "|".join(str(v) for v in ctx["notif_fallidas"]) + "\n"
+    if "ORDER BY n.fecha_envio DESC" in sql:
+        return _filas(*ctx["notif_fallidas_lista"])
+
+    # ── Paso 11: la sonda de permisos del rol (devuelve `t`/`f`, como `psql -tA`) ──
+    if "has_table_privilege(current_user, 'public.notificaciones'" in sql:
+        return ctx["inapp_permiso"] + "\n"
+
     # ── A.3: se compara en Python, así que devuelve las columnas crudas, con el total delante
     # (`descuadre_creditos()` la lee con `sql_con_total`) ──
     if "s.creditos_totales - s.creditos_disponibles" in sql:
@@ -175,6 +208,9 @@ def _respuesta(sql: str, ctx: dict, vistas: dict) -> str:
             ("JOIN clases c ON c.id = r.clase_id", "cierre_pendientes"),
             ("FROM password_reset_tokens", "tokens_reset"),
             ("FROM notificaciones_enviadas", "notificaciones"),
+            # OJO: `FROM notificaciones ` (con espacio) es la bandeja in-app del paso 11; la de
+            # arriba es `notificaciones_enviadas` (`_` en vez de espacio), así que no se pisan.
+            ("FROM notificaciones ", "notificaciones_inapp"),
             ("(s.fecha_expiracion AT TIME ZONE 'America/Santiago')::date < current_date", "vencidos"),
             ("s.estado = 'pendiente'", "susc_pendientes"),
             ("FROM solicitudes_planes", "solicitudes"),
@@ -221,16 +257,18 @@ def _respuesta(sql: str, ctx: dict, vistas: dict) -> str:
 
 
 def _psql_falso(monkeypatch, ctx: dict) -> dict:
-    """Mockea TODO lo que sale del proceso: `psql` (las 3 transacciones y las lecturas).
+    """Mockea TODO lo que sale del proceso: `psql` (las 4 transacciones y las lecturas).
 
     La transacción se reconoce por el nombre de su tabla temporal (`_maint_cambios`,
-    `_maint_cierre`, `_maint_purga`), así que cada fase puede tener su propio resumen y su
-    propio error sin tocar las otras.
+    `_maint_cierre`, `_maint_purga`, `_maint_retencion`), así que cada fase puede tener su propio
+    resumen y su propio error sin tocar las otras. La 4ª (paso 11) sólo existe si el test pone
+    `inapp_permiso="t"`.
     """
     rastro = {"scripts": [], "sql": [], "vistas": {}}
     fases = {"_maint_cambios": ("script_out", "script_rc", "script_err"),
              "_maint_cierre": ("script_out_cierre", "cierre_rc", "cierre_err"),
-             "_maint_purga": ("script_out_purga", "purga_rc", "purga_err")}
+             "_maint_purga": ("script_out_purga", "purga_rc", "purga_err"),
+             "_maint_retencion": ("script_out_retencion", "retencion_rc", "retencion_err")}
 
     def fake(cmd):
         assert cmd[0] == "psql", f"solo debería correr psql: {cmd[0]}"
@@ -265,6 +303,10 @@ def entorno(monkeypatch):
               # `neon-api`). Se borran TODOS para que ningún test dependa de la máquina.
               "MAX_CIERRE", "MAX_PURGA", "DIAS_CIERRE_RESERVAS", "DIAS_PURGA_TOKENS",
               "DIAS_PURGA_NOTIF", "CREDITOS_DESCUADRE_TOLERANCIA", "PROD_PERMITIDOS",
+              # Paso 11 (retención in-app): tope y retención propios.
+              "MAX_PURGA_INAPP", "DIAS_PURGA_INAPP",
+              # A.7: umbral de notificaciones fallidas (sin variable ⇒ 10%).
+              "NOTIF_FALLIDAS_PCT",
               "TENANT_ID", "MIN_BASE_RETENCION", "NEON_CU_HORAS_LIMITE", "NEON_CU_UMBRAL_PCT",
               "NEON_RAMAS_LIMITE", "NEON_API_BASE", "NEON_API_KEY", "NEON_PROJECT_ID",
               # La nota de contexto de A.5(a): sin variable no hay nota (y los tests que la
@@ -700,7 +742,7 @@ def test_ao_verificacion_del_cierre_no_cuadra_exit_8(monkeypatch, mails):
     assert len(rastro["scripts"]) == 2                   # se cortó en la fase del cierre
 
 
-# ── Detecciones A.1–A.6 (sólo lectura) ────────────────────────────────────────
+# ── Detecciones A.1–A.7 (sólo lectura) ────────────────────────────────────────
 def test_aa_detecciones_rojas_exit_9_con_la_lista_completa_en_el_mail(monkeypatch, mails):
     """Un hallazgo rojo pone el run rojo (exit 9) SIN abortar la escritura, y la lista va
     completa. Exactamente el mismo contrato que la integridad (exit 4)."""
@@ -1723,7 +1765,7 @@ def test_cj_en_dry_run_el_motivo_dice_que_no_se_aplico_nada(monkeypatch, mails):
     _psql_falso(monkeypatch, _ctx(a5a=[["30", "2026-10-02", "19:00:00", "CrossFit"]]))
 
     assert men.main() == men.EXIT_DIAGNOSTICO
-    assert "el mantenimiento se aplicó igual: las detecciones A.1-A.6" in mails[1][0]
+    assert "el mantenimiento se aplicó igual: las detecciones A.1-A.7" in mails[1][0]
 
 
 def test_ck_en_dry_run_el_motivo_de_la_integridad_tambien_dice_que_no_se_aplico(monkeypatch,
@@ -1833,6 +1875,354 @@ def test_cq_a6_una_variante_de_cancelacion_desconocida_pone_el_run_rojo(monkeypa
     assert "A.6 variantes de cancelación que el predicado no conoce: 1 fila(s)" in html
     assert "🔴 rojo (exit 9)" in html
     assert "cancelled_x" in html and ">7<" in html        # la fila viaja al correo
+
+
+# ══ Paso 11: retención de la bandeja in-app (opt-in por GRANT) ══════════════════════════════
+# Es la ÚNICA limpieza que faltaba (2026-10-26): los tokens de reset vencidos los borra el paso 10,
+# las sesiones/refresh tokens NO existen (la sesión es un JWT sin tabla) y los usuarios que nunca
+# confirman el registro los aparta el paso 4 (`rechazado`/`activo=false`), no los borra.
+def test_cr_puede_purgar_inapp_exige_t_y_nunca_asume_el_permiso():
+    """La sonda del rol es la única fuente: `t`/`true`/`on`/`1` habilitan; todo lo demás, no."""
+    for crudo in ("t", "T", " true\n", "on", "1", "  t  "):
+        assert men.puede_purgar_inapp(crudo) is True
+    for crudo in ("", "   ", None, "f", "false", "0", "ff", "on!", "permission denied"):
+        assert men.puede_purgar_inapp(crudo) is False
+
+
+def test_cs_sin_grant_el_paso_11_no_existe_ni_se_lee_la_tabla(monkeypatch, mails, capsys):
+    """Sin GRANT no hay 4ª transacción y NO se intenta el `SELECT`: un `permission denied` sería
+    exit 3 y cortaría el run ANTES de aplicar las otras tres (por eso la sonda va primero)."""
+    rastro = _psql_falso(monkeypatch, _ctx())            # `inapp_permiso` default = "f"
+
+    assert men.main() == men.EXIT_OK
+    assert len(rastro["scripts"]) == 3                   # las de siempre: nada cambió en PROD
+    assert not any("_maint_retencion" in s for s in rastro["scripts"])
+    assert not any("FROM notificaciones " in sql for sql in rastro["sql"])
+    salida = capsys.readouterr().out
+    assert "paso 11 OMITIDO" in salida and "retencion=0" in salida
+    assert mails == []                                   # verde: sólo log, como siempre
+
+
+def test_ct_con_grant_el_paso_11_es_la_cuarta_transaccion_con_su_tope_y_su_filtro(monkeypatch,
+                                                                                  mails):
+    """Con el GRANT: 4ª transacción, guarda propia (`MAX_PURGA_INAPP`) y **sólo** `notificaciones`
+    (la bandeja in-app), con su filtro por antigüedad."""
+    monkeypatch.setenv("DRY_RUN", "0")
+    rastro = _psql_falso(monkeypatch, _ctx(inapp_permiso="t", despues="vacio",
+                                           notificaciones_inapp=_notif_inapp(3),
+                                           script_out_retencion=script_out_retencion(3)))
+
+    assert men.main() == men.EXIT_OK
+    a, _, _, d = rastro["scripts"]                        # las 4, en orden
+    assert a.rstrip().endswith("COMMIT;") and "MAX_CAMBIOS" in a
+    assert d.rstrip().endswith("COMMIT;") and "MAX_PURGA_INAPP=2000" in d
+    assert d.count("DELETE FROM") == 1 and "DELETE FROM notificaciones\n" in d
+    assert "interval '365 days'" in d                    # retención por default
+    assert "UPDATE" not in d and "password_reset_tokens" not in d
+    assert "notificaciones_enviadas" not in d            # la del paso 10 es otra tabla
+    assert "paso 11 · retención in-app" in d
+    assert mails == []
+
+
+def test_cu_dry_run_la_retencion_termina_en_rollback_y_sin_guarda(monkeypatch, mails):
+    """En DRY-RUN el `DELETE` corre igual y se deshace: el número que va al correo es el real."""
+    rastro = _psql_falso(monkeypatch, _ctx(inapp_permiso="t", notificaciones_inapp=_notif_inapp(2),
+                                           script_out_retencion=script_out_retencion(2)))
+
+    assert men.main() == men.EXIT_OK
+    retencion = rastro["scripts"][3]
+    assert retencion.rstrip().endswith("ROLLBACK;")
+    assert "GUARDA DE VOLUMEN" not in retencion          # en DRY-RUN ninguna guarda viaja
+    assert mails == []
+
+
+def test_cv_dry_run_la_retencion_por_encima_del_tope_informa_exit_6(monkeypatch, mails):
+    """La guarda del paso 11 no aborta en DRY-RUN: informa (lista completa) y deja el run rojo."""
+    _psql_falso(monkeypatch, _ctx(inapp_permiso="t", notificaciones_inapp=_notif_inapp(3),
+                                  script_out_retencion=script_out_retencion(2001)))
+
+    assert men.main() == men.EXIT_GUARDA
+    asunto, html = mails[0]
+    assert asunto.startswith("[ALERTA] Mantenimiento PROD: excede MAX_PURGA_INAPP (2001 > 2000)")
+    assert "Retención in-app (paso 11)" in html
+    assert html.count("<tr>") == 3                       # las 3 filas de la lista, completas
+    assert "4 transacciones" in html
+
+
+def test_cw_el_correo_dice_que_el_paso_11_se_omitio_y_cuantas_transacciones_corrieron(
+        monkeypatch, mails):
+    """Con un rojo cualquiera sale el correo: ahí se ve el aviso del paso omitido y el título con
+    3. Un bloque vacío sin explicación se leería como "la bandeja ya está limpia"."""
+    _psql_falso(monkeypatch, _ctx(dup_rut=[["12345678-9", "2"]]))
+
+    assert men.main() == men.EXIT_INTEGRIDAD
+    html = mails[0][1]
+    assert "3 transacciones" in html and "4 transacciones" not in html
+    assert "paso 11 OMITIDO" in html and "GRANT de la Fase 11" in html
+    assert "Retención in-app (paso 11)" in html
+
+
+def test_cx_consultas_retencion_respeta_el_permiso_y_la_retencion_configurada():
+    cfg = {"dias_purga_inapp": 90}
+    assert men.consultas_retencion(cfg, False) == []     # sin permiso ni se arma la consulta
+    (consulta,) = men.consultas_retencion(cfg, True)
+    assert consulta["clave"] == "notificaciones_inapp"
+    assert "interval '90 days'" in consulta["sql"]
+    assert "FROM notificaciones " in consulta["sql"]
+    assert "password_reset_tokens" not in consulta["sql"]
+    assert consulta["cabeceras"] == ("id", "alumno_id", "tipo", "leida", "creada")
+
+
+@pytest.mark.parametrize("var,valor", [("MAX_PURGA_INAPP", "0"), ("MAX_PURGA_INAPP", "dos mil"),
+                                       ("MAX_PURGA_INAPP", "1; DROP TABLE notificaciones--"),
+                                       ("DIAS_PURGA_INAPP", "0"), ("DIAS_PURGA_INAPP", "3651")])
+def test_cy_tope_y_retencion_del_paso_11_invalidos_exit_2(var, valor, monkeypatch, mails):
+    """Mismos criterios que los otros topes: se valida ANTES de tocar la base (exit 2)."""
+    monkeypatch.setenv(var, valor)
+    rastro = _psql_falso(monkeypatch, _ctx())
+
+    assert men.main() == men.EXIT_CONFIG
+    assert rastro["sql"] == [] and rastro["scripts"] == []
+    assert var in mails[0][0]
+
+
+def test_cz_los_defaults_del_paso_11_son_2000_y_365(monkeypatch):
+    cfg = men.leer_config()
+    assert (cfg["max_purga_inapp"], cfg["dias_purga_inapp"]) == (2000, 365)
+
+    monkeypatch.setenv("MAX_PURGA_INAPP", "500")
+    monkeypatch.setenv("DIAS_PURGA_INAPP", "730")
+    cfg = men.leer_config()
+    assert (cfg["max_purga_inapp"], cfg["dias_purga_inapp"]) == (500, 730)
+
+
+# ── A.7: notificaciones por correo fallidas (ventana de 24 h) ─────────────────
+def _a7(enviadas: int, fallidos: int, simuladas: int = 0, desconocidos: int = 0,
+        excluidas: int = 0) -> tuple:
+    """Las 6 cifras de la ventana tal como las devuelve `psql -tA`: enviadas, fallidas, simuladas,
+    desconocidas, registradas y excluidas (el orden de `sql_notif_fallidas()`). Los `simulado` y las
+    `excluidas` existen de verdad (`email_service.ESTADO_SIMULADO`, modo prueba; y los 496 usuarios
+    `@example.com` de PROD): es lo que hay hoy en las dos bases."""
+    return (str(enviadas), str(fallidos), str(simuladas), str(desconocidos),
+            str(enviadas + fallidos + simuladas + desconocidos), str(excluidas))
+
+
+def _fallidas(n: int) -> list:
+    """Filas de la lista de A.7: id, alumno_id, tipo, enviada, error."""
+    return [[str(900 + i), "7", "vencimiento", "2026-10-26 09:00",
+             "SMTPRecipientsRefused: 550 mailbox unavailable"] for i in range(n)]
+
+
+@pytest.mark.parametrize("intentos,fallidos,umbral,suficiente,excede", [
+    (0, 0, 10, False, False),     # sin intentos no hay razón que evaluar
+    (4, 4, 10, False, False),     # 100%, pero muestra chica: el % es ruido
+    (5, 0, 10, True, False),      # justo el mínimo de intentos, ninguna falla
+    (20, 1, 10, True, False),     # 5% < 10%
+    (100, 9, 10, True, False),    # 9% < 10% (el entero no redondea hacia arriba)
+    (10, 1, 10, True, True),      # exactamente el umbral ⇒ avisa (es `>=`, no `>`)
+    (5, 1, 10, True, True),       # 20% con el mínimo de intentos
+    (100, 4, 5, True, False),     # 4% < 5%: el umbral es configurable
+    (100, 5, 5, True, True),      # 5% justo con umbral 5%
+])
+def test_da_a7_decide_por_volumen_y_por_umbral_en_enteros(intentos, fallidos, umbral, suficiente,
+                                                          excede):
+    """Las dos condiciones son obligatorias y la comparación es en ENTEROS (`fallidos*100 >=
+    intentos*umbral`), igual que `guarda_vencidos()`: sin floats no hay 9.999999 que se lea como
+    10. El `pct` del dict es sólo para mostrar y no interviene en la decisión."""
+    ev = men.evaluar_notif_fallidas(intentos, fallidos, umbral)
+
+    assert (ev["suficiente"], ev["excede"]) == (suficiente, excede)
+    assert (ev["intentos"], ev["fallidos"]) == (intentos, fallidos)
+    assert ev["pct"] == (round(fallidos * 100.0 / intentos, 1) if intentos else 0.0)
+
+
+def test_db_a7_por_encima_del_umbral_es_exit_9_con_la_lista_en_el_mail(monkeypatch, mails,
+                                                                       capsys):
+    """2 de 12 (16.7%) con umbral 10% ⇒ hallazgo rojo: exit 9 y correo, SIN abortar la escritura
+    (las 3 transacciones corren igual, como en la integridad). El mail trae qué falló y el error."""
+    rastro = _psql_falso(monkeypatch, _ctx(notif_fallidas=_a7(10, 2),
+                                           notif_fallidas_lista=_fallidas(2)))
+
+    assert men.main() == men.EXIT_DIAGNOSTICO
+    asunto, html = mails[0]
+    assert asunto.startswith("[ALERTA] Mantenimiento PROD: los chequeos nuevos encontraron 1")
+    assert "A.7 notificaciones por correo fallidas (últimas 24 h)" in html
+    assert "10 enviada(s) y 2 fallida(s) de 12 intento(s) (16.7%) — umbral 10%" in html
+    assert "550 mailbox unavailable" in html and "🔴 rojo (exit 9)" in html
+    assert len(rastro["scripts"]) == 3                # las 3 transacciones corrieron igual
+    out = capsys.readouterr().out
+    assert "ROJO (A.7)" in out and "2 de 12 (16.7%)" in out
+
+
+def test_dc_a7_muestra_chica_es_informativa_y_no_pone_el_run_rojo(monkeypatch, mails):
+    """Con menos de `NOTIF_FALLIDAS_MIN_ENVIOS` envíos el % no significa nada: 2 de 3 es 66.7% y
+    NO es alerta. La regla del correo es "correo = algo que revisar": llenarlo de ruido le enseña
+    al admin a ignorarlo, y la muestra chica es el caso normal de un box de este tamaño."""
+    _psql_falso(monkeypatch, _ctx(notif_fallidas=_a7(1, 2), notif_fallidas_lista=_fallidas(2)))
+
+    assert men.main() == men.EXIT_OK
+    assert mails == []
+    salida = men.detecciones(URL, men.leer_config())
+    assert salida["hallazgos"] == []
+    assert any(i.startswith("A.7") and "muestra menor a 5" in i for i in salida["informes"])
+
+
+def test_dd_a7_sin_registros_el_informe_lo_dice_y_el_run_sigue_verde(monkeypatch, mails):
+    """0 registradas en 24 h no es un hallazgo (puede que no hubiera nada que mandar), pero el
+    informe lo dice: un bloque vacío se leería como "todo bien" sin haber mirado nada."""
+    _psql_falso(monkeypatch, _ctx())          # default: ("0", "0", "0", "0")
+
+    assert men.main() == men.EXIT_OK
+    assert mails == []
+    salida = men.detecciones(URL, men.leer_config())
+    assert salida["hallazgos"] == []
+    assert any(i.startswith("A.7") and "0 registradas" in i for i in salida["informes"])
+    assert salida["notif"] == {"intentos": 0, "fallidos": 0, "suficiente": False, "excede": False,
+                               "pct": 0.0}
+
+
+def test_de_a7_estado_desconocido_se_informa_sin_cambiar_el_exit(monkeypatch, mails):
+    """Misma regla que A.6: un `estado` que el código no escribe se VE (es un registro de envíos
+    en el que no se puede confiar) pero no es un hallazgo por sí solo: `fallidos` cuenta EXACTO
+    `'fallido'`, así que un valor nuevo no se esconde dentro del conteo."""
+    _psql_falso(monkeypatch, _ctx(notif_fallidas=_a7(9, 0, 0, 1)))
+
+    assert men.main() == men.EXIT_OK
+    salida = men.detecciones(URL, men.leer_config())
+    assert salida["hallazgos"] == []
+    informe = next(i for i in salida["informes"] if i.startswith("A.7"))
+    assert "9 enviada(s) y 0 fallida(s) de 9 intento(s) (0.0%)" in informe
+    assert "1 con un `estado` desconocido" in informe
+
+
+def test_df_a7_el_umbral_es_configurable_por_env(monkeypatch, mails):
+    """1 de 20 intentos es 5%: verde con el default (10%) y rojo con `NOTIF_FALLIDAS_PCT=5`."""
+    _psql_falso(monkeypatch, _ctx(notif_fallidas=_a7(19, 1), notif_fallidas_lista=_fallidas(1)))
+    assert men.main() == men.EXIT_OK
+
+    monkeypatch.setenv("NOTIF_FALLIDAS_PCT", "5")
+    _psql_falso(monkeypatch, _ctx(notif_fallidas=_a7(19, 1), notif_fallidas_lista=_fallidas(1)))
+    assert men.main() == men.EXIT_DIAGNOSTICO
+    assert "supera NOTIF_FALLIDAS_PCT=5%" in mails[0][1]
+
+
+def test_dg_a7_la_lista_se_lee_solo_si_hay_fallidas(monkeypatch):
+    """Una consulta menos en el caso normal (casi todas las corridas): sin fallidas no se lee la
+    lista, y con fallidas SÍ (si no, el correo no podría decir cuál falló ni por qué)."""
+    rastro = _psql_falso(monkeypatch, _ctx())
+    men.main()
+    assert not any("ORDER BY n.fecha_envio DESC" in s for s in rastro["sql"])
+
+    rastro = _psql_falso(monkeypatch,
+                         _ctx(notif_fallidas=_a7(19, 1), notif_fallidas_lista=_fallidas(1)))
+    men.main()
+    (lista,) = [s for s in rastro["sql"] if "ORDER BY n.fecha_envio DESC" in s]
+    assert "n.estado = 'fallido'" in lista and "interval '24 hours'" in lista
+    assert "FROM notificaciones_enviadas n " in lista     # la tabla de ENVIADAS, no la bandeja
+    assert "detalle_error" in lista
+
+
+def test_dh_a7_el_bloque_dice_cuantas_filas_se_muestran(monkeypatch, mails):
+    """`n` es el conteo REAL de fallidas (40) y `mostradas` lo que entró por `LIMITE_LISTA` (3):
+    el correo dice "mostrando 3 de 40" para que el tope no se lea como el tamaño del problema."""
+    _psql_falso(monkeypatch, _ctx(notif_fallidas=_a7(60, 40),
+                                  notif_fallidas_lista=_fallidas(3)))
+
+    assert men.main() == men.EXIT_DIAGNOSTICO
+    html = mails[0][1]
+    assert "40 de 100 (40.0%)" in html
+    assert "40 fila(s) (mostrando 3 de 40)" in html
+
+
+@pytest.mark.parametrize("valor", ["0", "101", "diez", "10; DROP TABLE notificaciones--"])
+def test_di_a7_umbral_invalido_exit_2_sin_tocar_la_base(valor, monkeypatch, mails):
+    """Mismos criterios que los otros números: rango (1..100) y entero, validados ANTES de leer
+    ni escribir nada. Un texto que llegue al SQL es el riesgo que `_entero()` corta acá."""
+    monkeypatch.setenv("NOTIF_FALLIDAS_PCT", valor)
+    rastro = _psql_falso(monkeypatch, _ctx())
+
+    assert men.main() == men.EXIT_CONFIG
+    assert rastro["sql"] == [] and rastro["scripts"] == []
+    assert "NOTIF_FALLIDAS_PCT" in mails[0][0]
+
+
+def test_dj_a7_defaults_10_por_ciento_y_minimo_5_envios(monkeypatch):
+    """El umbral es configurable; el mínimo de envíos es una CONSTANTE a propósito (no hay caso de
+    negocio para bajarlo a 1 y volver a llenar el correo de ruido)."""
+    assert (men.NOTIF_FALLIDAS_PCT_DEFECTO, men.NOTIF_FALLIDAS_MIN_ENVIOS) == (10, 5)
+    assert men.leer_config()["notif_fallidas_pct"] == 10
+
+    monkeypatch.setenv("NOTIF_FALLIDAS_PCT", "25")
+    assert men.leer_config()["notif_fallidas_pct"] == 25
+
+
+def test_dk_a7_el_log_dice_las_cifras_aunque_el_run_quede_verde(monkeypatch, capsys):
+    """La pregunta "¿el correo está fallando?" se contesta en la primera pantalla del run: el log
+    lleva las cifras de la ventana en TODAS las corridas, no sólo cuando hay hallazgo (y cuando la
+    muestra es chica lo dice, para que un 0% no se confunda con "todo bien")."""
+    _psql_falso(monkeypatch, _ctx(notif_fallidas=_a7(29, 1)))
+    assert men.main() == men.EXIT_OK
+    out = capsys.readouterr().out
+    assert "A.7 notificaciones por correo 24 h: 30 intento(s) reales, 1 fallida(s) (3.3%)" in out
+    assert "umbral NOTIF_FALLIDAS_PCT=10%" in out
+
+    _psql_falso(monkeypatch, _ctx(notif_fallidas=_a7(3, 0)))
+    assert men.main() == men.EXIT_OK
+    out = capsys.readouterr().out
+    assert "muestra < 5 intentos: no se evalúa el umbral" in out
+
+
+def test_dl_a7_los_simulados_no_cuentan_como_intentos(monkeypatch, mails):
+    """`simulado` es un estado REAL —el modo prueba de `email_service`, donde el correo NO sale y
+    la fila se registra igual— y es lo que hay hoy en TEST. Si contara en el denominador, un box en
+    modo prueba con el SMTP roto se vería como "todo bien"; y no puede contarse como "desconocido"
+    (esa falsa alarma apareció recién al validar el SQL contra la base de TEST)."""
+    _psql_falso(monkeypatch, _ctx(notif_fallidas=_a7(0, 0, 35)))
+
+    assert men.main() == men.EXIT_OK
+    salida = men.detecciones(URL, men.leer_config())
+    assert salida["hallazgos"] == []
+    informe = next(i for i in salida["informes"] if i.startswith("A.7"))
+    assert "35 simulada(s) y 0 intento(s) reales" in informe
+    assert "desconocido" not in informe            # `simulado` está en ESTADOS_ENVIO
+
+    # 2 de 10 intentos (20%) con 30 simulados de fondo: el % se mide sobre los intentos reales,
+    # así que los simulados no lo diluyen hacia abajo.
+    _psql_falso(monkeypatch, _ctx(notif_fallidas=_a7(8, 2, 30),
+                                  notif_fallidas_lista=_fallidas(2)))
+
+    assert men.main() == men.EXIT_DIAGNOSTICO
+    html = mails[0][1]
+    assert "2 de 10 (20.0%)" in html
+    assert "30 simulada(s) en modo prueba (no son intentos de envío)" in html
+
+
+def test_dm_a7_excluye_los_destinatarios_de_demo_y_lo_informa(monkeypatch, mails):
+    """`example.com` es un dominio RESERVADO por la RFC 2606 (no recibe correo nunca) y ahí apunta
+    todo lo sintético: en PROD **496 de los 511 `usuarios` son `@example.com`**. Si A.7 los contara
+    quedaría rojo para siempre después de cada seed —el 26/10/2026 daba 166 fallidas de 305
+    intentos, TODAS de `demo.prod.anual.N@example.com`— y taparía un SMTP roto de verdad. Se
+    excluyen del cálculo y se informan (nunca en silencio)."""
+    _psql_falso(monkeypatch, _ctx(notif_fallidas=_a7(139, 0, 0, 0, 166)))
+
+    assert men.main() == men.EXIT_OK
+    assert mails == []
+    salida = men.detecciones(URL, men.leer_config())
+    informe = next(i for i in salida["informes"] if i.startswith("A.7"))
+    assert "139 enviada(s) y 0 fallida(s) de 139 intento(s)" in informe
+    assert "166 excluida(s) por ser de demo/dominio reservado" in informe
+
+    # El SQL los deja afuera y la lista del correo usa el MISMO predicado: una falla de demo no
+    # puede colarse en el mail ni inflar el %.
+    cfg = men.leer_config()
+    for sql in (men.sql_notif_fallidas(cfg), men.sql_notif_fallidas_lista(cfg)):
+        assert "'%@example.com'" in sql and "'%@example.net'" in sql and "'%@example.org'" in sql
+        assert "NOT LIKE" in sql
+        assert "demo.prod.%@example.com" in sql        # PROD_PERMITIDOS por defecto
+        assert "LEFT JOIN usuarios" in sql             # el correo del alumno, no sólo el snapshot
+
+
+
 
 
 

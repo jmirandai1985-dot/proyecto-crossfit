@@ -75,7 +75,7 @@ Variables de entorno (env group `mantenimiento-prod` + `alertas` de Render)
 Fase 7 (2026-09-27): detecciones, límites de Neon, consistencia y reporte
 -------------------------------------------------------------------------
 Sobre la base de la Fase 6, el mismo run agrega cuatro bloques, sin scripts nuevos:
-  * **A — detecciones de sólo lectura** (A.1–A.6): `estado` de usuario desconocido, aforo de
+  * **A — detecciones de sólo lectura** (A.1–A.7): `estado` de usuario desconocido, aforo de
     las clases desincronizado con sus reservas, reservas vivas duplicadas, sobrecupo,
     descuadre de créditos, reservas sin auditoría de asistencia y clases futuras sin coach.
     A.5(a)/(b) miran **sólo** las disciplinas que exigen coach (`disciplinas.requiere_coach`:
@@ -99,6 +99,12 @@ Sobre la base de la Fase 6, el mismo run agrega cuatro bloques, sin scripts nuev
     `clases.asistentes_confirmados` con el conteo real de reservas vivas y purga tokens de
     reset y notificaciones viejas. Van en **dos transacciones propias** con sus propios
     topes (`MAX_CIERRE`, `MAX_PURGA`), porque crecen con el volumen acumulado.
+  * **G — retención de la bandeja in-app** (paso 11): borra de `notificaciones` lo que tiene más
+    de `DIAS_PURGA_INAPP` días. Va en una transacción PROPIA (la 4ª) con su propio tope
+    (`MAX_PURGA_INAPP`, más bajo que `MAX_PURGA` porque la tabla crece a diario) y **se omite
+    sola** mientras `maint_rw` no tenga el `GRANT` de `SELECT`+`DELETE` sobre esa tabla (README,
+    Fase 11): sin el permiso lo dice en el log y en el correo y el run queda igual. Así el código
+    puede viajar a PROD antes que el permiso, sin que un `permission denied` corte el run.
   * **E — reporte**: además de lo de la Fase 6, el MRR (misma definición que
     `app/services/metricas_service.py`: precio de lista de los planes vigentes), su
     variación contra el mes anterior, el churn/retención de la cohorte de 30 días (con
@@ -110,6 +116,7 @@ Variables de entorno NUEVAS de la Fase 7 (todas con default, todas validadas ant
 tocar la base; los textos pasan por un charset seguro, así que no pueden cambiar el SQL):
 `MAX_CIERRE` (500) · `MAX_PURGA` (5000) · `DIAS_CIERRE_RESERVAS` (7) ·
 `DIAS_PURGA_TOKENS` (30) · `DIAS_PURGA_NOTIF` (180) · `CREDITOS_DESCUADRE_TOLERANCIA` (0) ·
+`MAX_PURGA_INAPP` (2000) · `DIAS_PURGA_INAPP` (365) ·
 `PROD_PERMITIDOS` (`demo.prod.%@example.com`) · `TENANT_ID` (1) · `MIN_BASE_RETENCION` (5) ·
 `NEON_CU_HORAS_LIMITE` (100) · `NEON_CU_UMBRAL_PCT` (80) · `NEON_RAMAS_LIMITE` (10) ·
 `NEON_API_BASE` (misma variable que usa `restore_drill.py`).
@@ -126,7 +133,7 @@ Exit codes
 ----------
 0 OK · 2 config (falta variable, URL con `-pooler`, usuario que no es `maint_rw`,
 `ENVIRONMENT` ≠ production, entero fuera de rango) · 3 un `SELECT` de lectura falló ·
-4 la integridad encontró problemas (run rojo; la escritura NO se aborta) · 9 las detecciones A.1–A.6 o el chequeo de Neon que
+4 la integridad encontró problemas (run rojo; la escritura NO se aborta) · 9 las detecciones A.1–A.7 o el chequeo de Neon que
 no pudo correr (rojo; la escritura NO se aborta) · 6 guarda de
 volumen (en DRY-RUN informa y no aplica; en REAL aborta y no se aplica nada) ·
 7 la transacción de escritura falló (nada quedó aplicado) · 8 la verificación posterior no
@@ -219,6 +226,13 @@ MAX_PURGA_RANGO = (1, 1_000_000)
 DIAS_CIERRE_RESERVAS_DEFECTO = 7    # antigüedad mínima de la clase para cerrar su asistencia
 DIAS_PURGA_TOKENS_DEFECTO = 30      # retención de password_reset_tokens
 DIAS_PURGA_NOTIF_DEFECTO = 180      # retención de notificaciones_enviadas
+# ── Paso 11: retención de la bandeja in-app (`notificaciones`, la que lee el alumno) ──
+# Es la única limpieza que faltaba (2026-10-26): `notificaciones` no la purgaba nadie y crecía
+# para siempre. Tope PROPIO y más bajo que MAX_PURGA porque esta tabla crece a diario (una ráfaga
+# del scheduler) y un borrado masivo tiene que saltar a la vista antes de aplicarse.
+MAX_PURGA_INAPP_DEFECTO = 2000      # tope del paso 11 (filas que puede borrar en UN run)
+MAX_PURGA_INAPP_RANGO = (1, 1_000_000)
+DIAS_PURGA_INAPP_DEFECTO = 365      # retención de `notificaciones` (bandeja del alumno)
 CREDITOS_TOLERANCIA_DEFECTO = 0     # descuadres tolerados por alumno (A.3)
 PROD_PERMITIDOS_DEFECTO = "demo.prod.%@example.com"   # datos de demo intencionales (D-3)
 TENANT_ID_DEFECTO = 1               # el box es uno: fija las consultas de MRR/churn (E)
@@ -251,6 +265,17 @@ LIMITE_A3 = 200        # suscripciones vigentes que evalúa A.3 en cada corrida
 # La alerta NO se silencia: el run sigue rojo y el correo sigue saliendo; la nota se quita sola.
 A5_NOTA_TEXTO = ("Esperado en esta etapa: aún no hay coaches asignados a estas clases (desarrollo). "
                  "Asígnalos en la pantalla Coaches. Esta nota se quita sola el {fecha}.")
+# ── A.7: notificaciones por correo fallidas (2026-10-26) ──────────────────────
+# La alarma que faltaba: si el SMTP empieza a rechazar, la app sigue andando y
+# `notificaciones_enviadas` acumula `estado='fallido'` sin que nadie se entere hasta que un alumno
+# reclama. Se mide sobre una VENTANA DE 24 H (nunca sobre el total histórico, que sólo sube) y sólo
+# se evalúa con volumen suficiente: 1 falla de 2 envíos es 50% y no significa nada, así que por
+# debajo de `NOTIF_FALLIDAS_MIN_ENVIOS` el chequeo sólo informa. El % se compara en ENTEROS
+# (`fallidos*100 >= total*umbral`), igual que `guarda_vencidos()`: sin floats no hay 9.999999 que
+# se lea como 10, y `>=` hace que el umbral justo ya avise.
+NOTIF_FALLIDAS_PCT_DEFECTO = 10     # % de fallidas sobre las registradas en 24 h que pide alerta
+NOTIF_FALLIDAS_PCT_RANGO = (1, 100)
+NOTIF_FALLIDAS_MIN_ENVIOS = 5       # envíos mínimos en 24 h para que el % signifique algo
 
 
 class ConfigError(RuntimeError):
@@ -441,6 +466,15 @@ def leer_config() -> dict:
         "dias_cierre": _entero("DIAS_CIERRE_RESERVAS", DIAS_CIERRE_RESERVAS_DEFECTO, 1, 3650),
         "dias_purga_tokens": _entero("DIAS_PURGA_TOKENS", DIAS_PURGA_TOKENS_DEFECTO, 1, 3650),
         "dias_purga_notif": _entero("DIAS_PURGA_NOTIF", DIAS_PURGA_NOTIF_DEFECTO, 1, 3650),
+        # ── Fase 11: retención de la bandeja in-app (paso 11) ──
+        "max_purga_inapp": _entero("MAX_PURGA_INAPP", MAX_PURGA_INAPP_DEFECTO,
+                                   *MAX_PURGA_INAPP_RANGO),
+        "dias_purga_inapp": _entero("DIAS_PURGA_INAPP", DIAS_PURGA_INAPP_DEFECTO, 1, 3650),
+        # ── A.7: alerta de notificaciones por correo fallidas (ventana de 24 h) ──
+        # Opcional: sin la variable el umbral es 10% (y el mínimo de envíos es una constante, no
+        # una variable: no hay caso de negocio para bajarlo a 1 y volver a llenar el correo de ruido).
+        "notif_fallidas_pct": _entero("NOTIF_FALLIDAS_PCT", NOTIF_FALLIDAS_PCT_DEFECTO,
+                                      *NOTIF_FALLIDAS_PCT_RANGO),
         "creditos_tolerancia": _entero("CREDITOS_DESCUADRE_TOLERANCIA",
                                        CREDITOS_TOLERANCIA_DEFECTO, 0, 100),
         # Nota de contexto de A.5(a) (opcional: sin la variable no hay nota ni se toca la alerta).
@@ -739,7 +773,10 @@ def nota_a5(cfg: dict, hoy: date | None = None) -> str:
 
 
 def detecciones_sql(cfg: dict) -> tuple:
-    """A.1–A.6 declaradas como datos (para el mail) + SQL. `modo`:
+    """A.1–A.6 declaradas como datos (para el mail) + SQL. A.3 y A.7 no están acá porque su
+    decisión no es "≠ 0" ni "hay filas" sino una comparación (tolerancia del descuadre / razón de
+    fallidas de la ventana): se resuelven en `descuadre_creditos()` y `notif_fallidas()`.
+    `modo`:
       * `escalar`: un conteo ⇒ hallazgo si ≠ 0.
       * `lista`:   filas ⇒ hallazgo si hay alguna (y van COMPLETAS al mail).
     `sev`: `rojo` (pone el run rojo, exit 9) o `info` (sólo informa, nunca cambia el exit).
@@ -1075,6 +1112,54 @@ def consultas_purga(cfg: dict) -> list:
     ]
 
 
+# ── Fase 11: retención de la bandeja in-app (paso 11) ────────────────────────
+# ¿El rol puede hacer el paso 11? Necesita las DOS cosas: `SELECT` (la lista del correo y la
+# verificación posterior) y `DELETE` (el borrado). En PROD `maint_rw` NO las tiene hasta que se
+# aplique el `GRANT` de la Fase 11 del README, así que el paso se OMITE solo. Es a propósito: si
+# el grant falta, el `SELECT` de la lista sería `permission denied` (exit 3) y la transacción del
+# `DELETE` (exit 7), y el run se cortaría sin cumplir el resto. Con la sonda, el código puede
+# viajar a PROD antes del permiso y el run sigue igual que siempre.
+SQL_PURGA_INAPP_PERMITIDA = (
+    "SELECT (has_table_privilege(current_user, 'public.notificaciones', 'SELECT') "
+    "AND has_table_privilege(current_user, 'public.notificaciones', 'DELETE'))::text")
+
+
+def puede_purgar_inapp(crudo: str) -> bool:
+    """`t`/`true`/`on`/`1` ⇒ el rol puede `SELECT`+`DELETE` en `notificaciones` (paso 11).
+
+    **Pura**: sólo traduce la salida de `SQL_PURGA_INAPP_PERMITIDA` (psql `-tA` devuelve `t`/`f`).
+    Ante cualquier otra cosa (vacío, error, `f`) devuelve `False`: el paso se omite, no se asume
+    el permiso.
+    """
+    return (crudo or "").strip().lower() in ("t", "true", "on", "1")
+
+
+def consultas_retencion(cfg: dict, permitido: bool) -> list:
+    """La lista del paso 11 (bandeja in-app vieja), o `[]` si el rol todavía no puede.
+
+    Devolver `[]` —y no una consulta que va a fallar— es lo que hace que el run de PROD siga
+    siendo el de siempre (3 transacciones) mientras no exista el `GRANT`: no hay `SELECT` sobre
+    `notificaciones`, así que ni siquiera se intenta leer. Cuando el permiso está, la MISMA
+    definición alimenta la lista del correo, el `DELETE` y la verificación posterior (como en el
+    resto de las fases).
+    """
+    if not permitido:
+        return []
+    dias = int(cfg["dias_purga_inapp"])
+    return [
+        {
+            "clave": "notificaciones_inapp",
+            "titulo": "Notificaciones in-app viejas (paso 11)",
+            "destino": f"DELETE (retención {dias} días)",
+            "cabeceras": ("id", "alumno_id", "tipo", "leida", "creada"),
+            "sql": ("SELECT id::text, alumno_id::text, tipo, leida::text, created_at::text "
+                    "FROM notificaciones "
+                    f"WHERE created_at < now() - interval '{dias} days' "
+                    "ORDER BY created_at, id LIMIT 5000"),
+        },
+    ]
+
+
 # Mismo criterio que reporte_estadisticas.py. El corte del mes se arma en Python como
 # 'YYYY-MM-DD'::date (nunca texto que venga de afuera) y se evalúa en la TZ de Chile.
 #
@@ -1290,12 +1375,169 @@ def descuadre_creditos(url: str, cfg: dict) -> dict:
     }
 
 
-def detecciones(url: str, cfg: dict) -> dict:
-    """A.1–A.6 en marcha: lee cada consulta y separa hallazgos (rojo) de informes (info).
+# ── A.7: notificaciones por correo fallidas en las últimas 24 h (2026-10-26) ──
+# `estado` es un `String(20)` con TRES valores reales, no dos: `enviado`, `fallido` y `simulado`
+# (el modo prueba de `email_service.es_modo_simulado()`, que se ve en TEST: el correo NO sale y la
+# fila se registra igual — `app/core/config.py` lo documenta como modo de prueba). Los `simulado`
+# NO entran en la razón porque no son intentos de envío: contarlos en el denominador haría que un
+# box con el SMTP roto y `EMAIL_MODO` en prueba se viera como "todo bien". Se informan aparte.
+# Cualquier OTRO valor se cuenta aparte y se muestra (misma regla que A.6: comparar exacto y que lo
+# raro se vea): un estado que el código no escribe también invalida el registro de envíos.
+ESTADOS_ENVIO = ("enviado", "fallido", "simulado")
+_ESTADOS_ENVIO_SQL = ", ".join(f"'{e}'" for e in ESTADOS_ENVIO)
+# Los destinatarios de PRUEBA NO se evalúan. `example.com/net/org` son dominios RESERVADOS por la
+# RFC 2606 (no reciben correo NUNCA) y ahí apunta todo lo sintético: en PROD, **496 de los 511
+# `usuarios` son `@example.com`** (`seed_anual_prod.py` + los demo viejos). Se suma la allowlist
+# `PROD_PERMITIDOS` (los mismos patrones de A.1(c), reusando `sql_demo()`).
+# Esto se decidió con datos reales, no en teoría: el 26/10/2026 la ventana de 24 h daba **166
+# fallidas de 305 intentos** y TODAS eran de `demo.prod.anual.N@example.com`. Sin el filtro A.7
+# quedaría rojo para siempre después de cada seed y taparía un SMTP roto de verdad (ese mismo día
+# hubo 245 correos perdidos por credenciales vacías: eso SÍ tiene que alertar).
+DOMINIOS_RESERVADOS = ("%@example.com", "%@example.net", "%@example.org")
 
-    Devuelve `{"hallazgos", "informes", "listas", "nota_a5"}`. Un hallazgo NO aborta el
+
+def sql_destinatario_real(cfg: dict) -> str:
+    """Predicado (alias `n` para el envío, `u` para el alumno) de "es una persona, no una prueba".
+
+    El correo del destinatario es `destinatario_correo` cuando el envío NO era para un alumno
+    (admin/lead) y `usuarios.correo` cuando sí; si los dos son NULL (alumno borrado) se compara
+    `''`, así la fila NO se descarta por accidente: una falla sin destinatario identificable se
+    informa. `sql_demo()` ya escapa los `_` de los patrones, así que no hace falta otro `ESCAPE`.
+    """
+    correo = "COALESCE(n.destinatario_correo, u.correo, '')"
+    dominios = " AND ".join(f"{correo} NOT LIKE '{d}'" for d in DOMINIOS_RESERVADOS)
+    return f"{dominios} AND NOT ({sql_demo(cfg['permitidos'])})"
+
+
+def sql_notif_fallidas(cfg: dict) -> str:
+    """Las 6 cifras de la ventana de 24 h, en un solo recorrido (CTE `v`).
+
+    Las 4 primeras son del chequeo (enviadas, fallidas, simuladas, desconocidas), la 5ª es el total
+    evaluado (`registradas`) y la 6ª son las **excluidas** por ser de demo/reservado. `excluidas`
+    viaja al informe a propósito: una exclusión silenciosa es indistinguible de "no hubo fallas".
+    """
+    return (
+        "WITH v AS ("
+        "SELECT n.estado, (" + sql_destinatario_real(cfg) + ") AS real "
+        "FROM notificaciones_enviadas n LEFT JOIN usuarios u ON u.id = n.alumno_id "
+        "WHERE n.fecha_envio >= now() - interval '24 hours') "
+        "SELECT count(*) FILTER (WHERE real AND estado = 'enviado')::text, "
+        "count(*) FILTER (WHERE real AND estado = 'fallido')::text, "
+        "count(*) FILTER (WHERE real AND estado = 'simulado')::text, "
+        f"count(*) FILTER (WHERE real AND estado NOT IN ({_ESTADOS_ENVIO_SQL}))::text, "
+        "count(*) FILTER (WHERE real)::text, "
+        "count(*) FILTER (WHERE NOT real)::text "
+        "FROM v")
+
+
+def sql_notif_fallidas_lista(cfg: dict) -> str:
+    """Las fallidas de la ventana que viajan al correo: sólo destinatarios reales, error recortado."""
+    return (
+        "SELECT n.id::text, COALESCE(n.alumno_id::text, '-'), n.tipo, n.fecha_envio::text, "
+        "COALESCE(substr(n.detalle_error, 1, 120), '-') "
+        "FROM notificaciones_enviadas n LEFT JOIN usuarios u ON u.id = n.alumno_id "
+        "WHERE n.fecha_envio >= now() - interval '24 hours' AND n.estado = 'fallido' "
+        f"AND {sql_destinatario_real(cfg)} "
+        f"ORDER BY n.fecha_envio DESC, n.id LIMIT {LIMITE_LISTA}")
+
+
+def evaluar_notif_fallidas(intentos: int, fallidos: int, pct: int) -> dict:
+    """PURA: decide si A.7 es hallazgo (rojo) a partir de las cifras de la ventana de 24 h.
+
+    `intentos` son los envíos REALES de la ventana (`enviado` + `fallido`): los `simulado` quedan
+    afuera porque nunca salieron. Dos condiciones y las dos tienen que darse:
+      * **volumen**: `intentos >= NOTIF_FALLIDAS_MIN_ENVIOS`. Con pocos envíos un 50% es ruido (una
+        falla entre dos correos no dice nada del SMTP) y el correo ya es de alerta: llenarlo con
+        eso le enseña al admin a ignorarlo.
+      * **umbral**: `fallidos*100 >= intentos*pct`, en ENTEROS (mismo criterio que
+        `guarda_vencidos()`): sin floats no hay `9.999999` que se lea como 10. Es `>=`, así que el
+        umbral justo (`NOTIF_FALLIDAS_PCT=10` y 1 de 10) ya avisa.
+    `pct` es el redondeado a 1 decimal que se MUESTRA; la comparación no lo usa.
+    """
+    suficiente = intentos >= NOTIF_FALLIDAS_MIN_ENVIOS
+    excede = suficiente and fallidos > 0 and fallidos * 100 >= intentos * pct
+    return {"intentos": intentos, "fallidos": fallidos, "suficiente": suficiente,
+            "excede": excede,
+            "pct": round(fallidos * 100.0 / intentos, 1) if intentos else 0.0}
+
+
+def notif_fallidas(url: str, cfg: dict) -> dict:
+    """A.7 en marcha: lee la ventana de 24 h y devuelve `informe`, `hallazgos`, `tabla` y `eval`.
+
+    El **informe** sale SIEMPRE (con 0 registradas, con muestra chica y con el % bajo): es la línea
+    que dice cuántas se mandaron y cuántas fallaron, y sin ella un run rojo por otra cosa no
+    mostraría que el correo está fallando. El **hallazgo** (rojo ⇒ exit 9 ⇒ correo, sin abortar la
+    escritura) sale sólo si se cumplen las dos condiciones de `evaluar_notif_fallidas()`.
+    La lista se lee SÓLO si hay fallidas (una consulta menos en el caso normal).
+    Sólo se evalúan **destinatarios reales** (`sql_destinatario_real()`): los de demo o de dominio
+    reservado se cuentan aparte y se informan como `excluidas`, nunca en silencio.
+    """
+    crudas = psql_leer(url, sql_notif_fallidas(cfg))
+    fila = (list(crudas[0]) if crudas else []) + ["0"] * 6
+    enviadas, fallidos, simuladas, desconocidos, registradas, excluidas = (
+        _int_o_cero(v) for v in fila[:6])
+    intentos = enviadas + fallidos
+    umbral = int(cfg["notif_fallidas_pct"])
+    ev = evaluar_notif_fallidas(intentos, fallidos, umbral)
+
+    if not registradas:
+        informe = ("A.7 notificaciones por correo en las últimas 24 h: 0 registradas "
+                   f"(sin datos para evaluar el umbral {umbral}%)")
+    elif not intentos:
+        informe = (f"A.7 notificaciones por correo en las últimas 24 h: {simuladas} simulada(s) "
+                   f"y 0 intento(s) reales de envío — no se evalúa el umbral {umbral}%")
+    elif not ev["suficiente"]:
+        informe = (f"A.7 notificaciones por correo en las últimas 24 h: {enviadas} enviada(s) y "
+                   f"{fallidos} fallida(s) de {intentos} intento(s) — muestra menor a "
+                   f"{NOTIF_FALLIDAS_MIN_ENVIOS}, no se evalúa el umbral {umbral}%")
+    else:
+        informe = (f"A.7 notificaciones por correo en las últimas 24 h: {enviadas} enviada(s) y "
+                   f"{fallidos} fallida(s) de {intentos} intento(s) ({ev['pct']}%) — umbral "
+                   f"{umbral}% (mínimo {NOTIF_FALLIDAS_MIN_ENVIOS} intentos)")
+    if simuladas and intentos:
+        informe += f"; {simuladas} simulada(s) en modo prueba (no son intentos de envío)"
+    if desconocidos:
+        informe += (f"; {desconocidos} con un `estado` desconocido (se esperan "
+                    f"{', '.join(ESTADOS_ENVIO)})")
+    if excluidas:
+        informe += (f"; {excluidas} excluida(s) por ser de demo/dominio reservado "
+                    "(`PROD_PERMITIDOS` o `@example.*`: no se evalúan)")
+
+    hallazgos = []
+    if ev["excede"]:
+        hallazgos.append(
+            f"A.7 notificaciones por correo fallidas en las últimas 24 h: {fallidos} de "
+            f"{intentos} ({ev['pct']}%) supera NOTIF_FALLIDAS_PCT={umbral}% con {intentos} "
+            "intento(s) de envío: revisar `detalle_error` (SMTP, dirección rebotada o "
+            "credenciales de Gmail)")
+    filas = psql_leer(url, sql_notif_fallidas_lista(cfg)) if fallidos else []
+    return {
+        "informe": informe,
+        "hallazgos": hallazgos,
+        "eval": ev,
+        "tabla": {
+            "clave": "a7_notif_fallidas",
+            "titulo": "A.7 notificaciones por correo fallidas (últimas 24 h)",
+            "cabeceras": ("id", "alumno_id", "tipo", "enviada", "error"),
+            "destino": "", "sev": "rojo", "filas": filas,
+            # `n` = las fallidas de la ventana (el conteo real, no el tope): `mostradas` es lo que
+            # entra por `LIMITE_LISTA` y el bloque dice "mostrando X de N" cuando recorta.
+            "n": fallidos, "mostradas": len(filas),
+            "detalle": f"`detalle_error` de los envíos fallidos (máximo {LIMITE_LISTA})",
+        },
+    }
+
+
+def detecciones(url: str, cfg: dict) -> dict:
+    """A.1–A.7 en marcha: lee cada consulta y separa hallazgos (rojo) de informes (info).
+
+    Devuelve `{"hallazgos", "informes", "listas", "nota_a5", "notif"}`. Un hallazgo NO aborta el
     mantenimiento (igual que la integridad): pone el run rojo (exit 9) y viaja al mail con la
     lista completa. Los informes sólo aparecen en el mail y NO cambian el exit code.
+
+    `notif` son las cifras de A.7 (ventana de 24 h de `notificaciones_enviadas`) tal como las
+    evaluó `evaluar_notif_fallidas()`: `main()` las loguea para que el run diga con números si el
+    correo está fallando, sin depender de que haya hallazgo.
 
     El `n` de cada lista es el **total real** de la consulta (`count(*) OVER ()`, que se calcula
     antes del `LIMIT`), no el número de filas que viajan al mail: por eso `mostradas` existe. El
@@ -1337,9 +1579,16 @@ def detecciones(url: str, cfg: dict) -> dict:
     hallazgos.extend(creditos["hallazgos"])
     if creditos["tabla"]["n"]:
         listas.append(creditos["tabla"])
+    # A.7: la decisión es una RAZÓN entre dos cifras de la misma ventana, así que no cabe en
+    # `detecciones_sql()` (que sólo sabe de "≠ 0" y "hay filas"): igual que A.3, se resuelve acá.
+    notif = notif_fallidas(url, cfg)
+    informes.append(notif["informe"])
+    hallazgos.extend(notif["hallazgos"])
+    if notif["tabla"]["n"]:
+        listas.append(notif["tabla"])
     con_a5a = any(c["clave"] == "a5a_sin_coach_posible" and c["n"] for c in listas)
     return {"hallazgos": hallazgos, "informes": informes, "listas": listas,
-            "nota_a5": nota_a5(cfg) if con_a5a else ""}
+            "nota_a5": nota_a5(cfg) if con_a5a else "", "notif": notif["eval"]}
 
 
 def neon_api_get(cfg: dict, ruta: str, timeout: int = 20) -> dict:
@@ -1910,6 +2159,52 @@ SELECT paso, count(*) FROM _maint_purga GROUP BY paso ORDER BY paso;
 """
 
 
+def script_retencion(max_inapp: int, dias_inapp: int, dry_run: bool) -> str:
+    """Transacción del paso 11: retención de la **bandeja in-app** (`notificaciones`).
+
+    Por qué esta tabla y no otras
+    -----------------------------
+    Es la única limpieza que faltaba (lo pedido en 2026-10-26 ya estaba cubierto: los tokens de
+    reset vencidos los borra el paso 10, las sesiones/refresh tokens **no existen** —la sesión es
+    un JWT sin tabla— y los usuarios que nunca confirman el registro los APARTA el paso 4, que los
+    deja `rechazado`/`activo=false` en vez de borrarlos). `notificaciones` es distinta: no es
+    historial (ningún KPI la lee), no tiene FKs de entrada (borrarla no arrastra nada) y sin
+    retención crece para siempre: es la bandeja del alumno, y lo que tiene un año ya no lo lee
+    nadie.
+
+    **Idempotente**: el filtro es por antigüedad (`created_at`), así que lo ya borrado no vuelve y
+    una segunda corrida sólo borra lo que se haya vencido desde la anterior. No hay `UPDATE`: no
+    puede reescribir nada. Es la única tabla que toca, y ninguna otra transacción la toca.
+
+    **Guarda de volumen propia** (`MAX_PURGA_INAPP`, default 2000): en REAL aborta desde el SQL si
+    el `DELETE` tocó más filas que el tope, así que no se aplica nada; en DRY-RUN no se agrega y
+    lo evalúa Python con el conteo REAL (`main()`), que informa y deja el run rojo.
+
+    En DRY-RUN la transacción se ejecuta igual y termina en `ROLLBACK`: el número del correo es el
+    que el `DELETE` tocó de verdad, no una estimación.
+    """
+    cierre = "ROLLBACK;" if dry_run else "COMMIT;"
+    guarda = "" if dry_run else "\n" + guarda_volumen(max_inapp, "MAX_PURGA_INAPP",
+                                                      "_maint_retencion",
+                                                      "filas purgadas") + "\n"
+    return f"""-- mantenimiento PROD (paso 11 · retención in-app): UNA transacción (BEGIN … {cierre})
+BEGIN;
+SET LOCAL TIME ZONE '{TZ_CLT}';
+CREATE TEMP TABLE _maint_retencion (paso text NOT NULL, id integer NOT NULL) ON COMMIT DROP;
+
+-- 11) bandeja in-app: lo que el alumno ya no va a leer
+WITH del AS (
+  DELETE FROM notificaciones
+  WHERE created_at < now() - interval '{int(dias_inapp)} days'
+  RETURNING id)
+INSERT INTO _maint_retencion SELECT 'notificaciones_inapp', id FROM del;
+{guarda}
+SELECT paso, count(*) FROM _maint_retencion GROUP BY paso ORDER BY paso;
+
+{cierre}
+"""
+
+
 def verificar(url: str, consultas: list, listas_antes: list, dry_run: bool) -> tuple:
     """(ok, detalle): después de la transacción, ¿quedó como tiene que quedar?
 
@@ -1978,7 +2273,7 @@ def _bloques_listas(listas: list, vacio: str = "(sin listas)") -> str:
 
 
 def _bloques_detecciones(listas: list, nota_a5: str = "") -> str:
-    """Listas de las detecciones A.1–A.6: la severidad va delante y las filas detrás.
+    """Listas de las detecciones A.1–A.7: la severidad va delante y las filas detrás.
 
     El conteo es el **total** del conjunto; si el `LIMIT` dejó filas afuera se dice cuántas se
     muestran ("mostrando 25 de 63"), para que el tope no se lea como el tamaño del hallazgo.
@@ -2014,6 +2309,14 @@ def construir_html(datos: dict, inicio: datetime, segundos: float, titulo: str =
                                      "(sin nada que cerrar ni resincronizar)")
     bloques_purga = _bloques_listas(datos.get("listas_purga"),
                                     "(sin nada que purgar)")
+    # Paso 11 (retención in-app): si se OMITIÓ por falta del GRANT, el correo lo dice. Un bloque
+    # vacío sin explicación se leería como "la bandeja ya está limpia", y no es lo mismo.
+    reten = datos.get("retencion") or {}
+    n_tx = 4 if reten.get("permitido") else 3
+    bloques_retencion = _bloques_listas(datos.get("listas_retencion"),
+                                        "(sin nada que purgar en la bandeja in-app)")
+    retencion_nota = ("" if reten.get("permitido") or not reten.get("nota")
+                      else f"<p>ℹ️ {_e(reten['nota'])}</p>")
     detect = datos.get("detecciones") or {}
     nota_a5_txt = detect.get("nota_a5") or ""
     # Sólo las listas CON filas: las 11 vacías serían ruido en un correo que ya es de alerta
@@ -2090,7 +2393,9 @@ def construir_html(datos: dict, inicio: datetime, segundos: float, titulo: str =
     error_html = f"<p><b>psql (saneado):</b> <code>{_e(error)}</code></p>" if error else ""
 
     return (
-        "<h3>Mantenimiento PROD (día 1 y 15) — 3 transacciones: cambios, consistencia y purga</h3>"
+        f"<h3>Mantenimiento PROD (día 1 y 15) — {n_tx} transacciones: "
+        + ("cambios, consistencia, purga y retención in-app" if n_tx == 4
+           else "cambios, consistencia y purga") + "</h3>"
         + pasos
         + limites_html
         + (_lista_html("Transacción (filas efectivamente tocadas por el SQL)",
@@ -2101,7 +2406,8 @@ def construir_html(datos: dict, inicio: datetime, segundos: float, titulo: str =
         + "<h3>Cambios</h3>" + bloques
         + "<h3>Consistencia (pasos 8-9)</h3>" + bloques_cierre
         + "<h3>Purga (paso 10)</h3>" + bloques_purga
-        + "<h3>Detecciones (A.1-A.6)</h3>" + detecciones_html
+        + "<h3>Retención in-app (paso 11)</h3>" + retencion_nota + bloques_retencion
+        + "<h3>Detecciones (A.1-A.7)</h3>" + detecciones_html
         + "<h3>Integridad</h3>" + integridad
         + "<h3>Neon (API v2: CU-horas y ramas)</h3>" + neon_api_html
         + "<h3>Neon (almacenamiento)</h3>" + neon_html
@@ -2276,6 +2582,12 @@ def main() -> int:
         datos["listas"] = listas
         datos["listas_cierre"] = leer_listas(cfg["url"], consultas_cierre_fase)
         datos["listas_purga"] = leer_listas(cfg["url"], consultas_purga_fase)
+        # Paso 11: primero la sonda de permisos y recién después la lectura. Sin el GRANT, el
+        # SELECT daría `permission denied` (exit 3) y el run se cortaría ANTES de escribir nada,
+        # que es justo lo que la sonda evita mientras el permiso no esté aprobado en PROD.
+        permitido_inapp = puede_purgar_inapp(psql_escalar(cfg["url"], SQL_PURGA_INAPP_PERMITIDA))
+        consultas_retencion_fase = consultas_retencion(cfg, permitido_inapp)
+        datos["listas_retencion"] = leer_listas(cfg["url"], consultas_retencion_fase)
         datos["integridad"] = integridad(cfg["url"])
         datos["detecciones"] = detecciones(cfg["url"], cfg)
         datos["neon"] = neon_uso(cfg["url"], cfg["neon_limite_mb"], cfg["neon_umbral_pct"])
@@ -2283,7 +2595,7 @@ def main() -> int:
         # El REPORTE del mes NO se lee acá: se lee en el punto de salida (`reportar`) DESPUÉS de
         # las transacciones, para que sea la foto del box ya mantenido (ver
         # `reporte_tras_cambios`).
-        datos["resumen_cambios"] = {}     # lo que tocó cada una de las 3 transacciones
+        datos["resumen_cambios"] = {}     # lo que tocó cada fase (3 transacciones, o 4 con el paso 11)
         datos["verificacion"] = {}        # la verificación posterior de cada una
     except LecturaError as e:
         log(f"FATAL (lectura): {e}")
@@ -2292,6 +2604,15 @@ def main() -> int:
     cambios = sum(c["n"] for c in listas)
     cierres = sum(c["n"] for c in datos["listas_cierre"])
     purga = sum(c["n"] for c in datos["listas_purga"])
+    retencion = sum(c["n"] for c in datos["listas_retencion"])
+    # El paso 11 se OMITE solo mientras `maint_rw` no tenga el GRANT (README, Fase 11). Se dice en
+    # el log y en el correo: un job que "no borró nada" no puede parecer un job que falló.
+    datos["retencion"] = {
+        "permitido": permitido_inapp,
+        "nota": "" if permitido_inapp else (
+            "paso 11 OMITIDO: maint_rw no tiene SELECT+DELETE en `notificaciones` (falta el "
+            "GRANT de la Fase 11 del README); las otras 3 transacciones corren igual"),
+    }
     # Reglas de volumen: PURAS (conteos + config → reglas). Se evalúan acá, antes de las
     # transacciones, así el log y el correo dicen desde el principio cuánto se movió cada regla
     # y cuál se pasó. En REAL las mismas reglas viajan ADENTRO del SQL (`guarda_vencidos()`/
@@ -2305,7 +2626,8 @@ def main() -> int:
     resumen.update({
         "usuarios": datos["usuarios"], "alembic": datos["alembic"],
         "cambios_a_realizar": cambios, "cierres_a_realizar": cierres,
-        "purga_a_realizar": purga, "suscripciones_activas": datos["suscripciones_activas"],
+        "purga_a_realizar": purga, "retencion_a_realizar": retencion,
+        "suscripciones_activas": datos["suscripciones_activas"],
         "limites": linea_limites(evaluacion),
         "integridad_hallazgos": len(datos["integridad"]),
         "detecciones_hallazgos": len(datos["detecciones"]["hallazgos"]),
@@ -2319,9 +2641,17 @@ def main() -> int:
     # El log nombra CUÁL detección puso el run en rojo (`[A.5(a)]`) y, unas líneas más abajo, cada
     # hallazgo con su código, su título y su conteo (`ROJO (A.5(a)): … — 25 fila(s)`).
     codigos = ", ".join(codigo_de(h) for h in detecc["hallazgos"] if codigo_de(h))
-    log(f"Lecturas OK (Fase 7): cierres={cierres} | purga={purga} | "
+    log(f"Lecturas OK (Fase 7): cierres={cierres} | purga={purga} | retencion={retencion} | "
         f"detecciones={len(detecc['hallazgos'])} hallazgo(s){f' [{codigos}]' if codigos else ''} | "
         f"avisos Neon={len((datos['neon_api'] or {}).get('avisos') or [])}")
+    # A.7 con números en el log (no sólo si es hallazgo): la pregunta "¿el correo está fallando?"
+    # se contesta en la primera pantalla del run, sin abrir el mail.
+    a7 = detecc.get("notif") or {}
+    log(f"A.7 notificaciones por correo 24 h: {a7.get('intentos', 0)} intento(s) reales, "
+        f"{a7.get('fallidos', 0)} fallida(s) ({a7.get('pct', 0)}%) — umbral "
+        f"NOTIF_FALLIDAS_PCT={cfg['notif_fallidas_pct']}%"
+        + ("" if a7.get("suficiente")
+           else f" (muestra < {NOTIF_FALLIDAS_MIN_ENVIOS} intentos: no se evalúa el umbral)"))
     if detecc.get("nota_a5"):
         log(f"NOTA A.5(a) (esperado hasta {cfg['a5_nota_hasta'].isoformat()}): {detecc['nota_a5']}")
     log(f"Límites: {linea_limites(evaluacion)}")
@@ -2335,17 +2665,21 @@ def main() -> int:
         log(f"Neon API: {api.get('nota')}")
     for aviso in api.get("avisos") or []:
         log(f"AVISO (Neon): {aviso}")
-    for consulta in datos["listas_cierre"] + datos["listas_purga"]:
+    for consulta in datos["listas_cierre"] + datos["listas_purga"] + datos["listas_retencion"]:
         log(f"  {consulta['clave']}: {consulta['n']} fila(s) -> {consulta['destino']}")
+    if not datos["retencion"]["permitido"]:
+        log(f"AVISO (paso 11): {datos['retencion']['nota']}")
     for consulta in listas:
         log(f"  {consulta['clave']}: {consulta['n']} fila(s) → {consulta['destino']}")
 
-    # ── 2-4) Las TRES transacciones, cada una con su tope y su verificación ──
+    # ── 2-4) Las transacciones, cada una con su tope y su verificación ──
     # En serie y en este orden: primero los 4 UPDATE de la Fase 6, después la consistencia
     # (pasos 8-9) y al final la purga (paso 10). Cada una es UNA transacción independiente: si
     # la guarda de una aborta, las anteriores YA quedaron aplicadas y verificadas y la que
     # sigue no se intenta (run rojo y el mail dice exactamente dónde se cortó).
-    fases = (
+    # La 4ª (paso 11, retención in-app) se agrega SÓLO si `maint_rw` ya tiene el GRANT: sin él la
+    # lista viene vacía y el run queda exactamente como antes (3 transacciones).
+    fases = [
         {"nombre": "cambios", "clave_tx": "cambios_tx", "tope_var": "MAX_CAMBIOS",
          "que": "cambio(s)", "antes": cambios, "tope": cfg["max_cambios"],
          "excedidos": excedidos,      # las reglas finas (vencidos % y huérfanas)
@@ -2361,7 +2695,14 @@ def main() -> int:
          "script": script_purga(cfg["max_purga"], cfg["dias_purga_tokens"],
                                 cfg["dias_purga_notif"], dry),
          "consultas": consultas_purga_fase, "listas": datos["listas_purga"]},
-    )
+    ]
+    if consultas_retencion_fase:
+        fases.append(
+            {"nombre": "retención in-app", "clave_tx": "retencion_tx",
+             "tope_var": "MAX_PURGA_INAPP", "que": "fila(s) purgadas",
+             "antes": retencion, "tope": cfg["max_purga_inapp"], "excedidos": [],
+             "script": script_retencion(cfg["max_purga_inapp"], cfg["dias_purga_inapp"], dry),
+             "consultas": consultas_retencion_fase, "listas": datos["listas_retencion"]})
     total_tx = 0
     for fase in fases:
         try:
@@ -2421,7 +2762,7 @@ def main() -> int:
 
         # Guardas de volumen en DRY-RUN: informan (con la lista completa en el mail), no abortan.
         # En `cambios` las reglas finas ya se evaluaron en Python (`fase["excedidos"]`); en las
-        # otras dos fases el único tope es el global del SQL.
+        # demás fases el único tope es el global del SQL.
         if dry and (fase["excedidos"] or total > fase["tope"]):
             datos["estado"] = texto_excedidos(fase["excedidos"]) or (
                 f"excede {fase['tope_var']} ({total} > {fase['tope']})")
@@ -2441,7 +2782,7 @@ def main() -> int:
         (datos["neon_api"] or {}).get("hallazgos") or [])
     if rojos:
         datos["estado"] = f"los chequeos nuevos encontraron {len(rojos)} problema(s)"
-        motivo = motivo_no_aborta(dry, "las detecciones A.1-A.6 y los chequeos de Neon no "
+        motivo = motivo_no_aborta(dry, "las detecciones A.1-A.7 y los chequeos de Neon no "
                                        "abortan la escritura")
         log(f"ROJO ({datos['estado']}: {motivo})")
         # Cada hallazgo con SU código delante: es la línea que dice qué puso el run rojo, con el
@@ -2452,7 +2793,7 @@ def main() -> int:
 
     return reportar(True, f"mantenimiento {'simulado' if dry else 'aplicado'} y verificado: "
                           f"{total_tx} fila(s) {'habrían cambiado' if dry else 'tocadas'} en "
-                          "3 transacciones", datos, resumen, inicio, EXIT_OK, cfg)
+                          f"{len(fases)} transacciones", datos, resumen, inicio, EXIT_OK, cfg)
 
 
 

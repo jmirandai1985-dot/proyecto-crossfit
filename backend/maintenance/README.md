@@ -317,7 +317,7 @@ local logueaba "✅ Backup completado" con el dump fallando). El watchdog es un 
 | backup | 0 / 2 / 3 / 4 / 5 | OK / config / pg_dump / asserts de contenido / R2 |
 | watchdog | 0 / 2 / 6 / 7 | OK (sin email) / config (falta variable o R2 inaccesible) / **hay algo que avisar** / inesperado |
 | drill | 0 / 2 / 8 / 9 / 10 / 11 / 12 / 13 | OK (sin email) / config (falta variable o cupo de ramas lleno) / descarga-dump ilegible / API Neon / restore o verificación / **la prueba negativa no falló (crítico)** / inesperado / **la rama temporal quedó viva** (con el resto del drill OK) |
-| mantenimiento | 0 / 2 / 3 / 4 / 6 / 7 / 8 / **9** | OK (sin email, salvo que Neon pase el umbral de espacio o haya un aviso de CU-horas/ramas) / config / lectura / integridad / guarda de volumen (`MAX_VENCIDOS_PCT`, `MAX_HUERFANAS`, `MAX_CAMBIOS`, `MAX_CIERRE`, `MAX_PURGA`) / escritura / verificación / **detecciones A.1–A.6 o un chequeo de Neon que no pudo correr** |
+| mantenimiento | 0 / 2 / 3 / 4 / 6 / 7 / 8 / **9** | OK (sin email, salvo que Neon pase el umbral de espacio o haya un aviso de CU-horas/ramas) / config / lectura / integridad / guarda de volumen (`MAX_VENCIDOS_PCT`, `MAX_HUERFANAS`, `MAX_CAMBIOS`, `MAX_CIERRE`, `MAX_PURGA`) / escritura / verificación / **detecciones A.1–A.7 o un chequeo de Neon que no pudo correr** |
 
 ### Env groups (cero credenciales en el repo)
 
@@ -831,23 +831,161 @@ ORDER BY table_name, column_name;
 -- A nivel TABLA (lo único que NO se puede otorgar por columna: el DELETE de la purga)
 SELECT table_name, privilege_type FROM information_schema.role_table_grants
 WHERE grantee = 'maint_rw' AND privilege_type = 'DELETE'
-ORDER BY table_name;   -- 2 filas: password_reset_tokens y notificaciones_enviadas
+ORDER BY table_name;   -- 3 filas: password_reset_tokens, notificaciones_enviadas y notificaciones
+                       -- (la 3ª es el GRANT de la Fase 11, desde el 26/10/2026)
 ```
+
+> ✅ **Permisos heredados: hallazgo encontrado y fix aplicado (26/10/2026).**
+>
+> **Cómo era ANTES.** En PROD los `GRANT` de arriba no estaban aplicados y `maint_rw` era más
+> poderoso de lo que decía este README: al verificar el `GRANT` de la Fase 11 apareció que el rol
+> tenía `rolinherit = t` (o sea que **no** se había corrido el `CREATE ROLE … NOINHERIT` de arriba)
+> y que era **miembro de `pg_read_all_data` y `pg_write_all_data`**, los roles predefinidos de PG
+> 14+:
+>
+> ```sql
+> SELECT r.rolname FROM pg_auth_members m
+>   JOIN pg_roles r ON r.oid = m.roleid JOIN pg_roles u ON u.oid = m.member
+> WHERE u.rolname = 'maint_rw';    -- pg_read_all_data, pg_write_all_data
+> ```
+>
+> Eso le daba `SELECT`/`INSERT`/`UPDATE`/`DELETE` sobre **las 48 tablas de `public`**, que es justo
+> lo que la contención de este job quiere evitar. Y la membresía `neondb_owner → maint_rw` está con
+> `admin_option=t, inherit=f, set=f`, así que `SET ROLE maint_rw` desde el owner **falla**: no se
+> puede "probar como `maint_rw`" sin su password.
+> Inventario real (ACL de tabla no nulo en `public`): **una sola tabla**, `notificaciones` (con el
+> `rd` del 26/10). En el resto `relacl` era `NULL` y `pg_attribute.attacl` está vacío ⇒ ninguno de
+> los `GRANT` de las Fases 6/7 estaba aplicado. Consecuencias que tenía:
+>
+> * Las comprobaciones de **"lo que NO puede hacer"** (`u_delete`, `r_insert`, `c_delete`, …)
+>   devolvían `t` **por herencia**, no por grant explícito: no servían como prueba negativa en
+>   PROD (`information_schema.role_table_grants`, que sólo lista los grants DIRECTOS, sí era
+>   fiable: devolvía 1 fila de `DELETE` y no 3).
+> * La **prueba negativa** de la Fase 11 (`DELETE FROM reservas`, `UPDATE usuarios SET correo…`)
+>   **pasaba** en PROD en vez de fallar con `permission denied`: la base no frenaba un bug de SQL
+>   del job.
+>
+> **Lo que se aplicó**, en este orden para no dejar al job sin permisos en el medio:
+>
+> 1. Los 10 `GRANT` explícitos: `CONNECT`/`TEMP` en la base + `USAGE` del esquema, `SELECT` en **13
+>    tablas**, `UPDATE` en **12 columnas de 5 tablas** y `DELETE` en **3 tablas**.
+> 2. `REVOKE pg_read_all_data, pg_write_all_data FROM maint_rw;` y `ALTER ROLE maint_rw NOINHERIT;`
+>    (los grants directos no dependen de `rolinherit`).
+>
+> **Verificación final (PROD, 26/10/2026).** `SELECT` = 13 tablas; `DELETE` = 3
+> (`password_reset_tokens`, `notificaciones_enviadas`, `notificaciones`); `UPDATE` = 12 columnas:
+> `suscripciones(estado, updated_at)`, `solicitudes_planes(estado, comentario_admin, updated_at)`,
+> `usuarios(estado, activo)`, `reservas(asistencia_marcada_at, asistencia_via, updated_at)`,
+> `clases(asistentes_confirmados, updated_at)`. `INSERT`, `TRUNCATE` y `UPDATE` a nivel tabla en
+> **`f` en las 48**; las otras **35** tablas quedan **sin ningún privilegio**; `rolinherit = f`;
+> **0 membresías**.
+>
+> **Prueba negativa ejecutada de verdad** (con un rol réplica temporal `maint_probe`: los mismos
+> grants directos, `NOINHERIT`, sin membresías; se dropeó al terminar): `DELETE FROM
+> usuarios/reservas/clases/suscripciones` y `UPDATE usuarios.nombre`, `usuarios.correo`,
+> `reservas.estado`, `clases.cupo_maximo` ⇒ **`permission denied`** en las 8. `DELETE FROM
+> notificaciones` ⇒ permitido (es el paso 11). Y los **4 scripts reales del job**, generados en
+> `DRY_RUN` (terminan en `ROLLBACK`), corrieron **completos** con ese rol: `cambios` 0,
+> `consistencia` 1 (`cierre_asistencia`), `purga` 2 (`tokens_reset`), `retención in-app` 0 ⇒ el set
+> de permisos **alcanza y no sobra**, y no se aplicó nada.
+>
+> ⚠️ **Excepción conocida y pendiente separado (NO tocar todavía).** `CREATE TABLE` en `public`
+> **sigue funcionando**: `CREATE` le llega por el default de **`PUBLIC`** en el esquema (verificado:
+> `has_schema_privilege('maint_rw','public','CREATE') = t`). El job no lo necesita (usa `TEMP`, que
+> es otro permiso). PostgreSQL no tiene denegaciones explícitas, así que
+> `REVOKE CREATE ON SCHEMA public FROM maint_rw` es **no-op** mientras `PUBLIC` lo tenga: la única
+> forma es `REVOKE CREATE ON SCHEMA public FROM PUBLIC`, que afecta a **todos** los roles no-owner
+> del proyecto (`cloud_admin`, `neon_service`, …) y necesita su propia ventana y su propia prueba.
+>
+> ✅ **`backup_ro`: se deja como está, a propósito.** Se le hizo el mismo chequeo: tiene
+> `pg_read_all_data` (`rolinherit = t`) pero **`INSERT`/`UPDATE`/`DELETE` = `f` en las 48 tablas**
+> (tampoco tiene `TRUNCATE`), o sea **no puede escribir nada**. Para un rol de **backup** leer todo
+> es exactamente lo que tiene que hacer (`pg_dump`), y `pg_read_all_data` además cubre solo las
+> tablas nuevas de cada migración: revocarlo obligaría a mantener **48 `GRANT SELECT`** a mano y a
+> acordarse en cada migración (si no, el backup se rompe en silencio, que es peor que el "exceso").
+> La contención que importa —no escribir— ya la tiene.
+
+#### Fase 11 — retención de la bandeja in-app (`notificaciones`): **opt-in, requiere aprobación**
+
+El paso 11 es lo único que la limpieza **no** cubría: `notificaciones` (la bandeja que ve el alumno)
+no la purgaba nadie y crece todos los días. Es opt-in a propósito: **el código no necesita el
+permiso para funcionar**. Sin el `GRANT`, `SQL_PURGA_INAPP_PERMITIDA` devuelve `f`, la transacción 4
+**no se agrega** y el run sigue siendo el de siempre (3 transacciones), con una línea en el log y en
+el correo (`paso 11 OMITIDO: maint_rw no tiene SELECT+DELETE …`). Así no hay que coordinar el deploy
+con el permiso ni se corre el riesgo de que un `permission denied` corte el run (exit 3 si falla el
+`SELECT` de la lista, exit 7 si falla la transacción): en los dos casos **no se aplicaría nada** de
+lo demás.
+
+Motivo de la elección (frente a las otras tablas con volumen): no es historial (ningún KPI ni
+reporte la lee), **no tiene FKs de entrada** (`alumno_id` es saliente: borrar filas no arrastra
+nada) y su valor decae a los pocos días. `reservas`, `asistencias` y `auditoria` **no** se tocan:
+son historial de negocio y quedan fuera de este job.
+
+Cuando se apruebe, con la conexión del owner:
+
+```sql
+-- DELETE de TABLA (no existe por columna) + SELECT (lista del mail, `DELETE ... RETURNING` y la
+-- verificación posterior lo exigen).
+GRANT SELECT, DELETE ON public.notificaciones TO maint_rw;
+```
+
+> ✅ **Aplicado en PROD el 26/10/2026.** El ACL de la tabla quedó
+> `{neondb_owner=arwdDxtm/neondb_owner,maint_rw=rd/neondb_owner}` — nada más que `r` (SELECT) y `d`
+> (DELETE) para `maint_rw`; `TRUNCATE`/`REFERENCES`/`TRIGGER` siguen en `f`. A partir de este
+> permiso la sonda `SQL_PURGA_INAPP_PERMITIDA` devuelve `t` y el run pasa a **4 transacciones**
+> (antes el paso 11 se omitía solo).
+>
+> Lo que va a borrar el primer run, medido **antes** con `BEGIN READ ONLY` sobre PROD el mismo día:
+> **0 filas a borrar · 518 totales · la más vieja 2026-07-04 21:10** (la tabla nació ese día y el
+> 96 % de las filas es de octubre). Con `DIAS_PURGA_INAPP=365` la primera fila cumple la edad el
+> **2027-07-04**, así que el paso 11 va a pasar meses en "0 fila(s)" sin ser un error: el
+> `paso 11 OMITIDO` desaparece, no el "0".
+
+Verificación:
+
+```sql
+SELECT has_table_privilege('maint_rw','public.notificaciones','SELECT') AS inapp_select,  -- t
+       has_table_privilege('maint_rw','public.notificaciones','DELETE') AS inapp_delete;  -- t
+```
+
+Deshacer (el paso vuelve a omitirse solo, en el run siguiente):
+
+```sql
+REVOKE SELECT, DELETE ON public.notificaciones FROM maint_rw;
+```
+
+Cuánto va a borrar el primer run (correr **antes**, es sólo lectura):
+
+```sql
+SELECT count(*) AS filas_a_borrar, min(created_at) AS mas_vieja
+FROM notificaciones WHERE created_at < now() - interval '365 days';
+```
+
+Si ese número supera `MAX_PURGA_INAPP` (2000), el primer run **aborta por la guarda** (exit 6, no
+aplica nada): es el comportamiento buscado, se revisa la lista del correo y se sube el tope o se
+baja `DIAS_PURGA_INAPP` a propósito.
 
 #### Prueba negativa (con la URL de `maint_rw`, antes de encender el job)
 
 ```bash
-# Las NUEVE DEBEN fallar con "permission denied"; el ROLLBACK no deja nada.
-psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c 'BEGIN; CREATE TABLE _maint_no_debe_poder (i int); ROLLBACK;'
+# Las OCHO de escritura DEBEN fallar con "permission denied" (verificado en PROD el 26/10/2026 con
+# un rol réplica: dan "permission denied"). El ROLLBACK no deja nada.
 psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c 'BEGIN; DELETE FROM usuarios WHERE false; ROLLBACK;'
 psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c "UPDATE usuarios SET nombre = nombre WHERE false;"
-# Fase 7: el DELETE está SOLO en las 2 tablas de la purga y el UPDATE, sólo en sus columnas.
+# Fase 7: el DELETE está SOLO en las 3 tablas de la purga y el UPDATE, sólo en sus columnas.
 psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c 'BEGIN; DELETE FROM reservas WHERE false; ROLLBACK;'
 psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c 'BEGIN; DELETE FROM clases WHERE false; ROLLBACK;'
 psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c 'BEGIN; DELETE FROM suscripciones WHERE false; ROLLBACK;'
 psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c "UPDATE reservas SET estado = estado WHERE false;"
 psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c "UPDATE clases SET cupo_maximo = cupo_maximo WHERE false;"
 psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c "UPDATE usuarios SET correo = correo WHERE false;"
+# Las DOS que SÍ pasan, y por qué:
+#  * paso 11: `DELETE FROM notificaciones` está permitido desde el GRANT de la Fase 11.
+#  * `CREATE TABLE` en `public`: pasa porque `CREATE` viene del default de PUBLIC en el esquema
+#    (pendiente separado: sólo se cierra con `REVOKE CREATE ON SCHEMA public FROM PUBLIC`, que
+#    afecta a todos los roles no-owner). El job no lo necesita: usa TEMP.
+psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c 'BEGIN; DELETE FROM notificaciones WHERE false; ROLLBACK;'
+psql "$MAINT_DB_URL" -v ON_ERROR_STOP=1 -c 'BEGIN; CREATE TABLE _maint_no_debe_poder (i int); ROLLBACK;'
 ```
 
 #### Reversión (deshacer todo sin dejar rastro)
@@ -961,23 +1099,24 @@ revisar**).
 
 | Pieza | Qué agrega la Fase 7 |
 |---|---|
-| Detecciones (A) | 6 familias de chequeos de **sólo lectura** (A.1–A.6). No escriben nada: lo que encuentran viaja en el mail y pone el run rojo con **exit 9** |
+| Detecciones (A) | 7 familias de chequeos de **sólo lectura** (A.1–A.7). No escriben nada: lo que encuentran viaja en el mail y pone el run rojo con **exit 9** |
 | Límites de Neon (B) | `B.6` CU-horas del mes y `B.7` cupo de ramas, leídos de la **API v2** (env group `neon-api`, opcional). Son avisos: mandan correo pero **no** cambian el exit code |
 | Consistencia (C) | `C.8–C.10` con **escritura controlada**: cierre de asistencia de las clases pasadas, resincronización del aforo y purga de tokens/notificaciones viejas |
 | Reporte (E) | MRR, variación de MRR, retención/churn de la cohorte de 30 días y bajas del mes (mismas fórmulas que el BI) |
 | Watchdog (F) | el asunto del correo del watchdog de backups pasa a `[ALERTA] Watchdog backups PROD: …` (mismo prefijo que este job) |
 
-### Las 3 transacciones (antes era 1)
+### Las transacciones (antes era 1)
 
 | # | Transacción | Qué hace | Tope | Exit si se pasa |
 |---|---|---|---|---|
 | 1 | `cambios` | los 4 `UPDATE` de la Fase 6 | `MAX_VENCIDOS_PCT` (80 %), `MAX_HUERFANAS` (10) y `MAX_CAMBIOS` (500) | 6 |
 | 2 | `consistencia` | paso 8 (asistencia) + paso 9 (aforo) | `MAX_CIERRE` (500) | 6 |
 | 3 | `purga` | paso 10 (tokens + notificaciones) | `MAX_PURGA` (5000) | 6 |
+| 4 | `retención in-app` | paso 11 (bandeja `notificaciones`) — **sólo si está el GRANT de la Fase 11**; sin él la transacción **no existe** y el run queda en 3 | `MAX_PURGA_INAPP` (2000) | 6 |
 
 Cada una es **una transacción propia** (`BEGIN … COMMIT|ROLLBACK`) con su `CREATE TEMP TABLE` y su
 propia guarda de volumen *dentro* del SQL. Si la guarda de la 2 aborta, la 1 ya quedó aplicada y
-verificada, la 3 **no se intenta** y el correo dice exactamente dónde se cortó. Las tres se
+verificada, la que sigue **no se intenta** y el correo dice exactamente dónde se cortó. Todas se
 verifican igual: en REAL la lista tiene que quedar en 0 y en DRY-RUN en el mismo número de antes.
 
 | # | Escritura | Detalle | Antes en |
@@ -985,11 +1124,13 @@ verifican igual: en REAL la lista tiene que quedar en 0 y en DRY-RUN en el mismo
 | 8 | `UPDATE reservas SET asistencia_marcada_at = now(), asistencia_via = 'cierre', updated_at = now()` | sólo las reservas **vivas** de clases terminadas hace más de `DIAS_CIERRE_RESERVAS` días sin `asistencia_marcada_at`. **No toca `estado`** (D-6): pasar la reserva a `no_asistio` reescribiría los KPIs de asistencia ya publicados | (nuevo) |
 | 9 | `UPDATE clases SET asistentes_confirmados = <reservas vivas>, updated_at = now()` | deja el aforo publicado igual al conteo real, que es lo que la app mantiene con +1/−1 al reservar y cancelar | (nuevo) |
 | 10 | `DELETE FROM password_reset_tokens` · `DELETE FROM notificaciones_enviadas` | tokens vencidos o usados hace más de `DIAS_PURGA_TOKENS` días y notificaciones de más de `DIAS_PURGA_NOTIF` días | (nuevo) |
+| 11 | `DELETE FROM notificaciones` | bandeja in-app más vieja que `DIAS_PURGA_INAPP` días. **Opt-in**: sin el `GRANT` de la Fase 11 el paso se omite y el log/correo dicen "paso 11 OMITIDO" | (nuevo) |
 
-> **Única excepción de `DELETE` (D-7)**: ésas son las dos únicas tablas donde `maint_rw` puede
-> borrar. Son datos operativos (no historial del box) y no tienen FKs de entrada. En el resto de
-> las tablas el rol sigue **sin** `DELETE`, `INSERT`, `TRUNCATE` ni DDL, y la prueba negativa lo
-> verifica con cuatro sentencias que tienen que fallar.
+> **Excepción de `DELETE` (D-7)**: sólo esas tablas son las que `maint_rw` puede borrar. Son datos
+> operativos (no historial del box) y no tienen FKs de entrada. `notificaciones` (paso 11) es la
+> única **opt-in**: el `GRANT` se otorga cuando se aprueba, y mientras no esté el paso se omite solo
+> (ver *Fase 11*). En el resto de las tablas el rol sigue **sin** `DELETE`, `INSERT`, `TRUNCATE` ni
+> DDL, y la prueba negativa lo verifica con cuatro sentencias que tienen que fallar.
 
 #### Qué significa "reserva viva" (una sola lista, compartida con la app)
 
@@ -1031,14 +1172,15 @@ red para la otra variante.
   en REAL tienen que quedar en 0 y en DRY-RUN en el mismo número de antes.
 - El log del run imprime el resumen **paso por paso** (`consistencia: aforo_resync=3,
   cierre_asistencia=2`), así que se ve cuántas **clases** cambió el resync y no sólo el total.
-- Las 3 transacciones son **idempotentes** y escriben tablas **disjuntas** (1: `suscripciones`,
+- Las transacciones son **idempotentes** y escriben tablas **disjuntas** (1: `suscripciones`,
   `solicitudes_planes`, `usuarios` · 2: `reservas`, `clases` · 3: `password_reset_tokens`,
-  `notificaciones_enviadas`): la segunda corrida no encuentra nada que volver a tocar (los filtros
+  `notificaciones_enviadas` · 4 —sólo con el `GRANT` de la Fase 11—: `notificaciones`): la segunda
+  corrida no encuentra nada que volver a tocar (los filtros
   son por estado / `asistencia_marcada_at IS NULL` / antigüedad), no hay `INSERT` en tablas reales
-  (nada se puede duplicar) y un fallo en la 2 o la 3 no puede deshacer ni reescribir lo que la 1 ya
-  confirmó con su `COMMIT`.
+  (nada se puede duplicar) y un fallo en la 2, la 3 o la 4 no puede deshacer ni reescribir lo que la
+  1 ya confirmó con su `COMMIT`.
 
-### Detecciones A.1–A.6 (sólo leen)
+### Detecciones A.1–A.7 (sólo leen)
 
 | # | Chequeo | Rojo o informativo |
 |---|---|---|
@@ -1055,17 +1197,59 @@ red para la otra variante.
 | A.5(b) | igual que A.5(a) pero **con** coach activo en su disciplina (`EXISTS` en vez de `NOT EXISTS`) | informativo — falta asignarla |
 | A.5(c) | clase futura asignada a alguien que no es `coach` activo | **rojo** |
 | A.6 | `reservas.estado` que contiene "cancel" pero **no** está en la lista compartida (`shared/estados.ESTADOS_CANCELADA`) | **rojo** — el predicado lo ve como vivo (el paso 8 le escribiría `updated_at`, el dato de A.3) y el paso 9 lo contaría en el aforo: es la red que reemplaza al `ILIKE '%cancel%'` (la lista es exacta, así que una variante nueva tiene que verse) |
+| A.7 | notificaciones por correo **fallidas en las últimas 24 h** (`notificaciones_enviadas`) | **rojo** si `fallidos*100 >= intentos*NOTIF_FALLIDAS_PCT` **y** hubo al menos **5 intentos reales** en la ventana. No cuentan los `simulado` (modo prueba de `email_service`) ni los destinatarios de prueba (dominios reservados `@example.*` y `PROD_PERMITIDOS`): se informan aparte como "excluidas" |
 
 Un hallazgo **no aborta** el mantenimiento (igual que la integridad): se aplica todo y el run queda
 rojo con **exit 9** (si además hay integridad, gana el 4). Las listas viajan completas en el correo;
 las de detecciones no llevan columna "→ nuevo" porque no cambian nada.
+
+#### A.7: por qué 24 h, por qué un mínimo de 5 intentos y qué destinatarios no cuentan
+
+Es la alarma que faltaba: si el SMTP empieza a rechazar, la app sigue andando y
+`notificaciones_enviadas` acumula `estado='fallido'` sin que nadie se entere hasta que un alumno
+reclama. **El 26/10/2026 pasó de verdad**: entre las 01:02 y las 01:31 UTC hubo **245 correos
+perdidos** con `Configuración SMTP incompleta: GMAIL_SMTP_USER y/o GMAIL_SMTP_APP_PASSWORD vacíos`
+(más 16 con `Connection unexpectedly closed`). Nadie se enteró. Con A.7, ese run habría quedado rojo
+(245 fallidas sobre ~300 intentos = 82 %) y el correo habría salido en el mismo run.
+
+Cuatro decisiones:
+
+* **Ventana de 24 h, no histórico.** El total histórico de fallidas sólo sube y nunca vuelve a
+  cero, así que un % sobre el total se apaga solo: con 1 476 enviadas, 500 fallidas históricas son
+  34 % para siempre. Sobre 24 h, la ráfaga de las 01:02 **sí** supera el 10 % y avisa.
+* **Mínimo 5 intentos.** 1 falla de 2 es 50 % y no dice nada del SMTP. Por debajo del mínimo el
+  chequeo **sólo informa** (queda en el log y en el cuerpo del mail si el run se puso rojo por otra
+  cosa). El mínimo es una constante (`NOTIF_FALLIDAS_MIN_ENVIOS`), no una variable: no hay caso de
+  negocio para bajarlo a 1 y volver a llenar el correo de ruido.
+* **`simulado` afuera del denominador.** `email_service.ESTADO_SIMULADO` es el modo prueba
+  (`EMAIL_MODO` ≠ `real`): el correo **no sale** y la fila se registra igual. Si contara como
+  intento, un box en modo prueba con el SMTP roto se vería "todo bien". En TEST la ventana de 24 h
+  hoy es **35 simuladas y 0 intentos reales** ⇒ A.7 informa "0 intento(s) reales" y no evalúa el
+  umbral (se detectó al validar el SQL contra TEST, no en los tests: el doble de `psql` no tenía
+  `simulado`).
+* **Los destinatarios de prueba no cuentan** (`sql_destinatario_real()`): fuera los dominios
+  **reservados por la RFC 2606** (`example.com`/`.net`/`.org`: no reciben correo **nunca**) y la
+  allowlist `PROD_PERMITIDOS` (la misma de A.1(c)). Es imprescindible, no un detalle: en PROD **496
+  de los 511 `usuarios` son `@example.com`**, así que el 26/10 la ventana daba **166 fallidas de 305
+  intentos, TODAS de `demo.prod.anual.N@example.com`** (el scheduler de inactividad apuntando a los
+  usuarios del seed anual). Sin el filtro A.7 quedaría rojo después de cada seed y taparía el SMTP
+  roto de verdad. **Las excluidas se informan siempre** ("304 excluida(s) por ser de
+  demo/dominio reservado"): una exclusión silenciosa sería indistinguible de "no hubo fallas".
+  Medición real en PROD (26/10/2026, con el filtro puesto): `0 enviadas · 1 fallida · 304
+  excluidas` ⇒ 1 intento real, por debajo del mínimo ⇒ **verde**.
+
+La comparación es en **enteros** (`fallidos*100 >= intentos*umbral`, mismo criterio que
+`guarda_vencidos()`): sin floats no hay `9.999999` que se lea como 10, y el umbral justo ya avisa.
+Es **rojo informativo** como el resto: exit 9, el mantenimiento se aplica igual y el correo trae la
+lista de las fallidas con `detalle_error` recortado a 120 caracteres (y "mostrando X de N" si
+superan las 25 de `LIMITE_LISTA`).
 
 > **Datos de demo y `A.1(c)`.** El único chequeo que **sube** cuando se siembra datos
 > sintéticos es A.1(c) (usuarios que matchean `PROD_PERMITIDOS`): es informativo justamente
 > por eso. El seed anual (`scripts/seed_anual_prod.py`) agrega **300** usuarios
 > `demo.prod.anual.N@example.com` (+ `DEMOPRODANUAL…` en `transacciones_financieras`), así que
 > el conteo de A.1(c) pasa de *n* a *n + 300* y **ningún otro número del run cambia**: el
-> seed está construido para que los pasos 1-9 y A.1-A.6 queden en **0 cambios / 0
+> seed está construido para que los pasos 1-9 y A.1-A.7 queden en **0 cambios / 0
 > detecciones**, incluido el descuadre de créditos de A.3. El plan, los invariantes y la
 > reversión (`scripts/borrar_seed_anual.py`) están en
 > **[`scripts/README_seed_anual.md`](../scripts/README_seed_anual.md)**.
@@ -1225,10 +1409,10 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
 | 2 | configuración inválida: variable faltante, URL con `-pooler`, rol ≠ `maint_rw`, `ENVIRONMENT` ≠ `production`, número fuera de rango, allowlist con caracteres raros o `A5_NOTA_HASTA` con formato inválido |
 | 3 | falló una lectura |
 | 4 | la integridad encontró problemas (no aborta la escritura) |
-| 6 | se pasó un tope de volumen (`MAX_VENCIDOS_PCT`, `MAX_HUERFANAS`, `MAX_CAMBIOS`, `MAX_CIERRE` o `MAX_PURGA`) |
+| 6 | se pasó un tope de volumen (`MAX_VENCIDOS_PCT`, `MAX_HUERFANAS`, `MAX_CAMBIOS`, `MAX_CIERRE`, `MAX_PURGA` o `MAX_PURGA_INAPP`) |
 | 7 | falló una transacción de escritura |
 | 8 | la verificación posterior no cuadró |
-| **9** | **nuevo**: las detecciones A.1–A.6, o un chequeo de Neon configurado que no pudo correr |
+| **9** | **nuevo**: las detecciones A.1–A.7, o un chequeo de Neon configurado que no pudo correr |
 
 ### Variables de entorno nuevas (todas con default)
 
@@ -1238,10 +1422,13 @@ proyecto), copiadas a SQL porque el job no importa `app.*`:
 | `MAX_VENCIDOS_PCT` | `80` | % máximo de suscripciones activas que pueden vencer en un run (regla del día 1) |
 | `MAX_HUERFANAS` | `10` | máximo **por cada** lista de huérfanas (`0` = ninguna) |
 | `MAX_PURGA` | `5000` | tope de la transacción 3 (purga) |
+| `MAX_PURGA_INAPP` | `2000` | tope de la transacción 4 (retención in-app); más bajo que `MAX_PURGA` porque `notificaciones` crece a diario |
+| `DIAS_PURGA_INAPP` | `365` | retención de la bandeja `notificaciones` (paso 11) |
 | `DIAS_CIERRE_RESERVAS` | `7` | antigüedad mínima de la clase para cerrar su asistencia |
 | `DIAS_PURGA_TOKENS` | `30` | retención de `password_reset_tokens` |
 | `DIAS_PURGA_NOTIF` | `180` | retención de `notificaciones_enviadas` |
-| `CREDITOS_DESCUADRE_TOLERANCIA` | `0` | descuadre por alumno tolerado en A.3 |
+| CREDITOS_DESCUADRE_TOLERANCIA | `0` | descuadre por alumno tolerado en A.3 |
+| `NOTIF_FALLIDAS_PCT` | `10` | % de correos fallidos sobre los **intentos reales** de las últimas 24 h que dispara A.7 (el mínimo de 5 intentos es una constante del código, no una variable) |
 | `A5_NOTA_HASTA` | *(sin setear)* | fecha ISO hasta la que se muestra la nota de contexto de A.5(a) (el mismo día incluido). Sin la variable no hay nota y **la alerta no se silencia**; una fecha inválida ⇒ exit 2 |
 | `PROD_PERMITIDOS` | `demo.prod.%@example.com` | allowlist de correos de demo (A.1c). **Tras la defensa del 6/10/2026 se limpian esos datos y esta variable queda vacía** |
 | `TENANT_ID` | `1` | filtro de las consultas de MRR/churn (el box es uno) |
