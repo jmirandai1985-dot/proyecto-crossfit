@@ -126,3 +126,84 @@ def test_en_produccion_el_aviso_no_sale(monkeypatch):
     email_service.avisar_failsafe_una_vez()
 
     assert avisos == []
+
+
+# ── Guarda nueva (fix 2): producción FUERA de Render y sin SMTP ───────────────
+# Regresión del incidente del 26/10/2026: k6 corrió contra un backend LOCAL con
+# `ENVIRONMENT=production`, que lee `backend/.env.prod` (sin credenciales) y escribe en
+# la base de PROD ⇒ 245 filas `fallido` con "GMAIL_SMTP_USER y/o … vacíos".
+
+def test_produccion_fuera_de_render_sin_smtp_fuerza_noop(monkeypatch, smtp_falso):
+    """Local + producción + SMTP vacío ⇒ `noop` y NO se abre SMTP."""
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.setattr(email_service.settings, "EMAIL_MODO", email_service.MODO_REAL)
+    monkeypatch.setattr(email_service.settings, "GMAIL_SMTP_USER", "")
+    monkeypatch.setattr(email_service.settings, "GMAIL_SMTP_APP_PASSWORD", "")
+
+    assert email_service._forzar_noop_por_smtp() is True
+    assert email_service.modo_envio() == email_service.MODO_NOOP
+    assert email_service.es_modo_simulado() is True
+
+    ok = email_service._enviar("alguien@example.com", "Asunto", "<p>hola</p>")
+
+    assert ok is True                       # se registra como simulado, no como enviado
+    assert smtp_falso.ultimo is None, "con SMTP vacío NO se debe abrir conexión"
+
+
+def test_produccion_en_render_sin_smtp_no_fuerza_noop(monkeypatch):
+    """Dentro de Render la falta de SMTP es config para /health: el modo no se toca."""
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.setattr(email_service.settings, "EMAIL_MODO", email_service.MODO_REAL)
+    monkeypatch.setattr(email_service.settings, "GMAIL_SMTP_USER", "")
+    monkeypatch.setattr(email_service.settings, "GMAIL_SMTP_APP_PASSWORD", "")
+
+    assert email_service._forzar_noop_por_smtp() is False
+    assert email_service.modo_envio() == email_service.MODO_REAL
+
+
+def test_produccion_fuera_de_render_con_smtp_no_fuerza_noop(monkeypatch):
+    """La guarda es SÓLO por SMTP vacío: con credenciales se respeta `EMAIL_MODO=real`."""
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.setattr(email_service.settings, "EMAIL_MODO", email_service.MODO_REAL)
+    monkeypatch.setattr(email_service.settings, "GMAIL_SMTP_USER", "box@example.com")
+    monkeypatch.setattr(email_service.settings, "GMAIL_SMTP_APP_PASSWORD", "app-password")
+
+    assert email_service._forzar_noop_por_smtp() is False
+    assert email_service.modo_envio() == email_service.MODO_REAL
+
+
+def test_la_guarda_smtp_loguea_critical_una_sola_vez(monkeypatch):
+    """El arranque deja UNA línea CRITICAL (no una por correo) y nombra la causa."""
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.setattr(email_service.settings, "EMAIL_MODO", email_service.MODO_REAL)
+    monkeypatch.setattr(email_service.settings, "GMAIL_SMTP_USER", "")
+    monkeypatch.setattr(email_service.settings, "GMAIL_SMTP_APP_PASSWORD", " ")
+    monkeypatch.setattr(email_service, "_ya_avisado_failsafe", False)
+
+    avisos = []
+    monkeypatch.setattr(email_service, "_log_seguro",
+                        lambda mensaje, nivel="error": avisos.append((nivel, mensaje)))
+
+    email_service.avisar_failsafe_una_vez()
+    email_service.avisar_failsafe_una_vez()
+
+    assert len(avisos) == 1, avisos
+    assert avisos[0][0] == "critical"
+    assert "RENDER" in avisos[0][1]
+    assert "noop" in avisos[0][1]
+
+
+def test_fuera_de_produccion_la_guarda_smtp_no_aplica(monkeypatch):
+    """En TEST el motivo del `noop` es el entorno (WARNING), no la guarda nueva."""
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.setattr(email_service.settings, "EMAIL_MODO", email_service.MODO_REAL)
+    monkeypatch.setattr(email_service.settings, "GMAIL_SMTP_USER", "")
+    monkeypatch.setattr(email_service.settings, "GMAIL_SMTP_APP_PASSWORD", "")
+
+    assert email_service._forzar_noop_por_smtp() is False
+    assert email_service.modo_envio() == email_service.MODO_NOOP

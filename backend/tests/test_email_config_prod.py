@@ -73,7 +73,34 @@ def test_from_saneado_con_env_var_malformada(smtp_falso, monkeypatch):
     assert from_header == "Urban Training Box <usuario@test.com>"
 
 
-def test_smtp_vacio_da_error_claro_y_no_de_header(smtp_falso, monkeypatch):
+def test_smtp_vacio_en_prod_fuera_de_render_no_intenta_enviar(smtp_falso, monkeypatch):
+    """Guarda (fix 26/10/2026): prod LOCAL sin SMTP ⇒ se registra `simulado`, no `fallido`.
+
+    Un backend levantado a mano con `ENVIRONMENT=production` (lee `.env.prod`, sin
+    credenciales) NO debe abrir SMTP ni llenar `notificaciones_enviadas` de `fallido`.
+    """
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.setattr(settings, "EMAIL_MODO", email_service.MODO_REAL)
+    monkeypatch.setattr(settings, "GMAIL_SMTP_USER", "   \n ")
+    monkeypatch.setattr(settings, "GMAIL_SMTP_APP_PASSWORD", "   ")
+
+    ok = email_service._enviar("destino@example.com", "Asunto", "<p>x</p>", None,
+                               tipo="test_vacio")
+
+    assert ok is True
+    assert email_service.ULTIMO_ERROR_SMTP is None
+    assert SMTPFalso.ultimo is None
+    assert smtp_falso, "debía registrarse el intento (como simulado)"
+    assert smtp_falso[-1][0][2] == email_service.ESTADO_SIMULADO
+
+
+def test_smtp_vacio_en_render_da_error_claro_y_no_de_header(smtp_falso, monkeypatch):
+    """Dentro de Render la guarda NO aplica: el error de SMTP incompleto sigue siendo
+    el diagnóstico (lo expone `/health` via `problemas_de_config()`), no un noop mudo."""
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.setattr(settings, "EMAIL_MODO", email_service.MODO_REAL)
     monkeypatch.setattr(settings, "GMAIL_SMTP_USER", "   \n ")
     monkeypatch.setattr(settings, "GMAIL_SMTP_APP_PASSWORD", "   ")
 

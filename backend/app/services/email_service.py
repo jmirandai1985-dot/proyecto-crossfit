@@ -61,37 +61,86 @@ DETALLE_SIMULADO = "EMAIL_MODO=noop: el correo NO se envió (modo prueba)"
 _ya_avisado_failsafe = False
 
 
+def _smtp_vacio() -> bool:
+    """True si falta el usuario o la app password de Gmail (o son sólo espacios)."""
+    return not ((settings.GMAIL_SMTP_USER or "").strip()
+                and (settings.GMAIL_SMTP_APP_PASSWORD or "").strip())
+
+
+def _en_render() -> bool:
+    """True si el proceso corre en Render (`RENDER` presente y no vacía).
+
+    Render define `RENDER=true` en todos sus servicios; un backend levantado a mano
+    (localhost, un script, un contenedor local) NO la tiene. Se mira la PRESENCIA de
+    la variable, no su valor: lo que importa es "¿estoy dentro de Render?".
+    """
+    return bool((os.getenv("RENDER") or "").strip())
+
+
+def _forzar_noop_por_smtp() -> bool:
+    """Guarda: producción FUERA de Render y sin credenciales SMTP ⇒ `noop` forzado.
+
+    Motivo (incidente del 26/10/2026): un backend LOCAL levantado con
+    `ENVIRONMENT=production` lee `backend/.env.prod` —que a propósito no trae
+    credenciales— y escribe en la base de PROD. Sin esta guarda cada correo se
+    intentaba mandar con `GMAIL_SMTP_USER` vacío y quedaba `fallido` en
+    `notificaciones_enviadas` (245 filas en una ventana de 29 minutos).
+
+    En Render la ausencia de SMTP es un problema de CONFIGURACIÓN del env group que
+    hay que ver en `/health` (`problemas_de_config()`): ahí no se apaga nada en
+    silencio, porque un deploy sano sí tiene credenciales. Fuera de producción el
+    fail-safe de entorno ya fuerza `noop` y esta guarda no cambia nada.
+    """
+    return en_produccion() and not _en_render() and _smtp_vacio()
+
+
 def modo_envio() -> str:
     """Modo vigente de envío de correos.
 
     FAIL-SAFE (fuera de producción): si `ENVIRONMENT != "production"` se fuerza `noop`
     aunque `EMAIL_MODO` diga "real". Motivo: un `.env` de TEST/PROD cruzado (o una env
     var pegada a mano) NO puede terminar mandando correo real a destinatarios reales.
-    EN PRODUCCIÓN (`ENVIRONMENT=production`) el comportamiento NO cambia: manda lo que
-    diga `EMAIL_MODO` (por eso el default sigue siendo "real").
+    EN PRODUCCIÓN (`ENVIRONMENT=production`) manda lo que diga `EMAIL_MODO` (por eso el
+    default sigue siendo "real"), SALVO producción fuera de Render sin SMTP: ahí la
+    guarda `_forzar_noop_por_smtp()` también fuerza `noop`.
     """
     if not en_produccion():
+        return MODO_NOOP
+    if _forzar_noop_por_smtp():
         return MODO_NOOP
     return MODO_NOOP if (settings.EMAIL_MODO or "").strip().lower() == MODO_NOOP else MODO_REAL
 
 
 def es_modo_simulado() -> bool:
-    """True si los envíos NO salen de verdad (fuera de producción, o `EMAIL_MODO=noop`)."""
+    """True si los envíos NO salen de verdad (fuera de producción, `noop` o sin SMTP)."""
     return modo_envio() == MODO_NOOP
 
 
 def avisar_failsafe_una_vez() -> None:
-    """WARNING único al arranque si el fail-safe está forzando `noop` fuera de producción.
+    """Aviso único al arranque del fail-safe que esté forzando `noop`.
 
     Se llama desde el startup de la app (`app/main.py`): así queda VISIBLE en el log del
     deploy que los correos NO van a salir (en vez de descubrirlo cuando nadie los recibe).
-    Si ya se avisó, no repite; y si estamos en producción o `EMAIL_MODO=noop` a propósito,
-    tampoco avisa (no hay nada anómalo que reportar).
+    Dos casos, una sola vez por proceso:
+
+    1. **CRITICAL** — producción fuera de Render sin credenciales SMTP
+       (`_forzar_noop_por_smtp()`): es el incidente del 26/10/2026 y hay que verlo.
+    2. **WARNING** — fuera de producción con `EMAIL_MODO=real`: el entorno fuerza `noop`.
+
+    En producción DENTRO de Render, o con `EMAIL_MODO=noop` a propósito, no avisa: no
+    hay nada anómalo que reportar.
     """
     global _ya_avisado_failsafe
     if _ya_avisado_failsafe:
         return
     _ya_avisado_failsafe = True
+    if _forzar_noop_por_smtp():
+        _log_seguro(
+            "[email] CRITICAL: ENVIRONMENT=production sin GMAIL_SMTP_USER/"
+            "GMAIL_SMTP_APP_PASSWORD y sin la variable RENDER (no es Render). "
+            "Se fuerza EMAIL_MODO=noop: los correos NO se envian.",
+            "critical")
+        return
     if en_produccion():
         return
     if (settings.EMAIL_MODO or "").strip().lower() == MODO_NOOP:
