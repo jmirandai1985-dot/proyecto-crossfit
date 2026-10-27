@@ -47,11 +47,17 @@ def verificar_salud():
 
 
 def enviar_alerta(email, asunto, detalles):
-    """Registra la alerta en el log e intenta enviar email SMTP al admin."""
+    """Registra la alerta en el log e intenta enviar email SMTP al admin.
+
+    El resultado se loguea TAL CUAL (fix B2b de la auditoría 2026-10): `_enviar`
+    devuelve `True` también en modo prueba (`EMAIL_MODO=noop`, o el fail-safe que
+    fuerza `noop` fuera de producción) SIN abrir SMTP, así que decir "✅ Alerta
+    enviada" era un falso verde. Ahora ese caso se loguea como SIMULADA.
+    """
     logger.warning(f"📧 ALERTA [{asunto}] -> {email}: {str(detalles)[:300]}")
     try:
         # Reutiliza el envío SMTP existente (misma infraestructura de emails)
-        from app.services.email_service import _enviar
+        from app.services.email_service import _enviar, es_modo_simulado
         html = f"""<div style="font-family:Arial,Helvetica,sans-serif;padding:24px;">
             <h2 style="color:#b91c1c;">⚠️ Alerta de mantenimiento</h2>
             <p><strong>{asunto}</strong></p>
@@ -59,9 +65,14 @@ def enviar_alerta(email, asunto, detalles):
             <p style="color:#71717a;font-size:12px;">Urban Training Box — Health Check automático</p>
         </div>"""
         enviado = _enviar(email, f"[MANTENIMIENTO] {asunto}", html, tipo="health_check")
-        if enviado:
-            logger.info(f"✅ Alerta enviada a {email}")
-        else:
+        if not enviado:
             logger.warning(f"⚠️ No se pudo enviar alerta a {email} (revisar SMTP)")
+        elif es_modo_simulado():
+            # B2b (auditoría 2026-10): en `noop` NO salió ningún correo; el intento
+            # queda registrado en `notificaciones_enviadas` como `simulado`.
+            logger.warning(
+                f"🧪 Alerta SIMULADA (EMAIL_MODO=noop) — NO se envió correo real a {email}: {asunto}")
+        else:
+            logger.info(f"✅ Alerta enviada a {email}")
     except Exception as e:
         logger.error(f"❌ No se pudo enviar alerta por email: {e}")
