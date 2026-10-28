@@ -20,6 +20,10 @@ const Login = () => {
     const { login } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
+    // useInactividad() cierra la sesión a los 10 min y manda acá con `?motivo=inactividad`:
+    // sin este aviso el usuario cree que lo expulsaron.
+    const cerradaPorInactividad =
+        new URLSearchParams(location.search).get('motivo') === 'inactividad';
 
     // Navega al destino correcto tras autenticar (respeta ?redirect= o state.from).
     const redirigir = (rolUsuario) => {
@@ -103,6 +107,13 @@ const Login = () => {
                         <h1 className="text-white font-bold text-[20px]">Urban Training Box</h1>
                         <p className="text-gray-300 text-[13px] mt-1">Plataforma de Gestión</p>
                     </div>
+
+                    {cerradaPorInactividad && (
+                        <div data-testid="aviso-inactividad"
+                            className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+                            Tu sesión se cerró por 10 minutos de inactividad. Volvé a ingresar.
+                        </div>
+                    )}
 
                     {/* Form */}
                     <form onSubmit={handleSubmit} className="space-y-6">

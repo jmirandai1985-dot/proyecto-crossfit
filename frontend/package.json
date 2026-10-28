@@ -57,7 +57,8 @@
     "test:membresias": "node scripts/test-membresias-modal.mjs",
     "test:revision": "node scripts/test-revision-movil.mjs",
     "test:performance": "node scripts/test-performance-movil.mjs",
-    "test:momento": "node scripts/test-momento-dia.mjs"
+    "test:momento": "node scripts/test-momento-dia.mjs",
+    "test:inactividad": "node scripts/test-inactividad.mjs"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.3.0",

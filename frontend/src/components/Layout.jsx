@@ -14,8 +14,12 @@ import BannerPerfilIncompleto from './BannerPerfilIncompleto';
 // la campana: un solo request para los cuatro badges, y se refresca solo cada 60 s).
 import { useResumenPendientes } from '../hooks/queries';
 import { totalPendientes, textoBadge } from '../utils/pendientes';
+// Cierre de sesión automático a los 10 min sin actividad: el Layout es el marco compartido de
+// los tres paneles (alumno, coach y admin), así que se monta UNA sola vez.
+import { useInactividad } from '../hooks/useInactividad';
 
 const Layout = ({ children }) => {
+    useInactividad();
     const { usuario, rol, logout } = useAuth();
     const [sidebarOpen, setSidebarOpen] = useState(true);
     // Drawer off-canvas para <md (arranca CERRADO). En >=md la barra es estática
