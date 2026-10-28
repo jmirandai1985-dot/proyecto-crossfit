@@ -203,8 +203,11 @@ alembic=035_precio_snapshot_solicitudes | VEREDICTO: OK`.
    en R2 (`daily/AAAA-MM-DD_HHMM_neon_backup.sql.gz`).
 
 > Costo: los Cron Jobs no existen en el plan free; el mínimo es **US$1/mes** por servicio.
-> Para versionarlo se puede declarar en `render.yaml` (`type: cron`), pero recién después de
-> validarlo a mano, así un sync del blueprint no crea algo a medio probar.
+> **Desde el 2026-10-28 los 5 Cron Jobs están versionados** en `render.yaml` (`type: cron` con
+> `schedule`, `dockerCommand`, `dockerfilePath`/`dockerContext` y los `fromGroup`), que es el
+> hallazgo B4 de la auditoría. Los pasos de arriba siguen sirviendo para crear un job **a mano**;
+> una vez que el blueprint es la fuente de verdad, todo cambio se hace en `render.yaml` y se
+> sincroniza (guía: `docs/CRON_JOBS_RENDER.md`).
 
 ## Archivos subidos por la app en R2 — bucket propio (2026-04-10)
 
@@ -1013,7 +1016,7 @@ rol). El chequeo final es `SELECT rolname FROM pg_roles WHERE rolname = 'maint_r
 | `DIAS_PENDIENTE` | `7` |
 | `NEON_LIMITE_MB` | `512` (free tier de Neon: **0,5 GB por proyecto**; la alerta se calcula contra esto, no contra los 3 GB que decía `neon_usage_alerts.py`) |
 | `NEON_UMBRAL_PCT` | `80` |
-| `DRY_RUN` | `1` (arranca así; se apaga en el paso 3 de la puesta en marcha) |
+| `DRY_RUN` | `0` — **obligatoria** desde 2026-10-28 (fail-closed, auditoría B4): sin ella el job sale con exit 2 + correo. Para el primer ensayo `1` (ROLLBACK). En el blueprint está fijada en `"0"` **en el servicio**, y eso gana sobre el env group (`docs/CRON_JOBS_RENDER.md` §4) |
 
 Más el env group `alertas` (`GMAIL_SMTP_USER`, `GMAIL_SMTP_APP_PASSWORD`, `ALERT_EMAIL`, los
 mismos valores del Web Service). **No** se enlaza `backups-prod` (este job no toca R2).
@@ -1039,6 +1042,10 @@ log (con `DRY_RUN=1` no aplica nada y, si el run queda verde, **no llega ningún
 alerta sólo sale si hay algo que revisar). El Dockerfile ya está en el repo: la única línea nueva
 es `COPY maintenance/mantenimiento_cloud.py`, y no hace falta ningún `pip install` nuevo porque el
 job no importa la app ni boto3.
+
+> ⚠️ Si el job se crea **por el blueprint** (`render.yaml`, auditoría B4), `DRY_RUN` ya viene
+> fijada en `"0"` **en el servicio** y esa declaración gana sobre el env group: para hacer el
+> ensayo hay que cambiar el valor en `render.yaml` y sincronizar (`docs/CRON_JOBS_RENDER.md` §4).
 
 ### Qué NO hace (a propósito)
 

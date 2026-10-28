@@ -1,8 +1,11 @@
 # ============================================================
-# render.yaml — Blueprint para desplegar en Render (free tier).
-# Un ÚNICO Web Service Docker (imagen combinada: nginx + uvicorn).
+# render.yaml — Blueprint para desplegar en Render.
+#   1) Web Service Docker (imagen combinada: nginx + uvicorn).
+#   2) Los 5 Cron Jobs de automatización de PROD (auditoría B4, 2026-10-28).
 # La BD es externa (Neon) → NO se declara database en este archivo.
-# n8n y el cron de mantenimiento quedan FUERA de este blueprint.
+# n8n queda FUERA de este blueprint (corre fuera de Render).
+# Los pasos manuales, los env groups y la verificación de los Cron Jobs están en
+# docs/CRON_JOBS_RENDER.md; el detalle de cada script, en backend/maintenance/README.md.
 # ============================================================
 services:
   - type: web
@@ -66,3 +69,114 @@ services:
         sync: false
       - key: STORAGE_R2_PUBLIC_BASE_URL
         sync: false
+
+  # ─────────────────────────────────────────────────────────────
+  # CRON JOBS (auditoría B4 — 2026-10-28)
+  #
+  # Hasta hoy los 5 vivían SÓLO en el dashboard de Render: no se podían auditar ni
+  # recrear, y el `DRY_RUN=1` venía en la imagen (fail-open). Ahora están versionados
+  # acá y el modo de ejecución es explícito. Guía operativa: docs/CRON_JOBS_RENDER.md
+  #
+  # Reglas que NO se pueden romper en este bloque:
+  #   * `dockerfilePath`/`dockerContext` apuntan a `backend/`: la imagen de cron NO es
+  #     la del web service (`Dockerfile.render`); `backend/Dockerfile.cron` sólo copia
+  #     los módulos de `maintenance/` (sin FastAPI/SQLAlchemy).
+  #   * `dockerCommand` es OBLIGATORIO en cada job: si falta, Render usa el CMD de la
+  #     imagen (`maintenance.backup_cloud`) y un job de mantenimiento haría un backup.
+  #   * Los env groups (`backups-prod`, `r2-lectura`, `alertas`, `neon-api`,
+  #     `mantenimiento-prod`, `kpis-prod`) YA existen en el dashboard con sus secretos:
+  #     se referencian con `fromGroup` y NO se declaran acá (el repo no lleva valores).
+  #   * `DRY_RUN`: la imagen ya NO lo trae (se quitó de `backend/Dockerfile.cron`).
+  #     `mantenimiento_cloud` es fail-closed (sin la variable ⇒ exit 2 + correo), pero
+  #     `kpis_cloud` cae a `1` si falta ⇒ los dos jobs que aplican cambios fijan `"0"`
+  #     acá. Una variable declarada en el servicio GANA sobre la del env group.
+  #   * `schedule` siempre se interpreta en UTC (Chile = UTC-3 / UTC-4 según el mes).
+  #   * Plan Starter: los Cron Jobs no existen en el free tier (mínimo US$1/mes cada uno).
+  # ─────────────────────────────────────────────────────────────
+
+  # 1) Backup diario de Neon a R2 (el que ya corre con este mismo nombre).
+  - type: cron
+    name: proyecto-crossfit
+    runtime: docker
+    plan: starter
+    region: oregon
+    schedule: "0 6 * * *"                    # 03:00 CLT — diario
+    dockerfilePath: backend/Dockerfile.cron
+    dockerContext: backend
+    dockerCommand: python -m maintenance.backup_cloud
+    envVars:
+      # ⚠️ `DRY_RUN=0` tiene que estar en el grupo `backups-prod`: la imagen ya no lo
+      #    trae y `backup_cloud` cae a `1` = hace el dump y NO SUBE NADA (run verde).
+      #    Si el grupo lo perdió, el que avisa es el watchdog (objeto viejo en R2).
+      - fromGroup: backups-prod
+
+  # 2) Mantenimiento de datos PROD: vencidos, huérfanas, purga y retención
+  #    (días 1 y 15). Escribe en PROD ⇒ `ENVIRONMENT=production` lo valida el script.
+  - type: cron
+    name: box-crossfit-mantenimiento-prod
+    runtime: docker
+    plan: starter
+    region: oregon
+    schedule: "0 8 1,15 * *"                 # 05:00 CLT los días 1 y 15
+    dockerfilePath: backend/Dockerfile.cron
+    dockerContext: backend
+    dockerCommand: python -m maintenance.mantenimiento_cloud
+    envVars:
+      # Ensayo (ROLLBACK): cambiar a "1", correr, leer el log/correo y volver a "0".
+      - key: DRY_RUN
+        value: "0"
+      - fromGroup: mantenimiento-prod        # MAINT_DB_URL (rol maint_rw), límites, ENVIRONMENT
+      - fromGroup: alertas                   # GMAIL_SMTP_* + ALERT_EMAIL
+      - fromGroup: neon-api                   # sólo lectura de CU-horas y ramas (Fase 7)
+
+  # 3) Watchdog de frescura del backup: avisa si R2 no se renueva (sólo LEE R2).
+  - type: cron
+    name: box-crossfit-watchdog
+    runtime: docker
+    plan: starter
+    region: oregon
+    schedule: "0 12 * * *"                   # 09:00 CLT — 6 h después del backup
+    dockerfilePath: backend/Dockerfile.cron
+    dockerContext: backend
+    dockerCommand: python -m maintenance.watchdog_backups
+    envVars:
+      # Token de SÓLO LECTURA: este job no puede escribir en el bucket de respaldos.
+      - fromGroup: r2-lectura
+      - fromGroup: alertas
+      # No usa `DRY_RUN` (no escribe nada) ni `PROD_DB_DIRECT_URL`.
+
+  # 4) Restore drill mensual: restaura el último backup en una rama Neon desechable
+  #    y verifica integridad. Crea y borra ramas ⇒ necesita la API de Neon.
+  - type: cron
+    name: box-crossfit-restore-drill
+    runtime: docker
+    plan: starter
+    region: oregon
+    schedule: "0 13 1 * *"                   # 10:00 CLT el día 1 de cada mes
+    dockerfilePath: backend/Dockerfile.cron
+    dockerContext: backend
+    dockerCommand: python -m maintenance.restore_drill
+    envVars:
+      - fromGroup: backups-prod              # R2 del backup + URL de lectura de PROD
+      - fromGroup: neon-api                  # crear/borrar la rama temporal del drill
+      - fromGroup: alertas
+      # No usa `DRY_RUN`: el destino del restore es una rama desechable, nunca PROD.
+
+  # 5) KPIs diarios/mensuales, predicciones y reentrenamiento ML — reemplaza los
+  #    4 workflows de n8n (Fase 8). Llama a la API propia con `X-N8N-API-Key`.
+  - type: cron
+    name: box-crossfit-kpis-ml
+    runtime: docker
+    plan: starter
+    region: oregon
+    schedule: "0 10 * * *"                   # 06:00 CLT (07:00 con horario de verano)
+    dockerfilePath: backend/Dockerfile.cron
+    dockerContext: backend
+    dockerCommand: python -m maintenance.kpis_cloud
+    envVars:
+      # ⚠️ `kpis_cloud` cae a `DRY_RUN=1` si la variable falta: sin esto el job imprime
+      #    el plan, NO llama a ningún endpoint y el run queda VERDE (fail-open).
+      - key: DRY_RUN
+        value: "0"
+      - fromGroup: kpis-prod                 # KPIS_API_URL, N8N_API_KEY / CRON_API_KEY
+      - fromGroup: alertas
