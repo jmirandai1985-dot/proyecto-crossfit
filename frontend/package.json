@@ -29,6 +29,7 @@
     "test:bazar": "node scripts/test-bazar-pestanas.mjs",
     "test:entrega": "node scripts/test-entrega-movil.mjs",
     "test:fidelizacion": "node scripts/test-fidelizacion-movil.mjs",
+    "test:tope": "node scripts/test-tope-descuento.mjs",
     "test:menu": "node scripts/test-menu.mjs",
     "test:recarga": "node scripts/test-recarga-chunk.mjs",
     "test:admin-api": "node scripts/test-admin-sin-api.mjs",

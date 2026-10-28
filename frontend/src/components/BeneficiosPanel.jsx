@@ -17,9 +17,11 @@
  *   - onVerAlumno(alumnoId): abrir la ficha del alumno (clic en su nombre).
  *   - onMensaje(texto): avisar en la pantalla (el mismo cartel que usa Fidelización).
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import api from '../services/api';
 import { fmtFechaChile } from '../utils/fecha';
+import { useAuth } from '../context/AuthContext';
+import { useConfiguracionBancaria, useGuardarConfiguracion } from '../hooks/queries';
 
 const ESTADOS = [
     { id: 'todos', label: 'Todos' },
@@ -49,6 +51,47 @@ const BeneficiosPanel = ({ onVerAlumno, onMensaje }) => {
     const [anular, setAnular] = useState(null);     // el beneficio que se está anulando
     const [motivo, setMotivo] = useState('');
     const [anulando, setAnulando] = useState(false);
+
+    // ── Tope de descuento (antes vivía en Configuración) ─────────────────────
+    // Es una regla de FIDELIZACIÓN, no de los datos bancarios del box: el tope limita lo que
+    // un beneficio puede regalar sobre el próximo plan. Se mueve acá junto a los beneficios
+    // que lo usan; la API y la columna (`configuracion_negocio.beneficio_descuento_max_pct`)
+    // son las mismas.
+    const { tenant_id } = useAuth();
+    const configQ = useConfiguracionBancaria(tenant_id);
+    const guardarConfig = useGuardarConfiguracion();
+    const [tope, setTope] = useState('50');
+    const [guardandoTope, setGuardandoTope] = useState(false);
+    const [avisoTope, setAvisoTope] = useState('');
+    const topeRellenado = useRef(false);
+
+    useEffect(() => {
+        const guardado = configQ.data?.beneficio_descuento_max_pct;
+        // Se rellena UNA vez: un refetch en segundo plano no pisa lo que el admin escribe.
+        if (topeRellenado.current || guardado === null || guardado === undefined) return;
+        topeRellenado.current = true;
+        setTope(String(guardado));
+    }, [configQ.data]);
+
+    const guardarTope = async (e) => {
+        e.preventDefault();
+        const pct = Number(tope);
+        if (!Number.isInteger(pct) || pct < 0 || pct > 100) {
+            setAvisoTope('El tope debe ser un número entero entre 0 y 100.');
+            return;
+        }
+        setGuardandoTope(true);
+        setAvisoTope('');
+        try {
+            // Sólo el tope: el PUT aplica los campos enviados y no toca el resto.
+            await guardarConfig.mutateAsync({ beneficio_descuento_max_pct: pct });
+            setAvisoTope('Tope guardado.');
+        } catch (err) {
+            setAvisoTope(err.response?.data?.detail || 'No se pudo guardar el tope.');
+        } finally {
+            setGuardandoTope(false);
+        }
+    };
 
     const cargar = useCallback(async () => {
         setCargando(true);
@@ -98,6 +141,55 @@ const BeneficiosPanel = ({ onVerAlumno, onMensaje }) => {
 
     return (
         <div className="space-y-6">
+            {/* ── Tope de descuento (movido desde Configuración) ─────────────────
+                Es la regla que limita lo que un beneficio puede regalar sobre el próximo plan.
+                Vive junto a los beneficios porque es SU política, no un dato bancario. */}
+            <form onSubmit={guardarTope} data-testid="beneficios-tope-descuento"
+                className="bg-zinc-900 border border-zinc-800 rounded-lg p-5">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                        <h2 className="font-semibold text-white">🎟️ Tope de descuento de beneficios</h2>
+                        <p className="text-xs text-zinc-500 mt-1">
+                            Máximo que puede regalar un beneficio sobre el próximo plan (0-100 %).
+                            Por defecto 50 %. Se aplica a los beneficios NUEVOS.
+                        </p>
+                    </div>
+                    <div className="flex items-end gap-2">
+                        <div>
+                            <label htmlFor="beneficio-descuento-max"
+                                className="block text-xs text-zinc-400 mb-1">
+                                Descuento máximo (%)
+                            </label>
+                            <input
+                                id="beneficio-descuento-max"
+                                data-testid="beneficios-descuento-max"
+                                type="number" min="0" max="100" step="1"
+                                value={tope}
+                                onChange={(e) => { setTope(e.target.value); setAvisoTope(''); }}
+                                disabled={configQ.isPending}
+                                className="w-28 px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                required
+                            />
+                        </div>
+                        <button type="submit" disabled={guardandoTope || configQ.isPending}
+                            data-testid="beneficios-guardar-tope"
+                            className="px-4 py-2 rounded-lg bg-orange-600 text-white text-sm font-semibold hover:bg-orange-500 disabled:opacity-50">
+                            {guardandoTope ? 'Guardando…' : 'Guardar tope'}
+                        </button>
+                    </div>
+                </div>
+                {configQ.isError && (
+                    <p className="mt-2 text-xs text-amber-300">
+                        No se pudo leer el tope guardado; se muestra el valor por defecto (50 %).
+                    </p>
+                )}
+                {avisoTope && (
+                    <p data-testid="beneficios-tope-aviso" className="mt-2 text-xs text-zinc-300">
+                        {avisoTope}
+                    </p>
+                )}
+            </form>
+
             {/* ── Métricas de efectividad (el espacio que la F4 llena con estos mismos números) ── */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-5">
                 <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
