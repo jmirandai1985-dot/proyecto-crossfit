@@ -27,7 +27,10 @@ class HistorialRM(Base):
         "usuarios.id", ondelete="CASCADE"), nullable=False)
     movimiento_id = Column(Integer, ForeignKey(
         "movimientos.id", ondelete="CASCADE"), nullable=False)
-    peso_kg = Column(Float, nullable=False)
+    # D4: el peso es EXCLUSIVO de fuerza. Gimnasia guarda su valor en `repeticiones` (reps /
+    # metros) y cardio/metabólico en minutos/km/calorías; por eso es nullable desde la 061.
+    # Las filas viejas conservan el peso dummy para la UI anterior (el cálculo ya no lo usa).
+    peso_kg = Column(Float, nullable=True)
     # peso, tiempo, reps, altura, distancia
     tipo_rm = Column(String(20), nullable=False, default='peso')
     # ej: "3x10" para series x reps

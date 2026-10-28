@@ -4,10 +4,12 @@ Antes esta consulta vivía dentro de `GET /historial-rm/alumnos/{id}/rms` y el H
 alumno (sección `rms`) necesita el MISMO dato: dos lugares para el mismo cálculo, que con el
 tiempo divergen. Ahora la definición está acá y el endpoint delega.
 
-Criterio (el de siempre, sólo cambió de lugar):
-  * FUERZA y GIMNÁSTICO → el registro con mayor `peso_kg` del movimiento. En gimnasia el valor
-    del RM es la repetición, pero el ORDEN sigue siendo por `peso_kg` (la columna donde el
-    RM vive en ambas categorías): cambiarlo alteraría lo que hoy devuelve el endpoint.
+Criterio:
+  * FUERZA → el registro con mayor `peso_kg` del movimiento.
+  * GIMNÁSTICO → el registro con más REPETICIONES (D4, 2026-10-28). El valor del RM gimnástico
+    son las reps (o metros); `peso_kg` es un dummy histórico y ordenar por él elegía el registro
+    con el dummy más alto, no el mejor set. `COALESCE(repeticiones, peso_kg)` cubre las filas
+    viejas que todavía tienen el número en `peso_kg`.
   * CARDIO y METABÓLICO (máquinas) → el registro MÁS RECIENTE (desempate `id` desc): comparar
     por `peso_kg` ahí no tiene sentido, es un dummy.
 
@@ -17,6 +19,7 @@ que la UI no repita la tabla de unidades en cada pantalla.
 from types import SimpleNamespace
 from typing import Final
 
+from sqlalchemy import Float, case, func
 from sqlalchemy.orm import Session
 
 from app.models.historial_rm import HistorialRM
@@ -147,11 +150,23 @@ def mejor_rm_por_movimiento_lote(db: Session, alumno_ids, tenant_id: int) -> dic
     # El `distinct` es DISTINCT ON de PostgreSQL: las columnas del `distinct` tienen que ser el
     # prefijo del `order_by` (por eso arranca en `alumno_id, movimiento_id`). El orden RELATIVO
     # de los movimientos de un alumno queda igual que antes (por `movimiento_id`).
+    #
+    # D4: dentro de fuerza+gimnasia el "mejor" depende de la categoría: gimnasia ordena por
+    # repeticiones (peso = dummy), fuerza por peso. Es la MISMA expresión que
+    # `nivel_service._mejores_rms_lote` usa para el nivel, así que la Pizarra y el badge no
+    # pueden elegir registros distintos.
+    valor_orden = case(
+        (func.lower(Movimiento.categoria).in_(("gimnastico", "gimnástico")),
+         func.coalesce(func.cast(HistorialRM.repeticiones, Float),
+                       HistorialRM.peso_kg)),
+        else_=HistorialRM.peso_kg,
+    )
     por_peso = (
         db.query(HistorialRM.alumno_id, *_columnas())
         .join(Movimiento, HistorialRM.movimiento_id == Movimiento.id)
         .filter(*base, Movimiento.categoria.in_(CATEGORIAS_POR_PESO))
-        .order_by(HistorialRM.alumno_id, HistorialRM.movimiento_id, HistorialRM.peso_kg.desc())
+        .order_by(HistorialRM.alumno_id, HistorialRM.movimiento_id,
+                  valor_orden.desc(), HistorialRM.id.desc())
         .distinct(HistorialRM.alumno_id, HistorialRM.movimiento_id)
         .all()
     )

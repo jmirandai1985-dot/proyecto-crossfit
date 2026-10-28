@@ -40,7 +40,7 @@ import Toast from '../../components/Toast';
 import BotonVolver from '../../components/BotonVolver';
 // El VALOR de un RM sale de la fuente única (utils/rm.js, H-03): pintar `peso_kg` a mano
 // mostraba "530 kg" en un Air Runner (su peso es un dummy: en la BD real hay 1,0 y 530,0).
-import { formatResultadoRM } from '../../utils/rm';
+import { formatResultadoRM, valorRM } from '../../utils/rm';
 import { fmtFechaCortaChile } from '../../utils/fecha';
 // Paginación del tab Progreso: los MISMOS helpers del padrón del admin (una sola definición
 // de "total de páginas" y de "mostrando X–Y de Z").
@@ -1217,7 +1217,7 @@ const DashboardCoach = () => {
                                         </thead>
                                         <tbody className="divide-y divide-zinc-800">
                                             {progresoFiltrado.map((alumno, index) => {
-                                                const topRM = alumno.rms?.reduce((max, r) => (r.peso_kg > (max?.peso_kg || 0) ? r : max), null);
+                                                const topRM = alumno.rms?.reduce((max, r) => (valorRM(r) > valorRM(max) ? r : max), null);
                                                 return (
                                                     <tr key={alumno.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                                                         <td className="px-6 py-4 text-sm font-medium text-gray-900">
@@ -1256,7 +1256,7 @@ const DashboardCoach = () => {
                                                             </span>
                                                         </td>
                                                         <td className="px-6 py-4 text-sm text-gray-600">
-                                                            {topRM ? `${topRM.peso_kg} kg (${topRM.movimiento_nombre || ''})` : '-'}
+                                                            {topRM ? `${formatResultadoRM(topRM)} (${topRM.movimiento_nombre || ''})` : '-'}
                                                         </td>
                                                         <td className="px-6 py-4 text-sm">
                                                             <button

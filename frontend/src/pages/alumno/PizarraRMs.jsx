@@ -44,14 +44,13 @@ const textoVentanaEdicion = (createdAt) => {
     return horas > 0 ? `${horas} h ${minutos} min` : `${minutos} min`;
 };
 
-// RM-01: `peso_kg` es el "valor" del RM (kg / reps / min / km según categoría).
-// Vive acá porque lo usan el alta y la edición (una sola regla).
-const valorDelFormRM = (form, cat) => cat === 'fuerza'
-    ? (parseFloat(form.peso_kg) || 1)
-    : cat === 'gimnastico'
-        ? (parseInt(form.repeticiones) || 1)
-        : (parseInt(form.minutos) || parseFloat(form.km)
-            || parseInt(form.vueltas) || parseInt(form.calorias) || 1);
+// D4: el valor del RM va en SU columna. Fuerza -> `peso_kg` (kg); gimnasia -> `repeticiones`
+// (reps/metros); cardio/metabólico -> minutos/km/vueltas/calorías. `null` en el resto: el
+// backend rechaza `peso_kg` en gimnasia (antes se copiaba el número en las dos columnas y el
+// cálculo ordenaba por el dummy).
+const pesoDelFormRM = (form, cat) => (cat === 'fuerza'
+    ? (parseFloat(form.peso_kg) || null)
+    : null);
 
 const PizarraRMs = () => {
     const { usuario_id, tenant_id } = useAuth();
@@ -125,11 +124,9 @@ const PizarraRMs = () => {
                 tenant_id,
                 alumno_id: usuario_id,
                 movimiento_id: Number(rmForm.movimiento_id),
-                // RM-01: `peso_kg` es el "valor" del RM (kg / reps / min / km según la
-                // categoría, ver HistorialRMBase), así que NO se manda un 1 fijo: para
-                // gimnástico va el nº de repeticiones y para cardio/metabólico la métrica
-                // cargada. Antes, con 1 fijo, el nivel gimnástico daba siempre Principiante.
-                peso_kg: valorDelFormRM(rmForm, cat),
+                // D4: solo la fuerza manda peso; gimnasia manda sus reps y cardio su métrica
+                // (el backend valida por categoría y rechaza `peso_kg` fuera de fuerza).
+                peso_kg: pesoDelFormRM(rmForm, cat),
                 fecha: rmForm.fecha || today,
                 notas: rmForm.notas || null,
                 repeticiones: rmForm.repeticiones ? parseInt(rmForm.repeticiones) : null,
@@ -205,7 +202,7 @@ const PizarraRMs = () => {
         try {
             await editarRm.mutateAsync({
                 id: rmEditando.id,
-                peso_kg: valorDelFormRM(rmForm, cat),
+                peso_kg: pesoDelFormRM(rmForm, cat),
                 fecha: rmForm.fecha || today,
                 notas: rmForm.notas || null,
                 repeticiones: rmForm.repeticiones ? parseInt(rmForm.repeticiones) : null,
@@ -503,10 +500,11 @@ const PizarraRMs = () => {
                                             <>
                                                 <div>
                                                     <label className="block text-xs font-medium text-gray-600 mb-1">Peso (kg) *</label>
-                                                    <input type="number" step="0.1" min="0"
+                                                    <input type="number" step="0.1" min="1" max="400"
                                                         value={rmForm.peso_kg}
                                                         onChange={e => setRmForm(p => ({ ...p, peso_kg: e.target.value }))}
                                                         placeholder="Ej: 100"
+                                                        required
                                                         className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
                                                 </div>
                                                 <div>
@@ -532,10 +530,11 @@ const PizarraRMs = () => {
                                             <>
                                                 <div>
                                                     <label className="block text-xs font-medium text-gray-600 mb-1">Repeticiones *</label>
-                                                    <input type="number" min="0"
+                                                    <input type="number" min="1"
                                                         value={rmForm.repeticiones}
                                                         onChange={e => setRmForm(p => ({ ...p, repeticiones: e.target.value }))}
                                                         placeholder="Ej: 12"
+                                                        required
                                                         className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent" />
                                                 </div>
                                                 <div>

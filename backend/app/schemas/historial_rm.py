@@ -10,8 +10,10 @@ class HistorialRMBase(BaseModel):
     """Esquema base para Historial RM"""
     alumno_id: int = Field(..., gt=0, description="ID del alumno")
     movimiento_id: int = Field(..., gt=0, description="ID del movimiento")
-    peso_kg: float = Field(..., gt=0,
-                           description="Valor del RM (kg, segundos, reps, cm o metros según tipo)")
+    # D4: el peso dejó de ser obligatorio. Fuerza lo exige (lo valida el endpoint según la
+    # categoría del movimiento); gimnasia usa `repeticiones` y cardio/metabólico minutos/km.
+    peso_kg: Optional[float] = Field(
+        None, gt=0, description="Peso del RM en kg (solo fuerza; categoría-validado)")
     tipo_rm: str = Field(
         default="peso", description="Tipo de RM: peso, tiempo, reps, altura, distancia")
     valor_extra: Optional[str] = Field(
@@ -70,7 +72,8 @@ class HistorialRMListItem(BaseModel):
     id: int
     alumno_id: int
     movimiento_id: int
-    peso_kg: float
+    # D4: NULL en gimnasia/cardio nuevas (el valor va en repeticiones/minutos/km/…).
+    peso_kg: Optional[float] = None
     tipo_rm: Optional[str] = "peso"
     valor_extra: Optional[str] = None
     repeticiones: Optional[int] = None
@@ -104,7 +107,9 @@ class RMPorMovimiento(BaseModel):
     # es `cardio`- se dibujaba como `metabolico`, perdiendo sus minutos.
     categoria: Optional[str] = Field(
         None, description="Categoría del movimiento: fuerza/gimnastico/cardio/metabolico")
-    peso_kg: float
+    # D4: NULL en gimnasia/cardio nuevas. La UI muestra el valor con `formatResultadoRM`
+    # (usa repeticiones/minutos/km), no con `peso_kg`.
+    peso_kg: Optional[float] = None
     tipo_rm: Optional[str] = "peso"
     valor_extra: Optional[str] = None
     repeticiones: Optional[int] = None

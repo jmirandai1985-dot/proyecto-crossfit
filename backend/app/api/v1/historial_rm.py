@@ -118,6 +118,27 @@ def crear_historial_rm(
     if not movimiento:
         raise HTTPException(status_code=404, detail="Movimiento no encontrado")
 
+    # ── D4: el valor del RM vive en SU columna, según la categoría ──
+    # Gimnasia: reps (o metros) en `repeticiones`; el peso es un dummy que ya no se acepta.
+    # Fuerza: kg en `peso_kg`. Cardio/metabólico: minutos/km/vueltas/calorías.
+    categoria = categoria_de(movimiento)
+    if categoria == "gimnastico":
+        if not historial_data.repeticiones:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Gimnasia: las repeticiones son obligatorias (el peso no se usa)",
+            )
+        if historial_data.peso_kg is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Gimnasia: no envíes peso_kg; el valor del RM son las repeticiones",
+            )
+    elif categoria == "fuerza" and not historial_data.peso_kg:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Fuerza: el peso (kg) es obligatorio",
+        )
+
     db_historial = HistorialRM(
         tenant_id=historial_data.tenant_id,
         alumno_id=historial_data.alumno_id,
@@ -444,6 +465,23 @@ def actualizar_historial_rm(
     _verificar_ventana_edicion(historial.created_at)
 
     update_data = historial_data.model_dump(exclude_unset=True)
+
+    # ── D4: en gimnasia el peso no se acepta; el valor son las repeticiones ──
+    movimiento = db.query(Movimiento).filter(
+        Movimiento.id == historial.movimiento_id
+    ).first()
+    if movimiento is not None and categoria_de(movimiento) == "gimnastico":
+        # `peso_kg: null` es válido (limpia el dummy histórico); un número no.
+        if update_data.get("peso_kg") is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Gimnasia: no envíes peso_kg; el valor del RM son las repeticiones",
+            )
+        if "repeticiones" in update_data and not update_data["repeticiones"]:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Gimnasia: las repeticiones deben ser mayores a 0",
+            )
 
     for field, value in update_data.items():
         setattr(historial, field, value)

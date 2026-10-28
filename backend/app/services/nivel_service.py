@@ -302,16 +302,27 @@ def _mejores_rms_lote(db, alumno_ids, tenant_id) -> dict:
     """
     from app.models.historial_rm import HistorialRM
     from app.models.movimiento import Movimiento
-    from sqlalchemy import func
+    from sqlalchemy import Float, case, func
 
     ids = [int(i) for i in (alumno_ids or []) if i is not None]
     if not ids:
         return {}
 
+    # D4: el "mejor" valor depende de la categoría. Gimnasia -> REPETICIONES (el peso es un
+    # dummy histórico); fuerza -> peso. `COALESCE` cubre las filas viejas que todavía tienen el
+    # número de reps en `peso_kg` (la migración 061 las copia, pero una fila sin migrar no
+    # puede quedar en 0). Es la MISMA expresión que usa `rms_service` para elegir el registro.
+    valor_nivel = case(
+        (func.lower(Movimiento.categoria).in_(("gimnastico", "gimnástico")),
+         func.coalesce(func.cast(HistorialRM.repeticiones, Float),
+                       HistorialRM.peso_kg)),
+        else_=HistorialRM.peso_kg,
+    )
+
     filas = db.query(
         HistorialRM.alumno_id,
         HistorialRM.movimiento_id,
-        func.max(HistorialRM.peso_kg).label('max_peso'),
+        func.max(valor_nivel).label('max_valor'),
         Movimiento.nombre
     ).filter(
         HistorialRM.alumno_id.in_(ids),
@@ -321,8 +332,8 @@ def _mejores_rms_lote(db, alumno_ids, tenant_id) -> dict:
     ).all()
 
     por_alumno: dict = {}
-    for alumno_id, mov_id, max_peso, nombre in filas:
-        por_alumno.setdefault(alumno_id, []).append((mov_id, max_peso, nombre))
+    for alumno_id, mov_id, max_valor, nombre in filas:
+        por_alumno.setdefault(alumno_id, []).append((mov_id, max_valor, nombre))
     return por_alumno
 
 
