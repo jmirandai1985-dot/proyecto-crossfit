@@ -263,6 +263,87 @@ def listar_solicitudes_pendientes(
     return results
 
 
+@router.get("/alumno/{alumno_id}")
+def listar_solicitudes_de_alumno(
+    alumno_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Solicitudes de plan de UN alumno (para revisar SU comprobante).
+
+    POR QUÉ EXISTE: el padrón (Admin → Alumnos) tiene un botón "Voucher" por fila.
+    Ese modal no sabía qué solicitud mostrar —`/pendientes` sólo trae la COLA del box,
+    así que la solicitud de un alumno ya aprobado o rechazado no aparecía— y terminaba
+    pintando un comprobante INVENTADO (TXN y monto fijos) con un selector de plan: el
+    admin creía estar revisando el pago sin haber visto ningún archivo. Con este
+    listado el modal pide el comprobante REAL de la solicitud correcta al endpoint
+    autenticado (`/{solicitud_id}/voucher`).
+
+    🔒 Guard de documentos (mismo criterio que el voucher suelto): el alumno dueño o
+    staff del MISMO box. Un alumno ajeno responde 403 explícito (no se silencia).
+
+    Se ordena de la más nueva a la más vieja: la primera con `voucher_url` es la que
+    el modal muestra por defecto (una pendiente primero, ver `solicitudConComprobante`
+    en el front).
+    """
+    alumno = db.query(Usuario).filter(Usuario.id == alumno_id).first()
+    if not alumno:
+        raise HTTPException(status_code=404, detail="Alumno no encontrado")
+
+    visible = puede_ver_documento(
+        usuario_id=current_user["usuario_id"],
+        tenant_id=current_user["tenant_id"],
+        alumno_id=alumno_id,
+        tenant_documento=alumno.tenant_id,
+        rol=current_user.get("rol", ""),
+    )
+    if not visible:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No puedes ver los comprobantes de este alumno",
+        )
+
+    # El `tenant_id` de la solicitud también se filtra: el guard ya limita a dueño o
+    # box, pero así una fila con tenant cruzado nunca se cuela en la respuesta.
+    solicitudes = db.query(SolicitudPlan).filter(
+        SolicitudPlan.alumno_id == alumno_id,
+        SolicitudPlan.tenant_id == current_user["tenant_id"],
+    ).order_by(SolicitudPlan.created_at.desc()).limit(50).all()
+
+    # Los planes se traen de una vez (una solicitud vieja puede apuntar a un plan
+    # que ya no está activo; `Plan.nombre` sigue siendo el nombre con que se pidió).
+    planes_por_id = {}
+    if solicitudes:
+        ids = {s.plan_id for s in solicitudes}
+        planes_por_id = {
+            p.id: p for p in db.query(Plan).filter(Plan.id.in_(ids)).all()
+        }
+
+    results = []
+    for s in solicitudes:
+        plan = planes_por_id.get(s.plan_id)
+        results.append({
+            "id": s.id,
+            "estado": s.estado,
+            "plan_nombre": plan.nombre if plan else "Desconocido",
+            # Precio de LISTA (snapshot) y precio FINAL con descuento: los mismos dos
+            # números que muestra la cola de Pendientes, para no inventar un monto.
+            "plan_precio": (s.precio_clp_snapshot
+                            if s.precio_clp_snapshot is not None
+                            else (plan.precio_clp if plan else 0)),
+            "descuento_pct": s.descuento_pct,
+            "precio_final": (s.precio_final_clp if s.precio_final_clp is not None
+                             else (s.precio_clp_snapshot
+                                   if s.precio_clp_snapshot is not None
+                                   else (plan.precio_clp if plan else 0))),
+            "voucher_url": s.voucher_url,
+            "certificado_estudiante_url": s.certificado_estudiante_url,
+            "comentario_admin": s.comentario_admin,
+            "created_at": s.created_at,
+        })
+    return results
+
+
 @router.get("/{solicitud_id}/voucher")
 def descargar_voucher(
     solicitud_id: int,

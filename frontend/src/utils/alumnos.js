@@ -122,3 +122,50 @@ export const rangoMostrado = ({ total = 0, porPagina = 25, pagina = 1, enPagina 
         hasta: (pagina - 1) * porPagina + enPagina,
     };
 };
+
+// ── Comprobante del padrón (el modal "Voucher" de cada fila) ─────────────────────
+// El modal pintaba un comprobante INVENTADO (TXN y monto fijos) y un selector de plan;
+// lo que tiene que mostrar es el ARCHIVO que el alumno subió. Estas dos funciones
+// deciden CUÁL solicitud se muestra y con qué rótulo, y son puras para poder probarlas
+// sin navegador (`scripts/test-alumnos.mjs`, sección 9).
+
+/** Milisegundos de una fecha ISO; `0` si viene vacía o inválida (nunca `NaN`). */
+const fechaMs = (iso) => {
+    const t = new Date(iso || 0).getTime();
+    return Number.isFinite(t) ? t : 0;
+};
+
+/**
+ * La solicitud cuyo comprobante abre el modal "Voucher" del padrón.
+ *
+ * Reglas, en orden:
+ *   1. sólo cuentan las que tienen `voucher_url` (sin archivo no hay nada que mostrar y
+ *      el endpoint autenticado responde 404);
+ *   2. manda una PENDIENTE: es la que el admin tiene que revisar para aprobar;
+ *   3. si no hay pendientes, la más NUEVA (una compra ya aprobada sigue siendo la prueba
+ *      del pago que el box cobró).
+ *
+ * Devuelve `null` cuando el alumno nunca subió un comprobante: el modal lo dice con
+ * todas las letras en vez de inventar un monto.
+ */
+export const solicitudConComprobante = (solicitudes = []) => {
+    const conArchivo = (Array.isArray(solicitudes) ? solicitudes : [])
+        .filter((s) => Boolean(s?.voucher_url));
+    if (conArchivo.length === 0) return null;
+    const pendiente = conArchivo.find((s) => s.estado === 'pending');
+    if (pendiente) return pendiente;
+    return conArchivo.reduce((mejor, s) => (
+        fechaMs(s.created_at) > fechaMs(mejor.created_at) ? s : mejor
+    ));
+};
+
+/** Rótulo y color del estado de una solicitud de plan (`NULL`/desconocido no rompe). */
+const ESTADOS_SOLICITUD_PLAN = {
+    pending: { texto: 'Pendiente de revisión', clase: 'text-amber-300' },
+    approved: { texto: 'Aprobada', clase: 'text-emerald-300' },
+    rejected: { texto: 'Rechazada', clase: 'text-red-300' },
+};
+
+export const estadoSolicitudPlan = (estado) =>
+    ESTADOS_SOLICITUD_PLAN[estado] || { texto: estado || 'Sin estado', clase: 'text-zinc-400' };
+

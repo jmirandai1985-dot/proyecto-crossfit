@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -7,18 +7,22 @@ import AlumnoFichaModal from '../../components/AlumnoFichaModal';
 // cambia; las dos vistas comparten los datos y las reglas (`utils/alumnos*`).
 import AlumnosMovil from './AlumnosMovil';
 import { fmtFechaChile, sumarDiasInstante } from '../../utils/fecha';
+// El comprobante del alumno se pide al endpoint AUTENTICADO (blob): /static/uploads/...
+// se sirve sin token, así que no se puede abrir por URL pública.
+import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
 import {
     SIN_DATOS, useAlumnosPaginados, useBeneficiosAlumno, useCrearSuscripcion,
     useDesactivarUsuario, useGuardarUsuario, usePlanesActivos,
-    useSuscripcionesActivas, useSuscripcionesAlumno,
+    useSolicitudesPlanAlumno, useSuscripcionesActivas, useSuscripcionesAlumno,
 } from '../../hooks/queries';
 // Las reglas del padrón (¿la suscripción está vigente HOY?, badge del estado, params del
 // listado paginado, tramos de la paginación) viven en `utils/alumnos`: las comparte la
 // tabla de escritorio con la vista móvil del padrón (A5) y no pueden divergir.
 import {
-    badgeEstado, nombrePlan, paginaFueraDeRango, paginaValida, rangoMostrado,
-    suscripcionDeAlumno, suscripcionVigente,
+    badgeEstado, estadoSolicitudPlan, nombrePlan, paginaFueraDeRango, paginaValida,
+    rangoMostrado, solicitudConComprobante, suscripcionDeAlumno, suscripcionVigente,
 } from '../../utils/alumnos';
+
 
 // `?estado=` que acepta `GET /usuarios/`. La tarjeta "Alumnos Activos" del
 // Dashboard llega con `?estado=activo`, así la tabla abre YA filtrada en el
@@ -46,6 +50,8 @@ const Alumnos = () => {
     const [confirmarDuplicado, setConfirmarDuplicado] = useState(false);
     const [planSeleccionado, setPlanSeleccionado] = useState('');
     const [mensajeAprobacion, setMensajeAprobacion] = useState('');
+    // Error de descarga del comprobante (blob autenticado): se muestra junto al archivo.
+    const [avisoComprobante, setAvisoComprobante] = useState('');
     const [editingAlumno, setEditingAlumno] = useState(null);
     const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
     const [searchParams, setSearchParams] = useSearchParams();
@@ -91,6 +97,30 @@ const Alumnos = () => {
 
     // Suscripciones del alumno del comprobante: alimenta el aviso de plan ya vigente.
     const { data: suscripcionesAlumnoData } = useSuscripcionesAlumno(selectedAlumnoVoucher?.id);
+
+    // ── Comprobante REAL del alumno (modal "Voucher" del padrón) ────────────────
+    // Antes este modal pintaba un comprobante INVENTADO (TXN y monto fijos) y un
+    // selector de plan: el admin creía estar revisando el pago sin haber visto ningún
+    // archivo. Ahora se busca la solicitud del alumno y su archivo se pide al endpoint
+    // autenticado (blob, con token). `enabled` (dentro del hook) evita el request
+    // mientras el modal está cerrado.
+    const solicitudesPlanQ = useSolicitudesPlanAlumno(selectedAlumnoVoucher?.id);
+    const solicitudComprobante = useMemo(
+        () => solicitudConComprobante(solicitudesPlanQ.data ?? SIN_DATOS),
+        [solicitudesPlanQ.data],
+    );
+    const {
+        preview: comprobantePreview,
+        descargando: descargandoComprobante,
+        descargar: descargarComprobante,
+        reintentar: reintentarComprobante,
+    } = useDocumentoAutenticado({
+        previewUrl: solicitudComprobante?.id
+            ? `/api/v1/solicitudes/${solicitudComprobante.id}/voucher?inline=1` : '',
+        downloadUrl: solicitudComprobante?.id
+            ? `/api/v1/solicitudes/${solicitudComprobante.id}/voucher` : '',
+        nombreFallback: `comprobante_${selectedAlumnoVoucher?.id || ''}`,
+    });
 
     // ── Mutaciones ──────────────────────────────────────────────────────────────
     // Crear/editar y dar de baja invalidan `['usuarios']`, así que la tabla se refresca
@@ -197,12 +227,14 @@ const Alumnos = () => {
         setSelectedAlumnoVoucher(alumno);
         setPlanSeleccionado('');
         setMensajeAprobacion('');
+        setAvisoComprobante('');
         setPlanVigenteAlumno(null);
         setConfirmarDuplicado(false);
         setShowVoucherModal(true);
         // El "¿ya tiene un plan ACTIVO?" lo resuelve la consulta `useSuscripcionesAlumno`
         // (arranca al quedar puesto `selectedAlumnoVoucher`) y lo aplica el efecto de
         // arriba, que además deja el aviso listo antes de que el admin pueda aprobar.
+        // El COMPROBANTE lo resuelve `useSolicitudesPlanAlumno` (mismo disparador).
     };
 
     const closeVoucherModal = () => {
@@ -210,6 +242,7 @@ const Alumnos = () => {
         setSelectedAlumnoVoucher(null);
         setPlanVigenteAlumno(null);
         setConfirmarDuplicado(false);
+        setAvisoComprobante('');
     };
 
     const handleSubmit = async (e) => {
@@ -520,12 +553,15 @@ const Alumnos = () => {
 
                 {showVoucherModal && selectedAlumnoVoucher && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                        <div className="bg-zinc-900 rounded-lg shadow-xl max-w-2xl w-full">
-                            <div className="bg-purple-600 text-white px-6 py-4 rounded-t-lg flex items-center justify-between">
+                        {/* `max-h` + `overflow-y-auto` en el CUERPO: antes el modal crecía
+                            con el contenido y en pantallas bajas (o al abrir el comprobante)
+                            los botones quedaban fuera de la vista. La cabecera no se mueve. */}
+                        <div className="bg-zinc-900 rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] flex flex-col">
+                            <div className="bg-purple-600 text-white px-6 py-4 rounded-t-lg flex items-center justify-between shrink-0">
                                 <h2 className="text-xl font-bold">Comprobante de Pago</h2>
                                 <button onClick={closeVoucherModal} className="text-white hover:text-gray-200 text-2xl">×</button>
                             </div>
-                            <div className="p-6 space-y-6">
+                            <div className="p-6 space-y-6 overflow-y-auto">
                                 <div className="bg-zinc-800/50 p-4 rounded-lg">
                                     <h3 className="text-sm font-semibold text-zinc-300 mb-3">Información del Alumno</h3>
                                     <div className="grid grid-cols-2 gap-4">
@@ -535,24 +571,141 @@ const Alumnos = () => {
                                         <div><p className="text-xs text-zinc-400">Fecha Registro</p><p className="text-sm font-medium text-zinc-100">{fmtFecha(selectedAlumnoVoucher.created_at)}</p></div>
                                     </div>
                                 </div>
-                                <div className="border-2 border-dashed border-zinc-700 rounded-lg p-8 text-center bg-zinc-800/50">
-                                    <div className="text-6xl mb-4">📋</div>
-                                    <h4 className="text-lg font-semibold text-zinc-100 mb-2">Comprobante de Pago</h4>
-                                    <p className="text-sm text-zinc-400 mb-4">Transacción ID: <span className="font-mono font-bold">TXN-{selectedAlumnoVoucher.id}-2026</span></p>
-                                    <div className="bg-zinc-900 p-4 rounded border border-zinc-800 mb-4">
-                                        <p className="text-xs text-zinc-400 mb-2">Monto Pagado</p>
-                                        <p className="text-2xl font-bold text-green-600">$49.990</p>
-                                        <p className="text-xs text-zinc-400 mt-2">Membresía Mensual</p>
+                                {/* ── Comprobante REAL: el archivo que subió el alumno ──
+                                    Se pide al endpoint autenticado (blob) porque
+                                    /static/uploads/... se sirve sin token. Si el alumno no subió
+                                    nada se dice con todas las letras: antes acá había un
+                                    comprobante INVENTADO (TXN y monto fijos) y un cartel que
+                                    daba el pago por verificado sin haber validado ningún
+                                    archivo. */}
+                                <div className="border border-zinc-700 rounded-lg bg-zinc-800/40 overflow-hidden"
+                                    data-testid="comprobante-alumno">
+                                    <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2">
+                                        <h3 className="text-sm font-semibold text-zinc-200">
+                                            Comprobante enviado por el alumno
+                                        </h3>
+                                        {solicitudComprobante && (
+                                            <span className={`text-xs font-medium ${estadoSolicitudPlan(solicitudComprobante.estado).clase}`}
+                                                data-testid="estado-comprobante">
+                                                Solicitud #{solicitudComprobante.id} ·{' '}
+                                                {estadoSolicitudPlan(solicitudComprobante.estado).texto}
+                                            </span>
+                                        )}
                                     </div>
-                                    <p className="text-xs text-zinc-400">Fecha de Pago: {fmtFechaChile(new Date())}</p>
+
+                                    {solicitudesPlanQ.isLoading ? (
+                                        <div className="p-8 flex items-center justify-center">
+                                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500" />
+                                        </div>
+                                    ) : solicitudesPlanQ.error ? (
+                                        <div className="p-6 text-center" data-testid="error-comprobante">
+                                            <p className="text-sm text-red-400">
+                                                No se pudieron cargar las solicitudes del alumno.
+                                            </p>
+                                            <button
+                                                onClick={() => solicitudesPlanQ.refetch()}
+                                                className="mt-3 px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors"
+                                            >
+                                                Reintentar
+                                            </button>
+                                        </div>
+                                    ) : !solicitudComprobante ? (
+                                        <p className="p-6 text-sm text-zinc-400" data-testid="sin-comprobante">
+                                            Este alumno no tiene comprobantes de plan cargados.
+                                            <span className="block text-xs text-zinc-500 mt-1">
+                                                Aparecen cuando el alumno sube el pago de un plan
+                                                desde su panel.
+                                            </span>
+                                        </p>
+                                    ) : (
+                                        <>
+                                            <div className="px-4 py-2 text-xs text-zinc-400 flex flex-wrap gap-x-4 gap-y-1">
+                                                <span>
+                                                    Plan:{' '}
+                                                    <span className="text-zinc-200">{solicitudComprobante.plan_nombre}</span>
+                                                </span>
+                                                <span>
+                                                    Monto:{' '}
+                                                    <span className="text-zinc-200 font-semibold">
+                                                        ${(solicitudComprobante.precio_final
+                                                            ?? solicitudComprobante.plan_precio ?? 0).toLocaleString('es-CL')}
+                                                    </span>
+                                                    {solicitudComprobante.descuento_pct != null && (
+                                                        <span className="ml-1 text-amber-300">
+                                                            (−{solicitudComprobante.descuento_pct} % sobre
+                                                            ${(solicitudComprobante.plan_precio || 0).toLocaleString('es-CL')})
+                                                        </span>
+                                                    )}
+                                                </span>
+                                                <span>
+                                                    Enviado: {fmtFechaChile(solicitudComprobante.created_at)}
+                                                </span>
+                                            </div>
+                                            <div className="p-4 min-h-[12rem] flex items-center justify-center bg-zinc-950/40">
+                                                {comprobantePreview.loading ? (
+                                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500" />
+                                                ) : comprobantePreview.error ? (
+                                                    <div className="text-center" data-testid="error-vista-comprobante">
+                                                        <p className="text-sm text-red-400">{comprobantePreview.error}</p>
+                                                        <button
+                                                            onClick={reintentarComprobante}
+                                                            className="mt-3 px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors"
+                                                        >
+                                                            Reintentar
+                                                        </button>
+                                                    </div>
+                                                ) : comprobantePreview.blobUrl ? (
+                                                    comprobantePreview.mime.includes('pdf') ? (
+                                                        <iframe src={comprobantePreview.blobUrl}
+                                                            className="w-full h-80 rounded"
+                                                            title="Comprobante PDF" />
+                                                    ) : (
+                                                        <img src={comprobantePreview.blobUrl} alt="Comprobante"
+                                                            className="max-h-80 w-auto rounded" />
+                                                    )
+                                                ) : (
+                                                    <p className="text-zinc-400 text-sm">Sin vista previa</p>
+                                                )}
+                                            </div>
+                                            <div className="px-4 py-3 border-t border-zinc-800 flex justify-end">
+                                                <button
+                                                    onClick={async () => {
+                                                        setAvisoComprobante('');
+                                                        const r = await descargarComprobante();
+                                                        if (!r.ok) {
+                                                            setAvisoComprobante(r.error
+                                                                || 'No se pudo descargar el comprobante');
+                                                        }
+                                                    }}
+                                                    disabled={descargandoComprobante}
+                                                    className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                                                    data-testid="descargar-comprobante"
+                                                >
+                                                    {descargandoComprobante ? 'Descargando…' : '⬇ Descargar comprobante'}
+                                                </button>
+                                            </div>
+                                            {avisoComprobante && (
+                                                <p className="px-4 pb-3 text-xs text-red-400"
+                                                    data-testid="error-descarga-comprobante">
+                                                    ⚠️ {avisoComprobante}
+                                                </p>
+                                            )}
+                                        </>
+                                    )}
                                 </div>
-                                <div className="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-lg">
-                                    <span className="text-2xl">✓</span>
+
+                                {/* ── Aprobación MANUAL (crear la suscripción a mano) ──
+                                    El camino normal es aprobar el comprobante en Admin →
+                                    Pendientes de revisión (activa el plan y avisa al alumno).
+                                    Esto queda para el pago que llegó por fuera de la app. */}
+                                <div className="border-t border-zinc-800 pt-4 space-y-4">
                                     <div>
-                                        <p className="text-sm font-semibold text-green-800">Pago Verificado</p>
-                                        <p className="text-xs text-green-700">El comprobante ha sido validado correctamente</p>
+                                        <h3 className="text-sm font-semibold text-zinc-200">Aprobación manual</h3>
+                                        <p className="text-xs text-zinc-500 mt-1">
+                                            Sólo si el alumno pagó sin subir la solicitud: acá se crea
+                                            la suscripción a mano.
+                                        </p>
                                     </div>
-                                </div>
                                 {planVigenteAlumno && (
                                     <div className="bg-amber-500/10 border-l-4 border-amber-500 rounded p-4 text-sm text-amber-200"
                                         data-testid="aviso-plan-vigente">
@@ -608,6 +761,7 @@ const Alumnos = () => {
                                         </span>
                                     </div>
                                 )}
+                                </div>
                                 {mensajeAprobacion && (
                                     <p className={`text-sm font-medium ${mensajeAprobacion.startsWith('✅') ? 'text-green-700' : 'text-red-600'}`}>
                                         {mensajeAprobacion}

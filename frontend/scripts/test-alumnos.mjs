@@ -11,9 +11,12 @@
 //   5. badge de estado: mismos textos y mismas clases de siempre
 //   6. el tramo pedido FUERA DE RANGO retrocede al último válido (no deja la tabla vacía)
 //   7. el "Mostrando A-B de N" del pie (última página incompleta incluida)
+//   9. qué solicitud abre el modal "Voucher": la del ARCHIVO real (pendiente primero) y
+//      `null` cuando el alumno nunca subió comprobante (antes se inventaba uno)
 import {
-    badgeEstado, nombrePlan, paginaFueraDeRango, paginaValida, paramsAlumnos, rangoMostrado,
-    suscripcionDeAlumno, suscripcionVigente, suscripcionVigenteHoy, totalPaginas,
+    badgeEstado, estadoSolicitudPlan, nombrePlan, paginaFueraDeRango, paginaValida, paramsAlumnos,
+    rangoMostrado, solicitudConComprobante, suscripcionDeAlumno, suscripcionVigente,
+    suscripcionVigenteHoy, totalPaginas,
 } from '../src/utils/alumnos.js';
 import { sumarDiasInstante } from '../src/utils/fecha.js';
 
@@ -117,6 +120,32 @@ eq(rangoMostrado({ total: 60, porPagina: 25, pagina: 3, enPagina: 10 }), { total
 eq(rangoMostrado({ total: 7, porPagina: 25, pagina: 1, enPagina: 7 }), { totalPaginas: 1, desde: 1, hasta: 7 }, 'página única -> 1-7 de 7');
 eq(rangoMostrado({ total: 0, porPagina: 25, pagina: 2, enPagina: 0 }).desde, 0, 'sin datos, ninguna página inventa un "desde 26"');
 
+console.log('\n== 9. Modal "Voucher" del padrón: qué solicitud tiene el comprobante ==');
+// Lo que devuelve `/api/v1/solicitudes/alumno/{id}`: nuevas primero, con y sin archivo.
+const solNuevaSinArchivo = { id: 30, estado: 'rejected', voucher_url: null, created_at: '2026-03-10T12:00:00' };
+const solViejaAprobada = { id: 20, estado: 'approved', voucher_url: '/static/uploads/v20.pdf', created_at: '2026-03-01T09:00:00' };
+const solPendiente = { id: 10, estado: 'pending', voucher_url: '/static/uploads/v10.jpg', created_at: '2026-02-20T09:00:00' };
+const solNuevaAprobada = { id: 25, estado: 'approved', voucher_url: '/static/uploads/v25.jpg', created_at: '2026-03-05T09:00:00' };
+eq(solicitudConComprobante([]), null, 'sin solicitudes -> null (el modal dice que no hay comprobante)');
+eq(solicitudConComprobante(), null, 'lista ausente -> null (no explota)');
+eq(solicitudConComprobante([solNuevaSinArchivo]), null,
+    'solicitudes SIN archivo -> null: no hay nada que mostrar (nunca se inventa un monto)');
+eq(solicitudConComprobante([solNuevaSinArchivo, solViejaAprobada]), solViejaAprobada,
+    'se salta la solicitud sin archivo y toma la que sí lo tiene');
+eq(solicitudConComprobante([solNuevaAprobada, solPendiente]), solPendiente,
+    'si hay una PENDIENTE manda esa, aunque no sea la más nueva (es la que hay que revisar)');
+eq(solicitudConComprobante([solViejaAprobada, solNuevaAprobada]), solNuevaAprobada,
+    'sin pendientes -> la más NUEVA con archivo');
+eq(solicitudConComprobante([solPendiente, solNuevaSinArchivo]).id, 10,
+    'una pendiente SIN archivo no bloquea a la pendiente que sí lo tiene');
+eq(estadoSolicitudPlan('pending').texto, 'Pendiente de revisión', 'rótulo de pendiente');
+eq(estadoSolicitudPlan('approved').texto, 'Aprobada', 'rótulo de aprobada');
+eq(estadoSolicitudPlan('rejected').texto, 'Rechazada', 'rótulo de rechazada');
+eq(estadoSolicitudPlan('raro'), { texto: 'raro', clase: 'text-zinc-400' },
+    'un estado desconocido se muestra tal cual (no rompe el modal)');
+eq(estadoSolicitudPlan(null), { texto: 'Sin estado', clase: 'text-zinc-400' }, 'estado nulo -> "Sin estado"');
+
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
+
 process.exit(fallos === 0 ? 0 : 1);
 

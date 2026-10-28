@@ -17,6 +17,9 @@ export const SIN_DATOS = [];
 
 export const claves = {
     solicitudesPendientes: ['solicitudes', 'pendientes'],
+    // Solicitudes de UN alumno (padrón → modal "Voucher"). Cuelga de `['solicitudes']`
+    // a propósito: aprobar/rechazar invalida esa familia y el modal abierto se refresca.
+    solicitudesPlanAlumno: (alumnoId) => ['solicitudes', 'alumno', alumnoId],
     pendientesActivacion: ['alumnos', 'pendientes-activacion'],
     countPendientesActivacion: ['alumnos', 'pendientes-activacion', 'count'],
     stats: (tenantId) => ['reportes', tenantId],
@@ -194,6 +197,28 @@ export function useSolicitudesPendientes({ autoRefrescoMs = 0, staleTime = 15_00
         queryFn: async () => (await api.get('/api/v1/solicitudes/pendientes')).data || [],
         staleTime,
         refetchInterval: autoRefrescoMs || false,
+    });
+}
+
+/**
+ * Solicitudes de plan de UN alumno — las mira el modal "Voucher" del padrón.
+ *
+ * POR QUÉ EXISTE: `/solicitudes/pendientes` es la COLA del box; un alumno cuya
+ * solicitud ya fue aprobada o rechazada no aparecía ahí, y el modal del padrón
+ * terminaba mostrando un comprobante de mentira. Este endpoint devuelve SU historial,
+ * así el admin ve el archivo real que el alumno subió (comprobante pendiente o el de
+ * la última compra ya aprobada).
+ *
+ * `enabled` evita el request mientras el modal está cerrado (el id llega `undefined`).
+ */
+export function useSolicitudesPlanAlumno(alumnoId) {
+    return useQuery({
+        queryKey: claves.solicitudesPlanAlumno(alumnoId),
+        queryFn: async () => (
+            await api.get(`/api/v1/solicitudes/alumno/${alumnoId}`)
+        ).data || [],
+        enabled: Boolean(alumnoId),
+        staleTime: 30_000,
     });
 }
 
