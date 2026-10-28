@@ -1222,11 +1222,13 @@ const DashboardCoach = () => {
                                                     <tr key={alumno.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                                                         <td className="px-6 py-4 text-sm font-medium text-gray-900">
                                                             {alumno.nombre}
-                                                            {/* Nivel ESTIMADO con sus RMs (no hay campo en el
-                                                                perfil): fuerza y gimnasia por separado en el title. */}
+                                                            {/* Nivel PERSISTIDO (D3) que recalcula el backend: el
+                                                                badge es `usuarios.nivel_atleta`; fuerza y gimnasia
+                                                                viajan por separado para el tooltip. D1: un eje con
+                                                                <2 movimientos no publica nivel (se muestra el conteo). */}
                                                             <span
                                                                 className={`ml-2 inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full border ${colorNivel(alumno.nivel)}`}
-                                                                title={`Nivel estimado con sus RMs · fuerza: ${alumno.nivel_fuerza || 'sin datos'} · gimnasia: ${alumno.nivel_gimnastico || 'sin datos'}`}
+                                                                title={`Nivel calculado con sus RMs · fuerza: ${alumno.nivel_fuerza || 'sin datos'} (${alumno.movs_fuerza || 0} mov.) · gimnasia: ${alumno.nivel_gimnastico || 'sin datos'} (${alumno.movs_gimnasia || 0} mov.) · confianza: ${alumno.nivel_confianza || 'sin datos'}`}
                                                                 data-testid={`nivel-alumno-${alumno.id}`}
                                                             >
                                                                 {etiquetaNivelAtleta(alumno.nivel)}

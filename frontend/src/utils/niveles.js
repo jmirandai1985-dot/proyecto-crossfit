@@ -1,33 +1,27 @@
 /**
  * niveles — el "nivel de atleta" que se puede mostrar HOY, y de dónde sale.
  *
- * ESTADO REAL DEL DATO (auditado antes de construir el filtro del coach):
- *   · el perfil del alumno NO tiene un campo de nivel: `usuarios` no tiene columna `nivel` ni
- *     nada equivalente, y el formulario del admin no lo edita;
- *   · la tabla `student_segments` (migración 021, BASICO/INTERMEDIO/AVANZADO + scores) existe
- *     pero está documentada como SIN CONSUMIDORES: nadie la escribe, nadie la lee y no hay
- *     endpoint que la exponga.
+ * ESTADO REAL DEL DATO (D3, 2026-10-28):
+ *   · el backend persiste el nivel en `usuarios` (`nivel_fuerza`, `nivel_gimnastico`,
+ *     `nivel_atleta`, `nivel_movs_fuerza`, `nivel_movs_gimnasia`, `nivel_confianza`,
+ *     `nivel_calculado_en`, `nivel_version`) y lo recalcula al escribir un RM, al cambiar el
+ *     perfil (peso/género) y en el job nocturno;
+ *   · `GET /historial-rm/progreso-lote` devuelve esas columnas. Este módulo NORMALIZA lo que
+ *     manda el backend (`"Sin datos"` -> null) y NO vuelve a derivar el nivel: la regla del
+ *     badge (el menor de los ejes publicados) vive en `nivel_service.nivel_desde_mejores`.
  *
- * Lo que SÍ existe y el coach puede leer es el cálculo EN VIVO del backend:
- * `GET /historial-rm/alumnos/{id}/nivel-general` devuelve `nivel_fuerza` y `nivel_gimnastico`
- * (escala de `nivel_service.NIVELES`), o "Sin datos" cuando falta peso corporal/género o no
- * hay marcas.
- *
- * Este módulo deriva UN nivel de atleta con el MISMO criterio que usa el servicio —"el nivel
- * más bajo" entre los movimientos de cada grupo—: el MENOR de los dos. Es una ESTIMACIÓN con
- * los RMs cargados, no un campo del perfil, y así se rotula en el panel.
+ * D1: un eje publica nivel solo con >=2 movimientos clasificables; con menos queda "Sin datos"
+ * aunque haya una marca. Por eso `nivel` puede ser null aun con RMs cargados: el tooltip de la
+ * tabla muestra los conteos (`movs_fuerza` / `movs_gimnasia`) para explicarlo.
  */
 
 export const NIVELES_ATLETA = ['Principiante', 'Intermedio', 'Avanzado', 'Elite'];
 export const SIN_DATOS_NIVEL = 'Sin datos';
 
-/** Nivel estimado del alumno: el MENOR de fuerza/gimnasia (null si ninguno se pudo calcular). */
-export const nivelDeAtleta = ({ nivel_fuerza, nivel_gimnastico } = {}) => {
-    const presentes = [nivel_fuerza, nivel_gimnastico]
-        .filter((n) => NIVELES_ATLETA.includes(n));
-    if (presentes.length === 0) return null;
-    return presentes.reduce((min, n) => (
-        NIVELES_ATLETA.indexOf(n) < NIVELES_ATLETA.indexOf(min) ? n : min));
+/** Nivel de atleta que manda el backend (`nivel_atleta` persistido); null = "Sin datos". */
+export const nivelDesdeBackend = (fila = {}) => {
+    const nivel = fila?.nivel_atleta;
+    return NIVELES_ATLETA.includes(nivel) ? nivel : null;
 };
 
 /** Etiqueta para la UI: el nivel o "Sin datos" (nunca `undefined`). */

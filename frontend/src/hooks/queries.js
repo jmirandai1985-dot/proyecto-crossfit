@@ -9,7 +9,7 @@ import api from '../services/api';
 // función pura que valida `scripts/test-alumnos.mjs`: el request del escritorio y el de
 // la vista móvil del padrón son exactamente el mismo.
 import { paramsAlumnos } from '../utils/alumnos';
-import { nivelDeAtleta } from '../utils/niveles';
+import { nivelDesdeBackend } from '../utils/niveles';
 
 // Array vacío ESTABLE: es el fallback de las listas que devuelven las consultas. Un
 // `|| []` nuevo en cada render invalidaría los `useMemo` que dependen de esos datos.
@@ -1149,8 +1149,11 @@ export function useAlumnosCoachEnRiesgo(coachId) {
 // El corte de 50 queda como tope de seguridad si alguien pide una lista más grande (el endpoint
 // admite 100 y responde 400 más allá).
 //
-// El nivel NO vive en el perfil del alumno (`usuarios` no tiene esa columna) ni en
-// `student_segments` (sin consumidores): `utils/niveles` deriva el menor de fuerza/gimnasia.
+// El nivel VIVE en el perfil del alumno (`usuarios.nivel_*`, D3) y el backend lo recalcula al
+// escribir un RM, al cambiar peso/género y en el job nocturno. El hook LEE `nivel_atleta` de la
+// respuesta y NO lo deriva (antes hacía `nivelDeAtleta`, o sea una segunda definición en el
+// cliente). D1: un eje con <2 movimientos clasificables queda "Sin datos"; `movs_*` permite
+// explicar el badge vacío en el tooltip.
 export function useProgresoAlumnosCoach(alumnos) {
     const lista = (alumnos || []).slice(0, 50);
     const ids = lista.map((a) => a.id).join(',');
@@ -1171,14 +1174,13 @@ export function useProgresoAlumnosCoach(alumnos) {
                     telefono: alumno.telefono,
                     total_rms: fila?.total_rms ?? rms.length,
                     rms,
-                    // `null` = no se pudo calcular (sin peso/género o sin marcas): el panel lo
-                    // muestra como "Sin datos" y el filtro tiene su propio bucket.
-                    nivel: nivelDeAtleta({
-                        nivel_fuerza: fila?.nivel_fuerza,
-                        nivel_gimnastico: fila?.nivel_gimnastico,
-                    }),
+                    // `null` = nivel no publicado (sin perfil, sin marcas o con <2 por eje).
+                    nivel: nivelDesdeBackend(fila),
                     nivel_fuerza: fila?.nivel_fuerza || null,
                     nivel_gimnastico: fila?.nivel_gimnastico || null,
+                    nivel_confianza: fila?.nivel_confianza || null,
+                    movs_fuerza: fila?.movs_fuerza ?? 0,
+                    movs_gimnasia: fila?.movs_gimnasia ?? 0,
                     estado: rms.length >= 5 ? 'activo' : rms.length > 0 ? 'iniciando' : 'sin_datos',
                 };
             });

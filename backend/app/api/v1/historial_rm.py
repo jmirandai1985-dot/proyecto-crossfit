@@ -270,8 +270,15 @@ def progreso_lote(
             alumno_id=alumno_id,
             total_rms=len(rms_por_alumno.get(alumno_id, [])),
             rms=rms_por_alumno.get(alumno_id, []),
-            nivel_fuerza=niveles.get(alumno_id, {}).get("nivel_fuerza", "Sin datos"),
-            nivel_gimnastico=niveles.get(alumno_id, {}).get("nivel_gimnastico", "Sin datos"),
+            **{clave: niveles.get(alumno_id, {}).get(clave, defecto)
+               for clave, defecto in (
+                   ("nivel_fuerza", "Sin datos"),
+                   ("nivel_gimnastico", "Sin datos"),
+                   ("nivel_atleta", "Sin datos"),
+                   ("movs_fuerza", 0),
+                   ("movs_gimnasia", 0),
+                   ("nivel_confianza", "sin_datos"),
+               )},
         )
         for alumno_id in ids
     ]}

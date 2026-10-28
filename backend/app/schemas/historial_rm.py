@@ -126,10 +126,16 @@ class ProgresoAlumnoLote(BaseModel):
     total_rms: int
     rms: List[RMPorMovimiento]
     # Mismo contrato que `GET /alumnos/{id}/nivel-general`: los DOS niveles del servicio, o
-    # "Sin datos". El frontend deriva el nivel de atleta con `utils/niveles` (el menor de los dos),
-    # así que la tabla del coach y el endpoint individual no pueden pintar niveles distintos.
+    # "Sin datos". D1: un eje publica con >=2 movimientos clasificables; con menos queda
+    # "Sin datos" (por eso viajan los conteos: la UI puede explicar POR QUÉ no hay nivel).
+    # D3: `nivel_atleta` lo calcula el backend (el menor de los ejes publicados) y el front
+    # lo LEE; ya no lo deriva en el cliente.
     nivel_fuerza: str
     nivel_gimnastico: str
+    nivel_atleta: str = "Sin datos"
+    movs_fuerza: int = 0
+    movs_gimnasia: int = 0
+    nivel_confianza: str = "sin_datos"
 
 
 class ProgresoLoteResponse(BaseModel):

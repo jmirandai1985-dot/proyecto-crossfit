@@ -56,18 +56,27 @@ def _hook_progreso() -> str:
 
 
 # ── A. El reductor de nivel (puro) ────────────────────────────────────────────
+# D1 (2026-10-28): un eje publica nivel solo con >=2 movimientos clasificables.
 def test_a1_nivel_por_movimiento():
     from app.services.nivel_service import nivel_desde_mejores
 
-    # Back Squat 200 kg con 80 kg de peso corporal = ratio 2.5 -> Elite (M).
-    fuerza = nivel_desde_mejores([(1, 200.0, BACK_SQUAT)], 80, "M")
-    assert fuerza["nivel_fuerza"] == "Elite"
-    assert fuerza["nivel_gimnastico"] == "Sin datos"
+    # UNA sola marca NO publica el eje (D1): Back Squat 200 kg con 80 kg = ratio 2.5 (Elite),
+    # pero el eje queda "Sin datos" hasta tener un segundo movimiento clasificable.
+    una_marca = nivel_desde_mejores([(1, 200.0, BACK_SQUAT)], 80, "M")
+    assert una_marca["nivel_fuerza"] == "Sin datos"
+    assert una_marca["movs_fuerza"] == 1
+    assert una_marca["nivel_gimnastico"] == "Sin datos"
 
-    # 10 pull-ups = Intermedio (M: 1 / 10 / 20 / 30).
-    gimnasia = nivel_desde_mejores([(2, 10.0, PULL_UPS)], 80, "M")
-    assert gimnasia["nivel_gimnastico"] == "Intermedio"
-    assert gimnasia["nivel_fuerza"] == "Sin datos"
+    # Con 2 movimientos de fuerza sí publica el mínimo de los dos (Elite + Elite).
+    dos_marcas = nivel_desde_mejores(
+        [(1, 200.0, BACK_SQUAT), (2, 170.0, FRONT_SQUAT)], 80, "M")
+    assert dos_marcas["nivel_fuerza"] == "Elite"
+    assert dos_marcas["movs_fuerza"] == 2
+
+    # 10 pull-ups = Intermedio (M: 1 / 10 / 20 / 30), pero solo con una marca no publica.
+    una_gim = nivel_desde_mejores([(3, 10.0, PULL_UPS)], 80, "M")
+    assert una_gim["nivel_gimnastico"] == "Sin datos"
+    assert una_gim["movs_gimnasia"] == 1
 
 
 def test_a2_gana_el_nivel_mas_bajo_entre_movimientos():
@@ -88,24 +97,33 @@ def test_a3_el_orden_de_las_marcas_no_altera_el_nivel():
     invertido = nivel_desde_mejores(list(reversed(marcas)), 80, "M")
     assert (directo["nivel_fuerza"], directo["nivel_gimnastico"]) == (
         invertido["nivel_fuerza"], invertido["nivel_gimnastico"])
-    assert directo["nivel_gimnastico"] == "Intermedio"
+    assert directo["nivel_fuerza"] == "Principiante"
+    # Gimnasia con UNA sola marca: no publica (D1), pero el detalle la muestra.
+    assert directo["nivel_gimnastico"] == "Sin datos"
+    assert directo["movs_gimnasia"] == 1
 
 
 def test_a4_sin_peso_o_genero_no_hay_nivel_de_fuerza():
     from app.services.nivel_service import nivel_desde_mejores
 
-    sin_peso = nivel_desde_mejores([(1, 200.0, BACK_SQUAT)], None, "M")
+    sin_peso = nivel_desde_mejores(
+        [(1, 200.0, BACK_SQUAT), (2, 60.0, FRONT_SQUAT)], None, "M")
     assert sin_peso["nivel_fuerza"] == "Sin datos"
-    # La gimnasia NO necesita peso corporal: sigue calculando.
-    assert nivel_desde_mejores([(2, 10.0, PULL_UPS)], None, "M")["nivel_gimnastico"] == "Intermedio"
+    # La gimnasia NO necesita peso corporal: con 2 marcas sigue calculando.
+    gimnasia = nivel_desde_mejores(
+        [(3, 10.0, PULL_UPS), (4, 15.0, "Toes to Bar (T2B)")], None, "M")
+    assert gimnasia["nivel_gimnastico"] == "Intermedio"
 
 
 def test_a5_sin_marcas_todo_sin_datos():
     from app.services.nivel_service import nivel_desde_mejores
 
     vacio = nivel_desde_mejores([], 80, "M")
-    assert vacio == {"nivel_fuerza": "Sin datos", "nivel_gimnastico": "Sin datos",
-                     "detalle_fuerza": [], "detalle_gimnastico": []}
+    assert vacio["nivel_fuerza"] == "Sin datos"
+    assert vacio["nivel_gimnastico"] == "Sin datos"
+    assert vacio["nivel_atleta"] == "Sin datos"
+    assert vacio["nivel_confianza"] == "sin_datos"
+    assert vacio["detalle_fuerza"] == [] and vacio["detalle_gimnastico"] == []
 
 
 # ── B. UNA definición: la de a uno delega en la del lote ──────────────────────
@@ -170,6 +188,9 @@ def test_c3_el_hook_conserva_el_contrato_de_la_tabla():
     """Las claves que consume `DashboardCoach` (y el filtro de nivel) siguen saliendo del hook."""
     hook = _hook_progreso()
     for clave in ("total_rms", "rms", "nivel_fuerza", "nivel_gimnastico", "estado",
-                  "nivel: nivelDeAtleta("):
+                  "nivel: nivelDesdeBackend(", "movs_fuerza", "movs_gimnasia",
+                  "nivel_confianza"):
         assert clave in hook, f"el hook dejó de exponer {clave}"
+    # D3: el front LEE el nivel del backend; no lo vuelve a derivar en el cliente.
+    assert "nivelDeAtleta" not in hook
 

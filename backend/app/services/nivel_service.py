@@ -3,10 +3,19 @@ Servicio de cálculo de nivel de atleta.
 Usa las tablas crossfit_ratios.py (fuerza) y crossfit_habilidades.py (gimnástico)
 para determinar el nivel de un alumno en cada movimiento.
 """
+import os
+
 from app.db.crossfit_ratios import CROSSFIT_RATIOS
 from app.db.crossfit_habilidades import CROSSFIT_HABILIDADES
 
 NIVELES = ["Principiante", "Intermedio", "Avanzado", "Elite"]
+
+# D1 (decisión de negocio 2026-10-28): un eje NO publica nivel con una sola marca.
+# El mínimo de muestra por eje es 2 movimientos clasificables; con menos, el eje queda
+# "Sin datos" aunque haya 1 marca (era lo que producía los falsos "Elite": la alumna 9
+# tenía 2 marcas de fuerza, 0 de gimnasia, y su badge global salía Elite).
+# Configurable por entorno para poder bajarlo a 1 sin tocar código si el box lo pide.
+NIVEL_MIN_MOVS_EJE = int(os.getenv("NIVEL_MIN_MOVS_EJE", "2"))
 NIVELES_ORDEN = {n: i for i, n in enumerate(NIVELES)}
 
 
@@ -149,7 +158,7 @@ def _siguiente_nivel_gimnastico(valor, niveles, tipo):
     return {"nivel": sig_nivel, "faltante": faltante}
 
 
-def nivel_desde_mejores(mejores, peso_corporal, genero) -> dict:
+def nivel_desde_mejores(mejores, peso_corporal, genero, min_movs_eje=None) -> dict:
     """
     Nivel de UN alumno a partir de sus mejores RMs por movimiento. FUNCIÓN PURA (sin DB).
 
@@ -161,6 +170,11 @@ def nivel_desde_mejores(mejores, peso_corporal, genero) -> dict:
     (`calcular_nivel_general`) y el de TODA la página del coach (`calcular_niveles_lote`), así
     que las dos pantallas no pueden divergir.
 
+    D1 (2026-10-28): cada eje publica nivel solo si tiene `min_movs_eje` movimientos
+    clasificables (default 2). Con menos, el eje devuelve "Sin datos" aunque haya 1 marca.
+    `nivel_atleta` es el minimo de los ejes publicados y `nivel_confianza` resume cuanta
+    evidencia hay (alta/media/baja/sin_datos).
+
     - nivel_fuerza: el nivel más bajo entre todos los movimientos de Grupo A, recalculado con el
       peso_kg y genero ACTUAL del usuario
     - nivel_gimnastico: el nivel más bajo entre todos los movimientos de Grupo B, recalculado en
@@ -168,6 +182,10 @@ def nivel_desde_mejores(mejores, peso_corporal, genero) -> dict:
     """
     nivel_fuerza = None
     nivel_gimnastico = None
+    # D1: cuántos movimientos CLASIFICARON en cada eje (no cuántos hay). El eje publica
+    # nivel solo si llega a `min_movs_eje`; si no, queda "Sin datos" aunque haya una marca.
+    movs_fuerza = 0
+    movs_gimnasia = 0
     detalle_fuerza = []
     detalle_gimnastico = []
     tiene_fuerza = peso_corporal is not None and genero is not None
@@ -186,6 +204,7 @@ def nivel_desde_mejores(mejores, peso_corporal, genero) -> dict:
                 nivel = None
 
             if nivel:
+                movs_fuerza += 1
                 idx = NIVELES_ORDEN.get(nivel, -1)
                 if nivel_fuerza is None or idx < NIVELES_ORDEN.get(nivel_fuerza, 99):
                     nivel_fuerza = nivel
@@ -204,6 +223,7 @@ def nivel_desde_mejores(mejores, peso_corporal, genero) -> dict:
                 nivel = None
 
             if nivel:
+                movs_gimnasia += 1
                 idx = NIVELES_ORDEN.get(nivel, -1)
                 if nivel_gimnastico is None or idx < NIVELES_ORDEN.get(nivel_gimnastico, 99):
                     nivel_gimnastico = nivel
@@ -213,9 +233,41 @@ def nivel_desde_mejores(mejores, peso_corporal, genero) -> dict:
                 detalle_gimnastico.append(
                     {"movimiento": nombre, "nivel": "Sin datos"})
 
+    # D1: publicar el eje exige `min_movs_eje` movimientos clasificables. Con menos, el eje
+    # queda "Sin datos" (no se publica un nivel sostenido por una sola marca).
+    minimo = NIVEL_MIN_MOVS_EJE if min_movs_eje is None else max(1, int(min_movs_eje))
+    publica_fuerza = movs_fuerza >= minimo
+    publica_gimnasia = movs_gimnasia >= minimo
+    nivel_fuerza = nivel_fuerza if publica_fuerza else None
+    nivel_gimnastico = nivel_gimnastico if publica_gimnasia else None
+
+    # Badge global (D3): MISMA regla que el front tenía en `utils/niveles.js` — el MENOR de
+    # los ejes publicados. Se calcula en el backend para que el front lo LEA de la columna
+    # `usuarios.nivel_atleta` en vez de volver a derivarlo.
+    publicados = [n for n in (nivel_fuerza, nivel_gimnastico) if n]
+    nivel_atleta = (min(publicados, key=lambda n: NIVELES_ORDEN.get(n, 99))
+                    if publicados else None)
+
+    # Confianza de la clasificación: alta = los dos ejes publican; media = los dos ejes
+    # tienen alguna marca clasificable pero a alguno le falta muestra; baja = un solo eje
+    # con evidencia; sin_datos = ninguna marca clasificable.
+    if publica_fuerza and publica_gimnasia:
+        confianza = "alta"
+    elif movs_fuerza >= 1 and movs_gimnasia >= 1:
+        confianza = "media"
+    elif movs_fuerza or movs_gimnasia:
+        confianza = "baja"
+    else:
+        confianza = "sin_datos"
+
     return {
         "nivel_fuerza": nivel_fuerza or "Sin datos",
         "nivel_gimnastico": nivel_gimnastico or "Sin datos",
+        "nivel_atleta": nivel_atleta or "Sin datos",
+        "movs_fuerza": movs_fuerza,
+        "movs_gimnasia": movs_gimnasia,
+        "min_movs_eje": minimo,
+        "nivel_confianza": confianza,
         "detalle_fuerza": detalle_fuerza,
         "detalle_gimnastico": detalle_gimnastico
     }
