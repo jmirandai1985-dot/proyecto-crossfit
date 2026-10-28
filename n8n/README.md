@@ -3,6 +3,17 @@
 Estos JSON son **copias de referencia** de workflows que viven en la **instancia de n8n**.
 El repo **no** es la fuente de verdad de la automatización: la instancia lo es.
 
+> **⚠️ 2026-10-28 — la carpeta está VACÍA (auditoría B9).** Los 9 JSON que había se borraron
+> en el commit `017bd65` (2026-10-02, "borrar endpoints n8n sin uso, workflows y vars
+> BASIC_AUTH obsoletas"), así que hoy `n8n/workflows/` **no tiene ningún archivo** y ninguna de
+> las referencias de este README a un `.json` versionado existe. En ese mismo commit se eliminó
+> también `POST /api/v1/asistencia/n8n/evaluar-mes`: el cierre mensual lo dispara APScheduler
+> (`cierre_mes`, `app/services/scheduler.py`) llamando a `asistencia_service.evaluar_mes`, sin
+> pasar por HTTP. **Si el workflow `fidelizacion y retencion` sigue activo en la instancia de
+> PROD, el día 1 responde 404 y no envía ningún correo.** Qué hacer con eso (exportar, apagar o
+> repuntar) es la decisión pendiente de B9: `AUDITORIA_CLASIFICACION_Y_MANTENIMIENTO.md`,
+> Anexo D.
+
 ## ⚠️ Autenticación: `X-N8N-API-Key`
 
 Los nodos HTTP Request mandan el header `X-N8N-API-Key` (**no** usan credencial de n8n).
@@ -42,7 +53,8 @@ En este repo el valor está **sanitizado** como placeholder:
 > Antes apuntaba a `host.docker.internal:8001` (TEST) con la key de TEST, así que
 > esos correos **nunca llegaban a alumnos reales**. Ahora apunta a PROD con la key
 > de PROD (misma key que usan los workflows `[PROD]`).
-> Copia saneada versionada en `n8n/workflows/fidelizacion_y_retencion_prod.json`.
+> Copia saneada versionada en `n8n/workflows/fidelizacion_y_retencion_prod.json`
+> (**borrada el 2026-10-02**, ver el aviso del principio).
 > Verificado con una corrida real del trigger (sonda `?anio=2026&mes=13`): n8n
 > ejecutó el workflow (`mode=trigger`) y PROD respondió su propia validación
 > `400 "mes fuera de rango (1-12)"`, lo que prueba URL + key válidas sin enviar
@@ -99,8 +111,8 @@ claves vacías (`app/api/v1/kpis_populate.py`, `app/api/v1/mantenimiento.py`).
 - Migrar de header hardcodeado a **credencial HTTP Header Auth** en n8n (así el valor no viaja
   en los exports) y referenciarla con `{{ $credentials.n8nApiKey.value }}` o, con variables de
   entorno de n8n, `={{ $env.N8N_API_KEY }}`.
-- El repo tiene sólo **7 de los 18** workflows de la instancia: además de los 6 de KPIs/ML
-  se agregó `fidelizacion_y_retencion_prod.json` (cierre mensual de Asistencia + Hitos).
+- El repo tiene **0 de los 18** workflows de la instancia: hasta el 2026-10-02 versionaba 7
+  (los 6 de KPIs/ML + `fidelizacion_y_retencion_prod.json`), pero se borraron en `017bd65`.
   Faltan `Mantenimiento Diario/Mensual` y los de alertas (`Urgencia`, `1. RENOVACIÓN`,
   `INACTIVIDAD`, `ÚLTIMO CRÉDITO`, `SIN CRÉDITOS`). Exportarlos y sanitizarlos igual.
 - Revisar workflows inactivos/duplicados de la instancia: `My workflow` (apunta al puerto 8000,

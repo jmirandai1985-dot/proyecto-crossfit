@@ -118,8 +118,11 @@ class Settings(BaseSettings):
     # fail-safe fuera de producción); esto apaga el resto de la cadena.
     SCHEDULER_ENABLED: bool = True
 
-    # n8n (Sistema de Asistencia/Hitos): API key para POST /api/v1/asistencia/n8n/evaluar-mes
-    # Se envía en el header `X-N8N-API-Key` y se compara con secrets.compare_digest.
+    # n8n / Cron Job de Render: API key para los endpoints de automatizacion que la usan
+    # (`kpis_populate.py`, `ml.py`, `notificaciones_enviadas.py`). Se envia en el header
+    # `X-N8N-API-Key` y se compara con secrets.compare_digest. OJO: desde 2026-10-02 ya NO
+    # existe `POST /api/v1/asistencia/n8n/evaluar-mes` (lo reemplazo el job `cierre_mes` del
+    # scheduler interno), asi que esta key no autentica ningun webhook de asistencia.
     N8N_API_KEY: str = ""
 
     # Cron Job de Render (KPIs/ML/segmentacion): API key ALTERNATIVA para los MISMOS

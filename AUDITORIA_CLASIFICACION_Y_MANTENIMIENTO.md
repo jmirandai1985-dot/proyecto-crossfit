@@ -718,4 +718,136 @@ quedaron **fuera del repo** (`%TEMP%`), y los logs se copiaron a `%TEMP%\mlogs` 
 *Documento generado el 2026-10-26. Read-only: ningún archivo de producto, dato o configuración fue
 modificado. Queda sin commitear para revisión.*
 
+---
 
+# Anexo D — B1–B9 al 2026-10-28
+
+Tres commits nuevos en `main` (sin push) cierran o desbloquean 6 de los 9 hallazgos de la Parte 2;
+los otros 3 dependen de una decisión de negocio, no de código. Nada de esta tanda se ejecutó
+contra PROD: lo que escribe se probó con dobles (`tests/test_mantenimiento_cloud.py`, sin red ni
+credenciales) y lo que despliega se declara en el blueprint para que lo aplique Render.
+
+| ID | Hallazgo (§2) | Estado | Dónde quedó |
+|---|---|---|---|
+| B1 | Job diario local falla 5/5 desde 2026-10-02 | ✅ **Ejecutado** | `19676ff`, ver D.1 |
+| B2 | Falsos verdes: "Backup completado" y "Alerta enviada" | ✅ **Ejecutado** | `19676ff` + `bcfc6bf`, ver D.1 |
+| B3 | Único backup: 1,4 MB del 2026-09-26, manual | 🟡 **Desbloqueado, sin corrida real** | decisión 1, D.4 |
+| B4 | Cron Jobs sin versionar; `DRY_RUN=1` por defecto | ✅ **Ejecutado** | `0f886bd` + `e3973c8`, ver D.2 |
+| B5 | 4 ramas Neon, una con credencial revocada | ⛔ **Bloqueado** | decisión 2, D.4 |
+| B6 | 538/2.017 notificaciones fallidas (26,7 %) | 🟡 **Código sí; los 538 históricos no se tocaron** | `d032d5b` `654fe05` `eaf8298` `bcfc6bf`, ver D.3 |
+| B7 | Scheduler pierde liderazgo 121 veces / 48 h | ✅ **Ya estaba arreglado** (2026-10-11) | `65c1910`, ver D.3 |
+| B8 | Sin retención en `reservas`, `asistencias`, `auditoria` y usuarios `baja` | ⛔ **Bloqueado** (falta la política) | decisión 3, D.4 |
+| B9 | `fidelizacion y retencion` sin reemplazo ni versión | ⛔ **Bloqueado** + hallazgo nuevo | `017bd65`, ver D.4 |
+
+## D.1 B1/B2 — el job local ya corre con el entorno del contenedor
+
+La causa del falso verde era una sola línea del crontab: `boxapp cd /app && python -m
+maintenance.run_daily >> …` con **cron, que no hereda el entorno del contenedor**. `ENVIRONMENT`
+llegaba vacío, el fail-safe elegía `.env.test` (localhost:5432), el job moría con "Connection
+refused" y el redirect dejaba un log vacío con **salida 0**: indistinguible de un día sin nada
+que hacer.
+
+- `maintenance/docker-entrypoint.sh` (nuevo `ENTRYPOINT`): vuelca `env_file:` + `environment:`
+  —lo que docker-compose ya inyecta— a `/etc/box-maintenance.env` `0600 boxapp`, y hace
+  `exec cron -f`. No escribe el archivo si no hay nada que volcar (no inventa un entorno vacío) y
+  nunca imprime valores: sólo los nombres de las variables.
+- `maintenance/cron_job.sh` (nuevo): lo invoca cada línea del crontab; carga el snapshot con
+  `set -a`, hace `cd /app`, verifica que el módulo exista y ejecuta `python -m <módulo>`. Sin
+  snapshot sale con **78 (EX_CONFIG)** en vez de arrancar a ciegas.
+- `crontab`: `SHELL=/bin/sh` y `PATH=/usr/local/bin:/usr/bin:/bin` explícitos (el `sh` de Debian
+  es dash y el PATH mínimo de cron no incluye `/usr/local/bin`).
+- `.gitattributes` (nuevo): `*.sh`, `backend/maintenance/crontab` y `Dockerfile*` con `eol=lf`
+  aunque el repo se clone en Windows. Un CRLF al final deja el comando con el retorno de carro
+  pegado: la misma clase de falla silenciosa, y el repo no tenía ninguna regla de fin de línea.
+- B2 (segunda mitad): `bcfc6bf` ya había sacado el "✅ Alerta enviada" cuando el correo era
+  simulado; la primera mitad ("Backup completado" sin backup) era justamente B1.
+
+Verificación: `docs/CRON_JOBS_RENDER.md` §5 tiene los 5 comandos (cuántas variables volcó el
+entrypoint, el `0600` del snapshot, el crontab con el wrapper, un job leyendo el entorno real
+como `boxapp`, y los logs del volumen).
+
+## D.2 B4 — los 5 Cron Jobs y el modo de ejecución explícito
+
+- `render.yaml` declaraba **sólo** el Web Service y decía que el cron de mantenimiento quedaba
+  afuera. Ahora tiene 6 servicios: el `web` y los 5 `type: cron` (`proyecto-crossfit` 06:00,
+  `box-crossfit-mantenimiento-prod` 08:00 los días 1 y 15, `box-crossfit-watchdog` 12:00,
+  `box-crossfit-restore-drill` 13:00 el día 1, `box-crossfit-kpis-ml` 10:00; todo en UTC), con
+  `dockerfilePath: backend/Dockerfile.cron`, `dockerContext: backend` y `dockerCommand`
+  explícito en cada uno (sin él, Render usaría el `CMD` de la imagen y un job de mantenimiento
+  haría un backup).
+- `mantenimiento_cloud.dry_run_activo()` era `os.getenv("DRY_RUN", "1")` y `Dockerfile.cron`
+  también fijaba `DRY_RUN=1`: un env group incompleto producía runs **verdes que no aplicaban
+  nada**. Ahora la lista es cerrada (`0/false/no/off` = REAL, `1/true/si/sí/yes/on` = ROLLBACK) y
+  cualquier otra cosa —incluida la variable ausente— es `ConfigError` ⇒ **exit 2 + correo**, sin
+  un solo `psql`. Tests nuevos: `test_c2` (ausente), `test_c3` (valor desconocido) y `test_c4`
+  (lista cerrada) en `tests/test_mantenimiento_cloud.py` ⇒ **182 passed**.
+- Los 2 jobs que aplican cambios (`mantenimiento-prod` y `kpis-ml`) fijan `DRY_RUN: "0"` **en el
+  servicio** porque una variable del servicio gana sobre la del env group y `kpis_cloud` cae a
+  `1` si falta (fail-open). `backup_cloud` conserva su default `1` en el código: se compensa con
+  `DRY_RUN=0` en el grupo `backups-prod` y lo vigila el watchdog (objeto viejo en R2).
+- `docs/CRON_JOBS_RENDER.md` (nuevo): tabla de los 5 jobs, inventario de env groups con los
+  nombres reales (`PROD_DB_DIRECT_URL`, `R2_*`), orden de sincronización (los grupos primero; el
+  sync empareja por nombre y falla si el job no está asociado al blueprint), tabla de `DRY_RUN` y
+  precedencia, verificación de B1, lo que sigue sin versionarse y un snippet de validación del
+  YAML sin credenciales.
+
+## D.3 B6 y B7 — lo que ya estaba resuelto y lo que no
+
+**B6 (correos).** Los 538 fallos se atacaron por causa, en commits previos a esta auditoría:
+`d032d5b` (guarda SMTP + modo failsafe), `654fe05` (reintento del corte de SMTP con conexión
+nueva y ráfagas espaciadas), `eaf8298` (alerta **A.7** de correos fallidos dentro del job de
+mantenimiento + retención de la bandeja in-app) y `bcfc6bf` (dejar de reportar "alerta enviada"
+cuando el correo fue simulado). Lo que **no** se hizo, a propósito: reenviar los 538 históricos.
+Es una decisión (muchos son de septiembre y el mensaje ya no aplica), y por eso B6 queda en 🟡.
+
+**B7 (liderazgo).** El arreglo es anterior a esta auditoría: `65c1910` (2026-10-11) commitea al
+tomar el lock, verifica contra `pg_locks` (`pg_try_advisory_lock` es re-entrante en la misma
+sesión y mentiría) y agrega el latido `job_vigilar_liderazgo` cada 5 min con relevo automático.
+La medición de §2.6 (121 pérdidas en 48 h ≈ una cada 24 min) es exactamente la firma de
+`idle_in_transaction_session_timeout = 5 min` matando la sesión del líder: lo que falta no es
+código, es **evidencia con el arreglo desplegado** — buscar en el log de PROD las 24 h posteriores
+al deploy, confirmar que no vuelve a aparecer la pérdida del lock y que
+`sincronizar_liderazgo()` devuelve `lider_ok`. Riesgo residual: el latido corre en el mismo
+período que el timeout, así que una pérdida justo en el borde depende del catch-up del job.
+
+## D.4 B3, B5, B8, B9 — lo que necesito que decidas
+
+**1) B3 · primer backup real y drill de restauración.** El código está; nadie lo corrió. Alcance
+mínimo propuesto: (a) sincronizar el blueprint y disparar `proyecto-crossfit` una vez con
+`DRY_RUN=0` en `backups-prod`, comprobando objeto + tamaño en R2; (b) correr
+`box-crossfit-restore-drill` **una vez** (crea una rama Neon desechable, restaura ahí y la borra
+al terminar: no toca PROD) y leer el reporte; (c) recién ahí decidir si el backup local de
+`/app/backups` sigue teniendo sentido o queda sólo R2. Pregunta: **¿autorizás (a) y (b) en el
+próximo deploy, o querés que el drill espere?** (el drill consume horas de cómputo de Neon y crea
+una rama temporal).
+
+**2) B5 · ramas Neon.** Hay 4 ramas, 4 configuraciones y una (`ep-summer-river`, sa-east-1, la del
+contenedor `box-crossfit-maintenance-1`) con la credencial revocada. Pregunta: **¿cuál rama es la
+TEST oficial — `crimson-tooth`, la que declara el `.env.test`, o `lingering-fog`, la que usa el
+backend local en ejecución?** Con eso: se borra `summer-river`, se alinean `docker-compose` y el
+`.env.test`, y se documenta el inventario. No borro ninguna rama sin ese OK.
+
+**3) B8 · retención.** Lo que ya existe en `mantenimiento_cloud` (pasos 10 y 11): tokens de reset
+vencidos/usados, `notificaciones_enviadas` > 180 d y bandeja in-app > 365 d. Eso corre **sólo en
+PROD** y probablemente nunca corrió: los 2 tokens expirados del 2026-09-26 siguen ahí, lo que es
+consistente con que el Cron Job de mantenimiento todavía no exista (D.2 lo crea). Lo que falta es
+la política para lo que no es bandeja: `reservas` (23.495 filas), `asistencias` (24.752),
+`auditoria` (68) y los 46 usuarios en `baja` (datos personales de ex-alumnos, sin anonimizar).
+Propuesta a decidir: **plazo de archivo de `reservas`/`asistencias` (3 / 5 / 7 años), TTL de
+`auditoria` (2 años) y anonimización de `usuarios` en `baja` a los 12 meses** (se conserva el `id`
+y las FKs; se vacían nombre, email y teléfono). Son migración + pasos nuevos del job + tests, así
+que necesito los plazos antes de escribir nada.
+
+**4) B9 · n8n.** Hallazgo nuevo de esta tanda: `n8n/workflows/` está **vacío** desde `017bd65`
+(2026-10-02) —el README seguía afirmando "7 de los 18 versionados" y que
+`fidelizacion_y_retencion_prod.json` estaba en el repo— y en ese mismo commit se eliminó
+`POST /api/v1/asistencia/n8n/evaluar-mes`, que ahora hace el job `cierre_mes` del scheduler
+interno. Es decir: **si `fidelizacion y retencion` sigue activo en la instancia de PROD, el día 1
+recibe 404 y no manda ningún correo de cumplimiento/hito**. Ya quedaron corregidos el README de
+`n8n/` (aviso al principio + las 2 afirmaciones falsas) y el comentario de `N8N_API_KEY` en
+`app/core/config.py`. Pregunta: **¿exportamos y apagamos ese workflow, o lo repuntamos a un
+endpoint que ya no existe?** Opciones reales: (a) exportar los 18 con
+`n8n export:workflow --all`, sanearlos y versionarlos; (b) apagar en la UI los que ya tienen
+reemplazo (los 4 de KPIs/ML y `fidelizacion y retencion`) y exportar sólo los de alertas; (c) las
+dos cosas. La instancia de n8n de este equipo está `Exited` hace 3 semanas, así que el export
+sale de la instancia externa y requiere tus credenciales.
