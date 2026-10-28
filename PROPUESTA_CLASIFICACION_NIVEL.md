@@ -23,7 +23,7 @@
 
 Cada sección cierra con **opciones + recomendación + esfuerzo**, no con una implementación.
 Al final hay un checklist de decisiones que necesito de vos y un anexo con el **FIX 4**
-bloqueado.
+(ejecutado en PROD el 2026-10-28, Anexo A.4).
 
 ---
 
@@ -65,7 +65,7 @@ bloqueado.
 6. [`student_segments`: qué hacer](#6-student_segments-qué-hacer)
 7. [Roadmap, esfuerzo y tests](#7-roadmap-esfuerzo-y-tests)
 8. [Decisiones pendientes](#8-decisiones-pendientes-para-el-dueño-del-producto)
-- [Anexo A — FIX 4 (PROD, carga k6): dry-run y bloqueo](#anexo-a--fix-4-prod-carga-k6-listo-para-ejecutar-bloqueado-por-credencial)
+- [Anexo A — FIX 4 (PROD, carga k6): ejecutado](#anexo-a--fix-4-prod-carga-k6-ejecutado-el-2026-10-28-ver-a4)
 - [Anexo B — Metodología](#anexo-b--metodología-y-límites-de-las-mediciones)
 
 ---
@@ -677,13 +677,13 @@ y por eje) debe dar:
 | D7 | ¿Se dropea `student_segments`? | DROP / dejar deprecada | **DROP** con backup | entrega 7 |
 | D8 | ¿`Pull-ups (Dominadas)` (2865) queda como alias de Kipping? | sí / se elimina del catálogo | **sí** | entrega 6 |
 | D9 | Los ratios propuestos (§5.2–5.3) ¿se calibran con el coach? | tal cual / calibrados | **calibrar P y E** (los extremos) | entrega 6 |
-| D10 | `MAINT_DB_URL` (rol `maint_rw`) para poder ejecutar FIX 4 | proveer la cadena | — | **FIX 4** (Anexo A) |
+| D10 | `MAINT_DB_URL` (rol `maint_rw`) para poder ejecutar FIX 4 | proveer la cadena | — | **FIX 4** (Anexo A.4) — **resuelta el 2026-10-28**, ejecutada |
 
 Ninguna de las entregas 1–3 y 7 depende de una decisión de negocio: se pueden arrancar ya.
 
 ---
 
-## Anexo A — FIX 4 (PROD, carga k6): listo para ejecutar, bloqueado por credencial
+## Anexo A — FIX 4 (PROD, carga k6): **EJECUTADO** el 2026-10-28 (ver A.4)
 
 **Tarea autorizada** (texto original): limpiar en PROD los usuarios de carga k6 —
 `suscripciones → 'vencido'` y `usuarios → 'rechazado', activo=false` — con dry-run previo,
@@ -711,7 +711,7 @@ Filas dependientes (para dimensionar el efecto, no se modifican): `reservas` 123
 `suscripciones` ni tablas hijas en `usuarios` que se borren: el cambio es de estado, no un
 DELETE.
 
-### A.2 Por qué no se ejecutó
+### A.2 Por qué no se ejecutó el 2026-10-27 (histórico, resuelto)
 
 `MAINT_DB_URL` (rol `maint_rw`, host directo sin `-pooler`) **no está definida en ningún
 `.env` del repo** (revisados `backend/.env*` y `.env*` de la raíz; solo aparece en
@@ -719,7 +719,7 @@ DELETE.
 pueden hacer los dos `UPDATE`, y tampoco el paso 3 (el dry-run de mantenimiento valida
 `MAINT_DB_URL` y aborta con `ConfigError` si falta — `mantenimiento_cloud.py:441-444`).
 
-### A.3 Ejecución, en cuanto exista la variable
+### A.3 Plan de ejecución (el que se usó, tal cual)
 
 Los `UPDATE` son los de la tarea, sin cambios. `rowcount` impreso por cada uno para comparar
 con el dry-run (95 / 95); si alguno no coincide, `ROLLBACK` en vez de `COMMIT`:
@@ -770,13 +770,41 @@ termina con exit 0 (o con los códigos ya conocidos por otros hallazgos, sin A.3
 `updated_at` no. Si se ejecuta y hay que revertir, es un `UPDATE` por id con la lista de los 95
 ids (536–630) — guardar esa lista antes de ejecutar.
 
+### A.4 Ejecutado — 2026-10-28 (resultado)
+
+Credencial provista por el dueño (`MAINT_DB_URL` de `maint_rw`, endpoint directo
+`ep-winter-star-…us-west-2`, sin `-pooler`). Secuencia real: dry-run → backup → 2 `UPDATE` en
+**una** transacción → `COMMIT` → verificación independiente → dry-run del mantenimiento.
+
+| Paso | Resultado |
+|---|---|
+| Dry-run previo (solo lectura) | 95 usuarios (ids 536–630, `@example.com`, todos `alumno`/tenant 1) · 141 suscripciones (95 `activo` + 46 `vencido`) · **UPDATE 1 = 95**, **UPDATE 2 = 95** — idéntico a A.1 |
+| Backup | `~/Desktop/Proyectos/_fix4_k6_backup_20261028_063424.json` — 95 filas de `usuarios` (id, correo, estado, activo, tenant_id, rol, created_at) + **141** filas de `suscripciones` (id, usuario_id, estado, plan_id, fechas) + los ids aplicados (95/95) |
+| `UPDATE 1` (suscripciones) | **95** filas → `estado='vencido'`, `updated_at=now()` |
+| `UPDATE 2` (usuarios) | **95** filas → `estado='rechazado'`, `activo=false` |
+| Guardas dentro de la transacción | `suscripciones vigentes = 0`, `usuarios sin rechazar/activos = 0` ⇒ `COMMIT` (si el rowcount no hubiera sido 95/95 ⇒ `ROLLBACK`) |
+| Post-fix (conexión nueva) | usuarios k6: `rechazado/false` ×95 · suscripciones k6: `vencido` ×141 · **0** vigentes · suscripciones vigentes de usuarios reales: **260**, igual que antes del fix |
+| Dry-run de `mantenimiento_cloud.py` (`DRY_RUN=1`, `ENVIRONMENT=production`) | `cambios_a_realizar=0` · `detecciones_hallazgos=0` (**A.3 sin hallazgos**) · `integridad_hallazgos=0` · `vencidos: 0 fila(s)` · `suscripciones_activas: 260` · `MAIL: no se envía (todo OK)` · `duracion_s=85` |
+
+Efecto lateral conocido y aceptado: el `updated_at` de las **95** suscripciones que el `UPDATE 1`
+tocó quedó en el momento del fix (las 46 que ya estaban `vencido` no entraron en el `WHERE` y
+conservan su fecha). A.3 sólo mira suscripciones **vigentes** y estos usuarios ya no tienen
+ninguna, así que no puede aparecer un descuadre falso por eso.
+
+Artefactos (fuera del repo, no se commitean): `_fix4_k6.py` (dry-run / apply / **revert** desde el
+backup), `_fix4_k6_backup_20261028_063424.json` y `_fix4_k6_mantenimiento_dryrun.log`, los tres en
+`~/Desktop/Proyectos/`. Revertir: `python _fix4_k6.py --revert --backup _fix4_k6_backup_…json`.
+El script aborta solo si el dry-run no da 95/95, así que una segunda corrida no puede tocar nada
+(hoy da 0/0 por idempotencia).
+
 ---
 
 ## Anexo B — Metodología y límites de las mediciones
 
 **Entorno:** PROD (Neon), conexión de **solo lectura** (`SELECT`) vía `DIRECT_URL` con
 `sslmode=require` (`backend/.env.prod`). **Cero escrituras**: no se ejecutó ningún `INSERT`,
-`UPDATE`, `DELETE` ni DDL. `MAINT_DB_URL` nunca estuvo disponible (Anexo A.2).
+`UPDATE`, `DELETE` ni DDL. `MAINT_DB_URL` nunca estuvo disponible durante la medición (Anexo A.2);
+se usó el 2026-10-28 ya con la credencial provista, sólo para el FIX 4 (A.4).
 
 **Población de referencia:** `usuarios` con `tenant_id = 1`, `rol = 'alumno'` y
 `correo NOT LIKE 'carga_k6_%'` → **410 alumnos**. Los 95 usuarios de carga k6 (ids 536–630)
