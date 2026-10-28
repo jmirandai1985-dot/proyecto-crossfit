@@ -43,11 +43,16 @@ RUN apt-get update \
     && pip install --no-cache-dir boto3
 
 # TZ=Chile para que los nombres de archivo salgan en hora local del box.
-# DRY_RUN=1 por defecto: si alguien olvida la variable, la imagen NO sube nada.
+# ⚠️ NO se define `DRY_RUN` acá (auditoría B4, 2026-10-28): cuando la imagen lo traía en `1`,
+#    un env group incompleto producía corridas VERDES que no aplicaban nada y nadie se
+#    enteraba. El valor ahora sale del env group de cada Cron Job, declarado en `render.yaml`
+#    (`DRY_RUN: "0"` en `mantenimiento-prod`/`kpis-prod`) y documentado en
+#    `docs/CRON_JOBS_RENDER.md`. `mantenimiento_cloud` es fail-closed: sin la variable, exit 2.
+#    `backup_cloud` y `kpis_cloud` conservan su default `1` en el código (el watchdog de
+#    backups avisa si el objeto de R2 no se renueva, y kpis lo dice en el log de cada run).
 ENV TZ=America/Santiago \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    DRY_RUN=1
+    PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 

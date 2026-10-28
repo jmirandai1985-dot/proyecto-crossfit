@@ -101,8 +101,15 @@ RUN apt-get update \
     && mkdir -p /app/backups \
     && chown -R boxapp:boxapp /app
 COPY maintenance/crontab /etc/cron.d/box-maintenance
-RUN chmod 0644 /etc/cron.d/box-maintenance
 # cron corre como root (Debian lo exige); los jobs se ejecutan como boxapp
 # vía la columna de usuario del crontab (/etc/cron.d/box-maintenance).
 # Los jobs escriben en /app/logs (volumen) y /app/backups (volumen).
+# OJO con los permisos: en Windows el bit de ejecución del contexto de build se pierde,
+# así que el chmod va acá (si falta, cron falla con "Permission denied" y el job no corre).
+RUN chmod 0644 /etc/cron.d/box-maintenance \
+    && chmod 0755 /app/maintenance/cron_job.sh /app/maintenance/docker-entrypoint.sh
+# ENTRYPOINT (auditoría B1): cron NO hereda el entorno del contenedor. El entrypoint volca
+# `env_file:` + `environment:` a /etc/box-maintenance.env (0600 boxapp) y cron_job.sh lo
+# carga en cada job. Sin esto los jobs corrían con ENVIRONMENT=None y DATABASE_URL vacía.
+ENTRYPOINT ["/app/maintenance/docker-entrypoint.sh"]
 CMD ["cron", "-f", "-l", "2"]

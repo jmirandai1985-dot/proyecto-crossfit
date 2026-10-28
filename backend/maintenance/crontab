@@ -2,8 +2,21 @@
 # TZ del contenedor = America/Santiago (seteada en la imagen Docker).
 # Los horarios están escritos en CLT (Chile), no en UTC.
 #
+# ⚠️ cron NO hereda el entorno del contenedor (auditoría B1, 2026-10-28): por eso los jobs
+#    se lanzan por `maintenance/cron_job.sh`, que carga `/etc/box-maintenance.env` (el
+#    snapshot que escribe `maintenance/docker-entrypoint.sh` al arrancar el contenedor:
+#    `ENVIRONMENT=test`, `DATABASE_URL` de la rama de TEST, `BACKEND_URL`, credenciales SMTP,
+#    etc.) y hace `cd /app` antes de invocar el módulo.
+#    Sin eso el job corría con `ENVIRONMENT=None`, caía al fail-safe (`.env.test` ⇒
+#    localhost:5432) y fallaba todos los días con "Connection refused", con salida 0.
+#
+# SHELL y PATH explícitos: el `sh` de Debian es dash y el PATH mínimo de cron no incluye
+# /usr/local/bin (donde pip instala el intérprete y uvicorn/alembic).
+SHELL=/bin/sh
+PATH=/usr/local/bin:/usr/bin:/bin
+
 # Diario 02:30 CLT -> run_daily.py  (backup, vencidos, huérfanas, health, neon)
-30 2 * * * boxapp cd /app && /usr/local/bin/python -m maintenance.run_daily >> /app/logs/cron.log 2>&1
+30 2 * * * boxapp /app/maintenance/cron_job.sh maintenance.run_daily >> /app/logs/cron.log 2>&1
 #
 # Mensual, día 1, 03:00 CLT -> run_monthly.py (todo + integridad + reporte + rotación)
-0 3 1 * * boxapp cd /app && /usr/local/bin/python -m maintenance.run_monthly >> /app/logs/cron.log 2>&1
+0 3 1 * * boxapp /app/maintenance/cron_job.sh maintenance.run_monthly >> /app/logs/cron.log 2>&1

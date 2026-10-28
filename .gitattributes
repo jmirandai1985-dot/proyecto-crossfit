@@ -1,0 +1,8 @@
+# Scripts de shell, crontab y Dockerfiles: SIEMPRE LF, también cuando el repo se clona en
+# Windows (core.autocrlf=true). Un \r al final de la línea rompe cron (el comando se ejecuta
+# con "\r" pegado y falla con "Permission denied" o "not found") y también el shebang.
+# Es exactamente la trampa que dejó el job diario en falso verde durante semanas (auditoría
+# B1: la salida era 0 y el log no se escribía).
+*.sh                         text eol=lf
+backend/maintenance/crontab  text eol=lf
+Dockerfile*                  text eol=lf
