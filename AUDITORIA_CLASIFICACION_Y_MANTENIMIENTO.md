@@ -731,9 +731,9 @@ credenciales) y lo que despliega se declara en el blueprint para que lo aplique 
 |---|---|---|---|
 | B1 | Job diario local falla 5/5 desde 2026-10-02 | ✅ **Ejecutado** | `19676ff`, ver D.1 |
 | B2 | Falsos verdes: "Backup completado" y "Alerta enviada" | ✅ **Ejecutado** | `19676ff` + `bcfc6bf`, ver D.1 |
-| B3 | Único backup: 1,4 MB del 2026-09-26, manual | 🟡 **Desbloqueado, sin corrida real** | decisión 1, D.4 |
+| B3 | Único backup: 1,4 MB del 2026-09-26, manual | ✅ **Ejecutado** (dump real de PROD + drill; subida a R2 pendiente) | decisión 1, ver D.5 |
 | B4 | Cron Jobs sin versionar; `DRY_RUN=1` por defecto | ✅ **Ejecutado** | `0f886bd` + `e3973c8`, ver D.2 |
-| B5 | 4 ramas Neon, una con credencial revocada | ⛔ **Bloqueado** | decisión 2, D.4 |
+| B5 | 4 ramas Neon, una con credencial revocada | ✅ **Resuelto** (TEST = `crimson-tooth`) | decisión 2, ver D.5 |
 | B6 | 538/2.017 notificaciones fallidas (26,7 %) | 🟡 **Código sí; los 538 históricos no se tocaron** | `d032d5b` `654fe05` `eaf8298` `bcfc6bf`, ver D.3 |
 | B7 | Scheduler pierde liderazgo 121 veces / 48 h | ✅ **Ya estaba arreglado** (2026-10-11) | `65c1910`, ver D.3 |
 | B8 | Sin retención en `reservas`, `asistencias`, `auditoria` y usuarios `baja` | ⛔ **Bloqueado** (falta la política) | decisión 3, D.4 |
@@ -851,3 +851,141 @@ endpoint que ya no existe?** Opciones reales: (a) exportar los 18 con
 reemplazo (los 4 de KPIs/ML y `fidelizacion y retencion`) y exportar sólo los de alertas; (c) las
 dos cosas. La instancia de n8n de este equipo está `Exited` hace 3 semanas, así que el export
 sale de la instancia externa y requiere tus credenciales.
+
+## D.5 B3 y B5 — ejecutados (2026-10-28)
+
+**Decisiones del dueño.** (1) La rama **TEST oficial es `ep-crimson-tooth-akhx7q2s`**; `lingering-fog`
+y `summer-river` quedan **retiradas como TEST** (siguen en `ENDPOINTS_RETIRADOS`, no se borran de la
+denylist: sacarlas habilitaría escrituras sobre datos reales si alguien corre un script con un `.env`
+viejo). (2) B3 autorizado: dump real + drill.
+
+### B5 — inventario y lo que se corrigió
+
+La premisa "`:8000` apunta a PROD" era **falsa**, y hay evidencia en vivo (no en el `.env`):
+
+```
+GET http://localhost:8000/debug/db-url -> {"is_safe":true,"is_test":true,"branch":"ep-crimson-tooth-akhx7q2s"}
+GET http://localhost:8000/health/db     -> {"status":"healthy","database":"connected","environment":"test",...}
+```
+
+`app/core/config.py` elige el archivo de entorno por `ENVIRONMENT`: con `ENVIRONMENT=production` lee
+`backend/.env` (PROD) y en cualquier otro caso `.env.test`. El servidor de desarrollo corre
+`ENVIRONMENT=test` => lee `.env.test` => `crimson-tooth`. **`backend/.env` no lo usa el :8000**: es el
+archivo de PROD por diseño (lo leen Alembic y los scripts de sincronización/auditoría), y por eso no se
+repunta a TEST — hacerlo rompería las migraciones de PROD y volvería inseguro cualquier proceso con
+`ENVIRONMENT=production`. Lo que sí se hizo es documentarlo en la cabecera de los tres archivos.
+
+Bugs reales encontrados (guards que comparaban contra ramas ya retiradas y, por lo tanto, **abortaban
+siempre** o avisaban en falso):
+
+| Archivo | Antes | Ahora |
+|---|---|---|
+| `backend/iniciar_servidor.py` | `"billowing-violet-acdqud44" in db_url` | `config.is_test_db_url()` + nombre de la rama y host sin credenciales |
+| `backend/ml/train_forecast.py` | guard 2 con `billowing-violet-acdqud44` | `config.is_test_db_url()` |
+| `backend/scripts/crear_usuarios_demo.py` | comentario `ep-summer-river` | `ep-crimson-tooth` |
+| `backend/scripts/README_seed_anual.md` | PROD `nameless-sound` / TEST `jolly-butterfly` | PROD `winter-star` / TEST `crimson-tooth` + `bitter-cloud` como PROD anterior |
+| `docker-compose.yml` | `ep-jolly-butterfly` en la cabecera y en el `SAFE DEFAULT` | `ep-crimson-tooth` |
+| `backend/PENDIENTE_DECISION_USUARIO.md` | "Endpoint TEST actual: jolly-butterfly" | `crimson-tooth` + histórico marcado como RETIRADO |
+| `docs/ACTIVO_VS_ESTADO.md` | medición "contra la rama TEST (la misma del `.env.test`)" con `summer-river` | marcada como histórica (credencial revocada) |
+| `MIGRACION_PROD_NEON.md` | "ACTUALIZADO 2026-09-24 — TEST = jolly-butterfly" | "ACTUALIZADO 2026-10-28 — TEST = crimson-tooth; summer-river/lingering-fog retiradas" |
+| `backend/app/core/config.py` | `TEST_BRANCH_IDS` sin marcar cuál es la oficial | `TEST OFICIAL` + nota de retiro en `ENDPOINTS_RETIRADOS` |
+
+`summer-river`: **cero referencias activas** (sólo aparecen en la denylist, en documentos históricos y
+en backups de `.env.test`), consistente con la credencial revocada.
+
+
+### B3 — primer backup real de PROD (sin subida: esta PC no tiene credenciales R2)
+
+Se ejecutó el camino de datos de `maintenance/backup_cloud.py` (`hacer_dump` -> `comprimir` ->
+`verificar_dump`) contra `DIRECT_URL` de PROD (conexión directa, sin `-pooler`):
+
+| Dato | Valor |
+|---|---|
+| Origen | `ep-winter-star-akwis51j.c-3.us-west-2.aws.neon.tech/neondb` (directa) |
+| `pg_dump` / servidor | 18.4 / 18.6 (mismo major => el `Dockerfile.cron` con 18.6 sirve) |
+| Sanity `SELECT count(*) FROM usuarios` | 511 |
+| Dump | `backend/backups/neon_backup_PROD_20261028_192307.sql` — 8.206,7 KB en **40,3 s** |
+| Comprimido | `...sql.gz` — 817,6 KB en **8,9 s** |
+| Asserts | 47 `CREATE TABLE`, 47 `COPY`, footer OK, `alembic=063_notificaciones_soft_delete`, 0 problemas |
+| `sha256(gz)` | `a6ff30babe1edf356301d7573fb68c82c34d15fc2ce1db011cba1dc3602ba7e9` |
+
+**Los asserts se probaron en carne propia:** la primera corrida quedó cortada a los 30 s (timeout de la
+herramienta que lanzó el dump) con 1.452 KB y 47 tablas — es decir, **pasaba el mínimo de tablas** — y
+`verificar_dump` la rechazó por el footer (`falta el footer 'PostgreSQL database dump complete'`). Ese es
+exactamente el falso verde que arregló B2.
+
+**Lo que falta para cerrar B3 al 100 %:** la subida a R2. `python -m maintenance.backup_cloud` en esta PC
+sale **exit 2** y nombra las 5 variables que faltan (`PROD_DB_DIRECT_URL, R2_ENDPOINT, R2_BUCKET,
+R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY`): fail-closed, como debe ser. Queda para Render (el Environment
+Group `backups-prod` las tiene) o para cuando se exporten acá. Además `validar_url()` exige el rol
+**`backup_ro`** (`el usuario no es backup_ro`): el dump de arriba se hizo con `neondb_owner` porque la
+credencial de sólo lectura no está en esta PC, así que **no es** una corrida equivalente a la del cron.
+
+### B3 — drill de restauración ejecutado (destino desechable, no Neon)
+
+`maintenance/restore_drill.py` necesita la API de Neon + credenciales de R2 + Gmail, que acá no están,
+así que el drill se corrió con el mismo procedimiento pero contra un **Postgres 18.6 desechable en
+Docker** (contenedor `drill-pg`, borrado al terminar), restaurando el dump de arriba:
+
+| Verificación (`verificar_restore`) | Resultado |
+|---|---|
+| Tablas en `public` | 47 (esperadas 47, las del dump) |
+| `usuarios` | 511 (> 0) |
+| `alembic_version` | `063_notificaciones_soft_delete` (= la del dump) |
+| Restore | `psql -v ON_ERROR_STOP=1` sin un solo error |
+
+Paridad PROD vs restaurado: `usuarios` 511/511 · `asistencias` 24752/24752 · `reservas` 23495/23495 ·
+`codigos_referido` 96/96 · `movimientos` 103/103 · `solicitudes_planes` 54/54 · `notificaciones` 518/518.
+
+Prueba negativa (la que `restore_drill.py` hace contra PROD con `backup_ro`), replicada con un rol
+`drill_ro` de sólo lectura: `BEGIN; CREATE TABLE _drill_no_debe_poder (i int); ROLLBACK;` ->
+**`ERROR: permission denied for schema public`** (correcto), y la lectura sí funciona (`SELECT count(*)
+FROM usuarios` -> 511).
+
+Pendiente para el drill "oficial": correr `box-crossfit-restore-drill` en Render (crea y borra la rama
+Neon temporal; el equivalente local no prueba la API de Neon ni el `head_object` de R2).
+
+### Smoke tests de estos cambios (2026-10-28)
+
+Dos archivos, los que tocan lo editado; nada de suite completa:
+
+| Test | Antes | Después | Causa |
+|---|---|---|---|
+| `tests/test_pendientes_unificada_resumen.py` | 3 errores | **3 passed** | El fixture insertaba `activo=true` con `estado='pendiente_activacion'` y violaba la CHECK `ck_usuarios_activo_estado` (migración 034: `activo = (estado = 'activo')`). Corregido el fixture: `activo` ahora se deriva del `estado`. |
+| `tests/test_referidos_api.py` | 2 failed | **2 failed (bloqueado, no es del cambio)** | `psycopg2.errors.UndefinedColumn: column usuarios.nivel_fuerza does not exist`. |
+
+El segundo no es un fallo del código: es **drift de esquema de TEST**.
+
+```
+TEST (crimson-tooth)  alembic_version = 059_reserva_suscripcion_id
+PROD (winter-star)    alembic_version = 063_notificaciones_soft_delete   (también el dump de B3)
+HEAD del repo         060_nivel_atleta_persistido · 061_rm_gimnasia_reps
+                      062_drop_student_segments · 063_notificaciones_soft_delete
+```
+
+Verificado con una consulta ORM mínima (no un endpoint): con `ENVIRONMENT=test`,
+`SessionLocal().query(Usuario).limit(1).all()` -> `UndefinedColumn: column usuarios.nivel_fuerza does
+not exist`. Es decir, **cualquier lectura de `usuarios` con el código actual contra TEST revienta**, y
+`:8000` corre con `ENVIRONMENT=test`: la app en desarrollo está rota para alumnos y admin hasta que TEST
+suba a 063. Los chequeos que se venían usando (`/health/db`, `/debug/db-url`) no lo detectan porque no
+tocan `usuarios`.
+
+`test_referidos_api.py` no se puede correr en otro lado para sortearlo: aborta por diseño si
+`is_test_db_url(DATABASE_URL)` es falso. Se probó igual contra una **copia local del dump de B3**
+(Postgres 18.6 en Docker, 47 tablas, 511 usuarios, `alembic_version = 063`), sana pero irrelevante para
+el test: la única forma de validarlo es migrar TEST.
+
+Para cerrarlo: `ENVIRONMENT=test alembic upgrade head` (aplica 060-063, las mismas que ya corren en PROD)
+o el resync completo desde PROD. Es DDL sobre una rama compartida, así que queda a la espera de OK.
+
+### Residual
+
+- **TEST está 4 migraciones atrás de PROD** (059 vs 063) y por eso `:8000` no puede leer `usuarios`
+  (ver arriba). Es el pendiente más urgente de esta lista.
+- `.env` sigue apuntando a PROD **a propósito**; la cabecera de los tres `.env*` documenta qué lee cada
+  proceso y que `:8000` usa `.env.test`.
+- No se borró ninguna rama en Neon (`summer-river`, `lingering-fog` siguen existiendo): borrarlas es una
+  acción destructiva que necesita OK explícito. Retirarlas de la clasificación ya está hecho.
+- Falta la corrida en Render: `proyecto-crossfit` con `DRY_RUN=0` (objeto + tamaño + timestamp en R2) y
+  `box-crossfit-restore-drill` una vez.
+

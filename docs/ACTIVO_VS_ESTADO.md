@@ -91,8 +91,10 @@ falla ese contrato a propósito, para que nadie saque la clave por error).
 
 ## 3. Conteo en TEST (medido el 2026-04-10)
 
-Consulta de **solo lectura** contra la rama TEST
-(`ep-summer-river-b6c8fj2f...sa-east-1...neon.tech`, la misma del `.env.test`):
+Consulta de **solo lectura** contra la rama TEST **de ese momento**
+(`ep-summer-river-b6c8fj2f...sa-east-1...neon.tech`, hoy RETIRADA: su credencial está
+revocada). La TEST oficial desde el 2026-10-24 es `ep-crimson-tooth-akhx7q2s`
+(`backend/.env.test`); el número de abajo es histórico, no se re-midió:
 
 ```
 SELECT

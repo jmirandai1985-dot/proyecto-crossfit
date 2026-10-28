@@ -8,7 +8,10 @@ en `ml/persistencia.py` — las mismas que usa el endpoint
 ⚠️ Ya NO escribe en `ml/artifacts/`: el modelo se persiste como pickle en la
    tabla `ml_modelos` (BD) para sobrevivir a los reinicios/redeploys de Render.
 
-- Guard de seguridad: ENVIRONMENT=test + DATABASE_URL con 'billowing-violet-acdqud44'.
+- Guard de seguridad: ENVIRONMENT=test + la URL tiene que ser un endpoint de
+  `TEST_BRANCH_IDS` (`app.core.config.is_test_db_url`), hoy
+  `ep-crimson-tooth-akhx7q2s`. Antes comparaba contra `billowing-violet-acdqud44`
+  (rama retirada): el guard abortaba SIEMPRE con la TEST oficial.
 
 Uso (PowerShell, desde backend/):
     $env:ENVIRONMENT="test"; python3.12 ml\\train_forecast.py
@@ -30,10 +33,12 @@ BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BACKEND_DIR)
 os.chdir(BACKEND_DIR)
 
-# ── GUARD 2: la URL debe ser la de TEST (billowing-violet-acdqud44) ──
-settings = importlib.import_module("app.core.config").settings
-if "billowing-violet-acdqud44" not in settings.DATABASE_URL:
-    print("ERROR: URL no es billowing-violet-acdqud44")
+# ── GUARD 2: la URL debe ser TEST (TEST_BRANCH_IDS, hoy ep-crimson-tooth-akhx7q2s) ──
+config = importlib.import_module("app.core.config")
+settings = config.settings
+if not config.is_test_db_url(settings.DATABASE_URL):
+    print("ERROR: la URL no es un endpoint TEST conocido "
+          f"({', '.join(config.TEST_BRANCH_IDS)}): corrige backend/.env.test")
     sys.exit(1)
 
 import ml.entrenar as entrenar  # noqa: E402

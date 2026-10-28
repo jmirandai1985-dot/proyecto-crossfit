@@ -217,9 +217,11 @@ if not settings.JWT_SECRET_KEY:
 # de producción. Van a `ENDPOINTS_RETIRADOS` (denylist) para que el guard falle
 # CERRADO si alguien corre un script con un `.env` viejo.
 TEST_BRANCH_IDS = (
-    # TEST actual (2026-10-24): rama test del proyecto nuevo. Es un espejo exacto
-    # de PROD (Fase 3), por lo que TODAVÍA no tiene los overrides de desarrollo:
-    # se restauran con `scripts/aplicar_overrides_test.py`.
+    # TEST OFICIAL (decisión del dueño, 2026-10-28): rama test del proyecto nuevo.
+    # Es la ÚNICA rama TEST activa y la que declara `backend/.env.test`; todo
+    # proceso que corra en :8000 o contra TEST tiene que caer acá.
+    # Es un espejo exacto de PROD (Fase 3), por lo que TODAVÍA no tiene los
+    # overrides de desarrollo: se restauran con `scripts/aplicar_overrides_test.py`.
     "ep-crimson-tooth-akhx7q2s",
 )
 
@@ -239,12 +241,20 @@ PROD_BRANCH_IDS = (
 
 # Endpoints retirados pero TODAVÍA accesibles con datos reales (el TEST viejo era
 # un espejo de PROD con alumnos y credenciales reales). Nunca son TEST.
+#
+# RETIRADAS COMO TEST (decisión del dueño, 2026-10-28): `lingering-fog` y
+# `summer-river` NO son TEST nunca más. No se borran de esta denylist: siguen
+# vivas (o con datos reales / credencial muerta) y sacarlas de acá habilitaría
+# escrituras destructivas si alguien corre un script con un `.env` viejo.
+# `summer-river` tenía la credencial REVOCADA al 2026-10-28 (verificado: su
+# `.env`/contenedor local ya no la usa y ningún proceso activo la referencia).
 ENDPOINTS_RETIRADOS = (
-    "ep-lingering-fog-arywdnbg",      # TEST 2026-10-18 → 2026-10-24 (espejo de PROD)
+    "ep-lingering-fog-arywdnbg",      # TEST 2026-10-18 → 2026-10-24 (espejo de PROD); RETIRADA
     "ep-damp-base-b6mpe739",          # TEST anterior: credencial inválida desde 2026-10-18
     "ep-winter-boat-b6zpvtxu",        # TEST anterior: rama recreada (2026-10-13); su credencial
                                       # quedó inválida al rotar la contraseña
-    "ep-summer-river-b6c8fj2f",       # TEST anterior: rama recreada (2026-10-04), ya sin credencial
+    "ep-summer-river-b6c8fj2f",       # TEST anterior: rama recreada (2026-10-04); credencial
+                                      # REVOCADA y RETIRADA como TEST (2026-10-28)
     "ep-jolly-butterfly-b6ty2z89",    # TEST anterior: Neon ya la eliminó
     "ep-nameless-sound-b6km6wyi",     # PROD del proyecto "produccion2.0" (São Paulo)
     "ep-withered-silence-acly7gq5",   # PROD anterior (agotó cuota)

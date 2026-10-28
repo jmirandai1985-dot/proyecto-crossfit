@@ -162,10 +162,14 @@ encendida a las 02:30 (logs del 22/08, 11/09, 24/09 y 25/09) y, por default, con
 | Script | `maintenance/backup_cloud.py` (dump + asserts + subida verificada) |
 
 ### Comportamiento
-- `DRY_RUN=1` (default de la imagen): dump + asserts + **lista** el bucket y termina **sin subir
-  nada**.
 - `DRY_RUN=0`: sube, **verifica con `head_object`** que el objeto pesa igual que el archivo
-  local, purga lo que tenga más de `RETENTION_DAYS` y **re-lista** para confirmar la subida.
+  local y **re-lista** para confirmar la subida. La retención la aplica el lifecycle del
+  bucket (90 días): el runner no borra nada.
+- `DRY_RUN=1` (o ausente ⇒ `1`): dump + asserts + lista el bucket y termina **sin subir
+  nada**. Ojo: la imagen **ya no** trae `DRY_RUN` (se quitó de `Dockerfile.cron` para que no
+  haya un default que falle abierto): hoy el valor verdadero vive en el Environment Group
+  `backups-prod` de Render, y si ese grupo lo pierde el run queda **verde sin subir** (el que
+  avisa es el watchdog: objeto viejo en R2).
 - **Falla de verdad**: exit `2` config (falta variable / `-pooler` / major distinta), `3` dump,
   `4` asserts de contenido, `5` R2 ⇒ Render marca el run como fallido. Nunca dice "OK" en falso
   (el bug del 26/09 fue un "✅ Backup completado" con el dump fallando).

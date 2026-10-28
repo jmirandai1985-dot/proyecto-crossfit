@@ -3,7 +3,7 @@
 #
 # ⚠️ AMBIENTES — LEA ESTO ANTES DE LEVANTAR:
 #   El archivo BASE usa backend/.env.test → branch TEST de Neon
-#   (ep-jolly-butterfly-b6ty2z89...). Es el SAFE DEFAULT a propósito:
+#   (ep-crimson-tooth-akhx7q2s, la TEST oficial). Es el SAFE DEFAULT a propósito:
 #   `docker compose up` NUNCA toca producción por accidente.
 #
 #   ┌─────────────────────────────────────────────────────────────┐
@@ -49,7 +49,7 @@ services:
       dockerfile: Dockerfile
       target: prod
     env_file:
-      # TEST/ep-jolly-butterfly-b6ty2z89 (SAFE DEFAULT) — ver cabecera del archivo.
+      # TEST/ep-crimson-tooth-akhx7q2s (SAFE DEFAULT) — ver cabecera del archivo.
       - ./backend/.env.test
     environment:
       ENVIRONMENT: test

@@ -56,14 +56,16 @@ Reparto y forma:
 1. **`--destino prod|test` es obligatorio.** De ahí sale `ENVIRONMENT` (`production`
    / `test`) y por lo tanto qué `.env` lee `app.core.config`.
 2. **La URL tiene que ser la del destino** (ids leídos de `app.core.config`):
-   - `prod` → `ep-nameless-sound-b6km6wyi` (host `nameless-sound`). Cualquier otro host
+   - `prod` → `ep-winter-star-akwis51j` (host `winter-star`). Cualquier otro host
      aborta.
-   - `test` → `ep-jolly-butterfly-b6ty2z89` (host `jolly-butterfly`) y **jamás** el de
-     PROD (denylist primero: un copy/paste cruzado no habilita producción).
-   - Si aparece `withered-silence` (el PROD **viejo**, endpoint retirado el 2026-09-24)
-     aborta en los DOS destinos. El guard del seed viejo (`"withered-silence" in URL`) ya
-     no puede pasar: por eso se reescribió.
-   - Además se valida que `PROD_BRANCH_ID` siga conteniendo `nameless-sound`: si Neon
+   - `test` → `ep-crimson-tooth-akhx7q2s` (host `crimson-tooth`, la TEST oficial desde el
+     2026-10-24) y **jamás** el de PROD (denylist primero: un copy/paste cruzado no
+     habilita producción).
+   - Si aparece `withered-silence` (el PROD **viejo**, endpoint retirado el 2026-09-24) o
+     `bitter-cloud` (el PROD **anterior**, reemplazado el 2026-10-24 y todavía con datos
+     reales) aborta en los DOS destinos. El guard del seed viejo (`"withered-silence" in URL`)
+     ya no puede pasar: por eso se reescribió.
+   - Además se valida que `PROD_BRANCH_ID` siga conteniendo `winter-star`: si Neon
      recrea el endpoint, el script **aborta** en vez de escribir en una base que no es la
      que espera (y pide actualizar `config.py` + este script).
 3. **Ventana de ejecución (sólo con `--destino prod`)**: aborta si hoy es **día 1 o 15** (el

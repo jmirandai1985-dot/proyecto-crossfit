@@ -134,13 +134,17 @@ def box(db, request):
                                  "promociones_referidos_detectadas"])
 
     def usuario(nombre, rol, estado):
+        # `activo` es derivado de `estado`: la CHECK `ck_usuarios_activo_estado`
+        # (migración 034) exige `activo = (estado = 'activo')`, así que un alumno
+        # en `pendiente_activacion` va con activo=false.
         return db.execute(text("""
             INSERT INTO usuarios (tenant_id, rut, nombre, correo, password_hash, rol,
                                   activo, estado, created_at)
-            VALUES (:t, :r, :n, :c, 'x', :rol, true, :estado, :alta) RETURNING id"""),
+            VALUES (:t, :r, :n, :c, 'x', :rol, :activo, :estado, :alta) RETURNING id"""),
             {"t": tenant, "r": f"{sufijo[-6:]}-{uuid.uuid4().hex[:4]}", "n": nombre,
              "c": f"{PREFIJO}.{uuid.uuid4().hex[:10]}@test.local",
-             "rol": getattr(rol, "value", rol), "estado": estado, "alta": alta}).scalar()
+             "rol": getattr(rol, "value", rol), "estado": estado,
+             "activo": estado == "activo", "alta": alta}).scalar()
 
     # Registros: 1 alumno esperando activación (+1 activo y +1 coach pendiente que NO cuentan).
     pendiente = usuario("Alumno Pendiente TEST", RolUsuario.alumno, "pendiente_activacion")

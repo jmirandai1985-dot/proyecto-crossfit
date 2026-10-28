@@ -63,7 +63,7 @@ sin recrear reservas ni tocar la contraseña; suma N a `creditos_totales` y a
 ni con `--extender-plan`.
 
 Uso (desde `backend/`):
-    # TEST (rama ep-summer-river-b6c8fj2f)
+    # TEST (rama oficial ep-crimson-tooth-akhx7q2s, `TEST_BRANCH_IDS`)
     $env:ENVIRONMENT="test";       py -3.12 scripts\\crear_usuarios_demo.py --destino test --dry-run
     $env:ENVIRONMENT="test";       py -3.12 scripts\\crear_usuarios_demo.py --destino test
     $env:ENVIRONMENT="test";       py -3.12 scripts\\crear_usuarios_demo.py --destino test --borrar

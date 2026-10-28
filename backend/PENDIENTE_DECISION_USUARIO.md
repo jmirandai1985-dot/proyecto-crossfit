@@ -16,9 +16,10 @@
    ✅ APLICADO (2026-09-24): `run_setup_test_db.py` ahora prioriza `settings.DIRECT_URL` (con
    fallback `replace("-pooler.", ".")`, que sirve para los dos formatos de host) para el
    `DROP SCHEMA`/`create_all`. Antes el replace viejo no matcheaba y el DDL viajaba por el pooler.
-   Endpoint TEST **actual**: `ep-jolly-butterfly-b6ty2z89` (rama del MISMO proyecto Neon que PROD,
-   desde el 2026-09-24). Histórico: ep-odd-smoke (2026-09-23) → ep-long-salad → ep-billowing-violet
-   → ep-purple-cherry.
+   Endpoint TEST **actual** (2026-10-28): `ep-crimson-tooth-akhx7q2s` (rama del MISMO proyecto
+   Neon que PROD, espejo de PROD desde la Fase 3). Histórico, todas RETIRADAS:
+   ep-odd-smoke (2026-09-23) → ep-long-salad → ep-billowing-violet → ep-purple-cherry →
+   ep-jolly-butterfly → ep-summer-river → ep-lingering-fog (2026-10-18 → 2026-10-24).
 
 ## Notas
 - Los 2 "bugs" reportados inicialmente eran errores del script de prueba,
