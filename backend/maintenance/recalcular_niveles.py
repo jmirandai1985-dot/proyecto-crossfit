@@ -45,11 +45,29 @@ log = logging.getLogger("recalcular_niveles")
 BATCH = 500
 
 
-def _alumnos(db, alumno_id=None):
-    q = db.query(Usuario).filter(Usuario.rol == RolUsuario.alumno)
-    if alumno_id:
-        q = q.filter(Usuario.id == alumno_id)
-    return q.order_by(Usuario.id).yield_per(BATCH)
+def _paginas(db, alumno_id=None):
+    """Devuelve el padrón de a `BATCH` filas, paginando por clave (`id > último`).
+
+    ⚠️ NO usar `yield_per` acá: abre un cursor con nombre del lado del servidor y
+    psycopg2 lo invalida en cuanto `recalcular_nivel` hace `commit()` dentro del
+    bucle. Visto en PROD (backfill de la `060`, 28/10/2026): el job escribió las
+    primeras ~500 filas y murió en el fetch siguiente con
+    `sqlalchemy.exc.InterfaceError: (psycopg2.InterfaceError) cursor already closed`
+    (sin imprimir el resumen y con exit 1, aunque los datos quedaron bien).
+    Paginar por id evita el cursor compartido: cada página es una query normal que
+    se trae completa ANTES de que el bucle escriba.
+    """
+    ultimo = 0
+    while True:
+        q = db.query(Usuario).filter(
+            Usuario.rol == RolUsuario.alumno, Usuario.id > ultimo)
+        if alumno_id:
+            q = q.filter(Usuario.id == alumno_id)
+        pagina = q.order_by(Usuario.id).limit(BATCH).all()
+        if not pagina:
+            return
+        yield pagina
+        ultimo = pagina[-1].id
 
 
 def run(dry_run=True, alumno_id=None) -> dict:
@@ -57,14 +75,16 @@ def run(dry_run=True, alumno_id=None) -> dict:
     db = SessionLocal()
     revisados = recalculados = vigentes = 0
     try:
-        for usuario in _alumnos(db, alumno_id):
-            revisados += 1
-            if nivel_esta_vigente(usuario):
-                vigentes += 1
-                continue
+        for pagina in _paginas(db, alumno_id):
+            revisados += len(pagina)
+            # Se decide la vigencia de TODA la página antes de escribir: así el
+            # `commit()` de cada alumno no expira objetos que todavía no leímos.
+            pendientes = [u for u in pagina if not nivel_esta_vigente(u)]
+            vigentes += len(pagina) - len(pendientes)
             if not dry_run:
-                recalcular_nivel(db, usuario.id, usuario.tenant_id)
-            recalculados += 1
+                for usuario in pendientes:
+                    recalcular_nivel(db, usuario.id, usuario.tenant_id)
+            recalculados += len(pendientes)
     finally:
         db.close()
     return {

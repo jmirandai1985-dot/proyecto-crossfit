@@ -177,3 +177,24 @@ def test_el_job_nocturno_existe_y_es_dry_run_por_defecto():
     cuerpo = job[desde:job.index("def main(", desde)]
     assert "if not dry_run:" in cuerpo
 
+
+def test_el_job_pagina_por_id_y_no_usa_yield_per():
+    """`yield_per` + `commit()` dentro del bucle cierra el cursor de psycopg2.
+
+    Visto en PROD el 28/10/2026 (backfill de la `060` sobre 505 alumnos): el job
+    escribió la primera página y murió en el fetch siguiente con
+    `sqlalchemy.exc.InterfaceError: (psycopg2.InterfaceError) cursor already closed`
+    — exit 1 y sin imprimir el resumen, aunque las filas quedaron escritas. La
+    paginación por clave (`id > último`) trae cada página completa ANTES de
+    escribir, así que el commit no invalida el cursor.
+    """
+    job = _fuente("backend/maintenance/recalcular_niveles.py")
+    assert ".yield_per(" not in job, "el job volvio a usar yield_per (cursor compartido)"
+    assert "Usuario.id > ultimo" in job
+    assert "limit(BATCH)" in job
+    # La vigencia se decide antes de escribir: el commit expira los objetos ORM de
+    # la página y `nivel_esta_vigente` volvería a la BD (o leería atributos viejos).
+    desde = job.index("def run(")
+    cuerpo = job[desde:job.index("def main(", desde)]
+    assert cuerpo.index("nivel_esta_vigente(u)") < cuerpo.index("recalcular_nivel(")
+
