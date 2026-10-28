@@ -8,6 +8,8 @@ import { getMenuItems, COACH_SUBTABS } from '../config/menu';
 import { MENU_ICONS } from '../config/menuIcons';
 // N-2: campana de notificaciones del alumno (contador de no leídas + panel).
 import CampanaNotificaciones from './CampanaNotificaciones';
+// D2: banner "Completá tu perfil" del alumno (peso/género obligatorios para el nivel).
+import BannerPerfilIncompleto from './BannerPerfilIncompleto';
 // Contador de pendientes del admin (misma queryKey que la pantalla, el Dashboard y
 // la campana: un solo request para los cuatro badges, y se refresca solo cada 60 s).
 import { useResumenPendientes } from '../hooks/queries';
@@ -367,6 +369,9 @@ const Layout = ({ children }) => {
                         el contenido normal sigue por debajo del cajón móvil (`z-40`/`z-50`) y
                         sólo los hijos con z POSITIVO (modales, toasts) suben por encima del
                         header, que es lo que se espera. */}
+                    {/* D2: solo para el alumno; el componente se auto-oculta si el perfil está
+                        completo (la regla vive en el backend: GET /alumnos/me). */}
+                    {rol === 'alumno' && <BannerPerfilIncompleto />}
                     <div className="relative">{children}</div>
                 </main>
             </div>

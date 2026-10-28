@@ -27,8 +27,8 @@ const RegistroAlumnoNuevo = ({ onClose }) => {
                 nombre: form.nombre,
                 correo: form.correo,
                 rut: form.rut,
-                sexo: form.sexo || null,
-                peso: form.peso ? parseFloat(form.peso) : null,
+                sexo: form.sexo,
+                peso: parseFloat(form.peso),
                 estatura: form.estatura ? parseFloat(form.estatura) : null,
             });
             const d = r.data || {};
@@ -105,22 +105,26 @@ const RegistroAlumnoNuevo = ({ onClose }) => {
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-1.5">Sexo</label>
-                                <select name="sexo" value={form.sexo} onChange={handleChange} className={`${inputClass} bg-zinc-800`}>
+                                <label className="block text-sm font-medium text-gray-300 mb-1.5">Sexo *</label>
+                                <select name="sexo" value={form.sexo} onChange={handleChange} className={`${inputClass} bg-zinc-800`} required>
                                     <option value="">Seleccionar</option>
                                     <option value="M">Masculino</option>
                                     <option value="F">Femenino</option>
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-1.5">Peso (kg)</label>
-                                <input name="peso" type="number" step="0.1" min="1" value={form.peso} onChange={handleChange} placeholder="70" className={inputClass} />
+                                <label className="block text-sm font-medium text-gray-300 mb-1.5">Peso (kg) *</label>
+                                <input name="peso" type="number" step="0.1" min="1" max="400" value={form.peso} onChange={handleChange} placeholder="70" className={inputClass} required />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Estatura (cm)</label>
                                 <input name="estatura" type="number" step="1" min="1" value={form.estatura} onChange={handleChange} placeholder="170" className={inputClass} />
                             </div>
                         </div>
+                        <p className="text-gray-500 text-[11px]">
+                            * Peso y sexo son obligatorios: los usamos para calcular tu nivel (sin
+                            ellos el motor de niveles no puede clasificar tu fuerza ni tu gimnasia).
+                        </p>
 
                         {error && (
                             <div className="bg-red-500/15 border border-red-500/30 text-red-300 px-4 py-3 rounded-lg text-sm">

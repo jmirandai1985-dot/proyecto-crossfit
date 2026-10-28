@@ -11,8 +11,8 @@
  * El dato lo trae `useFichaAlumnoCoach` (caché compartida, Bloque 6): reabrir la ficha pinta
  * al instante lo último visto y revalida en segundo plano; "Reintentar" es un `refetch`.
  */
-import React from 'react';
-import { useFichaAlumnoCoach, useRmsAlumno } from '../hooks/queries';
+import React, { useEffect, useState } from 'react';
+import { useActualizarPerfilAlumnoCoach, useFichaAlumnoCoach, useRmsAlumno } from '../hooks/queries';
 import { fmtFechaChile, fmtFechaCortaChile } from '../utils/fecha';
 // El valor y la categoría de un RM salen de la fuente única (utils/rm.js, H-03): acá NO se
 // repite el criterio. Importa de verdad: el `peso_kg` de cardio/máquinas es un dummy
@@ -47,6 +47,40 @@ const AlumnoFichaCoach = ({ alumnoId, coachId, onClose }) => {
     const errorRms = rmsQ.isError
         ? (rmsQ.error?.response?.data?.detail || 'No se pudieron cargar los RMs.')
         : '';
+
+    // ── D2: peso y género editables por el coach ──────────────────────────────
+    // Son los dos datos que el motor de niveles necesita. El formulario se hidrata con la
+    // ficha y se re-sincroniza cuando llega una ficha nueva (revalidación al guardar).
+    const perfilMut = useActualizarPerfilAlumnoCoach();
+    const [peso, setPeso] = useState('');
+    const [genero, setGenero] = useState('');
+    const [avisoPerfil, setAvisoPerfil] = useState('');
+
+    useEffect(() => {
+        if (!ficha) return;
+        setPeso(ficha.peso_kg !== null && ficha.peso_kg !== undefined ? String(ficha.peso_kg) : '');
+        setGenero(ficha.genero || '');
+    }, [ficha]);
+
+    const guardarPerfil = async (e) => {
+        e.preventDefault();
+        setAvisoPerfil('');
+        const pesoNum = parseFloat(peso);
+        if (!Number.isFinite(pesoNum) || pesoNum <= 0 || pesoNum > 400) {
+            setAvisoPerfil('Ingresá un peso válido (1–400 kg).');
+            return;
+        }
+        if (!['M', 'F'].includes(genero)) {
+            setAvisoPerfil('Elegí masculino (M) o femenino (F).');
+            return;
+        }
+        try {
+            await perfilMut.mutateAsync({ coachId, alumnoId, peso_kg: pesoNum, genero });
+            setAvisoPerfil('Perfil actualizado.');
+        } catch (err) {
+            setAvisoPerfil(err.response?.data?.detail || 'No se pudo guardar el perfil.');
+        }
+    };
 
     if (!alumnoId) return null;
 
@@ -129,6 +163,71 @@ const AlumnoFichaCoach = ({ alumnoId, coachId, onClose }) => {
                                 ) : (
                                     <p className="text-zinc-400 text-sm" data-testid="ficha-sin-plan">
                                         Sin plan activo
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* ── D2: peso y género ───────────────────────────────────────
+                                Son los datos que el motor de niveles necesita (ratio y tabla
+                                M/F). El alta vieja no los pedía: acá el coach los carga o
+                                corrige, y el badge de nivel sale de esta información. */}
+                            <div className="bg-zinc-800/60 rounded-lg p-4" data-testid="ficha-perfil-nivel">
+                                <div className="flex items-center justify-between mb-2">
+                                    <p className="text-xs text-zinc-500">Datos para el nivel</p>
+                                    {ficha.perfil_completo ? (
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full border border-emerald-500/40 text-emerald-300">
+                                            Completo
+                                        </span>
+                                    ) : (
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full border border-orange-500/40 text-orange-300">
+                                            Falta completar
+                                        </span>
+                                    )}
+                                </div>
+                                <form onSubmit={guardarPerfil} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                                    <div className="flex-1">
+                                        <label htmlFor="ficha-peso" className="block text-xs text-zinc-500 mb-1">
+                                            Peso (kg)
+                                        </label>
+                                        <input
+                                            id="ficha-peso"
+                                            data-testid="ficha-peso"
+                                            type="number" min="1" max="400" step="0.1"
+                                            value={peso}
+                                            onChange={(e) => setPeso(e.target.value)}
+                                            className="w-full px-3 py-1.5 rounded-md bg-zinc-900 border border-zinc-700 text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/60"
+                                            required
+                                        />
+                                    </div>
+                                    <div className="flex-1">
+                                        <label htmlFor="ficha-genero" className="block text-xs text-zinc-500 mb-1">
+                                            Género
+                                        </label>
+                                        <select
+                                            id="ficha-genero"
+                                            data-testid="ficha-genero"
+                                            value={genero}
+                                            onChange={(e) => setGenero(e.target.value)}
+                                            className="w-full px-3 py-1.5 rounded-md bg-zinc-900 border border-zinc-700 text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/60"
+                                            required
+                                        >
+                                            <option value="">Seleccionar</option>
+                                            <option value="M">Masculino (M)</option>
+                                            <option value="F">Femenino (F)</option>
+                                        </select>
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        data-testid="ficha-guardar-perfil"
+                                        disabled={perfilMut.isPending}
+                                        className="px-3 py-1.5 bg-orange-600 text-white rounded-md text-sm font-semibold hover:bg-orange-500 disabled:opacity-50"
+                                    >
+                                        {perfilMut.isPending ? 'Guardando…' : 'Guardar'}
+                                    </button>
+                                </form>
+                                {avisoPerfil && (
+                                    <p className="mt-2 text-xs text-zinc-300" data-testid="ficha-perfil-aviso">
+                                        {avisoPerfil}
                                     </p>
                                 )}
                             </div>

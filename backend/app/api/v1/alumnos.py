@@ -7,7 +7,10 @@ import sentry_sdk
 from datetime import datetime, timedelta, date, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from pydantic import BaseModel, EmailStr, Field, AliasChoices, ConfigDict, model_validator
+from pydantic import (
+    BaseModel, EmailStr, Field, AliasChoices, ConfigDict, model_validator,
+    field_validator,
+)
 from sqlalchemy.orm import Session
 from typing import ClassVar, Optional
 
@@ -51,15 +54,18 @@ class ActualizarMiPerfil(BaseModel):
 
     SOLO se aplican los campos AUTOEDITABLES:
 
-        telefono · peso_kg · estatura_cm
+        telefono · peso_kg · estatura_cm · genero (una sola vez, si está vacío)
 
-    El resto de la ficha (`nombre`, `correo`, `genero`, `fecha_nacimiento`) es
-    dato de identidad/administración del box y se edita por
-    `PUT /usuarios/{id}` (admin-only). Esos 4 campos siguen declarados en el
-    schema por compatibilidad con clientes viejos, pero se DESCARTAN antes de
-    validar: el PUT responde 200, no cambia nada y el intento queda en el log
-    (antes el alumno podía reescribir su propio correo/género/fecha de
-    nacimiento desde Ajustes, con la UI ya bloqueada: backend ≠ UI).
+    El resto de la ficha (`nombre`, `correo`, `fecha_nacimiento`) es dato de
+    identidad/administración del box y se edita por `PUT /usuarios/{id}`
+    (admin-only). Esos campos siguen declarados en el schema por compatibilidad
+    con clientes viejos, pero se DESCARTAN antes de validar: el PUT responde
+    200, no cambia nada y el intento queda en el log.
+
+    D2 (2026-10-28): `genero` es obligatorio para clasificar el nivel. El alumno
+    puede COMPLETARLO una vez si está vacío (solo `M`/`F`, auditado); si ya tiene
+    valor, corregirlo sigue siendo del box (coach/admin). Peso y género también
+    se piden en el alta (`RegistroAlumnoNuevo`).
 
     NO permite cambiar rol/activo/estado/password (eso es admin o un flujo
     dedicado).
@@ -75,11 +81,15 @@ class ActualizarMiPerfil(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     # Campos que el alumno SÍ autogestiona (contrato con Ajustes.jsx).
-    CAMPOS_AUTOEDITABLES: ClassVar[tuple] = ("telefono", "peso_kg", "estatura_cm")
+    # D2: `genero` entra SOLO para completarlo cuando está vacío (el endpoint lo verifica
+    # contra el valor actual: si ya tiene género, 409 y lo corrige el box).
+    CAMPOS_AUTOEDITABLES: ClassVar[tuple] = (
+        "telefono", "peso_kg", "estatura_cm", "genero")
     # Campos que sólo modifica el box (`PUT /usuarios/{id}`): si llegan por acá
     # se descartan (200 + log) en vez de aplicarse o dar 422.
+    # D2: `genero` YA NO está acá — se autogestiona una vez si está vacío (ver endpoint).
     CAMPOS_SOLO_BOX: ClassVar[tuple] = (
-        "nombre", "correo", "genero", "fecha_nacimiento")
+        "nombre", "correo", "fecha_nacimiento")
 
     @model_validator(mode='before')
     @classmethod
@@ -130,12 +140,19 @@ def generar_password_provisional(longitud=8) -> str:
 
 
 class RegistroAlumnoNuevo(BaseModel):
+    """Alta de alumno (landing público y alta del box).
+
+    D2 (2026-10-28): `sexo` y `peso` son OBLIGATORIOS y se validan acá, en el endpoint real,
+    no solo en el formulario. Sin peso+género el motor de niveles no puede clasificar fuerza
+    (necesita el ratio peso_rm/peso_corporal) y la gimnasia necesita el género para elegir la
+    tabla M/F; esa era la causa de los 404 perfiles incompletos de PROD.
+    """
     nombre: str
     correo: EmailStr
-    sexo: Optional[str] = None
-    peso: Optional[float] = Field(
-        None, validation_alias=AliasChoices("peso", "peso_kg"),
-        description="Peso en kg (acepta campo 'peso' o 'peso_kg')")
+    sexo: str = Field(..., description="Género: M o F (obligatorio)")
+    peso: float = Field(
+        ..., gt=0, le=400, validation_alias=AliasChoices("peso", "peso_kg"),
+        description="Peso en kg (obligatorio; acepta campo 'peso' o 'peso_kg')")
     estatura: Optional[float] = Field(
         None, validation_alias=AliasChoices("estatura", "estatura_cm"),
         description="Estatura en cm (acepta campo 'estatura' o 'estatura_cm')")
@@ -148,6 +165,15 @@ class RegistroAlumnoNuevo(BaseModel):
     token_invitacion: Optional[str] = Field(None, max_length=64)
 
     model_config = {"populate_by_name": True}
+
+    @field_validator("sexo")
+    @classmethod
+    def _genero_valido(cls, valor):
+        """Normaliza a M/F. Acepta minúsculas (clientes viejos) y rechaza vacío/otro."""
+        normalizado = str(valor or "").strip().upper()
+        if normalizado not in ("M", "F"):
+            raise ValueError("Género inválido: usa M o F")
+        return normalizado
 
 
 # ─── POST /registro/alumno-nuevo (público con rate limit) ───
@@ -561,10 +587,10 @@ def obtener_mi_perfil(
 # ─── PUT /me (el usuario edita su PROPIO perfil) ───
 # Endpoint correcto para Ajustes del alumno: el CRUD /usuarios/{id} es
 # admin-only por diseño. Acá sólo se editan los campos de perfil que el alumno
-# autogestiona (telefono/peso_kg/estatura_cm); `nombre`, `correo`, `genero` y
-# `fecha_nacimiento` los gestiona el box vía `PUT /usuarios/{id}` (N-1: si
-# llegan, se descartan — ver `ActualizarMiPerfil`). NO se puede tocar
-# rol/activo/estado/password.
+# autogestiona (telefono/peso_kg/estatura_cm y `genero` UNA vez si está vacío);
+# `nombre`, `correo` y `fecha_nacimiento` los gestiona el box vía
+# `PUT /usuarios/{id}` (N-1: si llegan, se descartan — ver `ActualizarMiPerfil`).
+# NO se puede tocar rol/activo/estado/password.
 @router.put("/me")
 def actualizar_mi_perfil(
     datos: ActualizarMiPerfil,
@@ -592,6 +618,22 @@ def actualizar_mi_perfil(
     for campo_solo_box in ActualizarMiPerfil.CAMPOS_SOLO_BOX:
         update_data.pop(campo_solo_box, None)
 
+    # D2: `genero` se COMPLETA una sola vez si está vacío (es obligatorio para clasificar el
+    # nivel). No es un campo libre: si ya tiene valor, el alumno no lo cambia por acá (409);
+    # la corrección queda para el box (coach/admin), que la audita igual.
+    genero_anterior = usuario.genero
+    if "genero" in update_data:
+        genero_nuevo = str(update_data.get("genero") or "").strip().upper()
+        if genero_nuevo not in ("M", "F"):
+            raise HTTPException(
+                status_code=422, detail="Género inválido: usa M o F")
+        if genero_anterior:
+            raise HTTPException(
+                status_code=409,
+                detail="El género ya está definido; pídele al box que lo corrija",
+            )
+        update_data["genero"] = genero_nuevo
+
     # Correo: único dentro del tenant (mismo criterio que el CRUD admin).
     # ⚠️ Hoy es código DEFENSIVO: `correo` viene en CAMPOS_SOLO_BOX, así que
     # `update_data` nunca lo trae. Se mantiene por si el campo se rehabilita.
@@ -613,6 +655,25 @@ def actualizar_mi_perfil(
 
     db.commit()
     db.refresh(usuario)
+
+    # D2: el autoservicio de género queda auditado (valor anterior/nuevo). Solo entra acá el
+    # caso "estaba vacío y el alumno lo completó": si ya tenía valor, el endpoint respondió 409.
+    if genero_anterior is None and usuario.genero:
+        registrar_auditoria(
+            db,
+            tenant_id=tenant_id,
+            usuario_id=uid,
+            accion="UPDATE",
+            entidad="usuario",
+            entidad_id=usuario.id,
+            detalle={
+                "campos": ["genero"],
+                "genero_anterior": genero_anterior,
+                "genero_nuevo": usuario.genero,
+                "origen": "autoservicio_perfil",
+            },
+        )
+
     return _serializar_mi_perfil(usuario)
 
 

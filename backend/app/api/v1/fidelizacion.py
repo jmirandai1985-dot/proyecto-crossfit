@@ -3,6 +3,7 @@ Módulo de Fidelización Inteligente
 Analiza la asistencia REAL (reservas.asistio) y detecta alumnos en riesgo de abandono
 """
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 from datetime import date, datetime, timezone
 from typing import Optional
@@ -28,6 +29,28 @@ from app.services.asistencia_real import ultima_asistencia_por_alumno
 router = APIRouter()
 
 UMBRAL_ALERTA_DIAS = 7  # Días sin asistir para considerar alumno en riesgo
+
+
+class PerfilNivelAlumno(BaseModel):
+    """Peso y género del alumno, editables por el coach desde la ficha (D2).
+
+    Son los DOS datos que el motor de niveles necesita y que el alta no pedía: en PROD había
+    404 alumnos sin perfil completo (300 con peso y sin género, 104 sin nada), así que su
+    nivel nunca se podía clasificar. El coach los carga/corrige acá; el cambio queda auditado.
+    """
+
+    peso_kg: float = Field(..., gt=0, le=400, description="Peso corporal en kg")
+    genero: str = Field(..., description="Género: M o F")
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("genero")
+    @classmethod
+    def _genero_valido(cls, valor):
+        normalizado = str(valor or "").strip().upper()
+        if normalizado not in ("M", "F"):
+            raise ValueError("Género inválido: usa M o F")
+        return normalizado
 
 
 def _registros_json(df):
@@ -669,9 +692,79 @@ def ficha_alumno_coach(
         "nombre": alumno.nombre,
         "correo": alumno.correo,
         "telefono": alumno.telefono,
+        # D2: peso y género viajan en la ficha para que el coach vea si faltan y los cargue
+        # (antes no había NINGÚN lugar donde editarlos). `perfil_completo` es derivado: la UI
+        # no adivina la regla.
+        "peso_kg": alumno.peso_kg,
+        "genero": alumno.genero,
+        "perfil_completo": bool(alumno.peso_kg and alumno.genero in ("M", "F")),
         "created_at": alumno.created_at.isoformat() if alumno.created_at else None,
         "antiguedad_dias": (hoy_santiago() - alta).days if alta else None,
         "plan": plan_data,
+    }
+
+
+@router.put("/coach/{coach_id}/alumno/{alumno_id}/perfil")
+def actualizar_perfil_alumno_coach(
+    coach_id: int,
+    alumno_id: int,
+    datos: PerfilNivelAlumno,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_coach),
+):
+    """D2: el coach carga/corrige peso y género del alumno desde la ficha.
+
+    Mismo alcance que `GET .../ficha`: coach solo con su propio `coach_id`, alumno del box del
+    token y rol alumno. Es la vía para cerrar los perfiles incompletos que ya existen (el alta
+    nueva ya exige los dos datos). Cada cambio se audita con valor anterior/nuevo.
+    """
+    tenant_id = current_user["tenant_id"]
+    rol = current_user.get("rol", "")
+    if rol == "coach" and current_user["usuario_id"] != coach_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo puedes editar el perfil de alumnos de tu propio panel",
+        )
+
+    alumno = db.query(Usuario).filter(
+        Usuario.id == alumno_id,
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == RolUsuario.alumno,
+    ).first()
+    if not alumno:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alumno no encontrado en este box",
+        )
+
+    anterior = {"peso_kg": alumno.peso_kg, "genero": alumno.genero}
+    alumno.peso_kg = datos.peso_kg
+    alumno.genero = datos.genero
+    db.commit()
+    db.refresh(alumno)
+
+    registrar_auditoria(
+        db,
+        tenant_id=tenant_id,
+        usuario_id=current_user["usuario_id"],
+        accion="UPDATE",
+        entidad="usuario",
+        entidad_id=alumno.id,
+        detalle={
+            "campos": ["peso_kg", "genero"],
+            "peso_kg_anterior": anterior["peso_kg"],
+            "peso_kg_nuevo": alumno.peso_kg,
+            "genero_anterior": anterior["genero"],
+            "genero_nuevo": alumno.genero,
+            "origen": "ficha_coach",
+        },
+    )
+
+    return {
+        "id": alumno.id,
+        "peso_kg": alumno.peso_kg,
+        "genero": alumno.genero,
+        "perfil_completo": bool(alumno.peso_kg and alumno.genero in ("M", "F")),
     }
 
 

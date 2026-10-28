@@ -146,6 +146,9 @@ const Alumnos = () => {
         rol: 'alumno',
         rut: '',
         estado: 'activo',
+        // D2: obligatorios para rol alumno (el alta del box los exige igual que el registro).
+        peso_kg: '',
+        genero: '',
     });
 
     // El término de búsqueda viaja al backend con un retardo de 350 ms (y sin retardo al
@@ -212,7 +215,10 @@ const Alumnos = () => {
             });
         } else {
             setEditingAlumno(null);
-            setFormData({ nombre: '', correo: '', telefono: '', password: '', rol: rolFijo, rut: '', estado: 'activo' });
+            setFormData({
+                nombre: '', correo: '', telefono: '', password: '', rol: rolFijo,
+                rut: '', estado: 'activo', peso_kg: '', genero: '',
+            });
         }
         setShowModal(true);
     };
@@ -220,7 +226,10 @@ const Alumnos = () => {
     const closeModal = () => {
         setShowModal(false);
         setEditingAlumno(null);
-        setFormData({ nombre: '', correo: '', telefono: '', password: '', rol: 'alumno', rut: '', estado: 'activo' });
+        setFormData({
+            nombre: '', correo: '', telefono: '', password: '', rol: 'alumno',
+            rut: '', estado: 'activo', peso_kg: '', genero: '',
+        });
     };
 
     const openVoucherModal = (alumno) => {
@@ -266,6 +275,10 @@ const Alumnos = () => {
                 rol: formData.rol,
                 rut: formData.rut,
                 tenant_id: tenant_id,
+                // D2: el alta de un ALUMNO exige peso y género (el formulario ya los marca
+                // `required`); en coach/admin viajan en null.
+                peso_kg: formData.rol === 'alumno' ? parseFloat(formData.peso_kg) : null,
+                genero: formData.rol === 'alumno' ? formData.genero : null,
             };
         try {
             await guardarUsuario.mutateAsync({ id: editingAlumno?.id, payload });
@@ -529,6 +542,25 @@ const Alumnos = () => {
                                     <label className="block text-sm font-medium text-zinc-300 mb-1">Teléfono</label>
                                     <input type="tel" value={formData.telefono} onChange={(e) => setFormData({ ...formData, telefono: e.target.value })} className="w-full px-3 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" required />
                                 </div>
+                                {/* D2: peso y género del alumno (obligatorios en el alta). Son los
+                                    datos que el motor de niveles necesita; sin ellos el alumno nace
+                                    con el perfil incompleto y su nivel nunca se publica. */}
+                                {!editingAlumno && formData.rol === 'alumno' && (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-zinc-300 mb-1">Peso (kg) *</label>
+                                            <input type="number" min="1" max="400" step="0.1" value={formData.peso_kg} onChange={(e) => setFormData({ ...formData, peso_kg: e.target.value })} placeholder="70" className="w-full px-3 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" required />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-zinc-300 mb-1">Género *</label>
+                                            <select value={formData.genero} onChange={(e) => setFormData({ ...formData, genero: e.target.value })} className="w-full px-3 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" required>
+                                                <option value="">Seleccionar</option>
+                                                <option value="M">Masculino</option>
+                                                <option value="F">Femenino</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                )}
                                 {!editingAlumno && (
                                     <div>
                                         <label className="block text-sm font-medium text-zinc-300 mb-1">Contraseña</label>

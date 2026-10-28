@@ -1339,6 +1339,24 @@ export function useFichaAlumnoCoach(coachId, alumnoId) {
     });
 }
 
+// D2: el coach carga/corrige peso y género desde la ficha (los dos datos que el motor de
+// niveles necesita y que el alta vieja no pedía). Invalida la FAMILIA de fidelización (la ficha
+// que se está mirando) y el lote de Progreso, porque el nivel del alumno depende de estos dos
+// campos: sin invalidar, la tabla seguiría mostrando el badge "Sin datos".
+export function useActualizarPerfilAlumnoCoach() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ coachId, alumnoId, peso_kg, genero }) => api.put(
+            `/api/v1/fidelizacion/coach/${coachId}/alumno/${alumnoId}/perfil`,
+            { peso_kg, genero },
+        ).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['fidelizacion'] });
+            qc.invalidateQueries({ queryKey: ['historial-rm', 'progreso-lote'] });
+        },
+    });
+}
+
 // Vista previa del correo de inactividad ANTES de mandarlo: el asunto y el HTML los
 // renderiza el BACKEND con la MISMA función del envío real (`render_email_fidelizacion`),
 // así que es un GET sin efectos secundarios (no registra ni manda nada) y se puede cachear

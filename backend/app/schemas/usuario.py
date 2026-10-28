@@ -2,7 +2,7 @@
 Esquemas Pydantic para Usuario
 Define la estructura de datos para requests y responses
 """
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 from typing import Optional
 from datetime import datetime, date
 from app.models.usuario import RolUsuario
@@ -33,6 +33,22 @@ class UsuarioCreate(UsuarioBase):
     estado: Optional[str] = Field(
         None, pattern="^(activo|pendiente_activacion|rechazado|baja)$",
         description="activo | pendiente_activacion | rechazado | baja")
+    # D2: el alta del alumno desde el panel del box también carga peso y género (el formulario
+    # los exige para rol alumno). Sin ellos el nivel no se puede clasificar.
+    peso_kg: Optional[float] = Field(
+        None, gt=0, le=400, description="Peso corporal en kg (obligatorio para alumnos)")
+    genero: Optional[str] = Field(
+        None, max_length=10, description="Género: M o F (obligatorio para alumnos)")
+
+    @field_validator("genero")
+    @classmethod
+    def _genero_valido(cls, valor):
+        if valor is None:
+            return None
+        normalizado = str(valor).strip().upper()
+        if normalizado not in ("M", "F"):
+            raise ValueError("Género inválido: usa M o F")
+        return normalizado
 
 
 # Schema para actualizar un usuario (todos los campos opcionales)
@@ -63,6 +79,21 @@ class UsuarioUpdate(BaseModel):
     # antigua "estado" de la UI), que falle ruidosamente con 422 en vez de
     # ignorarse en silencio (Pydantic default extra='ignore').
     model_config = ConfigDict(extra='forbid')
+
+    @field_validator("genero")
+    @classmethod
+    def _genero_valido(cls, valor):
+        """D2: el box solo puede cargar M o F (es lo que el motor de niveles entiende).
+
+        Se normaliza a mayúscula. Un valor viejo raro ('otro', '') que ya esté en la BD no se
+        toca si no se manda en el update; mandarlo por acá falla con 422.
+        """
+        if valor is None:
+            return None
+        normalizado = str(valor).strip().upper()
+        if normalizado not in ("M", "F"):
+            raise ValueError("Género inválido: usa M o F")
+        return normalizado
 
 
 # Schema para respuesta (lo que devuelve la API)

@@ -80,12 +80,15 @@ const Ajustes = () => {
         try {
             // ── N-1: sólo se envían los campos que el alumno autogestiona. ──
             // `nombre` es de SOLO LECTURA (lo modifica el box) y los demás datos
-            // de la ficha (correo, género, fecha de nacimiento) también: no van
-            // en el payload para no sugerir que se pueden cambiar desde acá.
+            // de la ficha (correo, fecha de nacimiento) también: no van en el
+            // payload para no sugerir que se pueden cambiar desde acá.
+            // D2: `genero` se puede COMPLETAR una vez si está vacío (es obligatorio para
+            // calcular el nivel). Si ya tiene valor, el backend responde 409 y lo corrige el box.
             const payload = {};
             if (formData.telefono) payload.telefono = formData.telefono;
             if (formData.peso_kg) payload.peso_kg = parseFloat(formData.peso_kg);
             if (formData.estatura_cm) payload.estatura_cm = parseInt(formData.estatura_cm);
+            if (formData.genero && !perfilQ.data?.genero) payload.genero = formData.genero;
 
             await guardarPerfil.mutateAsync(payload);
             setMensaje({ tipo: 'exito', texto: 'Datos actualizados exitosamente' });
@@ -182,14 +185,21 @@ const Ajustes = () => {
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Género</label>
-                                    <select name="genero" value={formData.genero} disabled
-                                        className="w-full px-3 py-2.5 border border-gray-200 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed text-sm">
+                                    <select name="genero" value={formData.genero}
+                                        onChange={handleChange}
+                                        disabled={Boolean(perfilQ.data?.genero)}
+                                        className={`w-full px-3 py-2.5 border rounded-lg text-sm ${perfilQ.data?.genero
+                                            ? 'border-gray-200 bg-gray-50 text-gray-500 cursor-not-allowed'
+                                            : 'border-gray-300 focus:ring-2 focus:ring-emerald-500 focus:border-transparent'}`}>
                                         <option value="">Seleccionar...</option>
                                         <option value="M">Masculino</option>
                                         <option value="F">Femenino</option>
-                                        <option value="Otro">Otro</option>
                                     </select>
-                                    <p className="text-xs text-gray-500 mt-1">Solo el box puede modificar este dato</p>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        {perfilQ.data?.genero
+                                            ? 'Solo el box puede modificar este dato'
+                                            : 'Completalo para que podamos calcular tu nivel; después solo lo corrige el box'}
+                                    </p>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Fecha de nacimiento</label>

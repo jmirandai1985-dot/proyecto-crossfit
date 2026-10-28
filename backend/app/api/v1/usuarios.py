@@ -166,6 +166,9 @@ def crear_usuario(
         rol=usuario_data.rol,
         activo=(estado_nuevo == "activo"), estado=estado_nuevo,
         cambiar_password_al_login=True,
+        # D2: perfil para el nivel (el formulario del box los exige para rol alumno).
+        peso_kg=usuario_data.peso_kg,
+        genero=usuario_data.genero,
     )
 
     db.add(db_usuario)
