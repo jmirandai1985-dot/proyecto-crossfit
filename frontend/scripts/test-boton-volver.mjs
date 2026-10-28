@@ -94,7 +94,7 @@ const LAZY = new Map(
         .map((m) => [m[1], conExtension(m[2])]),
 );
 
-// Rutas hijas de `/alumno/*` (el bloque es plano: 11 pantallas y un comodín que
+// Rutas hijas de `/alumno/*` (el bloque es plano: 12 pantallas y un comodín que
 // redirige al Inicio). Se corta en el `</Route>` que cierra el bloque.
 const abre = APP.indexOf('path="/alumno/*"');
 const bloque = abre === -1 ? '' : APP.slice(abre, APP.indexOf('</Route>', abre));
@@ -108,7 +108,7 @@ const inicio = leer('../src/config/roles.js').match(/alumno:\s*'([^']+)'/);
 eq(inicio?.[1], INICIO_ALUMNO, 'roles.js apunta el inicio del alumno a /alumno/dashboard');
 const RUTA_RAIZ = (inicio?.[1] || '').split('/').filter(Boolean).pop() || '';
 
-ok(RUTAS_ALUMNO.length === 11, `App.jsx tiene las 11 pantallas del alumno (vistas: ${RUTAS_ALUMNO.length})`);
+ok(RUTAS_ALUMNO.length === 12, `App.jsx tiene las 12 pantallas del alumno (vistas: ${RUTAS_ALUMNO.length})`);
 ok(RUTAS_ALUMNO.every((r) => r.ruta && r.archivo), 'cada ruta del alumno apunta a una pantalla lazy conocida');
 ok(RUTAS_ALUMNO.some((r) => r.ruta === RUTA_RAIZ), `la raíz (${RUTA_RAIZ}) es una de las rutas del alumno`);
 
