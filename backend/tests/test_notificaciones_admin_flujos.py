@@ -189,6 +189,8 @@ def test_registro_de_alumno_avisa_a_los_admins():
             "tenant_id": TENANT_ID,
             "peso": 70.5,
             "estatura": 175,
+            # D2: el alta exige género además de peso.
+            "sexo": "M",
         }, timeout=30)
         assert r.status_code == 201, r.text[:300]
 

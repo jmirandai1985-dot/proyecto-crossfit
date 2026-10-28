@@ -399,8 +399,11 @@ def test_e2e_06_coach_genera_wod():
     assert r.status_code == 200, f"Listar movimientos falló: {r.status_code}"
     movimientos = r.json()
     assert len(movimientos) > 0, "No hay movimientos en la BD"
-    # Guardar un movimiento_id para el test de RM posterior
-    SharedE2E.movimiento_id = movimientos[0]["id"]
+    # Guardar un movimiento_id para el test de RM posterior.
+    # D4: el RM del paso 8 manda `peso_kg`, así que tiene que ser un movimiento de FUERZA
+    # (en gimnasia el peso se rechaza y el valor son las repeticiones).
+    fuerza = [m for m in movimientos if m.get("categoria") == "fuerza"]
+    SharedE2E.movimiento_id = (fuerza or movimientos)[0]["id"]
     print(f"  ✅ Movimientos disponibles: {len(movimientos)}")
 
     # 6b. Obtener la clase para saber fecha, hora

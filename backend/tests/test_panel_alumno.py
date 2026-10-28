@@ -263,11 +263,13 @@ def test_11_rm_gimnastico():
     Shared.mov_gimnastico_id = mov["id"]
 
     payload = {"tenant_id": TENANT_ID, "alumno_id": ALUMNO_ID,
-               "movimiento_id": mov["id"], "peso_kg": 10, "repeticiones": 12,
+               "movimiento_id": mov["id"], "repeticiones": 12,
                "series": 3, "fecha": HOY_STR, "notas": "TEST gimnastico"}
     r = requests.post(f"{BASE}/historial-rm", json=payload)
     assert r.status_code < 300, f"Status {r.status_code}: {r.text[:200]}"
     data = r.json()
+    # D4: en gimnasia el valor son las repeticiones; el peso va NULL (antes era un dummy).
+    assert data.get("peso_kg") is None, f"peso_kg esperado=None, real={data.get('peso_kg')}"
     assert data.get(
         "repeticiones") == 12, f"repeticiones esperado=12, real={data.get('repeticiones')}"
     assert data.get(

@@ -162,6 +162,9 @@ def _payload_registro(correo: str) -> dict:
         "correo": correo,
         "rut": _rut_valido(),
         "tenant_id": TENANT_ID,
+        # D2: el alta exige peso y género (validación real en el endpoint).
+        "sexo": "F",
+        "peso": 60,
     }
 
 
