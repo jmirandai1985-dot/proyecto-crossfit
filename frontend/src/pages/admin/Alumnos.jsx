@@ -50,6 +50,11 @@ const Alumnos = () => {
     const [confirmarDuplicado, setConfirmarDuplicado] = useState(false);
     const [planSeleccionado, setPlanSeleccionado] = useState('');
     const [mensajeAprobacion, setMensajeAprobacion] = useState('');
+    // La "Aprobación manual" está PLEGADA por defecto cuando el alumno ya subió un
+    // comprobante pendiente: ese pago se aprueba en Admin → Pendientes, que activa el
+    // plan y avisa al alumno. A mano sólo queda para el pago que llegó por fuera de la
+    // app, así que el panel se abre con un clic explícito (`mostrarAprobacionManual`).
+    const [mostrarAprobacionManual, setMostrarAprobacionManual] = useState(false);
     // Error de descarga del comprobante (blob autenticado): se muestra junto al archivo.
     const [avisoComprobante, setAvisoComprobante] = useState('');
     const [editingAlumno, setEditingAlumno] = useState(null);
@@ -109,6 +114,13 @@ const Alumnos = () => {
         () => solicitudConComprobante(solicitudesPlanQ.data ?? SIN_DATOS),
         [solicitudesPlanQ.data],
     );
+    // ¿El alumno ya subió un comprobante que está esperando revisión? Entonces la
+    // aprobación NO se hace acá a mano: `/admin/pendientes?tab=solicitudes` es el
+    // camino que activa el plan, registra quién aprobó y le avisa al alumno. Este
+    // modal sólo deja la aprobación manual detrás de un clic explícito (pago por
+    // fuera de la app) para no crear suscripciones duplicadas sin querer.
+    const haySolicitudPendiente = solicitudComprobante?.estado === 'pending';
+    const aprobacionManualVisible = !haySolicitudPendiente || mostrarAprobacionManual;
     const {
         preview: comprobantePreview,
         descargando: descargandoComprobante,
@@ -239,6 +251,7 @@ const Alumnos = () => {
         setAvisoComprobante('');
         setPlanVigenteAlumno(null);
         setConfirmarDuplicado(false);
+        setMostrarAprobacionManual(false);
         setShowVoucherModal(true);
         // El "¿ya tiene un plan ACTIVO?" lo resuelve la consulta `useSuscripcionesAlumno`
         // (arranca al quedar puesto `selectedAlumnoVoucher`) y lo aplica el efecto de
@@ -251,6 +264,7 @@ const Alumnos = () => {
         setSelectedAlumnoVoucher(null);
         setPlanVigenteAlumno(null);
         setConfirmarDuplicado(false);
+        setMostrarAprobacionManual(false);
         setAvisoComprobante('');
     };
 
@@ -726,11 +740,74 @@ const Alumnos = () => {
                                     )}
                                 </div>
 
+                                {/* ── ¿Comprobante pendiente? Primero Pendientes ──────
+                                    Si el alumno ya subió un comprobante esperando revisión,
+                                    el camino correcto es /admin/pendientes?tab=solicitudes:
+                                    ahí se activa el plan, queda quién aprobó y se le avisa
+                                    al alumno. La aprobación manual esconde sus controles
+                                    detrás de un clic para no crear una SEGUNDA
+                                    suscripción por error (el bug: se aprobaba a mano algo
+                                    que ya estaba esperando en Pendientes). */}
+                                {!aprobacionManualVisible && (
+                                    <div className="border-t border-zinc-800 pt-4 space-y-3"
+                                        data-testid="aviso-solicitud-pendiente">
+                                        <div>
+                                            <h3 className="text-sm font-semibold text-teal-300">
+                                                ✅ Este pago se aprueba desde Pendientes
+                                            </h3>
+                                            <p className="text-xs text-zinc-400 mt-1">
+                                                <span className="font-medium text-zinc-200">
+                                                    {selectedAlumnoVoucher?.nombre}
+                                                </span>{' '}
+                                                subió el comprobante
+                                                {solicitudComprobante?.plan_nombre && (
+                                                    <>
+                                                        {' '}del plan{' '}
+                                                        <span className="font-medium text-zinc-200">
+                                                            {solicitudComprobante.plan_nombre}
+                                                        </span>
+                                                    </>
+                                                )}{' '}
+                                                y está esperando revisión. Aprobarlo ahí activa el
+                                                plan y le avisa al alumno.
+                                            </p>
+                                        </div>
+                                        <div className="flex flex-col gap-2 sm:flex-row">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    closeVoucherModal();
+                                                    navigate('/admin/pendientes?tab=solicitudes');
+                                                }}
+                                                data-testid="ir-a-pendientes"
+                                                className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-teal-700"
+                                            >
+                                                Ir a Pendientes →
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setMostrarAprobacionManual(true)}
+                                                data-testid="abrir-aprobacion-manual"
+                                                className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                                            >
+                                                El pago llegó por fuera de la app
+                                            </button>
+                                        </div>
+                                        <p className="text-[11px] text-zinc-500">
+                                            La aprobación manual crea la suscripción sin registro de
+                                            revisión: usala sólo si el alumno pagó sin subir la solicitud.
+                                        </p>
+                                    </div>
+                                )}
+
                                 {/* ── Aprobación MANUAL (crear la suscripción a mano) ──
                                     El camino normal es aprobar el comprobante en Admin →
                                     Pendientes de revisión (activa el plan y avisa al alumno).
                                     Esto queda para el pago que llegó por fuera de la app. */}
-                                <div className="border-t border-zinc-800 pt-4 space-y-4">
+                                {aprobacionManualVisible && (
+                                <>
+                                <div className="border-t border-zinc-800 pt-4 space-y-4"
+                                    data-testid="aprobacion-manual">
                                     <div>
                                         <h3 className="text-sm font-semibold text-zinc-200">Aprobación manual</h3>
                                         <p className="text-xs text-zinc-500 mt-1">
@@ -835,6 +912,8 @@ const Alumnos = () => {
                                         {crearSuscripcion.isPending ? 'Aprobando...' : 'Aprobar Pago'}
                                     </button>
                                 </div>
+                                </>
+                                )}
                             </div>
                         </div>
                     </div>

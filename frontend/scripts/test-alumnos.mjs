@@ -13,6 +13,9 @@
 //   7. el "Mostrando A-B de N" del pie (última página incompleta incluida)
 //   9. qué solicitud abre el modal "Voucher": la del ARCHIVO real (pendiente primero) y
 //      `null` cuando el alumno nunca subió comprobante (antes se inventaba uno)
+//  10. qué se ve en el modal cuando el alumno YA subió un comprobante pendiente: la
+//      aprobación manual queda plegada y el camino es Admin → Pendientes
+import { readFileSync } from 'node:fs';
 import {
     badgeEstado, estadoSolicitudPlan, nombrePlan, paginaFueraDeRango, paginaValida, paramsAlumnos,
     rangoMostrado, solicitudConComprobante, suscripcionDeAlumno, suscripcionVigente,
@@ -144,6 +147,27 @@ eq(estadoSolicitudPlan('rejected').texto, 'Rechazada', 'rótulo de rechazada');
 eq(estadoSolicitudPlan('raro'), { texto: 'raro', clase: 'text-zinc-400' },
     'un estado desconocido se muestra tal cual (no rompe el modal)');
 eq(estadoSolicitudPlan(null), { texto: 'Sin estado', clase: 'text-zinc-400' }, 'estado nulo -> "Sin estado"');
+
+console.log('\n== 10. Modal "Voucher": con comprobante pendiente se aprueba en Pendientes ==');
+// El repo no tiene jsdom: se fija el CONTRATO del componente real (`Alumnos.jsx`).
+const alumnosSrc = readFileSync(new URL('../src/pages/admin/Alumnos.jsx', import.meta.url), 'utf8');
+ok(/const haySolicitudPendiente = solicitudComprobante\?\.estado === 'pending'/.test(alumnosSrc),
+    'el modal detecta la solicitud PENDIENTE (la que `solicitudConComprobante` prioriza)');
+ok(/const aprobacionManualVisible = !haySolicitudPendiente \|\| mostrarAprobacionManual/.test(alumnosSrc),
+    'sin comprobante pendiente la aprobación manual sigue a la vista');
+ok(/\{!aprobacionManualVisible && \(/.test(alumnosSrc)
+    && /data-testid="aviso-solicitud-pendiente"/.test(alumnosSrc),
+    'con comprobante pendiente el modal avisa antes de ofrecer la carga manual');
+ok(alumnosSrc.includes('/admin/pendientes?tab=solicitudes'),
+    'el aviso manda a la cola de Solicitudes (ahí se activa el plan y se avisa al alumno)');
+ok(/data-testid="ir-a-pendientes"/.test(alumnosSrc)
+    && /data-testid="abrir-aprobacion-manual"/.test(alumnosSrc),
+    'hay dos salidas explícitas: ir a Pendientes o forzar la aprobación manual');
+ok(/\{aprobacionManualVisible && \(/.test(alumnosSrc)
+    && /data-testid="aprobacion-manual"/.test(alumnosSrc),
+    'el selector de plan y "Aprobar Pago" quedan detrás de ese clic');
+eq((alumnosSrc.match(/setMostrarAprobacionManual\(false\)/g) || []).length, 2,
+    'al abrir y al cerrar el modal el panel manual vuelve a plegarse');
 
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 
