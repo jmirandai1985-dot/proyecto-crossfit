@@ -25,7 +25,7 @@ las clases del seed, que ya no existen cuando termina):
     4. transacciones del seed           (por descripcion)
     5. suscripciones del seed           (por usuario)
     6. usuarios del seed                (por correo; cascada: predictions_churn,
-                                         student_segments, segmentacion_alumnos, …)
+                                         segmentacion_alumnos, …)
     7. clases del seed                  (sólo si quedaron vacías)
 
 ──────────────────────────────────────────────────────────────────────────────
@@ -247,7 +247,7 @@ def borrar_en_transaccion(db, env: dict, tenant_id: int = TENANT_ID,
     # 4) transacciones (sin FK a usuarios: se identifican por el marcador)
     conteos["transacciones"] = db.execute(t(
         f"DELETE FROM transacciones_financieras WHERE {where_tx}"), params_tx).rowcount
-    # 5) suscripciones y 6) usuarios (cascada: predictions_churn, student_segments, …)
+    # 5) suscripciones y 6) usuarios (cascada: predictions_churn, …)
     conteos["suscripciones"] = db.execute(t(
         "DELETE FROM suscripciones WHERE usuario_id = ANY(:ids)"),
         {"ids": ids or [0]}).rowcount

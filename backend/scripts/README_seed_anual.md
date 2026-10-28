@@ -298,7 +298,7 @@ Qué hace exactamente (una sola transacción, `BEGIN` … `COMMIT`):
    transacciones, y las `clases` con `created_at = MARCA_TS`.
 2. Borra en el orden de `pasos_borrado()` (hijos primero; verificado por un test):
    `asistencias` → `reservas` → `clases` → `transacciones` → `suscripciones` → `usuarios`
-   (la cascada se lleva `predictions_churn`, `student_segments`, `kpi_daily`…).
+   (la cascada se lleva `predictions_churn`, `kpi_daily`…).
 3. **Recalcula el aforo de las clases REALES** que el seed infló:
    `asistentes_confirmados = <reservas vivas que quedan>`. Sin esto, el run siguiente
    tendría cientos de cambios del paso 9 en la cola.

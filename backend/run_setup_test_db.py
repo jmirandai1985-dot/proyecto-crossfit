@@ -53,12 +53,13 @@ Reserva = importlib.import_module("app.models.reserva").Reserva
 # ── MODELOS ANALÍTICOS / ML / DATA MARTS ────────────────────────────────────
 # `Base.metadata.create_all()` sólo crea las tablas de los modelos que fueron
 # IMPORTADOS. `app/models/__init__.py` no importa estos módulos y el seed tampoco
-# los necesita para insertar datos, así que en una rama TEST vacía faltaban 8
+# los necesita para insertar datos, así que en una rama TEST vacía faltaban 7
 # tablas que antes se heredaban de PROD: churn_gestion, daily_kpis, ml_modelos,
-# monthly_kpis, predictions_churn, predictions_forecast, segmentacion_alumnos
-# y student_segments. Con la rama nueva (proyecto urban-training-box) eso hacía
+# monthly_kpis, predictions_churn, predictions_forecast y segmentacion_alumnos.
+# Con la rama nueva (proyecto urban-training-box) eso hacía
 # fallar los tests de churn/BI con "relation ... does not exist". Registrarlos
 # acá garantiza que el bootstrap del esquema quede completo.
+# (D6: `student_segments` se eliminó en la migración 062: no tenía consumidores.)
 for _modelo_analitico in (
     "app.models.churn_gestion",
     "app.models.daily_kpis",
@@ -67,7 +68,6 @@ for _modelo_analitico in (
     "app.models.predictions_churn",
     "app.models.predictions_forecast",
     "app.models.segmentacion_alumno",
-    "app.models.student_segments",
 ):
     importlib.import_module(_modelo_analitico)
 
@@ -231,12 +231,6 @@ ALTER TABLE reservas ALTER COLUMN estado SET DEFAULT 'reserved'::character varyi
 ALTER TABLE reservas ALTER COLUMN tokens_gastados SET DEFAULT 0;
 ALTER TABLE retencion_alumnos ALTER COLUMN estado_plan SET DEFAULT 'activo'::character varying;
 ALTER TABLE segmentacion_alumnos ALTER COLUMN arquetipo SET DEFAULT 'ACTIVO_FIEL'::character varying;
-ALTER TABLE student_segments ALTER COLUMN asistencia_score SET DEFAULT 0;
-ALTER TABLE student_segments ALTER COLUMN fuerza_score SET DEFAULT 0;
-ALTER TABLE student_segments ALTER COLUMN gymnastica_score SET DEFAULT 0;
-ALTER TABLE student_segments ALTER COLUMN nivel SET DEFAULT 'BASICO'::character varying;
-ALTER TABLE student_segments ALTER COLUMN ready_for_upgrade SET DEFAULT false;
-ALTER TABLE student_segments ALTER COLUMN retention_score SET DEFAULT 0;
 ALTER TABLE suscripciones ALTER COLUMN es_compra_emergencia SET DEFAULT false;
 ALTER TABLE suscripciones ALTER COLUMN puede_comprar_emergencia SET DEFAULT true;
 ALTER TABLE tenants ALTER COLUMN activo SET DEFAULT true;

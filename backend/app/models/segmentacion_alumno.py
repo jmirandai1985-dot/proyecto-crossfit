@@ -6,8 +6,8 @@ tenant, igual que `predictions_churn`). El estimador vive en `ml_modelos`
 (`tipo_modelo='segmentacion'`).
 
 ⚠️ NO confundir con las otras dos tablas "parecidas":
-  - `student_segments` (migración 021): nivel de ATLETA
-    (BASICO|INTERMEDIO|AVANZADO + fuerza/gimnástica/asistencia/retention).
+  - `student_segments` (migración 021): nivel de ATLETA. **ELIMINADA en la 062 (D6)**: nunca
+    tuvo consumidores; el nivel real vive en `usuarios.nivel_*` (migración 060, D3).
   - `retencion_alumnos`: seguimiento MANUAL (coach_id, notas, proxima_renovacion).
 
 Los 6 valores posibles de `arquetipo` (escalera de retención, definida en

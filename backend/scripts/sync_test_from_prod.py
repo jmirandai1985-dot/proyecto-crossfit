@@ -191,7 +191,7 @@ cur_test.execute("""
         -- se vacian a proposito: NO se copian de PROD (ver nota antes de TABLAS)
         auditoria, password_reset_tokens,
         daily_kpis, monthly_kpis, ml_modelos, predictions_churn, predictions_forecast,
-        segmentacion_alumnos, student_segments,
+        segmentacion_alumnos,
         transacciones_financieras
     CASCADE
 """)
@@ -225,7 +225,7 @@ cur_test.execute("ALTER TABLE planes ADD COLUMN IF NOT EXISTS requiere_certifica
 #   auditoria                  -> log de operaciones; ademas `detalle` es json en
 #                                 TEST y jsonb en PROD (riesgo de desajuste).
 #   password_reset_tokens      -> tokens de seguridad efimeros, no viajan a TEST.
-#   daily_kpis, monthly_kpis, segmentacion_alumnos, student_segments,
+#   daily_kpis, monthly_kpis, segmentacion_alumnos,
 #   predictions_churn, predictions_forecast
 #                              -> derivados/ML, recalculables desde los datos base.
 #   ml_modelos                 -> apunta a artefactos .pkl que TEST no tiene.
