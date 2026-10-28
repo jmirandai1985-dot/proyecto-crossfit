@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from typing import Optional
+from datetime import datetime, timezone
 
 from app.db.database import get_db
 from app.models.notificacion import Notificacion
@@ -15,6 +16,25 @@ from app.core.rate_limit import limiter, LIMIT_CRITICO
 from app.services.asistencia_service import verificar_token_optout
 
 router = APIRouter()
+
+# Tope de "Borrar todas" en una pasada: el MISMO límite del listado de la campana (50). Así el
+# usuario borra exactamente lo que vio y confirmó; si tenía más, repite la acción.
+MAX_BORRAR_NOTIFICACIONES = 50
+
+
+def _vivas(db: Session, alumno_id: int):
+    """Query base de las notificaciones VIVAS (soft delete: `eliminada_en IS NULL`)."""
+    return db.query(Notificacion).filter(
+        Notificacion.alumno_id == alumno_id,
+        Notificacion.eliminada_en.is_(None),
+    )
+
+
+def _filas_borrables(db: Session, alumno_id: int) -> list:
+    """Las filas que "Borrar todas" tocaría AHORA (mismo orden y tope que el listado)."""
+    return _vivas(db, alumno_id).order_by(
+        Notificacion.created_at.desc()
+    ).limit(MAX_BORRAR_NOTIFICACIONES).all()
 
 
 @router.get("")
@@ -60,9 +80,7 @@ def listar_notificaciones(
     else:
         alumno_id = current_user["usuario_id"]
 
-    query = db.query(Notificacion).filter(
-        Notificacion.alumno_id == alumno_id
-    )
+    query = _vivas(db, alumno_id)
     if solo_no_leidas:
         query = query.filter(Notificacion.leida == False)
 
@@ -90,7 +108,7 @@ def marcar_como_leida(
     current_user: dict = Depends(get_current_user),
 ):
     """Marca una notificación como leída (solo el dueño)"""
-    notif = db.query(Notificacion).filter(
+    notif = _vivas(db, current_user["usuario_id"]).filter(
         Notificacion.id == notificacion_id).first()
     if not notif:
         raise HTTPException(
@@ -115,12 +133,50 @@ def marcar_todas_como_leidas(
     """Marca todas las notificaciones del alumno autenticado como leídas"""
     # 🔒 SEGURIDAD: alumno_id del token; el query param se ignora.
     alumno_id = current_user["usuario_id"]
-    db.query(Notificacion).filter(
-        Notificacion.alumno_id == alumno_id,
+    _vivas(db, alumno_id).filter(
         Notificacion.leida == False
     ).update({"leida": True})
     db.commit()
     return {"status": "ok", "message": "Todas las notificaciones marcadas como leídas"}
+
+
+@router.delete("")
+def borrar_todas_las_notificaciones(
+    confirmar: int = Query(
+        ..., ge=0,
+        description="Cantidad de notificaciones que el usuario vio y confirmó borrar"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """SOFT-DELETE de las notificaciones propias ("Borrar todas").
+
+    El panel de la campana muestra el número N y pide confirmación explícita; el request manda
+    `confirmar=N`. Si la cantidad cambió (llegó un aviso nuevo mientras el diálogo estaba
+    abierto), responde 409 con `total_actual` y NO borra nada: el usuario ve el número nuevo y
+    vuelve a confirmar. Así un "borrar todas" nunca se lleva avisos que el usuario no vio.
+
+    - No se borran filas: se marca `eliminada_en` (el listado y el badge filtran por eso).
+    - Tope: las mismas 50 filas que devuelve el listado; si había más, se repite la acción.
+    - Idempotente: con la lista vacía y `confirmar=0` responde 200 con `eliminadas=0`.
+    """
+    alumno_id = current_user["usuario_id"]
+    filas = _filas_borrables(db, alumno_id)
+
+    if confirmar != len(filas):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "mensaje": ("La cantidad de notificaciones cambió; "
+                            "revisá el número y confirmá de nuevo"),
+                "total_actual": len(filas),
+            },
+        )
+
+    ahora = datetime.now(timezone.utc)
+    for fila in filas:
+        fila.eliminada_en = ahora
+    db.commit()
+    return {"status": "ok", "eliminadas": len(filas)}
 
 
 # ═══════════════════════════════════════════════════════════════════════

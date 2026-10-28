@@ -112,7 +112,8 @@ def test_la_cadena_de_alembic_tiene_un_solo_head():
     # Sin revisiones duplicadas y un único head (si no, `alembic upgrade head` falla).
     assert len(revisiones.values()) == len(set(revisiones.values()))
     heads = sorted(set(revisiones.values()) - set(padres))
-    assert heads == ["062_drop_student_segments"], heads
+    # No se fija CUÁL es el head: las migraciones siguientes (063, …) lo mueven.
+    assert len(heads) == 1, heads
 
 
 def test_los_docs_historicos_no_se_reescriben():

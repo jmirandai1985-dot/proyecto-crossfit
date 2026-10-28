@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Bell, BellOff, CheckCheck, Inbox, RefreshCw, X } from 'lucide-react';
+import { AlertTriangle, Bell, BellOff, CheckCheck, Inbox, RefreshCw, Trash2, X } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -18,10 +18,12 @@ import {
 //    * el panel se REFRESCA AL ABRIRLO y el refresco de fondo se PAUSA mientras
 //      está abierto (no se pisa la lista que el usuario está leyendo);
 //    * marcar una leída (PUT /{id}/leer) y marcar todas (PUT /leer-todas);
+//    * BORRAR TODAS (DELETE /notificaciones?confirmar=N): soft-delete en el backend. El panel
+//      muestra el número N y pide confirmación; si la cantidad cambió (llegó un aviso nuevo),
+//      el backend responde 409 con el total real y no borra nada;
 //    * LIMPIEZA DE VISTA (utils/notificacionesPanel.js): los avisos de más de 30
 //      días no se listan ni cuentan en el badge, y "Ocultar leídas" deja el panel
-//      sólo con lo pendiente (preferencia guardada en localStorage). No se borra
-//      nada: el backend no tiene DELETE de notificaciones;
+//      sólo con lo pendiente (preferencia guardada en localStorage).
 //    * estados de CARGA y de ERROR visibles, con Reintentar (sin catch mudo).
 //
 //  Endpoints: todos derivan el `alumno_id` del token JWT (notificaciones.py),
@@ -133,6 +135,9 @@ const CampanaNotificaciones = () => {
     const [cargando, setCargando] = useState(false);
     const [error, setError] = useState('');
     const [accionando, setAccionando] = useState(false);
+    // Borrado masivo con confirmación por N (el backend exige `confirmar=N`).
+    const [confirmandoBorrado, setConfirmandoBorrado] = useState(false);
+    const [avisoBorrado, setAvisoBorrado] = useState('');
     // "Sólo pendientes": preferencia de la vista, no del servidor (no hay DELETE).
     const [ocultarLeidas, setOcultarLeidas] = useState(() => leerOcultarLeidas());
     const navigate = useNavigate();
@@ -196,6 +201,8 @@ const CampanaNotificaciones = () => {
     const togglePanel = () => {
         if (abierto) {
             setAbierto(false);
+            // Un diálogo de borrado abierto no sobrevive al cierre del panel.
+            setConfirmandoBorrado(false);
             return;
         }
         setAbierto(true);
@@ -231,6 +238,41 @@ const CampanaNotificaciones = () => {
         } catch (e) {
             console.error('No se pudieron marcar todas las notificaciones:', e);
             setError('No se pudieron marcar todas como leídas. Intenta de nuevo.');
+        } finally {
+            setAccionando(false);
+        }
+    };
+
+    // ── Borrar todas (soft-delete con confirmación por N) ──
+    // `notificaciones` es EXACTAMENTE lo que devolvió el backend (hasta 50), así que su
+    // `length` es el N que el usuario ve y confirma. Si entre el diálogo y el click llegó un
+    // aviso nuevo, el backend responde 409 con el total real: se muestra y se recarga la lista.
+    const borrarTodas = async () => {
+        const cantidad = notificaciones.length;
+        setAccionando(true);
+        setError('');
+        setAvisoBorrado('');
+        try {
+            const { data } = await api.delete('/api/v1/notificaciones', {
+                params: { confirmar: cantidad },
+            });
+            setNotificaciones([]);
+            setNoLeidas(0);
+            setConfirmandoBorrado(false);
+            setAvisoBorrado(`Se borraron ${data?.eliminadas ?? cantidad} notificaciones.`);
+        } catch (e) {
+            const detalle = e.response?.data?.detail;
+            const totalActual = (detalle && typeof detalle === 'object')
+                ? detalle.total_actual
+                : null;
+            console.error('No se pudieron borrar las notificaciones:', e);
+            setError(totalActual !== null && totalActual !== undefined
+                ? `La cantidad de notificaciones cambió (ahora hay ${totalActual}). `
+                    + 'Revisá y confirmá de nuevo.'
+                : 'No se pudieron borrar las notificaciones. Intenta de nuevo.');
+            setConfirmandoBorrado(false);
+            // Resincroniza el N real con el backend.
+            cargarLista();
         } finally {
             setAccionando(false);
         }
@@ -349,6 +391,17 @@ const CampanaNotificaciones = () => {
                                 </button>
                                 <button
                                     type="button"
+                                    onClick={() => { setConfirmandoBorrado(true); setAvisoBorrado(''); }}
+                                    disabled={accionando || notificaciones.length === 0}
+                                    title="Borrar todas"
+                                    aria-label="Borrar todas las notificaciones"
+                                    data-testid="borrar-todas-notificaciones"
+                                    className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800 disabled:opacity-40 disabled:hover:text-zinc-400 transition-colors"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                    type="button"
                                     onClick={() => setAbierto(false)}
                                     aria-label="Cerrar panel de notificaciones"
                                     className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
@@ -377,6 +430,43 @@ const CampanaNotificaciones = () => {
                                 >
                                     <RefreshCw className="w-3.5 h-3.5" /> Reintentar
                                 </button>
+                            </div>
+                        )}
+
+                        {avisoBorrado && (
+                            <div className="px-4 py-2 text-[11px] text-emerald-300 bg-emerald-500/10 border-b border-emerald-500/20"
+                                data-testid="aviso-borrado-notificaciones">
+                                ✓ {avisoBorrado}
+                            </div>
+                        )}
+
+                        {confirmandoBorrado && (
+                            <div className="px-4 py-3 border-b border-red-500/30 bg-red-500/10"
+                                data-testid="confirmar-borrar-todas">
+                                <p className="text-xs text-red-200">
+                                    ¿Borrar <strong>{notificaciones.length}</strong>{' '}
+                                    {notificaciones.length === 1 ? 'notificación' : 'notificaciones'}?
+                                    Dejan de mostrarse en tu panel (incluye las de más de 30 días).
+                                </p>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={borrarTodas}
+                                        disabled={accionando}
+                                        data-testid="confirmar-borrar-todas-si"
+                                        className="px-3 py-1.5 rounded-md bg-red-600 text-white text-xs font-bold hover:bg-red-500 disabled:opacity-50"
+                                    >
+                                        Sí, borrar {notificaciones.length}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setConfirmandoBorrado(false)}
+                                        disabled={accionando}
+                                        className="px-3 py-1.5 rounded-md bg-zinc-800 text-zinc-200 text-xs font-semibold hover:bg-zinc-700"
+                                    >
+                                        Cancelar
+                                    </button>
+                                </div>
                             </div>
                         )}
 
