@@ -845,3 +845,48 @@ descritas arriba. Codificación de consola resuelta con `PYTHONUTF8=1` +
 5. **`ENVIRONMENT`/`DRY_RUN`** del mantenimiento no se ejecutaron contra PROD en esta sesión
    (§Anexo A), así que los hallazgos A.3 son los del reporte previo, no una corrida nueva.
 
+---
+
+## Anexo C — D1–D6 **EJECUTADOS** el 2026-10-28
+
+Se implementaron las 6 decisiones de negocio en el orden pedido. Cada una es un commit propio
+(sin push) y tiene su archivo de tests aislados (`--noconftest`):
+
+| # | Decisión | Qué quedó | Commit |
+|---|---|---|---|
+| D1 | Confianza mínima | `nivel_service.nivel_desde_mejores` exige `NIVEL_MIN_MOVS_EJE` (default **2**) movimientos clasificables por eje; con menos, el eje queda “Sin datos”. Devuelve `nivel_atleta`, `movs_*` y `nivel_confianza`. El front ya no deriva el badge. | `c7cabd3` |
+| D2 | Perfil obligatorio | Alta (registro público y modal del box) exige `sexo` (M/F) y `peso` con validación en el endpoint. El alumno **completa** su género una vez si está vacío (`PUT /alumnos/me`, 409 si ya tiene); el coach lo carga/corrige en la ficha (`PUT …/alumno/{id}/perfil`). Banner “Completá tu perfil”. Gimnasia sin género ya **no** se clasifica (antes usaba la tabla M). | `89bea0c` |
+| D3 | Nivel persistido | Migración **060**: `usuarios.nivel_fuerza/gimnastico/atleta`, `nivel_movs_*`, `nivel_confianza`, `nivel_calculado_en`, `nivel_version` + índice `(tenant_id, nivel_atleta)`. `recalcular_nivel` es el único escritor; hooks en POST/PUT/DELETE de RM, cambios de peso/género y job nocturno (`maintenance/recalcular_niveles.py`, dry-run por defecto). `progreso-lote` lee lo persistido y sólo recalcula lo vencido (24 h o versión distinta). | `f218231` |
+| D4 | Gimnasia por reps | Migración **061**: `historial_rm.peso_kg` nullable + backfill `repeticiones = round(peso_kg)` en gimnasia. POST/PUT validan por categoría (gimnasia exige reps y rechaza peso; fuerza exige peso). `nivel_service` y `rms_service` ordenan gimnasia por `COALESCE(reps, peso)` con la MISMA expresión. Formulario manda peso sólo en fuerza. | `1310455` |
+| D5 | Movimientos faltantes | Estándares nuevos (estimados, reglas de extrapolación del archivo): Power Clean, Power Snatch, Push Jerk, Push Press; habilidades Strict/Kipping Pull-up, Ring Dips, Wall Ball Shot y Kettlebell Swing. `ALIAS_ESTANDAR` resuelve Split Jerk, Squat Clean, Squat Snatch, Rope Climb (Trepada) y Bear Crawl (Caminata). `NIVEL_VERSION = d5-v1`. | `8320cd9` |
+| D6 | `student_segments` | Migración **062**: DROP idempotente (downgrade la recrea como la 021). Se borró el modelo y se sacó de bootstrap/sync/seed. `segmentacion_alumnos` (026) **no** se toca: tiene consumidores y otra semántica. | `6d767db` |
+
+**Decisiones tomadas al ejecutar (no estaban en el pedido):**
+
+1. **Wall Ball Shot y Kettlebell Swing SÍ suman al nivel** (D5 lo pidió explícito). El documento
+   recomendaba dejarlos como benchmark; se implementaron como reps unbroken con el implemento
+   estándar y el código deja anotado cómo moverlos a `CROSSFIT_BENCHMARKS` si el box cambia de
+   idea. Es el único punto donde D5 contradice §5.5 del documento.
+2. **`nivel_atleta` = el menor de los ejes publicados** (la regla que antes vivía en el front).
+   No se adoptó el “badge sólo con ambos ejes” del §1.2: el pedido de D1 habla del mínimo de
+   muestra por eje, no de exigir los dos ejes para el global.
+3. **El POST de RM deja de escribir `historial_rm.nivel_calculado`** (era un snapshot con otra
+   regla y nadie lo leía). La columna sigue en la tabla; el campo de la respuesta se mantiene por
+   compatibilidad y ahora sale del mismo cálculo que persiste `usuarios`.
+4. **`progreso-lote` recalcula y persiste como máximo las filas de la página visible** (25). No
+   escribe en cada GET: sólo cuando la fila está vencida. El barrido completo lo hace el job.
+5. **Tope de “Borrar todas” = 50** (el mismo límite del listado): se borra exactamente lo que el
+   usuario vio y confirmó; si tenía más, repite.
+
+**Tanda paralela (también ejecutada):** soft-delete de “Borrar todas” en la campana con
+confirmación por N (`4a47596`, migración 063), inventario de la flecha Volver (`9d922ee`),
+stacking móvil de Avisos/Notificaciones + orden por severidad (`4234692`), “Descuento máximo” en
+Fidelización → Beneficios (`20af630`), auto-logout a los 10 min (`70edad7`) y el fallback de la
+foto de fondo del carrusel (`f32d3e7`).
+
+**Pendiente al cerrar:** correr los tests de integración contra un backend levantado
+(`test_voucher_static_privado.py`, `test_documentos_solicitud_privados.py`,
+`test_voucher_alumno_plan_vigente_front.py` y los fixtures ajustados en `b227e8b`), aplicar las
+migraciones 060–063 en TEST/PROD y correr el job de nivel (`--aplicar`) para el backfill inicial.
+
+
