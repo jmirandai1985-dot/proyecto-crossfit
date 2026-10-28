@@ -23,15 +23,21 @@ const ok = (cond, msg) => {
 const CAMPANA = leer('../src/components/CampanaNotificaciones.jsx');
 const LAYOUT = leer('../src/components/Layout.jsx');
 
+// Las clases pueden venir como string o como template literal: el panel de la campana usa
+// `${CLASES_CAPA.notificaciones}` (utils/capas.js) para fijar la capa.
+const clases = [
+    ...CAMPANA.matchAll(/className=(?:"([^"]+)"|\{`([^`]+)`\})/g),
+].map((m) => m[1] || m[2]).join(' ');
+
 console.log('== 1. En mobile el panel se ancla al viewport (no desborda a la izquierda) ==');
-ok(/className="fixed inset-x-2 top-\[calc\(env\(safe-area-inset-top\)\+4\.5rem\)\][^"]*"/.test(CAMPANA),
+ok(clases.includes('fixed inset-x-2')
+    && clases.includes('top-[calc(env(safe-area-inset-top)+4.5rem)]'),
     'mobile: fixed + inset-x-2 (8px a cada lado) y debajo del header (respetando el notch)');
 ok(CAMPANA.includes('sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2'),
     'desde sm vuelve al dropdown alineado a la derecha de la campana');
 ok(CAMPANA.includes('sm:w-96'), 'en escritorio conserva el ancho de siempre');
 ok(!/className="absolute right-0 mt-2 w-80/.test(CAMPANA),
     'ya no queda el panel `w-80` colgado de la campana (la causa del recorte)');
-const clases = [...CAMPANA.matchAll(/className="([^"]+)"/g)].map((m) => m[1]).join(' ');
 ok(!/\bw-80\b/.test(clases), 'no hay ningún ancho fijo de 320px que desborde en mobile');
 ok(CAMPANA.includes('sm:max-w-[calc(100vw-2rem)]'),
     'en pantallas angostas el ancho nunca supera el viewport');

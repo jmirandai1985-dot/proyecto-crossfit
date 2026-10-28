@@ -5,8 +5,9 @@ import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import {
     DIAS_VIGENCIA_NOTIFICACION, contarNoLeidas, filtrarVisibles, guardarOcultarLeidas,
-    leerOcultarLeidas,
+    leerOcultarLeidas, ordenarPorSeveridad,
 } from '../utils/notificacionesPanel';
+import { CLASES_CAPA } from '../utils/capas';
 
 // ══════════════════════════════════════════════════════════════════════════
 //  N-2 — Campana de notificaciones del ALUMNO (Layout del panel alumno)
@@ -279,9 +280,10 @@ const CampanaNotificaciones = () => {
     };
 
     // ── Limpieza de la vista (ver utils/notificacionesPanel.js) ──
-    // Se calcula sobre lo que ya está en memoria: no hay request extra.
+    // Se calcula sobre lo que ya está en memoria: no hay request extra. El ORDEN es por
+    // severidad (críticas primero) y, dentro de cada nivel, lo más nuevo arriba.
     const visibles = useMemo(
-        () => filtrarVisibles(notificaciones, { ocultarLeidas }),
+        () => ordenarPorSeveridad(filtrarVisibles(notificaciones, { ocultarLeidas })),
         [notificaciones, ocultarLeidas],
     );
 
@@ -347,7 +349,7 @@ const CampanaNotificaciones = () => {
                     <div
                         role="dialog"
                         aria-label="Notificaciones"
-                        className="fixed inset-x-2 top-[calc(env(safe-area-inset-top)+4.5rem)] z-50 max-h-[70vh] overflow-y-auto overscroll-contain rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96 sm:max-w-[calc(100vw-2rem)]"
+                        className={`fixed inset-x-2 top-[calc(env(safe-area-inset-top)+4.5rem)] max-h-[70vh] overflow-y-auto overscroll-contain rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96 sm:max-w-[calc(100vw-2rem)] ${CLASES_CAPA.notificaciones}`}
                     >
                         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
                             <p className="text-sm font-semibold text-zinc-100">

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { usePublicarAvisoRapido } from '../hooks/queries';
+import { CLASES_CAPA } from '../utils/capas';
 import {
     MAX_TEXTO_RAPIDO, avisoRapidoVacio, formatearFechaCorta, hayErrores, hoyISO,
     mensajeDeError, payloadAvisoRapido, tipoDe, tituloRapidoDeTexto,
@@ -54,7 +55,7 @@ const ModalAvisoRapido = ({ isOpen, onClose, onSuccess }) => {
     const titulo = tituloRapidoDeTexto(form.texto);
 
     return (
-        <div className="fixed inset-0 bg-black/60 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
+        <div className={`fixed inset-0 bg-black/60 flex items-start sm:items-center justify-center p-4 overflow-y-auto ${CLASES_CAPA.modalAviso}`}>
             <div className="w-full max-w-lg my-6 rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl">
                 {/* ── Encabezado ── */}
                 <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-zinc-800">

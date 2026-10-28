@@ -20,6 +20,36 @@
 /** Días que un aviso sigue apareciendo en la campana. */
 export const DIAS_VIGENCIA_NOTIFICACION = 30;
 
+// ── Severidad (orden de la lista) ────────────────────────────────────────────
+// El backend ya devuelve lo más NUEVO primero, pero no todas las notificaciones pesan igual:
+// un plan rechazado o una cobertura de emergencia exigen acción inmediata; un "pedido
+// entregado" es informativo. La campana ordena por severidad y, dentro de cada nivel, por
+// fecha (lo más nuevo arriba), así un aviso crítico viejo no queda tapado por diez
+// informativos nuevos.
+//
+// 0 = crítica (hay que actuar), 1 = alta (importante, sin urgencia), 2 = informativa.
+// Un tipo desconocido cae en 2: no se inventa urgencia.
+export const SEVERIDAD_NOTIFICACION = {
+    rechazado: 0,
+    emergencia: 0,
+    clase_liberada: 0,
+    aprobado: 1,
+    plan_solicitado: 1,
+    pedido_nuevo: 1,
+    config_bancaria: 1,
+    clase_asignada: 1,
+    clase_reasignada: 1,
+    plan_activo: 2,
+    alumno_nuevo: 2,
+    pedido_validado: 2,
+    pedido_entregado: 2,
+};
+
+/** Nivel de severidad de una notificación (2 por defecto: tipo desconocido = informativa). */
+export const severidadDe = (notificacion) => (
+    SEVERIDAD_NOTIFICACION[notificacion?.tipo] ?? 2
+);
+
 /** Clave de localStorage con la preferencia "ocultar leídas" ('1' / '0'). */
 export const CLAVE_OCULTAR_LEIDAS = 'campana-ocultar-leidas';
 
@@ -67,6 +97,21 @@ export function filtrarVisibles(notificaciones, {
         if (!n) return false;
         if (ocultarLeidas && n.leida) return false;
         return esVigente(n, { ahora, dias });
+    });
+}
+
+/**
+ * Orden de la lista: severidad (0 crítica primero) y, a igual severidad, lo más nuevo arriba.
+ * No muta la entrada. Una notificación sin fecha válida queda al final de su grupo.
+ */
+export function ordenarPorSeveridad(notificaciones) {
+    const lista = Array.isArray(notificaciones) ? [...notificaciones] : [];
+    return lista.sort((a, b) => {
+        const porSeveridad = severidadDe(a) - severidadDe(b);
+        if (porSeveridad !== 0) return porSeveridad;
+        const fa = fechaDe(a);
+        const fb = fechaDe(b);
+        return (fb ?? -Infinity) - (fa ?? -Infinity);
     });
 }
 

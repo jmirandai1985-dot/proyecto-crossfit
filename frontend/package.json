@@ -50,6 +50,7 @@
     "test:imagenes": "node scripts/test-imagenes-bazar.mjs",
     "test:inicio": "node scripts/test-inicio-alumno.mjs",
     "test:campana": "node scripts/test-campana-movil.mjs",
+    "test:avisos": "node scripts/test-avisos-capas.mjs",
     "test:notificaciones": "node scripts/test-notificaciones-panel.mjs",
     "test:pendientes": "node scripts/test-pendientes.mjs",
     "test:membresias": "node scripts/test-membresias-modal.mjs",
