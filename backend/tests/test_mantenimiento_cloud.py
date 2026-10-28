@@ -372,6 +372,41 @@ def test_c_environment_no_production_exit_2(monkeypatch, mails):
     assert "ENVIRONMENT='test'" in mails[0][0]
 
 
+# ── B4: `DRY_RUN` obligatorio (fail-closed, auditoría 2026-10-28) ─────────────
+def test_c2_dry_run_ausente_exit_2_fail_closed(monkeypatch, mails):
+    """Sin `DRY_RUN` el job NO elige un modo implícito: exit 2 + correo.
+
+    Antes el default era `1` (en el código y en `Dockerfile.cron`), así que un env group
+    incompleto producía runs **verdes que no aplicaban nada**: el fail-open del hallazgo B4.
+    """
+    monkeypatch.delenv("DRY_RUN", raising=False)
+    rastro = _psql_falso(monkeypatch, _ctx())
+
+    assert men.main() == men.EXIT_CONFIG
+    assert rastro["sql"] == [] and rastro["scripts"] == []
+    assert mails[0][0].startswith("[ALERTA] Mantenimiento PROD: configuración inválida")
+    assert "DRY_RUN=no está definida" in mails[0][0]
+
+
+@pytest.mark.parametrize("valor", ["", "   ", "2", "dry", "sí!"])
+def test_c3_dry_run_desconocido_exit_2(valor, monkeypatch, mails):
+    monkeypatch.setenv("DRY_RUN", valor)
+    rastro = _psql_falso(monkeypatch, _ctx())
+
+    assert men.main() == men.EXIT_CONFIG
+    assert rastro["sql"] == [] and rastro["scripts"] == []
+    assert "DRY_RUN" in mails[0][0]
+
+
+@pytest.mark.parametrize("valor,esperado", [
+    ("1", True), ("true", True), ("SI", True), ("sí", True), ("on", True),
+    ("0", False), ("false", False), ("NO", False), ("off", False), (" 0 ", False),
+])
+def test_c4_dry_run_acepta_solo_los_valores_de_la_lista(valor, esperado, monkeypatch):
+    monkeypatch.setenv("DRY_RUN", valor)
+    assert men.dry_run_activo() is esperado
+
+
 @pytest.mark.parametrize("valor", ["20; DROP TABLE usuarios--", "0", "1001", "abc", "2.5"])
 def test_d_max_cambios_invalido_exit_2_nunca_llega_al_sql(valor, monkeypatch, mails):
     monkeypatch.setenv("MAX_CAMBIOS", valor)

@@ -25,9 +25,13 @@ Principios
    sigue siendo de sólo lectura: son dos roles distintos a propósito.
 3. **Una sola transacción**: los 4 `UPDATE` van en un único `psql` (`BEGIN … ROLLBACK|COMMIT`).
    Antes cada script commiteaba por su cuenta: un fallo a mitad dejaba el trabajo a medias.
-4. **DRY_RUN=1 por defecto** (igual que `backup_cloud`): la transacción completa se ejecuta
-   y termina en `ROLLBACK`, así el mail dice **exactamente** qué filas habrían cambiado
-   (no una estimación). Se apaga (`DRY_RUN=0`) recién cuando el log da verde.
+4. **DRY_RUN obligatorio y explícito** (fail-closed, auditoría B4 — 2026-10-28): con
+   `DRY_RUN=1` la transacción completa se ejecuta y termina en `ROLLBACK`, así el mail dice
+   **exactamente** qué filas habrían cambiado (no una estimación); con `DRY_RUN=0` se aplica
+   (`COMMIT`). Antes la variable tenía default `1` (en el código y en `Dockerfile.cron`), así
+   que un env group incompleto producía un run **verde que no aplicaba nada** y nadie se
+   enteraba. Ahora **tiene que estar** (cualquier otro valor o su ausencia ⇒ `ConfigError`,
+   exit 2 + correo `[ALERTA]`).
 5. **Guardas de volumen por regla**: no alcanza con un único tope global. La regla de negocio
    dice que **todo plan vence el ÚLTIMO día del mes**, así que el run del día 1 marca vencidos a
    todos los que no renovaron: ese volumen es ESPERABLE. Las huérfanas, en cambio, tienen que
@@ -69,7 +73,8 @@ Variables de entorno (env group `mantenimiento-prod` + `alertas` de Render)
   * `DIAS_PENDIENTE`— antigüedad de las huérfanas (default 7)
   * `NEON_LIMITE_MB`— límite del free tier de Neon (default 512 = 0,5 GB por proyecto)
   * `NEON_UMBRAL_PCT`— alerta de uso (default 80 %)
-  * `DRY_RUN`       — `1` (default de la imagen) no aplica nada
+  * `DRY_RUN`       — **obligatoria**: `0` aplica los cambios, `1` ensayo con `ROLLBACK`
+                      (sin default desde 2026-10-28: si falta ⇒ exit 2, ver B4)
   * `GMAIL_SMTP_USER`, `GMAIL_SMTP_APP_PASSWORD`, `ALERT_EMAIL` — del env group `alertas`
 
 Fase 7 (2026-09-27): detecciones, límites de Neon, consistencia y reporte
@@ -132,7 +137,8 @@ columnas/tablas que la Fase 7 necesita (el SQL exacto está en el README).
 Exit codes
 ----------
 0 OK · 2 config (falta variable, URL con `-pooler`, usuario que no es `maint_rw`,
-`ENVIRONMENT` ≠ production, entero fuera de rango) · 3 un `SELECT` de lectura falló ·
+`ENVIRONMENT` ≠ production, `DRY_RUN` ausente o desconocido, entero fuera de rango) · 3 un
+`SELECT` de lectura falló ·
 4 la integridad encontró problemas (run rojo; la escritura NO se aborta) · 9 las detecciones A.1–A.7 o el chequeo de Neon que
 no pudo correr (rojo; la escritura NO se aborta) · 6 guarda de
 volumen (en DRY-RUN informa y no aplica; en REAL aborta y no se aplica nada) ·
@@ -198,6 +204,13 @@ VARS_OBLIGATORIAS = (
 )
 
 USUARIO_ROL = "maint_rw"           # el único rol con UPDATE sobre estas columnas
+
+# Valores ACEPTADOS de `DRY_RUN` (lista cerrada: auditoría B4). Lo que no esté acá —incluida la
+# variable ausente— es error de configuración (exit 2), no un modo de ejecución.
+DRY_RUN_VALORES = {
+    "1": True, "true": True, "si": True, "sí": True, "yes": True, "on": True,
+    "0": False, "false": False, "no": False, "off": False,
+}
 ENTORNO_ESPERADO = "production"    # guarda dura: este job escribe en PROD
 TZ_CLT = "America/Santiago"        # mismo huso que el contenedor (Dockerfile.cron)
 MAX_CAMBIOS_DEFECTO = 500           # tope GLOBAL de respaldo (las reglas finas están abajo)
@@ -391,12 +404,32 @@ def _fecha_iso(nombre: str) -> date | None:
 
 
 def dry_run_activo() -> bool:
-    """DRY_RUN=1 (o cualquier valor que no sea "0"/"false"/"no") ⇒ no se aplica nada.
+    """Modo de ejecución, EXIGIDO explícitamente (fail-closed — auditoría B4).
 
-    Misma regla y mismo default que `backup_cloud.py` (y `DRY_RUN=1` está también en la
-    imagen `Dockerfile.cron`).
+    Hasta el 2026-10-28 esto era `os.getenv("DRY_RUN", "1")`: sin la variable el job corría
+    igual, en ROLLBACK, y Render lo marcaba **verde**. Un env group incompleto se veía
+    exactamente igual que un run real, y eso es lo que el hallazgo B4 llama fail-open (el
+    mismo patrón que dejó 15 corridas del job local "sin que nadie se enterara").
+
+    Ahora la lista de valores es CERRADA (`DRY_RUN_VALORES`) y la ausencia de la variable es un
+    error de configuración, no un modo de ejecución:
+
+      * `0/false/no/off`            ⇒ REAL   (la transacción termina en `COMMIT`)
+      * `1/true/si/sí/yes/on`       ⇒ DRY-RUN (termina en `ROLLBACK`, no se aplica nada)
+      * cualquier otra cosa / nada  ⇒ `ConfigError` (exit 2 + correo `[ALERTA]`)
+
+    La imagen ya NO trae `DRY_RUN` (se quitó de `Dockerfile.cron` en el mismo cambio): el valor
+    sale del env group del Cron Job de Render, declarado en `render.yaml` y documentado en
+    `docs/CRON_JOBS_RENDER.md`.
     """
-    return (os.getenv("DRY_RUN", "1").strip().lower() not in ("0", "false", "no"))
+    crudo = limpiar_valor(os.getenv("DRY_RUN") or "").lower()
+    if crudo not in DRY_RUN_VALORES:
+        raise ConfigError(
+            f"DRY_RUN={'no está definida' if not crudo else repr(crudo)}: hay que declararla "
+            "explícitamente (0 = aplica los cambios, 1 = ensayo con ROLLBACK). Se define en el "
+            "env group del Cron Job de Render (ver render.yaml y docs/CRON_JOBS_RENDER.md); "
+            "la imagen ya no trae un default.")
+    return DRY_RUN_VALORES[crudo]
 
 
 def validar_url_maint(url: str) -> str:
