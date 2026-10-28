@@ -63,7 +63,7 @@ def test_el_modelo_usuario_declara_las_mismas_columnas():
 # ── 2. Política de staleness (pura, con objetos falsos) ───────────────────────
 def _usuario(**kw):
     base = {"nivel_calculado_en": datetime.now(timezone.utc),
-            "nivel_version": "d3-v1"}
+            "nivel_version": "d5-v1"}
     base.update(kw)
     return SimpleNamespace(**base)
 
@@ -109,7 +109,7 @@ def test_sin_datos_se_guarda_como_null_y_vuelve_como_sin_datos():
     assert columnas["nivel_fuerza"] is None
     assert columnas["nivel_gimnastico"] == "Intermedio"
     assert columnas["nivel_movs_fuerza"] == 1
-    assert columnas["nivel_version"] == "d3-v1"
+    assert columnas["nivel_version"] == "d5-v1"
     assert columnas["nivel_calculado_en"] is not None
 
     vuelta = _nivel_desde_columnas(SimpleNamespace(

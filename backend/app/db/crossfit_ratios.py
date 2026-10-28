@@ -170,4 +170,79 @@ CROSSFIT_RATIOS = {
         },
     },
     # Fuente: criterio coach: Thruster (Front Squat + Push Press) ~65-70% del Clean
+
+    # ==============================
+    # D5 (2026-10-28): variantes de arrancada/cargada que el box programa
+    # ==============================
+    # ESTIMADO, no medido: mismas reglas de extrapolación que declara el encabezado del archivo
+    # (el doc `PROPUESTA_CLASIFICACION_NIVEL.md` §5.2 las deriva de las tablas existentes).
+    # Ajustar con el coach si el box tiene datos propios.
+    "Power Clean": {
+        "unidad": "ratio",
+        "M": {
+            "Principiante": 0.40,
+            "Intermedio": 0.80,
+            "Avanzado": 1.05,
+            "Elite": 1.35,
+        },
+        "F": {
+            "Principiante": 0.32,
+            "Intermedio": 0.64,
+            "Avanzado": 0.80,
+            "Elite": 1.05,
+        },
+    },
+    # Estimado: Power Clean ~80% del Clean (la barra no baja al piso).
+    # Split Jerk NO lleva tabla: es alias de "Jerk (Envión)" (nivel_service.ALIAS_ESTANDAR).
+
+    "Power Snatch": {
+        "unidad": "ratio",
+        "M": {
+            "Principiante": 0.32,
+            "Intermedio": 0.64,
+            "Avanzado": 0.80,
+            "Elite": 1.05,
+        },
+        "F": {
+            "Principiante": 0.24,
+            "Intermedio": 0.48,
+            "Avanzado": 0.64,
+            "Elite": 0.80,
+        },
+    },
+    # Estimado: Power Snatch ~80% del Snatch.
+
+    "Push Jerk": {
+        "unidad": "ratio",
+        "M": {
+            "Principiante": 0.45,
+            "Intermedio": 0.81,
+            "Avanzado": 1.08,
+            "Elite": 1.35,
+        },
+        "F": {
+            "Principiante": 0.36,
+            "Intermedio": 0.63,
+            "Avanzado": 0.81,
+            "Elite": 1.08,
+        },
+    },
+    # Estimado: Push Jerk ~90% del Split Jerk (no hay split, se recibe en fuerza).
+
+    "Push Press": {
+        "unidad": "ratio",
+        "M": {
+            "Principiante": 0.40,
+            "Intermedio": 0.72,
+            "Avanzado": 0.96,
+            "Elite": 1.20,
+        },
+        "F": {
+            "Principiante": 0.32,
+            "Intermedio": 0.56,
+            "Avanzado": 0.72,
+            "Elite": 0.96,
+        },
+    },
+    # Estimado: Push Press ~80% del Split Jerk (usa el impulso de piernas, sin split).
 }

@@ -20,11 +20,32 @@ NIVEL_MIN_MOVS_EJE = int(os.getenv("NIVEL_MIN_MOVS_EJE", "2"))
 
 # D3 (2026-10-28): versión de la REGLA de cálculo. Cambiarla invalida las filas persistidas
 # (todas se recalculan en el siguiente acceso o en el job nocturno) sin migración de datos.
-#   d3-v1 = D1 (>=2 movimientos por eje) + gimnasia por repeticiones (D4) + estándares D5.
-NIVEL_VERSION = "d3-v1"
+#   d5-v1 = D1 (>=2 movimientos por eje) + gimnasia por repeticiones (D4) + estándares y alias
+#           de D5 + gimnasia exige género (D2).
+NIVEL_VERSION = "d5-v1"
 # Anti-staleness: una fila con más de 24 h se recalcula al leer (auto-sanación) y el job
 # nocturno la repasa igual. Así un cambio de ratios o un job caído no mienten para siempre.
 NIVEL_STALENESS_HORAS = 24
+
+# D5 (2026-10-28): el catálogo de la BD y las tablas se escribieron por separado y el match es
+# por string EXACTO. Sin este mapa, movimientos que existen en los dos lados con otro nombre
+# nunca clasificaban (0 matches en PROD):
+#   · `Split Jerk` / `Squat Clean` / `Squat Snatch` → la clave de las tablas es la del lift
+#     completo (un split jerk ES el jerk; repetir tabla permitiría dos niveles del mismo lift);
+#   · `Rope Climb (Trepada)` y `Bear Crawl (Caminata)` → la BD abrevia el nombre.
+# Es un alias EXPLÍCITO (auditable), no una heurística de texto.
+ALIAS_ESTANDAR = {
+    "Split Jerk": "Jerk (Envión)",
+    "Squat Clean": "Clean (Cargada)",
+    "Squat Snatch": "Snatch (Arrancada)",
+    "Rope Climb (Trepada)": "Rope Climb (Subida de cuerda usando los pies)",
+    "Bear Crawl (Caminata)": "Bear Crawl (Caminata de oso)",
+}
+
+
+def clave_estandar(movimiento_nombre: str) -> str:
+    """Nombre canónico para buscar el estándar de un movimiento (alias explícitos, D5)."""
+    return ALIAS_ESTANDAR.get(movimiento_nombre, movimiento_nombre)
 NIVELES_ORDEN = {n: i for i, n in enumerate(NIVELES)}
 
 
@@ -41,7 +62,8 @@ def obtener_nivel_fuerza(movimiento_nombre, peso_rm, peso_corporal, genero):
     Returns:
         dict con {"aplica": bool, "clasificable": bool, "nivel": str|None, ...}
     """
-    if movimiento_nombre not in CROSSFIT_RATIOS:
+    clave = clave_estandar(movimiento_nombre)
+    if clave not in CROSSFIT_RATIOS:
         return {"aplica": False}
 
     if not peso_corporal or not genero:
@@ -60,7 +82,7 @@ def obtener_nivel_fuerza(movimiento_nombre, peso_rm, peso_corporal, genero):
         }
 
     ratio = peso_rm / peso_corporal
-    tabla = CROSSFIT_RATIOS[movimiento_nombre]
+    tabla = CROSSFIT_RATIOS[clave]
     niveles = tabla[genero]
 
     nivel_actual = _encontrar_nivel(ratio, niveles)
@@ -90,20 +112,26 @@ def obtener_nivel_gimnastico(movimiento_nombre, valor, genero=None):
     Returns:
         dict con {"aplica": bool, "clasificable": bool, "nivel": str|None, ...}
     """
-    if movimiento_nombre not in CROSSFIT_HABILIDADES:
+    clave = clave_estandar(movimiento_nombre)
+    if clave not in CROSSFIT_HABILIDADES:
         return {"aplica": False}
 
-    tabla = CROSSFIT_HABILIDADES[movimiento_nombre]
+    tabla = CROSSFIT_HABILIDADES[clave]
     tipo = tabla["tipo"]
 
-    # Determinar qué tabla usar
-    if "M" in tabla and isinstance(tabla["M"], dict) and "Principiante" in tabla["M"]:
-        # Tiene género
-        if genero and genero.upper() in ("M", "F"):
-            niveles = tabla[genero.upper()]
-        else:
-            # Usar M como default
-            niveles = tabla["M"]
+    # Tabla por género cuando el estándar la declara (la mayoría). D2: sin género NO se
+    # clasifica con la tabla masculina (antes `niveles = tabla["M"]` subvaloraba a las alumnas
+    # sin el dato cargado y metía `genero='otro'` en M).
+    tiene_genero = isinstance(tabla.get("M"), dict) and "Principiante" in tabla["M"]
+    if tiene_genero:
+        genero_norm = (genero or "").upper()
+        if genero_norm not in ("M", "F"):
+            return {
+                "aplica": True,
+                "clasificable": False,
+                "mensaje": "Completa tu género en tu perfil (M o F)",
+            }
+        niveles = tabla[genero_norm]
     else:
         niveles = tabla
 
@@ -200,7 +228,10 @@ def nivel_desde_mejores(mejores, peso_corporal, genero, min_movs_eje=None) -> di
     tiene_fuerza = peso_corporal is not None and genero is not None
 
     for mov_id, max_peso, nombre in mejores:
-        if nombre in CROSSFIT_RATIOS:
+        # D5: el eje se decide por el nombre CANÓNICO (alias explícitos), y el detalle conserva
+        # el nombre tal como está en el catálogo del box.
+        clave = clave_estandar(nombre)
+        if clave in CROSSFIT_RATIOS:
             # Grupo A - recalcular en vivo
             if tiene_fuerza:
                 result = obtener_nivel_fuerza(
@@ -223,7 +254,7 @@ def nivel_desde_mejores(mejores, peso_corporal, genero, min_movs_eje=None) -> di
                 detalle_fuerza.append(
                     {"movimiento": nombre, "nivel": "Sin datos"})
 
-        elif nombre in CROSSFIT_HABILIDADES:
+        elif clave in CROSSFIT_HABILIDADES:
             # Grupo B - recalcular en vivo
             result = obtener_nivel_gimnastico(nombre, max_peso, genero)
             if result.get("clasificable"):

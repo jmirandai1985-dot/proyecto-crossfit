@@ -36,11 +36,14 @@ def categoria_por_nombre(movimiento_nombre: str) -> str | None:
         return None
     from app.db.crossfit_ratios import CROSSFIT_RATIOS
     from app.db.crossfit_habilidades import CROSSFIT_HABILIDADES
+    # D5: el nombre canónico resuelve los alias del catálogo (Split Jerk -> Jerk, etc.).
+    from app.services.nivel_service import clave_estandar
 
-    if movimiento_nombre in CROSSFIT_RATIOS:
+    clave = clave_estandar(movimiento_nombre)
+    if clave in CROSSFIT_RATIOS:
         return "fuerza"
-    if movimiento_nombre in CROSSFIT_HABILIDADES:
-        tabla = CROSSFIT_HABILIDADES[movimiento_nombre] or {}
+    if clave in CROSSFIT_HABILIDADES:
+        tabla = CROSSFIT_HABILIDADES[clave] or {}
         return normalizar_categoria(tabla.get("categoria")) or "gimnastico"
     return None
 

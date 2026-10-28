@@ -395,4 +395,103 @@ CROSSFIT_HABILIDADES = {
     # Fuente: CrossFit general standards - Bear Crawl
     # Se mide en metros
     # No varía por género
+
+    # ==============================
+    # D5 (2026-10-28): dominadas específicas, anillas y peso fijo
+    # ==============================
+    # ESTIMADO, no medido: derivado de las tablas de Pull-ups (la propia tabla de
+    # "Pull-ups (Dominadas)" declara en sus comentarios 1/5/10/15 strict y 30/20 kipping).
+    # El doc `PROPUESTA_CLASIFICACION_NIVEL.md` §5.3 y §5.5 tiene el detalle.
+    "Strict Pull-up": {
+        "tipo": "reps_unbroken",
+        "M": {
+            "Principiante": 1,
+            "Intermedio": 5,
+            "Avanzado": 10,
+            "Elite": 15,
+        },
+        "F": {
+            "Principiante": 1,
+            "Intermedio": 3,
+            "Avanzado": 6,
+            "Elite": 8,
+        },
+    },
+    # Estimado: strict es ~50% del volumen de kipping (sin impulso de cadera).
+
+    "Kipping Pull-up": {
+        "tipo": "reps_unbroken",
+        "M": {
+            "Principiante": 1,
+            "Intermedio": 10,
+            "Avanzado": 20,
+            "Elite": 30,
+        },
+        "F": {
+            "Principiante": 1,
+            "Intermedio": 5,
+            "Avanzado": 12,
+            "Elite": 20,
+        },
+    },
+    # Estimado: misma tabla que "Pull-ups (Dominadas)" (2865), que es el nombre genérico con el
+    # que el alumno carga el movimiento. La clave existe para que los ids 2866/2867 del catálogo
+    # (Strict / Kipping) clasifiquen aparte en vez de descartarse.
+
+    "Ring Dips": {
+        "tipo": "reps_unbroken",
+        "M": {
+            "Principiante": 0,
+            "Intermedio": 5,
+            "Avanzado": 12,
+            "Elite": 20,
+        },
+        "F": {
+            "Principiante": 0,
+            "Intermedio": 3,
+            "Avanzado": 8,
+            "Elite": 15,
+        },
+    },
+    # Estimado: ~70% del volumen de Dips en barra (las anillas exigen más estabilidad).
+
+    # ── PESO FIJO (decisión D5 del dueño del producto) ──────────────────────────
+    # El documento recomendaba NO puntuarlos en el nivel (son benchmarks: una Wall Ball de 9 kg
+    # no distingue a un Principiante de un Elite). D5 los pidió explícitamente, así que se
+    # clasifican por REPS UNBROKEN con el implemento estándar (Wall Ball 9/6 kg a 10/9 ft; KB
+    # 24/16 kg americano). Valores ESTIMADOS de criterio de coach: si el box quiere, se mueven a
+    # `CROSSFIT_BENCHMARKS` y dejan de sumar al nivel.
+    "Wall Ball Shot": {
+        "tipo": "reps_unbroken",
+        "M": {
+            "Principiante": 5,
+            "Intermedio": 20,
+            "Avanzado": 40,
+            "Elite": 60,
+        },
+        "F": {
+            "Principiante": 5,
+            "Intermedio": 15,
+            "Avanzado": 30,
+            "Elite": 50,
+        },
+    },
+    # Estimado (criterio coach, §5.5): peso fijo 9/6 kg, blanco 10/9 ft.
+
+    "Kettlebell Swing": {
+        "tipo": "reps_unbroken",
+        "M": {
+            "Principiante": 10,
+            "Intermedio": 25,
+            "Avanzado": 50,
+            "Elite": 75,
+        },
+        "F": {
+            "Principiante": 10,
+            "Intermedio": 20,
+            "Avanzado": 40,
+            "Elite": 60,
+        },
+    },
+    # Estimado (criterio coach, §5.5): KB 24/16 kg, swing americano.
 }
