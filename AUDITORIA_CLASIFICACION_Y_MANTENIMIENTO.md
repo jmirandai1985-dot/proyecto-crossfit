@@ -978,10 +978,36 @@ el test: la única forma de validarlo es migrar TEST.
 Para cerrarlo: `ENVIRONMENT=test alembic upgrade head` (aplica 060-063, las mismas que ya corren en PROD)
 o el resync completo desde PROD. Es DDL sobre una rama compartida, así que queda a la espera de OK.
 
+**Ejecutado (con OK del usuario, mismo día):**
+
+```
+059_reserva_suscripcion_id -> 060_nivel_atleta_persistido   (nivel de atleta persistido, D3)
+060 -> 061_rm_gimnasia_reps                                  (gimnasia por repeticiones, D4)
+061 -> 062_drop_student_segments                             (DROP student_segments, D6)
+062 -> 063_notificaciones_soft_delete                        (soft-delete de notificaciones)
+```
+
+Sin errores (`transactional DDL`, una sola transacción). Verificación posterior contra TEST:
+
+| Chequeo | Resultado |
+|---|---|
+| `alembic current` | `063_notificaciones_soft_delete (head)` |
+| `query(Usuario).limit(1)` | OK (antes: `UndefinedColumn`) |
+| `student_segments` | ya no existe |
+| `usuarios` | 459 filas (la rama tiene datos de PROD menos los de prueba) |
+| `nivel_fuerza` poblado | TEST 0/459 · PROD 2/511 (060 no hace backfill masivo: recalcula en escrituras y en el job nocturno, igual que en PROD) |
+
+Y los dos smoke tests, ahora sí:
+
+| Test | Resultado |
+|---|---|
+| `tests/test_referidos_api.py` | **2 passed** (110 s) |
+| `tests/test_pendientes_unificada_resumen.py` | **3 passed** |
+
 ### Residual
 
-- **TEST está 4 migraciones atrás de PROD** (059 vs 063) y por eso `:8000` no puede leer `usuarios`
-  (ver arriba). Es el pendiente más urgente de esta lista.
+- TEST ya está en 063 (= PROD). Si en el futuro se recrea la rama desde un dump viejo, vuelve el drift y
+  con él el `UndefinedColumn` de `usuarios`.
 - `.env` sigue apuntando a PROD **a propósito**; la cabecera de los tres `.env*` documenta qué lee cada
   proceso y que `:8000` usa `.env.test`.
 - No se borró ninguna rama en Neon (`summer-river`, `lingering-fog` siguen existiendo): borrarlas es una
