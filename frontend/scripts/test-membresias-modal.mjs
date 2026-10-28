@@ -1,4 +1,5 @@
-// Test aislado del modal "Membresías del Mes" del Dashboard del admin.
+// Test aislado del modal "Membresías del Mes" del Dashboard del admin y del
+// detalle equivalente en Reportes.
 //   Ejecutar:  node scripts/test-membresias-modal.mjs
 //
 // El repo no tiene jsdom: se fija el CONTRATO de layout del componente real, que es
@@ -167,6 +168,40 @@ ok(/Ninguna membresía coincide con los filtros\./.test(modal)
     && /Limpiar filtros/.test(modal), 'si no queda nada ofrece limpiar los filtros');
 ok(/useMemo\(\(\) => filtrarMembresias\(/.test(dashboard),
     'el filtrado está memoizado (no se recalcula en cada render)');
+
+// ── 6. El mismo detalle "Membresías del mes" aparece en Reportes ──────────────
+// El Dashboard y Reportes pintan la MISMA lista (`suscripcionesMes` de `/reportes/`):
+// si uno filtra y el otro no, el admin ve dos verdades distintas del mismo mes.
+console.log('6. Detalle "Membresías del mes" en Reportes');
+const reportes = leer('../src/pages/admin/Reportes.jsx');
+const iniRep = reportes.indexOf('id="membresias-mes"');
+const finRep = reportes.indexOf('{/* Resumen de Disciplinas */}', iniRep);
+ok(iniRep >= 0 && finRep > iniRep, 'se encuentra la tarjeta "Membresías del mes" en Reportes');
+const tarjeta = iniRep >= 0 && finRep > iniRep ? reportes.slice(iniRep, finRep) : '';
+ok(/from '\.\.\/\.\.\/utils\/membresiasMes'/.test(reportes),
+    'Reportes usa las reglas compartidas (no reimplementa el filtro)');
+ok(/useMemo\(\(\) => filtrarMembresias\(/.test(reportes),
+    'el filtrado está memoizado también en Reportes');
+ok(/useMemo\(\(\) => planesDe\(/.test(reportes),
+    'el select de planes sale de los datos del mes');
+ok(tarjeta.includes('placeholder="Buscar alumno…"'), 'la tarjeta tiene buscador por alumno');
+ok(tarjeta.includes('aria-label="Buscar alumno en las membresías del mes"'),
+    'el buscador tiene nombre accesible');
+ok(/<option value=\{FILTRO_PLAN_SIN_PRUEBA\}>Sin pruebas<\/option>/.test(tarjeta),
+    'el select de plan ofrece "Sin pruebas"');
+ok(/setOrdenMembresias\(\(o\) => \(o === 'reciente' \? 'antigua' : 'reciente'\)\)/.test(tarjeta),
+    'el botón de orden alterna reciente/antigua');
+ok(/membresiasVisibles\.map\(/.test(tarjeta), 'la tabla pinta la lista FILTRADA');
+ok(!/suscripcionesMes\.map\(/.test(tarjeta),
+    'la tarjeta ya no pinta el listado crudo del backend');
+ok(/membresiasVisibles\.length !== totalMembresiasMes/.test(tarjeta),
+    'la cabecera avisa cuántas quedan con los filtros');
+ok(/Ninguna membresía coincide con los filtros\./.test(tarjeta)
+    && /Limpiar filtros/.test(tarjeta), 'si no queda nada ofrece limpiar los filtros');
+ok(/totalMembresiasMes === 0 \?/.test(tarjeta) && /No hay membresías vendidas este mes\./.test(tarjeta),
+    'un mes sin ventas tiene su propio mensaje (no "no coincide")');
+ok(/membresias: 'membresias-mes'/.test(reportes),
+    'la sección se puede enlazar con ?seccion=membresias');
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);

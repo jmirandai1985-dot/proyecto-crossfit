@@ -11,6 +11,12 @@ import {
 } from '../../hooks/queries';
 import { DetalleModal } from '../../components/kpis/DetalleModal';
 import { hoyChileStr } from '../../utils/fecha';
+// Filtros del detalle "Membresías del mes": las MISMAS reglas puras del modal del
+// Dashboard (`utils/membresiasMes`). Sin esto, el mismo listado se filtraba distinto
+// en cada pantalla (o no se filtraba acá, que es lo que pasaba: 263 filas seguidas).
+import {
+    FILTRO_PLAN_SIN_PRUEBA, FILTRO_PLAN_TODOS, filtrarMembresias, planesDe,
+} from '../../utils/membresiasMes';
 
 // Tooltip personalizado con Tailwind
 const CustomTooltip = ({ active, payload, label, formatter }) => {
@@ -60,6 +66,7 @@ const ThOrden = ({ campo, etiqueta, orden, onOrdenar }) => {
 const SECCION_IDS = {
     bazar: 'seccion-bazar',
     ranking: 'ranking-planes',
+    membresias: 'membresias-mes',
     movimientos: 'detalle-movimientos',
     disciplinas: 'resumen-disciplinas',
     coaches: 'clases-coach',
@@ -176,6 +183,26 @@ const Reportes = () => {
     const totalAltasRanking = rankingPlanes.reduce((acc, p) => acc + (p.altas || 0), 0);
     // Detalle de la tarjeta "Planes Vencidos (Mes)" (mismas filas del COUNT).
     const planesVencidos = reportData?.planesVencidosMes || [];
+
+    // ── Membresías del mes: filtro y orden EN MEMORIA ────────────────────────
+    // `/reportes/` ya manda TODAS las suscripciones del mes (`suscripcionesMes`, 263
+    // en un mes normal), así que acá se recorta y se ordena para leerlas: no hay
+    // endpoint nuevo ni otra petición. La lista NO se copia con `|| []` (crearía un
+    // array nuevo en cada render y rompería los `useMemo`): los auxiliares aceptan
+    // `undefined` mientras el reporte carga.
+    const suscripcionesMes = reportData?.suscripcionesMes;
+    const [busquedaMembresias, setBusquedaMembresias] = useState('');
+    const [planMembresias, setPlanMembresias] = useState(FILTRO_PLAN_TODOS);
+    const [ordenMembresias, setOrdenMembresias] = useState('reciente');
+    const planesMembresias = useMemo(() => planesDe(suscripcionesMes), [suscripcionesMes]);
+    const membresiasVisibles = useMemo(() => filtrarMembresias(suscripcionesMes, {
+        busqueda: busquedaMembresias, plan: planMembresias, orden: ordenMembresias,
+    }), [suscripcionesMes, busquedaMembresias, planMembresias, ordenMembresias]);
+    const totalMembresiasMes = (suscripcionesMes || []).length;
+    const limpiarFiltrosMembresias = () => {
+        setBusquedaMembresias('');
+        setPlanMembresias(FILTRO_PLAN_TODOS);
+    };
 
     // Degradados para AreaChart
     const degradeMembresias = (
@@ -603,6 +630,103 @@ const Reportes = () => {
                                                     <span className="text-sm text-zinc-400">{p.porcentaje}%</span>
                                                 </div>
                                             </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+
+                {/* Detalle de "Membresías Mensuales" (Dashboard): cada suscripción del mes
+                    con filtro por alumno, por plan ("Sin pruebas" saca las cuentas de
+                    prueba, que no son ventas) y orden por fecha. Mismas reglas puras que
+                    el modal del Dashboard (`utils/membresiasMes`, `npm run test:membresias`):
+                    el mismo listado no puede filtrarse distinto en dos pantallas. */}
+                <div id="membresias-mes"
+                    className={`bg-zinc-900 rounded-lg shadow overflow-hidden${seccionActiva === 'membresias' ? ' ring-2 ring-indigo-500/60' : ''}`}>
+                    <div className="px-6 py-4 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h2 className="text-lg font-bold text-zinc-100">📦 Membresías del mes</h2>
+                            <p className="text-xs text-zinc-500 mt-0.5">
+                                Cada suscripción iniciada este mes, con su alumno, plan y fecha
+                            </p>
+                        </div>
+                        <span className="shrink-0 text-xs font-semibold text-zinc-400"
+                            data-testid="membresias-contador">
+                            {totalMembresiasMes} suscripción{totalMembresiasMes === 1 ? '' : 'es'}
+                            {membresiasVisibles.length !== totalMembresiasMes
+                                && ` · ${membresiasVisibles.length} con los filtros`}
+                        </span>
+                    </div>
+                    <div className="flex flex-col gap-2 border-b border-zinc-800 px-4 py-2.5 sm:flex-row sm:items-center sm:px-6">
+                        <input
+                            type="search"
+                            value={busquedaMembresias}
+                            onChange={(e) => setBusquedaMembresias(e.target.value)}
+                            placeholder="Buscar alumno…"
+                            aria-label="Buscar alumno en las membresías del mes"
+                            className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-teal-500 focus:outline-none"
+                        />
+                        <div className="flex items-center gap-2">
+                            <select
+                                value={planMembresias}
+                                onChange={(e) => setPlanMembresias(e.target.value)}
+                                aria-label="Filtrar por tipo de plan"
+                                className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 focus:border-teal-500 focus:outline-none sm:flex-none"
+                            >
+                                <option value={FILTRO_PLAN_TODOS}>Todos los planes</option>
+                                <option value={FILTRO_PLAN_SIN_PRUEBA}>Sin pruebas</option>
+                                {planesMembresias.map((nombre) => (
+                                    <option key={nombre} value={nombre}>{nombre}</option>
+                                ))}
+                            </select>
+                            <button
+                                type="button"
+                                onClick={() => setOrdenMembresias((o) => (o === 'reciente' ? 'antigua' : 'reciente'))}
+                                title={ordenMembresias === 'reciente'
+                                    ? 'Ordenado por fecha: más reciente primero (clic para invertir)'
+                                    : 'Ordenado por fecha: más antigua primero (clic para invertir)'}
+                                className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                            >
+                                {ordenMembresias === 'reciente' ? '↓ Fecha' : '↑ Fecha'}
+                            </button>
+                        </div>
+                    </div>
+                    {totalMembresiasMes === 0 ? (
+                        <p className="px-6 py-8 text-center text-sm text-zinc-500">
+                            No hay membresías vendidas este mes.
+                        </p>
+                    ) : membresiasVisibles.length === 0 ? (
+                        <div className="px-6 py-8 text-center text-sm text-zinc-500"
+                            data-testid="membresias-sin-coincidencias">
+                            <p>Ninguna membresía coincide con los filtros.</p>
+                            <button
+                                type="button"
+                                onClick={limpiarFiltrosMembresias}
+                                className="mt-3 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                            >
+                                Limpiar filtros
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full min-w-[34rem] table-fixed">
+                                <thead className="bg-zinc-800 text-zinc-300">
+                                    <tr>
+                                        <th className="w-[46%] px-4 py-3 text-left text-sm font-medium">Alumno</th>
+                                        <th className="w-[32%] px-4 py-3 text-left text-sm font-medium">Plan</th>
+                                        <th className="w-[22%] px-4 py-3 text-left text-sm font-medium">Fecha</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-zinc-800">
+                                    {membresiasVisibles.map((s, idx) => (
+                                        // El endpoint no manda id de suscripción: la lista sale
+                                        // estable del filtro, así que `idx` sirve de key.
+                                        <tr key={idx} className="hover:bg-zinc-800/40">
+                                            <td className="break-words px-4 py-3 text-sm font-medium text-zinc-100">{s.alumno_nombre}</td>
+                                            <td className="break-words px-4 py-3 text-sm text-teal-400">{s.plan_nombre}</td>
+                                            <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums text-zinc-400">{s.fecha_inicio || '-'}</td>
                                         </tr>
                                     ))}
                                 </tbody>
