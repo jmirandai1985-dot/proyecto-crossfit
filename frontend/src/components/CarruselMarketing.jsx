@@ -76,7 +76,9 @@ const TarjetaAviso = ({ aviso, onVerFlyer, onVerReferidos }) => {
                 texto (el velo de `.cm-fondo::after` garantiza el contraste). */}
             {aviso.imagen_url && (
                 <span className="cm-fondo" aria-hidden="true">
-                    <img src={urlArchivo(aviso.imagen_url)} alt="" loading="lazy" />
+                    {/* ImagenProducto: si la foto del aviso no carga, no queda el ícono de
+                        imagen rota detrás del texto (el respaldo es `null`). */}
+                    <ImagenProducto url={aviso.imagen_url} alt="" />
                 </span>
             )}
             <Remaches />
