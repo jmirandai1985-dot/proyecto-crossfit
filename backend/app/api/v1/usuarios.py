@@ -25,6 +25,8 @@ from app.services.asignaciones_clases import (
 )
 from app.services.asistencia_real import ultima_asistencia_por_alumno
 from app.services.auditoria_service import registrar_auditoria
+# D3: el nivel persistido depende de peso/género; el CRUD admin los puede cambiar.
+from app.services.nivel_service import recalcular_nivel
 from app.services.email_service import send_solicitud_prueba_clase
 # Fase 2 del Sistema de Referidos: el alta del alumno le asigna su código.
 from app.services.referidos_service import asignar_codigo_referido
@@ -502,6 +504,11 @@ def actualizar_usuario(
 
     db.commit()
     db.refresh(usuario)
+
+    # D3: peso y género son los insumos del nivel; si cambiaron, se recalcula lo persistido
+    # (mismo cálculo que los RMs, no una regla nueva). Se audita justo después.
+    if {"peso_kg", "genero"} & set(update_data):
+        recalcular_nivel(db, usuario.id, tenant_id)
 
     # ── Auditoría interna: cambio de datos/rol de usuario ──
     rol_nuevo = usuario.rol.value if hasattr(usuario.rol, "value") else str(usuario.rol)

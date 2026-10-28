@@ -4,6 +4,7 @@ Usa las tablas crossfit_ratios.py (fuerza) y crossfit_habilidades.py (gimnástic
 para determinar el nivel de un alumno en cada movimiento.
 """
 import os
+from datetime import datetime, timedelta, timezone
 
 from app.db.crossfit_ratios import CROSSFIT_RATIOS
 from app.db.crossfit_habilidades import CROSSFIT_HABILIDADES
@@ -16,6 +17,14 @@ NIVELES = ["Principiante", "Intermedio", "Avanzado", "Elite"]
 # tenía 2 marcas de fuerza, 0 de gimnasia, y su badge global salía Elite).
 # Configurable por entorno para poder bajarlo a 1 sin tocar código si el box lo pide.
 NIVEL_MIN_MOVS_EJE = int(os.getenv("NIVEL_MIN_MOVS_EJE", "2"))
+
+# D3 (2026-10-28): versión de la REGLA de cálculo. Cambiarla invalida las filas persistidas
+# (todas se recalculan en el siguiente acceso o en el job nocturno) sin migración de datos.
+#   d3-v1 = D1 (>=2 movimientos por eje) + gimnasia por repeticiones (D4) + estándares D5.
+NIVEL_VERSION = "d3-v1"
+# Anti-staleness: una fila con más de 24 h se recalcula al leer (auto-sanación) y el job
+# nocturno la repasa igual. Así un cambio de ratios o un job caído no mienten para siempre.
+NIVEL_STALENESS_HORAS = 24
 NIVELES_ORDEN = {n: i for i, n in enumerate(NIVELES)}
 
 
@@ -317,21 +326,123 @@ def _mejores_rms_lote(db, alumno_ids, tenant_id) -> dict:
     return por_alumno
 
 
-def calcular_nivel_general(alumno_id, db, tenant_id):
-    """Calcula el nivel general del alumno EN VIVO (fuerza y gimnástico). Propio o staff."""
-    peso_corporal, genero = _peso_y_genero(db, alumno_id, tenant_id)
-    return nivel_desde_mejores(
+# ── D3: persistencia del nivel en `usuarios` ───────────────────────────────────
+# Regla de oro: la ÚNICA definición del nivel sigue siendo `nivel_desde_mejores`. Estas
+# funciones solo guardan/leen su resultado; nunca calculan distinto.
+
+def _usuario_nivel(db, alumno_id, tenant_id):
+    """Fila de `usuarios` del alumno (para leer/escribir las columnas de nivel)."""
+    from app.models.usuario import Usuario
+
+    return db.query(Usuario).filter(
+        Usuario.id == alumno_id,
+        Usuario.tenant_id == tenant_id,
+    ).first()
+
+
+def _columnas_desde_nivel(resultado) -> dict:
+    """Resultado puro -> columnas de `usuarios`. 'Sin datos' se guarda como NULL."""
+    def valor(clave):
+        v = resultado.get(clave)
+        return None if v in (None, "Sin datos") else v
+
+    return {
+        "nivel_fuerza": valor("nivel_fuerza"),
+        "nivel_gimnastico": valor("nivel_gimnastico"),
+        "nivel_atleta": valor("nivel_atleta"),
+        "nivel_movs_fuerza": resultado.get("movs_fuerza", 0),
+        "nivel_movs_gimnasia": resultado.get("movs_gimnasia", 0),
+        "nivel_confianza": resultado.get("nivel_confianza", "sin_datos"),
+        "nivel_calculado_en": datetime.now(timezone.utc),
+        "nivel_version": NIVEL_VERSION,
+    }
+
+
+def _nivel_desde_columnas(usuario) -> dict:
+    """Columnas de `usuarios` -> MISMO contrato que `nivel_desde_mejores`, sin detalle.
+
+    El detalle (qué nivel dio cada movimiento) no se persiste: lo piden solo los endpoints
+    individuales de nivel, que calculan en vivo con `calcular_nivel_general`.
+    """
+    return {
+        "nivel_fuerza": usuario.nivel_fuerza or "Sin datos",
+        "nivel_gimnastico": usuario.nivel_gimnastico or "Sin datos",
+        "nivel_atleta": usuario.nivel_atleta or "Sin datos",
+        "movs_fuerza": usuario.nivel_movs_fuerza or 0,
+        "movs_gimnasia": usuario.nivel_movs_gimnasia or 0,
+        "min_movs_eje": NIVEL_MIN_MOVS_EJE,
+        "nivel_confianza": usuario.nivel_confianza or "sin_datos",
+        "detalle_fuerza": [],
+        "detalle_gimnastico": [],
+    }
+
+
+def nivel_esta_vigente(usuario) -> bool:
+    """¿La fila persistida se puede usar sin recalcular? (versión + antigüedad)."""
+    if usuario is None or usuario.nivel_calculado_en is None:
+        return False
+    if (usuario.nivel_version or "") != NIVEL_VERSION:
+        return False
+    calculado = usuario.nivel_calculado_en
+    if calculado.tzinfo is None:            # TIMESTAMP sin TZ (BD de TEST vieja)
+        calculado = calculado.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - calculado) < timedelta(hours=NIVEL_STALENESS_HORAS)
+
+
+def _guardar_nivel(usuario, resultado) -> None:
+    for campo, valor in _columnas_desde_nivel(resultado).items():
+        setattr(usuario, campo, valor)
+
+
+def recalcular_nivel(db, alumno_id, tenant_id, commit=True) -> dict:
+    """Recalcula y PERSISTE el nivel de un alumno (D3). Es el único camino de escritura.
+
+    Se llama tras cualquier cambio que pueda mover el resultado: crear/editar/borrar un RM,
+    cambiar peso o género, el job nocturno. Nunca hace cálculo incremental: relee los mejores
+    RMs y el perfil actual, y aplica `nivel_desde_mejores` (la función pura).
+    """
+    usuario = _usuario_nivel(db, alumno_id, tenant_id)
+    resultado = nivel_desde_mejores(
         _mejores_rms_lote(db, [alumno_id], tenant_id).get(alumno_id, []),
-        peso_corporal, genero)
+        usuario.peso_kg if usuario else None,
+        usuario.genero if usuario else None,
+    )
+    if usuario is not None:
+        _guardar_nivel(usuario, resultado)
+        if commit:
+            db.commit()
+    return resultado
+
+
+def calcular_nivel_general(alumno_id, db, tenant_id):
+    """Calcula el nivel general del alumno EN VIVO (fuerza y gimnástico). Propio o staff.
+
+    Devuelve el detalle por movimiento, que usan los endpoints de nivel de fuerza/gimnasia,
+    así que el cálculo es en vivo. Además REFRESCA las columnas persistidas si están vencidas
+    (24 h, versión distinta o NULL): un GET no escribe en cada request, solo cuando toca.
+    """
+    usuario = _usuario_nivel(db, alumno_id, tenant_id)
+    resultado = nivel_desde_mejores(
+        _mejores_rms_lote(db, [alumno_id], tenant_id).get(alumno_id, []),
+        usuario.peso_kg if usuario else None,
+        usuario.genero if usuario else None,
+    )
+    if usuario is not None and not nivel_esta_vigente(usuario):
+        _guardar_nivel(usuario, resultado)
+        db.commit()
+    return resultado
 
 
 def calcular_niveles_lote(db, alumno_ids, tenant_id) -> dict:
-    """`calcular_nivel_general` para VARIOS alumnos en DOS consultas (sin N+1).
+    """`calcular_nivel_general` para VARIOS alumnos, leyendo lo PERSISTIDO (D3).
 
     Lo usa `GET /historial-rm/progreso-lote`: el tab Progreso del coach enriquece su página
-    visible (25 alumnos) con UNA request y 2 consultas, en vez de 2 requests y 2 consultas por
-    alumno. El nivel de cada alumno sale del MISMO `nivel_desde_mejores` que el de a uno, así que
-    el valor no puede divergir entre la tabla y el endpoint individual.
+    visible (25 alumnos) con UNA request. Antes eran 2 consultas por alumno; ahora, para las
+    filas vigentes, es UNA consulta (la de `usuarios`) y ninguna de RMs.
+
+    Las filas vencidas (sin calcular, versión vieja o con más de 24 h) se recalculan con
+    `nivel_desde_mejores` —la MISMA función del cálculo individual— y se persisten en la misma
+    transacción; así la tabla y el endpoint de a uno no pueden divergir.
 
     Un alumno sin marcas (o sin peso/género) sale igual, con "Sin datos": es un valor del nivel,
     no una ausencia de fila.
@@ -342,16 +453,32 @@ def calcular_niveles_lote(db, alumno_ids, tenant_id) -> dict:
     if not ids:
         return {}
 
-    # 1) Peso y género de todos (un alumno de otro box / inexistente -> (None, None)).
-    personas = {fila[0]: (fila[1], fila[2]) for fila in db.query(
-        Usuario.id, Usuario.peso_kg, Usuario.genero
-    ).filter(
+    personas = {fila.id: fila for fila in db.query(Usuario).filter(
         Usuario.id.in_(ids), Usuario.tenant_id == tenant_id
     ).all()}
-    # 2) Los mejores RMs por movimiento de todos (una sola consulta agregada).
-    mejores = _mejores_rms_lote(db, ids, tenant_id)
 
-    return {alumno_id: nivel_desde_mejores(
-        mejores.get(alumno_id, []),
-        *personas.get(alumno_id, (None, None)),
-    ) for alumno_id in ids}
+    resultados: dict = {}
+    pendientes = []
+    for alumno_id in ids:
+        usuario = personas.get(alumno_id)
+        if usuario is not None and nivel_esta_vigente(usuario):
+            resultados[alumno_id] = _nivel_desde_columnas(usuario)
+        else:
+            pendientes.append(alumno_id)
+
+    if pendientes:
+        # Los mejores RMs por movimiento de los que hay que recalcular (una sola consulta).
+        mejores = _mejores_rms_lote(db, pendientes, tenant_id)
+        for alumno_id in pendientes:
+            usuario = personas.get(alumno_id)
+            resultado = nivel_desde_mejores(
+                mejores.get(alumno_id, []),
+                usuario.peso_kg if usuario else None,
+                usuario.genero if usuario else None,
+            )
+            resultados[alumno_id] = resultado
+            if usuario is not None:
+                _guardar_nivel(usuario, resultado)
+        db.commit()
+
+    return resultados

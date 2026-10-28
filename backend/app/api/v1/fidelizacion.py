@@ -19,6 +19,8 @@ from app.core.dependencies import get_current_admin, get_current_coach
 from app.core.estados import dia_chile, vigente_hoy
 from app.utils.santiago import dias_para_vencer, fecha_chile, hoy_santiago
 from app.services.auditoria_service import registrar_auditoria
+# D3: al cargar/corregir peso y género desde la ficha hay que recalcular el nivel persistido.
+from app.services.nivel_service import recalcular_nivel
 from app.services import churn_service
 # "Mis alumnos" del coach: UNA sola definición (el alcance de las dos pestañas del panel).
 from app.services.clases_service import alumnos_del_coach
@@ -742,6 +744,9 @@ def actualizar_perfil_alumno_coach(
     alumno.genero = datos.genero
     db.commit()
     db.refresh(alumno)
+
+    # D3: el nivel depende de estos dos datos -> recalcular lo persistido en la misma request.
+    recalcular_nivel(db, alumno.id, tenant_id)
 
     registrar_auditoria(
         db,

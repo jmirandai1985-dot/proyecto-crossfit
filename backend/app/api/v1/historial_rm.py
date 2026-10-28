@@ -21,7 +21,7 @@ from app.schemas.historial_rm import (
 )
 from app.services.nivel_service import (
     obtener_nivel_fuerza, obtener_nivel_gimnastico, calcular_nivel_general,
-    calcular_niveles_lote,
+    calcular_niveles_lote, recalcular_nivel,
 )
 # H-03: criterio único de categorización de movimientos (BD -> normalización -> nombre).
 from app.services.movimiento_categoria import categoria_de
@@ -149,50 +149,20 @@ def crear_historial_rm(
             detail="Alta demanda, intenta de nuevo",
         )
 
-    # --- CALCULO AUTOMATICO DE NIVEL ---
-    movimiento_nombre = movimiento.nombre
-    nivel_resultado = None
-
-    if movimiento_nombre in CROSSFIT_RATIOS:
-        # Grupo A - Fuerza: necesita peso corporal y género
-        alumno = db.query(Usuario).filter(
-            Usuario.id == historial_data.alumno_id,
-            Usuario.tenant_id == historial_data.tenant_id
-        ).first()
-        if alumno:
-            result = obtener_nivel_fuerza(
-                movimiento_nombre=movimiento_nombre,
-                peso_rm=historial_data.peso_kg,
-                peso_corporal=getattr(alumno, "peso_kg", None),
-                genero=getattr(alumno, "genero", None)
-            )
-            if result.get("clasificable"):
-                nivel_resultado = result["nivel"]
-    elif movimiento_nombre in CROSSFIT_HABILIDADES:
-        # Grupo B - Gimnástico
-        alumno = db.query(Usuario).filter(
-            Usuario.id == historial_data.alumno_id,
-            Usuario.tenant_id == historial_data.tenant_id
-        ).first()
-        genero = getattr(alumno, "genero", None) if alumno else None
-        # RM-01: el "valor" del nivel gimnástico son las REPETICIONES (reps, metros…),
-        # no el peso. Antes se usaba peso_kg y el frontend lo mandaba fijo en 1, así que
-        # el nivel gimnástico se calculaba siempre con 1 => todos "Principiante".
-        valor_para_nivel = historial_data.repeticiones or historial_data.peso_kg
-        # Para ciertos movimientos gimnásticos, el valor se pasa directo
-        result = obtener_nivel_gimnastico(
-            movimiento_nombre=movimiento_nombre,
-            valor=valor_para_nivel,
-            genero=genero
-        )
-        if result.get("clasificable"):
-            nivel_resultado = result["nivel"]
-
-    if nivel_resultado:
-        db_historial.nivel_calculado = nivel_resultado
-        db.commit()
-        db.refresh(db_historial)
-    # --- FIN CALCULO AUTOMATICO ---
+    # --- D3: recalculo del NIVEL DEL ALUMNO (persistido en usuarios.nivel_*) ---
+    # Antes se calculaba solo el nivel de ESTE movimiento y se guardaba en
+    # `historial_rm.nivel_calculado`: un snapshot que nadie leia y que se congelaba con el
+    # peso de ese dia (una segunda verdad). Ahora se recalcula el nivel COMPLETO del alumno
+    # (fuerza + gimnasia, con D1 y las formulas de D4/D5) y se persiste en `usuarios`, que es
+    # lo que leen la tabla del coach, la ficha y el job nocturno.
+    resultado_nivel = recalcular_nivel(db, historial_data.alumno_id, tenant_id)
+    # Compatibilidad: el POST sigue devolviendo el nivel de ESTE movimiento, pero sale del
+    # MISMO calculo (detalle por movimiento), no de una columna snapshot.
+    nivel_movimiento = next((
+        d.get("nivel")
+        for d in (resultado_nivel["detalle_fuerza"] + resultado_nivel["detalle_gimnastico"])
+        if d.get("movimiento_id") == movimiento.id
+    ), None)
 
     return {
         "id": db_historial.id,
@@ -211,7 +181,7 @@ def crear_historial_rm(
         "calorias": db_historial.calorias,
         "fecha": str(db_historial.fecha),
         "notas": db_historial.notas,
-        "nivel_calculado": db_historial.nivel_calculado,
+        "nivel_calculado": nivel_movimiento,
         "created_at": str(db_historial.created_at),
         "updated_at": str(db_historial.updated_at),
     }
@@ -496,6 +466,10 @@ def actualizar_historial_rm(
         },
     )
 
+    # D3: el RM editado pudo mover el mejor valor del movimiento (o su perfil cambió antes):
+    # se recalcula el nivel persistido del alumno en la misma request.
+    recalcular_nivel(db, historial.alumno_id, current_user["tenant_id"])
+
     return historial
 
 
@@ -533,6 +507,12 @@ def eliminar_historial_rm(
             detail="Solo puedes eliminar tus propios PRs (o ser administrador del box)",
         )
 
+    # D3: el mejor RM del movimiento pudo cambiar (o desaparecer): recalcular el nivel
+    # persistido del alumno. `alumno_id` se lee ANTES del delete para no depender de una fila
+    # ya borrada.
+    alumno_id = historial.alumno_id
+    movimiento_id = historial.movimiento_id
+
     db.delete(historial)
     db.commit()
 
@@ -544,8 +524,10 @@ def eliminar_historial_rm(
         accion="DELETE",
         entidad="historial_rm",
         entidad_id=historial_id,
-        detalle={"alumno_id": historial.alumno_id, "movimiento_id": historial.movimiento_id},
+        detalle={"alumno_id": alumno_id, "movimiento_id": movimiento_id},
     )
+
+    recalcular_nivel(db, alumno_id, current_user["tenant_id"])
 
     return None
 

@@ -27,6 +27,8 @@ from app.core.dependencies import get_current_user, get_current_admin, es_usuari
 # hay consumidores que lo importan desde este módulo (`scripts/seed_ml_data*.py`).
 from app.utils.rut import validar_rut
 from app.services.auditoria_service import registrar_auditoria
+# D3: peso/género son los insumos del nivel persistido (`usuarios.nivel_*`).
+from app.services.nivel_service import recalcular_nivel
 # Avisos del PANEL (la campana): el alta avisa al admin del box también in-app.
 # Ver docs/NOTIFICACIONES_PANEL.md.
 from app.services.notificaciones_panel import notificar_admins_del_tenant
@@ -673,6 +675,10 @@ def actualizar_mi_perfil(
                 "origen": "autoservicio_perfil",
             },
         )
+
+    # D3: peso/género son los insumos del nivel -> recalcular lo persistido si cambiaron.
+    if {"peso_kg", "genero"} & set(update_data):
+        recalcular_nivel(db, usuario.id, tenant_id)
 
     return _serializar_mi_perfil(usuario)
 

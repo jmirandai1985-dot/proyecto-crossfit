@@ -1,7 +1,7 @@
 ﻿"""
 Modelo SQLAlchemy para la tabla usuarios
 """
-from sqlalchemy import Column, Integer, Float, String, Boolean, Date, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, Integer, Float, String, Boolean, Date, ForeignKey, Enum as SQLEnum, SmallInteger
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.sql import func
 import enum
@@ -46,6 +46,18 @@ class Usuario(Base):
     estatura_cm = Column(Integer, nullable=True)
     genero = Column(String(10), nullable=True)
     fecha_nacimiento = Column(Date, nullable=True)
+    # ── D3 (2026-10-28): nivel de atleta PERSISTIDO ──────────────────────────
+    # Lo escribe `nivel_service.recalcular_nivel` (POST/PUT/DELETE de RM, cambios de
+    # peso/género, job nocturno y auto-sanación al leer). NULL en un eje = "Sin datos",
+    # NO "Principiante": el eje no publica (D1 exige >=2 movimientos clasificables).
+    nivel_fuerza = Column(String(20), nullable=True)
+    nivel_gimnastico = Column(String(20), nullable=True)
+    nivel_atleta = Column(String(20), nullable=True)      # el menor de los ejes publicados
+    nivel_movs_fuerza = Column(SmallInteger, nullable=True)
+    nivel_movs_gimnasia = Column(SmallInteger, nullable=True)
+    nivel_confianza = Column(String(10), nullable=True)   # alta | media | baja | sin_datos
+    nivel_calculado_en = Column(TIMESTAMP(timezone=True), nullable=True)
+    nivel_version = Column(String(10), nullable=True)     # regla usada (anti-staleness)
     # ── Churn / KPIs: fecha en que el alumno se dio de baja (NULL = activo) ──
     fecha_baja = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True),
