@@ -12,7 +12,13 @@ import pytest
 import requests
 from datetime import timedelta
 
-from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, HOY_STR, get_coach_token, get_admin_token
+from tests.conftest import (BASE, ALUMNO_ID, COACH_ID, MOTIVO_SIN_SEED,
+                            SEED_DISPONIBLE, TENANT_ID, HOY, HOY_STR,
+                            get_coach_token, get_admin_token)
+
+# Casos que asumen el MUNDO del seed (alumno 999 con plan de 50 créditos y un
+# WOD publicado hoy): con una TEST sincronizada desde PROD no se pueden correr.
+requiere_seed = pytest.mark.skipif(not SEED_DISPONIBLE, reason=MOTIVO_SIN_SEED)
 
 
 # ── Estado compartido entre tests (se llena en orden) ──
@@ -81,6 +87,7 @@ def test_03_dashboard_nivel_gimnastico():
     assert isinstance(top_rms, list), "top_rms debe ser lista"
 
 
+@requiere_seed
 def test_04_dashboard_wod_hoy():
     """[4] GET /wods/hoy - WOD de hoy."""
     r = requests.get(f"{BASE}/wods/hoy", params={"tenant_id": TENANT_ID})
@@ -123,6 +130,7 @@ def test_06_dashboard_clases_7dias():
 # BLOQUE 2 — FLUJO DE RESERVA (tests 7-9)
 # ===================================================================
 
+@requiere_seed
 def test_07_reserva_clase_futura():
     """[7] Reservar clase futura (>6h) y verificar descuento de crédito."""
     assert Shared.clases_7dias is not None, "Depende de test_06"
@@ -175,6 +183,7 @@ def test_08_cancelar_reserva_devuelve_credito():
     )
 
 
+@requiere_seed
 def test_09_reserva_cancelacion_clase_hoy():
     """[9] Reservar y cancelar clase de HOY (<6h, puede no devolver)."""
     if Shared.clases_7dias is None:
@@ -425,10 +434,10 @@ def test_16_crear_wod_y_verificar_hoy():
         "fuerza_habilidad": "Clean 5x3 @ 75%\nPush Press 3x5",
         "wod_principal": "AMRAP 12 minutos:\n10 Clean\n15 Box Jumps\n20 Burpees",
         "tipo_metcon": "AMRAP",
-        "coach_id": 1000,
+        "coach_id": COACH_ID,
         "estado": "publicado"
     }
-    token = get_coach_token(coach_id=1000)
+    token = get_coach_token(coach_id=COACH_ID)
     r = requests.post(f"{BASE}/wods/", json=payload,
                       params={"tenant_id": TENANT_ID, "disciplina_id": 1},
                       headers={"Authorization": f"Bearer {token}"})
@@ -474,7 +483,7 @@ def test_cleanup():
     # Eliminar WOD de prueba
     if Shared.wod_creado_id:
         try:
-            token = get_coach_token(coach_id=1000)
+            token = get_coach_token(coach_id=COACH_ID)
             requests.delete(f"{BASE}/wods/{Shared.wod_creado_id}",
                             params={"tenant_id": TENANT_ID},
                             headers={"Authorization": f"Bearer {token}"})

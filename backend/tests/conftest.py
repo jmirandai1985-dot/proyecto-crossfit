@@ -119,6 +119,101 @@ def _resolver_alumno_test(tenant_id=TENANT_ID, seed_id=ALUMNO_SEED_ID):
 
 ALUMNO_ID = _resolver_alumno_test()
 
+
+def _resolver_persona_test(rol: str, seed_id: int, tenant_id=TENANT_ID) -> int:
+    """Usuario_id ACTIVO del rol pedido en la branch test (coach / admin).
+
+    POR QUÉ EXISTE (mismo motivo que `_resolver_alumno_test`): los tokens se
+    firman con `create_access_token`, que NO consulta la BD. Si el seed no está
+    en la branch (branch recién creada, TEST sincronizado desde PROD, uvicorn
+    levantado a mano) los requests de esa persona mueren con 404 "Usuario no
+    encontrado o inactivo" y el test parece roto por el endpoint cuando el que
+    faltaba era la persona.
+
+    Orden de preferencia:
+      1. el id del seed (1000 coach / 1001 admin), si existe y está activo;
+      2. el primer usuario activo de ese rol del box (prefiriendo `demo.*`);
+      3. el id del seed, para que el 404 diga exactamente qué faltó.
+
+    Sólo consulta la BD con ENVIRONMENT=test (nunca en un proceso apuntado a
+    producción) y es de SÓLO LECTURA.
+    """
+    if _os.getenv("ENVIRONMENT") != "test":
+        return seed_id
+    try:
+        from sqlalchemy import text as _text
+
+        from app.db.database import SessionLocal
+
+        db = SessionLocal()
+    except Exception:
+        return seed_id
+    try:
+        existe = db.execute(_text(
+            "SELECT id FROM usuarios "
+            "WHERE id = :i AND tenant_id = :t AND estado = 'activo' "
+            "  AND rol::text = :r"),
+            {"i": seed_id, "t": tenant_id, "r": rol}).first()
+        if existe is not None:
+            return int(existe.id)
+        fila = db.execute(_text(
+            "SELECT id FROM usuarios "
+            "WHERE tenant_id = :t AND rol::text = :r AND estado = 'activo' "
+            "  AND activo IS TRUE "
+            "ORDER BY (correo LIKE 'demo.%') DESC, id LIMIT 1"),
+            {"t": tenant_id, "r": rol}).first()
+        return int(fila.id) if fila is not None else seed_id
+    except Exception:
+        return seed_id
+    finally:
+        db.close()
+
+
+# Personas fijas de la suite (coach 1000 / admin 1001 en el seed).
+COACH_ID = _resolver_persona_test("coach", 1000)
+ADMIN_ID = _resolver_persona_test("administrador", 1001)
+
+
+def _seed_personas_presentes(tenant_id=TENANT_ID) -> bool:
+    """¿Están en la branch las personas del seed (999/1000/1001, activas)?
+
+    Varios módulos de integración viejos (panel del alumno/coach, end-to-end)
+    asumen el MUNDO del seed: el alumno 999 con un plan de 50 créditos, el coach
+    1000 con CrossFit asignado y un WOD publicado para hoy. Cuando TEST se
+    sincroniza desde PROD esos ids no existen y el test no puede correr, aunque
+    el producto esté bien. Con esta bandera esos casos se SALTAN con un motivo
+    claro (en vez de fallar), y siguen corriendo normalmente tras
+    `run_setup_test_db.py`. Sólo consulta con ENVIRONMENT=test.
+    """
+    if _os.getenv("ENVIRONMENT") != "test":
+        return True
+    try:
+        from sqlalchemy import text as _text
+
+        from app.db.database import SessionLocal
+
+        db = SessionLocal()
+    except Exception:
+        return True
+    try:
+        fila = db.execute(_text(
+            "SELECT COUNT(*) FROM usuarios "
+            "WHERE tenant_id = :t AND id IN (999, 1000, 1001) "
+            "  AND estado = 'activo'"), {"t": tenant_id}).scalar()
+        return int(fila or 0) == 3
+    except Exception:
+        return True          # ante la duda no se saltea nada
+    finally:
+        db.close()
+
+
+SEED_DISPONIBLE = _seed_personas_presentes()
+MOTIVO_SIN_SEED = (
+    "TEST no tiene las personas del seed (999/1000/1001): este caso asume el "
+    "mundo de `run_setup_test_db.py` (plan del alumno demo, coach 1000 con "
+    "CrossFit, WOD de hoy). Corré el seed y vuelve a intentar."
+)
+
 # ── Fecha de referencia para tests que necesitan clases CONFIRMADAS ──
 # REGLA DE NEGOCIO: los domingos NO hay clases (dia de descanso).
 # DIA_REF = HOY si HOY no es domingo, si no, el proximo lunes (HOY+1).
@@ -153,8 +248,14 @@ def hoy_str():
     return HOY_STR
 
 
-def get_coach_token(coach_id=1000, tenant_id=1):
-    """Generate a valid JWT for a coach (for tests that need auth)."""
+def get_coach_token(coach_id=None, tenant_id=1):
+    """Generate a valid JWT for a coach (for tests that need auth).
+
+    Sin argumentos firma el coach RESUELTO para la branch test (`COACH_ID`), no
+    un 1000 fijo: el token de un usuario inexistente pasaba la firma igual y el
+    request moría con 404.
+    """
+    coach_id = COACH_ID if coach_id is None else coach_id
     return create_access_token({
         "usuario_id": coach_id,
         "tenant_id": tenant_id,
@@ -164,9 +265,13 @@ def get_coach_token(coach_id=1000, tenant_id=1):
 
 
 def get_admin_token():
-    """Generate a valid JWT for an admin (for tests that need auth)."""
+    """Generate a valid JWT for an admin (for tests that need auth).
+
+    Mismo criterio que `get_coach_token`: el admin RESUELTO para la branch test
+    (`ADMIN_ID`), no un 1001 fijo que puede no existir.
+    """
     return create_access_token({
-        "usuario_id": 1001,
+        "usuario_id": ADMIN_ID,
         "tenant_id": 1,
         "rol": "admin",
         "correo": "admin@test.com"
@@ -229,7 +334,7 @@ def _inyectar_auth_por_modulo(request, monkeypatch):
     elif persona == "alumno":
         token = get_alumno_token(ALUMNO_ID)
     else:
-        token = get_coach_token(1000)
+        token = get_coach_token(COACH_ID)
 
     def _wrap(func):
         def _call(*args, **kwargs):

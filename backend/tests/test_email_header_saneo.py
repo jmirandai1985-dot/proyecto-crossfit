@@ -71,10 +71,27 @@ class SMTPCaido(SMTPFalso):
 
 @pytest.fixture
 def entorno(monkeypatch):
-    """SMTP falso + registro en memoria: sin red y sin tocar la BD."""
+    """SMTP falso + registro en memoria: sin red y sin tocar la BD.
+
+    ── FIX (auditoría de tests 2026-10-29): el modo tiene que ser REAL ────────
+    El test verifica el SANEO de headers al ARMAR el mensaje, así que `_enviar`
+    tiene que llegar a construir el `EmailMessage` y pasarlo al SMTP falso. En
+    TEST el fail-safe de `email_service` fuerza `noop` (fuera de producción no
+    se abre SMTP, ver `tests/test_email_modo_failsafe.py`), así que sin este
+    parche `SMTPFalso.ultimo` queda en `None` y los 25 casos fallaban por el
+    MODO, no por el saneo (se registraba `simulado` en vez de `enviado`).
+    Se dobla `modo_envio` (y las credenciales SMTP) SÓLO dentro del test: el
+    SMTP y `_registrar_envio` ya están doblados, no sale nada a la red y no
+    cambia el comportamiento de producción.
+    """
+    from app.core.config import settings
+
     registros = []
     SMTPFalso.ultimo = None
     monkeypatch.setattr(email_service, "ULTIMO_ERROR_SMTP", None)
+    monkeypatch.setattr(email_service, "modo_envio", lambda: email_service.MODO_REAL)
+    monkeypatch.setattr(settings, "GMAIL_SMTP_USER", "box@test.local")
+    monkeypatch.setattr(settings, "GMAIL_SMTP_APP_PASSWORD", "clave-de-test")
     monkeypatch.setattr(smtplib, "SMTP_SSL", SMTPFalso)
     monkeypatch.setattr(
         email_service, "_registrar_envio",

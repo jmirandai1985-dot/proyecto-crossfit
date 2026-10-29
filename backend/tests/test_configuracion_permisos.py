@@ -23,8 +23,9 @@ Qué verifica (hoy ningún test cubre los permisos de este endpoint):
   6. Round-trip: lo que guardó el admin lo lee el alumno (es el dato que copia para
      transferir).
 
-Correr (API de TEST en 8001 y migración 046 aplicada):
-    ENVIRONMENT=test API_BASE=http://localhost:8001/api/v1 ^
+Correr (la suite usa la API de TEST en :8000; `--noconftest` porque este archivo
+no depende de los fixtures de conftest):
+    ENVIRONMENT=test API_BASE=http://localhost:8000/api/v1 ^
       py -3.12 -m pytest tests/test_configuracion_permisos.py -q --noconftest
 
 Verificación manual del rastro, después del test (debería quedar limpio):
@@ -46,7 +47,11 @@ if str(BACKEND) not in sys.path:
 from app.core.config import is_test_db_url, settings                 # noqa: E402
 from app.core.security import create_access_token                     # noqa: E402
 
-API_BASE = os.environ.get("API_BASE", "http://localhost:8001/api/v1")
+# La suite completa corre contra la API de TEST en :8000 (la misma de
+# `tests/conftest.py`). Antes el default era `:8001` —un segundo uvicorn que hoy
+# no existe— y los 15 casos morían con ConnectionError (E), no con un fallo de
+# permisos. `API_BASE` sigue sirviendo para apuntarlo a otro puerto.
+API_BASE = os.environ.get("API_BASE", "http://localhost:8000/api/v1")
 HOST = API_BASE.replace("/api/v1", "")
 TENANT_ID = 1
 # El "otro box" con usuarios REALES en TEST: el box 2 existe pero está vacío (0 usuarios),

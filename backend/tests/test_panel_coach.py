@@ -6,11 +6,16 @@ disciplinas, horarios, creacion de WODs, edicion, y asistencia.
 Usa datos del Coach Demo (id=1000) y Alumno Demo (id=999).
 Sigue el mismo patron que test_panel_alumno.py.
 """
+import pytest
 import requests
 
-from tests.conftest import BASE, ALUMNO_ID, TENANT_ID, HOY, DIA_REF_STR, get_coach_token, get_alumno_token
+from tests.conftest import (BASE, ALUMNO_ID, COACH_ID, MOTIVO_SIN_SEED,
+                            SEED_DISPONIBLE, TENANT_ID, HOY,
+                            DIA_REF_STR, get_coach_token, get_alumno_token)
 
-COACH_ID = 1000
+# Casos que asumen el MUNDO del seed (coach 1000 con CrossFit y las clases de
+# ese horario): con una TEST sincronizada desde PROD no se pueden correr.
+requiere_seed = pytest.mark.skipif(not SEED_DISPONIBLE, reason=MOTIVO_SIN_SEED)
 
 
 # ── Estado compartido entre tests ──
@@ -306,6 +311,7 @@ def test_c08_asistencia_false_no_devuelve_credito():
 # BLOQUE 4 — SEGURIDAD (test permanente de regresión IDOR)
 # ===================================================================
 
+@requiere_seed
 def test_c10_seguridad_coach_no_puede_operar_otra_disciplina():
     """[10] Verificar que un coach NO puede asignar WOD ni marcar asistencia
     en una disciplina a la que NO pertenece (IDOR cerrado permanentemente).
@@ -373,6 +379,7 @@ def test_c10_seguridad_coach_no_puede_operar_otra_disciplina():
 # BLOQUE 5 — BATCH WOD (tests 11-12)
 # ===================================================================
 
+@requiere_seed
 def test_c12_batch_asignar_wod():
     """[12] POST /wods/batch — Asignar WOD a varias clases en un solo request.
     a) Batch exitoso con 2 clases de la misma disciplina (CrossFit)
@@ -431,6 +438,7 @@ def test_c12_batch_asignar_wod():
 # BLOQUE 6 — COBERTURA DE EMERGENCIA (test 13-14)
 # ===================================================================
 
+@requiere_seed
 def test_c14_cobertura_emergencia():
     """[14] Verificar cobertura de emergencia:
     a) Sin modo_emergencia, coach 1000 NO puede asignar WOD a Lev. Olimpico (disc 4) → 403

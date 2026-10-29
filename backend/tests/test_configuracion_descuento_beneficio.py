@@ -1,4 +1,4 @@
-"""M4 — tope de descuento de beneficios (`beneficio_descuento_max_pct`) en /admin/configuracion.
+"""M4 — tope de descuento de beneficios (`beneficio_descuento_max_pct`).
 
 Qué fija este archivo (guard del BACKEND + del FRONTEND, sin red y sin base):
 
@@ -8,6 +8,10 @@ Qué fija este archivo (guard del BACKEND + del FRONTEND, sin red y sin base):
   C. El campo queda AUDITADO: está en `CAMPOS_EDITABLES`, lo que compara la auditoría antes/después.
   D. El default se mantiene en 50 (mismo valor en el diseño y en el saneador).
   E. El frontend tiene el campo (0-100).
+
+  ⚠️ El control se MUDÓ: ya no vive en `/admin/configuracion` (datos bancarios) sino
+  en **Fidelización → Beneficios** (`frontend/src/components/BeneficiosPanel.jsx`).
+  La API y la columna son las mismas (`configuracion_negocio.beneficio_descuento_max_pct`).
 
 Correr (aislado):
     cd backend && py -3.12 -m pytest tests/test_configuracion_descuento_beneficio.py -q --noconftest
@@ -25,7 +29,9 @@ from app.api.v1.configuracion import CAMPOS_EDITABLES, ConfiguracionUpdate   # n
 from app.services import beneficios_service as bs                            # noqa: E402
 
 RAIZ = Path(__file__).resolve().parents[2]           # .../proyecto-crossfit
-CONFIG_JSX = "frontend/src/pages/admin/Configuracion.jsx"
+# El control vive en Fidelización → Beneficios (se mudó desde /admin/configuracion,
+# que ahora sólo guarda datos bancarios/contacto).
+CONFIG_JSX = "frontend/src/components/BeneficiosPanel.jsx"
 
 
 def test_a_acepta_0_y_100_y_el_valor_tipico():
@@ -70,6 +76,7 @@ def test_d_el_default_sigue_siendo_50():
 
 def test_e_el_frontend_tiene_el_campo():
     fuente = (RAIZ / CONFIG_JSX).read_text(encoding="utf-8")
-    assert 'name="beneficio_descuento_max_pct"' in fuente
-    assert 'data-testid="config-descuento-max"' in fuente
-    assert "min={0} max={100}" in fuente
+    assert "beneficio_descuento_max_pct" in fuente
+    # El input numérico limita el rango en el navegador (la API lo revalida).
+    assert 'min="0" max="100"' in fuente
+    assert "type=\"number\"" in fuente

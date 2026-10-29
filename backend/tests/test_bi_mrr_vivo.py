@@ -29,8 +29,9 @@ Lo que fija este archivo:
 Ninguna prueba escribe en la base: las partes C/D sólo leen (y C pisa `metricas.mrr` en
 memoria, con `monkeypatch`).
 
-Correr (API de TEST en 8001; `--noconftest` porque este archivo no usa el servidor de 8000):
-    ENVIRONMENT=test API_BASE=http://localhost:8001/api/v1 ^
+Correr (la suite completa corre contra la API de TEST en :8000; `--noconftest`
+porque este archivo no usa los fixtures de conftest):
+    ENVIRONMENT=test API_BASE=http://localhost:8000/api/v1 ^
       py -3.12 -m pytest tests/test_bi_mrr_vivo.py -q --noconftest
 """
 import os
@@ -45,7 +46,11 @@ sys.path.insert(0, str(BACKEND))
 import pytest  # noqa: E402
 import requests  # noqa: E402
 
-API_BASE = os.environ.get("API_BASE", "http://localhost:8001/api/v1")
+# La suite completa corre contra la API de TEST en :8000 (la misma de
+# `tests/conftest.py`). El default `:8001` era un segundo uvicorn que hoy no
+# existe: los 4 casos de integración morían con ConnectionError. `API_BASE`
+# sigue sirviendo para apuntarlo a otro puerto.
+API_BASE = os.environ.get("API_BASE", "http://localhost:8000/api/v1")
 HOST = API_BASE.replace("/api/v1", "")
 TENANT_ID = 1
 KPI_JSX = REPO / "frontend" / "src" / "pages" / "admin" / "Kpis.jsx"

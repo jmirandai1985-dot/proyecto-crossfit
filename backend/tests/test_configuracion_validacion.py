@@ -414,7 +414,7 @@ def test_d3_el_whatsapp_del_pie_del_correo_sale_escapado(monkeypatch):
     from app.services import email_service
 
     monkeypatch.setattr(email_service, "contacto_del_box",
-                        lambda tenant_id=None: '+56 9 1111 2222<b>"x"')
+                        lambda tenant_id=None, db=None: '+56 9 1111 2222<b>"x"')
 
     bloque = email_service.bloque_contacto(TENANT)
 

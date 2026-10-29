@@ -88,7 +88,7 @@ def _alumno_para_solicitar():
         "SELECT u.id, u.tenant_id, u.correo FROM usuarios u "
         "WHERE u.tenant_id = :t AND u.rol::text = 'alumno' "
         "AND u.estado = 'activo' AND u.correo IS NOT NULL "
-        "AND NOT EXISTS (SELECT 1 FROM solicitudes_plan s "
+        "AND NOT EXISTS (SELECT 1 FROM solicitudes_planes s "
         "                WHERE s.alumno_id = u.id AND s.estado = 'pending') "
         "AND NOT EXISTS (SELECT 1 FROM beneficios b "
         "                WHERE b.alumno_id = u.id "
@@ -164,7 +164,7 @@ def test_solicitar_plan_con_voucher_avisa_a_los_admins():
                 "AND tipo = 'plan_solicitado' "
                 f"AND alumno_id IN ({ids_sql})", desde=inicio)
         if solicitud_id is not None:
-            _exec("DELETE FROM solicitudes_plan WHERE id = :id", id=solicitud_id)
+            _exec("DELETE FROM solicitudes_planes WHERE id = :id", id=solicitud_id)
 
 
 
@@ -177,7 +177,9 @@ def test_registro_de_alumno_avisa_a_los_admins():
     # Correo y RUT únicos por corrida (el alta exige que no existan y valida el DV)
     marca = str(int(time.time()))
     cuerpo_rut = "9" + marca[-7:]
-    correo = f"prueba.campana.{marca}@example.test"
+    # `.test` es un TLD reservado (RFC 6761) y pydantic `EmailStr` lo rechaza:
+    # el correo de prueba tiene que ser de un dominio normal.
+    correo = f"prueba.campana.{marca}@example.com"
     inicio = datetime.now(timezone.utc)
     usuario_id = None
     try:

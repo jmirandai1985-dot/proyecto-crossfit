@@ -15,19 +15,33 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[2]          # .../proyecto-crossfit
 PANTALLA = "frontend/src/pages/admin/Alumnos.jsx"
+# El request paginado y la cuenta de páginas se movieron a helpers compartidos:
+# `useAlumnosPaginados` (hooks/queries.js) arma el GET, `paramsAlumnos`
+# (utils/alumnos.js) los parámetros y `rangoMostrado` el tramo visible. El guard
+# mira los tres archivos: si vuelven a divergir, el test se pone rojo.
+HOOK = "frontend/src/hooks/queries.js"
+UTIL = "frontend/src/utils/alumnos.js"
 
 
 def _fuente() -> str:
     return (RAIZ / PANTALLA).read_text(encoding="utf-8")
 
 
+def _texto(rel: str) -> str:
+    return (RAIZ / rel).read_text(encoding="utf-8")
+
+
 def test_a_pide_limit_skip_y_lee_el_total_del_header():
     fuente = _fuente()
-    assert "limit: porPagina," in fuente
-    assert "skip: (pagina - 1) * porPagina," in fuente
-    assert "parseInt(response.headers['x-total-count'])" in fuente or \
-           "response.headers?.['x-total-count']" in fuente
-    assert "setTotalAlumnos(total)" in fuente
+    hook = _texto(HOOK)
+    util = _texto(UTIL)
+    assert "useAlumnosPaginados({" in fuente
+    assert "paramsAlumnos({ rol, porPagina, pagina, buscar, estado })" in hook
+    assert "x-total-count" in hook, "el total sale del header del padrón"
+    assert "limit: porPagina," in util
+    assert "skip: (Math.max(1, pagina) - 1) * porPagina," in util
+    assert "buscar: String(buscar || '').trim() || undefined," in util, (
+        "la búsqueda es server-side: viaja al backend, no se filtra en el cliente")
 
 
 def test_a_la_busqueda_es_server_side_y_refresca_la_pagina():
@@ -42,7 +56,8 @@ def test_b_el_pie_muestra_el_total_y_el_tramo():
     fuente = _fuente()
     assert "de <span className=\"font-bold text-zinc-100\">{totalAlumnos}</span>" in fuente
     assert "{desde}-{hasta}" in fuente
-    assert "const totalPaginas = Math.max(1, Math.ceil(totalAlumnos / porPagina));" in fuente
+    # La cuenta vive en `rangoMostrado` (una sola definición para el pie).
+    assert "const { totalPaginas, desde, hasta } = rangoMostrado({" in fuente
 
 
 def test_c_tamano_de_pagina_y_navegacion():
