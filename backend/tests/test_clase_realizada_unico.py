@@ -152,9 +152,13 @@ def test_b3_ocupacion_promedio_del_mes_en_curso_solo_cuenta_realizadas(db):
     ini = hoy.replace(day=1)
     params = {"t": TENANT_ID, "a": ini, "b": hoy}
 
+    # Migración 066: sólo las clases CON cupo entran al cociente (Musculación y
+    # Open Box tienen cupo NULL = sin tope y sus reservas no tienen denominador).
     fila = db.execute(text(
-        "SELECT COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0)), 0), "
-        "       COALESCE(SUM(COALESCE(c.cupo_maximo, 0)), 0) "
+        "SELECT COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0)) "
+        "                FILTER (WHERE c.cupo_maximo IS NOT NULL), 0), "
+        "       COALESCE(SUM(c.cupo_maximo) "
+        "                FILTER (WHERE c.cupo_maximo IS NOT NULL), 0) "
         "FROM clases c WHERE c.tenant_id = :t AND c.fecha >= :a AND c.fecha <= :b AND "
         + cs.sql_clase_realizada("c")), params).first()
     esperado = round(int(fila[0]) / int(fila[1]) * 100, 2) if fila[1] else 0

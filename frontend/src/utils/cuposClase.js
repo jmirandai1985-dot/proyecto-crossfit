@@ -18,6 +18,13 @@
 
 export const MAX_CUPOS_EXTRA = 10;
 
+/**
+ * ¿La clase NO tiene tope? (migración 066): `cupo_maximo` NULL = Musculación /
+ * Open Box, salas de acceso libre. No hay cupo original que ampliar, así que el
+ * control "Ampliar cupo" no se ofrece (el backend responde 400 si se intenta).
+ */
+export const sinTopeClase = (clase) => clase?.cupo_maximo === null || clase?.cupo_maximo === undefined;
+
 /** Cupo original de la clase (el techo se mide desde acá), con el fallback del backend. */
 export const cupoOriginal = (clase) => {
     const original = Number(clase?.cupo_original);

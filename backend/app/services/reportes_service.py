@@ -507,10 +507,15 @@ def crear_reporte_ventas_mensual_bytes(
     # Ocupacion por disciplina — solo clases REALIZADAS (ya terminaron y no canceladas;
     # definición única de `clases_service`), igual que la tarjeta de Reportes. Antes entraban
     # también las clases futuras del mes en curso.
+    # Migración 066: el cupo suma SOLO las clases con tope (`FILTER`); una disciplina de
+    # acceso libre (Musculación / Open Box, cupo NULL) no tiene denominador y en el
+    # archivo muestra el CONTEO de reservas en vez de un porcentaje inventado.
     ocupacion = db.execute(text("""
         SELECT d.nombre,
                SUM(COALESCE(c.asistentes_confirmados, 0)) as asistentes,
-               SUM(COALESCE(c.cupo_maximo, 1)) as cupo_total
+               SUM(c.cupo_maximo) FILTER (WHERE c.cupo_maximo IS NOT NULL) as cupo_total,
+               COUNT(c.id) FILTER (WHERE c.cupo_maximo IS NULL) as clases_sin_tope,
+               COUNT(c.id) as clases
         FROM clases c
         JOIN disciplinas d ON c.disciplina_id = d.id
         WHERE c.tenant_id = :tid AND c.fecha >= :ini AND c.fecha < :fin
@@ -675,9 +680,16 @@ def crear_reporte_ventas_mensual_bytes(
     for i, row_d in enumerate(ocupacion):
         is_alt = i % 2 == 1
         cupo = row_d.cupo_total or 0
-        pct_occ = round(row_d.asistentes / cupo * 100, 1) if cupo > 0 else 0
+        # Migración 066: sin tope no hay % posible -> se informa el conteo.
+        sin_tope = (row_d.clases or 0) > 0 and (
+            row_d.clases_sin_tope or 0) == row_d.clases
+        if sin_tope:
+            ocupacion_texto = f"{int(row_d.asistentes or 0)} reservas (sin cupo)"
+        else:
+            pct_occ = round(row_d.asistentes / cupo * 100, 1) if cupo > 0 else 0
+            ocupacion_texto = f"{pct_occ}%"
         _style_data_row(ws1, r, [row_d.nombre, row_d.asistentes,
-                        cupo, f"{pct_occ}%"], start_col=1, is_alt=is_alt)
+                        cupo, ocupacion_texto], start_col=1, is_alt=is_alt)
         r += 1
     occ_end = r - 1
     r += 1

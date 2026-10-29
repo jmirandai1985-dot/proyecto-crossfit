@@ -41,6 +41,12 @@ const ModalClase = ({ isOpen, onClose, onSuccess, tenant_id, claseEditar }) => {
     });
     const [errors, setErrors] = useState({});
 
+    // Migración 066: Musculación y Open Box son de acceso libre: su clase no
+    // lleva cupo (`cupo_maximo = NULL`), así que el campo no se pide ni se valida.
+    const disciplinaSel = (discData || []).find(
+        (d) => d && String(d.id) === String(formData.disciplina_id));
+    const esOpenBox = Boolean(disciplinaSel?.es_open_box);
+
     const esEdicion = !!claseEditar;
 
     useEffect(() => {
@@ -82,7 +88,7 @@ const ModalClase = ({ isOpen, onClose, onSuccess, tenant_id, claseEditar }) => {
         if (!formData.fecha) newErrors.fecha = 'Fecha requerida';
         if (!formData.hora_inicio) newErrors.hora_inicio = 'Hora inicio requerida';
         if (!formData.hora_fin) newErrors.hora_fin = 'Hora fin requerida';
-        if (!formData.cupo_maximo) newErrors.cupo_maximo = 'Cupo máximo requerido';
+        if (!esOpenBox && !formData.cupo_maximo) newErrors.cupo_maximo = 'Cupo máximo requerido';
 
         if (formData.fecha && !esEdicion) {
             const selectedDate = new Date(formData.fecha);
@@ -120,7 +126,7 @@ const ModalClase = ({ isOpen, onClose, onSuccess, tenant_id, claseEditar }) => {
                 fecha: formData.fecha,
                 hora_inicio: formData.hora_inicio,
                 hora_fin: formData.hora_fin,
-                cupo_maximo: parseInt(formData.cupo_maximo),
+                cupo_maximo: esOpenBox ? null : parseInt(formData.cupo_maximo),
                 horario_base_id: parseInt(formData.horario_base_id),
                 asistentes_confirmados: claseEditar?.asistentes_confirmados || 0,
                 cancelada: claseEditar?.cancelada || false,
@@ -253,11 +259,18 @@ const ModalClase = ({ isOpen, onClose, onSuccess, tenant_id, claseEditar }) => {
                         </label>
                         <input
                             type="number"
-                            value={formData.cupo_maximo}
+                            value={esOpenBox ? '' : formData.cupo_maximo}
                             onChange={(e) => setFormData({ ...formData, cupo_maximo: e.target.value })}
                             className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 ${errors.cupo_maximo ? 'border-red-500' : 'border-gray-300'}`}
                             min="1"
+                            disabled={esOpenBox}
+                            placeholder={esOpenBox ? 'Sin cupo (acceso libre)' : ''}
                         />
+                        {esOpenBox && (
+                            <p className="text-xs text-sky-600 mt-1">
+                                Acceso libre: esta disciplina no tiene cupo máximo.
+                            </p>
+                        )}
                         {errors.cupo_maximo && <p className="text-xs text-red-600 mt-1">{errors.cupo_maximo}</p>}
                     </div>
 

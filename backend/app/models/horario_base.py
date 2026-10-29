@@ -19,7 +19,10 @@ class HorarioBase(Base):
     dia_semana = Column(Integer, nullable=False)  # 0=Lunes, 6=Domingo
     hora_inicio = Column(Time, nullable=False)
     hora_fin = Column(Time, nullable=False)
-    cupo_maximo = Column(Integer, nullable=False, default=15)
+    # NULL = sin tope (migración 066): la plantilla de una disciplina de acceso
+    # libre (Musculación / Open Box, `disciplinas.es_open_box`) no tiene cupo, y
+    # `services/generar_clases.py` lo copia así a las clases que genera.
+    cupo_maximo = Column(Integer, nullable=True, default=15)
     activo = Column(Boolean, nullable=False, default=True)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())

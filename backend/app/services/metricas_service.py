@@ -163,7 +163,7 @@ def ocupacion_promedio(db: Session, tenant_id: int, inicio: date, fin: date) -> 
     """Ocupacion del periodo en porcentaje: asistentes_confirmados sobre cupo.
 
     OJO con el nombre: mide OCUPACION (lugares reservados contra cupo ofrecido),
-    no tasa de asistencia; eso requeriria comparar asistencias reales contra
+    no tasa de asistencia; eso requiriria comparar asistencias reales contra
     reservas confirmadas. Reportes la muestra como Asistencia Promedio y
     monthly_kpis.ocupacion_promedio guarda el mismo numero.
 
@@ -172,10 +172,19 @@ def ocupacion_promedio(db: Session, tenant_id: int, inicio: date, fin: date) -> 
     del periodo, asi que en el mes EN CURSO las clases futuras inflaban el
     denominador y el % salia artificialmente bajo (bug reportado 2026-10: 2.11%).
     Para un mes ya cerrado todas las clases terminaron, asi que el numero no cambia.
+
+    ── Migración 066: SOLO las clases con tope ─────────────────────────────────
+    Musculación y Open Box tienen `cupo_maximo IS NULL` (acceso libre). Si se
+    sumaran sus reservas al numerador, el % podria pasar de 100: no hay butacas
+    que comparar. Las dos partes del cociente salen de las clases CON cupo, y
+    las reservas de las salas libres se informan aparte (`reservas_sin_tope`),
+    como conteo, nunca como porcentaje.
     """
     fila = db.execute(text("""
-        SELECT COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0)), 0),
-               COALESCE(SUM(COALESCE(c.cupo_maximo, 0)), 0)
+        SELECT COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0))
+                        FILTER (WHERE c.cupo_maximo IS NOT NULL), 0),
+               COALESCE(SUM(c.cupo_maximo)
+                        FILTER (WHERE c.cupo_maximo IS NOT NULL), 0)
         FROM clases c
         WHERE c.tenant_id = :tid
           AND c.fecha >= :ini AND c.fecha <= :fin
@@ -184,6 +193,25 @@ def ocupacion_promedio(db: Session, tenant_id: int, inicio: date, fin: date) -> 
         "tid": tenant_id, "ini": inicio, "fin": fin}).first()
     asistentes, cupo = int(fila[0] or 0), int(fila[1] or 0)
     return round(asistentes / cupo * 100, 2) if cupo > 0 else 0
+
+
+def reservas_sin_tope(db: Session, tenant_id: int, inicio: date, fin: date) -> int:
+    """Reservas vivas del periodo en clases SIN tope (Musculación / Open Box).
+
+    Es el número que reemplaza al "% de ocupación" de esas disciplinas: sin
+    denominador no hay porcentaje honesto, pero el uso real sí se puede contar.
+    Sólo reservas NO canceladas, el mismo criterio que el resto de la app.
+    """
+    from shared import estados
+
+    return int(db.execute(text(
+        "SELECT COUNT(r.id) FROM reservas r "
+        "JOIN clases c ON c.id = r.clase_id "
+        "WHERE c.tenant_id = :tid "
+        "  AND c.fecha >= :ini AND c.fecha <= :fin "
+        "  AND c.cupo_maximo IS NULL "
+        "  AND r.estado NOT IN (" + estados.lista_sql() + ")"
+    ), {"tid": tenant_id, "ini": inicio, "fin": fin}).scalar() or 0)
 
 
 def alumnos_vigentes(db: Session, tenant_id: int, fecha: date) -> int:

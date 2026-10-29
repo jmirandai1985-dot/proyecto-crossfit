@@ -12,6 +12,9 @@ import logging
 
 from app.db.database import get_db
 from app.core.dependencies import get_current_admin
+# `no cancelada` = UNA lista compartida (`shared.estados`): el conteo de reservas
+# por disciplina del KPI de ocupación usa el mismo criterio que la app.
+from app.core.estados import lista_sql
 from app.services import metricas_service as metricas
 from app.services.clases_service import sql_clase_realizada
 
@@ -48,18 +51,30 @@ def _ocupacion_por_disciplina(db: Session, tenant_id: int, inicio_mes, fin_mes):
 
     ANTES: 1 consulta para las disciplinas + 1 consulta por CADA disciplina para
     contar los alumnos únicos (N+1; con 3 disciplinas eran 4 viajes a Neon).
-    AHORA: dos CTE (`clases_disc` y `alumnos_disc`) + un LEFT JOIN, un solo viaje.
+    AHORA: tres CTE (`clases_disc`, `alumnos_disc` y `reservas_disc`) + LEFT JOIN,
+    un solo viaje.
 
-    Los valores son EXACTAMENTE los del bloque anterior: el conteo de alumnos no
-    filtra por `sql_clase_realizada` (sólo por fecha y `reservas.asistio`), y el
-    cupo mantiene el COALESCE(cupo_maximo, 1) del KPI original.
+    ── Migración 066: hay dos clases de disciplina ──────────────────────────────
+      * CON tope (`cupo_maximo` numérico): se calcula el % de ocupación como
+        siempre (`asistentes / cupo`). El denominador es SOLO el de estas clases
+        (`SUM(cupo_maximo) FILTER (WHERE cupo_maximo IS NOT NULL)`); antes el
+        `COALESCE(cupo_maximo, 1)` le sumaba 1 por clase sin cupo, un invento.
+      * SIN tope (`cupo_maximo IS NULL`, Musculación / Open Box): no hay
+        denominador posible, así que `ocupacion_pct` viaja en `None` y la
+        pantalla muestra el CONTEO DE RESERVAS (`reservas`) en su lugar.
+        `sin_tope` es la bandera que usa el front; `clases_sin_tope` explica
+        por qué una disciplina puede tener clases y cupo_total 0.
     """
     filas = db.execute(sql_text("""
         WITH clases_disc AS (
             SELECT d.id, d.nombre,
                    COUNT(c.id) as total_clases,
+                   COUNT(c.id) FILTER (WHERE c.cupo_maximo IS NULL) as clases_sin_tope,
                    COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0)), 0) as asistentes,
-                   COALESCE(SUM(COALESCE(c.cupo_maximo, 1)), 0) as cupo
+                   COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0))
+                            FILTER (WHERE c.cupo_maximo IS NOT NULL), 0) as asistentes_con_tope,
+                   COALESCE(SUM(c.cupo_maximo)
+                            FILTER (WHERE c.cupo_maximo IS NOT NULL), 0) as cupo
             FROM clases c
             JOIN disciplinas d ON c.disciplina_id = d.id
             WHERE c.tenant_id = :tid
@@ -77,11 +92,24 @@ def _ocupacion_por_disciplina(db: Session, tenant_id: int, inicio_mes, fin_mes):
               AND c.fecha >= :inicio_d
               AND c.fecha <= :fin_d
             GROUP BY c.disciplina_id
+        ),
+        reservas_disc AS (
+            SELECT c.disciplina_id, COUNT(r.id) as reservas
+            FROM reservas r
+            JOIN clases c ON r.clase_id = c.id
+            WHERE c.tenant_id = :tid
+              AND c.fecha >= :inicio_d
+              AND c.fecha <= :fin_d
+              AND r.estado NOT IN (""" + lista_sql() + """)
+            GROUP BY c.disciplina_id
         )
-        SELECT cd.id, cd.nombre, cd.total_clases, cd.asistentes, cd.cupo,
-               COALESCE(ad.alumnos_unicos, 0) as alumnos_unicos
+        SELECT cd.id, cd.nombre, cd.total_clases, cd.clases_sin_tope,
+               cd.asistentes, cd.asistentes_con_tope, cd.cupo,
+               COALESCE(ad.alumnos_unicos, 0) as alumnos_unicos,
+               COALESCE(rd.reservas, 0) as reservas
         FROM clases_disc cd
         LEFT JOIN alumnos_disc ad ON ad.disciplina_id = cd.id
+        LEFT JOIN reservas_disc rd ON rd.disciplina_id = cd.id
         ORDER BY cd.id
     """), {
         "tid": tenant_id,
@@ -92,12 +120,18 @@ def _ocupacion_por_disciplina(db: Session, tenant_id: int, inicio_mes, fin_mes):
     resultado = []
     for r in filas:
         cupo = r.cupo or 0
-        pct = round(r.asistentes / cupo * 100) if cupo > 0 else 0
+        # Sin tope = sin denominador: % None (el front pinta las reservas).
+        sin_tope = (r.total_clases or 0) > 0 and (r.clases_sin_tope or 0) == r.total_clases
+        pct = None if sin_tope else (
+            round(r.asistentes_con_tope / cupo * 100) if cupo > 0 else 0)
         resultado.append({
             "id": r.id,
             "nombre": r.nombre.strip() if r.nombre else "—",
             "clases": r.total_clases,
+            "clases_sin_tope": r.clases_sin_tope or 0,
+            "sin_tope": sin_tope,
             "asistentes": r.asistentes,
+            "reservas": r.reservas,
             "cupo_total": cupo,
             "alumnos_unicos": r.alumnos_unicos,
             "ocupacion_pct": pct,
@@ -377,6 +411,12 @@ def obtener_reportes_analytics(
         ocupacion_por_disciplina = _ocupacion_por_disciplina(
             db, tenant_id, inicio_mes, fin_mes)
 
+        # --- 11b. RESERVAS DE LAS DISCIPLINAS SIN TOPE (migración 066) ---
+        # Musculación / Open Box no tienen cupo: su uso va como CONTEO aparte,
+        # fuera del denominador de ocupación (si no, el % se hunde otra vez).
+        reservas_sin_cupo = metricas.reservas_sin_tope(
+            db, tenant_id, inicio_mes.date(), fin_mes.date())
+
         # --- 12. CLASES POR COACH ESTE MES ---
         clases_por_coach = []
         coach_rows = db.execute(sql_text("""
@@ -505,7 +545,8 @@ def obtener_reportes_analytics(
             "clasesImpartidas": clases_impartidas,
             "asistenciaPromedio": ocupacion_promedio,
             "ocupacionPorDisciplina": ocupacion_por_disciplina,
-
+            # Conteo (no ratio) de las disciplinas sin tope del mes elegido.
+            "reservasSinCupo": reservas_sin_cupo,
             # Coaches
             "clasesPorCoach": clases_por_coach,
             "coberturasEmergencia": coberturas_mes,

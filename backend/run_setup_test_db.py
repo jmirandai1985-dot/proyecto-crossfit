@@ -418,9 +418,16 @@ try:
     ]
     # Gap se crea como ACTIVA (sin horarios asignados todavía; se mostrará
     # con el badge "sin horarios" en lugar de tratarla como inactiva)
+    # ── Migración 066: Open Box y Musculación son de ACCESO LIBRE ───────────
+    # No tienen cupo (sala libre: el alumno entra y entrena). El seed tiene que
+    # nacer con `es_open_box=True` para que sus horarios/clases se generen sin
+    # tope; si nacieran con cupo, `run_tests.bat` volvería a inventar el
+    # placeholder que la decisión de negocio eliminó.
+    open_box = {2, 3}                     # Open Box, Musculación
     db.add(Disciplina(id=5, tenant_id=1, nombre="Gap", activo=True))
     for d_id, d_nombre in disc_data:
-        db.add(Disciplina(id=d_id, tenant_id=1, nombre=d_nombre, activo=True))
+        db.add(Disciplina(id=d_id, tenant_id=1, nombre=d_nombre, activo=True,
+                          es_open_box=(d_id in open_box)))
     db.flush()
     print(f"   {len(disc_data)} disciplinas activas + Gap (activa)")
 
@@ -443,11 +450,14 @@ try:
     if hoy.weekday() == 6:  # hoy es domingo -> no hay clases hoy
         dia_horario = (hoy + timedelta(days=1)).weekday()
     horario_id_map = {}
+    # Migración 066: Open Box (disc 2) y Musculación (disc 3) van SIN CUPO
+    # (`None`): son salas de acceso libre. Generar sus clases con un número
+    # volvería a inflar el denominador del KPI de ocupación.
     horario_data = [
         # (id, disciplina_id, hora_inicio, hora_fin, cupo, dia_semana)
         (1, 1, time(10, 0), time(11, 0), 20, dia_horario),  # CrossFit
-        (2, 2, time(10, 0), time(11, 0), 10, dia_horario),  # Open Box
-        (3, 3, time(10, 0), time(11, 0), 15, dia_horario),  # Musculacion
+        (2, 2, time(10, 0), time(11, 0), None, dia_horario),  # Open Box
+        (3, 3, time(10, 0), time(11, 0), None, dia_horario),  # Musculacion
         (4, 4, time(10, 0), time(11, 0), 12, dia_horario),  # Levantamiento
     ]
     for h_id, disc_id, h_ini, h_fin, cupo, dia in horario_data:

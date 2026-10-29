@@ -537,7 +537,11 @@ const InicioMobile = ({
                             <p className="vacio">No hay clases de {filtroClases} este día.</p>
                         ) : (
                             clasesFiltradas.map((clase) => {
-                                const cupos = (clase.cupo_maximo || 0) - (clase.asistentes_confirmados || 0);
+                                // Migración 066: cupo NULL = sin tope (Musculación / Open Box).
+                                const sinTope = clase.cupo_maximo === null || clase.cupo_maximo === undefined;
+                                const cupos = sinTope
+                                    ? Infinity
+                                    : (clase.cupo_maximo || 0) - (clase.asistentes_confirmados || 0);
                                 const libre = cupos > 0;
                                 return (
                                     <div className="clase" key={clase.id}>
@@ -548,7 +552,7 @@ const InicioMobile = ({
                                         </div>
                                         <div className="cq">
                                             <span className={`cupos${libre ? ' ok' : ' no'}`}>
-                                                {libre ? `${cupos} cupos` : 'Lleno'}
+                                                {sinTope ? 'Acceso libre' : (libre ? `${cupos} cupos` : 'Lleno')}
                                             </span>
                                             <button
                                                 type="button"

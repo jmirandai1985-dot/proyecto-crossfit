@@ -835,7 +835,10 @@ const DashboardCoach = () => {
                                                                             )}
                                                                         </p>
                                                                         <p className="text-xs text-gray-500">
-                                                                            👥 {clase.asistentes_confirmados || 0}/{clase.cupo_maximo || 0}
+                                                                            👥 {clase.asistentes_confirmados || 0}
+                                                                            {clase.cupo_maximo === null || clase.cupo_maximo === undefined
+                                                                                ? ' (acceso libre)'
+                                                                                : `/${clase.cupo_maximo}`}
                                                                         </p>
                                                                     </div>
                                                                     <div className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-lg ${wod ? 'bg-green-100' : 'bg-yellow-100'}`}>
@@ -968,7 +971,10 @@ const DashboardCoach = () => {
                                                                                 ⬜ Sin {getTerminoDisciplina(clase.disciplina_nombre)}
                                                                             </div>
                                                                             <div className="text-sm text-zinc-400">
-                                                                                👥 {clase.asistentes_confirmados || 0}/{clase.cupo_maximo || 0}
+                                                                                👥 {clase.asistentes_confirmados || 0}
+                                                                                {clase.cupo_maximo === null || clase.cupo_maximo === undefined
+                                                                                    ? ' (acceso libre)'
+                                                                                    : `/${clase.cupo_maximo}`}
                                                                             </div>
                                                                         </button>
                                                                     )

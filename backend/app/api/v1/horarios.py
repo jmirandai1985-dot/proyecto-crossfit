@@ -13,6 +13,8 @@ from app.core.dependencies import get_current_admin, get_current_user
 from app.services import asignaciones_clases as asignaciones
 from app.services.auditoria_service import registrar_auditoria
 from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
+# Auditoría 1.1: un choque de UNIQUE/FK/CHECK es un 400/409 del cliente, no un 500.
+from app.utils.db_commit import commit_o_4xx
 
 router = APIRouter()
 
@@ -30,17 +32,34 @@ def crear_horario(
 ):
     # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT.
     tenant_id = current_user["tenant_id"]
+    # ── Migración 066: una disciplina de acceso libre no tiene cupo ──────────
+    # `es_open_box` (Musculación / Open Box) = sala libre: la plantilla se crea
+    # con `cupo_maximo = NULL` (sin tope), aunque el cliente mande un número.
+    disc = db.query(Disciplina).filter(
+        Disciplina.id == disciplina_id,
+        Disciplina.tenant_id == tenant_id,
+    ).first()
+    if not disc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="La disciplina no existe o no pertenece a este box",
+        )
     db_horario = HorarioBase(
         tenant_id=tenant_id,
         disciplina_id=disciplina_id,
         dia_semana=dia_semana,
         hora_inicio=hora_inicio,
         hora_fin=hora_fin,
-        cupo_maximo=cupo_maximo,
+        cupo_maximo=None if disc.es_open_box else cupo_maximo,
         activo=True
     )
     db.add(db_horario)
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo crear el horario: revisa la disciplina, el día y las horas.",
+        unico="Ya existe un horario igual para esa disciplina, día y hora.",
+        contexto="crear_horario",
+    )
     db.refresh(db_horario)
     return db_horario
 
@@ -180,6 +199,21 @@ def actualizar_horario(
     if hora_fin is not None:
         horario.hora_fin = hora_fin
     if cupo_maximo is not None:
+        # Migración 066: las disciplinas de acceso libre (Musculación / Open Box)
+        # NO tienen cupo. Fijarles un número volvería a inventar el placeholder
+        # que esta migración sacó, así que es un 400 de negocio.
+        efectiva = (disciplina_id if disciplina_id is not None
+                    else horario.disciplina_id)
+        disc_efectiva = db.query(Disciplina).filter(
+            Disciplina.id == efectiva,
+            Disciplina.tenant_id == tenant_id,
+        ).first()
+        if disc_efectiva is not None and disc_efectiva.es_open_box:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=("Musculación y Open Box son de acceso libre: no tienen "
+                        "cupo máximo que configurar."),
+            )
         horario.cupo_maximo = cupo_maximo
     if activo is not None:
         horario.activo = activo
@@ -200,6 +234,10 @@ def actualizar_horario(
                 detail="La disciplina no existe o no pertenece a este box",
             )
         horario.disciplina_id = disciplina_id
+        # Si la plantilla pasa a una disciplina de acceso libre, el cupo que
+        # tuviera deja de tener sentido: se limpia (migración 066).
+        if nueva.es_open_box:
+            horario.cupo_maximo = None
 
     if cambio_disciplina:
         hoy = hoy_santiago()
@@ -210,7 +248,12 @@ def actualizar_horario(
         clases_liberadas = asignaciones.liberar_clases_futuras_de_horario(
             db, tenant_id, horario.id, hoy)
 
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo actualizar el horario: revisa los datos enviados.",
+        unico="Ya existe otro horario igual para esa disciplina, día y hora.",
+        contexto="actualizar_horario",
+    )
     db.refresh(horario)
 
     if cambio_disciplina:
@@ -248,5 +291,9 @@ def eliminar_horario(
             detail=f"Horario {horario_id} no encontrado"
         )
     horario.activo = False
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo desactivar el horario. Intenta de nuevo.",
+        contexto="eliminar_horario",
+    )
     return None

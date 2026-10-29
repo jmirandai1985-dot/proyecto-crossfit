@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { acotarExtra, cupoActual, cupoOriginal, cupoTope, extraDisponible, extraMaximo } from '../utils/cuposClase';
+import { acotarExtra, cupoActual, cupoOriginal, cupoTope, extraDisponible, extraMaximo, sinTopeClase } from '../utils/cuposClase';
 
 /**
  * Fila de UNA clase puntual del dia para el panel de Supervision (admin, dark).
@@ -26,8 +26,10 @@ const SupervisionClaseRow = ({ clase, onAmpliarCupo }) => {
     const [msg, setMsg] = useState(null);
 
     const cupo = cupoActual(clase, cupos);
+    // Migración 066: sin cupo (acceso libre) no hay nada que ampliar.
+    const sinTope = sinTopeClase(clase);
     const libre = extraDisponible(clase, cupos);
-    const enTope = libre === 0;
+    const enTope = sinTope || libre === 0;
 
     const abrir = () => {
         setMsg(null);
@@ -63,7 +65,9 @@ const SupervisionClaseRow = ({ clase, onAmpliarCupo }) => {
                     {fmtHora(clase.hora_inicio)}-{fmtHora(clase.hora_fin)}
                 </span>
                 <span className="text-xs text-zinc-400">
-                    {clase.asistentes_confirmados || 0}/{cupo} confirmados
+                    {sinTope
+                        ? `${clase.asistentes_confirmados || 0} reservas · acceso libre`
+                        : `${clase.asistentes_confirmados || 0}/${cupo} confirmados`}
                 </span>
                 {clase.cancelada && (
                     <span className="text-xs px-1.5 py-0.5 rounded bg-red-500/20 text-red-300">Cancelada</span>
@@ -71,6 +75,7 @@ const SupervisionClaseRow = ({ clase, onAmpliarCupo }) => {
                 <span className="text-xs text-zinc-500">
                     {clase.coach_nombre ? clase.coach_nombre : 'Sin coach'}
                 </span>
+                {!sinTope && (
                 <button
                     onClick={abrir}
                     disabled={enTope}
@@ -83,6 +88,7 @@ const SupervisionClaseRow = ({ clase, onAmpliarCupo }) => {
                 >
                     Ampliar cupo (admin)
                 </button>
+                )}
             </div>
 
             {abierto && (

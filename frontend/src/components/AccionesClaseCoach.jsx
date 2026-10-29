@@ -138,7 +138,7 @@ const AccionesClaseCoach = ({ clase, coachId, coachDisciplinas = [], onAviso }) 
                             {diaSemanaDe(fechaCortaDe(clase))} {fechaCortaDe(clase)} ·{' '}
                             {horaCorta(clase.hora_inicio)}-{horaCorta(clase.hora_fin)} ·{' '}
                             {clase.disciplina_nombre || '-'} · cupo{' '}
-                            {clase.asistentes_confirmados || 0}/{clase.cupo_maximo || '?'}
+                            {clase.asistentes_confirmados || 0}{clase.cupo_maximo === null || clase.cupo_maximo === undefined ? ' (acceso libre)' : `/${clase.cupo_maximo}`}
                         </p>
                         <p className="mt-2 text-[12.5px] text-zinc-500">
                             {accion.accion === 'tomar'

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
     contadoresClase, estadoFila, etiquetaEstado, reservasDe, textoProgreso,
 } from '../utils/franjasAsistencia';
-import { acotarExtra, cupoActual, cupoOriginal, cupoTope, extraMaximo } from '../utils/cuposClase';
+import { acotarExtra, cupoActual, cupoOriginal, cupoTope, extraMaximo, sinTopeClase } from '../utils/cuposClase';
 
 /**
  * AsistenciaFranja — una franja del día (Mañana / Tarde / Noche) con sus clases.
@@ -166,7 +166,7 @@ const AsistenciaFranja = ({ franja, clases, osc, formatearHora, onAbrir, onAmpli
                             </span>
                         )}
 
-                        {puedeAmpliar && (
+                        {puedeAmpliar && !sinTopeClase(clase) && (
                             <button
                                 onClick={() => abrirCupo(clase)}
                                 disabled={libre === 0}

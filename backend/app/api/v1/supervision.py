@@ -587,11 +587,23 @@ def actualizar_cupo_disciplina(
     tenant_id = current_user["tenant_id"]
     # Verificar que la disciplina existe
     disc = db.execute(
-        sql_text("SELECT id FROM disciplinas WHERE id = :did AND tenant_id = :tid"),
+        sql_text("SELECT id, es_open_box FROM disciplinas "
+                 "WHERE id = :did AND tenant_id = :tid"),
         {"did": disciplina_id, "tid": tenant_id}
     ).first()
     if not disc:
         raise HTTPException(status_code=404, detail="Disciplina no encontrada")
+
+    # ── Migración 066: las salas de acceso libre NO tienen cupo ──────────────
+    # Fijarles un número volvería a inventar el placeholder que la decisión de
+    # negocio sacó (y re-inflaría el KPI de ocupación). Es un 400, no un no-op
+    # silencioso: el panel tiene que dejar de ofrecer el control.
+    if disc.es_open_box:
+        raise HTTPException(
+            status_code=400,
+            detail=("Musculación y Open Box son de acceso libre: no tienen "
+                    "cupo máximo que configurar."),
+        )
 
     # Actualizar cupo en todos los horario_base de esa disciplina
     result = db.execute(
@@ -630,10 +642,13 @@ def listar_cupos_disciplinas(
             d.id,
             d.nombre,
             d.activo,
-            COALESCE(
-                (SELECT h.cupo_maximo FROM horarios h WHERE h.disciplina_id = d.id AND h.tenant_id = :tid ORDER BY h.id DESC LIMIT 1),
-                16
-            ) AS cupo_actual,
+            d.es_open_box,
+            CASE WHEN d.es_open_box THEN NULL
+                 ELSE COALESCE(
+                    (SELECT h.cupo_maximo FROM horarios h WHERE h.disciplina_id = d.id AND h.tenant_id = :tid ORDER BY h.id DESC LIMIT 1),
+                    16
+                 )
+            END AS cupo_actual,
             (SELECT COUNT(*) FROM horarios h2 WHERE h2.disciplina_id = d.id AND h2.tenant_id = :tid) AS horarios_count
         FROM disciplinas d
         WHERE d.tenant_id = :tid
@@ -645,7 +660,10 @@ def listar_cupos_disciplinas(
             "id": r.id,
             "nombre": r.nombre.strip() if r.nombre else r.nombre,
             "activo": r.activo,
+            # NULL = sin tope (migración 066): el panel muestra "acceso libre"
+            # y esconde los controles de subir/bajar cupo.
             "cupo_actual": r.cupo_actual,
+            "sin_tope": bool(r.es_open_box),
             "horarios_count": r.horarios_count
         }
         for r in rows

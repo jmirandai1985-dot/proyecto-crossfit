@@ -51,8 +51,17 @@ class Clase(Base):
     fecha = Column(Date, nullable=False)
     hora_inicio = Column(Time, nullable=False)
     hora_fin = Column(Time, nullable=False)
-    cupo_maximo = Column(Integer, nullable=False, default=20)
-    cupo_original = Column(Integer, nullable=True)  # snapshot al generar; techo = cupo_original + 10
+    # ── Cupo (migración 066): NULL = SIN TOPE ───────────────────────────────
+    # Musculación y Open Box son salas de acceso libre: no tienen capacidad que
+    # reservar, así que sus clases y horarios quedan con `cupo_maximo = NULL`.
+    # NULL NO es "0" (un 0 rechazaría todas las reservas) ni "50" (un número es
+    # un techo): es la marca de "no hay tope" y así lo leen `POST /reservas`,
+    # la presencia sin cargo de Asistencia y los KPIs de ocupación (que para
+    # estas disciplinas muestran el CONTEO DE RESERVAS, no un porcentaje).
+    cupo_maximo = Column(Integer, nullable=True, default=20)
+    # Snapshot al generar; techo = cupo_original + 10. NULL cuando la clase no
+    # tiene cupo (no hay techo que ampliar: `POST /clases/{id}/ampliar-cupo` 400).
+    cupo_original = Column(Integer, nullable=True)
     asistentes_confirmados = Column(Integer, nullable=False, default=0)
     cancelada = Column(Boolean, nullable=False, default=False)
     # WOD asociado a esta clase (FK → wods.id)

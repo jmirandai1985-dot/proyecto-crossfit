@@ -849,6 +849,15 @@ export default function SupervisionClases() {
                                             )}
                                         </div>
                                         <div className="flex items-center gap-2">
+                                            {/* Migración 066: Musculación y Open Box son de acceso
+                                                libre (`cupo_actual` NULL): no hay cupo que subir ni
+                                                bajar, así que se dice tal cual. */}
+                                            {d.sin_tope || d.cupo_actual === null ? (
+                                                <span className="text-xs px-2 py-1 rounded bg-sky-500/15 text-sky-300 font-semibold">
+                                                    Acceso libre · sin cupo
+                                                </span>
+                                            ) : (
+                                                <>
                                             <button
                                                 onClick={() => ajustarCupo(d, -1)}
                                                 disabled={d.cupo_actual <= CUPO_MIN || cupoBloqueado(d)}
@@ -872,6 +881,8 @@ export default function SupervisionClases() {
                                             >
                                                 +
                                             </button>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
                                 ))}
@@ -1054,7 +1065,9 @@ export default function SupervisionClases() {
                                     </span>
                                 </p>
                                 <p className="text-zinc-300">👤 Coach: <span className="font-medium">{detalleClase.coach_nombre || 'Sin coach'}</span></p>
-                                <p className="text-zinc-300">🎟️ Cupos: {detalleClase.asistentes_confirmados || 0}/{detalleClase.cupo_maximo ?? '?'}</p>
+                                <p className="text-zinc-300">🎟️ {detalleClase.cupo_maximo === null || detalleClase.cupo_maximo === undefined
+                                    ? `Acceso libre · ${detalleClase.asistentes_confirmados || 0} reservas`
+                                    : `Cupos: ${detalleClase.asistentes_confirmados || 0}/${detalleClase.cupo_maximo}`}</p>
                                 <p className="text-zinc-300">📝 WOD: {detalleClase.wod_titulo || (detalleClase.wod_id ? `WOD #${detalleClase.wod_id}` : 'Sin WOD publicado')}</p>
                                 <p className="text-zinc-300">🔁 Horario: {detalleClase.horario_base_id ? 'viene de un horario fijo (recurrente)' : 'clase puntual'}</p>
                                 {detalleClase.cobertura_emergencia && (
@@ -1272,7 +1285,9 @@ export default function SupervisionClases() {
                                             📅 {new Date(modalReservasHorario.data.clase.fecha + 'T12:00:00').toLocaleDateString('es-CL')}
                                         </p>
                                         <p className="text-zinc-400 text-xs mt-1">
-                                            Cupo: {modalReservasHorario.data.clase.asistentes_confirmados || 0}/{modalReservasHorario.data.clase.cupo_maximo || '?'}
+                                            Cupo: {modalReservasHorario.data.clase.cupo_maximo === null || modalReservasHorario.data.clase.cupo_maximo === undefined
+                                                ? `acceso libre (${modalReservasHorario.data.clase.asistentes_confirmados || 0} reservas)`
+                                                : `${modalReservasHorario.data.clase.asistentes_confirmados || 0}/${modalReservasHorario.data.clase.cupo_maximo}`}
                                         </p>
                                     </div>
                                     {(modalReservasHorario.data.reservas || []).length === 0 ? (

@@ -302,18 +302,20 @@ const ResumenCoach = ({
                     <p className={`mb-2 ${ROTULO}`}>Ocupación por horario — hoy</p>
                     <div className="space-y-3.5 rounded-[20px] bg-[#18181B] p-5" data-testid="resumen-ocupacion">
                         {clasesHoy.map((clase) => {
-                            const { pct } = ocupacion(reservasDe(clase), clase.cupo_maximo);
+                            const { pct, sinTope } = ocupacion(reservasDe(clase), clase.cupo_maximo);
                             return (
                                 <div key={clase.id} className="flex items-center gap-3">
                                     <span className="w-[132px] flex-none text-[12px] font-bold text-zinc-400">
                                         {horaCorta(clase.hora_inicio)} {clase.disciplina_nombre || ''}
                                     </span>
                                     <span className="h-[18px] flex-1 overflow-hidden rounded-[9px] bg-[#242428]">
+                                        {/* Sin cupo (migración 066): no hay barra que llenar. */}
                                         <span className="block h-full rounded-[9px] bg-[linear-gradient(90deg,#D7FF4A,#8CFF6E)]"
-                                            style={{ width: `${pct}%` }} />
+                                            style={{ width: `${sinTope ? 0 : pct}%` }} />
                                     </span>
-                                    <span className="w-[44px] flex-none text-right text-[12px] font-bold text-zinc-400">
-                                        {pct}%
+                                    <span className="w-[44px] flex-none text-right text-[12px] font-bold text-zinc-400"
+                                        title={sinTope ? 'Acceso libre: sin cupo máximo' : undefined}>
+                                        {sinTope ? 'libre' : `${pct}%`}
                                     </span>
                                 </div>
                             );

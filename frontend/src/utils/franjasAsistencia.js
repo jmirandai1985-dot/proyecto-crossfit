@@ -96,19 +96,38 @@ export const contadoresClase = (clase) => contadoresDe(
     reservasDe(clase), clase?.marcados_count,
 );
 
-/** Resumen de una franja: cantidad de clases, rango horario y ocupación (0-100). */
+/**
+ * Resumen de una franja: cantidad de clases, rango horario y ocupación (0-100).
+ *
+ * Migración 066: `cupos` y `ocupacion` salen SÓLO de las clases con tope. Las de
+ * acceso libre (Musculación / Open Box, `cupo_maximo` NULL) aportan sus reservas
+ * a `reservasSinTope`, como conteo: sumarlas al denominador volvería a inflar el
+ * cupo ofrecido con un placeholder. `ocupacion` es `null` si la franja no tiene
+ * ninguna clase con cupo.
+ */
 export const resumenFranja = (clases) => {
     const lista = clases || [];
+    const conTope = lista.filter((c) => c?.cupo_maximo !== null && c?.cupo_maximo !== undefined);
     const reservas = lista.reduce((a, c) => a + reservasDe(c), 0);
-    const cupos = lista.reduce((a, c) => a + (Number(c?.cupo_maximo) || 0), 0);
+    const cupos = conTope.reduce((a, c) => a + (Number(c?.cupo_maximo) || 0), 0);
+    const reservasSinTope = lista
+        .filter((c) => c?.cupo_maximo === null || c?.cupo_maximo === undefined)
+        .reduce((a, c) => a + reservasDe(c), 0);
     const horas = lista.map((c) => horaDe(c?.hora_inicio)).filter((h) => h !== null);
     return {
         clases: lista.length,
         reservas,
         cupos,
+        reservasSinTope,
         desde: horas.length ? Math.min(...horas) : null,
         hasta: horas.length ? Math.max(...horas) : null,
-        ocupacion: cupos > 0 ? Math.round(reservas / cupos * 100) : 0,
+        // `null` = la franja tiene clases pero ninguna con tope (sin % posible).
+        // Franja VACÍA -> 0, como siempre (nada que medir).
+        ocupacion: lista.length === 0
+            ? 0
+            : (conTope.length === 0
+                ? null
+                : (cupos > 0 ? Math.round(reservas / cupos * 100) : 0)),
     };
 };
 
@@ -128,13 +147,20 @@ export const claseEnCurso = (clases, horaHHMM) => {
     return indice;
 };
 
-/** { pct, nivel } para la barra de ocupación (nivel = '' | 'mid' | 'low' del mockup). */
+/**
+ * { pct, nivel, sinTope } para la barra de ocupación (nivel = '' | 'mid' | 'low').
+ *
+ * `sinTope` (migración 066) = la clase no tiene cupo (Musculación / Open Box):
+ * no hay porcentaje que dibujar. `pct` queda en 0 y la fila muestra el conteo
+ * de reservas o "acceso libre" en vez de un `0 %` engañoso.
+ */
 export const ocupacion = (reservas, cupoMaximo) => {
+    const sinTope = cupoMaximo === null || cupoMaximo === undefined;
     const cap = Number(cupoMaximo) || 0;
-    if (cap <= 0) return { pct: 0, nivel: 'low' };
+    if (sinTope || cap <= 0) return { pct: 0, nivel: 'low', sinTope };
     const pct = Math.round((Number(reservas) || 0) / cap * 100);
     const nivel = pct >= 70 ? '' : pct >= 40 ? 'mid' : 'low';
-    return { pct, nivel };
+    return { pct, nivel, sinTope: false };
 };
 
 /** ¿La clase ya tiene la asistencia marcada? (badge "N ok" del botón Marcar). */

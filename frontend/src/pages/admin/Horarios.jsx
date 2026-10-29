@@ -75,14 +75,27 @@ export default function Horarios() {
     const openEdit = (disc) => {
         setEditingId(disc.id);
         const hKey = `${disc.hora_inicio?.slice(0, 5) || '10:00'}-${disc.hora_fin?.slice(0, 5) || '11:00'}`;
-        setFormData({ disciplina_id: disc.disciplina_id, dia_semana: disc.dia_semana ?? 0, hora_inicio: hKey.split('-')[0], hora_fin: hKey.split('-')[1], cupo_maximo: disc.cupo_maximo || 20 });
+        // Migración 066: `?? ''` conserva el "sin cupo" (NULL) de una disciplina de
+        // acceso libre; con `|| 20` se volvía a inventar el techo al editar.
+        setFormData({ disciplina_id: disc.disciplina_id, dia_semana: disc.dia_semana ?? 0, hora_inicio: hKey.split('-')[0], hora_fin: hKey.split('-')[1], cupo_maximo: disc.cupo_maximo ?? '' });
         setShowForm(true);
     };
+
+    // Migración 066: ¿la disciplina elegida es de acceso libre (Musculación / Open Box)?
+    // Su horario no lleva cupo: el backend lo fuerza a NULL.
+    const disciplinaForm = (disciplinas || []).find(
+        (d) => String(d.id) === String(formData.disciplina_id));
+    const esOpenBoxForm = Boolean(disciplinaForm?.es_open_box);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            await guardar.mutateAsync({ id: editingId, payload: { ...formData, tenant_id } });
+            // Sin cupo no se manda el parámetro (mandar `null`/'' daría 422 y mandar
+            // un número re-caparía una sala libre). El resto del formulario va igual.
+            const { cupo_maximo, ...resto } = formData;
+            const payload = { ...resto, tenant_id };
+            if (!esOpenBoxForm && cupo_maximo) payload.cupo_maximo = cupo_maximo;
+            await guardar.mutateAsync({ id: editingId, payload });
             setShowForm(false);
         } catch (error) { alert('Error: ' + (error.response?.data?.detail || error.message)); }
     };
@@ -159,7 +172,7 @@ export default function Horarios() {
                                         const available = getAvailableDisciplinas(horaKey, dia);
                                         return (
                                             <div key={`exp-${celKey}`} className="bg-zinc-800/50 border-b border-zinc-800 px-4 py-3">
-                                                <div className="text-sm font-semibold text-zinc-300 mb-2">{DIAS[dia]} · {horaKey} · Cupo: {cell.cupo_maximo}</div>
+                                                <div className="text-sm font-semibold text-zinc-300 mb-2">{DIAS[dia]} · {horaKey} · Cupo: {cell.cupo_maximo === null || cell.cupo_maximo === undefined ? 'sin cupo (acceso libre)' : cell.cupo_maximo}</div>
                                                 <div className="space-y-1 mb-3">
                                                     {cell.disciplinas.map(d => (
                                                         <div key={d.id} className="flex items-center justify-between bg-zinc-900 rounded px-3 py-1.5 border border-zinc-800">
@@ -209,7 +222,15 @@ export default function Horarios() {
                                         <input type="time" value={formData.hora_fin} onChange={e => setFormData({ ...formData, hora_fin: e.target.value })} className="w-full border rounded px-3 py-2" /></div>
                                 </div>
                                 <div><label className="block text-sm font-medium text-zinc-300 mb-1">Cupo Máximo</label>
-                                    <input type="number" value={formData.cupo_maximo} onChange={e => setFormData({ ...formData, cupo_maximo: parseInt(e.target.value) || 20 })} className="w-full border rounded px-3 py-2" /></div>
+                                    <input type="number" value={esOpenBoxForm ? '' : formData.cupo_maximo}
+                                        onChange={e => setFormData({ ...formData, cupo_maximo: parseInt(e.target.value) || 20 })}
+                                        disabled={esOpenBoxForm}
+                                        placeholder={esOpenBoxForm ? 'Sin cupo (acceso libre)' : ''}
+                                        className="w-full border rounded px-3 py-2 disabled:bg-zinc-800 disabled:text-zinc-400" />
+                                    {esOpenBoxForm && (
+                                        <p className="text-xs text-sky-400 mt-1">Acceso libre: esta disciplina no tiene cupo máximo.</p>
+                                    )}
+                                </div>
                                 <div className="flex gap-3 justify-end pt-2">
                                     <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-zinc-400 hover:bg-zinc-800 rounded">Cancelar</button>
                                     <button type="submit" className="px-4 py-2 bg-blue-900 text-white rounded hover:bg-blue-800">{editingId ? 'Guardar' : 'Crear'}</button>

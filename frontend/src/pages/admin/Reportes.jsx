@@ -349,7 +349,11 @@ const Reportes = () => {
                                 <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.asistenciaPromedio || 0}%</p>
                                 <p className="text-xs text-zinc-400 mt-2"
                                     title="Ocupacion: clases.asistentes_confirmados / clases.cupo_maximo (lugares reservados sobre cupo ofrecido). NO mide asistencia real. Puede verse 0% porque las asistencias todavia no estan vinculadas a su clase (asistencias.clase_id es NULL en toda la base).">Ocupación (reservas vs cupo), no asistencia real</p>
-                                <p className="text-[11px] text-zinc-500 mt-2">Clic para ver por disciplina</p>
+                                <p className="text-[11px] text-zinc-500 mt-2">
+                                    {reportData?.reservasSinCupo > 0
+                                        ? `+ ${reportData.reservasSinCupo} reservas en salas sin cupo (Musculación / Open Box)`
+                                        : 'Clic para ver por disciplina'}
+                                </p>
                             </div>
                             <span className="text-4xl">📊</span>
                         </div>
@@ -761,9 +765,18 @@ const Reportes = () => {
                                             <td className="px-6 py-4 text-sm text-zinc-400">{d.alumnos_unicos || 0}</td>
                                             <td className="px-6 py-4 text-sm text-zinc-400">{d.asistentes || 0}</td>
                                             <td className="px-6 py-4 text-sm">
-                                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${d.ocupacion_pct >= 70 ? 'bg-green-100 text-green-800' : d.ocupacion_pct >= 40 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
-                                                    {d.ocupacion_pct}%
-                                                </span>
+                                                {/* Migración 066: sin cupo no hay %; se muestra el
+                                                    conteo de reservas de esa disciplina. */}
+                                                {d.sin_tope || d.ocupacion_pct === null ? (
+                                                    <span className="px-3 py-1 rounded-full text-xs font-medium bg-sky-100 text-sky-800"
+                                                        title="Sala de acceso libre: no tiene cupo, se informa el conteo de reservas">
+                                                        {d.reservas || 0} reservas (sin cupo)
+                                                    </span>
+                                                ) : (
+                                                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${d.ocupacion_pct >= 70 ? 'bg-green-100 text-green-800' : d.ocupacion_pct >= 40 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
+                                                        {d.ocupacion_pct}%
+                                                    </span>
+                                                )}
                                             </td>
                                         </tr>
                                     ))

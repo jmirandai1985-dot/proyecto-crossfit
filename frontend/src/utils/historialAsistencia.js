@@ -146,6 +146,17 @@ export const reservasDe = (clase) => {
     return Array.isArray(clase?.alumnos) ? clase.alumnos.length : 0;
 };
 
+/**
+ * ¿La clase NO tiene tope? (migración 066): `cupo_maximo` NULL = Musculación /
+ * Open Box, salas de acceso libre. No hay denominador, así que la pantalla
+ * muestra el CONTEO DE RESERVAS en vez de un porcentaje.
+ *
+ * Un `undefined` (backend viejo, sin el campo) también se lee como sin tope: el
+ * `cuposDe` de abajo devolvía 0 y el % daba 0 igual, pero ahora al menos se dice
+ * "sin cupo" en vez de fingir un 0 % de ocupación.
+ */
+export const sinTopeDe = (clase) => clase?.cupo_maximo === null || clase?.cupo_maximo === undefined;
+
 /** Cupos de la clase (`cupo_maximo`: el mismo tope que pinta el donut del Resumen). */
 export const cuposDe = (clase) => Math.max(Number(clase?.cupo_maximo) || 0, 0);
 
@@ -175,6 +186,7 @@ export const alumnosDeClase = (clase) => {
 /** Ficha de UNA clase para el detalle diario: horas, contadores y las dos listas de alumnos. */
 export const fichaClase = (clase) => {
     const { presentes, ausentes } = alumnosDeClase(clase);
+    const sinTope = sinTopeDe(clase);
     return {
         clase,
         id: clase?.id,
@@ -183,12 +195,15 @@ export const fichaClase = (clase) => {
         disciplina: clase?.disciplina_nombre || 'Clase',
         coach: clase?.coach || 'Sin coach asignado',
         estado: clase?.estado || '',
-        cupos: cuposDe(clase),
+        // Sin tope (Musculación / Open Box): no hay cupos ni "% del cupo"; la
+        // pantalla pinta "acceso libre" y el conteo de reservas.
+        sinTope,
+        cupos: sinTope ? null : cuposDe(clase),
         reservas: reservasDe(clase),
         presentes: presentesDe(clase),
         ausentes: ausentesDe(clase),
-        libres: libresDe(clase),
-        pct: porcentaje(presentesDe(clase), cuposDe(clase)),
+        libres: sinTope ? null : libresDe(clase),
+        pct: sinTope ? null : porcentaje(presentesDe(clase), cuposDe(clase)),
         marcada: Boolean(clase?.marcada),
         alumnosPresentes: presentes,
         alumnosAusentes: ausentes,
@@ -210,23 +225,48 @@ export const filtrarPorHorario = (clases, horario) => (
         : (clases || [])
 );
 
-/** Totales de un conjunto de clases (un día, un día de la semana o el mes entero). */
+/**
+ * Totales de un conjunto de clases (un día, un día de la semana o el mes entero).
+ *
+ * ── Migración 066: dos universos, un solo objeto ────────────────────────────
+ * Las clases SIN tope (Musculación / Open Box, `cupo_maximo = NULL`) no tienen
+ * denominador: sumarlas al `cupos` volvería a inflar el "X de Y cupos" (era el
+ * 84 % del denominador y el KPI daba 2,4 %). Por eso:
+ *   · `cupos`, `presentesConTope` y `pct` salen SÓLO de las clases con cupo;
+ *   · `reservasSinTope` / `clasesSinTope` informan el uso de las salas libres
+ *     como CONTEO (nunca como ratio);
+ *   · `pct` es `null` cuando NINGUNA clase del conjunto tiene tope: no hay
+ *     porcentaje honesto que mostrar y la pantalla dice "sin cupo".
+ * `presentes`, `reservas`, `ausentes` y `clases` siguen siendo los totales de
+ * TODAS las clases (es la gente real que vino / reservó).
+ */
 export const totalesDe = (clases) => {
     const lista = clases || [];
+    const conTope = lista.filter((c) => !sinTopeDe(c));
+    const sinTope = lista.filter(sinTopeDe);
     const presentes = lista.reduce((a, c) => a + presentesDe(c), 0);
     const ausentes = lista.reduce((a, c) => a + ausentesDe(c), 0);
     const reservas = lista.reduce((a, c) => a + reservasDe(c), 0);
-    const cupos = lista.reduce((a, c) => a + cuposDe(c), 0);
+    const cupos = conTope.reduce((a, c) => a + cuposDe(c), 0);
+    const presentesConTope = conTope.reduce((a, c) => a + presentesDe(c), 0);
+    const reservasSinTope = sinTope.reduce((a, c) => a + reservasDe(c), 0);
     return {
         clases: lista.length,
         presentes,
         ausentes,
         reservas,
         cupos,
-        libres: Math.max(cupos - reservas, 0),
-        // El porcentaje de asistencia es contra los CUPOS: el mismo denominador del anillo del
-        // Resumen del coach (`presentes / cupo`), así las dos pantallas dicen lo mismo.
-        pct: porcentaje(presentes, cupos),
+        // Conteo aparte de las salas de acceso libre (migración 066).
+        clasesSinTope: sinTope.length,
+        reservasSinTope,
+        presentesConTope,
+        // `null` = hay clases pero NINGUNA tiene cupo -> no hay % que calcular.
+        // Un conjunto VACÍO sigue dando 0 (no hay nada que medir, y así lo
+        // esperan las pantallas y `scripts/test-historial-asistencia.mjs`).
+        pct: lista.length === 0
+            ? 0
+            : (conTope.length === 0 ? null : porcentaje(presentesConTope, cupos)),
+        libres: Math.max(cupos - (reservas - reservasSinTope), 0),
         // Clases con la asistencia ya cerrada (todas sus reservas vigentes marcadas).
         cerradas: lista.filter((c) => c?.marcada).length,
     };

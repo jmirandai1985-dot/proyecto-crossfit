@@ -110,6 +110,8 @@ const Clases = () => {
     };
 
     const getOccupancyColor = (inscritos, cupo) => {
+        // Migración 066: sin cupo (Musculación / Open Box) no hay %: celeste.
+        if (cupo === null || cupo === undefined) return 'bg-sky-100 text-sky-800';
         const pct = ((inscritos || 0) / (cupo || 1)) * 100;
         if (pct >= 90) return 'bg-red-100 text-red-800';
         if (pct >= 70) return 'bg-yellow-100 text-yellow-800';
@@ -248,7 +250,7 @@ const Clases = () => {
                                                                                                     <div className="flex items-center gap-3">
                                                                                                         <span className="font-bold text-blue-900 text-sm">{c.hora_inicio?.slice(0, 5)} - {c.hora_fin?.slice(0, 5)}</span>
                                                                                                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getOccupancyColor(c.asistentes_confirmados, c.cupo_maximo)}`}>
-                                                                                                            {c.asistentes_confirmados || 0}/{c.cupo_maximo || '?'}
+                                                                                                            {c.asistentes_confirmados || 0}{c.cupo_maximo === null || c.cupo_maximo === undefined ? ' (libre)' : `/${c.cupo_maximo}`}
                                                                                                         </span>
                                                                                                     </div>
                                                                                                     <div className="text-xs text-zinc-400 mt-1">{c.fecha || '—'}</div>

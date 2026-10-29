@@ -545,30 +545,37 @@ const AlumnoDashboard = () => {
                                         </thead>
                                         <tbody className="divide-y divide-gray-100">
                                             {clasesFiltradas.map((clase) => {
-                                                const cuposLibres = (clase.cupo_maximo || 0) - (clase.asistentes_confirmados || 0);
+                                                // Migración 066: cupo NULL = sin tope (Musculación /
+                                                // Open Box). No hay "X/Y libres" ni botón deshabilitado:
+                                                // la sala es de acceso libre y siempre se puede reservar.
+                                                const sinTope = clase.cupo_maximo === null || clase.cupo_maximo === undefined;
+                                                const cuposLibres = sinTope
+                                                    ? Infinity
+                                                    : (clase.cupo_maximo || 0) - (clase.asistentes_confirmados || 0);
+                                                const libre = cuposLibres > 0;
                                                 return (
                                                     <tr key={clase.id} className="hover:bg-gray-50 transition-colors">
                                                         <td className="px-5 py-2.5 text-sm font-medium text-gray-900">{clase.disciplina_nombre || 'Clase'}</td>
                                                         <td className="px-5 py-2.5 text-sm text-gray-600">🕐 {clase.hora_inicio} - {clase.hora_fin}</td>
                                                         <td className="px-5 py-2.5 text-sm text-gray-600">👨‍🏫 {clase.coach_nombre || '—'}</td>
                                                         <td className="px-5 py-2.5">
-                                                            <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-sm font-bold ${cuposLibres > 0
+                                                            <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-sm font-bold ${libre
                                                                 ? 'bg-green-100 text-green-700'
                                                                 : 'bg-red-100 text-red-700'
                                                                 }`}>
-                                                                {cuposLibres > 0 ? `${cuposLibres}/${clase.cupo_maximo} libres` : 'Completo'}
+                                                                {sinTope ? 'Acceso libre' : (libre ? `${cuposLibres}/${clase.cupo_maximo} libres` : 'Completo')}
                                                             </span>
                                                         </td>
                                                         <td className="px-5 py-2.5 text-right">
                                                             <button
                                                                 onClick={() => handleAbrirReserva(clase)}
-                                                                disabled={cuposLibres === 0}
-                                                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${cuposLibres > 0
+                                                                disabled={!libre}
+                                                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${libre
                                                                     ? 'bg-emerald-500 text-white hover:bg-emerald-600'
                                                                     : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                                                                     }`}
                                                             >
-                                                                {cuposLibres > 0 ? 'Reservar' : 'Lleno'}
+                                                                {libre ? 'Reservar' : 'Lleno'}
                                                             </button>
                                                         </td>
                                                     </tr>
@@ -708,6 +715,8 @@ const AlumnoDashboard = () => {
                 // "Cupos disponibles", incluso con la clase llena).
                 const cupoMax = Number(claseSeleccionada.cupo_maximo || 0);
                 const asistentes = Number(claseSeleccionada.asistentes_confirmados || 0);
+                // Migración 066: sin tope no hay "N/M cupos": se informa el acceso libre.
+                const sinTopeModal = claseSeleccionada.cupo_maximo === null || claseSeleccionada.cupo_maximo === undefined;
                 const cuposModal = Math.max(0, cupoMax - asistentes);
                 const tieneDuplicado = disciplina && fechaClase && misReservas.some(r =>
                     r.disciplina_nombre === disciplina &&
@@ -740,10 +749,12 @@ const AlumnoDashboard = () => {
                                         <p className="text-gray-600">🕐 {claseSeleccionada.hora_inicio} - {claseSeleccionada.hora_fin}</p>
                                         <p className="text-gray-600">👨‍🏫 {claseSeleccionada.coach_nombre || '—'}</p>
                                         <p className="text-gray-600">📅 {fechaClase}</p>
-                                        <p className={cuposModal > 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
-                                            {cuposModal > 0
-                                                ? `✅ ${cuposModal}/${cupoMax} cupos disponibles`
-                                                : `⛔ Sin cupos (${asistentes}/${cupoMax})`}
+                                        <p className={sinTopeModal || cuposModal > 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                                            {sinTopeModal
+                                                ? `✅ Acceso libre (${asistentes} reservas)`
+                                                : (cuposModal > 0
+                                                    ? `✅ ${cuposModal}/${cupoMax} cupos disponibles`
+                                                    : `⛔ Sin cupos (${asistentes}/${cupoMax})`)}
                                         </p>
                                     </div>
                                 </div>

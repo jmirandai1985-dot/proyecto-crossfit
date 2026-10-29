@@ -130,10 +130,30 @@ const ListaAlumnos = ({ items = [], tono = 'ok', vacio = 'Sin alumnos', extra = 
 /** Tinte de la celda del calendario según el % de asistencia del día. */
 const tinteDia = (totales) => {
     if (totales.clases === 0) return 'bg-transparent';
+    // Sin cupo (Musculación / Open Box, migración 066): no hay % que colorear.
+    if (totales.pct === null) return 'bg-sky-500/10';
     if (totales.pct >= 80) return 'bg-emerald-500/15';
     if (totales.pct >= 60) return 'bg-[#D7FF4A]/15';
     if (totales.pct > 0) return 'bg-amber-500/15';
     return 'bg-zinc-800/50';
+};
+
+/**
+ * El % de un conjunto de totales, o "sin cupo" cuando NINGUNA de sus clases tiene
+ * tope (migración 066). No se inventa un 0 %: no hay denominador.
+ */
+const textoPct = (totales) => (totales?.pct === null ? 'sin cupo' : `${totales?.pct}%`);
+
+/**
+ * Texto corto de los cupos de un conjunto: con tope, "presentes de cupos"; con
+ * clases de acceso libre, sus reservas como conteo aparte.
+ */
+const textoCupos = (totales) => {
+    if (totales.pct === null) return `${totales.reservasSinTope} reservas (sin cupo)`;
+    const base = `${totales.presentesConTope} de ${totales.cupos} cupos`;
+    return totales.reservasSinTope > 0
+        ? `${base} + ${totales.reservasSinTope} sin cupo`
+        : base;
 };
 
 const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
@@ -290,8 +310,17 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                                 {nombreMes(mes)} {anio}
                             </p>
                             <p className="mt-1 text-[11.5px] text-zinc-500">
-                                {totalMes.cupos} cupos en clases ya ocurridas · {totalMes.cerradas} clase
-                                {totalMes.cerradas === 1 ? '' : 's'} con la asistencia cerrada
+                                {totalMes.cupos} cupos ofrecidos en{' '}
+                                {totalMes.clases - totalMes.clasesSinTope} clase
+                                {totalMes.clases - totalMes.clasesSinTope === 1 ? '' : 's'} con cupo
+                                {totalMes.clasesSinTope > 0 && (
+                                    <>
+                                        {' · '}{totalMes.reservasSinTope} reservas en{' '}
+                                        {totalMes.clasesSinTope} clase
+                                        {totalMes.clasesSinTope === 1 ? '' : 's'} de acceso libre (sin cupo)
+                                    </>
+                                )}
+                                {' · '}{totalMes.cerradas} con la asistencia cerrada
                             </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-6">
@@ -300,7 +329,11 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                                 color="text-[#D7FF4A]" />
                             <Contador valor={totalMes.ausentes} label="no shows"
                                 color="text-amber-200" />
-                            <Contador valor={`${totalMes.pct}%`} label="asistencia" />
+                            <Contador valor={`${textoPct(totalMes)}`} label="asistencia (con cupo)" />
+                            {totalMes.reservasSinTope > 0 && (
+                                <Contador valor={totalMes.reservasSinTope} label="reservas sin cupo"
+                                    color="text-sky-300" />
+                            )}
                         </div>
                     </div>
 
@@ -335,16 +368,23 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                                     <button key={d.clave} type="button"
                                         onClick={() => setDiaSemana(activo ? null : d.indice)}
                                         aria-pressed={activo}
-                                        title={`${d.largo}: ${d.totales.clases} clase(s) ya ocurridas`}
+                                        title={`${d.largo}: ${textoCupos(d.totales)} en ${d.totales.clases} clase(s) ya ocurridas del mes`}
                                         data-testid={`historial-anillo-${d.clave}`}
                                         className={`flex flex-col items-center gap-1.5 rounded-[14px] border px-1 py-2.5 transition-colors ${
                                             activo
                                                 ? 'border-[#D7FF4A] bg-[#1F2412]'
                                                 : 'border-[#2A2A2E] bg-[#121214] hover:border-zinc-600'
                                         }`}>
-                                        <Anillo pct={d.pct} tamano={78} grosor={9}>
-                                            <span className={`text-[15px] font-black ${vacio ? 'text-zinc-600' : COLOR_PCT(d.pct)}`}>
-                                                {vacio ? '—' : `${d.pct}%`}
+                                        {/* Sin cupo (migración 066): el anillo queda vacío y el
+                                            centro muestra el CONTEO de reservas, no un %. */}
+                                        <Anillo pct={d.pct ?? 0} tamano={78} grosor={9}>
+                                            <span className={`text-[15px] font-black ${
+                                                vacio ? 'text-zinc-600'
+                                                    : d.pct === null ? 'text-sky-300'
+                                                        : COLOR_PCT(d.pct)}`}>
+                                                {vacio ? '—' : d.pct === null
+                                                    ? d.totales.reservasSinTope
+                                                    : `${d.pct}%`}
                                             </span>
                                         </Anillo>
                                         <span className="text-[12px] font-extrabold uppercase tracking-wide text-zinc-300">
@@ -353,7 +393,16 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                                         <span className="text-[10.5px] text-zinc-500">
                                             {vacio
                                                 ? 'sin clases'
-                                                : `${d.totales.presentes}/${d.totales.cupos} cupos`}
+                                                // El denominador son los cupos de las clases CON TOPE ya
+                                                // ocurridas de ESE día de la semana EN EL MES (5 jueves ×
+                                                // ~24 clases). Las salas de acceso libre no suman cupos:
+                                                // sus reservas van aparte, como conteo.
+                                                : d.pct === null
+                                                    ? `${d.totales.reservasSinTope} reservas (sin cupo)`
+                                                    : `${d.totales.presentesConTope} de ${d.totales.cupos} cupos (mes)${
+                                                        d.totales.reservasSinTope > 0
+                                                            ? ` + ${d.totales.reservasSinTope} sin cupo`
+                                                            : ''}`}
                                         </span>
                                     </button>
                                 );
@@ -371,7 +420,10 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                                     <p className="text-[11.5px] text-zinc-500">
                                         {anilloAbierto.totales.presentes} vinieron ·{' '}
                                         {anilloAbierto.totales.ausentes} no vinieron ·{' '}
-                                        {anilloAbierto.pct}% del cupo
+                                        {textoPct(anilloAbierto.totales)} del cupo
+                                        {anilloAbierto.totales.reservasSinTope > 0 && (
+                                            <> · {anilloAbierto.totales.reservasSinTope} reservas sin cupo</>
+                                        )}
                                     </p>
                                 </div>
                                 <div className="mt-3 grid gap-3 lg:grid-cols-2">
@@ -421,7 +473,7 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                                                 onClick={() => setFecha(elegido ? null : celda.fecha)}
                                                 aria-pressed={elegido}
                                                 title={conClases
-                                                    ? `${celda.fecha} · ${celda.totales.presentes}/${celda.totales.cupos} · ${celda.totales.pct}%`
+                                                    ? `${celda.fecha} · ${textoCupos(celda.totales)} · ${textoPct(celda.totales)}`
                                                     : `${celda.fecha} · sin clases`}
                                                 data-testid={`historial-dia-${celda.fecha}`}
                                                 className={`flex min-h-[62px] flex-col items-start gap-0.5 rounded-[12px] border p-1.5 text-left transition-colors ${
@@ -440,11 +492,19 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                                                 </span>
                                                 {conClases ? (
                                                     <>
-                                                        <span className={`text-[12.5px] font-black ${COLOR_PCT(celda.totales.pct)}`}>
-                                                            {celda.totales.pct}%
+                                                        {/* Sin cupo: el número grande son las reservas (no un %). */}
+                                                        <span className={`text-[12.5px] font-black ${
+                                                            celda.totales.pct === null
+                                                                ? 'text-sky-300'
+                                                                : COLOR_PCT(celda.totales.pct)}`}>
+                                                            {celda.totales.pct === null
+                                                                ? celda.totales.reservasSinTope
+                                                                : `${celda.totales.pct}%`}
                                                         </span>
                                                         <span className="text-[10px] text-zinc-500">
-                                                            {celda.totales.presentes}/{celda.totales.cupos}
+                                                            {celda.totales.pct === null
+                                                                ? 'reservas'
+                                                                : `${celda.totales.presentesConTope}/${celda.totales.cupos}`}
                                                         </span>
                                                     </>
                                                 ) : (
@@ -535,8 +595,12 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                                                 <Contador valor={f.ausentes} label="no shows"
                                                     color="text-amber-200" />
                                                 <Contador valor={f.reservas} label="reservas" />
-                                                <Contador valor={f.cupos} label="cupos" />
-                                                <Contador valor={`${f.pct}%`} label="del cupo" />
+                                                {/* Migración 066: una sala de acceso libre no tiene
+                                                    cupos ni "% del cupo"; se dice tal cual. */}
+                                                <Contador valor={f.sinTope ? '—' : f.cupos}
+                                                    label={f.sinTope ? 'sin cupo' : 'cupos'} />
+                                                <Contador valor={f.pct === null ? '—' : `${f.pct}%`}
+                                                    label={f.sinTope ? 'acceso libre' : 'del cupo'} />
                                             </div>
                                             <div className="mt-3 grid gap-3 lg:grid-cols-2">
                                                 <ListaAlumnos tono="ok" items={f.alumnosPresentes}

@@ -14,7 +14,10 @@ class ClaseBase(BaseModel):
     fecha: date = Field(..., description="Fecha de la clase")
     hora_inicio: time = Field(..., description="Hora de inicio")
     hora_fin: time = Field(..., description="Hora de fin")
-    cupo_maximo: int = Field(20, gt=0, description="Cupo máximo")
+    # NULL = sin tope (Musculación / Open Box, migración 066). Con cupo real es
+    # un entero > 0: el `gt=0` sigue aplicando al número, no al NULL.
+    cupo_maximo: Optional[int] = Field(
+        20, gt=0, description="Cupo máximo (None = sin tope / acceso libre)")
     asistentes_confirmados: int = Field(
         0, ge=0, description="Asistentes confirmados")
     cancelada: bool = Field(
@@ -59,7 +62,9 @@ class ClaseListItem(BaseModel):
     # para mostrar el nombre real en vez de "WOD #<id>". Sin declararlo acá, el
     # response_model lo descarta (mismo caso que cupo_original).
     wod_titulo: Optional[str] = None
-    cupo_maximo: int
+    # NULL = sin tope (Musculación / Open Box): el front muestra "acceso libre"
+    # y el KPI de ocupación cuenta reservas en vez de un porcentaje.
+    cupo_maximo: Optional[int] = None
     cupo_original: Optional[int] = None
     asistentes_confirmados: int
     cancelada: bool

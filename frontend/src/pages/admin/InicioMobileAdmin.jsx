@@ -1051,11 +1051,11 @@ const InicioMobileAdmin = () => {
                                 <button key={d.fechaStr} type="button"
                                     className={`day${elegido ? ' sel' : ''}${d.fechaStr === hoy ? ' today' : ''}`}
                                     aria-pressed={elegido}
-                                    aria-label={`${d.nombre} ${d.diaNum}: ${r.clases} ${r.clases === 1 ? 'clase' : 'clases'}, ${r.reservas} reservas, ${r.ocupacion}% de ocupación`}
+                                    aria-label={`${d.nombre} ${d.diaNum}: ${r.clases} ${r.clases === 1 ? 'clase' : 'clases'}, ${r.reservas} reservas, ${r.ocupacion === null ? 'acceso libre sin cupo' : `${r.ocupacion}% de ocupación`}`}
                                     onClick={() => setDiaPedido(d.fechaStr === hoy ? null : d.fechaStr)}>
                                     <span className="dw">{d.letra}<b>{d.diaNum}</b></span>
                                     <b className="dc num">{r.reservas}</b>
-                                    <span className="dp">{r.ocupacion}%</span>
+                                    <span className="dp">{r.ocupacion === null ? 'libre' : `${r.ocupacion}%`}</span>
                                 </button>
                             );
                         })}
@@ -1113,7 +1113,7 @@ const InicioMobileAdmin = () => {
                                 ? ` · ${dosDigitos(resumen.desde)}:00 a ${dosDigitos(Math.min(resumen.hasta + 1, 24))}:00`
                                 : ''}
                         </span>
-                        <span>Ocupación {resumen.ocupacion}%</span>
+                        <span>Ocupación {resumen.ocupacion === null ? 'libre (sin cupo)' : `${resumen.ocupacion}%`}</span>
                     </div>
 
                     {errorLista ? (
@@ -1149,11 +1149,13 @@ const InicioMobileAdmin = () => {
                                             </span>
                                         </div>
                                         <div className="sub">
-                                            {reservasDe(c)} de {c.cupo_maximo} cupos · {oc.pct}%
+                                            {oc.sinTope
+                                                ? `${reservasDe(c)} reservas · acceso libre`
+                                                : `${reservasDe(c)} de ${c.cupo_maximo} cupos · ${oc.pct}%`}
                                         </div>
                                         <div className="bar">
                                             <i className={oc.nivel}
-                                                style={{ width: `${Math.min(oc.pct, 100)}%` }} />
+                                                style={{ width: `${oc.sinTope ? 0 : Math.min(oc.pct, 100)}%` }} />
                                         </div>
                                     </div>
                                     {/* "Marcar" sólo HOY: en los otros días no hay asistencia

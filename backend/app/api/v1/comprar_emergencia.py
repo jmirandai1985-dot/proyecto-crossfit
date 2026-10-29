@@ -17,6 +17,8 @@ from app.utils.santiago import ahora_santiago, fecha_chile, fin_de_plan_chile
 # Los créditos que se guardan salen de UNA regla compartida: un plan ilimitado queda sin créditos
 # (`NULL` = "∞" en el front), un plan con cupo guarda sus clases MÁS lo que le sobraba al alumno.
 from app.utils.planes import creditos_de_emergencia
+# Auditoría 1.1: un choque de UNIQUE/FK/CHECK es un 400/409 del cliente, no un 500.
+from app.utils.db_commit import commit_o_4xx
 
 router = APIRouter()
 
@@ -66,12 +68,18 @@ def comprar_emergencia(
     # Vigencia por DÍA CHILENO (`vigente_hoy`): el plan vale hasta las 23:59:59 del último día,
     # así que el 30/09 un plan de septiembre sigue sirviendo para la compra de emergencia
     # (antes, `fecha_expiracion > datetime.now(timezone.utc)` lo cortaba a las 20:59 CLT).
+    # ── ACID (fix 2026-10-29): `with_for_update()` serializa dos compras simultáneas ──
+    # Es una COMPRA: doble clic / dos pestañas mandaban dos requests a la vez, los dos
+    # leían `fecha_compra_emergencia IS NULL` y los dos "compraban" (dos extensiones de
+    # la misma membresía y dos usos del cupo anual, que es 1 por año). Con el lock, el
+    # segundo espera, re-lee la fila ya actualizada y cae en el 400 de "ya usaste tu
+    # compra de emergencia". Mismo patrón que `POST /suscripciones` (lock del alumno).
     suscripcion = db.query(Suscripcion).filter(
         Suscripcion.tenant_id == data.tenant_id,
         Suscripcion.usuario_id == data.alumno_id,
         Suscripcion.estado == 'activo',
         vigente_hoy(Suscripcion.fecha_expiracion)
-    ).order_by(Suscripcion.fecha_expiracion.desc()).first()
+    ).order_by(Suscripcion.fecha_expiracion.desc()).with_for_update().first()
 
     if not suscripcion:
         raise HTTPException(
@@ -122,7 +130,11 @@ def comprar_emergencia(
     suscripcion.creditos_totales = creditos
     suscripcion.creditos_disponibles = creditos
 
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo registrar la compra de emergencia. Intenta de nuevo.",
+        contexto="comprar_emergencia",
+    )
 
     # ── La compra de emergencia cambió créditos/vencimiento -> recalc del churn (segundo plano). ──
     churn_service.programar_recalculo(background_tasks, current_user["tenant_id"], data.alumno_id)

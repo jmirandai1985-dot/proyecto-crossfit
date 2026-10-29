@@ -41,15 +41,18 @@ const ESTADO_CLASE_LABEL = {
 };
 
 const visualClaseHoy = (c) => {
-    const pct = c.cupo_maximo ? Math.round((c.reservas_count || 0) / c.cupo_maximo * 100) : 0;
-    const color = pct >= 100 ? 'red' : pct >= 80 ? 'amber' : 'green';
+    // Migración 066: `cupo_maximo` NULL = sin tope (Musculación / Open Box).
+    // No hay % de ocupación: la fila muestra el conteo de reservas y "libre".
+    const sinTope = c.cupo_maximo === null || c.cupo_maximo === undefined;
+    const pct = sinTope ? null : Math.round((c.reservas_count || 0) / c.cupo_maximo * 100);
+    const color = sinTope ? 'sky' : pct >= 100 ? 'red' : pct >= 80 ? 'amber' : 'green';
     const ampliado = (c.cupo_original && c.cupo_maximo > c.cupo_original)
         ? c.cupo_maximo - c.cupo_original : 0;
     const badge = c.estado === 'realizada' ? 'bg-green-100 text-green-800'
         : c.estado === 'en_curso' ? 'bg-blue-100 text-blue-800'
             : c.estado === 'cancelada' ? 'bg-red-100 text-red-800'
                 : 'bg-zinc-700 text-zinc-300';
-    return { pct, color, ampliado, estado: ESTADO_CLASE_LABEL[c.estado] || '', badge };
+    return { pct, color, ampliado, estado: ESTADO_CLASE_LABEL[c.estado] || '', badge, sinTope };
 };
 
 const AdminDashboard = () => {
@@ -372,7 +375,12 @@ const AdminDashboard = () => {
     const clasesHoyTotal = clasesHoy.length;
     const reservasHoy = clasesHoy.reduce((a, c) => a + (c.reservas_count || 0), 0);
     const cuposHoy = clasesHoy.reduce((a, c) => a + (c.cupo_maximo || 0), 0);
-    const ocupacionHoyPct = cuposHoy > 0 ? Math.round(reservasHoy / cuposHoy * 100) : 0;
+    // Migración 066: el cociente es sólo de las clases CON tope; las reservas de
+    // las salas libres (Musculación / Open Box) no tienen denominador.
+    const reservasHoyConTope = clasesHoy
+        .filter(c => c.cupo_maximo !== null && c.cupo_maximo !== undefined)
+        .reduce((a, c) => a + (c.reservas_count || 0), 0);
+    const ocupacionHoyPct = cuposHoy > 0 ? Math.round(reservasHoyConTope / cuposHoy * 100) : 0;
 
     if (loading) {
         return (
@@ -514,16 +522,18 @@ const AdminDashboard = () => {
                                                 </div>
                                             </div>
                                             <div className="flex-1 bg-zinc-800 rounded-full h-4 overflow-hidden min-w-[40px]">
-                                                <div className={`h-full rounded-full transition-all ${v.color === 'red' ? 'bg-red-500' : v.color === 'amber' ? 'bg-amber-500' : 'bg-green-500'}`}
-                                                    style={{ width: `${Math.min(v.pct, 100)}%` }} />
+                                                <div className={`h-full rounded-full transition-all ${v.color === 'red' ? 'bg-red-500' : v.color === 'amber' ? 'bg-amber-500' : v.color === 'sky' ? 'bg-sky-500' : 'bg-green-500'}`}
+                                                    style={{ width: `${Math.min(v.pct ?? 0, 100)}%` }} />
                                             </div>
                                             <div className="text-sm text-zinc-400 w-28 shrink-0 text-right">
-                                                {c.reservas_count || 0}/{c.cupo_maximo || 0}
+                                                {c.reservas_count || 0}{v.sinTope ? ' (libre)' : `/${c.cupo_maximo || 0}`}
                                                 {v.ampliado > 0 && (
                                                     <span className="text-amber-400" title={`Cupo ampliado +${v.ampliado} sobre el original de ${c.cupo_original}`}> (+{v.ampliado})</span>
                                                 )}
                                             </div>
-                                            <div className="text-sm font-semibold text-zinc-300 w-12 shrink-0 text-right">{v.pct}%</div>
+                                            <div className="text-sm font-semibold text-zinc-300 w-12 shrink-0 text-right">
+                                                {v.pct === null ? 'libre' : `${v.pct}%`}
+                                            </div>
                                             <span className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0 w-24 text-center ${v.badge}`}>
                                                 {v.estado}
                                             </span>
@@ -1053,7 +1063,10 @@ const AdminDashboard = () => {
                                 </h3>
                                 <p className="text-xs text-zinc-500 mt-0.5">
                                     {claseDetalle.coach ? `👤 ${claseDetalle.coach}` : '⚠️ Sin coach asignado'}
-                                    {' '}· {claseDetalle.reservas_count || 0}/{claseDetalle.cupo_maximo || 0} reservas
+                                    {' '}· {claseDetalle.reservas_count || 0}
+                                    {claseDetalle.cupo_maximo === null || claseDetalle.cupo_maximo === undefined
+                                        ? ' reservas (acceso libre)'
+                                        : `/${claseDetalle.cupo_maximo} reservas`}
                                 </p>
                             </div>
                             <button onClick={() => setClaseDetalle(null)}

@@ -25,7 +25,7 @@ Seguridad: tenant_id SIEMPRE del token JWT (patrón del resto de la API).
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
-from sqlalchemy import func, update
+from sqlalchemy import func, or_, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
@@ -678,11 +678,16 @@ def registrar_presente_sin_reserva(
 
     # Aforo ATÓMICO (mismo patrón que POST /reservas): si la clase se llenó entre la
     # lectura y este UPDATE, rowcount=0 -> 400 y NO se escribe la presencia.
+    # Migración 066: `cupo_maximo IS NULL` = sin tope (Musculación / Open Box); el
+    # `OR` deja entrar siempre y el contador igual sube.
     try:
         resultado = db.execute(
             update(Clase)
             .where(Clase.id == clase.id)
-            .where(Clase.asistentes_confirmados < Clase.cupo_maximo)
+            .where(or_(
+                Clase.cupo_maximo.is_(None),
+                Clase.asistentes_confirmados < Clase.cupo_maximo,
+            ))
             .values(asistentes_confirmados=Clase.asistentes_confirmados + 1)
         )
     except DBAPIError:
