@@ -317,7 +317,12 @@ def test_anonimizar_baja_de_18_meses(url, cfg, limpiar):
     assert correo == f"anonimo+{id_usuario}@anonimizado.invalid"
     assert telefono == ""
     assert rut_nuevo == esperado and re.fullmatch(r"ANON[0-9a-z]{8}", rut_nuevo)
-    assert rut_nuevo != rut and not any(d in rut_nuevo for d in rut if d.isdigit())
+    # El sufijo es un hash: puede repetir un dígito del RUT original por azar
+    # (~20 % de las corridas con un RUT como `99.999.99x-9`), así que se compara
+    # contra el RUT completo. Exigir "ningún dígito suelto del original" convertía
+    # este test en intermitente.
+    assert rut_nuevo != rut and rut not in rut_nuevo
+    assert not re.fullmatch(r"\d{1,2}\.?\d{3}\.?\d{3}-[\dkK]", rut_nuevo)
     assert sellado == "true"
 
 
