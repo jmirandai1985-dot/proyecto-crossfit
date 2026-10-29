@@ -7,6 +7,11 @@ BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BACKEND_DIR)
 os.chdir(BACKEND_DIR)
 
+# Auditoría 4.1: la clave de demostración NO se versiona. Se toma de
+# `TEST_SEED_PASSWORD` (backend/.env.test) y, si falta, se usa un texto
+# evidentemente de ejemplo: este email no crea ninguna cuenta.
+PASSWORD_DEMO = os.environ.get("TEST_SEED_PASSWORD") or "<clave-de-ejemplo>"
+
 from app.services.email_service import (
     send_solicitud_prueba_clase,
     send_bienvenida_activacion,
@@ -45,7 +50,7 @@ try:
     ok = send_bienvenida_activacion(
         nombre="Jesús Miranda",
         correo=CORREO,
-        password="FinalPass123!",
+        password=PASSWORD_DEMO,
         plan_nombre="Plan CrossFit Pro",
         cantidad_clases=16,
         fecha_vigencia="11 de septiembre de 2026",

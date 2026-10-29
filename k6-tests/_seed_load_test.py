@@ -57,7 +57,13 @@ from app.services.referidos_service import asignar_codigo_referido  # noqa: E402
 
 PREFIJO_CORREO = "carga_k6_"
 PRODUCTO_NOMBRE = "CARGA_K6 Bazar"
-PASSWORD = "Test1234!"  # la usan test_500_logins.js y scenario_e_mix.js
+PASSWORD = settings.TEST_SEED_PASSWORD  # la usan test_500_logins.js y scenario_e_mix.js
+if not PASSWORD:
+    # Auditoría 4.1: la clave ya no se versiona; se lee de backend/.env.test.
+    sys.exit(
+        "FATAL: define TEST_SEED_PASSWORD (backend/.env.test o variable de entorno) "
+        "antes de sembrar los usuarios de carga."
+    )
 SANTIAGO = ZoneInfo("America/Santiago")
 
 N_VOL = 20                 # alumnos con historial de RM (grupo 'vol' de F1)

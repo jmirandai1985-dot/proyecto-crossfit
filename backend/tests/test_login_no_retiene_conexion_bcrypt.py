@@ -41,7 +41,7 @@ from app.db.database import SessionLocal, engine  # noqa: E402
 from app.models.usuario import RolUsuario, Usuario  # noqa: E402
 from app.schemas.auth import LoginRequest  # noqa: E402
 
-PASSWORD = "Test1234!"
+PASSWORD = f"Pool-{uuid.uuid4().hex[:12]}!"  # aleatoria: el usuario lo crea este mismo test
 CORREO = f"bcrypt-pool-{uuid.uuid4().hex[:10]}@load.test"
 
 

@@ -6,20 +6,24 @@ Usa un alumno DEDICADO (id=8888) creado ad-hoc, que se limpia al final.
 """
 import requests
 import psycopg2
+import uuid
 from datetime import date, timedelta
 
-from tests.conftest import BASE, TENANT_ID, get_admin_token, get_coach_token
+from tests.conftest import (ADMIN_ID, BASE, COACH_ID, TENANT_ID, get_admin_token,
+                            get_coach_token)
 
 # ── Datos del alumno dedicado para este test ──
 E2E_ALUMNO_ID = 8888
 E2E_CORREO = "e2e.test@example.com"
-E2E_PASSWORD = "TestPass123!"
+# Auditoría 4.1: sin clave literal en el repo. El alumno lo crea el paso 1 de este
+# mismo test, así que una clave aleatoria por corrida alcanza (y no se reusa nunca).
+E2E_PASSWORD = f"E2e-{uuid.uuid4().hex[:12]}!"
 E2E_RUT = "88.888.888-8"
 E2E_NOMBRE = "Alumno E2E Test"
 
-# Admin y coach de prueba (existentes en test DB)
-ADMIN_ID = 1001
-COACH_ID = 1000
+# Admin y coach de prueba: RESUELTOS por `conftest` contra la branch (antes
+# 1001/1000 fijos, que en una TEST sin seed daban 404 "Usuario no encontrado").
+# `ADMIN_ID` y `COACH_ID` vienen importados de `tests.conftest`.
 
 # Estado compartido entre pasos
 
@@ -50,30 +54,38 @@ def get_db_conn():
 
 
 def limpiar_alumno_e2e():
-    """Elimina todos los datos creados por el test E2E."""
+    """Elimina todos los datos creados por el test E2E.
+
+    ── FIX (auditoría de tests 2026-10-29) ────────────────────────────────────
+    Antes borraba por `id = E2E_ALUMNO_ID (8888)`, pero el alumno lo crea el
+    ADMIN vía API y recibe un id AUTOINCREMENTAL: el filtro nunca coincidía y la
+    corrida anterior dejaba el RUT 88.888.888-8 tomado. El e2e_01 moría con
+    "Ya existe un usuario con el RUT ... en este box" y los 7 pasos siguientes
+    caían en cascada (`assert None is not None`).
+    Ahora se resuelven los ids por CORREO o RUT (las claves reales del alumno de
+    prueba) y se borran los hijos de esos ids. Sigue siendo idempotente.
+    """
     conn = get_db_conn()
     cur = conn.cursor()
     try:
-        # Orden inverso de creación
-        cur.execute("DELETE FROM historial_rm WHERE alumno_id = %s",
-                    (E2E_ALUMNO_ID,))
-        cur.execute("""
-            DELETE FROM reservas WHERE alumno_id = %s
-        """, (E2E_ALUMNO_ID,))
-        cur.execute("""
-            DELETE FROM suscripciones WHERE usuario_id = %s
-        """, (E2E_ALUMNO_ID,))
-        cur.execute("""
-            DELETE FROM solicitudes_planes WHERE alumno_id = %s
-        """, (E2E_ALUMNO_ID,))
-        cur.execute("""
-            DELETE FROM notificaciones WHERE alumno_id = %s
-        """, (E2E_ALUMNO_ID,))
-        cur.execute("""
-            DELETE FROM usuarios WHERE id = %s
-        """, (E2E_ALUMNO_ID,))
+        cur.execute(
+            "SELECT id FROM usuarios WHERE tenant_id = %s AND (correo = %s OR rut = %s)",
+            (TENANT_ID, E2E_CORREO, E2E_RUT))
+        ids = [fila[0] for fila in cur.fetchall()]
+        if not ids:
+            print("  🧹 Limpieza E2E: no había nada que borrar")
+            return
+        # Orden inverso de creación (los hijos por su FK al alumno).
+        cur.execute("DELETE FROM historial_rm WHERE alumno_id = ANY(%s)", (ids,))
+        cur.execute("DELETE FROM reservas WHERE alumno_id = ANY(%s)", (ids,))
+        cur.execute("DELETE FROM suscripciones WHERE usuario_id = ANY(%s)", (ids,))
+        cur.execute("DELETE FROM solicitudes_planes WHERE alumno_id = ANY(%s)", (ids,))
+        cur.execute("DELETE FROM notificaciones_enviadas WHERE alumno_id = ANY(%s)", (ids,))
+        cur.execute("DELETE FROM notificaciones WHERE alumno_id = ANY(%s)", (ids,))
+        cur.execute("DELETE FROM pedidos WHERE alumno_id = ANY(%s)", (ids,))
+        cur.execute("DELETE FROM usuarios WHERE id = ANY(%s)", (ids,))
         conn.commit()
-        print(f"  🧹 Limpieza E2E completada para alumno {E2E_ALUMNO_ID}")
+        print(f"  🧹 Limpieza E2E completada para alumno(s) {ids}")
     except Exception as e:
         conn.rollback()
         print(f"  ⚠️ Error en limpieza (no crítico): {e}")

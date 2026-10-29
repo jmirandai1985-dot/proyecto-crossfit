@@ -2,7 +2,8 @@
 Crea (ADITIVO) los 4 usuarios de prueba del seed histórico en la rama TEST de Neon.
 
 IDs y datos EXACTOS de run_setup_test_db.py (mismo tenant/rol/correo/rut/peso/genero
-y password 'Test1234!' hasheada con app.core.security.get_password_hash):
+y la clave de `TEST_SEED_PASSWORD` —backend/.env.test— hasheada con
+app.core.security.get_password_hash):
     999  alumno        Alumno Test        at@t.com
     1000 coach         Coach Test         ct@t.com
     1001 administrador Admin Test         admin@test.com
@@ -39,7 +40,15 @@ Usuario = importlib.import_module("app.models.usuario").Usuario
 get_password_hash = importlib.import_module("app.core.security").get_password_hash
 
 TENANT_ID = 1
-PASSWORD = "Test1234!"
+# Auditoría 4.1: la clave NO se versiona. Vive en `.env.test` (gitignored) o en una
+# env var del proceso; si falta, el script aborta en vez de crear cuentas con una
+# clave conocida ('Test1234!' estaba literal en 8 archivos).
+PASSWORD = settings.TEST_SEED_PASSWORD
+if not PASSWORD:
+    sys.exit(
+        "FATAL: define TEST_SEED_PASSWORD en backend/.env.test (o como variable de "
+        "entorno) antes de crear los usuarios de prueba."
+    )
 
 # (id, rut, nombre, correo, rol, peso_kg, genero)
 USUARIOS_SEED = [

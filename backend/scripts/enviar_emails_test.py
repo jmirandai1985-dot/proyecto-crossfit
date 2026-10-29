@@ -18,6 +18,12 @@ from app.services.email_service import (
 
 CORREO_TEST = "jesusmiranda26@gmail.com"
 
+# Auditoría 4.1: la clave de demostración NO se versiona. Se toma de
+# `TEST_SEED_PASSWORD` (backend/.env.test) y, si falta, se usa un texto
+# evidentemente de ejemplo: este email no crea ninguna cuenta.
+PASSWORD_DEMO = os.environ.get("TEST_SEED_PASSWORD") or "<clave-de-ejemplo>"
+
+
 print("🚀 Enviando emails de prueba a:", CORREO_TEST)
 print("=" * 60)
 
@@ -39,7 +45,7 @@ try:
     send_bienvenida_activacion(
         nombre="Test Alumno Jesús",
         correo=CORREO_TEST,
-        password="TestPass123!",
+        password=PASSWORD_DEMO,
         link_app="http://localhost:5173/login"
     )
     print("✅ Enviado: bienvenida_activacion")
