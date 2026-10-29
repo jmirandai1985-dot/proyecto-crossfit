@@ -1,7 +1,6 @@
 """
 Router de endpoints para Solicitudes de Planes (flujo admin)
 """
-from app.core.urls import url_frontend  # B.2
 import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
 from sqlalchemy import update
@@ -10,11 +9,9 @@ from typing import Optional
 
 from app.db.database import get_db
 from app.models.solicitud_plan import SolicitudPlan
-from app.models.suscripcion import Suscripcion
 from app.models.plan import Plan
 from app.models.usuario import Usuario
 from app.models.notificacion import Notificacion
-from app.models.transaccion_financiera import TransaccionFinanciera
 from app.schemas.solicitud import SolicitudPlanCreate
 from app.core.dependencies import get_current_admin, get_current_user
 # Servido de comprobantes (voucher de plan / certificado de estudiante): la
@@ -24,40 +21,21 @@ from app.core.documentos_privados import (
     puede_ver_documento, respuesta_documento,
 )
 from app.core.rate_limit import limiter, LIMIT_CRITICO
-# El fin de mes de un plan se escribe EN HORA DE CHILE (23:59:59 del último día, ver la regla en
-# `app/utils/santiago.py`): una sola definición para este flujo y la compra de emergencia.
-from app.utils.santiago import ahora_santiago, fin_de_plan_chile, hoy_santiago
-# Los créditos que se guardan en la suscripción salen de UNA regla compartida: un plan ilimitado
-# queda sin créditos (`NULL` = "∞" en el front), un plan con cupo guarda sus clases.
-from app.utils.planes import creditos_de_plan
 from app.services.auditoria_service import registrar_auditoria
-from app.services import churn_service
 # F2: el descuento vigente del alumno se aplica al SOLICITAR un plan. La aritmética (`desglose`)
 # y el ciclo de vida del beneficio (`vigente`/`usar`) viven en su servicio, no acá.
 from app.services import beneficios_service as beneficios
-# Fase 3b: al CONFIRMARSE la compra (aprobar la solicitud) se convierten los
-# referidos y se cobra el precio con descuento. La aritmética y el estado del
-# premio viven en `referidos_service`; acá sólo se engancha el punto de cobro.
-from app.services import referidos_service as referidos
 # Avisos del PANEL (la campana): un solo módulo decide A QUIÉN y CÓMO se avisa
 # (best-effort: un aviso nunca tumba la solicitud). Ver docs/NOTIFICACIONES_PANEL.md.
 from app.services.notificaciones_panel import notificar_admins_del_tenant
+# La aprobación (suscripción + ingreso + auditoría + correo) vive en UN servicio:
+# el webhook de Mercado Pago llama a la MISMA función con `actor_id=None`. Ver
+# `services/aprobacion_planes.py`.
+from app.services import aprobacion_planes
 
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
-
-
-def _precio_lista(solicitud, plan) -> int:
-    """Precio de LISTA de la compra: el snapshot (P0-4) o el precio del plan.
-
-    Es la base sobre la que se calcula cualquier descuento. Nunca el precio
-    final: un % aplicado sobre otro % sería un descuento inventado.
-    """
-    valor = (solicitud.precio_clp_snapshot
-             if solicitud.precio_clp_snapshot is not None
-             else (plan.precio_clp if plan is not None else 0))
-    return int(valor or 0)
 
 
 def _solicitud_con_guard(solicitud_id: int, db: Session, current_user: dict,
@@ -418,230 +396,44 @@ def aprobar_solicitud(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """
-    Admin aprueba solicitud: cambia estado, crea suscripción y activa el plan.
-    Además crea una notificación para el alumno.
+    """Admin aprueba solicitud: cambia estado, crea suscripción y activa el plan.
+
+    Además crea una notificación para el alumno y envía el correo de confirmación.
+
     SEGURIDAD: el admin sale del token JWT (get_current_admin), NO de un
     parámetro enviado por el cliente (elimina el spoofing de admin_id).
-    """
-    # 🔒 El admin autenticado por token (get_current_admin ya validó el rol)
-    admin_id = current_user["usuario_id"]
 
-    # ── FIX S2 (seguridad): la solicitud debe ser del tenant del admin ──
-    # Un admin del box A ya no puede aprobar solicitudes del box B (cross-tenant).
-    # Se devuelve 404 (no 403) para no revelar que el id existe en otro tenant.
-    # ── FIX doble-procesamiento (ATOMICO): una solicitud solo puede aprobarse
-    # UNA vez. El UPDATE condicional con estado='pending' garantiza que de dos
-    # admins aprobando en paralelo la misma solicitud, solo uno obtenga
-    # rowcount=1. El check leído-comprobar previo NO era seguro bajo MVCC.
-    result = db.execute(
-        update(SolicitudPlan)
-        .where(SolicitudPlan.id == solicitud_id)
-        .where(SolicitudPlan.tenant_id == current_user["tenant_id"])
-        .where(SolicitudPlan.estado == "pending")
-        .values(estado="approved", aprobado_por=admin_id, comentario_admin="Aprobado")
-    )
-    if result.rowcount == 0:
-        # Distinguir 404 (no existe / otro tenant) de 400 (ya procesada)
-        solicitud = db.query(SolicitudPlan).filter(
-            SolicitudPlan.id == solicitud_id,
-            SolicitudPlan.tenant_id == current_user["tenant_id"],
-        ).first()
-        if not solicitud:
-            raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+    La lógica vive en `services/aprobacion_planes.py::activar_plan` porque hay un
+    SEGUNDO camino que también activa planes: el webhook de Mercado Pago cuando
+    el pago queda `approved`. Dos copias de esta función serían dos verdades
+    (plan duplicado o dos ingresos en `transacciones_financieras`). Este endpoint
+    sólo valida, delega y traduce los errores de negocio a los mismos códigos y
+    mensajes de siempre.
+    """
+    try:
+        return aprobacion_planes.activar_plan(
+            db,
+            solicitud_id,
+            # ── FIX S2 (seguridad): la solicitud debe ser del tenant del admin ──
+            # Un admin del box A ya no puede aprobar solicitudes del box B
+            # (cross-tenant). Se responde 404 (no 403) para no revelar que el id
+            # existe en otro tenant.
+            tenant_id=current_user["tenant_id"],
+            actor_id=current_user["usuario_id"],
+            origen=aprobacion_planes.ORIGEN_MANUAL,
+            background_tasks=background_tasks,
+        )
+    except aprobacion_planes.SolicitudNoProcesable as error:
+        # Distinguir 404 (no existe / otro tenant) de 400 (ya procesada).
+        if error.motivo == "no_encontrada":
+            raise HTTPException(status_code=404,
+                                detail="Solicitud no encontrada")
         raise HTTPException(
             status_code=400,
             detail="La solicitud ya fue procesada (aprobada o rechazada)",
         )
-    solicitud = db.query(SolicitudPlan).filter(
-        SolicitudPlan.id == solicitud_id).first()
-
-    # Crear suscripción activa
-    plan = db.query(Plan).filter(Plan.id == solicitud.plan_id).first()
-    if not plan:
+    except aprobacion_planes.PlanNoEncontrado:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
-
-    # ── Vigencia del plan EN HORA DE CHILE: `inicio + plan.duracion_dias` días SEGUIDOS (regla
-    # 2026-10-06), hasta el fin de ese último día. UNA definición: `fin_de_plan_chile()`
-    # (app/utils/santiago.py), compartida con la compra de emergencia, `fix_fechas` y POST
-    # /suscripciones. Antes cada camino usaba el fin de MES: dos reglas sobre dinero que se
-    # desincronizaban. Un plan de Prueba cae solo (su `duracion_dias` es 7).
-    ahora = ahora_santiago()
-    expiracion = fin_de_plan_chile(ahora, plan.duracion_dias)
-
-    suscripcion = Suscripcion(
-        tenant_id=solicitud.tenant_id,
-        usuario_id=solicitud.alumno_id,
-        plan_id=solicitud.plan_id,
-        estado="activo",
-        # Los créditos los define UNA regla compartida (`app/utils/planes.creditos_de_plan`): un
-        # plan ilimitado queda SIN créditos (`NULL` = lo que el front pinta como "∞") y un plan con
-        # cupo guarda sus clases. Acá vivía el centinela viejo `or 999`: en PROD los ilimitados
-        # tienen `creditos = 0`, así que el panel del box mostraba "999 créditos" en vez de ∞ (bug
-        # de producción del 2026-10-08 con el alumno 533: el plan King Kong era el correcto, el
-        # número no).
-        creditos_totales=creditos_de_plan(plan),
-        creditos_disponibles=creditos_de_plan(plan),
-        fecha_inicio=ahora,
-        fecha_expiracion=expiracion,
-    )
-    db.add(suscripcion)
-
-    # Crear notificación de aprobado
-    notificacion = Notificacion(
-        alumno_id=solicitud.alumno_id,
-        tipo="aprobado",
-        mensaje=f"✅ Tu plan {plan.nombre} ha sido aprobado y ya está ACTIVO",
-        leida=False,
-    )
-    db.add(notificacion)
-
-    # ── FIX 3: desbloqueo de acceso completo tras pagar ──
-    # Si el alumno aún tiene una suscripción ACTIVA del plan 'Prueba', se
-    # expira (estado='vencido') para que es_prueba pase a false y se habiliten
-    # las secciones de pago. NO se borra el historial (solo cambia de estado).
-    # DECISIÓN: se usa 'vencido' porque el enum estado_suscripcion de la BD
-    # solo admite pendiente/activo/vencido/rechazado (un valor
-    # 'expirada_por_upgrade' exigiría ALTER TYPE, fuera de alcance).
-    sus_prueba = db.query(Suscripcion).join(
-        Plan, Suscripcion.plan_id == Plan.id
-    ).filter(
-        Suscripcion.usuario_id == solicitud.alumno_id,
-        Suscripcion.estado == "activo",
-        Plan.nombre == "Prueba",
-    ).all()
-    for sp in sus_prueba:
-        sp.estado = "vencido"
-        logger.info(
-            f"Suscripcion Prueba #{sp.id} del alumno {solicitud.alumno_id} "
-            "expirada por upgrade a plan pago"
-        )
-
-    # ── Fase 3b: el referido se resuelve al CONFIRMAR la compra ──
-    # Recién acá la solicitud pasó a `approved` y la suscripción existe: es el
-    # momento de convertir el referido `pendiente` y de consumir el crédito del
-    # invitador. Si la solicitud YA trae un descuento de fidelización
-    # (`beneficio_id`), no se toca nada: no se apilan descuentos y el referido
-    # queda pendiente (esa compra ya está resuelta por el otro programa).
-    descuento_referido = None
-    if solicitud.beneficio_id is None and solicitud.precio_final_clp is None:
-        db.flush()  # asigna el id de la suscripción sin commitear
-        descuento_referido = referidos.confirmar_compra(
-            db,
-            tenant_id=solicitud.tenant_id,
-            usuario_id=solicitud.alumno_id,
-            precio_lista_clp=_precio_lista(solicitud, plan),
-            suscripcion_id=suscripcion.id,
-            ahora=ahora,
-        )
-        if (descuento_referido is not None
-                and descuento_referido["descuento_clp"] > 0):
-            # `descuento_pct` es Integer y los porcentajes de referidos admiten
-            # decimales: el % autoritativo vive en `referidos_aplicados`. Acá se
-            # guarda el precio final, que es lo que cobra el ingreso de abajo.
-            solicitud.precio_final_clp = descuento_referido["precio_final_clp"]
-
-    db.commit()
-
-    # ── Churn del alumno: al aprobar un plan cambia su situación -> recalc en segundo plano. ──
-    churn_service.programar_recalculo(background_tasks, solicitud.tenant_id, solicitud.alumno_id)
-
-    # Precio que se cobra: el FINAL con descuento (fidelización o referido) o el de
-    # lista. Se calcula UNA vez y lo usan el ingreso y la respuesta del endpoint.
-    precio_lista = _precio_lista(solicitud, plan)
-    precio_cobrado = (solicitud.precio_final_clp
-                      if solicitud.precio_final_clp is not None
-                      else precio_lista)
-
-    # ── FIX 4: registrar la transacción financiera del pago aprobado ──
-    # Mismo formato que POST /suscripciones (suscripciones.py) para mantener
-    # consistencia. No debe impedir la aprobación si falla.
-    try:
-        # ── P0-4 (S-01): el ingreso usa el precio VIGENTE AL SOLICITAR ──
-        # (snapshot guardado al crear la solicitud). Antes se usaba
-        # `plan.precio_clp` del momento de APROBAR: si el admin cambiaba el
-        # precio entre medio, la transacción quedaba por el precio nuevo
-        # (reproducido en TEST: 44.000 al solicitar -> ingreso de 99.000).
-        # Fallback para solicitudes históricas sin snapshot.
-        # ── F2/3b: si la solicitud trae un descuento aplicado (beneficio o
-        # referido), se cobra el PRECIO FINAL; NULL = sin descuento.
-        monto_facturado = precio_cobrado
-        tx = TransaccionFinanciera(
-            tenant_id=suscripcion.tenant_id,
-            tipo="ingreso",
-            categoria="membresia",
-            monto=monto_facturado,
-            descripcion=(
-                f"Suscripcion plan {plan.nombre} (usuario #{solicitud.alumno_id})"
-            ),
-            referencia_tipo="suscripcion",
-            referencia_id=suscripcion.id,
-            fecha=hoy_santiago(),
-        )
-        db.add(tx)
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        logger.warning(f"No se pudo registrar transaccion financiera: {e}")
-
-    # ── Auditoría interna: quién, cuándo, qué (aprobación de comprobante) ──
-    registrar_auditoria(
-        db,
-        tenant_id=current_user["tenant_id"],
-        usuario_id=current_user["usuario_id"],
-        accion="UPDATE",
-        entidad="solicitud_plan",
-        entidad_id=solicitud.id,
-        detalle={
-            "estado": "approved",
-            "alumno_id": solicitud.alumno_id,
-            "plan_id": solicitud.plan_id,
-            "voucher_url": solicitud.voucher_url,
-        },
-    )
-
-    # ── Correo al alumno: confirmación del plan aprobado (no bloqueante) ──
-    # Primera vez vs renovación (mismo criterio que activar_alumno).
-    try:
-        alumno_obj = db.query(Usuario).filter(
-            Usuario.id == solicitud.alumno_id).first()
-        if alumno_obj and alumno_obj.correo:
-            from app.services.email_service import (
-                send_confirmacion_plan, send_confirmacion_renovacion_plan,
-                formatear_fecha_es)
-            # Renovación si existía ≥1 suscripción previa (excluye la recién creada).
-            es_renovacion = db.query(Suscripcion).filter(
-                Suscripcion.usuario_id == solicitud.alumno_id,
-                Suscripcion.tenant_id == solicitud.tenant_id,
-                Suscripcion.id != suscripcion.id,
-            ).count() > 0
-            fecha_vigencia = (formatear_fecha_es(suscripcion.fecha_expiracion)
-                              if suscripcion.fecha_expiracion else "")
-            link_app = url_frontend("/alumno/dashboard")
-            cant = plan.creditos if plan and plan.creditos else 0
-            if es_renovacion:
-                send_confirmacion_renovacion_plan(
-                    alumno_obj.nombre, alumno_obj.correo, plan.nombre,
-                    cant, fecha_vigencia, link_app, alumno_obj.id)
-            else:
-                send_confirmacion_plan(
-                    alumno_obj.nombre, alumno_obj.correo, plan.nombre,
-                    cant, fecha_vigencia, link_app, alumno_obj.id)
-    except Exception as e:
-        logger.warning(f"No se pudo enviar correo de confirmación de plan: {e}")
-
-    return {
-        "status": "approved",
-        "message": "Plan activado exitosamente",
-        # Fase 3b: el desglose real del cobro (auditable desde la respuesta).
-        "precio_lista_clp": precio_lista,
-        "precio_final_clp": precio_cobrado,
-        "descuento_aplicado_clp": precio_lista - precio_cobrado,
-        "descuento_referido_origen": (descuento_referido["origen"]
-                                      if descuento_referido else None),
-        "descuento_referido_pct": (descuento_referido["porcentaje"]
-                                   if descuento_referido else None),
-    }
 
 
 @router.put("/{solicitud_id}/rechazar")
