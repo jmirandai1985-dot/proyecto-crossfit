@@ -1,7 +1,8 @@
 # ============================================================
 # render.yaml — Blueprint para desplegar en Render.
 #   1) Web Service Docker (imagen combinada: nginx + uvicorn).
-#   2) Los 5 Cron Jobs de automatización de PROD (auditoría B4, 2026-10-28).
+#   2) Los 5 Cron Jobs de automatización de PROD (auditoría B4, 2026-10-28)
+#      + los 3 de RETENCIÓN (B8), dados de alta en modo ENSAYO (`DRY_RUN=1`).
 # La BD es externa (Neon) → NO se declara database en este archivo.
 # n8n queda FUERA de este blueprint (corre fuera de Render).
 # Los pasos manuales, los env groups y la verificación de los Cron Jobs están en
@@ -180,3 +181,77 @@ services:
         value: "0"
       - fromGroup: kpis-prod                 # KPIS_API_URL, N8N_API_KEY / CRON_API_KEY
       - fromGroup: alertas
+  # ─────────────────────────────────────────────────────────────
+  # 6-8) RETENCIÓN DE DATOS (B8) — ALTA HECHA, EN MODO ENSAYO
+  # ─────────────────────────────────────────────────────────────
+  # Los 3 trabajos existen y están probados: `backend/maintenance/retencion_cloud.py`,
+  # migración `065_retencion_datos`, tests `backend/tests/test_retencion_unit.py` (+ integración).
+  # Ahora quedan versionados acá, IGUAL que los 5 de arriba, con `DRY_RUN="1"` POR DEFAULT:
+  # el primer deploy cuenta filas y NO borra nada. Pasar a `"0"` es una decisión explícita
+  # del dueño (como se hizo con el job 2), se cambia acá, se revisa el log de la primera
+  # corrida y recién entonces se sincroniza.
+  #
+  # Requisitos ANTES de sincronizar el Blueprint (si falta uno, el sync FALLA entero y
+  # dejaría al web service sin actualizar — ver docs/CRON_JOBS_RENDER.md §8.3):
+  #   1. El env group `retencion-test` tiene que EXISTIR en el dashboard (con
+  #      `RETENCION_DB_URL` del rol `retencion_rw` y `ENVIRONMENT=test`).
+  #   2. La migración 065 tiene que estar aplicada en la base destino (`alembic upgrade head`).
+  #   3. Cada `type: cron` es un servicio FACTURADO (US$1/mes de piso).
+  #
+  # Horarios: los tres son MENSUALES y caen en DÍAS distintos a propósito.
+  #   15:00 UTC = 12:00 CLT. Ese hueco queda 9 h después del backup diario (06:00 UTC),
+  #   7 h después del mantenimiento (08:00 UTC), 5 h después de los KPIs (10:00 UTC),
+  #   3 h después del watchdog (12:00 UTC) y 2 h después del restore drill (13:00 UTC,
+  #   día 1: el más caro de la grilla). Ningún job pisa a otro ni compite por la BD.
+  #
+  - type: cron
+    name: box-crossfit-retencion-archivar
+    runtime: docker
+    plan: starter
+    region: oregon
+    schedule: "0 15 1 * *"                   # 12:00 CLT el día 1 — archiva asistencias/reservas
+    dockerfilePath: backend/Dockerfile.cron
+    dockerContext: backend
+    dockerCommand: python -m maintenance.retencion_cloud archivar
+    envVars:
+      # Escribir en TEST exige las DOS: `DRY_RUN=0` y `RETENCION_TEST_OK=1` (guarda anti-PROD).
+      # Si falta cualquiera de las dos, el job sale con exit 2 y manda correo: no hay forma
+      # de que "se olvide" el modo ensayo sin que alguien se entere.
+      - key: DRY_RUN
+        value: "1"
+      - fromGroup: retencion-test            # RETENCION_DB_URL (rol retencion_rw), ENVIRONMENT=test
+      - fromGroup: backups-prod              # R2 de respaldo (R2_ENDPOINT, R2_BUCKET, llaves)
+      - fromGroup: alertas                   # GMAIL_SMTP_* + ALERT_EMAIL
+
+  - type: cron
+    name: box-crossfit-retencion-auditoria
+    runtime: docker
+    plan: starter
+    region: oregon
+    schedule: "0 15 2 * *"                   # 12:00 CLT el día 2 — TTL de auditoría (2 años)
+    dockerfilePath: backend/Dockerfile.cron
+    dockerContext: backend
+    dockerCommand: python -m maintenance.retencion_cloud auditoria
+    envVars:
+      - key: DRY_RUN
+        value: "1"
+      - fromGroup: retencion-test
+      - fromGroup: alertas
+
+  - type: cron
+    name: box-crossfit-retencion-anonimizar
+    runtime: docker
+    plan: starter
+    region: oregon
+    schedule: "0 15 3 * *"                   # 12:00 CLT el día 3 — IRREVERSIBLE, nunca junto al archivo
+    dockerfilePath: backend/Dockerfile.cron
+    dockerContext: backend
+    dockerCommand: python -m maintenance.retencion_cloud anonimizar
+    envVars:
+      - key: DRY_RUN
+        value: "1"
+      - fromGroup: retencion-test
+      - fromGroup: alertas
+      - key: ANONIMIZACION_PEPPER
+        sync: false                          # secreto: se pega en el dashboard (≥ 16 caracteres)
+

@@ -10,7 +10,10 @@
 > `backend/maintenance/README.md` (detalle de cada script y de cada variable) y
 > `backend/maintenance/{backup_cloud,watchdog_backups,restore_drill,mantenimiento_cloud,kpis_cloud}.py`.
 
-## 1. Los 5 jobs
+## 1. Los 5 jobs de PROD (+ 3 de retención en modo ensayo)
+
+> **+ 3 jobs de retención (B8)** ya declarados en `render.yaml` con `DRY_RUN="1"` por default
+> (cuentan filas y no borran nada): ver **§8**. Son 8 `type: cron` en total.
 
 `schedule` en Render **siempre es UTC**. Chile es UTC-3 de septiembre a abril y UTC-4 el resto
 del año, así que la hora CLT de abajo se corre 1 h en invierno.
@@ -55,22 +58,26 @@ está en `backend/maintenance/README.md` (una sección por job).
 
 ## 3. Cómo se aplica (y el orden que importa)
 
-Los 5 jobs **ya existen** en el dashboard, con esos mismos nombres. El sync de un Blueprint
-empareja por nombre, así que este bloque no crea nada nuevo: sólo deja de haber configuración
-invisible.
+Los 5 jobs de PROD **ya existen** en el dashboard, con esos mismos nombres. El sync de un
+Blueprint empareja por nombre, así que para ellos este bloque no crea nada nuevo: sólo deja de
+haber configuración invisible. Los 3 de **retención** (§8) sí se **crean** en el primer sync.
 
-1. Dashboard → **Blueprints** → el blueprint del repo → **Sync** (o *Manual sync*).
-2. Leer el plan del sync **antes** de aplicar: los 5 Cron Jobs tienen que aparecer como
+1. Antes de sincronizar, crear el env group `retencion-test` (§8.1) y aplicar la migración 065
+   en la base destino: si el `fromGroup` no existe, el sync **falla entero** y el web service
+   se queda con la versión anterior.
+2. Dashboard → **Blueprints** → el blueprint del repo → **Sync** (o *Manual sync*).
+3. Leer el plan del sync **antes** de aplicar: los 5 Cron Jobs de PROD tienen que aparecer como
    *actualización* de un servicio existente. Si Render propone **crear** un servicio con un
    nombre que ya existe, el sync falla: significa que el job del dashboard no está asociado a
    este blueprint. Salida: copiar su log de los últimos runs (para tener historia), borrarlo del
    dashboard —su configuración completa ya está en `render.yaml`— y volver a sincronizar.
-3. Verificar uno por uno que el job quedó con el `dockerCommand` de la tabla del §1 (un job con
-   el `CMD` de la imagen hace un **backup** en vez de lo suyo).
-4. Disparar **Trigger Run** en los jobs 1 y 5 (son baratos y sus logs dicen en una línea si
-   actuaron: `DRY_RUN=0 (subida REAL)` / `fin: N/N llamada(s) ok`). Los jobs 2, 3 y 4 se
-   verifican en su próxima corrida programada: un run verde **no** manda correo (regla "correo =
-   algo que revisar"), así que hay que mirar el log.
+4. Verificar uno por uno que el job quedó con el `dockerCommand` de la tabla de §1 / §8 (un job
+   con el `CMD` de la imagen hace un **backup** en vez de lo suyo).
+5. Disparar **Trigger Run** en los jobs 1 y 5 (son baratos y sus logs dicen en una línea si
+   actuaron: `DRY_RUN=0 (subida REAL)` / `fin: N/N llamada(s) ok`). Los jobs 2, 3, 4 y los 3 de
+   retención se verifican en su próxima corrida programada: un run verde **no** manda correo
+   (regla "correo = algo que revisar"), así que hay que mirar el log. En retención, la línea que
+   importa es `DRY_RUN=1 (ensayo: no escribe)` + `habría movido N`.
 
 > **Regla:** un Cron Job se cambia en `render.yaml` y se sincroniza; **nunca** sólo en el
 > dashboard. Si se toca en el dashboard, el próximo sync lo revierte (o marca el blueprint como
@@ -147,8 +154,117 @@ contra `localhost:5432` **todas las noches desde 2026-10-02**, con salida 0. Si 
 python -c "import yaml; d=yaml.safe_load(open('render.yaml', encoding='utf-8')); print([(s['type'], s['name']) for s in d['services']])"
 #   [('web', 'box-crossfit'), ('cron', 'proyecto-crossfit'),
 #    ('cron', 'box-crossfit-mantenimiento-prod'), ('cron', 'box-crossfit-watchdog'),
-#    ('cron', 'box-crossfit-restore-drill'), ('cron', 'box-crossfit-kpis-ml')]
+#    ('cron', 'box-crossfit-restore-drill'), ('cron', 'box-crossfit-kpis-ml'),
+#    ('cron', 'box-crossfit-retencion-archivar'), ('cron', 'box-crossfit-retencion-auditoria'),
+#    ('cron', 'box-crossfit-retencion-anonimizar')]
 ```
 
 Con el Render CLI instalado, `render blueprints validate` valida contra el esquema oficial
 (incluye `fromGroup` y `dockerCommand`).
+
+## 8. Retención de datos (B8): 3 jobs dados de alta en modo ENSAYO
+
+`backend/maintenance/retencion_cloud.py` implementa los 3 trabajos de retención pedidos en
+`docs/RETENCION_DATOS_Y_N8N.md` §1. Están **probados y corribles** y desde 2026-10-29 están
+**declarados en `render.yaml`** con `DRY_RUN="1"` por default: la primera corrida cuenta filas,
+manda el correo de "habría movido N" y **no escribe nada**. Pasar a `"0"` es una decisión
+explícita (y en TEST exige además `RETENCION_TEST_OK=1`).
+
+| # | Job (`name`) | Schedule (UTC) | Hora CLT | `dockerCommand` | Exit ≠ 0 |
+|---|---|---|---|---|---|
+| 6 | `box-crossfit-retencion-archivar` | `0 15 1 * *` | 12:00 el día 1 | `python -m maintenance.retencion_cloud archivar` | 2/3/4/5/6/7 |
+| 7 | `box-crossfit-retencion-auditoria` | `0 15 2 * *` | 12:00 el día 2 | `python -m maintenance.retencion_cloud auditoria` | 2/3/5/6/7 |
+| 8 | `box-crossfit-retencion-anonimizar` | `0 15 3 * *` | 12:00 el día 3 | `python -m maintenance.retencion_cloud anonimizar` | 2/3/5/6/7 |
+
+Por qué `15:00 UTC` y días 1/2/3 (la grilla completa, en UTC):
+
+| Hora UTC | Job | Frecuencia |
+|---|---|---|
+| 06:00 | backup (`proyecto-crossfit`) | diario |
+| 08:00 | mantenimiento | días 1 y 15 |
+| 10:00 | KPIs/ML | diario |
+| 12:00 | watchdog | diario |
+| 13:00 | restore drill | día 1 |
+| **15:00** | **retención (§8)** | **días 1, 2 y 3** |
+
+15:00 UTC queda 9 h después del backup y 2 h después del restore drill del día 1 (el job más
+caro de la grilla): ningún cron pisa a otro y ninguno compite por la base con el archivado.
+Los 3 trabajos caen en **días distintos a propósito**: `anonimizar` es irreversible y nunca
+corre el mismo día que `archivar`.
+
+Qué hace cada uno (y por qué en ese orden del mes):
+
+| Trabajo | Regla | Qué mueve | Reversible |
+|---|---|---|---|
+| `archivar` | > **5 años** (`ANIOS_RETENCION_ARCHIVO`) | `asistencias` y `reservas` → `asistencias_archivo` / `reservas_archivo` + CSV.gz en R2 | Sí (las filas quedan en `*_archivo`) |
+| `auditoria` | > **2 años** (`ANIOS_RETENCION_AUDITORIA`) | `DELETE` de `auditoria` (no se archiva) | **No** |
+| `anonimizar` | **12 meses** desde `fecha_baja` (`MESES_RETENCION_ANONIMIZAR`) | nombre/correo/teléfono/RUT → valores anónimos + `anonimizado_en` | **No**; el día 2, nunca el mismo día que el archivo |
+
+`dockerCommand` **siempre con el argumento**: el script exige exactamente un trabajo
+(`archivar | auditoria | anonimizar`) y sale con exit 2 si falta o es otro. Sin argumento
+**no hace nada** — no hay default, a propósito.
+
+### 8.1 Variables (env group `retencion-test`, que hay que crear antes de sincronizar)
+
+| Variable | Obligatoria | Default | Nota |
+|---|---|---|---|
+| `RETENCION_DB_URL` | sí | — | Conexión **directa** (nunca `-pooler`). En PROD: usuario `retencion_rw` |
+| `ENVIRONMENT` | sí | — | `test` (hoy) o `production`. El script **rechaza** la URL si no calza con el entorno |
+| `DRY_RUN` | no | `1` | Con `1` cuenta filas, manda correo con "habría movido N" y **no escribe** |
+| `RETENCION_TEST_OK` | sólo para escribir en TEST | — | `1` habilita `DRY_RUN=0` contra TEST; sin ella ⇒ exit 2 (guarda anti-PROD) |
+| `ANONIMIZACION_PEPPER` | `anonimizar` | — | ≥ 16 caracteres; sal del `sha256` del RUT anónimo. **Perderla cambia todos los `rut_anonimo` futuros** |
+| `RETENCION_RESPALDO_LOCAL` | alternativa a R2 | — | Directorio local para el CSV.gz cuando no hay R2 (sólo TEST) |
+| `R2_ENDPOINT` / `R2_BUCKET` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | `archivar` (si no hay respaldo local) | — | Se reusan los del grupo `backups-prod` |
+| `ANIOS_RETENCION_ARCHIVO` / `ANIOS_RETENCION_AUDITORIA` / `MESES_RETENCION_ANONIMIZAR` | no | `5` / `2` / `12` | Rangos validados (1..50 / 1..50 / 1..120) |
+| `TAM_LOTE` | no | `5000` | Filas por lote de copia/borrado |
+| `MAX_ARCHIVAR` / `MAX_BORRAR_AUDITORIA` / `MAX_ANONIMIZAR` | no | `20000` / `100000` / `1000` | Tope **por corrida**: si se supera ⇒ exit 5 y **no se escribe nada** |
+| `RETENCION_LOCK_HORAS` | no | `12` | Vencimiento del bloqueo en `retencion_bloqueos` |
+| `RETENCION_PREFIJO` | no | `retencion/` | Prefijo de los objetos en R2 |
+| `GMAIL_SMTP_USER` / `GMAIL_SMTP_APP_PASSWORD` / `ALERT_EMAIL` | no | — | Sin las 3 no hay correo, pero el exit code no cambia |
+
+### 8.2 Correrlo a mano contra TEST (lo que se hace hoy)
+
+```bash
+# Desde backend/, con el entorno de TEST cargado (.env.test: DATABASE_URL de la rama TEST).
+$env:ENVIRONMENT="test"; $env:RETENCION_DB_URL=$env:DATABASE_URL
+$env:DRY_RUN="1"                 # default, pero explícito: no escribe
+$env:RETENCION_RESPALDO_LOCAL="$env:TEMP\retencion"   # sin R2: el CSV queda en disco
+py -3.12 -m maintenance.retencion_cloud archivar      # exit 0 = sólo contó
+py -3.12 -m maintenance.retencion_cloud auditoria
+py -3.12 -m maintenance.retencion_cloud anonimizar    # + ANONIMIZACION_PEPPER (≥16)
+```
+
+Para que **escriba** en TEST hacen falta las dos: `DRY_RUN=0` **y** `RETENCION_TEST_OK=1`.
+Con una sola, exit 2 y correo. Antes de la primera corrida real hay que aplicar
+`alembic upgrade head` (migración `065_retencion_datos`): si faltan las tablas, el script sale
+con exit 3 y dice exactamente qué falta.
+
+### 8.3 Cómo se activan en Render (orden que importa)
+
+1. `alembic upgrade head` en la base destino (TEST primero).
+2. Crear el rol `retencion_rw` por SQL (mismo procedimiento que `maint_rw`, README Fase 12) con
+   `GRANT` sólo sobre `asistencias`, `reservas`, `auditoria`, `usuarios`,
+   `asistencias_archivo`, `reservas_archivo`, `retencion_bloqueos`.
+3. Crear el env group `retencion-test` con las variables de §8.1 (`DRY_RUN=1`).
+4. Descomentar el bloque *# 6-8)* del final de `render.yaml` y sincronizar el Blueprint.
+5. Correr una vez con `DRY_RUN=1`, leer el correo/el log, y recién entonces pasar a `0` +
+   `RETENCION_TEST_OK=1` para la corrida real en TEST.
+6. PROD: mismo orden, con `ENVIRONMENT=production` y sin `RETENCION_TEST_OK`.
+
+Nada de esto está hecho todavía: **hoy no existe ningún job de retención corriendo, ni en
+TEST ni en PROD.**
+
+### 8.4 Pruebas hechas en TEST (2026-10-29)
+
+| Suite | Comando | Resultado |
+|---|---|---|
+| Unitaria (sin red/psql/R2) | `py -3.12 -m pytest tests/test_retencion_unit.py -q --noconftest` | **59 passed** |
+| Integración con `psql` real contra TEST (opt-in) | `$env:ENVIRONMENT='test'; $env:RETENCION_INTEGRACION='1'; py -3.12 -m pytest tests/test_retencion_integracion.py -q --noconftest` | **9 passed** (~3 min) |
+
+La integración siembra filas propias (`asistencias`/`reservas` de hace 7 años, `auditoria` de
+hace 3, un alumno con baja de 18 meses) y las borra en el `finally`; el esquema verificado en TEST
+es `alembic_version = 065_retencion_datos`, con `asistencias_archivo`, `reservas_archivo`,
+`retencion_bloqueos` y `usuarios.anonimizado_en` + índice parcial
+`ix_usuarios_bajas_por_anonimizar`.
+
+
