@@ -323,6 +323,9 @@ def _con_nombres(db: Session, pedidos: List[Pedido]) -> List[dict]:
             "total": p.total,
             "estado": p.estado,
             "voucher_url": p.voucher_url,
+            # Pago online (migración 067): sin comprobante, con badge.
+            "origen_pago": p.origen_pago or "manual",
+            "pago_id": p.pago_id,
             "fecha_pedido": p.fecha_pedido,
             "alumno_nombre": alumno.nombre if alumno else None,
             "alumno_email": alumno.correo if alumno else None,

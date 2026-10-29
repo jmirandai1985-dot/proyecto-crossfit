@@ -245,6 +245,12 @@ def listar_solicitudes_pendientes(
             "beneficio_id": s.beneficio_id,
             "voucher_url": s.voucher_url,
             "certificado_estudiante_url": s.certificado_estudiante_url,
+            # ── Pago online (migración 067) ──
+            # `origen_pago='mercadopago'` ⇒ NO hay comprobante: el panel muestra
+            # el badge "Pagado online ✓" en vez de un enlace al voucher (que
+            # respondería 404). `pago_id` queda para la trazabilidad.
+            "origen_pago": s.origen_pago or "manual",
+            "pago_id": s.pago_id,
             "estado": s.estado,
             "created_at": s.created_at,
         })
@@ -327,6 +333,9 @@ def listar_solicitudes_de_alumno(
             "voucher_url": s.voucher_url,
             "certificado_estudiante_url": s.certificado_estudiante_url,
             "comentario_admin": s.comentario_admin,
+            # Pago online: el historial del alumno también muestra el badge.
+            "origen_pago": s.origen_pago or "manual",
+            "pago_id": s.pago_id,
             "created_at": s.created_at,
         })
     return results

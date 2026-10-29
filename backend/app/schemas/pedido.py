@@ -74,6 +74,9 @@ class PedidoResponse(_PedidoTrazaRetiro):
     total: float
     estado: str
     voucher_url: Optional[str] = None
+    # Pago online (migración 067): `mercadopago` ⇒ no hay comprobante que abrir.
+    origen_pago: str = Field("manual", description="manual | mercadopago")
+    pago_id: Optional[int] = Field(None, description="Fila de `pagos` que lo cobró")
     fecha_pedido: datetime
     created_at: datetime
     updated_at: datetime
@@ -96,6 +99,10 @@ class PedidoListItem(_PedidoTrazaRetiro):
     total: float
     estado: str
     voucher_url: Optional[str] = None
+    # Pago online (migración 067): el panel muestra "Pagado online ✓" en vez de
+    # intentar abrir un voucher que no existe.
+    origen_pago: str = "manual"
+    pago_id: Optional[int] = None
     fecha_pedido: datetime
     alumno_nombre: Optional[str] = None
     alumno_email: Optional[str] = None

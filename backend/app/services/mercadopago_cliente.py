@@ -309,3 +309,29 @@ def monto_clp(valor) -> int:
     except (TypeError, ValueError):
         return 0
 
+
+def buscar_pagos(external_reference: str) -> list:
+    """Pagos de MP con ese `external_reference` (para la reconciliación).
+
+    Se usa cuando el webhook se perdió: el pago existe en MP pero el evento nunca
+    llegó. Devuelve la lista tal cual la da MP (puede venir vacía).
+    """
+    config = configuracion()
+    sdk = _sdk(config["access_token"])
+    try:
+        respuesta = sdk.payment().search({
+            "external_reference": str(external_reference),
+            "sort": "date_created",
+            "criteria": "desc",
+        })
+    except Exception as error:
+        logger.warning("MP: fallo al buscar pagos de %s: %s",
+                       external_reference, type(error).__name__)
+        raise ErrorMercadoPago("No se pudieron buscar los pagos en Mercado Pago") from error
+
+    estado_http = respuesta.get("status") if isinstance(respuesta, dict) else None
+    datos = (respuesta or {}).get("response") or {}
+    if estado_http != 200:
+        raise ErrorMercadoPago("Mercado Pago no devolvió la búsqueda de pagos")
+    return datos.get("results") or []
+
