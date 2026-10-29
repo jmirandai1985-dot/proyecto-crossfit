@@ -10,6 +10,8 @@ from app.models.plan import Plan
 from app.core.dependencies import get_current_admin, get_current_user
 from app.core.estados import vigente_hoy   # vigencia por DÍA CHILENO (no por instante)
 from app.utils.santiago import dias_para_vencer
+# Auditoría 1.1: un choque de UNIQUE/FK/CHECK es un 400/409 del cliente, no un 500.
+from app.utils.db_commit import commit_o_4xx
 
 router = APIRouter()
 
@@ -53,7 +55,12 @@ def crear_plan(
         activo=True
     )
     db.add(db_plan)
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo crear el plan: revisa el nombre, el precio y la duración.",
+        unico=f"Ya existe el plan '{nombre}' en este box.",
+        contexto="crear_plan",
+    )
     db.refresh(db_plan)
     return db_plan
 
@@ -194,7 +201,12 @@ def actualizar_plan(
     if requiere_certificado_estudiante is not None:
         plan.requiere_certificado_estudiante = requiere_certificado_estudiante
 
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo actualizar el plan: revisa los datos enviados.",
+        unico="Ya existe otro plan con ese nombre en este box.",
+        contexto="actualizar_plan",
+    )
     db.refresh(plan)
     return plan
 
@@ -218,5 +230,9 @@ def eliminar_plan(
             detail=f"Plan {plan_id} no encontrado"
         )
     plan.activo = False
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo desactivar el plan. Intenta de nuevo.",
+        contexto="eliminar_plan",
+    )
     return None

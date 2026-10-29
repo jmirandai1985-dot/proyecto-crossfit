@@ -8,6 +8,7 @@ from datetime import date
 from app.db.database import get_db
 from app.models.clase import Clase
 from app.models.coach_disciplina import CoachDisciplina
+from app.models.disciplina import Disciplina
 from app.services import asignaciones_clases as asignaciones
 from app.services.asignaciones_clases import (
     ORIGEN_ADMIN,
@@ -20,6 +21,8 @@ from app.core.dependencies import (
     verificar_coach_disciplina, get_current_coach, get_current_user,
 )
 from app.utils.santiago import hoy_santiago   # HOY en Chile (la TZ del proceso es UTC)
+# Auditoría 1.1: un choque de UNIQUE/FK/CHECK es un 400/409 del cliente, no un 500.
+from app.utils.db_commit import commit_o_4xx, flush_o_4xx
 
 logger = logging.getLogger("uvicorn.clases")
 
@@ -175,7 +178,12 @@ def listar_clases(
         conditions.append("c.fecha <= :fecha_hasta")
         query_params["fecha_hasta"] = fecha_hasta
     if solo_con_cupo:
-        conditions.append("c.asistentes_confirmados < c.cupo_maximo")
+        # "Con cupos disponibles" incluye las clases SIN TOPE (migración 066:
+        # Musculación / Open Box siempre tienen lugar). Si no, el `NULL < NULL`
+        # las dejaría afuera y el alumno no las vería como reservables.
+        conditions.append(
+            "(c.cupo_maximo IS NULL"
+            " OR c.asistentes_confirmados < c.cupo_maximo)")
     where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
     query = text(f"""
         SELECT c.id, c.fecha, c.hora_inicio, c.hora_fin, c.disciplina_id, c.coach_id,
@@ -325,6 +333,22 @@ def crear_clase(
     else:
         coach_id = clase.coach_id or current_user["usuario_id"]
 
+    # ── Migración 066: una disciplina de acceso libre no tiene cupo ──────────
+    # Aunque el cliente mande un número (o el default 20 del schema), la clase
+    # de Musculación / Open Box nace SIN TOPE. Es la misma regla que aplica
+    # `POST /horarios` a la plantilla, para que no haya dos caminos que digan
+    # cosas distintas sobre la misma sala.
+    disciplina = db.query(Disciplina).filter(
+        Disciplina.id == clase.disciplina_id,
+        Disciplina.tenant_id == tenant_id,
+    ).first()
+    cupo_maximo = clase.cupo_maximo
+    cupo_original = None
+    if disciplina is not None and disciplina.es_open_box:
+        cupo_maximo = None
+    elif cupo_maximo is not None:
+        cupo_original = cupo_maximo
+
     nueva_clase = Clase(
         tenant_id=tenant_id,
         horario_base_id=clase.horario_base_id,
@@ -333,13 +357,24 @@ def crear_clase(
         fecha=clase.fecha,
         hora_inicio=clase.hora_inicio,
         hora_fin=clase.hora_fin,
-        cupo_maximo=clase.cupo_maximo,
+        cupo_maximo=cupo_maximo,
+        # Snapshot del techo para "ampliar cupo" (+10 sobre el original). Sin
+        # cupo no hay techo: NULL (antes se dejaba en NULL y el endpoint caía
+        # al cupo actual, que tampoco existe).
+        cupo_original=cupo_original,
         asistentes_confirmados=0,
         cancelada=False
     )
 
     db.add(nueva_clase)
-    db.commit()
+    # Dos altas simultáneas de la misma disciplina a la misma hora chocan contra
+    # el UNIQUE de `clases`: es un 409 del admin, no un 500 del servidor.
+    commit_o_4xx(
+        db,
+        "No se pudo crear la clase: revisa los datos enviados.",
+        unico="Ya existe una clase de esa disciplina a esa hora.",
+        contexto=f"alta de clase {clase.fecha} {clase.hora_inicio}",
+    )
     db.refresh(nueva_clase)
 
     return nueva_clase
@@ -410,9 +445,28 @@ def actualizar_clase(
     if clase_update.hora_fin is not None:
         clase.hora_fin = clase_update.hora_fin
     if clase_update.cupo_maximo is not None:
+        # Migración 066: una clase de acceso libre (Musculación / Open Box) no
+        # puede recibir un cupo por el PUT. La decisión de negocio es que esas
+        # salas NO tienen tope; si se aceptara el número, volvería el placeholder
+        # y con él el denominador inflado del KPI.
+        disc = db.query(Disciplina).filter(
+            Disciplina.id == clase.disciplina_id,
+            Disciplina.tenant_id == tenant_id,
+        ).first()
+        if disc is not None and disc.es_open_box:
+            raise HTTPException(
+                status_code=400,
+                detail=("Esta clase es de una disciplina de acceso libre "
+                        "(Musculación / Open Box): no tiene cupo máximo."),
+            )
         clase.cupo_maximo = clase_update.cupo_maximo
 
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo actualizar la clase: revisa los datos enviados.",
+        unico="Ya existe una clase de esa disciplina a esa hora.",
+        contexto=f"update de clase {clase_id}",
+    )
     db.refresh(clase)
 
     return clase
@@ -437,7 +491,13 @@ def eliminar_clase(
         raise HTTPException(status_code=404, detail="Clase no encontrada")
 
     db.delete(clase)
-    db.commit()
+    # Borrar una clase que ya tiene asistencias/reservas es un 400 de negocio
+    # (FK), no un 500.
+    commit_o_4xx(
+        db,
+        "No se pudo eliminar la clase: tiene asistencias o reservas asociadas.",
+        contexto=f"delete de clase {clase_id}",
+    )
 
     return {"mensaje": "Clase eliminada"}
 
@@ -482,6 +542,17 @@ def ampliar_cupo_clase(
                 detail="Solo puedes ampliar el cupo de tus clases o de tus disciplinas asignadas",
             )
 
+    # ── Migración 066: sin cupo no hay techo que ampliar ─────────────────────
+    # Musculación / Open Box tienen `cupo_maximo = NULL` (acceso libre). Antes
+    # esto seguía de largo y `original + 10` explotaba con TypeError (None + int)
+    # -> 500. Es un 400 de negocio, no un error del servidor.
+    if clase.cupo_maximo is None:
+        raise HTTPException(
+            status_code=400,
+            detail=("Esta clase no tiene cupo (acceso libre): no hay cupo que "
+                    "ampliar."),
+        )
+
     original = clase.cupo_original or clase.cupo_maximo
     tope = original + 10
     if clase.cupo_maximo + body.cupos_extra > tope:
@@ -503,7 +574,13 @@ def ampliar_cupo_clase(
         db.rollback()
         raise HTTPException(status_code=409, detail="No se pudo ampliar: tope alcanzado")
 
-    db.commit()
+    # El UPDATE atómico ya respetó el tope; si el commit falla es un CHECK/NOT
+    # NULL (400), no un 500.
+    commit_o_4xx(
+        db,
+        "No se pudo ampliar el cupo: revisa el valor pedido.",
+        contexto=f"ampliar cupo de clase {clase_id}",
+    )
     db.refresh(clase)
 
     # Auditoria DESPUES del commit del UPDATE: si el UPDATE fallo, no queda fila falsa.
@@ -637,14 +714,25 @@ def tomar_clase(
             asignaciones.abrir_vigencia(
                 db, tenant_id, hid, coach_id, hoy, creado_por=coach_id)
             horario_registrado = True
-        db.flush()   # la vigencia tiene que existir antes del backfill
+        # La vigencia tiene que existir antes del backfill.
+        flush_o_4xx(
+            db,
+            "No se pudo registrar la asignación del horario.",
+            unico="Ese coach ya tiene una vigencia abierta en ese horario.",
+            contexto=f"abrir vigencia de horario {hid}",
+        )
         clases_tocadas = asignaciones.backfill_horario(
             db, tenant_id, hid, coach_id, quien_id=coach_id, desde=hoy,
             origen=origen)
     else:
         clases_tocadas = 1
 
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo tomar la clase: revisa los datos enviados.",
+        unico="Ese coach ya tiene una vigencia abierta en ese horario.",
+        contexto=f"tomar clase {clase_id}",
+    )
     db.refresh(clase)
 
     registrar_auditoria(
@@ -727,7 +815,11 @@ def soltar_clase(
         clases_liberadas = asignaciones.liberar_clases_futuras_de_horario(
             db, tenant_id, hid, hoy, coach_id=coach_que_la_tenia)
 
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo soltar la clase: revisa los datos enviados.",
+        contexto=f"soltar clase {clase_id}",
+    )
     db.refresh(clase)
 
     registrar_auditoria(

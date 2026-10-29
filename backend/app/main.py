@@ -19,7 +19,7 @@ import os
 
 import sentry_sdk
 
-from app.core.config import settings
+from app.core.config import settings, validar_cors_origins
 from app.core.rate_limit import limiter
 from app.core.logging import setup_logger
 # B.2: helper único de URLs públicas (saneadas y validadas por entorno).
@@ -120,13 +120,27 @@ _cors_origins = settings.cors_origins_list
 _frontend_saneado = url_frontend()
 if _frontend_saneado and _frontend_saneado not in _cors_origins:
     _cors_origins.append(_frontend_saneado)
+# Auditoría 1.2: valida y limpia la lista al arrancar. En PROD aborta si algo no
+# sirve (barra final, `*`, placeholder, http://, localhost); en TEST sólo avisa.
+_cors_origins = validar_cors_origins(_cors_origins)
+
+# Auditoría 1.2: antes `allow_methods=["*"]` / `allow_headers=["*"]` le decían al
+# navegador que CUALQUIER método y cabecera estaban permitidos. Con `allow_credentials`
+# eso no daba acceso nuevo (el navegador sólo manda lo que el JS pide), pero sí
+# ampliaba la superficie: cualquier librería/cabecera nueva pasaba el preflight sin
+# que nadie la revisara. La lista es exactamente lo que usa el frontend:
+#   métodos → GET/POST/PUT/PATCH/DELETE (los usa axios; PATCH lo usa /supervision/cupo-disciplina)
+#   cabeceras → Authorization (JWT), Content-Type (JSON y multipart de vouchers),
+#               Accept (descarga de reportes en Excel) y Accept-Language.
+CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+CORS_HEADERS = ["Authorization", "Content-Type", "Accept", "Accept-Language"]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=CORS_METHODS,
+    allow_headers=CORS_HEADERS,
     # Sin esto, en dev (frontend en otro puerto) el navegador no deja LEER el total
     # paginado que viaja en X-Total-Count (en prod es mismo origen: no aplica).
     expose_headers=["X-Total-Count"],

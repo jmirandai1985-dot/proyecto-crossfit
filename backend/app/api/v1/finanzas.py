@@ -14,6 +14,8 @@ from app.models.transaccion_financiera import TransaccionFinanciera
 from app.core.dependencies import get_current_admin
 from app.utils.caja import resumir_dia          # el CÁLCULO (puro, testeable aislado)
 from app.utils.santiago import hoy_santiago      # HOY en Chile (el proceso corre en UTC)
+# Auditoría 1.1: un choque de UNIQUE/FK/CHECK es un 400/409 del cliente, no un 500.
+from app.utils.db_commit import commit_o_4xx
 
 router = APIRouter()
 
@@ -49,7 +51,11 @@ def crear_transaccion(
         fecha=data.fecha,
     )
     db.add(tx)
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo registrar la transacción: revisa el tipo, el monto y la fecha.",
+        contexto="crear_transaccion",
+    )
     db.refresh(tx)
     return {"ok": True, "id": tx.id}
 

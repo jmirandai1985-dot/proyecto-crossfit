@@ -8,6 +8,8 @@ from typing import Optional
 from app.db.database import get_db
 from app.models.disciplina import Disciplina
 from app.core.dependencies import get_current_admin, get_current_user
+# Auditoría 1.1: un choque de UNIQUE/FK/CHECK es un 400/409 del cliente, no un 500.
+from app.utils.db_commit import commit_o_4xx
 
 router = APIRouter()
 
@@ -44,7 +46,12 @@ def crear_disciplina(
         activo=True
     )
     db.add(db_disciplina)
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo crear la disciplina: revisa el nombre.",
+        unico=f"Ya existe la disciplina '{nombre}' en este box.",
+        contexto="crear_disciplina",
+    )
     db.refresh(db_disciplina)
     return db_disciplina
 
@@ -120,7 +127,12 @@ def actualizar_disciplina(
     if activo is not None:
         disciplina.activo = activo
 
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo actualizar la disciplina: revisa los datos enviados.",
+        unico=f"Ya existe otra disciplina llamada '{nombre}' en este box.",
+        contexto="actualizar_disciplina",
+    )
     db.refresh(disciplina)
     return disciplina
 
@@ -149,5 +161,9 @@ def eliminar_disciplina(
             detail="No tienes acceso a esta disciplina",
         )
     disciplina.activo = False
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo desactivar la disciplina. Intenta de nuevo.",
+        contexto="eliminar_disciplina",
+    )
     return None

@@ -25,6 +25,8 @@ from app.services.auditoria_service import registrar_auditoria
 from app.services.beneficios_service import TOPE_DESCUENTO_DEFAULT
 from app.services.notificaciones_panel import notificar_admins_del_tenant
 from app.utils.rut import normalizar_rut, validar_rut
+# Auditoría 1.1: un choque de UNIQUE/FK/CHECK es un 400/409 del cliente, no un 500.
+from app.utils.db_commit import flush_o_4xx
 
 router = APIRouter()
 
@@ -224,7 +226,11 @@ def actualizar_configuracion(
 
     # El cambio y su traza viajan en la MISMA transacción (registrar_auditoria commitea
     # las dos cosas): o queda todo —fila + auditoría— o no queda nada.
-    db.flush()
+    flush_o_4xx(
+        db,
+        "No se pudo guardar la configuración: revisa los datos bancarios.",
+        contexto="actualizar_configuracion",
+    )
     registrar_auditoria(
         db,
         tenant_id=tenant_id,

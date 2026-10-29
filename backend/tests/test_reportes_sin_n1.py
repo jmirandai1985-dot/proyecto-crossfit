@@ -120,8 +120,9 @@ def _reportes():
 def test_ocupacion_por_disciplina_es_una_consulta_y_conserva_los_calculos():
     reportes = _reportes()
     fila = SimpleNamespace(
-        id=1, nombre=" CrossFit ", total_clases=10, asistentes=50,
-        cupo=100, alumnos_unicos=7,
+        id=1, nombre=" CrossFit ", total_clases=10, clases_sin_tope=0,
+        asistentes=50, asistentes_con_tope=50, cupo=100, alumnos_unicos=7,
+        reservas=52,
     )
     db = _DbFalsa(_ResultadoFalso(filas=[fila]))
 
@@ -133,7 +134,10 @@ def test_ocupacion_por_disciplina_es_una_consulta_y_conserva_los_calculos():
         "id": 1,
         "nombre": "CrossFit",
         "clases": 10,
+        "clases_sin_tope": 0,
+        "sin_tope": False,
         "asistentes": 50,
+        "reservas": 52,
         "cupo_total": 100,
         "alumnos_unicos": 7,
         "ocupacion_pct": 50,        # round(50 / 100 * 100)
@@ -143,8 +147,9 @@ def test_ocupacion_por_disciplina_es_una_consulta_y_conserva_los_calculos():
 def test_ocupacion_por_disciplina_cupo_cero_no_divide_por_cero():
     reportes = _reportes()
     fila = SimpleNamespace(
-        id=2, nombre="Yoga", total_clases=0, asistentes=0,
-        cupo=0, alumnos_unicos=0,
+        id=2, nombre="Yoga", total_clases=0, clases_sin_tope=0,
+        asistentes=0, asistentes_con_tope=0, cupo=0, alumnos_unicos=0,
+        reservas=0,
     )
     db = _DbFalsa(_ResultadoFalso(filas=[fila]))
 
@@ -153,6 +158,25 @@ def test_ocupacion_por_disciplina_cupo_cero_no_divide_por_cero():
 
     assert len(db.consultas) == 1
     assert resultado[0]["ocupacion_pct"] == 0
+
+
+def test_ocupacion_por_disciplina_sin_tope_informa_reservas_y_no_porcentaje():
+    """Migración 066: una sala de acceso libre no tiene denominador."""
+    reportes = _reportes()
+    fila = SimpleNamespace(
+        id=3, nombre="Musculacion", total_clases=40, clases_sin_tope=40,
+        asistentes=87, asistentes_con_tope=0, cupo=0, alumnos_unicos=31,
+        reservas=87,
+    )
+    db = _DbFalsa(_ResultadoFalso(filas=[fila]))
+
+    inicio, fin = reportes._inicio_fin_mes(0)
+    resultado = reportes._ocupacion_por_disciplina(db, 1, inicio, fin)
+
+    assert resultado[0]["sin_tope"] is True
+    assert resultado[0]["ocupacion_pct"] is None, "sin cupo no hay % honesto"
+    assert resultado[0]["reservas"] == 87, "el uso se informa como conteo"
+    assert resultado[0]["cupo_total"] == 0
 
 
 def test_historico_membresias_es_una_consulta_y_rellena_con_cero():
@@ -188,9 +212,10 @@ def test_historico_ingresos_es_una_consulta_y_usa_el_neto():
 @pytest.fixture(scope="module")
 def db_test():
     """Sesión a la BD TEST. Falla cerrado si la URL no es de test."""
+    from sqlalchemy import text
+
     from app.core.config import is_test_db_url, settings
     from app.db.database import SessionLocal, engine
-    from sqlalchemy import text
 
     if not is_test_db_url(str(settings.DATABASE_URL)):
         pytest.fail(
@@ -228,8 +253,7 @@ def _tenant_con_clases(db) -> int:
 
 def _contar_consultas(db, funcion):
     """Ejecuta `funcion()` y devuelve (resultado, lista de SQL ejecutado)."""
-    from sqlalchemy import event
-    from sqlalchemy import text
+    from sqlalchemy import event, text
 
     engine = db.get_bind()
     consultas = []
@@ -249,7 +273,7 @@ def _contar_consultas(db, funcion):
     return resultado, consultas
 
 
-def test_el_endpoint_hace_a_lo_mas_21_consultas(db_test):
+def test_el_endpoint_hace_a_lo_mas_22_consultas(db_test):
     reportes = _reportes()
     tenant_id = _tenant_con_clases(db_test)
 
@@ -262,13 +286,15 @@ def test_el_endpoint_hace_a_lo_mas_21_consultas(db_test):
         ),
     )
 
-    # 21 = 19 históricas (endpoint sin N+1) + 2 bloques FIJOS de la revisión
-    # 2026-10-22 (Parte B): ranking de planes del mes y Bazar del mes anterior.
+    # 22 = 19 históricas (endpoint sin N+1) + 2 bloques FIJOS de la revisión
+    # 2026-10-22 (Parte B): ranking de planes del mes y Bazar del mes anterior
+    # + 1 de la migración 066 (`metricas.reservas_sin_tope`: el conteo de las
+    # disciplinas de acceso libre, que NO entra al denominador de ocupación).
     # El detalle de "Planes Vencidos" no sumó: reemplazó al COUNT de
     # `cancelacionesMes` (mismo WHERE). Si la base no alcanza el mínimo de
-    # retención, `retencion_cohorte` corta antes y son 20: el tope sigue en 21.
-    assert len(consultas) <= 21, (
-        f"El endpoint ejecutó {len(consultas)} consultas (máximo 21).\n"
+    # retención, `retencion_cohorte` corta antes y son menos: el tope sigue en 22.
+    assert len(consultas) <= 22, (
+        f"El endpoint ejecutó {len(consultas)} consultas (máximo 22).\n"
         + "\n\n".join(consultas)
     )
 
@@ -284,9 +310,18 @@ def test_el_endpoint_hace_a_lo_mas_21_consultas(db_test):
 
 
 def _legacy_ocupacion(db, tenant_id, inicio_mes, fin_mes):
-    """Implementación ANTERIOR (1 + N) para comparar valores."""
-    from app.services.clases_service import sql_clase_realizada
+    """Implementación ANTERIOR (1 + N) para comparar valores.
+
+    Actualizada a la regla de la migración 066 (Musculación / Open Box sin
+    tope): el cupo suma sólo las clases CON cupo, el % es `None` cuando la
+    disciplina no tiene denominador y `reservas` se cuenta aparte. La forma de
+    calcular sigue siendo la vieja (1 consulta + 1 por disciplina), así que el
+    test sigue probando que el CTE y la N+1 dan lo MISMO.
+    """
     from sqlalchemy import text
+
+    from app.core.estados import lista_sql
+    from app.services.clases_service import sql_clase_realizada
 
     parametros = {
         "tid": tenant_id,
@@ -296,8 +331,12 @@ def _legacy_ocupacion(db, tenant_id, inicio_mes, fin_mes):
     filas = db.execute(text("""
         SELECT d.id, d.nombre,
                COUNT(c.id) as total_clases,
+               COUNT(c.id) FILTER (WHERE c.cupo_maximo IS NULL) as clases_sin_tope,
                COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0)), 0) as asistentes,
-               COALESCE(SUM(COALESCE(c.cupo_maximo, 1)), 0) as cupo
+               COALESCE(SUM(COALESCE(c.asistentes_confirmados, 0))
+                        FILTER (WHERE c.cupo_maximo IS NOT NULL), 0) as asistentes_con_tope,
+               COALESCE(SUM(c.cupo_maximo)
+                        FILTER (WHERE c.cupo_maximo IS NOT NULL), 0) as cupo
         FROM clases c
         JOIN disciplinas d ON c.disciplina_id = d.id
         WHERE c.tenant_id = :tid
@@ -320,15 +359,28 @@ def _legacy_ocupacion(db, tenant_id, inicio_mes, fin_mes):
               AND c.fecha >= :inicio_d
               AND c.fecha <= :fin_d
         """), {**parametros, "did": r.id}).scalar() or 0
+        reservas = db.execute(text(
+            "SELECT COUNT(r.id) FROM reservas r "
+            "JOIN clases c ON r.clase_id = c.id "
+            "WHERE c.tenant_id = :tid AND c.disciplina_id = :did "
+            "  AND c.fecha >= :inicio_d AND c.fecha <= :fin_d "
+            "  AND r.estado NOT IN (" + lista_sql() + ")"
+        ), {**parametros, "did": r.id}).scalar() or 0
         cupo = r.cupo or 0
+        sin_tope = (r.total_clases or 0) > 0 and (
+            r.clases_sin_tope or 0) == r.total_clases
         resultado.append({
             "id": r.id,
             "nombre": r.nombre.strip() if r.nombre else "—",
             "clases": r.total_clases,
+            "clases_sin_tope": r.clases_sin_tope or 0,
+            "sin_tope": sin_tope,
             "asistentes": r.asistentes,
+            "reservas": reservas,
             "cupo_total": cupo,
             "alumnos_unicos": alumnos,
-            "ocupacion_pct": round(r.asistentes / cupo * 100) if cupo > 0 else 0,
+            "ocupacion_pct": None if sin_tope else (
+                round(r.asistentes_con_tope / cupo * 100) if cupo > 0 else 0),
         })
     return resultado
 

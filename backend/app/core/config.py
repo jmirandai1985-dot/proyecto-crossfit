@@ -4,6 +4,7 @@ Carga variables de entorno desde el archivo .env
 """
 from pydantic_settings import BaseSettings
 from typing import List
+from urllib.parse import urlsplit
 
 
 import logging
@@ -142,6 +143,16 @@ class Settings(BaseSettings):
     #    (URL pública del API); el default localhost es solo para desarrollo.
     BACKEND_PUBLIC_URL: str = "http://localhost:8000"
 
+    # Contrasena de los usuarios de PRUEBA (admin@test.com, alumno@test.com, el seed
+    # 999/1000/1001 y los alumnos de carga de k6). Auditoria 4.1 (2026-10-29): el valor
+    # estaba LITERAL en 8 archivos versionados (y era la misma clave en todos), asi que
+    # cualquiera con el repo podia entrar a esas cuentas de TEST; si ese hash se copiaba
+    # a otra base, la clave ya era publica.
+    # Ahora vive en `backend/.env.test` (gitignored) o en una env var del proceso. Los
+    # scripts la LEEN y abortan si falta; los tests la LEEN y generan una al azar cuando
+    # crean su usuario. Vacio = no configurada (el default es no tener default).
+    TEST_SEED_PASSWORD: str = ""
+
     @property
     def automation_api_key(self) -> str:
         """La key que valida los endpoints de automatizacion (KPIs/ML/segmentacion).
@@ -191,6 +202,93 @@ settings = Settings()
 # Si ninguna está definida, security.py lanza error al firmar (sin secretos hardcodeados).
 if not settings.JWT_SECRET_KEY:
     settings.JWT_SECRET_KEY = settings.SECRET_KEY
+
+
+# ── CORS: validación de arranque (auditoría 1.2) ─────────────────────────────
+# POR QUÉ EXISTE: un `CORS_ORIGINS` mal escrito no rompía NADA en el backend. El
+# navegador simplemente no encontraba su `Origin` en la lista y bloqueaba TODAS las
+# llamadas del frontend con un "CORS policy" en la consola — sin error en el log del
+# servidor (la petición ni siquiera llegaba con las cabeceras correctas). Estos son
+# los tres casos que se comieron horas de diagnóstico:
+#   - `https://app.cl/` con barra final  → el navegador manda `https://app.cl` (sin barra)
+#   - `*`                               → con `allow_credentials=True` el comodín abre el
+#                                         API a cualquier sitio (y el token viaja en el header)
+#   - el placeholder de ejemplo sin reemplazar (`https://tu-frontend.onrender.com`)
+#
+# Reglas: se sanea (strip + sin `/` final), se descartan duplicados y las entradas
+# inválidas NUNCA se registran. En PRODUCCIÓN un problema aborta el arranque
+# (fail-fast: mejor un deploy que no levanta que un frontend mudo); en TEST/dev se
+# loguea un WARNING y se sigue con los orígenes que sí sirven.
+_HOSTS_LOCALES = ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+
+
+def en_produccion(entorno: str = None) -> bool:
+    """True si el entorno (por defecto el del proceso) es production."""
+    valor = _ENVIRONMENT if entorno is None else entorno
+    return (valor or "").strip().lower() == "production"
+
+
+def _limpiar_origin(origen) -> str:
+    """Un `Origin` del navegador no lleva `/` final ni espacios: se normaliza."""
+    return (origen or "").strip().rstrip("/")
+
+
+def problemas_cors_origins(origen: str, entorno: str = None) -> List[str]:
+    """Problemas de UN origen CORS ya saneado (lista vacía = sirve).
+
+    Se separa de `validar_cors_origins` para poder reusarlo en `/health` y en los
+    tests sin tener que provocar el aborto del arranque.
+    """
+    prod = en_produccion(entorno)
+    problemas: List[str] = []
+    if origen == "*":
+        return ["'*' no se acepta: con allow_credentials=True cualquier sitio podría "
+                "llamar al API con las credenciales del alumno"]
+    if any(c in origen for c in (" ", "\t", "\n", "\r")):
+        problemas.append(f"{origen!r} tiene espacios o saltos de línea")
+    partes = urlsplit(origen)
+    if partes.scheme not in ("http", "https") or not partes.hostname:
+        problemas.append(f"{origen!r} no es una URL absoluta http(s)://host[:puerto]")
+        return problemas
+    if partes.path or partes.query or partes.fragment:
+        problemas.append(f"{origen!r} tiene path/query: el navegador manda sólo "
+                         f"esquema://host:puerto ({partes.scheme}://{partes.netloc})")
+    if prod:
+        if partes.scheme != "https":
+            problemas.append(f"{origen!r} debería ser https:// en producción")
+        if (partes.hostname or "").lower() in _HOSTS_LOCALES:
+            problemas.append(f"{origen!r} apunta a localhost en producción")
+    return problemas
+
+
+def validar_cors_origins(origins: List[str], entorno: str = None) -> List[str]:
+    """Lista de orígenes CORS lista para `CORSMiddleware` (saneada y sin basura).
+
+    Aborta con `RuntimeError` en producción si algo no sirve; en TEST/dev avisa
+    por log y devuelve los orígenes válidos. Nunca devuelve `*`.
+    """
+    prod = en_produccion(entorno)
+    limpios: List[str] = []
+    problemas: List[str] = []
+    for crudo in origins or []:
+        origen = _limpiar_origin(crudo)
+        if not origen:
+            continue
+        errores = problemas_cors_origins(origen, entorno)
+        if errores:
+            problemas.extend(errores)
+            continue
+        if origen not in limpios:
+            limpios.append(origen)
+    if not limpios:
+        problemas.append("ningún origen válido quedó configurado en CORS_ORIGINS")
+    if problemas:
+        detalle = "; ".join(problemas)
+        if prod:
+            raise RuntimeError(f"[config] CORS_ORIGINS inválido: {detalle}")
+        logging.getLogger("app.core.config").warning(
+            "[config] CORS_ORIGINS con problemas (se usan sólo los válidos): %s", detalle)
+    return limpios
 
 
 # ── Guardas de seguridad TEST vs PROD ────────────────────────────────────────

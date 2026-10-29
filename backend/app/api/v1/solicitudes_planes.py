@@ -229,31 +229,41 @@ def listar_solicitudes_pendientes(
     """Lista solicitudes pendientes para el admin (solo admin, tenant del token)."""
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
-    solicitudes = db.query(SolicitudPlan).filter(
+    # ── Sin N+1 (era N+N): plan y alumno vienen en la MISMA consulta ────────
+    # ANTES: 1 SELECT de `solicitudes_planes` + 2 por CADA fila (Plan y Usuario),
+    # o sea 1+2N: con 20 pendientes eran 41 consultas.
+    # AHORA: 1 SELECT con LEFT JOIN a `planes` y `usuarios` por `id` — el mismo
+    # criterio de antes (el nombre se resolvía por id, sin filtro de tenant), así
+    # que una solicitud huérfana sigue mostrando "Desconocido" en vez de romper.
+    filas = db.query(
+        SolicitudPlan, Plan.nombre, Plan.precio_clp, Usuario.nombre, Usuario.correo,
+    ).outerjoin(
+        Plan, Plan.id == SolicitudPlan.plan_id,
+    ).outerjoin(
+        Usuario, Usuario.id == SolicitudPlan.alumno_id,
+    ).filter(
         SolicitudPlan.tenant_id == tenant_id,
         SolicitudPlan.estado == "pending"
     ).order_by(SolicitudPlan.created_at.desc()).all()
 
     results = []
-    for s in solicitudes:
-        plan = db.query(Plan).filter(Plan.id == s.plan_id).first()
-        from app.models.usuario import Usuario
-        alumno = db.query(Usuario).filter(Usuario.id == s.alumno_id).first()
+    for s, plan_nombre, plan_precio_clp, alumno_nombre, alumno_correo in filas:
+        precio_lista = plan_precio_clp if plan_precio_clp is not None else 0
         results.append({
             "id": s.id,
-            "alumno_nombre": alumno.nombre if alumno else "Desconocido",
-            "alumno_email": alumno.correo if alumno else "",
-            "plan_nombre": plan.nombre if plan else "Desconocido",
+            "alumno_nombre": alumno_nombre or "Desconocido",
+            "alumno_email": alumno_correo or "",
+            "plan_nombre": plan_nombre or "Desconocido",
             "plan_precio": (s.precio_clp_snapshot
                             if s.precio_clp_snapshot is not None
-                            else (plan.precio_clp if plan else 0)),
+                            else precio_lista),
             # ── F2: el descuento que se le aplicó al precio de lista (NULL = sin beneficio) ──
             # El precio de lista ya viaja en `plan_precio`: acá van el % y lo que hay que cobrar.
             "descuento_pct": s.descuento_pct,
             "precio_final": (s.precio_final_clp if s.precio_final_clp is not None
                              else (s.precio_clp_snapshot
                                    if s.precio_clp_snapshot is not None
-                                   else (plan.precio_clp if plan else 0))),
+                                   else precio_lista)),
             "beneficio_id": s.beneficio_id,
             "voucher_url": s.voucher_url,
             "certificado_estudiante_url": s.certificado_estudiante_url,

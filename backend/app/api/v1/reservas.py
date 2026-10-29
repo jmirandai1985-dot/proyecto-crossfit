@@ -14,7 +14,7 @@ from app.models.clase import Clase
 from app.models.reserva import Reserva, es_reserva_duplicada
 from app.db.database import get_db
 from typing import Optional
-from sqlalchemy import func, text, update
+from sqlalchemy import and_, func, or_, text, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 from fastapi import (APIRouter, BackgroundTasks, Body, Depends, HTTPException,
@@ -51,6 +51,8 @@ def crear_reserva(
 
     ARREGLO 1: Control de aforo
     - Verifica que asistentes_confirmados < cupo_maximo
+    - `cupo_maximo IS NULL` = SIN TOPE (migración 066: Musculación / Open Box):
+      la reserva nunca se rechaza por cupo lleno
     - Si está lleno → HTTPException 400
     - Si hay cupo → Crea reserva e INCREMENTA asistentes_confirmados
 
@@ -142,6 +144,12 @@ def crear_reserva(
     # UPDATE condicional: solo incrementa si hay cupo (WHERE asistentes < cupo).
     # Elimina la race condition check-then-use: si la clase se llenó entre la
     # lectura del objeto y este UPDATE, rowcount=0 -> 400 (sin overbooking).
+    # ── Migración 066: `cupo_maximo IS NULL` = SIN TOPE ─────────────────────
+    # Musculación y Open Box no tienen capacidad que reservar: el `OR` deja
+    # pasar la reserva sin mirar el aforo (el contador `asistentes_confirmados`
+    # se sigue incrementando: es el dato que muestran los KPIs de esas salas).
+    # Sin el `OR`, comparar contra NULL daría NULL -> rowcount=0 -> "Clase sin
+    # cupos disponibles" en una sala de acceso libre.
     # ── FIX cierre (test de esfuerzo): wrapper de errores de BD ──
     # Bajo contención extrema el UPDATE condicional puede fallar con deadlock
     # o timeout; se devuelve 503 "Alta demanda" en vez de un 500 genérico.
@@ -149,7 +157,10 @@ def crear_reserva(
         result = db.execute(
             update(Clase)
             .where(Clase.id == clase.id)
-            .where(Clase.asistentes_confirmados < Clase.cupo_maximo)
+            .where(or_(
+                Clase.cupo_maximo.is_(None),
+                Clase.asistentes_confirmados < Clase.cupo_maximo,
+            ))
             .values(asistentes_confirmados=Clase.asistentes_confirmados + 1)
         )
     except DBAPIError:
@@ -462,16 +473,23 @@ def listar_reservas_por_clase(
                 tenant_id=tenant_id,
             )
 
-    reservas = db.query(Reserva).filter(
+    # ── Sin N+1: el nombre del alumno viaja en la MISMA consulta ─────────────
+    # ANTES: 1 SELECT de `reservas` + 1 SELECT de `usuarios` por CADA reserva
+    # (una clase de 25 alumnos = 26 consultas; el panel la llama por día y por
+    # clase, así que el costo crecía con el aforo).
+    # AHORA: 1 SELECT con LEFT JOIN a `usuarios` por (id, tenant_id) — el MISMO
+    # filtro de tenant de antes, así que un alumno de otro box sigue cayendo en
+    # el fallback `Alumno #<id>` en vez de mostrar su nombre.
+    filas = db.query(Reserva, Usuario.nombre).outerjoin(
+        Usuario,
+        and_(Usuario.id == Reserva.alumno_id, Usuario.tenant_id == tenant_id),
+    ).filter(
         Reserva.clase_id == clase_id,
-        Reserva.tenant_id == tenant_id
-    ).order_by(Reserva.created_at.asc()).all()
+        Reserva.tenant_id == tenant_id,
+    ).order_by(Reserva.created_at.asc(), Reserva.id.asc()).all()
 
-    # JOIN con usuarios para obtener nombres reales
     result = []
-    for r in reservas:
-        alumno = db.query(Usuario).filter(
-            Usuario.id == r.alumno_id, Usuario.tenant_id == tenant_id).first()
+    for r, alumno_nombre in filas:
         result.append({
             "id": r.id,
             "tenant_id": r.tenant_id,
@@ -481,7 +499,7 @@ def listar_reservas_por_clase(
             "activa": not es_cancelada(r.estado),
             "tokens_gastados": r.tokens_gastados,
             "fecha_reserva": str(r.fecha_reserva) if r.fecha_reserva else None,
-            "alumno_nombre": alumno.nombre if alumno else f"Alumno #{r.alumno_id}",
+            "alumno_nombre": alumno_nombre or f"Alumno #{r.alumno_id}",
         })
     return result
 

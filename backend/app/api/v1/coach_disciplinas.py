@@ -13,6 +13,8 @@ from app.schemas.coach_disciplina import (
     CoachDisciplinaCreate, CoachDisciplinaUpdate, CoachDisciplinaResponse, CoachDisciplinaListItem, CoachDisciplinaReplaceRequest
 )
 from app.core.dependencies import get_current_admin, get_current_coach
+# Auditoría 1.1: un choque de UNIQUE/FK/CHECK es un 400/409 del cliente, no un 500.
+from app.utils.db_commit import commit_o_4xx
 
 router = APIRouter()
 
@@ -68,7 +70,12 @@ def crear_coach_disciplina(
     )
 
     db.add(db_coach_disciplina)
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo asignar la disciplina al coach: revisa el coach y la disciplina.",
+        unico="Este coach ya está asignado a esta disciplina.",
+        contexto="crear_coach_disciplina",
+    )
     db.refresh(db_coach_disciplina)
 
     return db_coach_disciplina
@@ -188,7 +195,12 @@ def reemplazar_coach_disciplinas(
             )
             db.add(nueva)
 
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudieron reemplazar las disciplinas del coach. Intenta de nuevo.",
+        unico="Hay una asignación duplicada para este coach y disciplina.",
+        contexto="reemplazar_coach_disciplinas",
+    )
 
     # Retornar asignaciones activas resultantes
     resultado = db.query(CoachDisciplina).filter(
@@ -225,7 +237,12 @@ def actualizar_coach_disciplina(
     for field, value in update_data.items():
         setattr(coach_disciplina, field, value)
 
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo actualizar la asignación coach-disciplina.",
+        unico="Ya existe otra asignación para ese coach y disciplina.",
+        contexto="actualizar_coach_disciplina",
+    )
     db.refresh(coach_disciplina)
 
     return coach_disciplina
@@ -252,6 +269,10 @@ def eliminar_coach_disciplina(
         )
 
     coach_disciplina.activo = False
-    db.commit()
+    commit_o_4xx(
+        db,
+        "No se pudo desactivar la asignación coach-disciplina.",
+        contexto="eliminar_coach_disciplina",
+    )
 
     return None
