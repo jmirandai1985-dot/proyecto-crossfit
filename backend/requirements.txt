@@ -55,6 +55,12 @@ boto3==1.43.108
 # Seguridad: rate limiting (login, registro, cambios críticos)
 slowapi==0.1.10
 
+# Pagos online (Checkout Pro): SDK oficial de Mercado Pago. Se importa PEREZOSAMENTE
+# (sólo con MERCADOPAGO_HABILITADO=true), así que dev/TEST no lo cargan al arrancar.
+# Requiere Python >= 3.10 (el proyecto corre 3.12) y arrastra `requests` (ya pinneado
+# arriba): no agrega transitivas nuevas.
+mercadopago==3.6.0
+
 # Monitoreo de errores (Sentry) — los errores van al log local y a Sentry Cloud
 sentry-sdk==2.68.0
 

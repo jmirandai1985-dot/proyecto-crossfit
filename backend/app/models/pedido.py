@@ -27,6 +27,14 @@ class Pedido(Base):
     # pendiente, validado, entregado
     estado = Column(String(20), nullable=False, default="pendiente")
     voucher_url = Column(String(500), nullable=True)
+    # ── Pago online (migración 067) ──────────────────────────────────────────
+    # `origen_pago='mercadopago'` ⇒ el pedido se creó desde el checkout y se
+    # valida solo cuando el webhook confirma el cobro (sin comprobante que
+    # revisar). `pago_id` traza la fila de `pagos` que lo cobró.
+    origen_pago = Column(String(12), nullable=False, server_default="manual",
+                         default="manual")
+    pago_id = Column(Integer, ForeignKey(
+        "pagos.id", ondelete="SET NULL"), nullable=True)
     # ── Código de retiro (Bazar, migración 044) ──────────────────────────────
     # Se genera UNA vez al VALIDAR el pedido (`services/codigos_retiro.py`) y el
     # alumno lo muestra en el mesón para retirar. Único POR BOX (índice único
