@@ -1,5 +1,14 @@
 # `n8n/workflows/` — Workflows exportados (⚠️ leer antes de importar)
 
+> **🛑 2026-10-28 — n8n queda DADO DE BAJA: no reactivar, no importar, no publicar.**
+> Todo lo que la instancia hacía tiene hoy un reemplazo dentro del repo
+> (APScheduler + Cron Jobs de Render). La tabla de equivalencia workflow → qué lo
+> reemplaza está en `docs/RETENCION_DATOS_Y_N8N.md` §2.2, junto con el motivo por el
+> que este directorio sigue vacío (los JSON se borraron en `017bd65` y la instancia
+> no está accesible para exportarlos).
+> Este README queda sólo como historia del formato y del incidente de la API key.
+
+
 Estos JSON son **copias de referencia** de workflows que viven en la **instancia de n8n**.
 El repo **no** es la fuente de verdad de la automatización: la instancia lo es.
 

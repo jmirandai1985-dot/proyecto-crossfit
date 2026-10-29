@@ -75,6 +75,10 @@ class AvisoMarketingOut(BaseModel):
     # por volumen que anuncia la tarjeta. NULL en el resto de los tipos y en una
     # Promoción escrita a mano en la pantalla Marketing.
     promocion_id: Optional[int] = None
+    # Sólo la tarjeta de la ESCALERA de tramos (migración 064). No cuelga de
+    # `promociones_referidos`: es una tarjeta por box que anuncia la escalera
+    # completa y la pantalla de tramos la usa para el chip "Publicada".
+    escalera_tramos: bool = False
     creado_en: datetime
     # Derivado (no es columna): ¿la ventana contiene AHORA, hora de Chile? Lo usa el
     # chip "Vigente/Vencido" del admin; el carrusel del alumno sólo recibe vigentes.

@@ -141,7 +141,7 @@ LATIDO_MIN = 5
 IDS_NEGOCIO = ("generar_clases_diarias", "alerta_urgencia_renovacion",
                "alerta_renovacion", "alerta_inactividad", "alerta_ultimo_credito",
                "alerta_sin_creditos", "cierre_mes", "reentrenar_churn",
-               "detectar_promociones_referidos")
+               "detectar_promociones_referidos", "evaluar_tramos_referidos")
 
 # Tenant del reentrenamiento de ML: hoy hay UN solo box, igual que
 # `app/api/v1/ml.py` y `app/api/v1/kpis_populate.py` (TENANT_ID = 1).
@@ -200,6 +200,17 @@ def _programar_jobs_de_negocio():
                CronTrigger(hour=23, minute=55, timezone=tz),
                "detectar_promociones_referidos",
                "Detecta umbrales de promociones de referidos y avisa al admin",
+               ahora)
+    # ── Tramos del invitador por CICLO (Parte C, 00:20 CLT) ──
+    # 20 minutos después del cierre de mes (00:05) y de la generación de clases
+    # (00:05): no se pisan. Evalúa los ciclos vencidos, crea el premio del tramo
+    # más alto y aplica los premios que quedaron esperando un plan. Los dos
+    # motores NO conviven: el box con `motor_premios='tramos'` queda fuera de la
+    # detección por mes calendario y viceversa.
+    _programar(job_evaluar_tramos_referidos,
+               CronTrigger(hour=0, minute=20, timezone=tz),
+               "evaluar_tramos_referidos",
+               "Evalúa ciclos cerrados de referidos y aplica premios pendientes",
                ahora)
     return list(IDS_NEGOCIO)
 
@@ -662,6 +673,66 @@ def _detectar_promociones_referidos_impl():
         db.rollback()
         logger.error(
             f"❌ [Scheduler] no se pudieron detectar promociones de referidos: "
+            f"{e}", exc_info=True)
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(e)
+        except Exception:
+            pass
+        return None
+    finally:
+        db.close()
+
+
+async def job_evaluar_tramos_referidos():
+    """Job diario 00:20 CLT: evalúa los ciclos cerrados y aplica premios.
+
+    Dos tareas en la misma corrida:
+      1. evaluar los ciclos de facturación que vencieron y crear el premio del
+         tramo MÁS ALTO alcanzado (idempotente por `UNIQUE (usuario, ciclo)`);
+      2. aplicar los premios que se confirmaron mientras el alumno no tenía plan
+         (`aplicado_en = NULL`), ahora que puede tenerlo.
+
+    El trabajo es bloqueante (consulta suscripciones/referidos y escribe
+    premios), así que corre en un hilo aparte igual que las alertas. El lock
+    (job, día) evita que dos instancias evalúen el mismo ciclo.
+    """
+    from app.services.scheduler_lock import lock_de_job
+    with lock_de_job("evaluar_tramos_referidos") as puede:
+        if not puede:
+            logger.info(
+                "🔒 [Scheduler] evaluar_tramos_referidos ya lo tomó otra "
+                "instancia hoy; se omite")
+            return
+        return await to_thread.run_sync(_evaluar_tramos_referidos_impl)
+
+
+def _evaluar_tramos_referidos_impl():
+    """Cuerpo síncrono del job: evalúa, aplica pendientes y avisa (best-effort)."""
+    from app.db.database import SessionLocal
+    from app.services import tramos_referidos_service as svc
+
+    db = SessionLocal()
+    try:
+        resultado = svc.evaluar_y_notificar(db)
+        aplicados = svc.aplicar_pendientes(db)
+        db.commit()
+        if resultado["nuevos"]:
+            logger.info(
+                "🎁 [Scheduler] tramos de referidos: "
+                f"{resultado['nuevos']} premio(s) nuevo(s), "
+                f"{resultado['avisos_campana']} aviso(s) de campana, "
+                f"{resultado['correos']} correo(s), "
+                f"{aplicados['total']} premio(s) pendiente(s) aplicado(s)")
+        else:
+            logger.info(
+                "✅ [Scheduler] tramos de referidos: sin ciclos nuevos"
+                f" ({aplicados['total']} premio(s) pendiente(s) aplicado(s))")
+        return {"evaluacion": resultado, "aplicados": aplicados}
+    except Exception as e:
+        db.rollback()
+        logger.error(
+            "❌ [Scheduler] no se pudieron evaluar los tramos de referidos: "
             f"{e}", exc_info=True)
         try:
             import sentry_sdk

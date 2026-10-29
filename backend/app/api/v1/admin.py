@@ -21,7 +21,7 @@ from app.models.disciplina import Disciplina
 # el badge dijera 3 y la lista mostrara 2, el admin dejaría de confiar en el badge.
 from app.models.pedido import Pedido
 from app.models.solicitud_plan import SolicitudPlan
-from app.models.referidos import (EstadoPromocionDetectada,
+from app.models.referidos import (EstadoPromocionDetectada, PremioTramoCiclo,
                                   PromocionReferidos,
                                   PromocionReferidosDetectada)
 from app.utils.santiago import SANTIAGO, fecha_chile, hoy_santiago
@@ -66,7 +66,8 @@ def resumen_pendientes(
       * `solicitudes` → solicitudes de plan esperando revisión (`pending`);
       * `pedidos`     → pedidos del Bazar con comprobante sin validar;
       * `registros`   → alumnos en `pendiente_activacion`;
-      * `premios`     → umbrales de referidos por confirmar (premio ganado).
+      * `premios`     → premios de referidos por confirmar (premio ganado):
+                        umbrales de la Fase 5 **y** tramos por ciclo (064).
 
     `total` es la suma: lo que el menú lateral muestra junto a "Pendientes".
     """
@@ -100,11 +101,23 @@ def resumen_pendientes(
         .scalar() or 0
     )
 
+    # Tramos del invitador (Parte C): el admin ve UN solo contador de premios.
+    # La pestaña Premios muestra las dos fuentes y el badge no puede mentir.
+    premios_tramos = (
+        db.query(func.count(PremioTramoCiclo.id))
+        .filter(
+            PremioTramoCiclo.tenant_id == tenant_id,
+            PremioTramoCiclo.estado
+            == EstadoPromocionDetectada.pendiente_confirmacion,
+        )
+        .scalar() or 0
+    )
+
     contadores = {
         "solicitudes": int(solicitudes),
         "pedidos": int(pedidos),
         "registros": int(registros),
-        "premios": int(premios),
+        "premios": int(premios) + int(premios_tramos),
     }
     return {**contadores, "total": sum(contadores.values())}
 

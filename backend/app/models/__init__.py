@@ -22,6 +22,9 @@ from app.models.horario_coach import HorarioCoach
 from app.models.pedido import Pedido
 from app.models.producto import Producto, ProductoImagen
 from app.models.reserva import Reserva
+from app.models.archivo_retencion import (
+    AsistenciaArchivo, ReservaArchivo, RetencionBloqueo,
+)
 from app.models.retencion import RetencionAlumno
 from app.models.solicitud_plan import SolicitudPlan
 from app.models.asistencia import Asistencia
@@ -33,9 +36,10 @@ from app.models.aviso_marketing import AvisoMarketing
 from app.models.referidos import (
     CodigoReferido, ConfiguracionReferidos, CreditoReferido,
     EstadoCreditoReferido, EstadoInvitacion, EstadoPromocionDetectada,
-    EstadoReferido, Invitacion, OrigenInvitacion, PeriodoPromocion,
-    PromocionReferidos, PromocionReferidosDetectada, ReferidoAplicado,
-    TarjetaReferidos, TipoPremio,
+    EstadoReferido, Invitacion, MotorPremios, OrigenInvitacion,
+    PeriodoPromocion, PremioTramoCiclo, PromocionReferidos,
+    PromocionReferidosDetectada, ReferidoAplicado, TarjetaReferidos,
+    TipoPremio, TramoReferido,
 )
 
 __all__ = ["Tenant", "Usuario", "RolUsuario",
@@ -46,6 +50,7 @@ __all__ = ["Tenant", "Usuario", "RolUsuario",
            "Clase", "CoachDisciplina", "Disciplina", "HistorialRM",
            "HorarioBase", "HorarioCoach", "Pedido", "Producto",
            "ProductoImagen", "Reserva",
+           "AsistenciaArchivo", "ReservaArchivo", "RetencionBloqueo",
            "RetencionAlumno", "SolicitudPlan", "Asistencia", "HitoAlumno",
            "Auditoria", "PasswordResetToken", "Beneficio", "EstadoBeneficio",
            "TipoBeneficio", "AvisoMarketing",
@@ -54,4 +59,5 @@ __all__ = ["Tenant", "Usuario", "RolUsuario",
            "CreditoReferido", "EstadoCreditoReferido",
            "ConfiguracionReferidos", "PromocionReferidos",
            "PeriodoPromocion", "TipoPremio", "PromocionReferidosDetectada",
-           "EstadoPromocionDetectada", "TarjetaReferidos"]
+           "EstadoPromocionDetectada", "TarjetaReferidos",
+           "MotorPremios", "TramoReferido", "PremioTramoCiclo"]

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import GestionPromocionesReferidos from './GestionPromocionesReferidos';
+import GestionTramosReferidos from './GestionTramosReferidos';
 import PendientesPromocionesReferidos from './PendientesPromocionesReferidos';
 import TarjetaReferidosMarketing from './TarjetaReferidosMarketing';
 import {
@@ -256,6 +257,10 @@ const ConfiguracionReferidos = () => {
             </div>
 
             <GestionPromocionesReferidos />
+            {/* Parte C: escalera por ciclo. El motor (`motor_premios`) decide cuál
+                de los dos paga; el backend se salta el box del otro motor, así que
+                las dos pantallas pueden convivir sin duplicar premios. */}
+            <GestionTramosReferidos />
             <PendientesPromocionesReferidos />
             <TarjetaReferidosMarketing />
         </div>

@@ -1015,3 +1015,53 @@ Y los dos smoke tests, ahora sí:
 - Falta la corrida en Render: `proyecto-crossfit` con `DRY_RUN=0` (objeto + tamaño + timestamp en R2) y
   `box-crossfit-restore-drill` una vez.
 
+
+
+## D.6 Parte C — Tramos del invitador (implementado en TEST, 2026-10-28)
+
+Motor nuevo de premios del INVITADOR por ciclo de facturación, con exclusividad
+(un solo premio: el escalón más alto). Diseño y decisiones:
+`docs/TRAMOS_REFERIDOS_DISENO.md` (§9 cerradas, §10 archivos).
+
+| Pieza | Dónde |
+|---|---|
+| Migración `064_tramos_referido_ciclo` (aplicada en TEST: `064 (head)`) | `backend/alembic/versions/` |
+| `tramos_referido`, `premios_tramo_ciclo`, `configuracion_referidos.motor_premios`, `creditos_referido.premio_tramo_ciclo_id`, `avisos_marketing.escalera_tramos` | migración 064 |
+| Servicio del motor + job 00:20 CLT (`evaluar_tramos_referidos`) | `backend/app/services/tramos_referidos_service.py`, `scheduler.py` |
+| APIs (`/referidos/tramos*`, `/referidos/mi-progreso`) | `backend/app/api/v1/referidos.py` |
+| Pantalla admin + cola de premios + "Tu ciclo" | `frontend/src/components/GestionTramosReferidos.jsx`, `PendientesPromocionesReferidos.jsx`, `pages/alumno/InvitaYGana.jsx` |
+
+**Exclusividad de motores:** `detectar_promociones` (Fase 5) excluye los boxes con
+`motor_premios = 'tramos'` y `evaluar_ciclos` sólo mira los que lo tienen. El default
+de la migración es `'promociones'`: el deploy **no** cambia el comportamiento del box
+hasta que el admin encienda el motor desde la pantalla.
+
+**Decisiones de negocio aplicadas** (además de las del diseño): el premio del tramo
+**no se acumula** con el crédito individual del referido (cada crédito se consume en
+una compra distinta; dos premios del 15 % no se suman en 30 %) y la tarjeta del
+carrusel publica la escalera COMPLETA (el backend agrega los escalones activos).
+
+### Pruebas
+
+| Suite | Resultado |
+|---|---|
+| `tests/test_tramos_referidos_unit.py` | **29 passed** |
+| `tests/test_promociones_referidos_unit.py` (regresión del refactor de validación) | **24 passed** |
+| `tests/test_tramos_referidos_integracion.py` (box de prueba propio, creado y borrado en TEST) | **9 passed** (3 min 56 s) |
+| `frontend`: `vite build` | **OK** (34,3 s) |
+
+El test de integración usa un **tenant nuevo** por corrida: no toca la
+configuración, la escalera ni los premios del box 1, y el `DELETE FROM tenants`
+final se lleva todo por CASCADE.
+
+### Residual de la Parte C
+
+- El **primer disparo del job en PROD** revisa los ciclos cerrados de los últimos
+  7 días: puede crear filas `pendiente_confirmacion` de ciclos anteriores a la
+  activación. No paga nada solo (el admin confirma), pero hay que avisarle al box.
+- `scripts/importar_promociones_a_tramos.py` (copiar promociones viejas a la
+  escalera) **no** se creó: la conversión es manual y sólo cuando el admin apruebe
+  su escalera.
+- B8 (retención) y B9 (n8n) quedan **diagnosticados y con plan**, sin implementar:
+  ver `docs/RETENCION_DATOS_Y_N8N.md` (hay una decisión pendiente y un export que
+  no se puede obtener desde este equipo).

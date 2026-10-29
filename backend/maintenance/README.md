@@ -1879,3 +1879,151 @@ horario cerca de la medianoche chilena cambia de DÍA con el horario de verano (
 fecha local es la misma con o sin DST, así que el "día 1 / 15 / último" nunca se corre de
 día. El KPI diario sale igual (`fecha=ayer`): a esa hora el día anterior ya cerró (en n8n
 corría 4 h antes, con el mismo resultado).
+
+## Fase 12 — Retención de datos (B8): `retencion_cloud` (2026-10-29)
+
+Implementa el plan de `docs/RETENCION_DATOS_Y_N8N.md` §1. Un módulo, **tres trabajos** y un
+proceso por trabajo (nunca dos en la misma corrida):
+
+| Trabajo | Regla | Qué hace | Tablas |
+|---|---|---|---|
+| `archivar` | > **5 años** | Copia a `*_archivo`, respalda en R2 y **después** borra del origen | `asistencias`, `reservas` |
+| `auditoria` | > **2 años** | `DELETE` en lotes (no se archiva) | `auditoria` |
+| `anonimizar` | **12 meses** de `fecha_baja` | Reemplaza nombre/correo/teléfono/RUT y sella `anonimizado_en` | `usuarios` |
+
+Migración: `065_retencion_datos` (crea `asistencias_archivo`, `reservas_archivo`,
+`retencion_bloqueos` y `usuarios.anonimizado_en` + índice parcial).
+
+### Por qué `psql` y no la app (misma decisión D1 que la Fase 6)
+
+`backend/Dockerfile.cron` copia **sólo** `maintenance/` + `shared/`: no hay `app/`, ni
+SQLAlchemy, ni el modelo de settings. Todo el SQL va por `psql` con `ON_ERROR_STOP=1`, en
+procesos con **lista de argumentos** (sin `shell=True`), y los números que llegan al SQL se
+validan antes como enteros en rango (`_entero`). El bloqueo tampoco puede ser
+`pg_try_advisory_lock` (no hay conexión larga): vive en la tabla `retencion_bloqueos`
+(una fila por trabajo, con `token` y `expira_en`; se toma con
+`INSERT … ON CONFLICT (job) DO UPDATE … WHERE expira_en < now() RETURNING token` y se libera
+sólo si el token coincide). Un doble disparo no corre dos veces; si un run muere sin liberar,
+el siguiente lo toma al vencer (`RETENCION_LOCK_HORAS`).
+
+### El orden que no se puede invertir (`archivar`)
+
+1. `COPY` de las filas viejas a la tabla de archivo (`ON CONFLICT (id) DO NOTHING`, idempotente).
+2. `md5` del contenido archivado == `md5` del origen **antes** de borrar (misma zona horaria:
+   todas las sesiones usan `SET TIME ZONE 'UTC'`).
+3. Export a `CSV.gz` (streaming desde `psql`), sha256 del archivo.
+4. Upload a R2 y **verificación del objeto** (tamaño + sha256 del que quedó guardado), con el
+   mismo `cliente_s3` de `backup_cloud`.
+5. `DELETE` del origen **en una transacción** que vuelve a verificar los conteos y el `md5`.
+
+Cualquier falla en 1-4 deja las filas en el origen y el run sale rojo (exit 4): el borrado
+nunca es la primera escritura. Con `RETENCION_RESPALDO_LOCAL` el paso 4 escribe en disco (sólo
+para TEST, sin R2).
+
+
+### Guardas (todas antes de tocar nada)
+
+| Guarda | Qué rechaza | Exit |
+|---|---|---|
+| `ENVIRONMENT` | ausente, o distinto de `test`/`production` | 2 |
+| `RETENCION_DB_URL` | vacía, sin `postgresql://`, `-pooler`, endpoint **retirado**, rama que no calza con el entorno; en PROD, usuario ≠ `retencion_rw` | 2 |
+| `RETENCION_TEST_OK` | `ENVIRONMENT=test` + `DRY_RUN=0` sin `RETENCION_TEST_OK=1` | 2 |
+| `ANONIMIZACION_PEPPER` | ausente o < 16 caracteres (sólo `anonimizar`) | 2 |
+| R2 / respaldo local | `archivar` sin R2 y sin `RETENCION_RESPALDO_LOCAL` | 2 |
+| Esquema | falta la migración 065 (se chequea con `to_regclass`) | 3 |
+| Volumen | `MAX_ARCHIVAR` (20 000), `MAX_BORRAR_AUDITORIA` (100 000), `MAX_ANONIMIZAR` (1 000) por corrida | 5 |
+
+`DRY_RUN` tiene default **`1`** (fail-closed: sin la variable no escribe), mismo criterio que
+`mantenimiento_cloud`. La lista de ramas TEST/PROD está **copiada** dentro del módulo (el
+contenedor no tiene `app/core/config.py`) y `tests/test_retencion_unit.py` compara las tuplas
+contra `app.core.config` parseándolo con `ast`: una rama nueva rompe el test en vez de romper
+el job.
+
+### Exit codes (no se solapan con los otros jobs)
+
+`0` OK · `2` configuración · `3` lectura · `4` respaldo · `5` guarda de volumen · `6` escritura ·
+`7` verificación posterior · (excepción inesperada ⇒ `3`).
+
+Correo (`alertas.enviar_email`) **sólo** si el run falló o si movió/purgó/anonimizó algo —con
+`DRY_RUN`, si *habría* movido algo—. Un run sin trabajo que hacer deja sólo log. Si el correo
+falla, el exit code no cambia.
+
+### Variables
+
+| Variable | Default | Para qué |
+|---|---|---|
+| `RETENCION_DB_URL` | — (obligatoria) | Conexión **directa** a la base (PROD: rol `retencion_rw`) |
+| `ENVIRONMENT` | — (obligatoria) | `test` / `production`; valida a qué base apunta la URL |
+| `DRY_RUN` | `1` | `1` = cuenta y avisa, no escribe |
+| `RETENCION_TEST_OK` | — | `1` habilita `DRY_RUN=0` contra TEST |
+| `ANONIMIZACION_PEPPER` | — | ≥ 16 caracteres; sal del `sha256` del RUT anónimo |
+| `RETENCION_RESPALDO_LOCAL` | — | Directorio local para el CSV.gz (alternativa a R2, sólo TEST) |
+| `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | — | Respaldo del archivo (`archivar` sin respaldo local) |
+| `ANIOS_RETENCION_ARCHIVO` | `5` | Corte del archivado (1..50) |
+| `ANIOS_RETENCION_AUDITORIA` | `2` | Corte de la purga de auditoría (1..50) |
+| `MESES_RETENCION_ANONIMIZAR` | `12` | Corte de la anonimización (1..120) |
+| `TAM_LOTE` | `5000` | Filas por lote (copiar y borrar) |
+| `MAX_ARCHIVAR` | `20000` | Tope de filas archivadas por corrida |
+| `MAX_BORRAR_AUDITORIA` | `100000` | Tope de filas purgadas por corrida |
+| `MAX_ANONIMIZAR` | `1000` | Tope de usuarios anonimizados por corrida |
+| `RETENCION_LOCK_HORAS` | `12` | Vencimiento del bloqueo (1..72) |
+| `RETENCION_PREFIJO` | `retencion/` | Prefijo de los objetos en R2 |
+
+
+### Cómo se corre (TEST: es lo único que se corre hoy)
+
+```powershell
+cd backend
+$env:ENVIRONMENT="test"
+$env:RETENCION_DB_URL=$env:DATABASE_URL        # rama TEST, directa (sin -pooler)
+$env:DRY_RUN="1"                               # default; explícito para que se lea en el log
+$env:RETENCION_RESPALDO_LOCAL="$env:TEMP\retencion"
+$env:ANONIMIZACION_PEPPER="..."                # ≥ 16 caracteres (sólo anonimizar)
+py -3.12 -m maintenance.retencion_cloud archivar
+py -3.12 -m maintenance.retencion_cloud auditoria
+py -3.12 -m maintenance.retencion_cloud anonimizar
+```
+
+Escribir de verdad en TEST exige **las dos**: `DRY_RUN=0` **y** `RETENCION_TEST_OK=1`. Antes:
+`alembic upgrade head` (migración 065). En Render el bloque *# 6-8)* de `render.yaml` está
+**comentado a propósito** (crear el Cron Job cuesta US$1/mes y arranca solo): el procedimiento
+de alta está en `docs/CRON_JOBS_RENDER.md` §8.3.
+
+En el contenedor local, el `crontab` ya tiene las 3 líneas (día 1: `archivar` 04:30 y
+`auditoria` 05:30; día 2: `anonimizar` 04:30, hora CLT), pero **sin `DRY_RUN=0` en el entorno
+hacen exactamente lo mismo que a mano: contar**.
+
+### Qué NO hace (a propósito)
+
+- **No borra `usuarios`**: la anonimización conserva la fila porque las estadísticas (asistencia,
+  churn, KPIs) se calculan sobre ella. El RUT no queda en claro: se reemplaza por
+  `ANON` + 8 caracteres base36 derivados de `sha256(pepper | id | RUT)`.
+- **No archiva `auditoria`**: la auditoría vieja no se consulta; se purga y queda cubierta por el
+  backup diario completo de `backup_cloud`.
+- **No corre nada en PROD**: no existe todavía un Cron Job de retención. El script sale con
+  exit 2 si `ENVIRONMENT` no calza con la URL (rama TEST / PROD / retirada) y en PROD exige el
+  usuario `retencion_rw`.
+- **No re-anonimiza**: la condición es `anonimizado_en IS NULL`, así que es idempotente.
+
+### Tests (sin red, sin psql y sin R2)
+
+`tests/test_retencion_unit.py` (unitario, con `--noconftest`): paridad de las tuplas de ramas con
+`app/core/config.py` (parseado con `ast`), columnas de `TABLAS_ARCHIVO` contra los modelos,
+guardas de configuración, constructores de SQL, orden `copia → CSV → subida → borrado` con un
+`psql` falso, y exit codes / reporte / política de correo.
+`tests/test_retencion_integracion.py` cubre los 3 trabajos con `psql` real contra TEST (escribe
+filas propias y las borra al final; es **opt-in** y sin las variables se salta solo):
+
+```powershell
+$env:ENVIRONMENT='test'; $env:RETENCION_INTEGRACION='1'
+py -3.12 -m pytest tests/test_retencion_integracion.py -q --noconftest   # 9 passed (~3 min)
+```
+
+Qué prueba cada una: `archivar` en `DRY_RUN` (no toca nada) y real (copia a `*_archivo`, respalda
+en `RETENCION_RESPALDO_LOCAL` y borra del origen), y que **si el respaldo falla el origen queda
+intacto**; `auditoria` con la guarda de volumen (`GuardaError`, no borra) y con la purga que
+respeta lo nuevo; `anonimizar` (nombre/correo/teléfono/RUT + `anonimizado_en`) y que repetir el
+`UPDATE` sobre la misma fila aborta; el bloqueo por trabajo; y `main()` de punta a punta
+(exit 0 en `DRY_RUN`, exit 2 sin argumentos o con dos).
+
+

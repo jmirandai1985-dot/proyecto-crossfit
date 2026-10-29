@@ -20,3 +20,17 @@ PATH=/usr/local/bin:/usr/bin:/bin
 #
 # Mensual, día 1, 03:00 CLT -> run_monthly.py (todo + integridad + reporte + rotación)
 0 3 1 * * boxapp /app/maintenance/cron_job.sh maintenance.run_monthly >> /app/logs/cron.log 2>&1
+#
+# ── Retención de datos (B8, migración 065) ────────────────────────────────────────────────
+# Un job (y un proceso) por trabajo: `retencion_cloud` exige exactamente un argumento.
+# Contra TEST: `ENVIRONMENT=test` sale del snapshot de arriba, y como `DRY_RUN` NO está en el
+# env del contenedor (se quitó de la imagen a propósito), el script corre con su default
+# `DRY_RUN=1`: cuenta las filas y NO escribe. Para aplicar cambios de verdad en TEST hay que
+# exportar además `RETENCION_TEST_OK=1` y `DRY_RUN=0` (ver docs/CRON_JOBS_RENDER.md, B8).
+# Horas: el archivo se hace después del backup de las 02:30 y antes del uso del box.
+# Archivo (5 años) — día 1, 04:30 CLT.
+30 4 1 * * boxapp /app/maintenance/cron_job.sh maintenance.retencion_cloud archivar >> /app/logs/cron.log 2>&1
+# Auditoría (2 años) — día 1, 05:30 CLT.
+30 5 1 * * boxapp /app/maintenance/cron_job.sh maintenance.retencion_cloud auditoria >> /app/logs/cron.log 2>&1
+# Anonimización de bajas (12 meses) — día 2, 04:30 CLT (irreversible: nunca el mismo día que el archivo).
+30 4 2 * * boxapp /app/maintenance/cron_job.sh maintenance.retencion_cloud anonimizar >> /app/logs/cron.log 2>&1

@@ -58,6 +58,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_admin, get_current_user
@@ -65,29 +66,38 @@ from app.db.database import get_db
 from app.models.aviso_marketing import TIPO_PROMOCION, AvisoMarketing
 from app.models.referidos import (CodigoReferido, ConfiguracionReferidos,
                                   EstadoInvitacion, EstadoPromocionDetectada,
-                                  EstadoReferido, Invitacion,
-                                  OrigenInvitacion, PromocionReferidos,
+                                  EstadoReferido, Invitacion, MotorPremios,
+                                  OrigenInvitacion, PremioTramoCiclo,
+                                  PromocionReferidos,
                                   PromocionReferidosDetectada,
-                                  ReferidoAplicado, TarjetaReferidos)
+                                  ReferidoAplicado, TarjetaReferidos,
+                                  TramoReferido)
 from app.models.usuario import Usuario
 from app.schemas.aviso_marketing import AvisoMarketingOut
 from app.schemas.referidos import (ConfiguracionReferidosOut,
                                    ConfiguracionReferidosUpdate,
-                                   ConfirmarPromocionOut,
+                                   ConfirmarPremioTramoOut,
+                                   ConfirmarPromocionOut, EscaleraTramosOut,
                                    InvitarAlumnoRequest,
                                    InvitacionEnviadaOut, MiCodigoOut,
-                                   MiInvitacionOut, PromocionDetectadaOut,
+                                   MiInvitacionOut, MiProgresoOut,
+                                   MotorPremiosUpdate, PremioTramoOut,
+                                   PromocionDetectadaOut,
                                    PromocionReferidosCreate,
                                    PromocionReferidosOut,
                                    PromocionReferidosUpdate,
                                    PublicarPromocionRequest,
-                                   RechazarPromocionOut, ValidarCodigoOut,
-                                   ValidarCodigoRequest, TarjetaReferidosOut,
+                                   RechazarPremioTramoOut,
+                                   RechazarPromocionOut, TramoReferidoCreate,
+                                   TramoReferidoOut, TramoReferidoUpdate,
+                                   ValidarCodigoOut, ValidarCodigoRequest,
+                                   TarjetaReferidosOut,
                                    TarjetaReferidosUpdate)
 from app.services import avisos_marketing as avisos_svc
 from app.services import promociones_referidos_service as promos_svc
 from app.services import referidos_service as svc
 from app.services import storage
+from app.services import tramos_referidos_service as tramos_svc
 from app.services.email_service import send_invitacion_alumno
 
 router = APIRouter()
@@ -766,3 +776,438 @@ def rechazar_promocion_detectada(
         db.rollback()
         raise HTTPException(status_code=error.status_code,
                             detail=error.mensaje)
+
+
+# ── Parte C: tramos del invitador (escalera por ciclo) ──────────────────────
+# El motor paga al cierre del CICLO de facturación del alumno y UN solo premio
+# (el tramo más alto). El flag `configuracion_referidos.motor_premios` decide
+# cuál de los dos motores evalúa: `tramos` apaga la detección por mes calendario.
+
+def _tramo_del_tenant(db: Session, tenant_id: int,
+                      tramo_id: int) -> TramoReferido:
+    """El escalón del box del token; el de otro box se comporta como 404."""
+    tramo = db.query(TramoReferido).filter(
+        TramoReferido.id == tramo_id,
+        TramoReferido.tenant_id == tenant_id,
+    ).first()
+    if tramo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Tramo no encontrado.")
+    return tramo
+
+
+def _escalera_completa(db: Session, tenant_id: int) -> list[TramoReferido]:
+    """TODOS los escalones del box (también los apagados): es la pantalla admin."""
+    return (db.query(TramoReferido)
+            .filter(TramoReferido.tenant_id == tenant_id)
+            .order_by(TramoReferido.umbral_referidos, TramoReferido.id)
+            .all())
+
+
+def _premios_pendientes_por_tramo(db: Session, tenant_id: int) -> dict:
+    """`{tramo_id: pendientes}` en UNA query (sin N+1 en la lista)."""
+    filas = (
+        db.query(PremioTramoCiclo.tramo_id,
+                 func.count(PremioTramoCiclo.id))
+        .filter(
+            PremioTramoCiclo.tenant_id == tenant_id,
+            PremioTramoCiclo.estado
+            == EstadoPromocionDetectada.pendiente_confirmacion,
+        )
+        .group_by(PremioTramoCiclo.tramo_id)
+        .all()
+    )
+    return {int(tramo_id): int(total) for tramo_id, total in filas
+            if tramo_id is not None}
+
+
+def _serializar_tramo_admin(tramo: TramoReferido,
+                            pendientes: dict) -> dict:
+    datos = tramos_svc.serializar_tramo(tramo)
+    datos["premios_pendientes"] = pendientes.get(int(tramo.id), 0)
+    return datos
+
+
+def _aplicar_datos_tramo(tramo: TramoReferido,
+                         datos: TramoReferidoCreate) -> None:
+    """Copia el cuerpo validado al ORM (crear y editar comparten las reglas)."""
+    tramo.umbral_referidos = datos.umbral_referidos
+    tramo.tipo_premio = datos.tipo_premio
+    tramo.valor_premio = datos.valor_premio
+    tramo.activo = bool(datos.activo)
+
+
+def _texto_con_escalera(texto: str, escalera: list[str]) -> str:
+    """Texto de la tarjeta + la escalera completa, dentro del tope de 1000.
+
+    El pie se genera SIEMPRE desde los tramos activos (decisión 4): la tarjeta
+    no puede quedar anunciando una escalera vieja porque el admin editó el texto
+    a mano.
+    """
+    limpio = (texto or "").strip()
+    if not escalera:
+        return limpio[:1000]
+    pie = "Escalera: " + " · ".join(escalera)
+    combinado = f"{limpio}\n\n{pie}" if limpio else pie
+    return combinado[:1000]
+
+
+@router.get("/tramos", response_model=EscaleraTramosOut)
+def listar_tramos(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """La escalera completa del box + qué motor está activo.
+
+    Incluye los escalones APAGADOS (la pantalla los muestra como historial) y
+    dos ayudas: `escalera` (la frase que lee el alumno) y `advertencias` (saltos
+    raros: un tramo que premia menos que el anterior).
+    """
+    tenant_id = current_user["tenant_id"]
+    tramos = _escalera_completa(db, tenant_id)
+    pendientes = _premios_pendientes_por_tramo(db, tenant_id)
+    aviso = (db.query(AvisoMarketing)
+             .filter(AvisoMarketing.tenant_id == tenant_id,
+                     AvisoMarketing.escalera_tramos.is_(True))
+             .first())
+    return {
+        "motor": tramos_svc.motor_del_tenant(db, tenant_id),
+        "tramos": [_serializar_tramo_admin(tramo, pendientes)
+                   for tramo in tramos],
+        "escalera": tramos_svc.texto_escalera(tramos),
+        "advertencias": tramos_svc.advertencias_escalera(tramos),
+        # La tarjeta del carrusel (064): el chip "Publicada" y el botón
+        # Publicar/Despublicar salen de acá, sin pedir los avisos por separado.
+        "publicada": aviso is not None,
+        "publicada_desde": aviso.vigente_desde if aviso is not None else None,
+        "publicada_hasta": aviso.vigente_hasta if aviso is not None else None,
+        "publicada_titulo": aviso.titulo if aviso is not None else None,
+        "publicada_texto": aviso.texto if aviso is not None else None,
+        "publicada_fijado_arriba": (bool(aviso.fijado_arriba)
+                                    if aviso is not None else False),
+    }
+
+
+@router.post("/tramos", response_model=TramoReferidoOut,
+             status_code=status.HTTP_201_CREATED)
+def crear_tramo(
+    datos: TramoReferidoCreate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Crea un escalón. 409 si el umbral ya existe en el box.
+
+    El valor del premio ya viene validado por Pydantic según el tipo
+    (`mes_gratis` sin valor, `dias_gratis` entero, `descuento_extra` 0-100 %).
+    """
+    tenant_id = current_user["tenant_id"]
+    repetido = db.query(TramoReferido.id).filter(
+        TramoReferido.tenant_id == tenant_id,
+        TramoReferido.umbral_referidos == datos.umbral_referidos,
+    ).first()
+    if repetido is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(f"Ya existe un tramo de {datos.umbral_referidos} "
+                    "referidos: edita ese escalón en vez de crear otro."))
+
+    tramo = TramoReferido(tenant_id=tenant_id)
+    _aplicar_datos_tramo(tramo, datos)
+    db.add(tramo)
+    try:
+        db.commit()
+    except IntegrityError:
+        # Carrera entre dos admins: la UNIQUE (tenant_id, umbral) gana.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ya existe un tramo con ese umbral.")
+    db.refresh(tramo)
+    return _serializar_tramo_admin(tramo, {})
+
+
+@router.put("/tramos/motor", response_model=dict)
+def actualizar_motor_premios(
+    datos: MotorPremiosUpdate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Cambia el motor de premios del box (`promociones` ↔ `tramos`).
+
+    Es el interruptor de la decisión de negocio: con `'tramos'` la detección por
+    mes calendario deja de correr (su job se salta el box) y evalúa la escalera.
+    Los premios YA detectados conservan su snapshot; nada se reescribe.
+
+    Guarda de seguridad: no se puede encender `'tramos'` sin al menos un escalón
+    activo (el box se quedaría sin pagar ningún premio).
+    """
+    tenant_id = current_user["tenant_id"]
+    if datos.motor_premios == MotorPremios.tramos.value:
+        activos = db.query(func.count(TramoReferido.id)).filter(
+            TramoReferido.tenant_id == tenant_id,
+            TramoReferido.activo.is_(True),
+        ).scalar() or 0
+        if int(activos) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=("Carga al menos un tramo ACTIVO antes de encender el "
+                        "motor de tramos: si no, el box dejaría de pagar "
+                        "cualquier premio."))
+
+    config = (db.query(ConfiguracionReferidos)
+              .filter(ConfiguracionReferidos.tenant_id == tenant_id)
+              .first())
+    if config is None:
+        config = ConfiguracionReferidos(
+            tenant_id=tenant_id, motor_premios=datos.motor_premios)
+        db.add(config)
+    else:
+        config.motor_premios = datos.motor_premios
+    db.commit()
+    return {
+        "motor_premios": datos.motor_premios,
+        "mensaje": ("Motor actualizado. Los premios ya detectados conservan "
+                    "su snapshot."),
+    }
+
+
+@router.post("/tramos/publicar", response_model=AvisoMarketingOut,
+             status_code=status.HTTP_200_OK)
+def publicar_escalera(
+    datos: PublicarPromocionRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Publica la ESCALERA completa en "Novedades del box" del Inicio del alumno.
+
+    Decisión de negocio: la tarjeta muestra la escalera entera ("1 = 15 %,
+    2 = 30 %, 3 = mes gratis"), no un mensaje genérico. El texto que escribe el
+    admin se conserva y la escalera se agrega SIEMPRE al final, generada desde
+    los tramos activos: si después cambia un escalón y republica, la tarjeta se
+    actualiza sola.
+
+    Responde 200 (no 201) y EDITA la tarjeta existente: una sola tarjeta de
+    escalera por box (`uq_avisos_marketing_escalera`), así republicar no duplica
+    ni pierde el flyer.
+    """
+    tenant_id = current_user["tenant_id"]
+    activos = [tramo for tramo in _escalera_completa(db, tenant_id)
+               if tramo.activo]
+    if not activos:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=("Carga al menos un tramo activo antes de publicar: la "
+                    "tarjeta anuncia la escalera y hoy está vacía."))
+    escalera = tramos_svc.texto_escalera(activos)
+
+    aviso = (db.query(AvisoMarketing)
+             .filter(AvisoMarketing.tenant_id == tenant_id,
+                     AvisoMarketing.escalera_tramos.is_(True))
+             .first())
+    payload = {
+        "tipo": TIPO_PROMOCION,
+        "titulo": datos.titulo,
+        "texto": _texto_con_escalera(datos.texto, escalera),
+        "nombre_aliado": None,
+        "fecha_evento": None,
+        "vigente_desde": datos.vigente_desde,
+        "vigente_hasta": datos.vigente_hasta,
+        "fijado_arriba": datos.fijado_arriba,
+        # El flyer se sube desde Marketing; republicar NO lo pierde.
+        "imagen_url": aviso.imagen_url if aviso is not None else None,
+        "promocion_id": None,
+        "escalera_tramos": True,
+    }
+    try:
+        if aviso is not None:
+            return avisos_svc.actualizar(db, aviso, payload)
+        return avisos_svc.crear(db, tenant_id, payload,
+                                creado_por=current_user["usuario_id"])
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=" ".join(error.args[0]))
+
+
+@router.delete("/tramos/publicar")
+def despublicar_escalera(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Quita la tarjeta de la escalera del carrusel (los tramos siguen igual)."""
+    tenant_id = current_user["tenant_id"]
+    aviso = (db.query(AvisoMarketing)
+             .filter(AvisoMarketing.tenant_id == tenant_id,
+                     AvisoMarketing.escalera_tramos.is_(True))
+             .first())
+    if aviso is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="La escalera no está publicada.")
+    flyer = avisos_svc.eliminar(db, aviso)
+    if flyer:
+        storage.borrar_publico(flyer)
+    return {"status": "ok"}
+
+
+@router.put("/tramos/{tramo_id}", response_model=TramoReferidoOut)
+def actualizar_tramo(
+    tramo_id: int,
+    datos: TramoReferidoUpdate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Edita un escalón. Los premios YA detectados conservan su snapshot.
+
+    Cambiar el umbral puede chocar con otro escalón del box: se responde 409 en
+    vez de dejar que reviente la UNIQUE.
+    """
+    tenant_id = current_user["tenant_id"]
+    tramo = _tramo_del_tenant(db, tenant_id, tramo_id)
+    if datos.umbral_referidos != tramo.umbral_referidos:
+        repetido = db.query(TramoReferido.id).filter(
+            TramoReferido.tenant_id == tenant_id,
+            TramoReferido.umbral_referidos == datos.umbral_referidos,
+            TramoReferido.id != tramo.id,
+        ).first()
+        if repetido is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(f"Ya existe un tramo de {datos.umbral_referidos} "
+                        "referidos en este box."))
+    _aplicar_datos_tramo(tramo, datos)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ya existe un tramo con ese umbral.")
+    db.refresh(tramo)
+    pendientes = _premios_pendientes_por_tramo(db, tenant_id)
+    return _serializar_tramo_admin(tramo, pendientes)
+
+
+@router.delete("/tramos/{tramo_id}")
+def eliminar_tramo(
+    tramo_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Borra un escalón SIN historial. Si ya generó premios, se apaga.
+
+    Borrarlo con premios dejaría las filas del alumno sin su escalón (el
+    snapshot del premio sobrevive, pero se pierde la traza): el panel ofrece
+    apagarlo (`activo=false`) en ese caso, igual que las promociones de la Fase 5.
+    """
+    tenant_id = current_user["tenant_id"]
+    tramo = _tramo_del_tenant(db, tenant_id, tramo_id)
+    usado = db.query(PremioTramoCiclo.id).filter(
+        PremioTramoCiclo.tramo_id == tramo.id).first()
+    if usado is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=("Este tramo ya generó premios y no se puede borrar: "
+                    "apágalo para conservar el historial."))
+    db.delete(tramo)
+    db.commit()
+    return {"status": "ok", "id": tramo_id}
+
+
+@router.get("/tramos/premios", response_model=list[PremioTramoOut])
+def listar_premios_tramo(
+    estado: str = "pendiente_confirmacion",
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Premios de tramo del box. `estado=todas` incluye el historial."""
+    tenant_id = current_user["tenant_id"]
+    consulta = (
+        db.query(PremioTramoCiclo, Usuario)
+        .join(Usuario, Usuario.id == PremioTramoCiclo.usuario_id)
+        .filter(PremioTramoCiclo.tenant_id == tenant_id)
+    )
+    if estado != "todas":
+        valores = {opcion.value for opcion in EstadoPromocionDetectada}
+        if estado not in valores:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=("Estado inválido. Usa 'pendiente_confirmacion', "
+                        "'confirmado', 'rechazado' o 'todas'."))
+        consulta = consulta.filter(PremioTramoCiclo.estado == estado)
+    filas = consulta.order_by(
+        PremioTramoCiclo.fecha_deteccion.desc(),
+        PremioTramoCiclo.id.desc(),
+    ).all()
+    return [tramos_svc.serializar_premio(premio, alumno)
+            for premio, alumno in filas]
+
+
+@router.post("/tramos/premios/{premio_id}/confirmar",
+             response_model=ConfirmarPremioTramoOut)
+def confirmar_premio_tramo(
+    premio_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Confirma el premio del ciclo y lo APLICA con el premio congelado.
+
+    Si el alumno no tiene plan vigente NO es un error: el premio queda
+    confirmado y pendiente de aplicar (ver `aplicado_en` / `pendiente_de_aplicar`).
+    """
+    try:
+        resultado = tramos_svc.confirmar_premio(
+            db,
+            tenant_id=current_user["tenant_id"],
+            premio_id=premio_id,
+            admin_id=current_user["usuario_id"],
+        )
+        db.commit()
+        return resultado
+    except tramos_svc.ErrorPromocion as error:
+        db.rollback()
+        raise HTTPException(status_code=error.status_code,
+                            detail=error.mensaje)
+
+
+@router.post("/tramos/premios/{premio_id}/rechazar",
+             response_model=RechazarPremioTramoOut)
+def rechazar_premio_tramo(
+    premio_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Rechaza el premio de tramo sin aplicar nada."""
+    try:
+        resultado = tramos_svc.rechazar_premio(
+            db,
+            tenant_id=current_user["tenant_id"],
+            premio_id=premio_id,
+            admin_id=current_user["usuario_id"],
+        )
+        db.commit()
+        return resultado
+    except tramos_svc.ErrorPromocion as error:
+        db.rollback()
+        raise HTTPException(status_code=error.status_code,
+                            detail=error.mensaje)
+
+
+# ── Progreso del alumno en su ciclo ("Tu ciclo" en Invita y Gana) ───────────
+
+@router.get("/mi-progreso", response_model=MiProgresoOut)
+def mi_progreso(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """El alumno ve SU ciclo: cuántos referidos lleva y cuánto le falta.
+
+    No expone datos de otros alumnos: el `usuario_id` sale del token y la
+    respuesta sólo trae la escalera del box (los premios, que son públicos en la
+    pantalla) y sus propios conteos.
+    """
+    _exigir_alumno(current_user)
+    return tramos_svc.progreso_actual(
+        db,
+        tenant_id=current_user["tenant_id"],
+        usuario_id=current_user["usuario_id"],
+    )
+

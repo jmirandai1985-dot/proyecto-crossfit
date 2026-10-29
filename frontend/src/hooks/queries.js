@@ -72,6 +72,12 @@ export const claves = {
     promocionesReferidos: ['referidos', 'promociones'],
     promocionesDetectadas: (estado) =>
         ['referidos', 'promociones-detectadas', estado || 'pendiente_confirmacion'],
+    // Parte C: escalera de tramos por ciclo. La misma familia `['referidos']`
+    // para que un cambio de escalera refresque también la tarjeta del carrusel.
+    tramosReferidos: ['referidos', 'tramos'],
+    premiosTramo: (estado) =>
+        ['referidos', 'tramos', 'premios', estado || 'pendiente_confirmacion'],
+    miProgreso: ['referidos', 'mi-progreso'],
     // ── Pantalla unificada "Pendientes" (Tanda 4) ────────────────────────────
     // UNA llamada (`GET /admin/pendientes/resumen`) alimenta TODOS los badges:
     // pestañas de la pantalla, menú lateral, campana del admin y Dashboard. Por eso
@@ -2145,4 +2151,118 @@ export function useDespublicarPromocionReferidos() {
         },
     });
 }
+
+// ── Parte C: tramos del invitador (escalera por ciclo) ──────────────────────
+// Un cambio en la escalera invalida `['referidos']`: la pantalla del admin, la
+// tarjeta publicada y el bloque "Tu ciclo" del alumno se pintan del mismo backend.
+export function useTramosReferidos() {
+    return useQuery({
+        queryKey: claves.tramosReferidos,
+        queryFn: async () => (await api.get('/api/v1/referidos/tramos')).data,
+        staleTime: 30_000,
+    });
+}
+
+export function useGuardarTramoReferido() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ id, payload }) => (id
+            ? api.put(`/api/v1/referidos/tramos/${id}`, payload)
+            : api.post('/api/v1/referidos/tramos', payload)).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['referidos'] }),
+    });
+}
+
+export function useEliminarTramoReferido() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => api.delete(`/api/v1/referidos/tramos/${id}`)
+            .then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['referidos'] }),
+    });
+}
+
+export function useCambiarMotorPremios() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (motor) => api.put('/api/v1/referidos/tramos/motor',
+            { motor_premios: motor }).then((r) => r.data),
+        // El motor decide qué job evalúa: también mueve el contador de Premios.
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['referidos'] });
+            qc.invalidateQueries({ queryKey: ['admin', 'pendientes'] });
+        },
+    });
+}
+
+export function usePremiosTramo(estado = 'pendiente_confirmacion') {
+    return useQuery({
+        queryKey: claves.premiosTramo(estado),
+        queryFn: async () => (await api.get('/api/v1/referidos/tramos/premios', {
+            params: { estado },
+        })).data,
+        staleTime: 15_000,
+    });
+}
+
+export function useConfirmarPremioTramo() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => api.post(
+            `/api/v1/referidos/tramos/premios/${id}/confirmar`).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['referidos'] });
+            qc.invalidateQueries({ queryKey: ['admin', 'pendientes'] });
+        },
+    });
+}
+
+export function useRechazarPremioTramo() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id) => api.post(
+            `/api/v1/referidos/tramos/premios/${id}/rechazar`).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['referidos'] });
+            qc.invalidateQueries({ queryKey: ['admin', 'pendientes'] });
+        },
+    });
+}
+
+// Publicar la escalera COMPLETA en el carrusel: una sola tarjeta por box, así
+// que republicar edita la misma (backend responde 200, no 201).
+export function usePublicarEscaleraTramos() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) => api.post('/api/v1/referidos/tramos/publicar',
+            payload).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['referidos'] });
+            qc.invalidateQueries({ queryKey: ['marketing'] });
+        },
+    });
+}
+
+export function useDespublicarEscaleraTramos() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: () => api.delete('/api/v1/referidos/tramos/publicar')
+            .then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['referidos'] });
+            qc.invalidateQueries({ queryKey: ['marketing'] });
+        },
+    });
+}
+
+// "Tu ciclo" de Invita y Gana: ciclo en curso, escalón alcanzado y cuánto falta.
+export function useMiProgresoReferidos({ enabled = true } = {}) {
+    return useQuery({
+        queryKey: claves.miProgreso,
+        queryFn: async () => (await api.get('/api/v1/referidos/mi-progreso')).data,
+        enabled,
+        staleTime: 30_000,
+    });
+}
+
 

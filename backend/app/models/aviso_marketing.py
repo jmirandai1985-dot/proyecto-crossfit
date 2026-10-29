@@ -2,7 +2,7 @@
 Modelo SQLAlchemy para la tabla avisos_marketing
 """
 from sqlalchemy import (Boolean, CheckConstraint, Column, Date, ForeignKey,
-                        Index, Integer, String)
+                        Index, Integer, String, text)
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.sql import func
 
@@ -81,6 +81,12 @@ class AvisoMarketing(Base):
     # `promociones_referidos.activo = False`).
     promocion_id = Column(Integer, ForeignKey(
         "promociones_referidos.id", ondelete="CASCADE"), nullable=True)
+    # escalera_tramos (migración 064): la tarjeta que anuncia la ESCALERA de
+    # tramos completa ("1 = 15%, 2 = 30%, 3 = mes gratis"). No usa
+    # `promocion_id` (su FK apunta a `promociones_referidos`), así que lleva su
+    # propio marcador con índice único parcial por box.
+    escalera_tramos = Column(Boolean, nullable=False, server_default="false",
+                             default=False)
     # creado_por: traza de quién publicó el aviso (SET NULL: dar de baja al
     # usuario no borra el aviso).
     creado_por = Column(Integer, ForeignKey(
@@ -108,6 +114,11 @@ class AvisoMarketing(Base):
         # Postgres los NULL no chocan entre sí → no se estorban.
         Index('uq_avisos_marketing_promocion', 'tenant_id', 'promocion_id',
               unique=True),
+        # UNA tarjeta de ESCALERA por box (migración 064). Índice único
+        # PARCIAL: sólo compiten las filas con el marcador encendido, así los
+        # avisos normales (todas con `escalera_tramos = false`) no se estorban.
+        Index('uq_avisos_marketing_escalera', 'tenant_id', unique=True,
+              postgresql_where=text('escalera_tramos')),
     )
 
     def __repr__(self):

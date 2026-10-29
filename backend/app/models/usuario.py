@@ -1,7 +1,8 @@
 ﻿"""
 Modelo SQLAlchemy para la tabla usuarios
 """
-from sqlalchemy import Column, Integer, Float, String, Boolean, Date, ForeignKey, Enum as SQLEnum, SmallInteger
+from sqlalchemy import (Column, Integer, Float, String, Boolean, Date,
+                        ForeignKey, Enum as SQLEnum, SmallInteger, Index, text)
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.sql import func
 import enum
@@ -60,8 +61,23 @@ class Usuario(Base):
     nivel_version = Column(String(10), nullable=True)     # regla usada (anti-staleness)
     # ── Churn / KPIs: fecha en que el alumno se dio de baja (NULL = activo) ──
     fecha_baja = Column(TIMESTAMP(timezone=True), nullable=True)
+    # ── Retención de datos (B8, migración 065) ──────────────────────────────
+    # CUÁNDO se anonimizó la fila (nombre/correo/teléfono/RUT reemplazados por el
+    # Cron Job `retencion_cloud` a los 12 meses de la baja). NULL = todavía no se
+    # anonimizó (incluye a todo el que sigue activo). Es la marca de idempotencia
+    # del job: sin ella cada corrida volvería a reescribir las mismas filas.
+    anonimizado_en = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())
+
+    # ── Índices ─────────────────────────────────────────────────────────────
+    __table_args__ = (
+        # Índice PARCIAL del job de retención (migración 065): barre sólo bajas
+        # sin anonimizar. Declarado acá para que `create_all` de TEST y PROD
+        # coincidan (el nombre es el mismo en los dos lados).
+        Index("ix_usuarios_bajas_por_anonimizar", "fecha_baja",
+              postgresql_where=text("anonimizado_en IS NULL")),
+    )
 
     # Relaciones
     # tenant = relationship("Tenant", back_populates="usuarios")

@@ -169,6 +169,9 @@ def serializar(aviso: AvisoMarketing, producto: Producto | None = None,
         "producto_id": aviso.producto_id,
         # Vínculo con una promoción de Referidos publicada (migración 056).
         "promocion_id": aviso.promocion_id,
+        # Tarjeta de la ESCALERA de tramos (migración 064): se publica una sola
+        # por box y no cuelga de `promociones_referidos`.
+        "escalera_tramos": bool(aviso.escalera_tramos),
         "creado_en": aviso.creado_en,
         # Derivado, para que el admin vea de un vistazo si está al aire hoy.
         "vigente": esta_vigente(aviso.vigente_desde, aviso.vigente_hasta, ahora),
@@ -247,6 +250,8 @@ def crear(db, tenant_id: int, datos: dict,
         # Sólo lo manda el flujo de publicación de Referidos (056); el
         # formulario "Nuevo aviso" nunca lo incluye y queda en None.
         promocion_id=limpio.get("promocion_id"),
+        # Sólo lo manda `POST /referidos/tramos/publicar` (064).
+        escalera_tramos=bool(limpio.get("escalera_tramos", False)),
         creado_por=creado_por,
     )
     db.add(aviso)
@@ -283,6 +288,10 @@ def actualizar(db, aviso: AvisoMarketing, datos: dict) -> dict:
     aviso.vigente_desde = desde
     aviso.vigente_hasta = hasta
     aviso.fijado_arriba = bool(limpio.get("fijado_arriba", False))
+    # La tarjeta de la escalera (064) republica sobre su MISMA fila: el marcador
+    # no puede apagarse por un PUT que no lo mande.
+    aviso.escalera_tramos = bool(limpio.get("escalera_tramos",
+                                            aviso.escalera_tramos))
     db.commit()
     db.refresh(aviso)
     return serializar(aviso)

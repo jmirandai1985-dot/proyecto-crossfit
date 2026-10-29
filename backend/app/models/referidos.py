@@ -21,8 +21,8 @@ nuevo exige migración, no entra como texto libre (mismo criterio que
 """
 import enum
 
-from sqlalchemy import (Boolean, CheckConstraint, Column, ForeignKey, Index,
-                        Integer, Numeric, String, UniqueConstraint,
+from sqlalchemy import (Boolean, CheckConstraint, Column, Date, ForeignKey,
+                        Index, Integer, Numeric, String, UniqueConstraint,
                         Enum as SQLEnum)
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.sql import func
@@ -99,6 +99,22 @@ class EstadoPromocionDetectada(str, enum.Enum):
     pendiente_confirmacion = "pendiente_confirmacion"
     confirmado = "confirmado"
     rechazado = "rechazado"
+
+
+class MotorPremios(str, enum.Enum):
+    """Qué motor evalúa los premios del INVITADOR en el box (migración 064).
+
+    `promociones` = Fase 5, umbral por MES CALENDARIO y umbrales acumulables.
+    `tramos`      = escalera por CICLO de facturación, un solo premio (el más
+                    alto alcanzado).
+
+    Los dos motores NO conviven: si evaluaran a la vez, un alumno con 3
+    referidos cobraría el premio de la promoción **y** el del tramo. El job de
+    cada motor se salta el box cuyo flag no le corresponde.
+    """
+    promociones = "promociones"
+    tramos = "tramos"
+
 
 
 # ── 1. Invitaciones por correo (admin/coach → prospecto) ─────────────────────
@@ -273,6 +289,12 @@ class ConfiguracionReferidos(Base):
         Numeric(5, 2), nullable=False, server_default="0", default=0)
     activo = Column(Boolean, nullable=False, server_default="true",
                     default=True)
+    # Qué motor paga los premios del invitador (migración 064). Default
+    # `promociones` para que el deploy NO cambie el comportamiento del box:
+    # el administrador cambia a `tramos` cuando su escalera está cargada.
+    motor_premios = Column(String(20), nullable=False,
+                           server_default=MotorPremios.promociones.value,
+                           default=MotorPremios.promociones.value)
 
     __table_args__ = (
         UniqueConstraint("tenant_id",
@@ -283,12 +305,16 @@ class ConfiguracionReferidos(Base):
             "AND porcentaje_descuento_invitador >= 0 "
             "AND porcentaje_descuento_invitador <= 100",
             name="ck_configuracion_referidos_porcentajes"),
+        CheckConstraint(
+            "motor_premios IN ('promociones', 'tramos')",
+            name="ck_configuracion_referidos_motor"),
     )
 
     def __repr__(self):
         return (f"<ConfiguracionReferidos(tenant_id={self.tenant_id}, "
                 f"invitado={self.porcentaje_descuento_invitado}, "
                 f"invitador={self.porcentaje_descuento_invitador}, "
+                f"motor='{self.motor_premios}', "
                 f"activo={self.activo})>")
 
 
@@ -433,11 +459,17 @@ class PromocionReferidosDetectada(Base):
 class CreditoReferido(Base):
     """Descuento GANADO por un alumno, consumible en SU próxima compra de plan.
 
-    Tiene DOS orígenes posibles, y exactamente uno debe estar presente:
+    Tiene TRES orígenes posibles, y exactamente uno debe estar presente:
       * `referido_aplicado_id`: premio del invitador al convertir un referido;
       * `promocion_detectada_id`: premio `descuento_extra` de una promoción por
-        volumen que el admin confirmó.
-    Cada origen es UNIQUE: un referido o una detección paga UN solo crédito.
+        volumen que el admin confirmó;
+      * `premio_tramo_ciclo_id` (migración 064): premio `descuento_extra` de un
+        tramo de la escalera al cierre de un ciclo de facturación.
+    Cada origen es UNIQUE: un referido, una detección o un premio de tramo paga
+    UN solo crédito. Los créditos NO se suman entre sí: cada uno se consume en
+    una compra distinta (`referidos_service._credito_pendiente` toma el más
+    antiguo pendiente), o sea que el descuento de un tramo no se acumula con el
+    crédito individual del mismo referido.
 
     El `porcentaje` queda CONGELADO al otorgar el premio: cambiar la
     configuración del box o editar la promoción después no reescribe un premio
@@ -463,6 +495,9 @@ class CreditoReferido(Base):
     # Origen B: la detección confirmada que lo originó (NULL si vino de un referido).
     promocion_detectada_id = Column(Integer, ForeignKey(
         "promociones_referidos_detectadas.id", ondelete="CASCADE"), nullable=True)
+    # Origen C (migración 064): el premio de tramo confirmado que lo originó.
+    premio_tramo_ciclo_id = Column(Integer, ForeignKey(
+        "premios_tramo_ciclo.id", ondelete="CASCADE"), nullable=True)
     # % del descuento, congelado al otorgarlo (0 < porcentaje <= 100).
     porcentaje = Column(Numeric(5, 2), nullable=False)
     estado = Column(SQLEnum(EstadoCreditoReferido,
@@ -483,11 +518,14 @@ class CreditoReferido(Base):
                          name="uq_creditos_referido_referido_aplicado_id"),
         UniqueConstraint("promocion_detectada_id",
                          name="uq_creditos_referido_promocion_detectada_id"),
+        UniqueConstraint("premio_tramo_ciclo_id",
+                         name="uq_creditos_referido_premio_tramo_ciclo_id"),
         CheckConstraint("porcentaje > 0 AND porcentaje <= 100",
                         name="ck_creditos_referido_porcentaje"),
         CheckConstraint(
             "(referido_aplicado_id IS NOT NULL)::int + "
-            "(promocion_detectada_id IS NOT NULL)::int = 1",
+            "(promocion_detectada_id IS NOT NULL)::int + "
+            "(premio_tramo_ciclo_id IS NOT NULL)::int = 1",
             name="ck_creditos_referido_un_origen"),
         Index("ix_creditos_referido_tenant_id", "tenant_id"),
         Index("ix_creditos_referido_usuario_id", "usuario_id"),
@@ -500,4 +538,123 @@ class CreditoReferido(Base):
         return (f"<CreditoReferido(id={self.id}, usuario_id={self.usuario_id}, "
                 f"referido_aplicado_id={self.referido_aplicado_id}, "
                 f"promocion_detectada_id={self.promocion_detectada_id}, "
+                f"premio_tramo_ciclo_id={self.premio_tramo_ciclo_id}, "
                 f"porcentaje={self.porcentaje}, estado='{self.estado}')>")
+
+
+# ── 8. Tramos del invitador (Parte C, migración 064) ────────────────────────
+
+class TramoReferido(Base):
+    """Un escalón de la escalera del box: "N referidos convertidos → premio".
+
+    La escalera completa es el conjunto de filas activas ordenadas por
+    `umbral_referidos`. `UNIQUE (tenant_id, umbral_referidos)` impide dos
+    premios en el MISMO escalón (una escalera no puede ser ambigua); el orden
+    lo da el umbral, no una columna `orden` que pueda desincronizarse.
+
+    El premio se aplica al escalón MÁS ALTO alcanzado, no a todos: la
+    exclusividad la garantiza `premios_tramo_ciclo` (una fila por ciclo).
+
+    `valor_premio` depende del tipo (mismas reglas que `PromocionReferidos`):
+    NULL en `mes_gratis`, días > 0 en `dias_gratis`, porcentaje 0–100 en
+    `descuento_extra`. `activo=False` apaga el escalón sin borrar el historial
+    de premios ya ganados (que conservan su snapshot).
+    """
+    __tablename__ = "tramos_referido"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Integer, ForeignKey(
+        "tenants.id", ondelete="CASCADE"), nullable=False)
+    umbral_referidos = Column(Integer, nullable=False)
+    tipo_premio = Column(SQLEnum(TipoPremio, name="tipo_premio_referido"),
+                         nullable=False)
+    valor_premio = Column(Numeric(10, 2), nullable=True)
+    activo = Column(Boolean, nullable=False, server_default="true",
+                    default=True)
+    creado_en = Column(TIMESTAMP(timezone=True), nullable=False,
+                       server_default=func.now())
+    actualizado_en = Column(TIMESTAMP(timezone=True), nullable=False,
+                            server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        CheckConstraint("umbral_referidos > 0",
+                        name="ck_tramos_referido_umbral"),
+        UniqueConstraint("tenant_id", "umbral_referidos",
+                         name="uq_tramos_referido_tenant_umbral"),
+        Index("ix_tramos_referido_tenant", "tenant_id", "activo"),
+    )
+
+    def __repr__(self):
+        return (f"<TramoReferido(id={self.id}, tenant_id={self.tenant_id}, "
+                f"umbral={self.umbral_referidos}, "
+                f"premio='{self.tipo_premio}', activo={self.activo})>")
+
+
+class PremioTramoCiclo(Base):
+    """Premio GANADO por un alumno al cerrar UN ciclo de facturación.
+
+    Nace al cierre del ciclo si el alumno alcanzó algún escalón: una fila por
+    ciclo, con el escalón MÁS ALTO alcanzado (no uno por escalón). La
+    `UNIQUE (usuario_id, suscripcion_id)` lo garantiza en la base: la detección
+    usa `ON CONFLICT DO NOTHING`, así correr el job dos veces no duplica ni
+    notifica dos veces.
+
+    El premio y la ventana quedan CONGELADOS (`ciclo_inicio`, `ciclo_fin`,
+    `referidos_convertidos`, `umbral_referidos`, `tipo_premio`, `valor_premio`):
+    editar o apagar el escalón después no reescribe un premio ya ganado, igual
+    que en `promociones_referidos_detectadas`.
+
+    `aplicado_en` es la diferencia con la Fase 5: si al confirmar el alumno NO
+    tiene plan vigente, el premio queda `confirmado` con `aplicado_en = NULL` en
+    vez de rechazarse con 409, y el job diario lo aplica cuando vuelva a tener
+    plan. Un premio ganado no se pierde porque el alumno esté entre planes.
+    """
+    __tablename__ = "premios_tramo_ciclo"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Integer, ForeignKey(
+        "tenants.id", ondelete="CASCADE"), nullable=False)
+    usuario_id = Column(Integer, ForeignKey(
+        "usuarios.id", ondelete="CASCADE"), nullable=False)
+    # El escalón que se aplicó (SET NULL si el admin borra la escalera: el
+    # snapshot de abajo conserva lo que el alumno ganó).
+    tramo_id = Column(Integer, ForeignKey(
+        "tramos_referido.id", ondelete="SET NULL"), nullable=True)
+    # El ciclo evaluado (la suscripción que lo define).
+    suscripcion_id = Column(Integer, ForeignKey(
+        "suscripciones.id", ondelete="SET NULL"), nullable=True)
+    ciclo_inicio = Column(Date, nullable=False)
+    ciclo_fin = Column(Date, nullable=False)
+    referidos_convertidos = Column(Integer, nullable=False)
+    # Snapshot del premio (mismo criterio que la Fase 5).
+    umbral_referidos = Column(Integer, nullable=False)
+    tipo_premio = Column(SQLEnum(TipoPremio, name="tipo_premio_referido"),
+                         nullable=False)
+    valor_premio = Column(Numeric(10, 2), nullable=True)
+    estado = Column(SQLEnum(EstadoPromocionDetectada,
+                            name="estado_promocion_detectada"),
+                    nullable=False, server_default="pendiente_confirmacion",
+                    default=EstadoPromocionDetectada.pendiente_confirmacion)
+    fecha_deteccion = Column(TIMESTAMP(timezone=True), nullable=False,
+                             server_default=func.now())
+    fecha_confirmacion = Column(TIMESTAMP(timezone=True), nullable=True)
+    confirmado_por_usuario_id = Column(Integer, ForeignKey(
+        "usuarios.id", ondelete="SET NULL"), nullable=True)
+    aplicado_en = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("usuario_id", "suscripcion_id",
+                         name="uq_premios_tramo_ciclo_ciclo"),
+        CheckConstraint("ciclo_fin > ciclo_inicio",
+                        name="ck_premios_tramo_ciclo_ventana"),
+        CheckConstraint("referidos_convertidos > 0",
+                        name="ck_premios_tramo_ciclo_convertidos"),
+        Index("ix_premios_tramo_ciclo_estado", "estado"),
+        Index("ix_premios_tramo_ciclo_tenant", "tenant_id", "estado"),
+    )
+
+    def __repr__(self):
+        return (f"<PremioTramoCiclo(id={self.id}, usuario_id={self.usuario_id}, "
+                f"umbral={self.umbral_referidos}, "
+                f"convertidos={self.referidos_convertidos}, "
+                f"estado='{self.estado}', aplicado_en={self.aplicado_en})>")

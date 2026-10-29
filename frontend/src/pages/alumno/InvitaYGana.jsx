@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import Layout from '../../components/Layout';
 import BotonVolver from '../../components/BotonVolver';
 import InvitarPorCorreo from '../../components/InvitarPorCorreo';
-import { useMiCodigoReferido } from '../../hooks/queries';
+import { useMiCodigoReferido, useMiProgresoReferidos } from '../../hooks/queries';
 import { copiarAlPortapapeles, textoCompartirReferido } from '../../utils/referidos';
 
 const fechaLarga = (valor) => {
@@ -26,6 +26,9 @@ const fechaLarga = (valor) => {
  */
 const InvitaYGana = () => {
     const { data, isPending, isError, error, refetch } = useMiCodigoReferido();
+    // "Tu ciclo" (Parte C): sólo tiene sentido con la pantalla cargada; si el
+    // endpoint falla, el bloque no se dibuja y el resto de la pantalla sigue igual.
+    const { data: progreso } = useMiProgresoReferidos({ enabled: Boolean(data) });
     const [aviso, setAviso] = useState('');
 
     const codigo = data?.codigo || '';
@@ -178,6 +181,83 @@ const InvitaYGana = () => {
                         {aviso && (
                             <p role="status" className="mt-3 text-sm text-emerald-50">
                                 {aviso}
+                            </p>
+                        )}
+                    </div>
+                )}
+
+                {/* ── "Tu ciclo" (Parte C): progreso por CICLO de facturación ── */}
+                {progreso && (progreso.ciclo || (progreso.escalera ?? []).length > 0) && (
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5"
+                        data-testid="mi-ciclo-referidos">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div>
+                                <h2 className="text-base font-bold text-gray-900">Tu ciclo de referidos</h2>
+                                {progreso.ciclo ? (
+                                    <p className="text-sm text-gray-600 mt-1">
+                                        Del {fechaLarga(progreso.ciclo.inicio)} al {fechaLarga(progreso.ciclo.fin)}
+                                        {' · '}
+                                        {progreso.ciclo.dias_restantes === 0
+                                            ? 'cierra hoy'
+                                            : `quedan ${progreso.ciclo.dias_restantes} días`}
+                                    </p>
+                                ) : (
+                                    <p className="text-sm text-gray-600 mt-1">
+                                        {progreso.mensaje || 'Necesitas un plan vigente para que se evalúe tu ciclo.'}
+                                    </p>
+                                )}
+                            </div>
+                            {progreso.ciclo && (
+                                <span className="rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-[12px] font-bold text-emerald-700">
+                                    {progreso.referidos_convertidos}
+                                    {progreso.referidos_convertidos === 1 ? ' referido' : ' referidos'}
+                                </span>
+                            )}
+                        </div>
+
+                        {(progreso.escalera ?? []).length > 0 && (
+                            <ul className="mt-4 space-y-1.5">
+                                {progreso.escalera.map((tramo) => {
+                                    const alcanzado = Boolean(progreso.tramo_alcanzado
+                                        && progreso.tramo_alcanzado.id === tramo.id);
+                                    return (
+                                        <li key={tramo.id}
+                                            className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm ${alcanzado
+                                                ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                                                : 'border-gray-200 text-gray-700'}`}>
+                                            <span>
+                                                {tramo.umbral_referidos}
+                                                {tramo.umbral_referidos === 1 ? ' referido' : ' referidos'}
+                                            </span>
+                                            <span className="font-semibold">
+                                                {alcanzado ? '✅ ' : ''}{tramo.premio_texto}
+                                            </span>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        )}
+
+                        {progreso.ciclo && progreso.siguiente_tramo && (
+                            <p className="mt-3 text-sm text-gray-700">
+                                Te {progreso.faltan_para_siguiente === 1 ? 'falta' : 'faltan'}{' '}
+                                <strong>{progreso.faltan_para_siguiente}</strong>{' '}
+                                {progreso.faltan_para_siguiente === 1 ? 'referido' : 'referidos'} para el
+                                premio de {progreso.siguiente_tramo.umbral_referidos}
+                                {' ('}{progreso.siguiente_tramo.premio_texto}{')'}.
+                            </p>
+                        )}
+
+                        {progreso.ciclo && !progreso.siguiente_tramo && (
+                            <p className="mt-3 text-sm text-emerald-700 font-semibold">
+                                ¡Alcanzaste el tramo más alto de la escalera!
+                            </p>
+                        )}
+
+                        {progreso.premio_pendiente_aplicar && (
+                            <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+                                Tienes un premio confirmado esperando: se aplicará automáticamente cuando
+                                tengas un plan activo.
                             </p>
                         )}
                     </div>

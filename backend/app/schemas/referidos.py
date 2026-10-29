@@ -195,6 +195,38 @@ class TarjetaReferidosUpdate(BaseModel):
 
 # ── Fase 5: promociones por volumen ──────────────────────────────────────────
 
+def _normalizar_valor_premio(tipo: TipoPremio,
+                             valor: Decimal | None) -> Decimal | None:
+    """Regla ÚNICA del valor del premio según su tipo.
+
+    La usan las promociones por umbral (Fase 5) y los tramos (Parte C): el
+    premio es el MISMO concepto en los dos motores y no puede validarse distinto
+    según la pantalla que lo creó.
+
+      * `mes_gratis`      → no usa valor (se normaliza a `None`: son 30 días);
+      * `dias_gratis`     → entero > 0;
+      * `descuento_extra` → porcentaje > 0 y <= 100, hasta 2 decimales.
+    """
+    if tipo == TipoPremio.mes_gratis:
+        return None
+    if valor is None:
+        raise ValueError("Debes indicar el valor del premio.")
+    if -valor.as_tuple().exponent > 2:
+        raise ValueError(
+            "El valor del premio admite como máximo 2 decimales.")
+    if tipo == TipoPremio.dias_gratis:
+        if valor != valor.to_integral_value():
+            raise ValueError("Los días gratis deben ser un número entero.")
+        if valor <= 0:
+            raise ValueError("Los días gratis deben ser mayores que 0.")
+    elif tipo == TipoPremio.descuento_extra:
+        if valor <= 0 or valor > 100:
+            raise ValueError(
+                "El descuento extra debe ser un porcentaje mayor que 0 "
+                "y hasta 100.")
+    return valor
+
+
 class PromocionReferidosCreate(BaseModel):
     """Cuerpo de `POST /referidos/promociones` (sólo admin).
 
@@ -227,24 +259,8 @@ class PromocionReferidosCreate(BaseModel):
     @model_validator(mode="after")
     def _validar_valor_premio(self):
         """Normaliza/valida `valor_premio` según `tipo_premio`."""
-        if self.tipo_premio == TipoPremio.mes_gratis:
-            self.valor_premio = None
-            return self
-        if self.valor_premio is None:
-            raise ValueError("Debes indicar el valor del premio.")
-        if -self.valor_premio.as_tuple().exponent > 2:
-            raise ValueError(
-                "El valor del premio admite como máximo 2 decimales.")
-        if self.tipo_premio == TipoPremio.dias_gratis:
-            if self.valor_premio != self.valor_premio.to_integral_value():
-                raise ValueError("Los días gratis deben ser un número entero.")
-            if self.valor_premio <= 0:
-                raise ValueError("Los días gratis deben ser mayores que 0.")
-        elif self.tipo_premio == TipoPremio.descuento_extra:
-            if self.valor_premio <= 0 or self.valor_premio > 100:
-                raise ValueError(
-                    "El descuento extra debe ser un porcentaje mayor que 0 "
-                    "y hasta 100.")
+        self.valor_premio = _normalizar_valor_premio(self.tipo_premio,
+                                                     self.valor_premio)
         return self
 
 
@@ -355,3 +371,146 @@ class RechazarPromocionOut(BaseModel):
     status: str
     mensaje: str
     estado: str
+
+
+# ── Parte C: tramos del invitador (escalera por ciclo) ──────────────────────
+
+class TramoReferidoCreate(BaseModel):
+    """Cuerpo de `POST /referidos/tramos` (sólo admin).
+
+    `valor_premio` usa la MISMA regla que las promociones por umbral
+    (`_normalizar_valor_premio`): un premio imposible no llega a la BD.
+    """
+
+    umbral_referidos: int = Field(..., ge=1, le=10_000)
+    tipo_premio: TipoPremio
+    valor_premio: Decimal | None = Field(None, ge=0, le=10_000)
+    activo: bool = True
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _validar_valor(self):
+        self.valor_premio = _normalizar_valor_premio(self.tipo_premio,
+                                                     self.valor_premio)
+        return self
+
+
+class TramoReferidoUpdate(TramoReferidoCreate):
+    """Cuerpo de `PUT /referidos/tramos/{id}` (mismos campos que crear)."""
+
+
+class TramoReferidoOut(BaseModel):
+    """Un escalón de la escalera, tal como lo muestra el panel."""
+
+    id: int
+    umbral_referidos: int
+    tipo_premio: str
+    valor_premio: float | None
+    premio_texto: str
+    activo: bool
+    premios_pendientes: int = 0
+
+
+class EscaleraTramosOut(BaseModel):
+    """La escalera completa + lo que necesita la pantalla para avisar.
+
+    `advertencias` no bloquea: son saltos raros (un tramo que premia menos que
+    el anterior) para que el admin los vea antes de publicar.
+    """
+
+    motor: str
+    tramos: list[TramoReferidoOut]
+    escalera: list[str]
+    advertencias: list[str] = []
+    # ── Tarjeta publicada en el carrusel (decisión 4: la escalera completa) ──
+    publicada: bool = False
+    publicada_desde: datetime | None = None
+    publicada_hasta: datetime | None = None
+    publicada_titulo: str | None = None
+    publicada_texto: str | None = None
+    publicada_fijado_arriba: bool = False
+
+
+class MotorPremiosUpdate(BaseModel):
+    """Cuerpo de `PUT /referidos/tramos/motor` (sólo admin).
+
+    Cambiar de motor NO reescribe premios ya detectados: cada fila conserva su
+    snapshot. Lo único que cambia es cuál de los dos jobs evalúa.
+    """
+
+    motor_premios: str = Field(..., pattern="^(promociones|tramos)$")
+
+
+class PremioTramoOut(BaseModel):
+    """Un premio ganado al cierre de un ciclo, con el premio CONGELADO."""
+
+    id: int
+    usuario_id: int
+    alumno_nombre: str
+    alumno_correo: str | None = None
+    tramo_id: int | None = None
+    suscripcion_id: int | None = None
+    ciclo_inicio: str
+    ciclo_fin: str
+    referidos_convertidos: int
+    umbral_referidos: int
+    tipo_premio: str
+    valor_premio: float | None = None
+    premio_texto: str
+    estado: str
+    fecha_deteccion: datetime
+    fecha_confirmacion: datetime | None = None
+    confirmado_por_usuario_id: int | None = None
+    aplicado_en: datetime | None = None
+    # `True` = confirmado esperando que el alumno tenga un plan vigente.
+    pendiente_de_aplicar: bool = False
+
+
+class ConfirmarPremioTramoOut(BaseModel):
+    """Resultado de confirmar un premio de tramo."""
+
+    status: str
+    mensaje: str
+    premio_id: int | None = None
+    tipo_premio: str
+    premio_texto: str
+    suscripcion_id: int | None = None
+    fecha_expiracion_anterior: datetime | None = None
+    fecha_expiracion_nueva: datetime | None = None
+    dias_extendidos: int | None = None
+    credito_referido_id: int | None = None
+    porcentaje: float | None = None
+    pendiente_de_aplicar: bool = False
+
+
+class RechazarPremioTramoOut(BaseModel):
+    """Resultado de rechazar un premio de tramo."""
+
+    status: str
+    mensaje: str
+    estado: str
+    premio_id: int | None = None
+
+
+class CicloAlumnoOut(BaseModel):
+    """El ciclo de facturación EN CURSO del alumno (sin datos de terceros)."""
+
+    suscripcion_id: int
+    inicio: str
+    fin: str
+    dias_restantes: int
+
+
+class MiProgresoOut(BaseModel):
+    """`GET /referidos/mi-progreso`: qué lleva y cuánto le falta en su ciclo."""
+
+    motor: str
+    ciclo: CicloAlumnoOut | None = None
+    referidos_convertidos: int = 0
+    tramo_alcanzado: TramoReferidoOut | None = None
+    siguiente_tramo: TramoReferidoOut | None = None
+    faltan_para_siguiente: int | None = None
+    escalera: list[TramoReferidoOut] = []
+    premio_pendiente_aplicar: bool = False
+    mensaje: str | None = None

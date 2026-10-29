@@ -45,14 +45,16 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.core.estados import vigente_hoy
-from app.models.referidos import (CreditoReferido, EstadoCreditoReferido,
+from app.models.referidos import (ConfiguracionReferidos, CreditoReferido,
+                                  EstadoCreditoReferido,
                                   EstadoPromocionDetectada, EstadoReferido,
-                                  PeriodoPromocion, PromocionReferidos,
+                                  MotorPremios, PeriodoPromocion,
+                                  PromocionReferidos,
                                   PromocionReferidosDetectada,
                                   ReferidoAplicado, TipoPremio)
 from app.models.suscripcion import Suscripcion
@@ -199,11 +201,21 @@ def detectar_promociones(db: Session, *, tenant_id: Optional[int] = None,
             ReferidoAplicado.fecha_conversion >= desde,
             ReferidoAplicado.fecha_conversion < hasta,
         ))
+        # MOTOR ÚNICO (migración 064): un box con `motor_premios='tramos'` NO
+        # se evalúa por mes calendario; si no, el mismo logro se pagaría dos
+        # veces. Sin fila de configuración el motor es `promociones` (default),
+        # así que el LEFT JOIN no excluye a nadie que hoy esté funcionando.
+        .outerjoin(
+            ConfiguracionReferidos,
+            ConfiguracionReferidos.tenant_id == PromocionReferidos.tenant_id)
         .filter(
             PromocionReferidos.activo.is_(True),
             PromocionReferidos.periodo == PeriodoPromocion.mensual,
             Usuario.rol == RolUsuario.alumno,
             Usuario.estado == "activo",
+            or_(ConfiguracionReferidos.id.is_(None),
+                ConfiguracionReferidos.motor_premios
+                != MotorPremios.tramos.value),
         )
         .group_by(PromocionReferidos.id, Usuario.id)
         .having(func.count(ReferidoAplicado.id)

@@ -2,11 +2,14 @@
 # ============================================================
 # Dockerfile.cron — imagen MÍNIMA para el Cron Job de Render.
 #
-# La usan los 4 Cron Jobs de mantenimiento, todos con `python -m maintenance.<script>`:
+# La usan los Cron Jobs de mantenimiento, todos con `python -m maintenance.<script>`:
 #   * `mantenimiento_cloud` → mantenimiento de datos de PROD los días 1 y 15 (rol `maint_rw`)
 #   * `backup_cloud`        → backup diario de la base REAL de PROD (pg_dump) a Cloudflare R2
 #   * `watchdog_backups`    → vigila la frescura de ese backup (solo lee R2) y avisa por mail
 #   * `restore_drill`       → drill mensual de restore en una rama temporal de Neon
+#   * `retencion_cloud`     → retención de datos (B8): archiva >5 años, purga auditoría >2 años y
+#                             anonimiza bajas >12 meses. Habla con la base por `psql` y NO importa
+#                             la app (igual que `mantenimiento_cloud`). Arranca en TEST y en DRY_RUN.
 # No toca el web service ni `Dockerfile.render` / `backend/Dockerfile` (esos siguen igual).
 #
 # Por qué una imagen aparte:
@@ -68,6 +71,9 @@ WORKDIR /app
 # EXCEPCIÓN (2026-09-27): `mantenimiento_cloud` importa `shared.estados` —el paquete neutral sin
 # imports donde vive la lista de estados "cancelada" que también usa la app—, así que `shared/`
 # va TAMBIÉN acá: si falta, el job muere con "No module named 'shared'". Son 2 archivos.
+# `retencion_cloud` (B8) importa `backup_cloud` (ConfigError, S3Error, cliente_s3, host_de,
+# limpiar_valor, sanear) y `alertas`; los dos ya están abajo. No necesita nada más: usa `psql`
+# (postgresql-client-18, ya instalado arriba) y la stdlib.
 COPY maintenance/__init__.py ./maintenance/__init__.py
 COPY maintenance/backup_cloud.py ./maintenance/backup_cloud.py
 COPY maintenance/alertas.py ./maintenance/alertas.py
@@ -75,6 +81,7 @@ COPY maintenance/watchdog_backups.py ./maintenance/watchdog_backups.py
 COPY maintenance/restore_drill.py ./maintenance/restore_drill.py
 COPY maintenance/mantenimiento_cloud.py ./maintenance/mantenimiento_cloud.py
 COPY maintenance/kpis_cloud.py ./maintenance/kpis_cloud.py
+COPY maintenance/retencion_cloud.py ./maintenance/retencion_cloud.py
 COPY shared/__init__.py ./shared/__init__.py
 COPY shared/estados.py ./shared/estados.py
 
@@ -90,4 +97,7 @@ USER boxapp
 #   watchdog      → python -m maintenance.watchdog_backups
 #   drill         → python -m maintenance.restore_drill
 #   kpis y ML     → python -m maintenance.kpis_cloud      (Fase 8)
+#   retención     → python -m maintenance.retencion_cloud archivar|auditoria|anonimizar  (B8)
+#                   ⚠️ UN TRABAJO POR JOB: el script exige exactamente 1 argumento y sale
+#                   con exit 2 si falta (nunca hace nada por defecto).
 CMD ["python", "-m", "maintenance.backup_cloud"]
