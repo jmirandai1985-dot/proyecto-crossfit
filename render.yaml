@@ -2,7 +2,8 @@
 # render.yaml — Blueprint para desplegar en Render.
 #   1) Web Service Docker (imagen combinada: nginx + uvicorn).
 #   2) Los 5 Cron Jobs de automatización de PROD (auditoría B4, 2026-10-28)
-#      + los 3 de RETENCIÓN (B8), dados de alta en modo ENSAYO (`DRY_RUN=1`).
+#      + los 3 de RETENCIÓN de TEST (B8) en modo ENSAYO (`DRY_RUN=1`)
+#      + los 3 de RETENCIÓN de PROD (B8) en modo ENSAYO (`DRY_RUN=1`) = 11 `type: cron`.
 # La BD es externa (Neon) → NO se declara database en este archivo.
 # n8n queda FUERA de este blueprint (corre fuera de Render).
 # Los pasos manuales, los env groups y la verificación de los Cron Jobs están en
@@ -254,4 +255,84 @@ services:
       - fromGroup: alertas
       - key: ANONIMIZACION_PEPPER
         sync: false                          # secreto: se pega en el dashboard (≥ 16 caracteres)
+
+  # ─────────────────────────────────────────────────────────────
+  # 9-11) RETENCIÓN DE DATOS (B8) EN PROD — ALTA HECHA, EN MODO ENSAYO
+  # ─────────────────────────────────────────────────────────────
+  # Los MISMOS 3 trabajos del bloque *# 6-8)*, apuntando ahora a la rama PROD de
+  # Neon con el rol `retencion_rw` de PROD (`RETENCION_DB_URL` del env group
+  # `retencion-prod`). `DRY_RUN="1"` POR DEFAULT, igual que en TEST: la primera
+  # corrida cuenta filas y NO escribe. Pasar a `"0"` es una decisión explícita del
+  # dueño, se cambia acá, se lee el log de la primera corrida y recién entonces se
+  # sincroniza (en PROD NO hace falta `RETENCION_TEST_OK`: esa guarda es sólo TEST).
+  #
+  # Requisitos ANTES de sincronizar el Blueprint (si falta uno, el sync FALLA entero
+  # y el web service se queda con la versión anterior — ver docs/CRON_JOBS_RENDER.md §9):
+  #   1. El env group `retencion-prod` tiene que EXISTIR en el dashboard:
+  #      `RETENCION_DB_URL` (rol `retencion_rw` de PROD, conexión DIRECTA sin `-pooler`),
+  #      `ENVIRONMENT=production` y `ANONIMIZACION_PEPPER`.
+  #      ⚠️ `ENVIRONMENT` tiene que ser `production` EXACTO: el script sólo acepta
+  #      `test`/`production` y rechaza (`prod`, `prd`, …) con exit 2.
+  #   2. El rol `retencion_rw` tiene que existir en la rama PROD: `validar_url()` exige
+  #      ESE usuario cuando `ENVIRONMENT=production` (si no, exit 2 sin tocar la base).
+  #   3. La migración 065 tiene que estar aplicada en PROD (`alembic upgrade head`).
+  #   4. Cada `type: cron` es un servicio FACTURADO (US$1/mes de piso).
+  #
+  # Horarios: mensuales, DÍAS 4/5/6 a las 17:00 UTC (14:00 CLT; 13:00 en invierno).
+  #   * 17:00 UTC no lo usa ningún job: los 5 de PROD son 06:00/08:00/10:00/12:00/13:00
+  #     y los 3 de retención de TEST son 15:00 (días 1/2/3).
+  #   * Días 4/5/6 dejan el día 1 libre: ahí caen el mantenimiento (08:00) y el restore
+  #     drill (13:00), los dos jobs más caros de la grilla, y también el `archivar` de TEST.
+  #   * Se mantiene el orden del mes: `archivar` (4) antes de `anonimizar` (6), que es el
+  #     irreversible, y nunca el mismo día.
+  #
+  - type: cron
+    name: box-crossfit-retencion-archivar-prod
+    runtime: docker
+    plan: starter
+    region: oregon
+    schedule: "0 17 4 * *"                   # 14:00 CLT el día 4 — archiva asistencias/reservas
+    dockerfilePath: backend/Dockerfile.cron
+    dockerContext: backend
+    dockerCommand: python -m maintenance.retencion_cloud archivar
+    envVars:
+      # En PROD no hay guarda extra: `DRY_RUN=0` alcanza (a diferencia de TEST, que
+      # además exige `RETENCION_TEST_OK=1`). Se deja en "1" hasta que el dueño lo pida.
+      - key: DRY_RUN
+        value: "1"
+      - fromGroup: retencion-prod            # RETENCION_DB_URL (rol retencion_rw de PROD), ENVIRONMENT=production
+      - fromGroup: backups-prod              # R2 de respaldo (R2_ENDPOINT, R2_BUCKET, llaves) — su DRY_RUN=0 NO gana: la variable del servicio tiene precedencia
+      - fromGroup: alertas                   # GMAIL_SMTP_* + ALERT_EMAIL
+
+  - type: cron
+    name: box-crossfit-retencion-auditoria-prod
+    runtime: docker
+    plan: starter
+    region: oregon
+    schedule: "0 17 5 * *"                   # 14:00 CLT el día 5 — TTL de auditoría (2 años)
+    dockerfilePath: backend/Dockerfile.cron
+    dockerContext: backend
+    dockerCommand: python -m maintenance.retencion_cloud auditoria
+    envVars:
+      - key: DRY_RUN
+        value: "1"
+      - fromGroup: retencion-prod
+      - fromGroup: alertas
+
+  - type: cron
+    name: box-crossfit-retencion-anonimizar-prod
+    runtime: docker
+    plan: starter
+    region: oregon
+    schedule: "0 17 6 * *"                   # 14:00 CLT el día 6 — IRREVERSIBLE, nunca junto al archivo
+    dockerfilePath: backend/Dockerfile.cron
+    dockerContext: backend
+    dockerCommand: python -m maintenance.retencion_cloud anonimizar
+    envVars:
+      - key: DRY_RUN
+        value: "1"
+      - fromGroup: retencion-prod            # acá viene ANONIMIZACION_PEPPER (≥ 16 caracteres)
+      - fromGroup: alertas
+      # El pepper NO se declara en el servicio (`sync: false`) a propósito: vive en el
+      # env group, y una variable del servicio GANARÍA sobre la del grupo (quedaría vacía).
 

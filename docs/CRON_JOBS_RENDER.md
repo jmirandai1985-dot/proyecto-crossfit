@@ -10,10 +10,11 @@
 > `backend/maintenance/README.md` (detalle de cada script y de cada variable) y
 > `backend/maintenance/{backup_cloud,watchdog_backups,restore_drill,mantenimiento_cloud,kpis_cloud}.py`.
 
-## 1. Los 5 jobs de PROD (+ 3 de retención en modo ensayo)
+## 1. Los 5 jobs de PROD (+ 3 de retención en TEST y 3 en PROD, todos en modo ensayo)
 
-> **+ 3 jobs de retención (B8)** ya declarados en `render.yaml` con `DRY_RUN="1"` por default
-> (cuentan filas y no borran nada): ver **§8**. Son 8 `type: cron` en total.
+> **+ 3 jobs de retención (B8) de TEST** y **+ 3 de PROD**, todos declarados en `render.yaml` con
+> `DRY_RUN="1"` por default (cuentan filas y no borran nada): ver **§8** (TEST) y **§9** (PROD).
+> Son **11 `type: cron`** en total (+ el web service).
 
 `schedule` en Render **siempre es UTC**. Chile es UTC-3 de septiembre a abril y UTC-4 el resto
 del año, así que la hora CLT de abajo se corre 1 h en invierno.
@@ -52,6 +53,8 @@ el dashboard con sus secretos (el repo no lleva valores). Si un nombre no existe
 | `neon-api` | `NEON_API_KEY`, `NEON_PROJECT_ID` | jobs 2 (lectura de CU-horas) y 4 (crear/borrar la rama del drill) |
 | `mantenimiento-prod` | `MAINT_DB_URL` (rol `maint_rw`), `ENVIRONMENT=production`, límites (`MAX_*`, `DIAS_*`, `NEON_*`), `DRY_RUN` | job 2 |
 | `kpis-prod` | `KPIS_API_URL`, `N8N_API_KEY` / `CRON_API_KEY` | job 5 |
+| `retencion-test` | `RETENCION_DB_URL` (rol `retencion_rw` de TEST), `ENVIRONMENT=test`, `ANONIMIZACION_PEPPER` | jobs 6-8 (§8) |
+| `retencion-prod` | `RETENCION_DB_URL` (rol `retencion_rw` de PROD), `ENVIRONMENT=production`, `ANONIMIZACION_PEPPER` | jobs 9-11 (§9) |
 
 El inventario completo de variables, con los valores recomendados y qué pasa si falta cada una,
 está en `backend/maintenance/README.md` (una sección por job).
@@ -60,19 +63,20 @@ está en `backend/maintenance/README.md` (una sección por job).
 
 Los 5 jobs de PROD **ya existen** en el dashboard, con esos mismos nombres. El sync de un
 Blueprint empareja por nombre, así que para ellos este bloque no crea nada nuevo: sólo deja de
-haber configuración invisible. Los 3 de **retención** (§8) sí se **crean** en el primer sync.
+haber configuración invisible. Los 3 de **retención de TEST** (§8) y los 3 de **retención de
+PROD** (§9) sí se **crean** en el primer sync.
 
-1. Antes de sincronizar, crear el env group `retencion-test` (§8.1) y aplicar la migración 065
-   en la base destino: si el `fromGroup` no existe, el sync **falla entero** y el web service
-   se queda con la versión anterior.
+1. Antes de sincronizar, crear los env groups `retencion-test` (§8.1) y `retencion-prod` (§9.2),
+   y aplicar la migración 065 en las dos bases: si un `fromGroup` no existe, el sync **falla
+   entero** y el web service se queda con la versión anterior.
 2. Dashboard → **Blueprints** → el blueprint del repo → **Sync** (o *Manual sync*).
 3. Leer el plan del sync **antes** de aplicar: los 5 Cron Jobs de PROD tienen que aparecer como
    *actualización* de un servicio existente. Si Render propone **crear** un servicio con un
    nombre que ya existe, el sync falla: significa que el job del dashboard no está asociado a
    este blueprint. Salida: copiar su log de los últimos runs (para tener historia), borrarlo del
    dashboard —su configuración completa ya está en `render.yaml`— y volver a sincronizar.
-4. Verificar uno por uno que el job quedó con el `dockerCommand` de la tabla de §1 / §8 (un job
-   con el `CMD` de la imagen hace un **backup** en vez de lo suyo).
+4. Verificar uno por uno que el job quedó con el `dockerCommand` de la tabla de §1 / §8 / §9
+   (un job con el `CMD` de la imagen hace un **backup** en vez de lo suyo).
 5. Disparar **Trigger Run** en los jobs 1 y 5 (son baratos y sus logs dicen en una línea si
    actuaron: `DRY_RUN=0 (subida REAL)` / `fin: N/N llamada(s) ok`). Los jobs 2, 3, 4 y los 3 de
    retención se verifican en su próxima corrida programada: un run verde **no** manda correo
@@ -156,7 +160,10 @@ python -c "import yaml; d=yaml.safe_load(open('render.yaml', encoding='utf-8'));
 #    ('cron', 'box-crossfit-mantenimiento-prod'), ('cron', 'box-crossfit-watchdog'),
 #    ('cron', 'box-crossfit-restore-drill'), ('cron', 'box-crossfit-kpis-ml'),
 #    ('cron', 'box-crossfit-retencion-archivar'), ('cron', 'box-crossfit-retencion-auditoria'),
-#    ('cron', 'box-crossfit-retencion-anonimizar')]
+#    ('cron', 'box-crossfit-retencion-anonimizar'),
+#    ('cron', 'box-crossfit-retencion-archivar-prod'),
+#    ('cron', 'box-crossfit-retencion-auditoria-prod'),
+#    ('cron', 'box-crossfit-retencion-anonimizar-prod')]
 ```
 
 Con el Render CLI instalado, `render blueprints validate` valida contra el esquema oficial
@@ -246,13 +253,15 @@ con exit 3 y dice exactamente qué falta.
    `GRANT` sólo sobre `asistencias`, `reservas`, `auditoria`, `usuarios`,
    `asistencias_archivo`, `reservas_archivo`, `retencion_bloqueos`.
 3. Crear el env group `retencion-test` con las variables de §8.1 (`DRY_RUN=1`).
-4. Descomentar el bloque *# 6-8)* del final de `render.yaml` y sincronizar el Blueprint.
+4. Sincronizar el Blueprint: el bloque *# 6-8)* del final de `render.yaml` ya está descomentado,
+   así que el sync **crea** los 3 jobs.
 5. Correr una vez con `DRY_RUN=1`, leer el correo/el log, y recién entonces pasar a `0` +
    `RETENCION_TEST_OK=1` para la corrida real en TEST.
-6. PROD: mismo orden, con `ENVIRONMENT=production` y sin `RETENCION_TEST_OK`.
+6. PROD: mismo orden, con el grupo `retencion-prod` (§9), `ENVIRONMENT=production` y **sin**
+   `RETENCION_TEST_OK` (esa guarda es sólo de TEST).
 
-Nada de esto está hecho todavía: **hoy no existe ningún job de retención corriendo, ni en
-TEST ni en PROD.**
+Estado: los 3 de **TEST** quedaron dados de alta el 2026-10-29 y corrieron en ensayo (§8.4);
+los 3 de **PROD**, el mismo día, en modo ensayo también (§9).
 
 ### 8.4 Pruebas hechas en TEST (2026-10-29)
 
@@ -266,5 +275,214 @@ hace 3, un alumno con baja de 18 meses) y las borra en el `finally`; el esquema 
 es `alembic_version = 065_retencion_datos`, con `asistencias_archivo`, `reservas_archivo`,
 `retencion_bloqueos` y `usuarios.anonimizado_en` + índice parcial
 `ix_usuarios_bajas_por_anonimizar`.
+
+## 9. Retención de datos en PROD (B8): los mismos 3 jobs, también en ENSAYO
+
+Los 3 trabajos de §8 están declarados **dos veces** en `render.yaml`: una contra TEST (grupo
+`retencion-test`) y otra contra **PROD** (grupo `retencion-prod`). Mismo binario, mismo
+`Dockerfile.cron`, mismo contexto `backend` y mismo `dockerCommand`; lo único que cambia es el
+env group y el `schedule`. Los de PROD también arrancan con **`DRY_RUN="1"`**: la primera corrida
+cuenta filas y **no escribe**.
+
+| # | Job (`name`) | Schedule (UTC) | Hora CLT | `dockerCommand` | Env groups | Exit ≠ 0 |
+|---|---|---|---|---|---|---|
+| 9 | `box-crossfit-retencion-archivar-prod` | `0 17 4 * *` | 14:00 el día 4 | `python -m maintenance.retencion_cloud archivar` | `retencion-prod` + `backups-prod` + `alertas` | 2/3/4/5/6/7 |
+| 10 | `box-crossfit-retencion-auditoria-prod` | `0 17 5 * *` | 14:00 el día 5 | `python -m maintenance.retencion_cloud auditoria` | `retencion-prod` + `alertas` | 2/3/5/6/7 |
+| 11 | `box-crossfit-retencion-anonimizar-prod` | `0 17 6 * *` | 14:00 el día 6 | `python -m maintenance.retencion_cloud anonimizar` | `retencion-prod` + `alertas` | 2/3/5/6/7 |
+
+`runtime`, `plan`, `region`, `dockerfilePath`/`dockerContext` y `autoDeploy` son los de la tabla
+"Común a los 5" (§1): `docker`, `starter`, `oregon`, `backend/Dockerfile.cron` + `backend`.
+
+Dos detalles que no son obvios:
+
+* `archivar` toma **sólo** `R2_*` de `backups-prod` (es donde sube el CSV.gz, prefijo
+  `retencion/`). Ese grupo trae `DRY_RUN=0`, pero **no gana**: la variable declarada en el
+  servicio tiene precedencia (ver §4), así que el job sigue en ensayo hasta que se cambie el
+  `value` de `render.yaml`.
+* `anonimizar` **no** declara `ANONIMIZACION_PEPPER` con `sync: false` (como sí hace el de TEST):
+  el pepper vive en el grupo `retencion-prod`. Si se declarara en el servicio con `sync: false`,
+  la variable del servicio ganaría sobre la del grupo y llegaría **vacía** ⇒ exit 2.
+
+### 9.1 Por qué 17:00 UTC en los días 4/5/6
+
+Grilla completa en UTC (los 11 `type: cron` del blueprint):
+
+| Hora UTC | Job | Frecuencia |
+|---|---|---|
+| 06:00 | backup (`proyecto-crossfit`) | diario |
+| 08:00 | mantenimiento | días 1 y 15 |
+| 10:00 | KPIs/ML | diario |
+| 12:00 | watchdog | diario |
+| 13:00 | restore drill | día 1 |
+| 15:00 | retención **TEST** (§8) | días 1, 2 y 3 |
+| **17:00** | **retención PROD (§9)** | **días 4, 5 y 6** |
+
+* **17:00 UTC** es la primera franja libre después de las 15:00 de TEST: ningún job de PROD ni de
+  TEST la usa, y queda 2 h después del último de retención de TEST (margen para que un run largo
+  de TEST no se solape con el arranque del de PROD).
+* **Días 4/5/6** dejan libre el día 1 (el más cargado: mantenimiento 08:00 + restore drill 13:00,
+  los dos jobs más caros, + `archivar` de TEST 15:00) y los días 2/3 para la retención de TEST.
+  Todos los meses tienen día 4, 5 y 6, así que la corrida nunca se saltea un mes.
+* Se conserva el orden del mes: `archivar` (día 4) **antes** de `anonimizar` (día 6), que es el
+  irreversible, y nunca el mismo día.
+* 14:00 CLT con horario de verano; **13:00 CLT** en invierno (UTC-4).
+
+### 9.2 Env group `retencion-prod` (crear ANTES de sincronizar)
+
+Render → *Env Groups* → **New Environment Group**, nombre exacto `retencion-prod`:
+
+| Variable | Valor | Nota |
+|---|---|---|
+| `RETENCION_DB_URL` | `postgresql://retencion_rw:<password-generada>@ep-winter-star-akwis51j.c-3.us-west-2.aws.neon.tech/neondb?sslmode=require` | Conexión **DIRECTA** a la rama PROD (sin `-pooler`: el script la rechaza con exit 2). En `ENVIRONMENT=production` el usuario **tiene que ser** `retencion_rw` (cualquier otro ⇒ exit 2 sin abrir conexión) |
+| `ENVIRONMENT` | `production` | **Exacto**: el script sólo acepta `test` o `production` (`prod` ⇒ exit 2) |
+| `ANONIMIZACION_PEPPER` | el mismo valor de `retencion-test` | ≥ 16 caracteres; ver §9.3 |
+
+`DRY_RUN` **no** va en el grupo: va en cada servicio (`"1"`) para que cambiarlo sea un cambio
+versionado en `render.yaml` y no un click invisible en el dashboard (mismo criterio que los jobs
+2 y 5 de §4). Las variables `R2_*` y las de SMTP no se declaran acá: vienen de `backups-prod`
+y `alertas` con `fromGroup`.
+
+### 9.3 ¿Mismo pepper que TEST o uno nuevo?
+
+**El mismo valor de TEST**, por ahora:
+
+* PROD todavía no tiene alumnos reales, así que **no hay ningún `rut_anonimo` emitido** cuyo hash
+  dependa de un pepper anterior: cambiarlo más adelante no reescribe nada.
+* Un solo secreto que custodiar y una sola variable que copiar; además una corrida en TEST
+  produce exactamente el mismo `rut_anonimo` que produciría en PROD, que es lo que comparan los
+  tests de integración.
+* Rotarlo después **no** invalida lo ya anonimizado: el `rut_anonimo` guardado se conserva y el
+  pepper nuevo sólo afecta a los futuros. Por eso la decisión se puede tomar **antes de cargar
+  alumnos reales**, sin migración ni backfill.
+
+### 9.4 Rol `retencion_rw` en la rama PROD — se crea SÓLO por SQL
+
+> ⚠️ **No usar el botón *Connect* ni *Roles* de la consola de Neon.** Los roles que crea la
+> consola quedan como miembros de `neon_superuser` (heredan todo y anulan cualquier contención).
+> Se crea por SQL en el **SQL Editor** de la rama PROD, conectado como `neondb_owner`, igual que
+> `maint_rw` y `backup_ro` (README `backend/maintenance/README.md`, Fase 6/12).
+
+La password se genera **antes**, sólo alfanumérica (32 caracteres), y se pega **sólo** en el env
+group de Render: no va al repo.
+
+```powershell
+# PowerShell: 32 caracteres alfanuméricos (sin + / = , que rompen la URI)
+-join ((48..57)+(65..90)+(97..122) | Get-Random -Count 32 | % {[char]$_})
+```
+
+```sql
+-- 0) Como neondb_owner, en el SQL Editor de la rama PROD (la de ep-winter-star-akwis51j).
+CREATE ROLE retencion_rw WITH LOGIN NOINHERIT PASSWORD '<password-generada>';
+
+-- 1) Entrar: CONNECT a la base + USAGE del esquema (explícitos, aunque PUBLIC ya los otorgue).
+GRANT CONNECT ON DATABASE neondb TO retencion_rw;
+GRANT USAGE   ON SCHEMA   public TO retencion_rw;
+
+-- 2) Datos: GRANT AMPLIO sobre el esquema public (decisión 2026-10-29: hoy PROD tiene datos
+--    ficticios, así que no se acota al mínimo como en TEST). Lo que el job usa de verdad es:
+--    SELECT/INSERT/DELETE en asistencias y reservas, lo mismo en asistencias_archivo y
+--    reservas_archivo, SELECT/DELETE en auditoria, SELECT/UPDATE en usuarios (nombre, correo,
+--    telefono, rut, anonimizado_en, updated_at) y SELECT/INSERT/UPDATE/DELETE en
+--    retencion_bloqueos.
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES    IN SCHEMA public TO retencion_rw;
+GRANT USAGE,  SELECT                ON ALL SEQUENCES IN SCHEMA public TO retencion_rw;
+
+-- 3) Que las tablas que creen las próximas migraciones también queden cubiertas: sin esto, el
+--    primer job que toque una tabla nueva sale con exit 3 "permission denied". Se corre como
+--    neondb_owner, que es el rol que ejecuta `alembic upgrade head`.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO retencion_rw;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO retencion_rw;
+
+-- 4) Nada de DDL ni de memberships: el rol NO es miembro de ningún otro (ni de neon_superuser).
+```
+
+Verificación (todo `t`, salvo `es_superuser` que tiene que dar `f`):
+
+```sql
+SELECT rolname, rolcanlogin, rolinherit FROM pg_roles WHERE rolname = 'retencion_rw';
+SELECT pg_has_role('retencion_rw', 'neon_superuser', 'MEMBER') AS es_superuser;   -- f
+
+SELECT has_database_privilege('retencion_rw', current_database(), 'CONNECT')       AS db_connect,
+       has_schema_privilege('retencion_rw', 'public', 'USAGE')                     AS schema_usage,
+       has_table_privilege('retencion_rw', 'public.asistencias', 'DELETE')         AS asistencias_delete,
+       has_table_privilege('retencion_rw', 'public.asistencias_archivo', 'INSERT') AS archivo_insert,
+       has_table_privilege('retencion_rw', 'public.reservas_archivo', 'INSERT')    AS reservas_archivo_insert,
+       has_table_privilege('retencion_rw', 'public.auditoria', 'DELETE')           AS auditoria_delete,
+       has_column_privilege('retencion_rw', 'public.usuarios', 'rut', 'UPDATE')    AS usuarios_rut_update,
+       has_table_privilege('retencion_rw', 'public.retencion_bloqueos', 'INSERT')  AS bloqueos_insert;
+```
+
+Prueba de humo con la URL nueva (desde `backend/`, contra PROD, **sin escribir**): el script
+valida TODO antes de abrir la conexión, así que un exit 2 acá es un problema de configuración y
+no de permisos.
+
+```powershell
+$env:ENVIRONMENT      = "production"
+$env:RETENCION_DB_URL = "<la del env group retencion-prod>"
+$env:DRY_RUN          = "1"
+Remove-Item Env:RETENCION_RESPALDO_LOCAL -ErrorAction SilentlyContinue   # en PROD el respaldo va a R2
+py -3.12 -m maintenance.retencion_cloud auditoria      # exit 0 = contó filas, no borró nada
+# `archivar` sin R2_* sale con exit 2 a propósito (no hay dónde respaldar).
+```
+
+Reversión (si hay que deshacerlo):
+
+```sql
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES    FROM retencion_rw;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE USAGE, SELECT                ON SEQUENCES FROM retencion_rw;
+REVOKE ALL PRIVILEGES ON ALL TABLES    IN SCHEMA public FROM retencion_rw;
+REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM retencion_rw;
+REVOKE USAGE   ON SCHEMA   public FROM retencion_rw;
+REVOKE CONNECT ON DATABASE neondb FROM retencion_rw;
+DROP ROLE retencion_rw;      -- falla si le quedó algún privilegio: es a propósito
+```
+
+### 9.5 Cómo se activan (orden que importa)
+
+1. `alembic upgrade head` en PROD (tiene que quedar `alembic_version = 065_retencion_datos`).
+2. Crear el rol `retencion_rw` por SQL (§9.4) y verificar los `has_*_privilege`.
+3. Crear el env group `retencion-prod` (§9.2). Sin el grupo, el sync **falla entero**.
+4. Sincronizar el Blueprint: es el primer sync en que los 3 jobs de PROD **se crean** (US$1/mes
+   cada uno). Los 5 de §1 y los 3 de TEST sólo se actualizan.
+5. Disparar **Trigger Run** en cada uno (o esperar a su día 4/5/6) y leer el **log**: la línea que
+   importa es `DRY_RUN=1 (ensayo: no escribe)` + `habría movido N`. Un run sin nada que hacer no
+   manda correo; con `N > 0` sí llega el correo (regla "correo = algo que revisar").
+6. Con los 3 verdes en ensayo y los números leídos, **recién ahí** pasar `DRY_RUN` a `"0"` en los
+   3 servicios de `render.yaml` y sincronizar. En PROD **no** hace falta `RETENCION_TEST_OK`.
+
+Dos guardas de volumen que conviene mirar **antes** de la primera corrida real (no cambian nada
+mientras `DRY_RUN=1`, pero sí abortan la corrida real con exit 5 y sin escribir):
+
+| Guarda | Default | Qué hacer si el ensayo dice N > default |
+|---|---|---|
+| `MAX_ANONIMIZAR` | `1 000` | Subirlo en `retencion-prod`, o dejar que se anonimicen 1 000 por mes (la regla es 12 meses desde la baja, no hace falta ponerse al día de golpe) |
+| `MAX_ARCHIVAR` | `20 000` | Las filas de más de 5 años suelen ser pocas por mes; si el backlog es grande, subirlo |
+
+### 9.6 Pruebas (2026-10-29)
+
+| Suite | Comando | Resultado |
+|---|---|---|
+| Unitaria (sin red/psql/R2) | `py -3.12 -m pytest tests/test_retencion_unit.py -q --noconftest` | **59 passed** |
+| Integración con `psql` real contra TEST (opt-in) | `$env:ENVIRONMENT='test'; $env:RETENCION_INTEGRACION='1'; py -3.12 -m pytest tests/test_retencion_integracion.py -q --noconftest` | **9 passed** (~3 min) |
+
+La primera pasada de integración dio **8 passed / 1 failed** en
+`test_anonimizar_baja_de_18_meses`, y **no** por el código: la última aserción exigía que
+*ningún dígito del RUT original* apareciera en el RUT anónimo (`ANON` + 8 caracteres base36
+sacados de un SHA-256). El RUT sembrado por el test es `99.999.99x-9`, así que esa condición era
+"el hash no contiene ningún `9`": falla **~20 % de las corridas** ((35/36)^8 ≈ 0,80). Se cambió
+por dos aserciones deterministas (`rut_nuevo != rut and rut not in rut_nuevo` y "el valor guardado
+ya no tiene forma de RUT"), que prueban lo mismo (no queda el RUT en claro) sin depender del azar
+del hash. Con eso la suite completa quedó en **9 passed**, y la corrida del test aislado pasa en
+18 s.
+
+No hay suite nueva para PROD: el código es el mismo y lo que cambia es **configuración**
+(`RETENCION_DB_URL`, `ENVIRONMENT`, `DRY_RUN`). Lo que sí se prueba en PROD es el arranque real:
+el ensayo del punto 5 de §9.5 valida en un solo run la URL directa, el rol `retencion_rw`, la
+migración 065 y los permisos (`exit 0` = todo eso está bien).
+
+
+
 
 
