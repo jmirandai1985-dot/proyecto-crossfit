@@ -620,6 +620,12 @@ Siguen abiertas (no bloquean esta fase, se aplicaron los criterios recomendados)
    `duplicado`/400 y no crea nada.
 7. **`GET /pagos/{id}` no "auto-sana"**: sólo el webhook (o la reconciliación) escribe
    el estado. Un GET no puede mover dinero.
+8. **Si MP no responde al crear la preferencia**, se deshace la reserva
+   (`_limpiar_cobro_fallido`): la solicitud pasa a `rejected` y, en el Bazar, el
+   pedido se rechaza y devuelve el stock. Sin eso el alumno quedaba bloqueado 24 h
+   ("ya tienes una solicitud pendiente") o con stock tomado 30 min por un checkout
+   que nunca existió. El beneficio de descuento (F2) se marca usado sólo DESPUÉS de
+   obtener el `init_point`.
 
 
 

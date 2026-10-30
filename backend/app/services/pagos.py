@@ -223,6 +223,11 @@ def crear_pago_membresia(db: Session, *, current_user: dict, plan_id: int,
     solicitud.pago_id = pago.id
     db.commit()
 
+    # La preferencia se pide ANTES de consumir el beneficio: si MP no responde,
+    # `_crear_preferencia` deshace la solicitud y el descuento del alumno sigue
+    # vivo (no se pierde un beneficio por un checkout que nunca existió).
+    resultado = _crear_preferencia(db, pago, titulo=f"Plan {plan.nombre}")
+
     # ── Efectos secundarios del flujo manual, ahora para el pago online ──
     # 1. El beneficio (F2) se marca usado: si no, el mismo descuento se podría
     #    aplicar a otra compra.
@@ -231,7 +236,7 @@ def crear_pago_membresia(db: Session, *, current_user: dict, plan_id: int,
     # 2. La campana del admin: la solicitud existe y el pago hay que vigilarlo.
     _avisar_solicitud_online(db, solicitud=solicitud, nombre_plan=plan.nombre)
 
-    return _crear_preferencia(db, pago, titulo=f"Plan {plan.nombre}")
+    return resultado
 
 
 
@@ -239,10 +244,10 @@ def _crear_preferencia(db: Session, pago: Pago, *, titulo: str,
                        excluir_medios=()) -> dict:
     """Pide la preferencia a MP y guarda su `preference_id`.
 
-    Si MP falla, la fila `pagos` queda `pendiente` (NO se borra): el job de
-    expiración la cierra y, si el alumno alcanzó a pagar, la reconciliación lo
-    recupera. El alumno recibe un 503 con "usa transferencia", nunca un error
-    genérico.
+    Si MP falla se DESHACE lo reservado (`_limpiar_cobro_fallido`): no hay
+    checkout, así que no tiene sentido dejar la solicitud pendiente (que además le
+    bloquearía enviar el voucher) ni el stock del Bazar tomado por 30 minutos. El
+    alumno recibe un 503 con "usa transferencia", nunca un error genérico.
     """
     try:
         preference_id, init_point = mp.crear_preferencia(
@@ -254,6 +259,7 @@ def _crear_preferencia(db: Session, pago: Pago, *, titulo: str,
     except mp.ErrorMercadoPago as error:
         logger.warning("Pago %s: no se pudo crear la preferencia (%s)",
                        pago.id, error)
+        _limpiar_cobro_fallido(db, pago)
         raise ErrorPago(
             "Mercado Pago no está disponible en este momento. "
             "Puedes pagar por transferencia.", 503)
@@ -265,6 +271,51 @@ def _crear_preferencia(db: Session, pago: Pago, *, titulo: str,
         "init_point": init_point,
         "monto_clp": pago.monto_clp,
     }
+
+
+def _limpiar_cobro_fallido(db: Session, pago: Pago) -> None:
+    """Deshace la reserva de un pago que nunca llegó a tener checkout.
+
+    Es el caso "MP no respondió al crear la preferencia": no existe `init_point`,
+    así que nadie puede pagar. Sin esta limpieza el alumno quedaría con una
+    solicitud `pending` (y no podría ni mandar el voucher) o con el stock del
+    Bazar reservado por un cobro imposible.
+
+    Best-effort: si falla, el job de expiración (30 min / 24 h) lo cierra igual.
+    """
+    try:
+        if pago.concepto == CONCEPTO_BAZAR:
+            pedido = (
+                db.query(Pedido)
+                .filter(Pedido.id == pago.referencia_id,
+                        Pedido.tenant_id == pago.tenant_id)
+                .with_for_update()
+                .first()
+            )
+            if pedido is not None and pedido.estado == "pendiente":
+                pedidos_estado.rechazar_pedido(
+                    db, pedido, "No se pudo iniciar el pago online",
+                    origen=pedidos_estado.ORIGEN_MERCADOPAGO)
+        elif pago.concepto == CONCEPTO_MEMBRESIA:
+            db.execute(
+                update(SolicitudPlan)
+                .where(SolicitudPlan.id == pago.referencia_id)
+                .where(SolicitudPlan.estado == "pending")
+                .values(estado="rejected",
+                        comentario_admin="No se pudo iniciar el pago online")
+            )
+        db.execute(
+            update(Pago)
+            .where(Pago.id == pago.id)
+            .where(Pago.estado == "pendiente")
+            .values(estado="cancelado")
+        )
+        db.commit()
+    except Exception as error:  # pragma: no cover - best-effort
+        db.rollback()
+        logger.warning("No se pudo limpiar el pago fallido %s: %s",
+                       pago.id, error)
+
 
 
 def crear_pago_bazar(db: Session, *, current_user: dict, producto_id: int,
@@ -346,13 +397,14 @@ def crear_pago_bazar(db: Session, *, current_user: dict, producto_id: int,
 
     # Campana del admin (mismo `tipo` que el pedido manual). NO se manda el correo
     # de "compra confirmada": el pedido todavía no está cobrado (nace pendiente).
-    _avisar_pedido_online(db, tenant_id=tenant_id, alumno_id=alumno_id,
-                          producto=producto.nombre, cantidad=cantidad)
-
-    return _crear_preferencia(
+    resultado = _crear_preferencia(
         db, pago, titulo=f"{producto.nombre} x{cantidad}",
         # `ticket` se acredita días después y el pedido ya habría vencido.
         excluir_medios=mp.MEDIOS_EXCLUIDOS_BAZAR)
+
+    _avisar_pedido_online(db, tenant_id=tenant_id, alumno_id=alumno_id,
+                          producto=producto.nombre, cantidad=cantidad)
+    return resultado
 
 
 # ── Webhooks: bitácora + aplicación del pago ────────────────────────────────
