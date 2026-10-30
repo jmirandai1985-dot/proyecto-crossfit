@@ -272,6 +272,14 @@ def _bloque(fuente: str, desde: str) -> str:
     return resto if siguiente == -1 else resto[:siguiente]
 
 
+def _funcion(fuente: str, desde: str) -> str:
+    """Texto desde `desde` (una `def` de un SERVICIO) hasta la siguiente `def`."""
+    inicio = fuente.index(desde)
+    resto = fuente[inicio + len(desde):]
+    siguiente = resto.find("\ndef ")
+    return fuente[inicio:] if siguiente == -1 else fuente[inicio:inicio + len(desde) + siguiente]
+
+
 def test_la_entrega_exige_coach_del_box_y_tiene_rate_limit():
     fuente = _fuente("backend/app/api/v1/pedidos.py")
     bloque = _bloque(fuente, '@router.post("/entregar"')
@@ -302,23 +310,27 @@ def test_la_entrega_es_atomica_y_sella_la_traza():
 
 
 def test_al_validar_se_genera_el_codigo_una_sola_vez():
-    bloque = _bloque(_fuente("backend/app/api/v1/pedidos.py"),
-                     '@router.put("/{pedido_id}/estado"')
-    assert 'nuevo_estado == "validado" and not pedido.codigo_retiro' in bloque
+    """El código se genera UNA vez, al validar.
+
+    La regla vive en `services/pedidos_estado.py::marcar_validado`: el endpoint del
+    admin y el webhook de Mercado Pago validan un pedido por la MISMA función.
+    """
+    bloque = _funcion(_fuente("backend/app/services/pedidos_estado.py"),
+                      "def marcar_validado(")
+    assert "if not pedido.codigo_retiro:" in bloque
     assert "codigos_retiro.generar_codigo_unico(" in bloque
-    assert "db, tenant_id" in bloque
+    assert "db, pedido.tenant_id" in bloque
     assert "texto_validado(" in bloque
 
 
 def test_la_entrega_avisa_en_la_campana_del_alumno():
-    fuente = _fuente("backend/app/api/v1/pedidos.py")
-    assert 'notificar_alumno(\n' in fuente or "notificar_alumno(" in fuente
+    fuente = _fuente("backend/app/services/pedidos_estado.py")
+    assert "notificar_alumno(" in fuente
     assert '"pedido_entregado"' in fuente
-    # El respaldo sin código (PUT /{id}/estado) también sella quién/cuándo.
-    respaldo = _bloque(fuente, '@router.put("/{pedido_id}/estado"')
-    assert 'nuevo_estado == "entregado"' in respaldo
-    assert "entregado_por = current_user" in respaldo
-    assert "entregado_en = ahora_santiago()" in respaldo
+    # La entrega (mesón o respaldo del admin) sella quién/cuándo.
+    respaldo = _funcion(fuente, "def marcar_entregado(")
+    assert "pedido.entregado_por = actor_id" in respaldo
+    assert "pedido.entregado_en = ahora_santiago()" in respaldo
 
 
 def test_el_qr_del_retiro_sirve_el_svg_del_codigo():

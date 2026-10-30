@@ -108,7 +108,12 @@ def test_b4_el_tenant_sale_del_token_y_no_del_query():
 # ── C. Los escritores de caja usan el mismo día (Chile) ──────────────────────
 
 def test_c1_aprobar_solicitud_registra_la_caja_de_hoy_en_chile():
-    fuente = _fuente("backend/app/api/v1/solicitudes_planes.py")
+    """La caja de la aprobación se fecha en CHILE, aunque la aprobación sea online.
+
+    La transacción la escribe `services/aprobacion_planes.py` (el endpoint del admin
+    y el webhook de Mercado Pago ejecutan la misma función).
+    """
+    fuente = _fuente("backend/app/services/aprobacion_planes.py")
     assert "fecha=hoy_santiago()," in fuente
 
 

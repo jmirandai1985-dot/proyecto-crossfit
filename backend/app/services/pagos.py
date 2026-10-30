@@ -75,6 +75,59 @@ def _alertar_admins(db: Session, tenant_id: int, tipo: str, mensaje: str) -> Non
                        tenant_id, error)
 
 
+def _marcar_beneficio_usado(db: Session, alumno_id: int, beneficio_id: int,
+                            precio_lista_clp: int) -> None:
+    """Marca el beneficio como USADO al crear la solicitud online.
+
+    Mismo efecto que `POST /solicitudes/solicitar`: si no se marcara, el descuento
+    seguiría "vigente" y el alumno podría aplicarlo a una segunda compra. Es
+    best-effort: la solicitud ya está guardada con su precio final.
+    """
+    try:
+        beneficio = beneficios.vigente(
+            db, alumno_id, tipo=beneficios.TIPO_DESCUENTO)
+        if beneficio is not None and beneficio.id == beneficio_id:
+            beneficios.usar(db, beneficio, precio_lista_clp=precio_lista_clp)
+    except Exception as error:
+        logger.warning("No se pudo marcar el beneficio #%s como usado: %s",
+                       beneficio_id, error)
+
+
+def _avisar_solicitud_online(db: Session, *, solicitud: SolicitudPlan,
+                             nombre_plan: str) -> None:
+    """Campana del admin: hay una solicitud nueva (aunque no tenga comprobante).
+
+    El admin no ve un voucher que revisar, pero sí tiene que vigilar el pago: si
+    MP lo rechaza, la solicitud queda `pending` hasta que el alumno reintente o
+    expire.
+    """
+    try:
+        alumno = db.query(Usuario).filter(
+            Usuario.id == solicitud.alumno_id).first()
+        nombre = alumno.nombre if alumno else f"Alumno #{solicitud.alumno_id}"
+        notificar_admins_del_tenant(
+            db, solicitud.tenant_id, "plan_solicitado",
+            f"💳 Nueva solicitud de plan de {nombre}: {nombre_plan} "
+            f"(solicitud #{solicitud.id}) — pago online")
+    except Exception as error:  # pragma: no cover - best-effort
+        logger.warning("No se pudo avisar la solicitud online %s: %s",
+                       solicitud.id, error)
+
+
+def _avisar_pedido_online(db: Session, *, tenant_id: int, alumno_id: int,
+                          producto: str, cantidad: int) -> None:
+    """Campana del admin: pedido nuevo del Bazar creado por checkout."""
+    try:
+        alumno = db.query(Usuario).filter(Usuario.id == alumno_id).first()
+        nombre = alumno.nombre if alumno else "Atleta"
+        notificar_admins_del_tenant(
+            db, tenant_id, "pedido_nuevo",
+            f"Nuevo pedido de {nombre}: {producto} x{cantidad} — pago online")
+    except Exception as error:  # pragma: no cover - best-effort
+        logger.warning("No se pudo avisar el pedido online del alumno %s: %s",
+                       alumno_id, error)
+
+
 
 def crear_pago_membresia(db: Session, *, current_user: dict, plan_id: int,
                          certificado_estudiante_url: Optional[str] = None) -> dict:
@@ -169,6 +222,14 @@ def crear_pago_membresia(db: Session, *, current_user: dict, plan_id: int,
     db.flush()
     solicitud.pago_id = pago.id
     db.commit()
+
+    # ── Efectos secundarios del flujo manual, ahora para el pago online ──
+    # 1. El beneficio (F2) se marca usado: si no, el mismo descuento se podría
+    #    aplicar a otra compra.
+    if descuento.get("beneficio_id"):
+        _marcar_beneficio_usado(db, alumno_id, descuento["beneficio_id"], lista)
+    # 2. La campana del admin: la solicitud existe y el pago hay que vigilarlo.
+    _avisar_solicitud_online(db, solicitud=solicitud, nombre_plan=plan.nombre)
 
     return _crear_preferencia(db, pago, titulo=f"Plan {plan.nombre}")
 
@@ -282,6 +343,11 @@ def crear_pago_bazar(db: Session, *, current_user: dict, producto_id: int,
     except DBAPIError:
         db.rollback()
         raise ErrorPago("Alta demanda, intenta de nuevo", 503)
+
+    # Campana del admin (mismo `tipo` que el pedido manual). NO se manda el correo
+    # de "compra confirmada": el pedido todavía no está cobrado (nace pendiente).
+    _avisar_pedido_online(db, tenant_id=tenant_id, alumno_id=alumno_id,
+                          producto=producto.nombre, cantidad=cantidad)
 
     return _crear_preferencia(
         db, pago, titulo=f"{producto.nombre} x{cantidad}",
