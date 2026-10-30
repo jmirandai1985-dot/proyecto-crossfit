@@ -225,19 +225,23 @@ ok(/useMiCodigoReferido\s*\(/.test(campo) === false, 'el campo no pide el códig
 ok(/useValidarCodigoReferido\s*\(/.test(campo), 'CampoReferido valida el código contra el backend');
 ok(/<ConfiguracionReferidos\s*\/>/.test(marketing) && /id:\s*'referidos'/.test(marketing),
     'Marketing monta la sub-pestaña Referidos');
-ok(/<CampoReferido/.test(solicitarPlan) && /useState\(null\)/.test(solicitarPlan),
-    'SolicitarPlan monta el campo y conserva el código al cambiar de paso');
-ok(/useMiInvitacion\s*\(/.test(solicitarPlan)
-    && /codigoSugerido=\{miInvitacionQ\.data\?\.codigo/.test(solicitarPlan),
-    'SolicitarPlan prellena el código de quien invitó al alumno');
+// F3b: el descuento del referido se aplica ANTES de cobrar, así que el paso de
+// compra ya no pide el código: muestra el precio final que calcula el backend.
+ok(!/<CampoReferido/.test(solicitarPlan),
+    'SolicitarPlan ya NO monta el campo del código: el descuento llega en el precio');
+ok(/descuento_referido_pct/.test(solicitarPlan),
+    'SolicitarPlan anuncia el premio del referido que manda /beneficios/mios');
 ok(/codigoSugerido/.test(campo) && /referido-prellenado/.test(campo)
     && /mutateAsync|enviar/.test(campo),
     'CampoReferido prellena pero NO aplica solo (sigue habiendo botón)');
 
-// Migración 054: la invitación por correo vive en "Invita y gana" y el
-// invitado aplica el código en la compra, no en la pantalla del invitador.
-ok(!/<CampoReferido/.test(invitaGana),
-    'InvitaYGana ya NO monta CampoReferido');
+// Migración 054: la invitación por correo vive en "Invita y gana", y el INVITADO
+// aplica el código en esa misma pantalla (antes vivía en la compra).
+ok(/useMiInvitacion\s*\(/.test(invitaGana)
+    && /codigoSugerido=\{miInvitacion\?\.codigo/.test(invitaGana),
+    'InvitaYGana prellena el código de quien invitó al alumno');
+ok(/<CampoReferido/.test(invitaGana) && /mostrarTitulo=\{false\}/.test(invitaGana),
+    'InvitaYGana monta el campo del invitado bajo su propio título');
 ok(/<InvitarPorCorreo\s*\/>/.test(invitaGana),
     'InvitaYGana monta la invitación por correo');
 ok(/useInvitarAlumno\s*\(/.test(invitarCorreo)
