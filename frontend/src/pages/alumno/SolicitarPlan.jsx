@@ -7,8 +7,9 @@ import { useAuth } from '../../context/AuthContext';
 // documentos salen de la caché compartida (`hooks/queries.js`), no de un `useEffect` que
 // repetía las mismas peticiones en cada montaje.
 import {
-    useConfiguracionBancaria, useMiInvitacion, useMiPerfil, useMisBeneficios,
-    usePlanesActivos, useSolicitarPlan, useSubirArchivoPrivado,
+    useConfiguracionBancaria, useCrearPagoMembresia, useMiInvitacion, useMiPerfil,
+    useMisBeneficios, usePagoDisponible, usePlanesActivos, useSolicitarPlan,
+    useSubirArchivoPrivado,
 } from '../../hooks/queries';
 import { fmtFechaChile } from '../../utils/fecha';
 
@@ -46,6 +47,16 @@ const SolicitarPlan = () => {
     const subirArchivo = useSubirArchivoPrivado();
     const solicitarPlan = useSolicitarPlan();
     const subiendo = subirArchivo.isPending || solicitarPlan.isPending;
+
+    // ─── Pago online (Mercado Pago Checkout Pro) ───────────────────────────
+    // Convive con la transferencia: el botón aparece SÓLO si el backend dice que
+    // la pasarela está encendida (`GET /pagos/disponibilidad`). La tarjeta nunca
+    // pasa por la app: el backend devuelve `init_point` y acá se redirige.
+    const pagoDisponibleQ = usePagoDisponible();
+    const pagoDisponible = Boolean(pagoDisponibleQ.data?.habilitado);
+    const crearPagoOnline = useCrearPagoMembresia();
+    // "Yendo a pagar": se queda en true al redirigir (evita el doble clic).
+    const [yendoAPagar, setYendoAPagar] = useState(false);
 
     // "Cargando" mientras falte el primer dato de las dos consultas del bloque (antes: un
     // `loading` que apagaba el `finally` del fetch).
@@ -144,6 +155,43 @@ const SolicitarPlan = () => {
             setMensajeError(
                 err.response?.data?.detail || 'Error al procesar la solicitud. Intenta nuevamente.'
             );
+        }
+    };
+
+    /**
+     * Paga el plan online (Checkout Pro). Crea la solicitud SIN comprobante: el
+     * cobro lo prueba Mercado Pago y el webhook activa el plan automáticamente.
+     * El certificado de estudiante SÍ se sube antes (es un requisito del plan,
+     * no una prueba de pago): al mismo lugar privado que en la transferencia.
+     */
+    const handlePagarOnline = async () => {
+        if (!planSeleccionado) return;
+        if (planSeleccionado?.requiere_certificado_estudiante && !archivoCertificado) {
+            setMensajeError('Este plan requiere un certificado de estudiante. Debes subirlo.');
+            return;
+        }
+        setMensajeError('');
+        setYendoAPagar(true);
+        try {
+            let certificadoUrl = null;
+            if (planSeleccionado?.requiere_certificado_estudiante && archivoCertificado) {
+                certificadoUrl = await subirArchivo.mutateAsync(archivoCertificado);
+            }
+            const pago = await crearPagoOnline.mutateAsync({
+                plan_id: planSeleccionado.id,
+                certificado_estudiante_url: certificadoUrl,
+            });
+            // Checkout Pro: se sale a Mercado Pago y se vuelve a
+            // /alumno/pago/resultado/<pago_id>. Nada de esto activa el plan: eso
+            // lo hace el webhook, no el navegador.
+            window.location.href = pago.init_point;
+        } catch (err) {
+            console.error('Error al iniciar el pago online:', err);
+            setMensajeError(
+                err.response?.data?.detail
+                || 'No se pudo iniciar el pago online. Intenta nuevamente o usa transferencia.'
+            );
+            setYendoAPagar(false);
         }
     };
 
@@ -477,6 +525,32 @@ const SolicitarPlan = () => {
                             </div>
                         )}
 
+                        {/* ─── PAGO ONLINE (Mercado Pago) ───
+                            Alternativa a la transferencia: el alumno NO sube
+                            comprobante; Mercado Pago confirma el cobro y el
+                            plan se activa solo (webhook). El botón sólo existe
+                            si el box habilitó la pasarela. */}
+                        {pagoDisponible && (
+                            <div className="bg-blue-50 rounded-xl border border-blue-200 p-5"
+                                data-testid="bloque-pago-online">
+                                <h4 className="font-bold text-blue-900 mb-2 flex items-center gap-2">
+                                    <span>💳</span> Pagar online con Mercado Pago
+                                </h4>
+                                <p className="text-xs text-blue-700 mb-4">
+                                    Tarjeta, débito o dinero en cuenta. Tu plan se activa
+                                    automáticamente cuando Mercado Pago confirma el pago: no
+                                    necesitas subir comprobante ni esperar aprobación.
+                                </p>
+                                <button type="button"
+                                    data-testid="pagar-mercadopago-plan"
+                                    onClick={handlePagarOnline}
+                                    disabled={yendoAPagar || subiendo}
+                                    className="w-full px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                    {yendoAPagar ? 'Redirigiendo a Mercado Pago...' : '💳 Pagar con Mercado Pago'}
+                                </button>
+                            </div>
+                        )}
+
                         {mensajeError && (
                             <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 font-medium text-sm">
                                 ❌ {mensajeError}
@@ -493,7 +567,7 @@ const SolicitarPlan = () => {
                             <button type="button"
                                 data-testid="enviar-solicitud"
                                 onClick={handleEnviarSolicitud}
-                                disabled={subiendo || !archivoVoucher || (planSeleccionado.requiere_certificado_estudiante && !archivoCertificado)}
+                                disabled={subiendo || yendoAPagar || !archivoVoucher || (planSeleccionado.requiere_certificado_estudiante && !archivoCertificado)}
                                 className="flex-1 px-6 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                                 {subiendo ? 'Enviando solicitud...' : '✅ Enviar Solicitud'}
                             </button>

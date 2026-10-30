@@ -73,6 +73,9 @@ const AlumnoSolicitarPlan = lazy(() => import('./pages/alumno/SolicitarPlan'));
 const AlumnoEvolucion = lazy(() => import('./pages/alumno/Evolucion'));
 const AlumnoBazar = lazy(() => import('./pages/alumno/Bazar'));
 const AlumnoMisPedidos = lazy(() => import('./pages/alumno/MisPedidos'));
+// Retorno de Mercado Pago (Checkout Pro): pantalla de "confirmando" con polling
+// a GET /pagos/{id}. No activa nada: eso lo hace el webhook.
+const AlumnoPagoResultado = lazy(() => import('./pages/alumno/PagoResultado'));
 const AlumnoPerformanceHub = lazy(() => import('./pages/alumno/PerformanceHub'));
 const AlumnoMiProgreso = lazy(() => import('./pages/alumno/MiProgreso'));
 const AlumnoMiHistorial = lazy(() => import('./pages/alumno/MiHistorial'));
@@ -199,6 +202,7 @@ function App() {
             <Route path="evolucion" element={<AlumnoEvolucion />} />
             <Route path="bazar" element={<AlumnoBazar />} />
             <Route path="mis-pedidos" element={<AlumnoMisPedidos />} />
+            <Route path="pago/resultado/:pagoId" element={<AlumnoPagoResultado />} />
             <Route path="performance-hub" element={<AlumnoPerformanceHub />} />
             <Route path="mi-progreso" element={<AlumnoMiProgreso />} />
             <Route path="mi-historial" element={<AlumnoMiHistorial />} />
