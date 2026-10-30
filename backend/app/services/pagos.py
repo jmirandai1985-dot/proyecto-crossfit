@@ -38,6 +38,7 @@ from app.services import aprobacion_planes
 from app.services import beneficios_service as beneficios
 from app.services import mercadopago_cliente as mp
 from app.services import pedidos_estado
+from app.services import referidos_service as referidos
 from app.services.notificaciones_panel import notificar_admins_del_tenant
 from app.utils.santiago import ahora_santiago
 
@@ -179,6 +180,26 @@ def crear_pago_membresia(db: Session, *, current_user: dict, plan_id: int,
                 # Se congela el precio final: es exactamente lo que cobra MP y
                 # lo que va a registrar `activar_plan` (sin re-descuentos).
                 "precio_final_clp": aritmetica["precio_final_clp"],
+            }
+
+    # ── Fase 3b: el descuento del REFERIDO también entra en la preferencia ──
+    # El monto que cobra Mercado Pago tiene que incluir el premio del programa de
+    # referidos: antes se aplicaba al aprobar el webhook, o sea DESPUÉS de que MP
+    # ya había cobrado el precio de lista. `previsualizar_compra` NO convierte el
+    # referido ni consume el crédito (una preferencia abandonada no puede gastar
+    # el premio); sólo fija el número. Sin apilar: si hay beneficio F2, el
+    # referido espera.
+    if lista > 0 and not descuento:
+        premio = referidos.previsualizar_compra(
+            db, tenant_id=tenant_id, usuario_id=alumno_id,
+            precio_lista_clp=lista)
+        if premio is not None and premio["descuento_clp"] > 0:
+            descuento = {
+                # `descuento_pct` es Integer en la solicitud: el % del programa
+                # se guarda redondeado para mostrarlo; el monto exacto que manda
+                # es `precio_final_clp`.
+                "descuento_pct": int(round(premio["porcentaje"])),
+                "precio_final_clp": premio["precio_final_clp"],
             }
 
     monto = mp.monto_clp(descuento.get("precio_final_clp") or lista)

@@ -25,6 +25,10 @@ from app.services.auditoria_service import registrar_auditoria
 # F2: el descuento vigente del alumno se aplica al SOLICITAR un plan. La aritmética (`desglose`)
 # y el ciclo de vida del beneficio (`vigente`/`usar`) viven en su servicio, no acá.
 from app.services import beneficios_service as beneficios
+# F3b: el descuento del programa de referidos tiene que conocerse ANTES de cobrar
+# (el alumno transfiere el precio final, no el de lista). El servicio es el mismo
+# que después CONVIERTE el referido al aprobar: una sola regla para las dos cosas.
+from app.services import referidos_service as referidos
 # Avisos del PANEL (la campana): un solo módulo decide A QUIÉN y CÓMO se avisa
 # (best-effort: un aviso nunca tumba la solicitud). Ver docs/NOTIFICACIONES_PANEL.md.
 from app.services.notificaciones_panel import notificar_admins_del_tenant
@@ -138,6 +142,26 @@ def solicitar_plan(
                 "beneficio_id": vigente.id,
                 "descuento_pct": aritmetica["descuento_pct"],
                 "precio_final_clp": aritmetica["precio_final_clp"],
+            }
+
+    # ── Fase 3b: el descuento del REFERIDO también se congela AL SOLICITAR ──
+    # Antes se resolvía al aprobar: el alumno transfería el precio de lista y el
+    # admin veía otro monto en la misma pantalla. `previsualizar_compra` NO
+    # convierte el referido ni consume el crédito (eso sigue pasando al aprobar,
+    # en `confirmar_compra`): sólo fija el número que se cobra. Sin apilar: si ya
+    # hay un beneficio F2, el referido espera su turno (la misma regla que aplica
+    # la aprobación).
+    if not descuento and isinstance(lista, int) and not isinstance(lista, bool) \
+            and lista > 0:
+        premio = referidos.previsualizar_compra(
+            db, tenant_id=data.tenant_id, usuario_id=data.alumno_id,
+            precio_lista_clp=lista)
+        if premio is not None and premio["descuento_clp"] > 0:
+            descuento = {
+                # `descuento_pct` es Integer en la solicitud: el % del programa se
+                # guarda redondeado para mostrarlo; el monto que manda es el final.
+                "descuento_pct": int(round(premio["porcentaje"])),
+                "precio_final_clp": premio["precio_final_clp"],
             }
 
     solicitud = SolicitudPlan(

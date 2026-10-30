@@ -48,6 +48,10 @@ from app.models.usuario import Usuario
 from app.services import beneficios_service as svc
 from app.services import fidelizacion_plantillas as plantillas
 from app.services import churn_service
+# F3b: el premio del programa de referidos también cambia el precio de la compra.
+# Se lo previsualiza acá (sin gastarlo) con la MISMA regla que después cobra la
+# solicitud / la preferencia de Mercado Pago.
+from app.services import referidos_service as referidos
 
 router = APIRouter()
 
@@ -229,6 +233,57 @@ def _precios_con_descuento(db: Session, tenant_id: int, descuento, plan_ids) -> 
         if isinstance(lista, int) and not isinstance(lista, bool) and lista > 0:
             precios[str(plan.id)] = svc.desglose(descuento, lista)
     return precios
+
+
+def _precios_con_referido(db: Session, tenant_id: int, usuario_id: int,
+                          descuento, plan_ids):
+    """`({plan_id: desglose}, pct)` con el premio del programa de REFERIDOS puesto.
+
+    Es el MISMO descuento que se va a cobrar: la decisión (¿invitado en su primera
+    compra o crédito de invitador?) la toma el servicio de referidos con la regla
+    que usan `solicitar_plan` y la preferencia de Mercado Pago
+    (`previsualizar_compra`), y los pesos de cada plan salen de su aritmética
+    (`calcular_descuento_clp`). Sin esto el alumno transfiere el precio de lista
+    mientras la solicitud nace con un precio final más bajo: dos números distintos
+    para la misma compra.
+
+    No convierte el referido ni consume el crédito: mirar el precio no puede gastar
+    el premio. Sin apilar: con un beneficio F2 (`descuento`) no se suma nada, igual
+    que al cobrar. Sólo se usa en la puerta del ALUMNO (`/mios`): el panel asigna
+    regalos y la compra del alumno no es suya.
+    """
+    if descuento is not None or not plan_ids:
+        return {}, None
+    ids = [int(trozo) for trozo in str(plan_ids).split(",") if trozo.strip().isdigit()][:MAX_PLANES]
+    if not ids:
+        return {}, None
+    planes = db.query(Plan).filter(
+        Plan.id.in_(ids), Plan.tenant_id == tenant_id).all()
+    # Una sola consulta al servicio (el % no depende del plan): se le pasa un
+    # precio de lista cualquiera de los pedidos, sólo para que resuelva la regla.
+    referencia = next((p.precio_clp for p in planes
+                       if isinstance(p.precio_clp, int)
+                       and not isinstance(p.precio_clp, bool) and p.precio_clp > 0),
+                      None)
+    if referencia is None:
+        return {}, None
+    premio = referidos.previsualizar_compra(
+        db, tenant_id=tenant_id, usuario_id=usuario_id, precio_lista_clp=referencia)
+    if premio is None or premio["descuento_clp"] <= 0:
+        return {}, None
+    pct = premio["porcentaje"]
+    precios = {}
+    for plan in planes:
+        lista = plan.precio_clp
+        if isinstance(lista, int) and not isinstance(lista, bool) and lista > 0:
+            descuento_clp = referidos.calcular_descuento_clp(lista, pct)
+            precios[str(plan.id)] = {
+                "precio_lista_clp": lista,
+                "descuento_pct": pct,
+                "descuento_clp": descuento_clp,
+                "precio_final_clp": lista - descuento_clp,
+            }
+    return precios, pct
 
 
 @router.get("/tipos")
@@ -438,16 +493,26 @@ def mis_beneficios(
     Con `plan_ids` va además el precio final de cada plan, calculado por el SERVICIO (`desglose`):
     la pantalla muestra un número, no lo calcula (una segunda aritmética del descuento se
     desincroniza del cobro por un peso y el alumno lo ve).
+
+    Si no hay beneficio F2 pero sí le toca el programa de REFERIDOS, el descuento viaja igual
+    (`descuento_referido_pct` + `precios` con el precio final): es el mismo número con el que nace
+    la solicitud y con el que se crea la preferencia de Mercado Pago. Si hay beneficio F2, manda
+    ese y el referido no se suma (no se apilan).
     """
     vivos = svc.vivos(db, current_user["usuario_id"])
     descuento = next((b for b in vivos if b.tipo == TipoBeneficio.descuento), None)
+    precios = _precios_con_descuento(
+        db, current_user["tenant_id"], descuento, plan_ids)
+    precios_referido, pct_referido = _precios_con_referido(
+        db, current_user["tenant_id"], current_user["usuario_id"], descuento, plan_ids)
 
     return {
         "vivos": [_item(b) for b in vivos],
         "descuento_pct": (descuento.valor if descuento is not None else None),
         "descuento_hasta": (descuento.vigente_hasta.isoformat()
                             if descuento is not None else None),
-        "precios": _precios_con_descuento(db, current_user["tenant_id"], descuento, plan_ids),
+        "descuento_referido_pct": pct_referido,
+        "precios": (precios_referido or precios),
     }
 
 

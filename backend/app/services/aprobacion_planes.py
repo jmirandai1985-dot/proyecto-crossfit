@@ -15,8 +15,9 @@ Qué hace `activar_plan` (en este orden, que importa):
 2. Crea la `Suscripcion` activa (vigencia en hora de Chile, créditos de la regla
    compartida) y la notificación del alumno.
 3. Expira las suscripciones activas del plan "Prueba" (upgrade).
-4. Convierte el referido pendiente (F3b) — sólo si la compra no traía ya un
-   descuento o un precio final congelado.
+4. Convierte el referido pendiente (F3b) — salvo que la compra traiga ya un
+   descuento de fidelización; si el precio venía congelado (Mercado Pago o el
+   monto de la transferencia), el descuento se mide contra lo cobrado.
 5. Registra la `TransaccionFinanciera` (una sola vez), la auditoría y el correo.
 
 `actor_id=None` es un valor VÁLIDO: significa "lo aprobó la pasarela".
@@ -184,11 +185,16 @@ def activar_plan(db: Session, solicitud_id: int, *, tenant_id: Optional[int] = N
             sp.id, solicitud.alumno_id)
 
     # ── Fase 3b: el referido se resuelve al CONFIRMAR la compra ──
-    # Si la solicitud YA trae un descuento de fidelización (`beneficio_id`) o un
-    # precio final congelado (pago online), no se toca nada: no se apilan
-    # descuentos y el referido queda pendiente.
+    # Si la solicitud YA trae un descuento de fidelización (`beneficio_id`) no se
+    # toca nada: no se apilan descuentos y el referido queda pendiente.
+    # El precio final puede venir YA CONGELADO (lo fijó la preferencia de Mercado
+    # Pago, o es el monto que el alumno vio al transferir): la compra igual
+    # CONVIERTE el referido —el invitador gana su crédito— pero el descuento se
+    # mide contra ese monto y no contra un `%` recalculado con la configuración de
+    # hoy. Antes esta rama se saltaba con cualquier `precio_final_clp`, así que un
+    # pago online nunca convertía el referido.
     descuento_referido = None
-    if solicitud.beneficio_id is None and solicitud.precio_final_clp is None:
+    if solicitud.beneficio_id is None:
         db.flush()  # asigna el id de la suscripción sin commitear
         descuento_referido = referidos.confirmar_compra(
             db,
@@ -197,8 +203,10 @@ def activar_plan(db: Session, solicitud_id: int, *, tenant_id: Optional[int] = N
             precio_lista_clp=precio_lista(solicitud, plan),
             suscripcion_id=suscripcion.id,
             ahora=ahora,
+            precio_final_clp=solicitud.precio_final_clp,
         )
         if (descuento_referido is not None
+                and solicitud.precio_final_clp is None
                 and descuento_referido["descuento_clp"] > 0):
             solicitud.precio_final_clp = descuento_referido["precio_final_clp"]
 

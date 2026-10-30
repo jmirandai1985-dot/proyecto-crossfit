@@ -265,6 +265,36 @@ def test_preferencia_sin_init_point_falla(monkeypatch):
         mp.crear_preferencia(pago=_pago(), titulo="Plan")
 
 
+def test_preferencia_usa_auto_return_con_back_url_https(monkeypatch):
+    _config_de_prueba(monkeypatch)
+    sdk = _SDKFalso(preferencia={"status": 201, "response": {
+        "id": "pref-5", "init_point": "https://mp/prod"}})
+    monkeypatch.setitem(mp._SDK_CACHE, "TEST-token", sdk)
+    mp.crear_preferencia(pago=_pago(), titulo="Plan")
+    assert sdk._preferencia.payload["auto_return"] == "approved"
+
+
+def test_preferencia_sin_https_omite_auto_return(monkeypatch):
+    """MP rechaza la preferencia ENTERA (`400 invalid_auto_return`) si `auto_return`
+    viaja con una `back_urls.success` http (localhost o IP de LAN). En local se
+    omite: el alumno vuelve con el botón de MP y el pago se confirma por webhook.
+    """
+    _config_de_prueba(monkeypatch)
+    monkeypatch.setattr(settings, "MERCADOPAGO_BACK_URL_BASE",
+                        "http://192.168.100.241:5173", raising=False)
+    sdk = _SDKFalso(preferencia={"status": 201, "response": {
+        "id": "pref-6", "init_point": "https://mp/prod"}})
+    monkeypatch.setitem(mp._SDK_CACHE, "TEST-token", sdk)
+
+    mp.crear_preferencia(pago=_pago(), titulo="Plan")
+
+    payload = sdk._preferencia.payload
+    assert payload["back_urls"]["success"].startswith("http://192.168.100.241:5173")
+    assert "auto_return" not in payload, \
+        "con back_urls http MP responde 400 invalid_auto_return (el endpoint lo "\
+        "mostraba como un 503 genérico)"
+
+
 def test_preferencia_rechazada_por_mp_falla(monkeypatch):
     _config_de_prueba(monkeypatch)
     sdk = _SDKFalso(preferencia={"status": 401,

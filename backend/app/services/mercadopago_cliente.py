@@ -171,6 +171,41 @@ def _url_retorno(config: dict, pago_id: int) -> dict:
     return {"success": url, "pending": url, "failure": url}
 
 
+def _admite_auto_return(back_urls: dict) -> bool:
+    """¿Se puede mandar `auto_return` con estas `back_urls`?
+
+    MP exige que `back_urls.success` sea **https** para aceptar `auto_return`:
+    con `http` (localhost o una IP de LAN) rechaza la preferencia ENTERA con
+    `400 invalid_auto_return` ("back_url.success must be defined"), y eso
+    terminaba como un 503 genérico en el endpoint. Sin `auto_return`, MP acepta
+    las `back_urls` http sin problema (el alumno vuelve con el botón de MP).
+    """
+    return str((back_urls or {}).get("success") or "").lower().startswith("https://")
+
+
+def _motivo_mp(datos) -> str:
+    """Motivo corto de una respuesta de error de MP (`error`/`message`/`cause`).
+
+    Sólo para el log: sin esto un 400 de MP se veía como "rechazó la creación de
+    la preferencia" y había que reproducir la llamada a mano para saber qué
+    campo fallaba. No incluye credenciales (MP no las devuelve en el cuerpo).
+    """
+    if not isinstance(datos, dict):
+        return "sin detalle"
+    partes = [str(datos.get("error") or ""), str(datos.get("message") or "")]
+    causas = datos.get("cause") or datos.get("causes") or []
+    if isinstance(causas, dict):
+        causas = [causas]
+    if isinstance(causas, list):
+        for causa in causas:
+            if isinstance(causa, dict):
+                partes.append(f"{causa.get('code')}: {causa.get('description')}")
+            else:
+                partes.append(str(causa))
+    texto = " | ".join(p.strip() for p in partes if p and p.strip())
+    return texto[:300] or "sin detalle"
+
+
 def crear_preferencia(*, pago, titulo: str, email: str = "",
                       excluir_medios=()):
     """Crea la preferencia de Checkout Pro y devuelve `(preference_id, init_point)`.
@@ -199,7 +234,11 @@ def crear_preferencia(*, pago, titulo: str, email: str = "",
     if back_urls:
         preferencia["back_urls"] = back_urls
         # Vuelve solo al aprobarse. No se usa para activar nada (ver docstring).
-        preferencia["auto_return"] = "approved"
+        # SÓLO con https: en local (http://localhost o http://192.168.x.x) MP
+        # rechaza la preferencia entera con `invalid_auto_return` (ver
+        # `_admite_auto_return`). Omitir `auto_return` no rompe nada.
+        if _admite_auto_return(back_urls):
+            preferencia["auto_return"] = "approved"
     if config["notification_url"]:
         preferencia["notification_url"] = config["notification_url"]
     if excluir_medios:
@@ -218,7 +257,8 @@ def crear_preferencia(*, pago, titulo: str, email: str = "",
     datos = (respuesta or {}).get("response") or {}
     if estado_http not in (200, 201) or not datos.get("id"):
         logger.warning("MP: respuesta inesperada al crear la preferencia del "
-                       "pago %s (status=%s)", pago.id, estado_http)
+                       "pago %s (status=%s): %s", pago.id, estado_http,
+                       _motivo_mp(datos))
         raise ErrorMercadoPago("Mercado Pago rechazó la creación de la preferencia")
 
     preference_id = str(datos["id"])

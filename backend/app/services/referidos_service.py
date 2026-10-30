@@ -37,6 +37,11 @@ en SU próxima compra. Sin configuración activa no se convierte ni se descuenta
 Tampoco commitea: el llamador guarda suscripción, referido, crédito e ingreso en
 la misma transacción.
 
+`previsualizar_compra` dice lo MISMO sin escribir nada, porque el monto se fija
+antes de cobrar (preferencia de Mercado Pago, monto de la transferencia): con el
+descuento aplicado recién al aprobar, el alumno pagaba el precio de lista y el
+premio aparecía después de que la plata ya había salido.
+
 La migración 054 suma las INVITACIONES ALUMNO → ALUMNO: armar el link
 rastreable (`enlace_invitacion`), decidir si un correo se puede invitar
 (`motivo_invitacion_rechazada`) y ligar la invitación al usuario que se
@@ -514,15 +519,123 @@ def _credito_pendiente(db: Session, *, tenant_id: int, usuario_id: int,
                              CreditoReferido.id).first()
 
 
+def _descuento_cobrado(precio_lista_clp: int, descuento: int,
+                       precio_final_clp: Optional[int]) -> int:
+    """El descuento que REALMENTE se cobró cuando el precio ya estaba congelado.
+
+    El precio puede haberse fijado ANTES de esta confirmación (la preferencia de
+    Mercado Pago o el monto que el alumno transfirió): si la configuración del
+    programa cambió entre medio, manda el dinero que entró a la caja y no un `%`
+    recalculado hoy. Sin precio congelado se respeta el `%` de la configuración.
+    Un precio final fuera de rango se acota a `[0, precio_lista_clp]`: nunca un
+    descuento negativo ni mayor que el precio.
+    """
+    if precio_final_clp is None:
+        return descuento
+    return max(0, min(precio_lista_clp, precio_lista_clp - int(precio_final_clp)))
+
+
+def _descuento_aplicable(db: Session, *, tenant_id: int, usuario_id: int,
+                         precio_lista_clp, suscripcion_id: Optional[int],
+                         bloquear: bool):
+    """QUÉ descuento le toca a esta compra, sin escribir nada.
+
+    Es la ÚNICA implementación del ORDEN de las reglas de `confirmar_compra` (ver
+    su docstring): la usan la confirmación real (`bloquear=True`, con `FOR UPDATE`)
+    y la previsualización (`bloquear=False`), así el precio que se anuncia antes de
+    cobrar y el que se aplica al cobrar no pueden salir de dos reglas distintas.
+
+    Devuelve `(config, referido, credito, pct, descuento_clp)` —exactamente uno de
+    `referido`/`credito` es distinto de `None`— o `None` si no hay nada que aplicar.
+    """
+    if isinstance(precio_lista_clp, bool) or not isinstance(precio_lista_clp, int) \
+            or precio_lista_clp <= 0:
+        return None
+    config = _configuracion_activa(db, tenant_id)
+    if config is None:
+        return None
+
+    referido = None
+    if es_primera_compra_pagada(db, tenant_id=tenant_id, usuario_id=usuario_id,
+                                suscripcion_id=suscripcion_id):
+        referido = _referido_pendiente(db, usuario_id, bloquear=bloquear)
+        # Otra compra concurrente pudo convertirlo mientras esperábamos el lock.
+        if referido is not None and referido.estado != EstadoReferido.pendiente:
+            referido = None
+
+    if referido is not None:
+        pct = Decimal(str(config.porcentaje_descuento_invitado
+                          if config.porcentaje_descuento_invitado is not None
+                          else 0))
+        return (config, referido, None, pct,
+                calcular_descuento_clp(precio_lista_clp, pct))
+
+    credito = _credito_pendiente(db, tenant_id=tenant_id,
+                                 usuario_id=usuario_id, bloquear=bloquear)
+    if credito is None or credito.estado != EstadoCreditoReferido.pendiente:
+        return None
+    pct = Decimal(str(credito.porcentaje
+                      if credito.porcentaje is not None else 0))
+    return (config, None, credito, pct,
+            calcular_descuento_clp(precio_lista_clp, pct))
+
+
+def previsualizar_compra(db: Session, *, tenant_id: int, usuario_id: int,
+                         precio_lista_clp, suscripcion_id: Optional[int] = None
+                         ) -> Optional[dict]:
+    """El desglose que `confirmar_compra` aplicaría, SIN escribir nada.
+
+    Existe porque el monto a cobrar tiene que conocerse ANTES de cobrar: la
+    preferencia de Mercado Pago y el monto que el admin valida en la transferencia
+    se fijan al crear la compra, y el descuento del referido aparecía recién al
+    aprobarla (cuando el alumno ya había pagado el precio de lista).
+
+    NO convierte el referido ni consume el crédito: consultar el precio no puede
+    gastar el premio (un carrito abandonado dejaría al alumno sin su descuento).
+    La conversión sigue ocurriendo en `confirmar_compra`, que ahora recibe el
+    precio ya congelado para registrar exactamente lo que se cobró.
+
+    Devuelve `{"origen", "porcentaje", "descuento_clp", "precio_lista_clp",
+    "precio_final_clp", "referido_aplicado_id"}` o `None`.
+    """
+    base = _descuento_aplicable(db, tenant_id=tenant_id, usuario_id=usuario_id,
+                                precio_lista_clp=precio_lista_clp,
+                                suscripcion_id=suscripcion_id, bloquear=False)
+    if base is None:
+        return None
+    _config, referido, credito, pct, descuento = base
+    return {
+        "origen": ("referido_invitado" if referido is not None
+                   else "credito_invitador"),
+        "porcentaje": float(pct),
+        "descuento_clp": descuento,
+        "precio_lista_clp": precio_lista_clp,
+        "precio_final_clp": precio_lista_clp - descuento,
+        "referido_aplicado_id": (referido.id if referido is not None
+                                 else credito.referido_aplicado_id),
+    }
+
+
 def confirmar_compra(db: Session, *, tenant_id: int, usuario_id: int,
                      precio_lista_clp, suscripcion_id: Optional[int] = None,
-                     ahora: Optional[datetime] = None) -> Optional[dict]:
+                     ahora: Optional[datetime] = None,
+                     precio_final_clp: Optional[int] = None) -> Optional[dict]:
     """Aplica los descuentos del programa al CONFIRMARSE una compra de plan.
 
     Se llama SÓLO en el punto en que la compra ya está confirmada (aprobar la
-    solicitud o crear la suscripción desde el panel), NUNCA en un preview: escribe
-    `referidos_aplicados` y `creditos_referido`. Devuelve el desglose que el
-    llamador debe cobrar, o `None` si no había nada que aplicar. NO commitea.
+    solicitud o crear la suscripción desde el panel): escribe `referidos_aplicados`
+    y `creditos_referido`. Devuelve el desglose que el llamador debe cobrar, o
+    `None` si no había nada que aplicar. NO commitea.
+
+    El precio que se ANUNCIA antes de cobrar lo dice `previsualizar_compra`, con
+    las mismas reglas; ésta es la que CONVIERTE (una sola vez).
+
+    `precio_final_clp` es el precio que ya se le fijó al alumno (preferencia de
+    Mercado Pago, monto de la transferencia). Si viene, el descuento se mide
+    contra ESE monto: lo que se registra tiene que ser lo que entró a la caja,
+    aunque la configuración del programa haya cambiado entre medio. El
+    `porcentaje` informado sigue siendo el de la configuración (es el número que
+    el panel muestra como "el % del programa"); el dinero es el cobrado.
 
     Reglas (Fase 3b):
       1. Sin configuración activa no se convierte ni se descuenta.
@@ -537,29 +650,17 @@ def confirmar_compra(db: Session, *, tenant_id: int, usuario_id: int,
          pendiente para una compra futura.
       5. Un precio no positivo (plan Prueba / Pase de regreso) no genera nada.
     """
-    if isinstance(precio_lista_clp, bool) or not isinstance(precio_lista_clp, int) \
-            or precio_lista_clp <= 0:
+    base = _descuento_aplicable(db, tenant_id=tenant_id, usuario_id=usuario_id,
+                                precio_lista_clp=precio_lista_clp,
+                                suscripcion_id=suscripcion_id, bloquear=True)
+    if base is None:
         return None
-    config = _configuracion_activa(db, tenant_id)
-    if config is None:
-        return None
+    config, referido, credito, pct, descuento = base
+    descuento = _descuento_cobrado(precio_lista_clp, descuento, precio_final_clp)
 
     momento = ahora or datetime.now(timezone.utc)
 
-    referido = None
-    if es_primera_compra_pagada(db, tenant_id=tenant_id, usuario_id=usuario_id,
-                                suscripcion_id=suscripcion_id):
-        referido = _referido_pendiente(db, usuario_id, bloquear=True)
-        # Otra compra concurrente pudo convertirlo mientras esperábamos el lock.
-        if referido is not None and referido.estado != EstadoReferido.pendiente:
-            referido = None
-
     if referido is not None:
-        pct = Decimal(str(config.porcentaje_descuento_invitado
-                          if config.porcentaje_descuento_invitado is not None
-                          else 0))
-        descuento = calcular_descuento_clp(precio_lista_clp, pct)
-
         referido.estado = EstadoReferido.convertido
         referido.fecha_conversion = momento
         referido.descuento_aplicado_invitado = Decimal(descuento)
@@ -593,15 +694,8 @@ def confirmar_compra(db: Session, *, tenant_id: int, usuario_id: int,
                                     if credito_otorgado is not None else None),
         }
 
-    credito = _credito_pendiente(db, tenant_id=tenant_id,
-                                 usuario_id=usuario_id, bloquear=True)
-    if credito is None or credito.estado != EstadoCreditoReferido.pendiente:
-        return None
-
-    pct = Decimal(str(credito.porcentaje
-                      if credito.porcentaje is not None else 0))
-    descuento = calcular_descuento_clp(precio_lista_clp, pct)
-
+    # No era el invitado: `_descuento_aplicable` sólo puede haber devuelto el
+    # crédito del invitador (FIFO), YA bloqueado para que dos compras no lo gasten.
     credito.estado = EstadoCreditoReferido.usado
     credito.fecha_usado = momento
     credito.descuento_aplicado_clp = descuento
