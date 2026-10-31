@@ -458,10 +458,12 @@ def activar_alumno(
     # alumno recién registrado ya nace con una suscripción ACTIVA a ese plan
     # (ver registrar_alumno_nuevo), por lo que sin este filtro el conteo daba
     # >0 y su PRIMERA activación se trataba como renovación (email equivocado).
+    # `inactiva` (Mercado Pago canceló o pausó el cobro, migración 068) también
+    # cuenta: el alumno SÍ tuvo un plan pago.
     es_renovacion = db.query(Suscripcion).join(Plan, Suscripcion.plan_id == Plan.id).filter(
         Suscripcion.usuario_id == alumno_id,
         Suscripcion.tenant_id == tenant_id,
-        Suscripcion.estado.in_(("activo", "vencido")),
+        Suscripcion.estado.in_(("activo", "vencido", "inactiva")),
         Plan.nombre != "Prueba",
     ).count() > 0
 

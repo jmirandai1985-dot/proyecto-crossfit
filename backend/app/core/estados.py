@@ -16,6 +16,7 @@ from shared.estados import (  # noqa: F401  (re-export: punto de importación de
     ESTADOS_CANCELADA,
     ESTADOS_PAGO_BAZAR,
     ESTADOS_SUSCRIPCION_NUNCA_VIGENTES,
+    ESTADOS_SUSCRIPCION_SIN_ACCESO,
     ESTADOS_SUSCRIPCION_VIGENTES,
     ZONA_CHILE,
     es_cancelada,
@@ -109,8 +110,15 @@ def da_acceso_hoy(estado, columna_expiracion, columna_inicio=None, hoy=None):
     SQL crudo del mantenimiento sí exige `fecha_inicio <= fecha` para no contar una suscripción que
     todavía no empieza.
 
+    **Además** de las fechas, se descarta lo que Mercado Pago dejó sin cobro vivo
+    (`ESTADOS_SUSCRIPCION_SIN_ACCESO` = `inactiva`): una suscripción cancelada o pausada no da
+    acceso aunque su `fecha_expiracion` todavía esté en el futuro. Va acá —y no en cada endpoint—
+    para que los 7 lugares que preguntan "¿puede reservar?" digan lo mismo (`admin`, `asistencia`
+    y `reservas`).
+
     ⚠️ La lista se lee de `shared.estados` en CADA llamada (no se captura al importar), igual que en
     `no_cancelada()`: un estado nuevo del enum se clasifica en un solo lugar.
     """
     return and_(estado.notin_(estados.ESTADOS_SUSCRIPCION_NUNCA_VIGENTES),
+                estado.notin_(estados.ESTADOS_SUSCRIPCION_SIN_ACCESO),
                 vigente_hoy(columna_expiracion, columna_inicio, hoy))

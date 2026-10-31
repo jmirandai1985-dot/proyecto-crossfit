@@ -27,6 +27,14 @@ class EstadoSuscripcion(str, enum.Enum):
     activo = "activo"
     vencido = "vencido"
     rechazado = "rechazado"
+    # ── `inactiva` (migración 068) ──
+    # Mercado Pago dice `cancelled` o `paused` sobre el `preapproval`. Antes no
+    # había dónde representarlo: `vencido` es "se le acabó la fecha" (lo pone el
+    # job nocturno) y `rechazado` es "el admin/la pasarela no lo aprobó nunca".
+    # Meter una cancelación en cualquiera de los dos ensuciaba esos reportes, así
+    # que el enum nativo suma este label. Ver `shared/estados.py`: cuenta para las
+    # métricas HISTÓRICAS (sí estuvo vigente) pero NO da acceso hoy.
+    inactiva = "inactiva"
 
 
 class Suscripcion(Base):
@@ -59,6 +67,17 @@ class Suscripcion(Base):
     # las suscripciones nacidas de una aprobación manual o del mesón.
     pago_id = Column(Integer, ForeignKey(
         "pagos.id", ondelete="SET NULL"), nullable=True)
+    # ── Vínculo con Mercado Pago "Planes y suscripciones" (migración 068) ──
+    # `mp_preapproval_id` es el id del `preapproval` (la suscripción recurrente
+    # en MP). UNIQUE: dos suscripciones del box no pueden reclamar el mismo
+    # cobro recurrente. NULL = todavía no se vinculó (se completa con la primera
+    # notificación que llegue; ver `services/suscripciones_mp.py`).
+    mp_preapproval_id = Column(String(64), nullable=True)
+    # Último `status` CRUDO de MP (`authorized`, `pending`, `paused`, ...). No se
+    # usa para decidir nada: el estado del negocio es `estado`. Sirve para
+    # auditar por qué quedó así sin volver a consultar la API.
+    mp_estado = Column(String(30), nullable=True)
+    mp_sincronizado_en = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False,
@@ -68,4 +87,9 @@ class Suscripcion(Base):
         Index('ix_suscripciones_tenant_id', 'tenant_id'),
         Index('ix_suscripciones_usuario_id', 'usuario_id'),
         Index('ix_suscripciones_estado', 'estado'),
+        # UNIQUE con el MISMO nombre que crea la migración 068 (el seed de TEST
+        # arma el esquema con `create_all()`, así que los nombres tienen que
+        # coincidir para no dejar dos objetos para la misma regla).
+        Index('ix_suscripciones_mp_preapproval_id', 'mp_preapproval_id',
+              unique=True),
     )

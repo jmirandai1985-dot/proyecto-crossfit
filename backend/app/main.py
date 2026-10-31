@@ -314,8 +314,9 @@ app.include_router(pedidos.router, prefix="/api/v1/pedidos",
 # es PÚBLICO: su autenticación es la firma HMAC, no el JWT.
 app.include_router(pagos.router, prefix="/api/v1/pagos", tags=["Pagos"])
 # Webhook de MP para Planes y suscripciones. Es el que se configura en el panel
-# de Mercado Pago (modo prueba) y también es PÚBLICO y read-only: sólo lee el
-# `preapproval` en MP y siempre responde 200 (ver `api/v1/mp_webhook.py`).
+# de Mercado Pago y también es PÚBLICO: relee el `preapproval` / cobro autorizado
+# en MP con el token del servidor, aplica el estado a `suscripciones` y registra
+# el cobro en `pagos`, y responde 200 SIEMPRE (ver `api/v1/mp_webhook.py`).
 app.include_router(mp_webhook.router, prefix="/api/v1/mp",
                    tags=["Mercado Pago - Suscripciones"])
 # Avisos de marketing: el carrusel "Novedades del box" del Inicio del alumno.

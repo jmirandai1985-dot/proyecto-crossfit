@@ -69,7 +69,8 @@ def test_a_las_constantes_se_definen_solo_en_shared_estados():
     en el mantenimiento), el test falla y dice en qué archivo. Las dos familias van acá: la de
     "reserva cancelada" y la de `suscripciones` ("nunca estuvo vigente" + los que sí)."""
     nombres = ("ESTADOS_CANCELADA", "ESTADO_CANCELADO",
-               "ESTADOS_SUSCRIPCION_NUNCA_VIGENTES", "ESTADOS_SUSCRIPCION_VIGENTES")
+               "ESTADOS_SUSCRIPCION_NUNCA_VIGENTES", "ESTADOS_SUSCRIPCION_VIGENTES",
+               "ESTADOS_SUSCRIPCION_SIN_ACCESO")
     definiciones = {}
     for rel, fuente in _fuentes((APP, MANTENIMIENTO, RAIZ / "ml", COMPARTIDO)):
         hallados = _asignados(ast.parse(fuente), nombres)
@@ -221,10 +222,18 @@ def test_g_el_predicado_de_vigencia_por_fecha_parte_el_enum_en_dos():
     vigentes = set(estados.ESTADOS_SUSCRIPCION_VIGENTES)
 
     assert nunca == {"pendiente", "rechazado"}
-    assert vigentes == {"activo", "vencido"}
+    # `inactiva` (MP canceló/pausó, migración 068) SÍ estuvo vigente hasta ese día:
+    # va con las "vigentes por fecha" para que los meses anteriores sigan contando
+    # en MRR/cohortes. Que no dé ACCESO hoy es otro criterio, más abajo.
+    assert vigentes == {"activo", "vencido", "inactiva"}
     assert nunca & vigentes == set()
     assert nunca | vigentes == _labels_del_enum_suscripcion("app/models/suscripcion.py"), (
         "hay un estado del enum sin clasificar en shared/estados.py")
+
+    # Tercer criterio (NO es "estuvo vigente"): qué estados cortan el acceso aunque
+    # las fechas todavía den. Sólo `inactiva`: `vencido` conserva el día completo.
+    assert set(estados.ESTADOS_SUSCRIPCION_SIN_ACCESO) == {"inactiva"}
+    assert set(estados.ESTADOS_SUSCRIPCION_SIN_ACCESO) <= vigentes
 
     # El día también es el de CHILE (fix 2026-09-29): `columna::date` lo resolvía la TZ de la
     # sesión de Postgres (UTC en Neon), así que un plan que vence el 30/09 a las 23:59 hora de

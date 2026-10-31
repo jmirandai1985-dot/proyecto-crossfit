@@ -16,8 +16,10 @@ Dos criterios viven acá:
    dos.
 
 2. **`suscripciones.estado` = "estuvo vigente"** (`ESTADOS_SUSCRIPCION_NUNCA_VIGENTES` +
-   `sql_suscripcion_vigente()`). Ver el docstring de cada uno: es el criterio de las métricas
-   históricas (MRR del mes anterior, cohorte de retención/churn de 30 días).
+   `sql_suscripcion_vigente()`) y **"da acceso hoy"** (`ESTADOS_SUSCRIPCION_SIN_ACCESO`, que suma el
+   caso de Mercado Pago cancelado/pausado). Ver el docstring de cada uno: el primero es el criterio
+   de las métricas históricas (MRR del mes anterior, cohorte de retención/churn de 30 días); el
+   segundo corta el acceso de una suscripción `inactiva` aunque sus fechas todavía den.
 
 3. **`planes.es_comercial` = "es una membresía de cliente"** (`COLUMNA_ES_COMERCIAL` +
    `sql_plan_comercial()`): excluye de las métricas los planes que existen para dar acceso sin
@@ -67,22 +69,33 @@ def es_cancelada(valor) -> bool:
 
 # ── `suscripciones.estado`: ¿esta suscripción pudo haber estado vigente en una fecha? ──────────
 # A diferencia de `reservas.estado`, acá la columna SÍ es un enum nativo (`estado_suscripcion`,
-# migración 023), así que la lista es cerrada: no hay variantes que adivinar. El enum tiene 4
-# valores y se parte en dos, sin solapamiento ni huecos (test_g del test compartido lo verifica
+# migración 023), así que la lista es cerrada: no hay variantes que adivinar. El enum se parte en
+# dos, sin solapamiento ni huecos (test_g del test compartido lo verifica
 # contra `EstadoSuscripcion` para que un estado nuevo no se clasifique en silencio):
 #
 #   * nunca vigentes → `pendiente` (todavía no se aprobó) y `rechazado` (no se aprobó nunca). Una
 #     fila así puede tener fechas que caigan dentro de la ventana, pero NUNCA contó: no suma MRR ni
 #     entra a la cohorte de retención de ningún mes.
-#   * vigentes → `activo` (lo está hoy) y `vencido` (lo estuvo hasta su `fecha_expiracion`). Una
-#     `vencido` SÍ cuenta para los meses en los que estuvo vigente: es justamente lo que se estaba
-#     perdiendo al filtrar por el estado de HOY.
+#   * vigentes → `activo` (lo está hoy), `vencido` (lo estuvo hasta su `fecha_expiracion`) e
+#     `inactiva` (Mercado Pago canceló o pausó el cobro recurrente, migración 068: SÍ estuvo
+#     vigente hasta ese momento, así que los meses anteriores siguen contando). Una `vencido` o una
+#     `inactiva` SÍ cuentan para los meses en los que estuvieron vigentes: es justamente lo que se
+#     estaba perdiendo al filtrar por el estado de HOY.
 #
 # El prefijo `ESTADOS_SUSCRIPCION_` no es decorativo: `app/api/v1/asistencia.py` tiene su propio
 # `ESTADOS_VIGENTES` local (estados de RESERVA: confirmada/completada) y el test compartido falla si
 # alguno de estos nombres se define fuera de acá (una sola definición por criterio).
 ESTADOS_SUSCRIPCION_NUNCA_VIGENTES: Final[tuple] = ("pendiente", "rechazado")
-ESTADOS_SUSCRIPCION_VIGENTES: Final[tuple] = ("activo", "vencido")
+ESTADOS_SUSCRIPCION_VIGENTES: Final[tuple] = ("activo", "vencido", "inactiva")
+
+
+# ── `suscripciones.estado`: ¿esta suscripción DA ACCESO hoy? ──────────────────────────────────────
+# Tercer criterio, distinto de "estuvo vigente": el acceso se corta cuando Mercado Pago cancela o
+# pausa el cobro recurrente (`inactiva`), aunque la `fecha_expiracion` siga en el futuro (el alumno
+# ya no tiene un cobro vivo; si después se re-autoriza, el webhook la devuelve a `activo`).
+# `vencido` NO está acá a propósito: el día de vencimiento vale completo y quien decide es la fecha
+# (`sql_suscripcion_vigente` / `app.core.estados.vigente_hoy`).
+ESTADOS_SUSCRIPCION_SIN_ACCESO: Final[tuple] = ("inactiva",)
 
 
 # La vigencia se mide en DÍAS DE CHILE (`sql_fecha_en_chile()`): un plan vale hasta las
