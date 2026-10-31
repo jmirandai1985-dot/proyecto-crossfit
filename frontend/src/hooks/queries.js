@@ -959,6 +959,28 @@ export function useCrearPagoMembresia() {
     });
 }
 
+/**
+ * Crea la suscripción RECURRENTE del plan (`POST /pagos/suscripcion`) y devuelve
+ * `{suscripcion_id, init_point, monto_clp, estado}`.
+ *
+ * Distinta de `useCrearPagoMembresia`: acá Mercado Pago cobra solo todos los
+ * meses con la autorización del checkout, así que NO nace un `pago` ni una
+ * solicitud en la cola del admin. La fila de `suscripciones` nace `pendiente`
+ * (sin acceso) y la abre el webhook cuando MP manda `authorized`; por eso se
+ * invalidan las dos familias: la lista del alumno y la del box.
+ */
+export function useCrearSuscripcionMp() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) =>
+            api.post('/api/v1/pagos/suscripcion', payload).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['suscripciones'] });
+            qc.invalidateQueries({ queryKey: claves.membresia });
+        },
+    });
+}
+
 /** Crea el pedido del Bazar (reserva stock) y devuelve `{pago_id, init_point}`. */
 export function useCrearPagoBazar() {
     const qc = useQueryClient();

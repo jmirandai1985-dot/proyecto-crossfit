@@ -9,18 +9,22 @@ Antes sólo leía el `preapproval` y lo dejaba en el log; ahora aplica el result
 
 CÓMO SE VINCULA UN PREAPPROVAL CON UNA SUSCRIPCIÓN
 --------------------------------------------------
-Hoy NO hay ningún código que cree el `preapproval` (`POST /preapproval`): el alumno se
-suscribe desde el link/plan configurado en el panel de MP, así que el id que MP nos
-manda en la primera notificación no está guardado en ninguna parte. Por eso el vínculo
-se resuelve en ese momento, en orden de confianza decreciente:
+El `preapproval` lo crea ESTE backend (`crear_suscripcion_mp`, `POST /pagos/suscripcion`)
+y en ese momento se guardan las dos cosas que después hacen el vínculo: el
+`mp_preapproval_id` que devuelve MP y el `external_reference = sus:<id>`. Así el aviso
+queda atado a la fila exacta y el correo deja de ser la única pista.
 
-1. `suscripciones.mp_preapproval_id` (UNIQUE): el camino normal a partir de la segunda
-   notificación. La primera vez se COMPLETA con el id que devuelve MP.
-2. `preapproval.external_reference`: si quien creó la suscripción puso `sus:<id>` (o el
-   id pelado de la fila), se usa esa suscripción.
+Aun así el webhook resuelve en orden de confianza decreciente (el vínculo puede faltar:
+suscripciones viejas, creadas a mano desde el panel de MP, o el aviso que llega entre
+el `flush` y el `commit` del alta):
+
+1. `suscripciones.mp_preapproval_id` (UNIQUE): el camino normal. Se COMPLETA con el id
+   que devuelve MP la primera vez.
+2. `preapproval.external_reference`: `sus:<id>` (o el id pelado de la fila) que manda
+   el alta de este backend; también sirve si el panel lo escribe a mano.
 3. `preapproval.payer_email` contra `usuarios.correo` (sin distinguir mayúsculas): la
-   suscripción MÁS RECIENTE de ese alumno. Es el único dato que ata al pagador con el
-   alumno cuando el panel cobra con un link genérico.
+   suscripción MÁS RECIENTE de ese alumno. Último recurso, heredado del tiempo en que
+   las suscripciones se creaban desde el panel de MP con un link genérico.
 
 Si ninguno coincide, NO se inventa una suscripción: se loguea `sin_suscripcion` y se
 responde 200 (MP reintenta cada 15 min; crear filas a ciegas duplicaría planes).
@@ -33,6 +37,15 @@ ESTADOS
 `authorized` ⇒ `activo` · `pending` ⇒ `pendiente` · `cancelled` / `paused` ⇒ `inactiva`
 (`inactiva` es un label nuevo del enum, migración 068, y corta el acceso en
 `app.core.estados.da_acceso_hoy`).
+
+ALTA DESDE EL BOX (`POST /pagos/suscripcion`)
+---------------------------------------------
+`crear_suscripcion_mp` crea la fila `pendiente` (que NO da acceso: eso lo hace el
+webhook con `authorized`) y el `preapproval` en MP con `external_reference=sus:<id>`.
+Si MP falla, la fila se borra: nunca queda una suscripción fantasma. Antes de emitir
+una autorización nueva se mira la anterior del mismo plan: si MP la tiene `pending` se
+REUSA su checkout (dos clics no pueden producir dos cobros recurrentes) y si ya está
+`authorized`/`activo` se responde 409.
 
 El mapa de ESTE módulo no reusa el de pagos a propósito: en un pago `authorized`
 significa "todavía no hay plata" (`en_proceso`); en un `preapproval` significa "el
@@ -59,12 +72,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.pago import Pago
+from app.models.plan import Plan
 from app.models.suscripcion import EstadoSuscripcion, Suscripcion
 from app.models.usuario import Usuario
+from app.services import mercadopago_cliente as mp
 from app.services.mercadopago_cliente import (
     estado_desde_mp, monto_clp, sin_none,
 )
-from app.utils.santiago import ahora_santiago
+from app.utils.planes import creditos_de_plan
+from app.utils.santiago import ahora_santiago, fin_de_plan_chile
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +294,10 @@ def procesar_preapproval(db: Session, preapproval: dict) -> str:
         return RESULTADO_OBSOLETO
 
     suscripcion.estado = objetivo
+    if objetivo is EstadoSuscripcion.activo:
+        # El periodo arranca cuando MP autoriza, no cuando el alumno abrió el
+        # checkout: si pagó tres días después, esos tres días no se pierden.
+        _abrir_periodo(db, suscripcion)
     db.commit()
     logger.info(
         "MP suscripciones: suscripción #%s %s -> %s (preapproval %s status=%s, "
@@ -440,3 +460,195 @@ def procesar_cobro(db: Session, cobro: dict) -> str:
         "estado=%s)", referencia, suscripcion.id, monto,
         pago.moneda or "CLP", estado)
     return RESULTADO_COBRO_REGISTRADO
+
+
+# ── ALTA desde el box (`POST /pagos/suscripcion`) ───────────────────────────
+class ErrorSuscripcion(Exception):
+    """Error de negocio del alta (el endpoint lo traduce a HTTP).
+
+    Igual que `services/pagos.ErrorPago`: `status_code` es el código con el que se
+    responde y `detalle` el mensaje que ve el alumno (nunca un 500).
+    """
+
+    def __init__(self, detalle: str, status_code: int = 400):
+        super().__init__(detalle)
+        self.detalle = detalle
+        self.status_code = status_code
+
+
+MENSAJE_YA_ACTIVA = ("Ya tienes este plan activo: no necesitas pagarlo de nuevo. "
+                     "Si quieres renovarlo, escríbele al box.")
+MENSAJE_NO_VERIFICABLE = ("No pudimos verificar tu suscripción anterior en Mercado "
+                          "Pago. Revisa tu plan y vuelve a intentarlo en unos minutos.")
+
+
+def _abrir_periodo(db: Session, suscripcion: Suscripcion) -> None:
+    """Reinicia la ventana del plan en el momento en que MP lo autoriza.
+
+    La fila nace `pendiente` con la `fecha_expiracion` ya calculada, pero entre el
+    alta y la autorización pueden pasar días (el alumno abandona el checkout y
+    vuelve): sin esto el acceso se cortaría antes de tiempo —o el job nocturno la
+    marcaría `vencido` apenas MP la activa—. Se llama SÓLO al pasar a `activo`
+    (`vencido` -> `activo` o `inactiva` -> `activo` también son un periodo nuevo);
+    una suscripción que ya estaba activa no entra acá porque no hay transición.
+    """
+    if not suscripcion.plan_id:
+        return
+    plan = db.query(Plan).filter(Plan.id == suscripcion.plan_id).first()
+    if plan is None:
+        return
+    inicio = ahora_santiago()
+    suscripcion.fecha_inicio = inicio
+    suscripcion.fecha_expiracion = fin_de_plan_chile(inicio, plan.duracion_dias)
+
+
+def _previa_reutilizable(db: Session, alumno_id: int, plan_id: int):
+    """La suscripción anterior de ese alumno para ese plan, si tiene `preapproval`.
+
+    Se mira la MÁS RECIENTE con `mp_preapproval_id`: es la única de la que se puede
+    saber qué pasó en MP. Sin id nunca se autorizó nada, así que no hay qué reusar.
+    """
+    return (db.query(Suscripcion)
+            .filter(Suscripcion.usuario_id == alumno_id,
+                    Suscripcion.plan_id == plan_id,
+                    Suscripcion.mp_preapproval_id.isnot(None))
+            .order_by(Suscripcion.id.desc())
+            .first())
+
+
+def crear_suscripcion_mp(db: Session, *, current_user: dict, plan_id: int) -> dict:
+    """Crea la suscripción `pendiente` + su `preapproval` y devuelve el checkout.
+
+    Igual que `services/pagos.crear_pago_membresia`, devuelve un dict con lo que el
+    endpoint necesita: `suscripcion_id`, `init_point`, `monto_clp` y `estado`.
+
+    Orden deliberado, con el `preapproval` DESPUÉS de la fila:
+
+    1. la fila se crea y se confirma (`commit`) porque `external_reference` necesita
+       su id (`sus:<id>`): es el vínculo que el webhook puede usar incluso si el
+       aviso llega antes de que se guarde el id de MP;
+    2. se crea el `preapproval` y se guarda su `id` en la MISMA fila (el webhook lo
+       encuentra por `mp_preapproval_id` desde el primer aviso);
+    3. si MP falla, la fila se borra: nunca queda una suscripción fantasma que
+       aparezca en el panel del box ni en los reportes.
+
+    La fila nace `pendiente`: NO da acceso (`app.core.estados.da_acceso_hoy` exige
+    `activo`). El acceso lo abre el webhook con `authorized`.
+
+    El monto es el **precio de lista** del plan. Los descuentos de una compra (F2) y
+    el premio de referidos NO se aplican: acá el cobro se repite todos los meses con
+    el `transaction_amount` autorizado, así que congelar un descuento de una sola vez
+    lo regalaría para siempre (y el crédito de referido se consume una única vez).
+    """
+    config = mp.configuracion()  # fail-fast: sin pasarela no se escribe nada
+    tenant_id = current_user["tenant_id"]
+    alumno_id = current_user["usuario_id"]
+
+    plan = db.query(Plan).filter(
+        Plan.id == plan_id, Plan.tenant_id == tenant_id).first()
+    if plan is None:
+        raise ErrorSuscripcion("Plan no encontrado", 404)
+
+    monto = monto_clp(plan.precio_clp)
+    if monto <= 0:
+        raise ErrorSuscripcion(
+            "Ese plan no tiene precio de venta online: pídele al box que te lo active",
+            400)
+
+    usuario = db.query(Usuario).filter(Usuario.id == alumno_id).first()
+    correo = str(getattr(usuario, "correo", "") or "").strip()
+    if "@" not in correo:
+        # `payer_email` es obligatorio en `POST /preapproval`: sin correo no hay
+        # checkout posible (y el alumno tampoco podría recibir el comprobante).
+        raise ErrorSuscripcion(
+            "Tu usuario no tiene un correo válido: el box tiene que completarlo "
+            "antes de que puedas suscribirte", 400)
+
+    # ── ¿Ya hay una autorización viva para este plan? ──
+    previa = _previa_reutilizable(db, alumno_id, plan.id)
+    if previa is not None:
+        try:
+            actual = mp.leer_preapproval(previa.mp_preapproval_id)
+        except mp.ErrorMercadoPago as error:
+            logger.warning("MP suscripciones: no se pudo releer el preapproval %s de "
+                           "la suscripción #%s: %s", previa.mp_preapproval_id,
+                           previa.id, error)
+            # Fail-closed: sin saber si la anterior sigue autorizada, emitir otra
+            # podría terminar en DOS cobros recurrentes del mismo plan.
+            raise ErrorSuscripcion(MENSAJE_NO_VERIFICABLE, 503) from error
+
+        estado_mp = str(actual.get("status") or "").strip().lower()
+        if estado_mp == "authorized":
+            logger.info("MP suscripciones: el alumno %s ya tiene el plan %s "
+                        "autorizado (suscripción #%s); no se crea otra",
+                        alumno_id, plan.id, previa.id)
+            raise ErrorSuscripcion(MENSAJE_YA_ACTIVA, 409)
+
+        if estado_mp == "pending":
+            url = mp.url_checkout_preapproval(actual, config)
+            if url:
+                # Doble clic / reintento: se devuelve el checkout que YA existe.
+                logger.info("MP suscripciones: se reusa el preapproval %s "
+                            "(pendiente) de la suscripción #%s",
+                            previa.mp_preapproval_id, previa.id)
+                return {"suscripcion_id": previa.id, "init_point": url,
+                        "monto_clp": monto,
+                        "estado": valor_estado(previa.estado)}
+            logger.warning("MP suscripciones: el preapproval %s sigue pendiente pero "
+                           "sin init_point; se emite uno nuevo",
+                           previa.mp_preapproval_id)
+        else:
+            logger.info("MP suscripciones: el preapproval %s de la suscripción #%s "
+                        "está %r; se emite uno nuevo", previa.mp_preapproval_id,
+                        previa.id, estado_mp or "?")
+
+    # ── Alta: primero la fila (su id arma `sus:<id>`), después MP ──
+    inicio = ahora_santiago()
+    suscripcion = Suscripcion(
+        tenant_id=tenant_id,
+        usuario_id=alumno_id,
+        plan_id=plan.id,
+        estado=EstadoSuscripcion.pendiente,
+        creditos_totales=creditos_de_plan(plan),
+        creditos_disponibles=creditos_de_plan(plan),
+        fecha_inicio=inicio,
+        fecha_expiracion=fin_de_plan_chile(inicio, plan.duracion_dias),
+        es_compra_emergencia=False,
+    )
+    db.add(suscripcion)
+    db.commit()  # el id es la referencia que va a MP: tiene que existir ya
+
+    referencia = f"sus:{suscripcion.id}"
+    try:
+        preapproval_id, init_point = mp.crear_preapproval(
+            suscripcion_id=suscripcion.id,
+            motivo=str(plan.nombre or "Plan"),
+            email=correo,
+            monto_clp=monto,
+            referencia=referencia,
+        )
+    except Exception:
+        # Nada a medias: si MP no dio el checkout, la fila pendiente se va con el
+        # fallo (si no, el panel del box mostraría una suscripción que nadie pagó).
+        # El id se lee ANTES de borrar: después del `delete` la instancia queda
+        # expirada y accederla dispararía un SELECT sobre una fila que ya no está.
+        suscripcion_id = suscripcion.id
+        try:
+            db.delete(suscripcion)
+            db.commit()
+        except Exception as error:  # pragma: no cover - best-effort
+            db.rollback()
+            logger.warning("MP suscripciones: no se pudo borrar la suscripción #%s "
+                           "tras el fallo de MP: %s", suscripcion_id, error)
+        raise
+
+    suscripcion.mp_preapproval_id = preapproval_id
+    db.commit()
+
+    logger.info("MP suscripciones: suscripción #%s creada (plan %s, alumno %s, "
+                "preapproval %s, monto=%s CLP, referencia=%s)", suscripcion.id,
+                plan.id, alumno_id, preapproval_id, monto, referencia)
+    return {"suscripcion_id": suscripcion.id, "init_point": init_point,
+            "monto_clp": monto, "estado": valor_estado(suscripcion.estado)}
+
+

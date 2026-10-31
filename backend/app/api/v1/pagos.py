@@ -31,10 +31,12 @@ from app.models.pago import Pago
 from app.models.pago import PagoEvento  # noqa: F401  (tipo del evento del webhook)
 from app.schemas.pago import (
     PagoBazarRequest, PagoCreacionResponse, PagoDisponibleResponse,
-    PagoEstadoResponse, PagoMembresiaRequest,
+    PagoEstadoResponse, PagoMembresiaRequest, SuscripcionMpRequest,
+    SuscripcionMpResponse,
 )
 from app.services import mercadopago_cliente as mp
 from app.services import pagos
+from app.services import suscripciones_mp
 from app.utils.santiago import ahora_santiago
 
 logger = logging.getLogger(__name__)
@@ -93,6 +95,40 @@ def pagar_membresia(
         raise _no_disponible(error)
     except pagos.ErrorPago as error:
         raise _error_pago(error)
+
+
+@router.post("/suscripcion", response_model=SuscripcionMpResponse)
+@limiter.limit(LIMIT_CRITICO)
+def suscribirse_con_mercadopago(
+    request: Request,
+    datos: SuscripcionMpRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_full_access),
+):
+    """Crea la suscripción RECURRENTE del plan y devuelve su `init_point`.
+
+    Distinto de `/membresia` (un pago único de Checkout Pro): acá MP cobra solo
+    todos los meses con la autorización que el alumno da en su checkout. La fila
+    nace `pendiente` y el acceso lo abre el webhook cuando llega `authorized`, así
+    que este endpoint NUNCA adelanta el plan.
+
+    Mismo guard que el resto de las secciones de pago (`require_full_access`).
+    """
+    try:
+        return suscripciones_mp.crear_suscripcion_mp(
+            db, current_user=current_user, plan_id=datos.plan_id)
+    except mp.PagoOnlineNoDisponible as error:
+        raise _no_disponible(error)
+    except suscripciones_mp.ErrorSuscripcion as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detalle)
+    except mp.ErrorMercadoPago as error:  # MP caído o respuesta sin `init_point`
+        logger.warning("MP suscripciones: fallo al crear el checkout recurrente: %s",
+                       error)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=("Mercado Pago no respondió al crear la suscripción. "
+                    "Vuelve a intentarlo en unos minutos."),
+        )
 
 
 @router.post("/bazar", response_model=PagoCreacionResponse)

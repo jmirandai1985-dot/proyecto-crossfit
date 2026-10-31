@@ -9,9 +9,10 @@ Tres responsabilidades, y ninguna más:
 2. **Traducción de estados**: MP devuelve `approved`/`in_process`/...; el resto
    del sistema usa los estados de `models/pago.py` (`aprobado`, `en_proceso`,
    ...). El mapa es UNA tabla, testeable sin red (tests/test_pagos_mercadopago_estados.py).
-3. **Llamadas al SDK**: crear la preferencia y releer el pago. El webhook NUNCA
-   cree el estado que viene en el body: pide `payment().get(id)` con el access
-   token del servidor (`leer_pago`).
+3. **Llamadas al SDK**: crear la preferencia de Checkout Pro (`crear_preferencia`),
+   crear la suscripción recurrente (`crear_preapproval`) y releer el pago. El
+   webhook NUNCA crea el estado que viene en el body: pide `payment().get(id)` con
+   el access token del servidor (`leer_pago`).
 
 El SDK se importa PEREZOSAMENTE: un entorno sin `mercadopago` instalado (o con
 la pasarela apagada) arranca igual, y los tests que sólo miran el mapa de
@@ -171,6 +172,11 @@ def _url_retorno(config: dict, pago_id: int) -> dict:
     return {"success": url, "pending": url, "failure": url}
 
 
+def _es_https(url) -> bool:
+    """¿La URL es https? MP lo exige para `auto_return` y para `back_url`."""
+    return str(url or "").lower().startswith("https://")
+
+
 def _admite_auto_return(back_urls: dict) -> bool:
     """¿Se puede mandar `auto_return` con estas `back_urls`?
 
@@ -180,7 +186,7 @@ def _admite_auto_return(back_urls: dict) -> bool:
     terminaba como un 503 genérico en el endpoint. Sin `auto_return`, MP acepta
     las `back_urls` http sin problema (el alumno vuelve con el botón de MP).
     """
-    return str((back_urls or {}).get("success") or "").lower().startswith("https://")
+    return _es_https((back_urls or {}).get("success"))
 
 
 def _motivo_mp(datos) -> str:
@@ -268,6 +274,121 @@ def crear_preferencia(*, pago, titulo: str, email: str = "",
         logger.warning("MP: la preferencia %s no trajo init_point", preference_id)
         raise ErrorMercadoPago("Mercado Pago no devolvió la URL de pago")
     return preference_id, init_point
+
+
+# ── Suscripciones recurrentes ("Planes y suscripciones") ───────────────────
+def _url_retorno_suscripcion(config: dict, suscripcion_id: int) -> str:
+    """`back_url` del `preapproval`: a dónde vuelve el alumno tras autorizar.
+
+    Es UNA sola URL (no el dict `back_urls` de Checkout Pro). MP la exige
+    **https**, igual que `auto_return`; con `http` (localhost o una IP de LAN) se
+    omite en vez de arriesgar un 400 que dejaría al alumno sin suscripción. No
+    decide nada: la confirmación real llega por webhook.
+    """
+    base = config["back_url_base"]
+    if not base:
+        return ""
+    url = (f"{base}/alumno/solicitar-plan?mp=suscripcion"
+           f"&suscripcion={int(suscripcion_id)}")
+    return url if _es_https(url) else ""
+
+
+def url_checkout_preapproval(datos: dict, config: dict) -> str:
+    """`init_point` del `preapproval` (sandbox en modo test si MP lo trae).
+
+    El `preapproval` documentado devuelve `init_point`; `sandbox_init_point` no
+    aparece en la referencia de Suscripciones (sí en Checkout Pro), así que se
+    prefiere cuando existe y se cae a `init_point` siempre.
+    """
+    return str((datos.get("sandbox_init_point") if config["sandbox"] else None)
+               or datos.get("init_point")
+               or datos.get("sandbox_init_point") or "")
+
+
+def crear_preapproval(*, suscripcion_id: int, motivo: str, email: str,
+                      monto_clp: int, referencia: str):
+    """Crea la suscripción recurrente en MP y devuelve `(preapproval_id, url)`.
+
+    Es la contraparte de `crear_preferencia` para "Planes y suscripciones":
+    `POST /preapproval` con `status="pending"` (suscripción SIN plan asociado y
+    SIN tarjeta: el pagador autoriza en el checkout de MP). Contrato según la
+    referencia oficial de MP (Subscriptions → Create subscription,
+    `/developers/en/reference/online-payments/subscriptions/create-preapproval/post`):
+    `reason`, `external_reference`, `payer_email` (OBLIGATORIO), `back_url`,
+    `status` y `auto_recurring`; la respuesta trae `id`, `status` e `init_point`.
+
+    `referencia` (`sus:<id>`) viaja como `external_reference`: es lo que permite
+    que el webhook encuentre ESTA suscripción del box aunque el aviso llegue
+    antes de que se guarde el `preapproval_id`. `notification_url` NO se manda:
+    no es un campo de este endpoint — la URL del webhook se configura en el
+    panel de MP (tema "Planes y suscripciones"), igual que hoy.
+    """
+    config = configuracion()
+    sdk = _sdk(config["access_token"])
+
+    preapproval = {
+        "reason": (motivo or "Plan")[:250],
+        "external_reference": referencia,
+        "payer_email": email,
+        "status": "pending",
+        "auto_recurring": {
+            "frequency": 1,
+            "frequency_type": "months",
+            "transaction_amount": int(monto_clp),
+            "currency_id": "CLP",
+        },
+    }
+    back_url = _url_retorno_suscripcion(config, suscripcion_id)
+    if back_url:
+        preapproval["back_url"] = back_url
+
+    try:
+        respuesta = sdk.preapproval().create(preapproval)
+    except Exception as error:  # el SDK puede levantar sus propias excepciones
+        logger.warning("MP: fallo al crear el preapproval de la suscripción %s: %s",
+                       suscripcion_id, type(error).__name__)
+        raise ErrorMercadoPago("No se pudo crear la suscripción en Mercado Pago") from error
+
+    estado_http = respuesta.get("status") if isinstance(respuesta, dict) else None
+    datos = (respuesta or {}).get("response") or {}
+    if estado_http not in (200, 201) or not datos.get("id"):
+        logger.warning("MP: respuesta inesperada al crear el preapproval de la "
+                       "suscripción %s (status=%s): %s", suscripcion_id,
+                       estado_http, _motivo_mp(datos))
+        raise ErrorMercadoPago("Mercado Pago rechazó la creación de la suscripción")
+
+    preapproval_id = str(datos["id"])
+    init_point = url_checkout_preapproval(datos, config)
+    if not init_point:
+        logger.warning("MP: el preapproval %s no trajo init_point", preapproval_id)
+        raise ErrorMercadoPago("Mercado Pago no devolvió la URL de la suscripción")
+    return preapproval_id, init_point
+
+
+def leer_preapproval(preapproval_id) -> dict:
+    """Relee la suscripción recurrente desde MP (`GET /preapproval/{id}`).
+
+    Se usa para NO emitir un segundo cobro recurrente si el alumno apretó dos
+    veces "Suscribirme": si MP dice que la anterior sigue `pending` y todavía
+    tiene `init_point`, se reusa ese checkout. Mismo criterio que `leer_pago`:
+    nunca se confía en lo que venga en el body de un webhook.
+    """
+    config = configuracion()
+    sdk = _sdk(config["access_token"])
+    try:
+        respuesta = sdk.preapproval().get(str(preapproval_id))
+    except Exception as error:
+        logger.warning("MP: fallo al leer el preapproval %s: %s",
+                       preapproval_id, type(error).__name__)
+        raise ErrorMercadoPago("No se pudo leer la suscripción en Mercado Pago") from error
+
+    estado_http = respuesta.get("status") if isinstance(respuesta, dict) else None
+    datos = (respuesta or {}).get("response") or {}
+    if estado_http != 200 or not datos:
+        logger.warning("MP: respuesta inesperada al leer el preapproval %s "
+                       "(status=%s)", preapproval_id, estado_http)
+        raise ErrorMercadoPago("Mercado Pago no devolvió la suscripción")
+    return datos
 
 
 def leer_pago(payment_id) -> dict:

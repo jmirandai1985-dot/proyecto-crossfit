@@ -36,6 +36,27 @@ class PagoCreacionResponse(BaseModel):
     monto_clp: int
 
 
+class SuscripcionMpRequest(BaseModel):
+    """`POST /pagos/suscripcion`: qué plan se paga de forma RECURRENTE.
+
+    No lleva monto ni fecha: el precio sale de `planes.precio_clp` y el periodo del
+    `duracion_dias` del plan, los dos en el backend.
+    """
+    plan_id: int = Field(..., gt=0, description="ID del plan a suscribir")
+
+
+class SuscripcionMpResponse(BaseModel):
+    """Lo que el front necesita para mandar al alumno al checkout de MP.
+
+    `suscripcion_id` ya existe en la BD cuando se responde: nace `pendiente` y el
+    webhook la pasa a `activo` cuando MP confirma la autorización.
+    """
+    suscripcion_id: int
+    init_point: str = Field(..., description="URL de autorización de la suscripción")
+    monto_clp: int
+    estado: str = Field("pendiente", description="Estado con el que quedó la fila")
+
+
 class PagoEstadoResponse(BaseModel):
     """`GET /pagos/{id}`: estado del cobro + si el negocio ya se aplicó.
 
