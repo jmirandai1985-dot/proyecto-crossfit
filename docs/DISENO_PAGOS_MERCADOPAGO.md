@@ -591,6 +591,7 @@ Siguen abiertas (no bloquean esta fase, se aplicaron los criterios recomendados)
 | `backend/tests/test_pagos_webhook_firma.py` | fail-closed HTTP + firma + duplicado (10) |
 | `backend/tests/test_pagos_boton_front.py` | guard de fuente del front (7) |
 | `backend/tests/test_pagos_mercadopago_integracion.py` | integración contra TEST (6) |
+| `backend/tests/test_pago_mercadopago_descuento.py` | pago MP con descuento de referido, contra TEST (2) |
 | `frontend/src/pages/alumno/PagoResultado.jsx` | retorno de Checkout Pro con polling |
 
 ### Archivos editados
