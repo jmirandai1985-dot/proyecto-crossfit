@@ -490,6 +490,7 @@ backend/tests/test_pagos_mercadopago_estados.py   # unitario puro: mapa de estad
 backend/tests/test_pagos_webhook_firma.py         # firma inválida/válida/faltante, sin red
 backend/tests/test_pagos_preferencia_failfast.py  # sin credenciales o deshabilitado → 503
 backend/tests/test_pagos_boton_front.py           # patrón "front": el botón sólo aparece si está habilitado
+backend/tests/test_pagos_render_env.py            # guard: las MERCADOPAGO_* van con `sync: false`, nunca `value:`
 ```
 
 ---
@@ -590,6 +591,7 @@ Siguen abiertas (no bloquean esta fase, se aplicaron los criterios recomendados)
 | `backend/tests/test_pagos_mercadopago_estados.py` | estados, montos, config, firma, preferencia (29) |
 | `backend/tests/test_pagos_webhook_firma.py` | fail-closed HTTP + firma + duplicado (10) |
 | `backend/tests/test_pagos_boton_front.py` | guard de fuente del front (7) |
+| `backend/tests/test_pagos_render_env.py` | guard de `render.yaml`: `MERCADOPAGO_*` con `sync: false` (4) |
 | `backend/tests/test_pagos_mercadopago_integracion.py` | integración contra TEST (6) |
 | `backend/tests/test_pago_mercadopago_descuento.py` | pago MP con descuento de referido, contra TEST (2) |
 | `frontend/src/pages/alumno/PagoResultado.jsx` | retorno de Checkout Pro con polling |

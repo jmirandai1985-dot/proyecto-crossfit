@@ -54,13 +54,19 @@ services:
       - key: REACTIVACION_OPT_OUT_SECRET
         sync: false
       # ── Pagos online: Mercado Pago Checkout Pro (migración 067) ──
-      # Interruptor maestro. `false` en el deploy = la pasarela no se muestra ni
-      # crea preferencias (503). Se enciende SOLO cuando el access token y el
-      # secreto del webhook estén cargados y probados en modo test.
+      # ⚠️ NINGUNA lleva `value:` en el YAML (ver docs/DISENO_PAGOS_MERCADOPAGO.md §9):
+      #    lo que se cargue en el dashboard se PISA en cada sync del Blueprint.
+      #    Bug 2026-10-31: con `value: "false"` acá, PROD respondía
+      #    {"habilitado": false} aunque el access token estuviera cargado, y el
+      #    botón "Pagar con Mercado Pago" no aparecía en /alumno/solicitar-plan.
+      #    `MERCADOPAGO_MODO` clavado en `test` tenía el mismo problema: con un
+      #    token APP_USR (producción) MP devuelve `sandbox_init_point` y la
+      #    preferencia falla por falta de `init_point`.
+      #    Defaults en código (app/core/config.py): HABILITADO=false, MODO=test.
       - key: MERCADOPAGO_HABILITADO
-        value: "false"
+        sync: false
       - key: MERCADOPAGO_MODO
-        value: test
+        sync: false
       # Credenciales: SIEMPRE desde el dashboard (sync: false), nunca en git.
       - key: MERCADOPAGO_ACCESS_TOKEN
         sync: false
