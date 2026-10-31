@@ -8,7 +8,7 @@
     comprar_emergencia, fix_fechas, supervision,
     finanzas, configuracion, alumnos, asistencia, ranking, kpis,
     kpis_populate, ml, segmentacion, historial_alumno, fidelizacion_plantillas,
-    beneficios, marketing, referidos
+    beneficios, marketing, referidos, pagos
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, status
@@ -310,6 +310,9 @@ app.include_router(productos.router, prefix="/api/v1/productos",
                    tags=["Bazar - Productos"])
 app.include_router(pedidos.router, prefix="/api/v1/pedidos",
                    tags=["Bazar - Pedidos"])
+# Pagos online (Mercado Pago Checkout Pro). El webhook vive en el mismo router y
+# es PÚBLICO: su autenticación es la firma HMAC, no el JWT.
+app.include_router(pagos.router, prefix="/api/v1/pagos", tags=["Pagos"])
 # Avisos de marketing: el carrusel "Novedades del box" del Inicio del alumno.
 app.include_router(marketing.router, prefix="/api/v1/marketing",
                    tags=["Marketing"])

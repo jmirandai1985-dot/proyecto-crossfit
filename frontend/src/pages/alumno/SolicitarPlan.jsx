@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import Layout from '../../components/Layout';
 import BotonVolver from '../../components/BotonVolver';
-import CampoReferido from '../../components/CampoReferido';
 import { useAuth } from '../../context/AuthContext';
 // Fase 2 (Bloque 1): planes, perfil, datos bancarios, descuento vigente y subida de
 // documentos salen de la caché compartida (`hooks/queries.js`), no de un `useEffect` que
 // repetía las mismas peticiones en cada montaje.
 import {
-    useConfiguracionBancaria, useMiInvitacion, useMiPerfil, useMisBeneficios,
-    usePlanesActivos, useSolicitarPlan, useSubirArchivoPrivado,
+    useConfiguracionBancaria, useCrearPagoMembresia, useMiPerfil,
+    useMisBeneficios, usePagoDisponible, usePlanesActivos, useSolicitarPlan,
+    useSubirArchivoPrivado,
 } from '../../hooks/queries';
 import { fmtFechaChile } from '../../utils/fecha';
 
@@ -30,13 +30,23 @@ const SolicitarPlan = () => {
 
     const planes = React.useMemo(() => planesQ.data || [], [planesQ.data]);
 
-    // ─── F2: el descuento vigente del alumno (beneficio de Fidelización) ──
+    // ─── F2 + F3b: el descuento que se va a COBRAR en esta compra ──
     // `precios` viene del BACKEND (`/beneficios/mios?plan_ids=...`): la pantalla muestra el
     // precio final, no lo calcula (la aritmética del descuento vive en un solo lugar y es
-    // la que se cobra). Si esto falla, la pantalla sigue igual, sin descuento anunciado.
+    // la que se cobra). El backend anuncia ahí el beneficio de Fidelización (F2) o, si no
+    // hay, el premio del programa de referidos (F3b): los dos caminos congelan el mismo
+    // número en la solicitud y en la preferencia de Mercado Pago. Si esto falla, la
+    // pantalla sigue igual, sin descuento anunciado.
     const planIds = planes.map((p) => p.id).join(',');
     const beneficiosQ = useMisBeneficios(planIds);
-    const descuento = beneficiosQ.data?.descuento_pct ? beneficiosQ.data : null;
+    const descuento = React.useMemo(() => {
+        const datos = beneficiosQ.data;
+        if (!datos) return null;
+        // `descuento_pct` es F2 (con vencimiento); `descuento_referido_pct` es el premio
+        // por invitar. El backend nunca manda los dos a la vez (no se apilan).
+        const pct = datos.descuento_pct ?? datos.descuento_referido_pct;
+        return pct ? { ...datos, descuento_pct: pct } : null;
+    }, [beneficiosQ.data]);
 
     // Datos bancarios del paso 2 (los guarda un admin en /admin/configuracion).
     const configBancaria = configQ.data?.configurado ? configQ.data : null;
@@ -46,6 +56,31 @@ const SolicitarPlan = () => {
     const subirArchivo = useSubirArchivoPrivado();
     const solicitarPlan = useSolicitarPlan();
     const subiendo = subirArchivo.isPending || solicitarPlan.isPending;
+
+    // ─── Pago online (Mercado Pago Checkout Pro) ───────────────────────────
+    // Convive con la transferencia: el botón aparece SÓLO si el backend dice que
+    // la pasarela está encendida (`GET /pagos/disponibilidad`). La tarjeta nunca
+    // pasa por la app: el backend devuelve `init_point` y acá se redirige.
+    const pagoDisponibleQ = usePagoDisponible();
+    const pagoDisponible = Boolean(pagoDisponibleQ.data?.habilitado);
+    const crearPagoOnline = useCrearPagoMembresia();
+    // "Yendo a pagar": se queda en true al redirigir (evita el doble clic).
+    const [yendoAPagar, setYendoAPagar] = useState(false);
+
+    // ─── Jerarquía de la pantalla (rediseño) ───────────────────────────────
+    // Mercado Pago es el camino principal: va primero y siempre abierto. La
+    // transferencia se muestra como una fila que se expande (accordion), igual que
+    // en el mockup aprobado. `null` = automático: se abre sola SÓLO si la pasarela
+    // está apagada, así la pantalla nunca queda sin ningún botón de pago. Si el
+    // alumno toca la fila, su elección manda.
+    const [transferenciaAbierta, setTransferenciaAbierta] = useState(null);
+    // `isPending` = todavía no sabemos si hay pasarela: mientras tanto la fila queda
+    // cerrada. Si la consulta FALLA también la abrimos: es preferible ofrecer la
+    // transferencia de más que dejar la pantalla sin ningún botón de pago.
+    const pasarelaApagada = !pagoDisponibleQ.isPending && !pagoDisponible;
+    const transferenciaVisible = transferenciaAbierta !== null
+        ? transferenciaAbierta
+        : pasarelaApagada;
 
     // "Cargando" mientras falte el primer dato de las dos consultas del bloque (antes: un
     // `loading` que apagaba el `finally` del fetch).
@@ -61,15 +96,6 @@ const SolicitarPlan = () => {
     const [archivoCertificado, setArchivoCertificado] = useState(null);
     const [mensajeExito, setMensajeExito] = useState('');
     const [mensajeError, setMensajeError] = useState('');
-    // Código de quien invitó al alumno (link `/landing?inv=<token>`). El backend
-    // devuelve `{codigo: null}` si no lo invitó nadie: sólo PRELLENA el campo de
-    // abajo, aplicarlo sigue siendo una acción explícita del alumno.
-    const miInvitacionQ = useMiInvitacion();
-
-    // Código de referido aplicado en este flujo. Vive en el padre para no perderlo
-    // al volver del paso 2 al 1 (el campo se desmonta y el backend ya no permite
-    // aplicar un segundo código).
-    const [referidoAplicado, setReferidoAplicado] = useState(null);
 
     // Categoría visible: la propone el sexo del perfil y el alumno la puede cambiar. Se
     // DERIVA de las consultas (antes se sincronizaba con un `setCategoriaSeleccionada`
@@ -92,11 +118,27 @@ const SolicitarPlan = () => {
     /** Precio final del plan si tiene un descuento vigente (o `null`). */
     const precioConDescuento = (plan) => descuento?.precios?.[String(plan?.id)] || null;
 
+    /**
+     * Precio que se cobra hoy por el plan: el que ya calculó el backend (con el
+     * beneficio aplicado) o el de lista. Sirve para el CTA de Mercado Pago, que
+     * anuncia el monto de la misma fuente que el resumen.
+     */
+    const precioAPagar = (plan) => precioConDescuento(plan)?.precio_final_clp ?? plan?.precio_clp ?? null;
+
     /** dd-mm-aaaa de la vigencia del descuento (lo que ve el alumno en el aviso). */
     const vigenciaDescuento = () => {
         if (!descuento?.descuento_hasta) return '';
         return fmtFechaChile(descuento.descuento_hasta);
     };
+
+    /**
+     * De dónde sale el descuento que se anuncia: el beneficio de Fidelización (F2) tiene
+     * vencimiento; el premio del programa de referidos (F3b) es por la invitación y no
+     * caduca. La pantalla dice lo que el backend va a cobrar, no una fecha inventada.
+     */
+    const motivoDescuento = () => (descuento?.descuento_hasta
+        ? `válido hasta el ${vigenciaDescuento()}`
+        : 'por tu invitación');
 
     const handleSeleccionarPlan = (plan) => {
         setPlanSeleccionado(plan);
@@ -147,6 +189,43 @@ const SolicitarPlan = () => {
         }
     };
 
+    /**
+     * Paga el plan online (Checkout Pro). Crea la solicitud SIN comprobante: el
+     * cobro lo prueba Mercado Pago y el webhook activa el plan automáticamente.
+     * El certificado de estudiante SÍ se sube antes (es un requisito del plan,
+     * no una prueba de pago): al mismo lugar privado que en la transferencia.
+     */
+    const handlePagarOnline = async () => {
+        if (!planSeleccionado) return;
+        if (planSeleccionado?.requiere_certificado_estudiante && !archivoCertificado) {
+            setMensajeError('Este plan requiere un certificado de estudiante. Debes subirlo.');
+            return;
+        }
+        setMensajeError('');
+        setYendoAPagar(true);
+        try {
+            let certificadoUrl = null;
+            if (planSeleccionado?.requiere_certificado_estudiante && archivoCertificado) {
+                certificadoUrl = await subirArchivo.mutateAsync(archivoCertificado);
+            }
+            const pago = await crearPagoOnline.mutateAsync({
+                plan_id: planSeleccionado.id,
+                certificado_estudiante_url: certificadoUrl,
+            });
+            // Checkout Pro: se sale a Mercado Pago y se vuelve a
+            // /alumno/pago/resultado/<pago_id>. Nada de esto activa el plan: eso
+            // lo hace el webhook, no el navegador.
+            window.location.href = pago.init_point;
+        } catch (err) {
+            console.error('Error al iniciar el pago online:', err);
+            setMensajeError(
+                err.response?.data?.detail
+                || 'No se pudo iniciar el pago online. Intenta nuevamente o usa transferencia.'
+            );
+            setYendoAPagar(false);
+        }
+    };
+
     const formatearPrecio = (precio) => {
         if (!precio) return '—';
         return '$' + precio.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
@@ -175,7 +254,7 @@ const SolicitarPlan = () => {
                         {formatearPrecio(conDescuento.precio_final_clp)}
                     </p>
                     <p className="text-xs font-semibold text-emerald-700">
-                        con tu −{descuento.descuento_pct} % de descuento · válido hasta el {vigenciaDescuento()}
+                        con tu −{descuento.descuento_pct} % de descuento · {motivoDescuento()}
                     </p>
                 </div>
             ) : (
@@ -215,7 +294,8 @@ const SolicitarPlan = () => {
         );
     };
 
-    // Aviso del descuento vigente (F2): el alumno lo ve ANTES de elegir, con su fecha límite.
+    // Aviso del descuento que se va a aplicar en esta compra (F2 o referidos): el alumno lo
+    // ve ANTES de elegir, con su % y —si el premio vence— su fecha límite.
     const avisoDescuento = descuento && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4"
             data-testid="aviso-descuento">
@@ -223,8 +303,11 @@ const SolicitarPlan = () => {
                 🎁 Tienes un {descuento.descuento_pct} % de descuento en tu próximo plan
             </p>
             <p className="text-sm text-emerald-700">
-                Válido hasta el {vigenciaDescuento()}. Se aplica al solicitar: los precios de abajo
-                ya están con el descuento hecho.
+                {descuento.descuento_hasta
+                    ? `Válido hasta el ${vigenciaDescuento()}.`
+                    : 'Por la invitación de un alumno del box.'}
+                {' '}Se aplica al solicitar: los precios de abajo ya están con el
+                descuento hecho.
             </p>
         </div>
     );
@@ -373,78 +456,16 @@ const SolicitarPlan = () => {
                             {precioConDescuento(planSeleccionado) && (
                                 <p className="mt-2 text-xs font-semibold text-emerald-700"
                                     data-testid="resumen-descuento">
-                                    Beneficio aplicado: −{descuento.descuento_pct} % · válido hasta el {vigenciaDescuento()}
-                                    {' '}· transfiere el precio final
+                                    Descuento aplicado: −{descuento.descuento_pct} % · {motivoDescuento()}
+                                    {' '}· paga el precio final
                                 </p>
                             )}
                         </div>
 
-                        {/* Código de quien lo invitó: el backend lo deja PENDIENTE y el
-                            descuento se calcula recién al confirmar la compra. Va antes de
-                            los datos bancarios para que el alumno lo vea al decidir el monto. */}
-                        <CampoReferido
-                            aplicado={referidoAplicado}
-                            onAplicado={setReferidoAplicado}
-                            codigoSugerido={miInvitacionQ.data?.codigo || ''}
-                        />
-
-                        {/* ─── DATOS BANCARIOS PARA TRANSFERENCIA ── */}
-                        <div className="bg-blue-50 rounded-xl border border-blue-200 p-5 shadow-sm">
-                            <h4 className="font-bold text-blue-800 mb-3 flex items-center gap-2">
-                                <span>🏦</span> Datos para Transferencia
-                            </h4>
-                            {configBancaria ? (
-                                <div className="space-y-2 text-sm text-blue-900">
-                                    <p className="font-semibold text-blue-700">Transfiere a:</p>
-                                    <div className="bg-white rounded-lg p-3 border border-blue-100 space-y-1.5">
-                                        <p><span className="font-medium text-gray-600">Banco:</span> {configBancaria.banco}</p>
-                                        <p><span className="font-medium text-gray-600">Tipo de Cuenta:</span> {configBancaria.tipo_cuenta}</p>
-                                        <p><span className="font-medium text-gray-600">N° de Cuenta:</span> <span className="font-bold text-blue-800">{configBancaria.numero_cuenta}</span></p>
-                                        <p><span className="font-medium text-gray-600">RUT:</span> {configBancaria.rut}</p>
-                                        <p><span className="font-medium text-gray-600">Email comprobantes:</span> {configBancaria.email_comprobantes}</p>
-                                    </div>
-                                    <p className="text-xs text-blue-600 mt-2 italic">
-                                        Luego de transferir, sube el comprobante abajo para que validemos tu pago.
-                                    </p>
-                                </div>
-                            ) : (
-                                <div className="text-sm text-blue-600 bg-white rounded-lg p-3 border border-blue-100">
-                                    <p>⏳ El box aún no ha configurado sus datos de pago.</p>
-                                    <p className="text-xs mt-1">Por favor contacta al administrador para obtener la información de transferencia.</p>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* ─── SUBIR VOUCHER DE PAGO ──────────────── */}
-                        <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                            <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                                <span>📎</span> Subir Comprobante de Pago
-                            </h4>
-                            <p className="text-xs text-gray-500 mb-4">
-                                Formatos aceptados: imagen (JPG, PNG) o PDF. Máximo 5 MB.
-                            </p>
-                            <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-emerald-400 transition-colors">
-                                <input type="file" id="voucher-upload" accept="image/*,application/pdf"
-                                    onChange={(e) => setArchivoVoucher(e.target.files[0] || null)} className="hidden" />
-                                <label htmlFor="voucher-upload" className="cursor-pointer">
-                                    <span className="text-4xl block mb-2">{archivoVoucher ? '📄' : '📤'}</span>
-                                    {archivoVoucher ? (
-                                        <div>
-                                            <p className="text-sm font-medium text-emerald-600">{archivoVoucher.name}</p>
-                                            <p className="text-xs text-gray-400 mt-1">{(archivoVoucher.size / 1024 / 1024).toFixed(2)} MB</p>
-                                            <p className="text-xs text-emerald-500 mt-2">Haz clic para cambiar archivo</p>
-                                        </div>
-                                    ) : (
-                                        <div>
-                                            <p className="text-sm font-medium text-gray-600">Haz clic para seleccionar el comprobante</p>
-                                            <p className="text-xs text-gray-400 mt-1">o arrastra el archivo aquí</p>
-                                        </div>
-                                    )}
-                                </label>
-                            </div>
-                        </div>
-
-                        {/* ─── SUBIR CERTIFICADO ESTUDIANTE (solo si aplica) ── */}
+                        {/* ─── CERTIFICADO DE ESTUDIANTE (requisito del plan) ──
+                            Va ANTES de los métodos de pago porque lo exigen los dos:
+                            se sube una sola vez y habilita tanto el pago online como
+                            la transferencia. */}
                         {planSeleccionado.requiere_certificado_estudiante && (
                             <div className="bg-amber-50 rounded-xl border border-amber-200 p-5 shadow-sm">
                                 <h4 className="font-bold text-amber-800 mb-3 flex items-center gap-2">
@@ -477,6 +498,160 @@ const SolicitarPlan = () => {
                             </div>
                         )}
 
+                        {/* ─── MÉTODOS DE PAGO ─── */}
+                        <div>
+                            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-1">
+                                ¿Cómo quieres pagar?
+                            </h3>
+                            <p className="text-xs text-gray-400">
+                                Elige un método: cada uno tiene su propio botón.
+                            </p>
+                        </div>
+
+                        {/* ─── 1. MERCADO PAGO (camino principal) ───
+                            Primero y con más peso visual: no exige comprobante ni revisión
+                            manual (el webhook activa el plan). El bloque sólo existe si el
+                            box habilitó la pasarela. */}
+                        {pagoDisponible && (
+                            <div className="bg-blue-50 rounded-xl border-2 border-blue-400 p-5 shadow-sm"
+                                data-testid="bloque-pago-online">
+                                <div className="flex items-start gap-3">
+                                    <span className="text-2xl">💳</span>
+                                    <div>
+                                        <span className="inline-block rounded-full bg-blue-600 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white">
+                                            Más rápido
+                                        </span>
+                                        <h4 className="mt-1 text-base font-bold text-blue-900">Pagar con tarjeta</h4>
+                                        <p className="text-xs text-blue-700">Vía Mercado Pago · activación instantánea</p>
+                                    </div>
+                                </div>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                    <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-800">✓ Sin comprobante</span>
+                                    <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-800">✓ Débito, crédito o saldo</span>
+                                    <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-800">✓ Activación automática</span>
+                                </div>
+                                <p className="mt-3 text-xs text-blue-700">
+                                    Tu plan se activa automáticamente cuando Mercado Pago confirma el pago:
+                                    no necesitas subir comprobante ni esperar aprobación.
+                                </p>
+                                <button type="button"
+                                    data-testid="pagar-mercadopago-plan"
+                                    onClick={handlePagarOnline}
+                                    disabled={yendoAPagar || subiendo || (planSeleccionado.requiere_certificado_estudiante && !archivoCertificado)}
+                                    className="mt-4 w-full px-6 py-3.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                    {yendoAPagar
+                                        ? 'Redirigiendo a Mercado Pago...'
+                                        : (precioAPagar(planSeleccionado)
+                                            ? `💳 Pagar ${formatearPrecio(precioAPagar(planSeleccionado))} con Mercado Pago`
+                                            : '💳 Pagar con Mercado Pago')}
+                                </button>
+                                {planSeleccionado.requiere_certificado_estudiante && !archivoCertificado && (
+                                    <p className="mt-2 text-center text-xs font-semibold text-amber-700">
+                                        Sube tu certificado de estudiante (arriba) para habilitar el pago.
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
+                        {/* ─── 2. TRANSFERENCIA (alternativa, colapsada) ───
+                            Mismo flujo de siempre (datos bancarios + comprobante + enviar
+                            solicitud), pero detrás de una fila que se abre: Mercado Pago es
+                            el camino principal. Con la pasarela apagada la fila arranca
+                            abierta, así la pantalla nunca queda sin su botón. */}
+                        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm"
+                            data-testid="bloque-transferencia">
+                            <button type="button"
+                                data-testid="toggle-transferencia"
+                                aria-expanded={transferenciaVisible}
+                                aria-controls="panel-transferencia"
+                                onClick={() => setTransferenciaAbierta(!transferenciaVisible)}
+                                className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-gray-50 transition-colors">
+                                <span className="text-xl">🏦</span>
+                                <span className="flex-1">
+                                    <span className="block text-sm font-bold text-gray-700">Prefiero transferir</span>
+                                    <span className="block text-xs text-gray-400">
+                                        {archivoVoucher
+                                            ? 'Comprobante listo: expande para enviar tu solicitud'
+                                            : 'Revisión manual: puede tardar hasta 24 h hábiles'}
+                                    </span>
+                                </span>
+                                <span className={`text-gray-400 transition-transform ${transferenciaVisible ? 'rotate-180' : ''}`}>▾</span>
+                            </button>
+
+                            {transferenciaVisible && (
+                                <div id="panel-transferencia"
+                                    className="border-t border-gray-100 bg-gray-50 px-5 py-5 space-y-4">
+                                    <div className="bg-blue-50 rounded-xl border border-blue-200 p-5 shadow-sm">
+                                        <h4 className="font-bold text-blue-800 mb-3 flex items-center gap-2">
+                                            <span>🏦</span> Datos para Transferencia
+                                        </h4>
+                                        {configBancaria ? (
+                                            <div className="space-y-2 text-sm text-blue-900">
+                                                <p className="font-semibold text-blue-700">Transfiere a:</p>
+                                                <div className="bg-white rounded-lg p-3 border border-blue-100 space-y-1.5">
+                                                    <p><span className="font-medium text-gray-600">Banco:</span> {configBancaria.banco}</p>
+                                                    <p><span className="font-medium text-gray-600">Tipo de Cuenta:</span> {configBancaria.tipo_cuenta}</p>
+                                                    <p><span className="font-medium text-gray-600">N° de Cuenta:</span> <span className="font-bold text-blue-800">{configBancaria.numero_cuenta}</span></p>
+                                                    <p><span className="font-medium text-gray-600">RUT:</span> {configBancaria.rut}</p>
+                                                    <p><span className="font-medium text-gray-600">Email comprobantes:</span> {configBancaria.email_comprobantes}</p>
+                                                </div>
+                                                <p className="text-xs text-blue-600 mt-2 italic">
+                                                    Luego de transferir, sube el comprobante abajo para que validemos tu pago.
+                                                </p>
+                                            </div>
+                                        ) : (
+                                            <div className="text-sm text-blue-600 bg-white rounded-lg p-3 border border-blue-100">
+                                                <p>⏳ El box aún no ha configurado sus datos de pago.</p>
+                                                <p className="text-xs mt-1">Por favor contacta al administrador para obtener la información de transferencia.</p>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* ─── SUBIR VOUCHER DE PAGO ─── */}
+                                    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                                        <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
+                                            <span>📎</span> Subir Comprobante de Pago
+                                        </h4>
+                                        <p className="text-xs text-gray-500 mb-4">
+                                            Formatos aceptados: imagen (JPG, PNG) o PDF. Máximo 5 MB.
+                                        </p>
+                                        <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-emerald-400 transition-colors">
+                                            <input type="file" id="voucher-upload" accept="image/*,application/pdf"
+                                                onChange={(e) => setArchivoVoucher(e.target.files[0] || null)} className="hidden" />
+                                            <label htmlFor="voucher-upload" className="cursor-pointer">
+                                                <span className="text-4xl block mb-2">{archivoVoucher ? '📄' : '📤'}</span>
+                                                {archivoVoucher ? (
+                                                    <div>
+                                                        <p className="text-sm font-medium text-emerald-600">{archivoVoucher.name}</p>
+                                                        <p className="text-xs text-gray-400 mt-1">{(archivoVoucher.size / 1024 / 1024).toFixed(2)} MB</p>
+                                                        <p className="text-xs text-emerald-500 mt-2">Haz clic para cambiar archivo</p>
+                                                    </div>
+                                                ) : (
+                                                    <div>
+                                                        <p className="text-sm font-medium text-gray-600">Haz clic para seleccionar el comprobante</p>
+                                                        <p className="text-xs text-gray-400 mt-1">o arrastra el archivo aquí</p>
+                                                    </div>
+                                                )}
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    {/* El ÚNICO CTA de este método: sube el comprobante y deja la
+                                        solicitud pendiente de revisión del box. */}
+                                    <button type="button"
+                                        data-testid="enviar-solicitud"
+                                        onClick={handleEnviarSolicitud}
+                                        disabled={subiendo || yendoAPagar || !archivoVoucher || !configBancaria || (planSeleccionado.requiere_certificado_estudiante && !archivoCertificado)}
+                                        className="w-full px-6 py-3.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                        {subiendo ? 'Enviando solicitud...' : '📎 Subir comprobante de transferencia'}
+                                    </button>
+                                    <p className="text-center text-xs text-gray-400">
+                                        Tu solicitud queda pendiente hasta que el box confirme la transferencia.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+
                         {mensajeError && (
                             <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 font-medium text-sm">
                                 ❌ {mensajeError}
@@ -487,15 +662,8 @@ const SolicitarPlan = () => {
                             <button type="button"
                                 onClick={() => { setPaso(1); setPlanSeleccionado(null); setMensajeError(''); }}
                                 className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-medium text-sm transition-colors"
-                                disabled={subiendo}>
+                                disabled={subiendo || yendoAPagar}>
                                 ← Volver
-                            </button>
-                            <button type="button"
-                                data-testid="enviar-solicitud"
-                                onClick={handleEnviarSolicitud}
-                                disabled={subiendo || !archivoVoucher || (planSeleccionado.requiere_certificado_estudiante && !archivoCertificado)}
-                                className="flex-1 px-6 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                                {subiendo ? 'Enviando solicitud...' : '✅ Enviar Solicitud'}
                             </button>
                         </div>
                     </div>

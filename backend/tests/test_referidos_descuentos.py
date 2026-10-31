@@ -548,8 +548,12 @@ def test_b4_compra_directa_del_admin_tambien_aplica_los_descuentos(
     print(f"[G compra directa] lista={PRECIO_LISTA} final={tx_g.monto}; "
           "credito usado")
 
-    # Y una tercera compra directa de G vuelve a lista.
-    compra_g2 = _comprar_directo(cliente, admin_headers, g, plan)
+    # Y una compra directa posterior de G vuelve a lista... pero sobre OTRO plan:
+    # `POST /suscripciones` responde 409 ante el mismo alumno + mismo plan dentro
+    # de la ventana de idempotencia (10 min), así que repetir `plan` acá mediría
+    # la guarda de doble cobro en vez del reuso del crédito.
+    plan2 = _crear_plan(db, escenario)
+    compra_g2 = _comprar_directo(cliente, admin_headers, g, plan2)
     assert compra_g2.status_code == 201, compra_g2.text
     assert _ultima_tx(db, g["id"]).monto == PRECIO_LISTA
     print(f"[G tercera compra directa] final={PRECIO_LISTA} (sin reuso)")

@@ -178,6 +178,16 @@ const PanelPedidos = () => {
                                                 >
                                                     📎 Ver comprobante
                                                 </button>
+                                            ) : p.origen_pago === 'mercadopago' ? (
+                                                /* Cobrado por Mercado Pago: no hay comprobante
+                                                   que revisar; el badge lo dice. */
+                                                <span
+                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 text-[11px] font-semibold"
+                                                    title={p.pago_id ? `Pago online #${p.pago_id}` : 'Pagado online'}
+                                                    data-testid="badge-pagado-online"
+                                                >
+                                                    💳 Pagado online ✓
+                                                </span>
                                             ) : (
                                                 <span className="text-zinc-500 text-xs">Sin comprobante</span>
                                             )}

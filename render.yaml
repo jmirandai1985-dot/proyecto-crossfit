@@ -53,6 +53,25 @@ services:
         sync: false
       - key: REACTIVACION_OPT_OUT_SECRET
         sync: false
+      # ── Pagos online: Mercado Pago Checkout Pro (migración 067) ──
+      # Interruptor maestro. `false` en el deploy = la pasarela no se muestra ni
+      # crea preferencias (503). Se enciende SOLO cuando el access token y el
+      # secreto del webhook estén cargados y probados en modo test.
+      - key: MERCADOPAGO_HABILITADO
+        value: "false"
+      - key: MERCADOPAGO_MODO
+        value: test
+      # Credenciales: SIEMPRE desde el dashboard (sync: false), nunca en git.
+      - key: MERCADOPAGO_ACCESS_TOKEN
+        sync: false
+      - key: MERCADOPAGO_PUBLIC_KEY
+        sync: false
+      - key: MERCADOPAGO_WEBHOOK_SECRET
+        sync: false
+      - key: MERCADOPAGO_BACK_URL_BASE
+        sync: false
+      - key: MERCADOPAGO_NOTIFICATION_URL
+        sync: false
       # ── Archivos subidos por la app (app/services/storage.py) ──
       # PROD guarda en Cloudflare R2 (disco efímero: sin esto, cada deploy borra
       # los comprobantes, certificados e imágenes del Bazar).

@@ -153,6 +153,22 @@ class Settings(BaseSettings):
     # crean su usuario. Vacio = no configurada (el default es no tener default).
     TEST_SEED_PASSWORD: str = ""
 
+    # ── Pagos online: Mercado Pago Checkout Pro (migración 067) ─────────────
+    # Credenciales SOLO por entorno (nunca en el repo). Ver docs/DISENO_PAGOS_MERCADOPAGO.md §9.
+    #   MERCADOPAGO_HABILITADO=false  ⇒ el botón no se muestra y los POST de pago
+    #     responden 503: la rama se puede mergear y desplegar sin encender nada.
+    #   MERCADOPAGO_MODO=test         ⇒ se usa `sandbox_init_point` de la preferencia.
+    #   MERCADOPAGO_WEBHOOK_SECRET    ⇒ secreto del webhook (distinto del access token).
+    #     Vacío = el webhook responde 503 (fail-closed), nunca "aceptar sin firma".
+    #   MERCADOPAGO_BACK_URL_BASE     ⇒ base del botón "volver" (default: FRONTEND_URL).
+    MERCADOPAGO_HABILITADO: bool = False
+    MERCADOPAGO_MODO: str = "test"
+    MERCADOPAGO_ACCESS_TOKEN: str = ""
+    MERCADOPAGO_PUBLIC_KEY: str = ""
+    MERCADOPAGO_WEBHOOK_SECRET: str = ""
+    MERCADOPAGO_BACK_URL_BASE: str = ""
+    MERCADOPAGO_NOTIFICATION_URL: str = ""
+
     @property
     def automation_api_key(self) -> str:
         """La key que valida los endpoints de automatizacion (KPIs/ML/segmentacion).

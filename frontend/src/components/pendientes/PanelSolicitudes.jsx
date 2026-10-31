@@ -144,6 +144,17 @@ const PanelSolicitudes = () => {
                                                 >
                                                     📎 Ver comprobante
                                                 </button>
+                                            ) : s.origen_pago === 'mercadopago' ? (
+                                                /* Pagado con Mercado Pago: NO existe comprobante
+                                                   que abrir (el endpoint del voucher daría 404).
+                                                   El badge es la prueba para el admin. */
+                                                <span
+                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 text-[11px] font-semibold"
+                                                    title={s.pago_id ? `Pago online #${s.pago_id}` : 'Pagado online'}
+                                                    data-testid="badge-pagado-online"
+                                                >
+                                                    💳 Pagado online ✓
+                                                </span>
                                             ) : (
                                                 <span className="text-zinc-500 text-xs">Sin comprobante</span>
                                             )}

@@ -32,6 +32,15 @@ class SolicitudPlan(Base):
     precio_final_clp = Column(Integer, nullable=True)
     comentario_admin = Column(String(500), nullable=True)
     aprobado_por = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    # ── Pago online (migración 067) ──
+    # `origen_pago='mercadopago'` ⇒ la solicitud NO tiene comprobante: el panel
+    # del admin muestra "Pagado online" en vez de intentar abrir un voucher que
+    # no existe (GET /solicitudes/{id}/voucher daría 404). `pago_id` es la fila
+    # de `pagos` que la cobró (NULL en las transferencias).
+    origen_pago = Column(String(12), nullable=False, server_default="manual",
+                         default="manual")
+    pago_id = Column(Integer, ForeignKey(
+        "pagos.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True),
                         server_default=func.now(), onupdate=func.now())

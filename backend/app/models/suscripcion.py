@@ -55,6 +55,10 @@ class Suscripcion(Base):
     es_compra_emergencia = Column(Boolean, nullable=False, default=False)
     puede_comprar_emergencia = Column(Boolean, nullable=False, default=True)
     fecha_compra_emergencia = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Trazabilidad del alta automática por pasarela (migración 067): NULL en
+    # las suscripciones nacidas de una aprobación manual o del mesón.
+    pago_id = Column(Integer, ForeignKey(
+        "pagos.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False,

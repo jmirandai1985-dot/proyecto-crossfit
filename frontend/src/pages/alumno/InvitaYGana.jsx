@@ -2,7 +2,11 @@ import React, { useState } from 'react';
 import Layout from '../../components/Layout';
 import BotonVolver from '../../components/BotonVolver';
 import InvitarPorCorreo from '../../components/InvitarPorCorreo';
-import { useMiCodigoReferido, useMiProgresoReferidos } from '../../hooks/queries';
+// El INVITADO aplica el código de quien lo trajo ACÁ (no en la compra): el
+// backend ya descuenta el premio antes de cobrar, así que éste es el único lugar
+// donde el código se ingresa.
+import CampoReferido from '../../components/CampoReferido';
+import { useMiCodigoReferido, useMiInvitacion, useMiProgresoReferidos } from '../../hooks/queries';
 import { copiarAlPortapapeles, textoCompartirReferido } from '../../utils/referidos';
 
 const fechaLarga = (valor) => {
@@ -15,10 +19,16 @@ const fechaLarga = (valor) => {
 };
 
 /**
- * "Invita y gana": el alumno ve y comparte su código, y puede invitar a un
- * amigo por CORREO (migración 054). El componente `CampoReferido` ya no vive
- * acá: el código de otra persona se aplica en la compra (`SolicitarPlan`), no
- * en la pantalla del invitador.
+ * "Invita y gana": la pantalla del programa de referidos, con los DOS lados.
+ * El INVITADOR ve y comparte su código (y puede invitar a un amigo por correo,
+ * migración 054); el INVITADO aplica el código de quien lo trajo en el bloque
+ * "¿Te invitó un amigo?" (`CampoReferido`).
+ *
+ * `CampoReferido` vivía en el paso de compra (`SolicitarPlan`) y se fue de ahí
+ * cuando el backend empezó a descontar ANTES de cobrar: el precio con descuento
+ * ya viaja en `/beneficios/mios` y se congela en la solicitud / en la
+ * preferencia de Mercado Pago, así que el código sólo hay que aplicarlo una vez
+ * y el pago no necesita un formulario propio.
  *
  * El código propio lo crea el backend al activarse un plan; si el alumno aún
  * no tiene fila, `GET /referidos/mi-codigo` responde 404 y acá se explica sin
@@ -29,6 +39,14 @@ const InvitaYGana = () => {
     // "Tu ciclo" (Parte C): sólo tiene sentido con la pantalla cargada; si el
     // endpoint falla, el bloque no se dibuja y el resto de la pantalla sigue igual.
     const { data: progreso } = useMiProgresoReferidos({ enabled: Boolean(data) });
+    // El lado del INVITADO: la invitación de otro alumno que trajo a este usuario
+    // (`GET /referidos/mi-invitacion`, 200 con `codigo: null` si no lo invitó
+    // nadie). Su `codigo` sólo PRELLENA el campo; aplicarlo sigue siendo un toque
+    // explícito en `CampoReferido` (`POST /referidos/validar-codigo`).
+    const { data: miInvitacion } = useMiInvitacion();
+    // Resultado de aplicar el código: vive en la pantalla para que el bloque de
+    // éxito no dependa de que `CampoReferido` siga montado.
+    const [codigoAplicado, setCodigoAplicado] = useState(null);
     const [aviso, setAviso] = useState('');
 
     const codigo = data?.codigo || '';
@@ -186,6 +204,36 @@ const InvitaYGana = () => {
                     </div>
                 )}
 
+                {/* ── "¿Te invitó un amigo?" (el lado del INVITADO) ──
+                    Este campo vivía en el paso de compra (`SolicitarPlan`), dentro
+                    de un acordeón que había que abrir ANTES de pagar: si el alumno
+                    no lo abría —o pagaba primero— el descuento llegaba tarde. Acá
+                    el código se aplica una vez, el precio con descuento aparece en
+                    la solicitud y en el checkout de Mercado Pago, y la pantalla de
+                    pago queda sin un formulario que no cobra nada. */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                    <h2 className="text-lg font-bold text-gray-900">¿Te invitó un amigo?</h2>
+                    <p className="text-sm text-gray-600 mt-1">
+                        Si alguien te invitó al box, aplica su código <strong>antes de pagar</strong>
+                        {' '}tu primer plan: el descuento se resta directo del precio que vas a
+                        transferir o pagar online.
+                    </p>
+                    {miInvitacion?.codigo && (
+                        <p className="text-xs text-emerald-700 mt-2" data-testid="invitado-por">
+                            Te invitó {miInvitacion.nombre_invitador || 'un alumno del box'}
+                            {' '}(código <strong className="font-mono">{miInvitacion.codigo}</strong>).
+                        </p>
+                    )}
+                    <CampoReferido
+                        className="mt-4"
+                        mostrarTitulo={false}
+                        codigoSugerido={miInvitacion?.codigo || ''}
+                        aplicado={codigoAplicado}
+                        onAplicado={setCodigoAplicado}
+                    />
+                </div>
+
+
                 {/* ── "Tu ciclo" (Parte C): progreso por CICLO de facturación ── */}
                 {progreso && (progreso.ciclo || (progreso.escalera ?? []).length > 0) && (
                     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5"
@@ -278,7 +326,8 @@ const InvitaYGana = () => {
                             <span className="shrink-0 w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold flex items-center justify-center">2</span>
                             <span>
                                 Tu amigo completa el formulario de la clase de prueba con tu enlace: tu
-                                código queda vinculado a su registro y lo confirma al comprar su primer plan.
+                                código queda vinculado a su registro y él lo aplica en «Invita y gana»
+                                antes de pagar su primer plan.
                             </span>
                         </li>
                         <li className="flex gap-3">

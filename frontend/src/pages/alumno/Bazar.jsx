@@ -7,7 +7,8 @@ import BotonVolver from '../../components/BotonVolver';
 // Fase 2 (Bloque 3): subir el comprobante es una mutación de la caché compartida (el
 // MISMO hook que usa Solicitar plan), no un `api.post` a mano dentro de la pantalla.
 import {
-    useConfiguracionBancaria, useCrearPedidoBazar, useProductos, useSubirArchivoPrivado,
+    useConfiguracionBancaria, useCrearPagoBazar, useCrearPedidoBazar,
+    usePagoDisponible, useProductos, useSubirArchivoPrivado,
 } from '../../hooks/queries';
 import ImagenProducto from '../../components/ImagenProducto';
 import GaleriaProducto from '../../components/GaleriaProducto';
@@ -30,6 +31,13 @@ const Bazar = () => {
     // "Ocupado" derivado de las dos mutaciones del envío (antes: un useState que había
     // que apagar en el `finally`).
     const subiendo = subirArchivo.isPending || crearPedido.isPending;
+    // ─── Pago online (Mercado Pago Checkout Pro) ───────────────────────────
+    // Convive con la transferencia. El botón sólo aparece si el backend tiene la
+    // pasarela encendida; la tarjeta nunca pasa por la app (sólo `init_point`).
+    const pagoDisponibleQ = usePagoDisponible();
+    const pagoDisponible = Boolean(pagoDisponibleQ.data?.habilitado);
+    const crearPagoOnline = useCrearPagoBazar();
+    const [yendoAPagar, setYendoAPagar] = useState(false);
     const productos = productosQ.data || [];
     const configBancaria = configQ.data?.configurado ? configQ.data : null;
     const loading = productosQ.isLoading || configQ.isLoading;
@@ -64,9 +72,9 @@ const Bazar = () => {
     }, [productoPedido, productos]);
 
     const handleComprar = (producto) => {
-        // Sin datos bancarios cargados no hay compra: el pedido exige subir el comprobante
-        // de la transferencia (ver el aviso de la grilla y el bloque de paso 2).
-        if (!configBancaria) return;
+        // Sin datos bancarios no hay transferencia posible; con el pago online
+        // habilitado el alumno puede comprar igual (no sube comprobante).
+        if (!configBancaria && !pagoDisponible) return;
         setProductoSeleccionado(producto);
         setCantidad(1);
         setPaso(2);
@@ -104,6 +112,32 @@ const Bazar = () => {
         } catch (err) {
             const detalle = err.response?.data?.detail || 'Error al procesar pedido.';
             setMensaje({ type: 'error', text: detalle });
+        }
+    };
+
+    /**
+     * Paga el pedido online (Checkout Pro). El pedido se crea en `pendiente` y
+     * el stock se reserva igual que en la transferencia; Mercado Pago confirma
+     * el cobro y el webhook lo pasa a `validado` (con código de retiro). Si el
+     * pago no llega en 30 minutos, el pedido se rechaza y el stock vuelve.
+     */
+    const handlePagarOnline = async () => {
+        if (!productoSeleccionado) return;
+        setMensaje({ type: '', text: '' });
+        setYendoAPagar(true);
+        try {
+            const pago = await crearPagoOnline.mutateAsync({
+                producto_id: productoSeleccionado.id,
+                cantidad,
+            });
+            window.location.href = pago.init_point;
+        } catch (err) {
+            setMensaje({
+                type: 'error',
+                text: err.response?.data?.detail
+                    || 'No se pudo iniciar el pago online. Intenta nuevamente o usa transferencia.',
+            });
+            setYendoAPagar(false);
         }
     };
 
@@ -238,6 +272,31 @@ const Bazar = () => {
                                 </label>
                             </div>
                         </div>
+
+                        {/* ─── PAGO ONLINE (Mercado Pago) ───
+                            Alternativa a la transferencia: sin comprobante, el
+                            pedido se valida solo cuando Mercado Pago confirma
+                            el cobro. El stock se reserva igual al crear. */}
+                        {pagoDisponible && (
+                            <div className="bg-blue-50 rounded-xl border border-blue-200 p-5"
+                                data-testid="bazar-pago-online">
+                                <h4 className="font-bold text-blue-900 mb-2 flex items-center gap-2">
+                                    <span>💳</span> Pagar online con Mercado Pago
+                                </h4>
+                                <p className="text-xs text-blue-700 mb-4">
+                                    Tarjeta, débito o dinero en cuenta. Tu pedido queda
+                                    confirmado automáticamente y te damos el código de retiro;
+                                    no necesitas subir comprobante.
+                                </p>
+                                <button type="button"
+                                    data-testid="pagar-mercadopago-bazar"
+                                    onClick={handlePagarOnline}
+                                    disabled={yendoAPagar || subiendo}
+                                    className="w-full px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                    {yendoAPagar ? 'Redirigiendo a Mercado Pago...' : '💳 Pagar con Mercado Pago'}
+                                </button>
+                            </div>
+                        )}
 
                         {mensaje.text && (
                             <div className={`p-4 rounded-xl border text-sm font-medium ${mensaje.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}>

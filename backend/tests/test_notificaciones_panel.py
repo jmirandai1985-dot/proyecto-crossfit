@@ -266,14 +266,14 @@ def test_notificar_alumno_es_un_alias_de_notificar_usuario():
 def test_mensajes_de_estado_del_bazar():
     """Los DOS avisos de estado del Bazar, cada uno por su camino.
 
-    El mapa sólo tiene `entregado`: desde el código de retiro (migración 044) el aviso de
-    `validado` lleva el código adentro, así que lo arma `codigos_retiro.texto_validado()` y
-    NO puede ser una plantilla sin variables (el comentario de `pedidos.py` lo explica). El
-    test fija las dos mitades —el mapa no puede perder `entregado` y el aviso de validación
-    no puede perder ni el texto ni el código— en vez de exigir que los dos estados salgan
-    del mismo diccionario.
+    El mapa tiene `entregado` y `rechazado`: desde el código de retiro (migración 044) el
+    aviso de `validado` lleva el código adentro, así que lo arma
+    `codigos_retiro.texto_validado()` y NO puede ser una plantilla sin variables (el
+    comentario de `pedidos_estado.py` lo explica). El test fija las dos mitades —el mapa
+    no puede perder `entregado`/`rechazado` y el aviso de validación no puede perder ni el
+    texto ni el código— en vez de exigir que los tres estados salgan del mismo diccionario.
     """
-    assert set(MENSAJES_ESTADO_PEDIDO) == {"entregado"}, (
+    assert set(MENSAJES_ESTADO_PEDIDO) == {"entregado", "rechazado"}, (
         "cambió el mapa de mensajes: revisa que CADA estado siga avisando al alumno")
 
     entregado = MENSAJES_ESTADO_PEDIDO["entregado"].format(
@@ -288,11 +288,17 @@ def test_mensajes_de_estado_del_bazar():
 
 
 def test_el_aviso_de_validado_se_arma_con_el_codigo():
-    """Guard de FUENTE: `pedidos.py` no puede volver a plantillar `validado` sin el código."""
-    fuente = _fuente("app/api/v1/pedidos.py")
+    """Guard de FUENTE: el aviso de `validado` no puede plantillarse sin el código.
+
+    Desde el refactor de Mercado Pago (rama `feature/pagos-mercadopago`) el efecto
+    del cambio de estado vive en `services/pedidos_estado.py`: el endpoint del
+    admin y el webhook de la pasarela llaman a la MISMA función. El guard apunta
+    al servicio (donde está la regla), no al router.
+    """
+    fuente = _fuente("app/services/pedidos_estado.py")
     assert "codigos_retiro.texto_validado(" in fuente, (
         "el aviso de validado dejó de usar el helper que agrega el código de retiro")
-    assert 'f"pedido_{nuevo_estado}"' in fuente, "cambió el tipo del aviso (campana)"
+    assert '"pedido_validado"' in fuente, "cambió el tipo del aviso (campana)"
 
 
 def test_los_tipos_entran_en_la_columna():

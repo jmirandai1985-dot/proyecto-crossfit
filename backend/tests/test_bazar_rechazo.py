@@ -29,6 +29,7 @@ from app.api.v1 import pedidos as ped                                 # noqa: E4
 from app.models.pedido import Pedido                                  # noqa: E402
 from app.models.producto import Producto                              # noqa: E402
 from app.schemas.pedido import PedidoRechazoRequest                   # noqa: E402
+from app.services import pedidos_estado as servicio_pedidos            # noqa: E402
 from shared.estados import ESTADOS_PAGO_BAZAR                         # noqa: E402
 
 
@@ -107,8 +108,12 @@ def test_d_el_motivo_es_obligatorio_y_con_largo_minimo():
 # ── C: el endpoint ────────────────────────────────────────────────────────────
 def test_c_rechazar_devuelve_stock_y_avisa(monkeypatch):
     avisos = []
+    # El aviso lo manda el SERVICIO que aplica el cambio de estado (el router sólo
+    # valida y delega): desde Mercado Pago, el webhook rechaza/valida un pedido por
+    # la misma función, así que el `notificar_alumno` que hay que interceptar es
+    # el del servicio.
     monkeypatch.setattr(
-        ped, "notificar_alumno",
+        servicio_pedidos, "notificar_alumno",
         lambda db, alumno_id, tipo, mensaje, **k: avisos.append((alumno_id, tipo, mensaje)))
     p, prod = _pedido(), _producto(stock=10)
     db = _FakeDB(p, prod)

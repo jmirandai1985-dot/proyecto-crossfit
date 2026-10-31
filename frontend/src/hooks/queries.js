@@ -20,6 +20,12 @@ export const claves = {
     // Solicitudes de UN alumno (padrón → modal "Voucher"). Cuelga de `['solicitudes']`
     // a propósito: aprobar/rechazar invalida esa familia y el modal abierto se refresca.
     solicitudesPlanAlumno: (alumnoId) => ['solicitudes', 'alumno', alumnoId],
+    // ── Pagos online (Mercado Pago Checkout Pro) ──
+    // `pagoDisponible` cuelga de `['pagos']` junto al detalle de un pago: es el
+    // interruptor maestro (`MERCADOPAGO_HABILITADO`) con el que el front decide
+    // si muestra el botón.
+    pagoDisponible: ['pagos', 'disponible'],
+    pago: (pagoId) => ['pagos', 'detalle', pagoId],
     pendientesActivacion: ['alumnos', 'pendientes-activacion'],
     countPendientesActivacion: ['alumnos', 'pendientes-activacion', 'count'],
     stats: (tenantId) => ['reportes', tenantId],
@@ -917,6 +923,83 @@ export function useSolicitarPlan() {
             qc.invalidateQueries({ queryKey: ['solicitudes'] });
             qc.invalidateQueries({ queryKey: claves.membresia });
         },
+    });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PAGOS ONLINE (Mercado Pago Checkout Pro)
+// ══════════════════════════════════════════════════════════════════════════════
+// El backend devuelve `init_point` y el front sólo hace
+// `window.location.href = init_point`: la tarjeta nunca pasa por la app y no hay
+// dependencia nueva en el frontend. Los MONTOS no viajan desde acá (los calcula
+// el backend: un precio en el cliente es un precio que se puede manipular).
+
+/** ¿Se puede ofrecer "Pagar con Mercado Pago" en esta instalación? */
+export function usePagoDisponible() {
+    return useQuery({
+        queryKey: claves.pagoDisponible,
+        queryFn: async () => (await api.get('/api/v1/pagos/disponibilidad')).data,
+        // El interruptor cambia con un deploy, no con el uso: 5 minutos alcanzan.
+        staleTime: 300_000,
+    });
+}
+
+/** Crea la solicitud de plan (sin voucher) y devuelve `{pago_id, init_point}`. */
+export function useCrearPagoMembresia() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) =>
+            api.post('/api/v1/pagos/membresia', payload).then((r) => r.data),
+        onSuccess: () => {
+            // Nace una solicitud `pending` (origen mercadopago): la cola del admin
+            // y el plan del alumno se refrescan con el mismo prefijo de siempre.
+            qc.invalidateQueries({ queryKey: ['solicitudes'] });
+            qc.invalidateQueries({ queryKey: claves.membresia });
+        },
+    });
+}
+
+/** Crea el pedido del Bazar (reserva stock) y devuelve `{pago_id, init_point}`. */
+export function useCrearPagoBazar() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) =>
+            api.post('/api/v1/pagos/bazar', payload).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['pedidos'] }),
+    });
+}
+
+/**
+ * Estado de UN pago (pantalla de retorno de Checkout Pro).
+ *
+ * `refetchIntervalMs` sólo se usa mientras el pago no está resuelto: el webhook
+ * tarda 1-30 s, así que la pantalla pregunta cada 3 s y corta cuando el backend
+ * dice `aplicado` (o el pago quedó en un estado final).
+ */
+// Estados en los que el cobro ya no va a cambiar solo: con uno de estos la
+// pantalla de retorno deja de hacer polling (el webhook ya hizo su trabajo o
+// nunca lo va a hacer).
+export const ESTADOS_PAGO_FINALES = [
+    'aprobado', 'rechazado', 'cancelado', 'reembolsado', 'expirado',
+];
+
+export function usePago(pagoId, { refetchIntervalMs = 0 } = {}) {
+    return useQuery({
+        queryKey: claves.pago(pagoId),
+        queryFn: async () => (await api.get(`/api/v1/pagos/${pagoId}`)).data,
+        enabled: Boolean(pagoId),
+        // El intervalo se corta solo cuando el pago ya se aplicó (o quedó en un
+        // estado final): dejar de preguntar es parte del contrato de la pantalla.
+        refetchInterval: (query) => {
+            if (!refetchIntervalMs) return false;
+            const datos = query.state.data;
+            if (datos && (datos.aplicado || ESTADOS_PAGO_FINALES.includes(datos.estado))) {
+                return false;
+            }
+            return refetchIntervalMs;
+        },
+        // Cada respuesta es un estado real del cobro: no se sirve de la caché.
+        staleTime: 0,
     });
 }
 

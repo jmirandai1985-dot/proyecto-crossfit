@@ -39,6 +39,14 @@ from app.services.notificaciones_panel import (
 # y consumirlo en el mesón. Toda la regla vive en el servicio (formato, unicidad por
 # box, normalización de lo que se tipea/escanea y los textos de los 409).
 from app.services import codigos_retiro
+# El efecto de un cambio de estado (código de retiro, traza de entrega, stock y
+# avisos) vive en un servicio: el webhook de Mercado Pago valida un pedido por el
+# MISMO camino que el admin. Los textos se re-exportan porque el resto del módulo
+# y los tests los importan desde este router.
+from app.services import pedidos_estado
+from app.services.pedidos_estado import (  # noqa: F401  (re-export)
+    MENSAJES_ESTADO_PEDIDO,
+)
 # Recordatorio MANUAL de retiro (panel móvil): dedupe del envío humano (tipos
 # `*_manual`, reabriendo la fila del día si el intento falló) y la traza en auditoría.
 from app.services.alertas_email_service import (
@@ -65,14 +73,9 @@ TRANSICIONES_PERMITIDAS = {
     "entregado": []
 }
 
-# Mensaje de campana para el alumno dueño cuando el admin avanza su pedido.
-# OJO: 'validado' NO está en este mapa a propósito — ese aviso lleva el CÓDIGO DE
-# RETIRO y lo arma services/codigos_retiro.texto_validado().
-# 'rechazado' (T3) sí está: el texto lo completa `texto_rechazo()` con el motivo del box.
-MENSAJES_ESTADO_PEDIDO = {
-    "entregado": "📦 Tu pedido de {producto} x{cantidad} fue entregado",
-    "rechazado": "❌ Tu pedido de {producto} x{cantidad} fue rechazado",
-}
+# Los mensajes de campana del pedido viven en `services/pedidos_estado.py`, que
+# es el módulo que aplica el cambio de estado y manda el aviso (se re-exportan
+# arriba para no cambiar los imports de los tests).
 
 
 def _nombre_de(db: Session, usuario_id: Optional[int]) -> Optional[str]:
@@ -320,6 +323,9 @@ def _con_nombres(db: Session, pedidos: List[Pedido]) -> List[dict]:
             "total": p.total,
             "estado": p.estado,
             "voucher_url": p.voucher_url,
+            # Pago online (migración 067): sin comprobante, con badge.
+            "origen_pago": p.origen_pago or "manual",
+            "pago_id": p.pago_id,
             "fecha_pedido": p.fecha_pedido,
             "alumno_nombre": alumno.nombre if alumno else None,
             "alumno_email": alumno.correo if alumno else None,
@@ -471,52 +477,23 @@ def actualizar_estado_pedido(
             detail=f"No se puede cambiar de '{pedido.estado}' a '{nuevo_estado}'. Transiciones permitidas: {TRANSICIONES_PERMITIDAS.get(pedido.estado, [])}"
         )
 
-    pedido.estado = nuevo_estado
-
-    # ── CÓDIGO DE RETIRO: se genera UNA sola vez, al VALIDAR (migración 044) ──
-    # En la MISMA transacción que la validación, para que el aviso de campana de
-    # abajo viaje con el código definitivo. Si el pedido ya tiene uno (revalidar
-    # tras un 400, datos viejos), se respeta: el código no cambia nunca.
-    if nuevo_estado == "validado" and not pedido.codigo_retiro:
-        try:
-            pedido.codigo_retiro = codigos_retiro.generar_codigo_unico(
-                db, tenant_id)
-        except codigos_retiro.SinCodigoDisponible as error:
-            db.rollback()
-            logger.error(f"No se pudo generar el código de retiro: {error}")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="No se pudo generar el código de retiro. Intenta de nuevo.",
-            )
-
-    # La entrega deja SIEMPRE su traza (quién y cuándo), venga del mesón (código)
-    # o de este respaldo del admin.
-    if nuevo_estado == "entregado":
-        pedido.entregado_por = current_user["usuario_id"]
-        pedido.entregado_en = ahora_santiago()
-
-    db.commit()
-    db.refresh(pedido)
-
-    # ── Aviso en el PANEL del alumno dueño (campana; sin correo) ──
-    # Antes, el avance del pedido sólo se veía entrando a Mis Pedidos.
-    producto_pedido = db.query(Producto).filter(
-        Producto.id == pedido.producto_id).first()
-    nombre_producto = (
-        producto_pedido.nombre if producto_pedido else "tu producto")
-    if nuevo_estado == "validado":
-        # El aviso de validación llega con el CÓDIGO DE RETIRO adentro.
-        mensaje = codigos_retiro.texto_validado(
-            nombre_producto, pedido.cantidad, pedido.codigo_retiro)
-    else:
-        plantilla = MENSAJES_ESTADO_PEDIDO.get(nuevo_estado)
-        mensaje = (plantilla.format(producto=nombre_producto, cantidad=pedido.cantidad)
-                   if plantilla else None)
-    if mensaje:
-        notificar_alumno(
-            db, pedido.alumno_id, f"pedido_{nuevo_estado}", mensaje)
-
-    return pedido
+    # ── EFECTO ──
+    # El código de retiro, la traza de la entrega y el aviso en la campana viven
+    # en `services/pedidos_estado.py`: el webhook de Mercado Pago valida un
+    # pedido por el MISMO camino (una copia propia desincronizaría el stock y el
+    # código de retiro).
+    try:
+        if nuevo_estado == "validado":
+            return pedidos_estado.marcar_validado(
+                db, pedido, actor_id=current_user["usuario_id"])
+        return pedidos_estado.marcar_entregado(
+            db, pedido, actor_id=current_user["usuario_id"])
+    except codigos_retiro.SinCodigoDisponible as error:
+        logger.error(f"No se pudo generar el código de retiro: {error}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No se pudo generar el código de retiro. Intenta de nuevo.",
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -537,14 +514,8 @@ def actualizar_estado_pedido(
 #   * El alumno recibe el motivo en su campana (`notificar_alumno`, best-effort).
 # ═══════════════════════════════════════════════════════════════════════════════
 def texto_rechazo(producto: str, cantidad: int, motivo: str) -> str:
-    """Mensaje de campana del pedido rechazado, CON el motivo que dejó el box.
-
-    Puro (se testea sin BD). El motivo se agrega al final para que el aviso funcione igual
-    aunque el motivo venga vacío en una llamada interna.
-    """
-    base = MENSAJES_ESTADO_PEDIDO["rechazado"].format(producto=producto, cantidad=cantidad)
-    return f"{base}. Motivo: {motivo}"
-
+    """(Re-exportado de `services/pedidos_estado.py`; ver el import de arriba.)"""
+    return pedidos_estado.texto_rechazo(producto, cantidad, motivo)
 
 @router.post("/{pedido_id}/rechazar", response_model=PedidoResponse)
 def rechazar_pedido(
@@ -582,33 +553,17 @@ def rechazar_pedido(
                     "reembolso, no un rechazo."),
         )
 
+    # El stock vuelve y el aviso lo manda el servicio (misma transacción, mismo
+    # camino que usa la expiración de un pago online que nunca se cobró).
     try:
-        # El stock se devuelve en la MISMA transacción que el cambio de estado.
-        producto = (
-            db.query(Producto)
-            .filter(Producto.id == pedido.producto_id)
-            .with_for_update()
-            .first()
-        )
-        if producto is not None:
-            producto.stock = (producto.stock or 0) + pedido.cantidad
-        pedido.estado = "rechazado"
-        db.commit()
+        return pedidos_estado.rechazar_pedido(
+            db, pedido, motivo, actor_id=current_user["usuario_id"])
     except DBAPIError:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Alta demanda, intenta de nuevo",
         )
-    db.refresh(pedido)
-
-    # ── Aviso en la campana del alumno dueño (best-effort, ya commiteado) ────
-    nombre_producto = producto.nombre if producto else "tu producto"
-    notificar_alumno(
-        db, pedido.alumno_id, "pedido_rechazado",
-        texto_rechazo(nombre_producto, pedido.cantidad, motivo))
-
-    return pedido
 
 
 @router.put("/{pedido_id}", response_model=PedidoResponse)

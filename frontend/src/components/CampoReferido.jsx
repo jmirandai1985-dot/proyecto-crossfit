@@ -8,7 +8,11 @@ import {
 /**
  * Campo para que el INVITADO aplique el código de quien lo invitó.
  *
- * Se usa en el paso de compra de `SolicitarPlan`. El texto de éxito lo manda el
+ * Vive en `InvitaYGana` (bloque "¿Te invitó un amigo?"). NO está en el paso de
+ * compra (`SolicitarPlan`): el backend ya descuenta el premio ANTES de cobrar
+ * —el precio final viaja en `/beneficios/mios` y se congela en la solicitud y en
+ * la preferencia de Mercado Pago—, así que el código se aplica una sola vez y el
+ * pago no necesita un formulario que no cobra nada. El texto de éxito lo manda el
  * backend (`MENSAJE_REFERIDO_REGISTRADO`): acá no se inventa el estado.
  *
  * `codigoSugerido` (migración 054) viene de `GET /referidos/mi-invitacion`, es
@@ -17,10 +21,14 @@ import {
  * código", así el consentimiento y la fuente de verdad quedan en el backend.
  *
  * `aplicado`/`onAplicado` permiten que el padre recuerde el resultado cuando
- * este bloque se desmonta (SolicitarPlan cambia de paso y vuelve al pago).
+ * este bloque se desmonta.
+ *
+ * `mostrarTitulo={false}` deja el bloque sin su `<h3>`, para cuando vive dentro
+ * de una tarjeta que ya lo rotula (así el texto no se repite dos veces).
  */
 const CampoReferido = ({
     aplicado = null, onAplicado, codigoSugerido = '', className = '',
+    mostrarTitulo = true,
 }) => {
     const [codigo, setCodigo] = useState(
         () => normalizarCodigoIngresado(codigoSugerido));
@@ -72,8 +80,8 @@ const CampoReferido = ({
                 </p>
                 <p className="text-xs text-green-700/80 mt-2">
                     Código: <strong className="font-mono">{resultado.codigo || codigo}</strong>.
-                    El descuento se aplica cuando el box confirma tu compra. Si tienes dudas sobre
-                    el monto a transferir, consulta con el box.
+                    El descuento se aplica al precio de tu plan: lo verás al solicitar el plan y en
+                    el checkout de Mercado Pago.
                 </p>
             </div>
         );
@@ -84,10 +92,12 @@ const CampoReferido = ({
             className={`bg-white border border-gray-200 rounded-xl p-5 shadow-sm ${className}`}
             data-testid="campo-referido"
         >
-            <h3 className="text-base font-bold text-gray-900">🎟️ ¿Tienes un código de invitación?</h3>
+            {mostrarTitulo && (
+                <h3 className="text-base font-bold text-gray-900">🎟️ ¿Tienes un código de invitación?</h3>
+            )}
             <p className="text-sm text-gray-600 mt-1">
-                Si un amigo te invitó al box, ingrésalo acá antes de comprar tu plan.
-                Sólo puedes usar un código.
+                Si un amigo te invitó al box, ingrésalo acá <strong>antes de pagar</strong> tu plan:
+                el descuento se resta del precio. Sólo puedes usar un código.
             </p>
 
             {sugerido && (
@@ -141,8 +151,8 @@ const CampoReferido = ({
             )}
 
             <p id="ayuda-codigo-referido" className="text-xs text-gray-500 mt-2">
-                El descuento se calcula cuando el box confirma la compra. Si ya transferiste,
-                avísale al box para que lo considere.
+                El precio con descuento aparece al solicitar tu plan. Si ya pagaste antes de aplicar
+                el código, avísale al box para que lo considere.
             </p>
         </div>
     );

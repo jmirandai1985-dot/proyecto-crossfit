@@ -68,6 +68,15 @@ const AccionesPedido = ({
             >
                 📎 Ver comprobante
             </button>
+        ) : pedido.origen_pago === 'mercadopago' ? (
+            /* Pagado con Mercado Pago: no hay comprobante; el badge lo reemplaza. */
+            <span
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-blue-500/15 text-blue-300 text-[11px] font-semibold"
+                title={pedido.pago_id ? `Pago online #${pedido.pago_id}` : 'Pagado online'}
+                data-testid="badge-pagado-online"
+            >
+                💳 Pagado online ✓
+            </span>
         ) : (
             <span className="text-zinc-500 text-xs">Sin comprobante</span>
         )}
