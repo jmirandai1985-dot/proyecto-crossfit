@@ -512,25 +512,30 @@ const SolicitarPlan = () => {
                             Primero y con más peso visual: no exige comprobante ni revisión
                             manual (el webhook activa el plan). El bloque sólo existe si el
                             box habilitó la pasarela. */}
+                        {/* SKIN: los colores del mockup viajan como valores arbitrarios de
+                            Tailwind (`bg-[#1C1B1A]`) porque `src/index.css` reescribe varias
+                            paletas con `!important` (y blue-50/blue-200/blue-900 nunca se
+                            reescribieron: por eso las tarjetas quedaban celestes acá).
+                            El azul #3B5BDB es la marca de Mercado Pago: badge y CTA lo usan. */}
                         {pagoDisponible && (
-                            <div className="bg-blue-50 rounded-xl border-2 border-blue-400 p-5 shadow-sm"
+                            <div className="rounded-xl border-2 border-[#3B5BDB44] bg-[#1C1B1A] p-5 shadow-sm"
                                 data-testid="bloque-pago-online">
                                 <div className="flex items-start gap-3">
                                     <span className="text-2xl">💳</span>
                                     <div>
-                                        <span className="inline-block rounded-full bg-blue-600 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white">
+                                        <span className="inline-block rounded-full bg-[#3B5BDB] px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white">
                                             Más rápido
                                         </span>
-                                        <h4 className="mt-1 text-base font-bold text-blue-900">Pagar con tarjeta</h4>
-                                        <p className="text-xs text-blue-700">Vía Mercado Pago · activación instantánea</p>
+                                        <h4 className="mt-1 text-base font-bold text-[#F5F4F1]">Pagar con tarjeta</h4>
+                                        <p className="text-xs text-[#A8A6A1]">Vía Mercado Pago · activación instantánea</p>
                                     </div>
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-2">
-                                    <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-800">✓ Sin comprobante</span>
-                                    <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-800">✓ Débito, crédito o saldo</span>
-                                    <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-800">✓ Activación automática</span>
+                                    <span className="rounded-full border border-[#2A2927] bg-[#141413] px-2.5 py-1 text-[11px] font-semibold text-[#A8A6A1]"><span className="text-[#6FCF6F]">✓</span> Sin comprobante</span>
+                                    <span className="rounded-full border border-[#2A2927] bg-[#141413] px-2.5 py-1 text-[11px] font-semibold text-[#A8A6A1]"><span className="text-[#6FCF6F]">✓</span> Débito, crédito o saldo</span>
+                                    <span className="rounded-full border border-[#2A2927] bg-[#141413] px-2.5 py-1 text-[11px] font-semibold text-[#A8A6A1]"><span className="text-[#6FCF6F]">✓</span> Activación automática</span>
                                 </div>
-                                <p className="mt-3 text-xs text-blue-700">
+                                <p className="mt-3 text-xs text-[#A8A6A1]">
                                     Tu plan se activa automáticamente cuando Mercado Pago confirma el pago:
                                     no necesitas subir comprobante ni esperar aprobación.
                                 </p>
@@ -538,7 +543,7 @@ const SolicitarPlan = () => {
                                     data-testid="pagar-mercadopago-plan"
                                     onClick={handlePagarOnline}
                                     disabled={yendoAPagar || subiendo || (planSeleccionado.requiere_certificado_estudiante && !archivoCertificado)}
-                                    className="mt-4 w-full px-6 py-3.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                    className="mt-4 w-full px-6 py-3.5 bg-[#3B5BDB] text-white rounded-xl hover:bg-[#4F6BE3] font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                                     {yendoAPagar
                                         ? 'Redirigiendo a Mercado Pago...'
                                         : (precioAPagar(planSeleccionado)
@@ -558,49 +563,49 @@ const SolicitarPlan = () => {
                             solicitud), pero detrás de una fila que se abre: Mercado Pago es
                             el camino principal. Con la pasarela apagada la fila arranca
                             abierta, así la pantalla nunca queda sin su botón. */}
-                        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm"
+                        <div className="rounded-xl border border-[#2A2927] bg-[#1C1B1A] overflow-hidden shadow-sm"
                             data-testid="bloque-transferencia">
                             <button type="button"
                                 data-testid="toggle-transferencia"
                                 aria-expanded={transferenciaVisible}
                                 aria-controls="panel-transferencia"
                                 onClick={() => setTransferenciaAbierta(!transferenciaVisible)}
-                                className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-gray-50 transition-colors">
+                                className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-[#242322] transition-colors">
                                 <span className="text-xl">🏦</span>
                                 <span className="flex-1">
-                                    <span className="block text-sm font-bold text-gray-700">Prefiero transferir</span>
-                                    <span className="block text-xs text-gray-400">
+                                    <span className="block text-sm font-bold text-[#F5F4F1]">Prefiero transferir</span>
+                                    <span className="block text-xs text-[#78766F]">
                                         {archivoVoucher
                                             ? 'Comprobante listo: expande para enviar tu solicitud'
                                             : 'Revisión manual: puede tardar hasta 24 h hábiles'}
                                     </span>
                                 </span>
-                                <span className={`text-gray-400 transition-transform ${transferenciaVisible ? 'rotate-180' : ''}`}>▾</span>
+                                <span className={`text-[#78766F] transition-transform ${transferenciaVisible ? 'rotate-180' : ''}`}>▾</span>
                             </button>
 
                             {transferenciaVisible && (
                                 <div id="panel-transferencia"
-                                    className="border-t border-gray-100 bg-gray-50 px-5 py-5 space-y-4">
-                                    <div className="bg-blue-50 rounded-xl border border-blue-200 p-5 shadow-sm">
-                                        <h4 className="font-bold text-blue-800 mb-3 flex items-center gap-2">
+                                    className="border-t border-[#2A2927] bg-[#1C1B1A] px-5 py-5 space-y-4">
+                                    <div className="rounded-xl border border-[#2A2927] bg-[#141413] p-5 shadow-sm">
+                                        <h4 className="font-bold text-[#E0B83C] mb-3 flex items-center gap-2">
                                             <span>🏦</span> Datos para Transferencia
                                         </h4>
                                         {configBancaria ? (
-                                            <div className="space-y-2 text-sm text-blue-900">
-                                                <p className="font-semibold text-blue-700">Transfiere a:</p>
-                                                <div className="bg-white rounded-lg p-3 border border-blue-100 space-y-1.5">
-                                                    <p><span className="font-medium text-gray-600">Banco:</span> {configBancaria.banco}</p>
-                                                    <p><span className="font-medium text-gray-600">Tipo de Cuenta:</span> {configBancaria.tipo_cuenta}</p>
-                                                    <p><span className="font-medium text-gray-600">N° de Cuenta:</span> <span className="font-bold text-blue-800">{configBancaria.numero_cuenta}</span></p>
-                                                    <p><span className="font-medium text-gray-600">RUT:</span> {configBancaria.rut}</p>
-                                                    <p><span className="font-medium text-gray-600">Email comprobantes:</span> {configBancaria.email_comprobantes}</p>
+                                            <div className="space-y-2 text-sm text-[#A8A6A1]">
+                                                <p className="font-semibold text-[#A8A6A1]">Transfiere a:</p>
+                                                <div className="rounded-lg p-3 border border-[#2A2927] bg-[#1C1B1A] space-y-1.5">
+                                                    <p><span className="font-medium text-[#78766F]">Banco:</span> <span className="text-[#7FB0F0]">{configBancaria.banco}</span></p>
+                                                    <p><span className="font-medium text-[#78766F]">Tipo de Cuenta:</span> <span className="text-[#7FB0F0]">{configBancaria.tipo_cuenta}</span></p>
+                                                    <p><span className="font-medium text-[#78766F]">N° de Cuenta:</span> <span className="font-bold text-[#7FB0F0]">{configBancaria.numero_cuenta}</span></p>
+                                                    <p><span className="font-medium text-[#78766F]">RUT:</span> <span className="text-[#7FB0F0]">{configBancaria.rut}</span></p>
+                                                    <p><span className="font-medium text-[#78766F]">Email comprobantes:</span> <span className="text-[#7FB0F0]">{configBancaria.email_comprobantes}</span></p>
                                                 </div>
-                                                <p className="text-xs text-blue-600 mt-2 italic">
+                                                <p className="text-xs text-[#78766F] mt-2 italic">
                                                     Luego de transferir, sube el comprobante abajo para que validemos tu pago.
                                                 </p>
                                             </div>
                                         ) : (
-                                            <div className="text-sm text-blue-600 bg-white rounded-lg p-3 border border-blue-100">
+                                            <div className="text-sm text-[#A8A6A1] rounded-lg p-3 border border-[#2A2927] bg-[#1C1B1A]">
                                                 <p>⏳ El box aún no ha configurado sus datos de pago.</p>
                                                 <p className="text-xs mt-1">Por favor contacta al administrador para obtener la información de transferencia.</p>
                                             </div>
@@ -608,14 +613,14 @@ const SolicitarPlan = () => {
                                     </div>
 
                                     {/* ─── SUBIR VOUCHER DE PAGO ─── */}
-                                    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                                        <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
+                                    <div className="rounded-xl border border-[#2A2927] bg-[#1C1B1A] p-5 shadow-sm">
+                                        <h4 className="font-bold text-[#F5F4F1] mb-3 flex items-center gap-2">
                                             <span>📎</span> Subir Comprobante de Pago
                                         </h4>
-                                        <p className="text-xs text-gray-500 mb-4">
+                                        <p className="text-xs text-[#A8A6A1] mb-4">
                                             Formatos aceptados: imagen (JPG, PNG) o PDF. Máximo 5 MB.
                                         </p>
-                                        <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-emerald-400 transition-colors">
+                                        <div className="border-2 border-dashed border-[#2A2927] rounded-xl p-6 text-center hover:border-[#6FCF6F] transition-colors">
                                             <input type="file" id="voucher-upload" accept="image/*,application/pdf"
                                                 onChange={(e) => setArchivoVoucher(e.target.files[0] || null)} className="hidden" />
                                             <label htmlFor="voucher-upload" className="cursor-pointer">
@@ -623,13 +628,13 @@ const SolicitarPlan = () => {
                                                 {archivoVoucher ? (
                                                     <div>
                                                         <p className="text-sm font-medium text-emerald-600">{archivoVoucher.name}</p>
-                                                        <p className="text-xs text-gray-400 mt-1">{(archivoVoucher.size / 1024 / 1024).toFixed(2)} MB</p>
+                                                        <p className="text-xs text-[#78766F] mt-1">{(archivoVoucher.size / 1024 / 1024).toFixed(2)} MB</p>
                                                         <p className="text-xs text-emerald-500 mt-2">Haz clic para cambiar archivo</p>
                                                     </div>
                                                 ) : (
                                                     <div>
-                                                        <p className="text-sm font-medium text-gray-600">Haz clic para seleccionar el comprobante</p>
-                                                        <p className="text-xs text-gray-400 mt-1">o arrastra el archivo aquí</p>
+                                                        <p className="text-sm font-medium text-[#A8A6A1]">Haz clic para seleccionar el comprobante</p>
+                                                        <p className="text-xs text-[#78766F] mt-1">o arrastra el archivo aquí</p>
                                                     </div>
                                                 )}
                                             </label>
@@ -645,7 +650,7 @@ const SolicitarPlan = () => {
                                         className="w-full px-6 py-3.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                                         {subiendo ? 'Enviando solicitud...' : '📎 Subir comprobante de transferencia'}
                                     </button>
-                                    <p className="text-center text-xs text-gray-400">
+                                    <p className="text-center text-xs text-[#78766F]">
                                         Tu solicitud queda pendiente hasta que el box confirme la transferencia.
                                     </p>
                                 </div>
