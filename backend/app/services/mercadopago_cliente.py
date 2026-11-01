@@ -117,6 +117,7 @@ def configuracion() -> dict:
         "access_token": access_token,
         "modo": modo,
         "sandbox": modo != "production",
+        "test_buyer_email": (settings.MERCADOPAGO_TEST_BUYER_EMAIL or "").strip(),
         "webhook_secret": (settings.MERCADOPAGO_WEBHOOK_SECRET or "").strip(),
         "notification_url": (settings.MERCADOPAGO_NOTIFICATION_URL or "").strip(),
         "back_url_base": (settings.MERCADOPAGO_BACK_URL_BASE
@@ -230,6 +231,19 @@ def _payer(email: str = "", rut: str = "") -> dict:
     return datos
 
 
+def _email_pagador(email: str, config: dict) -> str:
+    """Email efectivo del `payer` según el modo.
+
+    En sandbox/test NO se manda el correo real del alumno: se usa
+    `MERCADOPAGO_TEST_BUYER_EMAIL` (el test buyer). Mezclar un correo real con
+    un collector de prueba rompe el checkout de MP (step_exception tras
+    tokenizar la tarjeta). En producción el correo real se usa tal cual.
+    """
+    if config.get("sandbox"):
+        return str(config.get("test_buyer_email") or "").strip()
+    return str(email or "").strip()
+
+
 def crear_preferencia(*, pago, titulo: str, email: str = "", rut: str = "",
                       excluir_medios=()):
     """Crea la preferencia de Checkout Pro y devuelve `(preference_id, init_point)`.
@@ -258,7 +272,7 @@ def crear_preferencia(*, pago, titulo: str, email: str = "", rut: str = "",
         "external_reference": pago.external_reference,
         "statement_descriptor": "BOX CROSSFIT",
     }
-    pagador = _payer(email=email, rut=rut)
+    pagador = _payer(email=_email_pagador(email, config), rut=rut)
     if pagador:
         preferencia["payer"] = pagador
     back_urls = _url_retorno(config, pago.id)

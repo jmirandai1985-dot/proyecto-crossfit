@@ -168,6 +168,10 @@ class Settings(BaseSettings):
     MERCADOPAGO_WEBHOOK_SECRET: str = ""
     MERCADOPAGO_BACK_URL_BASE: str = ""
     MERCADOPAGO_NOTIFICATION_URL: str = ""
+    # Email del payer en modo test/sandbox (el test buyer de MP). En producción
+    # se ignora y se usa el correo real del alumno: mezclar un correo real con
+    # un collector de prueba rompe el checkout de MP.
+    MERCADOPAGO_TEST_BUYER_EMAIL: str = ""
 
     @property
     def automation_api_key(self) -> str:

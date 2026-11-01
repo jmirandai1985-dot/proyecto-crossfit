@@ -78,6 +78,10 @@ services:
         sync: false
       - key: MERCADOPAGO_NOTIFICATION_URL
         sync: false
+      # Email del comprador de prueba (test buyer) para el modo sandbox: evita
+      # mandar el correo real de la alumna con un collector de prueba.
+      - key: MERCADOPAGO_TEST_BUYER_EMAIL
+        sync: false
       # ── Archivos subidos por la app (app/services/storage.py) ──
       # PROD guarda en Cloudflare R2 (disco efímero: sin esto, cada deploy borra
       # los comprobantes, certificados e imágenes del Bazar).

@@ -126,6 +126,8 @@ def _config_de_prueba(monkeypatch, modo="test"):
     monkeypatch.setattr(settings, "MERCADOPAGO_NOTIFICATION_URL",
                         "https://api.test/api/v1/pagos/webhook/mercadopago",
                         raising=False)
+    monkeypatch.setattr(settings, "MERCADOPAGO_TEST_BUYER_EMAIL", "",
+                        raising=False)
 
 
 
@@ -230,14 +232,16 @@ def test_preferencia_arma_el_payload_y_usa_sandbox(monkeypatch):
     assert isinstance(payload["items"][0]["unit_price"], int), \
         "CLP no tiene decimales: mandar un Float es un monto inválido"
     assert payload["items"][0]["currency_id"] == "CLP"
-    assert payload["payer"] == {"email": "a@b.cl"}
+    # En sandbox el email real del alumno NO viaja: sin test buyer configurado
+    # el payer queda vacío y no se manda.
+    assert "payer" not in payload
     assert payload["notification_url"].endswith("/pagos/webhook/mercadopago")
     assert payload["back_urls"]["success"].endswith("/alumno/pago/resultado/7")
     assert "payment_methods" not in payload
 
 
 def test_preferencia_usa_el_rut_valido_como_identification(monkeypatch):
-    _config_de_prueba(monkeypatch)
+    _config_de_prueba(monkeypatch, modo="production")
     sdk = _SDKFalso(preferencia={"status": 201, "response": {
         "id": "pref-rut",
         "init_point": "https://mp/prod",
@@ -255,7 +259,7 @@ def test_preferencia_usa_el_rut_valido_como_identification(monkeypatch):
 
 
 def test_preferencia_omite_identification_si_el_rut_no_sirve(monkeypatch):
-    _config_de_prueba(monkeypatch)
+    _config_de_prueba(monkeypatch, modo="production")
     sdk = _SDKFalso(preferencia={"status": 201, "response": {
         "id": "pref-sin-rut",
         "init_point": "https://mp/prod",
@@ -283,6 +287,58 @@ def test_preferencia_sin_datos_del_pagador_no_manda_payer(monkeypatch):
     mp.crear_preferencia(pago=_pago(), titulo="Plan")
 
     assert "payer" not in sdk._preferencia.payload
+
+
+def test_preferencia_en_sandbox_usa_el_email_del_test_buyer(monkeypatch):
+    _config_de_prueba(monkeypatch, modo="test")
+    monkeypatch.setattr(settings, "MERCADOPAGO_TEST_BUYER_EMAIL",
+                        "comprador@test.com", raising=False)
+    sdk = _SDKFalso(preferencia={"status": 201, "response": {
+        "id": "pref-testbuyer",
+        "init_point": "https://mp/prod",
+        "sandbox_init_point": "https://mp/sandbox",
+    }})
+    monkeypatch.setitem(mp._SDK_CACHE, "TEST-token", sdk)
+
+    mp.crear_preferencia(pago=_pago(), titulo="Plan",
+                         email="alumna.real@gmail.com", rut="11.111.111-1")
+
+    assert sdk._preferencia.payload["payer"] == {
+        "email": "comprador@test.com",
+        "identification": {"type": "RUT", "number": "11111111-1"},
+    }
+
+
+def test_preferencia_en_sandbox_sin_test_buyer_no_manda_el_email_real(monkeypatch):
+    _config_de_prueba(monkeypatch, modo="test")
+    sdk = _SDKFalso(preferencia={"status": 201, "response": {
+        "id": "pref-sin-testbuyer",
+        "init_point": "https://mp/prod",
+        "sandbox_init_point": "https://mp/sandbox",
+    }})
+    monkeypatch.setitem(mp._SDK_CACHE, "TEST-token", sdk)
+
+    mp.crear_preferencia(pago=_pago(), titulo="Plan",
+                         email="alumna.real@gmail.com")
+
+    # El correo real no se filtra al sandbox y, sin RUT, el payer queda vacío.
+    assert "payer" not in sdk._preferencia.payload
+
+
+def test_preferencia_en_produccion_usa_el_email_real(monkeypatch):
+    _config_de_prueba(monkeypatch, modo="production")
+    monkeypatch.setattr(settings, "MERCADOPAGO_TEST_BUYER_EMAIL",
+                        "comprador@test.com", raising=False)
+    sdk = _SDKFalso(preferencia={"status": 201, "response": {
+        "id": "pref-prod-email",
+        "init_point": "https://mp/prod",
+    }})
+    monkeypatch.setitem(mp._SDK_CACHE, "TEST-token", sdk)
+
+    mp.crear_preferencia(pago=_pago(), titulo="Plan",
+                         email="alumna.real@gmail.com")
+
+    assert sdk._preferencia.payload["payer"] == {"email": "alumna.real@gmail.com"}
 
 
 def test_preferencia_en_produccion_usa_init_point(monkeypatch):
