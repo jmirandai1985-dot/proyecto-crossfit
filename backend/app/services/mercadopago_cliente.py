@@ -24,6 +24,7 @@ viaja al frontend.
 import logging
 
 from app.core.config import settings
+from app.utils.rut import normalizar_rut, validar_rut
 
 logger = logging.getLogger(__name__)
 
@@ -212,13 +213,36 @@ def _motivo_mp(datos) -> str:
     return texto[:300] or "sin detalle"
 
 
-def crear_preferencia(*, pago, titulo: str, email: str = "",
+def _payer(email: str = "", rut: str = "") -> dict:
+    """Datos del pagador para Checkout Pro, SÓLO con campos que tienen valor.
+
+    `identification` se omite si el RUT no es chileno/válido. NO se manda
+    `name`/`surname`: el modelo sólo guarda `nombre` completo y partirlo en dos
+    inventaría datos que MP podría usar para validar la tarjeta.
+    """
+    datos = {}
+    correo = str(email or "").strip()
+    if correo:
+        datos["email"] = correo
+    rut = normalizar_rut(rut)
+    if validar_rut(rut):
+        datos["identification"] = {"type": "RUT", "number": rut}
+    return datos
+
+
+def crear_preferencia(*, pago, titulo: str, email: str = "", rut: str = "",
                       excluir_medios=()):
     """Crea la preferencia de Checkout Pro y devuelve `(preference_id, init_point)`.
 
     `pago` es la fila de `models/pago.py` ya commiteada: su `id` y su
     `external_reference` son los que viajan a MP. El `unit_price` se manda como
     ENTERO (CLP no tiene decimales).
+
+    `email`/`rut` son del pagador. Si faltan, el campo NO se manda: una
+    `identification` con `type`/`number` vacíos es peor que no declararla
+    (Checkout Pro la toma como identificación del comprador y el formulario de
+    la tarjeta entra en conflicto). Con un RUT chileno válido se declara
+    `type="RUT"`.
     """
     config = configuracion()
     sdk = _sdk(config["access_token"])
@@ -234,8 +258,9 @@ def crear_preferencia(*, pago, titulo: str, email: str = "",
         "external_reference": pago.external_reference,
         "statement_descriptor": "BOX CROSSFIT",
     }
-    if email:
-        preferencia["payer"] = {"email": email}
+    pagador = _payer(email=email, rut=rut)
+    if pagador:
+        preferencia["payer"] = pagador
     back_urls = _url_retorno(config, pago.id)
     if back_urls:
         preferencia["back_urls"] = back_urls

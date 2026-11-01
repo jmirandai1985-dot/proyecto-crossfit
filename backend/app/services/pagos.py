@@ -62,9 +62,17 @@ class ErrorPago(Exception):
         self.status_code = status_code
 
 
-def _email(db: Session, usuario_id: int) -> str:
-    fila = db.query(Usuario.correo).filter(Usuario.id == usuario_id).first()
-    return (fila.correo if fila else "") or ""
+def _datos_pagador(db: Session, usuario_id: int) -> tuple[str, str]:
+    """Correo y RUT del alumno que paga; vacíos si la fila no existe.
+
+    Se leen juntos porque los dos viajan a la preferencia de MP: el correo como
+    `payer.email` y el RUT (si es válido) como `payer.identification`.
+    """
+    fila = db.query(Usuario.correo, Usuario.rut).filter(
+        Usuario.id == usuario_id).first()
+    if not fila:
+        return "", ""
+    return (fila.correo or ""), (fila.rut or "")
 
 
 def _alertar_admins(db: Session, tenant_id: int, tipo: str, mensaje: str) -> None:
@@ -270,11 +278,13 @@ def _crear_preferencia(db: Session, pago: Pago, *, titulo: str,
     bloquearía enviar el voucher) ni el stock del Bazar tomado por 30 minutos. El
     alumno recibe un 503 con "usa transferencia", nunca un error genérico.
     """
+    email, rut = _datos_pagador(db, pago.usuario_id)
     try:
         preference_id, init_point = mp.crear_preferencia(
             pago=pago,
             titulo=titulo,
-            email=_email(db, pago.usuario_id),
+            email=email,
+            rut=rut,
             excluir_medios=excluir_medios,
         )
     except mp.ErrorMercadoPago as error:

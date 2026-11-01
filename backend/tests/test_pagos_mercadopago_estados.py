@@ -236,6 +236,55 @@ def test_preferencia_arma_el_payload_y_usa_sandbox(monkeypatch):
     assert "payment_methods" not in payload
 
 
+def test_preferencia_usa_el_rut_valido_como_identification(monkeypatch):
+    _config_de_prueba(monkeypatch)
+    sdk = _SDKFalso(preferencia={"status": 201, "response": {
+        "id": "pref-rut",
+        "init_point": "https://mp/prod",
+        "sandbox_init_point": "https://mp/sandbox",
+    }})
+    monkeypatch.setitem(mp._SDK_CACHE, "TEST-token", sdk)
+
+    mp.crear_preferencia(pago=_pago(), titulo="Plan", email="a@b.cl",
+                         rut="11.111.111-1")
+
+    assert sdk._preferencia.payload["payer"] == {
+        "email": "a@b.cl",
+        "identification": {"type": "RUT", "number": "11111111-1"},
+    }
+
+
+def test_preferencia_omite_identification_si_el_rut_no_sirve(monkeypatch):
+    _config_de_prueba(monkeypatch)
+    sdk = _SDKFalso(preferencia={"status": 201, "response": {
+        "id": "pref-sin-rut",
+        "init_point": "https://mp/prod",
+        "sandbox_init_point": "https://mp/sandbox",
+    }})
+    monkeypatch.setitem(mp._SDK_CACHE, "TEST-token", sdk)
+
+    # DV inválido a propósito: el RUT no se manda ni como string vacío.
+    mp.crear_preferencia(pago=_pago(), titulo="Plan", email="a@b.cl",
+                         rut="12.345.678-9")
+
+    assert sdk._preferencia.payload["payer"] == {"email": "a@b.cl"}
+    assert "identification" not in sdk._preferencia.payload["payer"]
+
+
+def test_preferencia_sin_datos_del_pagador_no_manda_payer(monkeypatch):
+    _config_de_prueba(monkeypatch)
+    sdk = _SDKFalso(preferencia={"status": 201, "response": {
+        "id": "pref-sin-payer",
+        "init_point": "https://mp/prod",
+        "sandbox_init_point": "https://mp/sandbox",
+    }})
+    monkeypatch.setitem(mp._SDK_CACHE, "TEST-token", sdk)
+
+    mp.crear_preferencia(pago=_pago(), titulo="Plan")
+
+    assert "payer" not in sdk._preferencia.payload
+
+
 def test_preferencia_en_produccion_usa_init_point(monkeypatch):
     _config_de_prueba(monkeypatch, modo="production")
     sdk = _SDKFalso(preferencia={"status": 201, "response": {
