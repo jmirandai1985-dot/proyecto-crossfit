@@ -294,3 +294,48 @@ def test_e_correo_plan_en_cola_se_dispara(db):
     finally:
         _limpiar(db, alumno_id=alumno, plan_ids=[plan_actual, plan_nuevo])
 
+
+# ── F. El correo de "plan activado desde cola" se dispara al auto-activar ──────
+def test_f_correo_plan_activado_cola_se_dispara(db):
+    """Al activarse un plan EN COLA, además de la notificación in-app, se
+    dispara el correo `plan_activado_cola`. En TEST `EMAIL_MODO=noop` fuerza el
+    envío simulado: la fila queda en `notificaciones_enviadas` con estado
+    `simulado` y tipo `plan_activado_cola`.
+    """
+    sufijo = f"{datetime.now():%Y%m%d%H%M%S%f}"
+    alumno = _crear_alumno(db, sufijo)
+    plan_actual = _crear_plan(db, f"A{sufijo}", f"Plan actual {sufijo}",
+                              33000, 12)
+    plan_nuevo = _crear_plan(db, f"B{sufijo}", f"Plan nuevo {sufijo}", 40000, 12)
+    sub_actual = _crear_suscripcion(db, alumno, plan_actual,
+                                    dias_restantes=10, creditos=12)
+    solicitud = _crear_solicitud(db, alumno, plan_nuevo, 40000)
+    db.commit()
+
+    try:
+        # 1) Encola el plan nuevo (hay un plan vigente).
+        aprobacion_planes.activar_plan(
+            db, solicitud, tenant_id=TENANT_ID, actor_id=None,
+            origen=aprobacion_planes.ORIGEN_MANUAL, background_tasks=None)
+
+        # 2) El plan actual se queda sin créditos → el de cola se auto-activa.
+        db.execute(text("""
+            UPDATE suscripciones SET creditos_disponibles = 0 WHERE id = :s
+        """), {"s": sub_actual})
+        db.commit()
+
+        aprobacion_planes.activar_planes_en_cola(db)
+        db.commit()
+
+        # 3) El correo de auto-activación queda registrado (noop → simulado).
+        fila = db.execute(text("""
+            SELECT estado FROM notificaciones_enviadas
+            WHERE alumno_id = :a AND tipo = 'plan_activado_cola'
+            ORDER BY id DESC LIMIT 1
+        """), {"a": alumno}).first()
+        assert fila is not None, ("no se registró el correo de plan "
+                                  "activado desde cola")
+        assert fila[0] == "simulado"
+    finally:
+        _limpiar(db, alumno_id=alumno, plan_ids=[plan_actual, plan_nuevo])
+

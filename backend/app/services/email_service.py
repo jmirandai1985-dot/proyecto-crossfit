@@ -1307,6 +1307,38 @@ def send_confirmacion_plan_en_cola(nombre: str, correo: str, plan_nombre: str,
     return ok
 
 
+def send_confirmacion_plan_activado_cola(nombre: str, correo: str, plan_nombre: str,
+                                         cantidad_clases: int, fecha_vigencia: str,
+                                         link_app: str, alumno_id: int = None) -> bool:
+    """Plan EN COLA activado automáticamente (terminó el plan anterior).
+
+    Complementa a `send_confirmacion_plan_en_cola`: ese correo sale cuando el
+    alumno paga un plan nuevo teniendo uno vigente (queda en cola); este sale
+    cuando `activar_planes_en_cola` activa ese plan, sin intervención del admin.
+    Reusa el asunto y la estructura de `send_confirmacion_plan`, pero con un
+    `tipo` propio (`plan_activado_cola`) para distinguirlo en el log de correos.
+    """
+    if not correo:
+        return False
+    titulo = f"¡{nombre}, tu plan ya está ACTIVO! 🚀"
+    saludo = (f"¡Hola, {nombre}! Tu plan anterior terminó y tu nueva membresía "
+              f"<strong>{plan_nombre}</strong> quedó activa automáticamente.")
+    cuerpo = (
+        "<p>Aquí tienes el resumen de tu nuevo ciclo:</p>"
+        f"<p><strong>Plan:</strong> {plan_nombre}<br/>"
+        f"<strong>Clases disponibles:</strong> {cantidad_clases} clases al mes<br/>"
+        f"<strong>Vigencia:</strong> Hasta el {fecha_vigencia}</p>"
+        "<p>Tu acceso continúa sin interrupciones: ya puedes agendar tus clases, "
+        "registrar tus marcas y acceder a todas las funciones del sistema.</p>"
+        "<p>¡Nos vemos entrenando en el box!<br/>— El equipo de Urban Training Box 🏋️‍♂️</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Ir a mi panel", link_app)
+    ok = _enviar(correo, f"¡{nombre}, tu plan ya está ACTIVO! 🚀", html,
+                 alumno_id, tipo="plan_activado_cola")
+    logger.info(f"[plan_activado_cola] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    return ok
+
+
 def send_confirmacion_pedido(nombre: str, correo: str, producto_nombre: str,
                              cantidad: int, total: int, link_app: str,
                              alumno_id: int = None) -> bool:

@@ -591,6 +591,24 @@ def activar_planes_en_cola(db: Session) -> list[int]:
             leida=False,
         ))
 
+        # ── Correo al alumno: su plan en cola se activó solo (no bloqueante) ──
+        # Reusa el patrón/asunto de send_confirmacion_plan, con tipo propio
+        # `plan_activado_cola` para distinguirlo en el log de correos.
+        try:
+            alumno_obj = db.query(Usuario).filter(
+                Usuario.id == solicitud.alumno_id).first()
+            if alumno_obj and alumno_obj.correo:
+                from app.services.email_service import (
+                    send_confirmacion_plan_activado_cola, formatear_fecha_es)
+                send_confirmacion_plan_activado_cola(
+                    alumno_obj.nombre, alumno_obj.correo, plan.nombre,
+                    plan.creditos if plan and plan.creditos else 0,
+                    formatear_fecha_es(suscripcion.fecha_expiracion),
+                    url_frontend("/alumno/dashboard"), alumno_obj.id)
+        except Exception as e:
+            logger.warning(
+                f"No se pudo enviar correo de plan activado desde cola: {e}")
+
         creadas.append(suscripcion.id)
         logger.info(
             "Plan en cola activado: solicitud #%s → suscripción #%s (usuario %s)",
