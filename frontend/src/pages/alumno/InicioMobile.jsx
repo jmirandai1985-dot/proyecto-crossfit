@@ -22,6 +22,8 @@ import { CLAVE_FILTRO_INICIO, filtrarPorDisciplina } from '../../utils/filtroDis
 // Rótulo del cupo de créditos ("∞"/"—"): la MISMA regla que la tarjeta del
 // Dashboard (≥768px), para que las dos pantallas no puedan divergir.
 import { rotuloCreditos } from '../../utils/rotuloCreditos';
+// Banner de estado del plan: qué vence primero (fecha/clases) + plan en cola.
+import { textoBannerPlan } from '../../utils/bannerPlan';
 // Estilos del "Inicio" móvil (mockup urban-box-inicio-pulido-1), acotados a
 // `.ub-inicio`. Se construye por bloques; este archivo crece bloque a bloque.
 import './inicioMobile.css';
@@ -286,10 +288,9 @@ const InicioMobile = ({
                 : 'Vence hoy';
     // Puntos = créditos restantes (tope 20, como el mockup). Ilimitado no lleva.
     const dotsN = (!ilimitado && creditos > 0) ? Math.min(creditos, 20) : 0;
-    // El próximo plan ya está pagado y en cola: NO se ofrece renovar.
-    const planEnCola = Boolean(membresia?.plan_en_cola);
-    // Oferta de renovación (Espacio B): pocos créditos o pocos días.
-    const mostrarRenovacion = activa && !planEnCola && (diasRestantes <= 7 || (!ilimitado && creditos <= 4));
+    // Banner de estado del plan: qué vence primero (fecha o clases) y si el
+    // próximo plan ya está pagado y en cola. `null` = sin plan activo.
+    const banner = textoBannerPlan(membresia);
 
     // ── Bloque "Mis marcas" ──
     const marcaFuerza = (nivelFuerza?.top_rms || [])[0] || null;
@@ -463,21 +464,15 @@ const InicioMobile = ({
                                         ? 'Quedan pocos días: usa los créditos que puedas.'
                                         : <>Para usarlos todos, necesitas unas <b>{porSemana} clases por semana</b>.</>}
                     </p>
-                    {planEnCola && (
+                    {banner && (
                         <div className="ctx">
                             <div>
-                                <b>Tu próximo plan ya está pagado</b>
-                                <span>Se activa automáticamente cuando termine tu plan actual.</span>
+                                <b>{banner.titulo}</b>
+                                <span>{banner.detalle}</span>
                             </div>
-                        </div>
-                    )}
-                    {mostrarRenovacion && (
-                        <div className="ctx">
-                            <div>
-                                <b>Renueva esta semana</b>
-                                <span>No te quedes sin clases: revisa los planes.</span>
-                            </div>
-                            <button type="button" onClick={() => navigate('/alumno/solicitar-plan')}>Renovar</button>
+                            {banner.mostrarRenovar && (
+                                <button type="button" onClick={() => navigate('/alumno/solicitar-plan')}>Renovar</button>
+                            )}
                         </div>
                     )}
                 </section>

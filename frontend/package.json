@@ -58,7 +58,8 @@
     "test:revision": "node scripts/test-revision-movil.mjs",
     "test:performance": "node scripts/test-performance-movil.mjs",
     "test:momento": "node scripts/test-momento-dia.mjs",
-    "test:inactividad": "node scripts/test-inactividad.mjs"
+    "test:inactividad": "node scripts/test-inactividad.mjs",
+    "test:banner": "node scripts/test-banner-plan.mjs"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.3.0",
