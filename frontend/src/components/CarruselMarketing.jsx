@@ -366,7 +366,7 @@ const CarruselMarketing = () => {
     if (!tarjetas.length) return null;
 
     return (
-        <section className="cm-carrusel" aria-label="Novedades del box">
+        <section className={`cm-carrusel${pausado || hover ? ' cm-pausado' : ''}`} aria-label="Novedades del box">
             <div className="cm-rotulo">Novedades del box</div>
 
             <div className="cm-pista" ref={pistaRef} onScroll={alDesplazar}
@@ -397,16 +397,18 @@ const CarruselMarketing = () => {
             </div>
 
             {tarjetas.length > 1 && (
-                <div className="cm-puntos">
+                <div className="cm-barras">
                     {tarjetas.map((tarjeta, indice) => (
                         <button
-                            key={`punto-${indice}`}
+                            key={`barra-${indice}`}
                             type="button"
-                            className={`cm-punto${indice === activo ? ' on' : ''}`}
+                            className={`cm-barra${indice === activo ? ' on' : ''}`}
                             onClick={() => irA(indice)}
                             aria-label={`Ir al aviso ${indice + 1} de ${tarjetas.length}`}
                             aria-current={indice === activo}
-                        />
+                        >
+                            <span className="cm-barra-relleno" aria-hidden="true" />
+                        </button>
                     ))}
                 </div>
             )}

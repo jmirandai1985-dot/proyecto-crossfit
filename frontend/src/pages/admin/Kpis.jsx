@@ -704,8 +704,8 @@ const AdminKpis = () => {
                         {/* 5 tarjetas (incluye "Ventas Bazar"): 4 columnas hasta `lg` y una sola
                             fila desde `xl` (mismo criterio responsive que las tarjetas del Dashboard). */}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-                            <KpiCard label="Conversión prueba→plan" value={Number(mes.conversion_rate)} unit="%" icon={TrendingUp} color="border-green-500"
-                                onDetalle={verKpiMensual('mensual:conversion_rate', Number(mes.conversion_rate), '%')} />
+                            <KpiCard label="Conversión prueba→plan" value={mes.conversion_rate === null ? null : Number(mes.conversion_rate)} unit="%" icon={TrendingUp} color="border-green-500"
+                                onDetalle={verKpiMensual('mensual:conversion_rate', mes.conversion_rate === null ? null : Number(mes.conversion_rate), '%')} />
                             <KpiCard label="Riesgo de Abandono"
                                         value={mes.churn_rate === null ? null : Number(mes.churn_rate)}
                                         unit="%" icon={TriangleAlert} color="border-red-500"
@@ -771,7 +771,7 @@ const AdminKpis = () => {
                                     })}
                                     <div className="pt-3 border-t border-zinc-800 flex items-center justify-between">
                                         <span className="text-sm text-gray-400">Conversión</span>
-                                        <span className="text-xl font-bold text-white">{Number(mes.conversion_rate)}%</span>
+                                        <span className="text-xl font-bold text-white">{mes.conversion_rate === null ? '—' : `${Number(mes.conversion_rate)}%`}</span>
                                     </div>
                                 </div>
                             </div>

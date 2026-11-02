@@ -29,17 +29,13 @@
     overflow-x: auto;
     padding-bottom: 8px;
     scroll-snap-type: x mandatory;
+    /* El "peek del siguiente": cada tarjeta encaja con su borde izquierdo en
+       este margen, así la primera no queda pegada y la siguiente se asoma a la
+       derecha. */
+    scroll-padding-inline: 4vw;
     -ms-overflow-style: none;
     scrollbar-width: none;
-    padding-left: 1px;
-    padding-right: 1px;
 }
-
-/* Con el snap CENTRADO la primera y la última necesitan su margen de borde
-   (9% ≈ (100% − 82%) / 2) para poder quedar centradas: así se asoma la vecina
-   a los dos lados y la tarjeta nunca queda pegada al borde de la pantalla. */
-.cm-pista > .cm-tarjeta:first-child { margin-left: calc(9% - 1px); }
-.cm-pista > .cm-tarjeta:last-child { margin-right: calc(9% - 1px); }
 
 .cm-pista::-webkit-scrollbar {
     display: none;
@@ -48,9 +44,11 @@
 /* ── La tarjeta (placa) ── */
 .cm-tarjeta {
     position: relative;
-    /* 82%: se asoma un trozo de la vecina a los dos lados (pista de swipe). */
-    flex: 0 0 82%;
-    scroll-snap-align: center;
+    /* 85%: la tarjeta actual ocupa casi todo el ancho y deja asomar el borde
+       de la siguiente (peek). `start` + `scroll-padding-inline` alinean la
+       primera con el margen y revelan a la vecina a la derecha. */
+    flex: 0 0 85%;
+    scroll-snap-align: start;
     border-radius: 10px;
     border: 2px solid var(--ub-line, #2b2625);
     padding: 16px 16px 14px;
@@ -349,28 +347,59 @@ button.cm-mini {
 
 .cm-vertodo svg { width: 12px; height: 12px; }
 
-/* ── Puntos de posición (el activo es una pastilla alargada) ── */
-.cm-puntos {
+/* ── Mini-barras de posición con cuenta regresiva ──
+   La barra activa se llena durante el intervalo de auto-avance (5.5 s). */
+.cm-barras {
     display: flex;
     justify-content: center;
-    gap: 6px;
+    gap: 5px;
     margin-top: 10px;
 }
 
-.cm-punto {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
+.cm-barra {
+    position: relative;
+    width: 20px;
+    height: 4px;
+    border-radius: 2px;
     border: 0;
     padding: 0;
     background: var(--ub-line, #332423);
     cursor: pointer;
+    overflow: hidden;
 }
 
-.cm-punto.on {
-    width: 16px;
-    border-radius: 3px;
+.cm-barra.on {
+    width: 34px;
+}
+
+.cm-barra-relleno {
+    position: absolute;
+    inset: 0;
+    width: 0;
+    border-radius: inherit;
     background: var(--ub-orange, #d9472e);
+}
+
+.cm-barra.on .cm-barra-relleno {
+    animation: cm-progreso 5.5s linear forwards;
+}
+
+@keyframes cm-progreso {
+    from { width: 0; }
+    to { width: 100%; }
+}
+
+/* Pausa al pasar el cursor/tocar: la cuenta regresiva se detiene. */
+.cm-carrusel.cm-pausado .cm-barra.on .cm-barra-relleno {
+    animation-play-state: paused;
+}
+
+/* Accesibilidad: sin animación (la barra queda llena, sin parpadeo). */
+@media (prefers-reduced-motion: reduce) {
+    .cm-barra.on .cm-barra-relleno {
+        animation: none;
+        width: 100%;
+    }
 }
 
 /* ── Modal del flyer ("Toca para ver el flyer") ── */
