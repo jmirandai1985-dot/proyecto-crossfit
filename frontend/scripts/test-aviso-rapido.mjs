@@ -4,7 +4,8 @@
 //
 // Lo que se fija acá:
 //   1. la validación espejo (el tope de 1000 es el del esquema `AvisoRapidoCrear`)
-//   2. el payload lleva SÓLO el mensaje: ni tipo, ni ventana, ni fijado, ni flyer.
+//   2. el payload lleva el mensaje y la programación ("hoy" vs "mañana"): ni tipo,
+//      ni ventana, ni fijado, ni flyer.
 //      Si el coach pudiera mandarlos, podría publicar una Promoción de un mes o un
 //      Evento, que son contenido del admin
 //   3. la vista previa del título usa la MISMA regla que el backend
@@ -59,8 +60,12 @@ eq(hayErrores(validarAvisoRapido({ texto: 'a'.repeat(MAX_TEXTO_RAPIDO + 1) })), 
 // ── 2. El payload: SÓLO el mensaje ──────────────────────────────────────────
 console.log('== 2. Payload (la seguridad vive acá) ==');
 const payload = payloadAvisoRapido({ texto: '  Trae calcetas, hoy hay cuerda  ' });
-eq(Object.keys(payload).join(','), 'texto', 'el payload tiene UN solo campo');
+eq(Object.keys(payload).sort().join(','), 'programar_manana,texto',
+    'el payload lleva el mensaje y la programación (nada más)');
 eq(payload.texto, 'Trae calcetas, hoy hay cuerda', 'el mensaje viaja sin espacios de sobra');
+eq(payload.programar_manana, false, 'por defecto publica hoy');
+eq(payloadAvisoRapido({ texto: 'x', programarManana: true }).programar_manana, true,
+    'programar para mañana viaja como true');
 eq('tipo' in payload, false, 'el coach NO elige el tipo');
 eq('vigente_desde' in payload, false, 'el coach NO elige desde cuándo');
 eq('vigente_hasta' in payload, false, 'el coach NO elige hasta cuándo');
@@ -115,7 +120,7 @@ console.log('== 5. ModalAvisoRapido ==');
 const MODAL = leer('../src/components/ModalAvisoRapido.jsx');
 ok(/usePublicarAvisoRapido/.test(MODAL), 'el modal publica con el hook');
 ok(/validarAvisoRapido/.test(MODAL), 'valida antes de enviar');
-ok(/payloadAvisoRapido/.test(MODAL), 'manda el payload del helper (un solo campo)');
+ok(/payloadAvisoRapido/.test(MODAL), 'manda el payload del helper');
 ok(/tituloRapidoDeTexto/.test(MODAL), 'la vista previa usa la regla del backend');
 ok(/tipoDe\('aviso'\)/.test(MODAL), 'la vista previa toma el color del tipo `aviso`');
 ok(/data-testid="aviso-rapido-texto"/.test(MODAL), 'la caja de texto es identificable');
@@ -127,6 +132,7 @@ eq(/type="file"|imagen_url/.test(MODAL), false, 'NO ofrece flyer');
 ok(/disabled=\{publicar\.isPending\}/.test(MODAL),
     'el botón se bloquea mientras publica (no se publica dos veces)');
 ok(/Vigente solo hoy/.test(MODAL), 'le dice al coach que el aviso dura solo el día');
+ok(/Programar para mañana/.test(MODAL), 'el coach puede elegir programar para mañana');
 
 // ── 6. El panel del coach: barra + modal montados ──────────────────────────
 // (Vivía en Gestión de Clases, retirada del repo: el aviso rápido se portó a la pestaña

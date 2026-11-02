@@ -546,7 +546,7 @@ export const MAX_TEXTO_RAPIDO = 1000;
 export const MAX_TITULO_RAPIDO = 60;
 
 export function avisoRapidoVacio() {
-    return { texto: '' };
+    return { texto: '', programarManana: false };
 }
 
 export function validarAvisoRapido(datos) {
@@ -560,12 +560,16 @@ export function validarAvisoRapido(datos) {
     return errores;
 }
 
-// El cuerpo del POST: JSON y SÓLO el mensaje. A propósito NO lleva `tipo`,
-// `vigente_desde`, `vigente_hasta` ni `fijado_arriba`: si el payload pudiera
-// mandarlos, desde el panel del coach se podría publicar una Promoción de un mes o
-// un Evento con fecha, que son contenido del admin.
+// El cuerpo del POST: JSON con el mensaje y la elección "hoy vs mañana". A propósito
+// NO lleva `tipo`, `vigente_desde`, `vigente_hasta` ni `fijado_arriba`: si el payload
+// pudiera mandarlos, desde el panel del coach se podría publicar una Promoción de un
+// mes o un Evento con fecha, que son contenido del admin.
 export function payloadAvisoRapido(datos) {
-    return { texto: (datos?.texto || '').trim() };
+    return {
+        texto: (datos?.texto || '').trim(),
+        // "Publicar hoy" (false, default) vs "Programar para mañana" (true).
+        programar_manana: !!datos?.programarManana,
+    };
 }
 
 // La vista previa del título que va a derivar el backend: MISMA regla que

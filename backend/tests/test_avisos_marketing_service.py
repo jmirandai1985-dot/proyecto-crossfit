@@ -54,7 +54,9 @@ def _aviso(**cambios):
                                        tzinfo=timezone.utc),
         vigente_hasta=datetime.combine(HOY + timedelta(days=5), time(23, 59, 59),
                                        tzinfo=timezone.utc),
-        fijado_arriba=False, producto_id=None, creado_por=None,
+        fijado_arriba=False, producto_id=None, promocion_id=None,
+        escalera_tramos=False, publicar_en=None,
+        creado_por=None,
         creado_en=datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc),
     )
     base.update(cambios)
@@ -285,6 +287,8 @@ def test_vigentes_pide_solo_los_avisos_vigentes_del_box():
     criterios = _sql(db.consulta.filtros)
     assert "avisos_marketing.tenant_id" in criterios
     assert "vigente_desde <=" in criterios and "vigente_hasta >=" in criterios
+    # Programado para el futuro no sale: el feed filtra por publicar_en.
+    assert "publicar_en" in criterios
     # Un producto retirado (activo=false) no se anuncia.
     assert "productos.activo" in criterios
     assert db.consulta.orden, "el carrusel SIEMPRE viene ordenado"
@@ -501,9 +505,9 @@ def test_el_aviso_rapido_lo_publica_el_coach_con_permiso_completo():
     assert "require_full_access" in ast.unparse(decorador)
 
 
-def test_el_aviso_rapido_solo_lleva_el_mensaje():
-    """Sin tipo ni fechas en el payload, el coach no elige QUÉ publica."""
-    assert _campos_de_la_clase("AvisoRapidoCrear") == ["texto"]
+def test_el_aviso_rapido_solo_lleva_el_mensaje_y_la_programacion():
+    """Sin tipo ni fechas en el payload: el coach sólo elige el mensaje y cuándo."""
+    assert _campos_de_la_clase("AvisoRapidoCrear") == ["texto", "programar_manana"]
 
 
 def test_el_aviso_rapido_no_sube_flyer_ni_llega_fijado():
@@ -560,4 +564,22 @@ def test_el_aviso_rapido_dura_el_dia_completo_y_no_se_fija_arriba():
                                            datos["vigente_hasta"])
     assert desde < hasta, "la ventana queda abierta todo el día"
     assert fecha_chile(hasta) == hoy_santiago()
+
+
+def test_el_aviso_rapido_programado_para_manana_queda_en_manana():
+    """'Programar para mañana' no se publica hoy: ventana y publicar_en = mañana."""
+    datos = servicio.payload_aviso_rapido("Trae calcetas", programar_manana=True)
+    manana = hoy_santiago() + timedelta(days=1)
+    assert datos["vigente_desde"] == datos["vigente_hasta"] == manana
+    assert fecha_chile(datos["publicar_en"]) == manana
+    assert (datos["publicar_en"].hour, datos["publicar_en"].minute,
+            datos["publicar_en"].second) == (0, 0, 0)
+    # El payload sigue pasando la validación de `crear()`.
+    assert servicio.validar(datos) == []
+
+
+def test_el_aviso_rapido_de_hoy_no_programa_nada():
+    """'Publicar hoy' deja publicar_en en None (sin demora)."""
+    datos = servicio.payload_aviso_rapido("Trae calcetas")
+    assert datos["publicar_en"] is None
 

@@ -93,6 +93,11 @@ class AvisoMarketing(Base):
         "usuarios.id", ondelete="SET NULL"), nullable=True)
     creado_en = Column(TIMESTAMP(timezone=True),
                        nullable=False, server_default=func.now())
+    # publicar_en (migración 069): el instante desde el que el aviso ES visible en el
+    # feed del alumno (filtro `publicar_en <= now()`). NULL = sin demora (se ve según
+    # su vigencia). Sólo lo fija el aviso rápido del coach al "programar para mañana"
+    # (medianoche del día siguiente); el resto de los avisos queda en NULL.
+    publicar_en = Column(TIMESTAMP(timezone=True), nullable=True)
 
     __table_args__ = (
         # Los tipos permitidos: espejo del modelo (TIPOS_AVISO) y de la 048.

@@ -62,7 +62,9 @@ const ModalAvisoRapido = ({ isOpen, onClose, onSuccess }) => {
                     <div>
                         <h2 className="text-lg font-extrabold text-zinc-100">Aviso rápido</h2>
                         <p className="text-[12px] text-zinc-500 mt-0.5">
-                            Aparece hoy en el Inicio de los alumnos.
+                            {form.programarManana
+                                ? 'Aparecerá mañana en el Inicio de los alumnos.'
+                                : 'Aparece hoy en el Inicio de los alumnos.'}
                         </p>
                     </div>
                     <button
@@ -87,7 +89,7 @@ const ModalAvisoRapido = ({ isOpen, onClose, onSuccess }) => {
                             data-testid="aviso-rapido-texto"
                             value={form.texto}
                             maxLength={MAX_TEXTO_RAPIDO}
-                            onChange={(e) => setForm({ texto: e.target.value })}
+                            onChange={(e) => setForm((prev) => ({ ...prev, texto: e.target.value }))}
                             placeholder='Ej. "Trae calcetas, hoy hay cuerda"'
                             className={CAMPO}
                         />
@@ -122,9 +124,38 @@ const ModalAvisoRapido = ({ isOpen, onClose, onSuccess }) => {
                         </div>
                     </div>
 
+                    {/* ── Publicar hoy vs programar para mañana ── */}
+                    <div>
+                        <span className={ETIQUETA}>¿Cuándo se publica?</span>
+                        <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Cuándo se publica el aviso">
+                            <button
+                                type="button"
+                                role="radio"
+                                aria-checked={!form.programarManana}
+                                onClick={() => setForm((prev) => ({ ...prev, programarManana: false }))}
+                                data-testid="aviso-rapido-hoy"
+                                className={`px-3 py-2.5 rounded-lg border text-sm font-semibold ${!form.programarManana ? 'border-amber-500 bg-amber-500/15 text-amber-300' : 'border-zinc-800 text-zinc-400 hover:border-zinc-700'}`}
+                            >
+                                Publicar hoy
+                            </button>
+                            <button
+                                type="button"
+                                role="radio"
+                                aria-checked={form.programarManana}
+                                onClick={() => setForm((prev) => ({ ...prev, programarManana: true }))}
+                                data-testid="aviso-rapido-manana"
+                                className={`px-3 py-2.5 rounded-lg border text-sm font-semibold ${form.programarManana ? 'border-amber-500 bg-amber-500/15 text-amber-300' : 'border-zinc-800 text-zinc-400 hover:border-zinc-700'}`}
+                            >
+                                Programar para mañana
+                            </button>
+                        </div>
+                    </div>
+
                     <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-[11.5px] text-zinc-400">
                         <span aria-hidden="true">🕐</span>
-                        Vigente solo hoy ({formatearFechaCorta(hoyISO())}). Mañana desaparece solo.
+                        {form.programarManana
+                            ? 'Se publica mañana y desaparece al día siguiente.'
+                            : `Vigente solo hoy (${formatearFechaCorta(hoyISO())}). Mañana desaparece solo.`}
                     </div>
 
                     <div className="flex gap-3 pt-1">
@@ -139,7 +170,7 @@ const ModalAvisoRapido = ({ isOpen, onClose, onSuccess }) => {
                             data-testid="publicar-aviso-rapido"
                             className="flex-1 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-zinc-900 text-sm font-bold disabled:opacity-50"
                         >
-                            {publicar.isPending ? 'Publicando...' : 'Publicar aviso'}
+                            {publicar.isPending ? 'Publicando...' : (form.programarManana ? 'Programar aviso' : 'Publicar aviso')}
                         </button>
                     </div>
                 </form>

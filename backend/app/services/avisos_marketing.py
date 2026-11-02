@@ -173,6 +173,8 @@ def serializar(aviso: AvisoMarketing, producto: Producto | None = None,
         # por box y no cuelga de `promociones_referidos`.
         "escalera_tramos": bool(aviso.escalera_tramos),
         "creado_en": aviso.creado_en,
+        # Instante desde el que el aviso ES visible en el feed (migración 069).
+        "publicar_en": aviso.publicar_en,
         # Derivado, para que el admin vea de un vistazo si está al aire hoy.
         "vigente": esta_vigente(aviso.vigente_desde, aviso.vigente_hasta, ahora),
         "producto_nombre": producto.nombre if producto else None,
@@ -221,7 +223,10 @@ def vigentes(db, tenant_id: int, ahora: datetime | None = None) -> list[dict]:
     """
     ahora = ahora or ahora_santiago()
     filas = _consulta(db, tenant_id, FILTRO_VIGENTES, ahora).filter(
-        or_(AvisoMarketing.producto_id.is_(None), Producto.activo.is_(True))
+        # Programado para el futuro no sale hasta su instante (sin cron: sólo filtro).
+        or_(AvisoMarketing.publicar_en.is_(None),
+            AvisoMarketing.publicar_en <= ahora),
+        or_(AvisoMarketing.producto_id.is_(None), Producto.activo.is_(True)),
     ).all()
     return [serializar(aviso, producto, ahora) for aviso, producto in filas]
 
@@ -252,6 +257,8 @@ def crear(db, tenant_id: int, datos: dict,
         promocion_id=limpio.get("promocion_id"),
         # Sólo lo manda `POST /referidos/tramos/publicar` (064).
         escalera_tramos=bool(limpio.get("escalera_tramos", False)),
+        # publicar_en (069): NULL = sin demora; el aviso rápido "mañana" lo fija.
+        publicar_en=limpio.get("publicar_en"),
         creado_por=creado_por,
     )
     db.add(aviso)
@@ -485,15 +492,22 @@ def payload_aviso_de_fecha(texto: str, fecha: date) -> dict:
     }
 
 
-def payload_aviso_rapido(texto: str, ahora: datetime | None = None) -> dict:
-    """El payload de `crear()` del aviso rápido: tipo `aviso`, HOY y nada más.
+def payload_aviso_rapido(texto: str, programar_manana: bool = False,
+                         ahora: datetime | None = None) -> dict:
+    """El payload de `crear()` del aviso rápido: tipo `aviso`, HOY (o MAÑANA) y nada más.
 
-    Todo lo que el coach NO elige se fija ACÁ: el tipo (`aviso`), la ventana (HOY,
-    día de Chile), `fijado_arriba=False` y sin flyer (`imagen_url`). El título se
-    DERIVA del mensaje. Una Promoción, una Colaboración o un Evento llevan
-    fechas/aliado y siguen siendo del admin.
+    Todo lo que el coach NO elige se fija ACÁ: el tipo (`aviso`), la ventana (HOY, o
+    MAÑANA si `programar_manana`, en día de Chile), `fijado_arriba=False` y sin flyer
+    (`imagen_url`). El título se DERIVA del mensaje. Una Promoción, una Colaboración o
+    un Evento llevan fechas/aliado y siguen siendo del admin.
+
+    `programar_manana=True` deja la ventana en MAÑANA y `publicar_en` en la medianoche
+    del día siguiente: el feed filtra `publicar_en <= now()` y recién lo muestra mañana,
+    sin cron (es sólo un filtro en la query existente).
     """
-    desde, hasta = ventana_de_hoy(ahora)
+    hoy = fecha_chile(ahora) if ahora is not None else hoy_santiago()
+    dia = hoy + timedelta(days=1) if programar_manana else hoy
+    publicar_en = inicio_del_dia_chile(dia) if programar_manana else None
     mensaje = (texto or "").strip()
     return {
         "tipo": TIPO_AVISO,
@@ -501,8 +515,9 @@ def payload_aviso_rapido(texto: str, ahora: datetime | None = None) -> dict:
         "texto": mensaje,
         "nombre_aliado": None,
         "fecha_evento": None,
-        "vigente_desde": desde,
-        "vigente_hasta": hasta,
+        "vigente_desde": dia,
+        "vigente_hasta": dia,
+        "publicar_en": publicar_en,
         "fijado_arriba": False,
         "imagen_url": None,
     }

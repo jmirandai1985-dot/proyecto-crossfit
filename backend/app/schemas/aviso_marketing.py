@@ -54,6 +54,9 @@ class AvisoRapidoCrear(BaseModel):
     son contenido del admin. Tampoco lleva flyer.
     """
     texto: str = Field(..., min_length=1, max_length=1000)
+    # "Programar para mañana": el backend deja la ventana en MAÑANA (día de Chile) y
+    # `publicar_en` en la medianoche de mañana; el feed filtra por ese instante.
+    programar_manana: bool = False
 
 
 class AvisoMarketingOut(BaseModel):
@@ -80,6 +83,9 @@ class AvisoMarketingOut(BaseModel):
     # completa y la pantalla de tramos la usa para el chip "Publicada".
     escalera_tramos: bool = False
     creado_en: datetime
+    # Instante desde el que el aviso ES visible en el feed del alumno (migración 069).
+    # NULL = sin demora.
+    publicar_en: Optional[datetime] = None
     # Derivado (no es columna): ¿la ventana contiene AHORA, hora de Chile? Lo usa el
     # chip "Vigente/Vencido" del admin; el carrusel del alumno sólo recibe vigentes.
     vigente: bool = False

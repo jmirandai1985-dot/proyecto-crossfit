@@ -160,7 +160,8 @@ def publicar_aviso_rapido(
     los avisos los lee el alumnado, no cualquier cuenta autenticada.
     """
     # 🔒 SEGURIDAD: tenant_id del token JWT (no hay Form/query que lo pise).
-    datos = servicio.payload_aviso_rapido(aviso_data.texto)
+    datos = servicio.payload_aviso_rapido(aviso_data.texto,
+                                          programar_manana=aviso_data.programar_manana)
     return servicio.crear(db, current_user["tenant_id"], datos,
                           creado_por=current_user["usuario_id"])
 
