@@ -96,7 +96,10 @@ def test_a_el_predicado_se_arma_con_la_lista_de_nunca_vigentes():
         " AND (s2.fecha_expiracion AT TIME ZONE 'America/Santiago')::date >= :hasta")
 
     assert estados.ESTADOS_SUSCRIPCION_NUNCA_VIGENTES == ("pendiente", "rechazado")
-    assert estados.ESTADOS_SUSCRIPCION_VIGENTES == ("activo", "vencido")
+    # La migración 068 agregó `inactiva` (Mercado Pago cancelado/pausado): sí estuvo
+    # vigente históricamente, así que cuenta en ESTADOS_SUSCRIPCION_VIGENTES aunque
+    # hoy no dé acceso (eso lo corta ESTADOS_SUSCRIPCION_SIN_ACCESO, aparte).
+    assert estados.ESTADOS_SUSCRIPCION_VIGENTES == ("activo", "vencido", "inactiva")
 
 
 # ── B. Caso 1: vencer HOY no reescribe el MRR del pasado ────────────────────────────────────────
