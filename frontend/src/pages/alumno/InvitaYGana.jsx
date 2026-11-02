@@ -211,6 +211,11 @@ const InvitaYGana = () => {
                     el código se aplica una vez, el precio con descuento aparece en
                     la solicitud y en el checkout de Mercado Pago, y la pantalla de
                     pago queda sin un formulario que no cobra nada. */}
+                {/* El bloque del INVITADO sólo tiene sentido ANTES del primer pago: un
+                    alumno que ya tiene un plan vigente (`progreso.ciclo`) no necesita
+                    aplicar un código ajeno —le interesa el suyo para compartir—, así
+                    que se oculta para no mezclar los dos lados del programa. */}
+                {!progreso?.ciclo && (
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                     <h2 className="text-lg font-bold text-gray-900">¿Te invitó un amigo?</h2>
                     <p className="text-sm text-gray-600 mt-1">
@@ -232,7 +237,7 @@ const InvitaYGana = () => {
                         onAplicado={setCodigoAplicado}
                     />
                 </div>
-
+                )}
 
                 {/* ── "Tu ciclo" (Parte C): progreso por CICLO de facturación ── */}
                 {progreso && (progreso.ciclo || (progreso.escalera ?? []).length > 0) && (
@@ -296,9 +301,17 @@ const InvitaYGana = () => {
                             </p>
                         )}
 
-                        {progreso.ciclo && !progreso.siguiente_tramo && (
+                        {progreso.ciclo && progreso.tramo_alcanzado && !progreso.siguiente_tramo && (
                             <p className="mt-3 text-sm text-emerald-700 font-semibold">
                                 ¡Alcanzaste el tramo más alto de la escalera!
+                            </p>
+                        )}
+
+                        {progreso.ciclo && !progreso.tramo_alcanzado
+                            && !progreso.siguiente_tramo
+                            && progreso.referidos_convertidos === 0 && (
+                            <p className="mt-3 text-sm text-gray-700">
+                                Aún no has referido a nadie este ciclo.
                             </p>
                         )}
 
