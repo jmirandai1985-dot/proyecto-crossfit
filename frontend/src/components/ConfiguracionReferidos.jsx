@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import GestionPromocionesReferidos from './GestionPromocionesReferidos';
-import GestionTramosReferidos from './GestionTramosReferidos';
 import PendientesPromocionesReferidos from './PendientesPromocionesReferidos';
 import TarjetaReferidosMarketing from './TarjetaReferidosMarketing';
 import {
@@ -36,7 +35,7 @@ const ConfiguracionReferidos = () => {
     const configQuery = useConfiguracionReferidos();
     const guardar = useGuardarConfiguracionReferidos();
 
-    const [form, setForm] = useState({ invitado: '0', invitador: '0', activo: false });
+    const [form, setForm] = useState({ invitado: '20', invitador: '20', activo: false });
     const [errores, setErrores] = useState({});
     const [mensaje, setMensaje] = useState(null);
 
@@ -142,14 +141,14 @@ const ConfiguracionReferidos = () => {
             {config?.configurada === false && (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[13px] text-amber-200">
                     Todavía no hay una configuración guardada. Se muestran los valores por defecto
-                    (0 % e inactivo); al guardar se crea la configuración del box.
+                    (20 % e inactivo); al guardar se crea la configuración del box.
                 </div>
             )}
 
             <form onSubmit={enviar} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-6">
                 <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                     <div>
-                        <h3 className="text-base font-extrabold text-zinc-100">Porcentajes del programa</h3>
+                        <h3 className="text-base font-extrabold text-zinc-100">Crédito por Referido</h3>
                         <p className="text-[12.5px] text-zinc-500 mt-1">
                             Entre 0 y 100, con hasta 2 decimales. Un 0 % deja el beneficio sin monto
                             pero mantiene el programa encendido.
@@ -256,11 +255,17 @@ const ConfiguracionReferidos = () => {
                 </p>
             </div>
 
-            <GestionPromocionesReferidos />
-            {/* Parte C: escalera por ciclo. El motor (`motor_premios`) decide cuál
-                de los dos paga; el backend se salta el box del otro motor, así que
-                las dos pantallas pueden convivir sin duplicar premios. */}
-            <GestionTramosReferidos />
+            {/* ── Promoción Mensual por Referidos ── */}
+            <div className="mt-2">
+                <h2 className="text-lg font-extrabold text-zinc-100">Promoción Mensual por Referidos</h2>
+                <p className="text-sm text-zinc-400 mt-1">
+                    Configura un umbral de referidos y el premio que gana quien lo alcanza
+                    dentro del mes calendario.
+                </p>
+                <div className="mt-4">
+                    <GestionPromocionesReferidos />
+                </div>
+            </div>
             <PendientesPromocionesReferidos />
             <TarjetaReferidosMarketing />
         </div>

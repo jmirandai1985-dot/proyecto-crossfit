@@ -361,8 +361,8 @@ def datos_configuracion(config: Any) -> dict:
     """
     if config is None:
         return {
-            "porcentaje_descuento_invitado": 0.0,
-            "porcentaje_descuento_invitador": 0.0,
+            "porcentaje_descuento_invitado": 20.0,
+            "porcentaje_descuento_invitador": 20.0,
             "activo": False,
             "configurada": False,
         }

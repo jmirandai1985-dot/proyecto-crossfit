@@ -497,6 +497,88 @@ def test_deteccion_idempotente_y_confirmacion_extiende_30_dias(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 1b. creditos_gratis: suma créditos al plan vigente (o avisa si es ilimitado)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_confirmar_creditos_gratis_suma_a_la_suscripcion_vigente(
+        cliente, db, admin_headers, escenario):
+    _configurar(cliente, admin_headers, activo=True)
+    alumno = _crear_usuario(cliente, admin_headers, escenario, "Alumno Créditos")
+    promo = _crear_promocion(
+        cliente, admin_headers, escenario, nombre="Créditos gratis",
+        umbral=1, tipo_premio="creditos_gratis", valor_premio=5)
+
+    momento = datetime.now(timezone.utc)
+    _crear_referidos_convertidos(db, escenario, alumno["id"], cuantos=1,
+                                 momento=momento)
+
+    suscripcion = _suscripcion_vigente(db, alumno["id"])
+    assert suscripcion is not None
+    # Plan con cupo: créditos NO nulos para que el premio sí sume.
+    db.execute(text(
+        "UPDATE suscripciones SET creditos_totales = 4, "
+        "creditos_disponibles = 4 WHERE id = :s"), {"s": suscripcion.id})
+    db.commit()
+
+    detectadas = promos_svc.detectar_y_notificar(db, tenant_id=TENANT_ID,
+                                                 ahora=momento)
+    assert detectadas["nuevas"] == 1, detectadas
+    fila = _detectadas(db, alumno["id"])[0]
+    assert fila.tipo_premio == "creditos_gratis"
+
+    respuesta = cliente.post(
+        f"{BASE}/promociones-detectadas/{fila.id}/confirmar",
+        headers=admin_headers)
+    assert respuesta.status_code == 200, respuesta.text
+    confirmacion = respuesta.json()
+    assert confirmacion["status"] == "confirmado"
+    assert confirmacion["creditos_otorgados"] == 5
+    assert confirmacion["aviso"] is None
+
+    db.rollback()
+    guardada = db.execute(text(
+        "SELECT creditos_totales, creditos_disponibles FROM suscripciones "
+        "WHERE id = :s"), {"s": suscripcion.id}).first()
+    assert int(guardada.creditos_totales) == 9
+    assert int(guardada.creditos_disponibles) == 9
+
+
+def test_confirmar_creditos_gratis_en_ilimitado_no_op_con_aviso(
+        cliente, db, admin_headers, escenario):
+    _configurar(cliente, admin_headers, activo=True)
+    alumno = _crear_usuario(cliente, admin_headers, escenario, "Alumno Ilimitado")
+    _crear_promocion(
+        cliente, admin_headers, escenario, nombre="Créditos ilimitado",
+        umbral=1, tipo_premio="creditos_gratis", valor_premio=5)
+
+    momento = datetime.now(timezone.utc)
+    _crear_referidos_convertidos(db, escenario, alumno["id"], cuantos=1,
+                                 momento=momento)
+
+    suscripcion = _suscripcion_vigente(db, alumno["id"])
+    assert suscripcion is not None
+    # Plan ilimitado: créditos NULL (∞).
+    db.execute(text(
+        "UPDATE suscripciones SET creditos_totales = NULL, "
+        "creditos_disponibles = NULL WHERE id = :s"), {"s": suscripcion.id})
+    db.commit()
+
+    detectadas = promos_svc.detectar_y_notificar(db, tenant_id=TENANT_ID,
+                                                 ahora=momento)
+    assert detectadas["nuevas"] == 1, detectadas
+    fila = _detectadas(db, alumno["id"])[0]
+
+    respuesta = cliente.post(
+        f"{BASE}/promociones-detectadas/{fila.id}/confirmar",
+        headers=admin_headers)
+    assert respuesta.status_code == 200, respuesta.text
+    confirmacion = respuesta.json()
+    assert confirmacion["status"] == "confirmado"
+    assert confirmacion["creditos_otorgados"] is None
+    assert "Plan ilimitado" in (confirmacion["aviso"] or "")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 2. descuento_extra: crédito pendiente y consumo en la compra siguiente
 # ══════════════════════════════════════════════════════════════════════════════
 

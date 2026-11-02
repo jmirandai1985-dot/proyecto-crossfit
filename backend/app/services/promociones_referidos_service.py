@@ -45,15 +45,15 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.core.estados import vigente_hoy
-from app.models.referidos import (ConfiguracionReferidos, CreditoReferido,
+from app.models.referidos import (CreditoReferido,
                                   EstadoCreditoReferido,
                                   EstadoPromocionDetectada, EstadoReferido,
-                                  MotorPremios, PeriodoPromocion,
+                                  PeriodoPromocion,
                                   PromocionReferidos,
                                   PromocionReferidosDetectada,
                                   ReferidoAplicado, TipoPremio)
@@ -144,6 +144,9 @@ def texto_premio(tipo, valor=None) -> str:
         return f"{dias} día{'s' if dias != 1 else ''} gratis"
     if tipo == TipoPremio.descuento_extra.value:
         return f"{_texto_decimal(valor)} % de descuento extra"
+    if tipo == TipoPremio.creditos_gratis.value:
+        creditos = int(Decimal(str(valor or 0)))
+        return f"{creditos} crédito{'s' if creditos != 1 else ''} gratis"
     return "Premio de referidos"
 
 
@@ -201,21 +204,11 @@ def detectar_promociones(db: Session, *, tenant_id: Optional[int] = None,
             ReferidoAplicado.fecha_conversion >= desde,
             ReferidoAplicado.fecha_conversion < hasta,
         ))
-        # MOTOR ÚNICO (migración 064): un box con `motor_premios='tramos'` NO
-        # se evalúa por mes calendario; si no, el mismo logro se pagaría dos
-        # veces. Sin fila de configuración el motor es `promociones` (default),
-        # así que el LEFT JOIN no excluye a nadie que hoy esté funcionando.
-        .outerjoin(
-            ConfiguracionReferidos,
-            ConfiguracionReferidos.tenant_id == PromocionReferidos.tenant_id)
         .filter(
             PromocionReferidos.activo.is_(True),
             PromocionReferidos.periodo == PeriodoPromocion.mensual,
             Usuario.rol == RolUsuario.alumno,
             Usuario.estado == "activo",
-            or_(ConfiguracionReferidos.id.is_(None),
-                ConfiguracionReferidos.motor_premios
-                != MotorPremios.tramos.value),
         )
         .group_by(PromocionReferidos.id, Usuario.id)
         .having(func.count(ReferidoAplicado.id)
@@ -397,6 +390,8 @@ def _resultado_confirmacion(deteccion, *, mensaje: str, **extra) -> dict:
         "dias_extendidos": None,
         "credito_referido_id": None,
         "porcentaje": None,
+        "creditos_otorgados": None,
+        "aviso": None,
         **extra,
     }
 
@@ -453,6 +448,66 @@ def confirmar_deteccion(db: Session, *, tenant_id: int, deteccion_id: int,
             fecha_expiracion_anterior=anterior,
             fecha_expiracion_nueva=suscripcion.fecha_expiracion,
             dias_extendidos=dias,
+        )
+
+    if tipo == TipoPremio.creditos_gratis.value:
+        try:
+            creditos = int(Decimal(str(deteccion.valor_premio)))
+        except (TypeError, ValueError):
+            raise ErrorPromocion(
+                "El premio de créditos gratis no tiene un valor válido.", 409)
+        if creditos <= 0:
+            raise ErrorPromocion(
+                "Los créditos gratis deben ser un número entero mayor que 0.",
+                409)
+
+        suscripcion = _suscripcion_a_extender(
+            db, tenant_id=tenant_id, usuario_id=deteccion.usuario_id,
+            hoy=fecha_chile(momento))
+        if suscripcion is None:
+            # Sin plan vigente el premio NO se pierde ni falla con 409: la
+            # detección sigue en `pendiente_confirmacion` y el admin la
+            # reconfirma cuando el alumno vuelva a tener plan.
+            return {
+                "status": "pendiente",
+                "mensaje": ("El alumno no tiene una suscripción vigente para "
+                            "sumar los créditos. El premio queda pendiente: "
+                            "confírmalo cuando tenga un plan activo."),
+                "tipo_premio": tipo,
+                "premio_texto": texto_premio(tipo, deteccion.valor_premio),
+                "creditos_otorgados": None,
+                "aviso": None,
+            }
+
+        aviso = None
+        if (suscripcion.creditos_totales is None
+                or suscripcion.creditos_disponibles is None):
+            # Plan ilimitado: sumar créditos no cambia nada (NULL = ∞). Se deja
+            # un aviso visible al admin para que elija otro premio para este
+            # alumno la próxima vez.
+            aviso = ("Plan ilimitado: el premio de créditos no aplica. "
+                     "Considera otro tipo de premio para este alumno.")
+        else:
+            suscripcion.creditos_totales = (
+                int(suscripcion.creditos_totales) + creditos)
+            suscripcion.creditos_disponibles = (
+                int(suscripcion.creditos_disponibles) + creditos)
+
+        deteccion.estado = EstadoPromocionDetectada.confirmado
+        deteccion.fecha_confirmacion = momento
+        deteccion.confirmado_por_usuario_id = admin_id
+        db.flush()
+
+        mensaje = (f"Se sumaron {creditos} crédito"
+                   f"{'s' if creditos != 1 else ''} al plan del alumno."
+                   if aviso is None else
+                   "Premio confirmado sin cambios (plan ilimitado).")
+        return _resultado_confirmacion(
+            deteccion,
+            mensaje=mensaje,
+            suscripcion_id=int(suscripcion.id),
+            creditos_otorgados=(creditos if aviso is None else None),
+            aviso=aviso,
         )
 
     if tipo != TipoPremio.descuento_extra.value:

@@ -347,12 +347,14 @@ const InvitaYGana = () => {
                             <span className="shrink-0 w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold flex items-center justify-center">3</span>
                             <span>
                                 Cuando el box confirma esa compra, tu amigo recibe su descuento y tú
-                                recibes un % de descuento para tu próxima compra.
+                                recibes un % de descuento para tu próxima compra (Crédito por Referido).
                             </span>
                         </li>
                     </ol>
                     <p className="text-xs text-gray-500 mt-4">
-                        Los porcentajes y la vigencia los define el administrador del box.
+                        Además, si en un mes alcanzas el umbral de referidos que fija el box, ganas la{' '}
+                        <strong>Promoción Mensual por Referidos</strong> (descuento, días, mes o
+                        créditos gratis). Los porcentajes y los premios los define el box.
                     </p>
                 </div>
             </div>

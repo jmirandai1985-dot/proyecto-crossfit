@@ -54,9 +54,16 @@ const PendientesPromocionesReferidos = () => {
             const resultado = esConfirmar
                 ? await confirmar.mutateAsync(fila.id)
                 : await rechazar.mutateAsync(fila.id);
+            // `creditos_gratis` sin plan vigente devuelve status "pendiente": no
+            // es un error, se avisa en ámbar. `aviso` es la advertencia de plan
+            // ilimitado (premio confirmado sin cambios).
+            const pendiente = esConfirmar && resultado?.status === 'pendiente';
             setMensaje({
-                tipo: 'exito',
-                texto: `${resultado.mensaje} ${resultado.premio_texto || ''}`.trim(),
+                tipo: pendiente ? 'aviso' : 'exito',
+                texto: [
+                    `${resultado.mensaje} ${resultado.premio_texto || ''}`.trim(),
+                    resultado.aviso || '',
+                ].filter(Boolean).join(' '),
             });
         } catch (err) {
             console.error(`Error al ${accion} la promoción detectada:`, err);
@@ -108,9 +115,11 @@ const PendientesPromocionesReferidos = () => {
                     role="status"
                     className={`rounded-xl border px-4 py-3 text-sm font-medium ${mensaje.tipo === 'exito'
                         ? 'border-green-500/30 bg-green-500/10 text-green-300'
-                        : 'border-red-500/40 bg-red-500/10 text-red-200'}`}
+                        : mensaje.tipo === 'aviso'
+                            ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+                            : 'border-red-500/40 bg-red-500/10 text-red-200'}`}
                 >
-                    {mensaje.tipo === 'exito' ? '✅ ' : '❌ '}{mensaje.texto}
+                    {mensaje.tipo === 'exito' ? '✅ ' : mensaje.tipo === 'aviso' ? '⚠️ ' : '❌ '}{mensaje.texto}
                 </div>
             )}
 

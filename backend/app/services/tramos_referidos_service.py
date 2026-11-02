@@ -200,22 +200,14 @@ def advertencias_escalera(tramos: Iterable) -> list[str]:
 # ── Motor por box ───────────────────────────────────────────────────────────
 
 def motor_del_tenant(db: Session, tenant_id: int) -> str:
-    """`'promociones'` o `'tramos'` para ese box.
+    """Siempre `'promociones'` (decisión de negocio 2026).
 
-    Sin fila de configuración el motor es `'promociones'`: es el default de la
-    migración 064 y el comportamiento que el box ya tenía. Un valor inesperado
-    también cae ahí (nunca enciende el motor nuevo por accidente).
+    El motor de "tramos por ciclo" salió de la UI y su job se desactivó; la
+    columna `motor_premios` se conserva por compatibilidad pero ya no decide
+    nada. Los parámetros se mantienen para no romper a los llamadores que siguen
+    vivos (los endpoints de tramos quedan por compatibilidad).
     """
-    config = (db.query(ConfiguracionReferidos)
-              .filter(ConfiguracionReferidos.tenant_id == tenant_id)
-              .first())
-    if config is None:
-        return MotorPremios.promociones.value
-    valor = str(getattr(config.motor_premios, "value", config.motor_premios)
-                or MotorPremios.promociones.value)
-    if valor not in (MotorPremios.promociones.value, MotorPremios.tramos.value):
-        return MotorPremios.promociones.value
-    return valor
+    return MotorPremios.promociones.value
 
 
 def _tenants_con_motor_tramos(db: Session) -> set[int]:

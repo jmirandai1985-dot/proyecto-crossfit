@@ -71,8 +71,9 @@ ok(mensajeDeError({ message: 'Network Error' }, 'Fallback') === 'Fallback',
     'no filtra mensajes técnicos en inglés');
 
 console.log('== 6. Promociones por volumen (Fase 5) ==');
-ok(TIPOS_PREMIO.length === 3 && TIPOS_PREMIO.some((t) => t.id === 'mes_gratis'),
-    'el panel ofrece los 3 tipos de premio del backend');
+ok(TIPOS_PREMIO.length === 4 && TIPOS_PREMIO.some((t) => t.id === 'mes_gratis')
+    && TIPOS_PREMIO.some((t) => t.id === 'creditos_gratis'),
+    'el panel ofrece los 4 tipos de premio del backend');
 ok(ETIQUETAS_ESTADO_DETECCION.pendiente_confirmacion === 'Pendiente',
     'traduce el estado pendiente_confirmacion');
 

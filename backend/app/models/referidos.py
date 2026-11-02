@@ -82,11 +82,13 @@ class TipoPremio(str, enum.Enum):
     """Premio que otorga una promoción al cumplir el umbral.
 
     `mes_gratis` y `dias_gratis` usan `valor_premio` como días cuando aplica;
-    `descuento_extra` lo usa como porcentaje (las reglas son Fase 2/3).
+    `descuento_extra` lo usa como porcentaje y `creditos_gratis` como número
+    de créditos a sumar a la suscripción vigente (reglas Fase 2/3/5).
     """
     mes_gratis = "mes_gratis"
     descuento_extra = "descuento_extra"
     dias_gratis = "dias_gratis"
+    creditos_gratis = "creditos_gratis"
 
 
 class EstadoPromocionDetectada(str, enum.Enum):
@@ -284,9 +286,9 @@ class ConfiguracionReferidos(Base):
     tenant_id = Column(Integer, ForeignKey(
         "tenants.id", ondelete="CASCADE"), nullable=False)
     porcentaje_descuento_invitado = Column(
-        Numeric(5, 2), nullable=False, server_default="0", default=0)
+        Numeric(5, 2), nullable=False, server_default="20", default=20)
     porcentaje_descuento_invitador = Column(
-        Numeric(5, 2), nullable=False, server_default="0", default=0)
+        Numeric(5, 2), nullable=False, server_default="20", default=20)
     activo = Column(Boolean, nullable=False, server_default="true",
                     default=True)
     # Qué motor paga los premios del invitador (migración 064). Default

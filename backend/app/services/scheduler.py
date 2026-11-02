@@ -201,17 +201,6 @@ def _programar_jobs_de_negocio():
                "detectar_promociones_referidos",
                "Detecta umbrales de promociones de referidos y avisa al admin",
                ahora)
-    # ── Tramos del invitador por CICLO (Parte C, 00:20 CLT) ──
-    # 20 minutos después del cierre de mes (00:05) y de la generación de clases
-    # (00:05): no se pisan. Evalúa los ciclos vencidos, crea el premio del tramo
-    # más alto y aplica los premios que quedaron esperando un plan. Los dos
-    # motores NO conviven: el box con `motor_premios='tramos'` queda fuera de la
-    # detección por mes calendario y viceversa.
-    _programar(job_evaluar_tramos_referidos,
-               CronTrigger(hour=0, minute=20, timezone=tz),
-               "evaluar_tramos_referidos",
-               "Evalúa ciclos cerrados de referidos y aplica premios pendientes",
-               ahora)
     return list(IDS_NEGOCIO)
 
 

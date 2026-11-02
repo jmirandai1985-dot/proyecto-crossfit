@@ -80,6 +80,8 @@ def test_texto_del_premio_es_el_mismo_en_todos_los_canales():
     assert svc.texto_premio("dias_gratis", 1) == "1 día gratis"
     assert svc.texto_premio("dias_gratis", 7) == "7 días gratis"
     assert svc.texto_premio("descuento_extra", "12.50") == "12,5 % de descuento extra"
+    assert svc.texto_premio("creditos_gratis", 5) == "5 créditos gratis"
+    assert svc.texto_premio("creditos_gratis", 1) == "1 crédito gratis"
 
 
 def test_mensaje_de_la_campana_dice_quien_que_y_donde_confirmar():
@@ -126,6 +128,19 @@ def test_descuento_extra_exige_porcentaje_mayor_que_cero():
             PromocionReferidosCreate(
                 nombre="Extra", umbral_referidos_convertidos=3,
                 tipo_premio="descuento_extra", valor_premio=valor)
+
+
+def test_creditos_gratis_exige_entero_positivo():
+    ok = PromocionReferidosCreate(
+        nombre="Créditos", umbral_referidos_convertidos=3,
+        tipo_premio="creditos_gratis", valor_premio="5")
+    assert str(ok.valor_premio) == "5"
+
+    for valor in ("1.5", "0", "-1"):
+        with pytest.raises(ValidationError):
+            PromocionReferidosCreate(
+                nombre="Créditos", umbral_referidos_convertidos=3,
+                tipo_premio="creditos_gratis", valor_premio=valor)
 
 
 def test_tipo_sin_valor_obligatorio_falla():

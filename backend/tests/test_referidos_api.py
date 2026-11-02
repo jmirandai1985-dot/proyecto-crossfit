@@ -394,8 +394,8 @@ def test_configuracion_solo_admin_y_upsert(cliente, db, admin_headers,
         respuesta = cliente.get(ruta, headers=admin_headers)
         assert respuesta.status_code == 200, respuesta.text
         assert respuesta.json() == {
-            "porcentaje_descuento_invitado": 0.0,
-            "porcentaje_descuento_invitador": 0.0,
+            "porcentaje_descuento_invitado": 20.0,
+            "porcentaje_descuento_invitador": 20.0,
             "activo": False,
             "configurada": False,
         }

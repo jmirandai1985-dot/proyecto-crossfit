@@ -119,8 +119,8 @@ def test_datos_configuracion_sin_fila_devuelve_defaults():
     datos = rs.datos_configuracion(None)
 
     assert datos == {
-        "porcentaje_descuento_invitado": 0.0,
-        "porcentaje_descuento_invitador": 0.0,
+        "porcentaje_descuento_invitado": 20.0,
+        "porcentaje_descuento_invitador": 20.0,
         "activo": False,
         "configurada": False,
     }

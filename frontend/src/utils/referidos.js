@@ -54,6 +54,13 @@ export const TIPOS_PREMIO = [
         pideValor: true,
         unidad: '%',
     },
+    {
+        id: 'creditos_gratis',
+        label: 'Créditos gratis',
+        ayuda: 'Suma los créditos que indiques al plan vigente del alumno.',
+        pideValor: true,
+        unidad: 'créditos',
+    },
 ];
 
 export const ETIQUETAS_ESTADO_DETECCION = {
@@ -78,6 +85,7 @@ export function formatearValorPremio(tipo, valor) {
         const texto = new Intl.NumberFormat('es-CL', { maximumFractionDigits: 2 }).format(numero);
         return `${texto} % de descuento extra`;
     }
+    if (tipo === 'creditos_gratis') return `${numero} ${numero === 1 ? 'crédito' : 'créditos'} gratis`;
     return '—';
 }
 
@@ -124,6 +132,16 @@ export function validarPromocionReferido(form = {}) {
             errores.valor_premio = 'El descuento extra debe ser mayor que 0 %.';
         } else {
             valor = porcentaje.valor;
+        }
+    } else if (tipo === 'creditos_gratis') {
+        const texto = String(form.valor_premio ?? '').trim();
+        if (!/^\d+$/.test(texto)) {
+            errores.valor_premio = 'Los créditos gratis deben ser un número entero.';
+        } else {
+            valor = Number(texto);
+            if (valor < 1 || valor > 10000) {
+                errores.valor_premio = 'Los créditos deben estar entre 1 y 10.000.';
+            }
         }
     }
 

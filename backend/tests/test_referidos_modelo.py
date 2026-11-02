@@ -116,7 +116,7 @@ def test_columnas_de_referidos_aplicados():
 def test_columnas_de_configuracion_referidos():
     assert _columnas(ConfiguracionReferidos) == [
         "id", "tenant_id", "porcentaje_descuento_invitado",
-        "porcentaje_descuento_invitador", "activo"]
+        "porcentaje_descuento_invitador", "activo", "motor_premios"]
 
 
 def test_columnas_de_promociones_referidos():
@@ -136,8 +136,9 @@ def test_columnas_de_promociones_referidos_detectadas():
 def test_columnas_del_credito_con_los_dos_origenes():
     assert _columnas(CreditoReferido) == [
         "id", "tenant_id", "usuario_id", "referido_aplicado_id",
-        "promocion_detectada_id", "porcentaje", "estado", "fecha_otorgado",
-        "fecha_usado", "descuento_aplicado_clp", "suscripcion_id"]
+        "promocion_detectada_id", "premio_tramo_ciclo_id", "porcentaje",
+        "estado", "fecha_otorgado", "fecha_usado", "descuento_aplicado_clp",
+        "suscripcion_id"]
 
 
 def test_columnas_de_la_tarjeta_del_carrusel():
@@ -182,11 +183,13 @@ def _valores_nuevos_de_la_054() -> dict:
 def test_los_enums_del_modelo_y_la_migracion_son_el_mismo_set():
     migracion = _enums_de_la_migracion()
     assert set(migracion) == set(ENUMS_MODELO)
-    # El modelo = lo que crea la 051 + lo que agrega la 054, en ese orden.
+    # El modelo = lo que crea la 051 + lo que agregan la 054 y la 070, en ese
+    # orden. La 070 suma `creditos_gratis` a `tipo_premio_referido`.
     nuevos = _valores_nuevos_de_la_054()
+    nuevos_070 = {"tipo_premio_referido": ("creditos_gratis",)}
     for nombre, enum_modelo in ENUMS_MODELO.items():
         assert tuple(e.value for e in enum_modelo) == \
-            migracion[nombre] + nuevos.get(nombre, ()), nombre
+            migracion[nombre] + nuevos.get(nombre, ()) + nuevos_070.get(nombre, ()), nombre
 
 
 def test_las_columnas_enum_apuntan_al_tipo_nativo_correcto():

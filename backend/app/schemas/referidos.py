@@ -205,7 +205,8 @@ def _normalizar_valor_premio(tipo: TipoPremio,
 
       * `mes_gratis`      → no usa valor (se normaliza a `None`: son 30 días);
       * `dias_gratis`     → entero > 0;
-      * `descuento_extra` → porcentaje > 0 y <= 100, hasta 2 decimales.
+      * `descuento_extra` → porcentaje > 0 y <= 100, hasta 2 decimales;
+      * `creditos_gratis` → entero > 0 (créditos a sumar al plan vigente).
     """
     if tipo == TipoPremio.mes_gratis:
         return None
@@ -224,6 +225,11 @@ def _normalizar_valor_premio(tipo: TipoPremio,
             raise ValueError(
                 "El descuento extra debe ser un porcentaje mayor que 0 "
                 "y hasta 100.")
+    elif tipo == TipoPremio.creditos_gratis:
+        if valor != valor.to_integral_value():
+            raise ValueError("Los créditos gratis deben ser un número entero.")
+        if valor <= 0:
+            raise ValueError("Los créditos gratis deben ser mayores que 0.")
     return valor
 
 
@@ -363,6 +369,8 @@ class ConfirmarPromocionOut(BaseModel):
     dias_extendidos: int | None = None
     credito_referido_id: int | None = None
     porcentaje: float | None = None
+    creditos_otorgados: int | None = None
+    aviso: str | None = None
 
 
 class RechazarPromocionOut(BaseModel):

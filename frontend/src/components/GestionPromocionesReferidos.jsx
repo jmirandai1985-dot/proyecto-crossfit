@@ -180,8 +180,7 @@ const GestionPromocionesReferidos = () => {
     return (
         <div className="space-y-5" data-testid="gestion-promociones-referidos">
             <div>
-                <h3 className="text-base font-extrabold text-zinc-100">Promociones por volumen</h3>
-                <p className="text-[12.5px] text-zinc-500 mt-1">
+                <p className="text-[12.5px] text-zinc-500">
                     Define qué gana un alumno cuando convierte N referidos en el mes. El premio
                     se congela al detectar el umbral; la aplicación es manual.
                 </p>
