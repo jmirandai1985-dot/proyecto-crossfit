@@ -12,6 +12,7 @@ from typing import List, Optional
 
 from app.db.database import get_db
 from app.models.auditoria import Auditoria
+from app.models.pago import Pago
 from app.models.pedido import Pedido
 from app.models.producto import Producto
 from app.models.usuario import Usuario
@@ -310,6 +311,12 @@ def _con_nombres(db: Session, pedidos: List[Pedido]) -> List[dict]:
         Producto.id.in_(ids_productos)).all()
     mapa_alumnos = {a.id: a for a in alumnos}
     mapa_productos = {p.id: p.nombre for p in productos}
+    # Estado REAL del cobro online (migración 067): una consulta con IN, igual que
+    # alumnos/productos. `origen_pago='mercadopago'` es la intención de pagar; la
+    # confirmación es `pagos.estado='aprobado'`.
+    ids_pagos = {p.pago_id for p in pedidos if p.pago_id}
+    pagos = db.query(Pago.id, Pago.estado).filter(Pago.id.in_(ids_pagos)).all()
+    mapa_pagos = {p.id: p.estado for p in pagos}
 
     items = []
     for p in pedidos:
@@ -323,9 +330,11 @@ def _con_nombres(db: Session, pedidos: List[Pedido]) -> List[dict]:
             "total": p.total,
             "estado": p.estado,
             "voucher_url": p.voucher_url,
-            # Pago online (migración 067): sin comprobante, con badge.
+            # Pago online (migración 067): sin comprobante. El badge decide según
+            # `pago_estado` (confirmación REAL del webhook), no la mera intención.
             "origen_pago": p.origen_pago or "manual",
             "pago_id": p.pago_id,
+            "pago_estado": mapa_pagos.get(p.pago_id),
             "fecha_pedido": p.fecha_pedido,
             "alumno_nombre": alumno.nombre if alumno else None,
             "alumno_email": alumno.correo if alumno else None,
@@ -476,6 +485,23 @@ def actualizar_estado_pedido(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"No se puede cambiar de '{pedido.estado}' a '{nuevo_estado}'. Transiciones permitidas: {TRANSICIONES_PERMITIDAS.get(pedido.estado, [])}"
         )
+
+    # ── Guard pago online (migración 067): un pedido online NO se valida a mano ──
+    # `origen_pago='mercadopago'` es la INTENCIÓN de pagar; la confirmación real es
+    # el webhook con `pagos.estado='aprobado'`. Validar a mano un pedido online sin
+    # cobro confirmado dejaría una venta contabilizada (y su código de retiro) por
+    # una plata que nunca llegó.
+    if nuevo_estado == "validado" and pedido.origen_pago == pedidos_estado.ORIGEN_MERCADOPAGO:
+        pago = None
+        if pedido.pago_id is not None:
+            pago = db.query(Pago).filter(Pago.id == pedido.pago_id).first()
+        if pago is None or pago.estado != "aprobado":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=("No se puede validar: el pago online de este pedido "
+                        "todavía no está confirmado por Mercado Pago. Esperá la "
+                        "confirmación del cobro o rechazalo."),
+            )
 
     # ── EFECTO ──
     # El código de retiro, la traza de la entrega y el aviso en la campana viven

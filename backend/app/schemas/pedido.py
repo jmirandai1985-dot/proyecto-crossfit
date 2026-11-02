@@ -99,10 +99,11 @@ class PedidoListItem(_PedidoTrazaRetiro):
     total: float
     estado: str
     voucher_url: Optional[str] = None
-    # Pago online (migración 067): el panel muestra "Pagado online ✓" en vez de
-    # intentar abrir un voucher que no existe.
+    # Pago online (migración 067): el panel decide el badge según `pago_estado`
+    # (confirmación REAL del webhook), no la mera intención de pagar.
     origen_pago: str = "manual"
     pago_id: Optional[int] = None
+    pago_estado: Optional[str] = None
     fecha_pedido: datetime
     alumno_nombre: Optional[str] = None
     alumno_email: Optional[str] = None

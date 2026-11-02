@@ -93,6 +93,15 @@ const PanelPedidos = () => {
         }
     };
 
+    // ── Estado REAL del pago online (sólo origen mercadopago) ─────────────────
+    // `origen_pago === 'mercadopago'` es la INTENCIÓN de pagar; la confirmación es
+    // `pago_estado === 'aprobado'` (webhook). El badge y el botón Validar se apoyan
+    // en ese estado real para no validar un checkout que el alumno abandonó.
+    const esMercadopago = (pedido) => pedido.origen_pago === 'mercadopago';
+    const pagoConfirmado = (pedido) => esMercadopago(pedido) && pedido.pago_estado === 'aprobado';
+    const pagoEnEspera = (pedido) => esMercadopago(pedido)
+        && ['pendiente', 'en_proceso'].includes(pedido.pago_estado);
+
     return (
         <div>
             {message && (
@@ -178,15 +187,31 @@ const PanelPedidos = () => {
                                                 >
                                                     📎 Ver comprobante
                                                 </button>
-                                            ) : p.origen_pago === 'mercadopago' ? (
-                                                /* Cobrado por Mercado Pago: no hay comprobante
-                                                   que revisar; el badge lo dice. */
+                                            ) : pagoConfirmado(p) ? (
+                                                /* Pago CONFIRMADO por Mercado Pago: no hay
+                                                   comprobante que revisar y la plata ya existe. */
                                                 <span
-                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 text-[11px] font-semibold"
+                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 text-[11px] font-semibold"
                                                     title={p.pago_id ? `Pago online #${p.pago_id}` : 'Pagado online'}
                                                     data-testid="badge-pagado-online"
                                                 >
                                                     💳 Pagado online ✓
+                                                </span>
+                                            ) : pagoEnEspera(p) ? (
+                                                /* Intención de pagar, pero el webhook todavía NO
+                                                   confirmó el cobro: el admin NO debe validar. */
+                                                <span
+                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 text-[11px] font-semibold"
+                                                    data-testid="badge-pago-en-espera"
+                                                >
+                                                    ⏳ Esperando pago
+                                                </span>
+                                            ) : esMercadopago(p) ? (
+                                                <span
+                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/15 text-red-300 text-[11px] font-semibold"
+                                                    data-testid="badge-pago-no-completado"
+                                                >
+                                                    Pago no completado
                                                 </span>
                                             ) : (
                                                 <span className="text-zinc-500 text-xs">Sin comprobante</span>
@@ -200,7 +225,10 @@ const PanelPedidos = () => {
                                             <div className="flex items-center justify-end gap-2">
                                                 <button
                                                     onClick={() => validar(p)}
-                                                    disabled={accionId === p.id}
+                                                    disabled={accionId === p.id || (esMercadopago(p) && !pagoConfirmado(p))}
+                                                    title={esMercadopago(p) && !pagoConfirmado(p)
+                                                        ? 'El pago online todavía no está confirmado por Mercado Pago'
+                                                        : ''}
                                                     className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-semibold transition-colors"
                                                 >
                                                     {accionId === p.id ? '…' : '✓ Validar'}

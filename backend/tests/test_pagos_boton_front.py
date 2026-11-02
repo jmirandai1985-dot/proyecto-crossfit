@@ -135,3 +135,22 @@ def test_h_el_badge_pagado_online_exige_confirmacion_real():
     # El botón Aprobar se deshabilita mientras el pago online no esté confirmado.
     assert "(esMercadopago(s) && !pagoConfirmado(s))" in s, \
         "el botón Aprobar no puede habilitarse con el pago online sin confirmar"
+
+
+def test_i_el_badge_del_bazar_tambien_exige_confirmacion_real():
+    """El Bazar tenía el MISMO bug que Solicitudes: el badge "Pagado online ✓"
+    salía por la intención de pagar, no por el cobro confirmado. Mismo fix en la
+    pestaña Pendientes (`PanelPedidos`) y en la pantalla completa de Pedidos.
+    """
+    for archivo in (
+        "frontend/src/components/pendientes/PanelPedidos.jsx",
+        "frontend/src/pages/admin/Pedidos.jsx",
+    ):
+        s = _fuente(archivo)
+        assert "pago_estado === 'aprobado'" in s, \
+            f"{archivo}: el badge verde tiene que mirar el estado REAL del pago"
+        assert "Esperando pago" in s, \
+            f"{archivo}: falta el estado intermedio 'Esperando pago'"
+        assert 'data-testid="badge-pago-en-espera"' in s
+        assert "!pagoConfirmado(" in s, \
+            f"{archivo}: el botón de validar no puede habilitarse sin cobro confirmado"

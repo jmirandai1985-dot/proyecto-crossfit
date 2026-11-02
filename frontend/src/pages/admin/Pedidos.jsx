@@ -49,6 +49,13 @@ const tonoDe = (estado) => ESTADOS.find((e) => e.key === estado)?.tono
 
 const etiquetaDe = (estado) => ESTADOS.find((e) => e.key === estado)?.label || estado;
 
+// Estado REAL del pago online (sólo origen mercadopago): `origen_pago` es la
+// INTENCIÓN de pagar; la confirmación es `pago_estado='aprobado'` (webhook).
+const esMercadopago = (pedido) => pedido.origen_pago === 'mercadopago';
+const pagoConfirmado = (pedido) => esMercadopago(pedido) && pedido.pago_estado === 'aprobado';
+const pagoEnEspera = (pedido) => esMercadopago(pedido)
+    && ['pendiente', 'en_proceso'].includes(pedido.pago_estado);
+
 // Filtros: '' = todos; el backend recibe `estado` solo cuando hay un filtro activo.
 const FILTROS = [{ key: '', label: 'Todos' }, ...ESTADOS.map(({ key, label }) => ({ key, label }))];
 
@@ -59,7 +66,12 @@ const FILTROS = [{ key: '', label: 'Todos' }, ...ESTADOS.map(({ key, label }) =>
  */
 const AccionesPedido = ({
     pedido, siguiente, accionId, onVerComprobante, onEntregar, onRechazar, onAvanzar, className,
-}) => (
+}) => {
+    // Validar (pendiente → validado) es el paso que CONFIRMA el cobro: para un
+    // pedido online sólo se habilita cuando el webhook ya dejó el pago aprobado.
+    const pagoOnlinePendiente = siguiente === 'validado'
+        && esMercadopago(pedido) && !pagoConfirmado(pedido);
+    return (
     <div className={className}>
         {pedido.voucher_url ? (
             <button
@@ -68,14 +80,29 @@ const AccionesPedido = ({
             >
                 📎 Ver comprobante
             </button>
-        ) : pedido.origen_pago === 'mercadopago' ? (
-            /* Pagado con Mercado Pago: no hay comprobante; el badge lo reemplaza. */
+        ) : pagoConfirmado(pedido) ? (
+            /* Pago CONFIRMADO por Mercado Pago: no hay comprobante y la plata ya existe. */
             <span
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-blue-500/15 text-blue-300 text-[11px] font-semibold"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-300 text-[11px] font-semibold"
                 title={pedido.pago_id ? `Pago online #${pedido.pago_id}` : 'Pagado online'}
                 data-testid="badge-pagado-online"
             >
                 💳 Pagado online ✓
+            </span>
+        ) : pagoEnEspera(pedido) ? (
+            /* Intención de pagar, pero el webhook todavía NO confirmó el cobro. */
+            <span
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-500/15 text-amber-300 text-[11px] font-semibold"
+                data-testid="badge-pago-en-espera"
+            >
+                ⏳ Esperando pago
+            </span>
+        ) : esMercadopago(pedido) ? (
+            <span
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-500/15 text-red-300 text-[11px] font-semibold"
+                data-testid="badge-pago-no-completado"
+            >
+                Pago no completado
             </span>
         ) : (
             <span className="text-zinc-500 text-xs">Sin comprobante</span>
@@ -101,14 +128,18 @@ const AccionesPedido = ({
         )}
         <button
             onClick={() => onAvanzar(pedido)}
-            disabled={!siguiente || accionId === pedido.id}
+            disabled={!siguiente || accionId === pedido.id || pagoOnlinePendiente}
+            title={pagoOnlinePendiente
+                ? 'El pago online todavía no está confirmado por Mercado Pago'
+                : ''}
             className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition-colors"
         >
             {accionId === pedido.id ? '...'
                 : (siguiente ? ETIQUETA_ACCION[pedido.estado] : 'Completado')}
         </button>
     </div>
-);
+    );
+};
 
 /**
  * TARJETA de pedido para mobile (<768px).
