@@ -69,8 +69,10 @@ ok(/Marcar asistencia/.test(RESUMEN) && /data-testid="abrir-marcar-asistencia"/.
     'el botón "Marcar asistencia" del mockup está y lleva a la pestaña Asistencia');
 ok(/En curso ahora/.test(RESUMEN) && /Próxima clase/.test(RESUMEN),
     'la tarjeta distingue la clase en curso de la que sigue');
-ok(/restoDelDia\.map/.test(RESUMEN) && /resumen-clases-hoy-scroll/.test(RESUMEN),
-    'el resto del día va en una fila horizontal scrolleable con mini-donut');
+ok(/restoDelDiaFiltrado\.map/.test(RESUMEN) && /data-testid="resumen-clases-hoy"/.test(RESUMEN),
+    'el resto del día va en UNA fila por clase (lista vertical, no tarjetas en scroll)');
+ok(/resumen-selector-franja/.test(RESUMEN) && /FRANJAS\.map/.test(RESUMEN),
+    'el "Resto de hoy" tiene filtro Mañana/Tarde/Noche (mismo corte de franjas que Asistencia)');
 ok(/Ocupación por horario/.test(RESUMEN) && /ocupacion\(reservasDe\(clase\), clase\.cupo_maximo\)/.test(RESUMEN),
     'el gráfico de barras reusa el helper de ocupación compartido');
 eq(/kpi-clases-hoy|kpi-alumnos|kpi-riesgo/.test(RESUMEN), false,
@@ -155,8 +157,8 @@ console.log('== 4. Mobile-first declarado ==');
 ok(/mx-auto max-w-3xl/.test(RESUMEN), 'el Resumen acota y centra el contenido (mobile-first)');
 ok(/items-start justify-center gap-8/.test(RESUMEN),
     'la tarjeta grande apila y centra: donut, nombre, los 3 números y el botón');
-ok(/flex gap-3 overflow-x-auto/.test(RESUMEN),
-    'las clases del día se recorren en horizontal (sin grilla de escritorio inventada)');
+ok(/grid grid-cols-4/.test(RESUMEN),
+    'el selector de franja (Todas + Mañana/Tarde/Noche) va arriba de la lista vertical');
 
 console.log('== 5. Cableado y limpieza del Resumen viejo ==');
 ok(/<ResumenCoach/.test(DASH) && /activeTab === 'resumen' &&/.test(DASH), 'el Resumen está montado en su pestaña');

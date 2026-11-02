@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
-    estadoFila, etiquetaEstado, horaCorta, ocupacion, reservasDe, textoProgreso,
+    FRANJAS, estadoFila, etiquetaEstado, franjaDe, horaCorta, ocupacion, reservasDe, textoProgreso,
 } from '../utils/franjasAsistencia';
 import { etiquetaTipo } from '../utils/avisosMarketing';
 
@@ -86,6 +86,15 @@ const BADGE_ESTADO = {
     pendiente: 'text-amber-200 bg-amber-950/60',
 };
 
+// Selector de franja (Todas / Mañana / Tarde / Noche) del "Resto de hoy": el MISMO
+// corte que la pestaña Asistencia (`utils/franjasAsistencia`), pero en el Resumen
+// funciona como FILTRO de la lista (1 fila por clase).
+const tabFranja = (activo) =>
+    `flex flex-col items-center justify-center gap-0.5 rounded-[12px] border px-2 py-1.5 transition-colors ${
+        activo
+            ? 'border-[#D7FF4A] bg-[#D7FF4A]/10 text-[#E8FF8A]'
+            : 'border-[#2A2A2E] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'}`;
+
 const ResumenCoach = ({
     clasesHoy = [], proximaClase = null, reservasProxima = [], cargandoReservas = false,
     wodHoy = null, avisos = [], fechaCorta = '', sinAsignaciones = false, proximoCambio = null,
@@ -114,6 +123,13 @@ const ResumenCoach = ({
 
     // El resto del día (sin la clase de la tarjeta grande) para la fila horizontal.
     const restoDelDia = clasesHoy.filter((c) => c.id !== proximaClase?.id);
+
+    // Filtro por franja del "Resto de hoy" (Mañana / Tarde / Noche): mismo corte que
+    // la pestaña Asistencia. 'todas' muestra el día completo.
+    const [franjaActiva, setFranjaActiva] = useState('todas');
+    const restoDelDiaFiltrado = franjaActiva === 'todas'
+        ? restoDelDia
+        : restoDelDia.filter((c) => franjaDe(c.hora_inicio) === franjaActiva);
 
     return (
         <div className="mx-auto max-w-3xl space-y-5" data-testid="coach-resumen">
@@ -265,28 +281,60 @@ const ResumenCoach = ({
                 </p>
             </div>
 
-            {/* ── 6. El resto de las clases de hoy (fila horizontal) ── */}
+            {/* ── 6. El resto de las clases de hoy: 1 fila por clase + filtro por franja ── */}
             {restoDelDia.length > 0 && (
                 <div>
                     <p className={`mb-2 ${ROTULO}`}>Resto de hoy</p>
-                    <div className="flex gap-3 overflow-x-auto pb-2" data-testid="resumen-clases-hoy-scroll">
-                        {restoDelDia.map((clase) => {
+
+                    {/* Filtro Todas / Mañana / Tarde / Noche (mismo corte de franja que
+                        la pestaña Asistencia). */}
+                    <div className="mb-3 grid grid-cols-4 gap-1.5" data-testid="resumen-selector-franja">
+                        <button type="button" onClick={() => setFranjaActiva('todas')}
+                            aria-pressed={franjaActiva === 'todas'}
+                            data-testid="resumen-franja-todas"
+                            className={tabFranja(franjaActiva === 'todas')}>
+                            <span className="text-[11px] font-bold">Todas</span>
+                            <span className="text-[10px] opacity-70">{restoDelDia.length}</span>
+                        </button>
+                        {FRANJAS.map((f) => {
+                            const n = restoDelDia.filter((c) => franjaDe(c.hora_inicio) === f.id).length;
+                            return (
+                                <button key={f.id} type="button" onClick={() => setFranjaActiva(f.id)}
+                                    disabled={n === 0} aria-pressed={franjaActiva === f.id}
+                                    data-testid={`resumen-franja-${f.id}`}
+                                    className={`${tabFranja(franjaActiva === f.id)} disabled:opacity-40 disabled:cursor-not-allowed`}>
+                                    <span className="text-[11px] font-bold">{f.label}</span>
+                                    <span className="text-[10px] opacity-70">{n}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {/* Una fila por clase (lista vertical, no tarjetas en scroll). */}
+                    <div className="space-y-2" data-testid="resumen-clases-hoy">
+                        {restoDelDiaFiltrado.map((clase) => {
                             const estado = estadoFila(clase);
                             const esperados = reservasDe(clase);
+                            const sinTope = clase.cupo_maximo === null || clase.cupo_maximo === undefined;
                             return (
                                 <button key={clase.id} type="button"
                                     onClick={() => onAbrirClase && onAbrirClase(clase)}
                                     data-testid={`clase-hoy-${clase.id}`}
-                                    className={`flex w-[164px] flex-none flex-col items-center gap-2 rounded-[18px] border-2 bg-[#18181B] px-4 py-4 text-center transition-colors ${estado === 'en-curso' ? 'border-[#D7FF4A]' : 'border-transparent hover:border-[#2A2A2E]'}`}>
-                                    <Donut mini tamano={76} grosor={10}
-                                        marcados={esperados} cupo={Number(clase.cupo_maximo) || 0} />
-                                    <span className="text-[15px] font-extrabold text-zinc-100">
+                                    className={`flex w-full items-center gap-3 rounded-[14px] border-2 bg-[#18181B] px-4 py-3 text-left transition-colors ${estado === 'en-curso' ? 'border-[#D7FF4A]' : 'border-transparent hover:border-[#2A2A2E]'}`}>
+                                    <span className="w-14 flex-none text-[15px] font-extrabold text-zinc-100">
                                         {horaCorta(clase.hora_inicio)}
                                     </span>
-                                    <span className="text-[11.5px] font-semibold text-zinc-400">
-                                        {clase.disciplina_nombre || 'Clase'}
+                                    <span className="min-w-0 flex-1">
+                                        <span className="block truncate text-[13px] font-bold text-zinc-100">
+                                            {clase.disciplina_nombre || 'Clase'}
+                                        </span>
+                                        <span className="block text-[11px] text-zinc-500">
+                                            {sinTope
+                                                ? 'Acceso libre'
+                                                : `${esperados}/${Number(clase.cupo_maximo) || 0} reservas`}
+                                        </span>
                                     </span>
-                                    <span className={`rounded-[8px] px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wide ${BADGE_ESTADO[estado]}`}>
+                                    <span className={`flex-none rounded-[8px] px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wide ${BADGE_ESTADO[estado]}`}>
                                         {etiquetaEstado(estado)}
                                     </span>
                                 </button>
