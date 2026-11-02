@@ -32,6 +32,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.models.notificacion import Notificacion
+from app.models.pago import Pago
 from app.models.plan import Plan
 from app.models.solicitud_plan import SolicitudPlan
 from app.models.suscripcion import Suscripcion
@@ -67,6 +68,19 @@ class PlanNoEncontrado(Exception):
     """La solicitud apunta a un plan que ya no existe (404 en el endpoint)."""
 
 
+class PagoOnlineNoConfirmado(Exception):
+    """La solicitud es de pago online pero su cobro todavía no está confirmado.
+
+    El admin no puede aprobarla a mano: la aprobación de una solicitud online la
+    hace el webhook cuando Mercado Pago deja `pagos.estado='aprobado'`. Se traduce
+    a 409 (el pago online no está confirmado).
+    """
+
+    def __init__(self, solicitud_id: int):
+        super().__init__(str(solicitud_id))
+        self.solicitud_id = solicitud_id
+
+
 def precio_lista(solicitud, plan) -> int:
     """Precio de LISTA de la compra: el snapshot (P0-4) o el precio del plan.
 
@@ -78,6 +92,31 @@ def precio_lista(solicitud, plan) -> int:
              else (plan.precio_clp if plan is not None else 0))
     return int(valor or 0)
 
+
+def _validar_aprobacion_manual(db: Session, solicitud_id: int,
+                               tenant_id: Optional[int]) -> None:
+    """Bloquea aprobar a mano una solicitud online cuyo pago no está confirmado.
+
+    `origen_pago='mercadopago'` es la INTENCIÓN de pagar (se setea al crear la
+    preferencia), no la confirmación: si el alumno abandonó el checkout, la
+    solicitud sigue en Pendientes y un admin podría aprobarla creyendo que está
+    pagada. La única aprobación válida de una solicitud online es la del webhook
+    (con `pagos.estado='aprobado'`). Acá se permite además el caso límite en que
+    el pago YA quedó aprobado pero la activación falló y el admin la remata a mano.
+    """
+    consulta = db.query(SolicitudPlan).filter(SolicitudPlan.id == solicitud_id)
+    if tenant_id is not None:
+        consulta = consulta.filter(SolicitudPlan.tenant_id == tenant_id)
+    solicitud = consulta.first()
+    if solicitud is None:
+        raise SolicitudNoProcesable("no_encontrada")
+    if solicitud.origen_pago != ORIGEN_MERCADOPAGO:
+        return
+    pago = None
+    if solicitud.pago_id is not None:
+        pago = db.query(Pago).filter(Pago.id == solicitud.pago_id).first()
+    if pago is None or pago.estado != "aprobado":
+        raise PagoOnlineNoConfirmado(solicitud_id)
 
 
 def activar_plan(db: Session, solicitud_id: int, *, tenant_id: Optional[int] = None,
@@ -95,6 +134,9 @@ def activar_plan(db: Session, solicitud_id: int, *, tenant_id: Optional[int] = N
     Devuelve el mismo dict que respondía el endpoint (status, message y el
     desglose del cobro), para que el wrapper no cambie el contrato.
     """
+    if origen == ORIGEN_MANUAL:
+        _validar_aprobacion_manual(db, solicitud_id, tenant_id)
+
     valores = {
         "estado": "approved",
         "aprobado_por": actor_id,

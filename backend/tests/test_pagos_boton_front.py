@@ -115,3 +115,23 @@ def test_g_admin_muestra_badge_pagado_online_sin_romper_el_voucher():
         # badge es la rama contraria: el online nunca abre un voucher inexistente.
         assert "voucher_url ? (" in fuente, \
             f"{archivo}: el comprobante de la transferencia no puede desaparecer"
+
+
+def test_h_el_badge_pagado_online_exige_confirmacion_real():
+    """REGRESIÓN: el badge "Pagado online ✓" se mostraba con la mera INTENCIÓN
+    de pagar (`origen_pago='mercadopago'`, seteado al crear la preferencia), no
+    con la confirmación del webhook. Un alumno que abandonaba el checkout dejaba
+    la solicitud en Pendientes con el badge verde y un admin podía aprobarla
+    creyendo que la plata ya estaba. Ahora el badge verde exige
+    `pago_estado === 'aprobado'` y el estado intermedio "Esperando pago" cubre
+    el pago todavía no confirmado.
+    """
+    s = _fuente("frontend/src/components/pendientes/PanelSolicitudes.jsx")
+    assert "pago_estado === 'aprobado'" in s, \
+        "el badge verde tiene que mirar el estado REAL del pago, no origen_pago"
+    assert "Esperando pago" in s, \
+        "falta el estado intermedio para el pago aún no confirmado"
+    assert 'data-testid="badge-pago-en-espera"' in s
+    # El botón Aprobar se deshabilita mientras el pago online no esté confirmado.
+    assert "(esMercadopago(s) && !pagoConfirmado(s))" in s, \
+        "el botón Aprobar no puede habilitarse con el pago online sin confirmar"

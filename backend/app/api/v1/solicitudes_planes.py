@@ -10,6 +10,7 @@ from typing import Optional
 from app.db.database import get_db
 from app.models.solicitud_plan import SolicitudPlan
 from app.models.plan import Plan
+from app.models.pago import Pago
 from app.models.usuario import Usuario
 from app.models.notificacion import Notificacion
 from app.schemas.solicitud import SolicitudPlanCreate
@@ -238,18 +239,21 @@ def listar_solicitudes_pendientes(
     # criterio de antes (el nombre se resolvía por id, sin filtro de tenant), así
     # que una solicitud huérfana sigue mostrando "Desconocido" en vez de romper.
     filas = db.query(
-        SolicitudPlan, Plan.nombre, Plan.precio_clp, Usuario.nombre, Usuario.correo,
+        SolicitudPlan, Plan.nombre, Plan.precio_clp, Usuario.nombre,
+        Usuario.correo, Pago.estado,
     ).outerjoin(
         Plan, Plan.id == SolicitudPlan.plan_id,
     ).outerjoin(
         Usuario, Usuario.id == SolicitudPlan.alumno_id,
+    ).outerjoin(
+        Pago, Pago.id == SolicitudPlan.pago_id,
     ).filter(
         SolicitudPlan.tenant_id == tenant_id,
         SolicitudPlan.estado == "pending"
     ).order_by(SolicitudPlan.created_at.desc()).all()
 
     results = []
-    for s, plan_nombre, plan_precio_clp, alumno_nombre, alumno_correo in filas:
+    for s, plan_nombre, plan_precio_clp, alumno_nombre, alumno_correo, pago_estado in filas:
         precio_lista = plan_precio_clp if plan_precio_clp is not None else 0
         results.append({
             "id": s.id,
@@ -270,11 +274,12 @@ def listar_solicitudes_pendientes(
             "voucher_url": s.voucher_url,
             "certificado_estudiante_url": s.certificado_estudiante_url,
             # ── Pago online (migración 067) ──
-            # `origen_pago='mercadopago'` ⇒ NO hay comprobante: el panel muestra
-            # el badge "Pagado online ✓" en vez de un enlace al voucher (que
-            # respondería 404). `pago_id` queda para la trazabilidad.
+            # `origen_pago='mercadopago'` ⇒ NO hay comprobante. El panel decide el
+            # badge según `pago_estado` (la confirmación REAL del webhook, no la
+            # mera intención de pagar). `pago_id` queda para la trazabilidad.
             "origen_pago": s.origen_pago or "manual",
             "pago_id": s.pago_id,
+            "pago_estado": pago_estado,
             "estado": s.estado,
             "created_at": s.created_at,
         })
@@ -467,6 +472,13 @@ def aprobar_solicitud(
         )
     except aprobacion_planes.PlanNoEncontrado:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
+    except aprobacion_planes.PagoOnlineNoConfirmado:
+        raise HTTPException(
+            status_code=409,
+            detail=("No se puede aprobar: el pago online de esta solicitud "
+                    "todavía no está confirmado por Mercado Pago. Esperá la "
+                    "confirmación del cobro o rechazala."),
+        )
 
 
 @router.put("/{solicitud_id}/rechazar")

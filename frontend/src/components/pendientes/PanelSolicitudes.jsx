@@ -69,6 +69,17 @@ const PanelSolicitudes = () => {
         }
     };
 
+    // ── Estado REAL del pago online (sólo para origen mercadopago) ────────────
+    // `origen_pago === 'mercadopago'` es la INTENCIÓN de pagar (se setea al crear
+    // la solicitud), no la confirmación: el cobro queda confirmado recién cuando
+    // el webhook de Mercado Pago deja `pagos.estado` en `aprobado`. El badge y el
+    // botón Aprobar se apoyan en ese estado real para que un admin no apruebe un
+    // checkout que el alumno abandonó a mitad de camino.
+    const esMercadopago = (s) => s.origen_pago === 'mercadopago';
+    const pagoConfirmado = (s) => esMercadopago(s) && s.pago_estado === 'aprobado';
+    const pagoEnEspera = (s) => esMercadopago(s)
+        && ['pendiente', 'en_proceso'].includes(s.pago_estado);
+
     return (
         <div>
             {message && (
@@ -144,16 +155,31 @@ const PanelSolicitudes = () => {
                                                 >
                                                     📎 Ver comprobante
                                                 </button>
-                                            ) : s.origen_pago === 'mercadopago' ? (
-                                                /* Pagado con Mercado Pago: NO existe comprobante
-                                                   que abrir (el endpoint del voucher daría 404).
-                                                   El badge es la prueba para el admin. */
+                                            ) : pagoConfirmado(s) ? (
+                                                /* Pago CONFIRMADO por Mercado Pago: no hay
+                                                   comprobante que abrir y la plata ya existe. */
                                                 <span
-                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 text-[11px] font-semibold"
+                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 text-[11px] font-semibold"
                                                     title={s.pago_id ? `Pago online #${s.pago_id}` : 'Pagado online'}
                                                     data-testid="badge-pagado-online"
                                                 >
                                                     💳 Pagado online ✓
+                                                </span>
+                                            ) : pagoEnEspera(s) ? (
+                                                /* Intención de pagar, pero el webhook todavía NO
+                                                   confirmó el cobro: el admin NO debe aprobar. */
+                                                <span
+                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 text-[11px] font-semibold"
+                                                    data-testid="badge-pago-en-espera"
+                                                >
+                                                    ⏳ Esperando pago
+                                                </span>
+                                            ) : esMercadopago(s) ? (
+                                                <span
+                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/15 text-red-300 text-[11px] font-semibold"
+                                                    data-testid="badge-pago-no-completado"
+                                                >
+                                                    Pago no completado
                                                 </span>
                                             ) : (
                                                 <span className="text-zinc-500 text-xs">Sin comprobante</span>
@@ -167,7 +193,10 @@ const PanelSolicitudes = () => {
                                             <div className="flex items-center justify-end gap-2">
                                                 <button
                                                     onClick={() => handleSolicitudAccion(s.id, 'aprobar')}
-                                                    disabled={solicitudActionId === s.id}
+                                                    disabled={solicitudActionId === s.id || (esMercadopago(s) && !pagoConfirmado(s))}
+                                                    title={esMercadopago(s) && !pagoConfirmado(s)
+                                                        ? 'El pago online todavía no está confirmado por Mercado Pago'
+                                                        : ''}
                                                     className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-semibold transition-colors"
                                                 >
                                                     {solicitudActionId === s.id ? '…' : '✓ Aprobar'}

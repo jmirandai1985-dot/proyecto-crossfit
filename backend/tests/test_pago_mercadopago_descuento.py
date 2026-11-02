@@ -515,6 +515,14 @@ def test_mp_cobra_el_precio_con_descuento_de_referido(
     print(f"[A credito] estado={credito.estado} (intacto tras crear el cobro)")
 
     # ── 5. Al aprobarse, la caja registra LO COBRADO (sin re-descontar) ──
+    # El cobro online lo confirma el webhook de MP (`pagos.estado='aprobado'`)
+    # ANTES de poder aprobar: una solicitud online con el pago pendiente se
+    # rechaza con 409 (guard `PagoOnlineNoConfirmado`). Simulamos la confirmación
+    # en la BD para ejercitar el camino de aprobación que convierte el referido.
+    db.execute(text("UPDATE pagos SET estado = 'aprobado', pagado_en = now() "
+                    "WHERE id = :p"), {"p": cobro["pago_id"]})
+    db.commit()
+
     aprobada = _aprobar(cliente, admin_headers, solicitud.id)
     assert aprobada.status_code == 200, aprobada.text
     assert aprobada.json()["precio_final_clp"] == PRECIO_CON_CREDITO, \
