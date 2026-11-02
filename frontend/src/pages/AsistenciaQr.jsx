@@ -45,9 +45,9 @@ const AsistenciaQr = () => {
                 const r = await api.post(`/api/v1/asistencia/qr/${publicId || ''}/check-in`);
                 const d = r.data || {};
                 if (d.estado === 'ok') {
-                    setVista({ tipo: 'ok', titulo: '✅ ¡Asistencia registrada!', mensaje: d.mensaje || 'Buen entrenamiento.' });
+                    setVista({ tipo: 'ok', titulo: '✅ ¡Asistencia registrada!', mensaje: d.mensaje || 'Buen entrenamiento.', creditos: d.creditos, ilimitado: d.ilimitado });
                 } else if (d.estado === 'ya_marcado') {
-                    setVista({ tipo: 'ok', titulo: '🔄 Ya estabas registrado', mensaje: d.mensaje || 'Tu asistencia a esta clase ya estaba marcada.' });
+                    setVista({ tipo: 'ok', titulo: '🔄 Ya estabas registrado', mensaje: d.mensaje || 'Tu asistencia a esta clase ya estaba marcada.', creditos: d.creditos, ilimitado: d.ilimitado });
                 } else if (d.estado === 'ambiguo') {
                     setVista({ tipo: 'amb', titulo: '⚠️ Más de una clase en curso', mensaje: d.mensaje || 'Habla con tu coach para registrar la clase correcta.' });
                 } else {
@@ -85,7 +85,16 @@ const AsistenciaQr = () => {
                 ) : (
                     <>
                         <h1 className="text-2xl font-bold text-white mb-2">{vista.titulo}</h1>
-                        <p className="text-zinc-300 mb-6">{vista.mensaje}</p>
+                        <div className="mb-6">
+                            <p className="text-zinc-300">{vista.mensaje}</p>
+                            {vista.tipo === 'ok' && (vista.ilimitado || vista.creditos != null) && (
+                                <p className="text-sm text-zinc-400 mt-2">
+                                    {vista.ilimitado
+                                        ? 'Plan ilimitado: reserva las clases que quieras.'
+                                        : `Créditos de clase restantes: ${vista.creditos}`}
+                                </p>
+                            )}
+                        </div>
                         <button
                             onClick={() => navigate('/alumno/dashboard')}
                             className="px-6 py-2 bg-orange-500 text-white rounded-lg text-sm font-bold hover:bg-orange-600 transition-colors"

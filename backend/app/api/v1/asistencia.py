@@ -43,6 +43,7 @@ from app.models.suscripcion import Suscripcion
 from app.models.tenant import Tenant
 from app.models.usuario import Usuario, RolUsuario
 from app.models.disciplina import Disciplina
+from app.models.plan import Plan
 from app.utils.santiago import ahora_santiago, hoy_santiago, SANTIAGO
 from app.schemas.asistencia import (ConfirmarAsistenciaRequest,
                                     PresenteSinReservaRequest)
@@ -869,12 +870,24 @@ def qr_checkin_alumno(
 
     if len(en_curso) == 1:
         r, c = en_curso[0]
+        # Créditos/tokens que le quedan tras el check-in. El token ya se descontó
+        # al RESERVAR; acá sólo se LEE el saldo vigente (no se toca). Misma "mejor"
+        # suscripción que `POST /reservas` y `GET /planes/membresia-activa`.
+        suscripcion = _planes_que_dan_acceso(
+            db, tenant.id, [current_user["usuario_id"]]).get(current_user["usuario_id"])
+        creditos = suscripcion.creditos_disponibles if suscripcion is not None else None
+        ilimitado = False
+        if suscripcion is not None:
+            plan = db.query(Plan).filter(Plan.id == suscripcion.plan_id).first()
+            ilimitado = bool(plan.es_ilimitado) if plan else False
         if r.asistencia_marcada_at is not None:
             return {
                 "estado": "ya_marcado",
                 "mensaje": "Ya registramos tu asistencia a esta clase.",
                 "reserva_id": r.id,
                 "disciplina": c.disciplina_id,
+                "creditos": creditos,
+                "ilimitado": ilimitado,
             }
         # Marcar asistencia con la misma auditoría que coach/admin/batch.
         r.asistio = True
@@ -890,6 +903,8 @@ def qr_checkin_alumno(
             "mensaje": "✅ Asistencia registrada. ¡Buen entrenamiento!",
             "reserva_id": r.id,
             "disciplina": c.disciplina_id,
+            "creditos": creditos,
+            "ilimitado": ilimitado,
         }
 
     return {
