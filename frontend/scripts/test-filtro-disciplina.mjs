@@ -13,6 +13,7 @@
 //   6. lo recordado en la sesión: se respeta si existe, cae a "Todas" si no
 import {
     TODAS, SIN_DISCIPLINA, CLAVE_FILTRO_INICIO, CLAVE_FILTRO_RESERVAS,
+    DISCIPLINA_INSIGNIA, ordenarChips,
     disciplinaDe, disciplinasDe, hayQueFiltrar, filtroEfectivo,
     coincideDisciplina, filtrarPorDisciplina, leerRecordado, recordar,
 } from '../src/utils/filtroDisciplina.js';
@@ -56,6 +57,15 @@ eq(disciplinaDe(null), SIN_DISCIPLINA, 'fila nula -> "Sin disciplina" (no rompe)
 eq(disciplinasDe(null).length, 0, 'lista nula -> sin disciplinas');
 eq(disciplinasDe([clase(SIN_DISCIPLINA)]).join(' | '), SIN_DISCIPLINA,
     '"Sin disciplina" se agrupa como cualquier otra');
+
+// ── 1b. Orden de los chips (mockup: insignia primero, "Todas" al final) ──────
+eq(ordenarChips(['Musculación', 'Open Box', 'CrossFit']).join(' | '),
+    'CrossFit | Musculación | Open Box | Todas',
+    'CrossFit primero, resto alfabético, "Todas" al final');
+eq(ordenarChips(['Musculación', 'Open Box']).join(' | '),
+    'Musculación | Open Box | Todas',
+    'sin CrossFit no se inventa la insignia');
+eq(DISCIPLINA_INSIGNIA, 'CrossFit', 'la insignia es CrossFit');
 
 // ── 2. ¿Corresponde pintar los chips? ───────────────────────────────────────
 eq(hayQueFiltrar([]), false, 'sin disciplinas no hay chips');

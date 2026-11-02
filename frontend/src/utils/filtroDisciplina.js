@@ -30,6 +30,20 @@ export const disciplinaDe = (fila) => fila?.disciplina_nombre || SIN_DISCIPLINA;
 export const disciplinasDe = (filas) => Array.from(new Set((filas || []).map(disciplinaDe)))
     .sort((a, b) => a.localeCompare(b, 'es'));
 
+// Disciplina insignia del box: en los chips va PRIMERA y resaltada (relleno
+// naranja sólido), y "Todas" pasa al final (antes iba primero). Mockup de
+// "Clases disponibles".
+export const DISCIPLINA_INSIGNIA = 'CrossFit';
+
+// Orden de los chips: insignia primero (solo si está en la lista), el resto
+// alfabético, "Todas" al final. No inventa la insignia si el día no la tiene.
+export const ordenarChips = (disciplinas) => {
+    const lista = disciplinas || [];
+    const insignia = lista.includes(DISCIPLINA_INSIGNIA) ? [DISCIPLINA_INSIGNIA] : [];
+    const resto = lista.filter((d) => d !== DISCIPLINA_INSIGNIA);
+    return [...insignia, ...resto, TODAS];
+};
+
 // Los chips sólo aportan con más de una disciplina: con una sola, "Todas" y esa
 // disciplina devolverían exactamente la misma lista.
 export const hayQueFiltrar = (disciplinas) => (disciplinas || []).length > 1;

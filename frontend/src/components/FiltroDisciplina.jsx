@@ -16,22 +16,25 @@
  * el filtro sigue siendo SÓLO móvil, igual que hoy; el Inicio móvil entero se
  * pinta bajo <768px.
  */
-import { TODAS, hayQueFiltrar } from '../utils/filtroDisciplina';
+import { DISCIPLINA_INSIGNIA, TODAS, hayQueFiltrar, ordenarChips } from '../utils/filtroDisciplina';
 
 // Las dos pieles del mismo control. `claro` = panel del alumno (Tailwind);
 // `ub` = Inicio móvil (clases `ub-*` definidas en pages/alumno/inicioMobile.css).
+// `insignia` = la disciplina insignia (CrossFit): siempre relleno naranja sólido.
 const VARIANTES = {
     claro: {
         contenedor: 'md:hidden flex gap-2 overflow-x-auto pb-1',
         boton: 'shrink-0 inline-flex items-center justify-center min-h-11 px-4 rounded-full border text-sm font-semibold transition-colors',
         activo: 'bg-emerald-500 text-white border-emerald-500',
         inactivo: 'bg-white text-gray-700 border-gray-300 hover:border-emerald-400',
+        insignia: 'bg-orange-500 text-white border-orange-500',
     },
     ub: {
         contenedor: 'filtro',
         boton: '',
         activo: 'on',
         inactivo: '',
+        insignia: 'insignia',
     },
 };
 
@@ -47,16 +50,19 @@ const FiltroDisciplina = ({
 
     return (
         <div className={piel.contenedor} data-testid={testid}>
-            {[TODAS, ...disciplinas].map((disciplina) => {
+            {ordenarChips(disciplinas).map((disciplina) => {
                 const activo = valor === disciplina;
+                const insignia = disciplina === DISCIPLINA_INSIGNIA;
+                const clases = insignia
+                    ? [piel.boton, piel.insignia]
+                    : [piel.boton, activo ? piel.activo : piel.inactivo];
                 return (
                     <button
                         key={disciplina}
                         type="button"
                         onClick={() => onCambiar && onCambiar(disciplina)}
                         aria-pressed={activo}
-                        className={[piel.boton, activo ? piel.activo : piel.inactivo]
-                            .filter(Boolean).join(' ')}
+                        className={clases.filter(Boolean).join(' ')}
                     >
                         {disciplina}
                     </button>

@@ -40,9 +40,15 @@ def test_a_los_chips_viven_dentro_de_ub_clases_y_antes_de_la_lista():
     chips = fuente.index("<FiltroDisciplina")
     assert seccion < chips < cierre_lista, \
         "los chips van dentro de #ub-clases y antes de la lista del día"
-    # "Todas" + cada disciplina, y el chip activo se marca con aria-pressed.
+    # Orden del mockup: CrossFit primero (insignia resaltada), el resto, "Todas"
+    # al final. El chip activo se marca con aria-pressed.
     assert "aria-pressed={activo}" in _fuente(COMPONENTE)
-    assert "[TODAS, ...disciplinas]" in _fuente(COMPONENTE)
+    assert "ordenarChips(disciplinas)" in _fuente(COMPONENTE)
+    assert "DISCIPLINA_INSIGNIA" in _fuente(COMPONENTE)
+    util = _fuente(UTIL)
+    assert "export const DISCIPLINA_INSIGNIA = 'CrossFit';" in util
+    assert "export const ordenarChips" in util
+    assert "return [...insignia, ...resto, TODAS];" in util
 
 
 def test_b_el_filtro_aplica_a_la_lista_del_dia_y_no_a_la_rejilla_de_7_dias():

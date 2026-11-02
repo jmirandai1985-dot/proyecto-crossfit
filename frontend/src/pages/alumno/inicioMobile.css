@@ -375,6 +375,13 @@
     color: var(--ub-text);
 }
 
+/* Disciplina insignia ("CrossFit"): SIEMPRE relleno naranja sólido, primero. */
+.ub-inicio .filtro button.insignia {
+    border-color: var(--ub-orange);
+    background: var(--ub-orange);
+    color: #160b03;
+}
+
 .ub-inicio .clases {
     display: flex;
     flex-direction: column;
@@ -387,8 +394,10 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    border: 1.5px solid var(--ub-line);
+    background: #1e2028;                      /* sutil, para que el marco destaque */
+    border: 2px solid #4a4d59;                /* marco más marcado (neobrutalism) */
     border-radius: var(--ub-r-md);
+    box-shadow: 4px 4px 0 rgba(0, 0, 0, .4);  /* sombra dura, sin desenfoque */
     padding: 12px 14px;
 }
 
@@ -439,6 +448,12 @@
 .ub-inicio .clase .cupos.no {
     color: #f7d9d9;
     background: #4a1f1f;
+}
+
+/* Pocos cupos (<= UMBRAL_POCOS_CUPOS): advertencia roja de que se está llenando. */
+.ub-inicio .clase .cupos.pocos {
+    color: #fff;
+    background: #d64545;
 }
 
 .ub-inicio .clase .res {

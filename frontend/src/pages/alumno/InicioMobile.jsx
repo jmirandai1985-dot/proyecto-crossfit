@@ -39,6 +39,11 @@ const fechaLargaChile = () =>
 
 const capitalizar = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
 
+// "Pocos cupos": por debajo de este umbral la tarjeta muestra un badge rojo
+// (advertencia de que la clase está por llenarse). No hay otro umbral definido
+// en el resto de la app, así que este es el único.
+const UMBRAL_POCOS_CUPOS = 3;
+
 // Hora "HH:MM" desde el valor del backend ("HH:MM:SS" o "HH:MM").
 const horaCorta = (h) => {
     if (!h) return '';
@@ -543,6 +548,8 @@ const InicioMobile = ({
                                     ? Infinity
                                     : (clase.cupo_maximo || 0) - (clase.asistentes_confirmados || 0);
                                 const libre = cupos > 0;
+                                // Pocos cupos = advertencia roja (sin tope no cuenta).
+                                const pocosCupos = !sinTope && libre && cupos <= UMBRAL_POCOS_CUPOS;
                                 return (
                                     <div className="clase" key={clase.id}>
                                         <div className="ci">
@@ -551,8 +558,10 @@ const InicioMobile = ({
                                             <span className="cc">{clase.coach_nombre ? `Con ${clase.coach_nombre}` : 'Coach por confirmar'}</span>
                                         </div>
                                         <div className="cq">
-                                            <span className={`cupos${libre ? ' ok' : ' no'}`}>
-                                                {sinTope ? 'Acceso libre' : (libre ? `${cupos} cupos` : 'Lleno')}
+                                            <span className={`cupos${!libre ? ' no' : pocosCupos ? ' pocos' : ' ok'}`}>
+                                                {sinTope
+                                                    ? 'Acceso libre'
+                                                    : (!libre ? 'Lleno' : pocosCupos ? `¡Quedan ${cupos}!` : `${cupos} cupos`)}
                                             </span>
                                             <button
                                                 type="button"
