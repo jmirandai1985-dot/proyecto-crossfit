@@ -45,11 +45,9 @@ import re
 import sys
 from collections import namedtuple
 from datetime import date, datetime, timedelta, timezone
-from io import BytesIO
 from pathlib import Path
 
 import pytest
-from openpyxl import load_workbook
 
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
@@ -75,21 +73,6 @@ ALUMNOS_MES_PASADO = 2
 # HOY: la que venció en el corte del mes pasado ya no cuenta, y la que arranca este mes sí.
 MRR_HOY = PRECIO_VIGENTE_LARGA + PRECIO_EMPIEZA_DESPUES
 
-
-def _arranca_manana() -> bool:
-    """¿Mañana todavía cae dentro del mes en curso? (si hoy es el último día, no hay días que falten)."""
-    hoy = datetime.now(timezone.utc).date()
-    return (hoy + timedelta(days=1)).month == hoy.month
-
-
-def _mrr_al_cierre_del_mes_en_curso() -> float:
-    """El MRR con el corte del ÚLTIMO DÍA de este mes: distinto del de hoy por la fila que empieza
-    mañana (salvo que hoy sea el último día del mes, que es cuando "cierre" y "hoy" son lo mismo).
-
-    Es el número que saldría si el mes en curso se cortara "al cierre" —contando días que todavía no
-    pasaron, adelantando suscripciones futuras—: justo lo que el test F caza.
-    """
-    return MRR_HOY + (PRECIO_EMPIEZA_MANANA if _arranca_manana() else 0)
 
 Susc = namedtuple("Susc", "estado inicio expiracion precio")
 
@@ -222,44 +205,6 @@ class SesionFalsa:
 
 def _consultas(sesion: SesionFalsa, fragmento: str) -> list:
     return [c for c in sesion.consultas if fragmento in c[0]]
-
-
-# ── El Excel de verdad: se genera y se lee (hoja oculta "Historico Mensual" + tarjeta del KPI) ───
-# "Historico Mensual": fila 1 = encabezados, filas 2..7 = los 6 meses (del más viejo al actual).
-#   A Año | B Mes | C MesNum | D Ingresos | E Alumnos Activos | F Nuevos | G MRR | H Ventas | I Egresos
-COL_ALUMNOS, COL_MRR = 5, 7
-FILA_MES_PASADO, FILA_MES_ACTUAL = 6, 7
-# Tarjeta KPI del "Resumen Ejecutivo": fila 5 = etiqueta, 6 = valor, 7 = subtítulo (col 4 = MRR).
-FILA_LABEL_KPI, FILA_VALOR_KPI, COL_KPI_MRR = 5, 6, 4
-
-
-def _mes_actual() -> tuple:
-    """El mes del período que se exporta (mes, año)."""
-    ahora = datetime.now(timezone.utc)
-    return ahora.month, ahora.year
-
-
-def _genera_excel(sesion: SesionFalsa, mes: int = None, anio: int = None):
-    """El .xlsx real en memoria: lo que devuelve `/reportes/monthly-sales`.
-
-    Sin argumentos exporta el mes EN CURSO (el que elige la UI por defecto); con un mes pasado, la
-    tarjeta del KPI tiene que salir con el corte de ESE mes.
-    """
-    if mes is None or anio is None:
-        mes, anio = _mes_actual()
-    datos = rep.crear_reporte_ventas_mensual_bytes(sesion, TENANT, mes, anio)
-    return load_workbook(BytesIO(datos))
-
-
-def _celda_de_la_tarjeta(libro, fila: int):
-    return libro.worksheets[0].cell(row=fila, column=COL_KPI_MRR).value
-
-
-def _numero_de_la_tarjeta(libro) -> float:
-    """El valor de la tarjeta KPI como número (la celda guarda el texto con formato moneda)."""
-    texto = _celda_de_la_tarjeta(libro, FILA_VALOR_KPI)
-    assert isinstance(texto, str) and texto.startswith("$"), texto
-    return float(texto.replace("$", "").replace(",", ""))
 
 
 # ── A. El MRR de cada mes sale de metricas_service, con el último día del mes ────────────────────
@@ -409,4 +354,5 @@ def test_g_un_mes_pasado_se_corta_al_ultimo_dia_de_ese_mes():
 
     mrr_hoy = metricas.mrr(SesionFalsa(filas), TENANT, hoy)
     assert mrr_hoy == float(MRR_HOY) and mrr_hoy != resumen["mrr"]
+
 
