@@ -42,6 +42,17 @@ const formatCompact = (value) => {
 
 const formatCLP = (value) => `$${value.toLocaleString('es-CL')}`;
 
+// Semáforo de la tarjeta "Tasa de Retención": verde = alta (saludable),
+// ámbar = media (a vigilar), rojo = baja (crítica). La tarjeta muestra la tasa
+// que SIGUE vigente (más alto = mejor), por eso el verde va arriba. Umbrales:
+// >= 80% saludable, 50-79% a vigilar, < 50% crítica. Sin dato, neutro.
+const semaforoRetencion = (retencion) => {
+    if (retencion == null) return { borde: 'border-zinc-700', texto: 'text-zinc-500' };
+    if (retencion >= 80) return { borde: 'border-emerald-500', texto: 'text-emerald-400' };
+    if (retencion >= 50) return { borde: 'border-amber-500', texto: 'text-amber-400' };
+    return { borde: 'border-red-500', texto: 'text-red-400' };
+};
+
 // Encabezado ordenable del "Detalle de Movimientos". El click va en un <button>
 // (no en el <th>) para que se pueda tocar/teclear sin perder la semántica de la
 // tabla, y `aria-sort` en el <th> anuncia el orden actual al lector de pantalla.
@@ -517,14 +528,14 @@ const Reportes = () => {
                     <button type="button"
                         onClick={() => navigate('/admin/fidelizacion')}
                         title="Ver el panel de fidelización y alumnos en riesgo"
-                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-emerald-500 transition hover:shadow-md hover:border-emerald-400 cursor-pointer">
+                        className={`w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 ${semaforoRetencion(reportData?.tieneDatosRetencion ? reportData.retencion : null).borde} transition hover:shadow-md cursor-pointer`}>
                         <p className="text-zinc-400 text-sm font-medium"
                             title="Retención de cohorte de los últimos 30 días: de los alumnos vigentes hace 30 días, cuántos siguen vigentes hoy. Si la base no alcanza el mínimo, no se calcula.">
                             Tasa de Retención (30 días)
                         </p>
                         {reportData?.tieneDatosRetencion ? (
                             <>
-                                <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData.retencion}%</p>
+                                <p className={`text-3xl font-bold mt-2 ${semaforoRetencion(reportData.retencion).texto}`}>{reportData.retencion}%</p>
                                 <p className="text-xs text-zinc-400 mt-2">
                                     De {reportData.alumnosActivosHace30 ?? 0} alumnos vigentes hace 30 días
                                 </p>
