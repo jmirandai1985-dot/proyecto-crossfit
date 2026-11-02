@@ -1277,6 +1277,36 @@ def send_confirmacion_plan(nombre: str, correo: str, plan_nombre: str,
     return ok
 
 
+def send_confirmacion_plan_en_cola(nombre: str, correo: str, plan_nombre: str,
+                                   link_app: str, alumno_id: int = None) -> bool:
+    """Pago confirmado de un plan que queda EN COLA (renovación anticipada).
+
+    El alumno pagó un plan nuevo mientras el actual sigue vigente: acá se le
+    confirma que el cobro entró bien y que el plan nuevo se activará solo cuando
+    el actual termine (por fecha o por créditos, lo que ocurra primero). No hay
+    un correo aparte para la activación automática: ya se le avisa por la app.
+    """
+    if not correo:
+        return False
+    titulo = f"¡{nombre}, tu pago está confirmado y tu plan queda en cola! 🎯"
+    saludo = (f"¡Hola, {nombre}! Recibimos tu pago correctamente y tu plan "
+              f"<strong>{plan_nombre}</strong> quedó confirmado.")
+    cuerpo = (
+        "<p>Como todavía tienes un plan vigente, tu nueva membresía quedó "
+        "reservada: seguirás con tu plan actual hasta que termine —por fecha o "
+        "por créditos, lo que ocurra primero— y en ese momento el plan nuevo se "
+        "activará automáticamente.</p>"
+        "<p>No tienes que hacer nada más: te avisamos por la app y tu acceso "
+        "continúa sin interrupciones.</p>"
+        "<p>¡Nos vemos entrenando en el box!<br/>— El equipo de Urban Training Box 🏋️‍♂️</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Ir a mi panel", link_app)
+    ok = _enviar(correo, f"¡{nombre}, tu pago está confirmado y tu plan queda en cola! 🎯", html,
+                 alumno_id, tipo="plan_en_cola")
+    logger.info(f"[plan_en_cola] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    return ok
+
+
 def send_confirmacion_pedido(nombre: str, correo: str, producto_nombre: str,
                              cantidad: int, total: int, link_app: str,
                              alumno_id: int = None) -> bool:

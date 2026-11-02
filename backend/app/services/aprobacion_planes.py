@@ -508,6 +508,20 @@ def _registrar_plan_en_cola(db: Session, solicitud, plan, ahora, actor_id,
         },
     )
 
+    # ── Correo al alumno: su plan quedó EN COLA (no bloqueante) ──
+    # Mismo patrón que la confirmación de plan aprobado: en TEST/noop queda
+    # registrado como `simulado`; en PROD sale por SMTP.
+    try:
+        alumno_obj = db.query(Usuario).filter(
+            Usuario.id == solicitud.alumno_id).first()
+        if alumno_obj and alumno_obj.correo:
+            from app.services.email_service import send_confirmacion_plan_en_cola
+            send_confirmacion_plan_en_cola(
+                alumno_obj.nombre, alumno_obj.correo, plan.nombre,
+                url_frontend("/alumno/dashboard"), alumno_obj.id)
+    except Exception as e:
+        logger.warning(f"No se pudo enviar correo de plan en cola: {e}")
+
     return {
         "status": "approved",
         "message": "Plan pagado: quedó en cola y se activará automáticamente.",
