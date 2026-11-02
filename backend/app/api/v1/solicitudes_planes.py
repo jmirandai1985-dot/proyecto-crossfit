@@ -462,10 +462,17 @@ def aprobar_solicitud(
             background_tasks=background_tasks,
         )
     except aprobacion_planes.SolicitudNoProcesable as error:
-        # Distinguir 404 (no existe / otro tenant) de 400 (ya procesada).
+        # Distinguir 404 (no existe / otro tenant), 400 (ya procesada) y 409
+        # (el alumno ya tiene un plan en cola esperando su turno).
         if error.motivo == "no_encontrada":
             raise HTTPException(status_code=404,
                                 detail="Solicitud no encontrada")
+        if error.motivo == "ya_en_cola":
+            raise HTTPException(
+                status_code=409,
+                detail=("El alumno ya tiene un plan en cola: primero debe "
+                        "activarse el que está esperando."),
+            )
         raise HTTPException(
             status_code=400,
             detail="La solicitud ya fue procesada (aprobada o rechazada)",

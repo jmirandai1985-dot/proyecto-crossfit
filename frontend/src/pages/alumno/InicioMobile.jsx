@@ -286,8 +286,10 @@ const InicioMobile = ({
                 : 'Vence hoy';
     // Puntos = créditos restantes (tope 20, como el mockup). Ilimitado no lleva.
     const dotsN = (!ilimitado && creditos > 0) ? Math.min(creditos, 20) : 0;
+    // El próximo plan ya está pagado y en cola: NO se ofrece renovar.
+    const planEnCola = Boolean(membresia?.plan_en_cola);
     // Oferta de renovación (Espacio B): pocos créditos o pocos días.
-    const mostrarRenovacion = activa && (diasRestantes <= 7 || (!ilimitado && creditos <= 4));
+    const mostrarRenovacion = activa && !planEnCola && (diasRestantes <= 7 || (!ilimitado && creditos <= 4));
 
     // ── Bloque "Mis marcas" ──
     const marcaFuerza = (nivelFuerza?.top_rms || [])[0] || null;
@@ -461,6 +463,14 @@ const InicioMobile = ({
                                         ? 'Quedan pocos días: usa los créditos que puedas.'
                                         : <>Para usarlos todos, necesitas unas <b>{porSemana} clases por semana</b>.</>}
                     </p>
+                    {planEnCola && (
+                        <div className="ctx">
+                            <div>
+                                <b>Tu próximo plan ya está pagado</b>
+                                <span>Se activa automáticamente cuando termine tu plan actual.</span>
+                            </div>
+                        </div>
+                    )}
                     {mostrarRenovacion && (
                         <div className="ctx">
                             <div>

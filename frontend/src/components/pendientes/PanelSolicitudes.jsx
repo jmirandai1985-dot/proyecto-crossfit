@@ -54,8 +54,10 @@ const PanelSolicitudes = () => {
         setError('');
         try {
             if (accion === 'aprobar') {
-                await aprobarSolicitud.mutateAsync(id);
-                setMessage(`Solicitud #${id} aprobada. Plan activado y alumno notificado.`);
+                const resultado = await aprobarSolicitud.mutateAsync(id);
+                setMessage(resultado?.estado === 'en_cola'
+                    ? `Solicitud #${id} aprobada. El plan quedó en cola: se activa solo cuando termine el plan actual.`
+                    : `Solicitud #${id} aprobada. Plan activado y alumno notificado.`);
             } else {
                 await rechazarSolicitud.mutateAsync({ id, motivo });
                 setMessage(`Solicitud #${id} rechazada.`);

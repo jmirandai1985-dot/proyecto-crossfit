@@ -102,9 +102,19 @@ def obtener_membresia_activa(
     cualquier alumno).
     """
     from app.models.suscripcion import Suscripcion
+    from app.models.solicitud_plan import SolicitudPlan
 
     tenant_id = current_user["tenant_id"]
     alumno_id = current_user["usuario_id"]
+
+    # ── "Plan en cola": pagado y aprobado, esperando a que termine el actual ──
+    # El Dashboard lo usa para NO mostrar el banner de renovación (el próximo
+    # plan ya está pago). Se consulta aparte porque NO es una suscripción activa.
+    plan_en_cola = (db.query(SolicitudPlan)
+                    .filter(SolicitudPlan.tenant_id == tenant_id,
+                            SolicitudPlan.alumno_id == alumno_id,
+                            SolicitudPlan.estado == "en_cola")
+                    .first() is not None)
 
     # Vigencia por DÍA CHILENO: el plan vale hasta las 23:59:59 de su último día (el 30/09 un
     # plan de septiembre sigue vigente). El `> datetime.now(timezone.utc)` de antes lo cortaba
@@ -117,7 +127,7 @@ def obtener_membresia_activa(
     ).order_by(Suscripcion.creditos_disponibles.desc().nulls_last(), Suscripcion.fecha_expiracion.desc()).first()
 
     if not suscripcion:
-        return {"activa": False, "plan_nombre": None, "dias_restantes": 0, "clases_disponibles": 0, "es_ilimitado": False, "fecha_vencimiento": None}
+        return {"activa": False, "plan_nombre": None, "dias_restantes": 0, "clases_disponibles": 0, "es_ilimitado": False, "fecha_vencimiento": None, "plan_en_cola": plan_en_cola}
 
     plan = db.query(Plan).filter(Plan.id == suscripcion.plan_id).first()
     # 0 = vence HOY (día de vencimiento inclusive) y sin fecha = 0: nunca negativo.
@@ -130,6 +140,7 @@ def obtener_membresia_activa(
         "clases_disponibles": suscripcion.creditos_disponibles if hasattr(suscripcion, 'creditos_disponibles') else 0,
         "es_ilimitado": plan.es_ilimitado if plan else False,
         "fecha_vencimiento": suscripcion.fecha_expiracion,
+        "plan_en_cola": plan_en_cola,
     }
 
 

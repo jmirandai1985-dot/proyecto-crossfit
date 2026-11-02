@@ -28,7 +28,7 @@ una aprobación automática se distingue de una humana sin inventar un usuario
 import logging
 from typing import Optional
 
-from sqlalchemy import update
+from sqlalchemy import or_, update
 from sqlalchemy.orm import Session
 
 from app.models.notificacion import Notificacion
@@ -39,6 +39,7 @@ from app.models.suscripcion import Suscripcion
 from app.models.transaccion_financiera import TransaccionFinanciera
 from app.models.usuario import Usuario
 from app.core.urls import url_frontend
+from app.core.estados import vigente_hoy
 from app.services import beneficios_service as beneficios  # noqa: F401
 from app.services import churn_service
 from app.services import referidos_service as referidos
@@ -119,6 +120,39 @@ def _validar_aprobacion_manual(db: Session, solicitud_id: int,
         raise PagoOnlineNoConfirmado(solicitud_id)
 
 
+def _plan_vigente_usable(db: Session, tenant_id: int,
+                         usuario_id: int) -> Optional[Suscripcion]:
+    """La membresía que HOY está \"corriendo\" (fecha + créditos), o `None`.
+
+    Regla de vencimiento normal (la MISMA del sistema): un plan se termina por lo
+    que ocurra PRIMERO —su fecha de vencimiento O que se agoten sus créditos—. Por
+    eso \"usable\" = `estado='activo'` + vigente por día chileno + (ilimitado /
+    `creditos_disponibles IS NULL`, o `creditos_disponibles > 0`). Si hay más de
+    una, gana la que vence más tarde (mismo criterio que
+    `plan_vencimiento.suscripcion_vigente`).
+
+    Sólo cuentan los planes PAGADOS (`Plan.precio_clp > 0`): el plan \"Prueba\" del
+    alta (gratis, 1 crédito/7 días) y el \"Pase de regreso\" de Fidelización
+    (también gratis) NO deben mandar a cola la PRIMERA compra real de un alumno —
+    esa compra se activa ya y expira el plan de prueba (el flujo de upgrade de
+    siempre).
+    """
+    return (db.query(Suscripcion)
+            .join(Plan, Plan.id == Suscripcion.plan_id)
+            .filter(
+                Suscripcion.tenant_id == tenant_id,
+                Suscripcion.usuario_id == usuario_id,
+                Suscripcion.estado == "activo",
+                Plan.precio_clp > 0,
+                vigente_hoy(Suscripcion.fecha_expiracion),
+                or_(Suscripcion.creditos_disponibles.is_(None),
+                    Suscripcion.creditos_disponibles > 0),
+            )
+            .order_by(Suscripcion.fecha_expiracion.desc(),
+                      Suscripcion.id.desc())
+            .first())
+
+
 def activar_plan(db: Session, solicitud_id: int, *, tenant_id: Optional[int] = None,
                  actor_id: Optional[int] = None,
                  origen: str = ORIGEN_MANUAL,
@@ -137,8 +171,41 @@ def activar_plan(db: Session, solicitud_id: int, *, tenant_id: Optional[int] = N
     if origen == ORIGEN_MANUAL:
         _validar_aprobacion_manual(db, solicitud_id, tenant_id)
 
+    # ── Decidir ANTES del UPDATE atómico: ¿se activa ya o queda EN COLA? ──
+    # Un plan nuevo NO se activa de inmediato si el alumno todavía tiene una
+    # membresía "corriendo" (fecha + créditos): se marca en cola y se activa solo
+    # cuando la actual termine (por fecha o por créditos, la regla de siempre).
+    # El UPDATE atómico (`WHERE estado='pending'`) sigue siendo el candado contra
+    # la doble aprobación.
+    solicitud_previa = db.query(SolicitudPlan).filter(
+        SolicitudPlan.id == solicitud_id)
+    if tenant_id is not None:
+        solicitud_previa = solicitud_previa.filter(
+            SolicitudPlan.tenant_id == tenant_id)
+    solicitud_previa = solicitud_previa.first()
+    if solicitud_previa is None:
+        raise SolicitudNoProcesable("no_encontrada")
+
+    plan = db.query(Plan).filter(
+        Plan.id == solicitud_previa.plan_id).first()
+    if not plan:
+        raise PlanNoEncontrado(solicitud_id)
+
+    en_cola = (_plan_vigente_usable(
+        db, solicitud_previa.tenant_id, solicitud_previa.alumno_id) is not None)
+    if en_cola:
+        # Un alumno no puede tener MÁS de un plan en cola a la vez.
+        ya_en_cola = db.query(SolicitudPlan).filter(
+            SolicitudPlan.tenant_id == solicitud_previa.tenant_id,
+            SolicitudPlan.alumno_id == solicitud_previa.alumno_id,
+            SolicitudPlan.estado == "en_cola",
+            SolicitudPlan.id != solicitud_id,
+        ).first()
+        if ya_en_cola is not None:
+            raise SolicitudNoProcesable("ya_en_cola")
+
     valores = {
-        "estado": "approved",
+        "estado": "en_cola" if en_cola else "approved",
         "aprobado_por": actor_id,
         # Lo que el admin ve en el historial: distingue una aprobación humana de
         # un cobro online (que no tiene comprobante que revisar).
@@ -171,17 +238,19 @@ def activar_plan(db: Session, solicitud_id: int, *, tenant_id: Optional[int] = N
     solicitud = db.query(SolicitudPlan).filter(
         SolicitudPlan.id == solicitud_id).first()
 
+    ahora = ahora_santiago()
+
+    # ── Rama EN COLA: pago confirmado, plan SIN activar todavía ──
+    if en_cola:
+        return _registrar_plan_en_cola(
+            db, solicitud, plan, ahora, actor_id, origen, background_tasks)
+
     # ── Crear la suscripción activa ──
-    plan = db.query(Plan).filter(Plan.id == solicitud.plan_id).first()
-    if not plan:
-        db.rollback()
-        raise PlanNoEncontrado(solicitud_id)
 
     # ── Vigencia del plan EN HORA DE CHILE: `inicio + plan.duracion_dias` días
     # SEGUIDOS (regla 2026-10-06), hasta el fin de ese último día. UNA
     # definición: `fin_de_plan_chile()` (app/utils/santiago.py), compartida con
     # la compra de emergencia, `fix_fechas` y POST /suscripciones.
-    ahora = ahora_santiago()
     expiracion = fin_de_plan_chile(ahora, plan.duracion_dias)
 
     suscripcion = Suscripcion(
@@ -355,3 +424,163 @@ def activar_plan(db: Session, solicitud_id: int, *, tenant_id: Optional[int] = N
         "descuento_referido_pct": (descuento_referido["porcentaje"]
                                    if descuento_referido else None),
     }
+
+
+def _registrar_plan_en_cola(db: Session, solicitud, plan, ahora, actor_id,
+                            origen, background_tasks) -> dict:
+    """Registra la compra de un plan que queda EN COLA (sin activar aún).
+
+    El dinero YA entró (se cobró), así que acá se resuelve el referido y se
+    registra la transacción financiera y la auditoría; lo que NO se crea es la
+    `Suscripcion` activa: se activa sola cuando el plan actual termine (ver
+    `activar_planes_en_cola`).
+    """
+    db.add(Notificacion(
+        alumno_id=solicitud.alumno_id,
+        tipo="aprobado",
+        mensaje=(f"✅ Tu plan {plan.nombre} está pagado y quedó EN COLA: "
+                 "se activa automáticamente cuando termine tu plan actual."),
+        leida=False,
+    ))
+
+    # Fase 3b: el referido se resuelve al CONFIRMAR la compra (el dinero ya entró),
+    # aunque la suscripción se cree después. `suscripcion_id=None` porque todavía
+    # no hay suscripción que vincular (`creditos_referido.suscripcion_id` es
+    # NULL-able).
+    descuento_referido = None
+    if solicitud.beneficio_id is None:
+        descuento_referido = referidos.confirmar_compra(
+            db,
+            tenant_id=solicitud.tenant_id,
+            usuario_id=solicitud.alumno_id,
+            precio_lista_clp=precio_lista(solicitud, plan),
+            suscripcion_id=None,
+            ahora=ahora,
+            precio_final_clp=solicitud.precio_final_clp,
+        )
+        if (descuento_referido is not None
+                and solicitud.precio_final_clp is None
+                and descuento_referido["descuento_clp"] > 0):
+            solicitud.precio_final_clp = descuento_referido["precio_final_clp"]
+
+    db.commit()
+
+    # ── Churn: pagar un plan (aunque quede en cola) cambia la situación ──
+    churn_service.programar_recalculo(
+        background_tasks, solicitud.tenant_id, solicitud.alumno_id)
+
+    lista = precio_lista(solicitud, plan)
+    cobrado = (solicitud.precio_final_clp
+               if solicitud.precio_final_clp is not None else lista)
+
+    # ── Ingreso YA (plata cobrada), con referencia a la SOLICITUD ──
+    try:
+        db.add(TransaccionFinanciera(
+            tenant_id=solicitud.tenant_id,
+            tipo="ingreso",
+            categoria="membresia",
+            monto=cobrado,
+            descripcion=(
+                f"Suscripcion plan {plan.nombre} (usuario #{solicitud.alumno_id})"),
+            referencia_tipo="solicitud_plan",
+            referencia_id=solicitud.id,
+            fecha=hoy_santiago(),
+        ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"No se pudo registrar transaccion financiera: {e}")
+
+    registrar_auditoria(
+        db,
+        tenant_id=solicitud.tenant_id,
+        usuario_id=actor_id,
+        accion="UPDATE" if origen == ORIGEN_MANUAL else "PAGO_APROBADO",
+        entidad="solicitud_plan",
+        entidad_id=solicitud.id,
+        detalle={
+            "estado": "en_cola",
+            "alumno_id": solicitud.alumno_id,
+            "plan_id": solicitud.plan_id,
+            "origen": origen,
+            "pago_id": solicitud.pago_id,
+            "monto_clp": cobrado,
+        },
+    )
+
+    return {
+        "status": "approved",
+        "message": "Plan pagado: quedó en cola y se activará automáticamente.",
+        "estado": "en_cola",
+        "precio_lista_clp": lista,
+        "precio_final_clp": cobrado,
+        "descuento_aplicado_clp": lista - cobrado,
+        "descuento_referido_origen": (descuento_referido["origen"]
+                                      if descuento_referido else None),
+        "descuento_referido_pct": (descuento_referido["porcentaje"]
+                                   if descuento_referido else None),
+    }
+
+
+
+def activar_planes_en_cola(db: Session) -> list[int]:
+    """Activa las solicitudes EN COLA cuyo plan actual ya NO es usable.
+
+    Se llama desde el job diario (después de `marcar_plan_vencido`): un plan en
+    cola se activa cuando el plan actual termina por lo que ocurra PRIMERO —su
+    fecha de vencimiento O que se agoten sus créditos—, que es exactamente la
+    condición que evalúa `_plan_vigente_usable`. Sin admin: la activación es
+    automática y arranca sus propios 30 días.
+
+    NO commitea (el llamador —job o test— decide la transacción).
+    Devuelve los ids de las suscripciones creadas.
+    """
+    pendientes = db.query(SolicitudPlan).filter(
+        SolicitudPlan.estado == "en_cola").all()
+
+    creadas: list[int] = []
+    for solicitud in pendientes:
+        if _plan_vigente_usable(
+                db, solicitud.tenant_id, solicitud.alumno_id) is not None:
+            continue
+
+        plan = db.query(Plan).filter(Plan.id == solicitud.plan_id).first()
+        if plan is None:
+            logger.warning(
+                "Solicitud en cola #%s con plan #%s inexistente: se omite",
+                solicitud.id, solicitud.plan_id)
+            continue
+
+        ahora = ahora_santiago()
+        suscripcion = Suscripcion(
+            tenant_id=solicitud.tenant_id,
+            usuario_id=solicitud.alumno_id,
+            plan_id=solicitud.plan_id,
+            estado="activo",
+            creditos_totales=creditos_de_plan(plan),
+            creditos_disponibles=creditos_de_plan(plan),
+            fecha_inicio=ahora,
+            fecha_expiracion=fin_de_plan_chile(ahora, plan.duracion_dias),
+        )
+        if solicitud.pago_id is not None:
+            suscripcion.pago_id = solicitud.pago_id
+        db.add(suscripcion)
+        db.flush()  # asigna el id para la notificación sin commitear
+
+        solicitud.estado = "approved"
+
+        db.add(Notificacion(
+            alumno_id=solicitud.alumno_id,
+            tipo="aprobado",
+            mensaje=(f"✅ Tu plan {plan.nombre} quedó ACTIVO automáticamente: "
+                     "empieza hoy."),
+            leida=False,
+        ))
+
+        creadas.append(suscripcion.id)
+        logger.info(
+            "Plan en cola activado: solicitud #%s → suscripción #%s (usuario %s)",
+            solicitud.id, suscripcion.id, solicitud.alumno_id)
+
+    return creadas
+

@@ -1,6 +1,6 @@
 """
 Job diario 02:30 AM - Mantenimiento crítico
-Ejecuta: backup + planes vencidos + huérfanas + health + neon usage
+Ejecuta: backup + planes vencidos + planes en cola + huérfanas + health + neon usage
 """
 
 import os
@@ -66,28 +66,37 @@ def run():
         resultados.append(False)
 
     try:
-        # 3. Transacciones huérfanas
-        logger.info("3/5 Limpiando transacciones huérfanas...")
+        # 3. Planes en cola (se activan cuando terminó el plan actual)
+        logger.info("3/6 Activando planes en cola...")
+        from maintenance.activar_planes_en_cola import activar_en_cola
+        resultados.append(_paso("3/6", "activar_planes_en_cola", activar_en_cola))
+    except Exception as e:
+        logger.error(f"❌ Activar planes en cola falló: {e}")
+        resultados.append(False)
+
+    try:
+        # 4. Transacciones huérfanas
+        logger.info("4/6 Limpiando transacciones huérfanas...")
         from maintenance.transacciones_huerfanas import limpiar_huerfanas
-        resultados.append(_paso("3/5", "transacciones_huerfanas", limpiar_huerfanas))
+        resultados.append(_paso("4/6", "transacciones_huerfanas", limpiar_huerfanas))
     except Exception as e:
         logger.error(f"❌ Limpiar huérfanas falló: {e}")
         resultados.append(False)
 
     try:
-        # 4. Health check
-        logger.info("4/5 Verificando salud...")
+        # 5. Health check
+        logger.info("5/6 Verificando salud...")
         from maintenance.health_check import verificar_salud
-        resultados.append(_paso("4/5", "health_check", verificar_salud))
+        resultados.append(_paso("5/6", "health_check", verificar_salud))
     except Exception as e:
         logger.error(f"❌ Health check falló: {e}")
         resultados.append(False)
 
     try:
-        # 5. Alertas Neon
-        logger.info("5/5 Verificando uso Neon...")
+        # 6. Alertas Neon
+        logger.info("6/6 Verificando uso Neon...")
         from maintenance.neon_usage_alerts import verificar_uso
-        resultados.append(_paso("5/5", "neon_usage", verificar_uso))
+        resultados.append(_paso("6/6", "neon_usage", verificar_uso))
     except Exception as e:
         logger.error(f"❌ Neon usage falló: {e}")
         resultados.append(False)
