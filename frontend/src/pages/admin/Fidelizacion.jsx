@@ -102,14 +102,15 @@ const FILTROS = {
 // se conserva al cambiar de pestaña.
 const TABS = [
     { id: 'gestion', label: 'Gestión' },
-    { id: 'beneficios', label: 'Beneficios' },
+    { id: 'beneficios', label: 'Historial de beneficios' },
 ];
 
 const Fidelizacion = () => {
     const { tenant_id } = useAuth();
     // Filtros que llegan desde la pestaña BI (?filtro=... y/o ?arquetipo=...).
     const [searchParams, setSearchParams] = useSearchParams();
-    // Pestaña activa: Gestión (la tabla de siempre) o Beneficios (todos los regalos del box).
+    // Pestaña activa: Gestión (la tabla de siempre) o Historial de beneficios
+    // (seguimiento de los beneficios ya otorgados).
     const tab = searchParams.get('tab') || 'gestion';
     // ── Datos del BI en la caché compartida (React Query) ─────────────────────
     // `useChurn` ya reacciona a `buscar` (el término va en su queryKey) y conserva la
@@ -190,7 +191,7 @@ const Fidelizacion = () => {
     // `cargarChurn` con `setMsg`; ahora el error vive en la consulta).
     const msgMostrar = msg || (churnQ.isError
         ? `❌ ${mensajeError(churnQ.error, 'No se pudo cargar el panel')}` : '');
-    // El beneficio quedó dado: se avisa en el cartel de la pantalla (la pestaña Beneficios lo
+    // El beneficio quedó dado: se avisa en el cartel de la pantalla (la pestaña Historial lo
     // muestra al recargar) y se dice CÓMO se avisó al alumno.
     const beneficioDado = (resultado) => {
         const b = resultado?.beneficio || {};
@@ -328,7 +329,7 @@ const Fidelizacion = () => {
                     </div>
                 )}
 
-                {/* ── Pestaña Beneficios: TODOS los regalos del box (F2) ── */}
+                {/* ── Pestaña Historial de beneficios: seguimiento de lo otorgado ── */}
                 {tab === 'beneficios' && (
                     <BeneficiosPanel onVerAlumno={verDetalleAlumno} onMensaje={setMsg} />
                 )}
