@@ -439,7 +439,7 @@ const InicioMobile = ({
                 <section className="card sec" aria-label="Plan y créditos">
                     <div className="ph">
                         <div>
-                            <small>Créditos restantes</small>
+                            <small>Clases restantes</small>
                             <div className="cnum">{creditosTxt}</div>
                         </div>
                         <div className="pr">
@@ -459,9 +459,9 @@ const InicioMobile = ({
                             : ilimitado
                                 ? 'Plan ilimitado: reserva las clases que quieras.'
                                 : creditos <= 0
-                                    ? 'Sin créditos. Renueva tu plan para reservar.'
+                                    ? 'Sin clases. Renueva tu plan para reservar.'
                                     : diasRestantes < 7
-                                        ? 'Quedan pocos días: usa los créditos que puedas.'
+                                        ? 'Quedan pocos días: usa las clases que puedas.'
                                         : <>Para usarlos todos, necesitas unas <b>{porSemana} clases por semana</b>.</>}
                     </p>
                     {banner && (

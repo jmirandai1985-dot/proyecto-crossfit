@@ -108,5 +108,17 @@ ok(/button\.cm-mini\s*\{[^}]*cursor:\s*pointer/.test(CSS_CARRUSEL),
 ok(/\.cm-tarjeta\.cm-producto \.cm-abrir\s*\{/.test(CSS_CARRUSEL),
     'el botón de la tarjeta conserva el layout de foto + texto');
 
+console.log('== 6. El texto visible dice "clases", nunca "créditos" ==');
+ok(INICIO.includes('Clases restantes'),
+    'la tarjeta de cupo dice "Clases restantes"');
+ok(!INICIO.includes('<small>Créditos restantes</small>'),
+    'ya no queda el rótulo visible "Créditos restantes"');
+ok(INICIO.includes('Sin clases. Renueva tu plan para reservar.'),
+    'sin cupo avisa "Sin clases. Renueva..."');
+ok(INICIO.includes('Quedan pocos días: usa las clases que puedas.'),
+    'pocos días avisa "usa las clases que puedas"');
+ok(!INICIO.includes('usa los créditos'), 'ya no queda "usa los créditos" visible');
+ok(!INICIO.includes('Sin créditos.'), 'ya no queda "Sin créditos" visible');
+
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);
