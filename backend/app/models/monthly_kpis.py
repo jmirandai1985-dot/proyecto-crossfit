@@ -20,7 +20,9 @@ class MonthlyKpi(Base):
     alumnos_prueba = Column(Integer, nullable=False, default=0)
     alumnos_clase_prueba_ejecutada = Column(Integer, nullable=False, default=0)
     alumnos_plan_comprado = Column(Integer, nullable=False, default=0)
-    conversion_rate = Column(Numeric(5, 2), nullable=False, default=0)
+    # Nullable a propósito: None = "sin dato" (no hubo alumnos en prueba),
+    # 0 = 0% real. Mismo criterio que churn_rate (migración 027). Ver 071.
+    conversion_rate = Column(Numeric(5, 2), nullable=True)
     # Actividad / churn
     alumnos_activos_inicio = Column(Integer, nullable=False, default=0)
     alumnos_baja = Column(Integer, nullable=False, default=0)

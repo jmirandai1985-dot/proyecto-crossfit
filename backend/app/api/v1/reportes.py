@@ -374,9 +374,11 @@ def obtener_reportes_analytics(
             if bazar_mes_ant > 0 else None
         )
 
-        # --- 7. ARPU (Ingresos del mes / alumnos activos) ---
-        arpu = round(ingresos_mes / alumnos_activos,
-                     0) if alumnos_activos > 0 else 0
+        # --- 7. ARPU (último mes CERRADO) ---
+        # Antes: ingresos del mes EN CURSO / alumnos activos HOY (mes parcial); el
+        # día 2 del mes daba un ARPU sin sentido. Ahora sale del último mes cerrado
+        # (misma lógica que el MRR histórico).
+        arpu = metricas.arpu_mes_cerrado(db, tenant_id, ahora.date())
 
         # --- 8. COMPARACION MoM ---
         # Si el mes anterior no es comparable (neto <= 0: sin movimientos o mas

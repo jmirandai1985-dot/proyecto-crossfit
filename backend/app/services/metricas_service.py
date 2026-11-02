@@ -11,6 +11,7 @@ hasta hoy, ingresos y ocupacion del mes en curso); kpis_populate calcula un mes
 cerrado (o un dia) y lo persiste en monthly_kpis / daily_kpis como foto
 historica. La formula es la misma; el periodo es distinto y legitimo.
 """
+import calendar
 from datetime import date, timedelta
 
 from sqlalchemy import text
@@ -108,6 +109,41 @@ def ingresos_netos(db: Session, tenant_id: int, inicio: date, fin: date) -> floa
           AND fecha >= :ini AND fecha <= :fin
     """), params).scalar() or 0
     return float(ing) - float(egr)
+
+
+def _ultimo_mes_cerrado(hoy: date):
+    """(year, month, inicio, fin) del último mes CERRADO (el mes anterior a `hoy`).
+
+    PURA (sin BD). Un mes está cerrado cuando su último día ya pasó; para el día 1
+    de un mes, el mes anterior ya está completo y es el que se devuelve.
+    """
+    if hoy.month == 1:
+        anio, mes = hoy.year - 1, 12
+    else:
+        anio, mes = hoy.year, hoy.month - 1
+    inicio = date(anio, mes, 1)
+    fin = date(anio, mes, calendar.monthrange(anio, mes)[1])
+    return anio, mes, inicio, fin
+
+
+def calcular_arpu(ingresos, alumnos) -> float:
+    """ARPU = ingresos / alumnos redondeado a entero. 0 si no hay alumnos."""
+    return round(ingresos / alumnos, 0) if alumnos else 0
+
+
+def arpu_mes_cerrado(db: Session, tenant_id: int, hoy: date = None) -> float:
+    """ARPU del último mes CERRADO: ingresos netos / alumnos vigentes al cierre.
+
+    Antes el ARPU se calculaba con el mes EN CURSO (ingresos parciales del mes /
+    alumnos activos hoy): el día 2 del mes daba un ARPU sin sentido (un par de
+    días de ingresos contra la base completa). Igual que el MRR histórico, se
+    corta al último día del mes cerrado (`_ultimo_mes_cerrado`).
+    """
+    hoy = hoy or hoy_santiago()
+    _, _, inicio, fin = _ultimo_mes_cerrado(hoy)
+    ingresos = ingresos_netos(db, tenant_id, inicio, fin)
+    alumnos = alumnos_vigentes(db, tenant_id, fin)
+    return calcular_arpu(ingresos, alumnos)
 
 
 def ventas_bazar_detalle(db: Session, tenant_id: int, inicio: date, fin: date) -> dict:

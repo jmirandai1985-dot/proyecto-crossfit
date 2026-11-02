@@ -2,6 +2,7 @@
 Servicio de Reportes Excel - Version Premium 4 pestanas
 Genera reportes ejecutivos con diseno profesional, graficos y formulas reales
 """
+import calendar
 import io
 from datetime import datetime, date, timedelta, timezone
 from sqlalchemy.orm import Session
@@ -14,6 +15,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 
 from app.services import metricas_service as metricas
 from app.services.clases_service import sql_clase_realizada
+from app.utils.santiago import hoy_santiago
 from shared.estados import (lista_sql_pago_bazar, sql_plan_comercial,
                             sql_suscripcion_vigente)
 
@@ -413,19 +415,16 @@ def _pedidos_bazar_pendientes_mes(db, tenant_id, inicio, fin) -> int:
         return 0
 
 
-def crear_reporte_ventas_mensual_bytes(
+def _crear_reporte_ventas_mensual_bytes_v1(
     db: Session,
     tenant_id: int,
     mes: int,
     anio: int
 ) -> bytes:
-    """
-    Genera reporte Excel con 4 pestanas:
-    1. Resumen Ejecutivo
-    2. Detalle Planes
-    3. Bazar y Servicios
-    4. Flujo de Caja
-    """
+    """[LEGACY] Versión anterior (5 pestañas). Reemplazada por
+    `crear_reporte_ventas_mensual_bytes` (4 pestañas comparativas MoM/YoY/YTD/ARPU)
+    definida al final de este módulo. Se conserva temporalmente como referencia;
+    borrar en el próximo mantenimiento."""
     wb = Workbook()
     wb.remove(wb.active)
 
@@ -500,9 +499,8 @@ def crear_reporte_ventas_mensual_bytes(
     corte_mrr = _corte_suscripciones(fecha_fin - timedelta(days=1))
     mrr_val_f = float(metricas.mrr(db, tenant_id, corte_mrr))
 
-    # ARPU
-    arpu_val = round(neto_mes / alumnos_activos,
-                     0) if alumnos_activos > 0 else 0
+    # ARPU: último mes CERRADO (misma definición que Reportes y el BI).
+    arpu_val = metricas.arpu_mes_cerrado(db, tenant_id)
 
     # Ocupacion por disciplina — solo clases REALIZADAS (ya terminaron y no canceladas;
     # definición única de `clases_service`), igual que la tarjeta de Reportes. Antes entraban
@@ -1009,6 +1007,294 @@ def crear_reporte_ventas_mensual_bytes(
     for c in range(1, 7):
         ws4.cell(row=1, column=c).fill = PatternFill(
             start_color=NAVY, end_color=NAVY, fill_type="solid")
+# ============================================================================
+# REPORTE 4 PESTAÑAS COMPARATIVAS (MoM / YoY / YTD / ARPU)
+# Reemplaza a `_crear_reporte_ventas_mensual_bytes_v1`. Reusa las helpers de
+# estilo de arriba y las definiciones únicas de `metricas_service` (MRR, ARPU,
+# alumnos vigentes, ventas del Bazar).
+# ============================================================================
+_MESES_ES_LARGOS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+                    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+
+
+def _neto_rango(db, tenant_id, inicio, fin_exclusive):
+    """(ingresos, egresos, neto) de [inicio, fin_exclusive) desde transacciones."""
+    ing = db.execute(text("""
+        SELECT COALESCE(SUM(monto), 0) FROM transacciones_financieras
+        WHERE tenant_id = :tid AND tipo = 'ingreso' AND fecha >= :ini AND fecha < :fin
+    """), {"tid": tenant_id, "ini": inicio, "fin": fin_exclusive}).scalar() or 0
+    eg = db.execute(text("""
+        SELECT COALESCE(SUM(monto), 0) FROM transacciones_financieras
+        WHERE tenant_id = :tid AND tipo = 'egreso' AND fecha >= :ini AND fecha < :fin
+    """), {"tid": tenant_id, "ini": inicio, "fin": fin_exclusive}).scalar() or 0
+    ing_f, eg_f = float(ing), float(eg)
+    return ing_f, eg_f, ing_f - eg_f
+
+
+def _resumen_mes(db, tenant_id, anio, mes):
+    """Resumen de UN mes (ingresos/egresos/neto, alumnos, nuevos, MRR y Bazar).
+
+    MRR y ventas del Bazar salen de `metricas_service` (una sola definición);
+    el corte del mes lo define `_corte_suscripciones`.
+    """
+    inicio = date(anio, mes, 1)
+    fin_ex = date(anio + 1, 1, 1) if mes == 12 else date(anio, mes + 1, 1)
+    ing, eg, neto = _neto_rango(db, tenant_id, inicio, fin_ex)
+    corte = _corte_suscripciones(fin_ex - timedelta(days=1))
+    nuevos = db.execute(text("""
+        SELECT COUNT(*) FROM usuarios
+        WHERE tenant_id = :tid AND rol = 'alumno'
+          AND created_at::date >= :ini AND created_at::date < :fin
+    """), {"tid": tenant_id, "ini": inicio, "fin": fin_ex}).scalar() or 0
+    return {
+        "anio": anio, "mes": mes, "corte": corte,
+        "ingresos": ing, "egresos": eg, "neto": neto,
+        "alumnos": int(metricas.alumnos_vigentes(db, tenant_id, corte)),
+        "nuevos": int(nuevos),
+        "mrr": float(metricas.mrr(db, tenant_id, corte)),
+        "ventas": float(metricas.ventas_bazar(db, tenant_id, inicio, fin_ex)),
+    }
+
+
+def _meses_de_historia(db, tenant_id):
+    """Meses de historial (desde la primera transacción/alta hasta hoy, en Chile)."""
+    hoy = hoy_santiago()
+    primera = db.execute(text("""
+        SELECT MIN(f) FROM (
+            SELECT fecha AS f FROM transacciones_financieras WHERE tenant_id = :tid
+            UNION ALL
+            SELECT created_at AS f FROM usuarios WHERE tenant_id = :tid AND rol = 'alumno'
+        ) t WHERE f IS NOT NULL
+    """), {"tid": tenant_id}).scalar()
+    if primera is None:
+        return 0
+    return (hoy.year - primera.year) * 12 + (hoy.month - primera.month) + 1
+
+
+def _pct(ahora, antes):
+    """Variación porcentual; None si no hay base comparable."""
+    return round((ahora - antes) / abs(antes) * 100, 1) if antes else None
+
+
+def _fmt_pct(valor):
+    """'—' si no hay dato; si no, '+12.3%' / '-4.5%'."""
+    return "—" if valor is None else f"{valor:+.1f}%"
+
+
+def _titulo_hoja(ws, titulo, subtitulo):
+    """Banner navy + franja naranja + subtítulo (mismo patrón visual de la v1)."""
+    for c in range(1, 9):
+        ws.cell(row=1, column=c).fill = PatternFill(
+            start_color=NAVY, end_color=NAVY, fill_type="solid")
+    ws.merge_cells('A1:H1')
+    cell = ws.cell(row=1, column=1, value=titulo)
+    cell.font = Font(bold=True, size=20, color=WHITE)
+    cell.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[1].height = 40
+    for c in range(1, 9):
+        ws.cell(row=2, column=c).fill = PatternFill(
+            start_color=ORANGE_ACCENT, end_color=ORANGE_ACCENT, fill_type="solid")
+    ws.row_dimensions[2].height = 5
+    ws.merge_cells('A3:H3')
+    sub = ws.cell(row=3, column=1, value=subtitulo)
+    sub.font = Font(size=10, color="6B7280")
+    sub.alignment = Alignment(horizontal='center')
+
+def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
+    """Genera el reporte Excel con 4 pestañas comparativas: MoM, YoY, YTD, ARPU."""
+    wb = Workbook()
+    wb.remove(wb.active)
+    hoy = hoy_santiago()
+    label_mes = f"{_MESES_ES_LARGOS[mes - 1]} {anio}"
+
+    actual = _resumen_mes(db, tenant_id, anio, mes)
+    mes_ant, anio_ant = (12, anio - 1) if mes == 1 else (mes - 1, anio)
+    anterior = _resumen_mes(db, tenant_id, anio_ant, mes_ant)
+    label_ant = f"{_MESES_ES_LARGOS[mes_ant - 1]} {anio_ant}"
+
+    arpu = metricas.arpu_mes_cerrado(db, tenant_id, hoy)
+    alumnos_hoy = metricas.alumnos_vigentes(db, tenant_id, hoy)
+    generado = f"Generado: {datetime.now():%d/%m/%Y %H:%M}"
+
+    # ── 1) MoM: mes a mes (absorbe Resumen Ejecutivo + Flujo de Caja) ────────
+    ws = wb.create_sheet("MoM", 0)
+    ws.sheet_view.showGridLines = False
+    for col, w in (('A', 3), ('B', 22), ('C', 22), ('D', 22),
+                   ('E', 22), ('F', 22), ('G', 22), ('H', 3)):
+        ws.column_dimensions[col].width = w
+    _titulo_hoja(ws, "MoM — MES A MES", f"{label_mes} vs {label_ant}   ·   {generado}")
+
+    kpi = 5
+    _apply_kpi_card(ws, kpi, 2, "Ingresos netos", f"${actual['neto']:,.0f}",
+                    label_mes, ORANGE_ACCENT, "💰")
+    _apply_kpi_card(ws, kpi, 3, "vs mes anterior",
+                    _fmt_pct(_pct(actual['neto'], anterior['neto'])),
+                    label_ant, BLUE_KPI, "📊")
+    _apply_kpi_card(ws, kpi, 4, "Alumnos activos", f"{alumnos_hoy}",
+                    "Con suscripción vigente", GREEN_KPI, "👥")
+    _apply_kpi_card(ws, kpi, 5, "MRR", f"${actual['mrr']:,.0f}",
+                    f"al {actual['corte']:%d/%m/%Y}", PURPLE_KPI, "📈")
+    _apply_kpi_card(ws, kpi, 6, "ARPU", f"${arpu:,.0f}",
+                    "Último mes cerrado", TEAL_KPI, "🎯")
+    ws.row_dimensions[kpi].height = 20
+    ws.row_dimensions[kpi + 1].height = 35
+    ws.row_dimensions[kpi + 2].height = 20
+
+    r = 10
+    _style_section_header(ws, r, 1, "Flujo de Caja (mes vs mes anterior)", BLUE_KPI)
+    r += 1
+    _style_table_header(ws, r, ["Concepto", label_mes, label_ant, "Variación"])
+    r += 1
+    filas = [
+        ("Ingresos", actual["ingresos"], anterior["ingresos"]),
+        ("Egresos", actual["egresos"], anterior["egresos"]),
+        ("Neto", actual["neto"], anterior["neto"]),
+        ("Ventas Bazar (cobradas)", actual["ventas"], anterior["ventas"]),
+    ]
+    for i, (concepto, ahora_v, antes_v) in enumerate(filas):
+        variacion = _fmt_pct(_pct(ahora_v, antes_v))
+        _style_data_row(ws, r, [concepto, f"${ahora_v:,.0f}", f"${antes_v:,.0f}", variacion],
+                        is_alt=(i % 2 == 1), is_money_cols={2, 3})
+        r += 1
+
+    # ── 2) YoY: mismo mes vs mismo mes del año anterior ───────────────────────
+    ws = wb.create_sheet("YoY", 1)
+    ws.sheet_view.showGridLines = False
+    for col, w in (('A', 3), ('B', 24), ('C', 24), ('D', 24), ('E', 24), ('H', 3)):
+        ws.column_dimensions[col].width = w
+    _titulo_hoja(ws, "YoY — AÑO A AÑO",
+                 f"{label_mes} vs {_MESES_ES_LARGOS[mes - 1]} {anio - 1}   ·   {generado}")
+
+    if _meses_de_historia(db, tenant_id) < 13:
+        nota = ws.cell(row=5, column=2,
+                       value="Datos insuficientes: se necesitan al menos 13 meses de historial para comparar año contra año.")
+        nota.font = Font(size=12, bold=True, color=RED)
+    else:
+        mismo_mes_anterior = _resumen_mes(db, tenant_id, anio - 1, mes)
+        label_yoy = f"{_MESES_ES_LARGOS[mes - 1]} {anio - 1}"
+        _style_section_header(ws, 5, 1, "Comparación año contra año", BLUE_KPI)
+        _style_table_header(ws, 6, ["Métrica", label_mes, label_yoy, "Variación"])
+        yoy_filas = [
+            ("Ingresos", actual["ingresos"], mismo_mes_anterior["ingresos"]),
+            ("Egresos", actual["egresos"], mismo_mes_anterior["egresos"]),
+            ("Neto", actual["neto"], mismo_mes_anterior["neto"]),
+            ("MRR (al corte)", actual["mrr"], mismo_mes_anterior["mrr"]),
+            ("Alumnos (al corte)", actual["alumnos"], mismo_mes_anterior["alumnos"]),
+            ("Nuevos alumnos", actual["nuevos"], mismo_mes_anterior["nuevos"]),
+            ("Ventas Bazar", actual["ventas"], mismo_mes_anterior["ventas"]),
+        ]
+        r = 7
+        for i, (metrica, ahora_v, antes_v) in enumerate(yoy_filas):
+            variacion = _fmt_pct(_pct(ahora_v, antes_v))
+            _style_data_row(ws, r, [metrica, ahora_v, antes_v, variacion],
+                            is_alt=(i % 2 == 1), is_money_cols={2, 3})
+            r += 1
+
+    # ── 3) YTD: año a la fecha (1 ene → hoy) vs mismo periodo del año anterior ──
+    ws = wb.create_sheet("YTD", 2)
+    ws.sheet_view.showGridLines = False
+    for col, w in (('A', 3), ('B', 24), ('C', 26), ('D', 26), ('E', 24), ('H', 3)):
+        ws.column_dimensions[col].width = w
+    tope = hoy
+    tope_ant = date(anio - 1, hoy.month, min(hoy.day, calendar.monthrange(anio - 1, hoy.month)[1]))
+    ing_ytd, eg_ytd, neto_ytd = _neto_rango(db, tenant_id, date(anio, 1, 1), tope + timedelta(days=1))
+    ing_ytd_a, eg_ytd_a, neto_ytd_a = _neto_rango(db, tenant_id, date(anio - 1, 1, 1), tope_ant + timedelta(days=1))
+
+    def _nuevos_rango(ini, fin):
+        return int(db.execute(text("""
+            SELECT COUNT(*) FROM usuarios
+            WHERE tenant_id = :tid AND rol = 'alumno'
+              AND created_at::date >= :ini AND created_at::date < :fin
+        """), {"tid": tenant_id, "ini": ini, "fin": fin}).scalar() or 0)
+
+    nuevos_ytd = _nuevos_rango(date(anio, 1, 1), tope + timedelta(days=1))
+    nuevos_ytd_a = _nuevos_rango(date(anio - 1, 1, 1), tope_ant + timedelta(days=1))
+
+    _titulo_hoja(ws, "YTD — AÑO A LA FECHA",
+                 f"1 ene → {hoy:%d/%m/%Y} de {anio} vs {anio - 1}   ·   {generado}")
+    _style_section_header(ws, 5, 1, "Acumulado año a la fecha", BLUE_KPI)
+    _style_table_header(ws, 6, ["Concepto", f"{anio} (YTD)", f"{anio - 1} (YTD)", "Variación"])
+    ytd_filas = [
+        ("Ingresos", ing_ytd, ing_ytd_a),
+        ("Egresos", eg_ytd, eg_ytd_a),
+        ("Neto", neto_ytd, neto_ytd_a),
+        ("Nuevos alumnos", nuevos_ytd, nuevos_ytd_a),
+    ]
+    r = 7
+    for i, (concepto, ahora_v, antes_v) in enumerate(ytd_filas):
+        variacion = _fmt_pct(_pct(ahora_v, antes_v))
+        _style_data_row(ws, r, [concepto, ahora_v, antes_v, variacion],
+                        is_alt=(i % 2 == 1), is_money_cols={3, 4})
+        r += 1
+
+    # ── 4) ARPU: ingreso por alumno (absorbe Detalle Planes) ────────────────────
+    ws = wb.create_sheet("ARPU", 3)
+    ws.sheet_view.showGridLines = False
+    for col, w in (('A', 3), ('B', 22), ('C', 20), ('D', 20),
+                   ('E', 20), ('F', 20), ('G', 20), ('H', 3)):
+        ws.column_dimensions[col].width = w
+    _titulo_hoja(ws, "ARPU — INGRESO POR ALUMNO", f"{label_mes}   ·   {generado}")
+
+    kpi = 5
+    _apply_kpi_card(ws, kpi, 2, "ARPU", f"${arpu:,.0f}", "Último mes cerrado", PURPLE_KPI, "🎯")
+    _apply_kpi_card(ws, kpi, 3, "Alumnos activos", f"{alumnos_hoy}",
+                    "Con suscripción vigente", BLUE_KPI, "👥")
+    ws.row_dimensions[kpi].height = 20
+    ws.row_dimensions[kpi + 1].height = 35
+    ws.row_dimensions[kpi + 2].height = 20
+
+    planes = db.execute(text("""
+        SELECT p.nombre, p.precio_clp, COUNT(DISTINCT s.id) AS suscripciones,
+               COALESCE(ROUND(AVG(t.monto)), 0) AS ticket, COALESCE(SUM(t.monto), 0) AS ingreso
+        FROM planes p
+        LEFT JOIN suscripciones s ON s.plan_id = p.id AND s.tenant_id = :tid
+        LEFT JOIN transacciones_financieras t ON t.referencia_id = s.id
+            AND t.referencia_tipo = 'suscripcion' AND t.categoria = 'membresia'
+            AND t.tipo = 'ingreso' AND t.tenant_id = :tid
+        WHERE p.tenant_id = :tid
+        GROUP BY p.id, p.nombre, p.precio_clp
+        ORDER BY ingreso DESC, suscripciones DESC
+    """), {"tid": tenant_id}).fetchall()
+
+    gt = db.execute(text("""
+        SELECT COUNT(*), COALESCE(ROUND(AVG(monto)), 0), COALESCE(SUM(monto), 0)
+        FROM transacciones_financieras
+        WHERE tenant_id = :tid AND tipo = 'ingreso' AND categoria = 'membresia'
+    """), {"tid": tenant_id}).first()
+    vida_dias = int(db.execute(text("""
+        SELECT COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (
+            COALESCE(fecha_baja::timestamptz, NOW()) - created_at)) / 86400.0)), 0)
+        FROM usuarios WHERE tenant_id = :tid AND rol = 'alumno'
+    """), {"tid": tenant_id}).scalar() or 0)
+    ltv = round((arpu or 0) * vida_dias / 30, 0)
+
+    _style_section_header(ws, 10, 1, "Por plan", BLUE_KPI)
+    _style_table_header(ws, 11, ["Plan", "Precio lista", "Suscripciones", "Ticket prom.", "Ingreso total"])
+    r = 12
+    for i, fila in enumerate(planes):
+        _style_data_row(ws, r, [fila[0], fila[1] or 0, fila[2] or 0, fila[3] or 0, fila[4] or 0],
+                        is_alt=(i % 2 == 1), is_money_cols={3, 5, 6})
+        r += 1
+
+    _style_section_header(ws, r + 1, 1, "Ticket promedio y LTV", BLUE_KPI)
+    r += 2
+    _style_table_header(ws, r, ["Métrica", "Valor"])
+    r += 1
+    extras = [
+        ("Ticket promedio membresía", f"${int(gt[1] or 0):,}"),
+        ("Transacciones membresía", int(gt[0] or 0)),
+        ("Ingreso membresía total", f"${int(gt[2] or 0):,}"),
+        ("Vida promedio (días)", vida_dias),
+        ("LTV estimado (ARPU × vida)", f"${ltv:,}"),
+    ]
+    for i, (metrica, valor) in enumerate(extras):
+        _style_data_row(ws, r, [metrica, valor], is_alt=(i % 2 == 1))
+        r += 1
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
     ws4.merge_cells('A1:F1')
     ws4.cell(row=1, column=1, value="FLUJO DE CAJA").font = Font(
         bold=True, size=20, color=WHITE)

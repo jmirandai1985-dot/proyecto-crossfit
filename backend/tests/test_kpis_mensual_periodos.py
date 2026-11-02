@@ -154,6 +154,21 @@ def test_a2_churn_con_valor_sigue_siendo_numero():
     assert isinstance(resp["churn_rate"], float)
 
 
+def test_a3_conversion_null_no_rompe_el_endpoint_mensual():
+    """`conversion_rate` NULL (sin alumnos en prueba) => null, NO TypeError/500.
+
+    Antes el `float(None)` tiraba el request completo (mismo bug que churn_rate).
+    """
+    resp = _get_kpis_mensual(_fila_mensual(conversion_rate=None))
+    assert resp["conversion_rate"] is None
+
+
+def test_a4_conversion_con_valor_sigue_siendo_numero():
+    resp = _get_kpis_mensual(_fila_mensual(conversion_rate=Decimal("30.00")))
+    assert resp["conversion_rate"] == 30.0
+    assert isinstance(resp["conversion_rate"], float)
+
+
 # ── B/C/F. INTEGRACIÓN: índice de períodos ───────────────────────────────────
 def _periodos(admin_headers):
     r = requests.get(f"{API_BASE}/kpis/mensual/periodos",

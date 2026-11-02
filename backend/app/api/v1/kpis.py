@@ -430,7 +430,8 @@ def get_kpis_mensual(
         "alumnos_prueba": kpi.alumnos_prueba,
         "alumnos_clase_prueba_ejecutada": kpi.alumnos_clase_prueba_ejecutada,
         "alumnos_plan_comprado": kpi.alumnos_plan_comprado,
-        "conversion_rate": float(kpi.conversion_rate),
+        "conversion_rate": (float(kpi.conversion_rate)
+                            if kpi.conversion_rate is not None else None),
         "alumnos_activos_inicio": kpi.alumnos_activos_inicio,
         "alumnos_baja": kpi.alumnos_baja,
         # `churn_rate` es NULLABLE a propósito (migración 027): None = la cohorte

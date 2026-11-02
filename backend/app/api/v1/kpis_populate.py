@@ -260,6 +260,17 @@ def _semanas_transcurridas(inicio: date, fin: date, hoy: date) -> float:
     return dias / 7.0 if dias > 0 else 0.0
 
 
+def _calcular_conversion_rate(plan_comprado: int, alumnos_prueba: int):
+    """Conversión prueba→plan del mes. None si no hay alumnos en prueba.
+
+    Sin alumnos en prueba no hay denominador: devolver 0% mezclaba "nadie
+    convirtió" con "no hubo pruebas" (mismo criterio que churn_rate=None).
+    """
+    if not alumnos_prueba:
+        return None
+    return round(plan_comprado / alumnos_prueba * 100, 2)
+
+
 def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> dict:
     """Calcula y hace UPSERT (idempotente) de UN mes en `monthly_kpis`.
 
@@ -307,8 +318,8 @@ def _upsert_mes_monthly(db: Session, tenant_id: int, year: int, month: int) -> d
         dia_chile(Suscripcion.fecha_inicio) <= fin,
     ).scalar() or 0
 
-    conversion_rate = round(
-        alumnos_plan_comprado / alumnos_prueba * 100, 2) if alumnos_prueba else 0
+    conversion_rate = _calcular_conversion_rate(
+        alumnos_plan_comprado, alumnos_prueba)
 
     # ── Actividad / churn ──
     # "Cuántos alumnos había al ABRIR el mes": se mide con la vigencia EN ESA FECHA

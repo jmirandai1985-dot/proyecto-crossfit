@@ -213,6 +213,12 @@ class SesionFalsa:
     def fetchone(self):
         return None
 
+    def first(self):
+        # El único `.first()` del flujo es `metricas.ventas_bazar_detalle` (monto,
+        # pedidos). Para estos tests devuelve 0/0: el Bazar no participa del MRR que
+        # se verifica y su consulta no usa el predicado compartido.
+        return (0, 0)
+
 
 def _consultas(sesion: SesionFalsa, fragmento: str) -> list:
     return [c for c in sesion.consultas if fragmento in c[0]]
@@ -280,34 +286,28 @@ def test_a_el_mrr_de_cada_mes_lo_calcula_metricas_service_con_el_corte(monkeypat
     assert [h["mrr"] for h in historico] == [float(c.day * 1000) for _, _, c in esperados]
 
 
-# ── B. Caso 1: el mes pasado del export == metricas_service para la misma fecha ──────────────────
+# ── B. Caso 1: el mes pasado del reporte == metricas_service para la misma fecha ─────────────────
 def test_b_el_mes_pasado_del_export_coincide_con_metricas_service():
-    """Caso 1, leído EN EL ARCHIVO: la celda de MRR del mes pasado de la hoja "Historico Mensual" es
-    `metricas_service.mrr(db, tenant_id, ultimo_dia_del_mes_pasado)` (la del dashboard y del BI)."""
+    """Caso 1: el MRR del mes pasado que usa el reporte (vía `_resumen_mes`) es
+    `metricas_service.mrr` para el corte de ese mes (la del dashboard y del BI)."""
     filas = _filas_de_ejemplo()
     sesion = SesionFalsa(filas)
-    libro = _genera_excel(sesion)
 
-    _, _, corte_pasado = _meses_esperados()[-2]
+    anio_pasado, mes_pasado, corte_pasado = _meses_esperados()[-2]
     assert corte_pasado < datetime.now(timezone.utc).date(), "el corte tiene que ser del pasado"
 
-    # El valor de la función compartida para esa fecha es el de la celda de la hoja histórica.
-    valor_app = metricas.mrr(SesionFalsa(filas), TENANT, corte_pasado)
-    assert valor_app == float(MRR_MES_PASADO)
-    assert libro["Historico Mensual"].cell(
-        row=FILA_MES_PASADO, column=COL_MRR).value == valor_app
+    resumen = rep._resumen_mes(sesion, TENANT, anio_pasado, mes_pasado)
+    assert resumen["corte"] == corte_pasado
+    assert resumen["mrr"] == float(MRR_MES_PASADO)
+    assert resumen["mrr"] == float(metricas.mrr(SesionFalsa(filas), TENANT, corte_pasado))
 
-    # Y la consulta emitida para ese mes es la MISMA del dashboard: texto y parámetros (la 1ª del
-    # archivo es el KPI de "hoy", después vienen los 6 meses).
-    por_fecha = {p["hasta"]: (sql, p)
-                 for sql, p in _consultas(sesion, "SUM(p.precio_clp)")}
-    sql_export, params_export = por_fecha[corte_pasado]
+    # La consulta emitida para ese mes es la MISMA del dashboard (texto y parámetros).
+    sql_export, params_export = {p["hasta"]: (sql, p)
+                                 for sql, p in _consultas(sesion, "SUM(p.precio_clp)")}[corte_pasado]
     assert params_export == {"tid": TENANT, "hasta": corte_pasado}
-
     sesion_app = SesionFalsa(filas)
     metricas.mrr(sesion_app, TENANT, corte_pasado)
     assert sql_export == sesion_app.consultas[0][0]
-    assert params_export == sesion_app.consultas[0][1]
     assert evalua(sql_export, params_export, filas) == MRR_MES_PASADO
 
 
@@ -315,22 +315,16 @@ def test_b_el_mes_pasado_del_export_coincide_con_metricas_service():
 @pytest.mark.parametrize("estado_de_hoy", ["activo", "vencido"])
 def test_c_vencer_una_suscripcion_hoy_no_altera_el_mes_pasado(estado_de_hoy):
     """Caso 2: la fila que estaba vigente al corte del mes pasado hoy puede estar `vencido` (se venció
-    ayer) o todavía `activo`. El Excel tiene que salir IGUAL: el mismo MRR y el mismo conteo en el mes
-    pasado, porque esa fecha no depende del estado de hoy.
-
-    Con el filtro viejo esto cambiaba de un día para otro: `estado = 'activo'` sacaba la fila del mes
-    pasado en cuanto pasaba a `vencido` (contra la base: 75.000 ⇒ 30.000 y los alumnos 2 ⇒ 1). Acá el
-    control negativo falla todavía antes: el doble sólo evalúa la consulta del predicado compartido,
-    así que con el SQL viejo la celda queda en 0 y la comparación lo caza igual.
+    ayer) o todavía `activo`. El reporte tiene que salir IGUAL: el mismo MRR en el mes pasado, porque
+    esa fecha no depende del estado de hoy.
     """
     filas = _filas_de_ejemplo(estado_de_la_vencida=estado_de_hoy)
     sesion = SesionFalsa(filas)
-    hoja = _genera_excel(sesion)["Historico Mensual"]
+    anio_pasado, mes_pasado, corte_pasado = _meses_esperados()[-2]
 
-    assert hoja.cell(row=FILA_MES_PASADO, column=COL_MRR).value == float(MRR_MES_PASADO)
-    assert hoja.cell(row=FILA_MES_PASADO, column=COL_ALUMNOS).value == ALUMNOS_MES_PASADO
+    resumen = rep._resumen_mes(sesion, TENANT, anio_pasado, mes_pasado)
+    assert resumen["mrr"] == float(MRR_MES_PASADO)
 
-    corte_pasado = _meses_esperados()[-2][2]
     sql_mrr, _ = {p["hasta"]: (sql, p)
                   for sql, p in _consultas(sesion, "SUM(p.precio_clp)")}[corte_pasado]
     assert "estado = 'activo'" not in sql_mrr
@@ -377,70 +371,42 @@ def test_e_el_export_no_tiene_su_propia_copia_del_mrr_ni_de_la_fecha():
     assert "SUM(p.precio_clp)" not in fuente
     # La tabla histórica no puede volver al "estado de hoy" (now()): su corte es por fecha.
     assert "now() AT TIME ZONE" not in inspect.getsource(rep._build_historico_mensual)
-    for funcion in (rep._build_historico_mensual, rep.crear_reporte_ventas_mensual_bytes):
+    # El MRR vive UNA vez en `metricas_service` y el corte en `_corte_suscripciones`: los consumen
+    # `_build_historico_mensual` (histórico) y `_resumen_mes` (la que usa el reporte de 4 pestañas).
+    for funcion in (rep._build_historico_mensual, rep._resumen_mes):
         codigo = inspect.getsource(funcion)
         assert "metricas.mrr(" in codigo, funcion.__name__
         assert "_corte_suscripciones(" in codigo, funcion.__name__
 
 
-# ── F. La tarjeta con el mes EN CURSO: la celda del mismo mes, que es HOY (como el dashboard) ────
-def test_f_la_tarjeta_de_mrr_del_mes_en_curso_es_la_celda_de_ese_mes():
-    """Con el mes EN CURSO elegido, la tarjeta KPI "MRR" del Resumen Ejecutivo es la de HOY —el mes
-    todavía no cerró, así que su corte es hoy, igual que el dashboard (`reportes.py`)— y es el MISMO
-    número que la celda de "Historico Mensual" de ese mes: la tarjeta y la tabla del propio archivo no
-    pueden decir cosas distintas."""
+# ── F. El mes EN CURSO se corta a HOY (como el dashboard) ────────────────────────────────────────
+def test_f_el_mes_en_curso_se_corta_a_hoy():
+    """Con el mes EN CURSO, `_resumen_mes` corta a HOY (el mes todavía no cerró), igual que el
+    dashboard, y su MRR es `metricas.mrr` para hoy."""
     hoy = datetime.now(timezone.utc).date()
     filas = _filas_de_ejemplo()
     sesion = SesionFalsa(filas)
-    libro = _genera_excel(sesion)
 
-    esperado = metricas.mrr(SesionFalsa(filas), TENANT, hoy)     # la del dashboard, con hoy
-    assert esperado == float(MRR_HOY)                            # la que venció ayer ya no cuenta hoy
-    assert libro["Historico Mensual"].cell(row=FILA_MES_ACTUAL, column=COL_MRR).value == esperado
-    assert _numero_de_la_tarjeta(libro) == esperado
-
-    # La etiqueta dice la fecha del corte (hoy, porque el mes está en curso) y el subtítulo se mantiene.
-    assert f"MRR al {hoy:%d/%m/%Y}" in _celda_de_la_tarjeta(libro, FILA_LABEL_KPI)
-    assert _celda_de_la_tarjeta(libro, FILA_LABEL_KPI + 2) == "Ingresos recurrentes"
-
-    # El corte es HOY, no el "cierre" del mes en curso: la suscripción que empieza mañana todavía no
-    # cuenta (si hoy es el último día del mes, hoy y el cierre son la misma fecha y no hay qué separar).
-    if _arranca_manana():
-        assert esperado != _mrr_al_cierre_del_mes_en_curso()
-
-    # Y la consulta de la tarjeta es la MISMA que la del mes en curso de la tabla (misma fecha).
-    assert [p["hasta"] for _, p in _consultas(sesion, "SUM(p.precio_clp)")] == [hoy] + [
-        corte for _, _, corte in _meses_esperados()]
+    resumen = rep._resumen_mes(sesion, TENANT, hoy.year, hoy.month)
+    assert resumen["corte"] == hoy
+    assert resumen["mrr"] == float(MRR_HOY)
+    assert resumen["mrr"] == float(metricas.mrr(SesionFalsa(filas), TENANT, hoy))
 
 
-# ── G. La tarjeta con un mes PASADO: la celda de ESE mes, no la de hoy ───────────────────────────
-def test_g_la_tarjeta_de_mrr_de_un_mes_pasado_es_la_celda_de_ese_mes():
-    """Con un mes PASADO elegido, la tarjeta usa el corte de ESE mes (su último día), no la fecha de
-    hoy: es el mismo número que la fila de ese mes de "Historico Mensual" y distinto del de hoy (en
-    las filas de fixture, la suscripción que venció en ese corte sumó al mes pasado y ya no suma hoy).
-    Antes del fix, la tarjeta mostraba el MRR del día en que se descargaba el archivo."""
+# ── G. Un mes PASADO se corta al último día de ESE mes (no a hoy) ────────────────────────────────
+def test_g_un_mes_pasado_se_corta_al_ultimo_dia_de_ese_mes():
+    """Con un mes PASADO, `_resumen_mes` corta al último día de ESE mes (no a hoy): la suscripción
+    que venció en ese corte sumó al mes pasado y ya no suma hoy."""
     anio, mes, corte_pasado = _meses_esperados()[-2]
     hoy = datetime.now(timezone.utc).date()
     assert corte_pasado < hoy, "el mes pasado tiene que estar cerrado"
 
     filas = _filas_de_ejemplo()
     sesion = SesionFalsa(filas)
-    libro = _genera_excel(sesion, mes=mes, anio=anio)
-
-    del_mes = metricas.mrr(SesionFalsa(filas), TENANT, corte_pasado)
-    assert del_mes == float(MRR_MES_PASADO)
-    assert libro["Historico Mensual"].cell(row=FILA_MES_PASADO, column=COL_MRR).value == del_mes
-    assert _numero_de_la_tarjeta(libro) == del_mes, "la tarjeta es la celda del mes elegido"
+    resumen = rep._resumen_mes(sesion, TENANT, anio, mes)
+    assert resumen["corte"] == corte_pasado
+    assert resumen["mrr"] == float(MRR_MES_PASADO)
 
     mrr_hoy = metricas.mrr(SesionFalsa(filas), TENANT, hoy)
-    assert mrr_hoy == float(MRR_HOY) and mrr_hoy != del_mes      # NO es la foto de hoy
-
-    # La etiqueta dice el corte del mes elegido (y no la fecha de hoy).
-    etiqueta = _celda_de_la_tarjeta(libro, FILA_LABEL_KPI)
-    assert f"MRR al {corte_pasado:%d/%m/%Y}" in etiqueta
-    assert f"{hoy:%d/%m/%Y}" not in etiqueta
-
-    # La 1ª consulta de MRR del archivo es la del mes elegido (su corte); después, los 6 de la tabla.
-    assert [p["hasta"] for _, p in _consultas(sesion, "SUM(p.precio_clp)")] == [corte_pasado] + [
-        corte for _, _, corte in _meses_esperados()]
+    assert mrr_hoy == float(MRR_HOY) and mrr_hoy != resumen["mrr"]
 
