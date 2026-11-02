@@ -164,6 +164,8 @@ const ESTADOS_SOLICITUD_PLAN = {
     pending: { texto: 'Pendiente de revisión', clase: 'text-amber-300' },
     approved: { texto: 'Aprobada', clase: 'text-emerald-300' },
     rejected: { texto: 'Rechazada', clase: 'text-red-300' },
+    // Migración 067: vence sola si el pago online nunca se confirmó en 24 h.
+    expirada: { texto: 'Expirada', clase: 'text-zinc-400' },
 };
 
 export const estadoSolicitudPlan = (estado) =>

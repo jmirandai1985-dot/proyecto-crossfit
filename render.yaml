@@ -2,8 +2,9 @@
 # render.yaml — Blueprint para desplegar en Render.
 #   1) Web Service Docker (imagen combinada: nginx + uvicorn).
 #   2) Los 5 Cron Jobs de automatización de PROD (auditoría B4, 2026-10-28)
+#      + la expiración horaria de pagos online no cobrados (migración 067)
 #      + los 3 de RETENCIÓN de TEST (B8) en modo ENSAYO (`DRY_RUN=1`)
-#      + los 3 de RETENCIÓN de PROD (B8) en modo ENSAYO (`DRY_RUN=1`) = 11 `type: cron`.
+#      + los 3 de RETENCIÓN de PROD (B8) en modo ENSAYO (`DRY_RUN=1`) = 12 `type: cron`.
 # La BD es externa (Neon) → NO se declara database en este archivo.
 # n8n queda FUERA de este blueprint (corre fuera de Render).
 # Los pasos manuales, los env groups y la verificación de los Cron Jobs están en
@@ -211,6 +212,26 @@ services:
         value: "0"
       - fromGroup: kpis-prod                 # KPIS_API_URL, N8N_API_KEY / CRON_API_KEY
       - fromGroup: alertas
+
+  # 5b) Expiración de pagos online no cobrados — migración 067 (Cron horario).
+  #     Replica `services/pagos.expirar_pendientes` en SQL (la imagen de cron no
+  #     importa la app): membresía 24 h → solicitud `expirada`; Bazar 30 min →
+  #     pedido `rechazado` + stock devuelto. `DRY_RUN` es fail-closed (exit 2 si
+  #     falta). `DIRECT_URL` (sync:false) se pega en el dashboard.
+  - type: cron
+    name: box-crossfit-expirar-pendientes
+    runtime: docker
+    plan: starter
+    region: oregon
+    schedule: "0 * * * *"                       # cada hora en punto (UTC): delay máximo ~1 h
+    dockerfilePath: backend/Dockerfile.cron
+    dockerContext: backend
+    dockerCommand: python -m maintenance.expirar_pendientes
+    envVars:
+      - key: DRY_RUN
+        value: "0"
+      - key: DIRECT_URL
+        sync: false                             # conexión DIRECTA de Neon (sin -pooler)
   # ─────────────────────────────────────────────────────────────
   # 6-8) RETENCIÓN DE DATOS (B8) — ALTA HECHA, EN MODO ENSAYO
   # ─────────────────────────────────────────────────────────────

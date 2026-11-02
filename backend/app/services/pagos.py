@@ -612,15 +612,15 @@ def _aplicar_beneficio(db: Session, pago: Pago) -> None:
                 # El admin la aprobó (o rechazó) mientras el pago viajaba.
                 solicitud = db.query(SolicitudPlan).filter(
                     SolicitudPlan.id == pago.referencia_id).first()
-                if solicitud is not None and solicitud.estado == "rejected":
-                    # El alumno pagó y la solicitud está rechazada: plata sin
-                    # contraprestación. Un humano tiene que devolverla.
+                if solicitud is not None and solicitud.estado in ("rejected", "expirada"):
+                    # El alumno pagó y la solicitud está rechazada o expirada:
+                    # plata sin contraprestación. Un humano tiene que devolverla.
                     _alertar_admins(
                         db, pago.tenant_id, "pago_aprobado_solicitud_rechazada",
                         (f"⚠️ Se aprobó el pago #{pago.id} "
                          f"(${pago.monto_clp:,}) de una solicitud de plan que "
-                         "estaba RECHAZADA. Devuelve el dinero o activa el plan "
-                         "a mano."))
+                         "estaba RECHAZADA o EXPIRADA. Devuelve el dinero o activa "
+                         "el plan a mano."))
             return
         except aprobacion_planes.PlanNoEncontrado:
             _alertar_admins(
@@ -716,6 +716,25 @@ def estado_publico(db: Session, pago: Pago) -> dict:
     }
 
 
+def pago_vencido(pago, *, ahora, minutos_bazar: int = 30,
+                 horas_membresia: int = 24) -> bool:
+    """True si un pago abierto superó el umbral de expiración de su concepto.
+
+    Puro (sin DB): decide por `created_at` contra `ahora`. `None` (fila sin
+    fecha) y los conceptos sin expiración definida (emergencia, futuro) nunca
+    vencen. `<=` hace que el pago venza JUSTO en el límite (no un minuto después).
+    """
+    from datetime import timedelta
+
+    if pago.created_at is None:
+        return False
+    if pago.concepto == CONCEPTO_BAZAR:
+        return pago.created_at <= ahora - timedelta(minutes=minutos_bazar)
+    if pago.concepto == CONCEPTO_MEMBRESIA:
+        return pago.created_at <= ahora - timedelta(hours=horas_membresia)
+    return False
+
+
 def expirar_pendientes(db: Session, *, minutos_bazar: int = 30,
                        horas_membresia: int = 24) -> dict:
     """Cierra los pagos que nunca se cobraron y libera lo que reservaban.
@@ -723,34 +742,27 @@ def expirar_pendientes(db: Session, *, minutos_bazar: int = 30,
     * **Bazar (30 min)**: el stock vuelve por `rechazar_pedido` (el mismo camino
       del rechazo manual). Un pedido `pendiente` con la plata sin llegar es un
       producto bloqueado que otro alumno no puede comprar.
-    * **Membresía (24 h)**: la solicitud pasa a `rejected` con
-      `comentario_admin='Pago online no completado'` para que salga de la cola
-      de pendientes del admin (no se crea basura que nadie va a aprobar).
+    * **Membresía (24 h)**: la solicitud pasa a `expirada` con
+      `comentario_admin='Expirada: pago online no completado en 24 h'` para que
+      salga de la cola de pendientes del admin (no se crea basura que nadie va
+      a aprobar). ⚠️ NO se notifica al alumno al expirar (mejora futura: avisar
+      en su campana para que pueda volver a intentar el pago).
 
     Un pago aprobado DESPUÉS de esto no revive nada: lo detecta `aplicar_pago`
     y avisa a los admins (ver `_aplicar_beneficio`).
 
-    Lo llama `maintenance/reconciliar_pagos.py`; es idempotente.
+    Lo llama `maintenance/reconciliar_pagos.py` y el cron
+    `maintenance/expirar_pendientes.py`; es idempotente.
     """
-    from datetime import timedelta
-
     ahora = ahora_santiago()
     abiertos = db.query(Pago).filter(
         Pago.estado.in_(("pendiente", "en_proceso"))).all()
 
     contadores = {"expirados": 0, "pedidos_rechazados": 0,
-                  "solicitudes_rechazadas": 0}
+                  "solicitudes_expiradas": 0}
     for pago in abiertos:
-        creado = pago.created_at
-        if creado is None:
-            continue
-        if pago.concepto == CONCEPTO_BAZAR:
-            if creado > ahora - timedelta(minutes=minutos_bazar):
-                continue
-        elif pago.concepto == CONCEPTO_MEMBRESIA:
-            if creado > ahora - timedelta(hours=horas_membresia):
-                continue
-        else:  # concepto sin expiración definida (emergencia, futuro)
+        if not pago_vencido(pago, ahora=ahora, minutos_bazar=minutos_bazar,
+                            horas_membresia=horas_membresia):
             continue
 
         # CAS: si el webhook lo aprobó mientras recorríamos la lista, no se toca.
@@ -785,11 +797,11 @@ def expirar_pendientes(db: Session, *, minutos_bazar: int = 30,
                 update(SolicitudPlan)
                 .where(SolicitudPlan.id == pago.referencia_id)
                 .where(SolicitudPlan.estado == "pending")
-                .values(estado="rejected",
-                        comentario_admin="Pago online no completado")
+                .values(estado="expirada",
+                        comentario_admin="Expirada: pago online no completado en 24 h")
             )
             if cambiadas.rowcount:
-                contadores["solicitudes_rechazadas"] += 1
+                contadores["solicitudes_expiradas"] += 1
             db.commit()
 
     return contadores
