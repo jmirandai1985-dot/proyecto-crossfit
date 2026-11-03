@@ -43,6 +43,7 @@ from app.core.config import settings                  # noqa: E402
 from app.core.rate_limit import limiter               # noqa: E402
 from app.db.database import get_db                    # noqa: E402
 from app.models.pago import Pago                      # noqa: E402
+from app.models.solicitud_plan import SolicitudPlan   # noqa: E402
 from app.models.suscripcion import EstadoSuscripcion, Suscripcion  # noqa: E402
 from app.models.usuario import Usuario                               # noqa: E402
 from app.services import suscripciones_mp                            # noqa: E402
@@ -58,14 +59,21 @@ URL_COBRO = "https://api.mercadopago.com/authorized_payments/987654"
 class _Consulta:
     """Cadena `query(...).filter(...).order_by(...).first()` de mentira."""
 
-    def __init__(self, resultado):
+    def __init__(self, resultado, resultado_join=None):
         self._resultado = resultado
+        self._resultado_join = resultado_join
 
     def filter(self, *args, **kwargs):
         return self
 
     def order_by(self, *args, **kwargs):
         return self
+
+    def join(self, *args, **kwargs):
+        # `plan_vigente_usable` hace `db.query(Suscripcion).join(Plan...)`: el
+        # resultado del join es el "otro plan vigente" (o None), no la suscripción
+        # que busca `buscar_suscripcion` sin join.
+        return _Consulta(self._resultado_join)
 
     def first(self):
         return self._resultado
@@ -75,10 +83,11 @@ class _SesionFalsa:
     """Sesión de mentira: cada test decide qué devuelve cada tabla."""
 
     def __init__(self, *, suscripcion=None, pago=None, usuario=None,
-                 falla_commit=False):
+                 plan_vigente=None, falla_commit=False):
         self.suscripcion = suscripcion
         self.pago = pago
         self.usuario = usuario
+        self.plan_vigente = plan_vigente
         self.falla_commit = falla_commit
         self.agregados = []
         self.commits = 0
@@ -86,7 +95,9 @@ class _SesionFalsa:
 
     def query(self, modelo):
         if modelo is Suscripcion:
-            return _Consulta(self.suscripcion)
+            # `.join(Plan...)` lo usa `plan_vigente_usable`; sin join, es la
+            # suscripción que resuelve `buscar_suscripcion`.
+            return _Consulta(self.suscripcion, self.plan_vigente)
         if modelo is Pago:
             return _Consulta(self.pago)
         if modelo is Usuario:
@@ -95,6 +106,10 @@ class _SesionFalsa:
 
     def add(self, objeto):
         self.agregados.append(objeto)
+
+    def flush(self):
+        # `_encolar_recurrente` hace flush para obtener el id de la solicitud.
+        return None
 
     def commit(self):
         self.commits += 1
@@ -459,6 +474,27 @@ def test_authorized_activa_y_guarda_el_vinculo(monkeypatch):
     assert suscripcion.mp_sincronizado_en is not None
     assert sesion.commits == 1
     assert len(llamadas) == 1
+
+
+def test_authorized_con_otro_plan_vigente_va_a_cola(monkeypatch):
+    """Con otra membresía vigente, la recurrente NO se activa: queda en cola."""
+    _mock_mp(monkeypatch, status=200, cuerpo=_preapproval("authorized"))
+    suscripcion = _suscripcion()  # pendiente, la que recibe el aviso
+    otra_vigente = _suscripcion(estado=EstadoSuscripcion.activo)
+    sesion = _SesionFalsa(suscripcion=suscripcion, plan_vigente=otra_vigente)
+
+    respuesta = _app(sesion).post(
+        "/api/v1/mp/webhook?type=subscription_preapproval&data.id=123456",
+        json=_simulacion_panel())
+
+    assert respuesta.status_code == 200
+    assert respuesta.json()["resultado"] == "en_cola"
+    assert suscripcion.estado is EstadoSuscripcion.pendiente  # no se activó
+
+    solicitudes = [o for o in sesion.agregados if isinstance(o, SolicitudPlan)]
+    assert len(solicitudes) == 1
+    assert solicitudes[0].estado == "en_cola"
+    assert solicitudes[0].plan_id == suscripcion.plan_id
 
 
 def test_pending_deja_la_suscripcion_pendiente(monkeypatch):

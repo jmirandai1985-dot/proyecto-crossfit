@@ -37,6 +37,9 @@ const PanelSolicitudes = () => {
     const [error, setError] = useState('');
     // Vista previa del comprobante (blob autenticado, revocado al cerrar).
     const [voucherSolicitud, setVoucherSolicitud] = useState(null); // solicitud
+    // Detalle del pago ONLINE (origen_pago='mercadopago'): no hay voucher, se
+    // muestra la referencia/estado del cobro que devuelve el backend.
+    const [pagoDetalle, setPagoDetalle] = useState(null); // solicitud
 
     const { preview: voucherPreview } = useDocumentoAutenticado({
         previewUrl: voucherSolicitud?.id
@@ -157,32 +160,31 @@ const PanelSolicitudes = () => {
                                                 >
                                                     📎 Ver comprobante
                                                 </button>
-                                            ) : pagoConfirmado(s) ? (
-                                                /* Pago CONFIRMADO por Mercado Pago: no hay
-                                                   comprobante que abrir y la plata ya existe. */
-                                                <span
-                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 text-[11px] font-semibold"
-                                                    title={s.pago_id ? `Pago online #${s.pago_id}` : 'Pagado online'}
-                                                    data-testid="badge-pagado-online"
-                                                >
-                                                    💳 Pagado online ✓
-                                                </span>
-                                            ) : pagoEnEspera(s) ? (
-                                                /* Intención de pagar, pero el webhook todavía NO
-                                                   confirmó el cobro: el admin NO debe aprobar. */
-                                                <span
-                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 text-[11px] font-semibold"
-                                                    data-testid="badge-pago-en-espera"
-                                                >
-                                                    ⏳ Esperando pago
-                                                </span>
                                             ) : esMercadopago(s) ? (
-                                                <span
-                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/15 text-red-300 text-[11px] font-semibold"
-                                                    data-testid="badge-pago-no-completado"
-                                                >
-                                                    Pago no completado
-                                                </span>
+                                                /* Pago ONLINE: no hay voucher. Se muestra el estado
+                                                   y un link al detalle del cobro. */
+                                                <div className="flex flex-col gap-1 items-start">
+                                                    {pagoConfirmado(s) ? (
+                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 text-[11px] font-semibold" data-testid="badge-pagado-online">
+                                                            💳 Pagado online ✓
+                                                        </span>
+                                                    ) : pagoEnEspera(s) ? (
+                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 text-[11px] font-semibold" data-testid="badge-pago-en-espera">
+                                                            ⏳ Esperando pago
+                                                        </span>
+                                                    ) : (
+                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/15 text-red-300 text-[11px] font-semibold" data-testid="badge-pago-no-completado">
+                                                            Pago no completado
+                                                        </span>
+                                                    )}
+                                                    <button
+                                                        onClick={() => setPagoDetalle(s)}
+                                                        className="text-blue-400 underline text-[11px] hover:text-blue-300"
+                                                        data-testid="ver-pago-online"
+                                                    >
+                                                        Ver referencia del pago
+                                                    </button>
+                                                </div>
                                             ) : (
                                                 <span className="text-zinc-500 text-xs">Sin comprobante</span>
                                             )}
@@ -195,9 +197,9 @@ const PanelSolicitudes = () => {
                                             <div className="flex items-center justify-end gap-2">
                                                 <button
                                                     onClick={() => handleSolicitudAccion(s.id, 'aprobar')}
-                                                    disabled={solicitudActionId === s.id || (esMercadopago(s) && !pagoConfirmado(s))}
-                                                    title={esMercadopago(s) && !pagoConfirmado(s)
-                                                        ? 'El pago online todavía no está confirmado por Mercado Pago'
+                                                    disabled={solicitudActionId === s.id || esMercadopago(s)}
+                                                    title={esMercadopago(s)
+                                                        ? 'Pago online: se aprueba automáticamente por el webhook de Mercado Pago'
                                                         : ''}
                                                     className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-semibold transition-colors"
                                                 >
@@ -291,6 +293,37 @@ const PanelSolicitudes = () => {
                             >
                                 Cerrar
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL DETALLE DEL PAGO ONLINE: no hay voucher, se muestra la
+                referencia/estado del cobro que ya devuelve el backend. */}
+            {pagoDetalle && (
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4"
+                    onClick={() => setPagoDetalle(null)}>
+                    <div className="bg-zinc-900 rounded-lg shadow-xl max-w-md w-full"
+                        onClick={(e) => e.stopPropagation()}>
+                        <div className="p-4 border-b border-zinc-800 flex justify-between items-center">
+                            <h3 className="font-bold text-zinc-100">💳 Pago online</h3>
+                            <button onClick={() => setPagoDetalle(null)}
+                                className="text-zinc-400 hover:text-zinc-300 text-xl font-bold">✕</button>
+                        </div>
+                        <div className="p-4 space-y-2 text-sm text-zinc-300">
+                            <p>Alumno: <span className="text-white">{pagoDetalle.alumno_nombre}</span></p>
+                            <p>Plan: <span className="text-white">{pagoDetalle.plan_nombre}</span></p>
+                            <p>Pago #: <span className="text-white">{pagoDetalle.pago_id ?? '—'}</span></p>
+                            <p>Referencia: <span className="text-white break-all">{pagoDetalle.pago_external_reference ?? '—'}</span></p>
+                            <p>Estado: <span className="text-white">{pagoDetalle.pago_estado ?? '—'}</span></p>
+                            <p>Fecha de pago: <span className="text-white">{pagoDetalle.pago_fecha ? new Date(pagoDetalle.pago_fecha).toLocaleString('es-CL') : '—'}</span></p>
+                        </div>
+                        <div className="mx-4 mb-4 px-3 py-2 bg-amber-500/10 border-l-4 border-amber-500 rounded text-amber-300 text-xs">
+                            Pago online: se aprueba automáticamente por el webhook de Mercado Pago; no requiere acción manual.
+                        </div>
+                        <div className="p-4 border-t border-zinc-800 flex justify-end">
+                            <button onClick={() => setPagoDetalle(null)}
+                                className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm">Cerrar</button>
                         </div>
                     </div>
                 </div>

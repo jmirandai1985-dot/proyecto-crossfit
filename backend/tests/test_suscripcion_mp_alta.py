@@ -62,14 +62,20 @@ ID_FILA = 4242
 class _Consulta:
     """Cadena `query(...).filter(...).order_by(...).first()` de mentira."""
 
-    def __init__(self, resultado):
+    def __init__(self, resultado, resultado_join=None):
         self._resultado = resultado
+        self._resultado_join = resultado_join
 
     def filter(self, *args, **kwargs):
         return self
 
     def order_by(self, *args, **kwargs):
         return self
+
+    def join(self, *args, **kwargs):
+        # `plan_vigente_usable` (cola de planes) consulta con `.join(Plan...)`.
+        # En estos tests no hay otro plan vigente, así que devuelve None.
+        return _Consulta(self._resultado_join)
 
     def first(self):
         return self._resultado

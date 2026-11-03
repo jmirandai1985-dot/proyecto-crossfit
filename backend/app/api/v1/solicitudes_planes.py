@@ -240,7 +240,7 @@ def listar_solicitudes_pendientes(
     # que una solicitud huérfana sigue mostrando "Desconocido" en vez de romper.
     filas = db.query(
         SolicitudPlan, Plan.nombre, Plan.precio_clp, Usuario.nombre,
-        Usuario.correo, Pago.estado,
+        Usuario.correo, Pago.estado, Pago.external_reference, Pago.pagado_en,
     ).outerjoin(
         Plan, Plan.id == SolicitudPlan.plan_id,
     ).outerjoin(
@@ -253,7 +253,8 @@ def listar_solicitudes_pendientes(
     ).order_by(SolicitudPlan.created_at.desc()).all()
 
     results = []
-    for s, plan_nombre, plan_precio_clp, alumno_nombre, alumno_correo, pago_estado in filas:
+    for (s, plan_nombre, plan_precio_clp, alumno_nombre, alumno_correo,
+         pago_estado, pago_external_reference, pago_pagado_en) in filas:
         precio_lista = plan_precio_clp if plan_precio_clp is not None else 0
         results.append({
             "id": s.id,
@@ -280,6 +281,8 @@ def listar_solicitudes_pendientes(
             "origen_pago": s.origen_pago or "manual",
             "pago_id": s.pago_id,
             "pago_estado": pago_estado,
+            "pago_external_reference": pago_external_reference,
+            "pago_fecha": str(pago_pagado_en) if pago_pagado_en else None,
             "estado": s.estado,
             "created_at": s.created_at,
         })

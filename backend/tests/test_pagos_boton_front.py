@@ -132,9 +132,10 @@ def test_h_el_badge_pagado_online_exige_confirmacion_real():
     assert "Esperando pago" in s, \
         "falta el estado intermedio para el pago aún no confirmado"
     assert 'data-testid="badge-pago-en-espera"' in s
-    # El botón Aprobar se deshabilita mientras el pago online no esté confirmado.
-    assert "(esMercadopago(s) && !pagoConfirmado(s))" in s, \
-        "el botón Aprobar no puede habilitarse con el pago online sin confirmar"
+    # El botón Aprobar se deshabilita para CUALQUIER pago online: la aprobación la
+    # hace el webhook, no el admin (aunque el cobro ya esté confirmado).
+    assert "disabled={solicitudActionId === s.id || esMercadopago(s)}" in s, \
+        "el botón Aprobar no puede habilitarse para un pago online"
 
 
 def test_i_el_badge_del_bazar_tambien_exige_confirmacion_real():

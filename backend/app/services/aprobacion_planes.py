@@ -153,6 +153,17 @@ def _plan_vigente_usable(db: Session, tenant_id: int,
             .first())
 
 
+def plan_vigente_usable(db: Session, tenant_id: int,
+                        usuario_id: int) -> Optional[Suscripcion]:
+    """La membresía PAGADA vigente y usable HOY del alumno, o `None`.
+
+    Wrapper PÚBLICO de `_plan_vigente_usable` para los flujos que tienen que
+    respetar la MISMA regla de cola sin pasar por `activar_plan` (hoy: el webhook
+    de suscripciones recurrentes de MP, `services/suscripciones_mp.py`).
+    """
+    return _plan_vigente_usable(db, tenant_id, usuario_id)
+
+
 def activar_plan(db: Session, solicitud_id: int, *, tenant_id: Optional[int] = None,
                  actor_id: Optional[int] = None,
                  origen: str = ORIGEN_MANUAL,

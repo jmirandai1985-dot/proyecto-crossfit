@@ -85,11 +85,14 @@ def test_la_cola_de_pendientes_resuelve_plan_y_alumno_en_la_misma_consulta():
     endpoint = _funcion(ast.parse(fuente), "listar_solicitudes_pendientes")
     segmento = ast.get_source_segment(fuente, endpoint)
 
-    assert segmento.count("outerjoin(") == 2, (
-        "plan y alumno tienen que venir en el mismo SELECT (2 LEFT JOIN)"
+    # 3 LEFT JOIN: Plan + Usuario + Pago (el de Pago vino con la migración 067,
+    # para traer `pago_estado`/`external_reference`/`pagado_en` en el mismo SELECT).
+    assert segmento.count("outerjoin(") == 3, (
+        "plan, alumno y pago tienen que venir en el mismo SELECT (3 LEFT JOIN)"
     )
     assert "Plan.id == SolicitudPlan.plan_id" in segmento
     assert "Usuario.id == SolicitudPlan.alumno_id" in segmento
+    assert "Pago.id == SolicitudPlan.pago_id" in segmento
     # El import dentro del bucle era parte del N+1 (se resolvía fila por fila).
     assert "from app.models.usuario import Usuario" not in segmento
 

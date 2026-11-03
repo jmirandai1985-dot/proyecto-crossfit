@@ -71,11 +71,14 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.models.notificacion import Notificacion
 from app.models.pago import Pago
 from app.models.plan import Plan
+from app.models.solicitud_plan import SolicitudPlan
 from app.models.suscripcion import EstadoSuscripcion, Suscripcion
 from app.models.usuario import Usuario
 from app.services import mercadopago_cliente as mp
+from app.services.aprobacion_planes import ORIGEN_MERCADOPAGO, plan_vigente_usable
 from app.services.mercadopago_cliente import (
     estado_desde_mp, monto_clp, sin_none,
 )
@@ -125,6 +128,7 @@ RESULTADO_DUPLICADO = "duplicado"
 RESULTADO_MONTO_INVALIDO = "monto_invalido"
 RESULTADO_SIN_ID = "sin_id"
 RESULTADO_OTRO_PREAPPROVAL = "otro_preapproval"
+RESULTADO_EN_COLA = "en_cola"
 
 
 def valor_estado(estado) -> Optional[str]:
@@ -292,6 +296,23 @@ def procesar_preapproval(db: Session, preapproval: dict) -> str:
             "ignora el estado y sólo se guarda la traza",
             status, suscripcion.id, valor_estado(anterior))
         return RESULTADO_OBSOLETO
+
+    # ── FIX cola de planes: un cobro recurrente NO se activa de inmediato si el
+    # alumno ya tiene OTRA membresía pagada vigente y usable. Se usa la MISMA
+    # regla que `activar_plan` (Checkout Pro / aprobación manual): queda en cola
+    # (`SolicitudPlan` 'en_cola') y se activa sola cuando la actual termine. La
+    # `Suscripcion` pendiente queda como ancla del preapproval (su
+    # `mp_preapproval_id` sigue siendo el vínculo de MP).
+    if objetivo is EstadoSuscripcion.activo and \
+            plan_vigente_usable(db, suscripcion.tenant_id,
+                                suscripcion.usuario_id) is not None:
+        _encolar_recurrente(db, suscripcion)
+        db.commit()
+        logger.info(
+            "MP suscripciones: suscripción #%s quedó EN COLA (preapproval %s "
+            "status=%s, vínculo=%s): el alumno ya tiene otro plan vigente",
+            suscripcion.id, preapproval_id, status, via)
+        return RESULTADO_EN_COLA
 
     suscripcion.estado = objetivo
     if objetivo is EstadoSuscripcion.activo:
@@ -500,6 +521,54 @@ def _abrir_periodo(db: Session, suscripcion: Suscripcion) -> None:
     inicio = ahora_santiago()
     suscripcion.fecha_inicio = inicio
     suscripcion.fecha_expiracion = fin_de_plan_chile(inicio, plan.duracion_dias)
+
+
+def _encolar_recurrente(db: Session, suscripcion: Suscripcion) -> int:
+    """Deja el cobro recurrente EN COLA (`SolicitudPlan` 'en_cola') sin activarlo.
+
+    Sólo se llama cuando el preapproval llega `authorized` pero el alumno YA tiene
+    otra membresía pagada vigente y usable. El plan se activará solo cuando esa
+    termine (`activar_planes_en_cola`); la `Suscripcion` pendiente queda como ancla
+    del preapproval (su `mp_preapproval_id` sigue siendo el vínculo de MP).
+
+    Idempotente: si el alumno YA tiene un plan en cola (p. ej. un reintento del
+    aviso de MP), no se crea otro; se devuelve el id existente.
+    """
+    ya_en_cola = db.query(SolicitudPlan).filter(
+        SolicitudPlan.alumno_id == suscripcion.usuario_id,
+        SolicitudPlan.tenant_id == suscripcion.tenant_id,
+        SolicitudPlan.estado == "en_cola",
+    ).first()
+    if ya_en_cola is not None:
+        return ya_en_cola.id
+
+    plan = db.query(Plan).filter(Plan.id == suscripcion.plan_id).first()
+    precio = monto_clp(plan.precio_clp) if plan and plan.precio_clp else 0
+    solicitud = SolicitudPlan(
+        tenant_id=suscripcion.tenant_id,
+        alumno_id=suscripcion.usuario_id,
+        plan_id=suscripcion.plan_id,
+        estado="en_cola",
+        voucher_url=None,
+        certificado_estudiante_url=None,
+        precio_clp_snapshot=plan.precio_clp if plan else None,
+        precio_final_clp=precio or None,
+        origen_pago=ORIGEN_MERCADOPAGO,
+    )
+    db.add(solicitud)
+    db.flush()
+
+    # Mismo aviso que la rama en_cola de `activar_plan`: el alumno ve que su plan
+    # está pagado y esperando su turno.
+    db.add(Notificacion(
+        alumno_id=suscripcion.usuario_id,
+        tipo="aprobado",
+        mensaje=(f"✅ Tu plan {plan.nombre if plan else ''} está pagado y quedó "
+                 "EN COLA: se activa automáticamente cuando termine tu plan "
+                 "actual."),
+        leida=False,
+    ))
+    return solicitud.id
 
 
 def _previa_reutilizable(db: Session, alumno_id: int, plan_id: int):
