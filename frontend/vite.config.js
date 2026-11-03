@@ -1,9 +1,25 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { visualizer } from 'rollup-plugin-visualizer'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // Observabilidad del bundle: en cada `vite build` genera dist/stats.html con el
+    // tamaño de cada chunk (y su desglose por módulo, con gzip/brotli). Sirve para
+    // frenar regresiones de tamaño. Sólo actúa durante el build (no en dev).
+    visualizer({
+      open: false,
+      filename: 'dist/stats.html',
+      // gzip sí (es el peso real que transfiere el servidor); brotli se deja
+      // apagado porque su cálculo dispara el tiempo del build sin aportar para
+      // el objetivo de frenar regresiones de tamaño.
+      gzipSize: true,
+      brotliSize: false,
+      template: 'treemap',
+    }),
+  ],
   build: {
     rollupOptions: {
       output: {
