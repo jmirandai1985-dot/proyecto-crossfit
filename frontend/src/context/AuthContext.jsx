@@ -5,33 +5,23 @@ export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
     const [usuario, setUsuario] = useState(null);
-    const [token, setToken] = useState(null);
     const [rol, setRol] = useState(null);
     const [tenant_id, setTenant_id] = useState(null);
     const [usuario_id, setUsuario_id] = useState(null);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [loading, setLoading] = useState(true);
 
-    // Recuperar sesión desde localStorage al cargar
+    // Rehidratar la sesión al cargar.
+    // Hallazgo #15: ya NO hay JWT en localStorage; el token vive en la cookie
+    // httpOnly y el navegador lo manda solo. La IDENTIDAD sale del SERVIDOR vía
+    // `GET /alumnos/me` (misma fila que usa el backend para autorizar), nunca de
+    // localStorage. Si la consulta falla (sin cookie válida), la sesión NO se
+    // restaura (fail-closed). El interceptor de `api.js` NO redirige en duro acá
+    // (salta /alumnos/me), así que este catch es el que decide el estado.
     useEffect(() => {
-        const storedToken = localStorage.getItem('access_token');
-
-        // ── N-7: la IDENTIDAD sale del SERVIDOR, no de localStorage ──
-        // `usuario_id`, `rol` y `tenant_id` son datos de AUTORIZACIÓN: si se
-        // toman de localStorage, cualquiera los edita desde la consola y el
-        // front decide el menú/rutas con un valor manipulado. Ahora se hidratan
-        // con `GET /alumnos/me` (misma fila que usa el backend para autorizar).
-        // localStorage queda solo como caché visual del nombre.
-        // Si la consulta falla, la sesión NO se restaura (fail-closed): sin
-        // identidad verificada no se muestra ningún panel.
         const hidratar = async () => {
-            if (!storedToken) {
-                setLoading(false);
-                return;
-            }
             try {
                 const { data } = await api.get('/api/v1/alumnos/me');
-                setToken(storedToken);
                 setUsuario_id(data.id);
                 setRol(data.rol);
                 setTenant_id(data.tenant_id);
@@ -41,9 +31,7 @@ export const AuthProvider = ({ children }) => {
                 // Caché visual (nunca fuente de decisión).
                 if (data.nombre) localStorage.setItem('usuario', data.nombre);
                 if (data.rol) localStorage.setItem('rol', data.rol);
-            } catch (e) {
-                // El interceptor de `api.js` ya limpia y manda a /login en 401.
-                console.error('No se pudo verificar la sesión contra el servidor:', e);
+            } catch {
                 setIsAuthenticated(false);
             } finally {
                 setLoading(false);
@@ -53,15 +41,15 @@ export const AuthProvider = ({ children }) => {
         hidratar();
     }, []);
 
-    // Persiste la sesión (localStorage + state) tras un login válido.
-    const persistirSesion = ({ access_token, usuario_id, rol: userRol, tenant_id: userTenant, nombre }) => {
-        localStorage.setItem('access_token', access_token);
+    // Persiste la sesión (estado de React + caché visual de localStorage) tras un
+    // login válido. El JWT ya NO se persiste en localStorage: queda en la cookie
+    // httpOnly que setea el backend en `POST /auth/login`.
+    const persistirSesion = ({ usuario_id, rol: userRol, tenant_id: userTenant, nombre }) => {
         localStorage.setItem('usuario', nombre);
         localStorage.setItem('usuario_id', usuario_id);
         localStorage.setItem('rol', userRol);
         localStorage.setItem('tenant_id', userTenant);
 
-        setToken(access_token);
         setUsuario(nombre);
         setRol(userRol);
         setTenant_id(userTenant);
@@ -110,16 +98,22 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    const logout = () => {
-        // Limpiar localStorage
-        localStorage.removeItem('access_token');
+    const logout = async () => {
+        // Limpia las cookies httpOnly + CSRF en el backend (Max-Age=0).
+        // Best-effort: si falla, se cierra igual en el cliente.
+        try {
+            await api.post('/api/v1/auth/logout');
+        } catch {
+            // La cookie puede estar expirada/ausente: se ignora.
+        }
+
+        // Limpiar caché visual de localStorage (el JWT ya no vive ahí).
         localStorage.removeItem('usuario');
         localStorage.removeItem('usuario_id');
         localStorage.removeItem('rol');
         localStorage.removeItem('tenant_id');
 
         // Limpiar state
-        setToken(null);
         setUsuario(null);
         setRol(null);
         setTenant_id(null);
@@ -132,7 +126,6 @@ export const AuthProvider = ({ children }) => {
 
     const value = {
         usuario,
-        token,
         rol,
         tenant_id,
         usuario_id,

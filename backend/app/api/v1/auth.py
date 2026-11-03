@@ -7,7 +7,7 @@ import secrets
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -15,7 +15,9 @@ from app.db.database import get_db
 from app.schemas.auth import (LoginRequest, TokenResponse,
                               ResetPasswordRequest, ResetPasswordConfirm,
                               CambiarPasswordInicial)
-from app.core.security import verify_password, create_access_token, get_password_hash
+from app.core.security import (verify_password, create_access_token,
+                               get_password_hash, access_token_exp_seconds)
+from app.core.cookies import generar_csrf_token, set_auth_cookies, clear_auth_cookies
 from app.core.rate_limit import limiter, LIMIT_LOGIN, LIMIT_REGISTRO, LIMIT_CRITICO
 from app.core.dependencies import get_current_user
 from app.models.usuario import Usuario
@@ -32,7 +34,8 @@ router = APIRouter()
 def login(
     request: Request,
     login_data: LoginRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    response: Response = None,
 ):
     """
     Endpoint de login.
@@ -124,6 +127,19 @@ def login(
 
     access_token = create_access_token(data=token_data)
 
+    # Hallazgo #15: el JWT viaja como cookie httpOnly (inaccesible a JS) y se
+    # emite un token CSRF (double-submit) como cookie legible por el frontend.
+    # El body sigue devolviendo el JSON de siempre para no romper clientes ni
+    # tests. `response` es None sólo cuando un test aislado invoca el handler
+    # directamente (sin pasar por FastAPI); en ese caso no hay cookies que setear.
+    if response is not None:
+        set_auth_cookies(
+            response,
+            access_token=access_token,
+            csrf_token=generar_csrf_token(),
+            max_age=access_token_exp_seconds(access_token),
+        )
+
     return TokenResponse(
         access_token=access_token,
         token_type="bearer",
@@ -133,6 +149,17 @@ def login(
         nombre=fila["nombre"],
         cambiar_password_al_login=bool(fila["cambiar_password_al_login"]),
     )
+
+
+@router.post("/logout", status_code=status.HTTP_200_OK)
+def logout(response: Response):
+    """Limpia las cookies de sesión (httpOnly y CSRF) con Max-Age=0.
+
+    No depende de `get_current_user` a propósito: el logout debe poder cerrar la
+    sesión aunque el JWT ya esté expirado (idempotente, sin 401).
+    """
+    clear_auth_cookies(response)
+    return {"mensaje": "Sesión cerrada."}
 
 
 @router.post("/reset-password-request", status_code=status.HTTP_200_OK)

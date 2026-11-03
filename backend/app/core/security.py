@@ -91,6 +91,19 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
     return encoded_jwt
 
 
+def access_token_exp_seconds(token: str) -> int:
+    """Segundos restantes hasta la expiración del JWT (para `Max-Age` de la cookie).
+
+    La cookie `access_token` debe vivir lo mismo que el JWT. Si por cualquier
+    motivo el token no se puede decodificar (no debería: lo acabamos de firmar),
+    se devuelve el TTL por defecto como valor razonable.
+    """
+    payload = verify_token(token)
+    if payload and "exp" in payload:
+        return max(0, int(payload["exp"]) - int(datetime.now(timezone.utc).timestamp()))
+    return ACCESS_TOKEN_EXPIRE_MINUTES * 60
+
+
 def verify_token(token: str) -> Optional[Dict[str, Any]]:
     """
     Verifica y decodifica un JWT token.

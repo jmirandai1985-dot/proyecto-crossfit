@@ -14,6 +14,9 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 
 const apiPublica = axios.create({
     baseURL: API_URL,
+    // Consistencia con services/api.js: aunque el ranking público no requiere
+    // cookie, mantener `withCredentials` evita diferencias entre instancias.
+    withCredentials: true,
     headers: {
         'Content-Type': 'application/json',
     },

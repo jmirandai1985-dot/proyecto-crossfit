@@ -8,44 +8,52 @@ import axios from 'axios';
 // NUNCA se usa localhost por defecto (rompía dentro de contenedores).
 const API_URL = import.meta.env.VITE_API_URL || '';
 
+// Lee el token CSRF de la cookie `csrf_token` (NO httpOnly) sin dependencias
+// nuevas: una sola línea de `document.cookie`.
+const leerCsrfToken = () => {
+    if (typeof document === 'undefined') return '';
+    const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+};
+
 const api = axios.create({
     baseURL: API_URL,
+    // Hallazgo #15: el navegador manda la cookie httpOnly `access_token`
+    // automáticamente (y el CSRF se inyecta abajo en cada mutación).
+    withCredentials: true,
     headers: {
         'Content-Type': 'application/json',
     },
 });
 
-// Interceptor de request: agregar token JWT.
-// NO pisa un Authorization ya provisto explícitamente (p. ej. el cambio de
-// contraseña inicial usa el token del login temporal aunque todavía no se haya
-// persistido en localStorage, y no debe ser sobrescrito por un token viejo).
+// Interceptor de request: header CSRF en las mutaciones.
+// El JWT ya NO se inyecta acá: viaja en la cookie httpOnly. Se respeta un
+// `X-CSRF-Token` provisto explícitamente (p. ej. flujos custom).
 api.interceptors.request.use(
     (config) => {
-        const token = localStorage.getItem('access_token');
-        if (token && !config.headers.Authorization) {
-            config.headers.Authorization = `Bearer ${token}`;
+        const metodo = (config.method || '').toLowerCase();
+        const headers = config.headers;
+        if (['post', 'put', 'patch', 'delete'].includes(metodo) && headers && !headers.has('X-CSRF-Token')) {
+            const csrf = leerCsrfToken();
+            if (csrf) headers.set('X-CSRF-Token', csrf);
         }
         return config;
     },
-    (error) => {
-        return Promise.reject(error);
-    }
+    (error) => Promise.reject(error)
 );
 
-// Interceptor de response: manejar errores 401
+// Interceptor de response: manejar errores 401.
+// El JWT ya no vive en localStorage, así que acá sólo se redirige a /login.
+// Se saltan /auth/login (el propio login) y /alumnos/me (rehidratación de
+// sesión): ese 401 lo maneja AuthContext sin redirigir en duro, para no entrar
+// en bucle al recargar la página sin sesión.
 api.interceptors.response.use(
-    (response) => {
-        return response;
-    },
+    (response) => response,
     (error) => {
-        const isLoginEndpoint = error.config?.url?.includes('/auth/login');
-        if (error.response && error.response.status === 401 && !isLoginEndpoint) {
-            // Token inválido o expirado (solo fuera del endpoint de login)
-            localStorage.removeItem('access_token');
-            localStorage.removeItem('usuario');
-            localStorage.removeItem('tenant_id');
-            localStorage.removeItem('rol');
-            localStorage.removeItem('usuario_id');
+        const url = error.config?.url || '';
+        const esLogin = url.includes('/auth/login');
+        const esMe = url.includes('/alumnos/me');
+        if (error.response && error.response.status === 401 && !esLogin && !esMe) {
             window.location.href = '/login';
         }
         return Promise.reject(error);

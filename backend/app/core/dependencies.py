@@ -2,7 +2,7 @@
 Dependencias de FastAPI para autenticación y autorización
 """
 import logging
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 from app.db.database import get_db
 from app.core.security import verify_token
+from app.core.cookies import COOKIE_ACCESS, METODOS_MUTACION, validar_csrf
 from app.models.coach_disciplina import CoachDisciplina
 from app.models.suscripcion import Suscripcion
 from app.models.plan import Plan
@@ -22,6 +23,7 @@ security = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
+    request: Request,
     credentials=Depends(security),
     db: Session = Depends(get_db)
 ):
@@ -36,7 +38,8 @@ def get_current_user(
     cambia: todos los endpoints la siguen usando con `Depends(get_current_user)`.
 
     Args:
-        credentials: Credenciales HTTP Bearer (token JWT)
+        request: Request HTTP (para leer la cookie `access_token` y validar CSRF)
+        credentials: Credenciales HTTP Bearer (fallback de compatibilidad)
         db: Sesión de base de datos
 
     Returns:
@@ -44,14 +47,21 @@ def get_current_user(
 
     Raises:
         HTTPException 401: Si el token es inválido, expirado o no se envió
+        HTTPException 403: Si una mutación por cookie no trae el CSRF correcto
         HTTPException 404: Si el usuario no existe en BD
     """
-    token = credentials.credentials if credentials else None
+    # Hallazgo #15: el JWT viaja como cookie httpOnly (vía principal). El header
+    # Authorization: Bearer se mantiene como fallback para Postman/tests/clientes
+    # viejos; si la cookie está presente, manda ella.
+    token = request.cookies.get(COOKIE_ACCESS)
+    via_cookie = token is not None
+    if not token:
+        token = credentials.credentials if credentials else None
 
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No autenticado: se requiere token Bearer",
+            detail="No autenticado: se requiere cookie de sesión o token Bearer",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -74,6 +84,13 @@ def get_current_user(
             detail="Token incompleto",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # CSRF double-submit: sólo para mutaciones autenticadas por cookie. El Bearer
+    # (Postman/tests/clientes viejos) no es vulnerable a CSRF porque el token no
+    # viaja automático en la cookie, así que no se le exige el header. Los
+    # webhooks de Mercado Pago no pasan por acá (tienen su propia firma HMAC).
+    if via_cookie and request.method in METODOS_MUTACION:
+        validar_csrf(request)
 
     # Obtener usuario de BD.
     # 🔒 AUTORIZACIÓN: la fuente de verdad del ciclo de vida es `estado` (el flag

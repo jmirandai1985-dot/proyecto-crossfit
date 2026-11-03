@@ -40,7 +40,7 @@ const LoadingScreen = () => (
 const ProtectedRoute = ({ children, roles = [] }) => {
     const { isAuthenticated, rol, loading } = useAuth();
 
-    // 1. Esperando que AuthContext cargue la sesión desde localStorage
+    // 1. Esperando que AuthContext cargue la sesión (vía cookie httpOnly)
     if (loading) return <LoadingScreen />;
 
     // 2. No autenticado → login

@@ -130,10 +130,11 @@ _cors_origins = validar_cors_origins(_cors_origins)
 # ampliaba la superficie: cualquier librería/cabecera nueva pasaba el preflight sin
 # que nadie la revisara. La lista es exactamente lo que usa el frontend:
 #   métodos → GET/POST/PUT/PATCH/DELETE (los usa axios; PATCH lo usa /supervision/cupo-disciplina)
-#   cabeceras → Authorization (JWT), Content-Type (JSON y multipart de vouchers),
-#               Accept (descarga de reportes en Excel) y Accept-Language.
+#   cabeceras → Authorization (JWT, fallback), Content-Type (JSON y multipart de
+#               vouchers), Accept (descarga de reportes en Excel), Accept-Language
+#               y X-CSRF-Token (double-submit CSRF de la cookie httpOnly).
 CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-CORS_HEADERS = ["Authorization", "Content-Type", "Accept", "Accept-Language"]
+CORS_HEADERS = ["Authorization", "Content-Type", "Accept", "Accept-Language", "X-CSRF-Token"]
 
 app.add_middleware(
     CORSMiddleware,
