@@ -142,7 +142,7 @@ const Evolucion = () => {
 
     return (
         <Layout>
-            <div className="space-y-8">
+            <div className="grid grid-cols-1 gap-6">
                 {/* P1: si la API falló, banner con Reintentar (antes se veía "vacío") */}
                 <AvisoCarga secciones={erroresCarga} onReintentar={cargarTodo} />
 
@@ -157,10 +157,11 @@ const Evolucion = () => {
                 {/* ============================================================ */}
                 {/* TARJETAS: Mejor Progreso */}
                 {/* ============================================================ */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                    <h2 className="text-lg font-semibold text-gray-800 mb-4">
-                        🏆 Mejor Progreso
-                    </h2>
+                <section className="rounded-2xl bg-[#12161f] border border-[#1f2430] p-6">
+                    <div className="mb-5 flex items-center gap-3">
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-zinc-800 text-lg" aria-hidden="true">🏆</span>
+                        <h2 className="text-lg font-semibold text-gray-800">Mejor Progreso</h2>
+                    </div>
                     {topMejoras.length === 0 && (
                         <div className="text-center py-6 text-gray-400 text-sm">
                             Registra más marcas para ver tu progreso destacado aquí
@@ -190,15 +191,16 @@ const Evolucion = () => {
                             ))}
                         </div>
                     )}
-                </div>
+                </section>
 
                 {/* ============================================================ */}
                 {/* GRÁFICO 1: Progreso de RM */}
                 {/* ============================================================ */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                    <h2 className="text-lg font-semibold text-gray-800 mb-4">
-                        🏋️ Progreso de RM
-                    </h2>
+                <section className="rounded-2xl bg-[#12161f] border border-[#1f2430] p-6">
+                    <div className="mb-5 flex items-center gap-3">
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-zinc-800 text-lg" aria-hidden="true">🏋️</span>
+                        <h2 className="text-lg font-semibold text-gray-800">Progreso de RM</h2>
+                    </div>
 
                     {/* Selector de movimiento */}
                     <div className="mb-6">
@@ -312,15 +314,16 @@ const Evolucion = () => {
                             </div>
                         </div>
                     )}
-                </div>
+                </section>
 
                 {/* ============================================================ */}
                 {/* GRÁFICO 2: Asistencia Semanal */}
                 {/* ============================================================ */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                    <h2 className="text-lg font-semibold text-gray-800 mb-4">
-                        📊 Asistencia Semanal (últimos 3 meses)
-                    </h2>
+                <section className="rounded-2xl bg-[#12161f] border border-[#1f2430] p-6">
+                    <div className="mb-5 flex items-center gap-3">
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-zinc-800 text-lg" aria-hidden="true">📊</span>
+                        <h2 className="text-lg font-semibold text-gray-800">Asistencia Semanal (últimos 3 meses)</h2>
+                    </div>
 
                     {loadingAsistencia && (
                         <div className="text-center py-8 text-gray-400">Cargando asistencia...</div>
@@ -353,7 +356,7 @@ const Evolucion = () => {
                             </BarChart>
                         </ResponsiveContainer>
                     )}
-                </div>
+                </section>
             </div>
         </Layout>
     );
