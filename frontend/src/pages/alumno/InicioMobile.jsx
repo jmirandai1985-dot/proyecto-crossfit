@@ -305,7 +305,7 @@ const InicioMobile = ({
     const navInicio = itemMenu('Inicio');
     const navReservas = itemMenu('Mis Reservas');
     const navMarcas = itemMenu('Pizarra de RMs');
-    const navPerfil = itemMenu('Ajustes');
+    const navBazar = itemMenu('Bazar');
     // FAB: escanea el QR del box (public_id); si no está, va a Mis Reservas.
     const irAAsistencia = () => setEscanerAbierto(true);
 
@@ -621,7 +621,7 @@ const InicioMobile = ({
                 </section>
             </div>
 
-            {/* -- Barra inferior: Inicio - Reservas - FAB - Marcas - Perfil -- */}
+            {/* -- Barra inferior: Inicio - Reservas - FAB - Marcas - Bazar -- */}
             <nav className="ub-nav" aria-label="Navegación del alumno">
                 {navInicio && (
                     <button type="button" className={`t${location.pathname === navInicio.path ? ' on' : ''}`} onClick={() => navigate(navInicio.path)}>
@@ -645,9 +645,9 @@ const InicioMobile = ({
                         {MENU_ICONS[navMarcas.icon]}<span>Marcas</span>
                     </button>
                 )}
-                {navPerfil && (
-                    <button type="button" className={`t${location.pathname === navPerfil.path ? ' on' : ''}`} onClick={() => navigate(navPerfil.path)}>
-                        {MENU_ICONS[navPerfil.icon]}<span>Perfil</span>
+                {navBazar && (
+                    <button type="button" className={`t${location.pathname === navBazar.path ? ' on' : ''}`} onClick={() => navigate(navBazar.path)}>
+                        {MENU_ICONS[navBazar.icon]}<span>Bazar</span>
                     </button>
                 )}
             </nav>

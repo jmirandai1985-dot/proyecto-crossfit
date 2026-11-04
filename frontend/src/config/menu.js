@@ -33,7 +33,7 @@ export const MENU_BY_ROL = {
         { label: 'Evolución', path: '/alumno/evolucion', icon: 'home' },
         { label: 'Performance Hub', path: '/alumno/performance-hub', icon: 'dumbbell' },
         { label: 'Mi Progreso', path: '/alumno/mi-progreso', icon: 'chart' },
-        { label: 'Bazar', path: '/alumno/bazar', icon: 'dumbbell' },
+        { label: 'Bazar', path: '/alumno/bazar', icon: 'shoppingCart' },
         { label: 'Mis Pedidos', path: '/alumno/mis-pedidos', icon: 'calendar' },
         { label: 'Invita y Gana', path: '/alumno/invita-y-gana', icon: 'gift' },
         { label: 'Mi Historial', path: '/alumno/mi-historial', icon: 'chart' },
