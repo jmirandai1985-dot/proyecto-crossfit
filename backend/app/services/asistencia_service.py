@@ -21,7 +21,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.estados import dia_chile   # el DÍA de una columna timestamptz, en hora de Chile
+from app.core.estados import dia_chile, vigente_hoy   # DÍA chileno + vigencia por día completo
 from app.utils.santiago import ahora_santiago, fecha_chile, hoy_santiago
 from app.models.reserva import Reserva
 from app.models.clase import Clase
@@ -176,6 +176,57 @@ def calcular_asistencia_mes(db: Session, alumno_id: int, tenant_id: int,
         "asistidas": asistidas,
         "pct": round(asistidas / total * 100) if total else 0,
         "estado": estado,
+    }
+
+
+def _pct_cumplimiento(asistidas: int, creditos_totales) -> int | None:
+    """% de cumplimiento del plan = asistidas / creditos_totales (uso real del plan).
+
+    Devuelve `None` cuando no hay denominador numérico (plan ilimitado con
+    `creditos_totales` NULL, o sin suscripción vigente): un % sobre un plan sin
+    créditos no tiene sentido.
+    """
+    if not creditos_totales:
+        return None
+    return round(asistidas / creditos_totales * 100)
+
+
+def _suscripcion_vigente(db: Session, alumno_id: int, tenant_id: int):
+    """Suscripción ACTIVA que HOY da acceso (misma regla que `plan_vencimiento`).
+
+    Gana la que vence más tarde. `creditos_totales` es el total de clases del plan
+    contratado (NULL en los planes ilimitados).
+    """
+    return db.query(Suscripcion).filter(
+        Suscripcion.tenant_id == tenant_id,
+        Suscripcion.usuario_id == alumno_id,
+        Suscripcion.estado == "activo",
+        vigente_hoy(Suscripcion.fecha_expiracion),
+    ).order_by(
+        Suscripcion.fecha_expiracion.desc(), Suscripcion.id.desc()).first()
+
+
+def cumplimiento_plan_mes(db: Session, alumno_id: int, tenant_id: int,
+                          anio: int, mes: int, hasta_hoy: bool = True) -> dict:
+    """Cumplimiento del plan en el mes: asistidas / `creditos_totales` del plan vigente.
+
+    Reemplaza el % "sobre reservas" que se mostraba en Mi Progreso: un alumno con
+    "1 de 1 reservadas" marcaba 100% aunque sólo hubiera ido 2 veces en todo su
+    ciclo de facturación. Acá el denominador es el total de créditos del plan
+    contratado (uso real), no las reservas.
+    """
+    reservas = _reservas_mes(db, alumno_id, tenant_id, anio, mes, hasta_hoy=hasta_hoy)
+    asistidas = sum(1 for r in reservas if r.asistio)
+
+    suscripcion = _suscripcion_vigente(db, alumno_id, tenant_id)
+    creditos_totales = suscripcion.creditos_totales if suscripcion else None
+
+    return {
+        "anio": anio,
+        "mes": mes,
+        "asistidas": asistidas,
+        "creditos_totales": creditos_totales,
+        "pct": _pct_cumplimiento(asistidas, creditos_totales),
     }
 
 
@@ -389,9 +440,10 @@ def resumen_alumno(db: Session, alumno_id: int, tenant_id: int) -> dict:
     """Racha actual, % del mes en curso y próximo hito (GET /mi-resumen)."""
     hoy = hoy_santiago()
 
-    # Mes en curso: solo clases ya pasadas (no inflar con reservas futuras).
-    mes_curso = calcular_asistencia_mes(db, alumno_id, tenant_id,
-                                        hoy.year, hoy.month, hasta_hoy=True)
+    # Mes en curso: % de cumplimiento sobre los créditos del plan vigente (uso real
+    # del plan contratado), no sobre las reservas. Solo clases ya pasadas.
+    mes_curso = cumplimiento_plan_mes(db, alumno_id, tenant_id,
+                                      hoy.year, hoy.month, hasta_hoy=True)
 
     anio_prev, mes_prev = _mes_anterior(hoy.year, hoy.month)
     racha = calcular_racha(db, alumno_id, tenant_id, anio_prev, mes_prev)

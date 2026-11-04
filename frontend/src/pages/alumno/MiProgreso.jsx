@@ -82,15 +82,17 @@ const MiProgreso = () => {
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
                         <p className="text-sm text-gray-500 uppercase tracking-wide font-semibold mb-2">Cumplimiento del mes actual</p>
                         <div className="flex items-end gap-2">
-                            <span className="text-5xl font-bold text-gray-800">{mes.pct ?? 0}%</span>
-                            <span className="text-gray-400 mb-1">de asistencia</span>
+                            <span className="text-5xl font-bold text-gray-800">{mes.pct != null ? `${mes.pct}%` : '—'}</span>
+                            <span className="text-gray-400 mb-1">de tu plan</span>
                         </div>
-                        {mes.total_reservadas > 0 ? (
+                        {mes.creditos_totales != null ? (
                             <p className="text-sm text-gray-500 mt-3">
-                                Asististe a <strong className="text-gray-800">{mes.asistidas} de {mes.total_reservadas}</strong> clases reservadas.
+                                Asististe a <strong className="text-gray-800">{mes.asistidas ?? 0} de {mes.creditos_totales}</strong> clases de tu plan.
                             </p>
                         ) : (
-                            <p className="text-sm text-gray-500 mt-3">Sin clases reservadas este mes aún.</p>
+                            <p className="text-sm text-gray-500 mt-3">
+                                Asististe a <strong className="text-gray-800">{mes.asistidas ?? 0}</strong> clases este mes.
+                            </p>
                         )}
                     </div>
                 </div>
