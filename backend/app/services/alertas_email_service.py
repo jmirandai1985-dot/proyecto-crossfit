@@ -40,6 +40,24 @@ def _formatear_fecha_es(fecha) -> str:
     return formatear_fecha_es(fecha)
 
 
+def _sql_sin_plan_en_cola() -> str:
+    """Fragmento SQL: excluye a los alumnos que YA tienen un plan en cola.
+
+    Un alumno con el próximo plan pagado (`SolicitudPlan` en `en_cola`) no debe
+    recibir el recordatorio de renovación: su plan siguiente ya está comprado y
+    se activa solo. Es el mismo chequeo que el banner del Dashboard del alumno
+    (`frontend/src/utils/bannerPlan.js`) aplica por el lado del frontend; acá se
+    aplica en el SQL de las alertas de renovación (vence en 3 días / vence hoy).
+    """
+    return (
+        "NOT EXISTS ("
+        "SELECT 1 FROM solicitudes_planes sp "
+        "WHERE sp.tenant_id = s.tenant_id "
+        "AND sp.alumno_id = u.id "
+        "AND sp.estado = 'en_cola')"
+    )
+
+
 def _ya_enviado(db, alumno_id: int, tipo: str, dias: int = 7) -> bool:
     """True si este alumno ya recibió ESTE tipo en los últimos `dias` (dedupe por ventana).
 
@@ -166,6 +184,7 @@ def enviar_alertas_renovacion(db, tenant_id: int = 1, dias_aviso: int = 3) -> di
           AND s.estado = 'activo'
           AND u.estado = 'activo'
           AND u.rol = 'alumno'
+          AND {_sql_sin_plan_en_cola()}
           AND {sql_fecha_en_chile("s.fecha_expiracion")} = :target
         ORDER BY u.id, s.fecha_expiracion DESC
     """), {"tid": tenant_id, "target": target}).fetchall()
@@ -271,6 +290,7 @@ def enviar_alertas_urgencia(db, tenant_id: int = 1) -> dict:
           AND s.estado = 'activo'
           AND u.estado = 'activo'
           AND u.rol = 'alumno'
+          AND {_sql_sin_plan_en_cola()}
           AND {sql_fecha_en_chile("s.fecha_expiracion")} = :target
         ORDER BY u.id
     """), {"tid": tenant_id, "target": target}).fetchall()
