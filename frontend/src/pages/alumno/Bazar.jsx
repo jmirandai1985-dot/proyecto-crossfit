@@ -12,6 +12,29 @@ import {
 } from '../../hooks/queries';
 import ImagenProducto from '../../components/ImagenProducto';
 import GaleriaProducto from '../../components/GaleriaProducto';
+// Piel "Industrial Moderno" del catálogo (solo esta pantalla).
+import './bazar.css';
+
+// ── Fallback "metal cepillado" por producto ──────────────────────────────────
+// No existe campo "categoría" en Producto, así que el tono del gradiente se
+// deriva de forma determinística del id (placeholder cuando no hay foto real).
+const TONOS_METAL = [
+    'linear-gradient(135deg, #3f3f3a 0%, #2c2c29 50%, #3a3a35 100%)',
+    'linear-gradient(135deg, #41434b 0%, #2c2d33 50%, #383a42 100%)',
+    'linear-gradient(135deg, #4a4036 0%, #332c24 50%, #42392f 100%)',
+    'linear-gradient(135deg, #3a4540 0%, #2a312e 50%, #333d39 100%)',
+    'linear-gradient(135deg, #45413f 0%, #2f2c2a 50%, #3d3937 100%)',
+];
+const tonoMetal = (producto) => TONOS_METAL[(Number(producto?.id) || 0) % TONOS_METAL.length];
+
+// Umbral a partir del cual el stock se muestra "X unidades" en vez de "Últimas N".
+const STOCK_ULTIMAS = 5;
+const stockBadge = (stock) => {
+    const n = Number(stock) || 0;
+    if (n <= 0) return { clase: 'bb-stock-agotado', texto: 'Agotado' };
+    if (n < STOCK_ULTIMAS) return { clase: 'bb-stock-ultimas', texto: `Últimas ${n}` };
+    return { clase: 'bb-stock-unidades', texto: `${n} unidades` };
+};
 
 const Bazar = () => {
     const { usuario_id, tenant_id } = useAuth();
@@ -147,13 +170,14 @@ const Bazar = () => {
 
     return (
         <Layout>
-            <div className="max-w-4xl mx-auto space-y-6">
-                <div className="flex items-center gap-3">
+            <div className="bazar-industrial">
+                <div className="max-w-4xl mx-auto space-y-6">
+                <div className="bb-header">
                     <BotonVolver />
                     <span className="text-3xl">🛍️</span>
                     <div>
-                        <h1 className="text-2xl font-bold text-gray-800">Bazar</h1>
-                        <p className="text-sm text-gray-500">Productos disponibles</p>
+                        <h1 className="bb-titulo-header">Bazar</h1>
+                        <p className="bb-sub">Productos disponibles</p>
                     </div>
                 </div>
 
@@ -183,30 +207,43 @@ const Bazar = () => {
                             <div className="col-span-full text-center py-12">
                                 <p className="text-gray-400 text-lg">📦 El box aún no publicó productos</p>
                             </div>
-                        ) : productos.map(p => (
-                            <div key={p.id} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-md transition-all">
-                                {/* Foto del producto si el box la subió; sin foto —o si la
-                                    foto no carga— queda el ícono de siempre. */}
-                                <ImagenProducto
-                                    url={p.imagen_url}
-                                    alt={p.nombre}
-                                    className="w-full h-40 object-cover rounded-lg mb-3 border border-gray-100"
-                                    respaldo={<span className="text-4xl block mb-3">🛍️</span>}
-                                />
-                                <h3 className="font-bold text-gray-800">{p.nombre}</h3>
-                                {p.descripcion && <p className="text-xs text-gray-400 mt-1">{p.descripcion}</p>}
-                                <p className="text-2xl font-bold text-emerald-600 mt-3">${(p.precio || 0).toLocaleString('es-CL')}</p>
-                                <p className="text-xs text-gray-400 mt-1">Stock: {p.stock} unidades</p>
-                                {p.stock > 0 ? (
-                                    <button onClick={() => handleComprar(p)} disabled={!configBancaria}
-                                        className="mt-4 w-full py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                                        Comprar
-                                    </button>
-                                ) : (
-                                    <p className="mt-4 text-center text-sm text-red-500 font-medium">Agotado</p>
-                                )}
-                            </div>
-                        ))}
+                        ) : productos.map(p => {
+                            const badge = stockBadge(p.stock);
+                            return (
+                                <div key={p.id} className="bb-placa">
+                                    <span className="bb-remache bb-remache--tl" aria-hidden="true" />
+                                    <span className="bb-remache bb-remache--tr" aria-hidden="true" />
+                                    <span className="bb-remache bb-remache--bl" aria-hidden="true" />
+                                    <span className="bb-remache bb-remache--br" aria-hidden="true" />
+                                    <div className="bb-cuerpo">
+                                        {/* Foto real si el box la subió; si no, queda el gradiente
+                                            "metal cepillado" (fallback por tono de producto). */}
+                                        <div className="bb-foto" style={{ background: tonoMetal(p) }}>
+                                            <ImagenProducto
+                                                url={p.imagen_url}
+                                                alt={p.nombre}
+                                                className="bb-foto-img"
+                                                respaldo={null}
+                                            />
+                                        </div>
+                                        <div className="bb-info">
+                                            <h3 className="bb-titulo">{p.nombre}</h3>
+                                            {p.descripcion && <p className="bb-desc">{p.descripcion}</p>}
+                                            <p className="bb-precio">${(p.precio || 0).toLocaleString('es-CL')}</p>
+                                            <span className={`bb-stock ${badge.clase}`}>{badge.texto}</span>
+                                        </div>
+                                    </div>
+                                    {p.stock > 0 ? (
+                                        <button onClick={() => handleComprar(p)} disabled={!configBancaria}
+                                            className="bb-comprar">
+                                            Comprar
+                                        </button>
+                                    ) : (
+                                        <span className="bb-agotado">Agotado</span>
+                                    )}
+                                </div>
+                            );
+                        })}
                     </div>
                 )}
 
@@ -320,13 +357,14 @@ const Bazar = () => {
                 {paso === 3 && (
                     <div className="text-center py-12">
                         <div className="text-6xl mb-6">✅</div>
-                        <h2 className="text-2xl font-bold text-gray-800 mb-3">¡Pedido Enviado!</h2>
-                        <p className="text-gray-600 mb-4">{mensaje.text}</p>
+                        <h2 className="text-2xl font-bold text-gray-100 mb-3">¡Pedido Enviado!</h2>
+                        <p className="text-gray-400 mb-4">{mensaje.text}</p>
                         <a href="/alumno/mis-pedidos" className="inline-block px-8 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm">
                             Ver Mis Pedidos
                         </a>
                     </div>
                 )}
+            </div>
             </div>
         </Layout>
     );

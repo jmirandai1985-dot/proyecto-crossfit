@@ -1,0 +1,177 @@
+/* ─── Bazar del alumno — piel "Industrial Moderno" (scoped a .bazar-industrial) ──
+   Sólo afecta esta pantalla. Paleta: fondo #1a1a1a, header #161614, placas con
+   textura #2a2a28/#262624, remaches #4a4a46, acento óxido #b5491a.
+   Tipografía: Oswald (títulos/precios/botones) + Inter (texto secundario). */
+
+.bazar-industrial {
+    /* Cancela el padding del <main> (p-4 / p-6) para pintar el fondo full-bleed. */
+    margin: -1rem;
+    padding: 1rem;
+    background: #1a1a1a;
+    color: #e5e5e0;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    min-height: calc(100vh - 4rem);
+}
+@media (min-width: 768px) {
+    .bazar-industrial {
+        margin: -1.5rem;
+        padding: 1.5rem;
+    }
+}
+
+/* ── Header / secciones (#161614) ──────────────────────────────────────────── */
+.bb-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: #161614;
+    border: 1px solid #2a2a26;
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.25rem;
+}
+.bb-titulo-header {
+    font-family: 'Oswald', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #e5e5e0;
+    font-size: 1.75rem;
+    font-weight: 600;
+    line-height: 1.1;
+    margin: 0;
+}
+.bb-sub {
+    font-family: 'Inter', sans-serif;
+    color: #9a9a94;
+    font-size: 0.8rem;
+    margin: 0.15rem 0 0;
+}
+
+/* ── Placa de producto (metal/concreto) ────────────────────────────────────── */
+.bb-placa {
+    position: relative;
+    border: 1px solid #3a3a36;
+    border-radius: 10px;
+    padding: 1.25rem;
+    background: repeating-linear-gradient(135deg, #2a2a28 0 6px, #262624 6px 12px);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+    transition: border-color 0.15s ease;
+}
+.bb-placa:hover { border-color: #4a4a46; }
+
+/* Remaches decorativos (4 esquinas) */
+.bb-remache {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #4a4a46;
+    box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.bb-remache--tl { top: 8px; left: 8px; }
+.bb-remache--tr { top: 8px; right: 8px; }
+.bb-remache--bl { bottom: 8px; left: 8px; }
+.bb-remache--br { bottom: 8px; right: 8px; }
+
+.bb-cuerpo {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+}
+
+/* Foto lateral 110x110: gradiente "metal cepillado" de fallback (se pisa con la
+   foto real si el box la subió). */
+.bb-foto {
+    width: 110px;
+    height: 110px;
+    flex-shrink: 0;
+    border-radius: 6px;
+    border: 1px solid #3a3a36;
+    overflow: hidden;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+.bb-foto img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.bb-info {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    align-items: flex-start;
+}
+.bb-titulo {
+    font-family: 'Oswald', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: #e5e5e0;
+    font-size: 1.05rem;
+    font-weight: 600;
+    line-height: 1.2;
+    margin: 0;
+}
+.bb-desc {
+    font-family: 'Inter', sans-serif;
+    color: #9a9a94;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    margin: 0;
+}
+.bb-precio {
+    font-family: 'Oswald', sans-serif;
+    color: #b5491a;
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1;
+    margin: 0.15rem 0 0;
+}
+
+/* ── Badges de stock (colores apagados con borde) ──────────────────────────── */
+.bb-stock {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    line-height: 1.5;
+}
+.bb-stock-unidades { color: #6fae7d; border: 1px solid #3f6b4a; background: rgba(63, 107, 74, 0.15); }
+.bb-stock-ultimas  { color: #d4af37; border: 1px solid #b58a1a; background: rgba(181, 138, 26, 0.15); }
+.bb-stock-agotado  { color: #c45c42; border: 1px solid #8a3a2a; background: rgba(138, 58, 42, 0.18); }
+
+/* ── Botón Comprar (acento óxido #b5491a) ──────────────────────────────────── */
+.bb-comprar {
+    width: 100%;
+    margin-top: 1rem;
+    padding: 0.65rem 1rem;
+    background: #b5491a;
+    color: #1a1a1a;
+    font-family: 'Oswald', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    font-size: 0.95rem;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: filter 0.15s ease;
+}
+.bb-comprar:hover:not(:disabled) { filter: brightness(1.08); }
+.bb-comprar:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.bb-agotado {
+    display: block;
+    margin-top: 1rem;
+    text-align: center;
+    font-family: 'Oswald', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #c45c42;
+    font-size: 0.85rem;
+}
