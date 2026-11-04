@@ -136,6 +136,21 @@ const QrRetiro = ({ pedidoId, codigo }) => {
     );
 };
 
+// Filtro por estado del pedido. Los estados reales en BD son `pendiente`,
+// `validado`, `entregado` y `rechazado`; "Pendiente de entrega" agrupa los dos
+// primeros (aún no entregados ni rechazados).
+const FILTROS_ESTADO = [
+    { key: 'todos', label: 'Todos' },
+    { key: 'pendiente_entrega', label: 'Pendiente de entrega' },
+    { key: 'entregado', label: 'Entregado' },
+    { key: 'rechazado', label: 'Rechazado' },
+];
+const ESTADOS_POR_FILTRO = {
+    pendiente_entrega: ['pendiente', 'validado'],
+    entregado: ['entregado'],
+    rechazado: ['rechazado'],
+};
+
 const MisPedidos = () => {
     // Datos en la caché de React Query (Fase 2): `pedidos` y el catálogo de
     // productos comparten queryKey con el Bazar y el Inicio del alumno, así que
@@ -152,11 +167,16 @@ const MisPedidos = () => {
     if (pedidosQ.isError) erroresCarga.push('mis pedidos');
     if (productosQ.isError) erroresCarga.push('nombres de productos');
     const cargarTodo = () => { pedidosQ.refetch(); productosQ.refetch(); };
+    const [filtro, setFiltro] = useState('todos');
+    const pedidosFiltrados = filtro === 'todos'
+        ? pedidos
+        : pedidos.filter((p) => (ESTADOS_POR_FILTRO[filtro] || []).includes(p.estado));
 
     const getEstadoStyle = (estado) => {
         if (estado === 'pendiente') return 'bg-yellow-100 text-yellow-800';
         if (estado === 'validado') return 'bg-blue-100 text-blue-800';
         if (estado === 'entregado') return 'bg-green-100 text-green-800';
+        if (estado === 'rechazado') return 'bg-red-100 text-red-800';
         return 'bg-gray-100 text-gray-800';
     };
 
@@ -164,6 +184,7 @@ const MisPedidos = () => {
         if (estado === 'pendiente') return '⏳';
         if (estado === 'validado') return '✅';
         if (estado === 'entregado') return '📦';
+        if (estado === 'rechazado') return '❌';
         return '❓';
     };
 
@@ -185,6 +206,21 @@ const MisPedidos = () => {
 
                 <AvisoCarga secciones={erroresCarga} onReintentar={cargarTodo} />
 
+                {pedidos.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                        {FILTROS_ESTADO.map((f) => (
+                            <button
+                                key={f.key}
+                                type="button"
+                                onClick={() => setFiltro(f.key)}
+                                className={`px-4 py-1.5 rounded-full text-sm font-medium border transition-colors ${filtro === f.key ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                            >
+                                {f.label}
+                            </button>
+                        ))}
+                    </div>
+                )}
+
                 {pedidos.length === 0 && erroresCarga.length === 0 ? (
                     <div className="text-center py-12">
                         <p className="text-gray-400 text-lg mb-4">📦 No has realizado pedidos aún</p>
@@ -192,9 +228,13 @@ const MisPedidos = () => {
                             Ir al Bazar
                         </a>
                     </div>
+                ) : pedidosFiltrados.length === 0 ? (
+                    <div className="text-center py-8">
+                        <p className="text-gray-400">No hay pedidos con este estado.</p>
+                    </div>
                 ) : (
                     <div className="space-y-4">
-                        {pedidos.map(p => (
+                        {pedidosFiltrados.map(p => (
                             <div key={p.id} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                                 <div className="flex items-center justify-between">
                                     <div>
