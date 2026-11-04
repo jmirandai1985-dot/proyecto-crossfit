@@ -25,6 +25,19 @@ const CAT_CONFIG = {
     metabolico: { label: 'Metabólico', color: '#8B5CF6', icon: '⚡' },
 };
 
+// Etiqueta del eje X de los gráficos de marcas: "DD/MM" arriba y "valor+unidad"
+// abajo, en DOS líneas (antes era la semana ISO S40/S42, un dato técnico poco
+// legible para el alumno).
+const EtiquetaMarca = ({ x, y, payload }) => {
+    const [fecha, valor] = String(payload?.value || '').split(' · ');
+    return (
+        <text x={x} y={y} textAnchor="middle" fill="#6b7280" fontSize={9}>
+            <tspan x={x} y={y + 10}>{fecha}</tspan>
+            {valor ? <tspan x={x} y={y + 21}>{valor}</tspan> : null}
+        </text>
+    );
+};
+
 
 const PerformanceHub = () => {
     const { usuario_id } = useAuth();
@@ -92,9 +105,15 @@ const PerformanceHub = () => {
             const weekMap = {};
             items.forEach(item => {
                 const d = item.fecha, wk = getWeekKey(d);
-                if (!weekMap[wk] || item.valor > weekMap[wk].valor) weekMap[wk] = { valor: item.valor, nombre: item.nombre };
+                if (!weekMap[wk] || item.valor > weekMap[wk].valor) {
+                    weekMap[wk] = { valor: item.valor, nombre: item.nombre, fecha: d };
+                }
             });
-            chartRes[c] = Object.entries(weekMap).sort(([a], [b]) => a.localeCompare(b)).map(([wk, v]) => ({ semana: wk, max: v.valor }));
+            chartRes[c] = Object.entries(weekMap).sort(([a], [b]) => a.localeCompare(b)).map(([wk, v]) => ({
+                semana: wk,
+                max: v.valor,
+                label: etiquetaMarca(c, v.fecha, v.valor),
+            }));
         });
         return { chartDataCat: chartRes, descartados: descartadosRes };
     }, [historialQ.data]);
@@ -144,11 +163,11 @@ const PerformanceHub = () => {
                 {tieneDatos && chart.length >= 2 ? (
                     <div style={{ height: 118 }}>
                         <ResponsiveContainer width="100%" height={118}>
-                            {/* `tickMargin` + margen inferior: las semanas (S40, S42…) quedaban
-                                pegadas a las barras en mobile. */}
-                            <BarChart data={chart} margin={{ top: 5, right: 5, bottom: 12, left: 0 }}>
+                            {/* Etiqueta en 2 líneas ("DD/MM" arriba, "valor+unidad" abajo):
+                                margen inferior mayor para que no se corte en mobile. */}
+                            <BarChart data={chart} margin={{ top: 5, right: 5, bottom: 22, left: 0 }}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
-                                <XAxis dataKey="semana" tick={{ fontSize: 9 }} tickMargin={8}
+                                <XAxis dataKey="label" tick={<EtiquetaMarca />}
                                     interval="preserveStartEnd" axisLine={false} tickLine={false} />
                                 <YAxis hide domain={[0, 'dataMax + 10']} />
                                 <Tooltip formatter={(v) => [`${v} ${cat === 'gimnastico' ? 'reps' : cat === 'fuerza' ? 'kg' : ''}`, cfg.label]} />
@@ -262,6 +281,13 @@ function getWeekKey(d) {
     const start = new Date(d.getFullYear(), 0, 1);
     const diff = (d - start + (start.getTimezoneOffset() - d.getTimezoneOffset()) * 60000) / 86400000;
     return `S${Math.ceil((diff + start.getDay() + 1) / 7)}`;
+}
+
+// "DD/MM · valor+unidad" para la etiqueta de cada barra (fecha + marca levantada,
+// no la semana ISO). La unidad es la misma que usa el tooltip del cuadrante.
+function etiquetaMarca(cat, fecha, valor) {
+    const unidad = cat === 'gimnastico' ? 'reps' : cat === 'fuerza' ? 'kg' : '';
+    return `${formatFecha(fecha)} · ${valor}${unidad}`;
 }
 
 // TZ Chile: las fechas de los RMs llegan como 'YYYY-MM-DD'; se formatean en el

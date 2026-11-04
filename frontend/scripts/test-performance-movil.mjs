@@ -49,11 +49,13 @@ ok(HUB.includes('whitespace-nowrap">Reps') && HUB.includes('whitespace-nowrap">S
 ok(HUB.includes('title={rm.movimiento_nombre}') && HUB.includes("title={rm.notas || ''}"),
     'lo truncado en la tabla tiene tooltip con el texto completo');
 
-console.log('== 3. El gráfico separa las semanas de las barras ==');
-ok(HUB.includes('tickMargin={8}'), 'las etiquetas S40/S42 tiene margen propio');
-ok(HUB.includes('margin={{ top: 5, right: 5, bottom: 12, left: 0 }}'),
-    'y el gráfico reserva espacio abajo (no se montan sobre las barras)');
-ok(HUB.includes('height={118}'), 'el cuadrante creció unos px para que quepan las etiquetas');
+console.log('== 3. El gráfico usa "fecha + marca" en 2 líneas (no la semana ISO) ==');
+ok(HUB.includes('dataKey="label"'), 'el eje X ya no usa la semana ISO (S40/S42)');
+ok(HUB.includes('tick={<EtiquetaMarca />}'), 'hay un tick propio para la etiqueta en 2 líneas');
+ok(HUB.includes('margin={{ top: 5, right: 5, bottom: 22, left: 0 }}'),
+    'el gráfico reserva más espacio abajo para las 2 líneas');
+ok(HUB.includes('height={118}'), 'el cuadrante mantiene su altura');
+ok(!HUB.includes('tickMargin={8}'), 'ya no se usa el margen de la etiqueta ISO vieja');
 
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);
