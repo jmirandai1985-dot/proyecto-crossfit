@@ -64,6 +64,8 @@ const CoachDashboard = lazy(() => import('./pages/coach/DashboardCoach'));
 // Código de retiro del Bazar: el coach entrega pedidos con el código del alumno
 // (misma pantalla/modal que usa el admin), sin ver listados ni montos.
 const CoachEntregarPedido = lazy(() => import('./pages/coach/EntregarPedido'));
+// Invitación de alumnos de prueba: el coach usa el MISMO panel que el admin.
+const CoachAlumnosPrueba = lazy(() => import('./pages/coach/AlumnosPrueba'));
 // · Familia ALUMNO
 const AlumnoDashboard = lazy(() => import('./pages/alumno/Dashboard'));
 const AlumnoMisReservas = lazy(() => import('./pages/alumno/MisReservas'));
@@ -184,6 +186,7 @@ function App() {
                 en `ModalPublicarWod`, tomar/soltar y cubrir suplencia en la pestaña Clases. */}
             {/* Mesón del Bazar: entrega con el código de retiro del alumno. */}
             <Route path="entregar-pedido" element={<CoachEntregarPedido />} />
+            <Route path="alumnos-prueba" element={<CoachAlumnosPrueba />} />
             {/* Bloque 5: `pizarra` (daba 400 sin disciplina_id; la reemplaza el modal
                 "Publicar WOD") y `generar-clases` (pegaba a un endpoint admin-only, 403
                 para el coach) ya no tienen ruta. Los archivos quedan en el repo, pero no

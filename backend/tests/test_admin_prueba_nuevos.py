@@ -366,3 +366,26 @@ def test_h5_el_modal_muestra_el_ultimo_envio_y_no_se_tapa():
     assert "Ya enviado hoy" in panel
     assert "Enviar de nuevo" in panel
 
+
+# ── I. Permisos: el coach puede ver e invitar alumnos de prueba ───────────────
+
+def test_i_el_coach_puede_ver_e_invitar_alumnos_de_prueba():
+    """El flujo \"alumnos de prueba\" (ver + invitar por correo) acepta coach además
+    de admin: `get_current_coach` admite `coach`/`admin`/`administrador`. El resto
+    del panel admin sigue cerrado a `get_current_admin` (sólo administrador)."""
+    fuente = _fuente("backend/app/api/v1/admin.py")
+
+    flujo_prueba = ("get_alumnos_prueba_hoy", "get_alumnos_en_prueba",
+                    "get_alumnos_nuevos", "preview_invitacion_prueba",
+                    "enviar_invitacion_prueba")
+    for nombre in flujo_prueba:
+        cuerpo = _bloque(fuente, f"def {nombre}", "\n@router.")
+        assert "get_current_coach" in cuerpo, nombre
+        assert "get_current_admin" not in cuerpo, nombre
+
+    # Los endpoints del admin que NO son del flujo de prueba siguen sólo-admin.
+    for nombre in ("resumen_pendientes", "get_alumnos_convertidos"):
+        cuerpo = _bloque(fuente, f"def {nombre}", "\n@router.")
+        assert "get_current_admin" in cuerpo, nombre
+        assert "get_current_coach" not in cuerpo, nombre
+

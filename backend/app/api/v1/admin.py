@@ -7,7 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.core.dependencies import get_current_admin
+from app.core.dependencies import get_current_admin, get_current_coach
 from app.core.estados import da_acceso_hoy, plan_comercial
 from app.models.notificacion_enviada import NotificacionEnviada
 from app.models.usuario import Usuario, RolUsuario
@@ -125,11 +125,11 @@ def resumen_pendientes(
 @router.get("/alumnos-prueba-hoy")
 def get_alumnos_prueba_hoy(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_admin),
+    current_user: dict = Depends(get_current_coach),
 ):
-    """Alumnos con plan "Prueba" registrados HOY. Solo admins.
+    """Alumnos con plan "Prueba" registrados HOY. Admin y coach.
 
-    - `get_current_admin` ya restringe a rol administrador (403 si no lo es).
+    - `get_current_coach` admite administrador y coach (403 para el resto).
     - "Hoy" se calcula en hora de Chile (America/Santiago) y se compara contra
       `usuarios.created_at` (TIMESTAMPTZ), por lo que es correcto aunque el
       servidor corra en UTC.
@@ -402,7 +402,7 @@ def _ultimos_envios_manuales(db: Session, alumno_ids: list, tipos=None) -> dict:
 @router.get("/alumnos-prueba")
 def get_alumnos_en_prueba(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_admin),
+    current_user: dict = Depends(get_current_coach),
 ):
     """Alumnos con el crédito de PRUEBA vigente, con su estado (panel móvil <768px).
 
@@ -459,7 +459,7 @@ def get_alumnos_en_prueba(
 @router.get("/alumnos-nuevos")
 def get_alumnos_nuevos(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_admin),
+    current_user: dict = Depends(get_current_coach),
 ):
     """Alumnos dados de alta en el MES EN CURSO, con su fecha de alta.
 
@@ -648,7 +648,7 @@ def _alumno_prueba_para_invitar(db: Session, current_user: dict, alumno_id: int)
 def preview_invitacion_prueba(
     alumno_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_admin),
+    current_user: dict = Depends(get_current_coach),
 ):
     """Vista previa del correo manual: el asunto y el HTML EXACTOS que se mandan.
 
@@ -690,7 +690,7 @@ def preview_invitacion_prueba(
 def enviar_invitacion_prueba(
     alumno_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_admin),
+    current_user: dict = Depends(get_current_coach),
 ):
     """Manda la invitación manual (un correo por alumno + tipo + día).
 

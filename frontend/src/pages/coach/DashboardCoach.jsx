@@ -613,10 +613,19 @@ const DashboardCoach = () => {
                         navega a ningún lado nuevo (antes, en escritorio, no había ningún clic
                         para volver y sólo quedaba el cajón lateral). */}
                     <BotonVolver fallback="/coach/dashboard" />
-                    <div>
+                    <div className="flex-1 min-w-0">
                         <h1 className="text-3xl font-bold text-white">Dashboard Coach</h1>
                         <p className="mt-1 text-sm text-zinc-400">{fechaCortaHoy} · {usuario || 'Coach'}</p>
                     </div>
+                    {/* Invitación de alumnos de prueba: mismo panel que usa el admin. */}
+                    <button
+                        type="button"
+                        onClick={() => navigate('/coach/alumnos-prueba')}
+                        data-testid="btn-invitar-alumnos-prueba"
+                        className="shrink-0 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold px-4 py-2 transition-colors"
+                    >
+                        ✉️ Invitar
+                    </button>
                 </div>
 
                 {/* Acá vivían las 4 tarjetas grandes del Resumen viejo (ver el comentario de
