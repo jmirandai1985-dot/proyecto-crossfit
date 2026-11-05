@@ -145,6 +145,7 @@ const precioCLP = (v) => {
 const ICONOS = {
     scan: <path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16" />,
     check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
+    lock: <g><path d="M7 11V7a5 5 0 0 1 10 0v4" /><rect x="4" y="11" width="16" height="9" rx="2" /></g>,
     x: <path d="M6 6l12 12M18 6 6 18" />,
     flame: <path d="M12 22c4 0 7-2.8 7-7 0-3-1.8-5-3-6.5-.5 1.5-1.5 2.5-2.5 3 0-4-1.5-7-4.5-9.5C9 7 5 10.5 5 15c0 4.2 3 7 7 7Z" />,
     tee: <path d="M8 3 3 6l2 4 3-1v11h8V9l3 1 2-4-5-3a4 4 0 0 1-8 0Z" />,
@@ -465,12 +466,18 @@ const InicioMobile = ({
                                         : <>Para usarlos todos, necesitas unas <b>{porSemana} clases por semana</b>.</>}
                     </p>
                     {banner && (
-                        <div className="ctx">
+                        <div className={`ctx${banner.asegurado ? ' asegurado' : ''}`}>
                             <div>
                                 <b>{banner.titulo}</b>
                                 <span>{banner.detalle}</span>
                             </div>
-                            {banner.mostrarRenovar && (
+                            {banner.asegurado ? (
+                                <span className="ctx-seguro"
+                                    title="Tu siguiente plan está asegurado"
+                                    aria-label="Tu siguiente plan está asegurado">
+                                    <Icono nombre="lock" />
+                                </span>
+                            ) : (
                                 <button type="button" onClick={() => navigate('/alumno/solicitar-plan')}>Renovar</button>
                             )}
                         </div>

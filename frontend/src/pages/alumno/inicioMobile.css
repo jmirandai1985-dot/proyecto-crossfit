@@ -690,6 +690,24 @@
     white-space: nowrap;
 }
 
+/* Candado "siguiente plan asegurado": ícono decorativo, sin acción de click. */
+.ub-inicio .ctx-seguro {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--ub-ok);
+    color: #0b2b1c;
+}
+
+.ub-inicio .ctx-seguro .i {
+    width: 20px;
+    height: 20px;
+}
+
 /* ── Enlaces de cabecera (Ver Performance Hub / Ver todo) ── */
 .ub-inicio .head .link {
     font-size: 14px;

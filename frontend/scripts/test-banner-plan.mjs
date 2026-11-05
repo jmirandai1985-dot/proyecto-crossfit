@@ -1,9 +1,10 @@
 // Test aislado del banner de estado del plan (Inicio del alumno).
 //   Ejecutar:  node scripts/test-banner-plan.mjs   (npm run test:banner)
 //
-// Sin navegador ni framework: valida la regla de "qué vence primero" (fecha vs
-// clases) y el copy de las 4 combinaciones (plan_en_cola × vence-primero), más
-// los bordes (sin plan, ilimitado, singular, 0).
+// Sin navegador ni framework: valida el copy específico del banner (días y/o
+// créditos restantes + fecha de activación del plan en cola) y el flag
+// `asegurado` que decide el candado vs el botón "Renovar", más los bordes
+// (sin plan, ilimitado, singular, 0).
 import { textoBannerPlan } from '../src/utils/bannerPlan.js';
 
 let fallos = 0;
@@ -23,35 +24,38 @@ const mem = (extra) => ({ activa: true, es_ilimitado: false, dias_restantes: 10,
 eq(textoBannerPlan({ activa: false }), null, 'sin plan activo -> null (no se dibuja)');
 eq(textoBannerPlan(null), null, 'membresia nula -> null');
 
-// ── CON plan_en_cola: informativo, sin botón ───────────────────────────────
+// ── CON plan_en_cola: informativo + candado (asegurado) ─────────────────────
 {
     const b = textoBannerPlan(mem({ plan_en_cola: true, dias_restantes: 5, clases_disponibles: 10 }));
-    eq(b.titulo, 'Tu plan vence en 5 días.', 'en cola + vence por fecha: título de días');
-    eq(b.detalle, 'Cuando venza, tu próximo plan —ya pagado— se activa automáticamente al día siguiente.', 'en cola + fecha: detalle de activación al vencer');
-    eq(b.mostrarRenovar, false, 'en cola: sin botón Renovar');
+    eq(b.titulo, 'Te quedan 10 clases y 5 días.', 'en cola: título con días y créditos');
+    eq(b.detalle, 'Tu próximo plan ya está pagado y se activa al día siguiente.', 'en cola sin fecha_vencimiento: fallback "al día siguiente"');
+    eq(b.asegurado, true, 'en cola: candado (asegurado)');
 }
 {
     const b = textoBannerPlan(mem({ plan_en_cola: true, dias_restantes: 10, clases_disponibles: 3 }));
-    eq(b.titulo, 'Te quedan 3 clases.', 'en cola + vence por clases: título de clases');
-    eq(b.detalle, 'Cuando se acaben, tu próximo plan —ya pagado— se activa automáticamente al día siguiente.', 'en cola + clases: detalle de activación al agotarse');
-    eq(b.mostrarRenovar, false, 'en cola (clases): sin botón Renovar');
+    eq(b.titulo, 'Te quedan 3 clases y 10 días.', 'en cola (clases): título con días y créditos');
+    eq(b.asegurado, true, 'en cola (clases): candado (asegurado)');
 }
 
-// ── SIN plan_en_cola: nudge + botón Renovar ─────────────────────────────────
+// ── Fecha de activación derivada del vencimiento (+1 día) ───────────────────
+{
+    const b = textoBannerPlan(mem({ plan_en_cola: true, dias_restantes: 5, clases_disponibles: 10, fecha_vencimiento: '2025-05-12' }));
+    eq(b.detalle, 'Tu próximo plan ya está pagado y se activa el 13 de mayo.', 'en cola + fecha: activación el día siguiente al vencimiento');
+}
+
+// ── SIN plan_en_cola: nudge + botón Renovar (sin candado) ───────────────────
 {
     const b = textoBannerPlan(mem({ plan_en_cola: false, dias_restantes: 5, clases_disponibles: 10 }));
-    eq(b.titulo, 'Tu plan vence en 5 días.', 'sin cola + vence por fecha: título de días');
-    eq(b.detalle, 'Renueva ahora para no quedarte sin clases.', 'sin cola + fecha: nudge de renovar');
-    eq(b.mostrarRenovar, true, 'sin cola: con botón Renovar');
+    eq(b.detalle, 'Renueva ahora para no quedarte sin clases.', 'sin cola: nudge de renovar');
+    eq(b.asegurado, false, 'sin cola: botón Renovar (no candado)');
 }
 {
     const b = textoBannerPlan(mem({ plan_en_cola: false, dias_restantes: 10, clases_disponibles: 3 }));
-    eq(b.titulo, 'Te quedan 3 clases.', 'sin cola + vence por clases: título de clases');
-    eq(b.detalle, 'Renueva ahora para no quedarte sin clases.', 'sin cola + clases: nudge de renovar');
-    eq(b.mostrarRenovar, true, 'sin cola (clases): con botón Renovar');
+    eq(b.detalle, 'Renueva ahora para no quedarte sin clases.', 'sin cola (clases): nudge de renovar');
+    eq(b.asegurado, false, 'sin cola (clases): botón Renovar (no candado)');
 }
 
-// ── Ilimitado: siempre vence por fecha (nunca se queda sin clases) ─────────
+// ── Ilimitado: siempre vence por fecha (nunca habla de clases) ─────────────
 {
     const b = textoBannerPlan(mem({ es_ilimitado: true, dias_restantes: 10, clases_disponibles: null }));
     eq(b.titulo, 'Tu plan vence en 10 días.', 'ilimitado: siempre por fecha (aunque clases sea NULL/0)');
@@ -60,13 +64,13 @@ eq(textoBannerPlan(null), null, 'membresia nula -> null');
 
 // ── Bordes de redacción (singular / 0) ──────────────────────────────────────
 eq(textoBannerPlan(mem({ dias_restantes: 1, clases_disponibles: 10 })).titulo,
-    'Tu plan vence en 1 día.', 'singular: "1 día"');
+    'Te quedan 10 clases y 1 día.', 'singular: "1 día"');
 eq(textoBannerPlan(mem({ dias_restantes: 0, clases_disponibles: 10 })).titulo,
-    'Tu plan vence hoy.', '0 días: "vence hoy"');
+    'Te quedan 10 clases y vence hoy.', '0 días: "vence hoy"');
 eq(textoBannerPlan(mem({ dias_restantes: 10, clases_disponibles: 1 })).titulo,
-    'Te queda 1 clase.', 'singular: "1 clase"');
+    'Te quedan 1 clase y 10 días.', 'singular: "1 clase"');
 eq(textoBannerPlan(mem({ dias_restantes: 10, clases_disponibles: 0 })).titulo,
-    'Te quedan 0 clases.', '0 clases: plural "0 clases" (vence por clases)');
+    'Te quedan 0 clases y 10 días.', '0 clases: créditos agotados');
 
 // ── El texto visible SIEMPRE dice "clases", nunca "créditos" ───────────────
 {
