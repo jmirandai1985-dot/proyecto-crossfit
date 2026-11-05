@@ -1,11 +1,39 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { VitePWA } from 'vite-plugin-pwa'
 import { visualizer } from 'rollup-plugin-visualizer'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
     react(),
+    // PWA instalable (ícono en el home, standalone). Alcance: SOLO instalable.
+    // ⚠️ Sin runtime caching de /api/*: generateSW solo precachea el app shell
+    // (HTML/JS/CSS/ícono). Si no hay internet, el navegador muestra su pantalla de
+    // "sin conexión" normal — nada de datos desactualizados de pagos/clases.
+    VitePWA({
+      registerType: 'autoUpdate',
+      manifest: {
+        name: 'Urban Training Box',
+        short_name: 'Urban Box',
+        description: 'Plataforma de gestión para Urban Training Box',
+        lang: 'es',
+        theme_color: '#0b0e14',
+        background_color: '#0b0e14',
+        display: 'standalone',
+        start_url: '/',
+        icons: [
+          { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png' },
+          {
+            src: '/pwa-maskable-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
+        ],
+      },
+    }),
     // Observabilidad del bundle: en cada `vite build` genera dist/stats.html con el
     // tamaño de cada chunk (y su desglose por módulo, con gzip/brotli). Sirve para
     // frenar regresiones de tamaño. Sólo actúa durante el build (no en dev).
