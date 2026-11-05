@@ -61,6 +61,15 @@
     font-family: var(--ub-body, 'Barlow', system-ui, sans-serif);
 }
 
+/* ── Tarjeta activa: borde de acento + brillo interior. La pista recorta los
+   box-shadow EXTERNOS (overflow-x), así que el glow va por DENTRO de la tarjeta
+   y no se ve cortado por el scroll. ── */
+.cm-tarjeta.cm-activa {
+    border-color: var(--ub-orange, #d9472e);
+    box-shadow: inset 0 0 0 1px rgba(234, 118, 48, .35),
+                inset 0 0 24px rgba(234, 118, 48, .22);
+}
+
 /* La foto del flyer, de fondo: apagada y con un velo que garantiza el contraste
    del título (texto claro sobre cualquier imagen). */
 .cm-fondo {
@@ -155,13 +164,15 @@
     font-weight: 700;
     line-height: 1.1;
     margin: 0 0 5px;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, .65);
 }
 
 .cm-texto {
     font-size: 12.5px;
     line-height: 1.4;
     margin: 0;
-    color: rgba(255, 255, 255, .78);
+    color: rgba(255, 255, 255, .92);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .5);
 }
 
 /* La fecha del pie (esquina inferior derecha). */
@@ -210,11 +221,11 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: rgba(255, 255, 255, .08);
-    border: 1px solid rgba(255, 255, 255, .15);
-    color: #eafff2;
+    background: rgba(255, 255, 255, .14);
+    border: 1px solid rgba(255, 255, 255, .34);
+    color: #ffffff;
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 700;
     padding: 6px 10px;
     border-radius: 7px;
     margin-top: 8px;
@@ -352,24 +363,25 @@ button.cm-mini {
 .cm-barras {
     display: flex;
     justify-content: center;
-    gap: 5px;
-    margin-top: 10px;
+    gap: 7px;
+    margin-top: 12px;
 }
 
 .cm-barra {
     position: relative;
-    width: 20px;
-    height: 4px;
-    border-radius: 2px;
+    width: 24px;
+    height: 6px;
+    border-radius: 3px;
     border: 0;
     padding: 0;
-    background: var(--ub-line, #332423);
+    background: rgba(255, 255, 255, .22);
     cursor: pointer;
     overflow: hidden;
+    transition: background .2s ease;
 }
 
 .cm-barra.on {
-    width: 34px;
+    width: 40px;
 }
 
 .cm-barra-relleno {
@@ -378,6 +390,7 @@ button.cm-mini {
     width: 0;
     border-radius: inherit;
     background: var(--ub-orange, #d9472e);
+    box-shadow: 0 0 8px rgba(234, 118, 48, .6);
 }
 
 .cm-barra.on .cm-barra-relleno {

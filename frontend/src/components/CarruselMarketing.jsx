@@ -60,7 +60,7 @@ const Etiqueta = ({ tipo }) => (
 // Tarjeta de uno de los CUATRO avisos que escribe el admin. La de una promoción
 // publicada desde Referidos (`promocion_id`) suma un CTA a `/alumno/invita-y-gana`:
 // es la tarjeta que ANUNCIA el premio, y el alumno necesita su código para ganarlo.
-const TarjetaAviso = ({ aviso, onVerFlyer, onVerReferidos }) => {
+const TarjetaAviso = ({ aviso, onVerFlyer, onVerReferidos, activa }) => {
     const tipo = tipoDe(aviso.tipo);
     const evento = aviso.tipo === 'evento' ? formatearFechaEvento(aviso.fecha_evento) : null;
     const pie = resumenVigencia(aviso);
@@ -68,7 +68,7 @@ const TarjetaAviso = ({ aviso, onVerFlyer, onVerReferidos }) => {
 
     return (
         <article
-            className="cm-tarjeta"
+            className={`cm-tarjeta${activa ? ' cm-activa' : ''}`}
             style={{ background: tipo.fondo }}
             data-tipo={aviso.tipo}
         >
@@ -124,14 +124,14 @@ const TarjetaAviso = ({ aviso, onVerFlyer, onVerReferidos }) => {
 
 // Tarjeta de UN producto nuevo: foto, nombre y precio REALES (salen del producto
 // en el Bazar, así que si el admin le cambia el precio, acá se ve al instante).
-const TarjetaProducto = ({ aviso, onAbrir }) => {
+const TarjetaProducto = ({ aviso, onAbrir, activa }) => {
     const tipo = tipoDe('producto_bazar');
     const foto = fotoDeTarjeta(aviso);
     const precio = precioDeTarjeta(aviso);
 
     return (
         <article
-            className="cm-tarjeta cm-producto"
+            className={`cm-tarjeta cm-producto${activa ? ' cm-activa' : ''}`}
             style={{ background: tipo.fondo }}
             data-tipo={aviso.tipo}
         >
@@ -163,13 +163,13 @@ const TarjetaProducto = ({ aviso, onAbrir }) => {
 
 // Tarjeta de VARIOS productos nuevos: la que el mockup rotula "Llegaron poleras
 // y polerones" — miniaturas y un "+N" cuando no caben todas.
-const TarjetaProductos = ({ tarjeta, onVerBazar, onVerProducto }) => {
+const TarjetaProductos = ({ tarjeta, onVerBazar, onVerProducto, activa }) => {
     const tipo = tipoDe('producto_bazar');
     const visibles = tarjeta.avisos.slice(0, MAX_MINIATURAS);
 
     return (
         <article
-            className="cm-tarjeta"
+            className={`cm-tarjeta${activa ? ' cm-activa' : ''}`}
             style={{ background: tipo.fondo }}
             data-tipo="producto_bazar"
         >
@@ -212,13 +212,13 @@ const TarjetaProductos = ({ tarjeta, onVerBazar, onVerProducto }) => {
 // `/alumno/invita-y-gana`, donde está el código del alumno y el botón para
 // compartir la invitación. La etiqueta ("Trae a un amigo"), el dorado y el
 // destino son fijos: son el lenguaje visual del carrusel, no copy.
-const TarjetaReferidos = ({ copy, onAbrir }) => {
+const TarjetaReferidos = ({ copy, onAbrir, activa }) => {
     const tipo = TIPO_REFERIDOS;
 
     return (
         <button
             type="button"
-            className="cm-tarjeta cm-referidos"
+            className={`cm-tarjeta cm-referidos${activa ? ' cm-activa' : ''}`}
             style={{ background: tipo.fondo }}
             onClick={onAbrir}
             data-testid="carrusel-referidos"
@@ -374,25 +374,26 @@ const CarruselMarketing = () => {
                 onTouchStart={pausarPorInteraccion}
                 onMouseEnter={() => setHover(true)}
                 onMouseLeave={() => setHover(false)}>
-                {tarjetas.map((tarjeta) => {
+                {tarjetas.map((tarjeta, indice) => {
+                    const esActiva = indice === activo;
                     if (tarjeta.clase === 'referidos') {
                         return <TarjetaReferidos key="referidos" copy={copiaReferidos}
-                                                 onAbrir={irAReferidos} />;
+                                                 onAbrir={irAReferidos} activa={esActiva} />;
                     }
                     if (tarjeta.clase === 'aviso') {
                         return <TarjetaAviso key={`aviso-${tarjeta.aviso.id}`}
                                              aviso={tarjeta.aviso} onVerFlyer={setFlyer}
-                                             onVerReferidos={irAReferidos} />;
+                                             onVerReferidos={irAReferidos} activa={esActiva} />;
                     }
                     if (tarjeta.clase === 'producto') {
                         return <TarjetaProducto key={`producto-${tarjeta.aviso.id}`}
                                                  aviso={tarjeta.aviso}
-                                                 onAbrir={irAProducto} />;
+                                                 onAbrir={irAProducto} activa={esActiva} />;
                     }
                     return <TarjetaProductos key="productos"
                                              tarjeta={tarjeta}
                                              onVerProducto={irAProducto}
-                                             onVerBazar={() => navigate('/alumno/bazar')} />;
+                                             onVerBazar={() => navigate('/alumno/bazar')} activa={esActiva} />;
                 })}
             </div>
 
