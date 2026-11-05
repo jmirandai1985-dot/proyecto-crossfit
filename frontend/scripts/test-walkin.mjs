@@ -18,7 +18,6 @@ const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const MODAL = leer('../src/components/ModalAgregarSinReserva.jsx');
 const ASIST = leer('../src/components/AsistenciaClases.jsx');
 const DASH = leer('../src/pages/coach/DashboardCoach.jsx');
-const HOOKS = leer('../src/hooks/queries.js');
 const API = leer('../../backend/app/api/v1/asistencia.py');
 
 let fallos = 0;

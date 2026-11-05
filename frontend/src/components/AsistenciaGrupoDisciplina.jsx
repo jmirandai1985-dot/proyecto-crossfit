@@ -45,7 +45,7 @@ const AsistenciaGrupoDisciplina = ({ grupo, osc, abierta, onToggle, onAbrir, for
         setExtra(Math.max(1, Math.min(2, libre)));
     };
 
-    const confirmarCupo = async (clase, libre) => {
+    const confirmarCupo = async (clase) => {
         setEnviando(true);
         setMsg(null);
         try {

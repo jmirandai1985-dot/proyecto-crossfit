@@ -247,12 +247,6 @@ const evalJs = async (expression) => {
     return r.result?.result?.value;
 };
 const hay = (sel) => evalJs(`!!document.querySelector(${JSON.stringify(sel)})`);
-// Visible de verdad: `md:hidden` oculta por CSS y el nodo sigue en el DOM (mismo criterio
-// que los otros harness del repo).
-const visible = (sel) => evalJs(`(() => {
-  const e = document.querySelector(${JSON.stringify(sel)});
-  return !!e && e.getClientRects().length > 0;
-})()`);
 const click = (sel) => evalJs(`(() => {
   const e = document.querySelector(${JSON.stringify(sel)});
   if (!e) return false;

@@ -136,16 +136,6 @@ const Coaches = () => {
         }
     };
 
-    const handleDelete = async (coach) => {
-        // NOTA: sin uso desde que la confirmacion vive en el modal propio (desactivarConfirmado). Se deja por contexto historico.
-        if (!window.confirm(`¿Estás seguro de eliminar a ${coach.nombre}?`)) return;
-        try {
-            await desactivarUsuario.mutateAsync(coach.id);
-        } catch (error) {
-            setMsgOperacion({ tipo: 'error', texto: error.response?.data?.detail || 'No se pudo desactivar' });
-        }
-    };
-
     const toggleDisciplina = (discId) => {
         setFormData(prev => ({
             ...prev,

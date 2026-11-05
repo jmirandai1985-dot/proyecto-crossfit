@@ -16,7 +16,7 @@ const DISCIPLINAS_FALLBACK = [
     { id: 5, nombre: 'Pilates' },
 ];
 
-const ModalClase = ({ isOpen, onClose, onSuccess, tenant_id, claseEditar }) => {
+const ModalClase = ({ isOpen, onClose, onSuccess, claseEditar }) => {
     // Bloque 3 (parte A): el padrón de coaches es el MISMO `GET /usuarios/?rol=coach` que
     // pide la pantalla de Coaches, y las disciplinas salen de la caché compartida: abrir
     // este modal ya no dispara dos GET que otra pantalla del admin acaba de traer.

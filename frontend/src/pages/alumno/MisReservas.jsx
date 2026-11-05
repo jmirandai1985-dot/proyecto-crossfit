@@ -60,7 +60,6 @@ const MisReservas = () => {
         let horasRestantes = 999;
         if (reserva.clase_fecha && reserva.hora_inicio) {
             const ahora = new Date();
-            const [h, m] = reserva.hora_inicio.split(':');
             const inicioClase = new Date(reserva.clase_fecha + 'T' + reserva.hora_inicio);
             horasRestantes = (inicioClase - ahora) / (1000 * 60 * 60);
         }

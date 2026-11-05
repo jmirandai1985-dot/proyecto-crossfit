@@ -193,9 +193,6 @@ const AlumnoDashboard = () => {
         }
     }, [loading, primerDiaDisponible, diaExpandido]);
 
-    // ─── Calcular total de clases ──────────────────────────────────────
-    const totalClases = Object.values(clasesPorDia).flat().length;
-
     // ─── Loading ───────────────────────────────────────────────────────
     if (loading) {
         return (
@@ -509,7 +506,6 @@ const AlumnoDashboard = () => {
                         const clasesDelDia = (clasesPorDia[diaExpandido] || [])
                             .sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || ''));
                         const { manana, tarde } = SEPARAR_CLASES(clasesDelDia);
-                        const tieneClases = clasesDelDia.length > 0;
                         const esPrimerDisponible = primerDiaDisponible === diaExpandido;
 
                         // Obtener disciplinas únicas de todas las clases del día

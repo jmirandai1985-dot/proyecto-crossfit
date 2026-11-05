@@ -12,7 +12,6 @@ import apiPublica from '../../services/apiPublica';
 // ═══════════════════════════════════════════════════════════════════════════
 
 const REFRESH_MS = 5 * 60 * 1000; // auto-refresh cada 5 minutos (decisión confirmada)
-const SELLO_PERFECTO = '100% PERFECTO';
 const SELLO_MONSTRUO = '🦍 MONSTRUO';
 
 const FONT_TITLE = "'Bebas Neue', 'Oswald', sans-serif";
@@ -403,7 +402,7 @@ function RankingAsistencia() {
 
     const columnas = data?.columnas || [];
     const maxNoIlimitado = data?.max_no_ilimitado ?? 0;
-    const [anio, mes] = (data?.mes || '').split('-');
+    const [, mes] = (data?.mes || '').split('-');
     const mesLabel = MESES[Number(mes) - 1] || data?.mes || '';
 
     return (

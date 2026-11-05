@@ -16,7 +16,6 @@ const GridCell = React.memo(({ horaKey, dia, cell, onCellClick }) => {
     if (!cell) {
         return <div className="h-16 bg-zinc-800/50 rounded border border-dashed border-zinc-800"></div>;
     }
-    const nomDia = DIAS[dia];
     return (
         <button onClick={() => onCellClick(horaKey, dia, cell)}
             className="h-16 bg-zinc-900 rounded border border-zinc-800 hover:shadow-md hover:border-blue-300 transition-all p-1 text-left overflow-hidden">
@@ -60,7 +59,7 @@ export default function Horarios() {
         return { filas: horas, celdasMap: map };
     }, [gridData]);
 
-    const handleCellClick = (horaKey, dia, cell) => {
+    const handleCellClick = (horaKey, dia, _cell) => {
         const key = `${horaKey}-${dia}`;
         setExpandedCell(prev => prev === key ? null : key);
     };

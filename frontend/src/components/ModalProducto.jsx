@@ -18,7 +18,7 @@ const leerFoto = (archivo) => new Promise((resolve, reject) => {
     reader.readAsDataURL(archivo);
 });
 
-const ModalProducto = ({ isOpen, onClose, onSuccess, tenant_id, productoEditar }) => {
+const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
     const [loading, setLoading] = useState(false);
     const [formData, setFormData] = useState({
         nombre: '',

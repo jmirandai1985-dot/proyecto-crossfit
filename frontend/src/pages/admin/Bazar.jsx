@@ -111,20 +111,6 @@ const Bazar = ({ sinLayout = false }) => {
         if (key === 'stock_bajo') return stats.alertas;
         return 0;
     };
-    // Badge de nivel de stock (mismo criterio que tenía el panel): bajo <=5,
-    // medio <=15, alto >15.
-    const getStockColor = (stock) => {
-        if (stock <= 5) return 'bg-red-100 text-red-800';
-        if (stock <= 15) return 'bg-yellow-100 text-yellow-800';
-        return 'bg-green-100 text-green-800';
-    };
-
-    const getStockLabel = (stock) => {
-        if (stock <= 5) return 'bajo';
-        if (stock <= 15) return 'medio';
-        return 'alto';
-    };
-
     const getProductoEmoji = (nombre) => {
         const n = (nombre || '').toLowerCase();
         if (n.includes('protein') || n.includes('suplemento') || n.includes('isot')) return '🥤';

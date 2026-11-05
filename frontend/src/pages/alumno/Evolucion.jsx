@@ -169,7 +169,7 @@ const Evolucion = () => {
                     )}
                     {topMejoras.length > 0 && (
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            {topMejoras.map((item, idx) => (
+                            {topMejoras.map((item) => (
                                 <div
                                     key={item.movimiento_id}
                                     className="border border-gray-200 rounded-lg p-4 bg-gradient-to-br from-purple-50 to-blue-50 hover:shadow-md transition-shadow cursor-pointer"

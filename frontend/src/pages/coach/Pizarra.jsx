@@ -413,8 +413,6 @@ const Pizarra = () => {
         }
     };
 
-    const diaSeleccionadoKey = diaSeleccionado ? getDiaKey(diaSeleccionado) : null;
-
     return (
         <Layout>
             <div className="max-w-6xl mx-auto space-y-6">
