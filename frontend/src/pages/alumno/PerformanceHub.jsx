@@ -17,6 +17,8 @@ import {
 } from '../../utils/rm';
 // TZ Chile: fechas de los RMs en el calendario chileno.
 import { fmtFechaCortaChile } from '../../utils/fecha';
+// Fase 2 (Bloque 2): evolución por movimiento + tips, derivados del historial.
+import { evolucionPorMovimiento, tipsEvolucion } from '../../utils/evolucionRM';
 
 const CAT_CONFIG = {
     fuerza: { label: 'Fuerza Máxima', color: '#3B82F6', icon: '💪' },
@@ -24,6 +26,9 @@ const CAT_CONFIG = {
     cardio: { label: 'Cardio', color: '#F97316', icon: '🧀' },
     metabolico: { label: 'Metabólico', color: '#8B5CF6', icon: '⚡' },
 };
+
+// Borde de color de las tarjetas "Para ti" (mismo patrón visual que los cuadrantes).
+const COLORES_TIP = { verde: '#10B981', naranja: '#F97316', gris: '#6B7280' };
 
 // Etiqueta del eje X de los gráficos de marcas: "DD/MM" arriba y "valor+unidad"
 // abajo, en DOS líneas (antes era la semana ISO S40/S42, un dato técnico poco
@@ -73,6 +78,17 @@ const PerformanceHub = () => {
         });
         return catsRes;
     }, [rms]);
+
+    // Fase 2 (Bloque 2): evolución por MOVIMIENTO (no por categoría). Compara el último
+    // RM de cada movimiento contra el anterior de ESE MISMO movimiento (mejora real, ya
+    // que un RM es siempre el mismo ejercicio). Vive en utils/evolucionRM.js.
+    const evolucion = React.useMemo(
+        () => evolucionPorMovimiento(historialQ.data),
+        [historialQ.data],
+    );
+
+    // Tips "Para ti" (logro / alerta / comparación) derivados de esa evolución.
+    const tips = React.useMemo(() => tipsEvolucion(evolucion), [evolucion]);
 
     // N-5: acá había un `catch (e) { }` VACÍO. Cualquier fallo al armar la serie semanal
     // se perdía en silencio y el gráfico salía incompleto sin avisar. Ahora se registra
@@ -193,6 +209,10 @@ const PerformanceHub = () => {
                     <BotonVolver />
                     <span className="text-3xl">🏆</span>
                     <div><h1 className="text-2xl font-bold text-gray-800">Performance Hub</h1><p className="text-sm text-gray-500">Perfil completo de atleta basado en tus RMs</p></div>
+                    <button type="button" onClick={() => navigate('/alumno/rms')}
+                        className="ml-auto shrink-0 px-4 py-2 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm transition-colors">
+                        + Registrar RM
+                    </button>
                 </div>
                 <div className="space-y-6">
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -271,6 +291,68 @@ const PerformanceHub = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                         {Object.keys(CAT_CONFIG).map(cat => renderCuadrante(cat))}
                     </div>
+
+                    {/* Fase 2 (Bloque 2): mejora REAL por movimiento (último vs anterior). */}
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                        <div className="px-3 py-3 border-b border-gray-100">
+                            <h2 className="font-bold text-gray-800 text-xl">📈 Evolución por movimiento</h2>
+                            <p className="text-sm text-gray-500">Mejora de cada movimiento contra su registro anterior.</p>
+                        </div>
+                        {evolucion.length === 0 ? (
+                            <p className="px-4 py-6 text-gray-400 text-sm">Sin movimientos registrados todavía.</p>
+                        ) : (
+                            <ul className="divide-y divide-gray-100">
+                                {evolucion.map((m) => {
+                                    const pct = formatearPctCambio(m.pctCambio);
+                                    return (
+                                        <li key={m.movimiento_id}>
+                                            <button type="button"
+                                                onClick={() => navigate(`/alumno/evolucion?movimiento=${m.movimiento_id}`)}
+                                                className="w-full text-left px-3 py-3 flex items-center justify-between gap-3 hover:bg-emerald-50 transition-colors">
+                                                <span className="min-w-0">
+                                                    <span className="block font-semibold text-gray-800 break-words">
+                                                        {m.movimiento_nombre}
+                                                        {m.esPR && <span className="ml-1 text-amber-500 text-xs" title="Mejor marca personal">⭐</span>}
+                                                    </span>
+                                                    <span className="block text-xs text-gray-500 mt-0.5">
+                                                        {m.valorActual} {m.unidad}
+                                                        {m.diasSinTestear !== null && m.diasSinTestear > 30 && (
+                                                            <span className="ml-2 inline-block px-2 py-0.5 bg-orange-100 text-orange-700 text-[11px] font-semibold rounded-full">
+                                                                sin testear hace {m.diasSinTestear} días
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                </span>
+                                                <span className={`shrink-0 text-base font-bold ${pct.clase}`}>{pct.texto}</span>
+                                            </button>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        )}
+                    </div>
+
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                        <div className="px-3 py-3 border-b border-gray-100">
+                            <h2 className="font-bold text-gray-800 text-xl">💡 Para ti</h2>
+                        </div>
+                        {tips.length === 0 ? (
+                            <p className="px-4 py-6 text-gray-400 text-sm">Registrá más RMs para recibir recomendaciones personalizadas.</p>
+                        ) : (
+                            <div className="p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                {tips.map((tip, i) => (
+                                    <button key={`${tip.tipo}-${i}`} type="button"
+                                        onClick={() => navigate(`/alumno/evolucion?movimiento=${tip.movimientoId}`)}
+                                        className="text-left rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow"
+                                        style={{ borderLeft: `4px solid ${COLORES_TIP[tip.color] || '#6B7280'}` }}>
+                                        <span className="block text-lg">{tip.icono}</span>
+                                        <span className="block font-semibold text-gray-800 mt-1">{tip.titulo}</span>
+                                        <span className="block text-sm text-gray-500 mt-0.5">{tip.detalle}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         </Layout>
@@ -294,6 +376,15 @@ function etiquetaMarca(cat, fecha, valor) {
 // calendario chileno (con new Date(f) a medianoche UTC la fecha se corría un día).
 function formatFecha(f) {
     return fmtFechaCortaChile(f) || '—';
+}
+
+// Texto/color del % de cambio de un movimiento: sube (verde), baja (rojo), igual ("=") o
+// "primera marca" cuando todavía no hay registro previo con qué comparar.
+function formatearPctCambio(pct) {
+    if (pct === null) return { texto: 'primera marca', clase: 'text-gray-400' };
+    if (pct > 0) return { texto: `+${pct.toFixed(1)}%`, clase: 'text-emerald-600' };
+    if (pct < 0) return { texto: `${pct.toFixed(1)}%`, clase: 'text-red-600' };
+    return { texto: '=', clase: 'text-gray-400' };
 }
 
 export default PerformanceHub;
