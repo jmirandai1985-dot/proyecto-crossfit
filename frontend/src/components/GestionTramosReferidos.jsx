@@ -57,7 +57,10 @@ const GestionTramosReferidos = () => {
     }));
     const [erroresPublicar, setErroresPublicar] = useState([]);
 
-    const tramos = data?.tramos ?? [];
+    // `data?.tramos ?? []` creaba un array NUEVO en cada render mientras la query no
+    // tenía datos → dependencia inestable (warning exhaustive-deps). Se memoiza el
+    // fallback; `activos` (abajo) ya depende de `tramos`, así que también se estabiliza.
+    const tramos = useMemo(() => data?.tramos ?? [], [data]);
     const escalera = data?.escalera ?? [];
     const motor = data?.motor ?? 'promociones';
     const activos = useMemo(() => tramos.filter((tramo) => tramo.activo), [tramos]);

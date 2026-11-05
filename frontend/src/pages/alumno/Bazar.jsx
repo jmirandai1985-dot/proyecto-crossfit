@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
@@ -61,7 +61,10 @@ const Bazar = () => {
     const pagoDisponible = Boolean(pagoDisponibleQ.data?.habilitado);
     const crearPagoOnline = useCrearPagoBazar();
     const [yendoAPagar, setYendoAPagar] = useState(false);
-    const productos = productosQ.data || [];
+    // `productosQ.data || []` creaba un array NUEVO en cada render mientras la query
+    // no tenía datos, así que React veía una dependencia que "cambia siempre" (warning
+    // exhaustive-deps). Se memoiza el fallback para estabilizar la referencia.
+    const productos = useMemo(() => productosQ.data || [], [productosQ.data]);
     const configBancaria = configQ.data?.configurado ? configQ.data : null;
     const loading = productosQ.isLoading || configQ.isLoading;
     // P1: si falla la carga, se avisa con banner + Reintentar (antes quedaba
