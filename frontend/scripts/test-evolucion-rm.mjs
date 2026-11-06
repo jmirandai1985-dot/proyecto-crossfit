@@ -167,6 +167,29 @@ ok(objSingle, 'un solo registro no rompe y genera objetivo');
 eq(objSingle?.ultimos3.length, 1, 'un solo registro → ultimos3 con 1 elemento');
 eq(objSingle?.objetivoSugerido, 62.5, 'objetivo de Snatch = 60 + 2.5');
 
+// ── 5b. Plan de progresión del tip "tu RM es tu 100%" ─────────────────────
+eq(objFuerza?.planProgresion.length, 3, 'fuerza: plan de 3 pasos (volumen, intensidad, PR)');
+eq(objFuerza?.planProgresion[0].valor, '79-84 kg',
+    'fuerza: bloque 1 (75-80% de 105) = 79-84 kg');
+eq(objFuerza?.planProgresion[1].valor, '89.5-94.5 kg',
+    'fuerza: bloque 2 (85-90% de 105) = 89.5-94.5 kg');
+eq(objFuerza?.planProgresion[2].valor, '107.5 kg',
+    'fuerza: bloque 3 = intentar 105 + 2.5 = 107.5 kg');
+eq(objFuerza?.ventanaReintento, 'en 3-4 semanas aprox.',
+    'fuerza: ventana de reintento en 3-4 semanas');
+
+eq(objGimn?.planProgresion.length, 2, 'gimnástico: plan de 2 pasos (volumen, PR)');
+eq(objGimn?.planProgresion[0].valor, '7-8 reps',
+    'gimnástico: volumen submáximo (70-80% de 10) = 7-8 reps');
+eq(objGimn?.planProgresion[1].valor, '11 reps',
+    'gimnástico: bloque 2 = intentar 10 + 1 = 11 reps');
+eq(objGimn?.ventanaReintento, 'en 3-4 semanas aprox.',
+    'gimnástico: ventana de reintento en 3-4 semanas');
+
+// El plan se calcula también con un solo registro (no depende de la historia previa).
+eq(objSingle?.planProgresion[0].valor, '45-48 kg',
+    'Snatch 60 kg: bloque 1 (75-80%) = 45-48 kg');
+
 // cardio/metabólico NO generan este tip.
 eq(objetivos.some((o) => o.movimiento_id === 13), false, 'cardio no genera objetivo');
 eq(objetivos.some((o) => o.movimiento_id === 14), false, 'metabólico no genera objetivo');

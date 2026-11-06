@@ -422,6 +422,18 @@ const PerformanceHub = () => {
                                                 </p>
                                                 <MiniBarrasObjetivo datos={o.ultimos3} />
                                                 <p className="text-xs text-gray-500 mt-2">{textoObjetivo(o)}</p>
+                                                <div className="mt-2 pt-2 border-t border-gray-100">
+                                                    <p className="text-[11px] font-semibold text-gray-500">Plan de progresión</p>
+                                                    <div className="mt-1 space-y-1">
+                                                        {o.planProgresion.map((paso, i) => (
+                                                            <div key={i} className="flex gap-1.5 text-xs text-gray-500">
+                                                                <span className="shrink-0 font-semibold text-indigo-500">{i + 1}.</span>
+                                                                <span>{paso.texto}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    <p className="text-[11px] text-gray-400 mt-1.5">Ventana de reintento: {o.ventanaReintento}</p>
+                                                </div>
                                             </button>
                                         ))}
                                     </div>

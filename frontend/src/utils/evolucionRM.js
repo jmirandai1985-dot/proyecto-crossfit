@@ -188,6 +188,58 @@ export function tipsEvolucion(resumenes) {
     return tips;
 }
 
+// Ventana sugerida para reintentar el máximo (coherente con el umbral de 30 días que ya
+// usa el badge "hace tiempo que no lo testeás" en "Evolución por movimiento").
+const VENTANA_REINTENTO = 'en 3-4 semanas aprox.';
+
+// Redondea un kg a 0.5 kg (el salto real de disco más chico del box): 78.75 → 79.0,
+// 89.25 → 89.5. `Math.round(n * 2) / 2` redondea hacia el 0.5 más cercano.
+function redondearMedioKg(n) {
+    return Math.round(n * 2) / 2;
+}
+
+// Plan de progresión de FUERZA (kg): periodización estándar de 3 semanas
+// (volumen → intensidad → intento de PR), con el peso exacto de cada bloque.
+function planFuerza(valorActual, unidad) {
+    const v = Number(valorActual) || 0;
+    const v75 = redondearMedioKg(v * 0.75);
+    const v80 = redondearMedioKg(v * 0.80);
+    const v85 = redondearMedioKg(v * 0.85);
+    const v90 = redondearMedioKg(v * 0.90);
+    return [
+        {
+            texto: `2 semanas de volumen: 3-4 series x 5-6 reps al 75-80% (${v75}-${v80} ${unidad}), 2 veces por semana.`,
+            valor: `${v75}-${v80} ${unidad}`,
+        },
+        {
+            texto: `1 semana de intensidad: 3 series x 2-3 reps al 85-90% (${v85}-${v90} ${unidad}).`,
+            valor: `${v85}-${v90} ${unidad}`,
+        },
+        {
+            texto: `Intentar el nuevo objetivo: ${v + 2.5} ${unidad}.`,
+            valor: `${v + 2.5} ${unidad}`,
+        },
+    ];
+}
+
+// Plan de progresión GIMNÁSTICO (reps): doble progresión (volumen submáximo → intento).
+function planGimnastico(valorActual, unidad) {
+    const v = Number(valorActual) || 0;
+    // Redondeo hacia abajo (floor): nunca se prescribe más de lo que el alumno ya hace.
+    const min = Math.floor(v * 0.70);
+    const max = Math.floor(v * 0.80);
+    return [
+        {
+            texto: `2-3 sesiones de volumen submáximo: series al 70-80% (${min}-${max} ${unidad}).`,
+            valor: `${min}-${max} ${unidad}`,
+        },
+        {
+            texto: `Intentar el nuevo objetivo: ${v + 1} ${unidad}.`,
+            valor: `${v + 1} ${unidad}`,
+        },
+    ];
+}
+
 /**
  * Objetivos sugeridos para la sección "Para ti" (tip "tu RM es tu 100%").
  *
@@ -198,6 +250,10 @@ export function tipsEvolucion(resumenes) {
  * Cardio/metabólico se excluyen a propósito (decisión cerrada 05/11): no tienen
  * comparación de intensidad ni "próximo objetivo", solo guardan el RM normal.
  *
+ * Cada objetivo además trae `planProgresion` (2-3 pasos con el peso/reps EXACTO de cada
+ * bloque, calculado a partir del RM actual) y `ventanaReintento` ("en 3-4 semanas aprox."),
+ * coherente con el umbral de 30 días del badge de "Evolución por movimiento".
+ *
  * Recibe el MISMO array que devuelve `evolucionPorMovimiento` (que ya trae `diasDesdePR`
  * y `ultimos3`); devuelve un objetivo por movimiento, en el mismo orden (más reciente
  * primero).
@@ -207,6 +263,9 @@ export function objetivosSugeridos(resumenes) {
         .filter((r) => (r.categoria === 'fuerza' || r.categoria === 'gimnastico') && r.valorActual)
         .map((r) => {
             const incremento = r.categoria === 'gimnastico' ? 1 : 2.5;
+            const planProgresion = r.categoria === 'gimnastico'
+                ? planGimnastico(r.valorActual, r.unidad)
+                : planFuerza(r.valorActual, r.unidad);
             return {
                 movimiento_id: r.movimiento_id,
                 movimiento_nombre: r.movimiento_nombre,
@@ -217,6 +276,8 @@ export function objetivosSugeridos(resumenes) {
                 unidad: r.unidad,
                 diasDesdePR: r.diasDesdePR,
                 ultimos3: r.ultimos3 || [],
+                planProgresion,
+                ventanaReintento: VENTANA_REINTENTO,
             };
         });
 }
