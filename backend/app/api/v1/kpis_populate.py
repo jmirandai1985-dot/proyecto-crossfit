@@ -598,6 +598,22 @@ def _mes_desplazado(anio, mes, delta):
     return indice // 12, indice % 12 + 1
 
 
+def _acotar_factor_crecimiento(factor: float, limite: float = 0.5) -> float:
+    """Acota `factor` (= 1 + crecimiento) al rango `[1 - limite, 1 + limite]`.
+
+    PURA (sin BD ni HTTP), para poder probarla.
+
+    BUGFIX (500 en producción, 06/11/2026): el modelo ML de forecast puede
+    extrapolar mal y devolver un `factor` desmesurado (en logs: 17481.83% y
+    19835.52%). `predictions_forecast.tasa_crecimiento` es `NUMERIC(5,2)`, cuyo
+    máximo es ±999.99, así que cualquier `tasa_crecimiento` fuera de ese rango
+    rompe el INSERT. La rama heurística ya acota `g` a ±50%/mes
+    (`g = max(min(g, 0.5), -0.5)`); acá `factor` representa `1 + crecimiento`,
+    así que el MISMO criterio es `factor ∈ [0.5, 1.5]` (con `limite=0.5`).
+    """
+    return max(min(factor, 1 + limite), 1 - limite)
+
+
 # ── 3) POST /api/v1/kpis/populate/predictions ────────────────────────────────
 @router.post("/populate/predictions")
 def populate_predictions(
@@ -805,7 +821,11 @@ def populate_predictions(
         ultimo_mes = round(float(serie[-1][2])) if serie else 0
         for p in proyeccion:
             ingresos = max(0, round(float(p["ingreso_predicho"])))
-            factor = (ingresos / ultimo_mes) if ultimo_mes > 0 else 1.0
+            # BUGFIX (500 en producción, 06/11/2026): el ML puede extrapolar mal
+            # y devolver un factor desmesurado; acotado a ±50%/mes (factor =
+            # 1 + crecimiento), mismo criterio que la rama heurística.
+            factor = _acotar_factor_crecimiento(
+                (ingresos / ultimo_mes) if ultimo_mes > 0 else 1.0)
             db.add(PredictionsForecast(
                 tenant_id=tenant_id,
                 mes_prediccion=date(int(p["anio"]), int(p["mes"]), 1),
