@@ -11,13 +11,18 @@ from app.core.estados import no_cancelada   # "reserva viva": la lista compartid
 from app.models.wod_movimiento import WodMovimiento
 from app.models.movimiento import Movimiento
 from app.models.clase import Clase
+from app.models.asistencia import Asistencia
 from app.models.coach_disciplina import CoachDisciplina
 from app.models.aviso_marketing import AvisoMarketing
 from app.services import avisos_marketing as avisos
 from app.services import wod_semana
+from app.services.movimiento_categoria import categoria_de
 from app.schemas import wod as schemas
 from app.schemas.wod_parse import WodParseRequest, WodParseResponse, MovimientoParseado, DebugInfo, FaseInfo, FaseMovimiento
-from datetime import date
+from app.schemas.intensidad_relativa import IntensidadRelativaItem
+from datetime import date, timedelta
+from types import SimpleNamespace
+from typing import List
 
 router = APIRouter(prefix="/api/v1/wods", tags=["wods"])
 
@@ -1517,3 +1522,101 @@ def programar_semana(
         "avisos": avisos_creados,
         "creados": dias_creados,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Intensidad relativa (%RM) — la carga prescrita en un WOD vs el RM del alumno.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _primer_entero(texto: str) -> int | None:
+    """Primer número entero de un texto libre de repeticiones ("8-10", "AMRAP", "3x5").
+
+    Devuelve `None` si no hay ningún número: esa fila gimnástica no aporta un valor
+    prescrito y se descarta (no rompe el endpoint).
+    """
+    if not texto:
+        return None
+    m = re.search(r'\d+', str(texto))
+    return int(m.group()) if m else None
+
+
+def _filas_intensidad_relativa(rows) -> List[dict]:
+    """Convierte las filas del JOIN en los ítems que devuelve el endpoint.
+
+    Se mantiene como función pura para poder testearla SIN base: recibe las filas ya
+    traídas (con asistencia `presente=True` filtrada en la query) y aplica las reglas:
+      · sólo `fuerza` (kg) y `gimnastico` (reps) — cardio/metabólico se descartan;
+      · fuerza: `peso` nulo o 0 se descarta;
+      · gimnástico: `repeticiones` se parsea con `_primer_entero`; sin número, se descarta.
+    """
+    filas: List[dict] = []
+    for r in rows:
+        cat = categoria_de(SimpleNamespace(nombre=r.nombre, categoria=r.categoria))
+        if cat not in ("fuerza", "gimnastico"):
+            continue
+        if cat == "fuerza":
+            valor = r.peso
+            if not valor:
+                continue
+            valor_prescrito = float(valor)
+        else:  # gimnastico
+            valor = _primer_entero(r.repeticiones)
+            if valor is None:
+                continue
+            valor_prescrito = float(valor)
+
+        filas.append({
+            "fecha": r.fecha,
+            "wod_id": r.wod_id,
+            "movimiento_id": r.movimiento_id,
+            "movimiento_nombre": r.nombre,
+            "categoria": cat,
+            "valor_prescrito": valor_prescrito,
+        })
+    return filas
+
+
+@router.get("/intensidad-relativa", response_model=List[IntensidadRelativaItem])
+def intensidad_relativa_wods(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Carga prescrita en los WODs a los que el alumno REALMENTE asistió.
+
+    Sólo los datos del alumno del token (scoping por JWT). Últimos 90 días o 200
+    registros, lo que ocurra primero. La intensidad (% del RM) la calcula el
+    frontend; acá sólo se entrega la prescripción cruda.
+    """
+    # 🔒 SEGURIDAD: tenant y alumno SIEMPRE del token JWT, nunca del query.
+    tenant_id = current_user["tenant_id"]
+    alumno_id = current_user["usuario_id"]
+
+    desde = date.today() - timedelta(days=90)
+    rows = (
+        db.query(
+            Wod.fecha.label("fecha"),
+            Wod.id.label("wod_id"),
+            WodMovimiento.movimiento_id,
+            Movimiento.nombre.label("nombre"),
+            Movimiento.categoria.label("categoria"),
+            WodMovimiento.peso,
+            WodMovimiento.repeticiones,
+        )
+        .join(Clase, Asistencia.clase_id == Clase.id)
+        .join(Wod, Clase.wod_id == Wod.id)
+        .join(WodMovimiento, WodMovimiento.wod_id == Wod.id)
+        .join(Movimiento, WodMovimiento.movimiento_id == Movimiento.id)
+        .filter(
+            Asistencia.usuario_id == alumno_id,
+            Asistencia.tenant_id == tenant_id,
+            Asistencia.presente.is_(True),
+            Wod.tenant_id == tenant_id,
+            Wod.fecha >= desde,
+        )
+        .order_by(Wod.fecha.desc())
+        .limit(200)
+        .all()
+    )
+
+    return _filas_intensidad_relativa(rows)
+

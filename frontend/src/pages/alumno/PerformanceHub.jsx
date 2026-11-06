@@ -7,7 +7,7 @@ import BotonVolver from '../../components/BotonVolver';
 import { useAuth } from '../../context/AuthContext';
 // Fase 2 (Bloque 1): los datos salen de la caché compartida (`hooks/queries.js`), la
 // MISMA que usan la Pizarra de RMs y Evolución.
-import { useHistorialRmTodos, useRmsAlumno } from '../../hooks/queries';
+import { useHistorialRmTodos, useRmsAlumno, useIntensidadRelativa } from '../../hooks/queries';
 // H-03: la categoría/valor de un RM salen de una única fuente (utils/rm.js).
 // Antes estas 3 funciones vivían acá y había otra copia en Evolución y otra en la Pizarra.
 import {
@@ -19,6 +19,8 @@ import {
 import { fmtFechaCortaChile } from '../../utils/fecha';
 // Fase 2 (Bloque 2): evolución por movimiento + tips, derivados del historial.
 import { evolucionPorMovimiento, tipsEvolucion } from '../../utils/evolucionRM';
+// Intensidad relativa (%RM): cuánto de su RM usa el alumno dentro de un WOD real.
+import { intensidadRelativaPorMovimiento } from '../../utils/intensidadRelativa';
 
 const CAT_CONFIG = {
     fuerza: { label: 'Fuerza Máxima', color: '#3B82F6', icon: '💪' },
@@ -58,6 +60,8 @@ const PerformanceHub = () => {
     // alumno (scoping por JWT). Es el perfil del atleta, no un tablero del box.
     const rmsQ = useRmsAlumno(usuario_id);
     const historialQ = useHistorialRmTodos(500);
+    // Intensidad relativa (%RM): prescripción de los WODs asistidos (endpoint nuevo).
+    const intensidadQ = useIntensidadRelativa();
 
     const rms = React.useMemo(
         () => (rmsQ.data || []).map(rm => ({ ...rm, categoria: inferirCategoria(rm) })),
@@ -89,6 +93,13 @@ const PerformanceHub = () => {
 
     // Tips "Para ti" (logro / alerta / comparación) derivados de esa evolución.
     const tips = React.useMemo(() => tipsEvolucion(evolucion), [evolucion]);
+
+    // Intensidad relativa (%RM): cruza la prescripción de los WODs con el historial de
+    // RMs (el RM vigente a la fecha de cada WOD). Vive en utils/intensidadRelativa.js.
+    const intensidad = React.useMemo(
+        () => intensidadRelativaPorMovimiento(intensidadQ.data, historialQ.data),
+        [intensidadQ.data, historialQ.data],
+    );
 
     // N-5: acá había un `catch (e) { }` VACÍO. Cualquier fallo al armar la serie semanal
     // se perdía en silencio y el gráfico salía incompleto sin avisar. Ahora se registra
@@ -136,22 +147,24 @@ const PerformanceHub = () => {
 
     // "Cargando" sólo mientras NO hay dato: al volver a la pantalla se pinta la copia en
     // caché al instante (misma queryKey que las otras pantallas de RMs).
-    const loading = rmsQ.isPending || historialQ.isPending;
+    const loading = rmsQ.isPending || historialQ.isPending || intensidadQ.isPending;
 
     const erroresCarga = React.useMemo(() => {
         const fallaron = [];
         if (rmsQ.isError) fallaron.push('mis RMs');
         if (historialQ.isError) fallaron.push('tu historial de RMs');
+        if (intensidadQ.isError) fallaron.push('la intensidad de tus WODs');
         if (descartados.length > 0) {
             fallaron.push(`evolución de RMs (${descartados.length} registro/s con fecha o valor inválido)`);
         }
         return fallaron;
-    }, [rmsQ.isError, historialQ.isError, descartados]);
+    }, [rmsQ.isError, historialQ.isError, intensidadQ.isError, descartados]);
 
-    // Reintentar = volver a pedir las dos (mismo botón del banner de antes).
+    // Reintentar = volver a pedir las tres (mismo botón del banner de antes).
     const cargarTodo = () => {
         rmsQ.refetch();
         historialQ.refetch();
+        intensidadQ.refetch();
     };
 
     if (loading) return (<Layout><div className="flex items-center justify-center h-96"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500" /></div></Layout>);
@@ -353,6 +366,42 @@ const PerformanceHub = () => {
                             </div>
                         )}
                     </div>
+
+                    {/* 🔥 Intensidad en tus WODs: cuánto de su RM usa en un WOD real. */}
+                    {intensidad.length > 0 && (
+                        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                            <div className="px-3 py-3 border-b border-gray-100">
+                                <h2 className="font-bold text-gray-800 text-xl">🔥 Intensidad en tus WODs</h2>
+                            </div>
+                            <div className="p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                {intensidad.map((mov) => {
+                                    // Subió/bajó vs el WOD anterior del MISMO movimiento (en puntos de %).
+                                    const pctCambio = mov.anteriorPct === null ? null : mov.ultimoPct - mov.anteriorPct;
+                                    const cambio = formatearPctCambio(pctCambio);
+                                    return (
+                                        <div key={mov.movimiento_id}
+                                            className="text-left rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="font-semibold text-gray-800 truncate">
+                                                    {mov.movimiento_nombre || 'Movimiento'}
+                                                </span>
+                                                <span className={`shrink-0 text-sm font-bold ${cambio.clase}`}>
+                                                    {cambio.texto}
+                                                </span>
+                                            </div>
+                                            <div className="mt-2 flex items-end gap-1">
+                                                <span className="text-2xl font-bold text-gray-800">{mov.ultimoPct}%</span>
+                                                <span className="text-sm text-gray-500 mb-0.5">de tu RM ({mov.unidad})</span>
+                                            </div>
+                                            <p className="text-xs text-gray-400 mt-1">
+                                                Último WOD {formatFecha(mov.ultimaFecha)} · {mov.puntos.length} registro{mov.puntos.length === 1 ? '' : 's'}
+                                            </p>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
         </Layout>

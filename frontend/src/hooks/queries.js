@@ -113,6 +113,9 @@ export const claves = {
     rmDeMovimiento: (alumnoId, movimientoId) => ['historial-rm', 'movimiento', alumnoId, movimientoId],
     nivelFuerza: (alumnoId) => ['historial-rm', 'nivel-fuerza', alumnoId],
     nivelGimnastico: (alumnoId) => ['historial-rm', 'nivel-gimnastico', alumnoId],
+    // Intensidad relativa (%RM) de los WODs asistidos: datos SOLO del alumno del
+    // token (scoping por JWT), igual que `historialRmTodos`.
+    intensidadRelativa: ['wods', 'intensidad-relativa'],
     // `planes/membresia-activa` es el plan/créditos del alumno: usa la MISMA familia
     // `['membresia']` que ya invalidan reservar/cancelar y la aprobación del plan.
     clasesRango: (desde, hasta, limite) => ['clases', 'rango', desde, hasta, limite],
@@ -694,6 +697,17 @@ export function useHistorialRmTodos(limite = 500) {
         // Sin filtro de alumno: el backend acota por JWT (el alumno recibe SÓLO los suyos).
         queryKey: claves.historialRmTodos(limite),
         queryFn: async () => (await api.get(`/api/v1/historial-rm?limit=${limite}`)).data || [],
+        staleTime: 30_000,
+    });
+}
+
+// Intensidad relativa (%RM) de los WODs a los que el alumno asistió de verdad.
+// Devuelve la prescripción cruda; el cruce con el historial de RMs lo hace
+// `utils/intensidadRelativa.js` en la pantalla (Performance Hub).
+export function useIntensidadRelativa() {
+    return useQuery({
+        queryKey: claves.intensidadRelativa,
+        queryFn: async () => (await api.get('/api/v1/wods/intensidad-relativa')).data || [],
         staleTime: 30_000,
     });
 }
