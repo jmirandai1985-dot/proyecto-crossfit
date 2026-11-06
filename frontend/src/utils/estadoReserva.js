@@ -44,3 +44,27 @@ export const getEstadoColor = (estado) => {
     const key = (estado || '').toLowerCase();
     return COLORES_ESTADO[key] || COLOR_DEFECTO;
 };
+
+// ── Filtro por estado del HISTORIAL (sólo "Mis Reservas", no toca activas) ──
+// Los chips son fijos (a diferencia del filtro de disciplina, que es dinámico).
+// "Cancelada" agrupa a propósito `cancelada` + `cancelada_tarde`: para el alumno
+// es el mismo desenlace ("la cancelaste"), así que se ven juntas en un solo chip.
+export const ESTADOS_HISTORIAL = [
+    { id: 'Todas', label: 'Todas' },
+    { id: 'asistio', label: 'Asistió' },
+    { id: 'falto', label: 'No asistió' },
+    { id: 'cancelada', label: 'Cancelada' },
+];
+
+// ¿Una reserva de historial coincide con el chip elegido? (el chip "cancelada"
+// agrupa los dos estados de cancelación).
+export function coincideEstado(reserva, filtro) {
+    if (!filtro || filtro === 'Todas') return true;
+    const estado = estadoVisible(reserva);
+    if (filtro === 'cancelada') return estado === 'cancelada' || estado === 'cancelada_tarde';
+    return estado === filtro;
+}
+
+export function filtrarPorEstado(reservas, filtro) {
+    return (reservas || []).filter((reserva) => coincideEstado(reserva, filtro));
+}

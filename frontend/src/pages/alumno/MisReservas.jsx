@@ -2,7 +2,10 @@ import React, { useState } from 'react';
 import { QrCode } from 'lucide-react';
 import Layout from '../../components/Layout';
 import { useCancelarReserva, usePublicIdBox, useReservasAlumno } from '../../hooks/queries';
-import { getEstadoColor, getEstadoDisplay, esActiva } from '../../utils/estadoReserva';
+import { getEstadoColor, getEstadoDisplay, esActiva, filtrarPorEstado } from '../../utils/estadoReserva';
+// Filtro por estado del HISTORIAL (chips fijos, mismo estilo "claro" que el filtro
+// de disciplina). Sólo aplica al historial: las activas son pocas y no se tocan.
+import FiltroEstadoHistorial from '../../components/FiltroEstadoHistorial';
 import BotonVolver from '../../components/BotonVolver';
 import EscanerQR from '../../components/EscanerQR';
 import FiltroDisciplina from '../../components/FiltroDisciplina';
@@ -106,6 +109,12 @@ const MisReservas = () => {
 
     const reservasActivas = filtrarPorDisciplina(reservas, filtroEfectivo).filter((r) => esActiva(r));
     const reservasHistorial = filtrarPorDisciplina(reservas, filtroEfectivo).filter((r) => !esActiva(r));
+
+    // ── Filtro por estado del HISTORIAL ──────────────────────────────────
+    // Sólo filtra el historial (las activas ya son pocas). Arranca en "Todas" y
+    // el alumno lo cambia libremente; no se persiste (criterio simple a pedido).
+    const [filtroEstado, setFiltroEstado] = useState('Todas');
+    const reservasHistorialFiltradas = filtrarPorEstado(reservasHistorial, filtroEstado);
 
     return (
         <Layout>
@@ -250,12 +259,27 @@ const MisReservas = () => {
                             })}
 
                             {/* Historial */}
+                            {/* Filtro por estado: JUSTO arriba de la lista, sólo afecta al historial. */}
+                            {reservasHistorial.length > 0 && (
+                                <div className="px-5 pt-4 md:px-5 md:pt-4">
+                                    <FiltroEstadoHistorial
+                                        valor={filtroEstado}
+                                        onCambiar={setFiltroEstado}
+                                        testid="filtro-estado-historial"
+                                    />
+                                </div>
+                            )}
                             {reservasHistorial.length > 0 && reservasActivas.length > 0 && (
                                 <div className="px-5 py-3 bg-gray-50 border-b border-gray-200">
                                     <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Historial</p>
                                 </div>
                             )}
-                            {reservasHistorial.map((reserva) => (
+                            {reservasHistorialFiltradas.length === 0 ? (
+                                <div className="p-5 text-center text-sm text-gray-400">
+                                    No hay reservas con ese estado.
+                                </div>
+                            ) : (
+                                reservasHistorialFiltradas.map((reserva) => (
                                 <div key={reserva.id} className="p-5 hover:bg-gray-50 transition-colors opacity-80">
                                     <div className="flex items-start justify-between">
                                         <div className="space-y-1.5 flex-1">
@@ -282,7 +306,8 @@ const MisReservas = () => {
                                         </div>
                                     </div>
                                 </div>
-                            ))}
+                                ))
+                            )}
                         </div>
                     )}
                 </div>
