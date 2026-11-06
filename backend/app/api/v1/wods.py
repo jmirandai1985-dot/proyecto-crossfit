@@ -1576,6 +1576,40 @@ def _filas_intensidad_relativa(rows) -> List[dict]:
     return filas
 
 
+def _query_intensidad_relativa(db, alumno_id, tenant_id, desde):
+    """JOIN asistencia → clase → wod → wod_movimientos → movimientos.
+
+    `.select_from(Asistencia)` es OBLIGATORIO: sin él, el primer `.join(Clase, ...)`
+    referencia `asistencias` en el ON sin que esté en el FROM, y Postgres tira
+    "missing FROM-clause entry for table 'asistencias'" (500 en el Performance Hub).
+    """
+    return (
+        db.query(
+            Wod.fecha.label("fecha"),
+            Wod.id.label("wod_id"),
+            WodMovimiento.movimiento_id,
+            Movimiento.nombre.label("nombre"),
+            Movimiento.categoria.label("categoria"),
+            WodMovimiento.peso,
+            WodMovimiento.repeticiones,
+        )
+        .select_from(Asistencia)
+        .join(Clase, Asistencia.clase_id == Clase.id)
+        .join(Wod, Clase.wod_id == Wod.id)
+        .join(WodMovimiento, WodMovimiento.wod_id == Wod.id)
+        .join(Movimiento, WodMovimiento.movimiento_id == Movimiento.id)
+        .filter(
+            Asistencia.usuario_id == alumno_id,
+            Asistencia.tenant_id == tenant_id,
+            Asistencia.presente.is_(True),
+            Wod.tenant_id == tenant_id,
+            Wod.fecha >= desde,
+        )
+        .order_by(Wod.fecha.desc())
+        .limit(200)
+    )
+
+
 @router.get("/intensidad-relativa", response_model=List[IntensidadRelativaItem])
 def intensidad_relativa_wods(
     current_user: dict = Depends(get_current_user),
@@ -1592,31 +1626,7 @@ def intensidad_relativa_wods(
     alumno_id = current_user["usuario_id"]
 
     desde = date.today() - timedelta(days=90)
-    rows = (
-        db.query(
-            Wod.fecha.label("fecha"),
-            Wod.id.label("wod_id"),
-            WodMovimiento.movimiento_id,
-            Movimiento.nombre.label("nombre"),
-            Movimiento.categoria.label("categoria"),
-            WodMovimiento.peso,
-            WodMovimiento.repeticiones,
-        )
-        .join(Clase, Asistencia.clase_id == Clase.id)
-        .join(Wod, Clase.wod_id == Wod.id)
-        .join(WodMovimiento, WodMovimiento.wod_id == Wod.id)
-        .join(Movimiento, WodMovimiento.movimiento_id == Movimiento.id)
-        .filter(
-            Asistencia.usuario_id == alumno_id,
-            Asistencia.tenant_id == tenant_id,
-            Asistencia.presente.is_(True),
-            Wod.tenant_id == tenant_id,
-            Wod.fecha >= desde,
-        )
-        .order_by(Wod.fecha.desc())
-        .limit(200)
-        .all()
-    )
+    rows = _query_intensidad_relativa(db, alumno_id, tenant_id, desde).all()
 
     return _filas_intensidad_relativa(rows)
 

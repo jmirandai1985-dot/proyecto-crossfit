@@ -89,6 +89,28 @@ def test_sin_asistencia_presente_no_aparece_por_el_where():
         "el endpoint tiene que filtrar `presente=True` (si no, trae WODs no asistidos)"
 
 
+def test_query_tiene_asistencia_en_el_from():
+    """El FROM arranca en `asistencias` (`.select_from(Asistencia)`).
+
+    Es el fix del 500 en producción: antes el primer `.join(Clase, ...)` referenciaba
+    `asistencias` en el ON sin que estuviera en el FROM, y Postgres tiraba
+    "missing FROM-clause entry for table 'asistencias'". Este test compila el SQL
+    (dialecto Postgres) SIN base y verifica que el FROM quede bien formado.
+    """
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.orm import Query
+
+    class _Db:
+        def query(self, *entidades):
+            return Query(entidades)
+
+    q = wods._query_intensidad_relativa(_Db(), 1, 1, date(2026, 1, 1))
+    sql = str(q.statement.compile(dialect=postgresql.dialect()))
+    assert "FROM asistencias" in sql, f"FROM sin asistencia:\n{sql}"
+    assert "asistencias.clase_id = clases.id" in sql, \
+        f"el primer JOIN (clases) no está anclado a asistencias:\n{sql}"
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # TestClient(app): la ruta existe y exige autenticación
 # ══════════════════════════════════════════════════════════════════════════════
