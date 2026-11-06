@@ -27,6 +27,9 @@ from app.models.referidos import (EstadoPromocionDetectada, PremioTramoCiclo,
 from app.utils.santiago import SANTIAGO, fecha_chile, hoy_santiago
 # Bordes del mes del KPI "alumnos nuevos": UNA sola definición (la de reportes).
 from app.api.v1.reportes import _inicio_fin_mes
+# Código de referido de un alumno (ficha admin): se reutiliza la MISMA consulta
+# que usa `mi-codigo` para el propio alumno, sin duplicar la lógica de búsqueda.
+from app.api.v1.referidos import _codigo_propio
 # Dedupe ATÓMICO del envío manual: la misma pieza que usan las alertas del scheduler
 # (índice único parcial por alumno + tipo + día chileno), pero REABRIENDO la fila si
 # el intento del mismo día falló (si no, el admin no podría reintentar hasta mañana).
@@ -37,6 +40,7 @@ from app.services.alertas_email_service import (
 )
 from app.services.auditoria_service import registrar_auditoria
 from app.services import email_service
+from app.services import referidos_service as svc
 from app.services.email_service import (
     render_con_contacto, render_email_clase_prueba, render_email_contratar_plan,
     send_clase_prueba, send_contratar_plan,
@@ -582,6 +586,41 @@ def get_alumnos_convertidos(
         "alumnos": alumnos,
     }
 
+
+
+@router.get("/alumnos/{usuario_id}/codigo-referido")
+def get_codigo_referido_alumno(
+    usuario_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Código de referido de UN alumno del box, para la ficha del panel admin.
+
+    `GET /referidos/mi-codigo` sólo responde al propio alumno (403 para staff);
+    acá el admin consulta el código de cualquier alumno de SU box. Si el alumno
+    no tiene fila en `codigos_referido` (alumno histórico sin backfill), se
+    responde 200 con `codigo: null` en vez de un 404/500: es un estado normal
+    del dato, no un error.
+    """
+    tenant_id = current_user["tenant_id"]
+    alumno = db.query(Usuario).filter(
+        Usuario.id == usuario_id,
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == RolUsuario.alumno,
+    ).first()
+    if alumno is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Alumno {usuario_id} no encontrado en este box",
+        )
+
+    try:
+        codigo = _codigo_propio(db, usuario_id)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            return {"codigo": None, "activo": False, "fecha_creacion": None}
+        raise
+    return svc.datos_mi_codigo(codigo)
 
 
 # ── Invitación MANUAL por correo (preview + envío) ───────────────────────────

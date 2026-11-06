@@ -18,6 +18,9 @@ const AlumnoFichaModal = ({ alumnoId, tenantId, onClose, onVerHistorial }) => {
     const [data, setData] = useState(null);
     const [suscripcion, setSuscripcion] = useState(null);
     const [planes, setPlanes] = useState([]);
+    // Código de referido del alumno (ficha admin): se carga junto al resto de la
+    // ficha; `null` = sin código asignado o el dato no se pudo traer.
+    const [codigoReferido, setCodigoReferido] = useState(null);
     const [loading, setLoading] = useState(true);
     // Error POR BLOQUE: antes un Promise.all hacia que el fallo de UN fetch (p. ej.
     // /planes) dejara la ficha entera en blanco con un unico mensaje. Ahora cada
@@ -29,14 +32,15 @@ const AlumnoFichaModal = ({ alumnoId, tenantId, onClose, onVerHistorial }) => {
         setLoading(true);
         setErrores({ usuario: '', suscripcion: '', planes: '' });
         const carga = async () => {
-            const [usrRes, susRes, planesRes] = await Promise.allSettled([
+            const [usrRes, susRes, planesRes, codigoRes] = await Promise.allSettled([
                 api.get(`/api/v1/usuarios/${alumnoId}`),
                 api.get('/api/v1/suscripciones', {
                     params: { usuario_id: alumnoId, estado: 'activo' }
                 }),
                 api.get('/api/v1/planes', {
                     params: { activo: true }
-                })
+                }),
+                api.get(`/api/v1/admin/alumnos/${alumnoId}/codigo-referido`)
             ]);
             const detalle = (r) => r.reason?.response?.data?.detail
                 || r.reason?.message || 'No se pudo cargar';
@@ -61,6 +65,12 @@ const AlumnoFichaModal = ({ alumnoId, tenantId, onClose, onVerHistorial }) => {
                 console.error('Ficha alumno: fallo /planes', planesRes.reason);
                 setPlanes([]);
                 setErrores(prev => ({ ...prev, planes: detalle(planesRes) }));
+            }
+            if (codigoRes.status === 'fulfilled') {
+                setCodigoReferido(codigoRes.value.data || null);
+            } else {
+                console.error('Ficha alumno: fallo /codigo-referido', codigoRes.reason);
+                setCodigoReferido(null);
             }
             setLoading(false);
         };
@@ -176,6 +186,10 @@ const AlumnoFichaModal = ({ alumnoId, tenantId, onClose, onVerHistorial }) => {
                                     <div>
                                         <p className="text-xs text-zinc-500">Rol</p>
                                         <p className="text-zinc-200 capitalize">{data.rol || '—'}</p>
+                                    </div>
+                                    <div className="col-span-2">
+                                        <p className="text-xs text-zinc-500">Código de referido</p>
+                                        <p className="text-zinc-200">{codigoReferido?.codigo || 'Sin código asignado'}</p>
                                     </div>
                                 </div>
                             </div>
