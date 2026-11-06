@@ -111,6 +111,21 @@ def test_query_tiene_asistencia_en_el_from():
         f"el primer JOIN (clases) no está anclado a asistencias:\n{sql}"
 
 
+def test_intensidad_relativa_se_registra_antes_que_wod_id():
+    """La ruta ESTÁTICA `/intensidad-relativa` tiene que estar ANTES de `/{wod_id}`.
+
+    Es el fix del 422 en producción: FastAPI matchea rutas en orden de declaración, así
+    que si `/{wod_id}` (path param int) estuviera antes, interceptaría la request y
+    trataría de parsear "intensidad-relativa" como int. Se verifica el orden real del
+    router (sin red ni base).
+    """
+    caminos = [r.path for r in wods.router.routes]
+    i_estatica = next(i for i, p in enumerate(caminos) if p.endswith("/intensidad-relativa"))
+    i_param = next(i for i, p in enumerate(caminos) if p.endswith("/{wod_id}"))
+    assert i_estatica < i_param, \
+        f"/intensidad-relativa ({i_estatica}) debe ir antes que /{{wod_id}} ({i_param})"
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # TestClient(app): la ruta existe y exige autenticación
 # ══════════════════════════════════════════════════════════════════════════════
@@ -124,6 +139,49 @@ def cliente():
 def test_endpoint_exige_token(cliente):
     r = cliente.get('/api/v1/wods/intensidad-relativa')
     assert r.status_code == 401, r.text
+
+
+def test_get_intensidad_relativa_responde_200_no_422(cliente):
+    """GET /intensidad-relativa con token válido responde 200 (no 422).
+
+    Es justo el bug de producción: con la ruta estática después de `/{wod_id}`,
+    FastAPI interceptaba la request y devolvía 422 ("Input should be a valid
+    integer"). Acá se mockean auth y DB (dependencias) para verificar el contrato
+    SIN depender de la rama TEST.
+    """
+    from app.core.dependencies import get_current_user
+    from app.db.database import get_db
+    from app.main import app
+
+    class _FakeQuery:
+        def select_from(self, *a): return self
+        def join(self, *a, **k): return self
+        def filter(self, *a, **k): return self
+        def order_by(self, *a): return self
+        def limit(self, *a): return self
+        def all(self): return []
+
+    class _FakeDb:
+        def query(self, *a, **k): return _FakeQuery()
+
+    def _user_override():
+        return {
+            "usuario_id": 1, "tenant_id": 1, "rol": "alumno", "nombre": "Test",
+            "correo": "t@t.com", "activo": True, "estado": "activo",
+        }
+
+    def _db_override():
+        return _FakeDb()
+
+    app.dependency_overrides[get_current_user] = _user_override
+    app.dependency_overrides[get_db] = _db_override
+    try:
+        r = cliente.get('/api/v1/wods/intensidad-relativa')
+    finally:
+        app.dependency_overrides.clear()
+
+    assert r.status_code == 200, f"{r.status_code}: {r.text}"
+    assert isinstance(r.json(), list)
 
 
 def test_endpoint_responde_200_con_token_valido(cliente):
