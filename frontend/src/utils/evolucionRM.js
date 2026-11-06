@@ -82,6 +82,23 @@ export function evolucionPorMovimiento(registros, hoyStr = hoyChileStr()) {
             ? ((valorActual - valorAnterior) / valorAnterior) * 100
             : null;
 
+        // Último PR: el registro más reciente cuyo valor iguala el máximo histórico. No es
+        // lo mismo que `ultimo`: si hoy levantó menos que su mejor marca, el PR quedó en un
+        // registro anterior (y los días "estancado" se cuentan desde ese PR, no desde hoy).
+        const ultimoPR = [...ordenados].reverse().find((r) => valorRM(r) === maximo) || ultimo;
+        const diasDesdePR = ultimoPR?.fecha ? diasEntre(ultimoPR.fecha, hoyStr) : null;
+
+        // Últimos 3 registros (cronológico ascendente) para el mini gráfico del tip
+        // "objetivo": valor + % respecto al registro actual (el actual es el 100%).
+        const ultimos3 = ordenados.slice(-3).map((r) => {
+            const valor = valorRM(r);
+            return {
+                fecha: r?.fecha || null,
+                valor,
+                pct: valorActual ? Math.round((valor / valorActual) * 100) : null,
+            };
+        });
+
         resumenes.push({
             movimiento_id: movimientoId,
             movimiento_nombre: ultimo?.movimiento_nombre || '',
@@ -91,9 +108,11 @@ export function evolucionPorMovimiento(registros, hoyStr = hoyChileStr()) {
             pctCambio,
             esPR: maximo !== null && valorActual === maximo,
             diasSinTestear: ultimo?.fecha ? diasEntre(ultimo.fecha, hoyStr) : null,
+            diasDesdePR,
             registros: ordenados.length,
             ultimaFecha: ultimo?.fecha || null,
             unidad: unidadRM(ultimo),
+            ultimos3,
         });
     });
 
@@ -167,5 +186,38 @@ export function tipsEvolucion(resumenes) {
     });
 
     return tips;
+}
+
+/**
+ * Objetivos sugeridos para la sección "Para ti" (tip "tu RM es tu 100%").
+ *
+ * Por cada movimiento de fuerza/gimnástico con RM registrado se sugiere el próximo salto:
+ *   - fuerza (kg)       → RM actual + 2.5 kg
+ *   - gimnastico (reps) → RM actual + 1 rep
+ * Incrementos FIJOS (no %): son los saltos reales de disco/rep que usan los coaches.
+ * Cardio/metabólico se excluyen a propósito (decisión cerrada 05/11): no tienen
+ * comparación de intensidad ni "próximo objetivo", solo guardan el RM normal.
+ *
+ * Recibe el MISMO array que devuelve `evolucionPorMovimiento` (que ya trae `diasDesdePR`
+ * y `ultimos3`); devuelve un objetivo por movimiento, en el mismo orden (más reciente
+ * primero).
+ */
+export function objetivosSugeridos(resumenes) {
+    return (resumenes || [])
+        .filter((r) => (r.categoria === 'fuerza' || r.categoria === 'gimnastico') && r.valorActual)
+        .map((r) => {
+            const incremento = r.categoria === 'gimnastico' ? 1 : 2.5;
+            return {
+                movimiento_id: r.movimiento_id,
+                movimiento_nombre: r.movimiento_nombre,
+                categoria: r.categoria,
+                valorActual: r.valorActual,
+                objetivoSugerido: r.valorActual + incremento,
+                incremento,
+                unidad: r.unidad,
+                diasDesdePR: r.diasDesdePR,
+                ultimos3: r.ultimos3 || [],
+            };
+        });
 }
 

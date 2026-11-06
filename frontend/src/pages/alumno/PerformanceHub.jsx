@@ -18,7 +18,7 @@ import {
 // TZ Chile: fechas de los RMs en el calendario chileno.
 import { fmtFechaCortaChile } from '../../utils/fecha';
 // Fase 2 (Bloque 2): evolución por movimiento + tips, derivados del historial.
-import { evolucionPorMovimiento, tipsEvolucion } from '../../utils/evolucionRM';
+import { evolucionPorMovimiento, tipsEvolucion, objetivosSugeridos } from '../../utils/evolucionRM';
 // Intensidad relativa (%RM): cuánto de su RM usa el alumno dentro de un WOD real.
 import { intensidadRelativaPorMovimiento } from '../../utils/intensidadRelativa';
 
@@ -32,6 +32,9 @@ const CAT_CONFIG = {
 // Borde de color de las tarjetas "Para ti" (mismo patrón visual que los cuadrantes).
 const COLORES_TIP = { verde: '#10B981', naranja: '#F97316', gris: '#6B7280' };
 
+// Tip "objetivo" (tu RM es tu 100%): color índigo, propio de este tipo nuevo.
+const COLOR_OBJETIVO = '#6366F1';
+
 // Etiqueta del eje X de los gráficos de marcas: "DD/MM" arriba y "valor+unidad"
 // abajo, en DOS líneas (antes era la semana ISO S40/S42, un dato técnico poco
 // legible para el alumno).
@@ -42,6 +45,28 @@ const EtiquetaMarca = ({ x, y, payload }) => {
             <tspan x={x} y={y + 10}>{fecha}</tspan>
             {valor ? <tspan x={x} y={y + 21}>{valor}</tspan> : null}
         </text>
+    );
+};
+
+// Mini gráfico de barras del tip "tu RM es tu 100%": últimos 3 registros y su % respecto
+// al registro actual (el 100%). Barras CSS (más liviano que recharts para solo 3 barras).
+const MiniBarrasObjetivo = ({ datos }) => {
+    const registros = (datos || []).slice(-3);
+    const maxPct = Math.max(...registros.map((d) => d.pct ?? 0), 1);
+    return (
+        <div className="mt-3 flex items-end gap-1.5 h-16">
+            {registros.map((d, i) => {
+                const pct = d.pct ?? 0;
+                const altura = Math.max(8, Math.round((pct / maxPct) * 100));
+                return (
+                    <div key={i} className="flex-1 flex flex-col items-center justify-end h-full min-w-0">
+                        <span className="text-[10px] text-gray-400 mb-0.5">{pct}%</span>
+                        <div className="w-full max-w-[36px] rounded-t" style={{ height: `${altura}%`, backgroundColor: COLOR_OBJETIVO }} />
+                        <span className="text-[10px] text-gray-400 mt-0.5 truncate w-full text-center">{d.valor}</span>
+                    </div>
+                );
+            })}
+        </div>
     );
 };
 
@@ -93,6 +118,13 @@ const PerformanceHub = () => {
 
     // Tips "Para ti" (logro / alerta / comparación) derivados de esa evolución.
     const tips = React.useMemo(() => tipsEvolucion(evolucion), [evolucion]);
+
+    // Tips "objetivo" (tu RM es tu 100%): un objetivo por movimiento de fuerza/gimnástico.
+    // Limitado a los 3 más recientes para no saturar la sección (mismo criterio que el resto).
+    const objetivos = React.useMemo(
+        () => objetivosSugeridos(evolucion).slice(0, 3),
+        [evolucion],
+    );
 
     // Intensidad relativa (%RM): cruza la prescripción de los WODs con el historial de
     // RMs (el RM vigente a la fecha de cada WOD). Vive en utils/intensidadRelativa.js.
@@ -349,20 +381,51 @@ const PerformanceHub = () => {
                         <div className="px-3 py-3 border-b border-gray-100">
                             <h2 className="font-bold text-gray-800 text-xl">💡 Para ti</h2>
                         </div>
-                        {tips.length === 0 ? (
+                        {tips.length === 0 && objetivos.length === 0 ? (
                             <p className="px-4 py-6 text-gray-400 text-sm">Registrá más RMs para recibir recomendaciones personalizadas.</p>
                         ) : (
-                            <div className="p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                                {tips.map((tip, i) => (
-                                    <button key={`${tip.tipo}-${i}`} type="button"
-                                        onClick={() => navigate(`/alumno/evolucion?movimiento=${tip.movimientoId}`)}
-                                        className="text-left rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow"
-                                        style={{ borderLeft: `4px solid ${COLORES_TIP[tip.color] || '#6B7280'}` }}>
-                                        <span className="block text-lg">{tip.icono}</span>
-                                        <span className="block font-semibold text-gray-800 mt-1">{tip.titulo}</span>
-                                        <span className="block text-sm text-gray-500 mt-0.5">{tip.detalle}</span>
-                                    </button>
-                                ))}
+                            <div className="p-3 space-y-3">
+                                {tips.length > 0 && (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                        {tips.map((tip, i) => (
+                                            <button key={`${tip.tipo}-${i}`} type="button"
+                                                onClick={() => navigate(`/alumno/evolucion?movimiento=${tip.movimientoId}`)}
+                                                className="text-left rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow"
+                                                style={{ borderLeft: `4px solid ${COLORES_TIP[tip.color] || '#6B7280'}` }}>
+                                                <span className="block text-lg">{tip.icono}</span>
+                                                <span className="block font-semibold text-gray-800 mt-1">{tip.titulo}</span>
+                                                <span className="block text-sm text-gray-500 mt-0.5">{tip.detalle}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                                {objetivos.length > 0 && (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                        {objetivos.map((o) => (
+                                            <button key={`objetivo-${o.movimiento_id}`} type="button"
+                                                onClick={() => navigate(`/alumno/evolucion?movimiento=${o.movimiento_id}`)}
+                                                className="text-left rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow"
+                                                style={{ borderLeft: `4px solid ${COLOR_OBJETIVO}` }}>
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <span className="text-lg">🎯</span>
+                                                    <span className="text-[11px] text-gray-400 shrink-0">tu RM es tu 100%</span>
+                                                </div>
+                                                <span className="block font-semibold text-gray-800 mt-1 truncate">{o.movimiento_nombre}</span>
+                                                <div className="mt-2 flex items-baseline gap-2">
+                                                    <span className="text-2xl font-bold text-gray-800">{o.valorActual}<span className="text-sm font-normal text-gray-400 ml-1">{o.unidad}</span></span>
+                                                    <span className="text-sm text-gray-500">→ objetivo {o.objetivoSugerido} {o.unidad}</span>
+                                                </div>
+                                                <p className="text-xs text-gray-500 mt-1">
+                                                    {o.diasDesdePR !== null && o.diasDesdePR > 0
+                                                        ? `Último PR hace ${o.diasDesdePR} días`
+                                                        : 'Este es tu PR actual'}
+                                                </p>
+                                                <MiniBarrasObjetivo datos={o.ultimos3} />
+                                                <p className="text-xs text-gray-500 mt-2">{textoObjetivo(o)}</p>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
@@ -434,6 +497,15 @@ function formatearPctCambio(pct) {
     if (pct > 0) return { texto: `+${pct.toFixed(1)}%`, clase: 'text-emerald-600' };
     if (pct < 0) return { texto: `${pct.toFixed(1)}%`, clase: 'text-red-600' };
     return { texto: '=', clase: 'text-gray-400' };
+}
+
+// Texto corto de contexto del tip "tu RM es tu 100%": varía si el alumno viene subiendo
+// seguido (PR reciente) o si lleva tiempo estancado (muchos días desde el último PR).
+function textoObjetivo(o) {
+    const objetivo = `${o.objetivoSugerido} ${o.unidad}`;
+    if (o.diasDesdePR === null) return `Primera marca. Tu próximo objetivo: ${objetivo}.`;
+    if (o.diasDesdePR <= 21) return `Venís subiendo seguido. Apuntá a ${objetivo} la próxima vez.`;
+    return `Llevás ${o.diasDesdePR} días sin batir tu PR. Probá con ${objetivo}.`;
 }
 
 export default PerformanceHub;

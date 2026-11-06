@@ -11,7 +11,7 @@
 //   4. orden: por fecha del último registro, el más reciente primero
 //   5. tips "Para ti": logro, alerta y comparación de pares conocidos
 import {
-    diasEntre, nombreComparable, evolucionPorMovimiento, tipsEvolucion,
+    diasEntre, nombreComparable, evolucionPorMovimiento, tipsEvolucion, objetivosSugeridos,
 } from '../src/utils/evolucionRM.js';
 
 let fallos = 0;
@@ -88,6 +88,10 @@ const back = res[4];
 eq(back.pctCambio, 25, 'subir de 100 a 125 es +25%');
 eq(back.esPR, true, '125 es PR de Back Squat');
 eq(back.diasSinTestear, 90, 'del 10-feb al 11-may hay 90 días');
+eq(back.diasDesdePR, 90, 'Back Squat: último PR el 10-feb → 90 días');
+eq(deadlift.diasDesdePR, 121, 'Deadlift: PR de 200 el 10-ene → 121 días (no el último registro)');
+eq(deadlift.ultimos3.length, 2, 'Deadlift: solo 2 registros en ultimos3');
+eq(deadlift.ultimos3[0].pct, 125, 'Deadlift: el PR previo (200) es 125% del actual (160)');
 
 // ── 3. Listas vacías / nulas no rompen ──────────────────────────────────────
 eq(evolucionPorMovimiento(null, HOY).length, 0, 'historial nulo → sin filas');
@@ -118,6 +122,58 @@ eq(tipsEvolucion([{
     valorActual: 100, valorAnterior: null, pctCambio: null, esPR: true,
     diasSinTestear: 5, registros: 1, ultimaFecha: '2026-05-06', unidad: 'kg',
 }]).length, 0, 'una sola marca no dispara ningún tip');
+
+// ── 5. Objetivos sugeridos (tip "tu RM es tu 100%") ────────────────────────
+const historialObjetivos = [
+    // Fuerza: Back Squat, 3 registros subiendo → objetivo +2.5 kg.
+    rm(11, 'Back Squat', '2026-03-01', 100),
+    rm(11, 'Back Squat', '2026-04-01', 102.5),
+    rm(11, 'Back Squat', '2026-05-01', 105),
+    // Gimnástico: Pull-up, 2 registros → objetivo +1 rep.
+    { movimiento_id: 12, movimiento_nombre: 'Pull-up (Dominadas)', fecha: '2026-04-01', repeticiones: 8 },
+    { movimiento_id: 12, movimiento_nombre: 'Pull-up (Dominadas)', fecha: '2026-05-01', repeticiones: 10 },
+    // Cardio: NO debe generar objetivo.
+    { movimiento_id: 13, movimiento_nombre: 'Run (Carrera)', fecha: '2026-05-01', minutos: 20 },
+    // Metabólico: NO debe generar objetivo.
+    { movimiento_id: 14, movimiento_nombre: 'Air Runner', fecha: '2026-05-01', calorias: 500 },
+    // Un solo registro (sin RM previo suficiente): no rompe.
+    rm(15, 'Snatch', '2026-04-15', 60),
+];
+
+const resObjetivos = evolucionPorMovimiento(historialObjetivos, HOY);
+const objetivos = objetivosSugeridos(resObjetivos);
+
+ok(Array.isArray(objetivos), 'objetivosSugeridos devuelve un array');
+eq(objetivos.length, 3, 'solo fuerza/gimnástico generan objetivo (3 de 5 movimientos)');
+
+const objFuerza = objetivos.find((o) => o.movimiento_id === 11);
+ok(objFuerza, 'hay objetivo para Back Squat (fuerza)');
+eq(objFuerza?.incremento, 2.5, 'incremento de fuerza = 2.5 kg');
+eq(objFuerza?.objetivoSugerido, 107.5, 'objetivo de fuerza = valorActual + 2.5 (105 + 2.5)');
+eq(objFuerza?.unidad, 'kg', 'unidad de fuerza = kg');
+eq(objFuerza?.ultimos3.length, 3, 'fuerza: últimos 3 registros');
+eq(objFuerza?.ultimos3[2].pct, 100, 'el registro actual es el 100%');
+eq(objFuerza?.ultimos3[1].pct, 98, '102.5 es ~98% del actual (105)');
+eq(objFuerza?.diasDesdePR, 10, 'último PR de Back Squat el 01-may → 10 días');
+
+const objGimn = objetivos.find((o) => o.movimiento_id === 12);
+ok(objGimn, 'hay objetivo para Pull-up (gimnástico)');
+eq(objGimn?.incremento, 1, 'incremento gimnástico = 1 rep');
+eq(objGimn?.objetivoSugerido, 11, 'objetivo gimnástico = valorActual + 1 (10 + 1)');
+eq(objGimn?.unidad, 'reps', 'unidad gimnástico = reps');
+
+const objSingle = objetivos.find((o) => o.movimiento_id === 15);
+ok(objSingle, 'un solo registro no rompe y genera objetivo');
+eq(objSingle?.ultimos3.length, 1, 'un solo registro → ultimos3 con 1 elemento');
+eq(objSingle?.objetivoSugerido, 62.5, 'objetivo de Snatch = 60 + 2.5');
+
+// cardio/metabólico NO generan este tip.
+eq(objetivos.some((o) => o.movimiento_id === 13), false, 'cardio no genera objetivo');
+eq(objetivos.some((o) => o.movimiento_id === 14), false, 'metabólico no genera objetivo');
+
+// Listas vacías / nulas no rompen.
+eq(objetivosSugeridos(null).length, 0, 'objetivos de resumenes nulos → []');
+eq(objetivosSugeridos([]).length, 0, 'objetivos de resumenes vacíos → []');
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);
