@@ -19,6 +19,10 @@ import CarruselMarketing from '../../components/CarruselMarketing';
 import FiltroDisciplina from '../../components/FiltroDisciplina';
 import { useFiltroDisciplina } from '../../hooks/useFiltroDisciplina';
 import { CLAVE_FILTRO_INICIO, filtrarPorDisciplina } from '../../utils/filtroDisciplina';
+// Filtro por franja horaria (segundo filtro de "Clases disponibles", debajo del de
+// disciplina). La franja se preselecciona con la hora de Chile (misma fuente que el
+// resto del archivo), no con `new Date()` del navegador.
+import { franjaActual, filtrarPorFranja, rangoFranja, TODO_EL_DIA, FRANJAS } from '../../utils/franjaHoraria';
 // Rótulo del cupo de créditos ("∞"/"—"): la MISMA regla que la tarjeta del
 // Dashboard (≥768px), para que las dos pantallas no puedan divergir.
 import { rotuloCreditos } from '../../utils/rotuloCreditos';
@@ -329,6 +333,13 @@ const InicioMobile = ({
     } = useFiltroDisciplina(clasesDelDia, CLAVE_FILTRO_INICIO);
     const clasesFiltradas = filtrarPorDisciplina(clasesDelDia, filtroClases);
 
+    // ── Filtro por franja horaria (se combina con el de disciplina) ──
+    // Arranca preseleccionado en la franja del momento (hora de Chile); el alumno
+    // puede cambiarlo libremente. "Todo el día" no filtra por franja, así que la
+    // lista resultante es la que ya salió del filtro de disciplina.
+    const [franjaFiltro, setFranjaFiltro] = useState(franjaActual);
+    const clasesFiltradasPorFranja = filtrarPorFranja(clasesFiltradas, franjaFiltro);
+
     // "Reservar otra clase": baja al bloque "Clases disponibles" (la rejilla del
     // dashboard reutilizada). Si ese bloque aún no existe, abre Mis Reservas.
     const irAReservar = () => {
@@ -547,13 +558,37 @@ const InicioMobile = ({
                         />
                     )}
 
+                    {/* Filtro por franja horaria (debajo del de disciplina): fila de 4
+                        chips fijos con el MISMO estilo `.filtro`/`.on`. No reusa el
+                        componente de disciplinas (esas son dinámicas). */}
+                    <div className="filtro" data-testid="ub-filtro-franja" aria-label="Filtrar por franja horaria">
+                        {FRANJAS.map((f) => (
+                            <button
+                                key={f.id}
+                                type="button"
+                                onClick={() => setFranjaFiltro(f.id)}
+                                aria-pressed={franjaFiltro === f.id}
+                                className={franjaFiltro === f.id ? 'on' : ''}
+                            >
+                                {f.label}
+                            </button>
+                        ))}
+                    </div>
+                    {franjaFiltro !== TODO_EL_DIA && (
+                        <p className="franja-info">
+                            Mostrando {rangoFranja(franjaFiltro)} · {clasesFiltradasPorFranja.length} de {clasesFiltradas.length} horarios
+                        </p>
+                    )}
+
                     <div className="clases">
                         {clasesDelDia.length === 0 ? (
                             <p className="vacio">Sin clases programadas este día.</p>
                         ) : clasesFiltradas.length === 0 ? (
                             <p className="vacio">No hay clases de {filtroClases} este día.</p>
+                        ) : clasesFiltradasPorFranja.length === 0 ? (
+                            <p className="vacio">No hay clases en esta franja horaria.</p>
                         ) : (
-                            clasesFiltradas.map((clase) => {
+                            clasesFiltradasPorFranja.map((clase) => {
                                 // Migración 066: cupo NULL = sin tope (Musculación / Open Box).
                                 const sinTope = clase.cupo_maximo === null || clase.cupo_maximo === undefined;
                                 const cupos = sinTope
