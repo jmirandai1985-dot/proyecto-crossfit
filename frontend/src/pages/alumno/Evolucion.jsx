@@ -9,13 +9,13 @@ import BotonVolver from '../../components/BotonVolver';
 import {
     useAsistenciaSemanal, useMovimientos, useProgresoDestacado, useRmDeMovimiento,
 } from '../../hooks/queries';
-// H-03: valor/etiqueta de cada RM desde la fuente única (utils/rm.js).
-import { valorRM, etiquetaValorRM } from '../../utils/rm';
 // Fecha corta DD/MM (misma función que usa Performance Hub para el eje X).
 import { fmtFechaCortaChile } from '../../utils/fecha';
 // Cálculo de cumplimiento + racha del gráfico de Asistencia Semanal.
 import { calcularRachaAsistencia } from '../../utils/asistenciaEvolucion';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import BottomSheet from '../../components/BottomSheet';
+import { getChartData } from '../../utils/evolucionChart';
 
 // Acento de la app (orange-500): es el "emerald → naranja" que aplica `src/index.css`.
 const COLOR_ACCENTO = '#f97316';
@@ -35,6 +35,10 @@ const Evolucion = () => {
     // es DERIVADA de esas consultas (antes era un estado sincronizado a mano desde tres
     // callbacks). El "movimiento seleccionado" sigue siendo estado de la PANTALLA.
     const [movimientoSeleccionado, setMovimientoSeleccionado] = useState('');
+    // Vista expandida del gráfico "Progreso de RM" (bottom sheet).
+    const [sheetAbierto, setSheetAbierto] = useState(false);
+    const abrirSheet = () => setSheetAbierto(true);
+    const cerrarSheet = React.useCallback(() => setSheetAbierto(false), []);
 
     const movimientosQ = useMovimientos();
     const progresoQ = useProgresoDestacado(alumnoId);
@@ -107,40 +111,25 @@ const Evolucion = () => {
     }, [movimientos, idsConMarcas]);
 
     // ── Determinar valor Y para el gráfico según categoría ──
-    const getChartData = () => {
-        if (!historialRM.length) return [];
-        return historialRM.map((r, idx) => {
-            // H-03: el valor y su etiqueta salen de la fuente única (utils/rm.js)
-            const valor = valorRM(r);
-            const label = etiquetaValorRM(r);
-            // Trend: compare with previous (mismo criterio de valor)
-            let trend = 'neutral';
-            if (idx > 0) {
-                const prevValor = valorRM(historialRM[idx - 1]);
-                trend = valor > prevValor ? 'up' : valor < prevValor ? 'down' : 'neutral';
-            }
-            return {
-                fecha: r.fecha,
-                valor: valor,
-                label: label,
-                trend: trend,
-            };
-        });
-    };
-
-    const chartData = getChartData();
+    // getChartData() vive en utils/evolucionChart.js (pura, testeable): agrega
+    // una clave única `x` por punto para que los registros de la misma fecha no
+    // colapsen en el tooltip de Recharts.
+    const chartData = getChartData(historialRM);
     const valorLabel = chartData[0]?.label || 'Valor';
 
     // ── Nombre del movimiento seleccionado ──
     const movSeleccionado = movimientos.find(m => m.id === Number(movimientoSeleccionado));
 
     // ── Custom Tooltip (dark, coherente con el resto de la pantalla) ──
-    const CustomTooltip = ({ active, payload, label }) => {
+    // Con `dataKey="x"` en el XAxis, `label` es el índice; la fecha sale del
+    // `payload` del punto tocado (no del label) para que los duplicados no
+    // muestren siempre el primer valor.
+    const CustomTooltip = ({ active, payload }) => {
         if (active && payload && payload.length) {
             const data = payload[0].payload;
             return (
                 <div className="rounded-lg border border-zinc-700 bg-zinc-900 shadow-lg px-4 py-3 text-sm">
-                    <p className="font-semibold text-zinc-200">{fmtFechaCortaChile(label)}</p>
+                    <p className="font-semibold text-zinc-200">{fmtFechaCortaChile(data.fecha)}</p>
                     <p className="text-zinc-300 mt-1">
                         {valorLabel}: <span className="font-bold text-zinc-100">{data.valor}</span>
                     </p>
@@ -170,6 +159,36 @@ const Evolucion = () => {
             />
         );
     };
+
+    // ── AreaChart reutilizable: el mismo gráfico en dos alturas (tarjeta y sheet) ──
+    const renderGraficoRM = (height) => (
+        <ResponsiveContainer width="100%" height={height}>
+            <AreaChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                <XAxis
+                    dataKey="x"
+                    tickFormatter={(idx) => fmtFechaCortaChile(chartData[idx]?.fecha)}
+                    tick={{ fill: '#a1a1aa', fontSize: 11 }}
+                    angle={-45}
+                    textAnchor="end"
+                    height={60}
+                />
+                <YAxis tick={{ fill: '#a1a1aa', fontSize: 12 }} />
+                <Tooltip content={<CustomTooltip />} />
+                <Area
+                    type="monotone"
+                    dataKey="valor"
+                    name={valorLabel}
+                    stroke={COLOR_ACCENTO}
+                    strokeWidth={2.5}
+                    fill="url(#rmAreaGradient)"
+                    dot={renderDot}
+                    activeDot={{ r: 5, fill: COLOR_ACCENTO, stroke: '#09090b', strokeWidth: 2 }}
+                    connectNulls
+                />
+            </AreaChart>
+        </ResponsiveContainer>
+    );
 
     return (
         <Layout>
@@ -314,35 +333,51 @@ const Evolucion = () => {
                             <p className="text-sm text-gray-500 mb-3">
                                 Movimiento: <strong>{movSeleccionado?.nombre}</strong> — {chartData.length} registro(s)
                             </p>
-                            <ResponsiveContainer width="100%" height={400}>
-                                <AreaChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-                                    <XAxis
-                                        dataKey="fecha"
-                                        tickFormatter={(f) => fmtFechaCortaChile(f)}
-                                        tick={{ fill: '#a1a1aa', fontSize: 11 }}
-                                        angle={-45}
-                                        textAnchor="end"
-                                        height={60}
-                                    />
-                                    <YAxis tick={{ fill: '#a1a1aa', fontSize: 12 }} />
-                                    <Tooltip content={<CustomTooltip />} />
-                                    <Area
-                                        type="monotone"
-                                        dataKey="valor"
-                                        name={valorLabel}
-                                        stroke={COLOR_ACCENTO}
-                                        strokeWidth={2.5}
-                                        fill="url(#rmAreaGradient)"
-                                        dot={renderDot}
-                                        activeDot={{ r: 5, fill: COLOR_ACCENTO, stroke: '#09090b', strokeWidth: 2 }}
-                                        connectNulls
-                                    />
-                                </AreaChart>
-                            </ResponsiveContainer>
+                            {/* Tocá/clickeá el gráfico para verlo en grande (bottom sheet) */}
+                            <div
+                                className="cursor-pointer group"
+                                role="button"
+                                tabIndex={0}
+                                aria-label="Ampliar gráfico de Progreso de RM"
+                                onClick={abrirSheet}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        abrirSheet();
+                                    }
+                                }}
+                            >
+                                {renderGraficoRM(400)}
+                                <p className="mt-2 text-center text-xs text-gray-500 group-hover:text-gray-300">
+                                    Toca el gráfico para verlo en grande
+                                </p>
+                            </div>
                         </div>
                     )}
                 </section>
+
+                {/* Vista expandida: bottom sheet con el mismo gráfico más grande + chips */}
+                <BottomSheet
+                    isOpen={sheetAbierto}
+                    onClose={cerrarSheet}
+                    title={movSeleccionado?.nombre || 'Progreso de RM'}
+                    subtitle={movSeleccionado?.categoria || ''}
+                >
+                    <div className="space-y-4">
+                        {renderGraficoRM(280)}
+                        <div className="flex flex-wrap gap-2">
+                            {chartData.map((p) => (
+                                <span
+                                    key={p.x}
+                                    className="inline-flex items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1 text-xs text-zinc-300"
+                                >
+                                    <span className="text-zinc-400">{fmtFechaCortaChile(p.fecha)}</span>
+                                    <span className="font-bold text-orange-300">{p.valor}</span>
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                </BottomSheet>
 
                 {/* ============================================================ */}
                 {/* GRÁFICO 2: Asistencia Semanal */}
