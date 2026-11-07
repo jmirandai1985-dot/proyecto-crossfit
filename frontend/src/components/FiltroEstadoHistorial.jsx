@@ -6,8 +6,8 @@
  * estado SOLO para el historial (las activas son pocas y no lo necesitan).
  *
  * Mismo patrón VISUAL que `FiltroDisciplina` en su variante `claro` (Tailwind):
- * chips con min-height 44px, scroll horizontal si no entran y `md:hidden` para
- * que siga siendo SÓLO móvil (en desktop el historial no tiene ese scroll largo).
+ * chips con min-height 44px, scroll horizontal en mobile y, en desktop (≥768px),
+ * una fila normal de chips que hace wrap.
  *
  * Las opciones y la agrupación de `cancelada` + `cancelada_tarde` viven en
  * `utils/estadoReserva.js` (ESTADOS_HISTORIAL), la misma fuente que los rótulos.
@@ -17,7 +17,7 @@ import { ESTADOS_HISTORIAL } from '../utils/estadoReserva';
 // La MISMA piel "claro" de FiltroDisciplina (clases Tailwind copiadas a propósito,
 // para no acoplar este control a la lógica de disciplinas dinámicas).
 const PIEL = {
-    contenedor: 'md:hidden flex gap-2 overflow-x-auto pb-1',
+    contenedor: 'flex gap-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-x-visible',
     boton: 'shrink-0 inline-flex items-center justify-center min-h-11 px-4 rounded-full border text-sm font-semibold transition-colors',
     activo: 'bg-emerald-500 text-white border-emerald-500',
     inactivo: 'bg-white text-gray-700 border-gray-300 hover:border-emerald-400',

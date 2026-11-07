@@ -13,6 +13,10 @@ import { useFiltroDisciplina } from '../../hooks/useFiltroDisciplina';
 import {
     CLAVE_FILTRO_RESERVAS, filtrarPorDisciplina,
 } from '../../utils/filtroDisciplina';
+// Estadísticas (clases del mes, % asistencia, racha) + agrupación por mes del historial.
+import { agruparReservasPorMes, calcularEstadisticasReservas } from '../../utils/reservasEstadisticas';
+// TZ Chile: el "mes actual" se ancla al día chileno, igual que el resto de la app.
+import { hoyChileStr } from '../../utils/fecha';
 
 const DIAS_NOMBRES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
@@ -116,15 +120,23 @@ const MisReservas = () => {
     const [filtroEstado, setFiltroEstado] = useState('Todas');
     const reservasHistorialFiltradas = filtrarPorEstado(reservasHistorial, filtroEstado);
 
+    // Estadísticas de la cabecera (clases del mes, % asistencia, racha) — calculadas
+    // en cliente a partir de `reservas`, sin red.
+    const stats = calcularEstadisticasReservas(reservas, hoyChileStr());
+    // Historial agrupado por mes (más reciente primero), ya filtrado por estado.
+    const gruposHistorial = agruparReservasPorMes(reservasHistorialFiltradas);
+
     return (
         <Layout>
             <div className="max-w-4xl mx-auto space-y-6">
-                {/* Título */}
-                <div className="max-md:flex max-md:items-start max-md:gap-2">
-                    <BotonVolver />
-                    <div>
-                        <h1 className="text-3xl font-bold text-gray-900">📋 Mis Reservas</h1>
-                        <p className="text-gray-600 mt-1">Consulta y administra tus clases reservadas</p>
+                {/* Encabezado (zinc oscuro, igual que el resto del panel del alumno) */}
+                <div className="rounded-2xl bg-[#12161f] border border-[#1f2430] p-5">
+                    <div className="flex items-start gap-2">
+                        <BotonVolver />
+                        <div>
+                            <h1 className="text-2xl font-bold text-zinc-100">📋 Mis Reservas</h1>
+                            <p className="text-zinc-400 mt-1">Consulta y administra tus clases reservadas</p>
+                        </div>
                     </div>
                 </div>
 
@@ -168,15 +180,44 @@ const MisReservas = () => {
                     </div>
                 )}
 
-                {/* Filtro por disciplina (sólo móvil <768px) */}
+                {/* 3 tarjetas de estadísticas */}
                 {!loading && (
-                    <FiltroDisciplina
-                        variante="claro"
-                        disciplinas={disciplinas}
-                        valor={filtroEfectivo}
-                        onCambiar={cambiarFiltro}
-                        testid="filtro-disciplina"
-                    />
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="rounded-xl bg-white border border-gray-200 p-4">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Clases este mes</p>
+                            <p className="mt-1 text-2xl font-bold text-gray-900">{stats.clasesEsteMes}</p>
+                        </div>
+                        <div className="rounded-xl bg-white border border-gray-200 p-4">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">% Asistencia</p>
+                            <p className="mt-1 text-2xl font-bold text-gray-900">{stats.pctAsistencia}%</p>
+                        </div>
+                        <div className="rounded-xl bg-white border border-gray-200 p-4">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Racha actual</p>
+                            <p className="mt-1 text-2xl font-bold text-gray-900">
+                                {stats.rachaActual} 🔥 <span className="text-sm font-medium text-gray-500">semana{stats.rachaActual === 1 ? '' : 's'}</span>
+                            </p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Filtros (disciplina + estado del historial) en una barra compacta */}
+                {!loading && (
+                    <div className="space-y-3">
+                        <FiltroDisciplina
+                            variante="claro"
+                            disciplinas={disciplinas}
+                            valor={filtroEfectivo}
+                            onCambiar={cambiarFiltro}
+                            testid="filtro-disciplina"
+                        />
+                        {reservasHistorial.length > 0 && (
+                            <FiltroEstadoHistorial
+                                valor={filtroEstado}
+                                onCambiar={setFiltroEstado}
+                                testid="filtro-estado-historial"
+                            />
+                        )}
+                    </div>
                 )}
 
                 {/* Lista de reservas */}
@@ -258,54 +299,51 @@ const MisReservas = () => {
                                 );
                             })}
 
-                            {/* Historial */}
-                            {/* Filtro por estado: JUSTO arriba de la lista, sólo afecta al historial. */}
-                            {reservasHistorial.length > 0 && (
-                                <div className="px-5 pt-4 md:px-5 md:pt-4">
-                                    <FiltroEstadoHistorial
-                                        valor={filtroEstado}
-                                        onCambiar={setFiltroEstado}
-                                        testid="filtro-estado-historial"
-                                    />
-                                </div>
-                            )}
+                            {/* Historial agrupado por mes (más reciente primero) */}
                             {reservasHistorial.length > 0 && reservasActivas.length > 0 && (
                                 <div className="px-5 py-3 bg-gray-50 border-b border-gray-200">
                                     <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Historial</p>
                                 </div>
                             )}
-                            {reservasHistorialFiltradas.length === 0 ? (
+                            {gruposHistorial.length === 0 ? (
                                 <div className="p-5 text-center text-sm text-gray-400">
                                     No hay reservas con ese estado.
                                 </div>
                             ) : (
-                                reservasHistorialFiltradas.map((reserva) => (
-                                <div key={reserva.id} className="p-5 hover:bg-gray-50 transition-colors opacity-80">
-                                    <div className="flex items-start justify-between">
-                                        <div className="space-y-1.5 flex-1">
-                                            <div className="flex items-center gap-2 flex-wrap">
-                                                <h3 className="font-bold text-gray-800">
-                                                    🏋️ {reserva.disciplina_nombre || 'Clase'}
-                                                </h3>
-                                                <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${getEstadoColor(reserva.estado_visible)}`}>
-                                                    {getEstadoDisplay(reserva.estado_visible)}
-                                                </span>
-                                            </div>
-                                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-500">
-                                                {reserva.clase_fecha && (
-                                                    <span className="flex items-center gap-1">
-                                                        📅 {formatearFecha(reserva.clase_fecha)}
-                                                    </span>
-                                                )}
-                                                {reserva.hora_inicio && (
-                                                    <span className="flex items-center gap-1">
-                                                        🕐 {reserva.hora_inicio} - {reserva.hora_fin || '—'}
-                                                    </span>
-                                                )}
-                                            </div>
+                                gruposHistorial.map((grupo) => (
+                                    <div key={grupo.clave}>
+                                        <div className="px-5 py-2 bg-gray-50 border-b border-gray-200">
+                                            <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">{grupo.label}</p>
                                         </div>
+                                        {grupo.reservas.map((reserva) => (
+                                            <div key={reserva.id} className="p-5 hover:bg-gray-50 transition-colors opacity-80">
+                                                <div className="flex items-start justify-between">
+                                                    <div className="space-y-1.5 flex-1">
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <h3 className="font-bold text-gray-800">
+                                                                🏋️ {reserva.disciplina_nombre || 'Clase'}
+                                                            </h3>
+                                                            <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${getEstadoColor(reserva.estado_visible)}`}>
+                                                                {getEstadoDisplay(reserva.estado_visible)}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-500">
+                                                            {reserva.clase_fecha && (
+                                                                <span className="flex items-center gap-1">
+                                                                    📅 {formatearFecha(reserva.clase_fecha)}
+                                                                </span>
+                                                            )}
+                                                            {reserva.hora_inicio && (
+                                                                <span className="flex items-center gap-1">
+                                                                    🕐 {reserva.hora_inicio} - {reserva.hora_fin || '—'}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
-                                </div>
                                 ))
                             )}
                         </div>

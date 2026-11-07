@@ -15,6 +15,7 @@
     "medir:login": "node scripts/medir-login-imgs.mjs",
     "test:click": "node scripts/click-test.mjs",
     "test:reservas": "node scripts/test-estado-reserva.mjs",
+    "test:reservas-estadisticas": "node scripts/test-reservas-estadisticas.mjs",
     "test:filtro": "node scripts/test-filtro-disciplina.mjs",
     "test:filtro-movimientos": "node scripts/test-filtro-movimientos.mjs",
     "test:rotulo": "node scripts/test-rotulo-creditos.mjs",

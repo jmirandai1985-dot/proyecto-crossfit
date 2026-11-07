@@ -12,9 +12,9 @@
  *   · con UNA sola disciplina no se pinta nada (`hayQueFiltrar`): no hay nada
  *     que filtrar y "Todas" sería un chip inútil.
  *
- * Regla de oro ≥768px: en Mis Reservas el contenedor lleva `md:hidden`, así que
- * el filtro sigue siendo SÓLO móvil, igual que hoy; el Inicio móvil entero se
- * pinta bajo <768px.
+ * Regla ≥768px: en Mis Reservas el filtro ahora se ve TAMBIÉN en desktop, como una
+ * fila normal de chips (wraps, sin el scroll horizontal forzado de mobile); el Inicio
+ * móvil entero sigue pintándose bajo <768px.
  */
 import { DISCIPLINA_INSIGNIA, TODAS, hayQueFiltrar, ordenarChips } from '../utils/filtroDisciplina';
 
@@ -23,7 +23,7 @@ import { DISCIPLINA_INSIGNIA, TODAS, hayQueFiltrar, ordenarChips } from '../util
 // `insignia` = la disciplina insignia (CrossFit): siempre relleno naranja sólido.
 const VARIANTES = {
     claro: {
-        contenedor: 'md:hidden flex gap-2 overflow-x-auto pb-1',
+        contenedor: 'flex gap-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-x-visible',
         boton: 'shrink-0 inline-flex items-center justify-center min-h-11 px-4 rounded-full border text-sm font-semibold transition-colors',
         activo: 'bg-emerald-500 text-white border-emerald-500',
         inactivo: 'bg-white text-gray-700 border-gray-300 hover:border-emerald-400',
