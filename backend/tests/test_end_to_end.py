@@ -625,6 +625,10 @@ def test_e2e_08_alumno_registra_rm_y_consulta_evolucion():
     assert isinstance(evolucion, list), "Evolución debe ser una lista"
     assert len(evolucion) >= 2, \
         f"Debe haber al menos 2 registros, obtenidos: {len(evolucion)}"
+    # El frontend agrupa por `movimiento_id` (`evolucionPorMovimiento`): sin ese
+    # campo el panel expandido deja "Próximo objetivo"/"Último PR" vacíos.
+    assert all(reg.get("movimiento_id") == SharedE2E.movimiento_id for reg in evolucion), \
+        "Cada registro de la evolución debe traer su movimiento_id"
 
     # Verificar que los RMs aparecen reflejados
     pesos_encontrados = [r.get("peso_kg")

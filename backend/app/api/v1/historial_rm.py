@@ -680,6 +680,7 @@ def obtener_historial_movimiento(
             "km": r.km,
             "calorias": r.calorias,
             "notas": r.notas,
+            "movimiento_id": r.movimiento_id,
             "movimiento_nombre": movimiento.nombre,
             "categoria": movimiento.categoria,
         }
