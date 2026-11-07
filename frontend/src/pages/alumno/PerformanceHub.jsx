@@ -1,6 +1,5 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import Layout from '../../components/Layout';
 import AvisoCarga from '../../components/AvisoCarga';
 import BotonVolver from '../../components/BotonVolver';
@@ -19,6 +18,8 @@ import {
 import { fmtFechaCortaChile } from '../../utils/fecha';
 // Fase 2 (Bloque 2): evolución por movimiento + tips, derivados del historial.
 import { evolucionPorMovimiento, tipsEvolucion, objetivosSugeridos } from '../../utils/evolucionRM';
+// Acordeón por movimiento dentro de cada categoría (cuadrantes) + texto del tip "objetivo".
+import { agruparMovimientosPorCategoria, textoObjetivo } from '../../utils/evolucionMovimiento';
 // Intensidad relativa (%RM): cuánto de su RM usa el alumno dentro de un WOD real.
 import { intensidadRelativaPorMovimiento } from '../../utils/intensidadRelativa';
 
@@ -35,38 +36,80 @@ const COLORES_TIP = { verde: '#10B981', naranja: '#F97316', gris: '#6B7280' };
 // Tip "objetivo" (tu RM es tu 100%): color índigo, propio de este tipo nuevo.
 const COLOR_OBJETIVO = '#6366F1';
 
-// Etiqueta del eje X de los gráficos de marcas: "DD/MM" arriba y "valor+unidad"
-// abajo, en DOS líneas (antes era la semana ISO S40/S42, un dato técnico poco
-// legible para el alumno).
-const EtiquetaMarca = ({ x, y, payload }) => {
-    const [fecha, valor] = String(payload?.value || '').split(' · ');
-    return (
-        <text x={x} y={y} textAnchor="middle" fill="#6b7280" fontSize={9}>
-            <tspan x={x} y={y + 10}>{fecha}</tspan>
-            {valor ? <tspan x={x} y={y + 21}>{valor}</tspan> : null}
-        </text>
-    );
-};
-
 // Mini gráfico de barras del tip "tu RM es tu 100%": últimos 3 registros y su % respecto
 // al registro actual (el 100%). Barras CSS (más liviano que recharts para solo 3 barras).
 const MiniBarrasObjetivo = ({ datos }) => {
     const registros = (datos || []).slice(-3);
     const maxPct = Math.max(...registros.map((d) => d.pct ?? 0), 1);
     return (
-        <div className="mt-3 flex items-end gap-1.5 h-16">
+        <div className="mt-3 flex items-end gap-1.5">
             {registros.map((d, i) => {
                 const pct = d.pct ?? 0;
                 const altura = Math.max(8, Math.round((pct / maxPct) * 100));
                 return (
-                    <div key={i} className="flex-1 flex flex-col items-center justify-end h-full min-w-0">
-                        <span className="text-[10px] text-gray-400 mb-0.5">{pct}%</span>
-                        <div className="w-full max-w-[36px] rounded-t" style={{ height: `${altura}%`, backgroundColor: COLOR_OBJETIVO }} />
-                        <span className="text-[10px] text-gray-400 mt-0.5 truncate w-full text-center">{d.valor}</span>
+                    <div key={i} className="flex-1 flex flex-col items-center min-w-0">
+                        {/* Texto de %: fuera del área de la barra, con alto propio */}
+                        <span className="text-[10px] text-gray-400 h-4 leading-4">{pct}%</span>
+                        {/* SÓLO acá crece la barra: el 100% ocupa este h-16 y no tapa los textos */}
+                        <div className="h-16 w-full flex items-end justify-center">
+                            <div className="w-full max-w-[36px] rounded-t" style={{ height: `${altura}%`, backgroundColor: COLOR_OBJETIVO }} />
+                        </div>
+                        {/* Texto de valor: fuera del área de la barra, con alto propio */}
+                        <span className="text-[10px] text-gray-400 mt-0.5 h-4 leading-4 truncate w-full text-center">{d.valor}</span>
                     </div>
                 );
             })}
         </div>
+    );
+};
+
+
+// Acordeón de un movimiento dentro de un cuadrante de categoría: la fila SIEMPRE
+// muestra el nombre + valor actual; al expandir se ve su propio mini-gráfico (solo
+// SUS puntos) y una línea de contexto sobre su PR. Usa <details>/<summary> nativo.
+const MovimientoAcordeon = ({ mov, color }) => {
+    const maxValor = Math.max(...mov.puntos.map((p) => p.valor), 1);
+    const contexto = mov.registros === 1
+        ? 'Primera marca registrada'
+        : mov.esPR
+            ? 'Este es tu PR actual'
+            : `Último PR hace ${mov.diasDesdePR ?? '—'} días`;
+    return (
+        <details className="group">
+            <summary className="flex items-center justify-between gap-2 cursor-pointer list-none [&::-webkit-details-marker]:hidden py-2.5 px-1 rounded-lg hover:bg-gray-50">
+                <span className="min-w-0">
+                    <span className="block font-semibold text-gray-800 break-words">{mov.movimiento_nombre}</span>
+                    <span className="block text-xs text-gray-500 mt-0.5">{contexto}</span>
+                </span>
+                <span className="shrink-0 flex items-center gap-2">
+                    <span className="text-sm font-bold text-gray-800">{mov.valorActual}<span className="text-xs font-normal text-gray-400 ml-1">{mov.unidad}</span></span>
+                    <span className="text-gray-400 text-xs transition-transform group-open:rotate-180" aria-hidden="true">▼</span>
+                </span>
+            </summary>
+            <div className="pb-3 px-1">
+                {mov.puntos.length > 1 && (
+                    <div className="mt-2 flex items-end gap-1 h-16">
+                        {mov.puntos.map((p, i) => {
+                            const altura = Math.max(8, Math.round((p.valor / maxValor) * 100));
+                            return (
+                                <div
+                                    key={i}
+                                    className="flex-1 flex flex-col items-center justify-end h-full min-w-0"
+                                    title={`${formatFecha(p.fecha)} · ${p.valor} ${mov.unidad}`}
+                                >
+                                    <div className="w-full max-w-[28px] rounded-t" style={{ height: `${altura}%`, backgroundColor: color }} />
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+                <p className="text-[11px] text-gray-400 mt-1.5">
+                    {mov.registros === 1
+                        ? 'Registra otro RM para ver tu progresión.'
+                        : `${mov.registros} marcas registradas.`}
+                </p>
+            </div>
+        </details>
     );
 };
 
@@ -133,49 +176,15 @@ const PerformanceHub = () => {
         [intensidadQ.data, historialQ.data],
     );
 
-    // N-5: acá había un `catch (e) { }` VACÍO. Cualquier fallo al armar la serie semanal
-    // se perdía en silencio y el gráfico salía incompleto sin avisar. Ahora se registra
-    // en consola y se reporta en el banner de la pantalla (`erroresCarga`).
-    // Ojo: una `fecha` ilegible NO lanza excepción (`new Date('x')` da `Invalid Date`),
-    // y eso rompía el orden y las semanas del gráfico en silencio, así que también se
-    // descarta y se reporta acá.
-    const { chartDataCat, descartados } = React.useMemo(() => {
-        const byCat = { fuerza: [], gimnastico: [], cardio: [], metabolico: [] };
-        const descartadosRes = [];
-        (historialQ.data || []).forEach(rm => {
-            const c = inferirCategoria(rm);
-            if (!byCat[c] || !rm.fecha) return;
-            try {
-                const fecha = new Date(rm.fecha);
-                if (Number.isNaN(fecha.getTime())) {
-                    throw new Error(`fecha inválida: ${rm.fecha}`);
-                }
-                byCat[c].push({ fecha, valor: getValorNumerico(rm), nombre: rm.movimiento_nombre });
-            } catch (e) {
-                console.error('RM descartado de la evolución semanal:', rm?.movimiento_nombre, rm?.fecha, e);
-                descartadosRes.push(rm);
-            }
-        });
-
-        const chartRes = {};
-        Object.keys(byCat).forEach(c => {
-            const items = byCat[c].sort((a, b) => a.fecha - b.fecha);
-            if (items.length < 2) { chartRes[c] = []; return; }
-            const weekMap = {};
-            items.forEach(item => {
-                const d = item.fecha, wk = getWeekKey(d);
-                if (!weekMap[wk] || item.valor > weekMap[wk].valor) {
-                    weekMap[wk] = { valor: item.valor, nombre: item.nombre, fecha: d };
-                }
-            });
-            chartRes[c] = Object.entries(weekMap).sort(([a], [b]) => a.localeCompare(b)).map(([wk, v]) => ({
-                semana: wk,
-                max: v.valor,
-                label: etiquetaMarca(c, v.fecha, v.valor),
-            }));
-        });
-        return { chartDataCat: chartRes, descartados: descartadosRes };
-    }, [historialQ.data]);
+    // Acordeón por movimiento dentro de cada categoría: agrupa `historialQ.data` por
+    // `movimiento_id` (sin mezclar movimientos), ordena por fecha y descarta fechas
+    // inválidas. Reemplaza al BarChart que mezclaba todos los movimientos de la
+    // categoría por semana tomando el máximo. `descartados` se conserva para el
+    // banner de errores (`erroresCarga`).
+    const { porCategoria: movimientosPorCategoria, descartados } = React.useMemo(
+        () => agruparMovimientosPorCategoria(historialQ.data),
+        [historialQ.data],
+    );
 
     // "Cargando" sólo mientras NO hay dato: al volver a la pantalla se pinta la copia en
     // caché al instante (misma queryKey que las otras pantallas de RMs).
@@ -213,7 +222,7 @@ const PerformanceHub = () => {
     const renderCuadrante = (cat) => {
         const cfg = CAT_CONFIG[cat];
         const data = catsData[cat] || {};
-        const chart = chartDataCat[cat] || [];
+        const movimientos = movimientosPorCategoria[cat] || [];
         const tieneDatos = data.count > 0;
         return (
             <div key={cat} className="bg-white rounded-xl border p-4 shadow-sm" style={{ borderLeft: `4px solid ${cfg.color}` }}>
@@ -221,25 +230,16 @@ const PerformanceHub = () => {
                     <div className="flex items-center gap-2"><span>{cfg.icon}</span><span className="font-bold text-gray-800 text-xl">{cfg.label}</span></div>
                     {tieneDatos && <span className="text-4xl font-bold" style={{ color: cfg.color }}>{data.valor}<span className="text-base font-normal text-gray-400 ml-1">{cat === 'gimnastico' ? 'reps' : cat === 'fuerza' ? 'kg' : ''}</span></span>}
                 </div>
-                {tieneDatos && chart.length >= 2 ? (
-                    <div style={{ height: 118 }}>
-                        <ResponsiveContainer width="100%" height={118}>
-                            {/* Etiqueta en 2 líneas ("DD/MM" arriba, "valor+unidad" abajo):
-                                margen inferior mayor para que no se corte en mobile. */}
-                            <BarChart data={chart} margin={{ top: 5, right: 5, bottom: 22, left: 0 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
-                                <XAxis dataKey="label" tick={<EtiquetaMarca />}
-                                    interval="preserveStartEnd" axisLine={false} tickLine={false} />
-                                <YAxis hide domain={[0, 'dataMax + 10']} />
-                                <Tooltip formatter={(v) => [`${v} ${cat === 'gimnastico' ? 'reps' : cat === 'fuerza' ? 'kg' : ''}`, cfg.label]} />
-                                <Bar dataKey="max" fill={cfg.color} radius={[3, 3, 0, 0]} />
-                            </BarChart>
-                        </ResponsiveContainer>
+                {movimientos.length > 0 ? (
+                    <div className="divide-y divide-gray-100">
+                        {movimientos.map((mov) => (
+                            <MovimientoAcordeon key={mov.movimiento_id} mov={mov} color={cfg.color} />
+                        ))}
                     </div>
-                ) : tieneDatos ? (
-                    <div className="h-[118px] flex items-center justify-center text-gray-400 text-sm italic">Registra más RMs para ver tu evolución</div>
                 ) : (
-                    <div className="h-[118px] flex items-center justify-center text-gray-400 text-sm">Sin registros aún</div>
+                    <div className="h-[118px] flex items-center justify-center text-gray-400 text-sm">
+                        {tieneDatos ? 'Sin movimientos con fechas válidas' : 'Sin registros aún'}
+                    </div>
                 )}
             </div>
         );
@@ -483,18 +483,7 @@ const PerformanceHub = () => {
     );
 };
 
-function getWeekKey(d) {
-    const start = new Date(d.getFullYear(), 0, 1);
-    const diff = (d - start + (start.getTimezoneOffset() - d.getTimezoneOffset()) * 60000) / 86400000;
-    return `S${Math.ceil((diff + start.getDay() + 1) / 7)}`;
-}
 
-// "DD/MM · valor+unidad" para la etiqueta de cada barra (fecha + marca levantada,
-// no la semana ISO). La unidad es la misma que usa el tooltip del cuadrante.
-function etiquetaMarca(cat, fecha, valor) {
-    const unidad = cat === 'gimnastico' ? 'reps' : cat === 'fuerza' ? 'kg' : '';
-    return `${formatFecha(fecha)} · ${valor}${unidad}`;
-}
 
 // TZ Chile: las fechas de los RMs llegan como 'YYYY-MM-DD'; se formatean en el
 // calendario chileno (con new Date(f) a medianoche UTC la fecha se corría un día).
@@ -511,13 +500,6 @@ function formatearPctCambio(pct) {
     return { texto: '=', clase: 'text-gray-400' };
 }
 
-// Texto corto de contexto del tip "tu RM es tu 100%": varía si el alumno viene subiendo
-// seguido (PR reciente) o si lleva tiempo estancado (muchos días desde el último PR).
-function textoObjetivo(o) {
-    const objetivo = `${o.objetivoSugerido} ${o.unidad}`;
-    if (o.diasDesdePR === null) return `Primera marca. Tu próximo objetivo: ${objetivo}.`;
-    if (o.diasDesdePR <= 21) return `Venís subiendo seguido. Apuntá a ${objetivo} la próxima vez.`;
-    return `Llevás ${o.diasDesdePR} días sin batir tu PR. Probá con ${objetivo}.`;
-}
+
 
 export default PerformanceHub;

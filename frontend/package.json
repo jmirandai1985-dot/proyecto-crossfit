@@ -32,6 +32,7 @@
     "test:entrega": "node scripts/test-entrega-movil.mjs",
     "test:evolucion-rm": "node scripts/test-evolucion-rm.mjs",
     "test:evolucion-chart": "node scripts/test-evolucion-chart.mjs",
+    "test:evolucion-movimiento": "node scripts/test-evolucion-movimiento.mjs",
     "test:fidelizacion": "node scripts/test-fidelizacion-movil.mjs",
     "test:tope": "node scripts/test-tope-descuento.mjs",
     "test:menu": "node scripts/test-menu.mjs",
