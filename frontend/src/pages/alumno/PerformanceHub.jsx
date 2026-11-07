@@ -467,9 +467,9 @@ const PerformanceHub = () => {
                                                     <span className="text-sm text-gray-500">→ objetivo {o.objetivoSugerido} {o.unidad}</span>
                                                 </div>
                                                 <p className="text-xs text-gray-500 mt-1">
-                                                    {o.diasDesdePR !== null && o.diasDesdePR > 0
-                                                        ? `Último PR hace ${o.diasDesdePR} días`
-                                                        : 'Este es tu PR actual'}
+                                                    {o.esPR
+                                                        ? (o.diasDesdePR === 0 ? 'Este es tu PR actual' : `Último PR hace ${o.diasDesdePR} días`)
+                                                        : `Última marca: ${o.diasSinTestear ?? '—'} días atrás`}
                                                 </p>
                                                 <MiniBarrasObjetivo datos={o.ultimos3} />
                                                 <p className="text-xs text-gray-500 mt-2">{textoObjetivo(o)}</p>

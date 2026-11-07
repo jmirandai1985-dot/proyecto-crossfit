@@ -198,6 +198,20 @@ eq(objetivos.some((o) => o.movimiento_id === 14), false, 'metabólico no genera 
 eq(objetivosSugeridos(null).length, 0, 'objetivos de resumenes nulos → []');
 eq(objetivosSugeridos([]).length, 0, 'objetivos de resumenes vacíos → []');
 
+// ── 5c. Bug real: último registro MENOR al mejor histórico, PR reciente ──────
+const historialBajo = [
+    rm(16, 'Overhead Squat', '2026-05-04', 80), // mejor histórico (PR) reciente
+    rm(16, 'Overhead Squat', '2026-05-08', 70), // última marca BAJA
+];
+const resBajo = evolucionPorMovimiento(historialBajo, HOY);
+const objBajo = objetivosSugeridos(resBajo)[0];
+eq(resBajo[0].esPR, false, 'última marca 70 < PR 80 → no es PR');
+eq(resBajo[0].valorMaximo, 80, 'valorMaximo = mejor histórico (80)');
+eq(resBajo[0].diasDesdePR, 7, 'días desde el PR (04-may) = 7 (PR reciente)');
+eq(objBajo.esPR, false, 'objetivosSugeridos propaga esPR = false');
+eq(objBajo.valorMaximo, 80, 'objetivosSugeridos propaga valorMaximo = 80');
+eq(objBajo.diasSinTestear, 3, 'objetivosSugeridos propaga diasSinTestear (08-may → 3)');
+
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);
     process.exit(1);

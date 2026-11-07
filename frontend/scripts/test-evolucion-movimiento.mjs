@@ -95,6 +95,15 @@ eq(textoObjetivo(o(21)), 'Vienes progresando bien. Tu próximo objetivo: 100 kg.
 eq(textoObjetivo(o(35)), 'Llevas 35 días sin marca nueva. Antes de reintentar, prueba variar el estímulo (otro rango de reps o un tempo más lento).',
     '35 días cae en el rango ≤35');
 
+// esPR === false: el último registro quedó por debajo del mejor histórico.
+eq(textoObjetivo({ objetivoSugerido: 100, unidad: 'kg', diasDesdePR: 7, esPR: false, valorActual: 70, valorMaximo: 80 }),
+    'Tu última marca (70 kg) quedó por debajo de tu mejor registro (80 kg). Es normal: sigue con tu plan de progresión.',
+    'esPR false → no felicita por un PR que no ocurrió');
+// esPR === true conserva el mensaje de PR reciente (lógica original).
+eq(textoObjetivo({ objetivoSugerido: 100, unidad: 'kg', diasDesdePR: 3, esPR: true }),
+    'Acabas de marcar un PR. Dale unos días a tu cuerpo antes de ir por 100 kg de nuevo.',
+    'esPR true → mantiene el mensaje de PR reciente');
+
 // ── Listas vacías / nulas no rompen ─────────────────────────────────────────
 eq(agruparMovimientosPorCategoria(null, HOY).porCategoria.fuerza.length, 0,
     'historial nulo → sin movimientos');

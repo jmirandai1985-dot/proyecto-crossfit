@@ -114,6 +114,11 @@ export function textoObjetivo(o) {
     if (o.diasDesdePR === null) {
         return `Primera marca. Tu próximo objetivo: ${objetivo}.`;
     }
+    // El último registro NO igualó el mejor histórico (aunque el PR sea reciente):
+    // no hay que felicitar por un PR que no ocurrió en esta marca.
+    if (o.esPR === false) {
+        return `Tu última marca (${o.valorActual} ${o.unidad}) quedó por debajo de tu mejor registro (${o.valorMaximo} ${o.unidad}). Es normal: sigue con tu plan de progresión.`;
+    }
     if (o.diasDesdePR <= 7) {
         return `Acabas de marcar un PR. Dale unos días a tu cuerpo antes de ir por ${objetivo} de nuevo.`;
     }
