@@ -11,7 +11,17 @@ import {
 } from '../../hooks/queries';
 // H-03: valor/etiqueta de cada RM desde la fuente única (utils/rm.js).
 import { valorRM, etiquetaValorRM } from '../../utils/rm';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
+// Fecha corta DD/MM (misma función que usa Performance Hub para el eje X).
+import { fmtFechaCortaChile } from '../../utils/fecha';
+// Cálculo de cumplimiento + racha del gráfico de Asistencia Semanal.
+import { calcularRachaAsistencia } from '../../utils/asistenciaEvolucion';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+
+// Acento de la app (orange-500): es el "emerald → naranja" que aplica `src/index.css`.
+const COLOR_ACCENTO = '#f97316';
+// Geometría del anillo de cumplimiento (Asistencia Semanal).
+const RING_RADIO = 54;
+const RING_CIRC = 2 * Math.PI * RING_RADIO;
 
 const Evolucion = () => {
     // E-01: acá había `localStorage.getItem('usuario_id') || 5` y `|| 1`. Si la sesión
@@ -41,6 +51,11 @@ const Evolucion = () => {
     const topMejoras = React.useMemo(() => progresoQ.data?.top_mejoras || [], [progresoQ.data]);
     const asistenciaSemanal = React.useMemo(() => asistenciaQ.data || [], [asistenciaQ.data]);
     const historialRM = React.useMemo(() => historialQ.data || [], [historialQ.data]);
+    // Cumplimiento + racha de Asistencia Semanal, calculados en cliente (sin red).
+    const asistenciaResumen = React.useMemo(
+        () => calcularRachaAsistencia(asistenciaSemanal),
+        [asistenciaSemanal],
+    );
     // "Cargando" sólo mientras NO hay dato: al volver a la pantalla se pinta la copia en
     // caché al instante y se refresca en segundo plano (nunca una pantalla vacía falsa).
     const loadingAsistencia = asistenciaQ.isPending;
@@ -119,18 +134,18 @@ const Evolucion = () => {
     // ── Nombre del movimiento seleccionado ──
     const movSeleccionado = movimientos.find(m => m.id === Number(movimientoSeleccionado));
 
-    // ── Custom Tooltip ──
+    // ── Custom Tooltip (dark, coherente con el resto de la pantalla) ──
     const CustomTooltip = ({ active, payload, label }) => {
         if (active && payload && payload.length) {
             const data = payload[0].payload;
             return (
-                <div className="bg-white border border-gray-200 rounded-lg shadow-lg px-4 py-3 text-sm">
-                    <p className="font-semibold text-gray-700">{label}</p>
-                    <p className="text-gray-600 mt-1">
-                        {valorLabel}: <span className="font-bold text-gray-800">{data.valor}</span>
+                <div className="rounded-lg border border-zinc-700 bg-zinc-900 shadow-lg px-4 py-3 text-sm">
+                    <p className="font-semibold text-zinc-200">{fmtFechaCortaChile(label)}</p>
+                    <p className="text-zinc-300 mt-1">
+                        {valorLabel}: <span className="font-bold text-zinc-100">{data.valor}</span>
                     </p>
                     {data.trend && data.trend !== 'neutral' && (
-                        <p className={`text-xs mt-1 ${data.trend === 'up' ? 'text-green-600' : 'text-red-600'}`}>
+                        <p className={`text-xs mt-1 ${data.trend === 'up' ? 'text-green-400' : 'text-red-400'}`}>
                             {data.trend === 'up' ? '▲ Subió' : '▼ Bajó'} respecto al anterior
                         </p>
                     )}
@@ -138,6 +153,22 @@ const Evolucion = () => {
             );
         }
         return null;
+    };
+
+    // ── Punto de la serie: el último (PR) va más grande y en el color de acento ──
+    const renderDot = ({ cx, cy, index }) => {
+        const esUltimo = index === chartData.length - 1;
+        return (
+            <circle
+                key={`dot-${index}`}
+                cx={cx}
+                cy={cy}
+                r={esUltimo ? 6 : 3}
+                fill={COLOR_ACCENTO}
+                stroke={esUltimo ? '#09090b' : 'none'}
+                strokeWidth={esUltimo ? 2 : 0}
+            />
+        );
     };
 
     return (
@@ -207,39 +238,46 @@ const Evolucion = () => {
                         <label className="block text-sm font-medium text-gray-600 mb-2">
                             Selecciona un movimiento
                         </label>
-                        <select
-                            value={movimientoSeleccionado}
-                            onChange={(e) => setMovimientoSeleccionado(e.target.value)}
-                            className="w-full max-w-md px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
-                        >
-                            <option value="">-- Elegir movimiento --</option>
-                            {/* Separador: movimientos CON marcas */}
-                            {movimientosOrdenados.filter(m => idsConMarcas.includes(m.id)).length > 0 && (
-                                <optgroup label="✦ Con registros">
-                                    {movimientosOrdenados
-                                        .filter(m => idsConMarcas.includes(m.id))
-                                        .map(m => (
-                                            <option key={m.id} value={m.id} className="font-semibold">
-                                                {m.nombre} ({m.categoria})
-                                            </option>
-                                        ))
-                                    }
-                                </optgroup>
-                            )}
-                            {/* Separador: movimientos SIN marcas */}
-                            {movimientosOrdenados.filter(m => !idsConMarcas.includes(m.id)).length > 0 && (
-                                <optgroup label="— Sin registros aún">
-                                    {movimientosOrdenados
-                                        .filter(m => !idsConMarcas.includes(m.id))
-                                        .map(m => (
-                                            <option key={m.id} value={m.id} className="text-gray-400">
-                                                {m.nombre} ({m.categoria})
-                                            </option>
-                                        ))
-                                    }
-                                </optgroup>
-                            )}
-                        </select>
+                        <div className="relative max-w-md">
+                            <select
+                                value={movimientoSeleccionado}
+                                onChange={(e) => setMovimientoSeleccionado(e.target.value)}
+                                className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm appearance-none cursor-pointer"
+                            >
+                                <option value="">-- Elegir movimiento --</option>
+                                {/* Separador: movimientos CON marcas */}
+                                {movimientosOrdenados.filter(m => idsConMarcas.includes(m.id)).length > 0 && (
+                                    <optgroup label="✦ Con registros">
+                                        {movimientosOrdenados
+                                            .filter(m => idsConMarcas.includes(m.id))
+                                            .map(m => (
+                                                <option key={m.id} value={m.id} className="font-semibold">
+                                                    {m.nombre} ({m.categoria})
+                                                </option>
+                                            ))
+                                        }
+                                    </optgroup>
+                                )}
+                                {/* Separador: movimientos SIN marcas */}
+                                {movimientosOrdenados.filter(m => !idsConMarcas.includes(m.id)).length > 0 && (
+                                    <optgroup label="— Sin registros aún">
+                                        {movimientosOrdenados
+                                            .filter(m => !idsConMarcas.includes(m.id))
+                                            .map(m => (
+                                                <option key={m.id} value={m.id} className="text-gray-400">
+                                                    {m.nombre} ({m.categoria})
+                                                </option>
+                                            ))
+                                        }
+                                    </optgroup>
+                                )}
+                            </select>
+                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </div>
+                        </div>
                         {idsConMarcas.length > 0 && (
                             <p className="text-xs text-gray-400 mt-1">
                                 {idsConMarcas.length} movimiento(s) con marcas — aparecen primero en la lista
@@ -247,25 +285,17 @@ const Evolucion = () => {
                         )}
                     </div>
 
-                    {/* SVG Defs for gradients */}
+                    {/* SVG Defs: gradiente del área bajo la curva de RM (se desvanece hacia abajo) */}
                     <svg width="0" height="0">
                         <defs>
-                            <linearGradient id="barGradientUp" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="#7c3aed" />
-                                <stop offset="100%" stopColor="#3b82f6" />
-                            </linearGradient>
-                            <linearGradient id="barGradientDown" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="#ef4444" />
-                                <stop offset="100%" stopColor="#f97316" />
-                            </linearGradient>
-                            <linearGradient id="barGradientNeutral" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="#8b5cf6" />
-                                <stop offset="100%" stopColor="#6366f1" />
+                            <linearGradient id="rmAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor={COLOR_ACCENTO} stopOpacity={0.35} />
+                                <stop offset="100%" stopColor={COLOR_ACCENTO} stopOpacity={0} />
                             </linearGradient>
                         </defs>
                     </svg>
 
-                    {/* Gráfico de barras */}
+                    {/* Gráfico de línea con área (Opción A del mockup) */}
                     {loadingRM && (
                         <div className="text-center py-8 text-gray-400">Cargando historial...</div>
                     )}
@@ -285,33 +315,31 @@ const Evolucion = () => {
                                 Movimiento: <strong>{movSeleccionado?.nombre}</strong> — {chartData.length} registro(s)
                             </p>
                             <ResponsiveContainer width="100%" height={400}>
-                                <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                                <AreaChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
                                     <XAxis
                                         dataKey="fecha"
-                                        tick={{ fontSize: 11, angle: -45, textAnchor: 'end' }}
+                                        tickFormatter={(f) => fmtFechaCortaChile(f)}
+                                        tick={{ fill: '#a1a1aa', fontSize: 11 }}
+                                        angle={-45}
+                                        textAnchor="end"
                                         height={60}
                                     />
-                                    <YAxis tick={{ fontSize: 12 }} />
+                                    <YAxis tick={{ fill: '#a1a1aa', fontSize: 12 }} />
                                     <Tooltip content={<CustomTooltip />} />
-                                    <Legend />
-                                    <Bar dataKey="valor" name={valorLabel} radius={[6, 6, 0, 0]} barSize={40}>
-                                        {chartData.map((entry, index) => {
-                                            let fill = 'url(#barGradientNeutral)';
-                                            if (entry.trend === 'up') fill = 'url(#barGradientUp)';
-                                            else if (entry.trend === 'down') fill = 'url(#barGradientDown)';
-                                            return <Cell key={`cell-${index}`} fill={fill} />;
-                                        })}
-                                    </Bar>
-                                </BarChart>
+                                    <Area
+                                        type="monotone"
+                                        dataKey="valor"
+                                        name={valorLabel}
+                                        stroke={COLOR_ACCENTO}
+                                        strokeWidth={2.5}
+                                        fill="url(#rmAreaGradient)"
+                                        dot={renderDot}
+                                        activeDot={{ r: 5, fill: COLOR_ACCENTO, stroke: '#09090b', strokeWidth: 2 }}
+                                        connectNulls
+                                    />
+                                </AreaChart>
                             </ResponsiveContainer>
-
-                            {/* Trend legend */}
-                            <div className="flex gap-6 mt-4 text-sm text-gray-500 justify-center">
-                                <span><span className="inline-block w-3 h-3 rounded-sm bg-gradient-to-b from-purple-600 to-blue-500 mr-1" /> Subió</span>
-                                <span><span className="inline-block w-3 h-3 rounded-sm bg-gradient-to-b from-red-500 to-orange-500 mr-1" /> Bajó</span>
-                                <span><span className="inline-block w-3 h-3 rounded-sm bg-gradient-to-b from-purple-500 to-indigo-500 mr-1" /> Sin cambios</span>
-                            </div>
                         </div>
                     )}
                 </section>
@@ -334,27 +362,45 @@ const Evolucion = () => {
                         </div>
                     )}
                     {!loadingAsistencia && asistenciaSemanal.length > 0 && (
-                        <ResponsiveContainer width="100%" height={350}>
-                            <BarChart data={asistenciaSemanal} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                <XAxis dataKey="semana" tick={{ fontSize: 11, angle: -45, textAnchor: 'end' }} height={60} />
-                                <YAxis tick={{ fontSize: 12 }} />
-                                <Tooltip
-                                    contentStyle={{
-                                        backgroundColor: '#18181b',
-                                        border: '1px solid #3f3f46',
-                                        borderRadius: '8px',
-                                        fontSize: '13px',
-                                        color: '#f4f4f5',
-                                    }}
-                                    labelStyle={{ color: '#f4f4f5' }}
-                                    itemStyle={{ color: '#d4d4d8' }}
-                                />
-                                <Legend />
-                                <Bar dataKey="asistencias" name="Asistió" fill="#10b981" radius={[4, 4, 0, 0]} />
-                                <Bar dataKey="total" name="Total reservas" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-                            </BarChart>
-                        </ResponsiveContainer>
+                        <div className="flex flex-col items-center">
+                            {/* Anillo de cumplimiento (Opción C del mockup) */}
+                            <div className="relative w-44 h-44">
+                                <svg
+                                    viewBox="0 0 120 120"
+                                    className="w-full h-full"
+                                    style={{ transform: 'rotate(-90deg)', transformOrigin: '50% 50%' }}
+                                >
+                                    <circle cx="60" cy="60" r={RING_RADIO} fill="none" stroke="#27272a" strokeWidth="12" />
+                                    <circle
+                                        cx="60"
+                                        cy="60"
+                                        r={RING_RADIO}
+                                        fill="none"
+                                        stroke={COLOR_ACCENTO}
+                                        strokeWidth="12"
+                                        strokeLinecap="round"
+                                        strokeDasharray={RING_CIRC}
+                                        strokeDashoffset={RING_CIRC * (1 - asistenciaResumen.cumplimientoPct / 100)}
+                                    />
+                                </svg>
+                                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                    <span className="text-3xl font-bold text-zinc-100">{asistenciaResumen.cumplimientoPct}%</span>
+                                    <span className="text-xs text-zinc-400">cumplimiento</span>
+                                </div>
+                            </div>
+
+                            <p className="mt-4 text-sm text-zinc-300">
+                                {asistenciaResumen.totalAsistencias} de {asistenciaResumen.totalReservas} clases reservadas
+                            </p>
+
+                            <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-orange-500/15 text-orange-300 text-xs font-semibold px-3 py-1">
+                                🔥 Racha actual: {asistenciaResumen.rachaActual} semana{asistenciaResumen.rachaActual === 1 ? '' : 's'}
+                            </span>
+
+                            <p className="mt-2 text-xs text-zinc-400">
+                                Mejor racha histórica: {asistenciaResumen.mejorRacha} semana{asistenciaResumen.mejorRacha === 1 ? '' : 's'}
+                            </p>
+                        </div>
                     )}
                 </section>
             </div>
