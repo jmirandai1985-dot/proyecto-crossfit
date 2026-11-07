@@ -23,7 +23,7 @@ from app.models.pedido import Pedido
 from app.models.solicitud_plan import SolicitudPlan
 from app.models.referidos import (EstadoPromocionDetectada, PremioTramoCiclo,
                                   PromocionReferidos,
-                                  PromocionReferidosDetectada)
+                                  PromocionReferidosDetectada, ReferidoAplicado)
 from app.utils.santiago import SANTIAGO, fecha_chile, hoy_santiago
 # Bordes del mes del KPI "alumnos nuevos": UNA sola definición (la de reportes).
 from app.api.v1.reportes import _inicio_fin_mes
@@ -621,6 +621,58 @@ def get_codigo_referido_alumno(
             return {"codigo": None, "activo": False, "fecha_creacion": None}
         raise
     return svc.datos_mi_codigo(codigo)
+
+
+@router.get("/alumnos/{usuario_id}/referidos-usados")
+def get_referidos_usados(
+    usuario_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Quién usó el código de referido de UN alumno, para la ficha admin.
+
+    Lista las aplicaciones de código (`referidos_aplicados`) en las que el alumno
+    fue el INVITADOR, con el nombre/correo del invitado (join a `usuarios`),
+    ordenadas por fecha de ingreso descendente (la más reciente primero).
+
+    Mismo guard que el endpoint vecino `codigo-referido`: el alumno tiene que
+    existir, ser del box del token y tener rol alumno (si no → 404).
+    """
+    tenant_id = current_user["tenant_id"]
+    alumno = db.query(Usuario).filter(
+        Usuario.id == usuario_id,
+        Usuario.tenant_id == tenant_id,
+        Usuario.rol == RolUsuario.alumno,
+    ).first()
+    if alumno is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Alumno {usuario_id} no encontrado en este box",
+        )
+
+    filas = (
+        db.query(ReferidoAplicado, Usuario)
+        .join(Usuario, Usuario.id == ReferidoAplicado.usuario_invitado_id)
+        .filter(ReferidoAplicado.usuario_invitador_id == usuario_id)
+        .order_by(ReferidoAplicado.fecha_ingreso_codigo.desc(),
+                  ReferidoAplicado.id.desc())
+        .all()
+    )
+
+    def _iso(fecha):
+        return fecha.isoformat() if fecha else None
+
+    def _valor_estado(estado):
+        return estado.value if hasattr(estado, "value") else estado
+
+    return [{
+        "usuario_invitado_id": aplicado.usuario_invitado_id,
+        "nombre": invitado.nombre,
+        "correo": invitado.correo,
+        "fecha_ingreso_codigo": _iso(aplicado.fecha_ingreso_codigo),
+        "estado": _valor_estado(aplicado.estado),
+        "fecha_conversion": _iso(aplicado.fecha_conversion),
+    } for aplicado, invitado in filas]
 
 
 # ── Invitación MANUAL por correo (preview + envío) ───────────────────────────
