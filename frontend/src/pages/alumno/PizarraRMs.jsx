@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Search } from 'lucide-react';
 import Layout from '../../components/Layout';
 import BotonVolver from '../../components/BotonVolver';
 import { useAuth } from '../../context/AuthContext';
@@ -10,6 +11,8 @@ import {
 } from '../../hooks/queries';
 // H-03: categoría/valor/formato de un RM desde la fuente única (utils/rm.js).
 import { formatResultadoRM, normalizarCategoria } from '../../utils/rm';
+// Selector con buscador: la lógica de filtrado vive en utils (testeable).
+import { filtrarMovimientos, categoriaDeMovimiento, TODAS_CATEGORIAS } from '../../utils/filtroMovimientos';
 // TZ Chile: default del formulario = día chileno (no el del navegador).
 import { hoyChileStr } from '../../utils/fecha';
 
@@ -51,6 +54,103 @@ const textoVentanaEdicion = (createdAt) => {
 const pesoDelFormRM = (form, cat) => (cat === 'fuerza'
     ? (parseFloat(form.peso_kg) || null)
     : null);
+
+// ─── Selector de movimiento con buscador (reemplaza el <select> nativo) ───────
+// Mismo patrón visual que el resto del modal: emerald de acento + grises neutros.
+// El filtro (texto + categoría) vive en `utils/filtroMovimientos.js` para testearlo.
+const SelectorMovimiento = ({ movimientos, valor, onCambiar, disabled }) => {
+    const [texto, setTexto] = useState('');
+    const [categoria, setCategoria] = useState(TODAS_CATEGORIAS);
+    const filtrados = filtrarMovimientos(movimientos, texto, categoria);
+
+    const chips = [
+        { key: TODAS_CATEGORIAS, label: 'Todas', icon: null },
+        ...Object.entries(CATEGORIA_META).map(([key, meta]) => ({ key, label: meta.label, icon: meta.icon })),
+    ];
+
+    return (
+        <div className={disabled ? 'opacity-60 pointer-events-none select-none' : ''}>
+            {/* Buscador */}
+            <div className="relative mb-3">
+                <Search
+                    aria-hidden="true"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400"
+                />
+                <input
+                    type="text"
+                    value={texto}
+                    onChange={(e) => setTexto(e.target.value)}
+                    placeholder="Buscar movimiento..."
+                    disabled={disabled}
+                    className="w-full pl-9 pr-3 py-2.5 border border-gray-300 rounded-xl text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent disabled:bg-gray-100"
+                />
+            </div>
+
+            {/* Chips de categoría (combinables con el texto, AND) */}
+            <div className="flex flex-wrap gap-2 mb-3">
+                {chips.map((c) => {
+                    const activo = categoria === c.key;
+                    return (
+                        <button
+                            key={c.key}
+                            type="button"
+                            onClick={() => setCategoria(c.key)}
+                            disabled={disabled}
+                            aria-pressed={activo}
+                            className={`shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-full border text-xs font-semibold transition-colors ${
+                                activo
+                                    ? 'bg-emerald-500 text-white border-emerald-500'
+                                    : 'bg-white text-gray-700 border-gray-300 hover:border-emerald-400'
+                            }`}
+                        >
+                            {c.icon && <span aria-hidden="true">{c.icon}</span>}
+                            {c.label}
+                        </button>
+                    );
+                })}
+            </div>
+
+            {/* Lista agrupada por categoría, con scroll acotado */}
+            <div className="max-h-56 overflow-y-auto rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
+                {filtrados.length === 0 && (
+                    <div className="p-4 text-center text-sm text-gray-400">
+                        No se encontraron movimientos
+                    </div>
+                )}
+                {filtrados.length > 0 && Object.entries(CATEGORIA_META).map(([catKey, catMeta]) => {
+                    const delGrupo = filtrados.filter((m) => categoriaDeMovimiento(m) === catKey);
+                    if (delGrupo.length === 0) return null;
+                    return (
+                        <div key={catKey}>
+                            <div className="px-3 py-1.5 bg-gray-100 text-xs font-bold uppercase tracking-wide text-gray-500">
+                                {catMeta.icon} {catMeta.label}
+                            </div>
+                            {delGrupo.map((m) => {
+                                const seleccionado = String(m.id) === String(valor);
+                                return (
+                                    <button
+                                        key={m.id}
+                                        type="button"
+                                        onClick={() => onCambiar(String(m.id))}
+                                        disabled={disabled}
+                                        className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                                            seleccionado
+                                                ? 'bg-emerald-50 text-emerald-700 font-semibold'
+                                                : 'text-gray-700 hover:bg-gray-50'
+                                        }`}
+                                    >
+                                        {seleccionado ? '✓ ' : ''}
+                                        {m.nombre}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
 
 const PizarraRMs = () => {
     const { usuario_id, tenant_id } = useAuth();
@@ -462,30 +562,12 @@ const PizarraRMs = () => {
                                 <label className="block text-sm font-semibold text-gray-700 mb-3">
                                     {rmEditando ? 'Movimiento (no editable):' : 'Selecciona un movimiento:'}
                                 </label>
-                                <div className="relative">
-                                    <select
-                                        value={rmForm.movimiento_id}
-                                        onChange={(e) => setRmForm(prev => ({ ...prev, movimiento_id: e.target.value }))}
-                                        disabled={!!rmEditando}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent appearance-none cursor-pointer disabled:bg-gray-100 disabled:cursor-not-allowed"
-                                    >
-                                        <option value="">-- Elige un movimiento --</option>
-                                        {Object.entries(CATEGORIA_META).map(([catKey, catMeta]) => (
-                                            <optgroup key={catKey} label={`${catMeta.icon} ${catMeta.label}`}>
-                                                {movimientos.filter(m => m.categoria === catKey).length === 0 ? (
-                                                    <option disabled>Sin movimientos</option>
-                                                ) : (
-                                                    movimientos.filter(m => m.categoria === catKey).map(m => (
-                                                        <option key={m.id} value={m.id}>{m.nombre}</option>
-                                                    ))
-                                                )}
-                                            </optgroup>
-                                        ))}
-                                    </select>
-                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400">
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                                    </div>
-                                </div>
+                                <SelectorMovimiento
+                                    movimientos={movimientos}
+                                    valor={rmForm.movimiento_id}
+                                    onCambiar={(id) => setRmForm((prev) => ({ ...prev, movimiento_id: id }))}
+                                    disabled={!!rmEditando}
+                                />
                             </div>
 
                             {/* ─── Campos específicos según categoría ─────────── */}
