@@ -31,6 +31,8 @@ import { textoBannerPlan } from '../../utils/bannerPlan';
 // Estilos del "Inicio" móvil (mockup urban-box-inicio-pulido-1), acotados a
 // `.ub-inicio`. Se construye por bloques; este archivo crece bloque a bloque.
 import './inicioMobile.css';
+// Badges de producto ("Nuevo" / "-N%") del carrusel Tienda Urban Box (migración 072).
+import { esNuevo, tieneDescuento } from '../../utils/badgesProducto';
 
 // "miércoles 7 de octubre" en el calendario de CHILE (no el del navegador).
 // Mismo criterio que utils/fecha.js (TZ America/Santiago). El mockup no lleva
@@ -645,6 +647,12 @@ const InicioMobile = ({
                                     onClick={() => navigate(`/alumno/bazar?producto=${p.id}`)}
                                     aria-label={`Comprar ${p.nombre || 'producto'}`}
                                 >
+                                    {esNuevo(p.created_at) && (
+                                        <span className="badge-nuevo">Nuevo</span>
+                                    )}
+                                    {tieneDescuento(p.descuento_pct) && (
+                                        <span className="badge-descuento">-{p.descuento_pct}%</span>
+                                    )}
                                     <div className="img">
                                         <ImagenProducto
                                             url={p.imagen_url}

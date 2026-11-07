@@ -47,6 +47,10 @@ class ProductoBase(BaseModel):
     # salen del producto.
     dias_anuncio: int = Field(
         0, ge=0, le=365, description="Días que se anuncia el producto en el Inicio")
+    # Descuento manual del producto (migración 072). NULL = sin descuento; 1..90 %
+    # es lo que la UI del alumno muestra como badge "-N%" en el Bazar.
+    descuento_pct: Optional[int] = Field(
+        None, ge=1, le=90, description="Descuento del producto en % (NULL = sin descuento)")
     activo: bool = Field(True, description="Indica si el producto está activo")
 
 
@@ -66,6 +70,9 @@ class ProductoUpdate(BaseModel):
     # Días de anuncio del producto en el carrusel del Inicio (0 = quitar el aviso).
     dias_anuncio: Optional[int] = Field(
         None, ge=0, le=365, description="Días de anuncio en el Inicio (0 = sin aviso)")
+    # Descuento manual (migración 072). Mandar null lo QUITA; omitirlo no lo toca.
+    descuento_pct: Optional[int] = Field(
+        None, ge=1, le=90, description="Descuento del producto en % (null = quitarlo)")
     # Imagen del producto: se sube por POST /productos/{id}/imagen (multipart) y
     # acá se puede QUITAR mandando null. En la respuesta viene resuelta.
     imagen_url: Optional[str] = Field(
@@ -107,6 +114,11 @@ class ProductoListItem(BaseModel):
     # Días de anuncio en el carrusel del Inicio del alumno (0 = no se anuncia). Lo
     # usa la tabla del admin para mostrar el chip "Anunciado en el Inicio".
     dias_anuncio: int = 0
+    # Descuento manual (migración 072): NULL = sin descuento. La UI del alumno lo
+    # usa para el badge "-N%" de la tarjeta.
+    descuento_pct: Optional[int] = None
+    # Fecha de alta del producto: la usa el badge "Nuevo" (últimos 14 días).
+    created_at: datetime
     activo: bool
 
     model_config = ConfigDict(from_attributes=True)

@@ -27,6 +27,7 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
         stock: '',
         stock_minimo: '',
         dias_anuncio: '0',
+        descuento_pct: '',
         activo: true,
     });
     // Galería en edición: fotos guardadas ({ id, preview }) + fotos nuevas
@@ -54,6 +55,9 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
                     // Días de anuncio: se precargan para que el admin vea si el
                     // producto está anunciado (y por cuánto) al abrirlo.
                     dias_anuncio: String(productoEditar.dias_anuncio ?? 0),
+                    // Descuento manual (migración 072). NULL = sin descuento.
+                    descuento_pct: (productoEditar.descuento_pct !== undefined && productoEditar.descuento_pct !== null)
+                        ? String(productoEditar.descuento_pct) : '',
                     activo: productoEditar.activo !== undefined ? productoEditar.activo : true,
                 });
             } else {
@@ -65,6 +69,7 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
                     stock: '',
                     stock_minimo: '',
                     dias_anuncio: '0',
+                    descuento_pct: '',
                     activo: true,
                 });
             }
@@ -166,6 +171,11 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
             && parseInt(formData.dias_anuncio) < 0) newErrors.dias_anuncio = 'Los días no pueden ser negativos';
         if (formData.dias_anuncio !== '' && formData.dias_anuncio !== undefined
             && parseInt(formData.dias_anuncio) > 365) newErrors.dias_anuncio = 'Máximo 365 días';
+        // Descuento manual (migración 072): opcional, entre 1 y 90%.
+        if (formData.descuento_pct !== '' && formData.descuento_pct !== undefined) {
+            const desc = parseInt(formData.descuento_pct);
+            if (desc < 1 || desc > 90) newErrors.descuento_pct = 'El descuento debe estar entre 1 y 90%';
+        }
 
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
@@ -190,6 +200,9 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
                     // Días de anuncio en el carrusel del Inicio: el backend crea,
                     // actualiza o quita el aviso del producto con este número.
                     dias_anuncio: parseInt(formData.dias_anuncio || 0),
+                    // Descuento manual (migración 072). Vacío = null (sin descuento).
+                    descuento_pct: (formData.descuento_pct === '' || formData.descuento_pct === undefined)
+                        ? null : parseInt(formData.descuento_pct),
                     activo: formData.activo,
                 };
                 // El PUT es JSON y no puede llevar archivos: la galería se manda
@@ -223,6 +236,10 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
                 }
                 // Días de anuncio en el carrusel "Novedades del box" del Inicio.
                 data.append('dias_anuncio', parseInt(formData.dias_anuncio || 0));
+                // Descuento manual (migración 072). Vacío = sin descuento.
+                if (formData.descuento_pct !== '' && formData.descuento_pct !== undefined) {
+                    data.append('descuento_pct', parseInt(formData.descuento_pct));
+                }
                 data.append('activo', formData.activo);
                 // La galería completa viaja en la MISMA petición (`files`, en orden:
                 // la primera es la portada). Si una foto falla, el backend no crea
@@ -239,6 +256,7 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
                 stock: '',
                 stock_minimo: '',
                 dias_anuncio: '0',
+                descuento_pct: '',
                 activo: true,
             });
             setFotos([]);
@@ -354,6 +372,26 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
                             Con días &gt; 0 el producto se anuncia en el carrusel "Novedades del box" del
                             Inicio del alumno (con su foto y su precio). 0 = no se anuncia.
                             Al guardar, el anuncio se relanza desde hoy con estos días.
+                        </p>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Descuento (%)
+                        </label>
+                        <input
+                            type="number"
+                            value={formData.descuento_pct}
+                            onChange={(e) => setFormData({ ...formData, descuento_pct: e.target.value })}
+                            className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 ${errors.descuento_pct ? 'border-red-500' : 'border-gray-300'}`}
+                            min="1"
+                            max="90"
+                            placeholder="Opcional"
+                        />
+                        {errors.descuento_pct && <p className="text-xs text-red-600 mt-1">{errors.descuento_pct}</p>}
+                        <p className="text-xs text-gray-500 mt-1">
+                            Descuento manual que el alumno verá como badge "-N%" en el Bazar.
+                            Vacío = sin descuento.
                         </p>
                     </div>
 

@@ -73,6 +73,33 @@
 .bb-remache--bl { bottom: 8px; left: 8px; }
 .bb-remache--br { bottom: 8px; right: 8px; }
 
+/* Badges de la tarjeta del catálogo (migración 072): "Nuevo" (verde, sup. izq.)
+   y "-N%" (naranja, sup. der.). Van ABSOLUTOS sobre la placa y no se superponen. */
+.bb-badge {
+    position: absolute;
+    top: 12px;
+    z-index: 3;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.bb-badge-nuevo {
+    left: 12px;
+    background: #34d399;
+    color: #06291a;
+}
+
+.bb-badge-descuento {
+    right: 12px;
+    background: #f97316;
+    color: #2b1103;
+}
+
 .bb-cuerpo {
     display: flex;
     gap: 1rem;

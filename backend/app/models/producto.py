@@ -42,6 +42,9 @@ class Producto(Base):
     # `services.avisos_marketing.sincronizar_producto()` mantiene el aviso
     # `producto_bazar` del producto (título, precio y foto salen de acá).
     dias_anuncio = Column(Integer, nullable=False, default=0)
+    # Descuento manual por producto (migración 072). NULL = sin descuento; la UI
+    # del alumno lo muestra como badge "-N%" en el Bazar y en el carrusel del Inicio.
+    descuento_pct = Column(Integer, nullable=True)
     activo = Column(Boolean, nullable=False, default=True)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())

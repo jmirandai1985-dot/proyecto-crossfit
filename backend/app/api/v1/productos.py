@@ -105,6 +105,7 @@ async def crear_producto(
     descripcion: Optional[str] = Form(None),
     stock_minimo: Optional[int] = Form(None),
     dias_anuncio: Optional[int] = Form(None),
+    descuento_pct: Optional[int] = Form(None),
     activo: bool = Form(True),
     # `file` es el campo legacy (041) con UNA foto. `files` permite crear el
     # producto y su galería completa en la MISMA petición: si un archivo falla,
@@ -154,6 +155,8 @@ async def crear_producto(
         stock_minimo=stock_minimo,
         imagen_url=imagen_url,
         dias_anuncio=max(int(dias_anuncio or 0), 0),
+        # Descuento manual (migración 072). None/ausente = sin descuento.
+        descuento_pct=descuento_pct,
         activo=activo,
     )
 

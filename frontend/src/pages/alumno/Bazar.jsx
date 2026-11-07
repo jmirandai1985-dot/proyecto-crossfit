@@ -12,6 +12,8 @@ import {
 } from '../../hooks/queries';
 import ImagenProducto from '../../components/ImagenProducto';
 import GaleriaProducto from '../../components/GaleriaProducto';
+// Badges "Nuevo" / "-N%" (migración 072), misma lógica que el carrusel del Inicio.
+import { esNuevo, tieneDescuento } from '../../utils/badgesProducto';
 // Piel "Industrial Moderno" del catálogo (solo esta pantalla).
 import './bazar.css';
 
@@ -214,6 +216,12 @@ const Bazar = () => {
                             const badge = stockBadge(p.stock);
                             return (
                                 <div key={p.id} className="bb-placa">
+                                    {esNuevo(p.created_at) && (
+                                        <span className="bb-badge bb-badge-nuevo">Nuevo</span>
+                                    )}
+                                    {tieneDescuento(p.descuento_pct) && (
+                                        <span className="bb-badge bb-badge-descuento">-{p.descuento_pct}%</span>
+                                    )}
                                     <span className="bb-remache bb-remache--tl" aria-hidden="true" />
                                     <span className="bb-remache bb-remache--tr" aria-hidden="true" />
                                     <span className="bb-remache bb-remache--bl" aria-hidden="true" />

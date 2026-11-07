@@ -804,6 +804,7 @@
 .ub-inicio .prod {
     flex: 0 0 136px;
     scroll-snap-align: start;
+    position: relative;
     background: var(--ub-panel);
     border: 1px solid var(--ub-line);
     border-radius: var(--ub-r-md);
@@ -853,6 +854,35 @@
     font-size: 14.5px;
     color: var(--ub-orange);
     font-weight: 700;
+}
+
+/* Badges de la tarjeta de producto (migración 072): "Nuevo" (verde, sup. izq.)
+   y "-N%" (naranja, sup. der.). Van ABSOLUTOS sobre la foto y no se superponen:
+   uno ancla a la izquierda y el otro a la derecha. */
+.ub-inicio .prod .badge-nuevo,
+.ub-inicio .prod .badge-descuento {
+    position: absolute;
+    top: 14px;
+    z-index: 2;
+    padding: 3px 7px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+.ub-inicio .prod .badge-nuevo {
+    left: 14px;
+    background: var(--ub-ok);
+    color: #06291a;
+}
+
+.ub-inicio .prod .badge-descuento {
+    right: 14px;
+    background: var(--ub-orange);
+    color: #2b1103;
 }
 
 /* ── Barra inferior con escáner central ── */
