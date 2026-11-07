@@ -456,67 +456,64 @@ const Evolucion = () => {
                     ) : movimientosMesAMes.length === 0 ? (
                         <div className="text-center py-8 text-gray-400">Todavía no registras marcas de RM.</div>
                     ) : (
-                        <>
-                            <div className="grid grid-cols-2 gap-x-3 gap-y-3">
-                                {movimientosMesAMes.map((m) => {
-                                    const abierto = movimientoMesAMesAbierto === m.movimiento_id;
-                                    return (
+                        <div>
+                            {movimientosMesAMes.map((m) => {
+                                const abierto = movimientoMesAMesAbierto === m.movimiento_id;
+                                const nMarcas = m.serie.length;
+                                const tendencia = m.serie.length >= 2
+                                    && m.serie[m.serie.length - 1].valor > m.serie[m.serie.length - 2].valor;
+                                return (
+                                    <div key={m.movimiento_id} className="border-b border-zinc-800 last:border-b-0">
                                         <button
-                                            key={m.movimiento_id}
                                             type="button"
                                             onClick={() => setMovimientoMesAMesAbierto(abierto ? null : m.movimiento_id)}
-                                            className={`text-left rounded-xl border p-3 transition-colors ${abierto ? 'border-orange-500 bg-zinc-800' : 'border-zinc-800 bg-zinc-900 hover:bg-zinc-800'}`}
+                                            className="w-full text-left flex items-center gap-3 py-3"
                                         >
-                                            <div className="flex items-baseline justify-between gap-1">
-                                                <span className="font-semibold text-zinc-100 truncate text-sm">{m.movimiento_nombre}</span>
-                                                <span className="text-xs text-zinc-400 shrink-0">{m.valorActual} {m.unidad}</span>
-                                            </div>
-                                            <div className="mt-3 flex items-end gap-1">
-                                                {m.serie.map((p) => (
-                                                    <div key={p.claveMes} className="flex-1 flex flex-col items-center min-w-0">
-                                                        <div className="h-14 w-full flex items-end justify-center">
-                                                            <div
-                                                                className="w-full max-w-[16px] rounded-t bg-orange-500"
-                                                                title={`${p.valor} ${m.unidad}`}
-                                                                style={{ height: `${Math.max(8, p.pct)}%` }}
-                                                            />
-                                                        </div>
-                                                        <span className="mt-0.5 text-[9px] text-zinc-500 leading-3">{p.mesLabel}</span>
-                                                    </div>
-                                                ))}
-                                            </div>
+                                            <span
+                                                className={`grid h-[30px] w-[30px] shrink-0 place-items-center rounded-full text-sm ${tendencia ? 'bg-green-500/15 text-green-400' : 'bg-zinc-700/40 text-zinc-500'}`}
+                                                aria-hidden="true"
+                                            >
+                                                {tendencia ? '↑' : '•'}
+                                            </span>
+                                            <span className="flex-1 min-w-0">
+                                                <span className="block font-medium text-zinc-100 truncate">{m.movimiento_nombre}</span>
+                                                <span className="block text-xs text-zinc-500">{nMarcas} marca{nMarcas === 1 ? '' : 's'}</span>
+                                            </span>
+                                            <span className="font-bold text-zinc-100 shrink-0">{m.valorActual} {m.unidad}</span>
+                                            <span
+                                                className={`shrink-0 text-zinc-500 transition-transform ${abierto ? 'rotate-180' : ''}`}
+                                                aria-hidden="true"
+                                            >
+                                                ▼
+                                            </span>
                                         </button>
-                                    );
-                                })}
-                            </div>
 
-                            {/* Detalle inline de la tarjeta expandida */}
-                            {detalleMesAMes && detalleMesAMes.mov && (
-                                <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-                                    <div className="flex items-baseline justify-between gap-2">
-                                        <h3 className="font-semibold text-zinc-100 truncate">{detalleMesAMes.mov.movimiento_nombre}</h3>
-                                        <span className="text-xs text-zinc-400 shrink-0">{detalleMesAMes.marcas.length} marca{detalleMesAMes.marcas.length === 1 ? '' : 's'}</span>
+                                        {/* Detalle inline dentro de la fila expandida */}
+                                        {abierto && detalleMesAMes && detalleMesAMes.mov && (
+                                            <div className="pb-4 pl-[42px]">
+                                                {detalleMesAMesQ.isPending ? (
+                                                    <p className="text-sm text-zinc-500">Cargando marcas...</p>
+                                                ) : detalleMesAMes.marcas.length === 0 ? (
+                                                    <p className="text-sm text-zinc-500">Sin marcas para este movimiento.</p>
+                                                ) : (
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {detalleMesAMes.marcas.map((marca) => (
+                                                            <span
+                                                                key={marca.id ?? `${marca.fecha}-${marca.valor}`}
+                                                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${marca.esMejor ? 'border-orange-500 bg-orange-500/15 text-orange-300' : 'border-zinc-700 bg-zinc-800 text-zinc-300'}`}
+                                                            >
+                                                                {marca.esMejor && <span aria-hidden="true">🏆</span>}
+                                                                {fmtFechaCortaChile(marca.fecha)} · {marca.valor} {marca.unidad}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
-                                    {detalleMesAMesQ.isPending ? (
-                                        <p className="mt-3 text-sm text-zinc-500">Cargando marcas...</p>
-                                    ) : detalleMesAMes.marcas.length === 0 ? (
-                                        <p className="mt-3 text-sm text-zinc-500">Sin marcas para este movimiento.</p>
-                                    ) : (
-                                        <div className="mt-3 flex flex-wrap gap-2">
-                                            {detalleMesAMes.marcas.map((m) => (
-                                                <span
-                                                    key={m.id ?? `${m.fecha}-${m.valor}`}
-                                                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${m.esMejor ? 'border-orange-500 bg-orange-500/15 text-orange-300' : 'border-zinc-700 bg-zinc-800 text-zinc-300'}`}
-                                                >
-                                                    {m.esMejor && <span aria-hidden="true">🏆</span>}
-                                                    {fmtFechaCortaChile(m.fecha)} · {m.valor} {m.unidad}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </>
+                                );
+                            })}
+                        </div>
                     )}
                 </section>
 
