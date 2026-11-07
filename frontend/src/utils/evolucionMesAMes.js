@@ -129,6 +129,23 @@ export function agruparPorMovimiento(rms) {
 }
 
 /**
+ * Marcas de UN movimiento (para el panel de detalle del grid "Mes a mes").
+ *
+ * Filtra `rms` por `movimiento_id`, resuelve `valor`/`unidad` de cada marca y las
+ * ordena cronológicamente (más antigua primero). Marca `esMejor: true` en la(s)
+ * marca(s) que igualan el valor MÁXIMO de ese movimiento.
+ */
+export function marcasDeMovimiento(rms, movimientoId) {
+    const marcas = (rms || [])
+        .filter((rm) => rm?.movimiento_id === movimientoId)
+        .map((rm) => ({ ...rm, valor: valorRM(rm), unidad: unidadRM(rm) }))
+        .sort((a, b) => fechaSolaAInstante(a.fecha).getTime() - fechaSolaAInstante(b.fecha).getTime());
+
+    const maximo = marcas.length ? Math.max(...marcas.map((m) => m.valor)) : 0;
+    return marcas.map((m) => ({ ...m, esMejor: m.valor === maximo }));
+}
+
+/**
  * % de la mejor marca de un movimiento que representa `valor` (para la barra de
  * progreso). El mejor RM del movimiento es el 100%; sin mejor marca → 0.
  */

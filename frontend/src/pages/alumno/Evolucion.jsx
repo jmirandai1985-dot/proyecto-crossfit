@@ -19,7 +19,7 @@ import { getChartData } from '../../utils/evolucionChart';
 // Resumen por movimiento + objetivo sugerido y plan de progresión (fuente única).
 import { evolucionPorMovimiento, objetivosSugeridos } from '../../utils/evolucionRM';
 // Vista "Mes a mes": una tarjeta por movimiento con su serie mensual (fuente única).
-import { agruparPorMovimiento } from '../../utils/evolucionMesAMes';
+import { agruparPorMovimiento, marcasDeMovimiento } from '../../utils/evolucionMesAMes';
 
 // Acento de la app (orange-500): es el "emerald → naranja" que aplica `src/index.css`.
 const COLOR_ACCENTO = '#f97316';
@@ -43,6 +43,8 @@ const Evolucion = () => {
     const [sheetAbierto, setSheetAbierto] = useState(false);
     const abrirSheet = () => setSheetAbierto(true);
     const cerrarSheet = React.useCallback(() => setSheetAbierto(false), []);
+    // Vista "Mes a mes": qué tarjeta está expandida (o `null` si ninguna).
+    const [movimientoMesAMesAbierto, setMovimientoMesAMesAbierto] = useState(null);
 
     const movimientosQ = useMovimientos();
     const progresoQ = useProgresoDestacado(alumnoId);
@@ -52,6 +54,10 @@ const Evolucion = () => {
     const nivelGeneralQ = useNivelGeneral(alumnoId);
     // Todas las marcas de RM del alumno (sin filtro): fuente de la vista "Mes a mes".
     const rmsQ = useRmsAlumno(alumnoId);
+    // Historial COMPLETO del movimiento expandido en "Mes a mes" (todas sus marcas).
+    // `useRmsAlumno` sólo trae el MEJOR RM por movimiento, así que el detalle usa este
+    // endpoint (el mismo de la Tarea 1). Sin movimiento expandido la consulta no sale.
+    const detalleMesAMesQ = useRmDeMovimiento(alumnoId, movimientoMesAMesAbierto);
 
     // `?? []` DENTRO de un `useMemo`: la consulta mantiene la MISMA referencia mientras
     // el dato no cambia, así que los `useMemo`/`useEffect` de abajo no se recalculan en
@@ -67,6 +73,13 @@ const Evolucion = () => {
     // ── Vista "Mes a mes": una tarjeta por movimiento con su serie mensual. ──
     const rms = React.useMemo(() => rmsQ.data || [], [rmsQ.data]);
     const movimientosMesAMes = React.useMemo(() => agruparPorMovimiento(rms), [rms]);
+    // Detalle del movimiento expandido (todas sus marcas + la mejor resaltada).
+    const detalleMesAMes = React.useMemo(() => {
+        if (movimientoMesAMesAbierto === null) return null;
+        const mov = movimientosMesAMes.find((m) => m.movimiento_id === movimientoMesAMesAbierto) || null;
+        const marcas = marcasDeMovimiento(detalleMesAMesQ.data || [], movimientoMesAMesAbierto);
+        return { mov, marcas };
+    }, [movimientoMesAMesAbierto, movimientosMesAMes, detalleMesAMesQ.data]);
 
     // Cumplimiento + racha de Asistencia Semanal, calculados en cliente (sin red).
     const asistenciaResumen = React.useMemo(
@@ -443,30 +456,67 @@ const Evolucion = () => {
                     ) : movimientosMesAMes.length === 0 ? (
                         <div className="text-center py-8 text-gray-400">Todavía no registras marcas de RM.</div>
                     ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {movimientosMesAMes.map((m) => (
-                                <div key={m.movimiento_id} className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-                                    <div className="flex items-baseline justify-between gap-2">
-                                        <span className="font-semibold text-zinc-100 truncate">{m.movimiento_nombre}</span>
-                                        <span className="text-sm text-zinc-400 shrink-0">{m.valorActual} {m.unidad}</span>
-                                    </div>
-                                    <div className="mt-4 flex items-end gap-1.5">
-                                        {m.serie.map((p) => (
-                                            <div key={p.claveMes} className="flex-1 flex flex-col items-center min-w-0">
-                                                <div className="h-20 w-full flex items-end justify-center">
-                                                    <div
-                                                        className="w-full max-w-[24px] rounded-t bg-orange-500"
-                                                        title={`${p.valor} ${m.unidad}`}
-                                                        style={{ height: `${Math.max(8, p.pct)}%` }}
-                                                    />
-                                                </div>
-                                                <span className="mt-1 text-[10px] text-zinc-500 leading-4">{p.mesLabel}</span>
+                        <>
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+                                {movimientosMesAMes.map((m) => {
+                                    const abierto = movimientoMesAMesAbierto === m.movimiento_id;
+                                    return (
+                                        <button
+                                            key={m.movimiento_id}
+                                            type="button"
+                                            onClick={() => setMovimientoMesAMesAbierto(abierto ? null : m.movimiento_id)}
+                                            className={`text-left rounded-xl border p-3 transition-colors ${abierto ? 'border-orange-500 bg-zinc-800' : 'border-zinc-800 bg-zinc-900 hover:bg-zinc-800'}`}
+                                        >
+                                            <div className="flex items-baseline justify-between gap-1">
+                                                <span className="font-semibold text-zinc-100 truncate text-sm">{m.movimiento_nombre}</span>
+                                                <span className="text-xs text-zinc-400 shrink-0">{m.valorActual} {m.unidad}</span>
                                             </div>
-                                        ))}
+                                            <div className="mt-3 flex items-end gap-1">
+                                                {m.serie.map((p) => (
+                                                    <div key={p.claveMes} className="flex-1 flex flex-col items-center min-w-0">
+                                                        <div className="h-14 w-full flex items-end justify-center">
+                                                            <div
+                                                                className="w-full max-w-[16px] rounded-t bg-orange-500"
+                                                                title={`${p.valor} ${m.unidad}`}
+                                                                style={{ height: `${Math.max(8, p.pct)}%` }}
+                                                            />
+                                                        </div>
+                                                        <span className="mt-0.5 text-[9px] text-zinc-500 leading-3">{p.mesLabel}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Detalle inline de la tarjeta expandida */}
+                            {detalleMesAMes && detalleMesAMes.mov && (
+                                <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+                                    <div className="flex items-baseline justify-between gap-2">
+                                        <h3 className="font-semibold text-zinc-100 truncate">{detalleMesAMes.mov.movimiento_nombre}</h3>
+                                        <span className="text-xs text-zinc-400 shrink-0">{detalleMesAMes.marcas.length} marca{detalleMesAMes.marcas.length === 1 ? '' : 's'}</span>
                                     </div>
+                                    {detalleMesAMesQ.isPending ? (
+                                        <p className="mt-3 text-sm text-zinc-500">Cargando marcas...</p>
+                                    ) : detalleMesAMes.marcas.length === 0 ? (
+                                        <p className="mt-3 text-sm text-zinc-500">Sin marcas para este movimiento.</p>
+                                    ) : (
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                            {detalleMesAMes.marcas.map((m) => (
+                                                <span
+                                                    key={m.id ?? `${m.fecha}-${m.valor}`}
+                                                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${m.esMejor ? 'border-orange-500 bg-orange-500/15 text-orange-300' : 'border-zinc-700 bg-zinc-800 text-zinc-300'}`}
+                                                >
+                                                    {m.esMejor && <span aria-hidden="true">🏆</span>}
+                                                    {fmtFechaCortaChile(m.fecha)} · {m.valor} {m.unidad}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
-                            ))}
-                        </div>
+                            )}
+                        </>
                     )}
                 </section>
 

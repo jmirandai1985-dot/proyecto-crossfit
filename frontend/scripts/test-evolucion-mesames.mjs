@@ -7,7 +7,7 @@
 //   2. filtro por movimiento case-insensitive, y que descarta los meses que quedan vacíos.
 //   3. pctDeMejora (redondeo, cero divisor, null).
 import {
-    agruparPorAnioYMes, agruparPorMovimiento, pctDeMejora,
+    agruparPorAnioYMes, agruparPorMovimiento, marcasDeMovimiento, pctDeMejora,
 } from '../src/utils/evolucionMesAMes.js';
 
 let fallos = 0;
@@ -76,6 +76,21 @@ eq(pctDeMejora(1, 3), 33, '1 de 3 -> 33% (redondeado)');
 eq(pctDeMejora(0, 100), 0, 'valor 0 -> 0%');
 eq(pctDeMejora(50, 0), 0, 'mejor marca 0 -> 0% (no divide por cero)');
 eq(pctDeMejora(null, 100), 0, 'valor null -> 0%');
+
+// ── 4. marcasDeMovimiento (detalle del grid clickeable) ─────────────────────
+const marcasDetalle = [
+    rm(1, '2026-10-15', 'Back Squat', 120),
+    rm(1, '2026-11-20', 'Back Squat', 125),
+    rm(1, '2026-09-10', 'Back Squat', 100),
+    rm(2, '2026-11-01', 'Deadlift', 200),
+];
+const detalle = marcasDeMovimiento(marcasDetalle, 1);
+eq(detalle.length, 3, 'solo las marcas del movimiento 1 (Back Squat)');
+eq(detalle.map((m) => m.valor).join(','), '100,120,125', 'marcas ordenadas cronológicamente');
+eq(detalle[2].esMejor, true, 'la marca de mayor valor (125) es la mejor');
+eq(detalle[0].esMejor, false, '100 no es la mejor');
+eq(detalle[1].esMejor, false, '120 no es la mejor');
+eq(marcasDeMovimiento(marcasDetalle, 999).length, 0, 'movimiento inexistente -> sin marcas');
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);
