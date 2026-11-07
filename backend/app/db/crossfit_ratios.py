@@ -174,75 +174,79 @@ CROSSFIT_RATIOS = {
     # ==============================
     # D5 (2026-10-28): variantes de arrancada/cargada que el box programa
     # ==============================
-    # ESTIMADO, no medido: mismas reglas de extrapolación que declara el encabezado del archivo
-    # (el doc `PROPUESTA_CLASIFICACION_NIVEL.md` §5.2 las deriva de las tablas existentes).
-    # Ajustar con el coach si el box tiene datos propios.
+    # Fuente real (2026-11-06): strengthlevel.com (percentiles de 1RM por peso corporal),
+    # ajustada -15% al contexto de un box de CrossFit recreativo (mismo criterio que usa
+    # Deadlift para adaptar powerlifting puro: Elite 3.0x -> 2.5x).
     "Power Clean": {
         "unidad": "ratio",
         "M": {
-            "Principiante": 0.40,
-            "Intermedio": 0.80,
-            "Avanzado": 1.05,
-            "Elite": 1.35,
+            "Principiante": 0.55,
+            "Intermedio": 0.94,
+            "Avanzado": 1.18,
+            "Elite": 1.43,
         },
         "F": {
-            "Principiante": 0.32,
-            "Intermedio": 0.64,
-            "Avanzado": 0.80,
-            "Elite": 1.05,
+            "Principiante": 0.41,
+            "Intermedio": 0.72,
+            "Avanzado": 0.94,
+            "Elite": 1.16,
         },
     },
-    # Estimado: Power Clean ~80% del Clean (la barra no baja al piso).
+    # Fuente: strengthlevel.com (datos reales a ~80kg hombres / ~60kg mujeres), ajustado
+    # -15% al contexto CrossFit igual que Deadlift — ya NO es estimado/extrapolado.
     # Split Jerk NO lleva tabla: es alias de "Jerk (Envión)" (nivel_service.ALIAS_ESTANDAR).
 
     "Power Snatch": {
         "unidad": "ratio",
         "M": {
-            "Principiante": 0.32,
-            "Intermedio": 0.64,
-            "Avanzado": 0.80,
-            "Elite": 1.05,
+            "Principiante": 0.38,
+            "Intermedio": 0.73,
+            "Avanzado": 0.96,
+            "Elite": 1.19,
         },
         "F": {
-            "Principiante": 0.24,
-            "Intermedio": 0.48,
-            "Avanzado": 0.64,
-            "Elite": 0.80,
+            "Principiante": 0.30,
+            "Intermedio": 0.54,
+            "Avanzado": 0.69,
+            "Elite": 0.85,
         },
     },
-    # Estimado: Power Snatch ~80% del Snatch.
+    # Fuente: strengthlevel.com (datos reales a ~80kg hombres / ~60kg mujeres), ajustado
+    # -15% al contexto CrossFit igual que Deadlift — ya NO es estimado/extrapolado.
 
     "Push Jerk": {
         "unidad": "ratio",
         "M": {
-            "Principiante": 0.45,
-            "Intermedio": 0.81,
-            "Avanzado": 1.08,
-            "Elite": 1.35,
+            "Principiante": 0.52,
+            "Intermedio": 0.91,
+            "Avanzado": 1.16,
+            "Elite": 1.42,
         },
         "F": {
-            "Principiante": 0.36,
-            "Intermedio": 0.63,
-            "Avanzado": 0.81,
-            "Elite": 1.08,
+            "Principiante": 0.41,
+            "Intermedio": 0.69,
+            "Avanzado": 0.88,
+            "Elite": 1.10,
         },
     },
-    # Estimado: Push Jerk ~90% del Split Jerk (no hay split, se recibe en fuerza).
+    # Fuente: strengthlevel.com (datos reales a ~80kg hombres / ~60kg mujeres), ajustado
+    # -15% al contexto CrossFit igual que Deadlift — ya NO es estimado/extrapolado.
 
     "Push Press": {
         "unidad": "ratio",
         "M": {
-            "Principiante": 0.40,
-            "Intermedio": 0.72,
-            "Avanzado": 0.96,
-            "Elite": 1.20,
+            "Principiante": 0.45,
+            "Intermedio": 0.84,
+            "Avanzado": 1.08,
+            "Elite": 1.35,
         },
         "F": {
-            "Principiante": 0.32,
-            "Intermedio": 0.56,
-            "Avanzado": 0.72,
-            "Elite": 0.96,
+            "Principiante": 0.31,
+            "Intermedio": 0.61,
+            "Avanzado": 0.81,
+            "Elite": 1.02,
         },
     },
-    # Estimado: Push Press ~80% del Split Jerk (usa el impulso de piernas, sin split).
+    # Fuente: strengthlevel.com (datos reales a ~80kg hombres / ~60kg mujeres), ajustado
+    # -15% al contexto CrossFit igual que Deadlift — ya NO es estimado/extrapolado.
 }

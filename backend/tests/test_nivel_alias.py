@@ -7,8 +7,10 @@ QUÉ FIJA ESTE ARCHIVO
    `Bear Crawl (Caminata)` NUNCA clasificaban (el match es por string exacto).
 2. Los estándares nuevos existen y clasifican: Strict / Kipping Pull-up, Power Clean / Snatch,
    Split Jerk (alias del Jerk), Push Press, Ring Dips, Wall Ball Shot y Kettlebell Swing.
-3. Fuente: los estándares nuevos están marcados como **estimados** (derivados de las reglas de
-   extrapolación del propio archivo y del doc §5.2/§5.3/§5.5), salvo los que el doc declara.
+3. Fuente: los estándares GIMNÁSTICOS nuevos siguen marcados como **estimados** (criterio de
+   coach §5.3/§5.5); los de FUERZA (Power Clean / Power Snatch / Push Jerk / Push Press) se
+   recalibraron a datos reales de strengthlevel.com (-15% al contexto CrossFit) y ya no son
+   estimados.
 4. D2: la gimnasia NO se clasifica sin género (antes se usaba la tabla masculina por defecto).
 5. `movimiento_categoria.categoria_por_nombre` resuelve los alias (importa para D4: la categoría
    decide si el valor del RM son reps o kg).
@@ -119,14 +121,14 @@ def test_los_estandares_gimnasticos_clasifican(nombre, valor, esperado):
 
 
 @pytest.mark.parametrize("nombre,peso,esperado", [
-    # Power Clean M: 0.40 / 0.80 / 1.05 / 1.35 (80 kg de peso corporal)
+    # Power Clean M: 0.55 / 0.94 / 1.18 / 1.43 (80 kg de peso corporal)
     ("Power Clean", 80, "Intermedio"),
-    # Power Snatch M: 0.32 / 0.64 / 0.80 / 1.05
-    ("Power Snatch", 56, "Intermedio"),
-    # Push Jerk M: 0.45 / 0.81 / 1.08 / 1.35
+    # Power Snatch M: 0.38 / 0.73 / 0.96 / 1.19
+    ("Power Snatch", 56, "Principiante"),
+    # Push Jerk M: 0.52 / 0.91 / 1.16 / 1.42
     ("Push Jerk", 40, "Principiante"),
-    # Push Press M: 0.40 / 0.72 / 0.96 / 1.20
-    ("Push Press", 60, "Intermedio"),
+    # Push Press M: 0.45 / 0.84 / 1.08 / 1.35
+    ("Push Press", 60, "Principiante"),
 ])
 def test_los_estandares_de_fuerza_clasifican(nombre, peso, esperado):
     from app.services.nivel_service import obtener_nivel_fuerza
@@ -137,7 +139,9 @@ def test_los_estandares_de_fuerza_clasifican(nombre, peso, esperado):
 def test_los_estandares_nuevos_declaran_su_origen_estimado():
     ratios = _fuente("backend/app/db/crossfit_ratios.py")
     habilidades = _fuente("backend/app/db/crossfit_habilidades.py")
-    assert "ESTIMADO, no medido" in ratios
+    # Fuerza D5 se recalibró a datos reales (strengthlevel.com): ya NO declara "estimado".
+    assert "ESTIMADO, no medido" not in ratios
+    # Gimnasia D5 sigue siendo estimada (criterio de coach, sin fuente real).
     assert "ESTIMADO, no medido" in habilidades
     # La decisión de puntuar peso fijo queda documentada (el doc recomendaba no hacerlo).
     assert "decisión D5 del dueño del producto" in habilidades
