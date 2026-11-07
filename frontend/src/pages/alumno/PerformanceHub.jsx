@@ -6,7 +6,7 @@ import BotonVolver from '../../components/BotonVolver';
 import { useAuth } from '../../context/AuthContext';
 // Fase 2 (Bloque 1): los datos salen de la caché compartida (`hooks/queries.js`), la
 // MISMA que usan la Pizarra de RMs y Evolución.
-import { useHistorialRmTodos, useRmsAlumno, useIntensidadRelativa } from '../../hooks/queries';
+import { useHistorialRmTodos, useRmsAlumno, useIntensidadRelativa, useNivelGeneral } from '../../hooks/queries';
 // H-03: la categoría/valor de un RM salen de una única fuente (utils/rm.js).
 // Antes estas 3 funciones vivían acá y había otra copia en Evolución y otra en la Pizarra.
 import {
@@ -22,6 +22,8 @@ import { evolucionPorMovimiento, tipsEvolucion, objetivosSugeridos } from '../..
 import { agruparMovimientosPorCategoria, textoObjetivo } from '../../utils/evolucionMovimiento';
 // Intensidad relativa (%RM): cuánto de su RM usa el alumno dentro de un WOD real.
 import { intensidadRelativaPorMovimiento } from '../../utils/intensidadRelativa';
+// Progreso de la barra de nivel por movimiento (Fuerza/Gimnástico), lógica pura.
+import { pctProgresoNivel } from '../../utils/progresoNivel';
 
 const CAT_CONFIG = {
     fuerza: { label: 'Fuerza Máxima', color: '#3B82F6', icon: '💪' },
@@ -67,8 +69,11 @@ const MiniBarrasObjetivo = ({ datos }) => {
 // Acordeón de un movimiento dentro de un cuadrante de categoría: la fila SIEMPRE
 // muestra el nombre + valor actual; al expandir se ve su propio mini-gráfico (solo
 // SUS puntos) y una línea de contexto sobre su PR. Usa <details>/<summary> nativo.
-const MovimientoAcordeon = ({ mov, color }) => {
+const MovimientoAcordeon = ({ mov, color, nivelInfo }) => {
     const maxValor = Math.max(...mov.puntos.map((p) => p.valor), 1);
+    // Progreso del nivel (Fuerza/Gimnástico): valor actual entre el umbral del
+    // nivel actual y el siguiente (misma barra que el panel expandido de Evolución).
+    const pctNivel = pctProgresoNivel(mov.valorActual, nivelInfo);
     const contexto = mov.registros === 1
         ? 'Primera marca registrada'
         : mov.esPR
@@ -78,7 +83,14 @@ const MovimientoAcordeon = ({ mov, color }) => {
         <details className="group">
             <summary className="flex items-center justify-between gap-2 cursor-pointer list-none [&::-webkit-details-marker]:hidden py-2.5 px-1 rounded-lg hover:bg-gray-50">
                 <span className="min-w-0">
-                    <span className="block font-semibold text-gray-800 break-words">{mov.movimiento_nombre}</span>
+                    <span className="flex items-center gap-1.5 flex-wrap">
+                        <span className="block font-semibold text-gray-800 break-words">{mov.movimiento_nombre}</span>
+                        {nivelInfo && nivelInfo.nivel && nivelInfo.nivel !== 'Sin datos' && (
+                            <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                                🥉 {nivelInfo.nivel}
+                            </span>
+                        )}
+                    </span>
                     <span className="block text-xs text-gray-500 mt-0.5">{contexto}</span>
                 </span>
                 <span className="shrink-0 flex items-center gap-2">
@@ -101,6 +113,18 @@ const MovimientoAcordeon = ({ mov, color }) => {
                                 </div>
                             );
                         })}
+                    </div>
+                )}
+                {nivelInfo && nivelInfo.nivel && nivelInfo.nivel !== 'Sin datos' && (
+                    <div className="mt-3">
+                        <p className="text-[11px] text-gray-500">
+                            {nivelInfo.siguiente_nivel
+                                ? `Para subir a ${nivelInfo.siguiente_nivel} te faltarían ${nivelInfo.valor_faltante} ${mov.unidad}`
+                                : 'Ya alcanzaste el nivel máximo (Elite)'}
+                        </p>
+                        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-gray-100">
+                            <div className="h-full rounded-full transition-all" style={{ width: `${pctNivel}%`, backgroundColor: color }} />
+                        </div>
                     </div>
                 )}
                 <p className="text-[11px] text-gray-400 mt-1.5">
@@ -130,6 +154,9 @@ const PerformanceHub = () => {
     const historialQ = useHistorialRmTodos(500);
     // Intensidad relativa (%RM): prescripción de los WODs asistidos (endpoint nuevo).
     const intensidadQ = useIntensidadRelativa();
+    // Nivel por movimiento (Fuerza/Gimnástico): el MISMO endpoint que usa el panel
+    // expandido de Evolución. No bloquea la pantalla si falla (ver erroresCarga).
+    const nivelGeneralQ = useNivelGeneral(usuario_id);
 
     const rms = React.useMemo(
         () => (rmsQ.data || []).map(rm => ({ ...rm, categoria: inferirCategoria(rm) })),
@@ -186,6 +213,21 @@ const PerformanceHub = () => {
         [historialQ.data],
     );
 
+    // Nivel de clasificación indexado por `movimiento_id` (solo Fuerza/Gimnástico).
+    // Unifica `detalle_fuerza` + `detalle_gimnastico` en un único mapa para el acordeón.
+    const nivelPorMovimiento = React.useMemo(() => {
+        const g = nivelGeneralQ.data;
+        if (!g) return {};
+        const mapa = {};
+        (g.detalle_fuerza || []).forEach((d) => {
+            if (d?.movimiento_id != null) mapa[d.movimiento_id] = { ...d, eje: 'fuerza' };
+        });
+        (g.detalle_gimnastico || []).forEach((d) => {
+            if (d?.movimiento_id != null) mapa[d.movimiento_id] = { ...d, eje: 'gimnastico' };
+        });
+        return mapa;
+    }, [nivelGeneralQ.data]);
+
     // "Cargando" sólo mientras NO hay dato: al volver a la pantalla se pinta la copia en
     // caché al instante (misma queryKey que las otras pantallas de RMs).
     const loading = rmsQ.isPending || historialQ.isPending || intensidadQ.isPending;
@@ -195,17 +237,19 @@ const PerformanceHub = () => {
         if (rmsQ.isError) fallaron.push('mis RMs');
         if (historialQ.isError) fallaron.push('tu historial de RMs');
         if (intensidadQ.isError) fallaron.push('la intensidad de tus WODs');
+        if (nivelGeneralQ.isError) fallaron.push('tu nivel de clasificación');
         if (descartados.length > 0) {
             fallaron.push(`evolución de RMs (${descartados.length} registro/s con fecha o valor inválido)`);
         }
         return fallaron;
-    }, [rmsQ.isError, historialQ.isError, intensidadQ.isError, descartados]);
+    }, [rmsQ.isError, historialQ.isError, intensidadQ.isError, nivelGeneralQ.isError, descartados]);
 
     // Reintentar = volver a pedir las tres (mismo botón del banner de antes).
     const cargarTodo = () => {
         rmsQ.refetch();
         historialQ.refetch();
         intensidadQ.refetch();
+        nivelGeneralQ.refetch();
     };
 
     if (loading) return (<Layout><div className="flex items-center justify-center h-96"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500" /></div></Layout>);
@@ -233,7 +277,14 @@ const PerformanceHub = () => {
                 {movimientos.length > 0 ? (
                     <div className="divide-y divide-gray-100">
                         {movimientos.map((mov) => (
-                            <MovimientoAcordeon key={mov.movimiento_id} mov={mov} color={cfg.color} />
+                            <MovimientoAcordeon
+                                key={mov.movimiento_id}
+                                mov={mov}
+                                color={cfg.color}
+                                nivelInfo={(cat === 'fuerza' || cat === 'gimnastico')
+                                    ? nivelPorMovimiento[mov.movimiento_id]
+                                    : undefined}
+                            />
                         ))}
                     </div>
                 ) : (

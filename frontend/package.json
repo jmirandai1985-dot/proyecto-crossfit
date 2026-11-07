@@ -67,7 +67,8 @@
     "test:momento": "node scripts/test-momento-dia.mjs",
     "test:inactividad": "node scripts/test-inactividad.mjs",
     "test:banner": "node scripts/test-banner-plan.mjs",
-    "test:badges": "node scripts/test-badges-producto.mjs"
+    "test:badges": "node scripts/test-badges-producto.mjs",
+    "test:nivel": "node scripts/test-progreso-nivel.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.1",
