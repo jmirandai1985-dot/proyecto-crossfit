@@ -69,7 +69,8 @@
     "test:banner": "node scripts/test-banner-plan.mjs",
     "test:badges": "node scripts/test-badges-producto.mjs",
     "test:nivel": "node scripts/test-progreso-nivel.mjs",
-    "test:evolucion-mesames": "node scripts/test-evolucion-mesames.mjs"
+    "test:evolucion-mesames": "node scripts/test-evolucion-mesames.mjs",
+    "test:ficha-alumno": "node scripts/test-ficha-alumno.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.1",

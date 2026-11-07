@@ -3,6 +3,9 @@ import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import AlumnoFichaModal from '../../components/AlumnoFichaModal';
+// Ficha de CONSULTA con 5 pestañas (buscador rápido, arriba de la tabla). No es el
+// modal chico `AlumnoFichaModal` que usan las filas: conviven sin tocarse.
+import FichaAlumnoTabs from '../../components/FichaAlumnoTabs';
 // Vista MÓVIL del padrón (<768px): tarjetas con acordeón. La tabla de escritorio no
 // cambia; las dos vistas comparten los datos y las reglas (`utils/alumnos*`).
 import AlumnosMovil from './AlumnosMovil';
@@ -59,6 +62,12 @@ const Alumnos = () => {
     const [avisoComprobante, setAvisoComprobante] = useState('');
     const [editingAlumno, setEditingAlumno] = useState(null);
     const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
+    // ── Buscador rápido + ficha con pestañas (consulta, arriba de la tabla) ──
+    // Independiente de `searchTerm`/`busqueda` (la tabla): otro estado, otra instancia
+    // del hook, y su propia debounce. No comparte nada con el buscador de abajo.
+    const [busquedaRapidaInput, setBusquedaRapidaInput] = useState('');
+    const [busquedaRapida, setBusquedaRapida] = useState('');
+    const [alumnoConsultaId, setAlumnoConsultaId] = useState(null);
     const [searchParams, setSearchParams] = useSearchParams();
     // Navegación al Historial del alumno (`/admin/alumnos/:id/historial`).
     const navigate = useNavigate();
@@ -83,6 +92,11 @@ const Alumnos = () => {
     });
     const alumnos = datos?.lista ?? SIN_DATOS;
     const totalAlumnos = datos?.total ?? 0;
+
+    // Resultados del buscador rápido (pocos por página): OTRA instancia del MISMO
+    // hook, con `porPagina` 8 → clave de query distinta, no interfiere con la tabla.
+    const { data: datosRapidos } = useAlumnosPaginados({ porPagina: 8, pagina: 1, buscar: busquedaRapida });
+    const resultadosRapidos = datosRapidos?.lista ?? [];
 
     // Planes ACTIVOS del box: los comparten la tabla (columna Plan Activo), el
     // comprobante (select + precio) y el resto del panel (`usePlanesActivos`).
@@ -169,6 +183,12 @@ const Alumnos = () => {
         const timer = setTimeout(() => setBusqueda(searchTerm.trim()), searchTerm ? 350 : 0);
         return () => clearTimeout(timer);
     }, [searchTerm]);
+
+    // Debounce del buscador RÁPIDO (mismo patrón de 350 ms que la tabla).
+    useEffect(() => {
+        const timer = setTimeout(() => setBusquedaRapida(busquedaRapidaInput.trim()), busquedaRapidaInput ? 350 : 0);
+        return () => clearTimeout(timer);
+    }, [busquedaRapidaInput]);
 
     // Si la página pedida quedó FUERA DE RANGO (se borró el último de la última, o la
     // búsqueda encogió el total) se retrocede al último tramo válido en vez de mostrar una
@@ -355,6 +375,59 @@ const Alumnos = () => {
                             </span>
                         </div>
                     )}
+                </div>
+
+                {/* ── Buscador rápido + ficha con pestañas (consulta, arriba de la tabla) ──
+                    No toca la tabla ni sus modales: es un bloque independiente. */}
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+                    <div className="mb-4">
+                        <h2 className="text-lg font-bold text-zinc-100">Consulta rápida</h2>
+                        <p className="text-sm text-zinc-400">Busca un alumno para ver su ficha completa.</p>
+                    </div>
+                    <input
+                        type="text"
+                        placeholder="Buscar por nombre o correo..."
+                        value={busquedaRapidaInput}
+                        onChange={(e) => { setBusquedaRapidaInput(e.target.value); setAlumnoConsultaId(null); }}
+                        className="w-full px-4 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-zinc-800 text-zinc-100 placeholder:text-zinc-500"
+                    />
+                    <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {/* Resultados a la izquierda */}
+                        <div>
+                            {busquedaRapida.trim() === '' ? (
+                                <p className="text-sm text-zinc-500 py-6 text-center">
+                                    Busca un alumno para ver su ficha completa.
+                                </p>
+                            ) : resultadosRapidos.length === 0 ? (
+                                <p className="text-sm text-zinc-500 py-6 text-center">Sin resultados.</p>
+                            ) : (
+                                <ul className="space-y-1.5 max-h-80 overflow-auto">
+                                    {resultadosRapidos.map((a) => (
+                                        <li key={a.id}>
+                                            <button
+                                                type="button"
+                                                onClick={() => setAlumnoConsultaId(a.id)}
+                                                className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${alumnoConsultaId === a.id ? 'border-orange-500 bg-orange-500/10' : 'border-zinc-800 bg-zinc-800/40 hover:bg-zinc-800'}`}
+                                            >
+                                                <span className="block text-zinc-200 font-medium truncate">{a.nombre}</span>
+                                                <span className="block text-xs text-zinc-500 truncate">{a.correo}</span>
+                                            </button>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                        {/* Ficha a la derecha (o debajo en mobile) */}
+                        <div>
+                            {alumnoConsultaId ? (
+                                <FichaAlumnoTabs alumnoId={alumnoConsultaId} />
+                            ) : (
+                                <div className="h-full flex items-center justify-center rounded-lg border border-dashed border-zinc-700 text-sm text-zinc-500 py-12">
+                                    Busca un alumno para ver su ficha completa
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
 
                 <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
