@@ -7,7 +7,7 @@ import BotonVolver from '../../components/BotonVolver';
 // Fase 2 (Bloque 1): los datos salen de la caché compartida (mismos datos que la
 // Pizarra de RMs y el Performance Hub), no de un useEffect por pantalla.
 import {
-    useAsistenciaSemanal, useMovimientos, useNivelGeneral, useProgresoDestacado, useRmDeMovimiento,
+    useAsistenciaSemanal, useMovimientos, useNivelGeneral, useProgresoDestacado, useRmDeMovimiento, useRmsAlumno,
 } from '../../hooks/queries';
 // Fecha corta DD/MM (misma función que usa Performance Hub para el eje X).
 import { fmtFechaCortaChile } from '../../utils/fecha';
@@ -18,6 +18,8 @@ import BottomSheet from '../../components/BottomSheet';
 import { getChartData } from '../../utils/evolucionChart';
 // Resumen por movimiento + objetivo sugerido y plan de progresión (fuente única).
 import { evolucionPorMovimiento, objetivosSugeridos } from '../../utils/evolucionRM';
+// Vista "Mes a mes": agrupa todas las marcas de RM por año/mes (fuente única).
+import { agruparPorAnioYMes, filtrarPorMovimiento, pctDeMejora } from '../../utils/evolucionMesAMes';
 
 // Acento de la app (orange-500): es el "emerald → naranja" que aplica `src/index.css`.
 const COLOR_ACCENTO = '#f97316';
@@ -41,6 +43,10 @@ const Evolucion = () => {
     const [sheetAbierto, setSheetAbierto] = useState(false);
     const abrirSheet = () => setSheetAbierto(true);
     const cerrarSheet = React.useCallback(() => setSheetAbierto(false), []);
+    // Vista "Mes a mes": año seleccionado, buscador de movimiento y carga progresiva.
+    const [anioSeleccionado, setAnioSeleccionado] = useState('');
+    const [busquedaMesAMes, setBusquedaMesAMes] = useState('');
+    const [mesesVisibles, setMesesVisibles] = useState(6);
 
     const movimientosQ = useMovimientos();
     const progresoQ = useProgresoDestacado(alumnoId);
@@ -48,6 +54,8 @@ const Evolucion = () => {
     const historialQ = useRmDeMovimiento(alumnoId, movimientoSeleccionado);
     // Detalle por movimiento del nivel (para la tarjeta de nivel del panel expandido).
     const nivelGeneralQ = useNivelGeneral(alumnoId);
+    // Todas las marcas de RM del alumno (sin filtro): fuente de la vista "Mes a mes".
+    const rmsQ = useRmsAlumno(alumnoId);
 
     // `?? []` DENTRO de un `useMemo`: la consulta mantiene la MISMA referencia mientras
     // el dato no cambia, así que los `useMemo`/`useEffect` de abajo no se recalculan en
@@ -59,6 +67,44 @@ const Evolucion = () => {
     const topMejoras = React.useMemo(() => progresoQ.data?.top_mejoras || [], [progresoQ.data]);
     const asistenciaSemanal = React.useMemo(() => asistenciaQ.data || [], [asistenciaQ.data]);
     const historialRM = React.useMemo(() => historialQ.data || [], [historialQ.data]);
+
+    // ── Vista "Mes a mes": todas las marcas agrupadas por año/mes (Chile). ──
+    const rms = React.useMemo(() => rmsQ.data || [], [rmsQ.data]);
+    const gruposMesAMes = React.useMemo(() => agruparPorAnioYMes(rms), [rms]);
+    const anios = React.useMemo(
+        () => [...new Set(gruposMesAMes.map((g) => g.anio))].sort((a, b) => b.localeCompare(a)),
+        [gruposMesAMes],
+    );
+    // Mejor marca por movimiento (el 100% de la barra de cada marca individual).
+    const mejorPorMovimiento = React.useMemo(() => {
+        const mapa = {};
+        gruposMesAMes.forEach((g) => g.registros.forEach((r) => {
+            if (r.movimiento_id == null) return;
+            const v = Number(r.valor) || 0;
+            if (mapa[r.movimiento_id] == null || v > mapa[r.movimiento_id]) mapa[r.movimiento_id] = v;
+        }));
+        return mapa;
+    }, [gruposMesAMes]);
+
+    // Si el año elegido dejó de existir (o todavía no hay), se selecciona el primero.
+    useEffect(() => {
+        if (!anios.length) return;
+        if (!anioSeleccionado || !anios.includes(anioSeleccionado)) {
+            setAnioSeleccionado(anios[0]);
+        }
+    }, [anios, anioSeleccionado]);
+
+    const gruposDelAnio = React.useMemo(
+        () => gruposMesAMes.filter((g) => g.anio === anioSeleccionado),
+        [gruposMesAMes, anioSeleccionado],
+    );
+    const gruposFiltrados = React.useMemo(
+        () => filtrarPorMovimiento(gruposDelAnio, busquedaMesAMes),
+        [gruposDelAnio, busquedaMesAMes],
+    );
+    const mesesAMostrar = gruposFiltrados.slice(0, mesesVisibles);
+    const hayMas = gruposFiltrados.length > mesesVisibles;
+
     // Cumplimiento + racha de Asistencia Semanal, calculados en cliente (sin red).
     const asistenciaResumen = React.useMemo(
         () => calcularRachaAsistencia(asistenciaSemanal),
@@ -76,9 +122,10 @@ const Evolucion = () => {
         if (progresoQ.isError) fallaron.push('progreso destacado');
         if (asistenciaQ.isError) fallaron.push('asistencia semanal');
         if (movimientoSeleccionado && historialQ.isError) fallaron.push('historial del movimiento');
+        if (rmsQ.isError) fallaron.push('tus marcas de RM');
         return fallaron;
     }, [movimientosQ.isError, progresoQ.isError, asistenciaQ.isError,
-        historialQ.isError, movimientoSeleccionado]);
+        historialQ.isError, rmsQ.isError, movimientoSeleccionado]);
 
     // Reintentar = volver a pedir las cuatro (el mismo botón del banner de antes).
     const cargarTodo = () => {
@@ -86,6 +133,7 @@ const Evolucion = () => {
         progresoQ.refetch();
         asistenciaQ.refetch();
         historialQ.refetch();
+        rmsQ.refetch();
     };
 
     // E-03: deep-link desde Performance Hub → /alumno/evolucion?movimiento=<id>.
@@ -415,6 +463,98 @@ const Evolucion = () => {
                                 </p>
                             </div>
                         </div>
+                    )}
+                </section>
+
+                {/* ============================================================ */}
+                {/* VISTA: Mes a mes (todas las marcas de RM por año/mes) */}
+                {/* ============================================================ */}
+                <section className="rounded-2xl bg-[#12161f] border border-[#1f2430] p-6">
+                    <div className="mb-5 flex items-center gap-3">
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-zinc-800 text-lg" aria-hidden="true">🗓️</span>
+                        <h2 className="text-lg font-semibold text-zinc-100">Mes a mes</h2>
+                    </div>
+
+                    {rmsQ.isPending ? (
+                        <div className="text-center py-8 text-gray-400">Cargando marcas...</div>
+                    ) : rms.length === 0 ? (
+                        <div className="text-center py-8 text-gray-400">Todavía no registras marcas de RM.</div>
+                    ) : (
+                        <>
+                            {/* Chips de año: solo los años con datos. */}
+                            <div className="flex flex-wrap gap-2 mb-4">
+                                {anios.map((anio) => (
+                                    <button
+                                        key={anio}
+                                        type="button"
+                                        onClick={() => { setAnioSeleccionado(anio); setMesesVisibles(6); }}
+                                        className={`px-3 py-1.5 rounded-full text-sm font-semibold transition-colors ${anio === anioSeleccionado ? 'bg-orange-500 text-white' : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'}`}
+                                    >
+                                        {anio}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* Buscador por movimiento (case-insensitive). */}
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium text-zinc-400 mb-2">Buscar movimiento</label>
+                                <input
+                                    type="text"
+                                    value={busquedaMesAMes}
+                                    onChange={(e) => { setBusquedaMesAMes(e.target.value); setMesesVisibles(6); }}
+                                    placeholder="Ej: Back Squat"
+                                    className="w-full max-w-sm px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                />
+                            </div>
+
+                            {mesesAMostrar.length === 0 ? (
+                                <div className="text-center py-8 text-gray-400">
+                                    Sin marcas para este año{busquedaMesAMes.trim() ? ' y movimiento' : ''}.
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    {mesesAMostrar.map((g) => (
+                                        <div key={g.clave} className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+                                            <h3 className="text-sm font-semibold text-zinc-100 mb-3">{g.label}</h3>
+                                            <ul className="space-y-3">
+                                                {g.registros.map((r, i) => {
+                                                    const pct = pctDeMejora(r.valor, mejorPorMovimiento[r.movimiento_id]);
+                                                    return (
+                                                        <li key={`${g.clave}-${r.id ?? i}`} className="flex items-center gap-3">
+                                                            <div className="min-w-0 flex-1">
+                                                                <div className="flex items-baseline justify-between gap-2">
+                                                                    <span className="font-medium text-zinc-200 truncate">{r.movimiento_nombre || 'Movimiento'}</span>
+                                                                    <span className="text-sm text-zinc-400 shrink-0">{r.valor} {r.unidad}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-2 mt-1">
+                                                                    <span className="text-xs text-zinc-500 shrink-0">{fmtFechaCortaChile(r.fecha)}</span>
+                                                                    <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+                                                                        <div className="h-full rounded-full bg-orange-500 transition-all" style={{ width: `${pct}%` }} />
+                                                                    </div>
+                                                                    <span className="text-xs text-zinc-500 shrink-0">{pct}%</span>
+                                                                </div>
+                                                            </div>
+                                                        </li>
+                                                    );
+                                                })}
+                                            </ul>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {hayMas && (
+                                <div className="mt-4 text-center">
+                                    <button
+                                        type="button"
+                                        onClick={() => setMesesVisibles((n) => n + 6)}
+                                        className="px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-sm font-medium transition-colors"
+                                    >
+                                        Cargar más
+                                    </button>
+                                </div>
+                            )}
+                        </>
                     )}
                 </section>
 

@@ -68,7 +68,8 @@
     "test:inactividad": "node scripts/test-inactividad.mjs",
     "test:banner": "node scripts/test-banner-plan.mjs",
     "test:badges": "node scripts/test-badges-producto.mjs",
-    "test:nivel": "node scripts/test-progreso-nivel.mjs"
+    "test:nivel": "node scripts/test-progreso-nivel.mjs",
+    "test:evolucion-mesames": "node scripts/test-evolucion-mesames.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.1",
