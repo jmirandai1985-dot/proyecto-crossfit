@@ -33,14 +33,21 @@ export function semanaISO(fechaStr) {
 }
 
 /**
- * Estadísticas de la cabecera: clases del mes actual, % de asistencia del historial
- * (asistió / total del historial) y racha actual de semanas con al menos 1 asistencia.
+ * Estadísticas de la cabecera: clases del mes actual (reservadas y asistidas), % de
+ * asistencia del historial (asistió / total del historial) y racha actual de semanas
+ * con al menos 1 asistencia.
  */
 export function calcularEstadisticasReservas(reservas, hoyStr) {
     const lista = reservas || [];
     const mesActual = String(hoyStr || '').slice(0, 7); // 'YYYY-MM'
 
     const clasesEsteMes = lista.filter((r) => String(r?.clase_fecha || '').slice(0, 7) === mesActual).length;
+    // Solo las del mes actual a las que el alumno ASISTIÓ de verdad (mismo estado
+    // visible que el historial). La tarjeta "Clases este mes" las muestra juntas:
+    // "X reservadas / Y asistidas", para no confundir ambas cosas.
+    const asistidasEsteMes = lista.filter(
+        (r) => String(r?.clase_fecha || '').slice(0, 7) === mesActual && estadoVisible(r) === 'asistio',
+    ).length;
 
     const historial = lista.filter((r) => !esActiva(r));
     const asistidas = historial.filter((r) => estadoVisible(r) === 'asistio').length;
@@ -59,7 +66,7 @@ export function calcularEstadisticasReservas(reservas, hoyStr) {
     });
     const { rachaActual } = calcularRachaAsistencia([...porSemana.values()]);
 
-    return { clasesEsteMes, pctAsistencia, rachaActual };
+    return { clasesEsteMes, asistidasEsteMes, pctAsistencia, rachaActual };
 }
 
 /** Etiqueta de mes 'YYYY-MM' -> 'Noviembre 2026'. */

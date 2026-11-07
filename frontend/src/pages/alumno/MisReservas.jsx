@@ -185,7 +185,10 @@ const MisReservas = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div className="rounded-xl bg-white border border-gray-200 p-4">
                             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Clases este mes</p>
-                            <p className="mt-1 text-2xl font-bold text-gray-900">{stats.clasesEsteMes}</p>
+                            <p className="mt-1 text-2xl font-bold text-gray-900">
+                                {stats.clasesEsteMes} <span className="text-sm font-normal text-gray-400">reservadas</span>
+                            </p>
+                            <p className="text-xs text-gray-500 mt-0.5">{stats.asistidasEsteMes} asistidas</p>
                         </div>
                         <div className="rounded-xl bg-white border border-gray-200 p-4">
                             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">% Asistencia</p>

@@ -58,7 +58,13 @@ const reservas = [
 ];
 const stats = calcularEstadisticasReservas(reservas, HOY);
 eq(stats.clasesEsteMes, 3, '3 reservas en noviembre (el mes de HOY)');
+eq(stats.asistidasEsteMes, 2, '2 de las 3 reservas de noviembre son asistidas');
 eq(stats.pctAsistencia, 75, 'asistió 3 de 4 en historial = 75%');
+
+// Una cancelada del mes cuenta como "reservada" pero NO como asistida: la tarjeta
+// ahora distingue las dos cosas (el bug que se corrige acá).
+eq(calcularEstadisticasReservas([r(1, '2026-11-05', 'cancelada')], HOY).asistidasEsteMes, 0,
+    'cancelada del mes no cuenta como asistida');
 
 // Sin historial no se divide por cero.
 eq(calcularEstadisticasReservas([r(1, '2026-11-05', 'reservada')], HOY).pctAsistencia, 0,
