@@ -111,5 +111,13 @@ def test_el_detalle_conserva_las_marcas_no_publicadas():
     from app.services.nivel_service import nivel_desde_mejores
 
     r = nivel_desde_mejores([(1, 200.0, BACK_SQUAT)], 80, "M")
-    assert r["detalle_fuerza"] == [
-        {"movimiento": BACK_SQUAT, "movimiento_id": 1, "nivel": "Elite"}]
+    assert r["detalle_fuerza"] == [{
+        "movimiento": BACK_SQUAT,
+        "movimiento_id": 1,
+        "nivel": "Elite",
+        # D6: el detalle también expone cuánto falta para el siguiente nivel (panel de Evolución).
+        "siguiente_nivel": None,      # ya es Elite
+        "valor_faltante": None,
+        "umbral_actual": 200.0,       # 2.5 x 80 kg
+        "umbral_siguiente": None,
+    }]

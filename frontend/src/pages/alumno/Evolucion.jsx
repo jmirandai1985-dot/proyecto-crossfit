@@ -7,15 +7,17 @@ import BotonVolver from '../../components/BotonVolver';
 // Fase 2 (Bloque 1): los datos salen de la caché compartida (mismos datos que la
 // Pizarra de RMs y el Performance Hub), no de un useEffect por pantalla.
 import {
-    useAsistenciaSemanal, useMovimientos, useProgresoDestacado, useRmDeMovimiento,
+    useAsistenciaSemanal, useMovimientos, useNivelGeneral, useProgresoDestacado, useRmDeMovimiento,
 } from '../../hooks/queries';
 // Fecha corta DD/MM (misma función que usa Performance Hub para el eje X).
 import { fmtFechaCortaChile } from '../../utils/fecha';
 // Cálculo de cumplimiento + racha del gráfico de Asistencia Semanal.
 import { calcularRachaAsistencia } from '../../utils/asistenciaEvolucion';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import BottomSheet from '../../components/BottomSheet';
 import { getChartData } from '../../utils/evolucionChart';
+// Resumen por movimiento + objetivo sugerido y plan de progresión (fuente única).
+import { evolucionPorMovimiento, objetivosSugeridos } from '../../utils/evolucionRM';
 
 // Acento de la app (orange-500): es el "emerald → naranja" que aplica `src/index.css`.
 const COLOR_ACCENTO = '#f97316';
@@ -44,6 +46,8 @@ const Evolucion = () => {
     const progresoQ = useProgresoDestacado(alumnoId);
     const asistenciaQ = useAsistenciaSemanal();
     const historialQ = useRmDeMovimiento(alumnoId, movimientoSeleccionado);
+    // Detalle por movimiento del nivel (para la tarjeta de nivel del panel expandido).
+    const nivelGeneralQ = useNivelGeneral(alumnoId);
 
     // `?? []` DENTRO de un `useMemo`: la consulta mantiene la MISMA referencia mientras
     // el dato no cambia, así que los `useMemo`/`useEffect` de abajo no se recalculan en
@@ -120,6 +124,45 @@ const Evolucion = () => {
     // ── Nombre del movimiento seleccionado ──
     const movSeleccionado = movimientos.find(m => m.id === Number(movimientoSeleccionado));
 
+    // ── Resumen del movimiento (evolucionPorMovimiento re-sortea y calcula PR/%/días) ──
+    const resumenMov = React.useMemo(() => {
+        if (!historialRM.length) return null;
+        const res = evolucionPorMovimiento(historialRM);
+        return res.length ? res[0] : null;
+    }, [historialRM]);
+    // Objetivo sugerido + plan de progresión (solo fuerza/gimnástico con marca).
+    const objetivo = React.useMemo(() => {
+        if (!resumenMov) return null;
+        const objs = objetivosSugeridos([resumenMov]);
+        return objs.length ? objs[0] : null;
+    }, [resumenMov]);
+    // PR actual = máximo histórico (lo que el backend usa para clasificar).
+    const prActual = chartData.length ? Math.max(...chartData.map((p) => p.valor)) : null;
+    // % de mejora total: primer registro → último registro.
+    const pctMejoraTotal = chartData.length >= 2 && chartData[0].valor
+        ? ((chartData[chartData.length - 1].valor - chartData[0].valor) / chartData[0].valor) * 100
+        : null;
+    // Nivel para ESTE movimiento (detalle por movimiento del endpoint nivel-general).
+    const nivelDetalle = React.useMemo(() => {
+        const g = nivelGeneralQ.data;
+        if (!g) return null;
+        const id = Number(movimientoSeleccionado);
+        const enFuerza = (g.detalle_fuerza || []).find((d) => d.movimiento_id === id);
+        if (enFuerza) return { ...enFuerza, eje: 'fuerza' };
+        const enGim = (g.detalle_gimnastico || []).find((d) => d.movimiento_id === id);
+        if (enGim) return { ...enGim, eje: 'gimnastico' };
+        return null;
+    }, [nivelGeneralQ.data, movimientoSeleccionado]);
+
+    // Progreso de la barra de nivel (entre el umbral del nivel actual y el siguiente).
+    const pctNivel = React.useMemo(() => {
+        if (!nivelDetalle) return 0;
+        const a = nivelDetalle.umbral_actual;
+        const b = nivelDetalle.umbral_siguiente;
+        if (a == null || b == null || b <= a) return nivelDetalle.nivel === 'Elite' ? 100 : 0;
+        return Math.min(100, Math.max(0, ((prActual - a) / (b - a)) * 100));
+    }, [nivelDetalle, prActual]);
+
     // ── Custom Tooltip (dark, coherente con el resto de la pantalla) ──
     // Con `dataKey="x"` en el XAxis, `label` es el índice; la fecha sale del
     // `payload` del punto tocado (no del label) para que los duplicados no
@@ -161,7 +204,9 @@ const Evolucion = () => {
     };
 
     // ── AreaChart reutilizable: el mismo gráfico en dos alturas (tarjeta y sheet) ──
-    const renderGraficoRM = (height) => (
+    // `referenciaValor` (opcional) dibuja la línea punteada del objetivo sugerido en el
+    // panel expandido y estira el dominio del eje Y para que la línea quede visible.
+    const renderGraficoRM = (height, referenciaValor = null) => (
         <ResponsiveContainer width="100%" height={height}>
             <AreaChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
@@ -173,8 +218,25 @@ const Evolucion = () => {
                     textAnchor="end"
                     height={60}
                 />
-                <YAxis tick={{ fill: '#a1a1aa', fontSize: 12 }} />
+                <YAxis
+                    tick={{ fill: '#a1a1aa', fontSize: 12 }}
+                    domain={[0, (dataMax) => Math.max(dataMax, referenciaValor || 0) * 1.1]}
+                />
                 <Tooltip content={<CustomTooltip />} />
+                {referenciaValor !== null && (
+                    <ReferenceLine
+                        y={referenciaValor}
+                        stroke="#f97316"
+                        strokeDasharray="6 6"
+                        strokeWidth={1.5}
+                        label={{
+                            value: `Objetivo ${referenciaValor}`,
+                            fill: '#fb923c',
+                            fontSize: 11,
+                            position: 'insideTopRight',
+                        }}
+                    />
+                )}
                 <Area
                     type="monotone"
                     dataKey="valor"
@@ -364,7 +426,84 @@ const Evolucion = () => {
                     subtitle={movSeleccionado?.categoria || ''}
                 >
                     <div className="space-y-4">
-                        {renderGraficoRM(280)}
+                        {/* Tarjeta de nivel (la más destacada, arriba de todo) */}
+                        {nivelDetalle && nivelDetalle.nivel && nivelDetalle.nivel !== 'Sin datos' && (
+                            <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-4">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <p className="text-xs uppercase tracking-wide text-zinc-400">Nivel actual</p>
+                                        <p className="text-2xl font-bold text-zinc-100">{nivelDetalle.nivel}</p>
+                                    </div>
+                                    <span className="rounded-full bg-orange-500/15 px-3 py-1 text-xs font-semibold text-orange-300">
+                                        {resumenMov?.categoria === 'gimnastico' ? 'Gimnástico' : 'Fuerza'}
+                                    </span>
+                                </div>
+                                <p className="mt-2 text-sm text-zinc-300">
+                                    {nivelDetalle.siguiente_nivel
+                                        ? `Para subir a ${nivelDetalle.siguiente_nivel} te faltarían ${nivelDetalle.valor_faltante} ${resumenMov?.unidad || ''} en este movimiento`
+                                        : 'Ya alcanzaste el nivel máximo (Elite)'}
+                                </p>
+                                <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-800">
+                                    <div
+                                        className="h-full rounded-full bg-orange-500 transition-all"
+                                        style={{ width: `${pctNivel}%` }}
+                                    />
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 4 tarjetas de estadísticas */}
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-3">
+                                <p className="text-xs text-zinc-400">PR actual</p>
+                                <p className="mt-1 text-lg font-bold text-zinc-100">
+                                    {prActual != null ? `${prActual} ${resumenMov?.unidad || ''}` : '—'}
+                                </p>
+                            </div>
+                            <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-3">
+                                <p className="text-xs text-zinc-400">% mejora total</p>
+                                <p className="mt-1 text-lg font-bold text-zinc-100">
+                                    {pctMejoraTotal != null ? `${pctMejoraTotal > 0 ? '+' : ''}${Math.round(pctMejoraTotal)}%` : '—'}
+                                </p>
+                            </div>
+                            <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-3">
+                                <p className="text-xs text-zinc-400">Próximo objetivo</p>
+                                <p className="mt-1 text-lg font-bold text-zinc-100">
+                                    {objetivo ? `${objetivo.objetivoSugerido} ${objetivo.unidad}` : '—'}
+                                </p>
+                            </div>
+                            <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-3">
+                                <p className="text-xs text-zinc-400">Último PR</p>
+                                <p className="mt-1 text-lg font-bold text-zinc-100">
+                                    {resumenMov?.diasDesdePR != null
+                                        ? (resumenMov.diasDesdePR === 0 ? 'Hoy' : `hace ${resumenMov.diasDesdePR} días`)
+                                        : '—'}
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Gráfico + panel lateral de progresión (desktop a la derecha) */}
+                        <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_280px] lg:gap-4">
+                            <div className="min-w-0">
+                                {renderGraficoRM(280, objetivo?.objetivoSugerido ?? null)}
+                            </div>
+                            {objetivo && objetivo.planProgresion?.length > 0 && (
+                                <div className="mt-4 lg:mt-0 lg:border-l lg:border-zinc-700 lg:pl-4">
+                                    <h3 className="text-sm font-semibold text-zinc-100">Plan de progresión</h3>
+                                    <ol className="mt-2 space-y-2">
+                                        {objetivo.planProgresion.map((paso, i) => (
+                                            <li key={i} className="flex gap-2 text-sm text-zinc-300">
+                                                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-orange-500/15 text-xs font-bold text-orange-300">
+                                                    {i + 1}
+                                                </span>
+                                                <span className="min-w-0">{paso.texto}</span>
+                                            </li>
+                                        ))}
+                                    </ol>
+                                    <p className="mt-2 text-xs text-zinc-400">{objetivo.ventanaReintento}</p>
+                                </div>
+                            )}
+                        </div>
                         <div className="flex flex-wrap gap-2">
                             {chartData.map((p) => (
                                 <span

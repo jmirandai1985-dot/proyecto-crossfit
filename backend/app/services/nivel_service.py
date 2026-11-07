@@ -89,13 +89,20 @@ def obtener_nivel_fuerza(movimiento_nombre, peso_rm, peso_corporal, genero):
     sig_nivel_info = _siguiente_nivel(
         ratio, niveles, tabla["unidad"], peso_corporal)
 
+    # Umbrales en kg del nivel actual y del siguiente (para la barra de progreso del panel).
+    umbral_actual = round(niveles[nivel_actual] * peso_corporal, 1)
+    sig_nivel = sig_nivel_info["nivel"]
+    umbral_siguiente = round(niveles[sig_nivel] * peso_corporal, 1) if sig_nivel else None
+
     return {
         "aplica": True,
         "clasificable": True,
         "nivel": nivel_actual,
         "ratio": round(ratio, 3),
-        "siguiente_nivel": sig_nivel_info["nivel"],
+        "siguiente_nivel": sig_nivel,
         "valor_faltante": sig_nivel_info["faltante"],
+        "umbral_actual": umbral_actual,
+        "umbral_siguiente": umbral_siguiente,
         "unidad": tabla["unidad"]
     }
 
@@ -138,14 +145,20 @@ def obtener_nivel_gimnastico(movimiento_nombre, valor, genero=None):
     nivel_actual = _encontrar_nivel(valor, niveles)
     sig_nivel_info = _siguiente_nivel_gimnastico(valor, niveles, tipo)
 
+    sig_nivel = sig_nivel_info["nivel"]
+    umbral_actual = niveles[nivel_actual]
+    umbral_siguiente = niveles[sig_nivel] if sig_nivel else None
+
     return {
         "aplica": True,
         "clasificable": True,
         "nivel": nivel_actual,
         "tipo": tipo,
         "valor": valor,
-        "siguiente_nivel": sig_nivel_info["nivel"],
-        "valor_faltante": sig_nivel_info["faltante"]
+        "siguiente_nivel": sig_nivel,
+        "valor_faltante": sig_nivel_info["faltante"],
+        "umbral_actual": umbral_actual,
+        "umbral_siguiente": umbral_siguiente,
     }
 
 
@@ -242,14 +255,22 @@ def nivel_desde_mejores(mejores, peso_corporal, genero, min_movs_eje=None) -> di
                     nivel = None
             else:
                 nivel = None
+                result = None
 
             if nivel:
                 movs_fuerza += 1
                 idx = NIVELES_ORDEN.get(nivel, -1)
                 if nivel_fuerza is None or idx < NIVELES_ORDEN.get(nivel_fuerza, 99):
                     nivel_fuerza = nivel
-                detalle_fuerza.append(
-                    {"movimiento": nombre, "movimiento_id": mov_id, "nivel": nivel})
+                detalle_fuerza.append({
+                    "movimiento": nombre,
+                    "movimiento_id": mov_id,
+                    "nivel": nivel,
+                    "siguiente_nivel": result.get("siguiente_nivel") if result else None,
+                    "valor_faltante": result.get("valor_faltante") if result else None,
+                    "umbral_actual": result.get("umbral_actual") if result else None,
+                    "umbral_siguiente": result.get("umbral_siguiente") if result else None,
+                })
             else:
                 detalle_fuerza.append(
                     {"movimiento": nombre, "nivel": "Sin datos"})
@@ -267,8 +288,15 @@ def nivel_desde_mejores(mejores, peso_corporal, genero, min_movs_eje=None) -> di
                 idx = NIVELES_ORDEN.get(nivel, -1)
                 if nivel_gimnastico is None or idx < NIVELES_ORDEN.get(nivel_gimnastico, 99):
                     nivel_gimnastico = nivel
-                detalle_gimnastico.append(
-                    {"movimiento": nombre, "movimiento_id": mov_id, "nivel": nivel})
+                detalle_gimnastico.append({
+                    "movimiento": nombre,
+                    "movimiento_id": mov_id,
+                    "nivel": nivel,
+                    "siguiente_nivel": result.get("siguiente_nivel"),
+                    "valor_faltante": result.get("valor_faltante"),
+                    "umbral_actual": result.get("umbral_actual"),
+                    "umbral_siguiente": result.get("umbral_siguiente"),
+                })
             else:
                 detalle_gimnastico.append(
                     {"movimiento": nombre, "nivel": "Sin datos"})

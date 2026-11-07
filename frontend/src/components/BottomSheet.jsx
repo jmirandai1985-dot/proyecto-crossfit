@@ -74,14 +74,14 @@ const BottomSheet = ({ isOpen, onClose, title, subtitle, children }) => {
 
     return (
         <div
-            className="fixed inset-0 z-50 flex items-end justify-center bg-black/60"
+            className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center"
             onClick={cerrar}
         >
             <div
                 role="dialog"
                 aria-modal="true"
                 aria-label={title}
-                className="w-full max-w-3xl max-h-[90dvh] overflow-y-auto rounded-t-2xl border border-zinc-700 bg-[#12161f] shadow-2xl"
+                className="w-full max-w-3xl max-h-[90dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-zinc-700 bg-[#12161f] shadow-2xl"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Encabezado */}

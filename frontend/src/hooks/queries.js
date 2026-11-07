@@ -113,6 +113,9 @@ export const claves = {
     rmDeMovimiento: (alumnoId, movimientoId) => ['historial-rm', 'movimiento', alumnoId, movimientoId],
     nivelFuerza: (alumnoId) => ['historial-rm', 'nivel-fuerza', alumnoId],
     nivelGimnastico: (alumnoId) => ['historial-rm', 'nivel-gimnastico', alumnoId],
+    // Detalle por movimiento (para el panel expandido de Evolución): trae
+    // `detalle_fuerza`/`detalle_gimnastico` con el nivel de CADA movimiento.
+    nivelGeneral: (alumnoId) => ['historial-rm', 'nivel-general', alumnoId],
     // Intensidad relativa (%RM) de los WODs asistidos: datos SOLO del alumno del
     // token (scoping por JWT), igual que `historialRmTodos`.
     intensidadRelativa: ['wods', 'intensidad-relativa'],
@@ -753,6 +756,20 @@ export function useNivelGimnastico(alumnoId) {
         queryKey: claves.nivelGimnastico(alumnoId),
         queryFn: async () => (await api.get(
             `/api/v1/historial-rm/alumnos/${alumnoId}/nivel-gimnastico`,
+        )).data || null,
+        staleTime: 60_000,
+        enabled: Boolean(alumnoId),
+    });
+}
+
+// Detalle por movimiento del cálculo de nivel (el MISMO `calcular_nivel_general`
+// del backend): devuelve `detalle_fuerza`/`detalle_gimnastico` con, por cada
+// movimiento, su nivel, cuánto falta para el siguiente y los umbrales de la barra.
+export function useNivelGeneral(alumnoId) {
+    return useQuery({
+        queryKey: claves.nivelGeneral(alumnoId),
+        queryFn: async () => (await api.get(
+            `/api/v1/historial-rm/alumnos/${alumnoId}/nivel-general`,
         )).data || null,
         staleTime: 60_000,
         enabled: Boolean(alumnoId),
