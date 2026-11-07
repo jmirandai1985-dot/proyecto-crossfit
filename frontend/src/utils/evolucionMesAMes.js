@@ -22,6 +22,14 @@ const etiquetaMes = (clave) => {
     return MESES[idx] != null ? `${MESES[idx]} ${anio}` : clave || '';
 };
 
+// Meses en 3 letras para la etiqueta corta de cada barra del grid "Mes a mes".
+const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+const etiquetaMesCorta = (claveMes) => {
+    const mes = Number(String(claveMes || '').slice(5, 7)) - 1;
+    return MESES_CORTOS[mes] || claveMes || '';
+};
+
 /**
  * Agrupa las marcas por año y mes ('YYYY-MM'), el más reciente primero. Cada grupo
  * trae `clave`, `anio`, `mes`, `label` ('Noviembre 2026') y `registros` (marcas con
@@ -48,19 +56,76 @@ export function agruparPorAnioYMes(rms) {
 }
 
 /**
- * Filtra los grupos por nombre de movimiento (case-insensitive). Devuelve la misma
- * forma que `agruparPorAnioYMes`; los meses que quedan sin marcas se descartan.
+ * Agrupa las marcas por MOVIMIENTO (no por mes) y arma, para cada uno, una serie
+ * mensual: una marca representativa por mes (la de mayor valor si hay varias en el
+ * mismo mes). Cada punto de la serie trae `mesLabel` ('ago', 'sep'...) y `pct`
+ * (% respecto al valor MÁXIMO de la serie de ESE movimiento, reusando pctDeMejora).
+ *
+ * Devuelve [{ movimiento_id, movimiento_nombre, unidad, valorActual, ultimaFecha,
+ * serie: [{ claveMes, mesLabel, valor, pct }] }], ordenado por fecha del último
+ * registro (el movimiento con actividad más reciente primero).
  */
-export function filtrarPorMovimiento(gruposPorMes, textoBusqueda) {
-    const q = String(textoBusqueda || '').trim().toLowerCase();
-    if (!q) return gruposPorMes || [];
-    return (gruposPorMes || [])
-        .map((g) => ({
-            ...g,
-            registros: (g.registros || []).filter((r) =>
-                String(r?.movimiento_nombre || '').toLowerCase().includes(q)),
-        }))
-        .filter((g) => g.registros.length > 0);
+export function agruparPorMovimiento(rms) {
+    const porMovimiento = new Map();
+    (rms || []).forEach((rm) => {
+        const id = rm?.movimiento_id;
+        if (id === null || id === undefined) return;
+        const fecha = toChileFechaStr(fechaSolaAInstante(rm?.fecha));
+        if (!fecha) return;
+        if (!porMovimiento.has(id)) porMovimiento.set(id, []);
+        porMovimiento.get(id).push({
+            ...rm,
+            valor: valorRM(rm),
+            unidad: unidadRM(rm),
+            fechaChile: fecha,
+            claveMes: fecha.slice(0, 7),
+        });
+    });
+
+    const resultado = [];
+    porMovimiento.forEach((marcas, id) => {
+        // Cronológico ascendente (por el día chileno normalizado).
+        marcas.sort((a, b) => a.fechaChile.localeCompare(b.fechaChile));
+
+        // Una marca representativa por mes: la de MAYOR valor de ese mes.
+        const porMes = new Map();
+        marcas.forEach((m) => {
+            const actual = porMes.get(m.claveMes);
+            if (!actual || m.valor > actual.valor) porMes.set(m.claveMes, m);
+        });
+
+        const serie = [...porMes.entries()]
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([claveMes, m]) => ({
+                claveMes,
+                mesLabel: etiquetaMesCorta(claveMes),
+                valor: m.valor,
+                pct: 0,
+            }));
+
+        // pct respecto al valor MÁXIMO de la serie del movimiento.
+        const maximo = serie.length ? Math.max(...serie.map((s) => s.valor)) : 0;
+        serie.forEach((s) => { s.pct = pctDeMejora(s.valor, maximo); });
+
+        const ultimo = marcas[marcas.length - 1];
+        resultado.push({
+            movimiento_id: id,
+            movimiento_nombre: ultimo?.movimiento_nombre || '',
+            unidad: ultimo?.unidad || '',
+            valorActual: ultimo?.valor ?? 0,
+            ultimaFecha: ultimo?.fechaChile || null,
+            serie,
+        });
+    });
+
+    // El movimiento con actividad más reciente primero.
+    resultado.sort((a, b) => {
+        const ta = a.ultimaFecha ? fechaSolaAInstante(a.ultimaFecha).getTime() : NaN;
+        const tb = b.ultimaFecha ? fechaSolaAInstante(b.ultimaFecha).getTime() : NaN;
+        return (Number.isNaN(tb) ? -Infinity : tb) - (Number.isNaN(ta) ? -Infinity : ta);
+    });
+
+    return resultado;
 }
 
 /**

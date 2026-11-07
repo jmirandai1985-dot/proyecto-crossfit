@@ -7,7 +7,7 @@
 //   2. filtro por movimiento case-insensitive, y que descarta los meses que quedan vacíos.
 //   3. pctDeMejora (redondeo, cero divisor, null).
 import {
-    agruparPorAnioYMes, filtrarPorMovimiento, pctDeMejora,
+    agruparPorAnioYMes, agruparPorMovimiento, pctDeMejora,
 } from '../src/utils/evolucionMesAMes.js';
 
 let fallos = 0;
@@ -46,15 +46,28 @@ eq(agruparPorAnioYMes([]).length, 0, 'sin marcas -> sin grupos');
 eq(agruparPorAnioYMes([rm(9, 'fecha-mala', 'X', 50)]).length, 0,
     'fecha ilegible se descarta (no inventa mes)');
 
-// ── 2. Filtro por movimiento ────────────────────────────────────────────────
-const filtrados = filtrarPorMovimiento(grupos, 'back squat');
-eq(filtrados.length, 2, 'back squat aparece en los dos meses');
-eq(filtrados[0].registros.length, 2, 'noviembre conserva sus 2 back squats');
-eq(filtrados[1].registros.length, 1, 'octubre conserva su 1 back squat');
-eq(filtrarPorMovimiento(grupos, 'BACK SQUAT').length, 2, 'filtro case-insensitive');
-eq(filtrarPorMovimiento(grupos, 'snatch').length, 0, 'sin coincidencias -> sin grupos');
-eq(filtrarPorMovimiento(grupos, '').length, 2, 'búsqueda vacía -> devuelve todo');
-eq(filtrarPorMovimiento(grupos, 'deadlift').length, 1, 'deadlift solo está en noviembre');
+// ── 2. Agrupación por movimiento (grid "Mes a mes") ─────────────────────────
+const marcasMov = [
+    rm(1, '2026-09-10', 'Back Squat', 100),
+    rm(1, '2026-10-15', 'Back Squat', 120),
+    rm(1, '2026-11-05', 'Back Squat', 130),
+    rm(1, '2026-11-20', 'Back Squat', 125),
+    rm(2, '2026-11-01', 'Deadlift', 200),
+];
+const porMov = agruparPorMovimiento(marcasMov);
+eq(porMov.length, 2, 'dos movimientos distintos -> dos tarjetas');
+eq(porMov[0].movimiento_nombre, 'Back Squat', 'Back Squat va primero (última marca 20-nov)');
+eq(porMov[0].valorActual, 125, 'valorActual = último registro (125, no el máximo del mes)');
+eq(porMov[0].unidad, 'kg', 'unidad resuelta = kg');
+eq(porMov[0].serie.length, 3, 'Back Squat tiene 3 meses en su serie');
+eq(porMov[0].serie.map((s) => s.mesLabel).join(','), 'sep,oct,nov', 'etiquetas cortas de mes');
+eq(porMov[0].serie[2].valor, 130, 'noviembre usa la mayor marca del mes (130 > 125)');
+eq(porMov[0].serie.map((s) => s.pct).join(','), '77,92,100', 'pct respecto al máximo (130)');
+eq(porMov[1].movimiento_nombre, 'Deadlift', 'Deadlift va segundo');
+eq(porMov[1].serie.length, 1, 'Deadlift: 1 mes en su serie');
+eq(porMov[1].serie[0].pct, 100, 'una sola marca es el 100% de su serie');
+eq(agruparPorMovimiento([]).length, 0, 'sin marcas -> sin tarjetas');
+eq(agruparPorMovimiento([rm(9, 'fecha-mala', 'X', 50)]).length, 0, 'fecha ilegible se descarta');
 
 // ── 3. pctDeMejora ──────────────────────────────────────────────────────────
 eq(pctDeMejora(100, 100), 100, 'la mejor marca es el 100%');
