@@ -5,7 +5,8 @@ Cubre:
   (b) `get_current_user` lee el JWT de la cookie,
   (c) una mutación autenticada por cookie SIN header CSRF -> 403,
   (d) con header CSRF correcto -> pasa,
-  (e) el logout limpia ambas cookies (Max-Age=0).
+  (e) el logout limpia ambas cookies (Max-Age=0),
+  (f) `set_auth_cookies` setea `max_age` en AMBAS cookies con el MISMO valor.
 
 AISLADO (crea y borra su propio usuario en TEST, sin app ni servidor). Se corre
 igual que los demás tests aislados:
@@ -28,7 +29,7 @@ from starlette.requests import Request  # noqa: E402
 
 import app.api.v1.auth as auth_mod  # noqa: E402
 from app.core.config import is_test_db_url, settings  # noqa: E402
-from app.core.cookies import COOKIE_ACCESS, COOKIE_CSRF  # noqa: E402
+from app.core.cookies import COOKIE_ACCESS, COOKIE_CSRF, set_auth_cookies  # noqa: E402
 from app.core.dependencies import get_current_user  # noqa: E402
 from app.core.security import create_access_token, get_password_hash  # noqa: E402
 from app.db.database import SessionLocal  # noqa: E402
@@ -193,4 +194,21 @@ def test_logout_limpia_cookies():
     assert len(cookies) == 2, cookies
     for c in cookies:
         assert "max-age=0" in c.lower(), c
+
+
+# (f) set_auth_cookies setea max_age en AMBAS cookies con el MISMO valor
+def test_set_auth_cookies_max_age_en_ambas_cookies():
+    resp = Response()
+    set_auth_cookies(resp, "jwt-de-prueba", "csrf-de-prueba", max_age=3600)
+
+    cookies = _set_cookies(resp)
+    assert len(cookies) == 2, cookies
+
+    access = [c for c in cookies if c.startswith(f"{COOKIE_ACCESS}=")]
+    csrf = [c for c in cookies if c.startswith(f"{COOKIE_CSRF}=")]
+    assert access, f"falta la cookie {COOKIE_ACCESS}: {cookies}"
+    assert csrf, f"falta la cookie {COOKIE_CSRF}: {cookies}"
+
+    assert "max-age=3600" in access[0].lower(), access[0]
+    assert "max-age=3600" in csrf[0].lower(), csrf[0]
 

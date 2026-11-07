@@ -66,6 +66,7 @@ def set_auth_cookies(
         secure=secure,
         samesite="strict",
         path="/",
+        max_age=max_age,
     )
 
 
