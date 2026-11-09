@@ -303,30 +303,30 @@ const Reportes = () => {
                 </div>
 
                 {/* KPIs principales */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                     <button type="button"
                         onClick={() => navigate('/admin/alumnos?estado=activo')}
                         title="Ver el padrón filtrado por alumnos activos"
-                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-blue-500 transition hover:shadow-md hover:border-blue-400 cursor-pointer">
+                        className="w-full rounded-lg bg-zinc-900 p-4 text-left shadow border-l-4 border-blue-500 transition hover:shadow-md hover:border-blue-400 cursor-pointer">
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-zinc-400 text-sm font-medium">Alumnos Activos</p>
-                                <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.alumnosActivos || 0}</p>
+                                <p className="text-2xl font-bold text-zinc-100 mt-1">{reportData?.alumnosActivos || 0}</p>
                                 {/* Mismo criterio que el endpoint: alumno con suscripcion vigente hoy. */}
                                 <p className="text-xs text-zinc-400 mt-2">Con suscripción vigente — Clic para ver</p>
                             </div>
-                            <span className="text-4xl">👥</span>
+                            <span className="text-2xl">👥</span>
                         </div>
                     </button>
 
                     <button type="button"
                         onClick={() => irASeccion('movimientos')}
                         title="Ver el detalle de movimientos del mes"
-                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-green-500 transition hover:shadow-md hover:border-green-400 cursor-pointer">
+                        className="w-full rounded-lg bg-zinc-900 p-4 text-left shadow border-l-4 border-green-500 transition hover:shadow-md hover:border-green-400 cursor-pointer">
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-zinc-400 text-sm font-medium">Ingreso Neto Mensual</p>
-                                <p className="text-3xl font-bold text-zinc-100 mt-2">
+                                <p className="text-2xl font-bold text-zinc-100 mt-1">
                                     {formatCompact(reportData?.ingresoMensual || 0)}
                                 </p>
                                 <p className="text-xs text-zinc-400 mt-2">Ingresos - Egresos del mes</p>
@@ -345,19 +345,19 @@ const Reportes = () => {
                                 )}
                                 <p className="text-[11px] text-zinc-500 mt-2">Clic para ver movimientos</p>
                             </div>
-                            <span className="text-4xl">💰</span>
+                            <span className="text-2xl">💰</span>
                         </div>
                     </button>
 
                     <button type="button"
                         onClick={() => irASeccion('disciplinas')}
                         title="Ver ocupación y asistencia por disciplina"
-                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-orange-500 transition hover:shadow-md hover:border-orange-400 cursor-pointer">
+                        className="w-full rounded-lg bg-zinc-900 p-4 text-left shadow border-l-4 border-orange-500 transition hover:shadow-md hover:border-orange-400 cursor-pointer">
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-zinc-400 text-sm font-medium"
                                     title="Ocupacion: clases.asistentes_confirmados / clases.cupo_maximo (lugares reservados sobre cupo ofrecido). NO mide asistencia real. Puede verse 0% porque las asistencias todavia no estan vinculadas a su clase (asistencias.clase_id es NULL en toda la base).">Ocupación promedio</p>
-                                <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.asistenciaPromedio || 0}%</p>
+                                <p className="text-2xl font-bold text-zinc-100 mt-1">{reportData?.asistenciaPromedio || 0}%</p>
                                 <p className="text-xs text-zinc-400 mt-2"
                                     title="Ocupacion: clases.asistentes_confirmados / clases.cupo_maximo (lugares reservados sobre cupo ofrecido). NO mide asistencia real. Puede verse 0% porque las asistencias todavia no estan vinculadas a su clase (asistencias.clase_id es NULL en toda la base).">Ocupación (reservas vs cupo), no asistencia real</p>
                                 <p className="text-[11px] text-zinc-500 mt-2">
@@ -366,34 +366,34 @@ const Reportes = () => {
                                         : 'Clic para ver por disciplina'}
                                 </p>
                             </div>
-                            <span className="text-4xl">📊</span>
+                            <span className="text-2xl">📊</span>
                         </div>
                     </button>
 
                     <button type="button"
                         onClick={() => irASeccion('coaches')}
                         title="Ver clases impartidas por coach"
-                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-purple-500 transition hover:shadow-md hover:border-purple-400 cursor-pointer">
+                        className="w-full rounded-lg bg-zinc-900 p-4 text-left shadow border-l-4 border-purple-500 transition hover:shadow-md hover:border-purple-400 cursor-pointer">
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-zinc-400 text-sm font-medium">Clases Impartidas</p>
-                                <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.clasesImpartidas || 0}</p>
+                                <p className="text-2xl font-bold text-zinc-100 mt-1">{reportData?.clasesImpartidas || 0}</p>
                                 <p className="text-xs text-zinc-400 mt-2">Este mes — Clic para ver por coach</p>
                             </div>
-                            <span className="text-4xl">📅</span>
+                            <span className="text-2xl">📅</span>
                         </div>
                     </button>
 
                     <button type="button"
                         onClick={() => irASeccion('ranking')}
                         title="Ver el ranking de planes del mes"
-                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-indigo-500 transition hover:shadow-md hover:border-indigo-400 cursor-pointer">
+                        className="w-full rounded-lg bg-zinc-900 p-4 text-left shadow border-l-4 border-indigo-500 transition hover:shadow-md hover:border-indigo-400 cursor-pointer">
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-zinc-400 text-sm font-medium">Plan más vendido (Mes)</p>
                                 {planTop ? (
                                     <>
-                                        <p className="text-3xl font-bold text-zinc-100 mt-2">{planTop.altas}</p>
+                                        <p className="text-2xl font-bold text-zinc-100 mt-1">{planTop.altas}</p>
                                         <p className="text-xs text-zinc-400 mt-2 truncate max-w-[180px]"
                                             title={planTop.plan_nombre}>
                                             {planTop.plan_nombre} · {planTop.porcentaje}% de las altas
@@ -407,7 +407,7 @@ const Reportes = () => {
                                 )}
                                 <p className="text-[11px] text-zinc-500 mt-2">Clic para ver el ranking</p>
                             </div>
-                            <span className="text-4xl">🏆</span>
+                            <span className="text-2xl">🏆</span>
                         </div>
                     </button>
                 </div>
@@ -454,32 +454,32 @@ const Reportes = () => {
                 </div>
 
                 {/* Nuevos Alumnos / Planes Vencidos / MRR / Plan más vendido */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                     <button type="button"
                         onClick={() => navigate('/admin/alumnos-prueba')}
                         title="Ver los alumnos nuevos del mes y si convirtieron"
-                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-emerald-500 transition hover:shadow-md hover:border-emerald-400 cursor-pointer">
+                        className="w-full rounded-lg bg-zinc-900 p-4 text-left shadow border-l-4 border-emerald-500 transition hover:shadow-md hover:border-emerald-400 cursor-pointer">
                         <p className="text-zinc-400 text-sm font-medium">Nuevos Alumnos (Mes)</p>
-                        <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.nuevosAlumnosMes || 0}</p>
+                        <p className="text-2xl font-bold text-zinc-100 mt-1">{reportData?.nuevosAlumnosMes || 0}</p>
                         <p className="text-[11px] text-zinc-500 mt-2">Clic para ver el detalle</p>
-                        <span className="text-4xl">✨</span>
+                        <span className="text-2xl">✨</span>
                     </button>
                     <button type="button"
                         onClick={() => irASeccion('vencidos')}
                         title="Ver los planes vencidos de este mes"
-                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-red-500 transition hover:shadow-md hover:border-red-400 cursor-pointer">
+                        className="w-full rounded-lg bg-zinc-900 p-4 text-left shadow border-l-4 border-red-500 transition hover:shadow-md hover:border-red-400 cursor-pointer">
                         <p className="text-zinc-400 text-sm font-medium"
                             title="Suscripciones con estado=vencido cuya fecha_expiracion cayo en este mes. NO son cancelaciones explicitas: ese estado no existe en la base.">Planes Vencidos (Mes)</p>
-                        <p className="text-3xl font-bold text-zinc-100 mt-2">{reportData?.cancelacionesMes || 0}</p>
+                        <p className="text-2xl font-bold text-zinc-100 mt-1">{reportData?.cancelacionesMes || 0}</p>
                         <p className="text-[11px] text-zinc-500 mt-2">Clic para ver el detalle</p>
-                        <span className="text-4xl">📉</span>
+                        <span className="text-2xl">📉</span>
                     </button>
                     <button type="button"
                         onClick={() => navigate('/admin/planes')}
                         title="Ver el catálogo de planes y sus precios"
-                        className="w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-purple-500 transition hover:shadow-md hover:border-purple-400 cursor-pointer">
+                        className="w-full rounded-lg bg-zinc-900 p-4 text-left shadow border-l-4 border-purple-500 transition hover:shadow-md hover:border-purple-400 cursor-pointer">
                         <p className="text-zinc-400 text-sm font-medium">Ingresos Recurrentes Mensuales (MRR)</p>
-                        <p className="text-3xl font-bold text-zinc-100 mt-2">{formatCompact(reportData?.mrr || 0)}</p>
+                        <p className="text-2xl font-bold text-zinc-100 mt-1">{formatCompact(reportData?.mrr || 0)}</p>
                         <p className="text-xs text-zinc-400 mt-2"
                             title="ARPU = ingreso NETO del mes (ingresos - egresos) dividido por los alumnos activos. No es bruto: los egresos del mes lo reducen.">
                             ARPU (neto): {formatCompact(reportData?.arpu || 0)}/alumno
@@ -500,10 +500,10 @@ const Reportes = () => {
                     <button type="button" id="seccion-bazar"
                         onClick={() => navigate('/admin/pedidos')}
                         title="Ver los pedidos del Bazar"
-                        className={`w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 border-teal-500 transition hover:shadow-md hover:border-teal-400 cursor-pointer${seccionActiva === 'bazar' ? ' ring-2 ring-teal-500/60' : ''}`}>
+                        className={`w-full rounded-lg bg-zinc-900 p-4 text-left shadow border-l-4 border-teal-500 transition hover:shadow-md hover:border-teal-400 cursor-pointer${seccionActiva === 'bazar' ? ' ring-2 ring-teal-500/60' : ''}`}>
                         <p className="text-zinc-400 text-sm font-medium"
                             title="Pedidos del bazar ya cobrados (validados o entregados) del mes en curso, por la fecha del pedido. Un pedido con el comprobante sin revisar todavía no suma.">Ventas Bazar (Mes)</p>
-                        <p className="text-3xl font-bold text-zinc-100 mt-2">{formatCLP(reportData?.ventasBazar || 0)}</p>
+                        <p className="text-2xl font-bold text-zinc-100 mt-1">{formatCLP(reportData?.ventasBazar || 0)}</p>
                         <p className="text-xs text-zinc-400 mt-2">
                             {reportData?.ventasBazarPedidos || 0} pedido{(reportData?.ventasBazarPedidos || 0) === 1 ? '' : 's'} cobrado{(reportData?.ventasBazarPedidos || 0) === 1 ? '' : 's'} (validados/entregados)
                         </p>
@@ -521,21 +521,21 @@ const Reportes = () => {
                             </p>
                         )}
                         <p className="text-[11px] text-zinc-500 mt-1">Clic para ver los pedidos</p>
-                        <span className="text-4xl">🛒</span>
+                        <span className="text-2xl">🛒</span>
                     </button>
                     {/* Retención (antes "Churn"): se muestra la tasa que SIGUE vigente,
                         no la pérdida. Mismo criterio que la tarjeta del panel/dashboard. */}
                     <button type="button"
                         onClick={() => navigate('/admin/fidelizacion')}
                         title="Ver el panel de fidelización y alumnos en riesgo"
-                        className={`w-full rounded-lg bg-zinc-900 p-6 text-left shadow border-l-4 ${semaforoRetencion(reportData?.tieneDatosRetencion ? reportData.retencion : null).borde} transition hover:shadow-md cursor-pointer`}>
+                        className={`w-full rounded-lg bg-zinc-900 p-4 text-left shadow border-l-4 ${semaforoRetencion(reportData?.tieneDatosRetencion ? reportData.retencion : null).borde} transition hover:shadow-md cursor-pointer`}>
                         <p className="text-zinc-400 text-sm font-medium"
                             title="Retención de cohorte de los últimos 30 días: de los alumnos vigentes hace 30 días, cuántos siguen vigentes hoy. Si la base no alcanza el mínimo, no se calcula.">
                             Tasa de Retención (30 días)
                         </p>
                         {reportData?.tieneDatosRetencion ? (
                             <>
-                                <p className={`text-3xl font-bold mt-2 ${semaforoRetencion(reportData.retencion).texto}`}>{reportData.retencion}%</p>
+                                <p className={`text-2xl font-bold mt-1 ${semaforoRetencion(reportData.retencion).texto}`}>{reportData.retencion}%</p>
                                 <p className="text-xs text-zinc-400 mt-2">
                                     De {reportData.alumnosActivosHace30 ?? 0} alumnos vigentes hace 30 días
                                 </p>
@@ -549,7 +549,7 @@ const Reportes = () => {
                             </>
                         )}
                         <p className="text-[11px] text-zinc-500 mt-2">Clic para ver Fidelización</p>
-                        <span className="text-4xl">🛡️</span>
+                        <span className="text-2xl">🛡️</span>
                     </button>
                 </div>
 
