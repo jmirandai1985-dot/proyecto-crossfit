@@ -26,6 +26,7 @@
     --ub-amber: #f5a524;
     --ub-red: #f0594f;
     --ub-violet: #9b7bff;
+    --ub-emerald: #10b981;
     --ub-r-xl: 20px;
     --ub-r-lg: 16px;
     --ub-r-md: 12px;
@@ -219,8 +220,8 @@
 /* ── Accesos rápidos (Alumnos / Fidelización / Bazar) ───────────────────── */
 .ub-admin .apps {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
     margin-top: 12px;
 }
 
@@ -239,9 +240,9 @@
 }
 
 .ub-admin .app .ico {
-    width: 42px;
-    height: 42px;
-    border-radius: 14px;
+    width: 34px;
+    height: 34px;
+    border-radius: 12px;
     display: grid;
     place-items: center;
     color: #0b0d11;
@@ -250,6 +251,7 @@
 .ub-admin .a-search .ico { background: linear-gradient(145deg, #7ea6ff, var(--ub-blue)); }
 .ub-admin .a-fid .ico { background: linear-gradient(145deg, #ff9f8f, var(--ub-red)); }
 .ub-admin .a-baz .ico { background: linear-gradient(145deg, #ffd27a, var(--ub-amber)); }
+.ub-admin .a-rep .ico { background: linear-gradient(145deg, #6ee7b7, var(--ub-emerald)); }
 
 /* ── Tarjetas ───────────────────────────────────────────────────────────── */
 .ub-admin .card {

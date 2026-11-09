@@ -83,6 +83,7 @@ const ICONOS = {
     heart: <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.4A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z" />,
     cart: <path d="M6 7h13l-1.5 8H8L6 4H3M9 19a1.3 1.3 0 1 0 0-2.6 1.3 1.3 0 0 0 0 2.6M17 19a1.3 1.3 0 1 0 0-2.6 1.3 1.3 0 0 0 0 2.6" />,
     check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
+    chart: <path d="M4 20h16M6 20v-6M10 20V9M14 20v-8M18 20V5" />,
 };
 
 const Icono = ({ nombre }) => (
@@ -894,6 +895,11 @@ const InicioMobileAdmin = () => {
                         {hayPedidos && (
                             <span className="app-sub">{pedidos.length} por entregar</span>
                         )}
+                    </button>
+                    <button type="button" className="app a-rep"
+                        onClick={() => navigate('/admin/reportes')}
+                        data-testid="app-reportes">
+                        <span className="ico"><Icono nombre="chart" /></span>Reportes
                     </button>
                 </nav>
 
