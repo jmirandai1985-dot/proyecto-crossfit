@@ -3,9 +3,6 @@ import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import ModalProducto from '../../components/ModalProducto';
 import { useProductos, useEliminarProducto, useGuardarProducto, SIN_DATOS } from '../../hooks/queries';
-// Foto del producto con RESPALDO: si la URL no carga (mal formada / archivo perdido),
-// se muestra el emoji de siempre en vez del ícono de imagen rota del navegador.
-import ImagenProducto from '../../components/ImagenProducto';
 
 const FILTROS = [
     { key: 'todos', label: 'Todos' },
@@ -14,13 +11,14 @@ const FILTROS = [
     { key: 'inactivos', label: 'Inactivos' },
 ];
 
-const THUMB_BG = [
-    'rgba(139,92,246,0.15)',
-    'rgba(249,115,22,0.15)',
-    'rgba(34,197,94,0.15)',
-    'rgba(239,68,68,0.15)',
-    'rgba(245,158,11,0.15)',
-    'rgba(14,165,233,0.15)',
+// Miniatura de iniciales por producto: color estable por id (sin imagen ni emoji).
+const INITIAL_BG = [
+    'bg-violet-500/20 text-violet-300',
+    'bg-orange-500/20 text-orange-300',
+    'bg-green-500/20 text-green-300',
+    'bg-red-500/20 text-red-300',
+    'bg-amber-500/20 text-amber-300',
+    'bg-sky-500/20 text-sky-300',
 ];
 
 const Bazar = ({ sinLayout = false }) => {
@@ -111,20 +109,11 @@ const Bazar = ({ sinLayout = false }) => {
         if (key === 'stock_bajo') return stats.alertas;
         return 0;
     };
-    const getProductoEmoji = (nombre) => {
-        const n = (nombre || '').toLowerCase();
-        if (n.includes('protein') || n.includes('suplemento') || n.includes('isot')) return '🥤';
-        if (n.includes('shaker')) return '🧴';
-        if (n.includes('grip') || n.includes('guante')) return '🤝';
-        if (n.includes('gorra')) return '🧢';
-        if (n.includes('bolso') || n.includes('mochila')) return '🎒';
-        if (n.includes('bottle') || n.includes('botella')) return '💧';
-        if (n.includes('shirt') || n.includes('camiseta') || n.includes('ropa') || n.includes('polera')) return '👕';
-        if (n.includes('belt') || n.includes('cinturon')) return '⚙️';
-        if (n.includes('band') || n.includes('banda')) return '🎯';
-        if (n.includes('foam') || n.includes('roller')) return '🔄';
-        if (n.includes('towel') || n.includes('toalla')) return '🧣';
-        return '🛍️';
+    const getInitials = (nombre) => {
+        const words = (nombre || '').trim().split(/\s+/).filter(Boolean);
+        if (words.length === 0) return '?';
+        if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+        return (words[0][0] + words[1][0]).toUpperCase();
     };
 
     const formatPrecio = (n) => `$${(n || 0).toLocaleString('es-CL')}`;
@@ -183,6 +172,68 @@ const Bazar = ({ sinLayout = false }) => {
         setProductoEditar(null);
     };
 
+    // Agrupación visual por estado: activos arriba, inactivos abajo (sin tocar datos).
+    const activosFiltrados = productosFiltrados.filter(p => p.activo);
+    const inactivosFiltrados = productosFiltrados.filter(p => !p.activo);
+
+    const renderFila = (p) => (
+        <div key={p.id} className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-800/30 transition-colors">
+            <span className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${INITIAL_BG[p.id % INITIAL_BG.length]}`}>
+                {getInitials(p.nombre)}
+            </span>
+            <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-bold text-zinc-100 truncate">{p.nombre}</span>
+                    {p.dias_anuncio > 0 && (
+                        <span className="text-[10px] font-bold text-blue-400 whitespace-nowrap shrink-0">Anunciado · {p.dias_anuncio} día{p.dias_anuncio === 1 ? '' : 's'}</span>
+                    )}
+                </div>
+                {p.descripcion && <div className="text-[12px] text-zinc-500 truncate">{p.descripcion}</div>}
+            </div>
+            <div className="text-sm font-semibold text-zinc-100 shrink-0">{formatPrecio(p.precio)}</div>
+            <div className="shrink-0">
+                <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${TONOS[estadoStock(p).key]}`}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
+                    {p.stock || 0} uds. · {estadoStock(p).label}
+                </span>
+                {p.stock_minimo != null ? (
+                    <div className={`mt-0.5 text-[10.5px] ${p.alerta_stock_enviada ? 'text-amber-400' : 'text-zinc-500'}`}>
+                        mínimo: {p.stock_minimo}{p.alerta_stock_enviada ? ' · alerta enviada' : ''}
+                    </div>
+                ) : (
+                    <div className="mt-0.5 text-[10.5px] text-zinc-500">sin mínimo</div>
+                )}
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                    onClick={() => handleEditarProducto(p)}
+                    title="Editar"
+                    className="w-8 h-8 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-zinc-400 hover:border-orange-500 hover:text-orange-500 transition-colors"
+                >
+                    ✎
+                </button>
+                {!p.activo && (
+                    <button
+                        onClick={() => handleReactivarProducto(p.id)}
+                        disabled={reactivandoId === p.id}
+                        title="Reactivar (vuelve a ser visible en el Bazar del alumno)"
+                        aria-label="Reactivar producto"
+                        className="h-8 px-2.5 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-[11px] font-bold text-zinc-400 hover:border-green-500 hover:text-green-500 transition-colors disabled:opacity-50"
+                    >
+                        {reactivandoId === p.id ? 'Reactivando…' : '↺ Reactivar'}
+                    </button>
+                )}
+                <button
+                    onClick={() => handleEliminarProducto(p.id)}
+                    title="Desactivar" aria-label="Desactivar producto"
+                    className="w-8 h-8 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-zinc-400 hover:border-red-500 hover:text-red-500 transition-colors"
+                >
+                    🗑
+                </button>
+            </div>
+        </div>
+    );
+
     if (loading) {
         return (
             <Marco>
@@ -225,31 +276,38 @@ const Bazar = ({ sinLayout = false }) => {
                     </div>
                 </div>
 
-                {/* ── 4 tarjetas de stats ── */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 mb-6">
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 pl-5 relative overflow-hidden">
-                        <span className="absolute left-0 top-0 bottom-0 w-1 bg-orange-500"></span>
-                        <div className="text-[11.5px] text-zinc-400 font-semibold uppercase tracking-wide">Total productos</div>
-                        <div className="text-2xl font-extrabold text-zinc-100 mt-1.5">{stats.activos}</div>
-                        <div className="text-[11px] text-zinc-500 mt-1">solo activos · {stats.inactivos} inactivo{stats.inactivos === 1 ? '' : 's'} fuera de venta</div>
+                {/* ── Franja horizontal compacta de KPIs ── */}
+                <div className="flex flex-wrap gap-3 mb-6">
+                    <div className="flex items-center gap-2.5 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5">
+                        <span className="w-1 h-9 rounded-full bg-orange-500 shrink-0"></span>
+                        <div>
+                            <div className="text-[10.5px] text-zinc-400 font-semibold uppercase tracking-wide">Total productos</div>
+                            <div className="text-xl font-extrabold text-zinc-100 leading-tight">
+                                {stats.activos}
+                                <span className="ml-1.5 text-[11px] font-normal text-zinc-500">{stats.inactivos} inactivo{stats.inactivos === 1 ? '' : 's'}</span>
+                            </div>
+                        </div>
                     </div>
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 pl-5 relative overflow-hidden">
-                        <span className="absolute left-0 top-0 bottom-0 w-1 bg-violet-500"></span>
-                        <div className="text-[11.5px] text-zinc-400 font-semibold uppercase tracking-wide">Stock total</div>
-                        <div className="text-2xl font-extrabold text-zinc-100 mt-1.5">{stats.stockTotal}</div>
-                        <div className="text-[11px] text-zinc-500 mt-1">unidades de productos activos</div>
+                    <div className="flex items-center gap-2.5 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5">
+                        <span className="w-1 h-9 rounded-full bg-violet-500 shrink-0"></span>
+                        <div>
+                            <div className="text-[10.5px] text-zinc-400 font-semibold uppercase tracking-wide">Stock total</div>
+                            <div className="text-xl font-extrabold text-zinc-100 leading-tight">{stats.stockTotal}</div>
+                        </div>
                     </div>
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 pl-5 relative overflow-hidden">
-                        <span className="absolute left-0 top-0 bottom-0 w-1 bg-green-500"></span>
-                        <div className="text-[11.5px] text-zinc-400 font-semibold uppercase tracking-wide">Valor inventario</div>
-                        <div className="text-2xl font-extrabold text-zinc-100 mt-1.5">{formatCompact(stats.valor)}</div>
-                        <div className="text-[11px] text-zinc-500 mt-1">a precio de venta (solo activos)</div>
+                    <div className="flex items-center gap-2.5 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5">
+                        <span className="w-1 h-9 rounded-full bg-green-500 shrink-0"></span>
+                        <div>
+                            <div className="text-[10.5px] text-zinc-400 font-semibold uppercase tracking-wide">Valor inventario</div>
+                            <div className="text-xl font-extrabold text-zinc-100 leading-tight">{formatCompact(stats.valor)}</div>
+                        </div>
                     </div>
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 pl-5 relative overflow-hidden">
-                        <span className="absolute left-0 top-0 bottom-0 w-1 bg-red-500"></span>
-                        <div className="text-[11.5px] text-zinc-400 font-semibold uppercase tracking-wide">Alertas activas</div>
-                        <div className="text-2xl font-extrabold text-zinc-100 mt-1.5">{stats.alertas}</div>
-                        <div className="text-[11px] text-zinc-500 mt-1">productos activos bajo su mínimo</div>
+                    <div className="flex items-center gap-2.5 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5">
+                        <span className="w-1 h-9 rounded-full bg-red-500 shrink-0"></span>
+                        <div>
+                            <div className="text-[10.5px] text-zinc-400 font-semibold uppercase tracking-wide">Alertas activas</div>
+                            <div className="text-xl font-extrabold text-zinc-100 leading-tight">{stats.alertas}</div>
+                        </div>
                     </div>
                 </div>
                 {/* Aviso con la tabla ya cargada (p. ej. fallo al reactivar). */}
@@ -284,136 +342,49 @@ const Bazar = ({ sinLayout = false }) => {
                     })}
                 </div>
 
-                {/* ── Tabla de productos ── */}
-                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="w-full">
-                            <thead>
-                                <tr className="bg-zinc-800">
-                                    <th className="px-4 py-3.5 text-left text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Producto</th>
-                                    <th className="px-4 py-3.5 text-left text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Precio</th>
-                                    <th className="px-4 py-3.5 text-left text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Stock</th>
-                                    <th className="px-4 py-3.5 text-left text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Estado</th>
-                                    <th className="px-4 py-3.5 text-right text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Acciones</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-zinc-800">
-                                {productosFiltrados.length > 0 ? (
-                                    productosFiltrados.map((p) => (
-                                        <tr key={p.id} className="hover:bg-zinc-800/40 transition-colors">
-                                            <td className="px-4 py-3.5">
-                                                <div className="flex items-center gap-3">
-                                                    {/* Foto del producto si el admin la subió (imagen_url:
-                                                        en PROD es la URL pública de R2). Sin foto —o si
-                                                        la foto no carga— queda el cuadro con el emoji. */}
-                                                    <ImagenProducto
-                                                        url={p.imagen_url}
-                                                        alt={p.nombre}
-                                                        className="w-[42px] h-[42px] rounded-xl object-cover flex-shrink-0 border border-zinc-700"
-                                                        respaldo={(
-                                                            <div
-                                                                className="w-[42px] h-[42px] rounded-xl flex items-center justify-center text-lg flex-shrink-0"
-                                                                style={{ background: THUMB_BG[p.id % THUMB_BG.length] }}
-                                                            >
-                                                                {getProductoEmoji(p.nombre)}
-                                                            </div>
-                                                        )}
-                                                    />
-                                                    <div>
-                                                        <div className="font-bold text-zinc-100">{p.nombre}</div>
-                                                        {p.descripcion && (
-                                                            <div className="text-[11.5px] text-zinc-500 mt-0.5">{p.descripcion}</div>
-                                                        )}
-                                                        {/* Anunciado en el Inicio del alumno: son los
-                                                            días de anuncio que mantiene el aviso del
-                                                            carrusel "Novedades del box" (Bloque 3). */}
-                                                        {p.dias_anuncio > 0 && (
-                                                            <div className="text-[10.5px] text-blue-400 font-bold mt-0.5">
-                                                                📣 Anunciado en el Inicio ({p.dias_anuncio} día{p.dias_anuncio === 1 ? '' : 's'})
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-3.5 text-[13.5px] text-zinc-100">{formatPrecio(p.precio)}</td>
-                                            <td className="px-4 py-3.5">
-                                                <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${TONOS[estadoStock(p).key]}`}>
-                                                    <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
-                                                    {p.stock || 0} uds. · {estadoStock(p).label}
-                                                </span>
-                                                {p.stock_minimo != null ? (
-                                                    p.alerta_stock_enviada ? (
-                                                        <div className="mt-1 text-[10.5px] flex items-center gap-1 text-amber-400">
-                                                            <span>🔔</span> mínimo: {p.stock_minimo} · alerta enviada
-                                                        </div>
-                                                    ) : (
-                                                        <div className="mt-1 text-[10.5px] text-zinc-500">mínimo: {p.stock_minimo}</div>
-                                                    )
-                                                ) : (
-                                                    <div className="mt-1 text-[10.5px] text-zinc-500">sin mínimo configurado</div>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3.5">
-                                                {p.activo ? (
-                                                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-md bg-green-100 text-green-800">Activo</span>
-                                                ) : (
-                                                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-md bg-zinc-800 text-zinc-500">Inactivo</span>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3.5">
-                                                <div className="flex items-center justify-end gap-1.5">
-                                                    <button
-                                                        onClick={() => handleEditarProducto(p)}
-                                                        title="Editar"
-                                                        className="w-8 h-8 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-zinc-400 hover:border-orange-500 hover:text-orange-500 transition-colors"
-                                                    >
-                                                        ✎
-                                                    </button>
-                                                    {!p.activo && (
-                                                        <button
-                                                            onClick={() => handleReactivarProducto(p.id)}
-                                                            disabled={reactivandoId === p.id}
-                                                            title="Reactivar (vuelve a ser visible en el Bazar del alumno)"
-                                                            aria-label="Reactivar producto"
-                                                            className="h-8 px-2.5 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-[11px] font-bold text-zinc-400 hover:border-green-500 hover:text-green-500 transition-colors disabled:opacity-50"
-                                                        >
-                                                            {reactivandoId === p.id ? 'Reactivando…' : '↺ Reactivar'}
-                                                        </button>
-                                                    )}
-                                                    <button
-                                                        onClick={() => handleEliminarProducto(p.id)}
-                                                        title="Desactivar" aria-label="Desactivar producto"
-                                                        className="w-8 h-8 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-zinc-400 hover:border-red-500 hover:text-red-500 transition-colors"
-                                                    >
-                                                        🗑
-                                                    </button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))
-                                ) : (
-                                    <tr>
-                                        <td colSpan={5} className="px-4 py-10 text-center">
-                                            <p className="text-zinc-500 text-sm">
-                                                {productos.length === 0
-                                                    ? error || 'No hay productos en el inventario'
-                                                    : 'No hay productos que coincidan con la búsqueda/filtro'}
-                                            </p>
-                                            {productos.length === 0 && (
-                                                <button
-                                                    onClick={error ? () => refetchProductos() : handleNuevoProducto}
-                                                    className="mt-3 px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-bold"
-                                                >
-                                                    {error ? 'Reintentar' : '+ Agregar primer producto'}
-                                                </button>
-                                            )}
-                                        </td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
+                {/* ── Productos agrupados por estado ── */}
+                {productosFiltrados.length === 0 ? (
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-10 text-center">
+                        <p className="text-zinc-500 text-sm">
+                            {productos.length === 0
+                                ? error || 'No hay productos en el inventario'
+                                : 'No hay productos que coincidan con la búsqueda/filtro'}
+                        </p>
+                        {productos.length === 0 && (
+                            <button
+                                onClick={error ? () => refetchProductos() : handleNuevoProducto}
+                                className="mt-3 px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-bold"
+                            >
+                                {error ? 'Reintentar' : '+ Agregar primer producto'}
+                            </button>
+                        )}
                     </div>
-                </div>
+                ) : (
+                    <>
+                        {activosFiltrados.length > 0 && (
+                            <div className="mb-6">
+                                <div className="flex items-baseline gap-2 mb-2">
+                                    <h2 className="text-sm font-bold text-zinc-300 uppercase tracking-wide">Productos activos</h2>
+                                    <span className="text-xs text-zinc-500">({activosFiltrados.length})</span>
+                                </div>
+                                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden divide-y divide-zinc-800">
+                                    {activosFiltrados.map(renderFila)}
+                                </div>
+                            </div>
+                        )}
+                        {inactivosFiltrados.length > 0 && (
+                            <div className="mb-6">
+                                <div className="flex items-baseline gap-2 mb-2">
+                                    <h2 className="text-sm font-bold text-zinc-300 uppercase tracking-wide">Inactivos</h2>
+                                    <span className="text-xs text-zinc-500">({inactivosFiltrados.length})</span>
+                                </div>
+                                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden divide-y divide-zinc-800">
+                                    {inactivosFiltrados.map(renderFila)}
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
 
                 {/* Modal de Producto (Crear / Editar) */}
                 <ModalProducto
