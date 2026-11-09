@@ -168,6 +168,8 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
     // Lo que el usuario tiene abierto: un día de la semana (el anillo) y un día del calendario.
     const [diaSemana, setDiaSemana] = useState(null);
     const [fecha, setFecha] = useState(null);
+    // Pestañas del historial: Resumen (totales + anillos) / Calendario (grilla del mes).
+    const [pestaña, setPestaña] = useState('resumen');
 
     const historialQ = useHistorialAsistencia(anio, mes);
     // Memorizado: el `|| []` crea un array NUEVO en cada render (mientras carga o si falla), y
@@ -301,6 +303,19 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                 </div>
             ) : (
                 <>
+                    <div className="flex gap-2" role="tablist" aria-label="Vistas del historial">
+                        <button type="button" onClick={() => setPestaña('resumen')}
+                            className={`px-3.5 py-1.5 rounded-full text-xs font-bold border transition-colors ${pestaña === 'resumen' ? 'bg-[#D7FF4A] text-[#0E0E10] border-[#D7FF4A]' : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:text-white'}`}>
+                            Resumen
+                        </button>
+                        <button type="button" onClick={() => setPestaña('calendario')}
+                            className={`px-3.5 py-1.5 rounded-full text-xs font-bold border transition-colors ${pestaña === 'calendario' ? 'bg-[#D7FF4A] text-[#0E0E10] border-[#D7FF4A]' : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:text-white'}`}>
+                            Calendario
+                        </button>
+                    </div>
+
+                    {pestaña === 'resumen' && (
+                    <>
                     {/* ── 2. Totales del mes elegido (sólo clases ya ocurridas; el % es contra
                         los CUPOS, igual que los anillos) ── */}
                     <div className={`${TARJETA} flex flex-wrap items-center justify-between gap-5 p-4`}>
@@ -436,7 +451,11 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                             </div>
                         )}
                     </div>
+                    </>
+                    )}
 
+                    {pestaña === 'calendario' && (
+                    <>
                     {/* ── 4. El calendario del mes: un casillero por día ──
                         El tinte y el % salen de los CUPOS del día (misma cuenta que los anillos).
                         Un día sin clases queda apagado y no se puede abrir. */}
@@ -446,6 +465,12 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                             <p className="text-[11px] text-zinc-500">
                                 Toca un día con clases para ver el detalle por bloque
                             </p>
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-3 text-[10.5px] text-zinc-500">
+                            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded bg-emerald-500/15 border border-emerald-500/50" /> ≥80%</span>
+                            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded bg-[#D7FF4A]/15 border border-[#D7FF4A]/50" /> 50–79%</span>
+                            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded bg-amber-500/15 border border-amber-500/50" /> 1–49%</span>
+                            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded bg-zinc-800/50 border border-zinc-700" /> sin asistentes</span>
                         </div>
                         <div className="mt-3 grid grid-cols-7 gap-1.5">
                             {DIAS_SEMANA.map((d) => (
@@ -613,6 +638,8 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                                 </div>
                             )}
                         </div>
+                    )}
+                    </>
                     )}
                 </>
             )}
