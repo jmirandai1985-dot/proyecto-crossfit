@@ -81,7 +81,7 @@ const Disciplinas = () => {
                                         <td className="px-6 py-4 text-sm font-medium text-zinc-100">{d.nombre}</td>
                                         <td className="px-6 py-4 text-sm">
                                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${d.requiere_coach ? 'bg-blue-500/20 text-blue-300' : 'bg-zinc-800 text-zinc-400'}`}>
-                                                {d.requiere_coach ? '🤼 Requiere coach' : '🏠 Self-service'}{d.es_open_box ? ' · 🔓 Open box' : ''}
+                                                {d.requiere_coach ? '🤼 Requiere coach' : 'Acceso libre'}{d.es_open_box ? ' · 🔓 Open box' : ''}
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 text-sm">

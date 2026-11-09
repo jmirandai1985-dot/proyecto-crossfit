@@ -66,7 +66,7 @@ export const MENU_BY_ROL = {
         // redirect para no romper enlaces viejos, pero el menú apunta a la nueva.
         { label: 'Pendientes', path: '/admin/pendientes', icon: 'clock' },
         { label: 'Coaches', path: '/admin/coaches', icon: 'users' },
-        { label: 'Supervisión', path: '/admin/supervision-clases', icon: 'eye' },
+        { label: 'Gestión de Cupos', path: '/admin/supervision-clases', icon: 'eye' },
         { label: 'Asistencia', path: '/admin/asistencia', icon: 'squareCheck' },
         // Historial de Asistencia (sólo lectura): el mes entero del box. Va como pestaña
         // propia —igual que la sub-pestaña `?tab=historial` del coach—: en el teléfono,
