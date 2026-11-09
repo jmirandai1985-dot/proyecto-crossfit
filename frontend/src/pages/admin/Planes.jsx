@@ -4,10 +4,10 @@ import { useAuth } from '../../context/AuthContext';
 import { usePlanes, useGuardarPlan, useEliminarPlan, SIN_DATOS } from '../../hooks/queries';
 
 const TARJETAS = [
-    { key: 'masculino', label: '💪 Masculino', color: 'border-zinc-800 bg-zinc-900', genero: 'masculino', soloEstudiante: false },
-    { key: 'femenino', label: '🌸 Femenino', color: 'border-zinc-800 bg-zinc-900', genero: 'femenino', soloEstudiante: false },
-    { key: 'estudiante_m', label: '🎓 Estudiante Masculino', color: 'border-zinc-800 bg-zinc-900', genero: 'masculino', soloEstudiante: true },
-    { key: 'estudiante_f', label: '🎓 Estudiante Femenino', color: 'border-zinc-800 bg-zinc-900', genero: 'femenino', soloEstudiante: true },
+    { key: 'masculino', label: 'Masculino', barColor: 'border-l-blue-500', textColor: 'text-blue-400', genero: 'masculino', soloEstudiante: false },
+    { key: 'femenino', label: 'Femenino', barColor: 'border-l-pink-500', textColor: 'text-pink-400', genero: 'femenino', soloEstudiante: false },
+    { key: 'estudiante_m', label: 'Estudiante Masculino', barColor: 'border-l-blue-500', textColor: 'text-blue-400', genero: 'masculino', soloEstudiante: true },
+    { key: 'estudiante_f', label: 'Estudiante Femenino', barColor: 'border-l-pink-500', textColor: 'text-pink-400', genero: 'femenino', soloEstudiante: true },
 ];
 
 const Planes = () => {
@@ -22,6 +22,9 @@ const Planes = () => {
     const [formData, setFormData] = useState({ nombre: '', precio_clp: 0, creditos: 0, duracion_dias: 30, genero: 'masculino', activo: true, es_estudiante: false, requiere_certificado_estudiante: false });
     const [editingId, setEditingId] = useState(null);
     const [showForm, setShowForm] = useState(false);
+    // Acordeón de categorías: arranca solo la primera abierta; se pueden abrir varias a la vez.
+    const [openCategories, setOpenCategories] = useState({ masculino: true });
+    const toggleCategory = (key) => setOpenCategories(prev => ({ ...prev, [key]: !prev[key] }));
 
     const openNew = (tarjeta) => {
         setEditingId(null);
@@ -99,42 +102,58 @@ const Planes = () => {
                     <button onClick={() => openNew({ genero: 'masculino', soloEstudiante: false })} className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium text-sm">+ Nuevo Plan</button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-3">
                     {TARJETAS.map(tarjeta => {
                         const planesTarjeta = planesPorTarjeta(tarjeta);
+                        const abierta = !!openCategories[tarjeta.key];
                         return (
-                            <div key={tarjeta.key} className={`border-2 rounded-lg ${tarjeta.color} overflow-hidden`}>
-                                <div className="px-5 py-3 flex items-center justify-between border-b border-zinc-800 bg-zinc-900 bg-opacity-50">
-                                    <h2 className="text-lg font-bold">{tarjeta.label} ({planesTarjeta.length})</h2>
-                                    <button onClick={() => openNew(tarjeta)} className="px-3 py-1.5 bg-blue-900 text-white rounded hover:bg-blue-800 text-xs font-medium">+ Añadir</button>
+                            <div key={tarjeta.key} className="border border-zinc-800 rounded-lg overflow-hidden bg-zinc-900/40">
+                                <div className={`flex items-stretch border-l-4 ${tarjeta.barColor} bg-zinc-900/50`}>
+                                    <button
+                                        type="button"
+                                        onClick={() => toggleCategory(tarjeta.key)}
+                                        className="flex-1 flex items-center justify-between px-4 py-3 text-left hover:bg-zinc-800/40 transition-colors"
+                                    >
+                                        <span className={`text-base font-bold ${tarjeta.textColor}`}>
+                                            {tarjeta.label}
+                                            <span className="ml-2 text-zinc-500 font-normal text-sm">({planesTarjeta.length})</span>
+                                        </span>
+                                        <svg className={`w-4 h-4 shrink-0 text-zinc-500 transition-transform ${abierta ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                    </button>
+                                    <button type="button" onClick={() => openNew(tarjeta)} className="m-2 px-3 py-1.5 bg-blue-900 text-white rounded hover:bg-blue-800 text-xs font-medium whitespace-nowrap">+ Añadir</button>
                                 </div>
-                                {planesTarjeta.length === 0 ? (
-                                    <div className="px-5 py-8 text-center text-zinc-500 text-sm">No hay planes en esta categoría</div>
-                                ) : (
-                                    <div className="p-3 space-y-2">
-                                        {planesTarjeta.map(p => (
-                                            <div key={p.id} className="bg-zinc-900 rounded-lg border border-zinc-800 p-4 flex items-center justify-between hover:shadow-sm transition-shadow">
-                                                <div className="flex-1">
-                                                    <div className="font-semibold text-zinc-100">{p.nombre}</div>
-                                                    <div className="text-sm text-zinc-400 mt-1">
-                                                        ${(p.precio_clp || 0).toLocaleString()} · {p.creditos || 0} créditos · {p.duracion_dias || 0} días
-                                                        {p.requiere_certificado_estudiante && <span className="ml-2 inline-block px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded text-xs font-medium">🎓 Certif. estudiante</span>}
-                                                    </div>
-                                                    {tarjeta.soloEstudiante && (
-                                                        <div className="mt-1">
-                                                            <span className="inline-block px-1.5 py-0.5 bg-blue-500/20 text-blue-300 rounded text-xs font-medium">🎓 Plan Estudiante</span>
+                                {abierta && (
+                                    <div className="border-t border-zinc-800">
+                                        {planesTarjeta.length === 0 ? (
+                                            <div className="px-5 py-6 text-center text-zinc-500 text-sm">No hay planes en esta categoría</div>
+                                        ) : (
+                                            <div className="divide-y divide-zinc-800">
+                                                {planesTarjeta.map(p => (
+                                                    <div key={p.id} className="flex items-center justify-between px-4 py-3 hover:bg-zinc-800/30 transition-colors">
+                                                        <div className="flex items-center gap-3 min-w-0">
+                                                            <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${p.activo !== false ? 'bg-green-500' : 'bg-zinc-500'}`} title={p.activo !== false ? 'Activo' : 'Inactivo'} />
+                                                            <div className="min-w-0">
+                                                                <div className="flex items-center gap-2 flex-wrap">
+                                                                    <span className="font-semibold text-zinc-100">{p.nombre}</span>
+                                                                    {esPlanEstudiante(p) && (
+                                                                        <span className="bg-amber-500 text-white uppercase text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded">Estudiante</span>
+                                                                    )}
+                                                                </div>
+                                                                <div className="text-sm text-zinc-400">
+                                                                    ${(p.precio_clp || 0).toLocaleString()} · {p.creditos || 0} créditos · {p.duracion_dias || 0} días
+                                                                </div>
+                                                            </div>
                                                         </div>
-                                                    )}
-                                                </div>
-                                                <div className="flex items-center gap-3">
-                                                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.activo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                                        {p.activo ? 'Activo' : 'Inactivo'}
-                                                    </span>
-                                                    <button onClick={() => openEdit(p)} className="px-2 py-1 text-blue-400 hover:bg-zinc-800 rounded text-xs">Editar</button>
-                                                    <button onClick={() => handleDelete(p.id)} className="px-2 py-1 text-red-600 hover:bg-red-50 rounded text-xs">Eliminar</button>
-                                                </div>
+                                                        <div className="flex items-center gap-3 shrink-0 ml-4">
+                                                            <button onClick={() => openEdit(p)} className="text-blue-400 hover:text-blue-300 hover:underline text-sm">Editar</button>
+                                                            <button onClick={() => handleDelete(p.id)} className="text-red-500 hover:text-red-400 hover:underline text-sm">Eliminar</button>
+                                                        </div>
+                                                    </div>
+                                                ))}
                                             </div>
-                                        ))}
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -162,12 +181,12 @@ const Planes = () => {
                                 {formData.es_estudiante && (
                                     <>
                                         <div className="flex items-center gap-2 mt-2">
-                                            <span className="inline-block px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded text-xs font-medium">🎓 Creando/Editando plan estudiante</span>
+                                            <span className="inline-block px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded text-xs font-medium">Creando/Editando plan estudiante</span>
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <input type="checkbox" checked={!!formData.es_estudiante} disabled readOnly
                                                 className="w-4 h-4 text-orange-500 rounded opacity-70" id="req_cert" />
-                                            <label htmlFor="req_cert" className="text-sm text-zinc-400">🎓 Requiere certificado de estudiante (automático: lo define "es plan de estudiante")</label>
+                                            <label htmlFor="req_cert" className="text-sm text-zinc-400">Requiere certificado de estudiante (automático: lo define "es plan de estudiante")</label>
                                         </div>
                                     </>
                                 )}
