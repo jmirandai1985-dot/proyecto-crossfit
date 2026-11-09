@@ -22,6 +22,12 @@ const CAMPOS = [
     },
 ];
 
+const TABS = [
+    { key: 'configuracion', label: 'Configuración' },
+    { key: 'promociones', label: 'Promociones' },
+    { key: 'tarjeta', label: 'Tarjeta del carrusel' },
+];
+
 const claseInput = (conError) => `w-full rounded-xl border bg-zinc-950 px-4 py-3 pr-10 text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-2 ${conError
     ? 'border-red-500/60 focus:border-red-400 focus:ring-red-500/20'
     : 'border-zinc-700 focus:border-orange-500 focus:ring-orange-500/20'}`;
@@ -38,6 +44,9 @@ const ConfiguracionReferidos = () => {
     const [form, setForm] = useState({ invitado: '20', invitador: '20', activo: false });
     const [errores, setErrores] = useState({});
     const [mensaje, setMensaje] = useState(null);
+    // Sub-pestañas de la sección Referidos: Configuración / Promociones / Tarjeta del carrusel.
+    const [tab, setTab] = useState('configuracion');
+    const [verDinero, setVerDinero] = useState(false);
 
     useEffect(() => {
         if (!configQuery.data) return;
@@ -138,6 +147,23 @@ const ConfiguracionReferidos = () => {
                 </p>
             </div>
 
+            <div className="flex flex-wrap gap-2">
+                {TABS.map((t) => (
+                    <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => setTab(t.key)}
+                        className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${tab === t.key
+                            ? 'bg-orange-500/15 border-orange-500/40 text-orange-500'
+                            : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'}`}
+                    >
+                        {t.label}
+                    </button>
+                ))}
+            </div>
+
+            {tab === 'configuracion' && (
+                <>
             {config?.configurada === false && (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[13px] text-amber-200">
                     Todavía no hay una configuración guardada. Se muestran los valores por defecto
@@ -242,18 +268,34 @@ const ConfiguracionReferidos = () => {
                 </div>
             </form>
 
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 text-[13px] text-zinc-400">
-                <h3 className="text-sm font-bold text-zinc-200">Cómo se mueve el dinero</h3>
-                <p className="mt-2">
-                    Al confirmar la compra de un invitado, el descuento se calcula sobre el precio
-                    de lista y queda registrado en el ingreso del box. El crédito del invitador se
-                    crea por separado y se usa una sola vez en su próxima compra.
-                </p>
-                <p className="mt-2">
-                    Apagar el programa no borra las invitaciones ya registradas: evita aplicar
-                    beneficios nuevos hasta que lo vuelvas a encender.
-                </p>
-            </div>
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                    <button
+                        type="button"
+                        onClick={() => setVerDinero((v) => !v)}
+                        className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-zinc-800/30 transition-colors"
+                    >
+                        <span className="text-sm font-bold text-zinc-200">Cómo se mueve el dinero</span>
+                        <span className="text-xs text-zinc-500">{verDinero ? 'Ocultar' : 'Ver'}</span>
+                    </button>
+                    {verDinero && (
+                        <div className="border-t border-zinc-800 px-5 py-4 text-[13px] text-zinc-400">
+                            <p>
+                                Al confirmar la compra de un invitado, el descuento se calcula sobre el precio
+                                de lista y queda registrado en el ingreso del box. El crédito del invitador se
+                                crea por separado y se usa una sola vez en su próxima compra.
+                            </p>
+                            <p className="mt-2">
+                                Apagar el programa no borra las invitaciones ya registradas: evita aplicar
+                                beneficios nuevos hasta que lo vuelvas a encender.
+                            </p>
+                        </div>
+                    )}
+                </div>
+                </>
+            )}
+
+            {tab === 'promociones' && (
+                <>
 
             {/* ── Promoción Mensual por Referidos ── */}
             <div className="mt-2">
@@ -267,7 +309,10 @@ const ConfiguracionReferidos = () => {
                 </div>
             </div>
             <PendientesPromocionesReferidos />
-            <TarjetaReferidosMarketing />
+                </>
+            )}
+
+            {tab === 'tarjeta' && <TarjetaReferidosMarketing />}
         </div>
     );
 };

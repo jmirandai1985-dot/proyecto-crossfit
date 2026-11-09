@@ -27,6 +27,7 @@ const ESTADO_CHIP = {
     vencido: 'bg-zinc-800 text-zinc-500 border-zinc-700',
 };
 const ESTADO_LABEL = { vigente: 'Al aire', programado: 'Programado', vencido: 'Terminado' };
+const BARRA_ESTADO = { vigente: 'border-l-green-500', programado: 'border-l-amber-500', vencido: 'border-l-zinc-600' };
 
 const Marketing = () => {
     // Dos sub-pestañas en la MISMA ruta: los avisos del carrusel y la
@@ -194,130 +195,99 @@ const Marketing = () => {
                             })}
                         </div>
 
-                        {/* ── Tabla ── */}
-                        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-sm">
-                                    <thead>
-                                        <tr className="text-left text-[11.5px] uppercase tracking-wide text-zinc-500 border-b border-zinc-800">
-                                            <th className="px-4 py-3 font-semibold">Aviso</th>
-                                            <th className="px-4 py-3 font-semibold">Ventana</th>
-                                            <th className="px-4 py-3 font-semibold">Estado</th>
-                                            <th className="px-4 py-3 font-semibold">Carrusel</th>
-                                            <th className="px-4 py-3 font-semibold text-right">Acciones</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {avisos.length > 0 ? (
-                                            avisos.map((aviso) => {
-                                                const acento = acentoDeTipo(aviso.tipo);
-                                                const estado = estadoVigencia(aviso);
-                                                const automatico = aviso.tipo === 'producto_bazar';
-                                                const pie = resumenVigencia(aviso);
-                                                return (
-                                                    <tr key={aviso.id} className="border-b border-zinc-800/60 last:border-0 align-top">
-                                                        <td className="px-4 py-3.5 max-w-[420px]">
-                                                            <span
-                                                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10.5px] font-bold uppercase tracking-wide"
-                                                                style={{ backgroundColor: tinteDeAcento(acento), color: acento }}
-                                                            >
-                                                                {etiquetaTipo(aviso.tipo)}
-                                                            </span>
-                                                            {aviso.fijado_arriba && (
-                                                                <span className="ml-2 text-[10.5px] text-orange-400 font-bold">★ Fijado</span>
-                                                            )}
-                                                            {/* Un aviso automático muestra el nombre ACTUAL del
-                                                                producto: el título guardado puede haber quedado
-                                                                viejo si el producto se renombró. */}
-                                                            <div className="text-zinc-100 font-semibold mt-1.5">
-                                                                {automatico ? (aviso.producto_nombre || aviso.titulo) : aviso.titulo}
-                                                            </div>
-                                                            {aviso.texto && (
-                                                                <div className="text-zinc-500 text-[12.5px] mt-0.5 line-clamp-2">{aviso.texto}</div>
-                                                            )}
-                                                            {aviso.nombre_aliado && (
-                                                                <div className="text-[11.5px] text-green-400 font-semibold mt-1">{aviso.nombre_aliado}</div>
-                                                            )}
-                                                            {automatico && (
-                                                                <div className="text-[11.5px] text-blue-400 mt-1">
-                                                                    Automático del Bazar
-                                                                    {aviso.producto_nombre ? `: ${aviso.producto_nombre}` : ''}
-                                                                </div>
-                                                            )}
-                                                        </td>
-                                                        <td className="px-4 py-3.5 text-zinc-300 whitespace-nowrap">
-                                                            {formatearFechaCorta(aviso.vigente_desde)} → {formatearFechaCorta(aviso.vigente_hasta)}
-                                                            {pie && <div className="text-[11.5px] text-zinc-500 mt-0.5">{pie}</div>}
-                                                        </td>
-                                                        <td className="px-4 py-3.5">
-                                                            <span className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold ${ESTADO_CHIP[estado]}`}>
-                                                                {ESTADO_LABEL[estado]}
-                                                            </span>
-                                                        </td>
-                                                        <td className="px-4 py-3.5 text-zinc-400">
-                                                            {automatico
-                                                                ? '—'
-                                                                : (aviso.fijado_arriba ? 'Primero' : 'Orden normal')}
-                                                        </td>
-                                                        {/* Acciones: fijar y editar son de los avisos
-                                                            manuales; el del producto lo mantiene el Bazar
-                                                            (de ese sólo se puede quitar el anuncio). */}
-                                                        <td className="px-4 py-3.5">
-                                                            <div className="flex items-center justify-end gap-2">
-                                                                {!automatico && (
-                                                                    <>
-                                                                        <button
-                                                                            onClick={() => alternarFijado(aviso)}
-                                                                            disabled={ocupadoId === aviso.id}
-                                                                            title={aviso.fijado_arriba ? 'Sacar de arriba' : 'Fijar arriba del carrusel'}
-                                                                            className="h-8 px-2.5 rounded-lg border border-zinc-700 bg-zinc-800 text-[11px] font-bold text-zinc-400 hover:border-orange-500 hover:text-orange-400 transition-colors disabled:opacity-50"
-                                                                        >
-                                                                            {aviso.fijado_arriba ? '☆ Desfijar' : '★ Fijar'}
-                                                                        </button>
-                                                                        <button
-                                                                            onClick={() => abrirEditar(aviso)}
-                                                                            title="Editar aviso"
-                                                                            className="h-8 px-2.5 rounded-lg border border-zinc-700 bg-zinc-800 text-[11px] font-bold text-zinc-400 hover:border-blue-500 hover:text-blue-400 transition-colors"
-                                                                        >
-                                                                            Editar
-                                                                        </button>
-                                                                    </>
-                                                                )}
-                                                                <button
-                                                                    onClick={() => borrar(aviso)}
-                                                                    disabled={ocupadoId === aviso.id}
-                                                                    title={automatico ? 'Quitar el anuncio (el producto sigue en el Bazar)' : 'Eliminar aviso'}
-                                                                    aria-label="Eliminar aviso"
-                                                                    className="w-8 h-8 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-zinc-400 hover:border-red-500 hover:text-red-500 transition-colors disabled:opacity-50"
-                                                                >
-                                                                    🗑
-                                                                </button>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })
-                                        ) : (
-                                            <tr>
-                                                <td colSpan={5} className="px-4 py-10 text-center">
-                                                    <p className="text-zinc-500 text-sm">
-                                                        {error || (filtro === 'todos'
-                                                            ? 'Todavía no hay avisos: el Inicio del alumno no muestra la sección.'
-                                                            : 'No hay avisos con ese filtro.')}
-                                                    </p>
-                                                    <button
-                                                        onClick={abrirNuevo}
-                                                        className="mt-3 px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-bold"
-                                                    >
-                                                        + Crear el primer aviso
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        )}
-                                    </tbody>
-                                </table>
+                        {/* ── Tarjetas de avisos ── */}
+                        <div className="space-y-3">
+                            {avisos.length > 0 ? (
+                                avisos.map((aviso) => {
+                                    const acento = acentoDeTipo(aviso.tipo);
+                                    const estado = estadoVigencia(aviso);
+                                    const automatico = aviso.tipo === 'producto_bazar';
+                                    const pie = resumenVigencia(aviso);
+                                    return (
+                                        <article key={aviso.id} className={`rounded-2xl border border-zinc-800 border-l-4 ${BARRA_ESTADO[estado]} bg-zinc-900 p-4`}>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10.5px] font-bold uppercase tracking-wide" style={{ backgroundColor: tinteDeAcento(acento), color: acento }}>
+                                                    {etiquetaTipo(aviso.tipo)}
+                                                </span>
+                                                <span className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold ${ESTADO_CHIP[estado]}`}>
+                                                    {ESTADO_LABEL[estado]}
+                                                </span>
+                                                {aviso.fijado_arriba && (
+                                                    <span className="text-[10.5px] text-orange-400 font-bold">★ Fijado</span>
+                                                )}
+                                            </div>
+                                            <div className="text-zinc-100 font-semibold mt-2">
+                                                {automatico ? (aviso.producto_nombre || aviso.titulo) : aviso.titulo}
+                                            </div>
+                                            {aviso.texto && (
+                                                <div className="text-zinc-500 text-[12.5px] mt-0.5 line-clamp-2">{aviso.texto}</div>
+                                            )}
+                                            {aviso.nombre_aliado && (
+                                                <div className="text-[11.5px] text-green-400 font-semibold mt-1">{aviso.nombre_aliado}</div>
+                                            )}
+                                            {automatico && (
+                                                <div className="text-[11.5px] text-blue-400 mt-1">
+                                                    Automático del Bazar{aviso.producto_nombre ? `: ${aviso.producto_nombre}` : ''}
+                                                </div>
+                                            )}
+                                            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-800 pt-2.5">
+                                                <span className="text-[12px] text-zinc-400">
+                                                    {formatearFechaCorta(aviso.vigente_desde)} → {formatearFechaCorta(aviso.vigente_hasta)}
+                                                    {pie && <span className="text-zinc-500"> · {pie}</span>}
+                                                </span>
+                                                <span className="text-[12px] text-zinc-400">
+                                                    {automatico ? '—' : (aviso.fijado_arriba ? 'Primero' : 'Orden normal')}
+                                                </span>
+                                            </div>
+                                            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-2.5">
+                                                {!automatico && (
+                                                    <>
+                                                        <button
+                                                            onClick={() => alternarFijado(aviso)}
+                                                            disabled={ocupadoId === aviso.id}
+                                                            title={aviso.fijado_arriba ? 'Sacar de arriba' : 'Fijar arriba del carrusel'}
+                                                            className="h-8 px-2.5 rounded-lg border border-zinc-700 bg-zinc-800 text-[11px] font-bold text-zinc-400 hover:border-orange-500 hover:text-orange-400 transition-colors disabled:opacity-50"
+                                                        >
+                                                            {aviso.fijado_arriba ? '☆ Desfijar' : '★ Fijar'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => abrirEditar(aviso)}
+                                                            title="Editar aviso"
+                                                            className="h-8 px-2.5 rounded-lg border border-zinc-700 bg-zinc-800 text-[11px] font-bold text-zinc-400 hover:border-blue-500 hover:text-blue-400 transition-colors"
+                                                        >
+                                                            Editar
+                                                        </button>
+                                                    </>
+                                                )}
+                                                <button
+                                                    onClick={() => borrar(aviso)}
+                                                    disabled={ocupadoId === aviso.id}
+                                                    title={automatico ? 'Quitar el anuncio (el producto sigue en el Bazar)' : 'Eliminar aviso'}
+                                                    aria-label="Eliminar aviso"
+                                                    className="w-8 h-8 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-zinc-400 hover:border-red-500 hover:text-red-500 transition-colors disabled:opacity-50"
+                                                >
+                                                    🗑
+                                                </button>
+                                            </div>
+                                        </article>
+                                    );
+                                })
+                                ) : (
+                                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-10 text-center">
+                                        <p className="text-zinc-500 text-sm">
+                                            {error || (filtro === 'todos'
+                                                ? 'Todavía no hay avisos: el Inicio del alumno no muestra la sección.'
+                                                : 'No hay avisos con ese filtro.')}
+                                        </p>
+                                        <button
+                                            onClick={abrirNuevo}
+                                            className="mt-3 px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-bold"
+                                        >
+                                            + Crear el primer aviso
+                                        </button>
+                                    </div>
+                                )}
                             </div>
-                        </div>
 
                         <p className="text-[12px] text-zinc-500 mt-4">
                             Las tarjetas de <strong className="text-zinc-300">producto nuevo</strong> no se crean acá:

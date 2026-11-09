@@ -322,100 +322,90 @@ const GestionPromocionesReferidos = () => {
                     promoción activa, el job diario no detecta ningún umbral.
                 </p>
             ) : (
-                <div className="overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-900">
-                    <table className="w-full min-w-[900px] text-sm">
-                        <thead className="bg-zinc-950/70 text-[11px] uppercase tracking-wide text-zinc-500">
-                            <tr>
-                                <th className="px-4 py-3 text-left">Promoción</th>
-                                <th className="px-4 py-3 text-left">Umbral</th>
-                                <th className="px-4 py-3 text-left">Premio</th>
-                                <th className="px-4 py-3 text-left">Estado</th>
-                                <th className="px-4 py-3 text-left">Carrusel</th>
-                                <th className="px-4 py-3 text-right">Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-zinc-800">
-                            {promociones.map((promocion) => (
-                                <tr key={promocion.id} data-testid={`promocion-${promocion.id}`}>
-                                    <td className="px-4 py-3">
-                                        <p className="font-semibold text-zinc-100">{promocion.nombre}</p>
-                                        <p className="text-xs text-zinc-500">{etiquetaTipoPremio(promocion.tipo_premio)}</p>
-                                    </td>
-                                    <td className="px-4 py-3 text-zinc-300">
-                                        {promocion.umbral_referidos_convertidos} referidos / mes
-                                    </td>
-                                    <td className="px-4 py-3 text-zinc-300">{promocion.premio_texto}</td>
-                                    <td className="px-4 py-3">
-                                        <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${promocion.activo
-                                            ? 'border-green-500/30 bg-green-500/10 text-green-300'
-                                            : 'border-zinc-700 bg-zinc-800 text-zinc-400'}`}>
-                                            {promocion.activo ? 'Activa' : 'Apagada'}
-                                        </span>
-                                        {promocion.detecciones_pendientes > 0 && (
-                                            <p className="mt-1 text-[11px] font-semibold text-amber-300">
-                                                {promocion.detecciones_pendientes} pendiente(s) de confirmar
-                                            </p>
-                                        )}
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        <span
-                                            data-testid={`promocion-${promocion.id}-carrusel`}
-                                            className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${CLASES_PUBLICACION[estadoPublicacion(promocion).clave]}`}
+                <div className="space-y-3">
+                    {promociones.map((promocion) => (
+                        <article key={promocion.id} data-testid={`promocion-${promocion.id}`} className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <p className="font-semibold text-zinc-100">{promocion.nombre}</p>
+                                    <p className="text-xs text-zinc-500">{etiquetaTipoPremio(promocion.tipo_premio)}</p>
+                                </div>
+                                <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-bold ${promocion.activo
+                                    ? 'border-green-500/30 bg-green-500/10 text-green-300'
+                                    : 'border-zinc-700 bg-zinc-800 text-zinc-400'}`}>
+                                    {promocion.activo ? 'Activa' : 'Apagada'}
+                                </span>
+                            </div>
+                            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Umbral</p>
+                                    <p className="text-sm text-zinc-300 mt-0.5">{promocion.umbral_referidos_convertidos} referidos / mes</p>
+                                </div>
+                                <div>
+                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Premio</p>
+                                    <p className="text-sm text-zinc-300 mt-0.5">{promocion.premio_texto}</p>
+                                </div>
+                            </div>
+                            {promocion.detecciones_pendientes > 0 && (
+                                <p className="mt-2 text-[11px] font-semibold text-amber-300">
+                                    {promocion.detecciones_pendientes} pendiente(s) de confirmar
+                                </p>
+                            )}
+                            <div className="mt-3 border-t border-zinc-800 pt-3">
+                                <span
+                                    data-testid={`promocion-${promocion.id}-carrusel`}
+                                    className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${CLASES_PUBLICACION[estadoPublicacion(promocion).clave]}`}
+                                >
+                                    {estadoPublicacion(promocion).texto}
+                                </span>
+                                {promocion.publicada && promocion.publicada_hasta && (
+                                    <p className="mt-1 text-[11px] text-zinc-500">
+                                        Hasta el {formatearDia(promocion.publicada_hasta)}
+                                    </p>
+                                )}
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                    <button
+                                        type="button"
+                                        onClick={() => setPublicando(promocion)}
+                                        disabled={!promocion.activo || ocupadoId === promocion.id}
+                                        title={promocion.activo
+                                            ? 'La tarjeta se muestra en el Inicio del alumno'
+                                            : 'Activa la promoción para poder publicarla'}
+                                        className="rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-[11px] font-bold text-zinc-200 hover:border-orange-500 hover:text-orange-300 disabled:opacity-40"
+                                    >
+                                        {promocion.publicada ? 'Editar tarjeta' : 'Publicar'}
+                                    </button>
+                                    {promocion.publicada && (
+                                        <button
+                                            type="button"
+                                            onClick={() => quitarDelCarrusel(promocion)}
+                                            disabled={ocupadoId === promocion.id}
+                                            className="rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-[11px] font-bold text-zinc-400 hover:border-red-500 hover:text-red-400 disabled:opacity-50"
                                         >
-                                            {estadoPublicacion(promocion).texto}
-                                        </span>
-                                        {promocion.publicada && promocion.publicada_hasta && (
-                                            <p className="mt-1 text-[11px] text-zinc-500">
-                                                Hasta el {formatearDia(promocion.publicada_hasta)}
-                                            </p>
-                                        )}
-                                        <div className="mt-2 flex flex-wrap gap-1.5">
-                                            <button
-                                                type="button"
-                                                onClick={() => setPublicando(promocion)}
-                                                disabled={!promocion.activo || ocupadoId === promocion.id}
-                                                title={promocion.activo
-                                                    ? 'La tarjeta se muestra en el Inicio del alumno'
-                                                    : 'Activa la promoción para poder publicarla'}
-                                                className="rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-[11px] font-bold text-zinc-200 hover:border-orange-500 hover:text-orange-300 disabled:opacity-40"
-                                            >
-                                                {promocion.publicada ? 'Editar tarjeta' : 'Publicar'}
-                                            </button>
-                                            {promocion.publicada && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => quitarDelCarrusel(promocion)}
-                                                    disabled={ocupadoId === promocion.id}
-                                                    className="rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-[11px] font-bold text-zinc-400 hover:border-red-500 hover:text-red-400 disabled:opacity-50"
-                                                >
-                                                    Quitar
-                                                </button>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        <div className="flex justify-end gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => editarPromocion(promocion)}
-                                                className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-bold text-zinc-200 hover:border-orange-500 hover:text-orange-300"
-                                            >
-                                                Editar
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => borrar(promocion)}
-                                                disabled={ocupadoId === promocion.id}
-                                                className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-bold text-zinc-400 hover:border-red-500 hover:text-red-400 disabled:opacity-50"
-                                            >
-                                                {ocupadoId === promocion.id ? '…' : 'Eliminar'}
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                                            Quitar
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="mt-3 flex justify-end gap-2 border-t border-zinc-800 pt-3">
+                                <button
+                                    type="button"
+                                    onClick={() => editarPromocion(promocion)}
+                                    className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-bold text-zinc-200 hover:border-orange-500 hover:text-orange-300"
+                                >
+                                    Editar
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => borrar(promocion)}
+                                    disabled={ocupadoId === promocion.id}
+                                    className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-bold text-zinc-400 hover:border-red-500 hover:text-red-400 disabled:opacity-50"
+                                >
+                                    {ocupadoId === promocion.id ? '…' : 'Eliminar'}
+                                </button>
+                            </div>
+                        </article>
+                    ))}
                 </div>
             )}
 
