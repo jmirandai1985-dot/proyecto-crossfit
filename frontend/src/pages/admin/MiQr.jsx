@@ -63,14 +63,7 @@ const MiQr = () => {
                                 download={`qr-${data.subdomain || data.public_id}.png`}
                                 className="px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-bold text-center"
                             >
-                                📥 Descargar QR (PNG)
-                            </a>
-                            <a
-                                href={qrHref}
-                                download={`qr-${data.subdomain || data.public_id}.svg`}
-                                className="px-4 py-2 border border-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-800 transition-colors text-sm text-center"
-                            >
-                                Descargar SVG (para imprenta grande)
+                                Descargar QR (PNG)
                             </a>
                             <p className="text-xs text-zinc-500 text-center">
                                 Imprimilo y pegalo en la recepción del box. El QR no es secreto: la
