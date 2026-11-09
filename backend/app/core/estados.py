@@ -13,6 +13,7 @@ from shared import estados
 from shared.estados import (  # noqa: F401  (re-export: punto de importación de la app)
     COLUMNA_ES_COMERCIAL,
     ESTADO_CANCELADO,
+    ESTADO_CANCELADA_POR_SUSPENSION,
     ESTADOS_CANCELADA,
     ESTADOS_PAGO_BAZAR,
     ESTADOS_SUSCRIPCION_NUNCA_VIGENTES,

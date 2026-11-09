@@ -49,6 +49,8 @@ const AdminAlumnosPendientes = lazy(() => import('./pages/admin/AdminAlumnosPend
 const AdminPendientes = lazy(() => import('./pages/admin/Pendientes'));
 
 const AdminDisciplinas = lazy(() => import('./pages/admin/Disciplinas'));
+// Suspensiones de plan (sólo lectura): supervisión de la suspensión self-service.
+const AdminSuspensiones = lazy(() => import('./pages/admin/Suspensiones'));
 const AdminAsistencia = lazy(() => import('./pages/admin/Asistencia'));
 // Historial de Asistencia: pestaña PROPIA en el menú del admin (sólo lectura del mes).
 // Antes estaba apilada debajo de Asistencia; se separó con el mismo criterio que la
@@ -167,6 +169,7 @@ function App() {
             <Route path="mi-qr" element={<AdminMiQr />} />
             <Route path="planes" element={<AdminPlanes />} />
             <Route path="disciplinas" element={<AdminDisciplinas />} />
+            <Route path="suspensiones" element={<AdminSuspensiones />} />
             <Route path="bazar" element={<AdminBazar />} />
             <Route path="marketing" element={<AdminMarketing />} />
             <Route path="pedidos" element={<AdminPedidos />} />

@@ -25,6 +25,9 @@ from app.core.rate_limit import limiter, LIMIT_RESERVA
 # N-9: trazabilidad de las reservas que el staff crea en nombre de un alumno.
 from app.services.auditoria_service import registrar_auditoria
 from app.services import churn_service
+# Devolución del crédito de una reserva cancelada: la MISMA función para la
+# cancelación manual y para la cancelación por suspensión (ver services/reservas_service.py).
+from app.services.reservas_service import reembolsar_credito_reserva, ReembolsoTransitorio
 # El estado VISIBLE de una reserva ("Mis Reservas") es el MISMO que usa el Historial del
 # alumno: una sola definición (`estado_asistencia`), para no volver a tener dos criterios.
 from app.services.historial_alumno_service import estado_asistencia
@@ -916,7 +919,6 @@ def _cancelar_reserva(
     Devuelve el resumen con el que responde `DELETE /reservas/{id}`.
     """
     from datetime import datetime
-    from app.models.suscripcion import Suscripcion
 
     reserva_id = reserva.id
 
@@ -1010,67 +1012,20 @@ def _cancelar_reserva(
     # de 6h de margen.
     reembolsado = False
     redireccion = None
-    if horas_restantes >= 6 and (reserva.tokens_gastados or 0) > 0:
-        # 1) La membresía que PAGÓ el crédito. `with_for_update()`: la fila queda
-        #    bloqueada hasta el commit, así el `+ 1` de abajo no compite con otra
-        #    cancelación del mismo alumno ni con un consumo del POST.
-        membresia = None
-        if reserva.suscripcion_id is not None:
-            membresia = db.query(Suscripcion).filter(
-                Suscripcion.id == reserva.suscripcion_id,
-                Suscripcion.tenant_id == tenant_id,
-                Suscripcion.usuario_id == reserva.alumno_id,
-                da_acceso_hoy(Suscripcion.estado, Suscripcion.fecha_expiracion)
-            ).with_for_update().first()
-        # 2) Red de seguridad: mismo ORDER BY de siempre (+ `id` como desempate
-        #    determinista), y se anota que hubo redirección.
-        if not membresia:
-            membresia = db.query(Suscripcion).filter(
-                Suscripcion.tenant_id == tenant_id,
-                Suscripcion.usuario_id == reserva.alumno_id,
-                da_acceso_hoy(Suscripcion.estado, Suscripcion.fecha_expiracion)
-            ).order_by(
-                Suscripcion.creditos_disponibles.desc().nulls_last(),
-                Suscripcion.fecha_expiracion.desc(),
-                Suscripcion.id.desc()
-            ).first()
-            if membresia:
-                redireccion = {
-                    "motivo": ("sin_registro" if reserva.suscripcion_id is None
-                               else "membresia_original_sin_acceso"),
-                    "reserva_id": reserva_id,
-                    "alumno_id": reserva.alumno_id,
-                    "clase_id": reserva.clase_id,
-                    "membresia_original_id": reserva.suscripcion_id,
-                    "membresia_destino_id": membresia.id,
-                }
-        if membresia:
-            # ── Devolución ATÓMICA del crédito: `+ 1` lo hace la base ──────
-            # Antes: `membresia.creditos_disponibles += 1` (read-modify-write en
-            # Python). Dos cancelaciones simultáneas del MISMO alumno (dos
-            # reservas, o dos pestañas) leían el mismo saldo y la última en
-            # commitear lo reponía: una de las dos devoluciones se perdía y el
-            # alumno quedaba con un crédito menos.
-            # `IS NOT NULL` = plan ilimitado: no hay crédito que devolver
-            # (misma regla que el `is not None` de antes, ahora en la base).
-            # `rowcount` dice si de verdad se devolvió: lo que responde el
-            # endpoint (`reembolsado`) sale de la BASE, no de una suposición.
-            try:
-                devolucion = db.execute(
-                    update(Suscripcion)
-                    .where(Suscripcion.id == membresia.id)
-                    .where(Suscripcion.tenant_id == tenant_id)
-                    .where(Suscripcion.creditos_disponibles.isnot(None))
-                    .values(creditos_disponibles=Suscripcion.creditos_disponibles + 1)
-                    .execution_options(synchronize_session=False)
-                )
-            except DBAPIError:
-                db.rollback()
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Alta demanda, intenta de nuevo",
-                )
-            reembolsado = devolucion.rowcount > 0
+    try:
+        # Devolución del crédito (la MISMA lógica que usa la suspensión de plan):
+        # por `reserva.suscripcion_id`, con fallback auditado y guard `tokens_gastados > 0`.
+        reembolsado, redireccion = reembolsar_credito_reserva(
+            db, tenant_id=tenant_id, reserva=reserva,
+            horas_restantes=horas_restantes,
+        )
+    except ReembolsoTransitorio as e:
+        # El rollback de la devolución deja la reserva como estaba (el estado también
+        # vuelve): el cliente puede reintentar sin perder el asiento ni el crédito.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
+        )
 
     db.commit()
 

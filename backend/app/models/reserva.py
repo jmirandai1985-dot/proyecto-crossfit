@@ -57,7 +57,11 @@ class Reserva(Base):
     # plan no puede borrar la reserva.
     suscripcion_id = Column(Integer, ForeignKey(
         "suscripciones.id", ondelete="SET NULL"), nullable=True)
-    estado = Column(String(20), nullable=False, default="reserved")
+    # ── `cancelada_por_suspension` (24 chars) NO cabe en VARCHAR(20) ──────────
+    # Migración 074: la columna se ensanchó a VARCHAR(32). Antes era String(20) y
+    # el estado nuevo de la suspensión de plan daba `value too long for type
+    # character varying(20)` (reproducido en el test de integración del POST).
+    estado = Column(String(32), nullable=False, default="reserved")
     # ── Auditoría de marcado de asistencia (Fase 1, sistema de Asistencia) ──
     # asistencias se soporta en reservas.asistio; estas columnas registran
     # QUIÉN marcó, CUÁNDO y por qué vía (coach|admin|batch|n8n).

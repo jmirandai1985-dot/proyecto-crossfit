@@ -204,6 +204,15 @@ export const claves = {
     // Descuento vigente del alumno y precio final de cada plan (lo calcula el backend).
     // Cuelga de `['beneficios']`, la familia que ya usa `useMisBeneficios`.
     beneficiosAlumno: (alumnoId, planIds) => ['beneficios', 'alumno', alumnoId, planIds],
+    // ── Suspensión de plan (self-service del alumno + supervisión del admin) ──
+    // La elegibilidad depende del rango pedido (fecha_inicio + dias), así que va en
+    // la clave: al mover el selector del modal se refetch. Sin rango, sólo elegibilidad.
+    elegibilidadSuspension: (fechaInicio, dias) =>
+        ['suspension', 'elegibilidad', fechaInicio || '', dias || ''],
+    // Listado + resumen del admin (pantalla de supervisión de suspensiones).
+    suspensionesAdmin: (buscar, estado, desde, hasta) =>
+        ['admin', 'suspensiones', buscar || '', estado || '', desde || '', hasta || ''],
+    suspensionesAdminResumen: ['admin', 'suspensiones', 'resumen'],
 };
 
 // ── Colas de revisión del admin (las miran el Dashboard Y Pendientes de revisión) ──
@@ -1093,6 +1102,63 @@ export function useCambiarPassword() {
             api.put('/api/v1/usuarios/cambiar-password', payload).then((r) => r.data),
     });
 }
+
+// ── Suspensión de plan (self-service del alumno) ─────────────────────────────
+// Elegibilidad + (opcional) previsualización de reservas que se cancelarían. Sin
+// `fechaInicio`/`dias` sólo pide la elegibilidad (el botón la usa para habilitarse).
+export function useElegibilidadSuspension({ fechaInicio, dias } = {}) {
+    return useQuery({
+        queryKey: claves.elegibilidadSuspension(fechaInicio, dias),
+        queryFn: async () => {
+            const params = {};
+            if (fechaInicio) params.fecha_inicio = fechaInicio;
+            if (dias) params.dias = dias;
+            return (await api.get('/api/v1/alumnos/me/suspension/elegibilidad', { params })).data;
+        },
+        staleTime: 15_000,
+    });
+}
+
+// Confirmar la suspensión: extiende la expiración y cancela reservas. Invalida la
+// membresía (cambió `fecha_expiracion`) y las reservas (quedaron canceladas).
+export function useCrearSuspension() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) =>
+            api.post('/api/v1/alumnos/me/suspension', payload).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: claves.membresia });
+            qc.invalidateQueries({ queryKey: ['reservas'] });
+            qc.invalidateQueries({ queryKey: ['suspension'] });
+        },
+    });
+}
+
+// ── Supervisión del admin (pantalla de sólo lectura) ────────────────────────
+export function useSuspensionesAdmin({ buscar, estado, desde, hasta } = {}) {
+    return useQuery({
+        queryKey: claves.suspensionesAdmin(buscar, estado, desde, hasta),
+        queryFn: async () => {
+            const params = {};
+            if (buscar) params.buscar = buscar;
+            if (estado) params.estado = estado;
+            if (desde) params.desde = desde;
+            if (hasta) params.hasta = hasta;
+            return (await api.get('/api/v1/admin/suspensiones', { params })).data || [];
+        },
+        staleTime: 30_000,
+    });
+}
+
+export function useResumenSuspensiones() {
+    return useQuery({
+        queryKey: claves.suspensionesAdminResumen,
+        queryFn: async () =>
+            (await api.get('/api/v1/admin/suspensiones/resumen')).data || null,
+        staleTime: 30_000,
+    });
+}
+
 
 // ══════════════════════════════════════════════════════════════════════════════
 // BLOQUE 2 parte B — PIZARRA DE WOD (panel del coach)

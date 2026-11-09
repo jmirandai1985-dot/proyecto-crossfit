@@ -4,6 +4,7 @@
     coach_disciplinas, movimientos, historial_rm,
     retencion, productos, pedidos, reportes, auditoria, auth,
     suscripciones, wods, solicitudes_planes, upload,
+    suspensiones,
     notificaciones, notificaciones_enviadas, migracion,
     comprar_emergencia, fix_fechas, supervision,
     finanzas, configuracion, alumnos, asistencia, ranking, kpis,
@@ -330,6 +331,12 @@ app.include_router(
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Autenticación"])
 app.include_router(suscripciones.router, prefix="/api/v1",
                    tags=["Suscripciones"])
+# Suspensión de plan: el router define su prefijo `/api/v1` y lleva el path completo
+# (`/alumnos/me/suspension/...` y `/admin/suspensiones...`). Se monta SIN prefijo y
+# ANTES que `historial_alumno`/`alumnos` para que las rutas literales `/me/suspension`
+# se resuelvan antes que cualquier ruta con path param `/{alumno_id}` (misma lección
+# del bug de `wods.py`).
+app.include_router(suspensiones.router, tags=["Suspensiones"])
 app.include_router(wods.router, tags=["WODs"])
 app.include_router(solicitudes_planes.router,
                    prefix="/api/v1/solicitudes", tags=["Solicitudes Planes"])

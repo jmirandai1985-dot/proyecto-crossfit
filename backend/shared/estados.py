@@ -3,7 +3,7 @@
 Dos criterios viven acá:
 
 1. **`reservas.estado` = cancelada** (lista + helpers). `reservas.estado` es un
-   `character varying(20)` (default `'reserved'`), no un enum: la base no impide que aparezca
+   `character varying(32)` (default `'reserved'`), no un enum: la base no impide que aparezca
    cualquier valor. En los datos conviven DOS formas de "cancelada":
 
 * `'cancelled'` — la que ESCRIBE la app (`DELETE /reservas/{id}` de `app/api/v1/reservas.py`);
@@ -40,8 +40,24 @@ from typing import Final
 # Lo que ESCRIBE la app al cancelar (una sola forma, la de siempre).
 ESTADO_CANCELADO: Final[str] = "cancelled"
 
+# ── Cancelación automática por SUSPENSIÓN de plan ─────────────────────────────
+# `DELETE /reservas/{id}` escribe `cancelled` (cancelación manual del alumno) y
+# `PUT /reservas/{id}` con `estado='cancelled'` hace lo mismo. La suspensión del
+# plan (`crear_suspension`) cancela reservas SOLAS —sin que el alumno toque nada—
+# y por una causa distinta (se va de vacaciones, no desistió de la clase). Reusar
+# `'cancelled'` mezclaría en el historial/reportes una baja auto-servicio con una
+# baja manual: por eso acá nace un estado nuevo y distinguible.
+ESTADO_CANCELADA_POR_SUSPENSION: Final[str] = "cancelada_por_suspension"
+
 # Todo lo que se LEE como "cancelada": la misma lista para la app y para el SQL del job.
-ESTADOS_CANCELADA: Final[tuple] = ("cancelled", "cancelada")
+# `cancelada_por_suspension` SÍ entra acá: ES una cancelación (la reserva deja de
+# estar viva), sólo que con una causa distinguible. Si no estuviera, la reserva
+# cancelada por suspensión seguiría "viva" para el índice parcial único
+# (`uq_reservas_clase_alumno_viva`) y para el SQL del mantenimiento: el alumno no
+# podría volver a reservar la clase cancelada y los reportes la contarían como
+# activa. Como el estado se escribe sólo con la causa nueva, los reportes que
+# quieren distinguir "manual vs suspensión" filtran por el literal exacto.
+ESTADOS_CANCELADA: Final[tuple] = ("cancelled", "cancelada", "cancelada_por_suspension")
 
 
 def lista_sql(estados: tuple | None = None) -> str:

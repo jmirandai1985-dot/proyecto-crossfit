@@ -1,0 +1,335 @@
+"""
+Router de Suspensión de plan (self-service del alumno + supervisión del admin).
+
+La suspensión la pide el alumno SIN aprobación del admin: el admin sólo supervisa
+(pantalla de sólo lectura). Por eso hay DOS familias acá:
+
+  * `/alumnos/me/suspension*` — el alumno consulta su elegibilidad y confirma.
+  * `/admin/suspensiones*` — el admin lista y ve los KPIs.
+
+Las reglas viven en `services/suspensiones_service.py`; este router sólo resuelve
+quién es el usuario, busca su plan vigente y traduce las excepciones del servicio
+a HTTP.
+"""
+from datetime import date, timedelta
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.core.dependencies import get_current_user, get_current_admin
+from app.core.estados import no_cancelada, vigente_hoy
+from app.core.rate_limit import limiter, LIMIT_CRITICO
+from app.db.database import get_db
+from app.models.clase import Clase
+from app.models.disciplina import Disciplina
+from app.models.reserva import Reserva
+from app.models.suscripcion import Suscripcion
+from app.models.suspension_plan import SuspensionPlan
+from app.models.usuario import Usuario
+from app.services import suspensiones_service
+from app.services.reservas_service import ReembolsoTransitorio
+from app.utils.santiago import fecha_chile, hoy_santiago
+
+# Mismo prefijo que `wods.py`/`kpis.py`: el router define su prefijo y `main.py` lo
+# monta SIN prefijo extra. Las rutas llevan el path completo para poder mezclar
+# `/alumnos/me/...` y `/admin/...` en un solo router sin chocar con path params.
+router = APIRouter(prefix="/api/v1", tags=["Suspensiones"])
+
+
+class SuspensionCreate(BaseModel):
+    fecha_inicio: date
+    dias: int
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+def _suscripcion_activa(db: Session, tenant_id: int, usuario_id: int):
+    """La membresía vigente del alumno (misma regla que `/planes/membresia-activa`)."""
+    return (
+        db.query(Suscripcion)
+        .filter(
+            Suscripcion.tenant_id == tenant_id,
+            Suscripcion.usuario_id == usuario_id,
+            Suscripcion.estado == "activo",
+            vigente_hoy(Suscripcion.fecha_expiracion),
+        )
+        .order_by(
+            Suscripcion.creditos_disponibles.desc().nulls_last(),
+            Suscripcion.fecha_expiracion.desc(),
+        )
+        .first()
+    )
+
+
+def _reservas_en_rango(db: Session, tenant_id: int, usuario_id: int,
+                       fecha_inicio: date, dias: int):
+    """Reservas vivas del alumno con `clase.fecha` en [fecha_inicio, fecha_fin]."""
+    filas = (
+        db.query(Reserva, Clase, Disciplina)
+        .join(Clase, Reserva.clase_id == Clase.id)
+        .join(Disciplina, Clase.disciplina_id == Disciplina.id)
+        .filter(
+            Reserva.tenant_id == tenant_id,
+            Reserva.alumno_id == usuario_id,
+            no_cancelada(Reserva.estado),
+            Clase.fecha >= fecha_inicio,
+            Clase.fecha <= fecha_inicio + timedelta(days=dias - 1),
+        )
+        .order_by(Clase.fecha, Clase.hora_inicio)
+        .all()
+    )
+    return [
+        {
+            "reserva_id": r.id,
+            "clase_id": c.id,
+            "fecha": str(c.fecha),
+            "hora_inicio": str(c.hora_inicio),
+            "disciplina": d.nombre,
+        }
+        for r, c, d in filas
+    ]
+
+
+def _reservas_canceladas_por_suspension(db: Session, tenant_id: int, usuario_id: int,
+                                        fecha_inicio: date, dias: int):
+    """Las reservas que acabaron en `cancelada_por_suspension` en el rango pedido.
+
+    Se usa DESPUÉS de `crear_suspension`: en ese momento las reservas del rango ya
+    están con el estado nuevo, así que se filtran por el literal exacto (la
+    previsualización de antes de confirmar usa `_reservas_en_rango`, que mira las
+    VIVAS).
+    """
+    filas = (
+        db.query(Reserva, Clase, Disciplina)
+        .join(Clase, Reserva.clase_id == Clase.id)
+        .join(Disciplina, Clase.disciplina_id == Disciplina.id)
+        .filter(
+            Reserva.tenant_id == tenant_id,
+            Reserva.alumno_id == usuario_id,
+            Reserva.estado == "cancelada_por_suspension",
+            Clase.fecha >= fecha_inicio,
+            Clase.fecha <= fecha_inicio + timedelta(days=dias - 1),
+        )
+        .order_by(Clase.fecha, Clase.hora_inicio)
+        .all()
+    )
+    return [
+        {
+            "reserva_id": r.id,
+            "clase_id": c.id,
+            "fecha": str(c.fecha),
+            "hora_inicio": str(c.hora_inicio),
+            "disciplina": d.nombre,
+        }
+        for r, c, d in filas
+    ]
+
+
+def _elegibilidad_para(db: Session, usuario: Usuario, suscripcion) -> dict:
+    """Elegibilidad + saldo del ciclo vigente para `usuario`/`suscripcion`."""
+    hoy = hoy_santiago()
+    ciclo_inicio, ciclo_fin = suspensiones_service.ciclo_vigente(usuario.created_at, hoy)
+    suspensiones = (
+        db.query(SuspensionPlan)
+        .filter(SuspensionPlan.usuario_id == usuario.id,
+                SuspensionPlan.tenant_id == usuario.tenant_id)
+        .all()
+    )
+    del_ciclo = [s for s in suspensiones if ciclo_inicio <= s.fecha_inicio < ciclo_fin]
+    return suspensiones_service.calcular_elegibilidad(suscripcion, usuario, del_ciclo, hoy)
+
+
+# ── Alumno: elegibilidad + previsualización de cancelaciones ─────────────────
+@router.get("/alumnos/me/suspension/elegibilidad")
+def elegibilidad_suspension(
+    fecha_inicio: Optional[date] = Query(None),
+    dias: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Elegibilidad del alumno y (opcional) las reservas que se cancelarían.
+
+    Sin `fecha_inicio`/`dias` sólo devuelve la elegibilidad; con ambos, agrega la
+    lista de reservas vivas que caen en el rango (para el aviso previo del modal).
+    """
+    uid = current_user["usuario_id"]
+    tid = current_user["tenant_id"]
+    usuario = db.query(Usuario).filter(
+        Usuario.id == uid, Usuario.tenant_id == tid).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    suscripcion = _suscripcion_activa(db, tid, uid)
+    if not suscripcion:
+        return {
+            "elegible": False,
+            "motivo": suspensiones_service.MOTIVO_SIN_PLAN,
+            "saldo_disponible": 0,
+            "dias_para_vencimiento": 0,
+            "periodos_usados": 0,
+            "reservas_a_cancelar": [],
+        }
+
+    resultado = _elegibilidad_para(db, usuario, suscripcion)
+    resultado["reservas_a_cancelar"] = []
+    if fecha_inicio is not None and dias is not None and dias > 0:
+        resultado["reservas_a_cancelar"] = _reservas_en_rango(
+            db, tid, uid, fecha_inicio, dias)
+    return resultado
+
+
+# ── Alumno: confirmar la suspensión ──────────────────────────────────────────
+@router.post("/alumnos/me/suspension", status_code=201)
+@limiter.limit(LIMIT_CRITICO)
+def crear_suspension(
+    request: Request,
+    data: SuspensionCreate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Confirma la suspensión: crea el registro, extiende la expiración y cancela.
+
+    Toca dinero/fechas de vencimiento, por eso va con `LIMIT_CRITICO` y toda la
+    lógica dentro de UNA transacción (ver `services/suspensiones_service.py`).
+    """
+    uid = current_user["usuario_id"]
+    tid = current_user["tenant_id"]
+    usuario = db.query(Usuario).filter(
+        Usuario.id == uid, Usuario.tenant_id == tid).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    suscripcion = _suscripcion_activa(db, tid, uid)
+    if not suscripcion:
+        raise HTTPException(status_code=400,
+                            detail=suspensiones_service.MOTIVO_SIN_PLAN)
+
+    try:
+        suspension = suspensiones_service.crear_suspension(
+            db, suscripcion, usuario, data.fecha_inicio, data.dias)
+    except ReembolsoTransitorio:
+        raise HTTPException(status_code=503, detail="Alta demanda, intenta de nuevo")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    reservas_canceladas = _reservas_canceladas_por_suspension(
+        db, tid, uid, data.fecha_inicio, data.dias)
+    return {
+        "suspension": {
+            "id": suspension.id,
+            "fecha_inicio": str(suspension.fecha_inicio),
+            "fecha_fin": str(suspension.fecha_fin),
+            "dias": suspension.dias,
+            "reservas_canceladas": suspension.reservas_canceladas,
+        },
+        "fecha_expiracion": str(suscripcion.fecha_expiracion),
+        "reservas_canceladas": reservas_canceladas,
+    }
+
+
+# ── Admin: listado (sólo lectura) + resumen de KPIs ─────────────────────────
+def _estado_suspension(s, hoy: date) -> str:
+    """'activa' | 'futura' | 'pasada' calculado en el momento (no se persiste)."""
+    inicio = fecha_chile(s.fecha_inicio)
+    fin = fecha_chile(s.fecha_fin)
+    if inicio <= hoy <= fin:
+        return "activa"
+    if inicio > hoy:
+        return "futura"
+    return "pasada"
+
+
+@router.get("/admin/suspensiones")
+def listar_suspensiones(
+    buscar: Optional[str] = Query(None),
+    estado: Optional[str] = Query(None),
+    desde: Optional[date] = Query(None),
+    hasta: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Listado de suspensiones del box (el admin sólo supervisa, no actúa).
+
+    Filtros: búsqueda por nombre/email de alumno, estado calculado en el momento
+    (activa/futura/pasada) y rango de `fecha_inicio`.
+    """
+    tid = current_user["tenant_id"]
+    query = (
+        db.query(SuspensionPlan, Usuario)
+        .join(Usuario, SuspensionPlan.usuario_id == Usuario.id)
+        .filter(SuspensionPlan.tenant_id == tid)
+    )
+    if buscar:
+        like = f"%{buscar}%"
+        query = query.filter(
+            Usuario.nombre.ilike(like) | Usuario.correo.ilike(like))
+    if desde:
+        query = query.filter(SuspensionPlan.fecha_inicio >= desde)
+    if hasta:
+        query = query.filter(SuspensionPlan.fecha_inicio <= hasta)
+
+    filas = query.order_by(SuspensionPlan.fecha_inicio.desc()).all()
+    hoy = hoy_santiago()
+    items = []
+    for s, u in filas:
+        estado_calc = _estado_suspension(s, hoy)
+        if estado and estado_calc != estado:
+            continue
+        items.append({
+            "id": s.id,
+            "alumno_id": s.usuario_id,
+            "alumno_nombre": u.nombre,
+            "alumno_email": u.correo,
+            "fecha_inicio": str(s.fecha_inicio),
+            "fecha_fin": str(s.fecha_fin),
+            "dias": s.dias,
+            "reservas_canceladas": s.reservas_canceladas,
+            "estado": estado_calc,
+            "created_at": str(s.created_at),
+        })
+    return items
+
+
+@router.get("/admin/suspensiones/resumen")
+def resumen_suspensiones(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Los 4 KPIs del mockup: activas hoy, del mes y días totales del mes (mes
+    calendario de Chile), y reservas canceladas como TOTAL HISTÓRICO (todas las
+    suspensiones de siempre, no sólo las del mes)."""
+    tid = current_user["tenant_id"]
+    suspensiones = (
+        db.query(SuspensionPlan)
+        .filter(SuspensionPlan.tenant_id == tid)
+        .all()
+    )
+    hoy = hoy_santiago()
+    mes = hoy.month
+    anio = hoy.year
+
+    activas_hoy = 0
+    del_mes = 0
+    dias_totales_mes = 0
+    reservas_canceladas_totales = 0
+
+    for s in suspensiones:
+        inicio = fecha_chile(s.fecha_inicio)
+        fin = fecha_chile(s.fecha_fin)
+        if inicio <= hoy <= fin:
+            activas_hoy += 1
+        if inicio.year == anio and inicio.month == mes:
+            del_mes += 1
+            dias_totales_mes += s.dias or 0
+        # TOTAL HISTÓRICO acumulado: TODAS las suspensiones de siempre (no el mes).
+        reservas_canceladas_totales += s.reservas_canceladas or 0
+
+    return {
+        "activas_hoy": activas_hoy,
+        "del_mes": del_mes,
+        "dias_totales_mes": dias_totales_mes,
+        "reservas_canceladas_totales": reservas_canceladas_totales,
+    }
+
+

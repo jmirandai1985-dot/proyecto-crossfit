@@ -75,6 +75,10 @@ export const MENU_BY_ROL = {
         { type: 'section', label: 'CATÁLOGO' },
         { label: 'Planes', path: '/admin/planes', icon: 'creditCard' },
         { label: 'Disciplinas', path: '/admin/disciplinas', icon: 'dumbbellLc' },
+        // Suspensiones de plan: supervisión (sólo lectura) de la suspensión
+        // self-service del alumno. Va en CATÁLOGO junto a Planes/Disciplinas por
+        // ser la vista que acompaña la gestión de membresías.
+        { label: 'Suspensiones', path: '/admin/suspensiones', icon: 'calendar' },
         { label: 'Bazar', path: '/admin/bazar', icon: 'shoppingCart' },
         { label: 'Pedidos', path: '/admin/pedidos', icon: 'shoppingBag' },
         // Marketing: los avisos del carrusel "Novedades del box" del Inicio del
