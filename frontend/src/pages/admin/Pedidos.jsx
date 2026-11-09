@@ -27,13 +27,13 @@ import { normalizarFiltroEstado } from '../../utils/pedidosAdmin';
  * muestra el comprobante (autenticado) y cambia el estado con confirmación.
  */
 const ESTADOS = [
-    { key: 'pendiente', label: '⏳ Pendiente', tono: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
-    { key: 'validado', label: '✅ Validado', tono: 'bg-blue-500/20 text-blue-300 border-blue-500/30' },
-    { key: 'entregado', label: '📦 Entregado', tono: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
+    { key: 'pendiente', label: 'Pendiente', tono: 'bg-amber-500/20 text-amber-300 border-amber-500/30', barra: 'border-l-amber-500' },
+    { key: 'validado', label: 'Validado', tono: 'bg-blue-500/20 text-blue-300 border-blue-500/30', barra: 'border-l-blue-500' },
+    { key: 'entregado', label: 'Entregado', tono: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30', barra: 'border-l-emerald-500' },
     // Rechazado (T3): un pendiente con comprobante inválido que el admin descartó. No es
     // un paso del avance (pendiente → validado → entregado), por eso no está en
     // SIGUIENTE_ESTADO: se llega por el botón "Rechazar" con un motivo obligatorio.
-    { key: 'rechazado', label: '❌ Rechazado', tono: 'bg-red-500/20 text-red-300 border-red-500/30' },
+    { key: 'rechazado', label: 'Rechazado', tono: 'bg-red-500/20 text-red-300 border-red-500/30', barra: 'border-l-red-500' },
 ];
 
 // Mismas transiciones que valida el backend (solo se avanza, no se retrocede).
@@ -48,6 +48,8 @@ const tonoDe = (estado) => ESTADOS.find((e) => e.key === estado)?.tono
     || 'bg-zinc-800 text-zinc-300 border-zinc-700';
 
 const etiquetaDe = (estado) => ESTADOS.find((e) => e.key === estado)?.label || estado;
+
+const barraDe = (estado) => ESTADOS.find((e) => e.key === estado)?.barra || 'border-l-zinc-700';
 
 // Estado REAL del pago online (sólo origen mercadopago): `origen_pago` es la
 // INTENCIÓN de pagar; la confirmación es `pago_estado='aprobado'` (webhook).
@@ -142,66 +144,74 @@ const AccionesPedido = ({
 };
 
 /**
- * TARJETA de pedido para mobile (<768px).
- *
- * POR QUÉ EXISTE: la tabla tiene 8 columnas y en un teléfono había que arrastrarla
- * en horizontal para ver el total o el código. La tarjeta deja lo importante en dos
- * líneas fijas —total + estado, y fecha + código de retiro— y las acciones abajo,
- * a lo ancho. En ≥768px sigue la tabla de siempre (`hidden md:block`).
+ * TARJETA de pedido unificada (desktop + mobile): resumen compacto cliqueable con
+ * franja de color por estado y detalle expandible en línea (sin salir de la lista).
+ * Reemplaza la tabla de 8 columnas y la tarjeta mobile anterior.
  */
 const TarjetaPedido = ({
-    pedido, accionId, onVerComprobante, onEntregar, onRechazar, onAvanzar,
+    pedido, expandido, onToggle, accionId, onVerComprobante, onEntregar, onRechazar, onAvanzar,
 }) => {
     const siguiente = SIGUIENTE_ESTADO[pedido.estado];
     return (
-        <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-            {/* Línea 1: total + estado */}
-            <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                    <p className="text-lg font-extrabold text-zinc-100">
-                        ${(pedido.total || 0).toLocaleString('es-CL')}
-                    </p>
-                    <p className="truncate text-[11.5px] text-zinc-500">
-                        Pedido #{pedido.id} · {pedido.cantidad} ×{' '}
-                        {pedido.producto_nombre || `Producto #${pedido.producto_id}`}
-                    </p>
+        <article className={`rounded-2xl border border-zinc-800 border-l-4 ${barraDe(pedido.estado)} bg-zinc-900 overflow-hidden`}>
+            <button
+                type="button"
+                onClick={() => onToggle(pedido.id)}
+                className="w-full text-left p-4 hover:bg-zinc-800/30 transition-colors"
+            >
+                {/* Línea 1: alumno + estado */}
+                <div className="flex items-center justify-between gap-3">
+                    <span className="truncate font-bold text-zinc-100">
+                        {pedido.alumno_nombre || `Alumno #${pedido.alumno_id}`}
+                    </span>
+                    <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold ${tonoDe(pedido.estado)}`}>
+                        {etiquetaDe(pedido.estado)}
+                    </span>
                 </div>
-                <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold ${tonoDe(pedido.estado)}`}>
-                    {etiquetaDe(pedido.estado)}
-                </span>
-            </div>
-            {/* Línea 2: fecha + código de retiro */}
-            <div className="mt-2 flex items-center justify-between gap-3 border-t border-zinc-800 pt-2">
-                <span className="text-[12px] text-zinc-400">
-                    {pedido.fecha_pedido ? fmtFechaChile(pedido.fecha_pedido) : '—'}
-                </span>
-                <span className="font-mono text-[13px] font-bold tracking-wider text-orange-300">
-                    {pedido.codigo_retiro || 'Sin código'}
-                </span>
-            </div>
-            {/* Quién lo pidió (contexto, una línea) */}
-            <p className="mt-2 truncate text-[12.5px] text-zinc-300">
-                {pedido.alumno_nombre || `Alumno #${pedido.alumno_id}`}
-            </p>
-            {pedido.alumno_email && (
-                <p className="truncate text-[11px] text-zinc-500">{pedido.alumno_email}</p>
+                {/* Línea 2: producto + total */}
+                <div className="mt-1.5 flex items-center justify-between gap-3">
+                    <span className="truncate text-sm text-zinc-400">
+                        {pedido.cantidad} × {pedido.producto_nombre || `Producto #${pedido.producto_id}`}
+                    </span>
+                    <span className="shrink-0 text-base font-extrabold text-zinc-100">
+                        ${(pedido.total || 0).toLocaleString('es-CL')}
+                    </span>
+                </div>
+                {/* Línea 3: fecha + código de retiro */}
+                <div className="mt-1.5 flex items-center justify-between gap-3">
+                    <span className="text-[12px] text-zinc-500">
+                        {pedido.fecha_pedido ? fmtFechaChile(pedido.fecha_pedido) : '—'} · Pedido #{pedido.id}
+                    </span>
+                    <span className="shrink-0 font-mono text-[13px] font-bold tracking-wider text-orange-300">
+                        {pedido.codigo_retiro || 'Sin código'}
+                    </span>
+                </div>
+            </button>
+            {expandido && (
+                <div className="border-t border-zinc-800 p-4">
+                    {pedido.alumno_email && (
+                        <p className="truncate text-[12.5px] text-zinc-300">
+                            Correo: {pedido.alumno_email}
+                        </p>
+                    )}
+                    {pedido.entregado_en && (
+                        <p className="mt-1 text-[11.5px] text-zinc-500">
+                            Entregado {fmtFechaChile(pedido.entregado_en)}
+                            {pedido.entregado_por_nombre ? ` por ${pedido.entregado_por_nombre}` : ''}
+                        </p>
+                    )}
+                    <AccionesPedido
+                        pedido={pedido}
+                        siguiente={siguiente}
+                        accionId={accionId}
+                        onVerComprobante={onVerComprobante}
+                        onEntregar={onEntregar}
+                        onRechazar={onRechazar}
+                        onAvanzar={onAvanzar}
+                        className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-3"
+                    />
+                </div>
             )}
-            {pedido.entregado_en && (
-                <p className="mt-1 text-[11px] text-zinc-500">
-                    Entregado {fmtFechaChile(pedido.entregado_en)}
-                    {pedido.entregado_por_nombre ? ` por ${pedido.entregado_por_nombre}` : ''}
-                </p>
-            )}
-            <AccionesPedido
-                pedido={pedido}
-                siguiente={siguiente}
-                accionId={accionId}
-                onVerComprobante={onVerComprobante}
-                onEntregar={onEntregar}
-                onRechazar={onRechazar}
-                onAvanzar={onAvanzar}
-                className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-3"
-            />
         </article>
     );
 };
@@ -231,6 +241,10 @@ const AdminPedidos = () => {
     // Entrega por código: `entrega` = código pre-cargado (el de la fila) o '' para
     // abrir el modal vacío desde el botón del header. `null` = modal cerrado.
     const [entrega, setEntrega] = useState(null);
+    // Detalle expandible por tarjeta: `expandido[id]` controla qué tarjetas muestran
+    // su detalle completo (se pueden abrir varias a la vez).
+    const [expandido, setExpandido] = useState({});
+    const toggleExpandido = (id) => setExpandido((prev) => ({ ...prev, [id]: !prev[id] }));
 
     const cargar = useCallback(async () => {
         setLoading(true);
@@ -399,102 +413,14 @@ const AdminPedidos = () => {
                     </div>
                 ) : (
                     <>
-                    {/* ESCRITORIO (≥768px): la tabla de siempre. En mobile se oculta
-                        (`md:block`) y deja lugar a las tarjetas de abajo. */}
-                    <div className="hidden bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden md:block">
-                        <div className="overflow-x-auto">
-                            <table className="w-full">
-                                <thead>
-                                    <tr className="bg-zinc-800">
-                                        <th className="px-4 py-3.5 text-left text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Alumno</th>
-                                        <th className="px-4 py-3.5 text-left text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Producto</th>
-                                        <th className="px-4 py-3.5 text-left text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Cantidad</th>
-                                        <th className="px-4 py-3.5 text-left text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Total</th>
-                                        <th className="px-4 py-3.5 text-left text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Fecha</th>
-                                        <th className="px-4 py-3.5 text-left text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Estado</th>
-                                        <th className="px-4 py-3.5 text-left text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Código de retiro</th>
-                                        <th className="px-4 py-3.5 text-right text-[11px] uppercase tracking-wider text-zinc-500 font-bold">Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-zinc-800">
-                                    {pedidos.map((p) => {
-                                        const siguiente = SIGUIENTE_ESTADO[p.estado];
-                                        return (
-                                            <tr key={p.id} className="hover:bg-zinc-800/40 transition-colors">
-                                                <td className="px-4 py-3.5">
-                                                    <div className="font-bold text-zinc-100">
-                                                        {p.alumno_nombre || `Alumno #${p.alumno_id}`}
-                                                    </div>
-                                                    {p.alumno_email && (
-                                                        <div className="text-[11.5px] text-zinc-500">{p.alumno_email}</div>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-3.5 text-[13.5px] text-zinc-100">
-                                                    {p.producto_nombre || `Producto #${p.producto_id}`}
-                                                </td>
-                                                <td className="px-4 py-3.5 text-[13.5px] text-zinc-300">{p.cantidad}</td>
-                                                <td className="px-4 py-3.5 text-[13.5px] font-bold text-zinc-100">
-                                                    ${(p.total || 0).toLocaleString('es-CL')}
-                                                </td>
-                                                <td className="px-4 py-3.5 text-[12.5px] text-zinc-400">
-                                                    {p.fecha_pedido ? fmtFechaChile(p.fecha_pedido) : '—'}
-                                                    <span className="block text-[11px] text-zinc-500">Pedido #{p.id}</span>
-                                                </td>
-                                                <td className="px-4 py-3.5">
-                                                    <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full border ${tonoDe(p.estado)}`}>
-                                                        {etiquetaDe(p.estado)}
-                                                    </span>
-                                                </td>
-                                                {/* Código de retiro + traza de la entrega: el código
-                                                    aparece desde que el pedido se valida y sólo lo
-                                                    puede usar el mesón (aquí, o el coach con su propio
-                                                    acceso). */}
-                                                <td className="px-4 py-3.5">
-                                                    {p.codigo_retiro ? (
-                                                        <>
-                                                            <span className="font-mono text-[13.5px] font-bold tracking-wider text-orange-300">
-                                                                {p.codigo_retiro}
-                                                            </span>
-                                                            {p.entregado_en && (
-                                                                <div className="text-[11px] text-zinc-500 mt-0.5">
-                                                                    Entregado {fmtFechaChile(p.entregado_en)}
-                                                                    {p.entregado_por_nombre
-                                                                        ? ` por ${p.entregado_por_nombre}` : ''}
-                                                                </div>
-                                                            )}
-                                                        </>
-                                                    ) : (
-                                                        <span className="text-xs text-zinc-600">—</span>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-3.5">
-                                                    <AccionesPedido
-                                                        pedido={p}
-                                                        siguiente={siguiente}
-                                                        accionId={accionId}
-                                                        onVerComprobante={setComprobante}
-                                                        onEntregar={abrirEntrega}
-                                                        onRechazar={abrirRechazo}
-                                                        onAvanzar={abrirConfirmacion}
-                                                        className="flex items-center justify-end gap-2"
-                                                    />
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    {/* MOBILE (<768px): una tarjeta por pedido. La tabla de 8 columnas
-                        obligaba a arrastrar en horizontal; acá el total, el estado, la
-                        fecha y el código de retiro se leen sin scroll lateral. */}
-                    <div className="space-y-3 md:hidden">
+                    {/* Lista unificada de tarjetas cliqueables (desktop + mobile). */}
+                    <div className="space-y-3">
                         {pedidos.map((p) => (
                             <TarjetaPedido
                                 key={p.id}
                                 pedido={p}
+                                expandido={!!expandido[p.id]}
+                                onToggle={toggleExpandido}
                                 accionId={accionId}
                                 onVerComprobante={setComprobante}
                                 onEntregar={abrirEntrega}
@@ -503,6 +429,9 @@ const AdminPedidos = () => {
                             />
                         ))}
                     </div>
+
+
+
                     </>
                 )}
 
