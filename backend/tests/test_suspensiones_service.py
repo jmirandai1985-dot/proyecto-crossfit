@@ -10,7 +10,7 @@ Correr:
     ENVIRONMENT=test py -3.12 -m pytest tests/test_suspensiones_service.py -q
 """
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -29,8 +29,9 @@ def _suscripcion(creditos=None, expiracion=None):
     return SimpleNamespace(creditos_disponibles=creditos, fecha_expiracion=expiracion)
 
 
-def _suspension(fecha_inicio, dias):
-    return SimpleNamespace(fecha_inicio=fecha_inicio, dias=dias)
+def _suspension(fecha_inicio, dias, cancelada=False, fecha_fin=None):
+    return SimpleNamespace(fecha_inicio=fecha_inicio, dias=dias, cancelada=cancelada,
+                           fecha_fin=fecha_fin)
 
 
 # ── ciclo_vigente ────────────────────────────────────────────────────────────
@@ -73,6 +74,16 @@ def test_dias_usados_suma_solo_las_del_ciclo():
         _suspension(datetime(2027, 4, 1, tzinfo=SANTIAGO), 3),   # ciclo siguiente
     ]
     assert svc.dias_usados_en_ciclo(suspensiones, ciclo_inicio, ciclo_fin) == 7
+
+
+def test_dias_usados_excluye_canceladas():
+    ciclo_inicio = datetime(2026, 3, 15, tzinfo=SANTIAGO)
+    ciclo_fin = datetime(2027, 3, 15, tzinfo=SANTIAGO)
+    suspensiones = [
+        _suspension(datetime(2026, 4, 1, tzinfo=SANTIAGO), 5, cancelada=False),
+        _suspension(datetime(2026, 9, 1, tzinfo=SANTIAGO), 2, cancelada=True),  # cancelada: no cuenta
+    ]
+    assert svc.dias_usados_en_ciclo(suspensiones, ciclo_inicio, ciclo_fin) == 5
 
 
 # ── calcular_elegibilidad ────────────────────────────────────────────────────
@@ -139,4 +150,79 @@ def test_saldo_disponible_descuenta_los_dias_usados():
                                   suspensiones, HOY)
     assert r["elegible"] is True
     assert r["saldo_disponible"] == 7
+
+
+def test_saldo_recupera_dias_de_suspensiones_canceladas():
+    # 7 días CANCELADOS no cuentan: el alumno recupera esos días del saldo (14).
+    cancelada = _suspension(datetime(2026, 4, 1, tzinfo=SANTIAGO), 7, cancelada=True)
+    r = svc.calcular_elegibilidad(_suscripcion(creditos=10), SimpleNamespace(),
+                                  [cancelada], HOY)
+    assert r["elegible"] is True
+    assert r["saldo_disponible"] == 14
+
+
+# ── puede_cancelar (cupo anual de cancelación) ───────────────────────────────
+def test_puede_cancelar_sin_cancelaciones_previas():
+    del_ciclo = [_suspension(datetime(2026, 4, 1, tzinfo=SANTIAGO), 5, cancelada=False)]
+    assert svc.puede_cancelar(del_ciclo) is True
+    assert svc.puede_cancelar([]) is True
+
+
+def test_puede_cancelar_con_cancelacion_previa_en_el_ciclo():
+    del_ciclo = [
+        _suspension(datetime(2026, 4, 1, tzinfo=SANTIAGO), 5, cancelada=True),
+        _suspension(datetime(2026, 8, 1, tzinfo=SANTIAGO), 3, cancelada=False),
+    ]
+    assert svc.puede_cancelar(del_ciclo) is False
+
+
+def test_puede_cancelar_cancelacion_en_ciclo_anterior_no_cuenta():
+    # La cancelación del ciclo ANTERIOR queda fuera de `suspensiones_del_ciclo`
+    # (el llamador filtra por `fecha_inicio` en el ciclo vigente). Acá se simula
+    # ese filtro: el ciclo vigente no tiene ninguna `cancelada=True`.
+    inscripcion = datetime(2026, 3, 15, 12, 0, tzinfo=SANTIAGO)
+    ciclo_inicio, ciclo_fin = svc.ciclo_vigente(inscripcion, HOY)
+    todas = [
+        _suspension(datetime(2025, 9, 1, tzinfo=SANTIAGO), 5, cancelada=True),   # ciclo anterior
+        _suspension(datetime(2026, 4, 1, tzinfo=SANTIAGO), 3, cancelada=False),  # ciclo vigente
+    ]
+    del_ciclo = [s for s in todas if ciclo_inicio <= s.fecha_inicio < ciclo_fin]
+    assert len(del_ciclo) == 1
+    assert svc.puede_cancelar(del_ciclo) is True
+
+
+# ── suspensión activa hoy (fix de visibilidad: no solapar dos suspensiones) ──
+def _activa(fecha_inicio_delta=-2, fecha_fin_delta=3):
+    inicio = datetime.combine(HOY + timedelta(days=fecha_inicio_delta), time.min,
+                              tzinfo=SANTIAGO)
+    fin = datetime.combine(HOY + timedelta(days=fecha_fin_delta), time.min, tzinfo=SANTIAGO)
+    return _suspension(inicio, 5, fecha_fin=fin)
+
+
+def test_suspension_activa_encuentra_la_viva_y_ignora_canceladas():
+    viva = _activa()
+    cancelada = _activa()  # mismo rango, pero marcada cancelada
+    cancelada.cancelada = True
+    futura = _suspension(datetime.combine(HOY + timedelta(days=5), time.min, tzinfo=SANTIAGO),
+                         5, fecha_fin=datetime.combine(HOY + timedelta(days=10), time.min, tzinfo=SANTIAGO))
+
+    assert svc.suspension_activa([cancelada, viva], HOY) is viva
+    assert svc.suspension_activa([cancelada, futura], HOY) is None
+
+
+def test_calcular_elegibilidad_con_suspension_activa():
+    r = svc.calcular_elegibilidad(_suscripcion(creditos=10), SimpleNamespace(),
+                                  [_activa()], HOY)
+    assert r["elegible"] is False
+    assert r["motivo"] == "Ya tienes una suspensión activa hasta 08/10/2026"
+
+
+def test_calcular_elegibilidad_sin_suspension_activa_sigue_elegible():
+    # Suspensión pasada (no activa hoy) no bloquea: el alumno puede pedir otra.
+    pasada = _suspension(datetime.combine(HOY - timedelta(days=10), time.min, tzinfo=SANTIAGO),
+                         5, fecha_fin=datetime.combine(HOY - timedelta(days=5), time.min, tzinfo=SANTIAGO))
+    r = svc.calcular_elegibilidad(_suscripcion(creditos=10), SimpleNamespace(),
+                                  [pasada], HOY)
+    assert r["elegible"] is True
+    assert r["motivo"] is None
 

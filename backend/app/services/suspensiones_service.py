@@ -52,6 +52,17 @@ MOTIVO_VENCIMIENTO = "No disponible — faltan {n} días para poder suspender"
 MOTIVO_SALDO = "Ya usaste los 14 días de suspensión de este ciclo."
 MOTIVO_PERIODOS = "Ya usaste los 2 períodos de suspensión permitidos en este ciclo."
 
+# ── Cancelación anticipada (fix del abuso en plan ilimitado) ─────────────────
+# Cupo: 1 cancelación por ciclo (el mismo ciclo del aniversario de inscripción).
+MOTIVO_SUSPENSION_NO_EXISTE = "La suspensión no existe."
+MOTIVO_SUSPENSION_YA_CANCELADA = "Esta suspensión ya fue cancelada."
+MOTIVO_SUSPENSION_NO_ACTIVA = "La suspensión no está activa hoy: no se puede cancelar."
+MOTIVO_CANCELACION_USADA = ("Ya cancelaste una suspensión este año: "
+                            "solo puedes cancelar una vez por ciclo.")
+# No se puede crear una suspensión si YA hay una activa hoy (fix de visibilidad):
+# antes el alumno podía solapar dos suspensiones y quedarse con el doble beneficio.
+MOTIVO_SUSPENSION_ACTIVA = "Ya tienes una suspensión activa."
+
 
 # ── Helpers puros ────────────────────────────────────────────────────────────
 def _a_date(valor) -> date:
@@ -89,14 +100,17 @@ def ciclo_vigente(fecha_inscripcion: datetime, hoy: datetime) -> tuple[datetime,
 
 
 def dias_usados_en_ciclo(suspensiones: list, ciclo_inicio: datetime, ciclo_fin: datetime) -> int:
-    """Suma los días de las suspensiones que caen dentro del ciclo vigente.
+    """Suma los días de las suspensiones NO canceladas que caen dentro del ciclo.
 
     "Cae dentro" = `fecha_inicio` está en `[ciclo_inicio, ciclo_fin)`. Se atribuye
     por la fecha de INICIO (no se prorratea una suspensión que cruce el borde del
-    ciclo): es la regla más simple y la que usa el saldo del alumno.
+    ciclo). Una suspensión CANCELADA (`cancelada=True`) NO cuenta: al cancelar, el
+    alumno recupera esos días del saldo anual de 14.
     """
     total = 0
     for s in suspensiones:
+        if bool(getattr(s, "cancelada", False)):
+            continue
         fi = getattr(s, "fecha_inicio", None)
         if fi is None:
             continue
@@ -112,6 +126,33 @@ def _dias_hasta(fecha_expiracion, hoy) -> int:
     return (fecha_chile(fecha_expiracion) - _a_date(hoy)).days
 
 
+def suspension_activa(suspensiones: list, hoy):
+    """La suspensión NO cancelada cuyo rango cubre `hoy` (o `None`).
+
+    Fix de visibilidad: el alumno no puede tener dos suspensiones solapadas, así
+    que antes de crear una nueva hay que mirar si ya hay una viva hoy. Devuelve el
+    objeto (o `None`); el llamador decide si es error o sólo deshabilita el botón.
+    """
+    hoy_dia = _a_date(hoy)
+    for s in suspensiones:
+        if bool(getattr(s, "cancelada", False)):
+            continue
+        inicio = fecha_chile(getattr(s, "fecha_inicio", None))
+        fin = fecha_chile(getattr(s, "fecha_fin", None))
+        if inicio is not None and fin is not None and inicio <= hoy_dia <= fin:
+            return s
+    return None
+
+
+def motivo_suspension_activa(s) -> str:
+    """El `motivo` exacto que ve el alumno: la suspensión activa y su fecha de fin."""
+    fin = fecha_chile(getattr(s, "fecha_fin", None))
+    if fin is None:
+        return MOTIVO_SUSPENSION_ACTIVA
+    return f"Ya tienes una suspensión activa hasta {fin.strftime('%d/%m/%Y')}"
+
+
+
 def calcular_elegibilidad(suscripcion, usuario, suspensiones_del_ciclo: list, hoy) -> dict:
     """Aplica las reglas 3a y 3b (más saldo y tope de períodos) y arma la respuesta.
 
@@ -120,10 +161,27 @@ def calcular_elegibilidad(suscripcion, usuario, suspensiones_del_ciclo: list, ho
     (no un código), `saldo_disponible` (días que le quedan del ciclo) y
     `dias_para_vencimiento` (días hasta la expiración del plan).
     """
-    dias_usados = sum(int(getattr(s, "dias", 0) or 0) for s in suspensiones_del_ciclo)
+    dias_usados = sum(
+        int(getattr(s, "dias", 0) or 0)
+        for s in suspensiones_del_ciclo
+        if not bool(getattr(s, "cancelada", False))
+    )
     periodos_usados = len(suspensiones_del_ciclo)
     saldo_disponible = max(0, DIAS_ANUALES - dias_usados)
     dias_para_vencimiento = _dias_hasta(suscripcion.fecha_expiracion, hoy)
+
+    # Fix (Fanny): si YA hay una suspensión activa hoy, no se puede pedir otra. Va
+    # ANTES de cualquier otra regla para que el botón del frontend salga
+    # deshabilitado con el motivo correcto, sin esperar el rechazo del POST.
+    activa = suspension_activa(suspensiones_del_ciclo, hoy)
+    if activa is not None:
+        return {
+            "elegible": False,
+            "motivo": motivo_suspension_activa(activa),
+            "saldo_disponible": saldo_disponible,
+            "dias_para_vencimiento": dias_para_vencimiento,
+            "periodos_usados": periodos_usados,
+        }
 
     elegible = True
     motivo = None
@@ -151,6 +209,19 @@ def calcular_elegibilidad(suscripcion, usuario, suspensiones_del_ciclo: list, ho
         "dias_para_vencimiento": dias_para_vencimiento,
         "periodos_usados": periodos_usados,
     }
+
+
+# ── Cancelación anticipada (regla pura + escritura) ──────────────────────────
+def puede_cancelar(suspensiones_del_ciclo: list) -> bool:
+    """¿El alumno todavía tiene su cupo de cancelación en este ciclo?
+
+    La cancelación anticipada se puede usar UNA vez por ciclo (el del aniversario
+    de inscripción), NO una vez por suspensión. Devuelve False si ya hay alguna
+    suspensión `cancelada=True` en `suspensiones_del_ciclo` (ya filtrado al ciclo
+    vigente por el llamador). No cuenta lo que esté fuera del ciclo: una
+    cancelación del año pasado no bloquea la de este año.
+    """
+    return not any(bool(getattr(s, "cancelada", False)) for s in suspensiones_del_ciclo)
 
 
 # ── Escritura (transacción atómica) ──────────────────────────────────────────
@@ -199,6 +270,14 @@ def crear_suspension(db: Session, suscripcion, usuario, fecha_inicio: date,
                 SuspensionPlan.tenant_id == tenant_id)
         .all()
     )
+
+    # Fix: no se puede crear una suspensión si YA hay una activa hoy (defensa en
+    # profundidad: el frontend ya la deshabilita vía `calcular_elegibilidad`, pero
+    # acá se valida sobre TODAS las suspensiones del usuario, no sólo las del ciclo).
+    activa = suspension_activa(suspensiones, hoy)
+    if activa is not None:
+        raise ValueError(motivo_suspension_activa(activa))
+
     suspensiones_del_ciclo = [
         s for s in suspensiones if ciclo_inicio <= s.fecha_inicio < ciclo_fin
     ]
@@ -225,6 +304,9 @@ def crear_suspension(db: Session, suscripcion, usuario, fecha_inicio: date,
         fecha_inicio=fecha_inicio_dt,
         fecha_fin=fecha_fin_dt,
         dias=dias,
+        # El original se captura ANTES de extender (la línea de abajo hace el `+= dias`).
+        # Es lo que permite revertir exacto si el alumno cancela antes de tiempo.
+        fecha_expiracion_original=suscripcion.fecha_expiracion,
         reservas_canceladas=0,
     )
     db.add(suspension)
@@ -287,5 +369,79 @@ def crear_suspension(db: Session, suscripcion, usuario, fecha_inicio: date,
     db.commit()
     db.refresh(suspension)
     return suspension
+
+
+def cancelar_suspension(db: Session, suspension, suscripcion) -> Suscripcion:
+    """Cancela una suspensión activa y revierte `fecha_expiracion` a la original.
+
+    Fix del abuso en plan ILIMITADO: si el alumno vuelve antes de que termine su
+    suspensión, con esto puede revertir la extensión y no quedarse con días de
+    regalo. Reglas:
+
+      * la suspensión debe estar ACTIVA hoy (`fecha_inicio <= hoy <= fecha_fin`) y
+        no haber sido cancelada ya;
+      * cupo anual: UNA sola cancelación por ciclo (`puede_cancelar`);
+      * `fecha_expiracion = fecha_expiracion_original` (exacto, no proporcional).
+
+    NO revierte las reservas que ya se cancelaron automáticamente al suspender: es
+    una limitación conocida (documentada), no un bug. Transacción atómica.
+    """
+    tenant_id = suspension.tenant_id
+    usuario_id = suspension.usuario_id
+    hoy = hoy_santiago()
+
+    # Serialización (mismo patrón que `crear_suspension`): un doble click no puede
+    # cancelar dos veces ni gastar el cupo anual dos veces.
+    usuario = db.query(Usuario).filter(
+        Usuario.id == usuario_id,
+        Usuario.tenant_id == tenant_id,
+    ).with_for_update().first()
+    if usuario is None:
+        raise ValueError(MOTIVO_SUSPENSION_NO_EXISTE)
+
+    susp = db.query(SuspensionPlan).filter(
+        SuspensionPlan.id == suspension.id,
+        SuspensionPlan.tenant_id == tenant_id,
+    ).with_for_update().first()
+    if susp is None:
+        raise ValueError(MOTIVO_SUSPENSION_NO_EXISTE)
+    suspension = susp
+
+    if suspension.cancelada:
+        raise ValueError(MOTIVO_SUSPENSION_YA_CANCELADA)
+
+    inicio = fecha_chile(suspension.fecha_inicio)
+    fin = fecha_chile(suspension.fecha_fin)
+    if not (inicio <= hoy <= fin):
+        raise ValueError(MOTIVO_SUSPENSION_NO_ACTIVA)
+
+    sus = db.query(Suscripcion).filter(
+        Suscripcion.id == suscripcion.id,
+        Suscripcion.tenant_id == tenant_id,
+    ).with_for_update().first()
+    if sus is None:
+        raise ValueError(MOTIVO_SUSPENSION_NO_EXISTE)
+    suscripcion = sus
+
+    # Cupo anual: sólo se puede cancelar UNA vez por ciclo (no por suspensión).
+    ciclo_inicio, ciclo_fin = ciclo_vigente(usuario.created_at, hoy)
+    suspensiones = (
+        db.query(SuspensionPlan)
+        .filter(SuspensionPlan.usuario_id == usuario_id,
+                SuspensionPlan.tenant_id == tenant_id)
+        .all()
+    )
+    del_ciclo = [s for s in suspensiones if ciclo_inicio <= s.fecha_inicio < ciclo_fin]
+    if not puede_cancelar(del_ciclo):
+        raise ValueError(MOTIVO_CANCELACION_USADA)
+
+    # Reversión exacta: la fecha vuelve a la que tenía antes de la extensión.
+    suscripcion.fecha_expiracion = suspension.fecha_expiracion_original
+    suspension.cancelada = True
+    suspension.cancelada_en = ahora_santiago()
+
+    db.commit()
+    db.refresh(suscripcion)
+    return suscripcion
 
 

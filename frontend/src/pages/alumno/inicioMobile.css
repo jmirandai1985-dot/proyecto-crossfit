@@ -697,6 +697,22 @@
     white-space: nowrap;
 }
 
+/* Banner informativo de suspensión activa (no es error): tono dorado/ámbar. */
+.ub-inicio .ub-suspension-banner {
+    display: block;
+    width: 100%;
+    text-align: left;
+    margin-top: 14px;
+    border: 1.5px solid var(--ub-gold);
+    border-radius: var(--ub-r-md);
+    padding: 12px 14px;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--ub-text);
+    background: transparent;
+}
+
 /* Candado "siguiente plan asegurado": ícono decorativo, sin acción de click. */
 .ub-inicio .ctx-seguro {
     display: inline-flex;

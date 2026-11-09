@@ -71,6 +71,8 @@ const CoachAlumnosPrueba = lazy(() => import('./pages/coach/AlumnosPrueba'));
 // · Familia ALUMNO
 const AlumnoDashboard = lazy(() => import('./pages/alumno/Dashboard'));
 const AlumnoMisReservas = lazy(() => import('./pages/alumno/MisReservas'));
+// Suspensión de plan: pantalla propia (saldo, suspensión activa, historial).
+const AlumnoSuspension = lazy(() => import('./pages/alumno/Suspension'));
 const AlumnoPizarraRMs = lazy(() => import('./pages/alumno/PizarraRMs'));
 const AlumnoAjustes = lazy(() => import('./pages/alumno/Ajustes'));
 const AlumnoSolicitarPlan = lazy(() => import('./pages/alumno/SolicitarPlan'));
@@ -202,6 +204,7 @@ function App() {
           <Route path="/alumno/*" element={<ProtectedRoute roles={ROLES_ALUMNO} />}>
             <Route path="dashboard" element={<AlumnoDashboard />} />
             <Route path="mis-reservas" element={<AlumnoMisReservas />} />
+            <Route path="suspension" element={<AlumnoSuspension />} />
             <Route path="rms" element={<AlumnoPizarraRMs />} />
             <Route path="ajustes" element={<AlumnoAjustes />} />
             <Route path="solicitar-plan" element={<AlumnoSolicitarPlan />} />

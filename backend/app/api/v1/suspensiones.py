@@ -126,8 +126,8 @@ def _reservas_canceladas_por_suspension(db: Session, tenant_id: int, usuario_id:
     ]
 
 
-def _elegibilidad_para(db: Session, usuario: Usuario, suscripcion) -> dict:
-    """Elegibilidad + saldo del ciclo vigente para `usuario`/`suscripcion`."""
+def _suspensiones_del_ciclo(db: Session, usuario: Usuario) -> list:
+    """Suspensiones del ciclo vigente (por `fecha_inicio`), para saldo y cupo."""
     hoy = hoy_santiago()
     ciclo_inicio, ciclo_fin = suspensiones_service.ciclo_vigente(usuario.created_at, hoy)
     suspensiones = (
@@ -136,8 +136,30 @@ def _elegibilidad_para(db: Session, usuario: Usuario, suscripcion) -> dict:
                 SuspensionPlan.tenant_id == usuario.tenant_id)
         .all()
     )
-    del_ciclo = [s for s in suspensiones if ciclo_inicio <= s.fecha_inicio < ciclo_fin]
-    return suspensiones_service.calcular_elegibilidad(suscripcion, usuario, del_ciclo, hoy)
+    return [s for s in suspensiones if ciclo_inicio <= s.fecha_inicio < ciclo_fin]
+
+
+def _suspension_activa_hoy(db: Session, tenant_id: int, usuario_id: int):
+    """La suspensión no cancelada cuyo rango cubre HOY (o None)."""
+    hoy = hoy_santiago()
+    suspensiones = (
+        db.query(SuspensionPlan)
+        .filter(SuspensionPlan.usuario_id == usuario_id,
+                SuspensionPlan.tenant_id == tenant_id,
+                SuspensionPlan.cancelada == False)  # noqa: E712
+        .all()
+    )
+    for s in suspensiones:
+        if fecha_chile(s.fecha_inicio) <= hoy <= fecha_chile(s.fecha_fin):
+            return s
+    return None
+
+
+def _elegibilidad_para(db: Session, usuario: Usuario, suscripcion) -> dict:
+    """Elegibilidad + saldo del ciclo vigente para `usuario`/`suscripcion`."""
+    del_ciclo = _suspensiones_del_ciclo(db, usuario)
+    return suspensiones_service.calcular_elegibilidad(suscripcion, usuario, del_ciclo,
+                                                      hoy_santiago())
 
 
 # ── Alumno: elegibilidad + previsualización de cancelaciones ─────────────────
@@ -169,6 +191,8 @@ def elegibilidad_suspension(
             "dias_para_vencimiento": 0,
             "periodos_usados": 0,
             "reservas_a_cancelar": [],
+            "suspension_activa": None,
+            "puede_cancelar": False,
         }
 
     resultado = _elegibilidad_para(db, usuario, suscripcion)
@@ -176,6 +200,21 @@ def elegibilidad_suspension(
     if fecha_inicio is not None and dias is not None and dias > 0:
         resultado["reservas_a_cancelar"] = _reservas_en_rango(
             db, tid, uid, fecha_inicio, dias)
+
+    # ── Cancelación anticipada: suspensión activa hoy + cupo anual ───────────
+    suspension_activa = _suspension_activa_hoy(db, tid, uid)
+    del_ciclo = _suspensiones_del_ciclo(db, usuario)
+    resultado["suspension_activa"] = (
+        {"id": suspension_activa.id,
+         "fecha_inicio": str(suspension_activa.fecha_inicio),
+         "fecha_fin": str(suspension_activa.fecha_fin),
+         "dias": suspension_activa.dias}
+        if suspension_activa else None
+    )
+    resultado["puede_cancelar"] = (
+        suspension_activa is not None
+        and suspensiones_service.puede_cancelar(del_ciclo)
+    )
     return resultado
 
 
@@ -226,6 +265,87 @@ def crear_suspension(
         "fecha_expiracion": str(suscripcion.fecha_expiracion),
         "reservas_canceladas": reservas_canceladas,
     }
+
+
+# ── Alumno: cancelar una suspensión activa (fix del abuso en plan ilimitado) ──
+@router.post("/alumnos/me/suspension/{suspension_id}/cancelar")
+@limiter.limit(LIMIT_CRITICO)
+def cancelar_suspension(
+    suspension_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Cancela una suspensión activa y revierte `fecha_expiracion` a la original.
+
+    Toca `fecha_expiracion` (dinero/duración del plan), por eso `LIMIT_CRITICO`.
+    Sólo el dueño de la suspensión puede cancelarla (validado por `usuario_id` del
+    token + `tenant_id`).
+    """
+    uid = current_user["usuario_id"]
+    tid = current_user["tenant_id"]
+
+    suspension = db.query(SuspensionPlan).filter(
+        SuspensionPlan.id == suspension_id,
+        SuspensionPlan.usuario_id == uid,
+        SuspensionPlan.tenant_id == tid,
+    ).first()
+    if not suspension:
+        raise HTTPException(status_code=404, detail="Suspensión no encontrada")
+
+    suscripcion = db.query(Suscripcion).filter(
+        Suscripcion.id == suspension.suscripcion_id,
+        Suscripcion.usuario_id == uid,
+        Suscripcion.tenant_id == tid,
+    ).first()
+    if not suscripcion:
+        raise HTTPException(status_code=404, detail="Suscripción no encontrada")
+
+    try:
+        suscripcion = suspensiones_service.cancelar_suspension(db, suspension, suscripcion)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "suspension_id": suspension.id,
+        "fecha_expiracion": str(suscripcion.fecha_expiracion),
+    }
+
+
+# ── Alumno: historial de SUS propias suspensiones ────────────────────────────
+@router.get("/alumnos/me/suspensiones")
+def mis_suspensiones(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Historial del alumno autenticado: período, días, fechas y estado.
+
+    Reusa `_estado_suspension` (misma regla activa/futura/pasada que el admin) y le
+    suma el caso `cancelada` (cuando `suspension.cancelada` es True), para que el
+    alumno vea cuáles canceló sin duplicar la lógica de fechas.
+    """
+    uid = current_user["usuario_id"]
+    tid = current_user["tenant_id"]
+    suspensiones = (
+        db.query(SuspensionPlan)
+        .filter(SuspensionPlan.usuario_id == uid,
+                SuspensionPlan.tenant_id == tid)
+        .order_by(SuspensionPlan.fecha_inicio.desc())
+        .all()
+    )
+    hoy = hoy_santiago()
+    items = []
+    for s in suspensiones:
+        estado = "cancelada" if s.cancelada else _estado_suspension(s, hoy)
+        items.append({
+            "id": s.id,
+            "fecha_inicio": str(s.fecha_inicio),
+            "fecha_fin": str(s.fecha_fin),
+            "dias": s.dias,
+            "estado": estado,
+            "cancelada": bool(s.cancelada),
+        })
+    return items
 
 
 # ── Admin: listado (sólo lectura) + resumen de KPIs ─────────────────────────
@@ -286,6 +406,7 @@ def listar_suspensiones(
             "dias": s.dias,
             "reservas_canceladas": s.reservas_canceladas,
             "estado": estado_calc,
+            "cancelada": bool(s.cancelada),
             "created_at": str(s.created_at),
         })
     return items

@@ -1,7 +1,7 @@
 """
 Modelo SQLAlchemy para la tabla suspensiones_plan
 """
-from sqlalchemy import Column, Integer, ForeignKey, Index
+from sqlalchemy import Column, Integer, ForeignKey, Index, Boolean
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.sql import func
 
@@ -33,6 +33,15 @@ class SuspensionPlan(Base):
     fecha_inicio = Column(TIMESTAMP(timezone=True), nullable=False)
     fecha_fin = Column(TIMESTAMP(timezone=True), nullable=False)
     dias = Column(Integer, nullable=False)
+    # ── Cancelación anticipada (fix del abuso en plan ilimitado) ────────────────
+    # `fecha_expiracion_original` es el valor de `Suscripcion.fecha_expiracion` ANTES
+    # de extenderla al crear la suspensión: es lo que permite REVERTIR exacto (no un
+    # cálculo proporcional) cuando el alumno cancela antes de tiempo.
+    fecha_expiracion_original = Column(TIMESTAMP(timezone=True), nullable=False)
+    # Si el alumno vuelve antes de que termine su suspensión, puede cancelarla (sólo
+    # UNA vez por ciclo): `cancelada` la marca y `cancelada_en` guarda cuándo.
+    cancelada = Column(Boolean, nullable=False, default=False)
+    cancelada_en = Column(TIMESTAMP(timezone=True), nullable=True)
     # Cuántas reservas se cancelaron al confirmar. Se guarda DENORMALIZADO para que
     # el listado del admin (y sus KPIs) lo lean sin hacer un JOIN pesado a `reservas`
     # filtrando por `estado = 'cancelada_por_suspension'` en cada request.

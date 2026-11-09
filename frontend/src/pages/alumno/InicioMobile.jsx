@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 // TZ Chile: "hoy" en el calendario chileno (no el del navegador), misma fuente
 // que el Dashboard (utils/fecha.js): así la reserva de hoy coincide con las clases.
-import { hoyChileStr, fechaSolaAInstante } from '../../utils/fecha';
+import { hoyChileStr, fechaSolaAInstante, fmtFechaChile } from '../../utils/fecha';
 // "Buenos días / Buenas tardes / Buenas noches": el copy de la tarjeta "Tu clase
 // de hoy" según el momento del día en Chile (no el del teléfono).
 import { copyClaseHoy, momentoDelDia, saludoDelMomento } from '../../utils/momentoDia';
@@ -176,6 +176,7 @@ const InicioMobile = ({
     clasesPorDia = {},
     proximosDias = [],
     onReservar,
+    suspActiva = null,
 }) => {
     const navigate = useNavigate();
     const location = useLocation();
@@ -367,6 +368,18 @@ const InicioMobile = ({
                         )}
                     </div>
                 </section>
+
+                {/* ── Suspensión activa (banner informativo, no de error) ── */}
+                {suspActiva && (
+                    <button
+                        type="button"
+                        onClick={() => navigate('/alumno/suspension')}
+                        className="ub-suspension-banner"
+                    >
+                        ⏸️ Tu plan está suspendido hasta{' '}
+                        {fmtFechaChile(suspActiva.fecha_fin)} — ver suspensión →
+                    </button>
+                )}
 
                 {/* ── Reserva de hoy: el único bloque naranja a pantalla completa ── */}
                 <section className="hero" data-estado={estadoHoy || 'sin-clase'}

@@ -148,6 +148,11 @@ const Suspensiones = () => {
                                                 <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full border ${tonoEstado(s.estado)}`}>
                                                     {etiquetaEstado(s.estado)}
                                                 </span>
+                                                {s.cancelada && (
+                                                    <span className="ml-1.5 inline-flex items-center text-[10px] font-bold px-2 py-1 rounded-full border bg-red-500/20 text-red-300 border-red-500/30">
+                                                        Cancelada
+                                                    </span>
+                                                )}
                                             </td>
                                         </tr>
                                     ))}

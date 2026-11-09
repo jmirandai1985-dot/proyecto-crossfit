@@ -29,6 +29,9 @@ export const MENU_BY_ROL = {
         { label: 'Inicio', path: '/alumno/dashboard', icon: 'home' },
         { label: 'Planes', path: '/alumno/solicitar-plan', icon: 'settings' },
         { label: 'Mis Reservas', path: '/alumno/mis-reservas', icon: 'calendar' },
+        // Suspensión de plan (self-service): pantalla propia con el saldo, la
+        // suspensión activa, el historial y el botón para suspender/cancelar.
+        { label: 'Suspensión', path: '/alumno/suspension', icon: 'calendar' },
         { label: 'Pizarra de RMs', path: '/alumno/rms', icon: 'dumbbell' },
         { label: 'Evolución', path: '/alumno/evolucion', icon: 'home' },
         { label: 'Performance Hub', path: '/alumno/performance-hub', icon: 'dumbbell' },

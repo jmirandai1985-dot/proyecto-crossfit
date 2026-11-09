@@ -6,10 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 // Fase 2 (Bloque 3): el perfil sale de la caché compartida `['alumnos','me']` (la misma
 // que usa Solicitar plan) y los dos formularios guardan con mutaciones. Antes eran un
 // `useEffect` + `api.get`/`api.put` a mano, con los `loading`/`saving` de estado espejo.
-import { useCambiarPassword, useElegibilidadSuspension, useGuardarMiPerfil,
-    useMembresiaActiva, useMiPerfil } from '../../hooks/queries';
-// Suspensión de plan self-service: el botón + modal de 3 pasos (debajo de "Mi plan").
-import ModalSuspensionPlan from '../../components/ModalSuspensionPlan';
+import { useCambiarPassword, useGuardarMiPerfil, useMiPerfil } from '../../hooks/queries';
 
 const Ajustes = () => {
     const { usuario_id } = useAuth();
@@ -17,10 +14,6 @@ const Ajustes = () => {
     const perfilQ = useMiPerfil();
     const guardarPerfil = useGuardarMiPerfil();
     const cambiarPassword = useCambiarPassword();
-    // Suspensión de plan: membresía (nombre/vencimiento) + elegibilidad del ciclo.
-    const membresiaQ = useMembresiaActiva();
-    const elegibilidadQ = useElegibilidadSuspension();
-    const [showSuspensionModal, setShowSuspensionModal] = useState(false);
 
     const [mensaje, setMensaje] = useState(null);
     const [formData, setFormData] = useState({
@@ -226,34 +219,6 @@ const Ajustes = () => {
                     )}
                 </div>
 
-                {/* ─── MI PLAN + SUSPENSIÓN ─────────────────────────── */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                    <h2 className="text-lg font-bold text-gray-800 mb-1">💳 Mi plan</h2>
-                    {membresiaQ.data?.activa ? (
-                        <p className="text-sm text-gray-500 mb-5">
-                            {membresiaQ.data.plan_nombre || 'Plan'} ·{' '}
-                            {membresiaQ.data.es_ilimitado
-                                ? 'Ilimitado'
-                                : `${membresiaQ.data.clases_disponibles ?? 0} crédito(s)`}{' '}
-                            · Vence en {membresiaQ.data.dias_restantes} día(s)
-                        </p>
-                    ) : (
-                        <p className="text-sm text-gray-500 mb-5">Sin plan activo.</p>
-                    )}
-
-                    <button
-                        type="button"
-                        onClick={() => setShowSuspensionModal(true)}
-                        disabled={!elegibilidadQ.data?.elegible}
-                        className="px-6 py-2.5 bg-blue-500 text-white rounded-xl font-medium text-sm hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        🏖️ Suspender mi plan
-                    </button>
-                    {elegibilidadQ.data && elegibilidadQ.data.elegible === false && (
-                        <p className="text-sm text-gray-500 mt-2">{elegibilidadQ.data.motivo}</p>
-                    )}
-                </div>
-
                 {/* ─── CAMBIAR CONTRASEÑA ──────────────────────────── */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                     <h2 className="text-lg font-bold text-gray-800 mb-1">🔒 Cambiar Contraseña</h2>
@@ -301,14 +266,6 @@ const Ajustes = () => {
                     </form>
                 </div>
             </div>
-
-            {showSuspensionModal && (
-                <ModalSuspensionPlan
-                    elegibilidad={elegibilidadQ.data}
-                    onCerrar={() => setShowSuspensionModal(false)}
-                    onConfirmada={() => membresiaQ.refetch()}
-                />
-            )}
         </Layout>
     );
 };

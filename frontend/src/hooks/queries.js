@@ -209,6 +209,8 @@ export const claves = {
     // la clave: al mover el selector del modal se refetch. Sin rango, sólo elegibilidad.
     elegibilidadSuspension: (fechaInicio, dias) =>
         ['suspension', 'elegibilidad', fechaInicio || '', dias || ''],
+    // Historial del alumno de SUS propias suspensiones (pestaña "Suspensión").
+    suspensionesAlumno: ['suspension', 'alumno'],
     // Listado + resumen del admin (pantalla de supervisión de suspensiones).
     suspensionesAdmin: (buscar, estado, desde, hasta) =>
         ['admin', 'suspensiones', buscar || '', estado || '', desde || '', hasta || ''],
@@ -1131,6 +1133,32 @@ export function useCrearSuspension() {
             qc.invalidateQueries({ queryKey: ['reservas'] });
             qc.invalidateQueries({ queryKey: ['suspension'] });
         },
+    });
+}
+
+// Cancelar una suspensión activa (reversión de `fecha_expiracion`). Invalida la
+// membresía (cambió la fecha) y la elegibilidad (cambió `puede_cancelar`).
+export function useCancelarSuspension() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (suspensionId) =>
+            api.post(`/api/v1/alumnos/me/suspension/${suspensionId}/cancelar`)
+                .then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: claves.membresia });
+            qc.invalidateQueries({ queryKey: ['suspension'] });
+        },
+    });
+}
+
+// Historial de SUS propias suspensiones (pestaña "Suspensión"). Cuelga de
+// `['suspension']` para que crear/cancelar invalide también esta lista.
+export function useMisSuspensiones() {
+    return useQuery({
+        queryKey: claves.suspensionesAlumno,
+        queryFn: async () =>
+            (await api.get('/api/v1/alumnos/me/suspensiones')).data || [],
+        staleTime: 30_000,
     });
 }
 

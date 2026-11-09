@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 // Fase 2 (Bloque 1): los datos del Inicio salen de la caché compartida (la misma que usan
 // Mi Progreso, Evolución y el Inicio móvil) en vez de un `useEffect` con siete peticiones.
 import {
-    useAsistenciaMes, useClasesRango, useCrearReserva, useMembresiaActiva,
-    useNivelFuerza, useNivelGimnastico, useReservasConfirmadas, useWodHoy,
+    useAsistenciaMes, useClasesRango, useCrearReserva, useElegibilidadSuspension,
+    useMembresiaActiva, useNivelFuerza, useNivelGimnastico, useReservasConfirmadas,
+    useWodHoy,
 } from '../../hooks/queries';
 // TZ Chile: "hoy" y el calendario de la semana salen de utils/fecha.js (el navegador
 // puede estar en otra zona: con la fecha local, entre 20:00 y 23:59 CLT ya era mañana).
-import { hoyChileStr, fechaSolaAInstante } from '../../utils/fecha';
+import { hoyChileStr, fechaSolaAInstante, fmtFechaChile } from '../../utils/fecha';
 // Rótulo del cupo de créditos (NULL = cupo desconocido, nunca en blanco): una
 // sola regla para esta tarjeta y el Inicio móvil.
 import { rotuloCupo } from '../../utils/rotuloCreditos';
@@ -73,6 +75,7 @@ const getProximosDias = () => {
 
 const AlumnoDashboard = () => {
     const { usuario_id, tenant_id, usuario } = useAuth();
+    const navigate = useNavigate();
 
     // ─── Datos (React Query) ───────────────────────────────────────────
     // Cada bloque con su clave: al volver al Inicio se pinta la copia en caché al instante
@@ -88,12 +91,16 @@ const AlumnoDashboard = () => {
     const membresiaQ = useMembresiaActiva();
     const asistenciaQ = useAsistenciaMes();
     const crearReserva = useCrearReserva();
+    // Suspensión activa hoy (para el banner del Inicio): misma fuente que la
+    // pestaña "Suspensión", así el banner no puede divergir del botón de cancelar.
+    const elegibilidadSuspQ = useElegibilidadSuspension();
 
     const nivelFuerza = nivelFuerzaQ.data || null;
     const nivelGimnastico = nivelGimnasticoQ.data || null;
     const wodHoy = wodQ.data || null;
     const membresia = membresiaQ.data || null;
     const asistenciaMes = asistenciaQ.data || null;
+    const suspActiva = elegibilidadSuspQ.data?.suspension_activa || null;
 
     // Clases agrupadas por día para el calendario de la semana (mismo agrupado que hacía
     // el fetch: `fecha` o `fecha_clase`). En `useMemo` para no recrear el objeto en cada
@@ -222,6 +229,7 @@ const AlumnoDashboard = () => {
                     clasesPorDia={clasesPorDia}
                     proximosDias={proximosDias}
                     onReservar={handleAbrirReserva}
+                    suspActiva={suspActiva}
                 />
             </div>
 
@@ -234,6 +242,18 @@ const AlumnoDashboard = () => {
                     <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 font-medium text-sm">
                         ❌ {fetchError}
                     </div>
+                )}
+
+                {/* ─── SUSPENSIÓN ACTIVA (banner informativo) ─────────── */}
+                {suspActiva && (
+                    <button
+                        type="button"
+                        onClick={() => navigate('/alumno/suspension')}
+                        className="w-full text-left p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 font-medium text-sm hover:bg-amber-100 transition-colors"
+                    >
+                        ⏸️ Tu plan está suspendido hasta{' '}
+                        {fmtFechaChile(suspActiva.fecha_fin)} — ver suspensión →
+                    </button>
                 )}
 
                 {/* ─── BOTÓN PERFORMANCE HUB ─────────────────────────── */}
