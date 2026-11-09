@@ -608,18 +608,18 @@ const AdminKpis = () => {
                             Último día con datos: <span className="text-gray-300">{fmtFechaCorta(dia.fecha)}</span>
                         </p>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Alumnos y actividad</h3>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                             <KpiCard label="Alumnos activos" value={dia.alumnos_activos} icon={Users} color="border-blue-500"
                                 onDetalle={verKpiDiario('diario:alumnos_activos', dia.alumnos_activos)} />
                             <KpiCard label="Alumnos nuevos" value={dia.alumnos_nuevos} icon={UserPlus} color="border-green-500"
                                 onDetalle={verKpiDiario('diario:alumnos_nuevos', dia.alumnos_nuevos)} />
                             <KpiCard label="Asistentes del día" value={dia.asistentes_totales} icon={Activity} color="border-purple-500"
                                 onDetalle={verKpiDiario('diario:asistentes_totales', dia.asistentes_totales)} />
-                            <KpiCard label="Ingresos del día" value={Number(dia.ingresos_total)} unit="CLP" icon={DollarSign} color="border-emerald-500"
-                                onDetalle={verKpiDiario('diario:ingresos_total', Number(dia.ingresos_total), 'CLP')} />
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Clases y ocupación</h3>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                             <KpiCard label="Clases ejecutadas" value={dia.clases_ejecutadas} icon={CalendarDays} color="border-cyan-500"
                                 onDetalle={verKpiDiario('diario:clases_ejecutadas', dia.clases_ejecutadas)} />
                             <KpiCard label="Ocupación promedio" value={Number(dia.ocupacion_promedio)} unit="%" icon={Percent} color="border-amber-500"
@@ -630,7 +630,10 @@ const AdminKpis = () => {
                                 onDetalle={verKpiDiario('diario:cancellaciones', dia.cancellaciones)} />
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Ingresos del día</h3>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                            <KpiCard label="Ingresos del día" value={Number(dia.ingresos_total)} unit="CLP" icon={DollarSign} color="border-emerald-500"
+                                onDetalle={verKpiDiario('diario:ingresos_total', Number(dia.ingresos_total), 'CLP')} />
                             <KpiCard label="Ingresos por membresía" value={Number(dia.ingresos_membresia)} unit="CLP" icon={Banknote} color="border-emerald-500"
                                 onDetalle={verKpiDiario('diario:ingresos_membresia', Number(dia.ingresos_membresia), 'CLP')} />
                             <KpiCard label="Ingresos por bazar" value={Number(dia.ingresos_bazar)} unit="CLP" icon={ShoppingCart} color="border-teal-500"
@@ -703,7 +706,8 @@ const AdminKpis = () => {
 
                         {/* 5 tarjetas (incluye "Ventas Bazar"): 4 columnas hasta `lg` y una sola
                             fila desde `xl` (mismo criterio responsive que las tarjetas del Dashboard). */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Finanzas y conversión</h3>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                             <KpiCard label="Conversión prueba→plan" value={mes.conversion_rate === null ? null : Number(mes.conversion_rate)} unit="%" icon={TrendingUp} color="border-green-500"
                                 onDetalle={verKpiMensual('mensual:conversion_rate', mes.conversion_rate === null ? null : Number(mes.conversion_rate), '%')} />
                             <KpiCard label="Riesgo de Abandono"
@@ -721,7 +725,8 @@ const AdminKpis = () => {
                                 onDetalle={verKpiMensual('mensual:ingresos_bazar', Number(mes.ingresos_bazar), 'CLP')} />
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Actividad y ocupación</h3>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                             <KpiCard label="Asistencia promedio" value={Number(mes.asistencia_promedio)} unit="%" icon={Activity} color="border-purple-500"
                                 onDetalle={verKpiMensual('mensual:asistencia_promedio', Number(mes.asistencia_promedio), '%')} />
                             <KpiCard label="Frecuencia semanal" value={Number(mes.frecuencia_semanal)} unit="clases/sem" icon={Gauge} color="border-cyan-500"
@@ -823,7 +828,8 @@ const AdminKpis = () => {
                             </div>
                         )}
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Resumen ejecutivo</h3>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                             {/* El MRR de esta tarjeta es el de HOY (precio de lista de los
                                 planes vigentes): no espera a que cierre el mes ni depende
                                 del data mart mensual. El caption lo dice para que nadie lo
@@ -922,7 +928,7 @@ const AdminKpis = () => {
                                 <Banknote className="w-5 h-5 text-emerald-500" />
                                 <h2 className="font-semibold text-white">Financiero</h2>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                                 <div>
                                     <KpiCard
                                         label="Ticket promedio"
