@@ -28,6 +28,7 @@ const Suspension = () => {
 
     const suspActiva = elegibilidadQ.data?.suspension_activa;
     const historial = historialQ.data || [];
+    const esSalud = suspActiva?.origen === 'admin_salud';
 
     const handleCancelar = async () => {
         if (!suspActiva) return;
@@ -73,24 +74,36 @@ const Suspension = () => {
 
                 {/* ── Suspensión activa (destacado) ────────────────────────── */}
                 {suspActiva && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
-                        <h2 className="text-lg font-bold text-amber-800 mb-1">⏸️ Tienes una suspensión activa</h2>
-                        <p className="text-sm text-amber-800 mb-4">
+                    <div className={`rounded-xl p-5 border ${esSalud ? 'bg-sky-50 border-sky-200' : 'bg-amber-50 border-amber-200'}`}>
+                        <h2 className={`text-lg font-bold mb-1 ${esSalud ? 'text-sky-800' : 'text-amber-800'}`}>
+                            {esSalud
+                                ? 'Suspendido por salud — gestionado por el box'
+                                : '⏸️ Tienes una suspensión activa'}
+                        </h2>
+                        <p className={`text-sm mb-4 ${esSalud ? 'text-sky-800' : 'text-amber-800'}`}>
                             Del {fmtFechaChile(suspActiva.fecha_inicio)} al{' '}
                             {fmtFechaChile(suspActiva.fecha_fin)} ({suspActiva.dias} día(s)).
                         </p>
-                        <button
-                            type="button"
-                            onClick={handleCancelar}
-                            disabled={!elegibilidadQ.data?.puede_cancelar}
-                            className="px-6 py-2.5 bg-red-500 text-white rounded-xl font-medium text-sm hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            Cancelar suspensión
-                        </button>
-                        {!elegibilidadQ.data?.puede_cancelar && (
-                            <p className="text-sm text-amber-700 mt-2">
-                                Ya cancelaste una suspensión este año: solo puedes cancelar una vez por ciclo.
+                        {esSalud ? (
+                            <p className="text-sm text-sky-700">
+                                Para reactivar antes de la fecha, contacta al administrador.
                             </p>
+                        ) : (
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={handleCancelar}
+                                    disabled={!elegibilidadQ.data?.puede_cancelar}
+                                    className="px-6 py-2.5 bg-red-500 text-white rounded-xl font-medium text-sm hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    Cancelar suspensión
+                                </button>
+                                {!elegibilidadQ.data?.puede_cancelar && (
+                                    <p className="text-sm text-amber-700 mt-2">
+                                        Ya cancelaste una suspensión este año: solo puedes cancelar una vez por ciclo.
+                                    </p>
+                                )}
+                            </>
                         )}
                     </div>
                 )}
@@ -148,6 +161,7 @@ const Suspension = () => {
                         <ul className="divide-y divide-gray-100">
                             {historial.map((s) => {
                                 const e = etiquetaEstado(s.estado);
+                                const esSaludFila = s.origen === 'admin_salud';
                                 return (
                                     <li key={s.id} className="py-3 flex items-center justify-between gap-3">
                                         <div>
@@ -157,9 +171,16 @@ const Suspension = () => {
                                             </p>
                                             <p className="text-xs text-gray-500">{s.dias} día(s)</p>
                                         </div>
-                                        <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-bold ${e.cls}`}>
-                                            {e.label}
-                                        </span>
+                                        <div className="flex items-center gap-1.5">
+                                            {esSaludFila && (
+                                                <span className="inline-block px-2.5 py-1 rounded-full text-xs font-bold bg-sky-100 text-sky-700">
+                                                    Por salud
+                                                </span>
+                                            )}
+                                            <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-bold ${e.cls}`}>
+                                                {e.label}
+                                            </span>
+                                        </div>
                                     </li>
                                 );
                             })}

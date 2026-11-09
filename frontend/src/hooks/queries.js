@@ -215,6 +215,8 @@ export const claves = {
     suspensionesAdmin: (buscar, estado, desde, hasta) =>
         ['admin', 'suspensiones', buscar || '', estado || '', desde || '', hasta || ''],
     suspensionesAdminResumen: ['admin', 'suspensiones', 'resumen'],
+    // Suspensiones por salud de UN alumno (panel "Suspensión por salud" de la ficha).
+    suspensionesSalud: (alumnoId) => ['admin', 'suspensiones-salud', alumnoId],
 };
 
 // ── Colas de revisión del admin (las miran el Dashboard Y Pendientes de revisión) ──
@@ -1184,6 +1186,66 @@ export function useResumenSuspensiones() {
         queryFn: async () =>
             (await api.get('/api/v1/admin/suspensiones/resumen')).data || null,
         staleTime: 30_000,
+    });
+}
+
+// ── Suspensión por salud (admin, desde la ficha del alumno) ──────────────────
+// Historial de suspensiones por salud de UN alumno (tabla del panel).
+export function useSuspensionesSalud(alumnoId) {
+    return useQuery({
+        queryKey: claves.suspensionesSalud(alumnoId),
+        queryFn: async () =>
+            (await api.get(`/api/v1/admin/alumnos/${alumnoId}/suspensiones-salud`)).data || [],
+        enabled: !!alumnoId,
+        staleTime: 30_000,
+    });
+}
+
+// Aviso previo (días + nueva fecha + reservas) ANTES de confirmar. Es un POST con
+// `?preview=true` (lleva body), así que se modela como mutación y se dispara a mano
+// al abrir el modal de confirmación.
+export function usePreviewSuspensionSalud() {
+    return useMutation({
+        mutationFn: (payload) =>
+            api.post(`/api/v1/admin/alumnos/${payload.usuario_id}/suspension-salud?preview=true`,
+                     { fecha_inicio: payload.fecha_inicio, fecha_fin: payload.fecha_fin,
+                       motivo: payload.motivo })
+                .then((r) => r.data),
+    });
+}
+
+// Confirmar: ejecuta la suspensión por salud. Invalida la lista del panel, la
+// membresía (cambió fecha_expiracion) y las reservas/suscripciones (quedaron
+// canceladas).
+export function useCrearSuspensionSalud() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (payload) =>
+            api.post(`/api/v1/admin/alumnos/${payload.usuario_id}/suspension-salud`,
+                     { fecha_inicio: payload.fecha_inicio, fecha_fin: payload.fecha_fin,
+                       motivo: payload.motivo })
+                .then((r) => r.data),
+        onSuccess: (_data, variables) => {
+            qc.invalidateQueries({ queryKey: claves.suspensionesSalud(variables.usuario_id) });
+            qc.invalidateQueries({ queryKey: ['membresia'] });
+            qc.invalidateQueries({ queryKey: ['reservas'] });
+            qc.invalidateQueries({ queryKey: ['suscripciones'] });
+        },
+    });
+}
+
+// Cancelar una suspensión por salud (reversión exacta de fecha_expiracion).
+export function useCancelarSuspensionSalud() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ suspension_id }) =>
+            api.post(`/api/v1/admin/suspensiones/${suspension_id}/cancelar-salud`)
+                .then((r) => r.data),
+        onSuccess: (_data, variables) => {
+            qc.invalidateQueries({ queryKey: claves.suspensionesSalud(variables.usuario_id) });
+            qc.invalidateQueries({ queryKey: ['membresia'] });
+            qc.invalidateQueries({ queryKey: ['suscripciones'] });
+        },
     });
 }
 

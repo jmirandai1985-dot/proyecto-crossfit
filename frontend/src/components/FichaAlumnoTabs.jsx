@@ -7,6 +7,7 @@ import { agruparReservasPorMes, calcularEstadisticasReservas } from '../utils/re
 import { esSuscripcionVigente } from '../utils/fichaAlumno';
 import { fmtFechaChile, hoyChileStr } from '../utils/fecha';
 import { getEstadoColor, getEstadoDisplay } from '../utils/estadoReserva';
+import SuspensionSaludPanel from './admin/SuspensionSaludPanel';
 
 const TABS = [
     { key: 'resumen', label: 'Resumen' },
@@ -14,6 +15,7 @@ const TABS = [
     { key: 'planes', label: 'Planes' },
     { key: 'referidos', label: 'Referidos' },
     { key: 'asistencia', label: 'Asistencia' },
+    { key: 'suspension', label: 'Suspensión' },
 ];
 
 /**
@@ -31,6 +33,7 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
     const [suscripciones, setSuscripciones] = useState([]);
     const [referidosUsados, setReferidosUsados] = useState([]);
     const [reservas, setReservas] = useState([]);
+    const [suspensionesPropias, setSuspensionesPropias] = useState([]);
     const [loading, setLoading] = useState(true);
     const [errores, setErrores] = useState({});
 
@@ -39,7 +42,7 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
         setLoading(true);
         setErrores({});
         const carga = async () => {
-            const [usr, sus, plan, cod, suscHist, refs, resv] = await Promise.allSettled([
+            const [usr, sus, plan, cod, suscHist, refs, resv, susp] = await Promise.allSettled([
                 api.get(`/api/v1/usuarios/${alumnoId}`),
                 api.get('/api/v1/suscripciones', { params: { usuario_id: alumnoId, estado: 'activo' } }),
                 api.get('/api/v1/planes'),
@@ -47,6 +50,7 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
                 api.get('/api/v1/suscripciones', { params: { usuario_id: alumnoId } }),
                 api.get(`/api/v1/admin/alumnos/${alumnoId}/referidos-usados`),
                 api.get('/api/v1/reservas', { params: { usuario_id: alumnoId, limit: 200 } }),
+                api.get('/api/v1/admin/suspensiones', { params: { usuario_id: alumnoId } }),
             ]);
             const det = (r) => r.reason?.response?.data?.detail || r.reason?.message || 'No se pudo cargar';
             const errs = {};
@@ -73,6 +77,9 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
 
             if (resv.status === 'fulfilled') setReservas(Array.isArray(resv.value.data) ? resv.value.data : []);
             else errs.reservas = det(resv);
+
+            if (susp.status === 'fulfilled') setSuspensionesPropias(Array.isArray(susp.value.data) ? susp.value.data : []);
+            else errs.suspensiones = det(susp);
 
             setErrores(errs);
             setLoading(false);
@@ -228,7 +235,7 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
                         </div>
                     </div>
 
-                ) : (
+                ) : tab === 'asistencia' ? (
                     <div className="space-y-4">
                         {errores.reservas && <p className="text-sm text-red-400">⚠️ {errores.reservas}</p>}
                         <div className="grid grid-cols-3 gap-3">
@@ -264,6 +271,35 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
                                 </div>
                             ))
                         )}
+                    </div>
+                ) : (
+                    <div className="space-y-4">
+                        {/* Resumen de solo lectura: suspensiones propias (origen='alumno') */}
+                        <div className="bg-zinc-800/50 rounded-lg p-4">
+                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide mb-2">
+                                Suspensiones del alumno (solo lectura)
+                            </p>
+                            {errores.suspensiones && <p className="text-sm text-red-400 mb-2">⚠️ {errores.suspensiones}</p>}
+                            {suspensionesPropias.length === 0 ? (
+                                <p className="text-sm text-zinc-400">Sin suspensiones propias.</p>
+                            ) : (
+                                <ul className="space-y-2">
+                                    {suspensionesPropias.map((s) => (
+                                        <li key={s.id} className="flex items-center justify-between gap-3 text-sm">
+                                            <span className="text-zinc-300">
+                                                {fmtFecha(s.fecha_inicio)} → {fmtFecha(s.fecha_fin)} · {s.dias} día(s)
+                                            </span>
+                                            <span className="shrink-0 px-2 py-0.5 rounded-full text-xs font-bold bg-zinc-700 text-zinc-300 capitalize">
+                                                {s.cancelada ? 'Cancelada' : s.estado}
+                                            </span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+
+                        {/* Panel de salud (crea/cancela el admin) */}
+                        <SuspensionSaludPanel usuarioId={alumnoId} />
                     </div>
                 )}
             </div>

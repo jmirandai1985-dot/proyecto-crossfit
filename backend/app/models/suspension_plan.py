@@ -1,7 +1,7 @@
 """
 Modelo SQLAlchemy para la tabla suspensiones_plan
 """
-from sqlalchemy import Column, Integer, ForeignKey, Index, Boolean
+from sqlalchemy import Column, Integer, ForeignKey, Index, Boolean, String
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.sql import func
 
@@ -46,6 +46,20 @@ class SuspensionPlan(Base):
     # el listado del admin (y sus KPIs) lo lean sin hacer un JOIN pesado a `reservas`
     # filtrando por `estado = 'cancelada_por_suspension'` en cada request.
     reservas_canceladas = Column(Integer, nullable=False, default=0)
+    # ── Origen de la suspensión (self-service del alumno vs. salud del admin) ──
+    # `origen` distingue la vía: 'alumno' (self-service, reglas de 14 días/año y
+    # 1 cancelación/año) o 'admin_salud' (la crea/cancela el admin, sin tope ni
+    # cupo). Las filas ya existentes quedan como 'alumno' (eso son).
+    origen = Column(String(20), nullable=False, default="alumno",
+                    server_default="alumno")
+    # Motivo de la suspensión por salud (sólo `origen='admin_salud'`): texto
+    # opcional ("licencia médica", "cirugía"). La del alumno no pide motivo.
+    motivo = Column(String(255), nullable=True)
+    # Qué admin la creó (sólo `origen='admin_salud'`). FK a usuarios con SET NULL:
+    # si se borra el admin, la suspensión (y su efecto sobre `fecha_expiracion`) no
+    # depende de quién la creó, así que no se pierde.
+    creada_por_usuario_id = Column(Integer, ForeignKey(
+        "usuarios.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True),
                         nullable=False, server_default=func.now())
 

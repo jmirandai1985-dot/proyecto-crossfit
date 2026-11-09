@@ -226,3 +226,44 @@ def test_calcular_elegibilidad_sin_suspension_activa_sigue_elegible():
     assert r["elegible"] is True
     assert r["motivo"] is None
 
+
+# ── Suspensión por salud (admin): no cuenta para el saldo/cupo del alumno ────
+def _salud(fecha_inicio, dias, cancelada=False, fecha_fin=None):
+    """Suspensión `origen='admin_salud'` (la crea el admin, no el alumno)."""
+    return SimpleNamespace(fecha_inicio=fecha_inicio, dias=dias, cancelada=cancelada,
+                           fecha_fin=fecha_fin, origen="admin_salud")
+
+
+def test_dias_entre_inclusivo():
+    # Del 01 al 03 son 3 días (inclusive), igual que el self-service.
+    assert svc.dias_entre(date(2026, 10, 1), date(2026, 10, 3)) == 3
+    assert svc.dias_entre(date(2026, 10, 1), date(2026, 10, 1)) == 1
+    assert svc.dias_entre(date(2026, 10, 5), date(2026, 10, 8)) == 4
+
+
+def test_admin_salud_no_cuenta_en_dias_usados():
+    ciclo_inicio = datetime(2026, 3, 15, tzinfo=SANTIAGO)
+    ciclo_fin = datetime(2027, 3, 15, tzinfo=SANTIAGO)
+    suspensiones = [
+        _suspension(datetime(2026, 4, 1, tzinfo=SANTIAGO), 5),   # alumno
+        _salud(datetime(2026, 5, 1, tzinfo=SANTIAGO), 9),        # admin_salud
+    ]
+    assert svc.dias_usados_en_ciclo(suspensiones, ciclo_inicio, ciclo_fin) == 5
+
+
+def test_admin_salud_no_consume_saldo_ni_periodos():
+    # Una suspensión por salud de 20 días NO mueve el saldo (14) ni el tope de
+    # períodos (0 usados): el alumno sigue 100% disponible.
+    salud = _salud(datetime(2026, 4, 1, tzinfo=SANTIAGO), 20)
+    r = svc.calcular_elegibilidad(_suscripcion(creditos=10), SimpleNamespace(),
+                                  [salud], HOY)
+    assert r["elegible"] is True
+    assert r["saldo_disponible"] == 14
+    assert r["periodos_usados"] == 0
+
+
+def test_admin_salud_cancelada_no_consume_cupo_de_cancelacion():
+    # Una `admin_salud` cancelada NO gasta el cupo de 1 cancelación/año del alumno.
+    del_ciclo = [_salud(datetime(2026, 4, 1, tzinfo=SANTIAGO), 5, cancelada=True)]
+    assert svc.puede_cancelar(del_ciclo) is True
+

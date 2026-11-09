@@ -43,6 +43,12 @@ class SuspensionCreate(BaseModel):
     dias: int
 
 
+class SuspensionSaludCreate(BaseModel):
+    fecha_inicio: date
+    fecha_fin: date
+    motivo: Optional[str] = None
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 def _suscripcion_activa(db: Session, tenant_id: int, usuario_id: int):
     """La membresía vigente del alumno (misma regla que `/planes/membresia-activa`)."""
@@ -133,14 +139,20 @@ def _suspensiones_del_ciclo(db: Session, usuario: Usuario) -> list:
     suspensiones = (
         db.query(SuspensionPlan)
         .filter(SuspensionPlan.usuario_id == usuario.id,
-                SuspensionPlan.tenant_id == usuario.tenant_id)
+                SuspensionPlan.tenant_id == usuario.tenant_id,
+                SuspensionPlan.origen == suspensiones_service.ORIGEN_ALUMNO)
         .all()
     )
     return [s for s in suspensiones if ciclo_inicio <= s.fecha_inicio < ciclo_fin]
 
 
 def _suspension_activa_hoy(db: Session, tenant_id: int, usuario_id: int):
-    """La suspensión no cancelada cuyo rango cubre HOY (o None)."""
+    """La suspensión no cancelada cuyo rango cubre HOY (o None).
+
+    Incluye AMBOS orígenes (`alumno` y `admin_salud`): el alumno debe VER la de
+    salud como su suspensión activa (aunque no pueda cancelarla). El filtro por
+    `origen='alumno'` para el CUPO vive en el servicio, no acá.
+    """
     hoy = hoy_santiago()
     suspensiones = (
         db.query(SuspensionPlan)
@@ -206,6 +218,7 @@ def elegibilidad_suspension(
     del_ciclo = _suspensiones_del_ciclo(db, usuario)
     resultado["suspension_activa"] = (
         {"id": suspension_activa.id,
+         "origen": suspension_activa.origen,
          "fecha_inicio": str(suspension_activa.fecha_inicio),
          "fecha_fin": str(suspension_activa.fecha_fin),
          "dias": suspension_activa.dias}
@@ -339,6 +352,7 @@ def mis_suspensiones(
         estado = "cancelada" if s.cancelada else _estado_suspension(s, hoy)
         items.append({
             "id": s.id,
+            "origen": s.origen,
             "fecha_inicio": str(s.fecha_inicio),
             "fecha_fin": str(s.fecha_fin),
             "dias": s.dias,
@@ -366,19 +380,22 @@ def listar_suspensiones(
     estado: Optional[str] = Query(None),
     desde: Optional[date] = Query(None),
     hasta: Optional[date] = Query(None),
+    usuario_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
     """Listado de suspensiones del box (el admin sólo supervisa, no actúa).
 
     Filtros: búsqueda por nombre/email de alumno, estado calculado en el momento
-    (activa/futura/pasada) y rango de `fecha_inicio`.
+    (activa/futura/pasada), rango de `fecha_inicio` y, opcionalmente, UN alumno
+    (`usuario_id`, lo usa la ficha para el resumen de solo lectura).
     """
     tid = current_user["tenant_id"]
     query = (
         db.query(SuspensionPlan, Usuario)
         .join(Usuario, SuspensionPlan.usuario_id == Usuario.id)
-        .filter(SuspensionPlan.tenant_id == tid)
+        .filter(SuspensionPlan.tenant_id == tid,
+                SuspensionPlan.origen == suspensiones_service.ORIGEN_ALUMNO)
     )
     if buscar:
         like = f"%{buscar}%"
@@ -388,6 +405,8 @@ def listar_suspensiones(
         query = query.filter(SuspensionPlan.fecha_inicio >= desde)
     if hasta:
         query = query.filter(SuspensionPlan.fecha_inicio <= hasta)
+    if usuario_id:
+        query = query.filter(SuspensionPlan.usuario_id == usuario_id)
 
     filas = query.order_by(SuspensionPlan.fecha_inicio.desc()).all()
     hoy = hoy_santiago()
@@ -398,6 +417,7 @@ def listar_suspensiones(
             continue
         items.append({
             "id": s.id,
+            "origen": s.origen,
             "alumno_id": s.usuario_id,
             "alumno_nombre": u.nombre,
             "alumno_email": u.correo,
@@ -423,7 +443,8 @@ def resumen_suspensiones(
     tid = current_user["tenant_id"]
     suspensiones = (
         db.query(SuspensionPlan)
-        .filter(SuspensionPlan.tenant_id == tid)
+        .filter(SuspensionPlan.tenant_id == tid,
+                SuspensionPlan.origen == suspensiones_service.ORIGEN_ALUMNO)
         .all()
     )
     hoy = hoy_santiago()
@@ -452,5 +473,152 @@ def resumen_suspensiones(
         "dias_totales_mes": dias_totales_mes,
         "reservas_canceladas_totales": reservas_canceladas_totales,
     }
+
+
+# ── Admin: suspensión por salud (la crea/cancela el admin desde la ficha) ─────
+@router.post("/admin/alumnos/{usuario_id}/suspension-salud")
+@limiter.limit(LIMIT_CRITICO)
+def crear_suspension_salud(
+    usuario_id: int,
+    request: Request,
+    data: SuspensionSaludCreate,
+    preview: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Suspensión por salud (admin): `?preview=true` devuelve el aviso previo
+    (días calculados + nueva fecha de vencimiento + reservas a cancelar) sin
+    escribir; sin `preview`, confirma y ejecuta.
+
+    El admin define `fecha_inicio`/`fecha_fin` (no días): `dias` lo calcula el
+    backend (`dias_entre`). Sin tope de días, sin mínimo de créditos y sin mínimo
+    de días hasta el vencimiento (esas reglas son de la self-service del alumno).
+    """
+    tid = current_user["tenant_id"]
+    admin_id = current_user["usuario_id"]
+
+    usuario = db.query(Usuario).filter(
+        Usuario.id == usuario_id, Usuario.tenant_id == tid).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Alumno no encontrado")
+
+    if data.fecha_fin <= data.fecha_inicio:
+        raise HTTPException(status_code=400,
+                            detail="La fecha de vuelta debe ser posterior a la de inicio.")
+
+    dias = suspensiones_service.dias_entre(data.fecha_inicio, data.fecha_fin)
+
+    suscripcion = _suscripcion_activa(db, tid, usuario_id)
+    if not suscripcion:
+        raise HTTPException(status_code=400,
+                            detail=suspensiones_service.MOTIVO_SIN_PLAN)
+
+    if preview:
+        reservas = _reservas_en_rango(db, tid, usuario_id, data.fecha_inicio, dias)
+        nueva_fecha = suscripcion.fecha_expiracion + timedelta(days=dias)
+        return {
+            "dias": dias,
+            "fecha_inicio": str(data.fecha_inicio),
+            "fecha_fin": str(data.fecha_fin),
+            "fecha_expiracion_actual": str(suscripcion.fecha_expiracion),
+            "fecha_expiracion_nueva": str(nueva_fecha),
+            "reservas_a_cancelar": reservas,
+        }
+
+    try:
+        suspension = suspensiones_service.crear_suspension_salud(
+            db, usuario_id, admin_id, data.fecha_inicio, data.fecha_fin,
+            data.motivo)
+    except ReembolsoTransitorio:
+        raise HTTPException(status_code=503, detail="Alta demanda, intenta de nuevo")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    reservas_canceladas = _reservas_canceladas_por_suspension(
+        db, tid, usuario_id, data.fecha_inicio, dias)
+    return {
+        "suspension": {
+            "id": suspension.id,
+            "fecha_inicio": str(suspension.fecha_inicio),
+            "fecha_fin": str(suspension.fecha_fin),
+            "dias": suspension.dias,
+            "motivo": suspension.motivo,
+            "reservas_canceladas": suspension.reservas_canceladas,
+        },
+        "fecha_expiracion": str(suscripcion.fecha_expiracion),
+        "reservas_canceladas": reservas_canceladas,
+    }
+
+
+@router.post("/admin/suspensiones/{suspension_id}/cancelar-salud")
+@limiter.limit(LIMIT_CRITICO)
+def cancelar_suspension_salud(
+    suspension_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Cancela una suspensión por salud y revierte `fecha_expiracion` exacta.
+
+    Sin cupo anual: el admin cancela cuando quiera, las veces que quiera.
+    """
+    tid = current_user["tenant_id"]
+
+    suspension = db.query(SuspensionPlan).filter(
+        SuspensionPlan.id == suspension_id,
+        SuspensionPlan.tenant_id == tid,
+    ).first()
+    if not suspension:
+        raise HTTPException(status_code=404, detail="Suspensión no encontrada")
+
+    try:
+        suscripcion = suspensiones_service.cancelar_suspension_salud(
+            db, suspension_id, current_user["usuario_id"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "suspension_id": suspension.id,
+        "fecha_expiracion": str(suscripcion.fecha_expiracion),
+    }
+
+
+@router.get("/admin/alumnos/{usuario_id}/suspensiones-salud")
+def suspensiones_salud(
+    usuario_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Historial de suspensiones por salud de un alumno (tabla del panel)."""
+    tid = current_user["tenant_id"]
+
+    usuario = db.query(Usuario).filter(
+        Usuario.id == usuario_id, Usuario.tenant_id == tid).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Alumno no encontrado")
+
+    suspensiones = (
+        db.query(SuspensionPlan)
+        .filter(SuspensionPlan.usuario_id == usuario_id,
+                SuspensionPlan.tenant_id == tid,
+                SuspensionPlan.origen == suspensiones_service.ORIGEN_ADMIN_SALUD)
+        .order_by(SuspensionPlan.fecha_inicio.desc())
+        .all()
+    )
+    hoy = hoy_santiago()
+    items = []
+    for s in suspensiones:
+        estado = "cancelada" if s.cancelada else _estado_suspension(s, hoy)
+        items.append({
+            "id": s.id,
+            "fecha_inicio": str(s.fecha_inicio),
+            "fecha_fin": str(s.fecha_fin),
+            "dias": s.dias,
+            "motivo": s.motivo,
+            "estado": estado,
+            "cancelada": bool(s.cancelada),
+            "created_at": str(s.created_at),
+        })
+    return items
 
 
