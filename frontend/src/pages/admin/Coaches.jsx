@@ -6,6 +6,33 @@ import {
     useReemplazarCoachDisciplinas, useUsuariosPorRol, SIN_DATOS,
 } from '../../hooks/queries';
 
+const AVATAR_BG = [
+    'linear-gradient(135deg, #3b72f6, #1d4ed8)',
+    'linear-gradient(135deg, #f0594f, #b91c1c)',
+    'linear-gradient(135deg, #2dd4bf, #0d9488)',
+    'linear-gradient(135deg, #9b7bff, #6d28d9)',
+    'linear-gradient(135deg, #f5a524, #b45309)',
+    'linear-gradient(135deg, #ec4899, #be185d)',
+];
+
+const colorIndice = (id) => {
+    const s = String(id);
+    let h = 0;
+    for (let i = 0; i < s.length; i += 1) { h = (h * 31 + s.charCodeAt(i)) >>> 0; }
+    return h % AVATAR_BG.length;
+};
+
+const iniciales = (nombre) => {
+    const words = (nombre || '').trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return '?';
+    if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+    return (words[0][0] + words[1][0]).toUpperCase();
+};
+
+const estadoCoach = (coach) => (
+    (coach.estado || (coach.activo === false ? 'baja' : 'activo')) === 'activo' ? 'activo' : 'baja'
+);
+
 const Coaches = () => {
     const { tenant_id } = useAuth();
     // Bloque 3 (parte A): los tres GET de esta pantalla salen de la caché compartida.
@@ -150,6 +177,50 @@ const Coaches = () => {
         return disc ? disc.nombre : `ID ${discId}`;
     };
 
+    const activos = coaches.filter((c) => estadoCoach(c) === 'activo');
+    const bajas = coaches.filter((c) => estadoCoach(c) !== 'activo');
+
+    const renderCoach = (coach) => {
+        const discIds = coachDisciplinasMap[coach.id] || [];
+        const activo = estadoCoach(coach) === 'activo';
+        return (
+            <article key={coach.id} className={`rounded-2xl border border-zinc-800 border-l-4 ${activo ? 'border-l-green-500' : 'border-l-zinc-500'} bg-zinc-900 p-4`}>
+                <div className="flex items-start gap-3">
+                    <span className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold shrink-0"
+                        style={{ background: AVATAR_BG[colorIndice(coach.id)] }}>
+                        {iniciales(coach.nombre)}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                            <h3 className="font-bold text-zinc-100 truncate">{coach.nombre}</h3>
+                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-bold ${activo ? 'bg-green-500/15 text-green-300' : 'bg-zinc-700/40 text-zinc-400'}`}>
+                                {activo ? 'Activo' : 'Baja'}
+                            </span>
+                        </div>
+                        <p className="text-sm text-zinc-400 truncate">{coach.correo}</p>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            {discIds.length > 0 ? discIds.map((id) => (
+                                <span key={id} className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
+                                    {getDisciplinaNombre(id)}
+                                </span>
+                            )) : (
+                                <span className="text-xs text-zinc-500">Sin disciplinas asignadas</span>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                        <button onClick={() => openModal(coach)} disabled={!asignacionesListas}
+                            title="Editar" aria-label={`Editar ${coach.nombre}`}
+                            className="w-8 h-8 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-zinc-400 hover:border-blue-500 hover:text-blue-400 transition-colors disabled:opacity-50">✎</button>
+                        <button onClick={() => setConfirmarEliminar(coach)}
+                            title="Dar de baja" aria-label={`Dar de baja a ${coach.nombre}`}
+                            className="w-8 h-8 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-zinc-400 hover:border-red-500 hover:text-red-500 transition-colors">✕</button>
+                    </div>
+                </div>
+            </article>
+        );
+    };
+
     if (loading) {
         return (
             <Layout>
@@ -209,76 +280,50 @@ const Coaches = () => {
                     </div>
                 )}
 
-                {/* Estadísticas */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-blue-500">
-                        <p className="text-zinc-400 text-sm font-medium">Total de Coaches</p>
-                        <p className="text-3xl font-bold text-zinc-100 mt-2">{coaches.length}</p>
+                {/* KPIs en franja horizontal */}
+                <div className="flex flex-wrap gap-3">
+                    <div className="flex items-center gap-2.5 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5">
+                        <span className="w-1 h-8 rounded-full bg-blue-500 shrink-0"></span>
+                        <div>
+                            <div className="text-[10.5px] text-zinc-400 font-semibold uppercase tracking-wide">Total de Coaches</div>
+                            <div className="text-xl font-extrabold text-zinc-100 leading-tight">{coaches.length}</div>
+                        </div>
                     </div>
-                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-green-500">
-                        <p className="text-zinc-400 text-sm font-medium">Coaches Activos</p>
-                        <p className="text-3xl font-bold text-zinc-100 mt-2">{coaches.filter((c) => (c.estado || (c.activo === false ? 'baja' : 'activo')) === 'activo').length}</p>
+                    <div className="flex items-center gap-2.5 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5">
+                        <span className="w-1 h-8 rounded-full bg-green-500 shrink-0"></span>
+                        <div>
+                            <div className="text-[10.5px] text-zinc-400 font-semibold uppercase tracking-wide">Coaches Activos</div>
+                            <div className="text-xl font-extrabold text-zinc-100 leading-tight">{coaches.filter((c) => (c.estado || (c.activo === false ? 'baja' : 'activo')) === 'activo').length}</div>
+                        </div>
                     </div>
-                    <div className="bg-zinc-900 rounded-lg shadow p-6 border-l-4 border-orange-500">
-                        <p className="text-zinc-400 text-sm font-medium">Disciplinas Asignadas</p>
-                        <p className="text-3xl font-bold text-zinc-100 mt-2">{new Set(Object.values(coachDisciplinasMap).flat()).size}</p>
+                    <div className="flex items-center gap-2.5 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5">
+                        <span className="w-1 h-8 rounded-full bg-orange-500 shrink-0"></span>
+                        <div>
+                            <div className="text-[10.5px] text-zinc-400 font-semibold uppercase tracking-wide">Disciplinas Asignadas</div>
+                            <div className="text-xl font-extrabold text-zinc-100 leading-tight">{new Set(Object.values(coachDisciplinasMap).flat()).size}</div>
+                        </div>
                     </div>
                 </div>
 
-                {/* Grid de tarjetas */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {coaches.length > 0 ? (
-                        coaches.map((coach) => {
-                            const discIds = coachDisciplinasMap[coach.id] || [];
-                            return (
-                                <div key={coach.id} className="bg-zinc-900 rounded-lg shadow hover:shadow-lg transition-shadow overflow-hidden">
-                                    <div className="bg-gradient-to-r from-blue-900 to-blue-800 px-6 py-4">
-                                        <div className="flex items-center justify-between">
-                                            <div>
-                                                <h3 className="text-lg font-bold text-white">{coach.nombre}</h3>
-                                                <p className="text-blue-100 text-sm">
-                                                    {discIds.length > 0
-                                                        ? discIds.map(id => getDisciplinaNombre(id)).join(', ')
-                                                        : 'Sin disciplinas asignadas'}
-                                                </p>
-                                            </div>
-                                            <span className="text-3xl">🏋️</span>
-                                        </div>
-                                    </div>
-                                    <div className="px-6 py-4 space-y-4">
-                                        <div className="flex items-center space-x-3">
-                                            <span className="text-zinc-500">📧</span>
-                                            <div>
-                                                <p className="text-xs text-zinc-400">Correo</p>
-                                                <p className="text-sm text-zinc-100 font-medium">{coach.correo}</p>
-                                            </div>
-                                        </div>
-                                        {discIds.length > 0 && (
-                                            <div className="flex flex-wrap gap-1.5">
-                                                {discIds.map(id => (
-                                                    <span key={id} className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
-                                                        {getDisciplinaNombre(id)}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        )}
-                                        <div className="pt-2 border-t border-zinc-800">
-                                            <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${(coach.estado || (coach.activo === false ? 'baja' : 'activo')) === 'activo' ? 'bg-green-100 text-green-800' : coach.estado === 'pendiente_activacion' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'}`}>
-                                                {coach.estado === 'pendiente_activacion' ? '⏳ Pendiente' : coach.estado === 'rechazado' ? '✗ Rechazado' : coach.estado === 'baja' ? '✗ Baja' : (coach.estado || (coach.activo === false ? 'baja' : 'activo')) === 'activo' ? '✓ Activo' : '✗ Inactivo'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <div className="px-6 py-4 bg-zinc-800/50 border-t border-zinc-800 flex gap-2">
-                                        <button onClick={() => openModal(coach)} disabled={!asignacionesListas} className="flex-1 px-3 py-2 text-blue-400 hover:bg-zinc-800 rounded text-sm font-medium">Editar</button>
-                                        <button onClick={() => setConfirmarEliminar(coach)} className="flex-1 px-3 py-2 text-red-600 hover:bg-red-50 rounded text-sm font-medium">Desactivar</button>
-                                    </div>
-                                </div>
-                            );
-                        })
-                    ) : (
-                        <div className="col-span-full text-center py-12"><p className="text-zinc-400 text-lg">No hay coaches registrados</p></div>
-                    )}
-                </div>
+                {/* Coaches agrupados por estado */}
+                {coaches.length > 0 ? (
+                    <>
+                        {activos.length > 0 && (
+                            <div>
+                                <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-zinc-300">Activos</h2>
+                                <div className="space-y-3">{activos.map(renderCoach)}</div>
+                            </div>
+                        )}
+                        {bajas.length > 0 && (
+                            <div>
+                                <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-zinc-300">Dados de baja</h2>
+                                <div className="space-y-3">{bajas.map(renderCoach)}</div>
+                            </div>
+                        )}
+                    </>
+                ) : (
+                    <div className="text-center py-12"><p className="text-zinc-400 text-lg">No hay coaches registrados</p></div>
+                )}
 
                 {showModal && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
