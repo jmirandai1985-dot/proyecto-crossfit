@@ -38,6 +38,13 @@ const ETIQUETA_ESTADO = {
     anulado: 'bg-red-500/10 text-red-300 border-red-700',
 };
 
+const BARRA_ESTADO = {
+    vigente: 'border-l-emerald-500',
+    usado: 'border-l-sky-500',
+    vencido: 'border-l-zinc-600',
+    anulado: 'border-l-red-600',
+};
+
 const clp = (valor) => (valor == null ? '—' : `$${Number(valor).toLocaleString('es-CL')}`);
 
 const BeneficiosPanel = ({ onVerAlumno, onMensaje }) => {
@@ -51,6 +58,10 @@ const BeneficiosPanel = ({ onVerAlumno, onMensaje }) => {
     const [anular, setAnular] = useState(null);     // el beneficio que se está anulando
     const [motivo, setMotivo] = useState('');
     const [anulando, setAnulando] = useState(false);
+    // Detalle expandible por tarjeta: `abiertos[id]` controla qué beneficios muestran
+    // su detalle completo (se pueden abrir varias a la vez).
+    const [abiertos, setAbiertos] = useState({});
+    const toggleAbierto = (id) => setAbiertos((prev) => ({ ...prev, [id]: !prev[id] }));
 
     // ── Tope de descuento (antes vivía en Configuración) ─────────────────────
     // Es una regla de FIDELIZACIÓN, no de los datos bancarios del box: el tope limita lo que
@@ -269,106 +280,64 @@ const BeneficiosPanel = ({ onVerAlumno, onMensaje }) => {
                 </div>
             )}
 
-            <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead className="bg-amber-800 text-white">
-                            <tr>
-                                <th className="px-4 py-3 text-left text-sm font-medium">Alumno</th>
-                                <th className="px-4 py-3 text-left text-sm font-medium">Beneficio</th>
-                                <th className="px-4 py-3 text-left text-sm font-medium">Estado</th>
-                                <th className="px-4 py-3 text-left text-sm font-medium">Vigencia</th>
-                                <th className="px-4 py-3 text-left text-sm font-medium">Uso</th>
-                                <th className="px-4 py-3 text-left text-sm font-medium">Correo</th>
-                                <th className="px-4 py-3 text-left text-sm font-medium">Acción</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-zinc-800" data-testid="beneficios-tabla">
-                            {cargando && (
-                                <tr>
-                                    <td colSpan={7} className="px-4 py-8 text-center">
-                                        <div className="flex justify-center">
-                                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500" />
-                                        </div>
-                                    </td>
-                                </tr>
+            <div className="space-y-3" data-testid="beneficios-tabla">
+                {cargando && (
+                    <div className="bg-zinc-900 rounded-lg shadow px-4 py-8 flex justify-center">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500" />
+                    </div>
+                )}
+                {!cargando && items.length === 0 && (
+                    <div className="bg-zinc-900 rounded-lg shadow px-4 py-8 text-center text-sm text-zinc-500">
+                        No hay beneficios que cumplan este filtro.
+                    </div>
+                )}
+                {!cargando && items.map((b) => (
+                    <article key={b.id} data-testid={`beneficio-fila-${b.id}`} className={`rounded-2xl border border-zinc-800 border-l-4 ${BARRA_ESTADO[b.estado] || 'border-l-zinc-700'} bg-zinc-900 overflow-hidden`}>
+                        <button type="button" onClick={() => toggleAbierto(b.id)} className="w-full text-left p-4 hover:bg-zinc-800/30 transition-colors">
+                            <div className="flex items-center justify-between gap-3">
+                                <span className="truncate font-bold text-zinc-100">{b.alumno_nombre || `Alumno #${b.alumno_id}`}</span>
+                                <span className={`shrink-0 inline-block px-2 py-0.5 rounded-full border text-xs ${ETIQUETA_ESTADO[b.estado] || ''}`}>{b.estado}</span>
+                            </div>
+                            <div className="mt-1.5 flex items-center justify-between gap-3">
+                                <span className="truncate text-sm text-zinc-400">{b.tipo_label}</span>
+                                <span className="shrink-0 font-bold text-zinc-100">
+                                    {b.unidad === 'pct' ? `−${b.valor} %` : `${b.valor} clase${b.valor === 1 ? '' : 's'}`}
+                                </span>
+                            </div>
+                            {b.aviso && (
+                                <p className="mt-1 text-[11px] text-amber-300" data-testid={`beneficio-aviso-${b.id}`}>{b.aviso}</p>
                             )}
-                            {!cargando && items.length === 0 && (
-                                <tr>
-                                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-zinc-500">
-                                        No hay beneficios que cumplan este filtro.
-                                    </td>
-                                </tr>
-                            )}
-                            {!cargando && items.map((b, idx) => (
-                                <tr key={b.id} data-testid={`beneficio-fila-${b.id}`}
-                                    className={idx % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
-                                    <td className="px-4 py-3">
-                                        <button type="button" onClick={() => onVerAlumno?.(b.alumno_id)}
-                                            className="text-sm font-bold text-zinc-100 hover:text-orange-300 underline decoration-dotted"
-                                            title="Ver la ficha del alumno">
-                                            {b.alumno_nombre || `Alumno #${b.alumno_id}`}
+                        </button>
+                        {abiertos[b.id] && (
+                            <div className="border-t border-zinc-800 p-4 space-y-2 text-xs text-zinc-400">
+                                <p>
+                                    <button type="button" onClick={() => onVerAlumno?.(b.alumno_id)} className="text-zinc-100 underline decoration-dotted hover:text-orange-300" title="Ver la ficha del alumno">
+                                        #{b.alumno_id}{b.alumno_correo ? ` · ${b.alumno_correo}` : ''}
+                                    </button>
+                                </p>
+                                <p>Dado el {fmtFechaChile(b.created_at)} · Hasta el <span className="text-zinc-200">{fmtFechaChile(b.vigente_hasta)}</span></p>
+                                <p>
+                                    {b.estado === 'usado'
+                                        ? `Usado ${fmtFechaChile(b.usado_en)}${b.dias_hasta_uso != null ? ` (${b.dias_hasta_uso} días)` : ''}${b.descuento_clp != null ? ` · ${clp(b.descuento_clp)}` : ''}`
+                                        : 'Uso: —'}
+                                </p>
+                                <p>Correo: {b.notificacion_id ? `avisado (#${b.notificacion_id})` : 'sin correo'}</p>
+                                {b.estado === 'anulado' && b.anulado_motivo && (
+                                    <p>Motivo de anulación: <span className="text-zinc-300">{b.anulado_motivo}</span></p>
+                                )}
+                                <div className="pt-1">
+                                    {b.puede_anular ? (
+                                        <button type="button" onClick={() => { setAnular(b); setMotivo(''); }} data-testid={`beneficio-anular-${b.id}`} className="px-3 py-1.5 bg-red-600/90 text-white rounded-lg text-xs font-bold hover:bg-red-700">
+                                            Anular
                                         </button>
-                                        <p className="text-xs text-zinc-500">
-                                            #{b.alumno_id}{b.alumno_correo ? ` · ${b.alumno_correo}` : ''}
-                                        </p>
-                                    </td>
-                                    <td className="px-4 py-3 text-sm text-zinc-300">
-                                        {b.tipo_label}
-                                        <span className="ml-1 font-bold text-zinc-100">
-                                            {b.unidad === 'pct'
-                                                ? `−${b.valor} %`
-                                                : `${b.valor} clase${b.valor === 1 ? '' : 's'}`}
-                                        </span>
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        <span className={`inline-block px-2 py-0.5 rounded-full border text-xs ${ETIQUETA_ESTADO[b.estado] || ''}`}>
-                                            {b.estado}
-                                        </span>
-                                        {b.aviso && (
-                                            <p className="mt-1 text-[11px] text-amber-300"
-                                                data-testid={`beneficio-aviso-${b.id}`}>{b.aviso}</p>
-                                        )}
-                                    </td>
-
-                                    <td className="px-4 py-3 text-xs text-zinc-400">
-                                        dado el {fmtFechaChile(b.created_at)}
-                                        <br />hasta el <span className="text-zinc-200">{fmtFechaChile(b.vigente_hasta)}</span>
-                                    </td>
-                                    <td className="px-4 py-3 text-xs text-zinc-400">
-                                        {b.estado === 'usado' ? (
-                                            <>
-                                                {fmtFechaChile(b.usado_en)}
-                                                {b.dias_hasta_uso != null && ` (${b.dias_hasta_uso} días)`}
-                                                {b.descuento_clp != null && <><br />{clp(b.descuento_clp)}</>}
-                                            </>
-                                        ) : '—'}
-                                    </td>
-                                    <td className="px-4 py-3 text-xs text-zinc-400">
-                                        {b.notificacion_id ? `avisado (#${b.notificacion_id})` : 'sin correo'}
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        {b.puede_anular ? (
-                                            <button type="button"
-                                                onClick={() => { setAnular(b); setMotivo(''); }}
-                                                data-testid={`beneficio-anular-${b.id}`}
-                                                className="px-3 py-1.5 bg-red-600/90 text-white rounded-lg text-xs font-bold hover:bg-red-700">
-                                                Anular
-                                            </button>
-                                        ) : (
-                                            <span className="text-xs text-zinc-500">
-                                                {b.estado === 'usado' ? 'ya usado' : '—'}
-                                            </span>
-                                        )}
-                                        {b.estado === 'anulado' && b.anulado_motivo && (
-                                            <p className="mt-1 text-[11px] text-zinc-500">{b.anulado_motivo}</p>
-                                        )}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                                    ) : (
+                                        <span className="text-xs text-zinc-500">{b.estado === 'usado' ? 'ya usado' : '—'}</span>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </article>
+                ))}
             </div>
 
             {datos && totalPaginas > 1 && (
