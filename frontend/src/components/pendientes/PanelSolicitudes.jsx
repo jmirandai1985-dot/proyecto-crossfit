@@ -121,103 +121,89 @@ const PanelSolicitudes = () => {
                         )}
                     </div>
                 ) : (
-                    <div className="overflow-x-auto">
-                        <table className="w-full">
-                            <thead className="bg-zinc-800">
-                                <tr>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400 uppercase">Alumno</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400 uppercase">Plan</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400 uppercase">Precio</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400 uppercase">Comprobante</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400 uppercase">Fecha</th>
-                                    <th className="px-4 py-3 text-right text-xs font-medium text-zinc-400 uppercase">Acciones</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-zinc-800">
-                                {solicitudes.map((s) => (
-                                    <tr key={s.id}>
-                                        <td className="px-4 py-3">
-                                            <p className="text-sm font-semibold text-white">{s.alumno_nombre}</p>
-                                            <p className="text-xs text-zinc-400">{s.alumno_email}</p>
-                                        </td>
-                                        <td className="px-4 py-3 text-sm text-zinc-200">{s.plan_nombre}</td>
-                                        <td className="px-4 py-3 text-sm font-bold text-emerald-400">
+                    <div className="space-y-3">
+                        {solicitudes.map((s) => (
+                            <article key={s.id} className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <p className="font-bold text-white truncate">{s.alumno_nombre}</p>
+                                        <p className="text-xs text-zinc-400 truncate">{s.alumno_email}</p>
+                                        <p className="mt-1 text-sm text-zinc-200">{s.plan_nombre}</p>
+                                    </div>
+                                    <div className="text-right shrink-0">
+                                        <p className="text-lg font-extrabold text-emerald-400">
                                             ${(s.precio_final ?? s.plan_precio ?? 0).toLocaleString('es-CL')}
-                                            {s.descuento_pct != null && (
-                                                <span className="block text-[11px] font-medium text-amber-400">
-                                                    Beneficio: −{s.descuento_pct} %
-                                                    <span className="ml-1 text-zinc-500 line-through">
-                                                        ${(s.plan_precio || 0).toLocaleString('es-CL')}
-                                                    </span>
+                                        </p>
+                                        {s.descuento_pct != null && (
+                                            <p className="text-[11px] font-medium text-amber-400">
+                                                Beneficio: −{s.descuento_pct} %
+                                                <span className="ml-1 text-zinc-500 line-through">
+                                                    ${(s.plan_precio || 0).toLocaleString('es-CL')}
+                                                </span>
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    {s.voucher_url ? (
+                                        <button
+                                            onClick={() => setVoucherSolicitud(s)}
+                                            className="text-blue-400 underline text-xs hover:text-blue-300"
+                                        >
+                                            📎 Ver comprobante
+                                        </button>
+                                    ) : esMercadopago(s) ? (
+                                        <>
+                                            {pagoConfirmado(s) ? (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 text-[11px] font-semibold" data-testid="badge-pagado-online">
+                                                    💳 Pagado online ✓
+                                                </span>
+                                            ) : pagoEnEspera(s) ? (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 text-[11px] font-semibold" data-testid="badge-pago-en-espera">
+                                                    ⏳ Esperando pago
+                                                </span>
+                                            ) : (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/15 text-red-300 text-[11px] font-semibold" data-testid="badge-pago-no-completado">
+                                                    Pago no completado
                                                 </span>
                                             )}
-                                        </td>
-                                        <td className="px-4 py-3">
-                                            {s.voucher_url ? (
-                                                <button
-                                                    onClick={() => setVoucherSolicitud(s)}
-                                                    className="text-blue-400 underline text-xs hover:text-blue-300"
-                                                >
-                                                    📎 Ver comprobante
-                                                </button>
-                                            ) : esMercadopago(s) ? (
-                                                /* Pago ONLINE: no hay voucher. Se muestra el estado
-                                                   y un link al detalle del cobro. */
-                                                <div className="flex flex-col gap-1 items-start">
-                                                    {pagoConfirmado(s) ? (
-                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 text-[11px] font-semibold" data-testid="badge-pagado-online">
-                                                            💳 Pagado online ✓
-                                                        </span>
-                                                    ) : pagoEnEspera(s) ? (
-                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 text-[11px] font-semibold" data-testid="badge-pago-en-espera">
-                                                            ⏳ Esperando pago
-                                                        </span>
-                                                    ) : (
-                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/15 text-red-300 text-[11px] font-semibold" data-testid="badge-pago-no-completado">
-                                                            Pago no completado
-                                                        </span>
-                                                    )}
-                                                    <button
-                                                        onClick={() => setPagoDetalle(s)}
-                                                        className="text-blue-400 underline text-[11px] hover:text-blue-300"
-                                                        data-testid="ver-pago-online"
-                                                    >
-                                                        Ver referencia del pago
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                <span className="text-zinc-500 text-xs">Sin comprobante</span>
-                                            )}
-                                        </td>
-                                        <td className="px-4 py-3 text-xs text-zinc-400">
-                                            {s.created_at ? new Date(s.created_at).toLocaleDateString('es-CL') : '—'}
-                                        </td>
+                                            <button
+                                                onClick={() => setPagoDetalle(s)}
+                                                className="text-blue-400 underline text-[11px] hover:text-blue-300"
+                                                data-testid="ver-pago-online"
+                                            >
+                                                Ver referencia del pago
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <span className="text-zinc-500 text-xs">Sin comprobante</span>
+                                    )}
+                                    <span className="text-xs text-zinc-400">
+                                        {s.created_at ? new Date(s.created_at).toLocaleDateString('es-CL') : '—'}
+                                    </span>
+                                </div>
 
-                                        <td className="px-4 py-3">
-                                            <div className="flex items-center justify-end gap-2">
-                                                <button
-                                                    onClick={() => handleSolicitudAccion(s.id, 'aprobar')}
-                                                    disabled={solicitudActionId === s.id || esMercadopago(s)}
-                                                    title={esMercadopago(s)
-                                                        ? 'Pago online: se aprueba automáticamente por el webhook de Mercado Pago'
-                                                        : ''}
-                                                    className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-semibold transition-colors"
-                                                >
-                                                    {solicitudActionId === s.id ? '…' : '✓ Aprobar'}
-                                                </button>
-                                                <button
-                                                    onClick={() => setRechazoPlanModal(s)}
-                                                    disabled={solicitudActionId === s.id}
-                                                    className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-red-500/20 border border-zinc-700 hover:border-red-500/40 text-zinc-300 hover:text-red-300 text-xs font-semibold transition-colors"
-                                                >
-                                                    ✕ Rechazar
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-zinc-800 pt-3">
+                                    <button
+                                        onClick={() => handleSolicitudAccion(s.id, 'aprobar')}
+                                        disabled={solicitudActionId === s.id || esMercadopago(s)}
+                                        title={esMercadopago(s)
+                                            ? 'Pago online: se aprueba automáticamente por el webhook de Mercado Pago'
+                                            : ''}
+                                        className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-semibold transition-colors"
+                                    >
+                                        {solicitudActionId === s.id ? '…' : '✓ Aprobar'}
+                                    </button>
+                                    <button
+                                        onClick={() => setRechazoPlanModal(s)}
+                                        disabled={solicitudActionId === s.id}
+                                        className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-red-500/20 border border-zinc-700 hover:border-red-500/40 text-zinc-300 hover:text-red-300 text-xs font-semibold transition-colors"
+                                    >
+                                        ✕ Rechazar
+                                    </button>
+                                </div>
+                            </article>
+                        ))}
                     </div>
                 )}
             </div>
@@ -254,12 +240,21 @@ const PanelSolicitudes = () => {
                     onClick={() => setVoucherSolicitud(null)}>
                     <div className="bg-zinc-900 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-auto"
                         onClick={(e) => e.stopPropagation()}>
-                        <div className="p-4 border-b border-zinc-800 flex justify-between items-center">
-                            <h3 className="font-bold text-zinc-100">
-                                📎 Comprobante de {voucherSolicitud.alumno_nombre} · {voucherSolicitud.plan_nombre}
-                            </h3>
-                            <button onClick={() => setVoucherSolicitud(null)}
-                                className="text-zinc-400 hover:text-zinc-300 text-xl font-bold">✕</button>
+                        <div className="p-4 border-b border-zinc-800">
+                            <div className="flex justify-between items-center">
+                                <h3 className="font-bold text-zinc-100">📎 Comprobante</h3>
+                                <button onClick={() => setVoucherSolicitud(null)}
+                                    className="text-zinc-400 hover:text-zinc-300 text-xl font-bold">✕</button>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-1.5">
+                                <span className="px-2.5 py-1 rounded-full bg-zinc-800 text-zinc-200 text-[11px] font-semibold">{voucherSolicitud.alumno_nombre}</span>
+                                <span className="px-2.5 py-1 rounded-full bg-blue-500/15 text-blue-300 text-[11px] font-semibold">{voucherSolicitud.plan_nombre}</span>
+                                <span className="px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 text-[11px] font-semibold">${(voucherSolicitud.precio_final ?? voucherSolicitud.plan_precio ?? 0).toLocaleString('es-CL')}</span>
+                            </div>
+                            <p className="mt-2 text-[11px] text-zinc-500">
+                                Subido {voucherSolicitud.created_at ? new Date(voucherSolicitud.created_at).toLocaleString('es-CL') : '—'}
+                                {' · '}Archivo: comprobante_{voucherSolicitud.id}
+                            </p>
                         </div>
                         <div className="p-4 min-h-[12rem] flex items-center justify-center">
                             {voucherPreview.loading ? (
@@ -267,16 +262,32 @@ const PanelSolicitudes = () => {
                             ) : voucherPreview.error ? (
                                 <p className="text-center text-red-400 text-sm py-6">{voucherPreview.error}</p>
                             ) : voucherPreview.blobUrl ? (
-                                voucherPreview.mime.includes('pdf') ? (
-                                    <iframe src={voucherPreview.blobUrl} className="w-full h-96" title="Comprobante PDF" />
-                                ) : (
-                                    <img src={voucherPreview.blobUrl} alt="Comprobante" className="w-full rounded-lg" />
-                                )
+                                <div className="w-full">
+                                    <div className="mb-2 flex justify-end">
+                                        <a href={voucherPreview.blobUrl} target="_blank" rel="noreferrer"
+                                            className="px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 text-xs hover:text-white transition-colors">🔍 Ampliar</a>
+                                    </div>
+                                    {voucherPreview.mime.includes('pdf') ? (
+                                        <iframe src={voucherPreview.blobUrl} className="w-full h-96" title="Comprobante PDF" />
+                                    ) : (
+                                        <img src={voucherPreview.blobUrl} alt="Comprobante" className="w-full rounded-lg" />
+                                    )}
+                                </div>
                             ) : (
                                 <p className="text-zinc-400 text-sm">Sin vista previa</p>
                             )}
                         </div>
                         <div className="p-4 border-t border-zinc-800 flex justify-end gap-2">
+                            <button
+                                onClick={() => {
+                                    const s = voucherSolicitud;
+                                    setVoucherSolicitud(null);
+                                    setRechazoPlanModal(s);
+                                }}
+                                className="px-4 py-2 rounded-lg border border-red-500/40 text-red-300 hover:bg-red-500/10 text-sm font-semibold"
+                            >
+                                ✕ Rechazar
+                            </button>
                             <button
                                 onClick={() => {
                                     const s = voucherSolicitud;
