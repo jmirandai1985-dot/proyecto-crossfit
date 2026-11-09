@@ -124,24 +124,19 @@ const Suspension = () => {
                 </div>
 
                 {/* ── Reglas (siempre visibles) ────────────────────────────── */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                    <h2 className="text-lg font-bold text-gray-800 mb-3">
-                        Cómo funciona la suspensión de tu plan
-                    </h2>
-                    <p className="text-xs text-gray-400 leading-relaxed">
-                        Tienes 14 días al año para suspender, divisibles en hasta
-                        2 períodos. El año se cuenta desde la fecha en que te
-                        inscribiste, no desde enero. Necesitas al menos 4 créditos
-                        disponibles y al menos 10 días antes de que venza tu plan
-                        para poder suspender. Las reservas que tengas dentro del
-                        período se cancelan automáticamente. Tu fecha de vencimiento
-                        se extiende exactamente los días que suspendas. Si quieres
-                        volver antes de que termine tu suspensión, puedes cancelarla
-                        — pero solo una vez por año. Al cancelar, tu plan vuelve a
-                        su fecha de vencimiento original y no se descuenta de tu
-                        saldo anual, pero las clases que ya se cancelaron no se
-                        recuperan.
-                    </p>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="bg-gradient-to-r from-amber-500 to-orange-500 px-6 py-3">
+                        <h2 className="text-lg font-bold text-white">Cómo funciona la suspensión de tu plan</h2>
+                    </div>
+                    <ol className="p-6 space-y-2.5 list-decimal list-inside text-xs text-gray-500 leading-relaxed">
+                        <li>Tienes 14 días al año para suspender, divisibles en hasta 2 períodos.</li>
+                        <li>El año se cuenta desde la fecha en que te inscribiste, no desde enero.</li>
+                        <li>Necesitas al menos 4 créditos disponibles.</li>
+                        <li>Necesitas al menos 10 días antes de que venza tu plan para poder suspender.</li>
+                        <li>Las reservas que tengas dentro del período se cancelan automáticamente.</li>
+                        <li>Tu fecha de vencimiento se extiende exactamente los días que suspendas.</li>
+                        <li>Si quieres volver antes de que termine tu suspensión, puedes cancelarla — pero solo una vez por año. Al cancelar, tu plan vuelve a su fecha de vencimiento original y no se descuenta de tu saldo anual, pero las clases que ya se cancelaron no se recuperan.</li>
+                    </ol>
                 </div>
 
                 {/* ── Historial ───────────────────────────────────────────── */}
