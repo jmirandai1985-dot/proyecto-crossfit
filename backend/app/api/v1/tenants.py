@@ -138,6 +138,47 @@ def qr_tenant_svg(
     )
 
 
+@router.get("/{public_id}/qr.png")
+@limiter.limit("30/minute")
+def qr_tenant_png(
+    request: Request,
+    public_id: str,
+    front: Optional[str] = Query(
+        None,
+        description="Base URL opcional para el contenido del QR "
+                    "(default: la URL publica del frontend). Sirve para pruebas en LAN.",
+    ),
+    db: Session = Depends(get_db),
+):
+    """Genera la imagen PNG del QR de check-in del box (sin auth).
+
+    Contenido: {front|FRONTEND_URL}/asistencia/qr/{public_id}.
+    public_id inexistente → 404 genérico (no revelar).
+    """
+    tenant = db.query(Tenant).filter(Tenant.public_id == public_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="No encontrado")
+
+    base = (front or "").strip().rstrip("/") or url_frontend()
+    if not base.startswith(("http://", "https://")):
+        raise HTTPException(
+            status_code=400, detail="front debe ser una URL http(s) válida")
+
+    contenido = f"{base}/asistencia/qr/{tenant.public_id}"
+
+    # Import diferido: segno es pura Python y solo se necesita aquí.
+    from segno import make as qr_make
+
+    qr = qr_make(contenido, error="m")
+    buf = io.BytesIO()
+    qr.save(buf, kind="png", scale=8)
+    return Response(
+        content=buf.getvalue(),
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @router.get("/{tenant_id}", response_model=TenantResponse)
 def obtener_tenant(
     tenant_id: int,

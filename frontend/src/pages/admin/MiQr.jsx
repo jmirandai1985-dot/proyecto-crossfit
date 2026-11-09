@@ -23,6 +23,9 @@ const MiQr = () => {
     const qrHref = data
         ? `/api/v1/tenants/${data.public_id}/qr.svg?front=${encodeURIComponent(base)}`
         : '';
+    const qrPngHref = data
+        ? `/api/v1/tenants/${data.public_id}/qr.png?front=${encodeURIComponent(base)}`
+        : '';
     const linkAlumno = data ? `${base}/asistencia/qr/${data.public_id}` : '';
 
     return (
@@ -56,11 +59,18 @@ const MiQr = () => {
 
                         <div className="mt-4 flex flex-col gap-3">
                             <a
-                                href={qrHref}
-                                download={`qr-${data.subdomain || data.public_id}.svg`}
+                                href={qrPngHref}
+                                download={`qr-${data.subdomain || data.public_id}.png`}
                                 className="px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-bold text-center"
                             >
-                                📥 Descargar QR (SVG)
+                                📥 Descargar QR (PNG)
+                            </a>
+                            <a
+                                href={qrHref}
+                                download={`qr-${data.subdomain || data.public_id}.svg`}
+                                className="px-4 py-2 border border-zinc-700 text-zinc-300 rounded-lg hover:bg-zinc-800 transition-colors text-sm text-center"
+                            >
+                                Descargar SVG (para imprenta grande)
                             </a>
                             <p className="text-xs text-zinc-500 text-center">
                                 Imprimilo y pegalo en la recepción del box. El QR no es secreto: la
