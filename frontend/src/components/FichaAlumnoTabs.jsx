@@ -191,13 +191,13 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
                 )}
             </div>
 
-            <div className="flex gap-1 px-3 pt-3 border-b border-zinc-800 overflow-x-auto">
+            <div className="flex flex-wrap gap-1 px-3 pt-3 border-b border-zinc-800 max-md:flex-nowrap max-md:overflow-x-auto max-md:snap-x">
                 {TABS.map((t) => (
                     <button
                         key={t.key}
                         type="button"
                         onClick={() => { setPagina(1); setTab(t.key); }}
-                        className={`px-3 py-2 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap ${tab === t.key ? 'text-orange-400 border-b-2 border-orange-500 bg-zinc-800/60' : 'text-zinc-400 hover:text-zinc-200'}`}
+                        className={`px-3 py-2 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap max-md:shrink-0 max-md:snap-start ${tab === t.key ? 'text-orange-400 border-b-2 border-orange-500 bg-zinc-800/60' : 'text-zinc-400 hover:text-zinc-200'}`}
                     >
                         {t.label}
                     </button>
