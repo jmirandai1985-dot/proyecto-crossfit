@@ -1468,6 +1468,27 @@ def render_email_contratar_plan(nombre: str) -> tuple:
     return asunto, html
 
 
+def render_email_invitacion_externa(nombre_invitado: str, nombre_coach: str) -> tuple:
+    """Invitación GENÉRICA a alguien que todavía NO existe en el sistema (Parte H).
+
+    El coach escribe nombre + correo libre desde su panel. A diferencia de
+    `render_email_clase_prueba` (que le habla a un alumno YA inscrito en prueba), acá no
+    hay alumno en la BD todavía: el CTA manda a la landing pública de registro.
+    """
+    asunto = f"🥊 {nombre_invitado}, {nombre_coach} te invita a tu clase de prueba"
+    titulo = "Tu clase de prueba te espera"
+    saludo = f"¡Hola, {nombre_invitado}!"
+    cuerpo = (
+        f"<p><strong>{nombre_coach}</strong> te invita a tomar tu "
+        "<strong>clase de prueba</strong> en Urban Training Box.</p>"
+        "<p>Veni a conocer el box, entrená con nosotros y viví la experiencia CrossFit "
+        "desde el primer día. Sin costo y sin compromiso.</p>"
+    )
+    html = _template(titulo, saludo, cuerpo, "Registrarme y agendar mi clase",
+                     url_frontend("/landing"))
+    return asunto, html
+
+
 def render_email_aviso_retiro(nombre: str, producto: str, cantidad: int,
                               codigo: str) -> tuple:
     """Recordatorio MANUAL de retiro del Bazar (pedido validado, sin retirar).
@@ -1511,6 +1532,24 @@ def send_contratar_plan(nombre: str, correo: str, registrar: bool) -> bool:
     ok = _enviar(correo, asunto, html, None,
                  tipo="prueba_plan_manual", registrar=registrar)
     logger.info(f"[prueba_plan_manual] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    return ok
+
+
+def send_invitacion_externa(nombre_invitado: str, correo: str, nombre_coach: str,
+                            tenant_id: int = None, registrar: bool = True) -> bool:
+    """Manda la invitación externa a una persona que aún no existe (tipo `invitacion_externa_manual`).
+
+    El destinatario es un LEAD (no un alumno): se registra con `destinatario_rol="lead"` para que
+    quede visible en /admin/notificaciones, igual que la solicitud de prueba de un alumno nuevo.
+    """
+    if not correo:
+        return False
+    asunto, html = render_email_invitacion_externa(nombre_invitado, nombre_coach)
+    ok = _enviar(correo, asunto, html, None,
+                 tipo="invitacion_externa_manual", registrar=registrar,
+                 destinatario_nombre=nombre_invitado, destinatario_rol="lead",
+                 tenant_id=tenant_id)
+    logger.info(f"[invitacion_externa_manual] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
 
 

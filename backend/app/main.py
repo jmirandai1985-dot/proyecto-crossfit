@@ -1,7 +1,7 @@
 ﻿from app.api.v1 import (
     usuarios, tenants, dashboard, fidelizacion, admin,
     disciplinas, planes, horarios, clases, reservas,
-    coach_disciplinas, movimientos, historial_rm,
+    coach, coach_disciplinas, movimientos, historial_rm,
     retencion, productos, pedidos, reportes, auditoria, auth,
     suscripciones, wods, solicitudes_planes, upload,
     suspensiones,
@@ -300,6 +300,8 @@ app.include_router(
     reservas.router, prefix="/api/v1/reservas", tags=["Reservas"])
 app.include_router(coach_disciplinas.router,
                    prefix="/api/v1/coach-disciplinas", tags=["Coach-Disciplinas"])
+# Invitaciones externas del coach (Parte H): nombre + correo libre -> correo con link a /landing.
+app.include_router(coach.router, prefix="/api/v1/coach", tags=["Coach"])
 
 # Módulos corregidos con el nombre del recurso en el prefijo (Evita errores 500 y 404)
 app.include_router(movimientos.router,
