@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import ModalProducto from '../../components/ModalProducto';
+import ImagenProducto from '../../components/ImagenProducto';
 import { useProductos, useEliminarProducto, useGuardarProducto, SIN_DATOS } from '../../hooks/queries';
 
 const FILTROS = [
@@ -178,9 +179,16 @@ const Bazar = ({ sinLayout = false }) => {
 
     const renderFila = (p) => (
         <div key={p.id} className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-800/30 transition-colors">
-            <span className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${INITIAL_BG[p.id % INITIAL_BG.length]}`}>
-                {getInitials(p.nombre)}
-            </span>
+            <ImagenProducto
+                url={p.imagen_url}
+                alt={p.nombre}
+                className="w-10 h-10 rounded-xl object-cover shrink-0"
+                respaldo={(
+                    <span className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${INITIAL_BG[p.id % INITIAL_BG.length]}`}>
+                        {getInitials(p.nombre)}
+                    </span>
+                )}
+            />
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 min-w-0">
                     <span className="font-bold text-zinc-100 truncate">{p.nombre}</span>
