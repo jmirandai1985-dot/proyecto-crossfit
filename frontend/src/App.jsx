@@ -2,6 +2,7 @@ import React, { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import SplashGate from './components/SplashGate';
 import { DASHBOARD_MAP, ROLES_ADMIN, ROLES_COACH, ROLES_ALUMNO } from './config/roles';
 
 // ─── Pages públicas (EAGER) ───────────────────────────────────────────────
@@ -128,6 +129,7 @@ function App() {
       <AuthProvider>
         {/* Suspense: hace de fallback mientras se descarga el chunk de la ruta lazy. */}
         <Suspense fallback={<LoadingScreen />}>
+        <SplashGate>
         <Routes>
 
           {/* ── /landing → Landing pública de registro (clase de prueba) ── */}
@@ -225,6 +227,7 @@ function App() {
           <Route path="*" element={<RootRedirect />} />
 
         </Routes>
+        </SplashGate>
         </Suspense>
       </AuthProvider>
     </Router>
