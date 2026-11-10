@@ -24,6 +24,7 @@ import { textoHace } from '../../utils/hace';
 // La pantalla y su fetch viven en componentes/hooks COMPARTIDOS: la usan el Inicio
 // móvil (<768px) y la ruta de escritorio `/admin/alumnos-prueba`.
 import PanelAlumnosPrueba from '../../components/PanelAlumnosPrueba';
+import FichaAlumnoTabs from '../../components/FichaAlumnoTabs';
 import { useAlumnosPrueba } from '../../hooks/useAlumnosPrueba';
 import { iniciales } from '../../utils/iniciales';
 // Pedidos listos para entrega (Bazar): qué fila se lista y qué dice cada una.
@@ -513,6 +514,7 @@ const InicioMobileAdmin = () => {
     const [buscador, setBuscador] = useState(false);
     const [consulta, setConsulta] = useState('');
     const [resultados, setResultados] = useState([]);
+    const [alumnoSeleccionadoId, setAlumnoSeleccionadoId] = useState(null);
     const [buscando, setBuscando] = useState(false);
     const [errorBusqueda, setErrorBusqueda] = useState('');
     // Alto REAL del header del Layout (incluye la safe-area del iPhone): la pantalla
@@ -674,6 +676,7 @@ const InicioMobileAdmin = () => {
     const cerrarBuscador = () => {
         setBuscador(false);
         setConsulta('');
+        setAlumnoSeleccionadoId(null);
     };
 
     // ── F. "Alumnos nuevos y en prueba" (tarjeta + pantalla completa) ────────
@@ -1338,82 +1341,98 @@ const InicioMobileAdmin = () => {
             {/* ── Pantalla completa: buscador de alumnos (E) ─────────────── */}
             {buscador && (
                 <section className="screen" aria-label="Buscar alumno">
-                    <div className="s-head">
-                        <button type="button" className="icon-btn" onClick={cerrarBuscador}
-                            aria-label="Volver">←</button>
-                        <label className="search">
-                            <Icono nombre="search" />
-                            <input type="search" autoFocus value={consulta}
-                                onChange={(e) => setConsulta(e.target.value)}
-                                placeholder="Nombre o correo del alumno"
-                                aria-label="Buscar alumno" />
-                        </label>
-                    </div>
+                    {alumnoSeleccionadoId ? (
+                        <>
+                            <div className="s-head">
+                                <button type="button" className="icon-btn"
+                                    onClick={() => setAlumnoSeleccionadoId(null)}
+                                    aria-label="Volver">←</button>
+                                <span style={{ fontWeight: 600 }}>Ficha del alumno</span>
+                            </div>
+                            <div className="results" style={{ padding: '12px' }}>
+                                <FichaAlumnoTabs alumnoId={alumnoSeleccionadoId} />
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <div className="s-head">
+                                <button type="button" className="icon-btn" onClick={cerrarBuscador}
+                                    aria-label="Volver">←</button>
+                                <label className="search">
+                                    <Icono nombre="search" />
+                                    <input type="search" autoFocus value={consulta}
+                                        onChange={(e) => setConsulta(e.target.value)}
+                                        placeholder="Nombre o correo del alumno"
+                                        aria-label="Buscar alumno" />
+                                </label>
+                            </div>
 
-                    <div className="results">
-                        {errorBusqueda ? (
-                            <p className="empty-line" role="alert">⚠️ {errorBusqueda}</p>
-                        ) : consulta.trim().length < 2 ? (
-                            <p className="hint">
-                                Escribe al menos 2 letras del nombre o del correo.
-                            </p>
-                        ) : buscando ? (
-                            <p className="hint">Buscando…</p>
-                        ) : resultados.length === 0 ? (
-                            <p className="hint">Sin resultados para «{consulta.trim()}».</p>
-                        ) : (
-                            resultados.map((a) => {
-                                const m = a.membresia || null;
-                                const est = estadoAlumno(m);
-                                const wa = enlaceWhatsapp(
-                                    a.telefono,
-                                    `Hola ${String(a.nombre || '').split(' ')[0]}, te escribo de Urban Box.`,
-                                );
-                                return (
-                                    <article className="student" key={a.id}>
-                                        <div className="st-top">
-                                            <span className="avatar">{iniciales(a.nombre)}</span>
-                                            <div style={{ minWidth: 0 }}>
-                                                <div className="st-name">{a.nombre}</div>
-                                                <div className="st-plan">
-                                                    {m?.plan_nombre || 'Sin plan activo'}
+                            <div className="results">
+                                {errorBusqueda ? (
+                                    <p className="empty-line" role="alert">⚠️ {errorBusqueda}</p>
+                                ) : consulta.trim().length < 2 ? (
+                                    <p className="hint">
+                                        Escribe al menos 2 letras del nombre o del correo.
+                                    </p>
+                                ) : buscando ? (
+                                    <p className="hint">Buscando…</p>
+                                ) : resultados.length === 0 ? (
+                                    <p className="hint">Sin resultados para «{consulta.trim()}».</p>
+                                ) : (
+                                    resultados.map((a) => {
+                                        const m = a.membresia || null;
+                                        const est = estadoAlumno(m);
+                                        const wa = enlaceWhatsapp(
+                                            a.telefono,
+                                            `Hola ${String(a.nombre || '').split(' ')[0]}, te escribo de Urban Box.`,
+                                        );
+                                        return (
+                                            <article className="student" key={a.id}>
+                                                <div className="st-top">
+                                                    <span className="avatar">{iniciales(a.nombre)}</span>
+                                                    <div style={{ minWidth: 0 }}>
+                                                        <div className="st-name">{a.nombre}</div>
+                                                        <div className="st-plan">
+                                                            {m?.plan_nombre || 'Sin plan activo'}
+                                                        </div>
+                                                    </div>
+                                                    <span className={`state ${est.clase}`}>{est.texto}</span>
                                                 </div>
-                                            </div>
-                                            <span className={`state ${est.clase}`}>{est.texto}</span>
-                                        </div>
-                                        <div className="st-grid">
-                                            <div>
-                                                <small>Vence</small>
-                                                <b>{fechaVencimiento(m?.fecha_expiracion)}</b>
-                                            </div>
-                                            <div>
-                                                <small>Créditos</small>
-                                                <b>{rotuloCreditos(m?.es_ilimitado, m?.creditos_disponibles)}</b>
-                                            </div>
-                                            <div>
-                                                <small>Última</small>
-                                                <b>{ultimaVisita(a.ultima_asistencia)}</b>
-                                            </div>
-                                        </div>
-                                        <div className={`st-actions${wa ? '' : ' una'}`}>
-                                            {/* Sin teléfono cargado el botón NO se dibuja
-                                                (no hay a dónde mandar el WhatsApp). */}
-                                            {wa && (
-                                                <a className="btn wa wa-link" href={wa}
-                                                    target="_blank" rel="noreferrer">
-                                                    WhatsApp
-                                                </a>
-                                            )}
-                                            <button type="button" className="btn soft"
-                                                onClick={() => navigate(`/admin/alumnos/${a.id}/historial`)}>
-                                                Ver perfil
-                                            </button>
-                                        </div>
-                                    </article>
-                                );
-                            })
-                        )}
-                    </div>
+                                                <div className="st-grid">
+                                                    <div>
+                                                        <small>Vence</small>
+                                                        <b>{fechaVencimiento(m?.fecha_expiracion)}</b>
+                                                    </div>
+                                                    <div>
+                                                        <small>Créditos</small>
+                                                        <b>{rotuloCreditos(m?.es_ilimitado, m?.creditos_disponibles)}</b>
+                                                    </div>
+                                                    <div>
+                                                        <small>Última</small>
+                                                        <b>{ultimaVisita(a.ultima_asistencia)}</b>
+                                                    </div>
+                                                </div>
+                                                <div className={`st-actions${wa ? '' : ' una'}`}>
+                                                    {/* Sin teléfono cargado el botón NO se dibuja
+                                                        (no hay a dónde mandar el WhatsApp). */}
+                                                    {wa && (
+                                                        <a className="btn wa wa-link" href={wa}
+                                                            target="_blank" rel="noreferrer">
+                                                            WhatsApp
+                                                        </a>
+                                                    )}
+                                                    <button type="button" className="btn soft"
+                                                        onClick={() => setAlumnoSeleccionadoId(a.id)}>
+                                                        Ver perfil
+                                                    </button>
+                                                </div>
+                                            </article>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </>
+                    )}
                 </section>
             )}
             {/* ── Pantalla completa: alumnos nuevos y en prueba (F) ────────

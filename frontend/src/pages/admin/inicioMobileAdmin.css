@@ -1161,6 +1161,7 @@
 .ub-admin .bazar-cat {
     flex: 1;
     overflow-y: auto;
+    padding-top: 12px;
     padding-bottom: calc(20px + env(safe-area-inset-bottom));
 }
 
