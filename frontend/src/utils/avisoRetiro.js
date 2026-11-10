@@ -17,10 +17,10 @@ export const AVISO_TIMEOUT_MS = 12000;
 
 /** La petición no llegó a responder dentro del plazo. */
 export const MSG_TIMEOUT =
-    'La vista previa tardó demasiado en responder. Reintentá.';
+    'La vista previa tardó demasiado en responder. Reintenta.';
 
 /** Falló sin un motivo legible del backend. */
-export const MSG_GENERICO = 'No se pudo armar el correo. Reintentá.';
+export const MSG_GENERICO = 'No se pudo armar el correo. Reintenta.';
 
 /** ¿El error es del reloj (timeout) o de una petición cancelada? */
 export const esTimeout = (err) => Boolean(err && (

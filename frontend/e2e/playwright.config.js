@@ -6,7 +6,7 @@ import { defineConfig } from '@playwright/test';
 //
 // Navegador: usa Chrome del sistema por defecto (`channel`) para NO depender
 // de la descarga del chromium bundled (que en esta red suele cortarse). Si
-// preferís el bundled: `npx playwright install chromium` y dejá
+// prefieres el bundled: `npx playwright install chromium` y deja
 // E2E_BROWSER_CHANNEL vacío (o 'chromium').
 //
 // Variables de entorno (opcionales salvo E2E_PASSWORD):

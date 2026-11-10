@@ -199,7 +199,7 @@ alembic=035_precio_snapshot_solicitudes | VEREDICTO: OK`.
 2. Runtime **Docker**: *Dockerfile Path* = `backend/Dockerfile.cron`;
    *Docker Build Context Directory* = `backend`.
 3. **Environment**: *Link Environment Group* → **`backups-prod`** (entran las 10 variables).
-   Confirmá `DRY_RUN=1` para el primer disparo.
+   Confirma `DRY_RUN=1` para el primer disparo.
 4. Schedule (UTC): `0 6 * * *` = **03:00 CLT** diario.
 5. Región: **Oregon (us-west-2)**, la misma del Web Service `box-crossfit` (ya probada).
 6. Crear → **Runs → Trigger Run** (no hace falta esperar a las 03:00) y revisar el log.
@@ -758,7 +758,7 @@ GRANT DELETE ON public.password_reset_tokens, public.notificaciones_enviadas TO 
 -- 4) Nada de INSERT / TRUNCATE / DDL en ninguna tabla (y NO hay memberships).
 ```
 
-> Si la base no se llamara `neondb`, cambiá el nombre en el `GRANT CONNECT` (o usá
+> Si la base no se llamara `neondb`, cambia el nombre en el `GRANT CONNECT` (o usa
 > `current_database()`) — el resto del SQL es igual.
 
 #### Verificación (todo tiene que dar `t` / `f` como dice el comentario)

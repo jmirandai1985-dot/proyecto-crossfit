@@ -167,7 +167,7 @@ def borrar_todas_las_notificaciones(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "mensaje": ("La cantidad de notificaciones cambió; "
-                            "revisá el número y confirmá de nuevo"),
+                            "revisa el número y confirma de nuevo"),
                 "total_actual": len(filas),
             },
         )

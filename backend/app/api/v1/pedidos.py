@@ -509,7 +509,7 @@ def actualizar_estado_pedido(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=("No se puede validar: el pago online de este pedido "
-                        "todavía no está confirmado por Mercado Pago. Esperá la "
+                        "todavía no está confirmado por Mercado Pago. Espera la "
                         "confirmación del cobro o rechazalo."),
             )
 
@@ -1008,7 +1008,7 @@ def preview_aviso_retiro(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=("No se pudo armar la vista previa del correo. "
-                    "Reintentá en unos segundos."),
+                    "Reintenta en unos segundos."),
         ) from exc
 
     return {

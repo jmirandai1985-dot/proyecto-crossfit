@@ -67,11 +67,11 @@ const AlumnoFichaCoach = ({ alumnoId, coachId, onClose }) => {
         setAvisoPerfil('');
         const pesoNum = parseFloat(peso);
         if (!Number.isFinite(pesoNum) || pesoNum <= 0 || pesoNum > 400) {
-            setAvisoPerfil('Ingresá un peso válido (1–400 kg).');
+            setAvisoPerfil('Ingresa un peso válido (1–400 kg).');
             return;
         }
         if (!['M', 'F'].includes(genero)) {
-            setAvisoPerfil('Elegí masculino (M) o femenino (F).');
+            setAvisoPerfil('Elige masculino (M) o femenino (F).');
             return;
         }
         try {

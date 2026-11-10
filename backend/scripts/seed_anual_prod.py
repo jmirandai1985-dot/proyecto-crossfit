@@ -1820,7 +1820,7 @@ def main(argv=None) -> int:
             print("\n[dry-run] no se escribió nada. Para ejecutar de verdad: quita --dry-run.")
             return 0
 
-        if not pedir("GENERAR", "\nEscribí 'GENERAR' para confirmar: "):
+        if not pedir("GENERAR", "\nEscribe 'GENERAR' para confirmar: "):
             return 1
         print("\n[seed] hasheando la password sintética...")
         hash_pwd = env["hash_password"](PASSWORD_SINTETICA)

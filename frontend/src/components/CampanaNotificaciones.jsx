@@ -269,7 +269,7 @@ const CampanaNotificaciones = () => {
             console.error('No se pudieron borrar las notificaciones:', e);
             setError(totalActual !== null && totalActual !== undefined
                 ? `La cantidad de notificaciones cambió (ahora hay ${totalActual}). `
-                    + 'Revisá y confirmá de nuevo.'
+                    + 'Revisa y confirma de nuevo.'
                 : 'No se pudieron borrar las notificaciones. Intenta de nuevo.');
             setConfirmandoBorrado(false);
             // Resincroniza el N real con el backend.

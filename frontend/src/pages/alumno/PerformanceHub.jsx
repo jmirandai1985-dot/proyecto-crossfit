@@ -433,7 +433,7 @@ const PerformanceHub = () => {
                             <h2 className="font-bold text-gray-800 text-xl">💡 Para ti</h2>
                         </div>
                         {tips.length === 0 && objetivos.length === 0 ? (
-                            <p className="px-4 py-6 text-gray-400 text-sm">Registrá más RMs para recibir recomendaciones personalizadas.</p>
+                            <p className="px-4 py-6 text-gray-400 text-sm">Registra más RMs para recibir recomendaciones personalizadas.</p>
                         ) : (
                             <div className="p-3 space-y-3">
                                 {tips.length > 0 && (

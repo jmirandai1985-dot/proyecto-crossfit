@@ -23,7 +23,7 @@ const ModalInvitarExterno = ({ onClose }) => {
         const nom = nombre.trim();
         const cor = correo.trim();
         if (!nom || !cor) {
-            setError('Completá nombre y correo.');
+            setError('Completa nombre y correo.');
             return;
         }
         try {
@@ -48,7 +48,7 @@ const ModalInvitarExterno = ({ onClose }) => {
                 <div className="flex items-start justify-between p-5 border-b border-zinc-800">
                     <div>
                         <h3 className="text-lg font-bold text-zinc-100">✉️ Invitar a una clase de prueba</h3>
-                        <p className="text-sm text-zinc-400">Mandá la invitación a alguien que todavía no es alumno.</p>
+                        <p className="text-sm text-zinc-400">Manda la invitación a alguien que todavía no es alumno.</p>
                     </div>
                     <button type="button" onClick={onClose} aria-label="Cerrar"
                         className="text-xl font-bold leading-none text-zinc-400 hover:text-zinc-200">✕</button>

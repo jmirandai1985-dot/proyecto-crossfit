@@ -1056,8 +1056,8 @@ const DashboardCoach = () => {
                                     {/* Parte F: nota fija del alcance por defecto + toggle de alcance. */}
                                     <p className="text-xs text-gray-500" data-testid="nota-alcance-alumnos">
                                         Por defecto ves <b>tus alumnos</b> (con reserva en alguna de tus
-                                        clases). Para ver a todos los del box activá «Todos del box». ¿Querés
-                                        invitar a alguien que todavía no existe? Usá el botón «✉️ Invitar».
+                                        clases). Para ver a todos los del box activa «Todos del box». ¿Quieres
+                                        invitar a alguien que todavía no existe? Usa el botón «✉️ Invitar».
                                     </p>
                                     <div className="inline-flex w-full rounded-lg bg-gray-100 p-1 text-sm font-medium">
                                         <button

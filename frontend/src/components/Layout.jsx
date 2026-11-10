@@ -8,7 +8,7 @@ import { getMenuItems, COACH_SUBTABS } from '../config/menu';
 import { MENU_ICONS } from '../config/menuIcons';
 // N-2: campana de notificaciones del alumno (contador de no leídas + panel).
 import CampanaNotificaciones from './CampanaNotificaciones';
-// D2: banner "Completá tu perfil" del alumno (peso/género obligatorios para el nivel).
+// D2: banner "Completa tu perfil" del alumno (peso/género obligatorios para el nivel).
 import BannerPerfilIncompleto from './BannerPerfilIncompleto';
 // Contador de pendientes del admin (misma queryKey que la pantalla, el Dashboard y
 // la campana: un solo request para los cuatro badges, y se refresca solo cada 60 s).

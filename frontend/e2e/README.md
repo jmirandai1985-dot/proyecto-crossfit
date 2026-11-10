@@ -34,7 +34,7 @@ npx playwright install chromium   # opcional: navegador bundled
 
 Los tests usan por defecto **Chrome del sistema** (`channel: 'chrome'`) para no
 depender de la descarga del chromium bundled (que en esta red suele cortarse por
-timeout). Si preferís el bundled, corré `npx playwright install chromium` y dejá
+timeout). Si prefieres el bundled, corre `npx playwright install chromium` y deja
 `E2E_BROWSER_CHANNEL` vacío.
 
 ## 3. Usuarios y contraseña
@@ -104,6 +104,6 @@ luego le marca la asistencia. Para no acumular datos en corridas repetidas, el t
 **cancela su propia reserva al final** (limpieza best-effort con `DELETE
 /api/v1/reservas/{id}`). Si la limpieza no llegara a correr (p. ej. por un fallo
 intermedio), la corrida siguiente puede chocar con "ya reservada" en esa misma
-clase; en ese caso cancelá la reserva colgada del alumno o re-sembrá los usuarios de
+clase; en ese caso cancela la reserva colgada del alumno o re-siembra los usuarios de
 carga (`python k6-tests/_seed_load_test.py`).
 

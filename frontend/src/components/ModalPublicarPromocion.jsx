@@ -161,7 +161,7 @@ const ModalPublicarPromocion = ({ isOpen, onClose, promocion, onSuccess }) => {
                         <textarea
                             id="promo-texto" rows={4} value={form.texto} maxLength={1000}
                             onChange={(e) => cambiar('texto', e.target.value)}
-                            placeholder="Contale al alumno qué gana y con cuántos referidos."
+                            placeholder="Cuéntale al alumno qué gana y con cuántos referidos."
                             className={`${CAMPO} resize-y`}
                         />
                         <div className="flex items-center justify-between gap-2 mt-1">

@@ -339,7 +339,7 @@ def main(argv=None) -> int:
 
     # Se pide ANTES del dry-run y antes de cualquier borrado (igual que el seed).
     frase = "BORRAR SEED PROD" if args.destino == "prod" else "BORRAR SEED TEST"
-    if not pedir(frase, f"\nEscribí '{frase}' para continuar: "):
+    if not pedir(frase, f"\nEscribe '{frase}' para continuar: "):
         return 1
     if args.limpiar_viejo:
         if not pedir("TAMBIEN EL VIEJO",
@@ -369,7 +369,7 @@ def main(argv=None) -> int:
         if args.dry_run:
             print("\n[dry-run] no se borró nada. Para borrar de verdad: quita --dry-run.")
             return 0
-        if not pedir("BORRAR", "\nEscribí 'BORRAR' para confirmar el borrado: "):
+        if not pedir("BORRAR", "\nEscribe 'BORRAR' para confirmar el borrado: "):
             return 1
 
         conteos = borrar_en_transaccion(db, env, incluir_viejo=args.limpiar_viejo)

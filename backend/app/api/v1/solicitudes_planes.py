@@ -486,7 +486,7 @@ def aprobar_solicitud(
         raise HTTPException(
             status_code=409,
             detail=("No se puede aprobar: el pago online de esta solicitud "
-                    "todavía no está confirmado por Mercado Pago. Esperá la "
+                    "todavía no está confirmado por Mercado Pago. Espera la "
                     "confirmación del cobro o rechazala."),
         )
 

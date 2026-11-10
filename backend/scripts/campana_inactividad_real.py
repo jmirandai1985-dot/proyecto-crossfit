@@ -228,7 +228,7 @@ def main() -> int:
         db.close()
 
     if args.dry_run or not args.si:
-        print("\n[sin envío] pasá --si para disparar la campaña de verdad.")
+        print("\n[sin envío] pasa --si para disparar la campaña de verdad.")
         return 0
 
     # ── Corrida real ────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 /**
- * Banner "Completá tu perfil" (D2) del panel del ALUMNO.
+ * Banner "Completa tu perfil" (D2) del panel del ALUMNO.
  *
  * Peso y género son obligatorios para clasificar el nivel: sin ellos el motor no puede
  * calcular fuerza (ratio peso_rm/peso_corporal) ni elegir la tabla M/F de gimnasia. Los
@@ -35,7 +35,7 @@ const BannerPerfilIncompleto = () => {
             className="mb-4 flex flex-col gap-2 rounded-lg border border-orange-500/40 bg-orange-500/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
         >
             <p className="text-sm text-orange-200">
-                <span className="font-semibold">Completá tu perfil:</span> falta tu {faltantes}.
+                <span className="font-semibold">Completa tu perfil:</span> falta tu {faltantes}.
                 Sin esos datos no podemos calcular tu nivel (fuerza y gimnasia).
             </p>
             <Link

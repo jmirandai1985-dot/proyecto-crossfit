@@ -593,7 +593,7 @@ const ModalPublicarWod = ({
                                         className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-sky-700/60 bg-sky-950/20 px-4 py-8 text-center transition-colors hover:border-sky-500"
                                     >
                                         <span className="text-3xl" aria-hidden="true">📄</span>
-                                        <span className="text-sm font-bold text-sky-200">Elegí el Excel de la semana</span>
+                                        <span className="text-sm font-bold text-sky-200">Elige el Excel de la semana</span>
                                         <span className="text-[11.5px] text-zinc-400">Archivo .xlsx, una fila por día</span>
                                     </label>
                                     <input

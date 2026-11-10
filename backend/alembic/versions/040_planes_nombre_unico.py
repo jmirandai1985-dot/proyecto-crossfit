@@ -90,7 +90,7 @@ def _verificar_sin_duplicados() -> None:
     raise RuntimeError(
         f"NO se crea {INDICE}: hay {len(duplicados)} nombre(s) de plan repetido(s) dentro del mismo "
         f"box ({detalle}). Dos planes con el mismo nombre en el mismo box es justo lo que este "
-        f"índice prohíbe: renombralos (o fusionalos) y volvé a correr la migración. Consulta:\n"
+        f"índice prohíbe: renómbralos (o fusiónalos) y vuelve a correr la migración. Consulta:\n"
         f"{CONSULTA_DUPLICADOS.strip()}")
 
 

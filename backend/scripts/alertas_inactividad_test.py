@@ -46,7 +46,7 @@ def main() -> int:
         description="Manda UN correo de inactividad a una dirección controlada (prueba del "
                     "template y del transporte; NO dispara la campaña).")
     parser.add_argument("--correo", required=True,
-                        help="destinatario de la prueba: usá tu propio correo")
+                        help="destinatario de la prueba: usa tu propio correo")
     parser.add_argument("--nombre", default="Alumno de prueba")
     args = parser.parse_args()
 

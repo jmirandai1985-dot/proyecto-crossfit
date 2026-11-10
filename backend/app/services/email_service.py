@@ -1481,7 +1481,7 @@ def render_email_invitacion_externa(nombre_invitado: str, nombre_coach: str) -> 
     cuerpo = (
         f"<p><strong>{nombre_coach}</strong> te invita a tomar tu "
         "<strong>clase de prueba</strong> en Urban Training Box.</p>"
-        "<p>Veni a conocer el box, entrená con nosotros y viví la experiencia CrossFit "
+        "<p>Ven a conocer el box, entrena con nosotros y vive la experiencia CrossFit "
         "desde el primer día. Sin costo y sin compromiso.</p>"
     )
     html = _template(titulo, saludo, cuerpo, "Registrarme y agendar mi clase",

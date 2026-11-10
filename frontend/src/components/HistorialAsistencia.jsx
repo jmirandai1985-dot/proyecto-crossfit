@@ -358,8 +358,8 @@ const HistorialAsistencia = ({ permitirFiltros = false } = {}) => {
                                 ? `${nombreMes(mes)} ${anio} no tiene clases cargadas.`
                                 : 'No hay clases con los filtros elegidos.'}
                             {clases.length === 0 && (historialQ.data?.alcance === 'coach'
-                                ? ' Probá con otro mes: acá sólo aparecen las clases tuyas.'
-                                : ' Probá con otro mes del selector.')}
+                                ? ' Prueba con otro mes: acá sólo aparecen las clases tuyas.'
+                                : ' Prueba con otro mes del selector.')}
                         </p>
                     )}
 

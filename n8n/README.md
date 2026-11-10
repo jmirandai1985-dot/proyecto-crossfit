@@ -71,7 +71,7 @@ En este repo el valor está **sanitizado** como placeholder:
 > Para revivir el flujo contra TEST (por ejemplo para pruebas) hay que crear un
 > workflow aparte apuntando a `host.docker.internal:8001` con la key de `.env.test`.
 
-### ⚠️ Si editás workflows por SQLite (sin la UI)
+### ⚠️ Si editas workflows por SQLite (sin la UI)
 
 n8n v2 versiona por `versionId`/`activeVersionId` y el motor NO relee
 `workflow_entity.nodes` si hay una **WAL** pendiente. Procedimiento probado:

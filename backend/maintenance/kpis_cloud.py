@@ -196,7 +196,7 @@ def validar_url_api(url: str) -> str:
     if partes.scheme == "http" and partes.hostname not in HOSTS_LOCALES:
         raise ConfigError(
             f"KPIS_API_URL='{limpio}' usa http contra un host remoto: la "
-            "N8N_API_KEY viajaría sin cifrar. Usá https (o localhost para TEST)")
+            "N8N_API_KEY viajaría sin cifrar. Usa https (o localhost para TEST)")
     return limpio
 
 
@@ -509,7 +509,7 @@ def main() -> int:
         for paso in pasos:
             log(f"  · [DRY_RUN] {paso['metodo']} "
                 f"{url_de(cfg, paso).replace(cfg['api_url'], '')} — {paso['porque']}")
-        log("DRY_RUN=1: NO se llamó a ningún endpoint (poné DRY_RUN=0 para que corra)")
+        log("DRY_RUN=1: NO se llamó a ningún endpoint (pon DRY_RUN=0 para que corra)")
         return EXIT_OK
 
     for paso in pasos:

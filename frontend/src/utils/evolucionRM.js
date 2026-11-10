@@ -160,8 +160,8 @@ export function tipsEvolucion(resumenes) {
             tipo: 'alerta',
             color: 'naranja',
             icono: '⚠️',
-            titulo: 'Hace tiempo que no lo testeás',
-            detalle: `Llevás ${sinTestear.diasSinTestear} días sin registrar ${sinTestear.movimiento_nombre}.`,
+            titulo: 'Hace tiempo que no lo testeas',
+            detalle: `Llevas ${sinTestear.diasSinTestear} días sin registrar ${sinTestear.movimiento_nombre}.`,
             movimientoId: sinTestear.movimiento_id,
         });
     }
@@ -180,7 +180,7 @@ export function tipsEvolucion(resumenes) {
                 color: 'gris',
                 icono: '📊',
                 titulo: 'Un par desparejo',
-                detalle: `${mayor.movimiento_nombre} avanzó ${mayor.pctCambio.toFixed(1)}% y ${menor.movimiento_nombre} solo ${menor.pctCambio.toFixed(1)}%. Revisá qué está frenando a ${menor.movimiento_nombre}.`,
+                detalle: `${mayor.movimiento_nombre} avanzó ${mayor.pctCambio.toFixed(1)}% y ${menor.movimiento_nombre} solo ${menor.pctCambio.toFixed(1)}%. Revisa qué está frenando a ${menor.movimiento_nombre}.`,
                 movimientoId: menor.movimiento_id,
             });
         }
@@ -190,7 +190,7 @@ export function tipsEvolucion(resumenes) {
 }
 
 // Ventana sugerida para reintentar el máximo (coherente con el umbral de 30 días que ya
-// usa el badge "hace tiempo que no lo testeás" en "Evolución por movimiento").
+// usa el badge "hace tiempo que no lo testeas" en "Evolución por movimiento").
 const VENTANA_REINTENTO = 'en 3-4 semanas aprox.';
 
 // Redondea un kg a 0.5 kg (el salto real de disco más chico del box): 78.75 → 79.0,

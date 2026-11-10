@@ -130,7 +130,7 @@ def entrenar_segmentacion(db, tenant_id, fecha_ref=None, k=K_CLUSTERS,
         from sklearn.preprocessing import StandardScaler
     except ImportError as e:
         raise RuntimeError(
-            f"falta scikit-learn ({e}); instalá con: "
+            f"falta scikit-learn ({e}); instala con: "
             f"pip install -r requirements.txt") from e
 
     fecha_ref = fecha_ref or date.today()

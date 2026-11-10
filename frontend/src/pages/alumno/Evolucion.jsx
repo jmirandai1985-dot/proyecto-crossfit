@@ -419,7 +419,7 @@ const Evolucion = () => {
                             <p className="text-sm text-gray-500 mb-3">
                                 Movimiento: <strong>{movSeleccionado?.nombre}</strong> — {chartData.length} registro(s)
                             </p>
-                            {/* Tocá/clickeá el gráfico para verlo en grande (bottom sheet) */}
+                            {/* Toca/clickea el gráfico para verlo en grande (bottom sheet) */}
                             <div
                                 className="cursor-pointer group"
                                 role="button"

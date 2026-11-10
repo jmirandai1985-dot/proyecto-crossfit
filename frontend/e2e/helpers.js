@@ -9,7 +9,7 @@ export function creds() {
   const password = process.env.E2E_PASSWORD;
   if (!password) {
     throw new Error(
-      'Falta E2E_PASSWORD. Seteá la clave de los usuarios de TEST ' +
+      'Falta E2E_PASSWORD. Setea la clave de los usuarios de TEST ' +
       '(TEST_SEED_PASSWORD de backend/.env.test) antes de correr los tests.'
     );
   }

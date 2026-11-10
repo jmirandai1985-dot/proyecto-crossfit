@@ -1028,7 +1028,7 @@ def main(argv=None) -> int:
         for c in CORREOS_DEMO:
             print(f"        - {c}")
         print("        Son las cuentas de presentación del box y no se borran por accidente.")
-        print("        Si de verdad querés borrarlas, volvé a correr con "
+        print("        Si de verdad quieres borrarlas, vuelve a correr con "
               "--forzar-borrado-cuentas-instituto.")
         return 1
     if args.borrar and args.extender_plan:
@@ -1162,7 +1162,7 @@ def main(argv=None) -> int:
                 return 1
         else:
             print("[i] las 3 cuentas ya existen: la contraseña queda INTACTA "
-                  "(usá --cambiar-password para rotarla).")
+                  "(usa --cambiar-password para rotarla).")
 
         print("\n" + "=" * 74)
         print("  ESCRITURA (una sola transacción)")

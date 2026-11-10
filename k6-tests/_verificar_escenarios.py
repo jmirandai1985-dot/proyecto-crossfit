@@ -87,7 +87,7 @@ def escalar(db, sql: str, **params):
 def cargar_config() -> dict:
     cfg = leer_json(Path(__file__).resolve().parent / "load_config.json")
     if not cfg.get("tenant_id"):
-        print("ABORTADO: falta k6-tests/load_config.json (corré _seed_load_test.py)")
+        print("ABORTADO: falta k6-tests/load_config.json (corre _seed_load_test.py)")
         raise SystemExit(2)
     return cfg
 

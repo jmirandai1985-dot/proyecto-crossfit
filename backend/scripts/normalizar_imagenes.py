@@ -77,7 +77,7 @@ def main() -> int:
             db.commit()
             print(f"\n{pendientes} fila(s) reparadas.")
         else:
-            print(f"\n{pendientes} fila(s) a reparar. Repetí con --aplicar para guardar.")
+            print(f"\n{pendientes} fila(s) a reparar. Repite con --aplicar para guardar.")
     finally:
         db.close()
     return 0

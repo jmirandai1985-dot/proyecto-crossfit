@@ -111,7 +111,7 @@ const TarjetaReferidosMarketing = () => {
         setErrores({});
         setMensaje({
             tipo: 'exito',
-            texto: 'Texto por defecto cargado. Guardá para aplicarlo en el carrusel.',
+            texto: 'Texto por defecto cargado. Guarda para aplicarlo en el carrusel.',
         });
     };
 

@@ -199,7 +199,7 @@ def test_a6_si_el_render_falla_el_preview_devuelve_un_502_visible(monkeypatch):
             current_user={"tenant_id": 3, "usuario_id": 1})
 
     assert info.value.status_code == 502
-    assert "Reintentá" in info.value.detail, "el modal necesita un motivo legible"
+    assert "Reintenta" in info.value.detail, "el modal necesita un motivo legible"
 
 
 def test_a7_el_preview_envuelve_el_render_en_try_except():

@@ -1440,7 +1440,7 @@ const InicioMobileAdmin = () => {
                             {bazarTab === 'catalogo' ? (
                                 <>
                                     <h3>Bazar</h3>
-                                    <small>Publicá y editá los productos del catálogo</small>
+                                    <small>Publica y edita los productos del catálogo</small>
                                 </>
                             ) : (
                                 <>

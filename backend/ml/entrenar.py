@@ -83,7 +83,7 @@ def entrenar_churn(db, tenant_id, fecha_ref=None,
                                              train_test_split)
     except ImportError as e:
         raise RuntimeError(
-            f"falta scikit-learn ({e}); instalá con: "
+            f"falta scikit-learn ({e}); instala con: "
             f"pip install -r requirements.txt") from e
 
     fecha_ref = fecha_ref or hoy_santiago()
@@ -314,7 +314,7 @@ def entrenar_forecast(db, tenant_id, meses_proyeccion=MESES_PROYECCION,
         from sklearn.metrics import mean_absolute_error, r2_score
     except ImportError as e:
         raise RuntimeError(
-            f"falta scikit-learn ({e}); instalá con: "
+            f"falta scikit-learn ({e}); instala con: "
             f"pip install -r requirements.txt") from e
 
     serie = serie_mensual(db, tenant_id)

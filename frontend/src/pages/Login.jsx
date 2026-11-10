@@ -111,7 +111,7 @@ const Login = () => {
                     {cerradaPorInactividad && (
                         <div data-testid="aviso-inactividad"
                             className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-                            Tu sesión se cerró por 10 minutos de inactividad. Volvé a ingresar.
+                            Tu sesión se cerró por 10 minutos de inactividad. Vuelve a ingresar.
                         </div>
                     )}
 
