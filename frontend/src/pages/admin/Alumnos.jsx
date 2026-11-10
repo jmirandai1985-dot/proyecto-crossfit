@@ -404,8 +404,8 @@ const Alumnos = () => {
                         onChange={(e) => { setBusquedaRapidaInput(e.target.value); setAlumnoConsultaId(null); }}
                         className="w-full px-4 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-zinc-800 text-zinc-100 placeholder:text-zinc-500"
                     />
-                    <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        {/* Resultados a la izquierda */}
+                    <div className="mt-4 space-y-4">
+                        {/* Resultados (fila completa) */}
                         <div>
                             {busquedaRapida.trim() === '' ? (
                                 <p className="text-sm text-zinc-500 py-6 text-center">
@@ -430,12 +430,12 @@ const Alumnos = () => {
                                 </ul>
                             )}
                         </div>
-                        {/* Ficha a la derecha (o debajo en mobile) */}
+                        {/* Ficha debajo, a todo el ancho */}
                         <div>
                             {alumnoConsultaId ? (
                                 <FichaAlumnoTabs alumnoId={alumnoConsultaId} />
                             ) : (
-                                <div className="h-full flex items-center justify-center rounded-lg border border-dashed border-zinc-700 text-sm text-zinc-500 py-12">
+                                <div className="flex items-center justify-center rounded-lg border border-dashed border-zinc-700 text-sm text-zinc-500 py-12">
                                     Busca un alumno para ver su ficha completa
                                 </div>
                             )}
