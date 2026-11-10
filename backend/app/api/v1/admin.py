@@ -82,9 +82,13 @@ def resumen_pendientes(
         SolicitudPlan.estado == "pending",
     ).scalar() or 0
 
+    # Parte I: el badge "Pendientes → Pedidos" sólo cuenta los `pendiente` CON comprobante
+    # (transferencia, requiere validación manual). Los `pendiente` SIN voucher son pagos ONLINE
+    # (Mercado Pago) que se resuelven solos vía webhook o auto-rechazo a los 30 min.
     pedidos = db.query(func.count(Pedido.id)).filter(
         Pedido.tenant_id == tenant_id,
         Pedido.estado == "pendiente",
+        Pedido.voucher_url.isnot(None),
     ).scalar() or 0
 
     registros = db.query(func.count(Usuario.id)).filter(

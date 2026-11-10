@@ -235,6 +235,61 @@ def test_ped_02_filtro_por_estado(pedido, cliente):
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Parte I — pendiente SIN voucher (pago online) fuera de la cola de Pedidos
+# ═══════════════════════════════════════════════════════════════════
+
+def test_ped_online_sin_voucher_fuera_de_la_cola_pero_visible_por_id(pedido, cliente):
+    """El pedido ONLINE (sin voucher) no contamina la cola filtrada, pero sigue vivo.
+
+    Confirma tres cosas de la Parte I:
+      * el online sigue RESERVANDO stock (la fila + el descuento que ya hace el flujo de pago);
+      * NO aparece en `GET /pedidos?estado=pendiente&solo_con_voucher=true` (la cola del admin);
+      * SÍ sigue visible por su id directo (`GET /pedidos/{id}`), para no perder el pedido.
+    """
+    from app.models.pedido import Pedido
+
+    db = pedido["db"]
+
+    def stock_actual():
+        return db.execute(text("SELECT stock FROM productos WHERE id = :i"),
+                          {"i": pedido["producto_id"]}).scalar()
+
+    antes = stock_actual()
+    assert antes is not None
+
+    # Simula lo que hace `crear_pago_bazar`: descuenta stock (UPDATE atómico) y deja el
+    # pedido `pendiente` SIN voucher (el pago lo confirma MP después, no un comprobante).
+    db.execute(text("UPDATE productos SET stock = stock - 1 WHERE id = :i"),
+               {"i": pedido["producto_id"]})
+    online = Pedido(tenant_id=pedido["tenant_id"], alumno_id=pedido["alumno_id"],
+                    producto_id=pedido["producto_id"], cantidad=1, total=5000,
+                    estado="pendiente", voucher_url=None)
+    db.add(online)
+    db.commit()
+    online_id = online.id
+
+    assert stock_actual() == antes - 1, "el pedido online sigue reservando stock"
+
+    # La cola del admin (solo_con_voucher) muestra el CON voucher y oculta el online.
+    r = _get(cliente, "/pedidos", headers=pedido["admin"],
+             estado="pendiente", solo_con_voucher=True)
+    assert r.status_code == 200, r.text[:200]
+    ids = [p["id"] for p in r.json()]
+    assert pedido["pedido_id"] in ids, "el pendiente CON voucher sí debe estar en la cola"
+    assert online_id not in ids, "el pendiente SIN voucher (online) no debe estar en la cola"
+
+    # Sin el filtro, el listado genérico sí lo trae (el flag es el que filtra).
+    r_sin = _get(cliente, "/pedidos", headers=pedido["admin"], estado="pendiente")
+    assert any(p["id"] == online_id for p in r_sin.json()), \
+        "sin `solo_con_voucher` el listado genérico sigue trayendo el online"
+
+    # Y por id directo sigue visible (no se perdió el pedido, sólo salió de esa cola).
+    r_id = cliente.get(f"{API}/pedidos/{online_id}", headers=pedido["admin"])
+    assert r_id.status_code == 200, r_id.text[:200]
+    assert r_id.json()["voucher_url"] is None
+
+
+# ═══════════════════════════════════════════════════════════════════
 # GET /pedidos/{id}/voucher — comprobante privado
 # ═══════════════════════════════════════════════════════════════════
 

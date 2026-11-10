@@ -410,10 +410,17 @@ def listar_pedidos(
     limit: int = 100,
     estado: str = None,
     alumno_id: Optional[int] = None,
+    solo_con_voucher: bool = False,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """Lista pedidos del tenant con filtros opcionales (propios o staff)"""
+    """Lista pedidos del tenant con filtros opcionales (propios o staff)
+
+    `solo_con_voucher=True` es el filtro de la cola "Pendientes → Pedidos" del admin: sólo trae
+    los `pendiente` que TIENEN comprobante (transferencia, requieren validación manual). Los
+    `pendiente` SIN voucher son pagos ONLINE (Mercado Pago) que se resuelven solos vía webhook o
+    auto-rechazo a los 30 min: no requieren acción del admin y no deben listarse en esa cola.
+    """
     # 🔒 SEGURIDAD: tenant_id del token + ownership.
     tenant_id = current_user["tenant_id"]
     rol = current_user.get("rol", "")
@@ -431,6 +438,9 @@ def listar_pedidos(
 
     if estado is not None:
         query = query.filter(Pedido.estado == estado)
+
+    if solo_con_voucher:
+        query = query.filter(Pedido.voucher_url.isnot(None))
 
     if alumno_id is not None:
         query = query.filter(Pedido.alumno_id == alumno_id)

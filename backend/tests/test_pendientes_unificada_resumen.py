@@ -26,6 +26,10 @@ import pytest
 from sqlalchemy import text
 
 from app.api.v1.admin import resumen_pendientes
+# Registra la tabla `pagos` en el metadata: `Pedido.pago_id` tiene FK a `pagos.id` y, sin este
+# import, el flush de un `Pedido` nuevo falla con NoReferencedTableError (el test no importa
+# `app.main`, que es lo que carga TODOS los modelos).
+from app.models.pago import Pago  # noqa: F401
 
 PREFIJO = "pendientes-resumen-test"
 TENANT_INEXISTENTE = 10 ** 9          # ningún box del seed usa este id
@@ -163,10 +167,12 @@ def box(db, request):
         SolicitudPlan(tenant_id=tenant, alumno_id=activo, plan_id=plan.id,
                       estado="approved"),
     ])
-    # Pedidos: 1 `pendiente` (+1 `entregado`).
+    # Pedidos: 1 `pendiente` CON comprobante (transferencia, SÍ cuenta) (+1 `entregado`).
+    # Parte I: el `pendiente` SIN voucher (pago online) NO cuenta en la cola del admin.
     db.add_all([
         Pedido(tenant_id=tenant, alumno_id=activo, producto_id=producto.id,
-               cantidad=1, total=5000, estado="pendiente"),
+               cantidad=1, total=5000, estado="pendiente",
+               voucher_url="test://voucher.png"),
         Pedido(tenant_id=tenant, alumno_id=activo, producto_id=producto.id,
                cantidad=1, total=5000, estado="entregado"),
     ])
@@ -225,5 +231,33 @@ def test_c_un_coach_pendiente_no_es_un_registro_de_alumno(box):
     resumen = resumen_pendientes(box["db"], _contexto(box["tenant_id"]))
     assert resumen["registros"] == 1, (
         "la pestaña Registros es de alumnos: el coach pendiente no se cuenta")
+
+
+# ── D. Parte I: un `pendiente` SIN voucher (pago online) NO suma al badge ────
+def test_d_un_pedido_pendiente_sin_voucher_no_se_cuenta(box):
+    """El pago ONLINE (sin comprobante) se resuelve solo: no contamina la cola de pedidos."""
+    from app.models.pedido import Pedido
+
+    db = box["db"]
+    assert resumen_pendientes(db, _contexto(box["tenant_id"]))["pedidos"] == 1, (
+        "el fixture deja 1 pendiente CON voucher")
+
+    producto_id = db.execute(text(
+        "SELECT id FROM productos WHERE tenant_id = :t LIMIT 1"),
+        {"t": box["tenant_id"]}).scalar()
+    alumno_id = db.execute(text(
+        "SELECT id FROM usuarios WHERE tenant_id = :t AND rol = 'alumno' "
+        "AND estado = 'activo' LIMIT 1"), {"t": box["tenant_id"]}).scalar()
+
+    db.add(Pedido(tenant_id=box["tenant_id"], alumno_id=alumno_id,
+                  producto_id=producto_id, cantidad=1, total=5000,
+                  estado="pendiente", voucher_url=None))
+    db.commit()
+
+    resumen = resumen_pendientes(db, _contexto(box["tenant_id"]))
+    assert resumen["pedidos"] == 1, (
+        "el pendiente SIN voucher (online) no requiere acción del admin: no se cuenta")
+
+    db.rollback()  # deja el box como estaba (el fixture lo borra al final)
 
 

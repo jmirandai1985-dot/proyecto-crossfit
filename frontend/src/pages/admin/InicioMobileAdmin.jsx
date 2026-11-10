@@ -290,9 +290,10 @@ const InicioMobileAdmin = () => {
             api.get('/api/v1/finanzas/resumen-hoy'),
             // Pedidos validados sin retirar: el indicador del Bazar (y su pantalla).
             api.get('/api/v1/pedidos', { params: { estado: 'validado' } }),
-            // Pedidos RECIÉN CREADOS por el alumno: esperan confirmación del admin y son
-            // parte de "En revisión" (misma consulta que la pantalla Pedidos, filtrada).
-            api.get('/api/v1/pedidos', { params: { estado: 'pendiente' } }),
+            // Pedidos PENDIENTES CON COMPROBANTE (transferencia): esperan validación manual y
+            // son parte de "En revisión". Los pendientes SIN voucher son pagos ONLINE que se
+            // resuelven solos (webhook / auto-rechazo) y no entran acá (Parte I).
+            api.get('/api/v1/pedidos', { params: { estado: 'pendiente', solo_con_voucher: true } }),
         ]);
 
         const motivo = motivoError;
