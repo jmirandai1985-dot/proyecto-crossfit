@@ -4,11 +4,10 @@ import { useAuth } from '../../context/AuthContext';
 import { useDisciplinas, useGridSemanalHorarios, useGuardarHorarioBase, useEliminarHorarioBase, SIN_DATOS } from '../../hooks/queries';
 
 const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
-const ICONS = { 'CrossFit': '🏋️', 'Open Box': '🥊', 'Musculación': '💪', 'Levantamiento Olímpico': '🏆' };
 const TURNOS = [
-    { id: 'am', label: '🌅 AM', desde: 7, hasta: 11 },
-    { id: 'md', label: '☀️ MD', desde: 12, hasta: 17 },
-    { id: 'pm', label: '🌆 PM', desde: 18, hasta: 23 },
+    { id: 'am', label: 'AM', desde: 7, hasta: 11 },
+    { id: 'md', label: 'MD', desde: 12, hasta: 17 },
+    { id: 'pm', label: 'PM', desde: 18, hasta: 23 },
 ];
 
 // ── Celda del grid (memoizada) ──
@@ -22,7 +21,7 @@ const GridCell = React.memo(({ horaKey, dia, cell, onCellClick }) => {
             <div className="flex flex-wrap gap-0.5">
                 {cell.disciplinas.map(d => (
                     <span key={d.id} className="text-xs leading-tight px-1 rounded bg-zinc-800/50 text-blue-400 border border-blue-200">
-                        {ICONS[d.disciplina_nombre] || '📋'} {d.disciplina_nombre}
+                        {d.disciplina_nombre}
                     </span>
                 ))}
             </div>
@@ -175,7 +174,12 @@ export default function Horarios() {
                                                 <div className="space-y-1 mb-3">
                                                     {cell.disciplinas.map(d => (
                                                         <div key={d.id} className="flex items-center justify-between bg-zinc-900 rounded px-3 py-1.5 border border-zinc-800">
-                                                            <span className="text-sm">{ICONS[d.disciplina_nombre] || '📋'} {d.disciplina_nombre}</span>
+                                                            <span className="text-sm">
+                                                                {d.disciplina_nombre}
+                                                                {(d.disciplina_nombre === 'CrossFit' || d.disciplina_nombre === 'Levantamiento Olímpico') && (
+                                                                    <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-zinc-500">FIJO</span>
+                                                                )}
+                                                            </span>
                                                             <div className="flex gap-2">
                                                                 <button onClick={() => openEdit({ ...d, dia_semana: dia, hora_inicio: h_ini, hora_fin: h_fin, cupo_maximo: cell.cupo_maximo })}
                                                                     className="px-2 py-0.5 text-blue-400 hover:bg-zinc-800 rounded text-xs">Editar</button>

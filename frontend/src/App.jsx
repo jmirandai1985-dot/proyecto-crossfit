@@ -49,6 +49,7 @@ const AdminAlumnosPendientes = lazy(() => import('./pages/admin/AdminAlumnosPend
 const AdminPendientes = lazy(() => import('./pages/admin/Pendientes'));
 
 const AdminDisciplinas = lazy(() => import('./pages/admin/Disciplinas'));
+const AdminHorarios = lazy(() => import('./pages/admin/Horarios'));
 // Suspensiones de plan (sólo lectura): supervisión de la suspensión self-service.
 const AdminSuspensiones = lazy(() => import('./pages/admin/Suspensiones'));
 const AdminAsistencia = lazy(() => import('./pages/admin/Asistencia'));
@@ -171,6 +172,7 @@ function App() {
             <Route path="mi-qr" element={<AdminMiQr />} />
             <Route path="planes" element={<AdminPlanes />} />
             <Route path="disciplinas" element={<AdminDisciplinas />} />
+            <Route path="horarios" element={<AdminHorarios />} />
             <Route path="suspensiones" element={<AdminSuspensiones />} />
             <Route path="bazar" element={<AdminBazar />} />
             <Route path="marketing" element={<AdminMarketing />} />

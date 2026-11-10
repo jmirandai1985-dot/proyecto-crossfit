@@ -78,6 +78,8 @@ export const MENU_BY_ROL = {
         { type: 'section', label: 'CATÁLOGO' },
         { label: 'Planes', path: '/admin/planes', icon: 'creditCard' },
         { label: 'Disciplinas', path: '/admin/disciplinas', icon: 'dumbbellLc' },
+        // Grid semanal de horarios base por disciplina (swap de disciplina).
+        { label: 'Horarios', path: '/admin/horarios', icon: 'calendarClock' },
         // Suspensiones de plan: supervisión (sólo lectura) de la suspensión
         // self-service del alumno. Va en CATÁLOGO junto a Planes/Disciplinas por
         // ser la vista que acompaña la gestión de membresías.
