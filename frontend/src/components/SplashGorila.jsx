@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import frame0 from '../assets/splash/frame0-intacto.jpg';
 import frame1 from '../assets/splash/frame1-grietas.jpg';
 import frame2 from '../assets/splash/frame2-brazos.jpg';
@@ -16,6 +16,9 @@ export default function SplashGorila({ onFinish }) {
   const [shake, setShake] = useState(false);
   const [mostrarTexto, setMostrarTexto] = useState(false);
   const [fadeOut, setFadeOut] = useState(false);
+
+  const onFinishRef = useRef(onFinish);
+  onFinishRef.current = onFinish;
 
   useEffect(() => {
     const timers = [];
@@ -36,11 +39,11 @@ export default function SplashGorila({ onFinish }) {
       setTimeout(() => setFadeOut(true), tiempoUltimoFrame + HOLD_FINAL_MS)
     );
     timers.push(
-      setTimeout(() => onFinish(), tiempoUltimoFrame + HOLD_FINAL_MS + FADE_MS)
+      setTimeout(() => onFinishRef.current(), tiempoUltimoFrame + HOLD_FINAL_MS + FADE_MS)
     );
 
     return () => timers.forEach(clearTimeout);
-  }, [onFinish]);
+  }, []); // se programa una sola vez al montar, no depende de onFinish
 
   return (
     <div className={`splash-gorila ${fadeOut ? 'splash-gorila--fade' : ''}`}>
