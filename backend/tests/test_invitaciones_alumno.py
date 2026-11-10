@@ -150,7 +150,8 @@ def test_el_alta_acepta_el_token_de_invitacion_opcional():
     from app.api.v1.alumnos import RegistroAlumnoNuevo
 
     base = {"nombre": "Ana María", "correo": "ana@box.cl",
-            "rut": "12.345.678-5"}
+            "rut": "12.345.678-5", "sexo": "F", "peso": 60,
+            "telefono": "+56 9 1234 5678", "fecha_nacimiento": "1995-06-15"}
 
     assert RegistroAlumnoNuevo(**base).token_invitacion is None
     assert RegistroAlumnoNuevo(

@@ -42,7 +42,8 @@ def _alta(**extra):
     from app.api.v1.alumnos import RegistroAlumnoNuevo
 
     base = {"nombre": "Ana Pérez", "correo": "ana@example.com",
-            "rut": "12345678-5", "sexo": "F", "peso": 62.5}
+            "rut": "12345678-5", "sexo": "F", "peso": 62.5,
+            "telefono": "+56 9 1234 5678", "fecha_nacimiento": "1995-06-15"}
     base.update(extra)
     return RegistroAlumnoNuevo(**base)
 
@@ -72,9 +73,38 @@ def test_el_alta_normaliza_minusculas_y_acepta_peso_kg():
 
     datos = RegistroAlumnoNuevo(
         nombre="Ana", correo="ana@example.com", rut="12345678-5",
-        sexo="f", peso_kg=60)
+        sexo="f", peso_kg=60, telefono="+56 9 1234 5678",
+        fecha_nacimiento="1995-06-15")
     assert datos.sexo == "F"
     assert datos.peso == 60.0
+
+
+def test_el_alta_rechaza_sin_telefono():
+    with pytest.raises(ValidationError):
+        _alta(telefono=None)
+
+
+def test_el_alta_rechaza_sin_fecha_nacimiento():
+    with pytest.raises(ValidationError):
+        _alta(fecha_nacimiento=None)
+
+
+def test_el_alta_rechaza_fecha_nacimiento_futura():
+    from datetime import date, timedelta
+
+    with pytest.raises(ValidationError):
+        _alta(fecha_nacimiento=date.today() + timedelta(days=1))
+
+
+def test_el_alta_rechaza_fecha_nacimiento_fuera_de_rango():
+    from datetime import date, timedelta
+
+    # mayor a 100 años
+    with pytest.raises(ValidationError):
+        _alta(fecha_nacimiento=date.today() - timedelta(days=365 * 110))
+    # menor a 10 años
+    with pytest.raises(ValidationError):
+        _alta(fecha_nacimiento=date.today() - timedelta(days=365 * 5))
 
 
 # ── 2. El alumno completa su género una sola vez ──────────────────────────────
@@ -144,10 +174,18 @@ def test_el_alta_del_front_marca_los_campos_como_obligatorios():
     # Ya no manda null: el backend lo rechaza.
     assert "sexo: form.sexo," in fuente
     assert "peso: parseFloat(form.peso)," in fuente
+    # BUG 2: teléfono y fecha de nacimiento también son obligatorios en el alta.
+    assert 'name="telefono"' in fuente and 'type="tel"' in fuente
+    assert 'name="fecha_nacimiento"' in fuente and 'type="date"' in fuente
+    assert "telefono: form.telefono," in fuente
+    assert "fecha_nacimiento: form.fecha_nacimiento," in fuente
 
     landing = _fuente("frontend/src/pages/LandingPage.jsx")
     assert "value={formData.genero}" in landing and "required" in landing
     assert "value={formData.peso_kg}" in landing
+    # BUG 2: el formulario público de /landing también pide teléfono y fecha.
+    assert "value={formData.telefono}" in landing
+    assert "value={formData.fecha_nacimiento}" in landing
 
 
 def test_el_banner_del_alumno_esta_montado_en_el_layout():

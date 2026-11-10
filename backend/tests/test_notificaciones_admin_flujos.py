@@ -193,6 +193,8 @@ def test_registro_de_alumno_avisa_a_los_admins():
             "estatura": 175,
             # D2: el alta exige género además de peso.
             "sexo": "M",
+            "telefono": "+56 9 8765 4321",
+            "fecha_nacimiento": "1990-01-02",
         }, timeout=30)
         assert r.status_code == 201, r.text[:300]
 

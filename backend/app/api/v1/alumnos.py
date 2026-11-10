@@ -159,6 +159,8 @@ class RegistroAlumnoNuevo(BaseModel):
         None, validation_alias=AliasChoices("estatura", "estatura_cm"),
         description="Estatura en cm (acepta campo 'estatura' o 'estatura_cm')")
     rut: str
+    telefono: str = Field(..., min_length=6, max_length=20)
+    fecha_nacimiento: date = Field(...)
     tenant_id: int = 1
     # Token del link `/landing?inv=<token>` (invitación de un alumno). Es
     # OPCIONAL: el auto-registro directo sigue funcionando igual y un token
@@ -176,6 +178,21 @@ class RegistroAlumnoNuevo(BaseModel):
         if normalizado not in ("M", "F"):
             raise ValueError("Género inválido: usa M o F")
         return normalizado
+
+    @field_validator("fecha_nacimiento")
+    @classmethod
+    def _fecha_nacimiento_valida(cls, valor: date):
+        """Rechaza fechas futuras y edades fuera de rango razonable (10–100 años)."""
+        hoy = date.today()
+        if valor > hoy:
+            raise ValueError("La fecha de nacimiento no puede ser futura")
+        edad = hoy.year - valor.year - (
+            (hoy.month, hoy.day) < (valor.month, valor.day))
+        if not (10 <= edad <= 100):
+            raise ValueError(
+                "La fecha de nacimiento debe corresponder a una edad "
+                "entre 10 y 100 años")
+        return valor
 
 
 # ─── POST /registro/alumno-nuevo (público con rate limit) ───
@@ -241,7 +258,7 @@ def registrar_alumno_nuevo(
         tenant_id=datos.tenant_id,
         rut=datos.rut.strip().upper(),
         nombre=datos.nombre.strip(),
-        telefono=None,
+        telefono=datos.telefono.strip(),
         correo=datos.correo.lower(),
         password_hash=hash_password(password_tmp),
         rol=RolUsuario.alumno,
@@ -251,6 +268,7 @@ def registrar_alumno_nuevo(
         peso_kg=datos.peso,
         estatura_cm=int(datos.estatura) if datos.estatura else None,
         genero=datos.sexo,
+        fecha_nacimiento=datos.fecha_nacimiento,
     )
     db.add(usuario)
     db.flush()

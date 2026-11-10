@@ -165,6 +165,8 @@ def _payload_registro(correo: str) -> dict:
         # D2: el alta exige peso y género (validación real en el endpoint).
         "sexo": "F",
         "peso": 60,
+        "telefono": "+56 9 1234 5678",
+        "fecha_nacimiento": "1995-06-15",
     }
 
 

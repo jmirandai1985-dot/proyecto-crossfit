@@ -6,6 +6,7 @@ const RegistroAlumnoNuevo = ({ onClose }) => {
     const navigate = useNavigate();
     const [form, setForm] = useState({
         nombre: '', correo: '', rut: '', sexo: '', peso: '', estatura: '',
+        telefono: '', fecha_nacimiento: '',
     });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -30,6 +31,8 @@ const RegistroAlumnoNuevo = ({ onClose }) => {
                 sexo: form.sexo,
                 peso: parseFloat(form.peso),
                 estatura: form.estatura ? parseFloat(form.estatura) : null,
+                telefono: form.telefono,
+                fecha_nacimiento: form.fecha_nacimiento,
             });
             const d = r.data || {};
             setAvisoCorreo(d.email_enviado === false && d.password_provisional
@@ -119,6 +122,16 @@ const RegistroAlumnoNuevo = ({ onClose }) => {
                             <div>
                                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Estatura (cm)</label>
                                 <input name="estatura" type="number" step="1" min="1" value={form.estatura} onChange={handleChange} placeholder="170" className={inputClass} />
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-300 mb-1.5">Teléfono *</label>
+                                <input name="telefono" type="tel" value={form.telefono} onChange={handleChange} placeholder="+56 9 1234 5678" className={inputClass} required />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-300 mb-1.5">Fecha de nacimiento *</label>
+                                <input name="fecha_nacimiento" type="date" value={form.fecha_nacimiento} onChange={handleChange} className={inputClass} required />
                             </div>
                         </div>
                         <p className="text-gray-500 text-[11px]">

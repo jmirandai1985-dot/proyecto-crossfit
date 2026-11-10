@@ -15,7 +15,9 @@ export default function LandingPage() {
     correo: '',
     genero: '',
     peso_kg: '',
-    estatura_cm: ''
+    estatura_cm: '',
+    telefono: '',
+    fecha_nacimiento: ''
   });
   const [mensaje, setMensaje] = useState('');
 
@@ -36,7 +38,9 @@ export default function LandingPage() {
         rut: formData.rut,
         sexo: formData.genero,
         peso_kg: parseFloat(formData.peso_kg),
-        estatura_cm: parseInt(formData.estatura_cm)
+        estatura_cm: parseInt(formData.estatura_cm),
+        telefono: formData.telefono,
+        fecha_nacimiento: formData.fecha_nacimiento
       };
       // Sólo se envía si vino en el link: el backend ignora un token inválido o
       // ya usado y NUNCA falla el registro por eso.
@@ -53,7 +57,7 @@ export default function LandingPage() {
       } else {
         setMensaje('✅ ¡Solicitud recibida! Revisa tu correo (incluyendo SPAM).');
       }
-      setFormData({ nombre: '', rut: '', correo: '', genero: '', peso_kg: '', estatura_cm: '' });
+      setFormData({ nombre: '', rut: '', correo: '', genero: '', peso_kg: '', estatura_cm: '', telefono: '', fecha_nacimiento: '' });
     } catch (error) {
       setMensaje('❌ Error: ' + (error.response?.data?.detail || 'Intenta de nuevo'));
     }
@@ -107,6 +111,14 @@ export default function LandingPage() {
         
         <input type="number" placeholder="Estatura (cm)" value={formData.estatura_cm}
           onChange={(e) => setFormData({...formData, estatura_cm: e.target.value})}
+          style={{ width: '100%', padding: '12px', marginBottom: '15px', border: '1px solid #ff8c00', borderRadius: '4px', background: '#0a0e27', color: 'white' }} required />
+
+        <input type="tel" placeholder="Teléfono (ej: +56 9 1234 5678)" value={formData.telefono}
+          onChange={(e) => setFormData({...formData, telefono: e.target.value})}
+          style={{ width: '100%', padding: '12px', marginBottom: '15px', border: '1px solid #ff8c00', borderRadius: '4px', background: '#0a0e27', color: 'white' }} required />
+
+        <input type="date" placeholder="Fecha de nacimiento" value={formData.fecha_nacimiento}
+          onChange={(e) => setFormData({...formData, fecha_nacimiento: e.target.value})}
           style={{ width: '100%', padding: '12px', marginBottom: '15px', border: '1px solid #ff8c00', borderRadius: '4px', background: '#0a0e27', color: 'white' }} required />
         
         <button type="submit" style={{ width: '100%', padding: '14px', background: '#ff8c00', color: '#0a0e27', fontWeight: 'bold', fontSize: '16px', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
