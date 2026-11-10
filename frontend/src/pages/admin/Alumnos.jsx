@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import AlumnoFichaModal from '../../components/AlumnoFichaModal';
-// Ficha de CONSULTA con 5 pestañas (buscador rápido, arriba de la tabla). No es el
-// modal chico `AlumnoFichaModal` que usan las filas: conviven sin tocarse.
+// Ficha unificada del alumno (11 pestañas, buscador rápido, arriba de la tabla): es el
+// ÚNICO punto de entrada a la ficha desde el padrón. El modal `AlumnoFichaModal` quedó
+// sólo para Fidelización.
 import FichaAlumnoTabs from '../../components/FichaAlumnoTabs';
 // Vista MÓVIL del padrón (<768px): tarjetas con acordeón. La tabla de escritorio no
 // cambia; las dos vistas comparten los datos y las reglas (`utils/alumnos*`).
@@ -61,7 +61,6 @@ const Alumnos = () => {
     // Error de descarga del comprobante (blob autenticado): se muestra junto al archivo.
     const [avisoComprobante, setAvisoComprobante] = useState('');
     const [editingAlumno, setEditingAlumno] = useState(null);
-    const [fichaAlumnoId, setFichaAlumnoId] = useState(null);
     // ── Buscador rápido + ficha con pestañas (consulta, arriba de la tabla) ──
     // Independiente de `searchTerm`/`busqueda` (la tabla): otro estado, otra instancia
     // del hook, y su propia debounce. No comparte nada con el buscador de abajo.
@@ -69,7 +68,7 @@ const Alumnos = () => {
     const [busquedaRapida, setBusquedaRapida] = useState('');
     const [alumnoConsultaId, setAlumnoConsultaId] = useState(null);
     const [searchParams, setSearchParams] = useSearchParams();
-    // Navegación al Historial del alumno (`/admin/alumnos/:id/historial`).
+    // Navegación interna del panel (p. ej. aprobar un pago en Pendientes).
     const navigate = useNavigate();
     // Filtro por estado que llega desde el Dashboard. Se valida: un valor
     // desconocido en la URL no se manda al backend (allí no filtra nada).
@@ -155,14 +154,28 @@ const Alumnos = () => {
     const desactivarUsuario = useDesactivarUsuario();
     const crearSuscripcion = useCrearSuscripcion();
 
-    // ?alumno_id=<id>: deep-link desde Notificaciones -> abre la ficha de ESE
-    // alumno. AlumnoFichaModal se auto-carga por API, asi que no depende de que
-    // el alumno este en la lista. Al cerrar se limpia el param (si no, un cambio
-    // de filtro lo volveria a abrir).
+    // Ref del bloque de "Consulta rápida": el único botón "Ver ficha" del padrón
+    // precarga `alumnoConsultaId` y scrollea hasta acá.
+    const consultaRef = useRef(null);
+
+    // ?alumno_id=<id>: deep-link desde Notificaciones -> abre la ficha unificada de ESE
+    // alumno (la misma que abre "Ver ficha"). Al abrir se limpia el param para que un
+    // cambio de filtro no la vuelva a abrir.
     useEffect(() => {
         const id = Number(searchParams.get('alumno_id'));
-        if (Number.isFinite(id) && id > 0) setFichaAlumnoId(id);
-    }, [searchParams]);
+        if (Number.isFinite(id) && id > 0) {
+            setAlumnoConsultaId(id);
+            const next = new URLSearchParams(searchParams);
+            next.delete('alumno_id');
+            setSearchParams(next, { replace: true });
+        }
+    }, [searchParams, setSearchParams]);
+
+    // Acción única de la fila para abrir la ficha del alumno (consulta rápida).
+    const verFicha = (alumnoId) => {
+        setAlumnoConsultaId(alumnoId);
+        consultaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
 
     const [formData, setFormData] = useState({
         nombre: '',
@@ -377,9 +390,9 @@ const Alumnos = () => {
                     )}
                 </div>
 
-                {/* ── Buscador rápido + ficha con pestañas (consulta, arriba de la tabla) ──
-                    No toca la tabla ni sus modales: es un bloque independiente. */}
-                <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+                {/* ── Buscador rápido + ficha unificada (consulta, arriba de la tabla) ──
+                    Único punto de entrada a la ficha del alumno. */}
+                <div ref={consultaRef} className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
                     <div className="mb-4">
                         <h2 className="text-lg font-bold text-zinc-100">Consulta rápida</h2>
                         <p className="text-sm text-zinc-400">Busca un alumno para ver su ficha completa.</p>
@@ -472,8 +485,7 @@ const Alumnos = () => {
                             suscripciones={suscripciones}
                             planes={planes}
                             onVoucher={openVoucherModal}
-                            onFicha={(alumno) => setFichaAlumnoId(alumno.id)}
-                            onHistorial={(alumno) => navigate(`/admin/alumnos/${alumno.id}/historial`)}
+                            onVerFicha={(alumno) => verFicha(alumno.id)}
                             onEditar={(alumno) => openModal(alumno)}
                             onEliminar={handleDelete}
                         />
@@ -531,17 +543,11 @@ const Alumnos = () => {
                                                     📄 Voucher
                                                 </button>
                                                 <button
-                                                    onClick={() => setFichaAlumnoId(alumno.id)}
+                                                    onClick={() => verFicha(alumno.id)}
+                                                    data-testid={`btn-ver-ficha-${alumno.id}`}
                                                     className="px-3 py-1 text-emerald-400 hover:bg-zinc-800 rounded transition-colors text-xs font-medium"
                                                 >
-                                                    👤 Ficha
-                                                </button>
-                                                <button
-                                                    onClick={() => navigate(`/admin/alumnos/${alumno.id}/historial`)}
-                                                    data-testid={`btn-historial-${alumno.id}`}
-                                                    className="px-3 py-1 text-indigo-400 hover:bg-zinc-800 rounded transition-colors text-xs font-medium"
-                                                >
-                                                    📜 Historial
+                                                    Ver ficha
                                                 </button>
                                                 <button
                                                     onClick={() => openModal(alumno)}
@@ -993,21 +999,6 @@ const Alumnos = () => {
                 )}
             </div>
 
-            {/* MODAL FICHA ALUMNO */}
-            {fichaAlumnoId && (
-                <AlumnoFichaModal
-                    alumnoId={fichaAlumnoId}
-                    tenantId={tenant_id}
-                    onVerHistorial={() => navigate(`/admin/alumnos/${fichaAlumnoId}/historial`)}
-                    onClose={() => {
-                        setFichaAlumnoId(null);
-                        // Limpia el deep-link para no re-abrir la ficha.
-                        const next = new URLSearchParams(searchParams);
-                        next.delete('alumno_id');
-                        setSearchParams(next);
-                    }}
-                />
-            )}
         </Layout>
     );
 };

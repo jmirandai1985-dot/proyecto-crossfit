@@ -1,55 +1,127 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
-// Stats + agrupación por mes de asistencia: las MISMAS funciones puras que usa
-// "Mis Reservas" del alumno (una sola fuente, sin red extra).
-import { agruparReservasPorMes, calcularEstadisticasReservas } from '../utils/reservasEstadisticas';
 // Vigente/Finalizado de la pestaña Planes (regla pura, testeada en `test:ficha-alumno`).
 import { esSuscripcionVigente } from '../utils/fichaAlumno';
-import { fmtFechaChile, hoyChileStr } from '../utils/fecha';
-import { getEstadoColor, getEstadoDisplay } from '../utils/estadoReserva';
+import { fmtFechaChile } from '../utils/fecha';
 import SuspensionSaludPanel from './admin/SuspensionSaludPanel';
+import { usePanelHistorial } from '../hooks/queries';
+// Las secciones del PanelHistorial (la MISMA pantalla que ve el alumno) se reutilizan
+// como pestañas de esta ficha unificada. Se importan por separado para no montar el
+// `<PanelHistorial>` completo, que maneja su propia pestaña por URL.
+import {
+    SeccionAsistencia,
+    SeccionBeneficios,
+    SeccionBazar,
+    SeccionGestion,
+    SeccionMembresias,
+    SeccionPagos,
+    SeccionRms,
+} from './historial/PanelHistorial';
 
 const TABS = [
     { key: 'resumen', label: 'Resumen' },
     { key: 'datos', label: 'Datos' },
     { key: 'planes', label: 'Planes' },
-    { key: 'referidos', label: 'Referidos' },
+    { key: 'membresias', label: 'Membresías' },
     { key: 'asistencia', label: 'Asistencia' },
+    { key: 'pagos', label: 'Pagos' },
+    { key: 'bazar', label: 'Bazar' },
+    { key: 'rms', label: 'RMs' },
+    { key: 'beneficios', label: 'Beneficios' },
+    { key: 'referidos', label: 'Referidos' },
     { key: 'suspension', label: 'Suspensión' },
 ];
 
+// Pestañas que se resuelven con `usePanelHistorial` (la fuente del alumno). El resto
+// (Datos/Planes/Referidos/Suspensión) sigue con los datos que ya carga esta ficha.
+const SECCIONES_PANEL = new Set([
+    'resumen', 'asistencia', 'membresias', 'pagos', 'bazar', 'rms', 'beneficios',
+]);
+const POR_PAGINA = 25;
+
+// Envuelve una sección del PanelHistorial con su estado de carga/error, sin duplicar
+// el spinner en cada pestaña.
+const SeccionPanel = ({ cargando, error, onReintentar, children }) => {
+    if (cargando) {
+        return (
+            <div className="flex justify-center py-16">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-orange-500" />
+            </div>
+        );
+    }
+    if (error) {
+        return (
+            <div className="bg-red-500/10 border-l-4 border-red-500 rounded p-4 text-sm text-red-300">
+                <p className="font-medium">⚠️ {error}</p>
+                <button type="button" onClick={onReintentar}
+                    className="mt-2 px-3 py-1 bg-red-600 text-white rounded text-xs font-bold hover:bg-red-700">
+                    Reintentar
+                </button>
+            </div>
+        );
+    }
+    return children;
+};
+
 /**
- * Ficha de consulta rápida de un alumno con 5 pestañas (vista admin, no es el modal
- * chico `AlumnoFichaModal`). Carga todo por `Promise.allSettled`: cada bloque se
- * resuelve aparte y muestra su propio error, sin dejar la ficha en blanco por un
- * solo fallo.
+ * Ficha unificada del alumno (vista admin) con 11 pestañas. Es el ÚNICO punto de entrada
+ * a la ficha desde el padrón de Alumnos: fusiona la antigua "consulta rápida" (Datos/
+ * Planes/Referidos/Suspensión) con las secciones del `PanelHistorial` (Membresías/
+ * Asistencia/Pagos/Bazar/RMs/Beneficios y el bloque de gestión del Resumen), la MISMA
+ * fuente que ve el alumno en `/mi-historial`.
+ *
+ * Los datos "propios" (usuario, suscripciones, referidos, suspensiones) se cargan con
+ * `Promise.allSettled`: cada bloque se resuelve aparte y muestra su propio error, sin
+ * dejar la ficha en blanco por un solo fallo. Las pestañas de historial usan
+ * `usePanelHistorial` (caché de React Query) controlado por el estado `tab` local.
  */
 const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
     const [tab, setTab] = useState('resumen');
+    const [pagina, setPagina] = useState(1);
     const [data, setData] = useState(null);
     const [suscripcion, setSuscripcion] = useState(null);
     const [planes, setPlanes] = useState([]);
     const [codigoReferido, setCodigoReferido] = useState(null);
     const [suscripciones, setSuscripciones] = useState([]);
     const [referidosUsados, setReferidosUsados] = useState([]);
-    const [reservas, setReservas] = useState([]);
     const [suspensionesPropias, setSuspensionesPropias] = useState([]);
     const [loading, setLoading] = useState(true);
     const [errores, setErrores] = useState({});
+
+    // Pestañas de historial (membresías/asistencia/pagos/bazar/rms/beneficios + el bloque
+    // de gestión del Resumen): la MISMA fuente que ve el alumno en `/mi-historial`. Sólo se
+    // pide cuando la pestaña activa lo necesita (`enabled`), para no pegar al backend en
+    // Datos/Planes/Referidos/Suspensión.
+    const seccionPanel = SECCIONES_PANEL.has(tab) ? tab : 'resumen';
+    const {
+        data: panel,
+        isPending: cargandoPanel,
+        isError: errorPanel,
+        error: errorConsulta,
+        refetch: reintentarPanel,
+    } = usePanelHistorial({
+        alumnoId,
+        seccion: seccionPanel,
+        pagina,
+        porPagina: POR_PAGINA,
+        enabled: SECCIONES_PANEL.has(tab),
+    });
+    const errorPanelMsg = errorPanel
+        ? (errorConsulta?.response?.data?.detail || 'No se pudo cargar el historial.')
+        : '';
 
     useEffect(() => {
         if (!alumnoId) return;
         setLoading(true);
         setErrores({});
         const carga = async () => {
-            const [usr, sus, plan, cod, suscHist, refs, resv, susp] = await Promise.allSettled([
+            const [usr, sus, plan, cod, suscHist, refs, susp] = await Promise.allSettled([
                 api.get(`/api/v1/usuarios/${alumnoId}`),
                 api.get('/api/v1/suscripciones', { params: { usuario_id: alumnoId, estado: 'activo' } }),
                 api.get('/api/v1/planes'),
                 api.get(`/api/v1/admin/alumnos/${alumnoId}/codigo-referido`),
                 api.get('/api/v1/suscripciones', { params: { usuario_id: alumnoId } }),
                 api.get(`/api/v1/admin/alumnos/${alumnoId}/referidos-usados`),
-                api.get('/api/v1/reservas', { params: { usuario_id: alumnoId, limit: 200 } }),
                 api.get('/api/v1/admin/suspensiones', { params: { usuario_id: alumnoId } }),
             ]);
             const det = (r) => r.reason?.response?.data?.detail || r.reason?.message || 'No se pudo cargar';
@@ -75,9 +147,6 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
             if (refs.status === 'fulfilled') setReferidosUsados(Array.isArray(refs.value.data) ? refs.value.data : []);
             else errs.referidos = det(refs);
 
-            if (resv.status === 'fulfilled') setReservas(Array.isArray(resv.value.data) ? resv.value.data : []);
-            else errs.reservas = det(resv);
-
             if (susp.status === 'fulfilled') setSuspensionesPropias(Array.isArray(susp.value.data) ? susp.value.data : []);
             else errs.suspensiones = det(susp);
 
@@ -91,8 +160,6 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
     useEffect(() => { setTab('resumen'); }, [alumnoId]);
 
     const planActivo = planes.find((p) => p.id === suscripcion?.plan_id);
-    const stats = useMemo(() => calcularEstadisticasReservas(reservas, hoyChileStr()), [reservas]);
-    const historialMeses = useMemo(() => agruparReservasPorMes(reservas), [reservas]);
     const suscripcionesOrdenadas = useMemo(
         () => [...suscripciones].sort((a, b) => new Date(b.fecha_inicio || 0) - new Date(a.fecha_inicio || 0)),
         [suscripciones],
@@ -129,7 +196,7 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
                     <button
                         key={t.key}
                         type="button"
-                        onClick={() => setTab(t.key)}
+                        onClick={() => { setPagina(1); setTab(t.key); }}
                         className={`px-3 py-2 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap ${tab === t.key ? 'text-orange-400 border-b-2 border-orange-500 bg-zinc-800/60' : 'text-zinc-400 hover:text-zinc-200'}`}
                     >
                         {t.label}
@@ -164,6 +231,12 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
                             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide mb-2">Código de referido</p>
                             <p className="text-zinc-200 text-lg font-mono">{codigoReferido?.codigo || 'Sin código asignado'}</p>
                         </div>
+
+                        {/* Bloque de gestión (arquetipo/riesgo): la MISMA info que el box ve
+                            en el PanelHistorial, fusionada en el Resumen de esta ficha. */}
+                        <SeccionPanel cargando={cargandoPanel} error={errorPanelMsg} onReintentar={reintentarPanel}>
+                            <SeccionGestion datos={panel?.datos || {}} />
+                        </SeccionPanel>
                     </div>
                 ) : tab === 'datos' ? (
                     <div className="grid grid-cols-2 gap-3 text-sm">
@@ -206,6 +279,30 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
                             })
                         )}
                     </div>
+                ) : tab === 'membresias' ? (
+                    <SeccionPanel cargando={cargandoPanel} error={errorPanelMsg} onReintentar={reintentarPanel}>
+                        <SeccionMembresias datos={panel?.datos || {}} onPagina={setPagina} />
+                    </SeccionPanel>
+                ) : tab === 'asistencia' ? (
+                    <SeccionPanel cargando={cargandoPanel} error={errorPanelMsg} onReintentar={reintentarPanel}>
+                        <SeccionAsistencia datos={panel?.datos || {}} onPagina={setPagina} />
+                    </SeccionPanel>
+                ) : tab === 'pagos' ? (
+                    <SeccionPanel cargando={cargandoPanel} error={errorPanelMsg} onReintentar={reintentarPanel}>
+                        <SeccionPagos datos={panel?.datos || {}} onPagina={setPagina} />
+                    </SeccionPanel>
+                ) : tab === 'bazar' ? (
+                    <SeccionPanel cargando={cargandoPanel} error={errorPanelMsg} onReintentar={reintentarPanel}>
+                        <SeccionBazar datos={panel?.datos || {}} onPagina={setPagina} />
+                    </SeccionPanel>
+                ) : tab === 'rms' ? (
+                    <SeccionPanel cargando={cargandoPanel} error={errorPanelMsg} onReintentar={reintentarPanel}>
+                        <SeccionRms datos={panel?.datos || {}} onPagina={setPagina} />
+                    </SeccionPanel>
+                ) : tab === 'beneficios' ? (
+                    <SeccionPanel cargando={cargandoPanel} error={errorPanelMsg} onReintentar={reintentarPanel}>
+                        <SeccionBeneficios datos={panel?.datos || {}} onPagina={setPagina} />
+                    </SeccionPanel>
                 ) : tab === 'referidos' ? (
                     <div className="space-y-4">
                         <div className="bg-zinc-800/50 rounded-lg p-4">
@@ -233,44 +330,6 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
                                 </ul>
                             )}
                         </div>
-                    </div>
-
-                ) : tab === 'asistencia' ? (
-                    <div className="space-y-4">
-                        {errores.reservas && <p className="text-sm text-red-400">⚠️ {errores.reservas}</p>}
-                        <div className="grid grid-cols-3 gap-3">
-                            <div className="rounded-lg border border-zinc-800 bg-zinc-800/40 p-3">
-                                <p className="text-xs text-zinc-500">Clases este mes</p>
-                                <p className="text-2xl font-bold text-zinc-100">{stats.clasesEsteMes}</p>
-                            </div>
-                            <div className="rounded-lg border border-zinc-800 bg-zinc-800/40 p-3">
-                                <p className="text-xs text-zinc-500">Asistidas</p>
-                                <p className="text-2xl font-bold text-zinc-100">{stats.asistidasEsteMes}</p>
-                            </div>
-                            <div className="rounded-lg border border-zinc-800 bg-zinc-800/40 p-3">
-                                <p className="text-xs text-zinc-500">% Asistencia</p>
-                                <p className="text-2xl font-bold text-zinc-100">{stats.pctAsistencia}%</p>
-                            </div>
-                        </div>
-                        {historialMeses.length === 0 ? (
-                            <p className="text-sm text-zinc-400">Sin historial de asistencia.</p>
-                        ) : (
-                            historialMeses.map((g) => (
-                                <div key={g.clave}>
-                                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide mb-2">{g.label}</p>
-                                    <ul className="space-y-1.5">
-                                        {g.reservas.map((r) => (
-                                            <li key={r.id} className="flex items-center justify-between gap-2 text-sm">
-                                                <span className="text-zinc-200 truncate">🏋️ {r.disciplina_nombre || 'Clase'}</span>
-                                                <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium border ${getEstadoColor(r.estado_visible)}`}>
-                                                    {getEstadoDisplay(r.estado_visible)}
-                                                </span>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            ))
-                        )}
                     </div>
                 ) : (
                     <div className="space-y-4">

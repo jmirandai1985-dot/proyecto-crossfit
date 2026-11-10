@@ -116,12 +116,57 @@ const Tabla = ({ columnas, children }) => (
 // ══════════════════════════════════════════════════════════════════════════════
 // Secciones
 // ══════════════════════════════════════════════════════════════════════════════
-const SeccionResumen = ({ datos }) => {
+// Bloque de gestión del box (arquetipo/riesgo) del Resumen. Se extrae para reutilizarlo
+// en la ficha unificada del admin sin montar el `<PanelHistorial>` completo (que maneja su
+// propia pestaña por URL). No cambia el render que ya hacía `SeccionResumen`.
+export const SeccionGestion = ({ datos }) => {
+    const g = datos.gestion;
+    if (!g) return null;
+    return (
+        <Card titulo="Gestión del box" testid="historial-gestion">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                    <p className="text-xs text-zinc-500">Arquetipo</p>
+                    <p className="text-zinc-100 font-semibold">{g.arquetipo || '—'}</p>
+                    {g.arquetipo_calculado_en && (
+                        <p className="text-[10px] text-zinc-500 mt-0.5"
+                            title="Cuándo se entrenó el modelo de segmentación">
+                            calculado el {fechaCorta(g.arquetipo_calculado_en)}
+                        </p>
+                    )}
+                </div>
+                <div>
+                    <p className="text-xs text-zinc-500">Riesgo de baja</p>
+                    <p className="text-zinc-100 font-semibold">
+                        {g.riesgo_nivel || '—'}
+                        {g.riesgo_probabilidad !== null && g.riesgo_probabilidad !== undefined
+                            && <span className="text-zinc-400"> · {g.riesgo_probabilidad}%</span>}
+                    </p>
+                    {g.riesgo_calculado_en && (
+                        <p className="text-[10px] text-zinc-500 mt-0.5"
+                            title="Cuándo se calculó el modelo (no es la situación de hoy, que es en vivo)">
+                            calculado el {fechaCorta(g.riesgo_calculado_en)}
+                        </p>
+                    )}
+                </div>
+                <div>
+                    <p className="text-xs text-zinc-500">Gestión</p>
+                    <p className="text-zinc-100 font-semibold">{g.estado_gestion || 'PENDIENTE'}</p>
+                </div>
+                <div>
+                    <p className="text-xs text-zinc-500">Días sin asistir</p>
+                    <p className="text-zinc-100 font-semibold">{num(g.dias_sin_asistir)}</p>
+                </div>
+            </div>
+        </Card>
+    );
+};
+
+export const SeccionResumen = ({ datos }) => {
     const a = datos.asistencia || {};
     const m = datos.membresia || {};
     const p = datos.pagos || {};
     const r = datos.rms || {};
-    const g = datos.gestion;
     const actual = m.actual;
 
     return (
@@ -186,51 +231,14 @@ const SeccionResumen = ({ datos }) => {
                     )}
                 </Card>
 
-                {g && (
-                    <Card titulo="Gestión del box" testid="historial-gestion">
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                            <div>
-                                <p className="text-xs text-zinc-500">Arquetipo</p>
-                                <p className="text-zinc-100 font-semibold">{g.arquetipo || '—'}</p>
-                                {g.arquetipo_calculado_en && (
-                                    <p className="text-[10px] text-zinc-500 mt-0.5"
-                                        title="Cuándo se entrenó el modelo de segmentación">
-                                        calculado el {fechaCorta(g.arquetipo_calculado_en)}
-                                    </p>
-                                )}
-                            </div>
-                            <div>
-                                <p className="text-xs text-zinc-500">Riesgo de baja</p>
-                                <p className="text-zinc-100 font-semibold">
-                                    {g.riesgo_nivel || '—'}
-                                    {g.riesgo_probabilidad !== null && g.riesgo_probabilidad !== undefined
-                                        && <span className="text-zinc-400"> · {g.riesgo_probabilidad}%</span>}
-                                </p>
-                                {g.riesgo_calculado_en && (
-                                    <p className="text-[10px] text-zinc-500 mt-0.5"
-                                        title="Cuándo se calculó el modelo (no es la situación de hoy, que es en vivo)">
-                                        calculado el {fechaCorta(g.riesgo_calculado_en)}
-                                    </p>
-                                )}
-                            </div>
-                            <div>
-                                <p className="text-xs text-zinc-500">Gestión</p>
-                                <p className="text-zinc-100 font-semibold">{g.estado_gestion || 'PENDIENTE'}</p>
-                            </div>
-                            <div>
-                                <p className="text-xs text-zinc-500">Días sin asistir</p>
-                                <p className="text-zinc-100 font-semibold">{num(g.dias_sin_asistir)}</p>
-                            </div>
-                        </div>
-                    </Card>
-                )}
+                <SeccionGestion datos={datos} />
             </div>
         </div>
     );
 };
 
 
-const SeccionAsistencia = ({ datos, onPagina }) => {
+export const SeccionAsistencia = ({ datos, onPagina }) => {
     const t = datos.totales || {};
     const suspendidas = t.clases_suspendidas || 0;
     const items = datos.items || [];
@@ -312,7 +320,7 @@ const SeccionAsistencia = ({ datos, onPagina }) => {
 };
 
 
-const SeccionPagos = ({ datos, onPagina }) => {
+export const SeccionPagos = ({ datos, onPagina }) => {
     const t = datos.totales || {};
     const items = datos.items || [];
     const porAnio = datos.por_anio || [];
@@ -402,7 +410,7 @@ const SeccionPagos = ({ datos, onPagina }) => {
 };
 
 
-const SeccionMembresias = ({ datos, onPagina }) => {
+export const SeccionMembresias = ({ datos, onPagina }) => {
     const r = datos.resumen || {};
     const actual = datos.membresia_actual;
     const items = datos.items || [];
@@ -495,7 +503,7 @@ const ESTADOS_BAZAR = {
     cancelado: { label: 'Cancelado', clase: 'bg-red-500/20 text-red-300' },
 };
 
-const SeccionBazar = ({ datos, onPagina }) => {
+export const SeccionBazar = ({ datos, onPagina }) => {
     const t = datos.totales || {};
     const items = datos.items || [];
 
@@ -560,7 +568,7 @@ const SeccionBazar = ({ datos, onPagina }) => {
 };
 
 
-const SeccionRms = ({ datos, onPagina }) => {
+export const SeccionRms = ({ datos, onPagina }) => {
     const t = datos.totales || {};
     const items = datos.items || [];
     const porCategoria = t.por_categoria || {};
@@ -610,7 +618,7 @@ const ESTADO_BENEFICIO = {
     anulado: 'bg-red-500/10 text-red-300',
 };
 
-const SeccionBeneficios = ({ datos, onPagina }) => {
+export const SeccionBeneficios = ({ datos, onPagina }) => {
     const t = datos.totales || {};
     const items = datos.items || [];
 

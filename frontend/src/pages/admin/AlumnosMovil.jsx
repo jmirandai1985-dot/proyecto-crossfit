@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronRight, FileText, History, Pencil, Trash2, UserRound } from 'lucide-react';
+import { ChevronRight, FileText, Pencil, Trash2, UserRound } from 'lucide-react';
 import {
     alternarTarjeta, detalleTarjeta, estaAbierta, resumenTarjeta,
 } from '../../utils/alumnosMovil';
@@ -19,7 +19,7 @@ import './alumnosMovil.css';
  * otra cierra la anterior por construcción (`utils/alumnosMovil.alternarTarjeta`).
  *
  * Los modales y los manejadores NO viven acá: se avisa por callback y los sigue abriendo
- * `pages/admin/Alumnos.jsx`, donde ya viven el comprobante, la ficha, el historial, el
+ * `pages/admin/Alumnos.jsx`, donde ya viven el comprobante, la ficha unificada, el
  * formulario y la baja. Así el rediseño móvil no agrega una segunda copia de ninguna
  * llamada al backend: recibe el mismo padrón, las mismas suscripciones y los mismos planes
  * que la tabla.
@@ -31,7 +31,7 @@ import './alumnosMovil.css';
  */
 const AlumnosMovil = ({
     alumnos, suscripciones, planes,
-    onVoucher, onFicha, onHistorial, onEditar, onEliminar,
+    onVoucher, onVerFicha, onEditar, onEliminar,
 }) => {
     const [abierta, setAbierta] = useState(null);
 
@@ -121,16 +121,10 @@ const AlumnosMovil = ({
                                         <FileText aria-hidden="true" /> Voucher
                                     </button>
                                     <button type="button" className="ub-alu-btn ficha"
-                                        onClick={() => onFicha(alumno)}
-                                        aria-label={`Ficha de ${resumen.nombre}`}
+                                        onClick={() => onVerFicha(alumno)}
+                                        aria-label={`Ver ficha de ${resumen.nombre}`}
                                         data-testid={`btn-ficha-movil-${alumno.id}`}>
-                                        <UserRound aria-hidden="true" /> Ficha
-                                    </button>
-                                    <button type="button" className="ub-alu-btn historial"
-                                        onClick={() => onHistorial(alumno)}
-                                        aria-label={`Historial de ${resumen.nombre}`}
-                                        data-testid={`btn-historial-movil-${alumno.id}`}>
-                                        <History aria-hidden="true" /> Historial
+                                        <UserRound aria-hidden="true" /> Ver ficha
                                     </button>
                                     <button type="button" className="ub-alu-btn editar"
                                         onClick={() => onEditar(alumno)}

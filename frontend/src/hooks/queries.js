@@ -904,6 +904,7 @@ export function useMisBeneficios(planIds) {
 // Lo montan el alumno (`/alumno/mi-historial`) y la ficha del box con `alumnoId`.
 export function usePanelHistorial({
     alumnoId = null, seccion = 'resumen', pagina = 1, porPagina = 10,
+    enabled = true,
 } = {}) {
     // Sin `alumnoId` se usa la puerta del propio alumno (nunca trae la gestión del box).
     const url = alumnoId
@@ -915,6 +916,10 @@ export function usePanelHistorial({
             params: { seccion, pagina, por_pagina: porPagina },
         })).data,
         staleTime: 30_000,
+        // `enabled` deja la consulta apagada hasta que la pestaña que la necesita esté
+        // activa (la ficha unificada del admin usa la MISMA fuente sin pegar al backend
+        // en Datos/Planes/Referidos/Suspensión).
+        enabled,
         // Al cambiar de sección/página se deja el panel anterior en pantalla hasta que
         // llega el nuevo (mismo criterio que la tabla de churn): sin parpadeo en blanco.
         placeholderData: keepPreviousData,

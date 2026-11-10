@@ -131,9 +131,15 @@ ok(jsx.includes('aria-expanded') && jsx.includes('aria-controls'),
     'el acordeón se anuncia (aria-expanded + aria-controls)');
 ok(!jsx.includes('title='), 'SIN title=: en el teléfono no hay hover, todo se explica con texto visible');
 ok(jsx.includes('aria-label'), 'y cada acción tiene nombre accesible (no reemplaza el texto visible)');
-for (const accion of ['Voucher', 'Ficha', 'Historial', 'Editar', 'Eliminar']) {
-    ok(new RegExp(`/>\\s*${accion}\\s*</`).test(jsx), `la tarjeta ofrece la acción "${accion}" (igual que la tabla)`);
-    ok(jsx.includes(`btn-${accion.toLowerCase()}-movil-`), `la acción "${accion}" usa testid propio del móvil`);
+const ACCIONES_MOVIL = [
+    { label: 'Voucher', testid: 'btn-voucher-movil-' },
+    { label: 'Ver ficha', testid: 'btn-ficha-movil-' },
+    { label: 'Editar', testid: 'btn-editar-movil-' },
+    { label: 'Eliminar', testid: 'btn-eliminar-movil-' },
+];
+for (const accion of ACCIONES_MOVIL) {
+    ok(new RegExp(`/>\\s*${accion.label}\\s*</`).test(jsx), `la tarjeta ofrece la acción "${accion.label}" (igual que la tabla)`);
+    ok(jsx.includes(accion.testid), `la acción "${accion.label}" usa testid propio del móvil`);
 }
 ok(!/\bmd:(hidden|block|flex|grid|w-|p-|gap-)/.test(jsx),
     'el componente móvil no usa breakpoints md: (nada se filtra a >=768px)');
@@ -188,7 +194,7 @@ for (const clave of new Set([...jsx.matchAll(/detalle\.(\w+)/g)].map((m) => m[1]
 // renombrada se vería recién al tocar una acción).
 for (const prop of [
     'alumnos', 'suscripciones', 'planes',
-    'onVoucher', 'onFicha', 'onHistorial', 'onEditar', 'onEliminar',
+    'onVoucher', 'onVerFicha', 'onEditar', 'onEliminar',
 ]) {
     ok(jsx.includes(prop), `el componente declara la prop ${prop}`);
     ok(pagina.includes(`${prop}=`), `la pantalla pasa ${prop}`);
