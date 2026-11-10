@@ -151,6 +151,10 @@ export const claves = {
     disciplinas: ['disciplinas'],
     alumnosCoach: (coachId) => ['fidelizacion', 'coach', coachId, 'alumnos'],
     alumnosCoachEnRiesgo: (coachId) => ['fidelizacion', 'coach', coachId, 'en-riesgo'],
+    // Alumnos en prueba del box completo (Parte F): mismo endpoint del panel de
+    // alumnos-en-prueba, SIN filtrar por coach. El toggle "Todos del box" lo combina
+    // con `alumnosCoach`.
+    alumnosPrueba: ['admin', 'alumnos-prueba'],
     // Los DOS modales que monta el Dashboard del coach (Bloque 6): la ficha acotada del
     // alumno (P2) y el preview del correo de inactividad (P1). Cuelgan de `['fidelizacion']`,
     // la familia de las dos listas de arriba, así que refrescar la familia las alcanza.
@@ -456,11 +460,15 @@ export function useResumenPendientes({ enabled = true, refetchInterval = 60_000 
 
 // Pedidos del Bazar para el admin (mismo endpoint que `/admin/pedidos`, sin paginar).
 // `estado` vacío = todos; la pestaña "Pedidos" pide sólo `pendiente`.
+// Parte I: los `pendiente` SIN voucher (pago online, se resuelve solo) NO entran en la cola
+// de "con comprobante sin validar": cuando se pide `pendiente` se filtra `solo_con_voucher`.
 export function usePedidosAdmin(estado = '') {
     return useQuery({
         queryKey: claves.pedidosAdmin(estado),
         queryFn: async () => (await api.get('/api/v1/pedidos', {
-            params: estado ? { estado } : undefined,
+            params: estado
+                ? { estado, ...(estado === 'pendiente' ? { solo_con_voucher: true } : {}) }
+                : undefined,
         })).data || [],
         staleTime: 15_000,
     });
@@ -1438,6 +1446,20 @@ export function useAlumnosCoachEnRiesgo(coachId) {
     });
 }
 
+// Alumnos en PRUEBA del box completo (Parte F): `GET /admin/alumnos-prueba`, el mismo
+// endpoint que usa el panel de alumnos-en-prueba. NO filtra por coach; el toggle "Todos
+// del box" del panel lo combina con `useAlumnosDeCoach` y deduplica por id.
+export function useAlumnosEnPrueba(enabled = true) {
+    return useQuery({
+        queryKey: claves.alumnosPrueba,
+        queryFn: async () => (await api.get(
+            '/api/v1/admin/alumnos-prueba',
+        )).data?.alumnos || [],
+        staleTime: 60_000,
+        enabled,
+    });
+}
+
 // Progreso del tab Progreso: para cada alumno de la PÁGINA visible (25), sus RMs y su nivel de
 // atleta. UNA sola request (`GET /historial-rm/progreso-lote`): antes eran 2 POR ALUMNO —sus RMs
 // + `nivel-general`— o sea 50 requests por página. El backend resuelve el lote en 5 consultas y
@@ -1676,6 +1698,17 @@ export function useContactarAlumnoCoach() {
     return useMutation({
         mutationFn: ({ coachId, alumnoId }) => api.post(
             `/api/v1/fidelizacion/coach/${coachId}/contactar/${alumnoId}`,
+        ).then((r) => r.data),
+    });
+}
+
+// Invitación externa (Parte H): nombre + correo libre. El `coach_id` sale del token del
+// backend (no viaja en el body); es una ORDEN, no un dato que se cachee.
+export function useInvitarExterno() {
+    return useMutation({
+        mutationFn: ({ nombre, correo }) => api.post(
+            '/api/v1/coach/invitaciones-externas',
+            { nombre, correo },
         ).then((r) => r.data),
     });
 }

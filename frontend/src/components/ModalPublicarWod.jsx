@@ -281,6 +281,12 @@ const ModalPublicarWod = ({
         setError('');
     };
 
+    // Pestaña "Cargar Excel" (Parte E): cambia a la rama del archivo SIN pedir la clase.
+    const irAlArchivo = () => {
+        setModo('archivo');
+        setError('');
+    };
+
     const programarSemana = async () => {
         if (!previa?.dias?.length) return;
         setError('');
@@ -349,50 +355,41 @@ const ModalPublicarWod = ({
                         </div>
                     )}
 
+                    {/* ── Pestañas (Parte E): Formulario manual / Cargar Excel ──
+                        Reemplazan el link chico "— o completa manualmente —". En modo EDICIÓN no
+                        se muestran: el Excel crea WODs NUEVOS por día, no actualiza el existente. */}
+                    {!esEdicion && (
+                        <div role="tablist" aria-label="Forma de publicar"
+                            className="grid grid-cols-2 gap-1.5 rounded-xl border border-zinc-800 bg-zinc-950 p-1.5">
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={modo === 'manual'}
+                                onClick={volverAlManual}
+                                data-testid="tab-formulario-manual"
+                                className={`rounded-lg px-3 py-2 text-[13px] font-semibold transition-colors ${modo === 'manual'
+                                    ? 'bg-orange-500/15 text-orange-200 ring-1 ring-orange-500/50'
+                                    : 'text-zinc-400 hover:text-zinc-200'}`}
+                            >
+                                📝 Formulario manual
+                            </button>
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={modo === 'archivo'}
+                                onClick={irAlArchivo}
+                                data-testid="tab-cargar-excel"
+                                className={`rounded-lg px-3 py-2 text-[13px] font-semibold transition-colors ${modo === 'archivo'
+                                    ? 'bg-sky-500/15 text-sky-200 ring-1 ring-sky-500/50'
+                                    : 'text-zinc-400 hover:text-zinc-200'}`}
+                            >
+                                📄 Cargar Excel
+                            </button>
+                        </div>
+                    )}
+
                     {modo === 'manual' ? (
                         <>
-                            {/* El Excel no se ofrece al EDITAR: ese WOD ya está publicado y
-                                el archivo crea WODs NUEVOS por día (no actualiza). */}
-                            {!esEdicion && (<div>
-                                <button
-                                    type="button"
-                                    onClick={() => document.getElementById('wod-archivo-semana').click()}
-                                    disabled={enviando}
-                                    data-testid="cargar-archivo-semana"
-                                    className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-zinc-700 px-3 py-2.5 text-[12px] font-semibold text-sky-300 hover:border-sky-500/60 disabled:opacity-50"
-                                >
-                                    📄 Cargar archivo con WODs de la semana
-                                </button>
-                                <input
-                                    id="wod-archivo-semana" type="file" accept=".xlsx" className="hidden"
-                                    onChange={elegirArchivo} data-testid="input-archivo-semana"
-                                />
-                                <button
-                                    type="button" onClick={() => setAyuda((v) => !v)}
-                                    className="mt-1 text-[10.5px] text-sky-300 underline"
-                                >
-                                    ¿Cómo debe venir el archivo?
-                                </button>
-                                {ayuda && (
-                                    <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-[10.5px] leading-relaxed text-zinc-400"
-                                        data-testid="ayuda-archivo">
-                                        Excel (.xlsx), una fila por día, en este orden:<br />
-                                        <span className="font-mono text-amber-200">
-                                            fecha | calentamiento | musculacion | wod_nombre | wod_tipo | wod_descripcion | aviso
-                                        </span><br />
-                                        · <b className="text-zinc-300">fecha</b> como fecha de Excel o AAAA-MM-DD
-                                        (ej. 2026-10-13)<br />
-                                        · <b className="text-zinc-300">wod_tipo</b>: For Time / AMRAP / EMOM
-                                        (lo demás queda como «Otro»)<br />
-                                        · calentamiento, musculacion y aviso son opcionales<br />
-                                        · sin filas vacías entre días ni celdas combinadas
-                                    </div>
-                                )}
-                                <p className="mt-3 text-center text-[11px] text-zinc-600">
-                                    — o completa manualmente —
-                                </p>
-                            </div>)}
-
                             {/* El WOD ya está vinculado a su(s) clase(s): el PUT actualiza ese
                                 MISMO WOD. El alcance (días/horarios) sólo aplica al crear. */}
                             {esEdicion && (
@@ -402,6 +399,12 @@ const ModalPublicarWod = ({
                                     no se crea otro ni se cambia su alcance.
                                 </div>
                             )}
+
+                            {/* Sección "contenido": los campos del WOD en sí, agrupados para que la
+                                jerarquía sea clara (arriba el contenido, abajo el alcance). */}
+                            <p className="pt-1 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                                Contenido del WOD
+                            </p>
 
                             <label className={ETIQUETA}>
                                 1 · Calentamiento
@@ -449,6 +452,10 @@ const ModalPublicarWod = ({
                                 En modo EDICIÓN no se muestran: el PUT actualiza el WOD que ya
                                 está publicado, no elige alcance (eso sólo pasa al crear). */}
                             {!esEdicion && (<>
+                            {/* Sección "alcance": días + horarios (lo que antes era "Aplicar a"). */}
+                            <p className="pt-2 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                                Alcance de publicación
+                            </p>
                             <div data-testid="wod-dias">
                                 <span className={ETIQUETA}>4 · Días donde publicar (semana actual)</span>
                                 <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -576,25 +583,46 @@ const ModalPublicarWod = ({
                                     </select>
                                 </label>
                             )}
-                            {/* Todavía sin archivo elegido (se entró directo a la carga
-                                masiva): el mismo botón + input de la rama manual. */}
+                            {/* Todavía sin archivo elegido (se entró directo a la carga masiva o
+                                tocó la pestaña "Cargar Excel"): dropzone clara + ayuda. */}
                             {!previa && (
                                 <div>
-                                    <button
-                                        type="button"
-                                        onClick={() => document.getElementById('wod-archivo-semana').click()}
-                                        disabled={enviando}
+                                    <label
+                                        htmlFor="wod-archivo-semana"
                                         data-testid="cargar-archivo-semana"
-                                        className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-zinc-700 px-3 py-2.5 text-[12px] font-semibold text-sky-300 hover:border-sky-500/60 disabled:opacity-50"
+                                        className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-sky-700/60 bg-sky-950/20 px-4 py-8 text-center transition-colors hover:border-sky-500"
                                     >
-                                        📄 Cargar archivo con WODs de la semana
-                                    </button>
+                                        <span className="text-3xl" aria-hidden="true">📄</span>
+                                        <span className="text-sm font-bold text-sky-200">Elegí el Excel de la semana</span>
+                                        <span className="text-[11.5px] text-zinc-400">Archivo .xlsx, una fila por día</span>
+                                    </label>
                                     <input
                                         id="wod-archivo-semana" type="file" accept=".xlsx" className="hidden"
                                         onChange={elegirArchivo} data-testid="input-archivo-semana"
                                     />
-                                    <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
-                                        Excel (.xlsx), una fila por día, en este orden:{' '}
+                                    <button
+                                        type="button" onClick={() => setAyuda((v) => !v)}
+                                        className="mt-2 text-[10.5px] text-sky-300 underline"
+                                    >
+                                        ¿Cómo debe venir el archivo?
+                                    </button>
+                                    {ayuda && (
+                                        <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-[10.5px] leading-relaxed text-zinc-400"
+                                            data-testid="ayuda-archivo">
+                                            Excel (.xlsx), una fila por día, en este orden:<br />
+                                            <span className="font-mono text-amber-200">
+                                                fecha | calentamiento | musculacion | wod_nombre | wod_tipo | wod_descripcion | aviso
+                                            </span><br />
+                                            · <b className="text-zinc-300">fecha</b> como fecha de Excel o AAAA-MM-DD
+                                            (ej. 2026-10-13)<br />
+                                            · <b className="text-zinc-300">wod_tipo</b>: For Time / AMRAP / EMOM
+                                            (lo demás queda como «Otro»)<br />
+                                            · calentamiento, musculacion y aviso son opcionales<br />
+                                            · sin filas vacías entre días ni celdas combinadas
+                                        </div>
+                                    )}
+                                    <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
+                                        Una fila por día, en este orden:{' '}
                                         <span className="font-mono text-amber-200">
                                             fecha | calentamiento | musculacion | wod_nombre |
                                             wod_tipo | wod_descripcion | aviso
@@ -624,7 +652,10 @@ const ModalPublicarWod = ({
                             )}
 
                             <div>
-                                <p className="text-[11px] text-zinc-500">
+                                <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                                    Vista previa de la semana
+                                </p>
+                                <p className="mt-1 text-[11px] text-zinc-500">
                                     Se publican solos en su fecha: el WOD del día se ve ESE día
                                     (y el aviso también, si el día lo trae).
                                 </p>
@@ -632,8 +663,8 @@ const ModalPublicarWod = ({
                                     {(previa?.dias || []).map((d) => (
                                         <div key={d.fecha}
                                             className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2">
-                                            <span className="w-[86px] flex-none text-[10.5px] font-semibold text-zinc-400">
-                                                {d.fecha}
+                                            <span className="w-[96px] flex-none text-[10.5px] font-semibold text-zinc-400">
+                                                {DIAS_CORTOS[fechaDiaDe(d.fecha)]} · {d.fecha}
                                             </span>
                                             <span className="flex-1 truncate text-[12.5px] text-zinc-100">
                                                 {d.wod_nombre} — {d.wod_descripcion}

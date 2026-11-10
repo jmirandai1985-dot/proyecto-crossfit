@@ -4,7 +4,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../context/AuthContext';
 import {
-    SIN_DATOS, useAlumnosCoachEnRiesgo, useAlumnosDeCoach, useAvisosMarketingVigentes,
+    SIN_DATOS, useAlumnosCoachEnRiesgo, useAlumnosDeCoach, useAlumnosEnPrueba,
+    useAvisosMarketingVigentes,
     useClasesAsistenciaHoy,
     useClasesCoach, useCoachDisciplinas, useContactarAlumnoCoach, useDisciplinas,
     useHistorialRmTodos, useProgresoAlumnosCoach, useReservasPorClase, useRmsAlumno,
@@ -33,6 +34,7 @@ import { TIPO_AVISO_RAPIDO } from '../../utils/avisosMarketing';
 import { proximoCambioDeClase } from '../../utils/relojClases';
 import ModalPublicarWod from '../../components/ModalPublicarWod';
 import ModalAgregarSinReserva from '../../components/ModalAgregarSinReserva';
+import ModalInvitarExterno from '../../components/ModalInvitarExterno';
 // Bloque 2: el walk-in avisa con un toast (el texto lo arma el modal en `alumno.mensaje`).
 import Toast from '../../components/Toast';
 // Bloque 6: la flecha Volver también en el escritorio. Acá es la RAÍZ del rol, así que el
@@ -67,6 +69,8 @@ const DashboardCoach = () => {
     const [searchTerm, setSearchTerm] = useState('');
     // Toggle Fase 2: "Ver todas" vs "Ver solo con WOD publicado"
     const [verSoloConWod, setVerSoloConWod] = useState(false);
+    // Toggle Alumnos & RMs (Parte F): "Mis alumnos" (default) vs "Todos del box".
+    const [verTodosDelBox, setVerTodosDelBox] = useState(false);
     // ── Modales del Resumen (Bloque C) ──
     // "Publicar WOD" (formulario manual o archivo de la semana) y el walk-in ("+ Agregar
     // alumno sin reserva"). Los dos ESCRIBEN, así que el Resumen muestra después lo que
@@ -85,6 +89,8 @@ const DashboardCoach = () => {
     // Bloque 3 del retiro: el "aviso rápido" del día, que vivía en Gestión de Clases.
     const [modalAviso, setModalAviso] = useState(false);
     const [claseSinReserva, setClaseSinReserva] = useState(null);
+    // Modal "✉️ Invitar" (Parte H): formulario de invitación a una persona NUEVA.
+    const [modalInvitar, setModalInvitar] = useState(false);
     const [msgPublicado, setMsgPublicado] = useState(null);
     // Bloque 2: el walk-in ahora avisa con un toast (el texto lo escribió el modal pegado a la
     // rama que ejecutó). `msgPublicado` queda para "qué contestó el backend" al publicar WOD.
@@ -299,6 +305,9 @@ const DashboardCoach = () => {
     // una y sólo se ofrecen las que este coach dicta (publicar en otra es un 403).
     const disciplinasQ = useDisciplinas();
     const alumnosQ = useAlumnosDeCoach(usuario_id);
+    // Alumnos en prueba del box completo (Parte F): sólo se pide cuando el coach activa
+    // "Todos del box" (`enabled=verTodosDelBox`); después queda cacheado.
+    const alumnosPruebaQ = useAlumnosEnPrueba(verTodosDelBox);
     // ── Tab Progreso: buscador + filtros + PAGINACIÓN REAL ──
     // El padrón completo (251) llega del endpoint del coach, así que buscar y paginar se hace
     // en el cliente sobre ESA lista, y el enriquecimiento (RMs + nivel, una consulta por
@@ -558,7 +567,21 @@ const DashboardCoach = () => {
     const irAPaginaProgreso = (delta) => setPaginaProgreso((p) => Math.max(
         1, Math.min(p + delta, rangoProgreso.totalPaginas)));
 
-    const filteredAlumnos = alumnos.filter((alumno) =>
+    // Parte F: en "Todos del box" se combinan los alumnos del coach con los de prueba del box
+    // completo (deduplicados por id). Los que llegan SÓLO de `/alumnos-prueba` llevan
+    // `enPrueba: true` para mostrar su tag en la fila.
+    const alumnosEnPrueba = alumnosPruebaQ.data || SIN_DATOS;
+    const listaAlumnosVisibles = useMemo(() => {
+        if (!verTodosDelBox) return alumnos;
+        const porId = new Map();
+        alumnos.forEach((a) => porId.set(a.id, a));
+        alumnosEnPrueba.forEach((p) => {
+            if (!porId.has(p.id)) porId.set(p.id, { ...p, enPrueba: true });
+        });
+        return Array.from(porId.values());
+    }, [verTodosDelBox, alumnos, alumnosEnPrueba]);
+
+    const filteredAlumnos = listaAlumnosVisibles.filter((alumno) =>
         alumno.nombre.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
@@ -617,10 +640,12 @@ const DashboardCoach = () => {
                         <h1 className="text-3xl font-bold text-white">Dashboard Coach</h1>
                         <p className="mt-1 text-sm text-zinc-400">{fechaCortaHoy} · {usuario || 'Coach'}</p>
                     </div>
-                    {/* Invitación de alumnos de prueba: mismo panel que usa el admin. */}
+                    {/* Invitar (Parte H): abre el modal de invitación EXTERNA (nombre + correo
+                        libre). El panel de alumnos-en-prueba (reenviar correo a los YA registrados)
+                        se movió adentro de "Alumnos & RMs". */}
                     <button
                         type="button"
-                        onClick={() => navigate('/coach/alumnos-prueba')}
+                        onClick={() => setModalInvitar(true)}
                         data-testid="btn-invitar-alumnos-prueba"
                         className="shrink-0 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold px-4 py-2 transition-colors"
                     >
@@ -742,31 +767,19 @@ const DashboardCoach = () => {
                                     </div>
                                 </div>
 
-                                {/* Toggle Fase 2: "Ver todas" / "Ver solo con WOD publicado".
-                                    Punto 3: en el teléfono ocupa la fila completa y envuelve
-                                    (los dos botones se reparten el ancho, y el rótulo largo parte
-                                    su texto en dos líneas en vez de desbordar); en >=768px queda
-                                    el chip inline de siempre. */}
-                                <div className="flex w-full flex-wrap items-center gap-2 rounded-xl bg-gray-100 p-2 md:inline-flex md:w-auto md:gap-3">
-                                    <button
-                                        onClick={() => setVerSoloConWod(false)}
-                                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all md:flex-none ${!verSoloConWod
-                                            ? 'bg-white text-gray-900 shadow-sm ring-1 ring-zinc-600'
-                                            : 'text-gray-500 hover:text-gray-700'
-                                            }`}
-                                    >
-                                        👁️ Ver todas
-                                    </button>
-                                    <button
-                                        onClick={() => setVerSoloConWod(true)}
-                                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all md:flex-none ${verSoloConWod
-                                            ? 'bg-white text-gray-900 shadow-sm ring-1 ring-zinc-600'
-                                            : 'text-gray-500 hover:text-gray-700'
-                                            }`}
-                                    >
-                                        ✅ Ver solo con {getTerminoDisciplina('CrossFit')} publicado
-                                    </button>
-                                </div>
+                                {/* Filtro (Parte E): UN checkbox. Desmarcado = todas las clases
+                                    (el default actual `verSoloConWod=false`); marcado = solo las que
+                                    tienen WOD publicado. Reemplaza el viejo toggle de dos botones. */}
+                                <label className="flex w-full cursor-pointer items-center gap-2.5 rounded-xl bg-gray-100 px-3 py-2.5 text-sm font-medium text-gray-700 md:inline-flex md:w-auto">
+                                    <input
+                                        type="checkbox"
+                                        checked={verSoloConWod}
+                                        onChange={() => setVerSoloConWod((v) => !v)}
+                                        data-testid="filtro-solo-con-wod"
+                                        className="h-4 w-4 rounded border-zinc-400 text-orange-600 focus:ring-orange-500"
+                                    />
+                                    <span>Mostrar solo clases con {getTerminoDisciplina('CrossFit')} publicado</span>
+                                </label>
 
                                 {/* Vista MOBILE (Fase 3): lista vertical de clases — visible solo en < md */}
                                 <div className="block md:hidden space-y-3">
@@ -1040,6 +1053,45 @@ const DashboardCoach = () => {
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 <div className="space-y-4">
                                     <h2 className="text-xl font-bold text-gray-900">Buscar Alumno</h2>
+                                    {/* Parte F: nota fija del alcance por defecto + toggle de alcance. */}
+                                    <p className="text-xs text-gray-500" data-testid="nota-alcance-alumnos">
+                                        Por defecto ves <b>tus alumnos</b> (con reserva en alguna de tus
+                                        clases). Para ver a todos los del box activá «Todos del box». ¿Querés
+                                        invitar a alguien que todavía no existe? Usá el botón «✉️ Invitar».
+                                    </p>
+                                    <div className="inline-flex w-full rounded-lg bg-gray-100 p-1 text-sm font-medium">
+                                        <button
+                                            type="button"
+                                            onClick={() => setVerTodosDelBox(false)}
+                                            data-testid="toggle-mis-alumnos"
+                                            className={`flex-1 rounded-md px-3 py-1.5 transition-colors ${!verTodosDelBox
+                                                ? 'bg-white text-gray-900 shadow-sm'
+                                                : 'text-gray-500 hover:text-gray-700'}`}
+                                        >
+                                            Mis alumnos
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setVerTodosDelBox(true)}
+                                            data-testid="toggle-todos-del-box"
+                                            className={`flex-1 rounded-md px-3 py-1.5 transition-colors ${verTodosDelBox
+                                                ? 'bg-white text-gray-900 shadow-sm'
+                                                : 'text-gray-500 hover:text-gray-700'}`}
+                                        >
+                                            Todos del box
+                                        </button>
+                                    </div>
+                                    {/* Parte H: el panel de alumnos-en-prueba (reenviar correo a los que YA
+                                        están en prueba) se reubica acá — el botón "✉️ Invitar" ahora invita
+                                        a una persona NUEVA. */}
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate('/coach/alumnos-prueba')}
+                                        data-testid="link-alumnos-en-prueba"
+                                        className="text-xs text-orange-600 hover:text-orange-700 underline"
+                                    >
+                                        Ver alumnos en prueba (reenviar correo)
+                                    </button>
                                     <input
                                         type="text"
                                         placeholder="Buscar por nombre..."
@@ -1069,7 +1121,17 @@ const DashboardCoach = () => {
                                                             onClick={() => setSelectedAlumno(alumno)}
                                                             className="flex-1 min-w-0 text-left"
                                                         >
-                                                            <p className="font-medium text-gray-900">{alumno.nombre}</p>
+                                                            <p className="font-medium text-gray-900">
+                                                                {alumno.nombre}
+                                                                {alumno.enPrueba && (
+                                                                    <span
+                                                                        data-testid="tag-en-prueba"
+                                                                        className="ml-2 inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700"
+                                                                    >
+                                                                        En prueba
+                                                                    </span>
+                                                                )}
+                                                            </p>
                                                             <p className="text-sm text-gray-600">
                                                                 {alumno.correo || 'Sin correo'}
                                                                 {alumno.telefono ? ` · ${alumno.telefono}` : ''}
@@ -1218,7 +1280,51 @@ const DashboardCoach = () => {
                                         ? '⏳ Cargando RMs y niveles de esta página…'
                                         : `El buscador y la paginación recorren los ${alumnos.length} alumnos del coach; los RMs y el nivel se piden al abrir cada página (una consulta por alumno).`}
                                 </p>
-                                <div className="overflow-x-auto">
+                                {/* Vista MOBILE (Parte G): fila compacta ~56px por alumno. En ≥768px se
+                                    usa la tabla de escritorio de abajo (hidden md:block). El "Top RM" deja
+                                    de ser columna fija: se ve al tocar "Ver RMs" (abre la pestaña Alumnos). */}
+                                <div className="md:hidden space-y-2">
+                                    {progresoFiltrado.map((alumno) => {
+                                        const inicial = (alumno.nombre || '?').trim().charAt(0).toUpperCase();
+                                        return (
+                                            <div key={alumno.id}
+                                                className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2">
+                                                <div className="h-9 w-9 flex-none rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-sm font-bold">
+                                                    {inicial}
+                                                </div>
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="truncate text-sm font-medium text-gray-900">{alumno.nombre}</span>
+                                                        <span className={`inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${colorNivel(alumno.nivel)}`}>
+                                                            {etiquetaNivelAtleta(alumno.nivel)}
+                                                        </span>
+                                                    </div>
+                                                    <div className="mt-1 flex items-center gap-2">
+                                                        <div className="h-1.5 w-20 rounded-full bg-gray-200">
+                                                            <div className={`h-1.5 rounded-full ${alumno.estado === 'activo' ? 'bg-green-500 w-full'
+                                                                : alumno.estado === 'iniciando' ? 'bg-orange-500 w-1/3' : 'bg-zinc-500 w-1/6'}`}></div>
+                                                        </div>
+                                                        <span className={`inline-flex items-center gap-1 text-[10px] font-medium rounded-full border px-1.5 py-0.5 ${getProgresoColor(alumno.estado)}`}>
+                                                            {getProgresoIcon(alumno.estado)}
+                                                            {alumno.estado === 'activo' ? 'Progresando' : alumno.estado === 'iniciando' ? 'Iniciando' : 'Sin datos'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setSelectedAlumno(alumno); navigate('/coach/dashboard?tab=alumnos'); }}
+                                                    data-testid={`ver-rms-movil-${alumno.id}`}
+                                                    className="flex-none rounded-lg border border-orange-300 px-2.5 py-1.5 text-xs font-medium text-orange-600 hover:bg-orange-50"
+                                                >
+                                                    Ver RMs
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* Vista DESKTOP (≥768px): la tabla de siempre, sin cambios. */}
+                                <div className="hidden md:block overflow-x-auto">
                                     <table className="w-full">
                                         <thead className="bg-zinc-800 text-white">
                                             <tr>
@@ -1497,6 +1603,11 @@ const DashboardCoach = () => {
                         onSuccess={() => setMsgPublicado(
                             '✅ Aviso rápido publicado: ya aparece en el Inicio de los alumnos.')}
                     />
+                )}
+
+                {/* Invitar (Parte H): formulario de invitación EXTERNA (nombre + correo). */}
+                {modalInvitar && (
+                    <ModalInvitarExterno onClose={() => setModalInvitar(false)} />
                 )}
             </div>
         </Layout>
