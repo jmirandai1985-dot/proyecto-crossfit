@@ -337,7 +337,7 @@ def _template(titulo: str, saludo: str, cuerpo: str, boton_texto: str, boton_url
     <p style="color:#3f3f46;font-size:16px;line-height:1.6;">{saludo}</p>
     <p style="color:#3f3f46;font-size:16px;line-height:1.6;">{cuerpo}</p>
     <div style="text-align:center;margin:28px 0 8px;">
-      <a href="{boton_url}" style="background-color:#f97316;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:8px;font-weight:bold;font-size:16px;">{boton_texto}</a>
+      <a href="{boton_url}" style="display:inline-block;background-color:#f97316;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:8px;font-weight:bold;font-size:16px;">{boton_texto}</a>
     </div>
     {PLACEHOLDER_CONTACTO}
   </div>
