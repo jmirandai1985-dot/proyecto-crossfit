@@ -62,8 +62,8 @@ const Alumnos = () => {
     const [avisoComprobante, setAvisoComprobante] = useState('');
     const [editingAlumno, setEditingAlumno] = useState(null);
     // ── Buscador rápido + ficha con pestañas (consulta, arriba de la tabla) ──
-    // Independiente de `searchTerm`/`busqueda` (la tabla): otro estado, otra instancia
-    // del hook, y su propia debounce. No comparte nada con el buscador de abajo.
+    // `busquedaRapidaInput` alimenta la ficha Y también espeja `searchTerm` (la tabla de
+    // abajo): unificado en UN solo buscador visible. Cada uno conserva su propio debounce.
     const [busquedaRapidaInput, setBusquedaRapidaInput] = useState('');
     const [busquedaRapida, setBusquedaRapida] = useState('');
     const [alumnoConsultaId, setAlumnoConsultaId] = useState(null);
@@ -401,7 +401,13 @@ const Alumnos = () => {
                         type="text"
                         placeholder="Buscar por nombre o correo..."
                         value={busquedaRapidaInput}
-                        onChange={(e) => { setBusquedaRapidaInput(e.target.value); setAlumnoConsultaId(null); }}
+                        onChange={(e) => {
+                            const val = e.target.value;
+                            setBusquedaRapidaInput(val);
+                            setAlumnoConsultaId(null);
+                            setSearchTerm(val);
+                            setPagina(1);
+                        }}
                         className="w-full px-4 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-zinc-800 text-zinc-100 placeholder:text-zinc-500"
                     />
                     <div className="mt-4 space-y-4">
@@ -414,17 +420,43 @@ const Alumnos = () => {
                             ) : resultadosRapidos.length === 0 ? (
                                 <p className="text-sm text-zinc-500 py-6 text-center">Sin resultados.</p>
                             ) : (
-                                <ul className="space-y-1.5 max-h-80 overflow-auto">
+                                <ul className="space-y-2 max-h-80 overflow-auto">
                                     {resultadosRapidos.map((a) => (
-                                        <li key={a.id}>
+                                        <li key={a.id} className={`rounded-lg border transition-colors ${alumnoConsultaId === a.id ? 'border-orange-500 bg-orange-500/10' : 'border-zinc-800 bg-zinc-800/40 hover:bg-zinc-800'}`}>
                                             <button
                                                 type="button"
                                                 onClick={() => setAlumnoConsultaId(a.id)}
-                                                className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${alumnoConsultaId === a.id ? 'border-orange-500 bg-orange-500/10' : 'border-zinc-800 bg-zinc-800/40 hover:bg-zinc-800'}`}
+                                                className="w-full text-left px-3 py-2"
                                             >
                                                 <span className="block text-zinc-200 font-medium truncate">{a.nombre}</span>
                                                 <span className="block text-xs text-zinc-500 truncate">{a.correo}</span>
                                             </button>
+                                            <div className="flex gap-1 px-3 pb-2 border-t border-zinc-800/60 pt-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => { e.stopPropagation(); openVoucherModal(a); }}
+                                                    className="px-2 py-1 text-xs rounded border border-zinc-700 text-zinc-300 hover:border-zinc-500"
+                                                    title="Voucher"
+                                                >
+                                                    📄 Voucher
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => { e.stopPropagation(); openModal(a); }}
+                                                    className="px-2 py-1 text-xs rounded border border-zinc-700 text-zinc-300 hover:border-zinc-500"
+                                                    title="Editar"
+                                                >
+                                                    Editar
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => { e.stopPropagation(); handleDelete(a); }}
+                                                    className="px-2 py-1 text-xs rounded border border-zinc-700 text-red-400 hover:border-red-500"
+                                                    title="Eliminar"
+                                                >
+                                                    Eliminar
+                                                </button>
+                                            </div>
                                         </li>
                                     ))}
                                 </ul>
@@ -462,16 +494,6 @@ const Alumnos = () => {
                                 </button>
                             </div>
                         </div>
-                    </div>
-
-                    <div className="px-6 py-4 bg-zinc-800/50 border-b border-zinc-800">
-                        <input
-                            type="text"
-                            placeholder="Buscar por nombre o correo..."
-                            value={searchTerm}
-                            onChange={(e) => { setSearchTerm(e.target.value); setPagina(1); }}
-                            className="w-full px-4 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                        />
                     </div>
 
                     {/* Vista MÓVIL (<768px): el padrón como TARJETAS con acordeón.
