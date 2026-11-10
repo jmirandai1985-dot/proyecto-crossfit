@@ -420,43 +420,17 @@ const Alumnos = () => {
                             ) : resultadosRapidos.length === 0 ? (
                                 <p className="text-sm text-zinc-500 py-6 text-center">Sin resultados.</p>
                             ) : (
-                                <ul className="space-y-2 max-h-80 overflow-auto">
+                                <ul className="space-y-1.5 max-h-80 overflow-auto">
                                     {resultadosRapidos.map((a) => (
-                                        <li key={a.id} className={`rounded-lg border transition-colors ${alumnoConsultaId === a.id ? 'border-orange-500 bg-orange-500/10' : 'border-zinc-800 bg-zinc-800/40 hover:bg-zinc-800'}`}>
+                                        <li key={a.id}>
                                             <button
                                                 type="button"
                                                 onClick={() => setAlumnoConsultaId(a.id)}
-                                                className="w-full text-left px-3 py-2"
+                                                className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${alumnoConsultaId === a.id ? 'border-orange-500 bg-orange-500/10' : 'border-zinc-800 bg-zinc-800/40 hover:bg-zinc-800'}`}
                                             >
                                                 <span className="block text-zinc-200 font-medium truncate">{a.nombre}</span>
                                                 <span className="block text-xs text-zinc-500 truncate">{a.correo}</span>
                                             </button>
-                                            <div className="flex gap-1 px-3 pb-2 border-t border-zinc-800/60 pt-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => { e.stopPropagation(); openVoucherModal(a); }}
-                                                    className="px-2 py-1 text-xs rounded border border-zinc-700 text-zinc-300 hover:border-zinc-500"
-                                                    title="Voucher"
-                                                >
-                                                    📄 Voucher
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => { e.stopPropagation(); openModal(a); }}
-                                                    className="px-2 py-1 text-xs rounded border border-zinc-700 text-zinc-300 hover:border-zinc-500"
-                                                    title="Editar"
-                                                >
-                                                    Editar
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => { e.stopPropagation(); handleDelete(a); }}
-                                                    className="px-2 py-1 text-xs rounded border border-zinc-700 text-red-400 hover:border-red-500"
-                                                    title="Eliminar"
-                                                >
-                                                    Eliminar
-                                                </button>
-                                            </div>
                                         </li>
                                     ))}
                                 </ul>

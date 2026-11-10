@@ -1081,17 +1081,6 @@ const DashboardCoach = () => {
                                             Todos del box
                                         </button>
                                     </div>
-                                    {/* Parte H: el panel de alumnos-en-prueba (reenviar correo a los que YA
-                                        están en prueba) se reubica acá — el botón "✉️ Invitar" ahora invita
-                                        a una persona NUEVA. */}
-                                    <button
-                                        type="button"
-                                        onClick={() => navigate('/coach/alumnos-prueba')}
-                                        data-testid="link-alumnos-en-prueba"
-                                        className="text-xs text-orange-600 hover:text-orange-700 underline"
-                                    >
-                                        Ver alumnos en prueba (reenviar correo)
-                                    </button>
                                     <input
                                         type="text"
                                         placeholder="Buscar por nombre..."
