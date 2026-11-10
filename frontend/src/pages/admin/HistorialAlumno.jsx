@@ -31,8 +31,8 @@ const HistorialAlumno = () => {
                         admin: `/admin/dashboard` es la raíz del panel en <768px. */}
                     <BotonVolver fallback="/admin/dashboard" />
                     <div className="max-md:flex-1">
-                        <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-                            <div>
+                        <div className="flex flex-wrap items-start justify-between gap-3 mb-4 min-w-0">
+                            <div className="min-w-0">
                                 <h1 className="text-2xl font-bold text-white">Historial del alumno</h1>
                                 <p className="text-sm text-zinc-400">
                                     Asistencia, pagos, membresías y marcas: desde el alta hasta hoy.

@@ -731,10 +731,10 @@ const PanelHistorial = ({ alumnoId = null }) => {
     return (
         <div className="space-y-5" data-testid="historial-panel">
             {alumno && (
-                <div className="bg-zinc-900 rounded-lg shadow p-5 flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                        <h2 className="text-xl font-bold text-white">{alumno.nombre}</h2>
-                        <p className="text-sm text-zinc-400">
+                <div className="bg-zinc-900 rounded-lg shadow p-5 flex flex-wrap items-center justify-between gap-3 min-w-0">
+                    <div className="min-w-0">
+                        <h2 className="text-xl font-bold text-white truncate">{alumno.nombre}</h2>
+                        <p className="text-sm text-zinc-400 break-words">
                             {alumno.correo} · alumno desde {fecha(alumno.alumno_desde || alumno.created_at)}
                             {alumno.antiguedad_dias !== null
                                 && ` (${num(alumno.antiguedad_dias)} días)`}
