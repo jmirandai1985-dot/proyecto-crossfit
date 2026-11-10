@@ -5,7 +5,7 @@ Analiza la asistencia REAL (reservas.asistio) y detecta alumnos en riesgo de aba
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import Optional
 import pandas as pd
 from app.services.email_service import enviar_email_fidelizacion, espaciar_envio
@@ -22,6 +22,10 @@ from app.services.auditoria_service import registrar_auditoria
 # D3: al cargar/corregir peso y género desde la ficha hay que recalcular el nivel persistido.
 from app.services.nivel_service import recalcular_nivel
 from app.services import churn_service
+# Plantillas de Fidelización: la ÚNICA definición de "qué correo le corresponde a cada alumno"
+# (`sugerir`) y del render/envío. El preview y el envío de contacto del coach la reusan para no
+# duplicar la heurística del panel de Fidelización (bug: mandaba siempre la misma plantilla).
+from app.services import fidelizacion_plantillas
 # "Mis alumnos" del coach: UNA sola definición (el alcance de las dos pestañas del panel).
 from app.services.clases_service import alumnos_del_coach
 # "Última asistencia" de un alumno: UNA sola definición, y sale de `reservas.asistio`, NO de la
@@ -453,31 +457,14 @@ def alumnos_de_coach(
 
 # ─────────────────────────────────────────
 # ENDPOINT 4c: Contactar por correo a un alumno (panel coach)
-# Mismo patron que POST /notificaciones-enviadas/enviar-manual (admin), pero
-# coach-scoped: el coach solo puede contactar alumnos de su propio box y usando
-# su propio coach_id. Reusa el template de inactividad (enviar_email_fidelizacion).
-#
-# IMPORTANTE (comportamiento deseado): el envio se registra en
-# notificaciones_enviadas con tipo='inactividad', igual que el envio manual del
-# admin. Eso hace que la alerta automatica de inactividad NO vuelva a escribirle
-# a ese alumno por los proximos 7 dias (dedupe de alertas_email_service), que es
-# justo lo que se busca cuando un coach ya lo contacto a mano.
+# Coach-scoped: el coach solo puede contactar alumnos de su propio box y usando su propio
+# `coach_id`. La plantilla NO es fija: sale del MISMO motor que el panel de Fidelización
+# (`fidelizacion_plantillas.sugerir`), que elige entre 6 plantillas reales según la situación
+# (vencimiento, plan sin usar, inactividad por tramo, riesgo del modelo). El envío lo registra
+# `fidelizacion_plantillas.enviar` en `notificaciones_enviadas` con el `tipo_envio` real de la
+# plantilla (p.ej. 'inactividad'), así que la dedupe de la alerta automática de inactividad
+# sigue funcionando para el tramo de inactividad.
 # ─────────────────────────────────────────
-def _registrar_notificacion(db: Session, alumno: Usuario, tipo: str,
-                            estado: str, detalle_error: str = None) -> None:
-    """Registra el envio en notificaciones_enviadas (mismo shape que el admin)."""
-    from app.models.notificacion_enviada import NotificacionEnviada
-    db.add(NotificacionEnviada(
-        alumno_id=alumno.id,
-        tenant_id=alumno.tenant_id,
-        tipo=tipo,
-        estado=estado,
-        detalle_error=detalle_error,
-        fecha_envio=datetime.now(timezone.utc),
-    ))
-    db.commit()
-
-
 def _alumno_para_contacto(db: Session, current_user: dict, coach_id: int,
                           alumno_id: int) -> Usuario:
     """Guardas comunes de los endpoints de contacto/preview del panel coach.
@@ -540,20 +527,36 @@ def preview_correo_contacto(
     mismos dias), para que el coach confirme sobre el mensaje real.
     """
     alumno = _alumno_para_contacto(db, current_user, coach_id, alumno_id)
-    dias = _dias_inactividad_alumno(db, current_user["tenant_id"], alumno)
 
-    from app.services.email_service import render_email_fidelizacion, render_con_contacto
-    asunto, html = render_email_fidelizacion(alumno.nombre, dias)
-    # Mismo pie que el envío real (el contacto del box de este tenant), con la MISMA
-    # conexión del request: ver email_service.contacto_del_box.
-    html = render_con_contacto(html, current_user["tenant_id"], db=db)
+    # MISMO motor que el panel de Fidelización (`_sugerir_con` vía `sugerir`): elige entre las 6
+    # plantillas reales según la situación del alumno (vencimiento, plan sin usar, inactividad,
+    # riesgo del modelo), en vez de mandar siempre la plantilla fija de "15-30 días".
+    sugerencia = fidelizacion_plantillas.sugerir(db, alumno)
+    plantilla_id = sugerencia["plantilla"]
+    if plantilla_id is None:
+        # Caso "sin_situacion" (p.ej. entrenó ayer y no hay nada que justificar). Este endpoint
+        # es el preview del botón "Enviar correo" de un alumno que YA está en la lista de Riesgo,
+        # así que en la práctica siempre hay una situación; si igual no la hay, se informa con 400
+        # en vez de forzar un correo.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=sugerencia["motivo"],
+        )
+
+    try:
+        mensaje = fidelizacion_plantillas.render(db, alumno, plantilla_id)
+    except fidelizacion_plantillas.PlantillaSinDatos as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     return {
-        "destinatario": alumno.correo,
+        "destinatario": mensaje["destinatario"],
         "nombre": alumno.nombre,
-        "asunto": asunto,
-        "html": html,
-        "dias_inactividad": dias,
+        "asunto": mensaje["asunto"],
+        "html": mensaje["html"],
+        "plantilla": plantilla_id,
+        "label": mensaje["label"],
+        "motivo": sugerencia["motivo"],
+        "dias_inactividad": sugerencia["contexto"].get("dias_inactividad"),
     }
 
 
@@ -574,27 +577,27 @@ def contactar_alumno_por_email(
     """
     tenant_id = current_user["tenant_id"]
     alumno = _alumno_para_contacto(db, current_user, coach_id, alumno_id)
-    dias = _dias_inactividad_alumno(db, tenant_id, alumno)
 
-    exito = False
-    detalle_error = None
+    # MISMO motor que el panel de Fidelización: la plantilla sale de `sugerir` (la MISMA función
+    # que usa el preview), así que el correo que se manda es EXACTAMENTE el que se vio. El registro
+    # en `notificaciones_enviadas` lo deja `fidelizacion_plantillas.enviar` con el `tipo_envio` real
+    # de la plantilla (antes quedaba SIEMPRE como 'inactividad' aunque fuera un vencimiento).
+    sugerencia = fidelizacion_plantillas.sugerir(db, alumno)
+    plantilla_id = sugerencia["plantilla"]
+    if plantilla_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=sugerencia["motivo"],
+        )
+
     try:
-        exito = enviar_email_fidelizacion(alumno.nombre, alumno.correo, dias)
-    except Exception as e:  # noqa: BLE001 - se reporta al panel, no se traga
-        detalle_error = str(e)
+        resultado = fidelizacion_plantillas.enviar(db, alumno, plantilla_id)
+    except fidelizacion_plantillas.PlantillaSinDatos as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-    if not exito and not detalle_error:
-        try:
-            from app.services import email_service
-            detalle_error = email_service.ULTIMO_ERROR_SMTP or (
-                "No se pudo enviar el correo via Gmail SMTP (revisar credenciales o destinatario).")
-        except Exception:
-            detalle_error = "No se pudo enviar el correo via Gmail SMTP."
-
-    _registrar_notificacion(
-        db, alumno, "inactividad",
-        "enviado" if exito else "fallido",
-        None if exito else detalle_error)
+    exito = resultado["ok"]
+    detalle_error = resultado["detalle_error"]
+    dias = sugerencia["contexto"].get("dias_inactividad")
 
     registrar_auditoria(
         db,
@@ -603,7 +606,8 @@ def contactar_alumno_por_email(
         accion="EMAIL_MANUAL",
         entidad="usuario",
         entidad_id=alumno.id,
-        detalle={"tipo": "inactividad", "dias_inactividad": dias,
+        detalle={"tipo": resultado["tipo_envio"], "plantilla": plantilla_id,
+                 "dias_inactividad": dias,
                  "exito": exito, "origen": "panel_coach"},
     )
 
