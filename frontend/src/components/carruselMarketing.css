@@ -51,8 +51,8 @@
     scroll-snap-align: start;
     border-radius: 10px;
     border: 2px solid var(--ub-line, #2b2625);
-    padding: 16px 16px 14px;
-    min-height: 170px;
+    padding: 20px 20px 18px;
+    min-height: 230px;
     overflow: hidden;
     /* El fondo (la foto del flyer) queda DEBAJO del texto sin pelearse con el
        z-index del resto de la página. */
@@ -121,8 +121,8 @@
    deja libre la etiqueta flotante (que ahora va absoluta, arriba a la
    izquierda) y el título tiene aire para dos líneas. */
 .cm-cuerpo {
-    padding-top: 22px;
-    max-height: 140px;
+    padding-top: 26px;
+    max-height: 190px;
     overflow: hidden;
 }
 
@@ -136,11 +136,11 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 10.5px;
+    font-size: 11.5px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: .04em;
-    padding: 3px 9px;
+    padding: 4px 10px;
     border-radius: 5px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, .45);
 }
@@ -160,7 +160,7 @@
 
 .cm-titulo {
     font-family: var(--ub-cond, 'Barlow Condensed', sans-serif);
-    font-size: 24px;
+    font-size: 30px;
     font-weight: 700;
     line-height: 1.1;
     margin: 0 0 5px;
@@ -168,7 +168,7 @@
 }
 
 .cm-texto {
-    font-size: 12.5px;
+    font-size: 14.5px;
     line-height: 1.4;
     margin: 0;
     color: rgba(255, 255, 255, .92);
@@ -224,9 +224,9 @@
     background: rgba(255, 255, 255, .14);
     border: 1px solid rgba(255, 255, 255, .34);
     color: #ffffff;
-    font-size: 11px;
+    font-size: 12.5px;
     font-weight: 700;
-    padding: 6px 10px;
+    padding: 7px 12px;
     border-radius: 7px;
     margin-top: 8px;
     cursor: pointer;
@@ -236,7 +236,7 @@
 
 /* ── Tarjeta de UN producto nuevo (foto + nombre + precio) ── */
 .cm-tarjeta.cm-producto {
-    padding: 14px;
+    padding: 18px;
 }
 
 /* El botón cubre foto + nombre + precio: tocar la tarjeta abre ESE producto en
@@ -262,15 +262,15 @@
 }
 
 .cm-foto {
-    width: 68px;
-    height: 68px;
+    width: 80px;
+    height: 80px;
     border-radius: 8px;
     border: 1px solid rgba(255, 255, 255, .12);
     flex: none;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-top: 18px;
+    margin-top: 20px;
     overflow: hidden;
     background: rgba(255, 255, 255, .05);
 }
@@ -281,33 +281,33 @@
     object-fit: cover;
 }
 
-.cm-foto svg { width: 28px; height: 28px; color: rgba(255, 255, 255, .35); }
+.cm-foto svg { width: 34px; height: 34px; color: rgba(255, 255, 255, .35); }
 
 .cm-tarjeta.cm-producto .cm-info {
-    margin-top: 18px;
+    margin-top: 20px;
     min-width: 0;
 }
 
 .cm-tarjeta.cm-producto .cm-titulo {
-    font-size: 16px;
+    font-size: 19px;
     font-family: var(--ub-body, 'Barlow', system-ui, sans-serif);
 }
 
 .cm-precio {
     font-family: var(--ub-cond, 'Barlow Condensed', sans-serif);
-    font-size: 19px;
+    font-size: 23px;
     font-weight: 700;
 }
 
 .cm-tarjeta.cm-producto .cm-texto {
-    font-size: 11px;
+    font-size: 13px;
 }
 
 /* ── Tarjeta de VARIOS productos ("Llegaron N productos nuevos") ── */
 /* La etiqueta ahora flota arriba a la izquierda: el título de la tarjeta
    agrupada arranca debajo de ella (en la de UN producto lo hace `.cm-info`). */
 .cm-tarjeta[data-tipo="producto_bazar"] > .cm-titulo {
-    padding-top: 22px;
+    padding-top: 26px;
 }
 
 .cm-minis {
@@ -317,8 +317,8 @@
 }
 
 .cm-mini {
-    width: 46px;
-    height: 46px;
+    width: 55px;
+    height: 55px;
     flex: none;
     padding: 0;
     border-radius: 7px;
@@ -338,25 +338,25 @@ button.cm-mini {
 }
 
 .cm-mini img { width: 100%; height: 100%; object-fit: cover; }
-.cm-mini svg { width: 18px; height: 18px; color: rgba(255, 255, 255, .35); }
+.cm-mini svg { width: 22px; height: 22px; color: rgba(255, 255, 255, .35); }
 
 .cm-mini.cm-mas {
     background: none;
     border: 1px dashed rgba(255, 255, 255, .25);
     font-weight: 700;
-    font-size: 12px;
+    font-size: 14px;
 }
 
 .cm-vertodo {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-size: 11.5px;
+    font-size: 14px;
     font-weight: 600;
     margin-top: 6px;
 }
 
-.cm-vertodo svg { width: 12px; height: 12px; }
+.cm-vertodo svg { width: 14px; height: 14px; }
 
 /* ── Mini-barras de posición con cuenta regresiva ──
    La barra activa se llena durante el intervalo de auto-avance (5.5 s). */
@@ -482,7 +482,7 @@ button.cm-mini {
     color: rgba(230, 181, 78, .5);
 }
 
-.cm-regalo svg { width: 26px; height: 26px; }
+.cm-regalo svg { width: 30px; height: 30px; }
 
 .cm-referidos .cm-cuerpo {
     display: block;
@@ -494,7 +494,7 @@ button.cm-mini {
 
 .cm-referidos .cm-titulo {
     display: block;
-    font-size: 27px;
+    font-size: 32px;
     line-height: 1;
     text-transform: uppercase;
     letter-spacing: .01em;
@@ -503,7 +503,7 @@ button.cm-mini {
 
 .cm-referidos .cm-texto {
     display: block;
-    font-size: 12px;
+    font-size: 14px;
     line-height: 1.35;
 }
 
@@ -513,16 +513,16 @@ button.cm-mini {
     align-items: center;
     gap: 4px;
     align-self: flex-start;
-    min-height: 30px;
-    padding: 5px 10px;
+    min-height: 36px;
+    padding: 6px 12px;
     border-radius: 7px;
     border: 1px solid rgba(230, 181, 78, .45);
     background: rgba(230, 181, 78, .14);
-    font-size: 11.5px;
+    font-size: 13.5px;
     font-weight: 700;
 }
 
-.cm-chip svg { width: 12px; height: 12px; }
+.cm-chip svg { width: 14px; height: 14px; }
 
 .cm-tarjeta.cm-referidos:focus-visible {
     outline: 2px solid var(--ub-gold, #e6b54e);
