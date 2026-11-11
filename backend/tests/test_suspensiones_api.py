@@ -26,7 +26,8 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from app.core.security import create_access_token                    # noqa: E402
-from app.utils.santiago import SANTIAGO, fin_del_dia_chile, hoy_santiago  # noqa: E402
+from app.utils.santiago import (SANTIAGO, fecha_chile, fin_del_dia_chile,  # noqa: E402
+                                hoy_santiago)
 
 
 @pytest.fixture(scope="module")
@@ -379,5 +380,77 @@ def test_historial_de_suspensiones_del_alumno(escenario, cliente):
     # La pasada es la de 5 días; la cancelada lleva su flag en True.
     assert [s for s in items if s["estado"] == "pasada"][0]["dias"] == 5
     assert [s for s in items if s["estado"] == "cancelada"][0]["cancelada"] is True
+
+
+# ── El listado del admin expone CUÁNDO se canceló (ficha del alumno) ─────────
+def _insertar_admin(db, tenant_id):
+    """Admin del MISMO box: `GET /admin/suspensiones` exige rol administrador."""
+    sufijo = uuid.uuid4().hex[:10]
+    return db.execute(text("""
+        INSERT INTO usuarios (tenant_id, rut, nombre, correo, password_hash, rol,
+                              activo, estado, created_at)
+        VALUES (:t, :r, 'Admin Susp TEST', :c, 'x', 'administrador', true, 'activo',
+                now())
+        RETURNING id"""),
+        {"t": tenant_id, "r": sufijo,
+         "c": f"susp.admin.{sufijo}@test.local"}).scalar()
+
+
+def test_admin_suspensiones_expone_cancelada_en(escenario, cliente):
+    """`cancelada_en` viaja en el payload del listado que usa la ficha del alumno.
+
+    Antes el listado devolvía sólo `cancelada: true`, así que el bloque "solo
+    lectura" no podía decir CUÁNDO se canceló aunque el dato ya existía en
+    `suspensiones_plan.cancelada_en` (migración 074). Cuando NO está cancelada
+    el campo va en `None`.
+    """
+    ids = escenario["ids"]
+    db = escenario["db"]
+
+    # La cancelada: instante conocido (mediodía de ayer en Chile).
+    cancelada_en = datetime.combine(
+        escenario["hoy"] - timedelta(days=1), datetime.min.time(),
+        tzinfo=SANTIAGO) + timedelta(hours=12)
+    cancelada = db.execute(text("""
+        INSERT INTO suspensiones_plan (tenant_id, usuario_id, suscripcion_id,
+                                       fecha_inicio, fecha_fin, dias, origen,
+                                       fecha_expiracion_original, cancelada,
+                                       cancelada_en, reservas_canceladas)
+        VALUES (:t, :u, :s, now() - interval '5 days', now() + interval '2 days',
+                2, 'alumno', now(), true, :cen, 0)
+        RETURNING id"""),
+        {"t": ids["tenant"], "u": ids["alumno"], "s": ids["suscripcion"],
+         "cen": cancelada_en}).scalar()
+    # La NO cancelada: mismo listado, `cancelada_en` en NULL.
+    vigente = db.execute(text("""
+        INSERT INTO suspensiones_plan (tenant_id, usuario_id, suscripcion_id,
+                                       fecha_inicio, fecha_fin, dias, origen,
+                                       fecha_expiracion_original, cancelada,
+                                       cancelada_en, reservas_canceladas)
+        VALUES (:t, :u, :s, now() + interval '10 days', now() + interval '12 days',
+                2, 'alumno', now(), false, NULL, 0)
+        RETURNING id"""),
+        {"t": ids["tenant"], "u": ids["alumno"], "s": ids["suscripcion"]}).scalar()
+    admin = _insertar_admin(db, ids["tenant"])
+    db.commit()
+
+    headers = {"Authorization": "Bearer " + create_access_token({
+        "usuario_id": admin, "tenant_id": ids["tenant"], "rol": "administrador",
+        "correo": "susp.admin@test.local"})}
+    resp = cliente.get(f"/api/v1/admin/suspensiones?usuario_id={ids['alumno']}",
+                       headers=headers)
+    assert resp.status_code == 200, resp.text
+    por_id = {s["id"]: s for s in resp.json()}
+
+    fila = por_id[cancelada]
+    assert fila["cancelada"] is True
+    assert fila["cancelada_en"], "la fecha de cancelación tiene que viajar en el payload"
+    # Mismo instante que el guardado; serializado como el resto (str de la BD).
+    instante = datetime.fromisoformat(fila["cancelada_en"])
+    assert instante == cancelada_en
+    assert fecha_chile(instante) == fecha_chile(cancelada_en)
+
+    assert por_id[vigente]["cancelada"] is False
+    assert por_id[vigente]["cancelada_en"] is None
 
 

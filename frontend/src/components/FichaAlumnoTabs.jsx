@@ -347,8 +347,8 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
                 ) : (
                     <div className="space-y-4">
                         {/* Resumen de solo lectura: suspensiones propias (origen='alumno') */}
-                        <div className="bg-zinc-800/50 rounded-lg p-4">
-                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide mb-2">
+                        <div className="bg-zinc-800/60 border border-zinc-700 rounded-lg shadow-sm p-5">
+                            <p className="text-sm font-bold uppercase tracking-wide text-orange-400 mb-3">
                                 Suspensiones del alumno (solo lectura)
                             </p>
                             {errores.suspensiones && <p className="text-sm text-red-400 mb-2">⚠️ {errores.suspensiones}</p>}
@@ -357,9 +357,14 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
                             ) : (
                                 <ul className="space-y-2">
                                     {suspensionesPropias.map((s) => (
-                                        <li key={s.id} className="flex items-center justify-between gap-3 text-sm">
+                                        <li key={s.id} className="flex items-center justify-between gap-3 text-sm border border-zinc-700 rounded-md px-3 py-2">
                                             <span className="text-zinc-300">
                                                 {fmtFecha(s.fecha_inicio)} → {fmtFecha(s.fecha_fin)} · {s.dias} día(s)
+                                                {s.cancelada && s.cancelada_en && (
+                                                    <span className="block text-xs text-zinc-500 mt-0.5">
+                                                        Cancelada el {fmtFecha(s.cancelada_en)}
+                                                    </span>
+                                                )}
                                             </span>
                                             <span className="shrink-0 px-2 py-0.5 rounded-full text-xs font-bold bg-zinc-700 text-zinc-300 capitalize">
                                                 {s.cancelada ? 'Cancelada' : s.estado}

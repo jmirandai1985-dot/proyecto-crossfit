@@ -431,6 +431,9 @@ def listar_suspensiones(
             "reservas_canceladas": s.reservas_canceladas,
             "estado": estado_calc,
             "cancelada": bool(s.cancelada),
+            # CUÁNDO se canceló (auditoría, migración 074): lo muestra la ficha del
+            # alumno. Mismo formato que el resto de las fechas de este dict (`str`).
+            "cancelada_en": str(s.cancelada_en) if s.cancelada_en else None,
             "created_at": str(s.created_at),
         })
     return items
