@@ -364,7 +364,11 @@ def mis_suspensiones(
 
 # ── Admin: listado (sólo lectura) + resumen de KPIs ─────────────────────────
 def _estado_suspension(s, hoy: date) -> str:
-    """'activa' | 'futura' | 'pasada' calculado en el momento (no se persiste)."""
+    """'activa' | 'futura' | 'pasada' | 'cancelada' calculado en el momento
+    (no se persiste). Una suspensión cancelada nunca es 'activa' ni
+    'futura', aunque su rango de fechas original siga vigente."""
+    if bool(getattr(s, "cancelada", False)):
+        return "cancelada"
     inicio = fecha_chile(s.fecha_inicio)
     fin = fecha_chile(s.fecha_fin)
     if inicio <= hoy <= fin:
@@ -387,7 +391,7 @@ def listar_suspensiones(
     """Listado de suspensiones del box (el admin sólo supervisa, no actúa).
 
     Filtros: búsqueda por nombre/email de alumno, estado calculado en el momento
-    (activa/futura/pasada), rango de `fecha_inicio` y, opcionalmente, UN alumno
+    (activa/futura/pasada/cancelada), rango de `fecha_inicio` y, opcionalmente, UN alumno
     (`usuario_id`, lo usa la ficha para el resumen de solo lectura).
     """
     tid = current_user["tenant_id"]

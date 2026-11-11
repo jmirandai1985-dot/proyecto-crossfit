@@ -8,6 +8,7 @@ const ESTADOS = [
     { key: 'activa', label: 'Activas' },
     { key: 'futura', label: 'Futuras' },
     { key: 'pasada', label: 'Pasadas' },
+    { key: 'cancelada', label: 'Canceladas' },
 ];
 
 const tonoEstado = (estado) => {
@@ -15,6 +16,7 @@ const tonoEstado = (estado) => {
         case 'activa': return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
         case 'futura': return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
         case 'pasada': return 'bg-zinc-700/40 text-zinc-400 border-zinc-700';
+        case 'cancelada': return 'bg-red-500/20 text-red-300 border-red-500/30';
         default: return 'bg-zinc-800 text-zinc-300 border-zinc-700';
     }
 };
@@ -148,11 +150,6 @@ const Suspensiones = () => {
                                                 <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full border ${tonoEstado(s.estado)}`}>
                                                     {etiquetaEstado(s.estado)}
                                                 </span>
-                                                {s.cancelada && (
-                                                    <span className="ml-1.5 inline-flex items-center text-[10px] font-bold px-2 py-1 rounded-full border bg-red-500/20 text-red-300 border-red-500/30">
-                                                        Cancelada
-                                                    </span>
-                                                )}
                                             </td>
                                         </tr>
                                     ))}
