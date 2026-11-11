@@ -74,7 +74,9 @@ def _apply_kpi_card(ws, row, col, label, value, subtitle, accent_color, emoji):
     """Dibuja una tarjeta KPI con barra de color superior."""
     cell = ws.cell(row=row, column=col, value=emoji + "  " + label)
     cell.font = kpi_label_font
-    cell.alignment = Alignment(horizontal='left', vertical='top')
+    # wrap_text: las etiquetas en lenguaje simple son más largas que el ancho
+    # de la tarjeta (22) y sin wrap Excel las corta en el borde.
+    cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
     # Barra de color arriba (fila anterior, misma col)
     ws.cell(row=row - 1, column=col).fill = PatternFill(
         start_color=accent_color, end_color=accent_color, fill_type="solid")
@@ -357,7 +359,8 @@ def _pedidos_bazar_pendientes_mes(db, tenant_id, inicio, fin) -> int:
 
 
 # ============================================================================
-# REPORTE 4 PESTAÑAS COMPARATIVAS (MoM / YoY / YTD / ARPU)
+# REPORTE 4 PESTAÑAS COMPARATIVAS
+# (Este mes [MoM] / Vs año pasado [YoY] / Lo que va del año [YTD] / Por alumno [ARPU])
 # Reemplaza a `_crear_reporte_ventas_mensual_bytes_v1`. Reusa las helpers de
 # estilo de arriba y las definiciones únicas de `metricas_service` (MRR, ARPU,
 # alumnos vigentes, ventas del Bazar).
@@ -461,7 +464,8 @@ def _titulo_hoja(ws, titulo, subtitulo):
     sub.alignment = Alignment(horizontal='center')
 
 def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
-    """Genera el reporte Excel con 4 pestañas comparativas: MoM, YoY, YTD, ARPU."""
+    """Genera el reporte Excel con 4 pestañas comparativas: Este mes (MoM),
+    Vs año pasado (YoY), Lo que va del año (YTD) y Por alumno (ARPU)."""
     wb = Workbook()
     wb.remove(wb.active)
     hoy = hoy_santiago()
@@ -478,34 +482,37 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
     alumnos_hoy = metricas.alumnos_vigentes(db, tenant_id, hoy)
     generado = f"Generado: {datetime.now():%d/%m/%Y %H:%M}"
 
-    # ── 1) MoM: mes a mes (absorbe Resumen Ejecutivo + Flujo de Caja) ────────
-    ws = wb.create_sheet("MoM", 0)
+    # ── 1) "Este mes" (MoM): mes a mes (absorbe Resumen Ejecutivo + Flujo de Caja)
+    ws = wb.create_sheet("Este mes", 0)
     ws.sheet_view.showGridLines = False
     for col, w in (('A', 3), ('B', 22), ('C', 22), ('D', 22),
                    ('E', 22), ('F', 22), ('G', 22), ('H', 3)):
         ws.column_dimensions[col].width = w
     sufijo_parcial = f" · comparado al día {hoy.day}" if mes_en_curso else ""
-    _titulo_hoja(ws, "MoM — MES A MES",
+    _titulo_hoja(ws, "ESTE MES",
                  f"{label_mes} vs {label_ant}{sufijo_parcial}   ·   {generado}")
 
     kpi = 5
     _apply_kpi_card(ws, kpi, 2, "Ingresos netos", f"${actual['neto']:,.0f}",
                     label_mes, ORANGE_ACCENT, "💰")
-    _apply_kpi_card(ws, kpi, 3, "vs mes anterior",
+    _apply_kpi_card(ws, kpi, 3, "Vs. mes anterior",
                     _fmt_pct(_pct(actual['neto'], anterior['neto'])),
                     label_ant, BLUE_KPI, "📊")
     _apply_kpi_card(ws, kpi, 4, "Alumnos activos", f"{alumnos_hoy}",
                     "Con suscripción vigente", GREEN_KPI, "👥")
-    _apply_kpi_card(ws, kpi, 5, "MRR", f"${actual['mrr']:,.0f}",
+    _apply_kpi_card(ws, kpi, 5, "Lo que vas a facturar este mes",
+                    f"${actual['mrr']:,.0f}",
                     f"al {actual['corte']:%d/%m/%Y}", PURPLE_KPI, "📈")
-    _apply_kpi_card(ws, kpi, 6, "ARPU", f"${arpu:,.0f}",
+    _apply_kpi_card(ws, kpi, 6, "Cuánto deja cada alumno", f"${arpu:,.0f}",
                     "Último mes cerrado", TEAL_KPI, "🎯")
-    ws.row_dimensions[kpi].height = 20
+    ws.row_dimensions[kpi].height = 32
     ws.row_dimensions[kpi + 1].height = 35
     ws.row_dimensions[kpi + 2].height = 20
 
     r = 10
-    _style_section_header(ws, r, 1, "Flujo de Caja (mes vs mes anterior)", BLUE_KPI)
+    _style_section_header(ws, r, 1,
+                          "Entradas y salidas de dinero (este mes vs mes anterior)",
+                          BLUE_KPI)
     r += 1
     _style_table_header(ws, r, ["Concepto", label_mes, label_ant, "Variación"])
     r += 1
@@ -521,12 +528,12 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
                         is_alt=(i % 2 == 1), is_money_cols={2, 3})
         r += 1
 
-    # ── 2) YoY: mismo mes vs mismo mes del año anterior ───────────────────────
-    ws = wb.create_sheet("YoY", 1)
+    # ── 2) "Vs año pasado" (YoY): mismo mes vs mismo mes del año anterior ─────
+    ws = wb.create_sheet("Vs año pasado", 1)
     ws.sheet_view.showGridLines = False
     for col, w in (('A', 3), ('B', 24), ('C', 24), ('D', 24), ('E', 24), ('H', 3)):
         ws.column_dimensions[col].width = w
-    _titulo_hoja(ws, "YoY — AÑO A AÑO",
+    _titulo_hoja(ws, "VS. EL AÑO PASADO",
                  f"{label_mes} vs {_MESES_ES_LARGOS[mes - 1]} {anio - 1}   ·   {generado}")
 
     if _meses_de_historia(db, tenant_id) < 13:
@@ -536,13 +543,15 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
     else:
         mismo_mes_anterior = _resumen_mes(db, tenant_id, anio - 1, mes)
         label_yoy = f"{_MESES_ES_LARGOS[mes - 1]} {anio - 1}"
-        _style_section_header(ws, 5, 1, "Comparación año contra año", BLUE_KPI)
+        _style_section_header(ws, 5, 1, "Comparado con el mismo mes del año pasado",
+                              BLUE_KPI)
         _style_table_header(ws, 6, ["Métrica", label_mes, label_yoy, "Variación"])
         yoy_filas = [
             ("Ingresos", actual["ingresos"], mismo_mes_anterior["ingresos"]),
             ("Egresos", actual["egresos"], mismo_mes_anterior["egresos"]),
             ("Neto", actual["neto"], mismo_mes_anterior["neto"]),
-            ("MRR (al corte)", actual["mrr"], mismo_mes_anterior["mrr"]),
+            ("Lo que ibas a facturar ese mes (al corte)",
+             actual["mrr"], mismo_mes_anterior["mrr"]),
             ("Alumnos (al corte)", actual["alumnos"], mismo_mes_anterior["alumnos"]),
             ("Nuevos alumnos", actual["nuevos"], mismo_mes_anterior["nuevos"]),
             ("Ventas Bazar", actual["ventas"], mismo_mes_anterior["ventas"]),
@@ -554,8 +563,8 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
                             is_alt=(i % 2 == 1), is_money_cols={2, 3})
             r += 1
 
-    # ── 3) YTD: año a la fecha (1 ene → hoy) vs mismo periodo del año anterior ──
-    ws = wb.create_sheet("YTD", 2)
+    # ── 3) "Lo que va del año" (YTD): 1 ene → hoy vs mismo periodo del año anterior ──
+    ws = wb.create_sheet("Lo que va del año", 2)
     ws.sheet_view.showGridLines = False
     for col, w in (('A', 3), ('B', 24), ('C', 26), ('D', 26), ('E', 24), ('H', 3)):
         ws.column_dimensions[col].width = w
@@ -574,10 +583,11 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
     nuevos_ytd = _nuevos_rango(date(anio, 1, 1), tope + timedelta(days=1))
     nuevos_ytd_a = _nuevos_rango(date(anio - 1, 1, 1), tope_ant + timedelta(days=1))
 
-    _titulo_hoja(ws, "YTD — AÑO A LA FECHA",
+    _titulo_hoja(ws, "LO QUE VA DEL AÑO",
                  f"1 ene → {hoy:%d/%m/%Y} de {anio} vs {anio - 1}   ·   {generado}")
-    _style_section_header(ws, 5, 1, "Acumulado año a la fecha", BLUE_KPI)
-    _style_table_header(ws, 6, ["Concepto", f"{anio} (YTD)", f"{anio - 1} (YTD)", "Variación"])
+    _style_section_header(ws, 5, 1, "Total acumulado desde el 1 de enero", BLUE_KPI)
+    _style_table_header(ws, 6, ["Concepto", f"{anio} (acumulado)",
+                                f"{anio - 1} (acumulado)", "Variación"])
     ytd_filas = [
         ("Ingresos", ing_ytd, ing_ytd_a),
         ("Egresos", eg_ytd, eg_ytd_a),
@@ -591,19 +601,20 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
                         is_alt=(i % 2 == 1), is_money_cols={2, 3})
         r += 1
 
-    # ── 4) ARPU: ingreso por alumno (absorbe Detalle Planes) ────────────────────
-    ws = wb.create_sheet("ARPU", 3)
+    # ── 4) "Por alumno" (ARPU): ingreso por alumno (absorbe Detalle Planes) ────
+    ws = wb.create_sheet("Por alumno", 3)
     ws.sheet_view.showGridLines = False
     for col, w in (('A', 3), ('B', 22), ('C', 20), ('D', 20),
                    ('E', 20), ('F', 20), ('G', 20), ('H', 3)):
         ws.column_dimensions[col].width = w
-    _titulo_hoja(ws, "ARPU — INGRESO POR ALUMNO", f"{label_mes}   ·   {generado}")
+    _titulo_hoja(ws, "CUÁNTO DEJA CADA ALUMNO", f"{label_mes}   ·   {generado}")
 
     kpi = 5
-    _apply_kpi_card(ws, kpi, 2, "ARPU", f"${arpu:,.0f}", "Último mes cerrado", PURPLE_KPI, "🎯")
+    _apply_kpi_card(ws, kpi, 2, "Cuánto deja cada alumno al mes", f"${arpu:,.0f}",
+                    "Último mes cerrado", PURPLE_KPI, "🎯")
     _apply_kpi_card(ws, kpi, 3, "Alumnos activos", f"{alumnos_hoy}",
                     "Con suscripción vigente", BLUE_KPI, "👥")
-    ws.row_dimensions[kpi].height = 20
+    ws.row_dimensions[kpi].height = 32
     ws.row_dimensions[kpi + 1].height = 35
     ws.row_dimensions[kpi + 2].height = 20
 
@@ -633,7 +644,7 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
     """), {"tid": tenant_id}).scalar() or 0)
     ltv = round((arpu or 0) * vida_dias / 30, 0)
 
-    _style_section_header(ws, 10, 1, "Por plan", BLUE_KPI)
+    _style_section_header(ws, 10, 1, "Cuánto deja cada plan hoy", BLUE_KPI)
     _style_table_header(ws, 11, ["Plan", "Precio lista", "Suscripciones", "Ticket prom.", "Ingreso total"])
     r = 12
     for i, fila in enumerate(planes):
@@ -641,16 +652,16 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
                         is_alt=(i % 2 == 1), is_money_cols={2, 4, 5})
         r += 1
 
-    _style_section_header(ws, r + 1, 1, "Ticket promedio y LTV", BLUE_KPI)
+    _style_section_header(ws, r + 1, 1, "Promedio y proyección a futuro", BLUE_KPI)
     r += 2
     _style_table_header(ws, r, ["Métrica", "Valor"])
     r += 1
     extras = [
-        ("Ticket promedio membresía", f"${int(gt[1] or 0):,}"),
-        ("Transacciones membresía", int(gt[0] or 0)),
-        ("Ingreso membresía total", f"${int(gt[2] or 0):,}"),
-        ("Vida promedio (días)", vida_dias),
-        ("LTV estimado (ARPU × vida)", f"${ltv:,}"),
+        ("Lo que paga en promedio cada alumno", f"${int(gt[1] or 0):,}"),
+        ("Cantidad de pagos de membresía", int(gt[0] or 0)),
+        ("Total cobrado en membresías", f"${int(gt[2] or 0):,}"),
+        ("Cuánto dura en promedio un alumno (días)", vida_dias),
+        ("Lo que deja un alumno en total (estimado)", f"${ltv:,}"),
     ]
     for i, (metrica, valor) in enumerate(extras):
         _style_data_row(ws, r, [metrica, valor], is_alt=(i % 2 == 1))

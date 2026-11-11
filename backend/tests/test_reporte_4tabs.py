@@ -1,4 +1,5 @@
-"""Reporte descargable: 4 pestañas comparativas (MoM/YoY/YTD/ARPU) sin errores.
+"""Reporte descargable: 4 pestañas comparativas (Este mes / Vs año pasado /
+Lo que va del año / Por alumno) sin errores.
 
 Verifica que `crear_reporte_ventas_mensual_bytes` genera las 4 pestañas con datos
 de TEST y que cada una tiene contenido (no sólo el banner).
@@ -23,7 +24,7 @@ from app.services import reportes_service as rep  # noqa: E402
 from app.utils.santiago import hoy_santiago  # noqa: E402
 
 TENANT_ID = 1
-TABS = ["MoM", "YoY", "YTD", "ARPU"]
+TABS = ["Este mes", "Vs año pasado", "Lo que va del año", "Por alumno"]
 
 
 @pytest.fixture()

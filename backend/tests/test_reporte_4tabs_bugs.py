@@ -1,12 +1,14 @@
-"""Bugs de datos del reporte Excel 4 pestañas (MoM/YoY/YTD/ARPU).
+"""Bugs de datos del reporte Excel 4 pestañas (Este mes / Vs año pasado /
+Lo que va del año / Por alumno).
 
-  * Bug 1: en YTD las columnas de dinero eran {3,4}; debían ser {2,3} (la
-    columna 4 es "Variación", texto). Se verifica el `number_format` de las
-    celdas. Se corrigió el mismo error en "Por plan" del ARPU ({3,5,6}->{2,4,5}).
-  * Bug 2: "Por plan" contaba TODA la historia; ahora sólo suscripciones
-    VIGENTES HOY (`sql_suscripcion_vigente`).
-  * Bug 3: con el mes en curso, MoM compara "lo que va del mes" contra el
-    MISMO tramo del mes anterior (día N vs día N), no contra el mes completo.
+  * Bug 1: en "Lo que va del año" las columnas de dinero eran {3,4}; debían ser
+    {2,3} (la columna 4 es "Variación", texto). Se verifica el `number_format`
+    de las celdas. Se corrigió el mismo error en "Cuánto deja cada plan hoy"
+    de "Por alumno" ({3,5,6}->{2,4,5}).
+  * Bug 2: "Cuánto deja cada plan hoy" contaba TODA la historia; ahora sólo
+    suscripciones VIGENTES HOY (`sql_suscripcion_vigente`).
+  * Bug 3: con el mes en curso, "Este mes" compara "lo que va del mes" contra
+    el MISMO tramo del mes anterior (día N vs día N), no contra el mes completo.
 
 Genera el reporte con `crear_reporte_ventas_mensual_bytes` y lee las celdas
 con openpyxl. Contra la rama TEST (escribe y limpia).
@@ -116,14 +118,14 @@ def _limpiar(db, tenant_id):
         print(f"\n[WARN] limpieza test_reporte_4tabs_bugs: {e}")
 
 
-# ── Bug 1: formato de dinero en YTD (y en "Por plan" del ARPU) ──────────────
+# ── Bug 1: formato de dinero en "Lo que va del año" (y en "Por alumno") ─────
 def test_bug1_ytd_columnas_de_dinero_son_b_y_c(db):
     hoy = hoy_santiago()
-    # Un tenant sin datos basta: la tabla YTD se arma igual (con ceros).
+    # Un tenant sin datos basta: la tabla acumulada se arma igual (con ceros).
     contenido = rep.crear_reporte_ventas_mensual_bytes(db, 999999999,
                                                        hoy.month, hoy.year)
     wb = load_workbook(BytesIO(contenido))
-    ws = wb["YTD"]
+    ws = wb["Lo que va del año"]
     assert ws.cell(6, 1).value == "Concepto"  # sanity: la data arranca en A
     for fila in range(7, 11):                 # Ingresos, Egresos, Neto, Nuevos
         # Col B (año actual) y col C (año anterior) = dinero con miles.
@@ -134,7 +136,7 @@ def test_bug1_ytd_columnas_de_dinero_son_b_y_c(db):
     wb.close()
 
 
-# ── Bug 2: "Por plan" cuenta sólo suscripciones vigentes HOY ────────────────
+# ── Bug 2: "Cuánto deja cada plan hoy" cuenta sólo vigentes HOY ─────────────
 def test_bug2_por_plan_cuenta_solo_vigentes_hoy(db):
     hoy = hoy_santiago()
     tenant = _crear_tenant(db)
@@ -162,12 +164,13 @@ def test_bug2_por_plan_cuenta_solo_vigentes_hoy(db):
         contenido = rep.crear_reporte_ventas_mensual_bytes(
             db, tenant, hoy.month, hoy.year)
         wb = load_workbook(BytesIO(contenido))
-        ws = wb["ARPU"]
-        # Tabla "Por plan": header en fila 11, data desde 12 (A=Plan, C=Suscripciones).
+        ws = wb["Por alumno"]
+        # Tabla "Cuánto deja cada plan hoy": header en fila 11, data desde 12
+        # (A=Plan, C=Suscripciones).
         conteo = {}
         for fila in range(12, ws.max_row + 1):
             nombre = ws.cell(fila, 1).value
-            if not nombre or str(nombre).startswith("Ticket"):
+            if not nombre or str(nombre).startswith("Lo que paga"):
                 break
             conteo[str(nombre)] = ws.cell(fila, 3).value
         assert conteo.get(nombre_a) == 2, conteo
@@ -177,7 +180,7 @@ def test_bug2_por_plan_cuenta_solo_vigentes_hoy(db):
         _limpiar(db, tenant)
 
 
-# ── Bug 3: MoM del mes en curso corta el mes anterior al mismo día ──────────
+# ── Bug 3: "Este mes" (MoM) del mes en curso corta el mes anterior al día ───
 def test_bug3_mom_mes_en_curso_compara_dia_contra_dia(db, monkeypatch):
     hoy_fijo = date(2026, 11, 11)
     monkeypatch.setattr(rep, "hoy_santiago", lambda: hoy_fijo)
@@ -194,7 +197,7 @@ def test_bug3_mom_mes_en_curso_compara_dia_contra_dia(db, monkeypatch):
     try:
         contenido = rep.crear_reporte_ventas_mensual_bytes(db, tenant, 11, 2026)
         wb = load_workbook(BytesIO(contenido))
-        ws = wb["MoM"]
+        ws = wb["Este mes"]
         # El subtítulo (fila 3) avisa que la comparación es parcial.
         subtitulo = ws.cell(3, 1).value or ""
         assert "comparado al día 11" in subtitulo, subtitulo
