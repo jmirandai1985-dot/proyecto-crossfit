@@ -375,7 +375,8 @@ def test_usuarios_libera_al_coach_en_baja_o_cambio_de_rol():
 
 def test_horarios_libera_al_cambiar_la_disciplina():
     fuente = _fuente("app/api/v1/horarios.py")
-    assert "disciplina_id: Optional[int] = None," in fuente
+    # La disciplina viaja en el body Pydantic (`HorarioUpdate`), no como query param.
+    assert "disciplina_id: Optional[int] = None" in fuente
     assert "cambio_disciplina" in fuente
     assert "liberar_clases_futuras_de_horario(" in fuente
     assert "cerrar_vigencia(" in fuente

@@ -114,7 +114,8 @@ def test_ampliar_cupo_sin_cupo_es_un_400_no_un_500():
 # ── 3. Panel: horarios y supervisión ─────────────────────────────────────────
 def test_crear_horario_fuerza_null_en_disciplinas_de_acceso_libre():
     texto = fuente("app", "api", "v1", "horarios.py")
-    assert "None if disc.es_open_box else cupo_maximo" in texto
+    # El cupo llega en el body Pydantic (`HorarioCreate`), no como query param.
+    assert "None if disc.es_open_box else body.cupo_maximo" in texto
     assert "if nueva.es_open_box:" in texto, (
         "cambiar la plantilla a una disciplina libre tiene que limpiar el cupo")
 

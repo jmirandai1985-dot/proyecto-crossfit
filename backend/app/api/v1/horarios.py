@@ -2,6 +2,7 @@
 Router de endpoints para gestión de Horarios
 """
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import date
@@ -19,14 +20,39 @@ from app.utils.db_commit import commit_o_4xx
 router = APIRouter()
 
 
+# ── Body JSON de crear/editar horario ───────────────────────────────────────
+# POR QUÉ EXISTEN: los campos estaban declarados como parámetros SUELTOS de la
+# función. En FastAPI un `int`/`str`/`bool` suelto (sin `Body()` ni un modelo
+# Pydantic) se lee como QUERY PARAM, no del body. El panel manda
+# `api.post('/api/v1/horarios', payload)` (body JSON de axios), así que el
+# backend recibía `disciplina_id = None`, el `if not disc` daba 404 "La
+# disciplina no existe o no pertenece a este box" SIEMPRE, y el PUT (todo
+# Optional) se quedaba con todos los `None` = "no cambiar nada" y no aplicaba
+# ningún cambio, en silencio. Con un modelo de body el campo viaja donde el
+# navegador lo manda.
+class HorarioCreate(BaseModel):
+    """Body de POST /horarios (crear plantilla de horario)."""
+    disciplina_id: int = Field(..., description="ID de la disciplina del box")
+    dia_semana: int = Field(..., description="0=Lunes … 6=Domingo")
+    hora_inicio: str = Field(..., description="Hora de inicio HH:MM")
+    hora_fin: str = Field(..., description="Hora de fin HH:MM")
+    # Musculación / Open Box lo ignoran (migración 066: cupo NULL = sin tope).
+    cupo_maximo: int = Field(16, description="Cupo máximo (se ignora si es acceso libre)")
+
+
+class HorarioUpdate(BaseModel):
+    """Body de PUT /horarios/{id}. `None` = ese campo no se toca."""
+    dia_semana: Optional[int] = None
+    hora_inicio: Optional[str] = None
+    hora_fin: Optional[str] = None
+    cupo_maximo: Optional[int] = None
+    activo: Optional[bool] = None
+    disciplina_id: Optional[int] = None
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 def crear_horario(
-    tenant_id: Optional[int] = None,
-    disciplina_id: int = None,
-    dia_semana: int = None,
-    hora_inicio: str = None,
-    hora_fin: str = None,
-    cupo_maximo: int = 16,
+    body: HorarioCreate,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
@@ -36,7 +62,7 @@ def crear_horario(
     # `es_open_box` (Musculación / Open Box) = sala libre: la plantilla se crea
     # con `cupo_maximo = NULL` (sin tope), aunque el cliente mande un número.
     disc = db.query(Disciplina).filter(
-        Disciplina.id == disciplina_id,
+        Disciplina.id == body.disciplina_id,
         Disciplina.tenant_id == tenant_id,
     ).first()
     if not disc:
@@ -46,11 +72,11 @@ def crear_horario(
         )
     db_horario = HorarioBase(
         tenant_id=tenant_id,
-        disciplina_id=disciplina_id,
-        dia_semana=dia_semana,
-        hora_inicio=hora_inicio,
-        hora_fin=hora_fin,
-        cupo_maximo=None if disc.es_open_box else cupo_maximo,
+        disciplina_id=body.disciplina_id,
+        dia_semana=body.dia_semana,
+        hora_inicio=body.hora_inicio,
+        hora_fin=body.hora_fin,
+        cupo_maximo=None if disc.es_open_box else body.cupo_maximo,
         activo=True
     )
     db.add(db_horario)
@@ -161,18 +187,13 @@ def obtener_horario(
 @router.put("/{horario_id}")
 def actualizar_horario(
     horario_id: int,
-    dia_semana: Optional[int] = None,
-    hora_inicio: Optional[str] = None,
-    hora_fin: Optional[str] = None,
-    cupo_maximo: Optional[int] = None,
-    activo: Optional[bool] = None,
-    disciplina_id: Optional[int] = None,
+    body: HorarioUpdate,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
     """Actualiza una plantilla de horario (admin).
 
-    B6 · `disciplina_id`: si se CAMBIA la disciplina de la plantilla, se suelta al
+    B6 · `body.disciplina_id`: si se CAMBIA la disciplina de la plantilla, se suelta al
     coach que la tenía (se cierra la vigencia de `horarios_coach`) y se liberan las
     clases FUTURAS de ese horario: nadie queda a cargo de una disciplina que no
     dicta. Las clases YA generadas conservan su disciplina (no se reescriben: puede
@@ -192,17 +213,17 @@ def actualizar_horario(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes acceso a este horario",
         )
-    if dia_semana is not None:
-        horario.dia_semana = dia_semana
-    if hora_inicio is not None:
-        horario.hora_inicio = hora_inicio
-    if hora_fin is not None:
-        horario.hora_fin = hora_fin
-    if cupo_maximo is not None:
+    if body.dia_semana is not None:
+        horario.dia_semana = body.dia_semana
+    if body.hora_inicio is not None:
+        horario.hora_inicio = body.hora_inicio
+    if body.hora_fin is not None:
+        horario.hora_fin = body.hora_fin
+    if body.cupo_maximo is not None:
         # Migración 066: las disciplinas de acceso libre (Musculación / Open Box)
         # NO tienen cupo. Fijarles un número volvería a inventar el placeholder
         # que esta migración sacó, así que es un 400 de negocio.
-        efectiva = (disciplina_id if disciplina_id is not None
+        efectiva = (body.disciplina_id if body.disciplina_id is not None
                     else horario.disciplina_id)
         disc_efectiva = db.query(Disciplina).filter(
             Disciplina.id == efectiva,
@@ -214,18 +235,19 @@ def actualizar_horario(
                 detail=("Musculación y Open Box son de acceso libre: no tienen "
                         "cupo máximo que configurar."),
             )
-        horario.cupo_maximo = cupo_maximo
-    if activo is not None:
-        horario.activo = activo
+        horario.cupo_maximo = body.cupo_maximo
+    if body.activo is not None:
+        horario.activo = body.activo
 
     # ── B6: cambio de disciplina de la plantilla ──
     cambio_disciplina = (
-        disciplina_id is not None and disciplina_id != horario.disciplina_id)
+        body.disciplina_id is not None
+        and body.disciplina_id != horario.disciplina_id)
     vigencia_cerrada = False
     clases_liberadas = 0
-    if disciplina_id is not None:
+    if body.disciplina_id is not None:
         nueva = db.query(Disciplina).filter(
-            Disciplina.id == disciplina_id,
+            Disciplina.id == body.disciplina_id,
             Disciplina.tenant_id == tenant_id,
         ).first()
         if not nueva:
@@ -233,7 +255,7 @@ def actualizar_horario(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="La disciplina no existe o no pertenece a este box",
             )
-        horario.disciplina_id = disciplina_id
+        horario.disciplina_id = body.disciplina_id
         # Si la plantilla pasa a una disciplina de acceso libre, el cupo que
         # tuviera deja de tener sentido: se limpia (migración 066).
         if nueva.es_open_box:
@@ -270,6 +292,10 @@ def actualizar_horario(
                 "clases_liberadas": clases_liberadas,
             },
         )
+        # `registrar_auditoria` commitea y EXPIRA `horario`: sin este refresh la
+        # respuesta salía `{}` (FastAPI serializa con los atributos ya cargados
+        # del objeto) aunque el cambio SÍ había quedado guardado.
+        db.refresh(horario)
     return horario
 
 
