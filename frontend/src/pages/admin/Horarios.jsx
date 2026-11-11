@@ -10,17 +10,32 @@ const TURNOS = [
     { id: 'pm', label: 'PM', desde: 18, hasta: 23 },
 ];
 
+// Colores por disciplina para los chips del grid (los nombres vienen de la BD,
+// `d.disciplina_nombre`; ver seed `run_setup_test_db.py`: CrossFit, Open Box,
+// Musculación, Levantamiento Olímpico y Gap). Disciplinas no listadas caen al
+// color por defecto, que deja de parecer un link suelto.
+const ESTILO_DISCIPLINA = {
+    'Musculacion': 'bg-[rgba(59,90,170,0.35)] text-[#f4f6fb] border-[rgba(99,130,220,0.5)]',
+    'Musculación': 'bg-[rgba(59,90,170,0.35)] text-[#f4f6fb] border-[rgba(99,130,220,0.5)]',
+    'Open Box': 'bg-[rgba(34,197,94,0.15)] text-[#86efac] border-[rgba(34,197,94,0.35)]',
+    'CrossFit': 'bg-[rgba(255,140,0,0.15)] text-[#ffb559] border-[rgba(255,140,0,0.4)]',
+    'Levantamiento Olímpico': 'bg-[rgba(168,85,247,0.15)] text-[#d8b4fe] border-[rgba(168,85,247,0.4)]',
+    'Gap': 'bg-[rgba(20,184,166,0.15)] text-[#5eead4] border-[rgba(20,184,166,0.35)]',
+};
+const ESTILO_DEFAULT = 'bg-zinc-800/50 text-zinc-300 border-zinc-600';
+const estiloChip = (nombre) => ESTILO_DISCIPLINA[nombre] || ESTILO_DEFAULT;
+
 // ── Celda del grid (memoizada) ──
 const GridCell = React.memo(({ horaKey, dia, cell, onCellClick }) => {
     if (!cell) {
-        return <div className="h-16 bg-zinc-800/50 rounded border border-dashed border-zinc-800"></div>;
+        return <div className="h-16 bg-zinc-800/30 rounded border border-dashed border-zinc-700" style={{ backgroundImage: 'repeating-linear-gradient(45deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 6px, transparent 6px, transparent 12px)' }}></div>;
     }
     return (
         <button onClick={() => onCellClick(horaKey, dia, cell)}
-            className="h-16 bg-zinc-900 rounded border border-zinc-800 hover:shadow-md hover:border-blue-300 transition-all p-1 text-left overflow-hidden">
+            className="h-16 bg-zinc-900 rounded border border-zinc-700 hover:shadow-md hover:border-orange-400 transition-all p-1 text-left overflow-hidden">
             <div className="flex flex-wrap gap-0.5">
                 {cell.disciplinas.map(d => (
-                    <span key={d.id} className="text-xs leading-tight px-1 rounded bg-zinc-800/50 text-blue-400 border border-blue-200">
+                    <span key={d.id} className={`badge-disciplina text-xs font-semibold leading-tight px-1.5 py-0.5 rounded-full border ${estiloChip(d.disciplina_nombre)}`}>
                         {d.disciplina_nombre}
                     </span>
                 ))}
@@ -142,9 +157,11 @@ export default function Horarios() {
                             return (
                                 <div key={horaKey}>
                                     <div className="grid grid-cols-[120px_repeat(7,1fr)] border-b border-zinc-800 hover:bg-zinc-800/30">
-                                        <div className="px-3 py-4 text-sm font-semibold text-blue-300 border-r border-zinc-800 flex items-center gap-1">
-                                            <span>{turno?.label}</span>
-                                            <span className="text-zinc-300">{horaKey}</span>
+                                        <div className="px-3 py-4 text-sm border-r border-zinc-800 flex flex-col items-start gap-1">
+                                            <span className="inline-block bg-zinc-700 text-zinc-100 text-[10px] font-bold px-1.5 py-0.5 rounded">
+                                                {turno?.label}
+                                            </span>
+                                            <span className="text-zinc-400 text-xs">{horaKey}</span>
                                         </div>
                                         {[0, 1, 2, 3, 4, 5, 6].map(dia => {
                                             const cell = celdasMap[horaKey]?.[dia] || null;
@@ -169,7 +186,7 @@ export default function Horarios() {
                                         if (!cell) return null;
                                         const available = getAvailableDisciplinas(horaKey, dia);
                                         return (
-                                            <div key={`exp-${celKey}`} className="bg-zinc-800/50 border-b border-zinc-800 px-4 py-3">
+                                            <div key={`exp-${celKey}`} className="bg-zinc-900 border border-zinc-700 rounded-lg mx-3 my-2 px-4 py-3 shadow-sm">
                                                 <div className="text-sm font-semibold text-zinc-300 mb-2">{DIAS[dia]} · {horaKey} · Cupo: {cell.cupo_maximo === null || cell.cupo_maximo === undefined ? 'sin cupo (acceso libre)' : cell.cupo_maximo}</div>
                                                 <div className="space-y-1 mb-3">
                                                     {cell.disciplinas.map(d => (
