@@ -380,14 +380,25 @@ def _neto_rango(db, tenant_id, inicio, fin_exclusive):
     return ing_f, eg_f, ing_f - eg_f
 
 
-def _resumen_mes(db, tenant_id, anio, mes):
+def _resumen_mes(db, tenant_id, anio, mes, limite_dia=None):
     """Resumen de UN mes (ingresos/egresos/neto, alumnos, nuevos, MRR y Bazar).
+
+    `limite_dia`: si se pasa, el rango financiero y de nuevos alumnos se corta
+    al día `limite_dia` de ese mes (inclusive) en vez del mes completo — para
+    comparar "mes en curso" contra "mismo tramo del mes anterior". None = mes
+    completo (comportamiento de siempre).
 
     MRR y ventas del Bazar salen de `metricas_service` (una sola definición);
     el corte del mes lo define `_corte_suscripciones`.
     """
     inicio = date(anio, mes, 1)
-    fin_ex = date(anio + 1, 1, 1) if mes == 12 else date(anio, mes + 1, 1)
+    fin_mes = date(anio + 1, 1, 1) if mes == 12 else date(anio, mes + 1, 1)
+    if limite_dia is not None:
+        ultimo_dia_mes = calendar.monthrange(anio, mes)[1]
+        dia_efectivo = min(limite_dia, ultimo_dia_mes)
+        fin_ex = date(anio, mes, dia_efectivo) + timedelta(days=1)
+    else:
+        fin_ex = fin_mes
     ing, eg, neto = _neto_rango(db, tenant_id, inicio, fin_ex)
     corte = _corte_suscripciones(fin_ex - timedelta(days=1))
     nuevos = db.execute(text("""
@@ -456,9 +467,11 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
     hoy = hoy_santiago()
     label_mes = f"{_MESES_ES_LARGOS[mes - 1]} {anio}"
 
+    mes_en_curso = (anio, mes) == (hoy.year, hoy.month)
     actual = _resumen_mes(db, tenant_id, anio, mes)
     mes_ant, anio_ant = (12, anio - 1) if mes == 1 else (mes - 1, anio)
-    anterior = _resumen_mes(db, tenant_id, anio_ant, mes_ant)
+    anterior = _resumen_mes(db, tenant_id, anio_ant, mes_ant,
+                             limite_dia=hoy.day if mes_en_curso else None)
     label_ant = f"{_MESES_ES_LARGOS[mes_ant - 1]} {anio_ant}"
 
     arpu = metricas.arpu_mes_cerrado(db, tenant_id, hoy)
@@ -471,7 +484,9 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
     for col, w in (('A', 3), ('B', 22), ('C', 22), ('D', 22),
                    ('E', 22), ('F', 22), ('G', 22), ('H', 3)):
         ws.column_dimensions[col].width = w
-    _titulo_hoja(ws, "MoM — MES A MES", f"{label_mes} vs {label_ant}   ·   {generado}")
+    sufijo_parcial = f" · comparado al día {hoy.day}" if mes_en_curso else ""
+    _titulo_hoja(ws, "MoM — MES A MES",
+                 f"{label_mes} vs {label_ant}{sufijo_parcial}   ·   {generado}")
 
     kpi = 5
     _apply_kpi_card(ws, kpi, 2, "Ingresos netos", f"${actual['neto']:,.0f}",
@@ -573,7 +588,7 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
     for i, (concepto, ahora_v, antes_v) in enumerate(ytd_filas):
         variacion = _fmt_pct(_pct(ahora_v, antes_v))
         _style_data_row(ws, r, [concepto, ahora_v, antes_v, variacion],
-                        is_alt=(i % 2 == 1), is_money_cols={3, 4})
+                        is_alt=(i % 2 == 1), is_money_cols={2, 3})
         r += 1
 
     # ── 4) ARPU: ingreso por alumno (absorbe Detalle Planes) ────────────────────
@@ -592,11 +607,12 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
     ws.row_dimensions[kpi + 1].height = 35
     ws.row_dimensions[kpi + 2].height = 20
 
-    planes = db.execute(text("""
+    planes = db.execute(text(f"""
         SELECT p.nombre, p.precio_clp, COUNT(DISTINCT s.id) AS suscripciones,
                COALESCE(ROUND(AVG(t.monto)), 0) AS ticket, COALESCE(SUM(t.monto), 0) AS ingreso
         FROM planes p
         LEFT JOIN suscripciones s ON s.plan_id = p.id AND s.tenant_id = :tid
+            AND {sql_suscripcion_vigente("s")}
         LEFT JOIN transacciones_financieras t ON t.referencia_id = s.id
             AND t.referencia_tipo = 'suscripcion' AND t.categoria = 'membresia'
             AND t.tipo = 'ingreso' AND t.tenant_id = :tid
@@ -622,7 +638,7 @@ def crear_reporte_ventas_mensual_bytes(db, tenant_id, mes, anio):
     r = 12
     for i, fila in enumerate(planes):
         _style_data_row(ws, r, [fila[0], fila[1] or 0, fila[2] or 0, fila[3] or 0, fila[4] or 0],
-                        is_alt=(i % 2 == 1), is_money_cols={3, 5, 6})
+                        is_alt=(i % 2 == 1), is_money_cols={2, 4, 5})
         r += 1
 
     _style_section_header(ws, r + 1, 1, "Ticket promedio y LTV", BLUE_KPI)
