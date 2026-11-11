@@ -61,11 +61,8 @@ const Alumnos = () => {
     // Error de descarga del comprobante (blob autenticado): se muestra junto al archivo.
     const [avisoComprobante, setAvisoComprobante] = useState('');
     const [editingAlumno, setEditingAlumno] = useState(null);
-    // ── Buscador rápido + ficha con pestañas (consulta, arriba de la tabla) ──
-    // `busquedaRapidaInput` alimenta la ficha Y también espeja `searchTerm` (la tabla de
-    // abajo): unificado en UN solo buscador visible. Cada uno conserva su propio debounce.
-    const [busquedaRapidaInput, setBusquedaRapidaInput] = useState('');
-    const [busquedaRapida, setBusquedaRapida] = useState('');
+    // Ficha unificada inline en la tabla: el id del alumno cuya ficha está abierta
+    // (null = ninguna). La abren el nombre de la fila, "Ver ficha" y el deep-link.
     const [alumnoConsultaId, setAlumnoConsultaId] = useState(null);
     const [searchParams, setSearchParams] = useSearchParams();
     // Navegación interna del panel (p. ej. aprobar un pago en Pendientes).
@@ -91,11 +88,6 @@ const Alumnos = () => {
     });
     const alumnos = datos?.lista ?? SIN_DATOS;
     const totalAlumnos = datos?.total ?? 0;
-
-    // Resultados del buscador rápido (pocos por página): OTRA instancia del MISMO
-    // hook, con `porPagina` 8 → clave de query distinta, no interfiere con la tabla.
-    const { data: datosRapidos } = useAlumnosPaginados({ porPagina: 8, pagina: 1, buscar: busquedaRapida });
-    const resultadosRapidos = datosRapidos?.lista ?? [];
 
     // Planes ACTIVOS del box: los comparten la tabla (columna Plan Activo), el
     // comprobante (select + precio) y el resto del panel (`usePlanesActivos`).
@@ -154,13 +146,14 @@ const Alumnos = () => {
     const desactivarUsuario = useDesactivarUsuario();
     const crearSuscripcion = useCrearSuscripcion();
 
-    // Ref del bloque de "Consulta rápida": el único botón "Ver ficha" del padrón
-    // precarga `alumnoConsultaId` y scrollea hasta acá.
-    const consultaRef = useRef(null);
+    // Ref del <tbody> de la tabla: sirve para scrollear hasta la FILA del alumno cuya
+    // ficha se abre (deep-link `?alumno_id=` o "Ver ficha"/nombre de la fila).
+    const tbodyRef = useRef(null);
 
     // ?alumno_id=<id>: deep-link desde Notificaciones -> abre la ficha unificada de ESE
     // alumno (la misma que abre "Ver ficha"). Al abrir se limpia el param para que un
-    // cambio de filtro no la vuelva a abrir.
+    // cambio de filtro no la vuelva a abrir. El scroll hasta la fila lo hace el efecto
+    // de abajo, una vez que `alumnos` trae al alumno.
     useEffect(() => {
         const id = Number(searchParams.get('alumno_id'));
         if (Number.isFinite(id) && id > 0) {
@@ -171,11 +164,13 @@ const Alumnos = () => {
         }
     }, [searchParams, setSearchParams]);
 
-    // Acción única de la fila para abrir la ficha del alumno (consulta rápida).
-    const verFicha = (alumnoId) => {
-        setAlumnoConsultaId(alumnoId);
-        consultaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    };
+    // Al abrir una ficha (deep-link o clic), scrollea hasta la FILA de ese alumno si ya
+    // está en la página actual; si no está cargada, no hay a dónde scrollear todavía.
+    useEffect(() => {
+        if (!alumnoConsultaId) return;
+        const fila = tbodyRef.current?.querySelector(`[data-alumno-id="${alumnoConsultaId}"]`);
+        fila?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, [alumnoConsultaId, alumnos]);
 
     const [formData, setFormData] = useState({
         nombre: '',
@@ -196,12 +191,6 @@ const Alumnos = () => {
         const timer = setTimeout(() => setBusqueda(searchTerm.trim()), searchTerm ? 350 : 0);
         return () => clearTimeout(timer);
     }, [searchTerm]);
-
-    // Debounce del buscador RÁPIDO (mismo patrón de 350 ms que la tabla).
-    useEffect(() => {
-        const timer = setTimeout(() => setBusquedaRapida(busquedaRapidaInput.trim()), busquedaRapidaInput ? 350 : 0);
-        return () => clearTimeout(timer);
-    }, [busquedaRapidaInput]);
 
     // Si la página pedida quedó FUERA DE RANGO (se borró el último de la última, o la
     // búsqueda encogió el total) se retrocede al último tramo válido en vez de mostrar una
@@ -390,65 +379,6 @@ const Alumnos = () => {
                     )}
                 </div>
 
-                {/* ── Buscador rápido + ficha unificada (consulta, arriba de la tabla) ──
-                    Único punto de entrada a la ficha del alumno. */}
-                <div ref={consultaRef} className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
-                    <div className="mb-4">
-                        <h2 className="text-lg font-bold text-zinc-100">Consulta rápida</h2>
-                        <p className="text-sm text-zinc-400">Busca un alumno para ver su ficha completa.</p>
-                    </div>
-                    <input
-                        type="text"
-                        placeholder="Buscar por nombre o correo..."
-                        value={busquedaRapidaInput}
-                        onChange={(e) => {
-                            const val = e.target.value;
-                            setBusquedaRapidaInput(val);
-                            setAlumnoConsultaId(null);
-                            setSearchTerm(val);
-                            setPagina(1);
-                        }}
-                        className="w-full px-4 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-zinc-800 text-zinc-100 placeholder:text-zinc-500"
-                    />
-                    <div className="mt-4 space-y-4">
-                        {/* Resultados (fila completa) */}
-                        <div>
-                            {busquedaRapida.trim() === '' ? (
-                                <p className="text-sm text-zinc-500 py-6 text-center">
-                                    Busca un alumno para ver su ficha completa.
-                                </p>
-                            ) : resultadosRapidos.length === 0 ? (
-                                <p className="text-sm text-zinc-500 py-6 text-center">Sin resultados.</p>
-                            ) : (
-                                <ul className="space-y-1.5 max-h-80 overflow-auto">
-                                    {resultadosRapidos.map((a) => (
-                                        <li key={a.id}>
-                                            <button
-                                                type="button"
-                                                onClick={() => setAlumnoConsultaId(a.id)}
-                                                className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${alumnoConsultaId === a.id ? 'border-orange-500 bg-orange-500/10' : 'border-zinc-800 bg-zinc-800/40 hover:bg-zinc-800'}`}
-                                            >
-                                                <span className="block text-zinc-200 font-medium truncate">{a.nombre}</span>
-                                                <span className="block text-xs text-zinc-500 truncate">{a.correo}</span>
-                                            </button>
-                                        </li>
-                                    ))}
-                                </ul>
-                            )}
-                        </div>
-                        {/* Ficha debajo, a todo el ancho */}
-                        <div>
-                            {alumnoConsultaId ? (
-                                <FichaAlumnoTabs alumnoId={alumnoConsultaId} />
-                            ) : (
-                                <div className="flex items-center justify-center rounded-lg border border-dashed border-zinc-700 text-sm text-zinc-500 py-12">
-                                    Busca un alumno para ver su ficha completa
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-
                 <div className="bg-zinc-900 rounded-lg shadow overflow-hidden">
                     <div className="px-6 py-4 border-b border-zinc-800">
                         <div className="flex items-center justify-between">
@@ -468,6 +398,18 @@ const Alumnos = () => {
                                 </button>
                             </div>
                         </div>
+                        <input
+                            type="text"
+                            placeholder="Buscar por nombre o correo..."
+                            value={searchTerm}
+                            onChange={(e) => {
+                                setSearchTerm(e.target.value);
+                                setAlumnoConsultaId(null);
+                                setPagina(1);
+                            }}
+                            className="mt-3 w-full px-4 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-zinc-800 text-zinc-100 placeholder:text-zinc-500"
+                            aria-label="Buscar alumno por nombre o correo"
+                        />
                     </div>
 
                     {/* Vista MÓVIL (<768px): el padrón como TARJETAS con acordeón.
@@ -481,13 +423,18 @@ const Alumnos = () => {
                             suscripciones={suscripciones}
                             planes={planes}
                             onVoucher={openVoucherModal}
-                            onVerFicha={(alumno) => verFicha(alumno.id)}
+                            onVerFicha={(alumno) => setAlumnoConsultaId(alumno.id)}
                             onEditar={(alumno) => openModal(alumno)}
                             onEliminar={handleDelete}
                         />
+                        {alumnoConsultaId && (
+                            <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900">
+                                <FichaAlumnoTabs alumnoId={alumnoConsultaId} />
+                            </div>
+                        )}
                     </div>
 
-                    {/* Vista de ESCRITORIO (>=768px): la tabla de siempre, sin cambios. */}
+                    {/* Vista de ESCRITORIO (>=768px): la tabla con la ficha del alumno inline. */}
                     <div className="overflow-x-auto hidden md:block">
                         <table className="w-full">
                             <thead className="bg-blue-900 text-white">
@@ -502,11 +449,20 @@ const Alumnos = () => {
                                     <th className="px-6 py-3 text-left text-sm font-medium">Acciones</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-zinc-800">
+                            <tbody ref={tbodyRef} className="divide-y divide-zinc-800">
                                 {alumnos.length > 0 ? (
                                     alumnos.map((alumno, index) => (
-                                        <tr key={alumno.id} className={index % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
-                                            <td className="px-6 py-4 text-sm font-medium text-zinc-100">{alumno.nombre}</td>
+                                        <React.Fragment key={alumno.id}>
+                                        <tr data-alumno-id={alumno.id} className={index % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-800/50'}>
+                                            <td className="px-6 py-4 text-sm font-medium">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setAlumnoConsultaId(alumnoConsultaId === alumno.id ? null : alumno.id)}
+                                                    className="text-left text-zinc-100 hover:text-orange-400 underline-offset-2 hover:underline font-medium"
+                                                >
+                                                    {alumno.nombre}
+                                                </button>
+                                            </td>
                                             <td className="px-6 py-4 text-sm text-zinc-400">{alumno.correo}</td>
                                             <td className="px-6 py-4 text-sm text-zinc-400">{alumno.telefono}</td>
                                             <td className="px-6 py-4 text-sm">
@@ -539,7 +495,7 @@ const Alumnos = () => {
                                                     📄 Voucher
                                                 </button>
                                                 <button
-                                                    onClick={() => verFicha(alumno.id)}
+                                                    onClick={() => setAlumnoConsultaId(alumnoConsultaId === alumno.id ? null : alumno.id)}
                                                     data-testid={`btn-ver-ficha-${alumno.id}`}
                                                     className="px-3 py-1 text-emerald-400 hover:bg-zinc-800 rounded transition-colors text-xs font-medium"
                                                 >
@@ -559,6 +515,16 @@ const Alumnos = () => {
                                                 </button>
                                             </td>
                                         </tr>
+                                        {alumnoConsultaId === alumno.id && (
+                                            <tr>
+                                                <td colSpan="8" className="p-0">
+                                                    <div className="bg-zinc-950 border-t-2 border-orange-500/40 p-5">
+                                                        <FichaAlumnoTabs alumnoId={alumnoConsultaId} />
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                        </React.Fragment>
                                     ))
                                 ) : (
                                     <tr>
