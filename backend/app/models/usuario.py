@@ -47,6 +47,13 @@ class Usuario(Base):
     estatura_cm = Column(Integer, nullable=True)
     genero = Column(String(10), nullable=True)
     fecha_nacimiento = Column(Date, nullable=True)
+    # ── Aceptaciones del alta pública (T&C + declaración de salud) ──────────
+    # NULL en alumnos existentes; se completan en `registrar_alumno_nuevo`.
+    # Se guarda CUÁNDO y QUÉ VERSIÓN aceptó (auditoría de consentimiento).
+    acepta_tyc_en = Column(TIMESTAMP(timezone=True), nullable=True)
+    acepta_tyc_version = Column(String(20), nullable=True)
+    acepta_salud_en = Column(TIMESTAMP(timezone=True), nullable=True)
+    acepta_salud_version = Column(String(20), nullable=True)
     # ── D3 (2026-10-28): nivel de atleta PERSISTIDO ──────────────────────────
     # Lo escribe `nivel_service.recalcular_nivel` (POST/PUT/DELETE de RM, cambios de
     # peso/género, job nocturno y auto-sanación al leer). NULL en un eje = "Sin datos",

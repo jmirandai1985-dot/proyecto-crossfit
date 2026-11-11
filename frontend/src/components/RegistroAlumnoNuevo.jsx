@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { validarAceptaciones } from '../utils/registroAceptaciones';
 
 const RegistroAlumnoNuevo = ({ onClose }) => {
     const navigate = useNavigate();
     const [form, setForm] = useState({
         nombre: '', correo: '', rut: '', sexo: '', peso: '', estatura: '',
         telefono: '', fecha_nacimiento: '',
+        acepta_tyc: false, acepta_salud: false,
     });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -14,6 +16,9 @@ const RegistroAlumnoNuevo = ({ onClose }) => {
     // RG-04: cuando el correo con la contraseña temporal NO sale, el backend la
     // devuelve en la respuesta (email_enviado=false) y hay que mostrarla acá.
     const [avisoCorreo, setAvisoCorreo] = useState(null);
+    // Consentimientos del alta: checkboxes independientes + modal de lectura.
+    const [modalAbierto, setModalAbierto] = useState(false);
+    const [errores, setErrores] = useState({});
 
     const handleChange = (e) => {
         setForm({ ...form, [e.target.name]: e.target.value });
@@ -22,6 +27,17 @@ const RegistroAlumnoNuevo = ({ onClose }) => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
+
+        // Consentimientos obligatorios (bloquean el submit si falta alguno).
+        const chequeo = validarAceptaciones({
+            acepta_tyc: form.acepta_tyc,
+            acepta_salud: form.acepta_salud,
+        });
+        if (!chequeo.valido) {
+            setErrores((prev) => ({ ...prev, ...chequeo.errores }));
+            return;
+        }
+
         setLoading(true);
         try {
             const r = await api.post('/api/v1/alumnos/registro/alumno-nuevo', {
@@ -33,6 +49,8 @@ const RegistroAlumnoNuevo = ({ onClose }) => {
                 estatura: form.estatura ? parseFloat(form.estatura) : null,
                 telefono: form.telefono,
                 fecha_nacimiento: form.fecha_nacimiento,
+                acepta_tyc: form.acepta_tyc,
+                acepta_salud: form.acepta_salud,
             });
             const d = r.data || {};
             setAvisoCorreo(d.email_enviado === false && d.password_provisional
@@ -138,6 +156,79 @@ const RegistroAlumnoNuevo = ({ onClose }) => {
                             * Peso y sexo son obligatorios: los usamos para calcular tu nivel (sin
                             ellos el motor de niveles no puede clasificar tu fuerza ni tu gimnasia).
                         </p>
+
+                        <div className="space-y-3 mt-4">
+                            <label className="flex items-start gap-2 text-sm text-zinc-300">
+                                <input
+                                    type="checkbox"
+                                    checked={form.acepta_tyc}
+                                    onChange={(e) => {
+                                        setForm({ ...form, acepta_tyc: e.target.checked });
+                                        setErrores((prev) => ({ ...prev, acepta_tyc: false }));
+                                    }}
+                                    className="mt-1 accent-[#ff8c00]"
+                                />
+                                <span>
+                                    He leído y acepto los{' '}
+                                    <button
+                                        type="button"
+                                        onClick={() => setModalAbierto(true)}
+                                        className="text-[#ff8c00] underline underline-offset-2"
+                                    >
+                                        Términos y Condiciones y la Política de Tratamiento de Datos Personales
+                                    </button>
+                                    .
+                                </span>
+                            </label>
+                            {errores?.acepta_tyc && (
+                                <p className="text-red-400 text-xs ml-6">Debes aceptar los Términos y Condiciones.</p>
+                            )}
+
+                            <label className="flex items-start gap-2 text-sm text-zinc-300">
+                                <input
+                                    type="checkbox"
+                                    checked={form.acepta_salud}
+                                    onChange={(e) => {
+                                        setForm({ ...form, acepta_salud: e.target.checked });
+                                        setErrores((prev) => ({ ...prev, acepta_salud: false }));
+                                    }}
+                                    className="mt-1 accent-[#ff8c00]"
+                                />
+                                <span>
+                                    Declaro no tener enfermedades, lesiones o condiciones de salud que me
+                                    imposibiliten practicar un deporte de alto rendimiento en este
+                                    establecimiento, y que informaré al Box de inmediato si esa situación
+                                    cambia. Entiendo que es mi responsabilidad consultar a un profesional
+                                    de la salud si tengo dudas sobre mi aptitud física para entrenar.
+                                </span>
+                            </label>
+                            {errores?.acepta_salud && (
+                                <p className="text-red-400 text-xs ml-6">Debes aceptar la declaración de salud.</p>
+                            )}
+                        </div>
+
+                        {modalAbierto && (
+                            <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+                                 onClick={() => setModalAbierto(false)}>
+                                <div className="bg-[#15151c] border border-zinc-700 rounded-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6"
+                                     onClick={(e) => e.stopPropagation()}>
+                                    <h2 className="text-lg font-bold text-white mb-4">Términos y Condiciones</h2>
+                                    <div className="text-sm text-zinc-300 space-y-3">
+                                        {/* Contenido de solo lectura — Cline: usar el texto final del doc
+                                            "Urban Training Box — Términos y Condiciones + Tratamiento de
+                                            Datos Personales" (secciones 1, 2 y 3). Pedir el texto si no
+                                            lo tienes a mano en vez de inventarlo. */}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setModalAbierto(false)}
+                                        className="mt-4 bg-[#ff8c00] text-black font-bold py-2 px-4 rounded"
+                                    >
+                                        Cerrar
+                                    </button>
+                                </div>
+                            </div>
+                        )}
 
                         {error && (
                             <div className="bg-red-500/15 border border-red-500/30 text-red-300 px-4 py-3 rounded-lg text-sm">

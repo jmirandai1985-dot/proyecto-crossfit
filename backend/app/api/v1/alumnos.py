@@ -161,6 +161,10 @@ class RegistroAlumnoNuevo(BaseModel):
     rut: str
     telefono: str = Field(..., min_length=6, max_length=20)
     fecha_nacimiento: date = Field(...)
+    # Consentimientos obligatorios del alta (T&C + declaración de salud).
+    # Son independientes entre sí; se guarda fecha/versión en el Usuario.
+    acepta_tyc: bool
+    acepta_salud: bool
     tenant_id: int = 1
     # Token del link `/landing?inv=<token>` (invitación de un alumno). Es
     # OPCIONAL: el auto-registro directo sigue funcionando igual y un token
@@ -231,6 +235,13 @@ def registrar_alumno_nuevo(
     if not validar_rut(datos.rut):
         raise HTTPException(status_code=400, detail="RUT inválido (formato chileno requerido)")
 
+    # ── Consentimientos del alta (obligatorios e independientes) ───────────
+    # Se validan ANTES de construir el Usuario: sin aceptación no se escribe nada.
+    if not datos.acepta_tyc:
+        raise HTTPException(status_code=400, detail="Debes aceptar los Términos y Condiciones.")
+    if not datos.acepta_salud:
+        raise HTTPException(status_code=400, detail="Debes aceptar la declaración de salud.")
+
     # ── Invitación de un ALUMNO (migración 054) ─────────────────────────────
     # Se busca ANTES de escribir nada: si el token no existe, es de otro box o
     # ya se usó, la invitación es `None` y el registro sigue exactamente igual.
@@ -269,6 +280,10 @@ def registrar_alumno_nuevo(
         estatura_cm=int(datos.estatura) if datos.estatura else None,
         genero=datos.sexo,
         fecha_nacimiento=datos.fecha_nacimiento,
+        acepta_tyc_en=datetime.now(timezone.utc),
+        acepta_tyc_version="v1",
+        acepta_salud_en=datetime.now(timezone.utc),
+        acepta_salud_version="v1",
     )
     db.add(usuario)
     db.flush()

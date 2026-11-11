@@ -111,6 +111,12 @@ class UsuarioResponse(UsuarioBase):
     genero: Optional[str] = None
     fecha_nacimiento: Optional[date] = Field(
         None, description="Fecha de nacimiento YYYY-MM-DD")
+    # Consentimientos del alta (T&C + declaración de salud): fecha y versión.
+    # None en alumnos existentes; se completan en el autoservicio de registro.
+    acepta_tyc_en: Optional[datetime] = None
+    acepta_tyc_version: Optional[str] = None
+    acepta_salud_en: Optional[datetime] = None
+    acepta_salud_version: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

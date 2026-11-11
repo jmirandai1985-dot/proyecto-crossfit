@@ -232,6 +232,19 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
                             <p className="text-zinc-200 text-lg font-mono">{codigoReferido?.codigo || 'Sin código asignado'}</p>
                         </div>
 
+                        {data.acepta_tyc_en && (
+                            <p className="text-xs text-zinc-500 mt-2">
+                                Términos y Condiciones aceptados: {new Date(data.acepta_tyc_en).toLocaleDateString('es-CL')}
+                                {' '}(v{data.acepta_tyc_version})
+                            </p>
+                        )}
+                        {data.acepta_salud_en && (
+                            <p className="text-xs text-zinc-500 mt-1">
+                                Declaración de salud aceptada: {new Date(data.acepta_salud_en).toLocaleDateString('es-CL')}
+                                {' '}(v{data.acepta_salud_version})
+                            </p>
+                        )}
+
                         {/* Bloque de gestión (arquetipo/riesgo): la MISMA info que el box ve
                             en el PanelHistorial, fusionada en el Resumen de esta ficha. */}
                         <SeccionPanel cargando={cargandoPanel} error={errorPanelMsg} onReintentar={reintentarPanel}>
