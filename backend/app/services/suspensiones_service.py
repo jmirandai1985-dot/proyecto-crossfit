@@ -28,6 +28,8 @@ from app.models.suscripcion import Suscripcion
 from app.models.suspension_plan import SuspensionPlan
 from app.models.usuario import Usuario
 from app.services.reservas_service import reembolsar_credito_reserva, ReembolsoTransitorio
+# Aviso in-app para la campana del admin: la suspensión self-service también avisa al box.
+from app.services.notificaciones_panel import notificar_admins_del_tenant
 from app.utils.santiago import (
     SANTIAGO,
     ahora_santiago,
@@ -440,6 +442,15 @@ def crear_suspension(db: Session, suscripcion, usuario, fecha_inicio: date,
         fecha_inicio + timedelta(days=dias - 1))
 
     suspension.reservas_canceladas = canceladas
+
+    # Campana del ADMIN: el alumno suspendió su plan. Aviso in-app para los admins
+    # del box en la MISMA transacción (commit=False: el commit lo hace esta función).
+    notificar_admins_del_tenant(
+        db, tenant_id, tipo="suspension_creada",
+        mensaje=f"{usuario.nombre} suspendió su plan ({dias} día(s), desde {fecha_inicio_dt.strftime('%d/%m/%Y')}).",
+        commit=False,
+    )
+
     db.commit()
     db.refresh(suspension)
     return suspension
@@ -519,6 +530,13 @@ def cancelar_suspension(db: Session, suspension, suscripcion) -> Suscripcion:
     suscripcion.fecha_expiracion = suspension.fecha_expiracion_original
     suspension.cancelada = True
     suspension.cancelada_en = ahora_santiago()
+
+    # Campana del ADMIN: el alumno canceló su suspensión. Aviso in-app (misma transacción).
+    notificar_admins_del_tenant(
+        db, tenant_id, tipo="suspension_cancelada",
+        mensaje=f"{usuario.nombre} canceló su suspensión activa.",
+        commit=False,
+    )
 
     db.commit()
     db.refresh(suscripcion)
