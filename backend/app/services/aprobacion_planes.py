@@ -354,13 +354,15 @@ def activar_plan(db: Session, solicitud_id: int, *, tenant_id: Optional[int] = N
     # (snapshot P0-4), no el precio del plan al momento de aprobar: si el admin
     # lo cambia entre medio, el ingreso no puede quedar por el precio nuevo.
     try:
+        alumno_tx = db.query(Usuario).filter(Usuario.id == solicitud.alumno_id).first()
+        nombre_alumno_tx = alumno_tx.nombre if alumno_tx else f"usuario #{solicitud.alumno_id}"
         db.add(TransaccionFinanciera(
             tenant_id=suscripcion.tenant_id,
             tipo="ingreso",
             categoria="membresia",
             monto=cobrado,
             descripcion=(
-                f"Suscripcion plan {plan.nombre} (usuario #{solicitud.alumno_id})"
+                f"Suscripcion plan {plan.nombre} ({nombre_alumno_tx})"
             ),
             referencia_tipo="suscripcion",
             referencia_id=suscripcion.id,
@@ -486,13 +488,15 @@ def _registrar_plan_en_cola(db: Session, solicitud, plan, ahora, actor_id,
 
     # ── Ingreso YA (plata cobrada), con referencia a la SOLICITUD ──
     try:
+        alumno_tx = db.query(Usuario).filter(Usuario.id == solicitud.alumno_id).first()
+        nombre_alumno_tx = alumno_tx.nombre if alumno_tx else f"usuario #{solicitud.alumno_id}"
         db.add(TransaccionFinanciera(
             tenant_id=solicitud.tenant_id,
             tipo="ingreso",
             categoria="membresia",
             monto=cobrado,
             descripcion=(
-                f"Suscripcion plan {plan.nombre} (usuario #{solicitud.alumno_id})"),
+                f"Suscripcion plan {plan.nombre} ({nombre_alumno_tx})"),
             referencia_tipo="solicitud_plan",
             referencia_id=solicitud.id,
             fecha=hoy_santiago(),

@@ -196,12 +196,14 @@ def crear_suscripcion(
             monto_facturado = (descuento_referido["precio_final_clp"]
                                if descuento_referido is not None
                                else plan.precio_clp)
+            alumno_tx = db.query(Usuario).filter(Usuario.id == data.usuario_id).first()
+            nombre_alumno_tx = alumno_tx.nombre if alumno_tx else f"usuario #{data.usuario_id}"
             tx = TransaccionFinanciera(
                 tenant_id=data.tenant_id,
                 tipo='ingreso',
                 categoria='membresia',
                 monto=monto_facturado,
-                descripcion=f"Suscripcion plan {plan.nombre} (usuario #{data.usuario_id})",
+                descripcion=f"Suscripcion plan {plan.nombre} ({nombre_alumno_tx})",
                 referencia_tipo='suscripcion',
                 referencia_id=db_sus.id,
                 fecha=hoy_santiago(),
