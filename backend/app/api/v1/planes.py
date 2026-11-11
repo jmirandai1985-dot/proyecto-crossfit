@@ -127,7 +127,7 @@ def obtener_membresia_activa(
     ).order_by(Suscripcion.creditos_disponibles.desc().nulls_last(), Suscripcion.fecha_expiracion.desc()).first()
 
     if not suscripcion:
-        return {"activa": False, "plan_nombre": None, "dias_restantes": 0, "clases_disponibles": 0, "es_ilimitado": False, "fecha_vencimiento": None, "plan_en_cola": plan_en_cola}
+        return {"activa": False, "plan_nombre": None, "dias_restantes": 0, "clases_disponibles": 0, "clases_totales": None, "es_ilimitado": False, "fecha_vencimiento": None, "plan_en_cola": plan_en_cola}
 
     plan = db.query(Plan).filter(Plan.id == suscripcion.plan_id).first()
     # 0 = vence HOY (día de vencimiento inclusive) y sin fecha = 0: nunca negativo.
@@ -138,6 +138,7 @@ def obtener_membresia_activa(
         "plan_nombre": plan.nombre if plan else None,
         "dias_restantes": dias_restantes,
         "clases_disponibles": suscripcion.creditos_disponibles if hasattr(suscripcion, 'creditos_disponibles') else 0,
+        "clases_totales": suscripcion.creditos_totales if hasattr(suscripcion, 'creditos_totales') else None,
         "es_ilimitado": plan.es_ilimitado if plan else False,
         "fecha_vencimiento": suscripcion.fecha_expiracion,
         "plan_en_cola": plan_en_cola,

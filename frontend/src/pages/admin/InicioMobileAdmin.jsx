@@ -45,8 +45,6 @@ import { cargarPreviewAviso } from '../../utils/avisoRetiro';
 // Secciones del Bazar móvil (pestañas "Catálogo" | "Entregar pedido"): única definición
 // de cuáles son, cuál arranca y qué pestaña abre cada acceso rápido.
 import { TABS_BAZAR, TAB_INICIAL, etiquetaTab, tabDelAcceso } from '../../utils/bazarMovil';
-// Enlace de contacto del alumno: wa.me armado desde el teléfono cargado (o nada).
-import { enlaceWhatsapp } from '../../utils/whatsapp';
 // Corte por franjas de "Asistencia de hoy" (cálculo puro, con test aislado propio).
 import {
     FRANJAS, agruparPorFranja, franjaActual, resumenFranja,
@@ -1382,12 +1380,11 @@ const InicioMobileAdmin = () => {
                                     resultados.map((a) => {
                                         const m = a.membresia || null;
                                         const est = estadoAlumno(m);
-                                        const wa = enlaceWhatsapp(
-                                            a.telefono,
-                                            `Hola ${String(a.nombre || '').split(' ')[0]}, te escribo de Urban Box.`,
-                                        );
                                         return (
-                                            <article className="student" key={a.id}>
+                                            <article className="student" key={a.id} role="button" tabIndex={0}
+                                                onClick={() => setAlumnoSeleccionadoId(a.id)}
+                                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setAlumnoSeleccionadoId(a.id); }}
+                                                style={{ cursor: 'pointer' }}>
                                                 <div className="st-top">
                                                     <span className="avatar">{iniciales(a.nombre)}</span>
                                                     <div style={{ minWidth: 0 }}>
@@ -1405,26 +1402,18 @@ const InicioMobileAdmin = () => {
                                                     </div>
                                                     <div>
                                                         <small>Créditos</small>
-                                                        <b>{rotuloCreditos(m?.es_ilimitado, m?.creditos_disponibles)}</b>
+                                                        <b>
+                                                            {m?.es_ilimitado
+                                                                ? '∞'
+                                                                : (m?.creditos_totales != null && m?.creditos_disponibles != null)
+                                                                    ? `${m.creditos_totales - m.creditos_disponibles} de ${m.creditos_totales}`
+                                                                    : rotuloCreditos(m?.es_ilimitado, m?.creditos_disponibles)}
+                                                        </b>
                                                     </div>
                                                     <div>
-                                                        <small>Última</small>
-                                                        <b>{ultimaVisita(a.ultima_asistencia)}</b>
+                                                        <small>Plan</small>
+                                                        <b className="truncate">{m?.plan_nombre || '—'}</b>
                                                     </div>
-                                                </div>
-                                                <div className={`st-actions${wa ? '' : ' una'}`}>
-                                                    {/* Sin teléfono cargado el botón NO se dibuja
-                                                        (no hay a dónde mandar el WhatsApp). */}
-                                                    {wa && (
-                                                        <a className="btn wa wa-link" href={wa}
-                                                            target="_blank" rel="noreferrer">
-                                                            WhatsApp
-                                                        </a>
-                                                    )}
-                                                    <button type="button" className="btn soft"
-                                                        onClick={() => setAlumnoSeleccionadoId(a.id)}>
-                                                        Ver perfil
-                                                    </button>
                                                 </div>
                                             </article>
                                         );
