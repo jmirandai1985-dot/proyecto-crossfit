@@ -171,12 +171,15 @@ def enviar_manual(
     exito = False
     try:
         if tipo == "inactividad":
-            # Días REALES de inactividad: UNA definición, la del servicio de plantillas de
-            # Fidelización (antes estaba copiada acá, con `date.today()`: con la TZ del
-            # servidor —UTC— de noche contaba un día de más).
-            from app.services.fidelizacion_plantillas import dias_inactividad
-            exito = enviar_email_fidelizacion(
-                alumno.nombre, alumno.correo, dias_inactividad(db, alumno))
+            # MISMO motor que el panel de Fidelización: la plantilla sale de `sugerir` según
+            # la situación REAL del alumno (vencimiento, plan sin usar, inactividad, riesgo),
+            # en vez de mandar siempre la plantilla fija de "15-30 días".
+            import app.services.fidelizacion_plantillas as fidelizacion_plantillas
+            sugerencia = fidelizacion_plantillas.sugerir(db, alumno)
+            if sugerencia["plantilla"] is None:
+                raise HTTPException(400, sugerencia["motivo"])
+            resultado = fidelizacion_plantillas.enviar(db, alumno, sugerencia["plantilla"])
+            exito = resultado["ok"]
         elif tipo == "vencimiento":
             from app.models.suscripcion import Suscripcion
             sus = db.query(Suscripcion).filter(
@@ -381,8 +384,13 @@ def _reenviar_por_tipo(db: Session, reg, alumno) -> bool:
         fecha = sus.fecha_expiracion if sus else None
         return enviar_email_vencimiento_plan(alumno_dict, fecha)
     if tipo == "inactividad":
-        return enviar_email_fidelizacion(
-            alumno.nombre, alumno.correo, _dias_inactividad(db, alumno))
+        # MISMO motor de plantillas: la situación REAL del alumno decide el correo.
+        import app.services.fidelizacion_plantillas as fidelizacion_plantillas
+        sugerencia = fidelizacion_plantillas.sugerir(db, alumno)
+        if sugerencia["plantilla"] is None:
+            raise HTTPException(400, sugerencia["motivo"])
+        resultado = fidelizacion_plantillas.enviar(db, alumno, sugerencia["plantilla"])
+        return resultado["ok"]
     if tipo == "activacion":
         return enviar_email_activacion_alumno(
             alumno_dict, _password_provisional(db, alumno))

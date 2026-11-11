@@ -278,11 +278,17 @@ def enviar_campana_email(
             omitidos.append(alumno["correo"])
             continue
 
-        exito = enviar_email_fidelizacion(
-            nombre=alumno["nombre"],
-            correo=alumno["correo"],
-            dias_ausente=alumno["dias_ausente"],
-        )
+        # MISMO motor que el resto de Fidelización: la plantilla sale de `sugerir` según la
+        # situación REAL del alumno (vencimiento, plan sin usar, inactividad, riesgo), no de
+        # la plantilla fija de "15-30 días". `alumno` acá es un dict, así que se recupera el
+        # objeto Usuario por su id para poder llamar `sugerir`/`enviar`.
+        alumno_obj = db.query(Usuario).filter(Usuario.id == alumno["id"]).first()
+        sugerencia = fidelizacion_plantillas.sugerir(db, alumno_obj) if alumno_obj else {"plantilla": None, "motivo": "Alumno no encontrado"}
+        if sugerencia["plantilla"] is None:
+            omitidos.append(alumno["correo"])
+            continue
+        resultado = fidelizacion_plantillas.enviar(db, alumno_obj, sugerencia["plantilla"])
+        exito = resultado["ok"]
         if exito:
             enviados.append(alumno["correo"])
         else:
