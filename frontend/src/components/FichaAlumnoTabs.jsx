@@ -180,7 +180,7 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
     const estadoBadge = data ? etiquetaEstado(data) : null;
 
     return (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 shadow overflow-hidden">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900 shadow overflow-hidden shrink-0">
             <div className="px-5 py-4 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0">
                     <h3 className="font-bold text-zinc-100 truncate">{data?.nombre || nombre || 'Ficha del alumno'}</h3>
@@ -355,20 +355,31 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
                             {suspensionesPropias.length === 0 ? (
                                 <p className="text-sm text-zinc-400">Sin suspensiones propias.</p>
                             ) : (
-                                <ul className="space-y-2">
+                                <ul className="space-y-3">
                                     {suspensionesPropias.map((s) => (
-                                        <li key={s.id} className="flex items-center justify-between gap-3 text-sm border border-zinc-700 rounded-md px-3 py-2">
-                                            <span className="text-zinc-300">
-                                                {fmtFecha(s.fecha_inicio)} → {fmtFecha(s.fecha_fin)} · {s.dias} día(s)
-                                                {s.cancelada && s.cancelada_en && (
-                                                    <span className="block text-xs text-zinc-500 mt-0.5">
-                                                        Cancelada el {fmtFecha(s.cancelada_en)}
-                                                    </span>
-                                                )}
-                                            </span>
-                                            <span className="shrink-0 px-2 py-0.5 rounded-full text-xs font-bold bg-zinc-700 text-zinc-300 capitalize">
-                                                {s.cancelada ? 'Cancelada' : s.estado}
-                                            </span>
+                                        <li key={s.id} className="border border-zinc-700 rounded-lg p-3">
+                                            <div className="flex items-center justify-between gap-3 mb-2">
+                                                <span className="text-sm font-semibold text-zinc-200">
+                                                    {fmtFecha(s.fecha_inicio)} → {fmtFecha(s.fecha_fin)}
+                                                </span>
+                                                <span className="shrink-0 px-2 py-0.5 rounded-full text-xs font-bold bg-zinc-700 text-zinc-300 capitalize">
+                                                    {s.cancelada ? 'Cancelada' : s.estado}
+                                                </span>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3 text-sm">
+                                                <div>
+                                                    <p className="text-xs text-zinc-500">Duración</p>
+                                                    <p className="text-zinc-200">{s.dias} día(s)</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-xs text-zinc-500">Información</p>
+                                                    <p className="text-zinc-200">
+                                                        {s.cancelada && s.cancelada_en
+                                                            ? `El alumno canceló esta suspensión el ${fmtFecha(s.cancelada_en)}`
+                                                            : 'Sin novedades'}
+                                                    </p>
+                                                </div>
+                                            </div>
                                         </li>
                                     ))}
                                 </ul>
