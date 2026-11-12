@@ -69,7 +69,7 @@ const MigracionActivacion = () => {
                             Panel de Activación — Migración BoxMagic
                         </h1>
                         <p className="text-zinc-400 text-sm mt-1">
-                            En qué etapa del alta quedó cada alumno que viene de BoxMagic.
+                            En qué etapa del alta quedó cada alumno del padrón de BoxMagic.
                             Sólo lectura: acá no se activa a nadie.
                         </p>
                     </div>
@@ -222,8 +222,12 @@ const MigracionActivacion = () => {
                         <tbody className="divide-y divide-zinc-800">
                             {visibles.length > 0 ? visibles.map((alumno) => {
                                 const badge = badgeEtapa(alumno.etapa);
+                                // Clave de la fila = `candidato_id` (el padrón). `id` es la
+                                // cuenta REAL y viene en null mientras no exista: usarlo de
+                                // clave repetiría la misma key en casi todas las filas.
+                                const clave = alumno.candidato_id ?? alumno.id;
                                 return (
-                                    <tr key={alumno.id} data-alumno-id={alumno.id} className="hover:bg-zinc-800/40">
+                                    <tr key={clave} data-alumno-id={clave} className="hover:bg-zinc-800/40">
                                         <td className="px-6 py-3 text-sm font-medium text-zinc-100">{alumno.nombre}</td>
                                         <td className="px-6 py-3 text-sm text-zinc-400">{alumno.correo}</td>
                                         <td className="px-6 py-3 text-sm">
@@ -250,7 +254,7 @@ const MigracionActivacion = () => {
                                 <tr>
                                     <td colSpan={4} className="px-6 py-8 text-center text-sm text-zinc-400">
                                         {alumnos.length === 0
-                                            ? 'No hay alumnos migrados todavía.'
+                                            ? 'El padrón de BoxMagic no tiene alumnos de activación cargados todavía.'
                                             : 'Ningún alumno coincide con el filtro.'}
                                     </td>
                                 </tr>

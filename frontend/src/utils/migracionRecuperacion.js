@@ -176,16 +176,27 @@ export function filtrarAlumnos(alumnos, { estado = null } = {}) {
 }
 
 // ── Qué acción ofrece cada fila ────────────────────────────────────────────────
-// La oferta se configura cuando NO hay una vigente: sin oferta o con la ventana vencida.
+// OJO (2026-12): la lista son los CANDIDATOS del padrón de BoxMagic. `id` es el id de la
+// cuenta REAL en el SaaS y viene en `null` mientras esa cuenta no exista (crear cuentas
+// es un paso posterior, el día de la migración real). Sin cuenta no hay a quién mandarle
+// el correo ni fila donde colgar la oferta, así que la fila no ofrece acción.
+export function tieneCuenta(alumno) {
+    return Boolean(alumno) && alumno.id !== null && alumno.id !== undefined;
+}
+
+// La oferta se configura cuando NO hay una vigente (sin oferta o con la ventana vencida)
+// y el alumno ya tiene cuenta real.
 export function puedeConfigurarPromocion(alumno) {
-    const estado = alumno && alumno.estado;
+    if (!tieneCuenta(alumno)) return false;
+    const estado = alumno.estado;
     return estado === 'sin_contactar' || estado === 'vencida';
 }
 
 // "Recuperado" sólo se marca con una oferta VIGENTE (el backend responde 404 si no la
 // hay), así el panel no ofrece un botón que va a fallar.
 export function puedeMarcarRecuperado(alumno) {
-    return Boolean(alumno) && alumno.estado === 'promocion_enviada';
+    if (!tieneCuenta(alumno)) return false;
+    return alumno.estado === 'promocion_enviada';
 }
 
 // ── Fechas (día chileno, sin que la zona del navegador corra nada) ──────────────

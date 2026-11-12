@@ -17,7 +17,7 @@ import {
     TIPO_BENEFICIO_DESCONOCIDO, badgeEstado, conteoPorEstado, esVencimientoValido, estadoDe,
     fechaEnDias, fechaParaInput, fechaTexto, filtrarAlumnos, hayFiltro,
     pendientesPorRecuperar, porcentajeRecuperado, puedeConfigurarPromocion,
-    puedeMarcarRecuperado, textoBeneficio, tipoBeneficioDe, totalAlumnos,
+    puedeMarcarRecuperado, textoBeneficio, tieneCuenta, tipoBeneficioDe, totalAlumnos,
 } from '../src/utils/migracionRecuperacion.js';
 
 let fallos = 0;
@@ -139,6 +139,23 @@ ok(!puedeMarcarRecuperado(alumno(1, 'sin_contactar')), 'sin oferta no se puede m
 ok(!puedeMarcarRecuperado(alumno(3, 'vencida')), 'una oferta vencida no se marca (no se puede canjear)');
 ok(!puedeMarcarRecuperado(null), 'sin fila no rompe');
 
+// ── 5b. El padrón: `id` es la cuenta REAL y puede venir en null ─────────────
+// (2026-12) La lista son los CANDIDATOS de BoxMagic y la mayoría todavía no tiene
+// `Usuario`: `id` viene null y esa fila NO ofrece acciones (no hay a quién mandarle el
+// correo). `candidato_id` es la clave de la fila.
+console.log('== 5b. Candidatos sin cuenta real ==');
+const sinCuenta = (estado) => ({ ...alumno(null, estado), id: null, candidato_id: 201 });
+ok(tieneCuenta(alumno(1, 'sin_contactar')), 'con cuenta real: tieneCuenta true');
+ok(!tieneCuenta(sinCuenta('sin_contactar')), 'sin cuenta: tieneCuenta false');
+ok(!tieneCuenta(null), 'sin fila no rompe');
+ok(!tieneCuenta({ candidato_id: 201 }), 'sin el campo id tampoco ofrece acciones');
+ok(!puedeConfigurarPromocion(sinCuenta('sin_contactar')),
+    'sin cuenta NO se ofrece "Configurar promoción" (el backend daría 404)');
+ok(!puedeConfigurarPromocion(sinCuenta('vencida')), 'sin cuenta y vencida: tampoco');
+ok(!puedeMarcarRecuperado(sinCuenta('promocion_enviada')),
+    'sin cuenta NO se puede marcar recuperado');
+ok(puedeConfigurarPromocion(alumno(1, 'sin_contactar')), 'con cuenta sigue ofreciendo configurar');
+
 // ── 6. Fechas: el día chileno no se corre ───────────────────────────────────
 console.log('== 6. Fechas (día chileno) ==');
 eq(fechaTexto('2026-01-03'), '03-01-2026', 'una fecha sola del backend NO se corre un día');
@@ -182,6 +199,11 @@ ok(PANTALLA.includes('modal-promocion-tipo') && PANTALLA.includes('modal-promoci
     && PANTALLA.includes('modal-promocion-vence'),
     'el formulario pide tipo de beneficio, cantidad y fecha de vencimiento');
 ok(PANTALLA.includes('etiquetaCantidad'), 'el rótulo de la cantidad cambia con el tipo elegido');
+// El padrón: la clave de la fila es `candidato_id` y sin cuenta real no hay acciones.
+ok(PANTALLA.includes('candidato_id'), 'la fila se identifica por candidato_id (el padrón)');
+ok(PANTALLA.includes('Sin cuenta todavía'), 'avisa cuando el candidato todavía no tiene cuenta');
+ok(PANTALLA.includes('Sin historial de asistencia'),
+    'no dibuja "null días ausente" cuando el candidato no tiene historial');
 // Regla fija del proyecto: nada de emojis (color, negrita y badges en su lugar).
 ok(!EMOJI.test(PANTALLA), 'la pantalla no tiene emojis ni flechas-icono');
 

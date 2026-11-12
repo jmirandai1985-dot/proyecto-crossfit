@@ -6,10 +6,23 @@ lectura y responde bajo `/api/v1/migracion-boxmagic`.
 
 QUÉ HACE
 --------
-`GET /activacion` responde en qué etapa del embudo está cada alumno del box:
+`GET /activacion` responde en qué etapa del embudo está cada CANDIDATO del padrón de
+BoxMagic (`candidatos_boxmagic`, grupo 'activacion'):
 
     sin_invitar -> correo_enviado -> password_cambiada -> registro_completo
                                                           -> plan_comprado
+
+FUENTE DE DATOS (2026-12, antes de la migración real)
+----------------------------------------------------
+El padrón es el Excel de BoxMagic (`candidatos_boxmagic`): los alumnos reales existen
+en el panel ANTES de tener cuenta en el SaaS. Cada candidato se cruza POR CORREO
+(normalizado) con la tabla `usuarios` real:
+
+  * si YA hay un `Usuario` con ese correo, la etapa se deduce de SUS columnas (la misma
+    lógica de siempre, ver abajo);
+  * si todavía NO hay cuenta, la etapa es `sin_invitar` SIEMPRE: no hay nada que haya
+    pasado con él en el sistema (crear la cuenta es un paso POSTERIOR y aparte, el día
+    de la migración real).
 
 Todo se DEDUCE de columnas que ya existen (no hay tabla de etapas que se pueda
 desincronizar del dato real):
@@ -28,31 +41,39 @@ desincronizar del dato real):
 
 DECISIONES
 ----------
-* Alcance: sólo alumnos (`rol = 'alumno'`) del box del token. Es un panel de
+* Alcance: sólo el padrón del box del token (`candidatos_boxmagic.tenant_id`) y, del
+  lado de `usuarios`, sólo alumnos (`rol = 'alumno'`) del mismo box. Es un panel de
   administración, así que nunca se puede ver otra tenant.
 * `activado_hoy` = el hito de la etapa alcanzada cayó en las últimas 24 h (ventana
   móvil, no día calendario: el panel se mira a cualquier hora). `sin_invitar` no
   tiene hito, así que siempre es False.
 * En `password_cambiada` no hay columna propia del cambio de contraseña: se usa
   `correo_migracion_enviado_en`, el único instante de ese tramo que está en la fila.
+* En la respuesta, `id` es el id del `Usuario` REAL (None si todavía no hay cuenta) y
+  `candidato_id` el de `candidatos_boxmagic`. El panel usa `candidato_id` como clave de
+  la fila y `id` para las acciones (que necesitan una cuenta real).
 
 RECUPERACIÓN DE INACTIVOS (Fase 2)
 ----------------------------------
-`GET /recuperacion` lista los alumnos INACTIVOS del box con el estado de su oferta,
-`POST /recuperacion/{usuario_id}/promocion` configura una oferta puntual y manda un
-correo DEDICADO a esa oferta, y `PUT /recuperacion/{usuario_id}/marcar-recuperado`
-cierra el ciclo cuando el alumno vuelve. Ver la sección "Recuperación" al final del
-archivo para el criterio de "alumno inactivo" (el de `fidelizacion.py`).
+`GET /recuperacion` lista los CANDIDATOS del padrón con grupo 'recuperacion' (los que
+en BoxMagic están `Inactivo`) y el estado de su oferta. `POST
+/recuperacion/{usuario_id}/promocion` configura una oferta puntual y manda un correo
+DEDICADO a esa oferta, y `PUT /recuperacion/{usuario_id}/marcar-recuperado` cierra el
+ciclo cuando el alumno vuelve.
 """
 import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_admin
 from app.db.database import get_db
+from app.models.candidato_boxmagic import (
+    GRUPO_ACTIVACION, GRUPO_RECUPERACION, CandidatoBoxmagic, normalizar_correo,
+)
 from app.models.plan import Plan
 from app.models.promocion_recuperacion import (
     ESTADO_PROMO_ENVIADA, ESTADO_PROMO_RECUPERADO, ESTADO_PROMO_VENCIDA,
@@ -65,9 +86,8 @@ from app.services import email_service
 # fuente que el panel de Fidelización y la campaña de inactividad (ver
 # `services/asistencia_real.py`, bug "En riesgo = 251").
 from app.services.asistencia_real import ultima_asistencia_por_alumno
-# El umbral de días y el "hoy" de Chile NO se redefinen acá: se reusan los de
-# `fidelizacion.py` y `utils/santiago.py` para no crear un tercer criterio.
-from app.api.v1.fidelizacion import UMBRAL_ALERTA_DIAS
+# El "hoy" de Chile y el fin del día se reusan de `utils/santiago.py` para no crear un
+# segundo criterio de fechas en el proyecto.
 from app.utils.santiago import fin_del_dia_chile, hoy_santiago
 
 logger = logging.getLogger(__name__)
@@ -127,34 +147,77 @@ def _hito(alumno, etapa, fecha_plan):
     return None  # sin_invitar: ningún hito alcanzado todavía
 
 
+def _candidatos(db: Session, tenant_id: int, grupo: str) -> list:
+    """Padrón del box para UN panel ('activacion' | 'recuperacion').
+
+    Es la fuente de la lista: los alumnos reales de BoxMagic existen acá aunque todavía
+    no tengan cuenta en el SaaS. Ordenados por nombre (lo que ve el admin).
+    """
+    return (
+        db.query(CandidatoBoxmagic)
+        .filter(
+            CandidatoBoxmagic.tenant_id == tenant_id,
+            CandidatoBoxmagic.grupo == grupo,
+        )
+        .order_by(CandidatoBoxmagic.nombre.asc(), CandidatoBoxmagic.id.asc())
+        .all()
+    )
+
+
+def _usuarios_por_correo(db: Session, tenant_id: int, correos: list) -> dict:
+    """{correo_normalizado: Usuario} de las cuentas REALES del box.
+
+    El cruce con el padrón es por correo porque `candidatos_boxmagic` no tiene FK a
+    `usuarios` (la mayoría de los candidatos todavía no tiene cuenta). Se normalizan los
+    DOS lados: `lower(trim(correo))` en SQL (el SaaS guarda el correo como lo escribió
+    cada alumno) contra el correo ya normalizado del padrón. UNA consulta para todo el
+    listado, no una por fila.
+    """
+    if not correos:
+        return {}
+    filas = (
+        db.query(Usuario)
+        .filter(
+            Usuario.tenant_id == tenant_id,
+            Usuario.rol == RolUsuario.alumno,
+            func.lower(func.trim(Usuario.correo)).in_(correos),
+        )
+        .order_by(Usuario.id.asc())
+        .all()
+    )
+    mapa: dict = {}
+    for usuario in filas:
+        # `setdefault`: si hubiera dos cuentas con el mismo correo, gana la más vieja
+        # (id asc) en vez de que el resultado dependa del orden que devuelva Postgres.
+        mapa.setdefault(normalizar_correo(usuario.correo), usuario)
+    return mapa
+
+
 @router.get("/activacion")
 def get_activacion(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Estado de activación de CADA alumno del box + resumen del embudo.
+    """Estado de activación de CADA candidato del padrón + resumen del embudo.
 
-    Sólo lectura: no escribe nada ni envía correos (el envío es Fase 2). Sirve para
-    el panel que, antes de cargar a los ~712 alumnos reales de BoxMagic, muestra qué
-    falta hacer con cada uno.
+    Sólo lectura: no escribe nada ni envía correos (el envío es Fase 2). Sirve para el
+    panel que muestra a los ~712 alumnos reales de BoxMagic qué falta hacer con cada uno,
+    ANTES de crear sus cuentas: mientras no exista el `Usuario`, el candidato aparece en
+    `sin_invitar`.
     """
     tenant_id = current_user["tenant_id"]
 
-    alumnos = (
-        db.query(Usuario)
-        .filter(
-            Usuario.tenant_id == tenant_id,
-            Usuario.rol == RolUsuario.alumno,
-        )
-        .order_by(Usuario.nombre.asc(), Usuario.id.asc())
-        .all()
-    )
+    candidatos = _candidatos(db, tenant_id, GRUPO_ACTIVACION)
+    # LEFT JOIN por correo contra las cuentas reales (una sola consulta para todo el
+    # padrón): el candidato SIN cuenta simplemente no aparece en el mapa.
+    usuarios = _usuarios_por_correo(
+        db, tenant_id, [candidato.correo for candidato in candidatos])
 
     # UNA sola consulta de planes para todo el listado (no una por alumno: son
     # cientos de filas). Ordenada de la suscripción MÁS RECIENTE a la más vieja, así
     # la primera fila de cada alumno es el plan que se muestra y la fecha del hito.
     planes: dict = {}
-    ids = [alumno.id for alumno in alumnos]
+    ids = [usuario.id for usuario in usuarios.values()]
     if ids:
         filas = (
             db.query(Suscripcion, Plan)
@@ -177,10 +240,15 @@ def get_activacion(
     por_etapa = {etapa: 0 for etapa in ETAPAS}
     total_activados_hoy = 0
 
-    for alumno in alumnos:
-        plan_nombre, fecha_plan = planes.get(alumno.id, (None, None))
-        etapa = _etapa(alumno, plan_nombre)
-        hito = _hito(alumno, etapa, fecha_plan)
+    for candidato in candidatos:
+        alumno = usuarios.get(candidato.correo)
+        if alumno is None:
+            # Todavía no existe la cuenta real: no pasó NADA con él en el sistema.
+            etapa, plan_nombre, hito = "sin_invitar", None, None
+        else:
+            plan_nombre, fecha_plan = planes.get(alumno.id, (None, None))
+            etapa = _etapa(alumno, plan_nombre)
+            hito = _hito(alumno, etapa, fecha_plan)
         # Sin hito (sin_invitar) no puede estar "activado hoy": no pasó nada.
         activado_hoy = hito is not None and hito >= desde_ventana
 
@@ -189,9 +257,12 @@ def get_activacion(
             total_activados_hoy += 1
 
         listado.append({
-            "id": alumno.id,
-            "nombre": alumno.nombre,
-            "correo": alumno.correo,
+            # Id de la cuenta REAL (None mientras no exista) y del padrón: la fila del
+            # panel se identifica por `candidato_id`, y las acciones usan `id`.
+            "id": alumno.id if alumno is not None else None,
+            "candidato_id": candidato.id,
+            "nombre": candidato.nombre,
+            "correo": candidato.correo,
             "etapa": etapa,
             "plan_comprado": plan_nombre,
             "activado_hoy": activado_hoy,
@@ -211,20 +282,23 @@ def get_activacion(
 # ═══════════════════════════════════════════════════════════════════════════════
 #  RECUPERACIÓN DE ALUMNOS INACTIVOS (Fase 2)
 #
-#  CRITERIO DE "ALUMNO INACTIVO" — es EXACTAMENTE el de `fidelizacion.py`, no uno
-#  nuevo (el proyecto ya tenía dos lecturas distintas en `fidelizacion` y
-#  `kpis_populate`; no se agrega una tercera):
+#  CRITERIO DE "QUIÉN ESTÁ EN EL PANEL" (cambió en 2026-12, antes de la migración
+#  real): la lista es el PADRÓN de BoxMagic, no la tabla `usuarios`:
 #
-#      rol = 'alumno'  ∧  estado = 'activo'
-#      ∧ última asistencia REAL (`reservas.asistio`, vía
-#        `asistencia_real.ultima_asistencia_por_alumno`) NO nula
-#      ∧ (hoy_santiago() - última_asistencia).days >= UMBRAL_ALERTA_DIAS   (=7)
+#      candidatos_boxmagic.tenant_id = <box del token>  ∧  grupo = 'recuperacion'
 #
-#  Es el mismo conjunto de `fidelizacion.analizar_fidelizacion` (`alumnos_alerta`)
-#  y el del correo automático de inactividad de `alertas_email_service`. Un alumno
-#  que NUNCA asistió no entra: es el bucket `sin_historial` de Fidelización (nunca
-#  empezó a entrenar, no es alguien a quien "recuperar"). El número 7 no se
-#  reescribe acá: se importa `UMBRAL_ALERTA_DIAS`.
+#  y ese grupo se deriva del estado del Excel (`Inactivo` -> 'recuperacion', ver
+#  `grupo_desde_estado`). Antes se filtraba por asistencia real (7+ días sin venir, el
+#  criterio de `fidelizacion.py`); ya no: los candidatos todavía no tienen cuenta, así
+#  que no tienen asistencias que mirar, y quien decide quién dejó de venir es BoxMagic.
+#
+#  Cada candidato se cruza POR CORREO con `usuarios` (LEFT JOIN, ver
+#  `_usuarios_por_correo`):
+#    * CON cuenta real -> se muestran sus datos de contacto/asistencia y sus ofertas
+#      (`promociones_recuperacion.usuario_id`), igual que antes;
+#    * SIN cuenta real -> `ultima_asistencia`/`dias_ausente`/`telefono` en None y estado
+#      `sin_contactar` SIEMPRE (no hay a quién mandarle el correo: el envío sale de
+#      `usuarios`). Es el comportamiento esperado antes de crear las cuentas.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Estados del alumno en el panel, en el orden en que se publican.
@@ -234,40 +308,6 @@ ESTADOS_RECUPERACION = (
     "vencida",             # se le ofreció algo y la ventana ya pasó
     "recuperado",          # volvió (lo marcó el admin)
 )
-
-
-def _alumnos_inactivos(db: Session, tenant_id: int) -> list:
-    """[(alumno, última_asistencia, días_ausente)] del box, más ausente primero.
-
-    Una sola consulta de asistencias para todo el padrón (sin N+1) y el "hoy" de
-    Chile, igual que `fidelizacion.py`: un cálculo con la TZ del servidor (UTC) corre
-    un día el conteo de noche.
-    """
-    alumnos = (
-        db.query(Usuario)
-        .filter(
-            Usuario.tenant_id == tenant_id,
-            Usuario.rol == RolUsuario.alumno,
-            Usuario.estado == "activo",
-        )
-        .all()
-    )
-    if not alumnos:
-        return []
-
-    mapa = ultima_asistencia_por_alumno(db, tenant_id, [a.id for a in alumnos])
-    hoy = hoy_santiago()
-    inactivos = []
-    for alumno in alumnos:
-        ultima = mapa.get(alumno.id)
-        if ultima is None:
-            continue  # sin historial: nunca entrenó -> NO es "inactivo"
-        dias = (hoy - ultima).days
-        if dias < UMBRAL_ALERTA_DIAS:
-            continue
-        inactivos.append((alumno, ultima, dias))
-    inactivos.sort(key=lambda fila: fila[2], reverse=True)
-    return inactivos
 
 
 def _estado_recuperacion(promo, ahora: datetime) -> str:
@@ -369,21 +409,27 @@ def get_recuperacion(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Alumnos INACTIVOS del box + el estado de su oferta de recuperación.
+    """Candidatos INACTIVOS del padrón + el estado de su oferta de recuperación.
 
-    Sólo lectura. El criterio de "inactivo" es el de `fidelizacion.py` (ver el
-    bloque de arriba): activos, con historial real de asistencia y 7+ días sin
-    venir. Para cada uno se mira su oferta MÁS RECIENTE, que es la que manda:
-    `sin_contactar` (nunca se le ofreció nada), `promocion_enviada` (oferta con
-    ventana abierta), `vencida` (la ventana pasó) o `recuperado` (volvió).
+    Sólo lectura. La lista sale de `candidatos_boxmagic` con grupo 'recuperacion' (los
+    que en BoxMagic están Inactivo, ver el bloque de arriba) y cada uno se cruza por
+    correo con la cuenta REAL del SaaS. Para cada uno se mira su oferta MÁS RECIENTE,
+    que es la que manda: `sin_contactar` (nunca se le ofreció nada), `promocion_enviada`
+    (oferta con ventana abierta), `vencida` (la ventana pasó) o `recuperado` (volvió).
+
+    Un candidato SIN cuenta real cae siempre en `sin_contactar`: no hay `usuario_id` al
+    que colgarle una oferta ni correo del que sacar el destinatario. Es lo esperado
+    antes de la migración real (crear las cuentas es un paso POSTERIOR).
     """
     tenant_id = current_user["tenant_id"]
-    inactivos = _alumnos_inactivos(db, tenant_id)
+    candidatos = _candidatos(db, tenant_id, GRUPO_RECUPERACION)
+    usuarios = _usuarios_por_correo(
+        db, tenant_id, [candidato.correo for candidato in candidatos])
 
     # UNA sola consulta de ofertas para todo el listado, de la más reciente a la más
     # vieja: la primera fila de cada alumno es la que define su estado.
     promociones: dict = {}
-    ids = [alumno.id for alumno, _, _ in inactivos]
+    ids = [usuario.id for usuario in usuarios.values()]
     if ids:
         filas = (
             db.query(PromocionRecuperacion)
@@ -398,21 +444,34 @@ def get_recuperacion(
         for promo in filas:
             promociones.setdefault(promo.usuario_id, promo)
 
+    # Última asistencia REAL de las cuentas que existen (una sola consulta, sin N+1).
+    # Los días se cuentan con el "hoy" de Chile, igual que `fidelizacion.py`: con la TZ
+    # del servidor (UTC) el conteo se corre un día de noche.
+    ultimas = ultima_asistencia_por_alumno(db, tenant_id, ids) if ids else {}
+    hoy = hoy_santiago()
+
     ahora = datetime.now(timezone.utc)
     listado = []
     por_estado = {estado: 0 for estado in ESTADOS_RECUPERACION}
 
-    for alumno, ultima, dias in inactivos:
-        promo = promociones.get(alumno.id)
+    for candidato in candidatos:
+        alumno = usuarios.get(candidato.correo)
+        promo = promociones.get(alumno.id) if alumno is not None else None
         estado = _estado_recuperacion(promo, ahora)
         por_estado[estado] += 1
+
+        ultima = ultimas.get(alumno.id) if alumno is not None else None
         listado.append({
-            "id": alumno.id,
-            "nombre": alumno.nombre,
-            "correo": alumno.correo,
-            "telefono": alumno.telefono,
+            # Id de la cuenta REAL (None mientras no exista) y del padrón: la fila del
+            # panel se identifica por `candidato_id`, y las acciones (oferta / marcar
+            # recuperado) necesitan el `id` de una cuenta real.
+            "id": alumno.id if alumno is not None else None,
+            "candidato_id": candidato.id,
+            "nombre": candidato.nombre,
+            "correo": candidato.correo,
+            "telefono": alumno.telefono if alumno is not None else None,
             "ultima_asistencia": str(ultima) if ultima else None,
-            "dias_ausente": dias,
+            "dias_ausente": (hoy - ultima).days if ultima else None,
             "estado": estado,
             "promocion": _promocion_json(promo),
         })
@@ -435,6 +494,11 @@ def crear_promocion_recuperacion(
     current_user: dict = Depends(get_current_admin),
 ):
     """Configura la oferta de un alumno y le manda el correo DEDICADO a esa oferta.
+
+    ⚠️ Requiere que el alumno YA tenga cuenta real en `usuarios`: la oferta se cuelga de
+    `usuario_id` (FK) y el destinatario del correo sale de esa fila. Antes de la
+    migración real, un candidato del padrón que todavía no tiene cuenta responde 404
+    "Alumno no encontrado": es el estado esperado, no un bug.
 
     La fila se guarda ANTES de mandar el correo: si el envío falla, la oferta existe
     igual (el admin la ve en el panel y puede contactar al alumno a mano) y el

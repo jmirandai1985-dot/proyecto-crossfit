@@ -24,6 +24,7 @@ from app.models.producto import Producto, ProductoImagen
 from app.models.reserva import Reserva
 from app.models.suspension_plan import SuspensionPlan
 from app.models.promocion_recuperacion import PromocionRecuperacion
+from app.models.candidato_boxmagic import CandidatoBoxmagic
 from app.models.archivo_retencion import (
     AsistenciaArchivo, ReservaArchivo, RetencionBloqueo,
 )
@@ -52,6 +53,7 @@ __all__ = ["Tenant", "Usuario", "RolUsuario",
            "Clase", "CoachDisciplina", "Disciplina", "HistorialRM",
            "HorarioBase", "HorarioCoach", "Pedido", "Producto",
            "ProductoImagen", "Reserva", "SuspensionPlan", "PromocionRecuperacion",
+           "CandidatoBoxmagic",
            "AsistenciaArchivo", "ReservaArchivo", "RetencionBloqueo",
            "RetencionAlumno", "SolicitudPlan", "Asistencia", "HitoAlumno",
            "Auditoria", "PasswordResetToken", "Beneficio", "EstadoBeneficio",

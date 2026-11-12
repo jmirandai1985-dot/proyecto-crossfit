@@ -118,6 +118,9 @@ ok(PANTALLA.includes('useMigracionActivacion'), 'la pantalla usa el hook del end
 ok(PANTALLA.includes('ETAPAS_ACTIVACION'), 'las tarjetas salen de la lista de etapas');
 ok(!/\bfetch\(|\baxios\b/.test(PANTALLA), 'la pantalla no pide nada a mano');
 ok(PANTALLA.includes('tarjeta-activados-hoy'), 'existe la tarjeta clickeable de "hoy"');
+// El padrón (2026-12): `id` es la cuenta REAL (null si todavía no existe) y la clave de
+// la fila es `candidato_id`; si no, casi todas las filas compartirían la misma key.
+ok(PANTALLA.includes('candidato_id'), 'la fila se identifica por candidato_id (el padrón)');
 // Regla fija del proyecto: nada de emojis (color, negrita y badges en su lugar).
 const EMOJI = /[\u{1F000}-\u{1FAFF}\u{2190}-\u{21FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/u;
 ok(!EMOJI.test(PANTALLA), 'la pantalla no tiene emojis ni flechas-icono');

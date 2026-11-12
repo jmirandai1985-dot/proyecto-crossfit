@@ -8,7 +8,7 @@ import {
     ESTADOS_RECUPERACION, TIPOS_BENEFICIO, badgeEstado, conteoPorEstado, esVencimientoValido,
     fechaEnDias, fechaParaInput, fechaTexto, filtrarAlumnos, hayFiltro,
     pendientesPorRecuperar, porcentajeRecuperado, puedeConfigurarPromocion,
-    puedeMarcarRecuperado, textoBeneficio, tipoBeneficioDe, totalAlumnos,
+    puedeMarcarRecuperado, textoBeneficio, tieneCuenta, tipoBeneficioDe, totalAlumnos,
 } from '../../utils/migracionRecuperacion';
 
 /**
@@ -208,12 +208,15 @@ const FormularioPromocion = ({ alumno, onClose }) => {
  * sección del menú (`config/menu.js`), las rutas de `App.jsx` y este archivo.
  *
  * LEE Y ESCRIBE (los dos endpoints ya existían desde la Fase 2):
- *   - `GET  /api/v1/migracion-boxmagic/recuperacion` lista los inactivos (7+ días sin
- *     venir, con historial real) y el estado de su última oferta. El criterio de
- *     "inactivo" y el estado (`sin_contactar` / `promocion_enviada` / `vencida` /
+ *   - `GET  /api/v1/migracion-boxmagic/recuperacion` lista a los CANDIDATOS del padrón
+ *     de BoxMagic que están `Inactivo` (el padrón se carga con
+ *     `scripts/importar_candidatos_boxmagic.py`; son los alumnos reales, SIN crearles
+ *     cuenta todavía) y el estado de su última oferta. El criterio de quién está en la
+ *     lista y el estado (`sin_contactar` / `promocion_enviada` / `vencida` /
  *     `recuperado`) los decide el backend: acá no se recalcula nada de eso.
  *   - `POST .../recuperacion/{usuario_id}/promocion` guarda la oferta y manda el correo
- *     dedicado.
+ *     dedicado. Necesita la CUENTA REAL del alumno: las filas del padrón que todavía no
+ *     tienen cuenta no ofrecen la acción (se muestran igual, en `sin_contactar`).
  *   - `PUT  .../recuperacion/{usuario_id}/marcar-recuperado` marca que el alumno volvió.
  *
  * Interacción (mismo patrón que el panel de Activación): las 4 tarjetas son botones que
@@ -287,7 +290,7 @@ const MigracionRecuperacion = () => {
                             Panel de Recuperación — Migración BoxMagic
                         </h1>
                         <p className="text-zinc-400 text-sm mt-1">
-                            Alumnos inactivos (7 días o más sin venir) y la oferta que se les envió.
+                            Los alumnos que en BoxMagic figuran Inactivo, con la oferta que se les envió.
                         </p>
                     </div>
                     <button
@@ -419,8 +422,11 @@ const MigracionRecuperacion = () => {
                                 const configurable = puedeConfigurarPromocion(alumno);
                                 const marcable = puedeMarcarRecuperado(alumno);
                                 const enVuelo = marcandoId === alumno.id;
+                                // Clave de la fila = `candidato_id` (el padrón). `id` es la
+                                // cuenta REAL y viene en null mientras no exista.
+                                const clave = alumno.candidato_id ?? alumno.id;
                                 return (
-                                    <tr key={alumno.id} data-alumno-id={alumno.id} className="hover:bg-zinc-800/40">
+                                    <tr key={clave} data-alumno-id={clave} className="hover:bg-zinc-800/40">
                                         <td className="px-6 py-3 text-sm font-medium text-zinc-100">{alumno.nombre}</td>
                                         <td className="px-6 py-3 text-sm text-zinc-400">{alumno.correo}</td>
                                         <td className="px-6 py-3 text-sm text-zinc-300">
@@ -428,7 +434,9 @@ const MigracionRecuperacion = () => {
                                                 ? fechaTexto(alumno.ultima_asistencia)
                                                 : '—'}
                                             <span className="block text-[11.5px] text-zinc-500">
-                                                {alumno.dias_ausente} día{alumno.dias_ausente === 1 ? '' : 's'} ausente
+                                                {alumno.dias_ausente === null || alumno.dias_ausente === undefined
+                                                    ? 'Sin historial de asistencia'
+                                                    : `${alumno.dias_ausente} día${alumno.dias_ausente === 1 ? '' : 's'} ausente`}
                                             </span>
                                         </td>
                                         <td className="px-6 py-3 text-sm">
@@ -473,7 +481,11 @@ const MigracionRecuperacion = () => {
                                                 </button>
                                             )}
                                             {!configurable && !marcable && (
-                                                <span className="text-zinc-500">—</span>
+                                                <span className="text-[11.5px] text-zinc-500">
+                                                    {tieneCuenta(alumno)
+                                                        ? '—'
+                                                        : 'Sin cuenta todavía'}
+                                                </span>
                                             )}
                                         </td>
                                     </tr>
@@ -482,7 +494,7 @@ const MigracionRecuperacion = () => {
                                 <tr>
                                     <td colSpan={6} className="px-6 py-8 text-center text-sm text-zinc-400">
                                         {alumnos.length === 0
-                                            ? 'No hay alumnos inactivos: todos siguen viniendo.'
+                                            ? 'El padrón de BoxMagic no tiene alumnos inactivos cargados todavía.'
                                             : 'Ningún alumno coincide con el filtro.'}
                                     </td>
                                 </tr>

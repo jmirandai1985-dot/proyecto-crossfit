@@ -4,10 +4,12 @@ Cubre, SIN BD y SIN red (app mínima con el router REAL de `migracion_boxmagic.p
 `get_db` falsa y la última asistencia inyectada — mismo patrón que
 `test_migracion_boxmagic_activacion.py`):
 
+  * GET: la lista sale del PADRÓN (`candidatos_boxmagic`, grupo 'recuperacion'), cruzada
+    por CORREO con las cuentas reales; un candidato sin cuenta cae en `sin_contactar`.
   * GET: los CUATRO estados (`sin_contactar`, `promocion_enviada`, `vencida`,
     `recuperado`), la oferta MÁS RECIENTE y el resumen agregado.
-  * GET: el criterio de "alumno inactivo" (7+ días sin asistir, con historial REAL:
-    quien nunca entrenó no entra, igual que en `fidelizacion.py`).
+  * GET: la asistencia ya NO decide quién está en el panel (lo decide el estado de
+    BoxMagic); sólo se usa para mostrar `ultima_asistencia` / `dias_ausente`.
   * POST: crea la fila, manda el correo (MOCKEADO, no sale nada) y responde
     `correo_enviado` true/false, incluido el caso en que el envío revienta: la oferta
     se guarda igual (best-effort).
@@ -30,6 +32,7 @@ from app.api.v1 import migracion_boxmagic  # noqa: E402
 from app.core.dependencies import (  # noqa: E402
     get_current_admin, get_current_user, get_db,
 )
+from app.models.candidato_boxmagic import CandidatoBoxmagic  # noqa: E402
 from app.models.promocion_recuperacion import PromocionRecuperacion  # noqa: E402
 from app.models.usuario import Usuario  # noqa: E402
 from app.services import email_service  # noqa: E402
@@ -46,8 +49,25 @@ EN_10_DIAS = AHORA + timedelta(days=10)
 AYER = datetime.now(timezone.utc) - timedelta(days=3)
 
 
-class _FilaAlumno:
-    """Lo mínimo que el endpoint lee de `usuarios`."""
+class _FilaCandidato:
+    """Una fila del PADRÓN (`candidatos_boxmagic`), grupo 'recuperacion'."""
+
+    def __init__(self, id_, nombre, correo, *, grupo="recuperacion",
+                 estado_boxmagic="Inactivo", tenant_id=TENANT):
+        self.id = id_
+        self.tenant_id = tenant_id
+        self.nombre = nombre
+        self.correo = correo.lower()
+        self.estado_boxmagic = estado_boxmagic
+        self.grupo = grupo
+
+
+class _FilaUsuario:
+    """Una cuenta REAL del SaaS (`usuarios`): sólo la tienen los ya migrados.
+
+    Los ids van en otro rango que los del padrón (1.. vs 201..) a propósito: si el
+    endpoint mezclara los dos ids, los tests lo verían.
+    """
 
     def __init__(self, id_, nombre="Alumno", correo="alumno@test.com", telefono=None,
                  estado="activo", tenant_id=TENANT):
@@ -94,11 +114,13 @@ class _Consulta:
 
 
 class _SesionFalsa:
-    """Session mínima: `query(Usuario)` devuelve alumnos y `query(PromocionRecuperacion)`
-    las ofertas tal como se configuraron; `add` les asigna id como haría Postgres."""
+    """Session mínima: `query(CandidatoBoxmagic)` devuelve el padrón, `query(Usuario)`
+    las cuentas reales y `query(PromocionRecuperacion)` las ofertas tal como se
+    configuraron; `add` les asigna id como haría Postgres."""
 
-    def __init__(self, alumnos=None, promociones=None):
-        self._alumnos = alumnos or []
+    def __init__(self, candidatos=None, usuarios=None, promociones=None):
+        self._candidatos = candidatos or []
+        self._usuarios = usuarios or []
         self._promociones = promociones or []
         self.agregados = []
         self.commits = 0
@@ -106,8 +128,10 @@ class _SesionFalsa:
 
     def query(self, *modelos):
         primero = modelos[0] if modelos else None
+        if primero is CandidatoBoxmagic:
+            return _Consulta(self._candidatos)
         if primero is Usuario:
-            return _Consulta(self._alumnos)
+            return _Consulta(self._usuarios)
         if primero is PromocionRecuperacion:
             return _Consulta(self._promociones)
         return _Consulta([])
@@ -203,18 +227,28 @@ def _mock_envio(monkeypatch, resultado=(True, 555), revienta=False):
     return llamadas
 
 
-def _por_id(body):
-    return {alumno["id"]: alumno for alumno in body["alumnos"]}
-
+def _por_candidato(body):
+    """{candidato_id: fila}: la fila del panel se identifica por el padrón."""
+    return {fila["candidato_id"]: fila for fila in body["alumnos"]}
 
 
 def _escenario_cuatro_estados(ultima=HOY - timedelta(days=20)):
-    """Un alumno inactivo por CADA estado del panel (ids 1..4)."""
-    alumnos = [
-        _FilaAlumno(1, "Sin Contactar", "sin@test.com"),
-        _FilaAlumno(2, "Con Oferta Viva", "viva@test.com"),
-        _FilaAlumno(3, "Oferta Vencida", "vencida@test.com"),
-        _FilaAlumno(4, "Ya Volvió", "volvio@test.com"),
+    """Un candidato inactivo por CADA estado del panel (padrón 201..204, cuentas 1..4).
+
+    Los cuatro tienen cuenta REAL (es el escenario "ya migrados"): así se pueden colgar
+    ofertas (`promociones_recuperacion.usuario_id`) y ver los cuatro estados.
+    """
+    candidatos = [
+        _FilaCandidato(201, "Sin Contactar", "sin@test.com"),
+        _FilaCandidato(202, "Con Oferta Viva", "viva@test.com"),
+        _FilaCandidato(203, "Oferta Vencida", "vencida@test.com"),
+        _FilaCandidato(204, "Ya Volvió", "volvio@test.com"),
+    ]
+    usuarios = [
+        _FilaUsuario(1, "Sin Contactar", "sin@test.com"),
+        _FilaUsuario(2, "Con Oferta Viva", "viva@test.com"),
+        _FilaUsuario(3, "Oferta Vencida", "vencida@test.com"),
+        _FilaUsuario(4, "Ya Volvió", "volvio@test.com"),
     ]
     promociones = [
         _FilaPromo(11, usuario_id=2, estado="enviada", vence_en=EN_10_DIAS),
@@ -222,8 +256,69 @@ def _escenario_cuatro_estados(ultima=HOY - timedelta(days=20)):
                    vence_en=AHORA - timedelta(days=2)),
         _FilaPromo(13, usuario_id=4, estado="recuperado", vence_en=EN_10_DIAS),
     ]
-    return (_SesionFalsa(alumnos=alumnos, promociones=promociones),
+    return (_SesionFalsa(candidatos=candidatos, usuarios=usuarios,
+                         promociones=promociones),
             {1: ultima, 2: ultima, 3: ultima, 4: ultima})
+
+
+# ── GET: la lista sale del PADRÓN, no de `usuarios` ──────────────────────────
+def test_get_lista_los_candidatos_del_padron(monkeypatch):
+    """Aparecen los candidatos del padrón, incluso los que todavía no tienen cuenta."""
+    candidatos = [
+        _FilaCandidato(201, "Sin Cuenta", "sincuenta@test.com"),
+        _FilaCandidato(202, "Con Cuenta", "concuenta@test.com"),
+    ]
+    usuarios = [
+        _FilaUsuario(1, "Con Cuenta", "concuenta@test.com"),
+        # Cuenta real que NO está en el padrón: no se lista.
+        _FilaUsuario(9, "Alumno De Prueba", "prueba@test.com"),
+    ]
+    _parchear(monkeypatch, {1: HOY - timedelta(days=40)})
+    cliente = _cliente_con(_SesionFalsa(candidatos=candidatos, usuarios=usuarios))
+
+    body = cliente.get(RUTA).json()
+
+    assert [f["nombre"] for f in body["alumnos"]] == ["Sin Cuenta", "Con Cuenta"]
+    assert body["resumen"]["total"] == 2
+
+
+def test_get_candidato_sin_cuenta_cae_en_sin_contactar(monkeypatch):
+    """Sin `Usuario` no hay a quién ofrecerle ni de dónde sacar el correo: sin_contactar.
+
+    Es el estado esperado ANTES de la migración real: la mayoría del padrón todavía no
+    tiene cuenta, y el panel tiene que mostrarlos igual.
+    """
+    candidatos = [_FilaCandidato(201, "Nuevo del Padrón", "nuevo@test.com")]
+    _parchear(monkeypatch, {})
+    cliente = _cliente_con(_SesionFalsa(candidatos=candidatos, usuarios=[]))
+
+    fila = _por_candidato(cliente.get(RUTA).json())[201]
+
+    assert fila["estado"] == "sin_contactar"
+    assert fila["id"] is None                 # no hay cuenta real todavía
+    assert fila["promocion"] is None
+    assert fila["telefono"] is None
+    assert fila["ultima_asistencia"] is None
+    assert fila["dias_ausente"] is None
+
+
+def test_get_la_asistencia_ya_no_decide_quien_esta_en_el_panel(monkeypatch):
+    """Quien vino ayer SIGUE en el panel si en BoxMagic está Inactivo.
+
+    El criterio de "inactivo" pasó a ser el estado del Excel (grupo 'recuperacion'), no
+    los 7+ días sin asistir de `fidelizacion.py`: los candidatos no tienen asistencias
+    todavía y quien decide quién dejó de venir es BoxMagic. La asistencia sólo se usa
+    para MOSTRAR cuánto hace que no viene.
+    """
+    candidatos = [_FilaCandidato(201, "Vino Ayer", "vinoayer@test.com")]
+    usuarios = [_FilaUsuario(1, "Vino Ayer", "vinoayer@test.com")]
+    _parchear(monkeypatch, {1: HOY - timedelta(days=2)})
+    cliente = _cliente_con(_SesionFalsa(candidatos=candidatos, usuarios=usuarios))
+
+    fila = _por_candidato(cliente.get(RUTA).json())[201]
+
+    assert fila["estado"] == "sin_contactar"
+    assert fila["dias_ausente"] == 2
 
 
 # ── GET: los cuatro estados ─────────────────────────────────────────────────
@@ -235,15 +330,15 @@ def test_get_clasifica_los_cuatro_estados(monkeypatch):
     r = cliente.get(RUTA)
 
     assert r.status_code == 200, r.text
-    alumnos = _por_id(r.json())
-    assert alumnos[1]["estado"] == "sin_contactar"
-    assert alumnos[1]["promocion"] is None
-    assert alumnos[2]["estado"] == "promocion_enviada"
-    assert alumnos[2]["promocion"]["id"] == 11
-    assert alumnos[3]["estado"] == "vencida"
-    assert alumnos[3]["promocion"]["id"] == 12
-    assert alumnos[4]["estado"] == "recuperado"
-    assert alumnos[4]["promocion"]["id"] == 13
+    alumnos = _por_candidato(r.json())
+    assert alumnos[201]["estado"] == "sin_contactar"
+    assert alumnos[201]["promocion"] is None
+    assert alumnos[202]["estado"] == "promocion_enviada"
+    assert alumnos[202]["promocion"]["id"] == 11
+    assert alumnos[203]["estado"] == "vencida"
+    assert alumnos[203]["promocion"]["id"] == 12
+    assert alumnos[204]["estado"] == "recuperado"
+    assert alumnos[204]["promocion"]["id"] == 13
 
 
 def test_get_resumen_cuadra_con_las_filas(monkeypatch):
@@ -267,7 +362,7 @@ def test_get_lista_las_ofertas_del_alumno_y_sus_dias(monkeypatch):
     _parchear(monkeypatch, ultimas)
     cliente = _cliente_con(sesion)
 
-    fila = _por_id(cliente.get(RUTA).json())[2]
+    fila = _por_candidato(cliente.get(RUTA).json())[202]
 
     assert fila["nombre"] == "Con Oferta Viva"
     assert fila["correo"] == "viva@test.com"
@@ -278,40 +373,14 @@ def test_get_lista_las_ofertas_del_alumno_y_sus_dias(monkeypatch):
     assert fila["promocion"]["vence_en"] == EN_10_DIAS.isoformat()
 
 
-# ── GET: quién es "inactivo" ────────────────────────────────────────────────
-def test_get_excluye_a_quien_asistio_dentro_del_umbral(monkeypatch):
-    alumnos = [
-        _FilaAlumno(1, "Activo", "activo@test.com"),
-        _FilaAlumno(2, "Inactivo", "inactivo@test.com"),
-    ]
-    _parchear(monkeypatch, {1: HOY - timedelta(days=2),
-                            2: HOY - timedelta(days=30)})
-    cliente = _cliente_con(_SesionFalsa(alumnos=alumnos))
-
-    alumnos_json = cliente.get(RUTA).json()["alumnos"]
-
-    assert [a["id"] for a in alumnos_json] == [2]
-    assert alumnos_json[0]["dias_ausente"] == 30
-
-
-def test_get_excluye_a_quien_nunca_asistio(monkeypatch):
-    """Sin historial NO es un inactivo a recuperar: nunca empezó a entrenar.
-
-    Es el mismo criterio de `fidelizacion.py` (bucket `sin_historial`).
-    """
-    alumnos = [_FilaAlumno(1, "Recién Inscrito", "nuevo@test.com")]
-    _parchear(monkeypatch, {})  # sin última asistencia
-    cliente = _cliente_con(_SesionFalsa(alumnos=alumnos))
-
-    body = cliente.get(RUTA).json()
-
-    assert body["alumnos"] == []
-    assert body["resumen"]["total"] == 0
-
-
-def test_get_sin_alumnos_devuelve_panel_vacio(monkeypatch):
+# ── GET: borde del panel ────────────────────────────────────────────────────
+def test_get_sin_candidatos_devuelve_panel_vacio(monkeypatch):
+    """Un box sin padrón cargado: lista vacía (no los alumnos de prueba del SaaS)."""
     _parchear(monkeypatch, {})
-    cliente = _cliente_con(_SesionFalsa(alumnos=[], promociones=[]))
+    cliente = _cliente_con(_SesionFalsa(
+        candidatos=[],
+        usuarios=[_FilaUsuario(1, "Alumno De Prueba", "prueba@test.com")],
+        promociones=[]))
 
     body = cliente.get(RUTA).json()
 
@@ -325,16 +394,18 @@ def test_get_sin_alumnos_devuelve_panel_vacio(monkeypatch):
 
 def test_get_manda_la_oferta_mas_reciente(monkeypatch):
     """Dos ofertas: la última (viva) define el estado, no la vieja vencida."""
-    alumnos = [_FilaAlumno(9, "Renovó Oferta", "r@test.com")]
+    candidatos = [_FilaCandidato(201, "Renovó Oferta", "r@test.com")]
+    usuarios = [_FilaUsuario(9, "Renovó Oferta", "r@test.com")]
     promociones = [
         _FilaPromo(30, usuario_id=9, estado="enviada", vence_en=EN_10_DIAS),
         _FilaPromo(20, usuario_id=9, estado="enviada",
                    vence_en=AHORA - timedelta(days=15)),
     ]
     _parchear(monkeypatch, {9: HOY - timedelta(days=40)})
-    cliente = _cliente_con(_SesionFalsa(alumnos=alumnos, promociones=promociones))
+    cliente = _cliente_con(_SesionFalsa(
+        candidatos=candidatos, usuarios=usuarios, promociones=promociones))
 
-    fila = _por_id(cliente.get(RUTA).json())[9]
+    fila = _por_candidato(cliente.get(RUTA).json())[201]
 
     assert fila["estado"] == "promocion_enviada"
     assert fila["promocion"]["id"] == 30
@@ -351,13 +422,19 @@ def _cuerpo(tipo_beneficio="dias_gratis", cantidad=5, vence_en=None):
     }
 
 
-def _alumno_inactivo():
-    return _FilaAlumno(ALUMNO_ID, "Inactivo", "inactivo@test.com",
-                       telefono="+56911111111")
+def _alumno_real():
+    """La cuenta REAL (`usuarios`) a la que se le configura la oferta.
+
+    POST/PUT exigen un `Usuario` de verdad: la oferta se cuelga de `usuario_id` y el
+    correo sale de esa fila. Un candidato del padrón sin cuenta no puede recibir oferta
+    (404 "Alumno no encontrado"), que es lo esperado antes de la migración real.
+    """
+    return _FilaUsuario(ALUMNO_ID, "Inactivo", "inactivo@test.com",
+                        telefono="+56911111111")
 
 
 def test_post_crea_la_fila_y_manda_el_correo(monkeypatch):
-    sesion = _SesionFalsa(alumnos=[_alumno_inactivo()])
+    sesion = _SesionFalsa(usuarios=[_alumno_real()])
     llamadas = _mock_envio(monkeypatch, (True, 555))
     cliente = _cliente_con(sesion)
 
@@ -393,7 +470,7 @@ def test_post_crea_la_fila_y_manda_el_correo(monkeypatch):
 
 def test_post_si_el_correo_falla_la_oferta_se_guarda_igual(monkeypatch):
     """Best-effort: el envío devuelve False y la oferta existe igual."""
-    sesion = _SesionFalsa(alumnos=[_alumno_inactivo()])
+    sesion = _SesionFalsa(usuarios=[_alumno_real()])
     _mock_envio(monkeypatch, (False, None))
     cliente = _cliente_con(sesion)
 
@@ -409,7 +486,7 @@ def test_post_si_el_correo_falla_la_oferta_se_guarda_igual(monkeypatch):
 
 def test_post_si_el_envio_revienta_no_rompe_el_endpoint(monkeypatch):
     """Una excepción del SMTP no puede tumbar el alta de la oferta."""
-    sesion = _SesionFalsa(alumnos=[_alumno_inactivo()])
+    sesion = _SesionFalsa(usuarios=[_alumno_real()])
     _mock_envio(monkeypatch, revienta=True)
     cliente = _cliente_con(sesion)
 
@@ -423,7 +500,7 @@ def test_post_si_el_envio_revienta_no_rompe_el_endpoint(monkeypatch):
 
 def test_post_alumno_de_otro_box_404(monkeypatch):
     _mock_envio(monkeypatch)
-    cliente = _cliente_con(_SesionFalsa(alumnos=[]))
+    cliente = _cliente_con(_SesionFalsa(usuarios=[]))
 
     r = cliente.post(f"{RUTA}/{ALUMNO_ID}/promocion", json=_cuerpo())
 
@@ -433,7 +510,7 @@ def test_post_alumno_de_otro_box_404(monkeypatch):
 
 def test_post_tipo_de_beneficio_invalido_422(monkeypatch):
     _mock_envio(monkeypatch)
-    cliente = _cliente_con(_SesionFalsa(alumnos=[_alumno_inactivo()]))
+    cliente = _cliente_con(_SesionFalsa(usuarios=[_alumno_real()]))
 
     r = cliente.post(f"{RUTA}/{ALUMNO_ID}/promocion",
                      json=_cuerpo(tipo_beneficio="2x1"))
@@ -443,7 +520,7 @@ def test_post_tipo_de_beneficio_invalido_422(monkeypatch):
 
 def test_post_vence_en_el_pasado_400(monkeypatch):
     llamadas = _mock_envio(monkeypatch)
-    sesion = _SesionFalsa(alumnos=[_alumno_inactivo()])
+    sesion = _SesionFalsa(usuarios=[_alumno_real()])
     cliente = _cliente_con(sesion)
 
     r = cliente.post(f"{RUTA}/{ALUMNO_ID}/promocion",
@@ -463,7 +540,7 @@ def test_post_vence_en_se_guarda_como_fin_de_dia_chile(monkeypatch):
     """
     for payload in ("2026-12-31T00:00:00", "2026-12-31T00:00:00Z",
                     "2026-12-31T23:59:59-03:00"):
-        sesion = _SesionFalsa(alumnos=[_alumno_inactivo()])
+        sesion = _SesionFalsa(usuarios=[_alumno_real()])
         llamadas = _mock_envio(monkeypatch, (True, 1))
         cliente = _cliente_con(sesion)
 
@@ -483,7 +560,7 @@ def test_put_marca_la_promocion_vigente_como_recuperada(monkeypatch):
     _mock_envio(monkeypatch)
     promo = _FilaPromo(40, usuario_id=ALUMNO_ID, estado="enviada",
                        vence_en=EN_10_DIAS)
-    sesion = _SesionFalsa(alumnos=[_alumno_inactivo()], promociones=[promo])
+    sesion = _SesionFalsa(usuarios=[_alumno_real()], promociones=[promo])
     cliente = _cliente_con(sesion)
 
     r = cliente.put(f"{RUTA}/{ALUMNO_ID}/marcar-recuperado")
@@ -500,7 +577,7 @@ def test_put_marca_la_promocion_vigente_como_recuperada(monkeypatch):
 
 def test_put_sin_promocion_vigente_404(monkeypatch):
     _mock_envio(monkeypatch)
-    sesion = _SesionFalsa(alumnos=[_alumno_inactivo()], promociones=[])
+    sesion = _SesionFalsa(usuarios=[_alumno_real()], promociones=[])
     cliente = _cliente_con(sesion)
 
     r = cliente.put(f"{RUTA}/{ALUMNO_ID}/marcar-recuperado")
@@ -512,7 +589,7 @@ def test_put_sin_promocion_vigente_404(monkeypatch):
 
 def test_put_alumno_de_otro_box_404(monkeypatch):
     _mock_envio(monkeypatch)
-    cliente = _cliente_con(_SesionFalsa(alumnos=[], promociones=[]))
+    cliente = _cliente_con(_SesionFalsa(usuarios=[], promociones=[]))
 
     r = cliente.put(f"{RUTA}/{ALUMNO_ID}/marcar-recuperado")
 
