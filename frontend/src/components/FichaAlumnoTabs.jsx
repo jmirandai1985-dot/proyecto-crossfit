@@ -74,8 +74,15 @@ const SeccionPanel = ({ cargando, error, onReintentar, children }) => {
  * `Promise.allSettled`: cada bloque se resuelve aparte y muestra su propio error, sin
  * dejar la ficha en blanco por un solo fallo. Las pestañas de historial usan
  * `usePanelHistorial` (caché de React Query) controlado por el estado `tab` local.
+ *
+ * `onVerHistorial` (OPCIONAL) es el mismo contrato que `AlumnoFichaModal`: abre la
+ * pantalla completa `/admin/alumnos/:id/historial` (la MISMA que ve el alumno). Sin la
+ * prop el botón no se dibuja, así la ficha sigue sirviendo donde no haya a dónde navegar.
+ * El padrón de Alumnos lo pasa apuntando al id de la ficha abierta; Fidelización, al
+ * modal. Perder ese cable deja al admin sin la pestaña Bazar del historial desde el
+ * padrón (fue la regresión del commit 316f222 al unificar la ficha inline).
  */
-const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
+const FichaAlumnoTabs = ({ alumnoId, nombre, onVerHistorial }) => {
     const [tab, setTab] = useState('resumen');
     const [pagina, setPagina] = useState(1);
     const [data, setData] = useState(null);
@@ -186,9 +193,23 @@ const FichaAlumnoTabs = ({ alumnoId, nombre }) => {
                     <h3 className="font-bold text-zinc-100 truncate">{data?.nombre || nombre || 'Ficha del alumno'}</h3>
                     <p className="text-sm text-zinc-400 truncate">{data?.correo || ''}</p>
                 </div>
-                {estadoBadge && (
-                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${estadoBadge.clase}`}>{estadoBadge.texto}</span>
-                )}
+                <div className="flex items-center gap-2 shrink-0">
+                    {/* Historial COMPLETO (todas las pestañas, incluida Bazar): se dibuja sólo si
+                        el contenedor pasó `onVerHistorial` (mismo contrato que el modal). */}
+                    {onVerHistorial && (
+                        <button
+                            type="button"
+                            onClick={onVerHistorial}
+                            data-testid="ficha-tabs-ver-historial"
+                            className="px-3 py-1.5 rounded-lg border border-orange-500/40 bg-orange-500/10 text-orange-400 text-xs font-bold hover:bg-orange-500/20 transition-colors"
+                        >
+                            Ver historial completo
+                        </button>
+                    )}
+                    {estadoBadge && (
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${estadoBadge.clase}`}>{estadoBadge.texto}</span>
+                    )}
+                </div>
             </div>
 
             <div className="grid gap-2 px-3 pt-3 border-b border-zinc-800 max-md:flex max-md:flex-nowrap max-md:gap-1 max-md:overflow-x-auto max-md:snap-x" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))' }}>
