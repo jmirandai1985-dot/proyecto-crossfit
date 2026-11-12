@@ -221,9 +221,10 @@ export const claves = {
     suspensionesAdminResumen: ['admin', 'suspensiones', 'resumen'],
     // Suspensiones por salud de UN alumno (panel "Suspensión por salud" de la ficha).
     suspensionesSalud: (alumnoId) => ['admin', 'suspensiones-salud', alumnoId],
-    // Panel de ACTIVACIÓN de la migración BoxMagic (TEMPORAL). Cuelga de
-    // `['migracion-boxmagic']` para poder invalidar los 2 paneles de la migración juntos.
+    // Paneles de la migración BoxMagic (TEMPORALES). Cuelgan de `['migracion-boxmagic']`
+    // para poder invalidar los 2 paneles juntos.
     migracionActivacion: ['migracion-boxmagic', 'activacion'],
+    migracionRecuperacion: ['migracion-boxmagic', 'recuperacion'],
 };
 
 // ── Colas de revisión del admin (las miran el Dashboard Y Pendientes de revisión) ──
@@ -2610,6 +2611,52 @@ export function useMigracionActivacion() {
         queryFn: async () => (await api.get('/api/v1/migracion-boxmagic/activacion')).data
             || { alumnos: [], resumen: {} },
         staleTime: 30_000,
+    });
+}
+
+// Panel de RECUPERACIÓN de la migración BoxMagic (TEMPORAL): los alumnos inactivos del
+// box y el estado de la oferta que se les mandó (`GET .../recuperacion` devuelve
+// `alumnos` + `resumen`, ya calculados en el backend). Mismo patrón que
+// `useMigracionActivacion`; `staleTime` de 30 s porque el dato se mueve mientras el
+// admin va configurando ofertas y marcando recuperados.
+// Las reglas de conteo/filtrado/badges viven en `utils/migracionRecuperacion.js` (JS
+// puro, probado por `scripts/test-migracion-recuperacion.mjs`), no en el componente.
+export function useMigracionRecuperacion() {
+    return useQuery({
+        queryKey: claves.migracionRecuperacion,
+        queryFn: async () => (await api.get('/api/v1/migracion-boxmagic/recuperacion')).data
+            || { alumnos: [], resumen: {} },
+        staleTime: 30_000,
+    });
+}
+
+// Configurar la oferta de UN alumno inactivo y mandarle el correo dedicado.
+//
+// La promoción se guarda ANTES de mandar el correo: `correo_enviado: false` en la
+// respuesta NO es un error de la mutación (la oferta existe y el panel la muestra), así
+// que la pantalla tiene que avisarlo a mano en vez de tragárselo. Cualquier 4xx/5xx real
+// (alumno de otro box, tipo inválido, vencimiento en el pasado) sí rechaza la promesa.
+export function useConfigurarPromocion() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: async ({ usuarioId, payload }) => (
+            await api.post(
+                `/api/v1/migracion-boxmagic/recuperacion/${usuarioId}/promocion`, payload,
+            )
+        ).data,
+        onSuccess: () => qc.invalidateQueries({ queryKey: claves.migracionRecuperacion }),
+    });
+}
+
+// El alumno volvió: marcar 'recuperado' la oferta VIGENTE (el backend responde 404 si no
+// la hay, y ese mensaje se muestra tal cual en el panel).
+export function useMarcarRecuperado() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (usuarioId) => api.put(
+            `/api/v1/migracion-boxmagic/recuperacion/${usuarioId}/marcar-recuperado`,
+        ).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: claves.migracionRecuperacion }),
     });
 }
 

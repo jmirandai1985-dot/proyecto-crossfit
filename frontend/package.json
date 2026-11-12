@@ -72,7 +72,8 @@
     "test:evolucion-mesames": "node scripts/test-evolucion-mesames.mjs",
     "test:ficha-alumno": "node scripts/test-ficha-alumno.mjs",
     "test:registro-aceptaciones": "node scripts/test-registro-aceptaciones.mjs",
-    "test:migracion": "node scripts/test-migracion-activacion.mjs"
+    "test:migracion": "node scripts/test-migracion-activacion.mjs",
+    "test:migracion-recuperacion": "node scripts/test-migracion-recuperacion.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.1",
