@@ -221,6 +221,9 @@ export const claves = {
     suspensionesAdminResumen: ['admin', 'suspensiones', 'resumen'],
     // Suspensiones por salud de UN alumno (panel "Suspensión por salud" de la ficha).
     suspensionesSalud: (alumnoId) => ['admin', 'suspensiones-salud', alumnoId],
+    // Panel de ACTIVACIÓN de la migración BoxMagic (TEMPORAL). Cuelga de
+    // `['migracion-boxmagic']` para poder invalidar los 2 paneles de la migración juntos.
+    migracionActivacion: ['migracion-boxmagic', 'activacion'],
 };
 
 // ── Colas de revisión del admin (las miran el Dashboard Y Pendientes de revisión) ──
@@ -2591,6 +2594,21 @@ export function useMiProgresoReferidos({ enabled = true } = {}) {
         queryKey: claves.miProgreso,
         queryFn: async () => (await api.get('/api/v1/referidos/mi-progreso')).data,
         enabled,
+        staleTime: 30_000,
+    });
+}
+
+// Panel de ACTIVACIÓN de la migración BoxMagic (TEMPORAL): el embudo completo en UNA
+// respuesta (`GET /api/v1/migracion-boxmagic/activacion` devuelve `alumnos` + `resumen`,
+// ya calculados en el backend). Mismo patrón que `useAvisosMarketing`; `staleTime` de 30 s
+// porque el dato se mueve mientras el admin va activando alumnos a mano.
+// Las reglas de conteo/filtrado/badges viven en `utils/migracionActivacion.js` (JS puro,
+// probado por `scripts/test-migracion-activacion.mjs`), no en el componente.
+export function useMigracionActivacion() {
+    return useQuery({
+        queryKey: claves.migracionActivacion,
+        queryFn: async () => (await api.get('/api/v1/migracion-boxmagic/activacion')).data
+            || { alumnos: [], resumen: {} },
         staleTime: 30_000,
     });
 }
