@@ -1564,3 +1564,96 @@ def send_aviso_retiro(nombre: str, correo: str, producto: str, cantidad: int,
     logger.info(f"[pedido_recordatorio_manual] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
     return ok
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PROMOCIÓN DE RECUPERACIÓN (migración BoxMagic, Fase 2)
+#  Correo DEDICADO a una oferta puntual para un alumno inactivo: NO es uno de los
+#  correos genéricos de Fidelización, porque el texto tiene que nombrar el beneficio
+#  EXACTO (5 días, 20 %, $10.000) y su fecha de vencimiento. Los valores válidos de
+#  `tipo_beneficio` son los de `promociones_recuperacion` (import perezoso del
+#  modelo: este módulo no importa modelos al cargarse, igual que `_registrar_envio`).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _beneficio_promocion_humano(tipo_beneficio: str, cantidad: int) -> str:
+    """Traduce (tipo_beneficio, cantidad) a lenguaje humano.
+
+    'dias_gratis' + 5 -> '5 días gratis de clases'
+    'descuento_porcentaje' + 20 -> '20% de descuento'
+    'descuento_monto' + 10000 -> '$10.000 de descuento' (CLP, sin decimales)
+
+    Un tipo desconocido devuelve un texto GENÉRICO a propósito: es preferible un
+    correo que no promete nada raro a uno que invente un beneficio que el box no
+    ofreció (el endpoint que crea la promoción ya valida el tipo).
+    """
+    from app.models.promocion_recuperacion import (
+        TIPO_BENEFICIO_DESCUENTO_MONTO, TIPO_BENEFICIO_DESCUENTO_PORCENTAJE,
+        TIPO_BENEFICIO_DIAS_GRATIS,
+    )
+    cantidad = int(cantidad or 0)
+    if tipo_beneficio == TIPO_BENEFICIO_DIAS_GRATIS:
+        dias = f"{cantidad} día" + ("" if cantidad == 1 else "s")
+        return f"{dias} gratis de clases"
+    if tipo_beneficio == TIPO_BENEFICIO_DESCUENTO_PORCENTAJE:
+        return f"{cantidad}% de descuento"
+    if tipo_beneficio == TIPO_BENEFICIO_DESCUENTO_MONTO:
+        # CLP: separador de miles con punto y sin decimales (formato chileno).
+        return f"${cantidad:,}".replace(",", ".") + " de descuento"
+    return "un beneficio especial"
+
+
+def render_email_promocion_recuperacion(nombre: str, tipo_beneficio: str,
+                                        cantidad: int, vence_en) -> tuple:
+    """Renderiza (asunto, html) de la oferta de recuperación.
+
+    Fuente ÚNICA del copy: la usa el envío real (`enviar_email_promocion_recuperacion`)
+    y cualquier preview futuro, así el alumno ve exactamente lo que el panel configuró.
+    `vence_en` es la fecha REAL de la oferta: una promoción sin fecha es una promoción
+    que el alumno no sabe hasta cuándo puede usar.
+    """
+    primer_nombre = (nombre or "Atleta").split()[0]
+    beneficio = _beneficio_promocion_humano(tipo_beneficio, cantidad)
+    fecha = formatear_fecha_es(vence_en) if vence_en else None
+    hasta = f"hasta el <strong>{fecha}</strong>" if fecha else "por tiempo limitado"
+
+    titulo = "Te guardamos un lugar en el box"
+    saludo = (f"Hola {primer_nombre}, hace un tiempo no te vemos por el box y "
+              "queremos que vuelvas a entrenar con nosotros.")
+    cuerpo = (f"<p>Te dejamos <strong>{beneficio}</strong>, válido {hasta}.</p>"
+              "<p>No tienes que hacer ningún trámite: entra a la app o escríbenos y "
+              "lo activamos para que retomes tu ritmo.</p>")
+
+    from app.models.promocion_recuperacion import TIPO_BENEFICIO_DIAS_GRATIS
+    if tipo_beneficio == TIPO_BENEFICIO_DIAS_GRATIS:
+        boton_texto = "Reservar mi clase"
+        url = url_frontend("/alumno/mis-reservas")
+    else:
+        boton_texto = "Ver mi beneficio"
+        url = url_frontend("/alumno/solicitar-plan")
+
+    asunto = f"🎁 {primer_nombre}, {beneficio} para que vuelvas al box"
+    return asunto, _template(titulo, saludo, cuerpo, boton_texto, url)
+
+
+def enviar_email_promocion_recuperacion(alumno: dict, tipo_beneficio: str,
+                                        cantidad: int, vence_en) -> tuple:
+    """Manda la oferta de recuperación (tipo `migracion_promocion`) -> (ok, notificacion_id).
+
+    El segundo elemento es la fila de `notificaciones_enviadas` que acaba de crear
+    `_enviar` (o `None` si el envío falló o no se pudo registrar): es lo que permite
+    ligar la oferta a su correo en `promociones_recuperacion.notificacion_id`, igual
+    que `beneficios.notificacion_id`.
+
+    Sin correo no se intenta nada: devuelve `(False, None)` y el que llama decide
+    (la oferta se guarda igual, best-effort).
+    """
+    nombre = (alumno or {}).get("nombre") or "Atleta"
+    correo = (alumno or {}).get("correo") or ""
+    if not correo:
+        return False, None
+    asunto, html = render_email_promocion_recuperacion(
+        nombre, tipo_beneficio, cantidad, vence_en)
+    ok, notificacion_id = enviar_renderizado_con_id(
+        correo, asunto, html, alumno_id=(alumno or {}).get("id"),
+        tipo="migracion_promocion", tenant_id=(alumno or {}).get("tenant_id"))
+    logger.info(f"[migracion_promocion] {'EXITOSO' if ok else 'FALLIDO'} -> {correo}")
+    return ok, notificacion_id
