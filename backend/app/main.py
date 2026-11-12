@@ -6,6 +6,7 @@
     suscripciones, wods, solicitudes_planes, upload,
     suspensiones,
     notificaciones, notificaciones_enviadas, migracion,
+    migracion_boxmagic,
     comprar_emergencia, fix_fechas, supervision,
     finanzas, configuracion, alumnos, asistencia, ranking, kpis,
     kpis_populate, ml, segmentacion, historial_alumno, fidelizacion_plantillas,
@@ -350,6 +351,11 @@ app.include_router(notificaciones_enviadas.router,
                    prefix="/api/v1/notificaciones-enviadas", tags=["Notificaciones Enviadas"])
 app.include_router(migracion.router,
                    prefix="/api/v1/migracion", tags=["Migración"])
+# Panel de activación de la migración BoxMagic: prefijo PROPIO para no chocar con
+# `/api/v1/migracion` (ALTER TABLE ad-hoc), que es otro módulo.
+app.include_router(migracion_boxmagic.router,
+                   prefix="/api/v1/migracion-boxmagic",
+                   tags=["Migración BoxMagic"])
 app.include_router(comprar_emergencia.router,
                    prefix="/api/v1/planes", tags=["Compra Emergencia"])
 app.include_router(fix_fechas.router,

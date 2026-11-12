@@ -43,6 +43,10 @@ class Usuario(Base):
     # no se le envían correos de reactivación aunque siga sin plan.
     acepta_correo_reactivacion = Column(Boolean, nullable=False, default=True)
     cambiar_password_al_login = Column(Boolean, nullable=False, default=False)
+    # Timestamp de envío del correo de activación en la migración BoxMagic
+    # (NULL = no enviado aún). Es también la señal de que el alumno viene de esa
+    # migración y no del alta pública normal (migración 077).
+    correo_migracion_enviado_en = Column(TIMESTAMP(timezone=True), nullable=True)
     peso_kg = Column(Float, nullable=True)
     estatura_cm = Column(Integer, nullable=True)
     genero = Column(String(10), nullable=True)
