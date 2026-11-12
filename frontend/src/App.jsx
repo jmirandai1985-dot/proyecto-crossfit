@@ -59,6 +59,11 @@ const AdminAsistencia = lazy(() => import('./pages/admin/Asistencia'));
 // sub-pestaña Historial del coach. Reutiliza el componente compartido.
 const AdminHistorialAsistencia = lazy(() => import('./pages/admin/HistorialAsistencia'));
 const AdminMiQr = lazy(() => import('./pages/admin/MiQr'));
+// Migración BoxMagic (TEMPORAL, 2 paneles de control para cargar a los ~712 alumnos
+// reales desde BoxMagic). Hoy son placeholders. Cuando la migración termine se borran
+// estos 2 imports, sus 2 rutas y la sección del menú (`config/menu.js`).
+const AdminMigracionActivacion = lazy(() => import('./pages/admin/MigracionActivacion'));
+const AdminMigracionRecuperacion = lazy(() => import('./pages/admin/MigracionRecuperacion'));
 // · Familia COACH
 // Pizarra y Generar Clases ya no se importan: sin ruta no hay chunk que bajar (Bloque 5).
 const CoachDashboard = lazy(() => import('./pages/coach/DashboardCoach'));
@@ -184,6 +189,12 @@ function App() {
             <Route path="notificaciones" element={<AdminNotificaciones />} />
             <Route path="fidelizacion" element={<AdminFidelizacion />} />
             <Route path="kpis" element={<AdminKpis />} />
+            {/* Migración BoxMagic (TEMPORAL): los 2 paneles de control de la carga de
+                los ~712 alumnos reales. Van DENTRO del bloque /admin, así que heredan
+                la MISMA protección de rol. Se borran junto con el menú y los
+                componentes cuando termine la migración. */}
+            <Route path="migracion/activacion" element={<AdminMigracionActivacion />} />
+            <Route path="migracion/recuperacion" element={<AdminMigracionRecuperacion />} />
             <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
           </Route>
 

@@ -103,6 +103,24 @@ export const MENU_BY_ROL = {
         { type: 'section', label: 'SISTEMA' },
         { label: 'Notificaciones', path: '/admin/notificaciones', icon: 'bell' },
         { label: 'Configuración', path: '/admin/configuracion', icon: 'gear' },
+
+        // ── MIGRACIÓN BOXMAGIC (TEMPORAL) ──
+        // ⚠️ TEMPORAL, NO ES UNA SECCIÓN DEL PRODUCTO: son los 2 paneles de control
+        // de la migración de los ~712 alumnos reales desde BoxMagic (diciembre 2026).
+        // Una vez que la migración termine se borra COMPLETA: esta sección del menú,
+        // las 2 rutas de App.jsx y los 2 componentes (`pages/admin/MigracionActivacion.jsx`
+        // y `pages/admin/MigracionRecuperacion.jsx`). Por eso va al final y separada:
+        // que se note que se va.
+        { type: 'section', label: 'MIGRACIÓN (TEMPORAL)' },
+        // Activación: en qué etapa del alta está cada alumno migrado
+        // (`GET /api/v1/migracion-boxmagic/activacion`). Ícono: `squareCheck` (tilde),
+        // el más cercano a "quedó activado".
+        { label: 'Activación', path: '/admin/migracion/activacion', icon: 'squareCheck' },
+        // Recuperación: los alumnos inactivos y la oferta que se les mandó
+        // (`GET /api/v1/migracion-boxmagic/recuperacion`). El registro de íconos no
+        // tiene uno de "reciclar/volver", así que se reusa `heart` — el mismo criterio
+        // de "alumno que dejó de venir" que ya usa Fidelización.
+        { label: 'Recuperación', path: '/admin/migracion/recuperacion', icon: 'heart' },
     ],
 };
 
