@@ -132,7 +132,20 @@ def login(
     # El body sigue devolviendo el JSON de siempre para no romper clientes ni
     # tests. `response` es None sólo cuando un test aislado invoca el handler
     # directamente (sin pasar por FastAPI); en ese caso no hay cookies que setear.
-    if response is not None:
+    #
+    # 🔒 SEGURIDAD (contraseña temporal): si el usuario debe cambiar la clave en
+    # este login (`cambiar_password_al_login=True`), NO se emiten cookies. Antes
+    # se seteaban SIEMPRE y el frontend sólo abría el modal: la cookie httpOnly
+    # ya era una sesión completa, así que refrescar o navegar atrás montaba de
+    # nuevo `AuthContext`, `GET /alumnos/me` autenticaba por cookie y el usuario
+    # entraba sin haber cambiado nunca la contraseña temporal. Sin cookie, el
+    # navegador queda SIN sesión y el único camino es el modal. El JWT se sigue
+    # devolviendo en el body: `CambiarPasswordInicial.jsx` lo usa como Bearer en
+    # `POST /auth/cambiar-password-inicial` (get_current_user acepta Bearer como
+    # fallback cuando no hay cookie). El segundo login —el que repite el
+    # frontend con la clave nueva— ya trae el flag en False y SÍ deja cookie.
+    requiere_cambio_password = bool(fila["cambiar_password_al_login"])
+    if response is not None and not requiere_cambio_password:
         set_auth_cookies(
             response,
             access_token=access_token,
@@ -147,7 +160,7 @@ def login(
         rol=fila["rol"],
         tenant_id=fila["tenant_id"],
         nombre=fila["nombre"],
-        cambiar_password_al_login=bool(fila["cambiar_password_al_login"]),
+        cambiar_password_al_login=requiere_cambio_password,
     )
 
 
