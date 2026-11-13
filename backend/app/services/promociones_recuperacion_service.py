@@ -16,14 +16,18 @@ coincide con un candidato del padrón (`candidatos_boxmagic`) que tiene una ofer
      mismas reglas que Fidelización) — `dias_gratis` → `clases_gratis`,
      `descuento_porcentaje` → `descuento`;
   3. la marca `recuperado`: el alumno volvió y la oferta ya se aplicó, así el panel no la
-     sigue mostrando como "enviada" para siempre.
+     sigue mostrando como "enviada" para siempre. Esta es la señal AUTOMÁTICA; el botón
+     manual del panel se mantiene para cuando el admin sabe que el alumno volvió por otra
+     vía (por ejemplo, pagó en efectivo sin pasar por `/landing`).
 
 Decisiones
 ----------
 * **Vencida no se aplica.** Una fila `enviada` con `vence_en` pasado está, a ojos del
   panel, `vencida` (mismo criterio que `_estado_recuperacion`). El correo dijo "válido
   hasta el X": regalar el beneficio meses después es prometer algo que la oferta ya no
-  decía. Se filtra por `vence_en >= ahora`.
+  decía. Se filtra por `vence_en > ahora`, el MISMO criterio estricto que el panel y el
+  botón manual (`marcar_promocion_recuperado`): una oferta que vence justo ahora ya no
+  se puede canjear.
 * **`descuento_monto` no crea nada.** Ese tipo no tiene equivalente en el sistema de cobro
   y ya no se ofrece; las filas históricas NO se tocan (ni se borran ni se marcan) y se
   avisa en el log para que el admin lo resuelva a mano.
@@ -62,6 +66,10 @@ BENEFICIO_POR_TIPO: Final[dict] = {
 def buscar_promocion_enviada(db: Session, usuario, *, ahora: datetime | None = None):
     """La oferta `enviada` y VIGENTE del correo de esa cuenta (o `None`).
 
+    "Vigente" es `vence_en > ahora`, el mismo criterio estricto que usa el panel
+    (`_estado_recuperacion`) y el botón manual (`marcar_promocion_recuperado`): una
+    oferta que vence justo ahora ya no se puede canjear.
+
     El cruce con el padrón es por correo normalizado (misma regla que el panel:
     `lower(trim(correo))`, ver `migracion_boxmagic._usuarios_por_correo`), porque
     `candidatos_boxmagic` no tiene FK a `usuarios`. Se aceptan las ofertas nuevas (por
@@ -96,7 +104,9 @@ def buscar_promocion_enviada(db: Session, usuario, *, ahora: datetime | None = N
         .filter(
             PromocionRecuperacion.tenant_id == usuario.tenant_id,
             PromocionRecuperacion.estado == ESTADO_PROMO_ENVIADA,
-            PromocionRecuperacion.vence_en >= momento,
+            # Estricto, igual que el panel y el botón manual: si vence justo ahora,
+            # ya no se puede canjear.
+            PromocionRecuperacion.vence_en > momento,
             or_(*destinatarios),
         )
         .order_by(PromocionRecuperacion.creado_en.desc(),
@@ -145,7 +155,9 @@ def aplicar_promocion_al_registrar(db: Session, usuario, *,
     try:
         promo.usuario_id = usuario.id
         # `recuperado` = el alumno volvió (es el estado que ya usa el panel para eso) y
-        # la oferta ya está entregada: no se le vuelve a ofrecer lo mismo.
+        # la oferta ya está entregada: no se le vuelve a ofrecer lo mismo. Esta es la
+        # señal AUTOMÁTICA del regreso; el botón manual (`marcar_promocion_recuperado`)
+        # sigue existiendo para el admin que sabe que volvió por otra vía.
         promo.estado = ESTADO_PROMO_RECUPERADO
         db.commit()
     except Exception:

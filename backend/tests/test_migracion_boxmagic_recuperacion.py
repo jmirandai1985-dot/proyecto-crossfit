@@ -809,12 +809,14 @@ def test_preview_nombra_el_beneficio_elegido(tipo, cantidad, texto, monkeypatch)
     assert "algo nuevo" in r.json()["asunto"]
 
 
-def test_preview_el_copy_invita_a_volver_y_apunta_al_login(monkeypatch):
+def test_preview_el_copy_invita_a_volver_y_apunta_al_landing(monkeypatch):
     """El correo es una invitación a VOLVER: plataforma nueva, Performance Hub y UN botón.
 
-    Antes el CTA llevaba a `/alumno/mis-reservas` o `/alumno/solicitar-plan`, pantallas que
-    un desertor que todavía no tiene cuenta no puede alcanzar: primero tiene que crear su
-    acceso. Se fija acá para que el copy y el destino no deriven en silencio.
+    Antes el CTA llevaba a `/alumno/mis-reservas` o `/alumno/solicitar-plan`, y después a
+    `/login`: ninguna sirve para un desertor que todavía no tiene cuenta. Ahora va a
+    `/landing`, el formulario público de alumno nuevo, donde el alta engancha sola la
+    oferta por correo (`promociones_recuperacion_service`). Se fija acá para que el copy y
+    el destino no deriven en silencio.
     """
     _mock_envio(monkeypatch)
     _mock_render(monkeypatch)
@@ -829,7 +831,8 @@ def test_preview_el_copy_invita_a_volver_y_apunta_al_login(monkeypatch):
     assert "plataforma nueva" in html or "nueva plataforma" in html
     assert "clase de prueba gratis" in html
     assert "Quiero volver al box" in html
-    assert "/login" in html
+    assert "/landing" in html
+    assert "/login" not in html, "un candidato sin cuenta no puede hacer nada en /login"
     assert "mis-reservas" not in html
     assert "solicitar-plan" not in html
     # UN solo botón: el template pinta exactamente un <a> de CTA con el naranja de marca.

@@ -246,7 +246,13 @@ def oferta_de_recuperacion(db):
 
 def test_registro_aplica_la_oferta_de_recuperacion(cliente, db, escenario,
                                                     oferta_de_recuperacion):
-    """El alta hace REAL el regalo que el correo de recuperación había prometido."""
+    """El alta hace REAL el regalo que el correo de recuperación había prometido.
+
+    Es la MISMA puerta a la que apunta el CTA de ese correo: `/landing` envía este POST
+    (`/alumnos/registro/alumno-nuevo`). No importa por dónde entró el alumno —la oferta se
+    engancha por el CORREO, no por la pantalla—; por eso el botón puede llevarlo directo
+    al formulario de alumno nuevo en vez de a `/login`, donde no tiene cuenta todavía.
+    """
     correo = oferta_de_recuperacion["correo"]
     escenario.append(correo)
 
