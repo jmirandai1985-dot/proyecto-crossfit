@@ -23,6 +23,10 @@ export default defineConfig({
         display: 'standalone',
         start_url: '/',
         icons: [
+          // El logo del box tal como está en /imgs/logo.png (447x447). Los íconos
+          // pwa-* de abajo son ESE logo en 192/512 (los exige el instalador); se
+          // mantienen los tres para que Chrome/Android pueda instalar la app.
+          { src: '/imgs/logo.png', sizes: '447x447', type: 'image/png', purpose: 'any' },
           { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
           { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png' },
           {

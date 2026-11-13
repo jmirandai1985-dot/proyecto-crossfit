@@ -6,6 +6,7 @@ import './index.css'
 import App from './App.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import { queryClient } from './services/queryClient.js'
+import { iniciarInstalacionApp } from './services/instalacionApp.js'
 import { instalarRecargaPorChunk } from './utils/recargaAutomatica.js'
 
 // ANTES del primer render (y del primer import() de una ruta `lazy`): si el navegador
@@ -18,6 +19,11 @@ instalarRecargaPorChunk();
 // JS viejo que tiene en memoria. registerSW() engancha el evento 'activated' y fuerza un
 // reload silencioso apenas el SW nuevo toma control (sin banner ni decisión del usuario).
 registerSW({ immediate: true });
+
+// PWA instalable: engancha `beforeinstallprompt` ANTES del primer render. El evento
+// puede dispararse una sola vez y muy temprano; si el listener viviera recién en el
+// Layout del alumno, el prompt se perdería y el botón "Instalar app" no aparecería.
+iniciarInstalacionApp();
 
 // El QueryClientProvider envuelve TODA la app (App adentro): la caché de React Query
 // sobrevive a la navegación entre rutas, que es justo lo que hacía que cada pantalla

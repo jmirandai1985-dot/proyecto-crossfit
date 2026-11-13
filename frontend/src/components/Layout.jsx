@@ -10,6 +10,9 @@ import { MENU_ICONS } from '../config/menuIcons';
 import CampanaNotificaciones from './CampanaNotificaciones';
 // D2: banner "Completa tu perfil" del alumno (peso/género obligatorios para el nivel).
 import BannerPerfilIncompleto from './BannerPerfilIncompleto';
+// PWA: "Instalar app" (botón Android/Chrome) + instructivo manual en iOS/Safari.
+// Se auto-oculta si ya está instalada o el alumno descartó el aviso.
+import InstalarApp from './InstalarApp';
 // Contador de pendientes del admin (misma queryKey que la pantalla, el Dashboard y
 // la campana: un solo request para los cuatro badges, y se refresca solo cada 60 s).
 import { useResumenPendientes } from '../hooks/queries';
@@ -376,6 +379,9 @@ const Layout = ({ children }) => {
                     {/* D2: solo para el alumno; el componente se auto-oculta si el perfil está
                         completo (la regla vive en el backend: GET /alumnos/me). */}
                     {rol === 'alumno' && <BannerPerfilIncompleto />}
+                    {/* PWA: instalar la app. Sólo alumno; el componente decide si mostrarse
+                        (prompt de Chrome disponible / banner instructivo en iOS). */}
+                    {rol === 'alumno' && <InstalarApp />}
                     <div className="relative">{children}</div>
                 </main>
             </div>
