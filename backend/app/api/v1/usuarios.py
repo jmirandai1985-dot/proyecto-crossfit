@@ -228,9 +228,9 @@ def crear_usuario(
     db.commit()
     db.refresh(db_usuario)
 
-    # ── Email con las credenciales temporales (solo alumnos) ──
+    # ── Email con las credenciales temporales (alumno) ──
     # Va DESPUÉS del commit: si el alta falla, no se envía el correo.
-    # Coaches/administradores no lo reciben.
+    # El coach tiene su propio envío más abajo (mismo patrón best-effort).
     if usuario_data.rol == RolUsuario.alumno:
         try:
             send_solicitud_prueba_clase(
@@ -244,6 +244,29 @@ def crear_usuario(
             sentry_sdk.capture_exception(e)
             logging.getLogger("uvicorn.usuarios").warning(
                 "Fallo al enviar email de credenciales al alumno")
+
+    # ── Email con las credenciales temporales (COACH) ──
+    # Mismo patrón best-effort que el alumno: va DESPUÉS del commit y NUNCA puede
+    # revertir ni tumbar el alta. `crear_usuario` ya fuerza
+    # `cambiar_password_al_login=True` para cualquier rol, así que el coach entra
+    # una vez con esta contraseña provisional y el sistema le exige cambiarla.
+    # Se reusa `enviar_email_activacion_alumno` porque su texto es genérico ("tu
+    # cuenta en Urban Training Box fue activada"), no menciona alumno ni plan.
+    if usuario_data.rol == RolUsuario.coach:
+        try:
+            # Import local: el envío queda contenido en este try/except y los
+            # tests pueden parchear `email_service` en tiempo de ejecución.
+            from app.services.email_service import enviar_email_activacion_alumno
+            enviar_email_activacion_alumno(
+                {"id": db_usuario.id, "nombre": db_usuario.nombre,
+                 "correo": db_usuario.correo},
+                usuario_data.password,
+            )
+        except Exception:
+            logging.getLogger("uvicorn.usuarios").exception(
+                "No se pudo enviar el correo de credenciales al coach %s",
+                db_usuario.id,
+            )
 
     # ── Auditoría interna: alta de usuario (posible cambio de rol) ──
     registrar_auditoria(
