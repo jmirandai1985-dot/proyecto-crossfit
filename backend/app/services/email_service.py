@@ -1629,10 +1629,13 @@ def render_email_promocion_recuperacion(nombre: str, tipo_beneficio: str,
     El correo cuenta TRES cosas y sólo tres: (1) hay una plataforma nueva y el atractivo
     concreto es el Performance Hub (RM + progreso); (2) el beneficio EXACTO que se le
     ofreció y hasta cuándo vale, junto con su clase de prueba gratis; (3) UN solo botón,
-    "Quiero volver al box", que lleva a `/login`: primero tiene que crear su acceso (los
-    desertores de BoxMagic todavía no tienen cuenta) y recién adentro puede agendar. Antes
-    el botón apuntaba a `/alumno/mis-reservas` o a `/alumno/solicitar-plan`, pantallas que
-    un alumno que vuelve todavía no puede alcanzar.
+    "Quiero volver al box", que lleva a `/landing`, el formulario público de alumno nuevo.
+    Ahí el candidato se registra como cualquier lead y la oferta se engancha sola en
+    `POST /registro/alumno-nuevo` (`promociones_recuperacion_service`), que cruza el correo
+    con la promoción pendiente. `/login` no sirve para este correo: un candidato de
+    recuperación todavía NO tiene cuenta y no puede hacer nada ahí. Antes el botón
+    apuntaba a `/alumno/mis-reservas` o a `/alumno/solicitar-plan`, pantallas que un
+    alumno que vuelve todavía no puede alcanzar.
 
     `vence_en` es la fecha REAL de la oferta: una promoción sin fecha es una promoción que
     el alumno no sabe hasta cuándo puede usar.
@@ -1666,7 +1669,7 @@ def render_email_promocion_recuperacion(nombre: str, tipo_beneficio: str,
 
     asunto = f"🔥 {primer_nombre}, tenemos algo nuevo que te va a encantar"
     return asunto, _template(titulo, saludo, cuerpo,
-                             "Quiero volver al box", url_frontend("/login"))
+                             "Quiero volver al box", url_frontend("/landing"))
 
 
 def enviar_email_promocion_recuperacion(alumno: dict, tipo_beneficio: str,
