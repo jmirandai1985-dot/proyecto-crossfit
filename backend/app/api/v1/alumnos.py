@@ -45,6 +45,9 @@ from app.services.email_service import (
     send_solicitud_prueba_clase, send_bienvenida_activacion,
     send_confirmacion_renovacion_plan, formatear_fecha_es
 )
+# Recuperación (migración BoxMagic): el alta aplica la oferta que se le mandó a ese
+# correo cuando el alumno vuelve (liga la oferta a la cuenta y crea el Beneficio real).
+from app.services import promociones_recuperacion_service
 
 router = APIRouter()
 
@@ -336,6 +339,22 @@ def registrar_alumno_nuevo(
             )
 
     db.commit()
+
+    # ── RECUPERACIÓN (migración BoxMagic): la oferta que se le mandó a este correo
+    #    se hace efectiva AHORA que la cuenta existe ──
+    # Si el correo del alta coincide con un candidato del padrón que tiene una oferta
+    # `enviada` vigente, se liga la fila a la cuenta nueva y se crea el Beneficio REAL
+    # (clases gratis o % de descuento): el regalo deja de vivir sólo en el correo y pasa
+    # a existir en el sistema (créditos/descuento + trazabilidad F4). Se hace DESPUÉS del
+    # commit del alta y el servicio es best-effort: una oferta NUNCA puede tumbar un
+    # registro que ya está guardado.
+    try:
+        promociones_recuperacion_service.aplicar_promocion_al_registrar(db, usuario)
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        logger.warning(
+            "Fallo al aplicar la promoción de recuperación al registrar %s",
+            usuario.correo)
 
     # ── Campana del ADMIN: el alta también avisa in-app ──
     # El registro avisa por EMAIL más abajo (enviar_email_solicitud_admin), pero el

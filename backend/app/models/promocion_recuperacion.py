@@ -20,16 +20,21 @@ ESTADO_PROMO_RECUPERADO: Final[str] = "recuperado"
 ESTADO_PROMO_VENCIDA: Final[str] = "vencida"
 
 # ── Tipos de beneficio (la unidad de `cantidad` la define el tipo) ──────────
+# `dias_gratis` se llama así por historia, pero son CLASES, no días de calendario
+# (el formulario pide de 1 a 15 clases y el Beneficio que se crea es `clases_gratis`).
 TIPO_BENEFICIO_DIAS_GRATIS: Final[str] = "dias_gratis"
 TIPO_BENEFICIO_DESCUENTO_PORCENTAJE: Final[str] = "descuento_porcentaje"
+# ⚠️ LEGADO: ya NO se ofrece ni se acepta al crear una promoción (no tiene
+# equivalente real en el cobro). La constante queda porque hay filas históricas
+# con este tipo que el panel tiene que poder mostrar. No se borra ningún dato.
 TIPO_BENEFICIO_DESCUENTO_MONTO: Final[str] = "descuento_monto"
 
 # ÚNICA lista de tipos válidos: la valida el endpoint que crea la promoción y la
 # traduce a lenguaje humano el correo. Un tipo nuevo se agrega acá y en el copy.
+# `descuento_monto` salió de la lista a propósito (ver arriba): se dejó de ofrecer.
 TIPOS_BENEFICIO_PROMOCION: Final[tuple] = (
     TIPO_BENEFICIO_DIAS_GRATIS,
     TIPO_BENEFICIO_DESCUENTO_PORCENTAJE,
-    TIPO_BENEFICIO_DESCUENTO_MONTO,
 )
 
 
@@ -71,10 +76,12 @@ class PromocionRecuperacion(Base):
     # candidato, la oferta pierde a quién pertenece.
     candidato_id = Column(Integer, ForeignKey(
         "candidatos_boxmagic.id", ondelete="CASCADE"), nullable=True)
-    # 'dias_gratis' | 'descuento_porcentaje' | 'descuento_monto'
-    # (lista canónica: `TIPOS_BENEFICIO_PROMOCION`).
+    # 'dias_gratis' | 'descuento_porcentaje'
+    # (lista canónica: `TIPOS_BENEFICIO_PROMOCION`). 'descuento_monto' quedó como
+    # legado: hay filas históricas, pero ya no se ofrece al configurar.
     tipo_beneficio = Column(String(50), nullable=False)
-    # La unidad la define `tipo_beneficio`: días, % o monto en CLP.
+    # La unidad la define `tipo_beneficio`: clases (1-15, se llaman "días" por
+    # historia) o % de descuento.
     cantidad = Column(Integer, nullable=False)
     # Hasta cuándo es válida la oferta (el panel y el correo la muestran).
     vence_en = Column(TIMESTAMP(timezone=True), nullable=False)

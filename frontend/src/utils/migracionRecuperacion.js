@@ -66,15 +66,25 @@ export function badgeEstado(key) {
 
 // ── Tipos de beneficio (la unidad de `cantidad` la define el tipo) ──────────────
 // Misma lista y mismas claves que el backend (`TIPOS_BENEFICIO_PROMOCION`). Sólo
-// describe el formulario: qué se elige, cómo se llama la cantidad y un valor inicial
-// razonable.
+// describe el formulario: qué se elige, cómo se llama la cantidad, un valor inicial
+// razonable y el RANGO que acepta el backend (el formulario no deja mandar otro).
+//
+// `dias_gratis` se llama así por historia, pero son CLASES, no días de calendario: el
+// rango es el de Fidelización (`beneficios_service.CLASES_MIN/MAX`). El tipo
+// `descuento_monto` ya NO se ofrece (no tiene equivalente en el sistema de cobro); las
+// filas históricas se siguen mostrando con `textoBeneficio`.
+export const CLASES_MIN = 1;
+export const CLASES_MAX = 15;
+
 export const TIPOS_BENEFICIO = [
     {
         key: 'dias_gratis',
         label: 'Días gratis',
-        etiquetaCantidad: 'Días de clases',
-        ayuda: 'Días de clases sin costo.',
+        etiquetaCantidad: 'Clases gratis (1 a 15)',
+        ayuda: 'Clases de regalo, no días de calendario: se suman a su plan o le abren un pase.',
         defecto: 5,
+        min: CLASES_MIN,
+        max: CLASES_MAX,
     },
     {
         key: 'descuento_porcentaje',
@@ -82,13 +92,8 @@ export const TIPOS_BENEFICIO = [
         etiquetaCantidad: 'Descuento (%)',
         ayuda: 'Porcentaje sobre su próximo plan.',
         defecto: 20,
-    },
-    {
-        key: 'descuento_monto',
-        label: 'Descuento en monto',
-        etiquetaCantidad: 'Descuento (CLP)',
-        ayuda: 'Monto en pesos sobre su próximo plan.',
-        defecto: 10000,
+        min: 1,
+        max: 100,
     },
 ];
 
@@ -98,6 +103,8 @@ export const TIPO_BENEFICIO_DESCONOCIDO = {
     etiquetaCantidad: 'Cantidad',
     ayuda: '',
     defecto: 1,
+    min: 1,
+    max: Number.POSITIVE_INFINITY,
 };
 
 export function tipoBeneficioDe(key) {
@@ -105,16 +112,16 @@ export function tipoBeneficioDe(key) {
 }
 
 // (tipo_beneficio, cantidad) -> texto humano, para MOSTRAR en pantalla:
-//   'dias_gratis' + 5           -> '5 días gratis de clases'
+//   'dias_gratis' + 5           -> '5 clases gratis'
 //   'descuento_porcentaje' + 20 -> '20% de descuento'
-//   'descuento_monto' + 10000   -> '$10.000 de descuento' (CLP, sin decimales)
+//   'descuento_monto' + 10000   -> '$10.000 de descuento' (LEGADO: filas históricas)
 // Es el MISMO formato que el correo (`email_service._beneficio_promocion_humano`), pero
 // esto no es lógica de negocio: la oferta la decide el backend y el correo lo arma él.
 // Acá sólo se pinta lo que ya se guardó.
 export function textoBeneficio(tipoBeneficio, cantidad) {
     const n = Number(cantidad || 0);
     if (tipoBeneficio === 'dias_gratis') {
-        return `${n} día${n === 1 ? '' : 's'} gratis de clases`;
+        return `${n} clase${n === 1 ? '' : 's'} gratis`;
     }
     if (tipoBeneficio === 'descuento_porcentaje') {
         return `${n}% de descuento`;
@@ -131,12 +138,13 @@ export function textoBeneficio(tipoBeneficio, cantidad) {
 // Los TRES datos del formulario: tipo, cantidad y vencimiento. El tipo y la fecha
 // arrancan con un valor, pero la cantidad la escribe el admin: a mitad de tipeo puede
 // quedar vacía ("" o "2,"), y con un dato incompleto no hay oferta que previsualizar.
-// La cantidad tiene que ser un entero >= 1, la misma regla que valida el backend
-// (`cantidad: int = Field(ge=1)`), para no pedir un preview que va a responder 422.
+// La cantidad tiene que ser un entero DENTRO DEL RANGO del tipo (clases 1-15, % 1-100),
+// la misma regla que valida el backend, para no pedir un preview que respondería 422.
 export function promocionCompleta({ tipo = '', cantidad = '', vence = '' } = {}) {
     if (!tipo || !vence) return false;
+    const entrada = tipoBeneficioDe(tipo);
     const n = Number(cantidad);
-    return Number.isInteger(n) && n >= 1;
+    return Number.isInteger(n) && n >= entrada.min && n <= entrada.max;
 }
 
 // ── Conteos del resumen (los manda el backend ya calculados) ────────────────────

@@ -72,8 +72,14 @@ from app.utils.santiago import ahora_santiago, fecha_chile, fin_del_dia_chile
 DIAS_VIGENCIA: Final[int] = 15
 # Tope del % cuando el box no lo configuró (o lo configuró imposible).
 TOPE_DESCUENTO_DEFAULT: Final[int] = 50
-# Las clases que se pueden regalar: el regalo es acotado, no "cualquier número".
-CLASES_VALIDAS: Final[tuple] = (1, 2, 3, 5)
+# Las clases que se pueden regalar: CUALQUIER cantidad de 1 a 15 (antes era una lista fija de
+# 4 opciones —1, 2, 3, 5— y el admin no podía regalar 4 clases). El tope sigue existiendo: el
+# regalo es acotado, no "las clases que quieras".
+CLASES_MIN: Final[int] = 1
+CLASES_MAX: Final[int] = 15
+# El RANGO (no una tupla de opciones): `valor in CLASES_VALIDAS` es la validación, y el panel
+# recibe la lista completa para dibujar un input numérico 1-15 en vez de botones fijos.
+CLASES_VALIDAS: Final[range] = range(CLASES_MIN, CLASES_MAX + 1)
 # El plan que lleva el pase: NO es un plan del catálogo (no se vende, se regala), es el soporte de la
 # suscripción que materializa el acceso. Uno por box, con este nombre exacto: los regalos siguientes
 # lo REUSAN, así que el admin nunca tiene que crearlo ni elegirlo.
@@ -96,10 +102,12 @@ TIPOS: Final[tuple] = (
     {
         "id": TIPO_CLASES_GRATIS,
         "label": "Clases gratis",
-        "descripcion": "Clases de regalo: se suman a su plan vigente, o se le abre un pase si no "
-                       "tiene ninguno.",
+        "descripcion": f"Clases de regalo (de {CLASES_MIN} a {CLASES_MAX}): se suman a su plan "
+                       "vigente, o se le abre un pase si no tiene ninguno.",
         "unidad": "clases",     # `valor` es un número de clases
-        "valores": CLASES_VALIDAS,
+        # La lista completa del rango: el panel la usa para el mínimo/máximo del input numérico
+        # (no hay 4 opciones que dibujar) y para no mandar un valor que el servicio va a rechazar.
+        "valores": list(CLASES_VALIDAS),
         "materializa": True,    # da acceso al enviar el correo
     },
 )
@@ -310,15 +318,25 @@ def _exigir_valor(db: Session, alumno, entrada: dict, valor) -> int:
     """El `valor` según su unidad: entero positivo, cantidad permitida y dentro del tope del box.
 
     Se valida ANTES de materializar nada: un valor imposible no puede dejar un acceso a medio dar.
+
+    Las clases gratis se validan por RANGO (`CLASES_MIN`..`CLASES_MAX`), no contra una lista de
+    opciones: el admin puede regalar cualquier cantidad de 1 a 15. El `valores` del catálogo es
+    esa misma lista y viaja al panel sólo para que dibuje el mínimo/máximo del input.
     """
     if isinstance(valor, bool) or not isinstance(valor, int) or valor <= 0:
         raise ValorInvalido(
             f"El valor del beneficio tiene que ser un entero positivo (llegó {valor!r}).")
-    permitidos = entrada["valores"]
-    if permitidos is not None and valor not in permitidos:
-        raise ValorInvalido(
-            f"`{entrada['id']}` sólo puede regalar "
-            f"{'/'.join(str(v) for v in permitidos)} clases (llegó {valor}).")
+    if entrada["unidad"] == "clases":
+        if not (CLASES_MIN <= valor <= CLASES_MAX):
+            raise ValorInvalido(
+                f"`{entrada['id']}` entrega entre {CLASES_MIN} y {CLASES_MAX} clases "
+                f"(llegó {valor}).")
+    else:
+        permitidos = entrada["valores"]
+        if permitidos is not None and valor not in permitidos:
+            raise ValorInvalido(
+                f"`{entrada['id']}` sólo puede regalar "
+                f"{'/'.join(str(v) for v in permitidos)} (llegó {valor}).")
     if entrada["unidad"] == "pct":
         tope = tope_descuento(db, alumno.tenant_id)
         if valor > tope:

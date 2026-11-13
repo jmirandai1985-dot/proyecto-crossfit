@@ -602,6 +602,77 @@ def test_post_tipo_de_beneficio_invalido_422(monkeypatch):
     assert r.status_code == 422, r.text
 
 
+@pytest.mark.parametrize("cantidad", [1, 4, 15])
+def test_post_dias_gratis_acepta_todo_el_rango_1_15(cantidad, monkeypatch):
+    """Cualquier cantidad de 1 a 15 clases se acepta: antes sólo 1, 2, 3 y 5.
+
+    Son CLASES, no días de calendario (el tipo se llama `dias_gratis` por historia).
+    """
+    sesion = _SesionFalsa(candidatos=[_candidato_inactivo()],
+                          usuarios=[_alumno_real()])
+    llamadas = _mock_envio(monkeypatch, (True, 1))
+    cliente = _cliente_con(sesion)
+
+    r = cliente.post(f"{RUTA}/{CANDIDATO_ID}/promocion",
+                     json=_cuerpo(cantidad=cantidad))
+
+    assert r.status_code == 201, r.text
+    assert r.json()["cantidad"] == cantidad
+    assert sesion.agregados[0].cantidad == cantidad
+    assert llamadas[0][2] == cantidad
+
+
+@pytest.mark.parametrize("cantidad", [16, 100])
+def test_post_dias_gratis_fuera_del_rango_422(cantidad, monkeypatch):
+    """El rango es 1-15: 16 (o 100) no es una oferta que el Beneficio real acepte."""
+    sesion = _SesionFalsa(candidatos=[_candidato_inactivo()],
+                          usuarios=[_alumno_real()])
+    llamadas = _mock_envio(monkeypatch)
+    cliente = _cliente_con(sesion)
+
+    r = cliente.post(f"{RUTA}/{CANDIDATO_ID}/promocion",
+                     json=_cuerpo(cantidad=cantidad))
+
+    assert r.status_code == 422, r.text
+    assert sesion.agregados == []       # no se guarda nada ni se manda el correo
+    assert llamadas == []
+
+
+@pytest.mark.parametrize("cantidad", [101, 500])
+def test_post_porcentaje_sobre_100_422(cantidad, monkeypatch):
+    """Un descuento mayor al precio no existe: el % también tiene techo."""
+    sesion = _SesionFalsa(candidatos=[_candidato_inactivo()],
+                          usuarios=[_alumno_real()])
+    _mock_envio(monkeypatch)
+    cliente = _cliente_con(sesion)
+
+    r = cliente.post(f"{RUTA}/{CANDIDATO_ID}/promocion",
+                     json=_cuerpo(tipo_beneficio="descuento_porcentaje",
+                                  cantidad=cantidad))
+
+    assert r.status_code == 422, r.text
+    assert sesion.agregados == []
+
+
+def test_post_descuento_monto_ya_no_se_ofrece_422(monkeypatch):
+    """El tipo "Descuento en dinero" se quitó del selector y del contrato del POST.
+
+    No tiene equivalente en el sistema de cobro. Las filas históricas NO se borran: el
+    panel las sigue mostrando (ver `textoBeneficio` del front).
+    """
+    sesion = _SesionFalsa(candidatos=[_candidato_inactivo()],
+                          usuarios=[_alumno_real()])
+    llamadas = _mock_envio(monkeypatch)
+    cliente = _cliente_con(sesion)
+
+    r = cliente.post(f"{RUTA}/{CANDIDATO_ID}/promocion",
+                     json=_cuerpo(tipo_beneficio="descuento_monto", cantidad=10000))
+
+    assert r.status_code == 422, r.text
+    assert sesion.agregados == []
+    assert llamadas == []
+
+
 def test_post_vence_en_el_pasado_400(monkeypatch):
     llamadas = _mock_envio(monkeypatch)
     sesion = _SesionFalsa(candidatos=[_candidato_inactivo()],
@@ -716,12 +787,15 @@ def test_preview_devuelve_el_mismo_correo_que_el_envio_real(monkeypatch):
 
 
 @pytest.mark.parametrize("tipo,cantidad,texto", [
-    ("dias_gratis", 5, "5 días gratis de clases"),
+    ("dias_gratis", 5, "5 clases gratis"),
     ("descuento_porcentaje", 20, "20% de descuento"),
-    ("descuento_monto", 10000, "$10.000 de descuento"),
 ])
 def test_preview_nombra_el_beneficio_elegido(tipo, cantidad, texto, monkeypatch):
-    """El correo que se ve es el de ESTA oferta: el beneficio va en asunto y cuerpo."""
+    """El correo que se ve es el de ESTA oferta: el beneficio va en el CUERPO.
+
+    El ASUNTO es el copy nuevo ("...tenemos algo nuevo que te va a encantar") y no repite
+    el beneficio: el detalle (cuántas clases / qué %) está en el cuerpo del correo.
+    """
     _mock_envio(monkeypatch)
     _mock_render(monkeypatch)
     cliente = _cliente_con(_SesionFalsa(candidatos=[_candidato_inactivo()],
@@ -730,8 +804,63 @@ def test_preview_nombra_el_beneficio_elegido(tipo, cantidad, texto, monkeypatch)
     r = cliente.get(_ruta_preview(), params=_params_preview(tipo, cantidad))
 
     assert r.status_code == 200, r.text
-    assert texto in r.json()["asunto"]
     assert texto in r.json()["html"]
+    assert texto not in r.json()["asunto"]
+    assert "algo nuevo" in r.json()["asunto"]
+
+
+def test_preview_el_copy_invita_a_volver_y_apunta_al_login(monkeypatch):
+    """El correo es una invitación a VOLVER: plataforma nueva, Performance Hub y UN botón.
+
+    Antes el CTA llevaba a `/alumno/mis-reservas` o `/alumno/solicitar-plan`, pantallas que
+    un desertor que todavía no tiene cuenta no puede alcanzar: primero tiene que crear su
+    acceso. Se fija acá para que el copy y el destino no deriven en silencio.
+    """
+    _mock_envio(monkeypatch)
+    _mock_render(monkeypatch)
+    cliente = _cliente_con(_SesionFalsa(candidatos=[_candidato_inactivo()],
+                                        usuarios=[_alumno_real()]))
+
+    r = cliente.get(_ruta_preview(), params=_params_preview("dias_gratis", 5))
+
+    assert r.status_code == 200, r.text
+    html = r.json()["html"]
+    assert "Performance Hub" in html
+    assert "plataforma nueva" in html or "nueva plataforma" in html
+    assert "clase de prueba gratis" in html
+    assert "Quiero volver al box" in html
+    assert "/login" in html
+    assert "mis-reservas" not in html
+    assert "solicitar-plan" not in html
+    # UN solo botón: el template pinta exactamente un <a> de CTA con el naranja de marca.
+    assert html.count("background-color:#f97316") == 1
+
+
+@pytest.mark.parametrize("cantidad", [16, 100])
+def test_preview_clases_fuera_del_rango_422(cantidad, monkeypatch):
+    """El preview no puede prometer una oferta que el POST rechazaría (clases 1-15)."""
+    _mock_envio(monkeypatch)
+    _mock_render(monkeypatch)
+    cliente = _cliente_con(_SesionFalsa(candidatos=[_candidato_inactivo()],
+                                        usuarios=[_alumno_real()]))
+
+    r = cliente.get(_ruta_preview(), params=_params_preview("dias_gratis", cantidad))
+
+    assert r.status_code == 422, r.text
+    assert "15" in r.json()["detail"]
+
+
+def test_preview_descuento_monto_ya_no_se_ofrece_422(monkeypatch):
+    """El tipo "Descuento en dinero" salió del selector: el backend tampoco lo acepta."""
+    _mock_envio(monkeypatch)
+    _mock_render(monkeypatch)
+    cliente = _cliente_con(_SesionFalsa(candidatos=[_candidato_inactivo()],
+                                        usuarios=[_alumno_real()]))
+
+    r = cliente.get(_ruta_preview(), params=_params_preview("descuento_monto", 10000))
+
+    assert r.status_code == 422, r.text
+    assert "descuento_porcentaje" in r.json()["detail"]
 
 
 def test_preview_funciona_para_un_candidato_sin_cuenta(monkeypatch):

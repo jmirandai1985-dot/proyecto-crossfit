@@ -130,6 +130,10 @@ def _payload(correo: str, **extra) -> dict:
         "peso": 62.5,
         "telefono": "+56 9 1234 5678",
         "fecha_nacimiento": "1995-06-15",
+        # Consentimientos del alta: el endpoint los exige desde que se agregaron
+        # (`RegistroAlumnoNuevo`), y sin ellos TODO el archivo daba 422.
+        "acepta_tyc": True,
+        "acepta_salud": True,
     }
     base.update(extra)
     return base
@@ -200,3 +204,87 @@ def test_422_si_fecha_nacimiento_da_edad_fuera_de_rango(cliente):
     respuesta = cliente.post(
         BASE_REGISTRO, json=_payload(correo, fecha_nacimiento=str(muy_joven)))
     assert respuesta.status_code == 422, respuesta.text
+
+
+# ── Recuperación (migración BoxMagic): el alta aplica la oferta enviada ──────
+# `promociones_recuperacion` guardaba la promesa del correo ("4 clases gratis hasta el
+# 31/12") pero el regalo no existía en el sistema: el alumno volvía y no había nada que
+# usar. Ahora el alta liga la oferta a la cuenta nueva, crea el `Beneficio` real y marca
+# la oferta como `recuperado`.
+
+@pytest.fixture
+def oferta_de_recuperacion(db):
+    """Candidato del padrón + oferta `enviada` (4 clases) para un correo SIN cuenta.
+
+    4 es a propósito: la lista fija vieja del Beneficio (1/2/3/5) lo rechazaba.
+    """
+    correo = f"reg.promo.{_sufijo()}@registro-test.com"
+    candidato_id = db.execute(text(
+        "INSERT INTO candidatos_boxmagic "
+        "(tenant_id, nombre, correo, estado_boxmagic, grupo) "
+        "VALUES (:t, :n, :c, 'Inactivo', 'recuperacion') RETURNING id"),
+        {"t": TENANT_ID, "n": "Desertor de prueba", "c": correo}).scalar()
+    promo_id = db.execute(text(
+        "INSERT INTO promociones_recuperacion "
+        "(tenant_id, candidato_id, tipo_beneficio, cantidad, vence_en, estado) "
+        "VALUES (:t, :c, 'dias_gratis', 4, now() + interval '10 days', 'enviada') "
+        "RETURNING id"), {"t": TENANT_ID, "c": candidato_id}).scalar()
+    db.commit()
+
+    yield {"correo": correo, "candidato_id": int(candidato_id),
+           "promocion_id": int(promo_id)}
+
+    # La oferta y el padrón se van con el candidato; el Beneficio y el usuario los borra
+    # el fixture `escenario` (beneficios.alumno_id es ON DELETE CASCADE).
+    db.rollback()
+    db.execute(text("DELETE FROM promociones_recuperacion WHERE candidato_id = :c"),
+               {"c": candidato_id})
+    db.execute(text("DELETE FROM candidatos_boxmagic WHERE id = :c"),
+               {"c": candidato_id})
+    db.commit()
+
+
+def test_registro_aplica_la_oferta_de_recuperacion(cliente, db, escenario,
+                                                    oferta_de_recuperacion):
+    """El alta hace REAL el regalo que el correo de recuperación había prometido."""
+    correo = oferta_de_recuperacion["correo"]
+    escenario.append(correo)
+
+    respuesta = cliente.post(BASE_REGISTRO, json=_payload(correo))
+
+    assert respuesta.status_code == 201, respuesta.text
+    usuario_id = db.execute(text(
+        "SELECT id FROM usuarios WHERE correo = :c AND tenant_id = :t"),
+        {"c": correo, "t": TENANT_ID}).scalar()
+    assert usuario_id is not None, "el alta no creó el usuario"
+
+    promo = db.execute(text(
+        "SELECT usuario_id, estado FROM promociones_recuperacion WHERE id = :p"),
+        {"p": oferta_de_recuperacion["promocion_id"]}).first()
+    assert promo.usuario_id == usuario_id, \
+        "la oferta quedó ligada a la cuenta nueva (usuario_id)"
+    assert promo.estado == "recuperado", \
+        "el panel de Recuperación no la sigue mostrando como 'enviada'"
+
+    beneficio = db.execute(text(
+        "SELECT tipo::text AS tipo, valor FROM beneficios WHERE alumno_id = :u"),
+        {"u": usuario_id}).first()
+    assert beneficio is not None, "el alta no creó el Beneficio real"
+    assert beneficio.tipo == "clases_gratis"
+    assert beneficio.valor == 4
+
+
+def test_registro_sin_oferta_no_crea_ningun_beneficio(cliente, db, escenario):
+    """El caso normal (correo que no está en el padrón) sigue sin regalar nada."""
+    correo = f"reg.promo.no.{_sufijo()}@registro-test.com"
+    escenario.append(correo)
+
+    respuesta = cliente.post(BASE_REGISTRO, json=_payload(correo))
+
+    assert respuesta.status_code == 201, respuesta.text
+    usuario_id = db.execute(text(
+        "SELECT id FROM usuarios WHERE correo = :c AND tenant_id = :t"),
+        {"c": correo, "t": TENANT_ID}).scalar()
+    beneficio = db.execute(text(
+        "SELECT id FROM beneficios WHERE alumno_id = :u"), {"u": usuario_id}).first()
+    assert beneficio is None

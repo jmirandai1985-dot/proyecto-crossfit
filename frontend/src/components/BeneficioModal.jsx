@@ -82,7 +82,18 @@ const BeneficioModal = ({ alumno, onClose, onCreado }) => {
     const aviso = tipo ? estado?.avisos?.[tipo] : null;
     const planVigente = estado?.plan_vigente || null;
     const tieneCorreo = Boolean(estado?.alumno?.tiene_correo);
-    const puedeCrear = Boolean(tipo) && !aviso && !creando;
+    // El rango de clases lo manda el BACKEND (`valores`: 1..15). El modal no tiene su
+    // propia copia del máximo: lo dibuja (input numérico con min/max) y no deja confirmar
+    // un valor que el servicio va a rechazar.
+    const valoresClases = entradaTipo?.valores || [];
+    const clasesMin = valoresClases.length ? Math.min(...valoresClases) : 1;
+    const clasesMax = valoresClases.length ? Math.max(...valoresClases) : 1;
+    const valorNum = Number(valor);
+    const valorValido = Boolean(entradaTipo) && Number.isInteger(valorNum) && valorNum >= 1
+        && (entradaTipo.unidad === 'pct'
+            ? valorNum <= (estado?.tope_descuento ?? 0)
+            : valorNum >= clasesMin && valorNum <= clasesMax);
+    const puedeCrear = Boolean(tipo) && !aviso && !creando && valorValido;
 
     const pedirPreview = useCallback(async () => {
         if (!tipo || !alumnoId) return;
@@ -219,15 +230,18 @@ const BeneficioModal = ({ alumno, onClose, onCreado }) => {
                                     <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1">
                                         Clases de regalo
                                     </label>
-                                    <select
+                                    {/* Cualquier cantidad del rango que autoriza el box (1-15): un
+                                        input numérico, no 4 botones fijos. El máximo es el que manda
+                                        el catálogo del backend. */}
+                                    <input
+                                        type="number" min={clasesMin} max={clasesMax} step={1}
                                         value={valor} data-testid="beneficio-valor"
                                         onChange={(e) => { setValor(e.target.value); setResultado(null); }}
-                                        className="bg-zinc-800 border border-zinc-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
-                                    >
-                                        {(entradaTipo.valores || []).map((v) => (
-                                            <option key={v} value={v}>{v}</option>
-                                        ))}
-                                    </select>
+                                        className="w-32 bg-zinc-800 border border-zinc-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
+                                    />
+                                    <span className="ml-3 text-xs text-zinc-500">
+                                        De {clasesMin} a {clasesMax} clases.
+                                    </span>
                                 </div>
                             )}
 

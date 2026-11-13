@@ -54,8 +54,11 @@ const FormularioPromocion = ({ alumno, onClose }) => {
         e.preventDefault();
         setError('');
         const n = Number(cantidad);
-        if (!Number.isInteger(n) || n < 1) {
-            setError('La cantidad tiene que ser un número entero de 1 o más.');
+        // El rango lo define el TIPO (clases 1-15, % 1-100): es la misma regla que valida
+        // el backend, así el formulario no manda algo que va a volver como 422.
+        if (!Number.isInteger(n) || n < entrada.min || n > entrada.max) {
+            setError(`La cantidad tiene que ser un número entero entre ${entrada.min} `
+                + `y ${entrada.max}.`);
             return;
         }
         if (!esVencimientoValido(vence)) {
@@ -132,7 +135,14 @@ const FormularioPromocion = ({ alumno, onClose }) => {
                                 <select
                                     id="promocion-tipo"
                                     value={tipo}
-                                    onChange={(e) => setTipo(e.target.value)}
+                                    onChange={(e) => {
+                                        // Al cambiar de tipo se vuelve al valor por defecto de
+                                        // ESE tipo: 15 clases no son 15 %, y así nunca queda
+                                        // una cantidad fuera del rango nuevo.
+                                        const nuevo = tipoBeneficioDe(e.target.value);
+                                        setTipo(nuevo.key);
+                                        setCantidad(String(nuevo.defecto));
+                                    }}
                                     disabled={guardando}
                                     data-testid="modal-promocion-tipo"
                                     className="w-full bg-zinc-800 border border-zinc-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
@@ -144,7 +154,7 @@ const FormularioPromocion = ({ alumno, onClose }) => {
                             </div>
 
                             <div>
-                                {/* El rótulo CAMBIA con el tipo: días, % o pesos. */}
+                                {/* El rótulo CAMBIA con el tipo: clases o %. */}
                                 <label htmlFor="promocion-cantidad"
                                     className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1">
                                     {entrada.etiquetaCantidad}
@@ -152,7 +162,8 @@ const FormularioPromocion = ({ alumno, onClose }) => {
                                 <input
                                     id="promocion-cantidad"
                                     type="number"
-                                    min={1}
+                                    min={entrada.min}
+                                    max={entrada.max}
                                     step={1}
                                     value={cantidad}
                                     onChange={(e) => setCantidad(e.target.value)}

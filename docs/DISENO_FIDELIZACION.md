@@ -134,7 +134,9 @@ es la F3 (seguimiento del correo) y la F4 (las métricas que la pestaña Benefic
 - **Estados: `ofrecido` | `usado` | `vencido` | `anulado`.** **No hay `aceptado`**: el regalo (con o
   sin correo) se materializa al DARLO.
 - **Dos tipos** (`tipo_beneficio`): `clases_gratis` (el "Pase de regreso") y `descuento`.
-- **`valor`**: % de descuento (1..tope del box) o número de clases (1/2/3/5), según el tipo.
+- **`valor`**: % de descuento (1..tope del box) o número de CLASES (1..15, cualquier cantidad:
+  antes era una lista fija de 1/2/3/5), según el tipo. El panel recibe el rango completo en
+  `tipos[].valores` y dibuja un input numérico (el servicio valida el rango).
 - **Vigencia: 15 días desde el alta** (`beneficios_service.DIAS_VIGENCIA`), para todos los tipos. Los
   `clases_gratis` sumados a un plan que vence antes **caducan con ese plan** (un plan mensual vence el
   último día del mes): la ventana se recorta a lo que le quede al plan, porque los créditos viven en

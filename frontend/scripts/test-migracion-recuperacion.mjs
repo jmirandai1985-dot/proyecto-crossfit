@@ -13,12 +13,12 @@
 import { readFileSync } from 'node:fs';
 
 import {
-    BLOQUE_ALUMNOS, ESTADOS_RECUPERACION, ESTADO_DESCONOCIDO, ESTADO_RECUPERADO, TIPOS_BENEFICIO,
-    TIPO_BENEFICIO_DESCONOCIDO, badgeEstado, coincideBusqueda, conteoPorEstado,
-    esVencimientoValido, estadoDe, fechaEnDias, fechaParaInput, fechaTexto, filtrarAlumnos,
-    hayFiltro, paginaAlumnos, pendientesPorRecuperar, porcentajeRecuperado, promocionCompleta,
-    puedeConfigurarPromocion, puedeMarcarRecuperado, textoBeneficio, tieneCuenta,
-    tipoBeneficioDe, totalAlumnos,
+    BLOQUE_ALUMNOS, CLASES_MAX, CLASES_MIN, ESTADOS_RECUPERACION, ESTADO_DESCONOCIDO,
+    ESTADO_RECUPERADO, TIPOS_BENEFICIO, TIPO_BENEFICIO_DESCONOCIDO, badgeEstado,
+    coincideBusqueda, conteoPorEstado, esVencimientoValido, estadoDe, fechaEnDias,
+    fechaParaInput, fechaTexto, filtrarAlumnos, hayFiltro, paginaAlumnos,
+    pendientesPorRecuperar, porcentajeRecuperado, promocionCompleta, puedeConfigurarPromocion,
+    puedeMarcarRecuperado, textoBeneficio, tieneCuenta, tipoBeneficioDe, totalAlumnos,
 } from '../src/utils/migracionRecuperacion.js';
 
 let fallos = 0;
@@ -72,22 +72,34 @@ ok(!EMOJI.test(ESTADOS_RECUPERACION.map((e) => e.label).join(' ')), 'los rótulo
 
 // ── 3. (tipo_beneficio, cantidad) -> texto humano ───────────────────────────
 console.log('== 3. Texto humano de la oferta (mismo formato que el correo) ==');
-eq(textoBeneficio('dias_gratis', 5), '5 días gratis de clases', 'dias_gratis: "5 días gratis de clases"');
-eq(textoBeneficio('dias_gratis', 1), '1 día gratis de clases', 'singular en 1 día');
+// `dias_gratis` son CLASES (el nombre del tipo quedó mal desde el principio), así que el
+// texto dice clases: el admin no puede prometer "5 días" cuando lo que da son 5 clases.
+eq(textoBeneficio('dias_gratis', 5), '5 clases gratis', 'dias_gratis: "5 clases gratis"');
+eq(textoBeneficio('dias_gratis', 1), '1 clase gratis', 'singular en 1 clase');
 eq(textoBeneficio('descuento_porcentaje', 20), '20% de descuento', 'porcentaje: "20% de descuento"');
-eq(textoBeneficio('descuento_monto', 10000), '$10.000 de descuento', 'monto CLP con punto de miles');
-eq(textoBeneficio('descuento_monto', 5000), '$5.000 de descuento', 'monto de 4 cifras');
-eq(textoBeneficio('descuento_monto', 100000), '$100.000 de descuento', 'monto de 6 cifras');
+// LEGADO: "Descuento en dinero" ya no se ofrece, pero las filas históricas se siguen
+// pintando (no se borra ningún dato).
+eq(textoBeneficio('descuento_monto', 10000), '$10.000 de descuento', 'monto CLP heredado con punto de miles');
+eq(textoBeneficio('descuento_monto', 5000), '$5.000 de descuento', 'monto heredado de 4 cifras');
+eq(textoBeneficio('descuento_monto', 100000), '$100.000 de descuento', 'monto heredado de 6 cifras');
 eq(textoBeneficio('2x1', 3), 'un beneficio especial',
     'un tipo desconocido NO inventa un beneficio (igual que el correo)');
-eq(textoBeneficio('dias_gratis', null), '0 días gratis de clases',
+eq(textoBeneficio('dias_gratis', null), '0 clases gratis',
     'sin cantidad no se dibuja "undefined"');
-// Los 3 tipos del backend, en el mismo orden que `TIPOS_BENEFICIO_PROMOCION`.
+// Los DOS tipos que se ofrecen, en el mismo orden que `TIPOS_BENEFICIO_PROMOCION`.
 eq(TIPOS_BENEFICIO.map((t) => t.key).join(','),
-    'dias_gratis,descuento_porcentaje,descuento_monto', 'los 3 tipos de beneficio del backend');
+    'dias_gratis,descuento_porcentaje', 'los 2 tipos de beneficio que se ofrecen');
+ok(!TIPOS_BENEFICIO.some((t) => t.key === 'descuento_monto'),
+    '"Descuento en dinero" salió del selector (no tiene equivalente en el cobro)');
 ok(TIPOS_BENEFICIO.every((t) => t.label && t.etiquetaCantidad && t.defecto >= 1),
     'cada tipo trae label + rótulo de la cantidad + valor inicial');
-eq(tipoBeneficioDe('descuento_monto').etiquetaCantidad, 'Descuento (CLP)',
+ok(TIPOS_BENEFICIO.every((t) => Number.isInteger(t.min) && Number.isInteger(t.max) && t.max > t.min),
+    'cada tipo declara su RANGO (el formulario no deja mandar otro)');
+// El rango de clases es el MISMO que valida el backend (beneficios_service 1-15).
+eq(CLASES_MIN, 1, 'el mínimo de clases es 1');
+eq(CLASES_MAX, 15, 'el máximo de clases es 15');
+eq(tipoBeneficioDe('dias_gratis').max, 15, 'el tipo de clases llega hasta 15');
+eq(tipoBeneficioDe('descuento_porcentaje').etiquetaCantidad, 'Descuento (%)',
     'el rótulo de la cantidad cambia con el tipo');
 eq(tipoBeneficioDe('otro').key, TIPO_BENEFICIO_DESCONOCIDO.key, 'un tipo desconocido no rompe el formulario');
 
@@ -259,6 +271,9 @@ ok(PANTALLA.includes('modal-promocion-tipo') && PANTALLA.includes('modal-promoci
     && PANTALLA.includes('modal-promocion-vence'),
     'el formulario pide tipo de beneficio, cantidad y fecha de vencimiento');
 ok(PANTALLA.includes('etiquetaCantidad'), 'el rótulo de la cantidad cambia con el tipo elegido');
+// El input de la cantidad usa el RANGO del tipo (clases 1-15), no un mínimo fijo.
+ok(PANTALLA.includes('min={entrada.min}') && PANTALLA.includes('max={entrada.max}'),
+    'la cantidad se limita con el rango del tipo (1-15 clases), no con un min=1 suelto');
 // El padrón: la clave de la fila es `candidato_id` y las acciones operan sobre él
 // (no sobre `id`, que es null mientras el candidato no tenga cuenta real).
 ok(PANTALLA.includes('candidato_id'), 'la fila se identifica por candidato_id (el padrón)');
@@ -358,10 +373,16 @@ ok(!promocionCompleta({ tipo: 'dias_gratis', cantidad: '5', vence: '' }),
     'sin vencimiento -> placeholder');
 ok(!promocionCompleta({ tipo: 'dias_gratis', cantidad: '0', vence: '2026-12-31' }),
     'cantidad 0 no es una oferta válida (el backend responde 422)');
+ok(promocionCompleta({ tipo: 'dias_gratis', cantidad: '15', vence: '2026-12-31' }),
+    '15 clases es el tope del rango y SÍ es una oferta válida');
+ok(!promocionCompleta({ tipo: 'dias_gratis', cantidad: '16', vence: '2026-12-31' }),
+    '16 clases está fuera del rango: no se pide un preview que respondería 422');
 ok(!promocionCompleta({ tipo: 'dias_gratis', cantidad: '2,5', vence: '2026-12-31' }),
     'una cantidad a medio tipear no dispara el endpoint');
-ok(promocionCompleta({ tipo: 'descuento_monto', cantidad: 10000, vence: '2026-12-31' }),
+ok(promocionCompleta({ tipo: 'descuento_porcentaje', cantidad: 20, vence: '2026-12-31' }),
     'la cantidad numérica (no string) también vale');
+ok(!promocionCompleta({ tipo: 'descuento_porcentaje', cantidad: 101, vence: '2026-12-31' }),
+    'un % mayor a 100 no existe (el backend responde 422)');
 ok(!promocionCompleta(), 'sin argumentos no rompe');
 
 ok(PANTALLA.includes('modal-promocion-preview'), 'el formulario tiene el bloque de vista previa');

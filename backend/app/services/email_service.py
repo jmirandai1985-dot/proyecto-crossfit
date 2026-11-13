@@ -1591,9 +1591,12 @@ def send_aviso_retiro(nombre: str, correo: str, producto: str, cantidad: int,
 def _beneficio_promocion_humano(tipo_beneficio: str, cantidad: int) -> str:
     """Traduce (tipo_beneficio, cantidad) a lenguaje humano.
 
-    'dias_gratis' + 5 -> '5 días gratis de clases'
+    'dias_gratis' + 5 -> '5 clases gratis'  (el tipo se llama "días" por historia,
+                                            pero son CLASES: el Beneficio que nace es
+                                            `clases_gratis`)
     'descuento_porcentaje' + 20 -> '20% de descuento'
-    'descuento_monto' + 10000 -> '$10.000 de descuento' (CLP, sin decimales)
+    'descuento_monto' + 10000 -> '$10.000 de descuento' (LEGADO: hay filas históricas
+                                que el panel tiene que poder mostrar; ya no se ofrece)
 
     Un tipo desconocido devuelve un texto GENÉRICO a propósito: es preferible un
     correo que no promete nada raro a uno que invente un beneficio que el box no
@@ -1605,8 +1608,8 @@ def _beneficio_promocion_humano(tipo_beneficio: str, cantidad: int) -> str:
     )
     cantidad = int(cantidad or 0)
     if tipo_beneficio == TIPO_BENEFICIO_DIAS_GRATIS:
-        dias = f"{cantidad} día" + ("" if cantidad == 1 else "s")
-        return f"{dias} gratis de clases"
+        clases = f"{cantidad} clase" + ("" if cantidad == 1 else "s")
+        return f"{clases} gratis"
     if tipo_beneficio == TIPO_BENEFICIO_DESCUENTO_PORCENTAJE:
         return f"{cantidad}% de descuento"
     if tipo_beneficio == TIPO_BENEFICIO_DESCUENTO_MONTO:
@@ -1617,35 +1620,53 @@ def _beneficio_promocion_humano(tipo_beneficio: str, cantidad: int) -> str:
 
 def render_email_promocion_recuperacion(nombre: str, tipo_beneficio: str,
                                         cantidad: int, vence_en) -> tuple:
-    """Renderiza (asunto, html) de la oferta de recuperación.
+    """Renderiza (asunto, html) del correo de recuperación: invitación a VOLVER.
 
-    Fuente ÚNICA del copy: la usa el envío real (`enviar_email_promocion_recuperacion`)
-    y cualquier preview futuro, así el alumno ve exactamente lo que el panel configuró.
-    `vence_en` es la fecha REAL de la oferta: una promoción sin fecha es una promoción
-    que el alumno no sabe hasta cuándo puede usar.
+    Fuente ÚNICA del copy: la usan el envío real (`enviar_email_promocion_recuperacion`),
+    la vista previa del panel y (por eso) los tests, así el alumno recibe exactamente lo
+    que el panel configuró.
+
+    El correo cuenta TRES cosas y sólo tres: (1) hay una plataforma nueva y el atractivo
+    concreto es el Performance Hub (RM + progreso); (2) el beneficio EXACTO que se le
+    ofreció y hasta cuándo vale, junto con su clase de prueba gratis; (3) UN solo botón,
+    "Quiero volver al box", que lleva a `/login`: primero tiene que crear su acceso (los
+    desertores de BoxMagic todavía no tienen cuenta) y recién adentro puede agendar. Antes
+    el botón apuntaba a `/alumno/mis-reservas` o a `/alumno/solicitar-plan`, pantallas que
+    un alumno que vuelve todavía no puede alcanzar.
+
+    `vence_en` es la fecha REAL de la oferta: una promoción sin fecha es una promoción que
+    el alumno no sabe hasta cuándo puede usar.
     """
+    from app.models.promocion_recuperacion import TIPO_BENEFICIO_DESCUENTO_PORCENTAJE
+
     primer_nombre = (nombre or "Atleta").split()[0]
     beneficio = _beneficio_promocion_humano(tipo_beneficio, cantidad)
     fecha = formatear_fecha_es(vence_en) if vence_en else None
     hasta = f"hasta el <strong>{fecha}</strong>" if fecha else "por tiempo limitado"
 
     titulo = "Te guardamos un lugar en el box"
-    saludo = (f"Hola {primer_nombre}, hace un tiempo no te vemos por el box y "
-              "queremos que vuelvas a entrenar con nosotros.")
-    cuerpo = (f"<p>Te dejamos <strong>{beneficio}</strong>, válido {hasta}.</p>"
-              "<p>No tienes que hacer ningún trámite: entra a la app o escríbenos y "
-              "lo activamos para que retomes tu ritmo.</p>")
+    saludo = (f"¡Hola {primer_nombre}! Hace tiempo que no te vemos entrenando con "
+              "nosotros, y queremos que vuelvas — pero esta vez con algo que antes no "
+              "tenías.")
+    # El cierre cambia según el beneficio: "usa tu descuento" no le dice nada a quien se
+    # le regalaron clases (y al revés).
+    cierre = ("usa tu descuento cuando elijas tu plan"
+              if tipo_beneficio == TIPO_BENEFICIO_DESCUENTO_PORCENTAJE
+              else "usa tus clases gratis cuando quieras")
+    cuerpo = (
+        "Estrenamos una nueva plataforma para que vivas el box de otra forma: agenda tus "
+        "clases desde el celular, lleva el registro de tus marcas personales en el "
+        "Performance Hub (anota tus RM, mira cómo progresas, recibe tips para seguir "
+        "mejorando), y mucho más.<br><br>"
+        f"Para que vuelvas con todo, te tenemos <strong>{beneficio}</strong> esperándote, "
+        f"válido {hasta}. Y tienes tu clase de prueba gratis lista para cuando quieras — "
+        "ven, prueba la plataforma nueva, siente de nuevo la energía del box, y "
+        f"{cierre}. Solo te toma un par de minutos crear tu acceso. Una vez adentro, "
+        "agenda tu clase y nosotros te acompañamos en el regreso.")
 
-    from app.models.promocion_recuperacion import TIPO_BENEFICIO_DIAS_GRATIS
-    if tipo_beneficio == TIPO_BENEFICIO_DIAS_GRATIS:
-        boton_texto = "Reservar mi clase"
-        url = url_frontend("/alumno/mis-reservas")
-    else:
-        boton_texto = "Ver mi beneficio"
-        url = url_frontend("/alumno/solicitar-plan")
-
-    asunto = f"🎁 {primer_nombre}, {beneficio} para que vuelvas al box"
-    return asunto, _template(titulo, saludo, cuerpo, boton_texto, url)
+    asunto = f"🔥 {primer_nombre}, tenemos algo nuevo que te va a encantar"
+    return asunto, _template(titulo, saludo, cuerpo,
+                             "Quiero volver al box", url_frontend("/login"))
 
 
 def enviar_email_promocion_recuperacion(alumno: dict, tipo_beneficio: str,

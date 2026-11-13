@@ -110,6 +110,12 @@ def test_a1_los_enums_del_modelo_son_los_de_la_migracion_y_no_existe_aceptado():
         assert set(entrada) == {"id", "label", "descripcion", "unidad", "valores", "materializa"}
     assert svc.etiqueta(svc.TIPO_CLASES_GRATIS) == "Clases gratis"
     assert svc.etiqueta("tipo_viejo") == "tipo_viejo", "un id viejo no rompe la lectura"
+    # Las clases que se regalan: CUALQUIER cantidad de 1 a 15 (ya no una tupla de 4
+    # opciones). El panel recibe el rango completo para dibujar un input numérico.
+    clases = next(t for t in svc.TIPOS if t["id"] == svc.TIPO_CLASES_GRATIS)
+    assert clases["valores"] == list(range(1, 16))
+    assert svc.CLASES_VALIDAS == range(svc.CLASES_MIN, svc.CLASES_MAX + 1)
+    assert (svc.CLASES_MIN, svc.CLASES_MAX) == (1, 15)
     # Sin aceptación no hay `aceptar()`: el regalo se entrega al mandarlo.
     assert not hasattr(svc, "aceptar")
 
@@ -282,7 +288,9 @@ def test_a6_crear_rechaza_lo_imposible_antes_de_tocar_la_base():
     for malo in (0, -1, "3", None, True, 3.5):
         with pytest.raises(svc.ValorInvalido):
             svc.crear(sesion, alumno, svc.TIPO_CLASES_GRATIS, malo, notificacion_id=1, ahora=T0)
-    for fuera in (4, 6, 100):
+    # Fuera del RANGO 1..15 se rechaza (4/6/15 son válidos desde que el regalo dejó de
+    # ser una lista fija de 1/2/3/5: acá sólo se prueban los bordes que NO entran).
+    for fuera in (16, 100):
         with pytest.raises(svc.ValorInvalido):
             svc.crear(sesion, alumno, svc.TIPO_CLASES_GRATIS, fuera, notificacion_id=1, ahora=T0)
     assert sesion.eventos == [], "nada de esto llegó a consultar la base"

@@ -166,8 +166,11 @@ def test_flujo_completo_de_un_candidato_sin_cuenta(cliente, db, admin_headers, c
                     params=_params_preview(), headers=admin_headers)
     assert r.status_code == 200, r.text
     preview = r.json()
-    assert "5 días gratis de clases" in preview["asunto"]
-    assert "5 días gratis de clases" in preview["html"]
+    # El beneficio (CLASES, no días de calendario) va en el CUERPO; el asunto es el copy
+    # nuevo de "volver al box", que no repite la oferta.
+    assert "5 clases gratis" in preview["html"]
+    assert "5 clases gratis" not in preview["asunto"]
+    assert "algo nuevo" in preview["asunto"]
     assert candidato.nombre.split()[0] in preview["asunto"]
 
     db.expire_all()

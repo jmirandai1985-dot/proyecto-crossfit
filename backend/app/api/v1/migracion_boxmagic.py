@@ -62,6 +62,17 @@ en BoxMagic están `Inactivo`) y el estado de su oferta. `POST
 DEDICADO a esa oferta, y `PUT /recuperacion/{candidato_id}/marcar-recuperado` cierra el
 ciclo cuando el alumno vuelve.
 
+La oferta es un BENEFICIO REAL, no sólo un correo: `dias_gratis` son CLASES gratis
+(el nombre del tipo quedó mal desde el principio; se mantiene por compatibilidad) y se
+pueden ofrecer de 1 a 15 — el MISMO rango que valida Fidelización
+(`beneficios_service.CLASES_MIN/MAX`). `descuento_porcentaje` es 1-100 %. El tipo
+`descuento_monto` ya NO se ofrece (no tiene equivalente en el sistema de cobro): la
+constante sobrevive sólo para las filas históricas.
+
+Cuando ese alumno se registra (`POST /api/v1/alumnos/registro/alumno-nuevo`), el alta
+aplica la oferta: liga la fila a la cuenta nueva, crea el `Beneficio` real y la marca
+como `recuperado` (ver `services/promociones_recuperacion_service.py`).
+
 El destinatario es el CANDIDATO del padrón (`candidato_id`, migración 080): los
 desertores de BoxMagic todavía no tienen cuenta y crearla es un paso posterior. Si ese
 correo ya existe en `usuarios`, la oferta se liga TAMBIÉN a la cuenta (`usuario_id`) y
@@ -82,7 +93,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -95,11 +106,11 @@ from app.models.candidato_boxmagic import (
 from app.models.plan import Plan
 from app.models.promocion_recuperacion import (
     ESTADO_PROMO_ENVIADA, ESTADO_PROMO_RECUPERADO, ESTADO_PROMO_VENCIDA,
-    TIPOS_BENEFICIO_PROMOCION, PromocionRecuperacion,
+    TIPO_BENEFICIO_DIAS_GRATIS, TIPOS_BENEFICIO_PROMOCION, PromocionRecuperacion,
 )
 from app.models.suscripcion import Suscripcion
 from app.models.usuario import RolUsuario, Usuario
-from app.services import email_service
+from app.services import beneficios_service, email_service
 # "¿Hace cuánto no entrena?" = última asistencia REAL (`reservas.asistio`), la misma
 # fuente que el panel de Fidelización y la campaña de inactividad (ver
 # `services/asistencia_real.py`, bug "En riesgo = 251").
@@ -525,17 +536,32 @@ def editar_candidato(
     }
 
 
+def _rango_cantidad(tipo_beneficio: str) -> tuple:
+    """Máximo (y la unidad, en palabras) que acepta ese `tipo_beneficio`.
+
+    Las clases gratis salen del MISMO rango que valida Fidelización
+    (`beneficios_service.CLASES_MIN/MAX`): así el panel de Recuperación no puede ofrecer
+    una cantidad que después el Beneficio real rechace. El % tiene su propio techo físico
+    (100) porque un descuento mayor al precio no existe.
+    """
+    if tipo_beneficio == TIPO_BENEFICIO_DIAS_GRATIS:
+        return beneficios_service.CLASES_MAX, "clases"
+    return 100, "porcentaje"
+
+
 class PromocionRecuperacionIn(BaseModel):
     """Oferta que el admin configura para un alumno inactivo.
 
-    `cantidad` es la unidad de `tipo_beneficio`: días (`dias_gratis`), porcentaje
-    (`descuento_porcentaje`) o monto en CLP (`descuento_monto`). El tipo se valida
-    acá para que la tabla no acumule valores que ningún correo sabe contar.
+    `cantidad` es la unidad de `tipo_beneficio`: CLASES gratis (`dias_gratis`, entre
+    `CLASES_MIN` y `CLASES_MAX` — el nombre del campo es viejo, son clases, no días de
+    calendario) o porcentaje (`descuento_porcentaje`, 1-100). El tipo se valida acá para
+    que la tabla no acumule valores que ningún correo sabe contar, y `descuento_monto`
+    ya no se acepta: no tiene equivalente en el sistema de cobro.
     """
 
     tipo_beneficio: str = Field(
-        ..., description="dias_gratis | descuento_porcentaje | descuento_monto")
-    cantidad: int = Field(..., ge=1, description="Días, % o monto CLP según el tipo")
+        ..., description="dias_gratis | descuento_porcentaje")
+    cantidad: int = Field(..., ge=1, description="Clases (1-15) o % de descuento")
     vence_en: datetime = Field(
         ..., description="Fecha hasta la que vale la oferta (ISO 8601). Se guarda el "
                          "FIN DE ESE DÍA en hora de Chile, igual que la vigencia de "
@@ -551,6 +577,16 @@ class PromocionRecuperacionIn(BaseModel):
             raise ValueError("Tipo de beneficio inválido: usa "
                              + " | ".join(TIPOS_BENEFICIO_PROMOCION))
         return normalizado
+
+    @model_validator(mode="after")
+    def _cantidad_del_tipo(self):
+        """La cantidad tiene que caber en su unidad (un % de 120 o 20 clases no existen)."""
+        maximo, que = _rango_cantidad(self.tipo_beneficio)
+        if self.cantidad > maximo:
+            raise ValueError(
+                f"La cantidad de {que} tiene que estar entre 1 y {maximo} "
+                f"(llegó {self.cantidad}).")
+        return self
 
 
 @router.get("/recuperacion")
@@ -661,8 +697,8 @@ def get_recuperacion(
 def preview_promocion_recuperacion(
     candidato_id: int,
     tipo_beneficio: str = Query(
-        ..., description="dias_gratis | descuento_porcentaje | descuento_monto"),
-    cantidad: int = Query(..., ge=1, description="Días, % o monto CLP según el tipo"),
+        ..., description="dias_gratis | descuento_porcentaje"),
+    cantidad: int = Query(..., ge=1, description="Clases (1-15) o % de descuento"),
     vence_en: datetime = Query(
         ..., description="Fecha hasta la que vale la oferta (ISO 8601). Igual que en el "
                          "POST, se toma el FIN DE ESE DÍA en hora de Chile."),
@@ -692,8 +728,10 @@ def preview_promocion_recuperacion(
     y no la del payload.
 
     Un tipo de beneficio fuera de `TIPOS_BENEFICIO_PROMOCION` responde 422 (igual que el
-    body del POST) y un `candidato_id` de otro box 404. La fecha pasada NO se rechaza:
-    acá no se crea nada, y el formulario ya la bloquea antes de llegar al POST.
+    body del POST) — y lo mismo una `cantidad` fuera de su rango (clases 1-15, % 1-100):
+    el preview no puede prometer una oferta que el POST rechazaría. Un `candidato_id` de
+    otro box 404. La fecha pasada NO se rechaza: acá no se crea nada, y el formulario ya
+    la bloquea antes de llegar al POST.
     """
     tipo = str(tipo_beneficio or "").strip().lower()
     if tipo not in TIPOS_BENEFICIO_PROMOCION:
@@ -701,6 +739,13 @@ def preview_promocion_recuperacion(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Tipo de beneficio inválido: usa "
                    + " | ".join(TIPOS_BENEFICIO_PROMOCION),
+        )
+    maximo, que = _rango_cantidad(tipo)
+    if cantidad > maximo:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"La cantidad de {que} tiene que estar entre 1 y {maximo} "
+                   f"(llegó {cantidad}).",
         )
 
     tenant_id = current_user["tenant_id"]

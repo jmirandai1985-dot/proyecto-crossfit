@@ -37,7 +37,9 @@ from app.services import fidelizacion_plantillas as plantillas          # noqa: 
 from app.utils.santiago import SANTIAGO                                 # noqa: E402
 
 TENANT_ID = 1
-CLASES = 3
+# 4 clases: un valor que la lista fija vieja (1/2/3/5) RECHAZABA. Todo el archivo regala
+# esta cantidad, así queda probado de punta a punta que el rango 1-15 se acepta.
+CLASES = 4
 T0 = datetime(2026, 9, 29, 12, 0, tzinfo=SANTIAGO)
 BASE_BENEFICIOS = "/api/v1/beneficios"
 
@@ -303,7 +305,8 @@ def test_b1_los_tipos_traen_el_catalogo_y_el_tope_del_box(cliente, tokens, db):
     por_tipo = {t["id"]: t for t in datos["tipos"]}
     assert por_tipo[svc.TIPO_DESCUENTO]["unidad"] == "pct"
     assert por_tipo[svc.TIPO_CLASES_GRATIS]["unidad"] == "clases"
-    assert por_tipo[svc.TIPO_CLASES_GRATIS]["valores"] == list(svc.CLASES_VALIDAS)
+    assert por_tipo[svc.TIPO_CLASES_GRATIS]["valores"] == list(range(1, 16)), \
+        "el panel recibe el rango completo (1-15), no las 4 opciones viejas"
     # La ventana viaja como DATO (el panel la muestra, no la decide).
     assert datos["dias_vigencia"] == svc.DIAS_VIGENCIA
 
