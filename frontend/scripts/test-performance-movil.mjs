@@ -3,9 +3,18 @@
 //
 // POR QUÉ EXISTE: "Tus RMs" era una tabla de 7 columnas con `tableLayout: fixed`. En un
 // teléfono las columnas se apretaban ("REPSSER."), el movimiento se cortaba ("Snatch
-// (Ar...") y NOTAS quedaba fuera de pantalla sin pista de scroll. Además las semanas del
-// gráfico (S40, S42…) tocaban las barras. Sin navegador se puede comprobar la estructura:
-// tarjetas en <lg, tabla sólo en ≥lg, notas completas y etiquetas separadas.
+// (Ar...") y NOTAS quedaba fuera de pantalla sin pista de scroll. Sin navegador se puede
+// comprobar la estructura: tarjetas en <lg, tabla sólo en ≥lg y notas completas.
+//
+// HISTORIA — por qué YA NO se valida "fecha + marca" en 2 líneas:
+// bbb0354 agregó un BarChart semanal por categoría con `EtiquetaMarca` (dataKey="label",
+// height={118}) para que las semanas ISO (S40/S42) no tocaran las barras. c7d5002 eliminó
+// ese gráfico A PROPÓSITO y lo reemplazó por el acordeón por movimiento
+// (`MovimientoAcordeon`): el semanal mezclaba todos los movimientos de la categoría
+// tomando el máximo de cada semana. El mini-gráfico actual no dibuja etiquetas de eje (la
+// fecha va en el `title` de cada barra), así que el problema original ya no puede ocurrir.
+// La agrupación del reemplazo la cubre `scripts/test-evolucion-movimiento.mjs`.
+
 import { readFileSync } from 'node:fs';
 
 const leer = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -48,14 +57,6 @@ ok(HUB.includes('whitespace-nowrap">Reps') && HUB.includes('whitespace-nowrap">S
     'REPS y SER. no se parten ni se pegan');
 ok(HUB.includes('title={rm.movimiento_nombre}') && HUB.includes("title={rm.notas || ''}"),
     'lo truncado en la tabla tiene tooltip con el texto completo');
-
-console.log('== 3. El gráfico usa "fecha + marca" en 2 líneas (no la semana ISO) ==');
-ok(HUB.includes('dataKey="label"'), 'el eje X ya no usa la semana ISO (S40/S42)');
-ok(HUB.includes('tick={<EtiquetaMarca />}'), 'hay un tick propio para la etiqueta en 2 líneas');
-ok(HUB.includes('margin={{ top: 5, right: 5, bottom: 22, left: 0 }}'),
-    'el gráfico reserva más espacio abajo para las 2 líneas');
-ok(HUB.includes('height={118}'), 'el cuadrante mantiene su altura');
-ok(!HUB.includes('tickMargin={8}'), 'ya no se usa el margen de la etiqueta ISO vieja');
 
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);
