@@ -2,7 +2,7 @@
 Router de endpoints para gestión de WODs (Workout of the Day)
 """
 import re
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.models.wod import Wod, EstadoWod
@@ -1166,6 +1166,29 @@ def eliminar_wod(
 # ENDPOINT: ASIGNAR WOD A CLASE
 # ──────────────────────────────────────────────
 
+def _exigir_estado_publicado(estado) -> None:
+    """Rechaza un estado que no sea `publicado` con el 400 de negocio.
+
+    Se usa tanto con una fila `Wod` como con el `estado` crudo del body de
+    `/wods/batch-create`, para que el mensaje y la regla sean UNA sola.
+    """
+    valor = getattr(estado, "value", estado) or "draft"
+    if valor != EstadoWod.publicado.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se puede asignar un WOD que no ha sido publicado",
+        )
+
+
+def _exigir_wod_publicado(wod: Wod) -> None:
+    """Un borrador no se puede enlazar a una clase real.
+
+    Es la primera barrera de la cadena: si el WOD nunca se publicó, la clase no
+    puede quedar apuntándolo (y el alumno no lo verá ni podrá registrarlo).
+    """
+    _exigir_estado_publicado(wod.estado)
+
+
 @router.post("/clases/{clase_id}/asignar-wod/{wod_id}")
 def asignar_wod_a_clase(
     clase_id: int,
@@ -1213,6 +1236,8 @@ def asignar_wod_a_clase(
     ).first()
     if not wod:
         raise HTTPException(status_code=404, detail="WOD no encontrado")
+
+    _exigir_wod_publicado(wod)
 
     # Asignar WOD a la clase
     clase.wod_id = wod_id
@@ -1269,6 +1294,8 @@ def asignar_wod_batch(
     ).first()
     if not wod:
         raise HTTPException(status_code=404, detail="WOD no encontrado")
+
+    _exigir_wod_publicado(wod)
 
     # FASE 1: Validar TODAS las clases ANTES de asignar (todo o nada)
     clases_a_asignar = []
@@ -1351,6 +1378,13 @@ def crear_wods_batch(
         raise HTTPException(
             status_code=400,
             detail="Fechas duplicadas en la tanda: cada WOD debe ser de una fecha distinta")
+
+    # ── Invariante de la cadena: un borrador NO se enlaza a clases ───────────
+    # Se valida ANTES de crear cualquier WOD o consultar clases: si un solo día
+    # viene `draft`, no se escribe nada y las clases quedan intactas. Mismo
+    # mensaje que la asignación individual y el batch.
+    for wd in body.wods:
+        _exigir_estado_publicado(wd.estado)
 
     # ── ALCANCE del vínculo (punto 2: "todas las horas" vs "solo esta hora") ──
     # clase_ids=None  → TODAS las clases de la fecha + disciplina (histórico).
