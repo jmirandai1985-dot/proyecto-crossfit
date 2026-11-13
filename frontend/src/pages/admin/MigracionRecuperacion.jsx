@@ -3,12 +3,14 @@ import Layout from '../../components/Layout';
 import { KpiCard } from '../../components/kpis/KpiCard';
 import {
     useConfigurarPromocion, useMarcarRecuperado, useMigracionRecuperacion,
+    usePreviewPromocionRecuperacion,
 } from '../../hooks/queries';
 import {
-    ESTADOS_RECUPERACION, TIPOS_BENEFICIO, badgeEstado, conteoPorEstado, esVencimientoValido,
-    fechaEnDias, fechaParaInput, fechaTexto, filtrarAlumnos, hayFiltro,
-    pendientesPorRecuperar, porcentajeRecuperado, puedeConfigurarPromocion,
-    puedeMarcarRecuperado, textoBeneficio, tieneCuenta, tipoBeneficioDe, totalAlumnos,
+    BLOQUE_ALUMNOS, ESTADOS_RECUPERACION, TIPOS_BENEFICIO, badgeEstado, conteoPorEstado,
+    esVencimientoValido, fechaEnDias, fechaParaInput, fechaTexto, filtrarAlumnos, hayFiltro,
+    paginaAlumnos, pendientesPorRecuperar, porcentajeRecuperado, promocionCompleta,
+    puedeConfigurarPromocion, puedeMarcarRecuperado, textoBeneficio, tieneCuenta,
+    tipoBeneficioDe, totalAlumnos,
 } from '../../utils/migracionRecuperacion';
 
 /**
@@ -34,6 +36,17 @@ const FormularioPromocion = ({ alumno, onClose }) => {
 
     const entrada = tipoBeneficioDe(tipo);
     const guardando = configurar.isPending;
+    // Vista previa del correo: el hook la pide solo cuando están los TRES datos (con
+    // debounce para no pegarle al backend en cada tecla) y el backend renderiza con la
+    // MISMA función del envío real. El vencimiento viaja como en el POST: el día elegido
+    // anclado al mediodía UTC (el backend lo lleva al fin del día chileno).
+    const datosCompletos = promocionCompleta({ tipo, cantidad, vence });
+    const preview = usePreviewPromocionRecuperacion({
+        usuarioId: alumno.id,
+        tipo,
+        cantidad,
+        venceEn: datosCompletos ? `${fechaParaInput(vence)}T12:00:00Z` : '',
+    });
 
     const enviar = async (e) => {
         e.preventDefault();
@@ -174,6 +187,52 @@ const FormularioPromocion = ({ alumno, onClose }) => {
                                 Se le ofrece {textoBeneficio(tipo, Number(cantidad) || 0)}
                                 {' '}y se le manda un correo con esa oferta.
                             </p>
+
+                            {/* ── Vista previa del correo ANTES de confirmar ──
+                                El asunto y el HTML los arma el BACKEND con la MISMA función
+                                del envío real, así que esto es lo que recibe el alumno. Se
+                                reusa el patrón de preview del BeneficioModal (iframe con
+                                `srcDoc` + `sandbox`): el HTML es del propio proyecto y el
+                                iframe lo aísla del CSS del panel. */}
+                            <div className="rounded-lg border border-zinc-700 bg-zinc-800/40 p-3"
+                                data-testid="modal-promocion-preview">
+                                <p className="text-[11.5px] font-semibold uppercase tracking-wide text-zinc-400">
+                                    Vista previa del correo
+                                </p>
+                                {!datosCompletos ? (
+                                    <p className="text-xs text-zinc-500 mt-2"
+                                        data-testid="modal-promocion-preview-placeholder">
+                                        Completa los datos para ver la vista previa.
+                                    </p>
+                                ) : preview.isError ? (
+                                    <p className="text-xs text-red-300 mt-2"
+                                        data-testid="modal-promocion-preview-error">
+                                        {preview.error?.response?.data?.detail
+                                            || 'No se pudo generar la vista previa del correo.'}
+                                    </p>
+                                ) : !preview.data ? (
+                                    <div className="flex justify-center py-6">
+                                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-orange-500" />
+                                    </div>
+                                ) : (
+                                    <>
+                                        <p className="text-sm mt-2 mb-2">
+                                            <span className="text-zinc-500">Asunto:</span>{' '}
+                                            <span className="text-zinc-100 font-medium"
+                                                data-testid="modal-promocion-preview-asunto">
+                                                {preview.data.asunto}
+                                            </span>
+                                        </p>
+                                        <iframe
+                                            title="Vista previa del correo de la promoción"
+                                            srcDoc={preview.data.html}
+                                            sandbox=""
+                                            data-testid="modal-promocion-preview-html"
+                                            className="w-full h-72 bg-white rounded-lg border border-zinc-700"
+                                        />
+                                    </>
+                                )}
+                            </div>
                         </>
                     )}
                 </form>
@@ -223,10 +282,26 @@ const FormularioPromocion = ({ alumno, onClose }) => {
  * filtran la tabla, se prenden y se apagan con el mismo clic, y el filtro activo queda a
  * la vista en los chips. Los conteos, los badges, el texto de la oferta y el filtro viven
  * en `utils/migracionRecuperacion.js` (probado sin navegador).
+ *
+ * En el TELÉFONO (<768px) las tarjetas de estado van en una fila con scroll horizontal
+ * propio y la tabla se reemplaza por una tarjeta por alumno, con los datos y las acciones
+ * apilados. En >=768px se mantiene la tabla de siempre.
  */
 const MigracionRecuperacion = () => {
-    const { data, isPending, isError, error, refetch } = useMigracionRecuperacion();
+    const { data, isPending, isFetching, isError, error, refetch } = useMigracionRecuperacion();
     const [estadoFiltro, setEstadoFiltro] = useState(null);
+    // Buscador por nombre o correo: filtra la tabla EN VIVO en el cliente (la respuesta ya
+    // trae la lista completa), así que escribir no dispara ninguna request.
+    const [busqueda, setBusqueda] = useState('');
+    // Cuántos resultados se pintan. Arranca en el primer bloque y "Cargar 25 más" lo
+    // agranda (AGREGA filas, no reemplaza las que ya se están mirando). El reset a 25 NO
+    // va en un efecto (dispararía un render de más): el estado guarda, junto al límite, la
+    // "clave" de los filtros con la que se cargó, y si esa clave ya no coincide (cambió
+    // una tarjeta, un chip o el texto buscado) se vuelve al primer bloque en el mismo
+    // render.
+    const claveFiltros = `${estadoFiltro ?? ''}|${busqueda}`;
+    const [paginacion, setPaginacion] = useState({ clave: claveFiltros, limite: BLOQUE_ALUMNOS });
+    const limite = paginacion.clave === claveFiltros ? paginacion.limite : BLOQUE_ALUMNOS;
     // Alumno cuya oferta se está configurando (null = formulario cerrado).
     const [alumnoFormulario, setAlumnoFormulario] = useState(null);
     // Fila con el "Marcar como recuperado" en vuelo (para deshabilitar ESE botón).
@@ -245,11 +320,14 @@ const MigracionRecuperacion = () => {
     const recuperados = conteo.recuperado;
     const avance = porcentajeRecuperado(resumen);
 
-    const visibles = filtrarAlumnos(alumnos, { estado: estadoFiltro });
-    const conFiltro = hayFiltro({ estado: estadoFiltro });
+    const visibles = filtrarAlumnos(alumnos, { estado: estadoFiltro, busqueda });
+    const conFiltro = hayFiltro({ estado: estadoFiltro, busqueda });
+    // El bloque que se pinta (25) + los números del footer ("faltan Z"). Sólo en memoria.
+    const bloque = paginaAlumnos(visibles, limite);
 
     const alternarEstado = (clave) => setEstadoFiltro((previa) => (previa === clave ? null : clave));
-    const quitarFiltros = () => setEstadoFiltro(null);
+    const quitarFiltros = () => { setEstadoFiltro(null); setBusqueda(''); };
+    const cargarMas = () => setPaginacion({ clave: claveFiltros, limite: limite + BLOQUE_ALUMNOS });
 
     const marcar = async (alumno) => {
         setMarcandoId(alumno.id);
@@ -296,8 +374,17 @@ const MigracionRecuperacion = () => {
                     <button
                         type="button"
                         onClick={() => refetch()}
-                        className="shrink-0 px-4 py-2 rounded-xl border border-zinc-700 bg-zinc-800 text-zinc-200 text-sm font-bold hover:border-orange-500 hover:text-orange-400 transition-colors"
+                        disabled={isFetching}
+                        aria-busy={isFetching}
+                        title="Volver a pedir la lista al servidor"
+                        className="inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 rounded-xl border border-zinc-700 bg-zinc-800 text-zinc-200 text-sm font-bold transition hover:border-orange-500 hover:text-orange-400 active:border-orange-500 active:bg-zinc-700 active:text-orange-400 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
                     >
+                        {/* El spinner ocupa su lugar SIEMPRE (invisible cuando no carga): así el
+                            botón no cambia de ancho al empezar/terminar la request. */}
+                        <span
+                            aria-hidden="true"
+                            className={`h-3.5 w-3.5 rounded-full border-2 border-orange-500 border-t-transparent ${isFetching ? 'animate-spin' : 'invisible'}`}
+                        />
                         Actualizar
                     </button>
                 </div>
@@ -358,8 +445,10 @@ const MigracionRecuperacion = () => {
                     </div>
                 </div>
 
-                {/* ── Las 4 tarjetas: CLICKEABLES, filtran la tabla por estado ── */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                {/* ── Las 4 tarjetas: CLICKEABLES, filtran la tabla por estado ──
+                    En el TELÉFONO van en UNA fila con scroll horizontal propio (el scroll
+                    no arrastra la página); desde 768px vuelve a la grilla de siempre. */}
+                <div className="mb-4 flex snap-x gap-3 overflow-x-auto p-1 md:grid md:grid-cols-2 md:overflow-visible md:p-0 lg:grid-cols-4">
                     {ESTADOS_RECUPERACION.map((estado) => {
                         const activa = estadoFiltro === estado.key;
                         return (
@@ -371,9 +460,9 @@ const MigracionRecuperacion = () => {
                                 aria-label={`Filtrar la tabla por el estado: ${estado.label}`}
                                 title={activa ? 'Quitar este filtro' : `Filtrar la tabla por ${estado.label}`}
                                 data-testid={`tarjeta-estado-${estado.key}`}
-                                className={`w-full text-left rounded-lg transition ${activa
+                                className={`w-40 shrink-0 snap-start text-left rounded-lg transition active:scale-[0.97] md:w-auto ${activa
                                     ? 'ring-2 ring-orange-500'
-                                    : 'hover:ring-1 hover:ring-zinc-600'}`}
+                                    : 'hover:ring-1 hover:ring-zinc-600 active:ring-2 active:ring-orange-500'}`}
                             >
                                 <KpiCard
                                     label={estado.label}
@@ -385,25 +474,157 @@ const MigracionRecuperacion = () => {
                     })}
                 </div>
 
-                {/* ── Filtro activo (se quita con el mismo clic o con "Ver todos") ── */}
+                {/* ── Filtros activos (se quitan uno por uno o con "Ver todos") ── */}
                 {conFiltro && (
                     <div className="flex flex-wrap items-center gap-2 mb-4" data-testid="filtros-activos">
                         <span className="text-xs text-zinc-500">Filtrando:</span>
-                        <button
-                            type="button"
-                            onClick={() => setEstadoFiltro(null)}
-                            className="px-3 py-1 rounded-full text-xs font-semibold border border-orange-500/40 bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 transition-colors"
-                        >
-                            Estado: {badgeEstado(estadoFiltro).texto} <span aria-hidden="true">×</span>
-                        </button>
+                        {estadoFiltro && (
+                            <button
+                                type="button"
+                                onClick={() => setEstadoFiltro(null)}
+                                className="px-3 py-1 rounded-full text-xs font-semibold border border-orange-500/40 bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 transition-colors"
+                            >
+                                Estado: {badgeEstado(estadoFiltro).texto} <span aria-hidden="true">×</span>
+                            </button>
+                        )}
+                        {busqueda.trim() && (
+                            <button
+                                type="button"
+                                onClick={() => setBusqueda('')}
+                                title="Limpiar la búsqueda"
+                                className="px-3 py-1 rounded-full text-xs font-semibold border border-zinc-600 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+                            >
+                                Buscar: {busqueda.trim()} <span aria-hidden="true">×</span>
+                            </button>
+                        )}
                         <button type="button" onClick={quitarFiltros} className="ml-1 text-xs font-semibold text-zinc-400 underline">
                             Ver todos
                         </button>
                     </div>
                 )}
 
-                {/* ── Tabla ── */}
-                <div className="overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-900">
+                {/* ── Buscador por nombre o correo: filtra la tabla EN VIVO ──
+                    Sin request: la lista ya está en memoria. Se combina con las tarjetas
+                    de estado. */}
+                <input
+                    type="text"
+                    value={busqueda}
+                    onChange={(e) => setBusqueda(e.target.value)}
+                    placeholder="Buscar por nombre o correo..."
+                    aria-label="Buscar alumno por nombre o correo"
+                    data-testid="buscar-recuperacion"
+                    className="mb-3 w-full px-4 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-zinc-800 text-zinc-100 placeholder:text-zinc-500"
+                />
+
+                {/* ── Vista MÓVIL (<768px): una tarjeta por alumno con los datos y las
+                    acciones apilados. La tabla de 6 columnas no entra en un teléfono; en
+                    >=768px esta vista no se muestra (el escritorio sigue igual). */}
+                <ul data-testid="padron-recuperacion-movil" className="md:hidden space-y-2">
+                    {bloque.mostrados.length > 0 ? bloque.mostrados.map((alumno) => {
+                        const badge = badgeEstado(alumno.estado);
+                        const promo = alumno.promocion;
+                        const configurable = puedeConfigurarPromocion(alumno);
+                        const marcable = puedeMarcarRecuperado(alumno);
+                        const enVuelo = marcandoId === alumno.id;
+                        // Misma clave que la fila de escritorio: `candidato_id` es el padrón
+                        // e `id` la cuenta REAL (null mientras no exista).
+                        const clave = alumno.candidato_id ?? alumno.id;
+                        return (
+                            <li
+                                key={clave}
+                                data-alumno-id={clave}
+                                data-testid={`alumno-movil-${clave}`}
+                                className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3"
+                            >
+                                <p className="text-sm font-bold text-zinc-100 break-words">{alumno.nombre}</p>
+                                <p className="mt-0.5 text-[12.5px] text-zinc-400 break-all">{alumno.correo}</p>
+                                <dl className="mt-3 space-y-2">
+                                    <div>
+                                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                                            Última asistencia
+                                        </dt>
+                                        <dd className="text-sm text-zinc-300">
+                                            {alumno.ultima_asistencia
+                                                ? fechaTexto(alumno.ultima_asistencia)
+                                                : '—'}
+                                            <span className="block text-[11.5px] text-zinc-500">
+                                                {alumno.dias_ausente === null || alumno.dias_ausente === undefined
+                                                    ? 'Sin historial de asistencia'
+                                                    : `${alumno.dias_ausente} día${alumno.dias_ausente === 1 ? '' : 's'} ausente`}
+                                            </span>
+                                        </dd>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Estado</dt>
+                                        <dd>
+                                            <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${badge.clase}`}>
+                                                {badge.texto}
+                                            </span>
+                                        </dd>
+                                    </div>
+                                    <div>
+                                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Promoción</dt>
+                                        <dd>
+                                            {promo ? (
+                                                <>
+                                                    <span className="text-sm text-zinc-100">
+                                                        {textoBeneficio(promo.tipo_beneficio, promo.cantidad)}
+                                                    </span>
+                                                    <span className="block text-[11.5px] text-zinc-500">
+                                                        {promo.vence_en ? `Vence el ${fechaTexto(promo.vence_en)}` : 'Sin fecha de vencimiento'}
+                                                    </span>
+                                                </>
+                                            ) : (
+                                                <span className="text-sm text-zinc-500">Sin oferta</span>
+                                            )}
+                                        </dd>
+                                    </div>
+                                </dl>
+                                {(configurable || marcable) && (
+                                    <div className="mt-3 flex flex-col gap-2">
+                                        {configurable && (
+                                            <button
+                                                type="button"
+                                                onClick={() => { setAviso(null); setAlumnoFormulario(alumno); }}
+                                                data-testid={`configurar-promocion-movil-${alumno.id}`}
+                                                className="w-full px-3 py-2 rounded-lg text-xs font-bold bg-orange-600 text-white transition hover:bg-orange-700 active:bg-orange-700 active:scale-[0.98]"
+                                            >
+                                                Configurar promoción
+                                            </button>
+                                        )}
+                                        {marcable && (
+                                            <button
+                                                type="button"
+                                                onClick={() => marcar(alumno)}
+                                                disabled={enVuelo}
+                                                data-testid={`marcar-recuperado-movil-${alumno.id}`}
+                                                className="w-full px-3 py-2 rounded-lg text-xs font-bold bg-emerald-600 text-white transition hover:bg-emerald-700 active:bg-emerald-700 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                {enVuelo ? 'Marcando...' : 'Marcar como recuperado'}
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                                {!configurable && !marcable && (
+                                    <p className="mt-2 text-[11.5px] text-zinc-500">
+                                        {tieneCuenta(alumno)
+                                            ? '—'
+                                            : 'Sin cuenta todavía'}
+                                    </p>
+                                )}
+                            </li>
+                        );
+                    }) : (
+                        <li className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-8 text-center text-sm text-zinc-400">
+                            {alumnos.length === 0
+                                ? 'El padrón de BoxMagic no tiene alumnos inactivos cargados todavía.'
+                                : 'Ningún alumno coincide con el filtro.'}
+                        </li>
+                    )}
+                </ul>
+
+                {/* ── Vista de ESCRITORIO (>=768px): la tabla de siempre ── */}
+                <div className="hidden md:block overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-900">
                     <table className="w-full">
                         <thead className="bg-zinc-800/60">
                             <tr>
@@ -416,7 +637,7 @@ const MigracionRecuperacion = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-zinc-800">
-                            {visibles.length > 0 ? visibles.map((alumno) => {
+                            {bloque.mostrados.length > 0 ? bloque.mostrados.map((alumno) => {
                                 const badge = badgeEstado(alumno.estado);
                                 const promo = alumno.promocion;
                                 const configurable = puedeConfigurarPromocion(alumno);
@@ -503,11 +724,28 @@ const MigracionRecuperacion = () => {
                     </table>
                 </div>
 
-                <p className="text-[12px] text-zinc-500 mt-4">
-                    Mostrando <span className="font-bold text-zinc-300">{visibles.length}</span> de{' '}
-                    <span className="font-bold text-zinc-300">{alumnos.length}</span> alumnos inactivos.{' '}
-                    &quot;Pendientes por recuperar&quot; son los que todavía no volvieron.
-                </p>
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-[12px] text-zinc-500" data-testid="footer-listado-recuperacion">
+                        Mostrando <span className="font-bold text-zinc-300">{bloque.mostrados.length}</span> de{' '}
+                        <span className="font-bold text-zinc-300">{bloque.total}</span>
+                        {bloque.faltan > 0 && (
+                            <> — faltan <span className="font-bold text-zinc-300">{bloque.faltan}</span></>
+                        )}.
+                        <span className="mt-1 block">
+                            &quot;Pendientes por recuperar&quot; son los que todavía no volvieron.
+                        </span>
+                    </p>
+                    {bloque.hayMas && (
+                        <button
+                            type="button"
+                            onClick={cargarMas}
+                            data-testid="cargar-mas-recuperacion"
+                            className="shrink-0 rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-bold text-zinc-200 transition hover:border-orange-500 hover:text-orange-400 active:border-orange-500 active:bg-zinc-700 active:text-orange-400 active:scale-[0.98]"
+                        >
+                            Cargar {BLOQUE_ALUMNOS} más
+                        </button>
+                    )}
+                </div>
             </div>
 
             {/* La oferta se configura en un modal: la tabla queda detrás, a la vista. */}

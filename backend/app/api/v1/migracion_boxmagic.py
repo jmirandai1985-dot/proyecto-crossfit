@@ -60,11 +60,15 @@ en BoxMagic están `Inactivo`) y el estado de su oferta. `POST
 /recuperacion/{usuario_id}/promocion` configura una oferta puntual y manda un correo
 DEDICADO a esa oferta, y `PUT /recuperacion/{usuario_id}/marcar-recuperado` cierra el
 ciclo cuando el alumno vuelve.
+
+`GET /recuperacion/{usuario_id}/promocion/preview` (Fase 6) devuelve el ASUNTO y el
+HTML del correo que mandaría ese POST, para que el admin lo lea antes de confirmar. Es
+de sólo lectura: no escribe en `promociones_recuperacion` ni manda nada.
 """
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -483,6 +487,59 @@ def get_recuperacion(
             "por_estado": por_estado,
         },
     }
+
+
+@router.get("/recuperacion/{usuario_id}/promocion/preview")
+def preview_promocion_recuperacion(
+    usuario_id: int,
+    tipo_beneficio: str = Query(
+        ..., description="dias_gratis | descuento_porcentaje | descuento_monto"),
+    cantidad: int = Query(..., ge=1, description="Días, % o monto CLP según el tipo"),
+    vence_en: datetime = Query(
+        ..., description="Fecha hasta la que vale la oferta (ISO 8601). Igual que en el "
+                         "POST, se toma el FIN DE ESE DÍA en hora de Chile."),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Vista previa (asunto + HTML) del correo de la oferta, SIN guardar ni enviar nada.
+
+    Es un GET sin efectos secundarios: NO crea la fila de `promociones_recuperacion`, NO
+    registra el envío en `notificaciones_enviadas` y NO llama a ningún método de envío de
+    `email_service`. Sólo lee al alumno (para su nombre) y la configuración del box (para
+    el pie de contacto).
+
+    El copy lo arma la MISMA función que usa el envío real
+    (`email_service.render_email_promocion_recuperacion`, documentada como fuente única
+    del texto) y el `{{CONTACTO_BOX}}` se resuelve con `render_con_contacto` igual que en
+    `_enviar`: así lo que el admin lee antes de confirmar es exactamente el correo que
+    recibiría el alumno, con su WhatsApp real y no un placeholder.
+
+    `vence_en` se normaliza con `_vence_en_chile` por el mismo motivo: el correo real
+    muestra el FIN DEL DÍA en Chile, así que la vista previa tiene que mostrar esa fecha
+    y no la del payload.
+
+    Un tipo de beneficio fuera de `TIPOS_BENEFICIO_PROMOCION` responde 422 (igual que el
+    body del POST) y un `usuario_id` de otro box 404. La fecha pasada NO se rechaza: acá
+    no se crea nada, y el formulario ya la bloquea antes de llegar al POST.
+    """
+    tipo = str(tipo_beneficio or "").strip().lower()
+    if tipo not in TIPOS_BENEFICIO_PROMOCION:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Tipo de beneficio inválido: usa "
+                   + " | ".join(TIPOS_BENEFICIO_PROMOCION),
+        )
+
+    tenant_id = current_user["tenant_id"]
+    alumno = _alumno_del_tenant(db, tenant_id, usuario_id)
+
+    asunto, html = email_service.render_email_promocion_recuperacion(
+        alumno.nombre, tipo, cantidad, _vence_en_chile(vence_en))
+    # El template deja el contacto como placeholder y el envío real lo resuelve en
+    # `_enviar`: acá se resuelve igual (con la MISMA sesión del request, ver
+    # `contacto_del_box`) para que la vista previa no muestre `{{CONTACTO_BOX}}`.
+    html = email_service.render_con_contacto(html, tenant_id, db=db)
+    return {"asunto": asunto, "html": html}
 
 
 @router.post("/recuperacion/{usuario_id}/promocion",

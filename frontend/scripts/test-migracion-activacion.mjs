@@ -10,9 +10,9 @@
 import { readFileSync } from 'node:fs';
 
 import {
-    ETAPAS_ACTIVACION, ETAPA_DESCONOCIDA, ETAPA_PLAN_COMPRADO,
-    activadosHoy, badgeEtapa, conteoPorEtapa, etapaDe, filtrarAlumnos, hayFiltro,
-    pendientesPorActivar, porcentajeComprado, totalAlumnos,
+    BLOQUE_ALUMNOS, ETAPAS_ACTIVACION, ETAPA_DESCONOCIDA, ETAPA_PLAN_COMPRADO,
+    activadosHoy, badgeEtapa, coincideBusqueda, conteoPorEtapa, etapaDe, filtrarAlumnos,
+    hayFiltro, paginaAlumnos, pendientesPorActivar, porcentajeComprado, totalAlumnos,
 } from '../src/utils/migracionActivacion.js';
 
 let fallos = 0;
@@ -110,6 +110,69 @@ eq(hayFiltro({}), false, 'sin filtros no hay chips');
 eq(hayFiltro({ etapa: 'sin_invitar' }), true, 'la etapa cuenta como filtro');
 eq(hayFiltro({ soloActivadosHoy: true }), true, '"hoy" cuenta como filtro');
 
+// ── 4b. Buscador por nombre o correo (en vivo, sin backend) ─────────────────
+console.log('== 4b. Buscador por nombre o correo ==');
+const padron = [
+    alumno(1, 'sin_invitar'),
+    { id: 6, nombre: 'José Pérez', correo: 'jperez@test.com', etapa: 'correo_enviado',
+        activado_hoy: true, plan_comprado: null },
+    { id: 7, nombre: 'María Núñez', correo: 'mnunez@test.com', etapa: 'sin_invitar',
+        activado_hoy: false, plan_comprado: null },
+    { id: 8, nombre: 'Ana Soto', correo: 'ana.soto@box.cl', etapa: 'plan_comprado',
+        activado_hoy: false, plan_comprado: 'Pase Libre' },
+];
+eq(ids(filtrarAlumnos(padron, { busqueda: 'soto' })), '8', 'coincidencia PARCIAL por nombre');
+eq(ids(filtrarAlumnos(padron, { busqueda: 'perez' })), '6', 'sin tilde encuentra a "Pérez"');
+eq(ids(filtrarAlumnos(padron, { busqueda: 'PÉREZ' })), '6', 'mayúsculas/tildes de más no cambian nada');
+eq(ids(filtrarAlumnos(padron, { busqueda: 'núñ' })), '7', 'acentos tipeados también encuentran');
+eq(ids(filtrarAlumnos(padron, { busqueda: 'nunez' })), '7', '"nunez" encuentra a "Núñez"');
+eq(ids(filtrarAlumnos(padron, { busqueda: 'ana.soto@' })), '8', 'también busca por CORREO');
+eq(ids(filtrarAlumnos(padron, { busqueda: '  ' })), '1,6,7,8', 'un término en blanco no filtra');
+eq(ids(filtrarAlumnos(padron, { busqueda: 'zzz' })), '', 'sin coincidencias la tabla queda vacía');
+eq(ids(filtrarAlumnos(padron, { etapa: 'sin_invitar', busqueda: 'nunez' })), '7',
+    'buscador + etapa se COMBINAN');
+eq(ids(filtrarAlumnos(padron, { etapa: 'plan_comprado', busqueda: 'nunez' })), '',
+    'una combinación imposible no devuelve todo');
+eq(ids(filtrarAlumnos(padron, { soloActivadosHoy: true, busqueda: 'perez' })), '6',
+    'buscador + "hoy" se combinan');
+eq(ids(filtrarAlumnos(padron, { busqueda: 'Soto' })), ids(filtrarAlumnos(padron, { busqueda: 'soto' })),
+    'mayúsculas y minúsculas dan el mismo resultado');
+eq(coincideBusqueda(null, 'ana'), false, 'sin alumno no rompe');
+eq(coincideBusqueda({ nombre: null, correo: null }, 'ana'), false, 'campos nulos no rompen');
+ok(hayFiltro({ busqueda: 'ana' }), true, 'el texto buscado cuenta como filtro');
+ok(!hayFiltro({ busqueda: '   ' }), 'un término en blanco no cuenta como filtro');
+
+// ── 4c. Listado por bloques (25 + "Cargar 25 más") ──────────────────────────
+// El padrón son ~712 alumnos: pintarlos todos de una congela el teléfono. El panel
+// muestra el primer bloque, el footer dice cuántos faltan y el botón AGREGA (no
+// reemplaza) el siguiente bloque.
+console.log('== 4c. Listado por bloques (25 + "Cargar 25 más") ==');
+eq(BLOQUE_ALUMNOS, 25, 'el primer bloque son 25 alumnos');
+const muchos = Array.from({ length: 60 }, (_, i) => alumno(100 + i, 'sin_invitar'));
+const primerBloque = paginaAlumnos(muchos);
+eq(primerBloque.mostrados.length, 25, 'pinta sólo el primer bloque');
+eq(primerBloque.total, 60, 'el total es toda la lista filtrada');
+eq(primerBloque.faltan, 35, '"faltan" es lo que queda fuera de pantalla');
+ok(primerBloque.hayMas, 'con más de 25 hay botón "Cargar 25 más"');
+eq(primerBloque.mostrados[0].id, 100, 'el bloque arranca por el primer resultado');
+const dosBloques = paginaAlumnos(muchos, BLOQUE_ALUMNOS * 2);
+eq(dosBloques.mostrados.length, 50, 'el siguiente bloque AGREGA 25 (no reemplaza)');
+eq(dosBloques.mostrados[0].id, 100, 'lo que ya se estaba mirando sigue arriba');
+eq(dosBloques.faltan, 10, 'el footer baja los faltantes al cargar más');
+const todo = paginaAlumnos(muchos, 1000);
+eq(todo.mostrados.length, 60, 'nunca inventa filas de más');
+eq(todo.faltan, 0, 'al final no falta ninguno');
+ok(!todo.hayMas, 'sin resultados pendientes el botón desaparece');
+eq(paginaAlumnos(muchos, 0).mostrados.length, BLOQUE_ALUMNOS,
+    'un límite inválido vuelve al bloque por defecto (no vacía la lista)');
+eq(paginaAlumnos(muchos, -7).mostrados.length, BLOQUE_ALUMNOS, 'un límite negativo tampoco rompe');
+eq(paginaAlumnos(muchos, 'abc').mostrados.length, BLOQUE_ALUMNOS, 'un límite no numérico tampoco');
+eq(paginaAlumnos(null).total, 0, 'sin datos no rompe');
+eq(paginaAlumnos(null).hayMas, false, 'sin datos no ofrece "Cargar más"');
+eq(paginaAlumnos(filtrarAlumnos(muchos, { busqueda: 'Alumno 1' }), 5).total,
+    filtrarAlumnos(muchos, { busqueda: 'Alumno 1' }).length,
+    'el bloque se calcula SOBRE lo filtrado (buscar primero, paginar después)');
+
 // ── 5. El componente: hook real y SIN emojis ────────────────────────────────
 console.log('== 5. MigracionActivacion.jsx (fuente) ==');
 const PANTALLA = readFileSync(
@@ -121,6 +184,35 @@ ok(PANTALLA.includes('tarjeta-activados-hoy'), 'existe la tarjeta clickeable de 
 // El padrón (2026-12): `id` es la cuenta REAL (null si todavía no existe) y la clave de
 // la fila es `candidato_id`; si no, casi todas las filas compartirían la misma key.
 ok(PANTALLA.includes('candidato_id'), 'la fila se identifica por candidato_id (el padrón)');
+// Buscador (Parte A): input arriba de la tabla que filtra en vivo y delega en utils.
+ok(PANTALLA.includes('buscar-activacion'), 'la tabla tiene el buscador por nombre o correo');
+ok(/filtrarAlumnos\(alumnos, \{[\s\S]{0,160}?busqueda/.test(PANTALLA),
+    'el buscador se combina con la etapa y "hoy" en el mismo filtro (no filtra inline)');
+// Actualizar: spinner mientras `isFetching` y botón deshabilitado en vuelo.
+ok(PANTALLA.includes('isFetching'), 'el botón Actualizar usa isFetching del hook');
+ok(/disabled=\{isFetching\}/.test(PANTALLA), 'el botón se desactiva mientras carga');
+ok(/isFetching \? 'animate-spin' : 'invisible'/.test(PANTALLA), 'muestra un spinner mientras carga');
+ok(PANTALLA.includes('active:'), 'da feedback táctil con active: (no sólo hover:)');
+// Paginación: primer bloque + footer + "Cargar 25 más" que AGREGA.
+ok(PANTALLA.includes('BLOQUE_ALUMNOS') && PANTALLA.includes('paginaAlumnos'),
+    'la pantalla pagina con la regla de utils (no recorta inline)');
+ok(PANTALLA.includes('Cargar {BLOQUE_ALUMNOS} más'), 'existe el botón "Cargar 25 más"');
+ok(/cargarMas[\s\S]{0,120}?limite \+ BLOQUE_ALUMNOS/.test(PANTALLA),
+    '"Cargar 25 más" AGREGA el siguiente bloque (no reemplaza)');
+ok(PANTALLA.includes("const claveFiltros = `${etapaFiltro ?? ''}|${soloHoy}|${busqueda}`"),
+    'la clave del listado incluye etapa + "hoy" + texto buscado');
+ok(/paginacion\.clave === claveFiltros \? paginacion\.limite : BLOQUE_ALUMNOS/.test(PANTALLA),
+    'el contador se resetea a 25 al cambiar un filtro o el texto buscado');
+ok(PANTALLA.includes('— faltan'), 'el footer dice "Mostrando X de Y — faltan Z"');
+// Móvil: tarjetas de etapa en fila con scroll propio y alumnos como tarjetas.
+ok(/overflow-x-auto[^"]*md:grid/.test(PANTALLA),
+    'las etapas scrollean en horizontal en el teléfono (sin arrastrar el layout)');
+ok(PANTALLA.includes('w-40 shrink-0'), 'las tarjetas no se aplastan dentro del scroll');
+ok(PANTALLA.includes('padron-activacion-movil') && PANTALLA.includes('md:hidden'),
+    'la lista móvil es una tarjeta por alumno');
+ok(PANTALLA.includes('hidden md:block'), 'la tabla de escritorio se mantiene desde 768px');
+ok((PANTALLA.match(/bloque\.mostrados\.map/g) || []).length >= 2,
+    'la tabla y las tarjetas pintan el MISMO bloque');
 // Regla fija del proyecto: nada de emojis (color, negrita y badges en su lugar).
 const EMOJI = /[\u{1F000}-\u{1FAFF}\u{2190}-\u{21FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/u;
 ok(!EMOJI.test(PANTALLA), 'la pantalla no tiene emojis ni flechas-icono');

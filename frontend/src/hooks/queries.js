@@ -3,6 +3,7 @@
 // Las CLAVES viven acá y sólo acá: invalidar un prefijo (`['solicitudes']`) refresca de
 // una vez todas las pantallas que muestran lo mismo, sin que cada página tenga que saber
 // quién más usa ese dato.
+import { useEffect, useState } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 // Los params del padrón de alumnos (rol, limit, skip, buscar) se arman con la misma
@@ -225,6 +226,10 @@ export const claves = {
     // para poder invalidar los 2 paneles juntos.
     migracionActivacion: ['migracion-boxmagic', 'activacion'],
     migracionRecuperacion: ['migracion-boxmagic', 'recuperacion'],
+    // Vista previa del correo de la oferta (sólo lectura). Es el render liso de TRES
+    // datos, así que los tres (y el alumno, por su nombre) van en la clave.
+    previewPromocionRecuperacion: (usuarioId, tipo, cantidad, venceEn) =>
+        ['migracion-boxmagic', 'preview-promocion', usuarioId, tipo, cantidad, venceEn || ''],
 };
 
 // ── Colas de revisión del admin (las miran el Dashboard Y Pendientes de revisión) ──
@@ -2660,4 +2665,57 @@ export function useMarcarRecuperado() {
     });
 }
 
+// Vista previa del correo de la oferta ANTES de guardarla (formulario "Configurar
+// promoción"). Es un GET sin efectos secundarios: NO crea la promoción, no registra el
+// envío ni manda nada, y el asunto/HTML los renderiza el BACKEND con la MISMA función del
+// envío real (`email_service.render_email_promocion_recuperacion`), así que lo que el
+// admin lee es exactamente el correo que recibiría el alumno.
+//
+// Debounce (400 ms por defecto): la cantidad es un input libre y sin esto cada tecla
+// pediría un render al servidor. El endpoint sólo se pide cuando están los TRES datos
+// (misma regla que `promocionCompleta` en `utils/migracionRecuperacion.js`, que es la que
+// decide si se muestra el placeholder); `venceEn` llega ya en ISO 8601, anclado al
+// mediodía UTC igual que el payload del POST.
+//
+// La clave NO cuelga de `claves.migracionRecuperacion`: guardar la oferta invalida esa
+// familia y el preview no depende de la oferta guardada, sólo del nombre del alumno y de
+// los tres datos elegidos.
+export function usePreviewPromocionRecuperacion(
+    { usuarioId = null, tipo = '', cantidad = '', venceEn = '' } = {},
+    { debounceMs = 400 } = {},
+) {
+    const completo = Boolean(usuarioId) && Boolean(tipo) && Boolean(venceEn)
+        && Number.isInteger(Number(cantidad)) && Number(cantidad) >= 1;
+    // Lo que se pide de verdad, ya "asentado": cambia recién `debounceMs` después de la
+    // última tecla. `null` = no hay nada que pedir (el panel muestra el placeholder).
+    const [pedido, setPedido] = useState(null);
 
+    useEffect(() => {
+        if (!completo) {
+            setPedido(null);
+            return undefined;
+        }
+        const temporizador = setTimeout(() => setPedido({
+            usuarioId, tipo, cantidad: Number(cantidad), venceEn,
+        }), debounceMs);
+        return () => clearTimeout(temporizador);
+    }, [completo, usuarioId, tipo, cantidad, venceEn, debounceMs]);
+
+    return useQuery({
+        queryKey: claves.previewPromocionRecuperacion(
+            pedido?.usuarioId, pedido?.tipo, pedido?.cantidad, pedido?.venceEn),
+        queryFn: async () => (await api.get(
+            `/api/v1/migracion-boxmagic/recuperacion/${pedido.usuarioId}/promocion/preview`,
+            {
+                params: {
+                    tipo_beneficio: pedido.tipo,
+                    cantidad: pedido.cantidad,
+                    vence_en: pedido.venceEn,
+                },
+            },
+        )).data || null,
+        enabled: Boolean(pedido),
+        // El correo de una oferta no cambia mientras el formulario está abierto.
+        staleTime: 60_000,
+    });
+}

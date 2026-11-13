@@ -127,6 +127,18 @@ export function textoBeneficio(tipoBeneficio, cantidad) {
     return 'un beneficio especial';
 }
 
+// ── ¿Se puede pedir la vista previa del correo? ───────────────────────────────
+// Los TRES datos del formulario: tipo, cantidad y vencimiento. El tipo y la fecha
+// arrancan con un valor, pero la cantidad la escribe el admin: a mitad de tipeo puede
+// quedar vacía ("" o "2,"), y con un dato incompleto no hay oferta que previsualizar.
+// La cantidad tiene que ser un entero >= 1, la misma regla que valida el backend
+// (`cantidad: int = Field(ge=1)`), para no pedir un preview que va a responder 422.
+export function promocionCompleta({ tipo = '', cantidad = '', vence = '' } = {}) {
+    if (!tipo || !vence) return false;
+    const n = Number(cantidad);
+    return Number.isInteger(n) && n >= 1;
+}
+
 // ── Conteos del resumen (los manda el backend ya calculados) ────────────────────
 // Los CUATRO contadores, siempre completos: un panel no puede dibujar `undefined` si la
 // respuesta viene recortada o vacía.
@@ -162,17 +174,60 @@ export function porcentajeRecuperado(resumen) {
 }
 
 // ── Filtro de la tabla ─────────────────────────────────────────────────────────
-// ¿Hay algún filtro puesto? (para mostrar u ocultar el "Ver todos").
-export function hayFiltro({ estado = null } = {}) {
-    return Boolean(estado);
+// Sin acentos, sin mayúsculas y sin espacios de sobra (mismo criterio que
+// `utils/membresiasMes.js`): "NUÑEZ" y "nunez" encuentran a la misma persona.
+const normalizarTexto = (texto) => String(texto ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+
+// ¿La fila coincide con el texto buscado? Coincidencia PARCIAL contra el NOMBRE **o** el
+// CORREO, sin distinguir mayúsculas ni acentos. Un término vacío no filtra nada.
+export function coincideBusqueda(alumno, termino) {
+    const buscado = normalizarTexto(termino);
+    if (!buscado) return true;
+    return normalizarTexto(alumno && alumno.nombre).includes(buscado)
+        || normalizarTexto(alumno && alumno.correo).includes(buscado);
 }
 
-// Un solo criterio (el estado de la tarjeta que se clickeó), igual que Activación: se
-// prende y se apaga con el mismo clic.
-export function filtrarAlumnos(alumnos, { estado = null } = {}) {
+// ¿Hay algún filtro puesto? (para mostrar u ocultar el "Ver todos"). El texto buscado
+// CUENTA: con algo escrito la tabla ya no muestra todos los inactivos.
+export function hayFiltro({ estado = null, busqueda = '' } = {}) {
+    return Boolean(estado) || normalizarTexto(busqueda) !== '';
+}
+
+// Los dos criterios se COMBINAN (el estado de la tarjeta que se clickeó + el texto del
+// buscador) y ninguno es excluyente: el estado se prende y se apaga con el mismo clic y el
+// texto se borra. Filtrar es SÓLO en memoria: la respuesta ya trae la lista completa.
+export function filtrarAlumnos(alumnos, { estado = null, busqueda = '' } = {}) {
     const lista = Array.isArray(alumnos) ? alumnos : [];
-    if (!estado) return lista;
-    return lista.filter((alumno) => alumno.estado === estado);
+    return lista.filter((alumno) => {
+        if (estado && alumno.estado !== estado) return false;
+        return coincideBusqueda(alumno, busqueda);
+    });
+}
+
+// ── Listado por bloques (no se pintan los ~712 de una) ─────────────────────────
+// La respuesta ya trae la lista completa, pero dibujar cientos de filas (o tarjetas, en
+// el teléfono) de golpe congela el scroll. Se pinta el primer bloque y "Cargar 25 más"
+// AGREGA el siguiente: lo que el admin ya está mirando no se reemplaza.
+export const BLOQUE_ALUMNOS = 25;
+
+// Lo que se pinta y los números del footer. `faltan` es cuántos quedan fuera de la
+// pantalla y `hayMas` decide si existe el botón "Cargar 25 más". Un `limite` inválido
+// (0, negativo, NaN) vuelve al bloque por defecto en vez de recortar la lista entera.
+export function paginaAlumnos(alumnos, limite = BLOQUE_ALUMNOS) {
+    const lista = Array.isArray(alumnos) ? alumnos : [];
+    const pedido = Math.floor(Number(limite));
+    const tope = Number.isFinite(pedido) && pedido > 0 ? pedido : BLOQUE_ALUMNOS;
+    const mostrados = lista.slice(0, tope);
+    return {
+        mostrados,
+        total: lista.length,
+        faltan: Math.max(0, lista.length - mostrados.length),
+        hayMas: lista.length > mostrados.length,
+    };
 }
 
 // ── Qué acción ofrece cada fila ────────────────────────────────────────────────

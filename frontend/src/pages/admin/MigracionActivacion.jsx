@@ -3,8 +3,8 @@ import Layout from '../../components/Layout';
 import { KpiCard } from '../../components/kpis/KpiCard';
 import { useMigracionActivacion } from '../../hooks/queries';
 import {
-    ETAPAS_ACTIVACION, activadosHoy, badgeEtapa, conteoPorEtapa, filtrarAlumnos,
-    hayFiltro, pendientesPorActivar, porcentajeComprado, totalAlumnos,
+    BLOQUE_ALUMNOS, ETAPAS_ACTIVACION, activadosHoy, badgeEtapa, conteoPorEtapa, filtrarAlumnos,
+    hayFiltro, paginaAlumnos, pendientesPorActivar, porcentajeComprado, totalAlumnos,
 } from '../../utils/migracionActivacion';
 
 /**
@@ -23,12 +23,30 @@ import {
  * tabla de abajo, se prenden y se apagan con el mismo clic, y el filtro activo queda a
  * la vista en los chips. Los conteos y las reglas del filtro viven en
  * `utils/migracionActivacion.js` (probado sin navegador).
+ *
+ * En el TELÉFONO (<768px) las tarjetas de etapa van en una fila con scroll horizontal
+ * propio y la tabla se reemplaza por una tarjeta por alumno (Nombre/Correo/Etapa/Plan
+ * apilados). En >=768px se mantiene la tabla de siempre.
  */
 const MigracionActivacion = () => {
-    const { data, isPending, isError, error, refetch } = useMigracionActivacion();
-    // Filtros de la tabla. Se COMBINAN entre sí (etapa + "se activaron hoy").
+    const { data, isPending, isFetching, isError, error, refetch } = useMigracionActivacion();
+    // Filtros de la tabla. Se COMBINAN entre sí (etapa + "se activaron hoy") y, encima de
+    // los dos, el buscador de texto.
     const [etapaFiltro, setEtapaFiltro] = useState(null);
     const [soloHoy, setSoloHoy] = useState(false);
+    // Buscador por nombre o correo: filtra la tabla EN VIVO en el cliente (el backend ya
+    // mandó el padrón completo en esta misma respuesta), así que escribir no dispara
+    // ninguna request.
+    const [busqueda, setBusqueda] = useState('');
+    // Cuántos resultados se pintan. Arranca en el primer bloque y "Cargar 25 más" lo
+    // agranda (AGREGA filas, no reemplaza las que ya se están mirando). El reset a 25 NO
+    // va en un efecto (dispararía un render de más): el estado guarda, junto al límite, la
+    // "clave" de los filtros con la que se cargó, y si esa clave ya no coincide (cambió
+    // una tarjeta, un chip o el texto buscado) se vuelve al primer bloque en el mismo
+    // render.
+    const claveFiltros = `${etapaFiltro ?? ''}|${soloHoy}|${busqueda}`;
+    const [paginacion, setPaginacion] = useState({ clave: claveFiltros, limite: BLOQUE_ALUMNOS });
+    const limite = paginacion.clave === claveFiltros ? paginacion.limite : BLOQUE_ALUMNOS;
 
     const alumnos = data?.alumnos || [];
     const resumen = data?.resumen || {};
@@ -42,11 +60,19 @@ const MigracionActivacion = () => {
     const avance = porcentajeComprado(resumen);
     const hoy = activadosHoy(resumen);
 
-    const visibles = filtrarAlumnos(alumnos, { etapa: etapaFiltro, soloActivadosHoy: soloHoy });
-    const conFiltro = hayFiltro({ etapa: etapaFiltro, soloActivadosHoy: soloHoy });
+    const visibles = filtrarAlumnos(alumnos, {
+        etapa: etapaFiltro, soloActivadosHoy: soloHoy, busqueda,
+    });
+    const conFiltro = hayFiltro({
+        etapa: etapaFiltro, soloActivadosHoy: soloHoy, busqueda,
+    });
+    // El bloque que se pinta (25) + los números del footer ("faltan Z"). Sólo se calcula
+    // en memoria: el backend ya mandó el padrón completo.
+    const bloque = paginaAlumnos(visibles, limite);
 
     const alternarEtapa = (clave) => setEtapaFiltro((previa) => (previa === clave ? null : clave));
-    const quitarFiltros = () => { setEtapaFiltro(null); setSoloHoy(false); };
+    const quitarFiltros = () => { setEtapaFiltro(null); setSoloHoy(false); setBusqueda(''); };
+    const cargarMas = () => setPaginacion({ clave: claveFiltros, limite: limite + BLOQUE_ALUMNOS });
 
     const mensajeError = error?.response?.data?.detail || 'No se pudo cargar el panel de activación.';
 
@@ -76,8 +102,17 @@ const MigracionActivacion = () => {
                     <button
                         type="button"
                         onClick={() => refetch()}
-                        className="shrink-0 px-4 py-2 rounded-xl border border-zinc-700 bg-zinc-800 text-zinc-200 text-sm font-bold hover:border-orange-500 hover:text-orange-400 transition-colors"
+                        disabled={isFetching}
+                        aria-busy={isFetching}
+                        title="Volver a pedir el padrón al servidor"
+                        className="inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 rounded-xl border border-zinc-700 bg-zinc-800 text-zinc-200 text-sm font-bold transition hover:border-orange-500 hover:text-orange-400 active:border-orange-500 active:bg-zinc-700 active:text-orange-400 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
                     >
+                        {/* El spinner ocupa su lugar SIEMPRE (invisible cuando no carga): así el
+                            botón no cambia de ancho al empezar/terminar la request. */}
+                        <span
+                            aria-hidden="true"
+                            className={`h-3.5 w-3.5 rounded-full border-2 border-orange-500 border-t-transparent ${isFetching ? 'animate-spin' : 'invisible'}`}
+                        />
                         Actualizar
                     </button>
                 </div>
@@ -137,7 +172,7 @@ const MigracionActivacion = () => {
                         data-testid="tarjeta-activados-hoy"
                         className={`w-full text-left rounded-2xl transition ${soloHoy
                             ? 'ring-2 ring-orange-500'
-                            : 'hover:ring-1 hover:ring-zinc-600'}`}
+                            : 'hover:ring-1 hover:ring-zinc-600 active:ring-2 active:ring-orange-500'}`}
                     >
                         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 pl-5 relative overflow-hidden">
                             <span className="absolute left-0 top-0 bottom-0 w-1 bg-emerald-500" />
@@ -152,8 +187,11 @@ const MigracionActivacion = () => {
                     </button>
                 </div>
 
-                {/* ── Las 5 etapas: tarjetas que filtran la tabla (patrón de Fidelización) ── */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 mb-4">
+                {/* ── Las 5 etapas: tarjetas que filtran la tabla (patrón de Fidelización) ──
+                    En el TELÉFONO van en UNA fila con scroll horizontal propio: el scroll
+                    queda contenido acá (no arrastra la página) y las 5 caben a un dedazo.
+                    Desde 768px vuelve a ser la grilla de siempre. */}
+                <div className="mb-4 flex snap-x gap-3.5 overflow-x-auto p-1 md:grid md:grid-cols-2 md:overflow-visible md:p-0 lg:grid-cols-5">
                     {ETAPAS_ACTIVACION.map((etapa) => {
                         const activa = etapaFiltro === etapa.key;
                         return (
@@ -165,9 +203,9 @@ const MigracionActivacion = () => {
                                 aria-label={`Filtrar la tabla por la etapa: ${etapa.label}`}
                                 title={activa ? 'Quitar este filtro' : `Filtrar la tabla por ${etapa.label}`}
                                 data-testid={`tarjeta-etapa-${etapa.key}`}
-                                className={`w-full text-left rounded-lg transition ${activa
+                                className={`w-40 shrink-0 snap-start text-left rounded-lg transition active:scale-[0.97] md:w-auto ${activa
                                     ? 'ring-2 ring-orange-500'
-                                    : 'hover:ring-1 hover:ring-zinc-600'}`}
+                                    : 'hover:ring-1 hover:ring-zinc-600 active:ring-2 active:ring-orange-500'}`}
                             >
                                 <KpiCard
                                     label={etapa.label}
@@ -201,6 +239,16 @@ const MigracionActivacion = () => {
                                 Activados hoy <span aria-hidden="true">×</span>
                             </button>
                         )}
+                        {busqueda.trim() && (
+                            <button
+                                type="button"
+                                onClick={() => setBusqueda('')}
+                                title="Limpiar la búsqueda"
+                                className="px-3 py-1 rounded-full text-xs font-semibold border border-zinc-600 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+                            >
+                                Buscar: {busqueda.trim()} <span aria-hidden="true">×</span>
+                            </button>
+                        )}
                         <button type="button" onClick={quitarFiltros} className="ml-1 text-xs font-semibold text-zinc-400 underline">
                             Ver todos
                         </button>
@@ -208,8 +256,73 @@ const MigracionActivacion = () => {
                 )}
 
 
-                {/* ── Tabla ── */}
-                <div className="overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-900">
+                {/* ── Buscador por nombre o correo: filtra la tabla EN VIVO ──
+                    Sin request: el padrón ya está en memoria. Se combina con las tarjetas
+                    de etapa y con "Hoy". */}
+                <input
+                    type="text"
+                    value={busqueda}
+                    onChange={(e) => setBusqueda(e.target.value)}
+                    placeholder="Buscar por nombre o correo..."
+                    aria-label="Buscar alumno por nombre o correo"
+                    data-testid="buscar-activacion"
+                    className="mb-3 w-full px-4 py-2 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-zinc-800 text-zinc-100 placeholder:text-zinc-500"
+                />
+
+                {/* ── Vista MÓVIL (<768px): una tarjeta por alumno con los datos apilados
+                    (Nombre / Correo / Etapa / Plan). Reemplaza a la tabla en el teléfono;
+                    en >=768px no se muestra (regla de oro: el escritorio no cambia). */}
+                <ul data-testid="padron-activacion-movil" className="md:hidden space-y-2">
+                    {bloque.mostrados.length > 0 ? bloque.mostrados.map((alumno) => {
+                        const badge = badgeEtapa(alumno.etapa);
+                        // Misma clave que la fila de escritorio: `candidato_id` es el padrón
+                        // e `id` la cuenta REAL (null mientras no exista).
+                        const clave = alumno.candidato_id ?? alumno.id;
+                        return (
+                            <li
+                                key={clave}
+                                data-alumno-id={clave}
+                                data-testid={`alumno-movil-${clave}`}
+                                className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3"
+                            >
+                                <p className="text-sm font-bold text-zinc-100 break-words">{alumno.nombre}</p>
+                                <p className="mt-0.5 text-[12.5px] text-zinc-400 break-all">{alumno.correo}</p>
+                                <dl className="mt-3 space-y-1.5">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Etapa</dt>
+                                        <dd className="flex items-center gap-2">
+                                            <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${badge.clase}`}>
+                                                {badge.texto}
+                                            </span>
+                                            {alumno.activado_hoy && (
+                                                <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-400">
+                                                    Hoy
+                                                </span>
+                                            )}
+                                        </dd>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Plan</dt>
+                                        <dd>
+                                            {alumno.plan_comprado
+                                                ? <span className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-300">{alumno.plan_comprado}</span>
+                                                : <span className="text-xs text-zinc-500">Sin plan</span>}
+                                        </dd>
+                                    </div>
+                                </dl>
+                            </li>
+                        );
+                    }) : (
+                        <li className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-8 text-center text-sm text-zinc-400">
+                            {alumnos.length === 0
+                                ? 'El padrón de BoxMagic no tiene alumnos de activación cargados todavía.'
+                                : 'Ningún alumno coincide con el filtro.'}
+                        </li>
+                    )}
+                </ul>
+
+                {/* ── Vista de ESCRITORIO (>=768px): la tabla de siempre ── */}
+                <div className="hidden md:block overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-900">
                     <table className="w-full">
                         <thead className="bg-zinc-800/60">
                             <tr>
@@ -220,7 +333,7 @@ const MigracionActivacion = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-zinc-800">
-                            {visibles.length > 0 ? visibles.map((alumno) => {
+                            {bloque.mostrados.length > 0 ? bloque.mostrados.map((alumno) => {
                                 const badge = badgeEtapa(alumno.etapa);
                                 // Clave de la fila = `candidato_id` (el padrón). `id` es la
                                 // cuenta REAL y viene en null mientras no exista: usarlo de
@@ -263,11 +376,28 @@ const MigracionActivacion = () => {
                     </table>
                 </div>
 
-                <p className="text-[12px] text-zinc-500 mt-4">
-                    Mostrando <span className="font-bold text-zinc-300">{visibles.length}</span> de{' '}
-                    <span className="font-bold text-zinc-300">{alumnos.length}</span> alumnos.{' '}
-                    &quot;Pendientes por activar&quot; son los que todavía no compraron plan.
-                </p>
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-[12px] text-zinc-500" data-testid="footer-listado-activacion">
+                        Mostrando <span className="font-bold text-zinc-300">{bloque.mostrados.length}</span> de{' '}
+                        <span className="font-bold text-zinc-300">{bloque.total}</span>
+                        {bloque.faltan > 0 && (
+                            <> — faltan <span className="font-bold text-zinc-300">{bloque.faltan}</span></>
+                        )}.
+                        <span className="mt-1 block">
+                            &quot;Pendientes por activar&quot; son los que todavía no compraron plan.
+                        </span>
+                    </p>
+                    {bloque.hayMas && (
+                        <button
+                            type="button"
+                            onClick={cargarMas}
+                            data-testid="cargar-mas-activacion"
+                            className="shrink-0 rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-bold text-zinc-200 transition hover:border-orange-500 hover:text-orange-400 active:border-orange-500 active:bg-zinc-700 active:text-orange-400 active:scale-[0.98]"
+                        >
+                            Cargar {BLOQUE_ALUMNOS} más
+                        </button>
+                    )}
+                </div>
             </div>
         </Layout>
     );

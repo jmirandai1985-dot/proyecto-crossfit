@@ -13,11 +13,12 @@
 import { readFileSync } from 'node:fs';
 
 import {
-    ESTADOS_RECUPERACION, ESTADO_DESCONOCIDO, ESTADO_RECUPERADO, TIPOS_BENEFICIO,
-    TIPO_BENEFICIO_DESCONOCIDO, badgeEstado, conteoPorEstado, esVencimientoValido, estadoDe,
-    fechaEnDias, fechaParaInput, fechaTexto, filtrarAlumnos, hayFiltro,
-    pendientesPorRecuperar, porcentajeRecuperado, puedeConfigurarPromocion,
-    puedeMarcarRecuperado, textoBeneficio, tieneCuenta, tipoBeneficioDe, totalAlumnos,
+    BLOQUE_ALUMNOS, ESTADOS_RECUPERACION, ESTADO_DESCONOCIDO, ESTADO_RECUPERADO, TIPOS_BENEFICIO,
+    TIPO_BENEFICIO_DESCONOCIDO, badgeEstado, coincideBusqueda, conteoPorEstado,
+    esVencimientoValido, estadoDe, fechaEnDias, fechaParaInput, fechaTexto, filtrarAlumnos,
+    hayFiltro, paginaAlumnos, pendientesPorRecuperar, porcentajeRecuperado, promocionCompleta,
+    puedeConfigurarPromocion, puedeMarcarRecuperado, textoBeneficio, tieneCuenta,
+    tipoBeneficioDe, totalAlumnos,
 } from '../src/utils/migracionRecuperacion.js';
 
 let fallos = 0;
@@ -156,6 +157,61 @@ ok(!puedeMarcarRecuperado(sinCuenta('promocion_enviada')),
     'sin cuenta NO se puede marcar recuperado');
 ok(puedeConfigurarPromocion(alumno(1, 'sin_contactar')), 'con cuenta sigue ofreciendo configurar');
 
+// ── 5c. Buscador por nombre o correo (en vivo, sin backend) ─────────────────
+// La respuesta ya trae la lista completa, así que el buscador filtra en memoria y se
+// combina con el estado de la tarjeta que esté activa.
+console.log('== 5c. Buscador por nombre o correo ==');
+const padron = [
+    alumno(1, 'sin_contactar'),
+    { ...alumno(5, 'promocion_enviada', promo('dias_gratis', 5)), nombre: 'José Pérez',
+        correo: 'jperez@test.com' },
+    { ...alumno(6, 'sin_contactar'), nombre: 'María Núñez', correo: 'mnunez@test.com' },
+    { ...alumno(7, 'vencida', promo('descuento_monto', 5000)), nombre: 'Ana Soto',
+        correo: 'ana.soto@box.cl' },
+];
+eq(ids(filtrarAlumnos(padron, { busqueda: 'soto' })), '7', 'coincidencia PARCIAL por nombre');
+eq(ids(filtrarAlumnos(padron, { busqueda: 'perez' })), '5', 'sin tilde encuentra a "Pérez"');
+eq(ids(filtrarAlumnos(padron, { busqueda: 'NÚÑEZ' })), '6', 'mayúsculas y acentos de más no estorban');
+eq(ids(filtrarAlumnos(padron, { busqueda: 'mnunez@' })), '6', 'también busca por CORREO');
+eq(ids(filtrarAlumnos(padron, { busqueda: '   ' })), '1,5,6,7', 'un término en blanco no filtra');
+eq(ids(filtrarAlumnos(padron, { busqueda: 'zzz' })), '', 'sin coincidencias la tabla queda vacía');
+eq(ids(filtrarAlumnos(padron, { estado: 'vencida', busqueda: 'soto' })), '7',
+    'buscador + estado se COMBINAN');
+eq(ids(filtrarAlumnos(padron, { estado: 'recuperado', busqueda: 'soto' })), '',
+    'una combinación imposible no devuelve todo');
+eq(ids(filtrarAlumnos(padron, { busqueda: 'Soto' })), ids(filtrarAlumnos(padron, { busqueda: 'soto' })),
+    'mayúsculas y minúsculas dan el mismo resultado');
+eq(coincideBusqueda(null, 'ana'), false, 'sin fila no rompe');
+eq(coincideBusqueda({ nombre: null, correo: null }, 'ana'), false, 'campos nulos no rompen');
+ok(hayFiltro({ busqueda: 'ana' }), true, 'el texto buscado cuenta como filtro');
+ok(!hayFiltro({ busqueda: '  ' }), 'un término en blanco no cuenta como filtro');
+
+// ── 5d. Listado por bloques (25 + "Cargar 25 más") ─────────────────────────
+// La lista completa llega de una vez, pero pintar cientos de tarjetas congela el
+// teléfono: el panel muestra 25, el footer dice cuántos faltan y el botón AGREGA.
+console.log('== 5d. Listado por bloques (25 + "Cargar 25 más") ==');
+eq(BLOQUE_ALUMNOS, 25, 'el primer bloque son 25 alumnos');
+const muchos = Array.from({ length: 60 }, (_, i) => alumno(100 + i, 'sin_contactar'));
+const primerBloque = paginaAlumnos(muchos);
+eq(primerBloque.mostrados.length, 25, 'pinta sólo el primer bloque');
+eq(primerBloque.total, 60, 'el total es toda la lista filtrada');
+eq(primerBloque.faltan, 35, '"faltan" es lo que queda fuera de pantalla');
+ok(primerBloque.hayMas, 'con más de 25 hay botón "Cargar 25 más"');
+const dosBloques = paginaAlumnos(muchos, BLOQUE_ALUMNOS * 2);
+eq(dosBloques.mostrados.length, 50, 'el siguiente bloque AGREGA 25 (no reemplaza)');
+eq(dosBloques.mostrados[0].id, 100, 'lo que ya se estaba mirando sigue arriba');
+eq(dosBloques.faltan, 10, 'el footer baja los faltantes al cargar más');
+const todo = paginaAlumnos(muchos, 1000);
+eq(todo.mostrados.length, 60, 'nunca inventa filas de más');
+eq(todo.faltan, 0, 'al final no falta ninguno');
+ok(!todo.hayMas, 'sin resultados pendientes el botón desaparece');
+eq(paginaAlumnos(muchos, 0).mostrados.length, BLOQUE_ALUMNOS,
+    'un límite inválido vuelve al bloque por defecto (no vacía la lista)');
+eq(paginaAlumnos(null).total, 0, 'sin datos no rompe');
+eq(paginaAlumnos(filtrarAlumnos(muchos, { busqueda: 'Alumno 1' }), 5).total,
+    filtrarAlumnos(muchos, { busqueda: 'Alumno 1' }).length,
+    'el bloque se calcula SOBRE lo filtrado (buscar primero, paginar después)');
+
 // ── 6. Fechas: el día chileno no se corre ───────────────────────────────────
 console.log('== 6. Fechas (día chileno) ==');
 eq(fechaTexto('2026-01-03'), '03-01-2026', 'una fecha sola del backend NO se corre un día');
@@ -201,6 +257,36 @@ ok(PANTALLA.includes('modal-promocion-tipo') && PANTALLA.includes('modal-promoci
 ok(PANTALLA.includes('etiquetaCantidad'), 'el rótulo de la cantidad cambia con el tipo elegido');
 // El padrón: la clave de la fila es `candidato_id` y sin cuenta real no hay acciones.
 ok(PANTALLA.includes('candidato_id'), 'la fila se identifica por candidato_id (el padrón)');
+ok(PANTALLA.includes('buscar-recuperacion'), 'la tabla tiene el buscador por nombre o correo');
+ok(/filtrarAlumnos\(alumnos, \{ estado: estadoFiltro, busqueda \}\)/.test(PANTALLA),
+    'el buscador se combina con el estado en el mismo filtro (no filtra inline)');
+// Actualizar: spinner mientras `isFetching` y botón deshabilitado en vuelo.
+ok(PANTALLA.includes('isFetching'), 'el botón Actualizar usa isFetching del hook');
+ok(/disabled=\{isFetching\}/.test(PANTALLA), 'el botón se desactiva mientras carga');
+ok(/isFetching \? 'animate-spin' : 'invisible'/.test(PANTALLA), 'muestra un spinner mientras carga');
+ok(PANTALLA.includes('active:'), 'da feedback táctil con active: (no sólo hover:)');
+// Paginación: primer bloque + footer + "Cargar 25 más" que AGREGA.
+ok(PANTALLA.includes('BLOQUE_ALUMNOS') && PANTALLA.includes('paginaAlumnos'),
+    'la pantalla pagina con la regla de utils (no recorta inline)');
+ok(PANTALLA.includes('Cargar {BLOQUE_ALUMNOS} más'), 'existe el botón "Cargar 25 más"');
+ok(/cargarMas[\s\S]{0,120}?limite \+ BLOQUE_ALUMNOS/.test(PANTALLA),
+    '"Cargar 25 más" AGREGA el siguiente bloque (no reemplaza)');
+ok(PANTALLA.includes("const claveFiltros = `${estadoFiltro ?? ''}|${busqueda}`"),
+    'la clave del listado incluye el estado + el texto buscado');
+ok(/paginacion\.clave === claveFiltros \? paginacion\.limite : BLOQUE_ALUMNOS/.test(PANTALLA),
+    'el contador se resetea a 25 al cambiar un filtro o el texto buscado');
+ok(PANTALLA.includes('— faltan'), 'el footer dice "Mostrando X de Y — faltan Z"');
+// Móvil: tarjetas de estado en fila con scroll propio y alumnos como tarjetas.
+ok(/overflow-x-auto[^"]*md:grid/.test(PANTALLA),
+    'las tarjetas de estado scrollean en horizontal en el teléfono');
+ok(PANTALLA.includes('w-40 shrink-0'), 'las tarjetas no se aplastan dentro del scroll');
+ok(PANTALLA.includes('padron-recuperacion-movil') && PANTALLA.includes('md:hidden'),
+    'la lista móvil es una tarjeta por alumno');
+ok(PANTALLA.includes('hidden md:block'), 'la tabla de escritorio se mantiene desde 768px');
+ok((PANTALLA.match(/bloque\.mostrados\.map/g) || []).length >= 2,
+    'la tabla y las tarjetas pintan el MISMO bloque');
+ok(PANTALLA.includes('configurar-promocion-movil-') && PANTALLA.includes('marcar-recuperado-movil-'),
+    'las acciones móviles tienen testids propios (no duplican los de escritorio)');
 ok(PANTALLA.includes('Sin cuenta todavía'), 'avisa cuando el candidato todavía no tiene cuenta');
 ok(PANTALLA.includes('Sin historial de asistencia'),
     'no dibuja "null días ausente" cuando el candidato no tiene historial');
@@ -215,6 +301,45 @@ ok(/useConfigurarPromocion[\s\S]{0,600}?invalidateQueries\(\{ queryKey: claves\.
     .test(HOOKS), 'configurar la promoción invalida la query de recuperación');
 ok(/useMarcarRecuperado[\s\S]{0,600}?invalidateQueries\(\{ queryKey: claves\.migracionRecuperacion \}\)/
     .test(HOOKS), 'marcar recuperado invalida la query de recuperación');
+
+// ── 8. Vista previa del correo ANTES de enviarlo ────────────────────────────
+// El admin elige tipo + cantidad + vencimiento y tiene que poder leer el correo que va a
+// recibir el alumno antes de confirmar. El copy lo arma el BACKEND (misma función que el
+// envío real) y el panel sólo lo pinta.
+console.log('== 8. Vista previa del correo (formulario de promoción) ==');
+ok(promocionCompleta({ tipo: 'dias_gratis', cantidad: '5', vence: '2026-12-31' }),
+    'con los TRES datos se pide la vista previa');
+ok(!promocionCompleta({ tipo: 'dias_gratis', cantidad: '', vence: '2026-12-31' }),
+    'sin cantidad -> placeholder (no le pega al backend)');
+ok(!promocionCompleta({ tipo: '', cantidad: '5', vence: '2026-12-31' }), 'sin tipo -> placeholder');
+ok(!promocionCompleta({ tipo: 'dias_gratis', cantidad: '5', vence: '' }),
+    'sin vencimiento -> placeholder');
+ok(!promocionCompleta({ tipo: 'dias_gratis', cantidad: '0', vence: '2026-12-31' }),
+    'cantidad 0 no es una oferta válida (el backend responde 422)');
+ok(!promocionCompleta({ tipo: 'dias_gratis', cantidad: '2,5', vence: '2026-12-31' }),
+    'una cantidad a medio tipear no dispara el endpoint');
+ok(promocionCompleta({ tipo: 'descuento_monto', cantidad: 10000, vence: '2026-12-31' }),
+    'la cantidad numérica (no string) también vale');
+ok(!promocionCompleta(), 'sin argumentos no rompe');
+
+ok(PANTALLA.includes('modal-promocion-preview'), 'el formulario tiene el bloque de vista previa');
+ok(PANTALLA.includes('Completa los datos para ver la vista previa'),
+    'con datos incompletos muestra el placeholder');
+ok(PANTALLA.includes('modal-promocion-preview-asunto'), 'se ve el ASUNTO antes de enviar');
+ok(PANTALLA.includes('srcDoc') && PANTALLA.includes('sandbox=""'),
+    'el cuerpo va en el iframe srcDoc + sandbox del BeneficioModal (HTML del propio backend)');
+ok(!PANTALLA.includes('dangerouslySetInnerHTML'),
+    'no se inyecta HTML a mano: se reusa el patrón de preview del proyecto');
+ok(PANTALLA.includes('usePreviewPromocionRecuperacion'),
+    'la vista previa sale de su hook (no de un fetch escrito en la pantalla)');
+ok(/usePreviewPromocionRecuperacion[\s\S]{0,400}?promocionCompleta/.test(PANTALLA)
+    || PANTALLA.includes('promocionCompleta'),
+    'el placeholder y el pedido usan la misma regla de "datos completos"');
+ok(HOOKS.includes('/promocion/preview'), 'el hook pega al endpoint de preview');
+ok(/usePreviewPromocionRecuperacion[\s\S]{0,900}?setTimeout\(/.test(HOOKS),
+    'el preview se pide con debounce (no en cada tecla)');
+ok(/usePreviewPromocionRecuperacion[\s\S]{0,2500}?enabled: Boolean\(pedido\)/.test(HOOKS),
+    'sin los TRES datos la consulta queda deshabilitada');
 
 console.log('\n' + (fallos === 0 ? 'TODO OK' : `${fallos} FALLO(S)`));
 process.exit(fallos === 0 ? 0 : 1);

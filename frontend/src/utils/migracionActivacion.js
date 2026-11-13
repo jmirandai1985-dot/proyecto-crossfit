@@ -105,18 +105,69 @@ export function activadosHoy(resumen) {
     return Number((resumen && resumen.activados_hoy) || 0);
 }
 
-// ¿Hay algún filtro puesto? (para mostrar u ocultar el "Ver todos").
-export function hayFiltro({ etapa = null, soloActivadosHoy = false } = {}) {
-    return Boolean(etapa) || Boolean(soloActivadosHoy);
+// ── Buscador por nombre o correo ───────────────────────────────────────────────
+// Sin acentos, sin mayúsculas y sin espacios de sobra (mismo criterio que
+// `utils/membresiasMes.js`): "PERÉZ" y "perez" encuentran a la misma persona y una
+// tilde tipeada de más no deja la tabla vacía.
+const normalizarTexto = (texto) => String(texto ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+
+// ¿La fila coincide con el texto buscado? Coincidencia PARCIAL contra el NOMBRE **o** el
+// CORREO ("ana" encuentra a "Ana Soto" y a "ana@box.cl"; "soto" también). Un término
+// vacío no filtra nada (la tabla completa).
+export function coincideBusqueda(alumno, termino) {
+    const buscado = normalizarTexto(termino);
+    if (!buscado) return true;
+    return normalizarTexto(alumno && alumno.nombre).includes(buscado)
+        || normalizarTexto(alumno && alumno.correo).includes(buscado);
 }
 
-// Filtro de la tabla. Los dos criterios se COMBINAN (etapa + "se activaron hoy") y
-// ninguno es excluyente: se prenden y se apagan con el mismo clic.
-export function filtrarAlumnos(alumnos, { etapa = null, soloActivadosHoy = false } = {}) {
+// ¿Hay algún filtro puesto? (para mostrar u ocultar el "Ver todos"). El texto buscado
+// CUENTA: con algo escrito la tabla ya no muestra el padrón completo.
+export function hayFiltro(
+    { etapa = null, soloActivadosHoy = false, busqueda = '' } = {},
+) {
+    return Boolean(etapa) || Boolean(soloActivadosHoy) || normalizarTexto(busqueda) !== '';
+}
+
+// Filtro de la tabla. Los criterios se COMBINAN entre sí (etapa + "se activaron hoy" +
+// texto buscado) y ninguno es excluyente: los dos de las tarjetas se prenden y se apagan
+// con el mismo clic, y el texto se borra. Filtrar es SÓLO en memoria: la respuesta del
+// backend ya trae el padrón completo.
+export function filtrarAlumnos(
+    alumnos, { etapa = null, soloActivadosHoy = false, busqueda = '' } = {},
+) {
     const lista = Array.isArray(alumnos) ? alumnos : [];
     return lista.filter((alumno) => {
         if (etapa && alumno.etapa !== etapa) return false;
         if (soloActivadosHoy && alumno.activado_hoy !== true) return false;
+        if (!coincideBusqueda(alumno, busqueda)) return false;
         return true;
     });
+}
+
+// ── Listado por bloques (no se pintan los ~712 de una) ─────────────────────────
+// El padrón completo llega en una sola respuesta, pero dibujar cientos de filas (o
+// tarjetas, en el teléfono) de golpe congela el scroll. La tabla/las tarjetas pintan el
+// primer bloque y "Cargar 25 más" AGREGA el siguiente: lo que el admin ya está mirando
+// no se reemplaza.
+export const BLOQUE_ALUMNOS = 25;
+
+// Lo que se pinta y los números del footer. `faltan` es cuántos quedan fuera de la
+// pantalla y `hayMas` decide si existe el botón "Cargar 25 más". Un `limite` inválido
+// (0, negativo, NaN) vuelve al bloque por defecto en vez de recortar la lista entera.
+export function paginaAlumnos(alumnos, limite = BLOQUE_ALUMNOS) {
+    const lista = Array.isArray(alumnos) ? alumnos : [];
+    const pedido = Math.floor(Number(limite));
+    const tope = Number.isFinite(pedido) && pedido > 0 ? pedido : BLOQUE_ALUMNOS;
+    const mostrados = lista.slice(0, tope);
+    return {
+        mostrados,
+        total: lista.length,
+        faltan: Math.max(0, lista.length - mostrados.length),
+        hayMas: lista.length > mostrados.length,
+    };
 }

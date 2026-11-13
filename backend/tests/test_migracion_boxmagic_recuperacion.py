@@ -13,8 +13,10 @@ Cubre, SIN BD y SIN red (app mínima con el router REAL de `migracion_boxmagic.p
   * POST: crea la fila, manda el correo (MOCKEADO, no sale nada) y responde
     `correo_enviado` true/false, incluido el caso en que el envío revienta: la oferta
     se guarda igual (best-effort).
+  * GET preview: el ASUNTO y el HTML que mandaría el POST (el MISMO render del envío
+    real), sin guardar la oferta ni llamar a ningún método de envío; 422/404.
   * PUT: marca recuperado y responde 404 cuando no hay promoción vigente.
-  * 403 para un usuario que no es admin en los TRES endpoints.
+  * 403 para un usuario que no es admin en los CUATRO endpoints.
 
     cd backend && py -3.12 -m pytest tests/test_migracion_boxmagic_recuperacion.py -q --noconftest
 """
@@ -555,6 +557,135 @@ def test_post_vence_en_se_guarda_como_fin_de_dia_chile(monkeypatch):
 
 
 
+# ── GET preview: el correo ANTES de mandarlo ────────────────────────────────
+def _ruta_preview(usuario_id=ALUMNO_ID):
+    return f"{RUTA}/{usuario_id}/promocion/preview"
+
+
+def _params_preview(tipo_beneficio="dias_gratis", cantidad=5, vence_en=None):
+    """Los TRES datos del formulario, como query params del preview."""
+    valor = vence_en or EN_10_DIAS
+    return {
+        "tipo_beneficio": tipo_beneficio,
+        "cantidad": cantidad,
+        "vence_en": valor if isinstance(valor, str) else valor.isoformat(),
+    }
+
+
+def _mock_render(monkeypatch):
+    """Espía del render REAL del correo: anota la llamada y delega en la función canónica.
+
+    No reemplaza el copy (eso taparía justo lo que hay que probar): el test compara el
+    asunto/HTML del endpoint con lo que produce `render_email_promocion_recuperacion`,
+    la MISMA función del envío real. El espía sirve para ver CON QUÉ se la llamó.
+    """
+    llamadas = []
+    real = email_service.render_email_promocion_recuperacion
+
+    def _espia(nombre, tipo_beneficio, cantidad, vence_en):
+        llamadas.append((nombre, tipo_beneficio, cantidad, vence_en))
+        return real(nombre, tipo_beneficio, cantidad, vence_en)
+
+    monkeypatch.setattr(email_service, "render_email_promocion_recuperacion", _espia)
+    return llamadas
+
+
+def test_preview_devuelve_el_mismo_correo_que_el_envio_real(monkeypatch):
+    """El asunto/HTML del preview son los del envío real, y no se escribe nada."""
+    # Lo que manda el envío real: el render canónico con el vencimiento ya normalizado.
+    vence = migracion_boxmagic._vence_en_chile(EN_10_DIAS)
+    asunto_esperado, html_esperado = email_service.render_email_promocion_recuperacion(
+        "Inactivo", "dias_gratis", 5, vence)
+    assert "{{CONTACTO_BOX}}" in html_esperado    # el template deja el pie pendiente
+
+    sesion = _SesionFalsa(usuarios=[_alumno_real()])
+    envios = _mock_envio(monkeypatch, (True, 555))
+    renders = _mock_render(monkeypatch)
+    cliente = _cliente_con(sesion)
+
+    r = cliente.get(_ruta_preview(), params=_params_preview())
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Sólo el correo: no hay ids de oferta ni nada que se haya guardado.
+    assert set(body) == {"asunto", "html"}
+
+    # Mismo asunto y mismo HTML que el envío real (que resuelve el pie de contacto en
+    # `_enviar` justo antes de mandar).
+    assert body["asunto"] == asunto_esperado
+    assert body["html"] == email_service.render_con_contacto(
+        html_esperado, TENANT, db=sesion)
+    assert "{{CONTACTO_BOX}}" not in body["html"]
+
+    # Se renderizó UNA vez, con el nombre/apellido real del alumno y la oferta exacta; el
+    # vencimiento es el FIN DEL DÍA en Chile (lo mismo que recibe el envío real).
+    assert len(renders) == 1
+    nombre, tipo, cantidad, vence_recibido = renders[0]
+    assert (nombre, tipo, cantidad) == ("Inactivo", "dias_gratis", 5)
+    assert fecha_chile(vence_recibido) == EN_10_DIAS.date()
+
+    # Sólo lectura: ninguna fila en promociones_recuperacion, ningún commit y NINGÚN envío.
+    assert sesion.agregados == []
+    assert sesion.commits == 0
+    assert envios == []
+
+
+@pytest.mark.parametrize("tipo,cantidad,texto", [
+    ("dias_gratis", 5, "5 días gratis de clases"),
+    ("descuento_porcentaje", 20, "20% de descuento"),
+    ("descuento_monto", 10000, "$10.000 de descuento"),
+])
+def test_preview_nombra_el_beneficio_elegido(tipo, cantidad, texto, monkeypatch):
+    """El correo que se ve es el de ESTA oferta: el beneficio va en asunto y cuerpo."""
+    _mock_envio(monkeypatch)
+    _mock_render(monkeypatch)
+    cliente = _cliente_con(_SesionFalsa(usuarios=[_alumno_real()]))
+
+    r = cliente.get(_ruta_preview(), params=_params_preview(tipo, cantidad))
+
+    assert r.status_code == 200, r.text
+    assert texto in r.json()["asunto"]
+    assert texto in r.json()["html"]
+
+
+def test_preview_tipo_de_beneficio_invalido_422(monkeypatch):
+    sesion = _SesionFalsa(usuarios=[_alumno_real()])
+    renders = _mock_render(monkeypatch)
+    cliente = _cliente_con(sesion)
+
+    r = cliente.get(_ruta_preview(), params=_params_preview("2x1", 5))
+
+    assert r.status_code == 422, r.text
+    assert renders == []            # ni siquiera se intentó renderizar
+    assert sesion.agregados == []
+    assert sesion.commits == 0
+
+
+@pytest.mark.parametrize("cantidad", [0, -3, "dos"])
+def test_preview_cantidad_invalida_422(cantidad, monkeypatch):
+    sesion = _SesionFalsa(usuarios=[_alumno_real()])
+    renders = _mock_render(monkeypatch)
+    cliente = _cliente_con(sesion)
+
+    r = cliente.get(_ruta_preview(), params=_params_preview(cantidad=cantidad))
+
+    assert r.status_code == 422, r.text
+    assert renders == []
+
+
+def test_preview_alumno_de_otro_box_404(monkeypatch):
+    renders = _mock_render(monkeypatch)
+    envios = _mock_envio(monkeypatch)
+    cliente = _cliente_con(_SesionFalsa(usuarios=[]))
+
+    r = cliente.get(_ruta_preview(), params=_params_preview())
+
+    assert r.status_code == 404, r.text
+    assert "no encontrado" in r.json()["detail"].lower()
+    assert renders == []
+    assert envios == []
+
+
 # ── PUT: marcar recuperado ──────────────────────────────────────────────────
 def test_put_marca_la_promocion_vigente_como_recuperada(monkeypatch):
     _mock_envio(monkeypatch)
@@ -597,10 +728,11 @@ def test_put_alumno_de_otro_box_404(monkeypatch):
     assert "no encontrado" in r.json()["detail"].lower()
 
 
-# ── Autorización: los TRES endpoints ────────────────────────────────────────
+# ── Autorización: los CUATRO endpoints ──────────────────────────────────────
 @pytest.mark.parametrize("rol", ["alumno", "coach"])
 @pytest.mark.parametrize("metodo,ruta,kwargs", [
     ("get", RUTA, {}),
+    ("get", f"{RUTA}/{ALUMNO_ID}/promocion/preview", {"params": _params_preview()}),
     ("post", f"{RUTA}/{ALUMNO_ID}/promocion", {"json": _cuerpo()}),
     ("put", f"{RUTA}/{ALUMNO_ID}/marcar-recuperado", {}),
 ])
