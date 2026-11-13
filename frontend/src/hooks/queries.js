@@ -120,6 +120,12 @@ export const claves = {
     // Intensidad relativa (%RM) de los WODs asistidos: datos SOLO del alumno del
     // token (scoping por JWT), igual que `historialRmTodos`.
     intensidadRelativa: ['wods', 'intensidad-relativa'],
+    // ── Mis WODs (Performance Hub): resultado real vs. lo prescrito ──
+    // Ambas cuelgan de `['wods','resultados']`: registrar/corregir un resultado
+    // invalida el prefijo y se refrescan a la vez la lista de pendientes y el
+    // historial sin que la pantalla tenga que acordarse de las dos claves.
+    wodsPendientes: ['wods', 'resultados', 'pendientes'],
+    wodsHistorial: (limite) => ['wods', 'resultados', 'historial', limite],
     // `planes/membresia-activa` es el plan/créditos del alumno: usa la MISMA familia
     // `['membresia']` que ya invalidan reservar/cancelar y la aprobación del plan.
     clasesRango: (desde, hasta, limite) => ['clases', 'rango', desde, hasta, limite],
@@ -743,6 +749,42 @@ export function useIntensidadRelativa() {
         queryKey: claves.intensidadRelativa,
         queryFn: async () => (await api.get('/api/v1/wods/intensidad-relativa')).data || [],
         staleTime: 30_000,
+    });
+}
+
+// ── Mis WODs: resultado REAL vs. lo prescrito ────────────────────────────────
+// Pendientes = WODs de los últimos 14 días con `reserva.asistio=True` y todavía
+// sin resultado. El backend acota por JWT: no hay que mandar el alumno.
+export function useWodsPendientes() {
+    return useQuery({
+        queryKey: claves.wodsPendientes,
+        queryFn: async () => (await api.get('/api/v1/alumnos/me/wods-pendientes')).data || [],
+        staleTime: 30_000,
+    });
+}
+
+// Historial de resultados ya registrados (con la prescripción del WOD para pintar
+// la comparación). Se piden los últimos 20 por defecto, como el resto del Hub.
+export function useWodsHistorial(limite = 20) {
+    return useQuery({
+        queryKey: claves.wodsHistorial(limite),
+        queryFn: async () => (await api.get(
+            `/api/v1/alumnos/me/wods-historial?limit=${limite}`,
+        )).data || [],
+        staleTime: 30_000,
+    });
+}
+
+// UPSERT: el backend actualiza la MISMA fila si el alumno ya había registrado ese
+// WOD. Invalida el prefijo `['wods','resultados']` para refrescar pendientes +
+// historial de una vez.
+export function useRegistrarResultadoWod() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ wodId, ...datos }) => api.post(
+            `/api/v1/alumnos/me/wods/${wodId}/resultado`, datos,
+        ).then((r) => r.data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['wods', 'resultados'] }),
     });
 }
 

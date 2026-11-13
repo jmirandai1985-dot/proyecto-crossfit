@@ -49,6 +49,9 @@ WodMovimiento = importlib.import_module(
     "app.models.wod_movimiento").WodMovimiento
 HistorialRM = importlib.import_module("app.models.historial_rm").HistorialRM
 Reserva = importlib.import_module("app.models.reserva").Reserva
+# Mis WODs: el `create_all()` del bootstrap de TEST sólo crea los modelos
+# importados. Registrarlo acá garantiza `wod_resultados` en una rama nueva.
+WodResultado = importlib.import_module("app.models.wod_resultado").WodResultado
 
 # ── MODELOS ANALÍTICOS / ML / DATA MARTS ────────────────────────────────────
 # `Base.metadata.create_all()` sólo crea las tablas de los modelos que fueron

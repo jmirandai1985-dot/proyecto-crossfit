@@ -6,19 +6,24 @@ import logging
 import sentry_sdk
 from datetime import datetime, timedelta, date, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from pydantic import (
     BaseModel, EmailStr, Field, AliasChoices, ConfigDict, model_validator,
     field_validator,
 )
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
-from typing import ClassVar, Optional
+from typing import ClassVar, Literal, Optional
 
 from app.db.database import get_db
 from app.core.rate_limit import limiter, LIMIT_REGISTRO
 from app.models.usuario import Usuario, RolUsuario
 from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
+from app.models.clase import Clase
+from app.models.reserva import Reserva
+from app.models.wod import Wod
+from app.models.wod_resultado import WodResultado
 from app.api.v1.usuarios import hash_password
 from app.core.dependencies import get_current_user, get_current_admin, es_usuario_prueba
 # El RUT chileno vive en `app/utils/rut.py` (módulo 11): lo comparten esta ruta y la
@@ -26,6 +31,7 @@ from app.core.dependencies import get_current_user, get_current_admin, es_usuari
 # de la cuenta). Se importa acá y se sigue exponiendo como `alumnos.validar_rut` porque
 # hay consumidores que lo importan desde este módulo (`scripts/seed_ml_data*.py`).
 from app.utils.rut import validar_rut
+from app.utils.santiago import hoy_santiago
 from app.services.auditoria_service import registrar_auditoria
 # D3: peso/género son los insumos del nivel persistido (`usuarios.nivel_*`).
 from app.services.nivel_service import recalcular_nivel
@@ -621,6 +627,259 @@ def rechazar_alumno(
         detalle={"alumno_id": usuario.id, "estado": "rechazado"},
     )
     return {"ok": True, "mensaje": "Solicitud rechazada"}
+
+
+# ─── Mis WODs (Performance Hub): resultado REAL vs. lo prescrito ───
+# El alumno registra cómo le fue en un WOD al que asistió de verdad. La prescripción
+# vive en `wods` y el resultado en `wod_resultados` (un registro por alumno y WOD).
+TIPOS_WOD_POR_TIEMPO = frozenset({"FOR TIME", "FORTIME", "RFT"})
+TIPOS_WOD_POR_RONDAS = frozenset({"AMRAP", "EMOM"})
+
+
+class RegistrarResultadoWod(BaseModel):
+    """Body de `POST /me/wods/{wod_id}/resultado`.
+
+    `modo` es obligatorio ('rx' | 'escalado'). Los campos del resultado dependen
+    de `wods.tipo_metcon`: tiempo para FOR TIME/RFT, rondas (+ reps sueltas) para
+    AMRAP/EMOM. La validación del tipo vive en el endpoint, no acá, porque necesita
+    el WOD.
+    """
+    modo: Literal["rx", "escalado"]
+    tiempo_segundos: Optional[int] = Field(None, gt=0)
+    rondas: Optional[int] = Field(None, ge=0)
+    reps_extra: Optional[int] = Field(None, ge=0)
+    nota: Optional[str] = Field(None, max_length=500)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+def _tipo_metcon_normalizado(valor) -> str:
+    """'for time', 'FOR_TIME' y ' For  Time ' comparan igual."""
+    return " ".join(str(valor or "").strip().upper().replace("_", " ").split())
+
+
+def _grupo_resultado(tipo_metcon) -> str:
+    """'tiempo' | 'rondas' | 'libre' según el tipo, tolerando sufijos reales.
+
+    `wods.tipo_metcon` es texto libre: "AMRAP 12" o "FOR TIME (cap 20)" son
+    variantes normales. Se comparan por prefijo para no degradar el formulario a
+    "libre" por un sufijo.
+    """
+    tipo = _tipo_metcon_normalizado(tipo_metcon)
+    if tipo in TIPOS_WOD_POR_TIEMPO or tipo.startswith("FOR TIME"):
+        return "tiempo"
+    if tipo in TIPOS_WOD_POR_RONDAS or tipo.startswith(("AMRAP", "EMOM")):
+        return "rondas"
+    return "libre"
+
+
+def _validar_resultado_wod(tipo_metcon, datos: RegistrarResultadoWod) -> None:
+    """Exige el campo que corresponde al tipo de metcon del WOD.
+
+    Sin `tipo_metcon` definido se acepta cualquiera de los dos, pero SIEMPRE hace
+    falta uno: un resultado que no dice tiempo ni rondas no sirve para comparar
+    contra lo prescrito.
+    """
+    grupo = _grupo_resultado(tipo_metcon)
+    if grupo == "tiempo" and datos.tiempo_segundos is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Este WOD es por tiempo: registra tu tiempo en mm:ss",
+        )
+    if grupo == "rondas" and datos.rondas is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Este WOD es por rondas: registra las rondas completadas",
+        )
+    if (grupo == "libre"
+            and datos.tiempo_segundos is None and datos.rondas is None):
+        raise HTTPException(
+            status_code=422,
+            detail="Registra un tiempo o las rondas del WOD",
+        )
+
+
+def _resultado_wod_json(resultado: WodResultado, wod: Wod) -> dict:
+    """Respuesta pública de un resultado (misma forma en POST e historial)."""
+    return {
+        "id": resultado.id,
+        "wod_id": resultado.wod_id,
+        "fecha": wod.fecha.isoformat() if wod.fecha else None,
+        "titulo": wod.titulo,
+        "wod_principal": wod.wod_principal,
+        "tipo_metcon": wod.tipo_metcon,
+        "modo": resultado.modo,
+        "tiempo_segundos": resultado.tiempo_segundos,
+        "rondas": resultado.rondas,
+        "reps_extra": resultado.reps_extra,
+        "nota": resultado.nota,
+        "reserva_id": resultado.reserva_id,
+        "created_at": (resultado.created_at.isoformat()
+                       if resultado.created_at else None),
+    }
+
+
+@router.get("/me/wods-pendientes")
+def mis_wods_pendientes(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """WODs de los últimos 14 días con asistencia real y SIN resultado registrado.
+
+    La asistencia se apoya en `reservas.asistio=True` (la misma fuente de verdad
+    que usa Asistencia). Un WOD puede tener varias clases/reservas: `.distinct()`
+    deja una sola tarjeta por WOD.
+    """
+    # 🔒 SEGURIDAD: alumno y tenant SIEMPRE del token JWT.
+    alumno_id = current_user.get("usuario_id")
+    tenant_id = current_user.get("tenant_id")
+    desde = hoy_santiago() - timedelta(days=14)
+
+    filas = (
+        db.query(
+            Wod.id.label("wod_id"),
+            Wod.fecha,
+            Wod.titulo,
+            Wod.wod_principal,
+            Wod.tipo_metcon,
+        )
+        .join(Clase, Clase.wod_id == Wod.id)
+        .join(Reserva, Reserva.clase_id == Clase.id)
+        .outerjoin(
+            WodResultado,
+            and_(
+                WodResultado.wod_id == Wod.id,
+                WodResultado.alumno_id == alumno_id,
+                WodResultado.tenant_id == tenant_id,
+            ),
+        )
+        .filter(
+            Reserva.alumno_id == alumno_id,
+            Reserva.tenant_id == tenant_id,
+            Reserva.asistio.is_(True),
+            Clase.tenant_id == tenant_id,
+            Wod.tenant_id == tenant_id,
+            Wod.fecha >= desde,
+            WodResultado.id.is_(None),
+        )
+        .distinct()
+        .order_by(Wod.fecha.desc(), Wod.id.desc())
+        .all()
+    )
+
+    return [
+        {
+            "wod_id": fila.wod_id,
+            "fecha": fila.fecha.isoformat() if fila.fecha else None,
+            "titulo": fila.titulo,
+            "wod_principal": fila.wod_principal,
+            "tipo_metcon": fila.tipo_metcon,
+        }
+        for fila in filas
+    ]
+
+
+@router.post("/me/wods/{wod_id}/resultado")
+def registrar_resultado_wod(
+    wod_id: int,
+    datos: RegistrarResultadoWod,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Registra (o corrige) el resultado del alumno en un WOD.
+
+    Requiere una reserva propia con `asistio=True` para una clase de ese WOD: sin
+    asistencia real no se puede registrar (403). Si ya existe un resultado para
+    `(alumno_id, wod_id)`, se ACTUALIZA la misma fila (UPSERT) — el alumno puede
+    corregir un tiempo o un modo sin crear un duplicado.
+
+    Se guarda `reserva_id` de la asistencia MÁS RECIENTE que respalda el
+    resultado (si el mismo WOD se dictó en varias clases).
+    """
+    # 🔒 SEGURIDAD: alumno y tenant SIEMPRE del token JWT.
+    alumno_id = current_user.get("usuario_id")
+    tenant_id = current_user.get("tenant_id")
+
+    wod = db.query(Wod).filter(
+        Wod.id == wod_id, Wod.tenant_id == tenant_id).first()
+    if not wod:
+        raise HTTPException(status_code=404, detail="WOD no encontrado")
+
+    reserva = (
+        db.query(Reserva)
+        .join(Clase, Reserva.clase_id == Clase.id)
+        .filter(
+            Reserva.alumno_id == alumno_id,
+            Reserva.tenant_id == tenant_id,
+            Reserva.asistio.is_(True),
+            Clase.tenant_id == tenant_id,
+            Clase.wod_id == wod_id,
+        )
+        .order_by(Reserva.fecha_reserva.desc(), Reserva.id.desc())
+        .first()
+    )
+    if reserva is None:
+        raise HTTPException(
+            status_code=403,
+            detail="No puedes registrar un WOD al que no asististe",
+        )
+
+    _validar_resultado_wod(wod.tipo_metcon, datos)
+
+    resultado = db.query(WodResultado).filter(
+        WodResultado.alumno_id == alumno_id,
+        WodResultado.wod_id == wod_id,
+        WodResultado.tenant_id == tenant_id,
+    ).first()
+
+    if resultado is None:
+        resultado = WodResultado(
+            tenant_id=tenant_id, alumno_id=alumno_id, wod_id=wod_id)
+        db.add(resultado)
+
+    resultado.reserva_id = reserva.id
+    resultado.modo = datos.modo
+    resultado.tiempo_segundos = datos.tiempo_segundos
+    resultado.rondas = datos.rondas
+    resultado.reps_extra = datos.reps_extra
+    resultado.nota = datos.nota
+    db.commit()
+    db.refresh(resultado)
+
+    return _resultado_wod_json(resultado, wod)
+
+
+@router.get("/me/wods-historial")
+def mi_historial_wods(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Resultados ya registrados por el alumno, del WOD más reciente al más viejo.
+
+    Devuelve la prescripción (`titulo`, `wod_principal`, `tipo_metcon`) junto con
+    el resultado real (`modo`, tiempo o rondas) para que el front pinte la
+    comparación sin pedir el WOD por separado.
+    """
+    alumno_id = current_user.get("usuario_id")
+    tenant_id = current_user.get("tenant_id")
+
+    filas = (
+        db.query(WodResultado, Wod)
+        .join(Wod, Wod.id == WodResultado.wod_id)
+        .filter(
+            WodResultado.alumno_id == alumno_id,
+            WodResultado.tenant_id == tenant_id,
+            Wod.tenant_id == tenant_id,
+        )
+        .order_by(Wod.fecha.desc(), WodResultado.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    return [_resultado_wod_json(resultado, wod) for resultado, wod in filas]
 
 
 # ─── GET /me (alumno autenticado) ───

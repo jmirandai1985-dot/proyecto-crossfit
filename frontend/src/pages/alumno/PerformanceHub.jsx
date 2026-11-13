@@ -278,7 +278,15 @@ const PerformanceHub = () => {
             <span className="text-7xl block mb-6">📊</span>
             <h2 className="text-xl font-bold text-gray-800 mb-3">Registra tu primer RM</h2>
             <p className="text-gray-500 max-w-md mx-auto mb-6">Para desbloquear tu perfil de atleta, comienza registrando tus marcas personales.</p>
-            <a href="/alumno/rms" className="inline-block px-8 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm">Ir a Pizarra de RMs</a>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+                <a href="/alumno/rms" className="inline-block px-8 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm">Ir a Pizarra de RMs</a>
+                {/* Mis WODs también vive en el Hub: el alumno puede registrar un WOD
+                    aunque todavía no tenga RMs (son datos independientes). */}
+                <button type="button" onClick={() => navigate('/alumno/mis-wods')}
+                    className="inline-block px-8 py-3 bg-white border border-emerald-600 text-emerald-700 rounded-xl hover:bg-emerald-50 font-bold text-sm transition-colors">
+                    Mis WODs
+                </button>
+            </div>
         </div></Layout>
     );
 
@@ -320,14 +328,20 @@ const PerformanceHub = () => {
             <div className="max-w-6xl mx-auto">
                 <AvisoCarga secciones={erroresCarga} onReintentar={cargarTodo} />
 
-                <div className="flex items-center gap-3 mb-6">
+                <div className="flex flex-wrap items-center gap-3 mb-6">
                     <BotonVolver />
                     <span className="text-3xl">🏆</span>
                     <div><h1 className="text-2xl font-bold text-gray-800">Performance Hub</h1><p className="text-sm text-gray-500">Perfil completo de atleta basado en tus RMs</p></div>
-                    <button type="button" onClick={() => navigate('/alumno/rms')}
-                        className="ml-auto shrink-0 px-4 py-2 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm transition-colors">
-                        + Registrar RM
-                    </button>
+                    <div className="ml-auto flex shrink-0 items-center gap-2">
+                        <button type="button" onClick={() => navigate('/alumno/mis-wods')}
+                            className="px-3 sm:px-4 py-2 bg-white border border-emerald-600 text-emerald-700 rounded-xl hover:bg-emerald-50 font-bold text-sm transition-colors">
+                            Mis WODs
+                        </button>
+                        <button type="button" onClick={() => navigate('/alumno/rms')}
+                            className="px-3 sm:px-4 py-2 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm transition-colors">
+                            + Registrar RM
+                        </button>
+                    </div>
                 </div>
                 <div className="space-y-6">
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">

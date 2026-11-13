@@ -90,6 +90,7 @@ const AlumnoMisPedidos = lazy(() => import('./pages/alumno/MisPedidos'));
 // a GET /pagos/{id}. No activa nada: eso lo hace el webhook.
 const AlumnoPagoResultado = lazy(() => import('./pages/alumno/PagoResultado'));
 const AlumnoPerformanceHub = lazy(() => import('./pages/alumno/PerformanceHub'));
+const AlumnoMisWods = lazy(() => import('./pages/alumno/MisWods'));
 const AlumnoMiProgreso = lazy(() => import('./pages/alumno/MiProgreso'));
 const AlumnoMiHistorial = lazy(() => import('./pages/alumno/MiHistorial'));
 const AlumnoInvitaYGana = lazy(() => import('./pages/alumno/InvitaYGana'));
@@ -228,6 +229,10 @@ function App() {
             <Route path="mis-pedidos" element={<AlumnoMisPedidos />} />
             <Route path="pago/resultado/:pagoId" element={<AlumnoPagoResultado />} />
             <Route path="performance-hub" element={<AlumnoPerformanceHub />} />
+            {/* Mis WODs: resultado real vs. lo prescrito. Se entra desde el
+                Performance Hub; la ruta existe para que el botón "volver" y un
+                enlace directo funcionen, no para navegarla suelta. */}
+            <Route path="mis-wods" element={<AlumnoMisWods />} />
             <Route path="mi-progreso" element={<AlumnoMiProgreso />} />
             <Route path="mi-historial" element={<AlumnoMiHistorial />} />
             <Route path="invita-y-gana" element={<AlumnoInvitaYGana />} />
