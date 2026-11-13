@@ -79,14 +79,30 @@ PATRON_CORREO = "descuento.%@test.local"
 PATRON_PLAN = "Plan descuento TEST %"
 
 
+def _borrar_ingresos_del_alumno(db, alumno_id: int) -> None:
+    """Borra los ingresos que dejan las compras de ese alumno (aprobadas o en cola).
+
+    Se buscan por REFERENCIA (`referencia_tipo` + `referencia_id`), no por el texto de la
+    descripción: la descripción se arma con el nombre del alumno —que todos los escenarios
+    de este módulo comparten— y su formato ya cambió una vez. Sin esto, el teardown y el
+    barrido dejan filas de caja huérfanas en la rama TEST.
+    """
+    db.execute(text("""
+        DELETE FROM transacciones_financieras
+        WHERE (referencia_tipo = 'suscripcion'
+               AND referencia_id IN (SELECT id FROM suscripciones WHERE usuario_id = :a))
+           OR (referencia_tipo = 'solicitud_plan'
+               AND referencia_id IN (SELECT id FROM solicitudes_planes WHERE alumno_id = :a))
+    """), {"a": alumno_id})
+
+
 def _borrar_residuo(db) -> int:
     """Borra el residuo de una corrida cortada. Devuelve cuántos alumnos limpió."""
     ids = [fila[0] for fila in db.execute(
         text("SELECT id FROM usuarios WHERE correo LIKE :p"),
         {"p": PATRON_CORREO}).fetchall()]
     for alumno_id in ids:
-        db.execute(text("DELETE FROM transacciones_financieras WHERE descripcion LIKE :d"),
-                   {"d": f"%(usuario #{alumno_id})%"})
+        _borrar_ingresos_del_alumno(db, alumno_id)
         db.execute(text("DELETE FROM notificaciones WHERE alumno_id = :a"), {"a": alumno_id})
         # Sin CASCADE: la FK de `notificaciones_enviadas` es la que rompía el borrado.
         db.execute(text("DELETE FROM notificaciones_enviadas WHERE alumno_id = :a"),
@@ -173,8 +189,7 @@ def escenario(db, tokens):
     # ── limpieza (siempre, aunque el test falle) ──
     db.rollback()
     try:
-        db.execute(text("DELETE FROM transacciones_financieras WHERE descripcion LIKE :d"),
-                   {"d": f"%(usuario #{alumno_id})%"})
+        _borrar_ingresos_del_alumno(db, alumno_id)
         db.execute(text("DELETE FROM notificaciones WHERE alumno_id = :a"), {"a": alumno_id})
         # `notificaciones_enviadas.alumno_id` NO tiene CASCADE: sin borrarla, el
         # DELETE del usuario falla por FK, la limpieza se cae con un WARN y el
@@ -316,7 +331,12 @@ def test_b3_los_pendientes_muestran_el_beneficio_aplicado(cliente, tokens, escen
 
 
 def test_b4_la_aprobacion_cobra_el_precio_final(cliente, tokens, db, escenario):
-    """El INGRESO es lo que el alumno paga: con descuento, el final (no la lista)."""
+    """El INGRESO es lo que el alumno paga: con descuento, el final (no la lista).
+
+    El monto se busca por la REFERENCIA del ingreso (`suscripcion` o, si el plan quedó
+    en cola, `solicitud_plan`), no por el texto de la descripción: el nombre del alumno
+    que arma esa descripción puede repetirse o cambiar sin que cambie lo cobrado.
+    """
     _dar_descuento(cliente, tokens["admin"], escenario["alumno_id"])
     creada = _solicitar(cliente, escenario["token_alumno"], escenario["alumno_id"],
                         escenario["plan_id"]).json()
@@ -325,9 +345,13 @@ def test_b4_la_aprobacion_cobra_el_precio_final(cliente, tokens, db, escenario):
                            headers=tokens["admin"])
 
     assert aprobada.status_code == 200, aprobada.text
-    monto = db.execute(text(
-        "SELECT monto FROM transacciones_financieras WHERE descripcion LIKE :d ORDER BY id DESC"),
-        {"d": f"%(usuario #{escenario['alumno_id']})%"}).scalar()
+    monto = db.execute(text("""
+        SELECT monto FROM transacciones_financieras
+        WHERE (referencia_tipo = 'suscripcion'
+               AND referencia_id IN (SELECT id FROM suscripciones WHERE usuario_id = :a))
+           OR (referencia_tipo = 'solicitud_plan' AND referencia_id = :s)
+        ORDER BY id DESC LIMIT 1"""),
+        {"a": escenario["alumno_id"], "s": creada["id"]}).scalar()
     assert monto == _esperado_final(), \
         "cobrar la lista sería cobrarle el descuento que el box le regaló"
 
