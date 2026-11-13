@@ -42,7 +42,7 @@ const FormularioPromocion = ({ alumno, onClose }) => {
     // anclado al mediodía UTC (el backend lo lleva al fin del día chileno).
     const datosCompletos = promocionCompleta({ tipo, cantidad, vence });
     const preview = usePreviewPromocionRecuperacion({
-        usuarioId: alumno.id,
+        candidatoId: alumno.candidato_id,
         tipo,
         cantidad,
         venceEn: datosCompletos ? `${fechaParaInput(vence)}T12:00:00Z` : '',
@@ -64,7 +64,7 @@ const FormularioPromocion = ({ alumno, onClose }) => {
             // El backend descarta la hora y guarda el FIN DE ESE DÍA en Chile, así que se
             // manda el día elegido anclado al mediodía UTC (nunca corre un día de fecha).
             const data = await configurar.mutateAsync({
-                usuarioId: alumno.id,
+                candidatoId: alumno.candidato_id,
                 payload: {
                     tipo_beneficio: tipo,
                     cantidad: n,
@@ -330,10 +330,10 @@ const MigracionRecuperacion = () => {
     const cargarMas = () => setPaginacion({ clave: claveFiltros, limite: limite + BLOQUE_ALUMNOS });
 
     const marcar = async (alumno) => {
-        setMarcandoId(alumno.id);
+        setMarcandoId(alumno.candidato_id);
         setAviso(null);
         try {
-            await marcarRecuperado.mutateAsync(alumno.id);
+            await marcarRecuperado.mutateAsync(alumno.candidato_id);
             setAviso({ tipo: 'ok', texto: `${alumno.nombre} quedó marcado como recuperado.` });
         } catch (err) {
             // El 404 ("El alumno no tiene una promoción vigente") es un dato real: se
@@ -525,7 +525,7 @@ const MigracionRecuperacion = () => {
                         const promo = alumno.promocion;
                         const configurable = puedeConfigurarPromocion(alumno);
                         const marcable = puedeMarcarRecuperado(alumno);
-                        const enVuelo = marcandoId === alumno.id;
+                        const enVuelo = marcandoId === alumno.candidato_id;
                         // Misma clave que la fila de escritorio: `candidato_id` es el padrón
                         // e `id` la cuenta REAL (null mientras no exista).
                         const clave = alumno.candidato_id ?? alumno.id;
@@ -586,7 +586,7 @@ const MigracionRecuperacion = () => {
                                             <button
                                                 type="button"
                                                 onClick={() => { setAviso(null); setAlumnoFormulario(alumno); }}
-                                                data-testid={`configurar-promocion-movil-${alumno.id}`}
+                                                data-testid={`configurar-promocion-movil-${alumno.candidato_id}`}
                                                 className="w-full px-3 py-2 rounded-lg text-xs font-bold bg-orange-600 text-white transition hover:bg-orange-700 active:bg-orange-700 active:scale-[0.98]"
                                             >
                                                 Configurar promoción
@@ -597,7 +597,7 @@ const MigracionRecuperacion = () => {
                                                 type="button"
                                                 onClick={() => marcar(alumno)}
                                                 disabled={enVuelo}
-                                                data-testid={`marcar-recuperado-movil-${alumno.id}`}
+                                                data-testid={`marcar-recuperado-movil-${alumno.candidato_id}`}
                                                 className="w-full px-3 py-2 rounded-lg text-xs font-bold bg-emerald-600 text-white transition hover:bg-emerald-700 active:bg-emerald-700 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
                                                 {enVuelo ? 'Marcando...' : 'Marcar como recuperado'}
@@ -642,7 +642,7 @@ const MigracionRecuperacion = () => {
                                 const promo = alumno.promocion;
                                 const configurable = puedeConfigurarPromocion(alumno);
                                 const marcable = puedeMarcarRecuperado(alumno);
-                                const enVuelo = marcandoId === alumno.id;
+                                const enVuelo = marcandoId === alumno.candidato_id;
                                 // Clave de la fila = `candidato_id` (el padrón). `id` es la
                                 // cuenta REAL y viene en null mientras no exista.
                                 const clave = alumno.candidato_id ?? alumno.id;
@@ -684,7 +684,7 @@ const MigracionRecuperacion = () => {
                                                 <button
                                                     type="button"
                                                     onClick={() => { setAviso(null); setAlumnoFormulario(alumno); }}
-                                                    data-testid={`configurar-promocion-${alumno.id}`}
+                                                    data-testid={`configurar-promocion-${alumno.candidato_id}`}
                                                     className="px-3 py-1.5 rounded-lg text-xs font-bold bg-orange-600 text-white hover:bg-orange-700 transition-colors"
                                                 >
                                                     Configurar promoción
@@ -695,7 +695,7 @@ const MigracionRecuperacion = () => {
                                                     type="button"
                                                     onClick={() => marcar(alumno)}
                                                     disabled={enVuelo}
-                                                    data-testid={`marcar-recuperado-${alumno.id}`}
+                                                    data-testid={`marcar-recuperado-${alumno.candidato_id}`}
                                                     className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                                 >
                                                     {enVuelo ? 'Marcando...' : 'Marcar como recuperado'}

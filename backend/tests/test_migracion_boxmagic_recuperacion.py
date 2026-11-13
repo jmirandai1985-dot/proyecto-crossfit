@@ -12,10 +12,14 @@ Cubre, SIN BD y SIN red (app mínima con el router REAL de `migracion_boxmagic.p
     BoxMagic); sólo se usa para mostrar `ultima_asistencia` / `dias_ausente`.
   * POST: crea la fila, manda el correo (MOCKEADO, no sale nada) y responde
     `correo_enviado` true/false, incluido el caso en que el envío revienta: la oferta
-    se guarda igual (best-effort).
+    se guarda igual (best-effort). La oferta se cuelga del CANDIDATO del padrón
+    (`candidato_id`, migración 080): funciona SIN cuenta real y, si esa cuenta existe,
+    se guarda también `usuario_id`.
   * GET preview: el ASUNTO y el HTML que mandaría el POST (el MISMO render del envío
-    real), sin guardar la oferta ni llamar a ningún método de envío; 422/404.
-  * PUT: marca recuperado y responde 404 cuando no hay promoción vigente.
+    real), sin guardar la oferta ni llamar a ningún método de envío; 422/404. Funciona
+    para candidatos sin cuenta.
+  * PUT: marca recuperado (por candidato o por cuenta histórica) y responde 404 cuando
+    no hay promoción vigente.
   * 403 para un usuario que no es admin en los CUATRO endpoints.
 
     cd backend && py -3.12 -m pytest tests/test_migracion_boxmagic_recuperacion.py -q --noconftest
@@ -83,13 +87,18 @@ class _FilaUsuario:
 
 
 class _FilaPromo:
-    """Una fila de `promociones_recuperacion` (atributos, sin ORM)."""
+    """Una fila de `promociones_recuperacion` (atributos, sin ORM).
 
-    def __init__(self, id_, usuario_id=ALUMNO_ID, estado="enviada",
+    `candidato_id` es el destinatario del padrón desde la migración 080; las filas
+    históricas solo tienen `usuario_id`. Los dos pueden venir juntos.
+    """
+
+    def __init__(self, id_, usuario_id=ALUMNO_ID, candidato_id=None, estado="enviada",
                  vence_en=EN_10_DIAS, tipo_beneficio="dias_gratis", cantidad=5,
                  notificacion_id=None, creado_en=AYER):
         self.id = id_
         self.usuario_id = usuario_id
+        self.candidato_id = candidato_id
         self.estado = estado
         self.vence_en = vence_en
         self.tipo_beneficio = tipo_beneficio
@@ -414,7 +423,30 @@ def test_get_manda_la_oferta_mas_reciente(monkeypatch):
 
 
 
+def test_get_muestra_la_oferta_de_un_candidato_sin_cuenta(monkeypatch):
+    """La oferta se cuelga del padrón: el panel la ve aunque no exista `usuarios`.
+
+    Es el caso de los 459 desertores (bug corregido en la migración 080). El estado
+    deja de ser `sin_contactar` en cuanto hay una oferta ligada al `candidato_id`.
+    """
+    candidatos = [_FilaCandidato(201, "Sin Cuenta", "sincuenta@test.com")]
+    promociones = [_FilaPromo(50, usuario_id=None, candidato_id=201,
+                              estado="enviada", vence_en=EN_10_DIAS)]
+    _parchear(monkeypatch, {})
+    cliente = _cliente_con(_SesionFalsa(
+        candidatos=candidatos, usuarios=[], promociones=promociones))
+
+    fila = _por_candidato(cliente.get(RUTA).json())[201]
+
+    assert fila["id"] is None                 # sigue sin cuenta real
+    assert fila["estado"] == "promocion_enviada"
+    assert fila["promocion"]["id"] == 50
+
+
 # ── POST: crear la oferta + mandar el correo ────────────────────────────────
+CANDIDATO_ID = 201
+
+
 def _cuerpo(tipo_beneficio="dias_gratis", cantidad=5, vence_en=None):
     valor = vence_en or EN_10_DIAS
     return {
@@ -424,26 +456,37 @@ def _cuerpo(tipo_beneficio="dias_gratis", cantidad=5, vence_en=None):
     }
 
 
-def _alumno_real():
-    """La cuenta REAL (`usuarios`) a la que se le configura la oferta.
+def _candidato_inactivo(id_=CANDIDATO_ID, nombre="Inactivo",
+                        correo="inactivo@test.com"):
+    """La fila del PADRÓN a la que se le configura la oferta (migración 080).
 
-    POST/PUT exigen un `Usuario` de verdad: la oferta se cuelga de `usuario_id` y el
-    correo sale de esa fila. Un candidato del padrón sin cuenta no puede recibir oferta
-    (404 "Alumno no encontrado"), que es lo esperado antes de la migración real.
+    Es el destinatario REAL: puede o no tener cuenta en `usuarios`.
+    """
+    return _FilaCandidato(id_, nombre, correo)
+
+
+def _alumno_real():
+    """La cuenta REAL (`usuarios`) del candidato, si YA migró.
+
+    Ya NO es requisito de POST/PUT: la oferta se cuelga de `candidato_id`. Cuando la
+    cuenta existe, los endpoints guardan también `usuario_id` y el correo sale a esa
+    persona.
     """
     return _FilaUsuario(ALUMNO_ID, "Inactivo", "inactivo@test.com",
                         telefono="+56911111111")
 
 
 def test_post_crea_la_fila_y_manda_el_correo(monkeypatch):
-    sesion = _SesionFalsa(usuarios=[_alumno_real()])
+    sesion = _SesionFalsa(candidatos=[_candidato_inactivo()],
+                          usuarios=[_alumno_real()])
     llamadas = _mock_envio(monkeypatch, (True, 555))
     cliente = _cliente_con(sesion)
 
-    r = cliente.post(f"{RUTA}/{ALUMNO_ID}/promocion", json=_cuerpo())
+    r = cliente.post(f"{RUTA}/{CANDIDATO_ID}/promocion", json=_cuerpo())
 
     assert r.status_code == 201, r.text
     body = r.json()
+    assert body["candidato_id"] == CANDIDATO_ID
     assert body["usuario_id"] == ALUMNO_ID
     assert body["tipo_beneficio"] == "dias_gratis"
     assert body["cantidad"] == 5
@@ -451,10 +494,12 @@ def test_post_crea_la_fila_y_manda_el_correo(monkeypatch):
     assert body["correo_enviado"] is True
     assert body["notificacion_id"] == 555
 
-    # La fila quedó guardada ANTES de mandar el correo, con el admin que la configuró.
+    # La fila quedó guardada ANTES de mandar el correo, con el admin que la configuró
+    # y con LOS DOS ids (candidato del padrón + cuenta real que ya existe).
     assert len(sesion.agregados) == 1
     guardada = sesion.agregados[0]
     assert guardada.tenant_id == TENANT
+    assert guardada.candidato_id == CANDIDATO_ID
     assert guardada.usuario_id == ALUMNO_ID
     assert guardada.creado_por == ADMIN_ID
     assert guardada.estado == "enviada"
@@ -464,19 +509,54 @@ def test_post_crea_la_fila_y_manda_el_correo(monkeypatch):
     alumno, tipo, cantidad, vence = llamadas[0]
     assert alumno["correo"] == "inactivo@test.com"
     assert alumno["nombre"] == "Inactivo"
+    assert alumno["id"] == ALUMNO_ID
     assert (tipo, cantidad) == ("dias_gratis", 5)
     # `vence_en` se normaliza al FIN del día elegido en Chile (ver `_vence_en_chile`).
     assert fecha_chile(vence) == EN_10_DIAS.date()
     assert vence > AHORA
 
 
+def test_post_candidato_sin_cuenta_crea_la_oferta_igual(monkeypatch):
+    """El bug bloqueante: 459 desertores sin `Usuario` no podían recibir oferta.
+
+    La oferta se cuelga del padrón (`candidato_id`) y `usuario_id` queda NULL; el
+    correo sale igual, con el nombre/correo del Excel.
+    """
+    candidato = _candidato_inactivo(nombre="Desertor Sin Cuenta",
+                                    correo="desertor@test.com")
+    sesion = _SesionFalsa(candidatos=[candidato], usuarios=[])
+    llamadas = _mock_envio(monkeypatch, (True, 777))
+    cliente = _cliente_con(sesion)
+
+    r = cliente.post(f"{RUTA}/{CANDIDATO_ID}/promocion", json=_cuerpo())
+
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["candidato_id"] == CANDIDATO_ID
+    assert body["usuario_id"] is None
+    assert body["correo_enviado"] is True
+    assert body["notificacion_id"] == 777
+
+    guardada = sesion.agregados[0]
+    assert guardada.candidato_id == CANDIDATO_ID
+    assert guardada.usuario_id is None
+
+    # El envío NO inventa un `usuario_id`: va sin id de cuenta y con el correo del padrón
+    # (`notificaciones_enviadas.alumno_id` es nullable, ver email_service).
+    alumno_mail = llamadas[0][0]
+    assert alumno_mail["id"] is None
+    assert alumno_mail["correo"] == "desertor@test.com"
+    assert alumno_mail["nombre"] == "Desertor Sin Cuenta"
+
+
 def test_post_si_el_correo_falla_la_oferta_se_guarda_igual(monkeypatch):
     """Best-effort: el envío devuelve False y la oferta existe igual."""
-    sesion = _SesionFalsa(usuarios=[_alumno_real()])
+    sesion = _SesionFalsa(candidatos=[_candidato_inactivo()],
+                          usuarios=[_alumno_real()])
     _mock_envio(monkeypatch, (False, None))
     cliente = _cliente_con(sesion)
 
-    r = cliente.post(f"{RUTA}/{ALUMNO_ID}/promocion", json=_cuerpo())
+    r = cliente.post(f"{RUTA}/{CANDIDATO_ID}/promocion", json=_cuerpo())
 
     assert r.status_code == 201, r.text
     body = r.json()
@@ -488,11 +568,12 @@ def test_post_si_el_correo_falla_la_oferta_se_guarda_igual(monkeypatch):
 
 def test_post_si_el_envio_revienta_no_rompe_el_endpoint(monkeypatch):
     """Una excepción del SMTP no puede tumbar el alta de la oferta."""
-    sesion = _SesionFalsa(usuarios=[_alumno_real()])
+    sesion = _SesionFalsa(candidatos=[_candidato_inactivo()],
+                          usuarios=[_alumno_real()])
     _mock_envio(monkeypatch, revienta=True)
     cliente = _cliente_con(sesion)
 
-    r = cliente.post(f"{RUTA}/{ALUMNO_ID}/promocion", json=_cuerpo())
+    r = cliente.post(f"{RUTA}/{CANDIDATO_ID}/promocion", json=_cuerpo())
 
     assert r.status_code == 201, r.text
     assert r.json()["correo_enviado"] is False
@@ -500,11 +581,11 @@ def test_post_si_el_envio_revienta_no_rompe_el_endpoint(monkeypatch):
     assert len(sesion.agregados) == 1
 
 
-def test_post_alumno_de_otro_box_404(monkeypatch):
+def test_post_candidato_de_otro_box_404(monkeypatch):
     _mock_envio(monkeypatch)
-    cliente = _cliente_con(_SesionFalsa(usuarios=[]))
+    cliente = _cliente_con(_SesionFalsa(candidatos=[], usuarios=[]))
 
-    r = cliente.post(f"{RUTA}/{ALUMNO_ID}/promocion", json=_cuerpo())
+    r = cliente.post(f"{RUTA}/{CANDIDATO_ID}/promocion", json=_cuerpo())
 
     assert r.status_code == 404, r.text
     assert "no encontrado" in r.json()["detail"].lower()
@@ -512,9 +593,10 @@ def test_post_alumno_de_otro_box_404(monkeypatch):
 
 def test_post_tipo_de_beneficio_invalido_422(monkeypatch):
     _mock_envio(monkeypatch)
-    cliente = _cliente_con(_SesionFalsa(usuarios=[_alumno_real()]))
+    cliente = _cliente_con(_SesionFalsa(candidatos=[_candidato_inactivo()],
+                                        usuarios=[_alumno_real()]))
 
-    r = cliente.post(f"{RUTA}/{ALUMNO_ID}/promocion",
+    r = cliente.post(f"{RUTA}/{CANDIDATO_ID}/promocion",
                      json=_cuerpo(tipo_beneficio="2x1"))
 
     assert r.status_code == 422, r.text
@@ -522,10 +604,11 @@ def test_post_tipo_de_beneficio_invalido_422(monkeypatch):
 
 def test_post_vence_en_el_pasado_400(monkeypatch):
     llamadas = _mock_envio(monkeypatch)
-    sesion = _SesionFalsa(usuarios=[_alumno_real()])
+    sesion = _SesionFalsa(candidatos=[_candidato_inactivo()],
+                          usuarios=[_alumno_real()])
     cliente = _cliente_con(sesion)
 
-    r = cliente.post(f"{RUTA}/{ALUMNO_ID}/promocion",
+    r = cliente.post(f"{RUTA}/{CANDIDATO_ID}/promocion",
                      json=_cuerpo(vence_en=AHORA - timedelta(days=1)))
 
     assert r.status_code == 400, r.text
@@ -542,11 +625,12 @@ def test_post_vence_en_se_guarda_como_fin_de_dia_chile(monkeypatch):
     """
     for payload in ("2026-12-31T00:00:00", "2026-12-31T00:00:00Z",
                     "2026-12-31T23:59:59-03:00"):
-        sesion = _SesionFalsa(usuarios=[_alumno_real()])
+        sesion = _SesionFalsa(candidatos=[_candidato_inactivo()],
+                              usuarios=[_alumno_real()])
         llamadas = _mock_envio(monkeypatch, (True, 1))
         cliente = _cliente_con(sesion)
 
-        r = cliente.post(f"{RUTA}/{ALUMNO_ID}/promocion",
+        r = cliente.post(f"{RUTA}/{CANDIDATO_ID}/promocion",
                          json=_cuerpo(vence_en=payload))
 
         assert r.status_code == 201, (payload, r.text)
@@ -558,8 +642,8 @@ def test_post_vence_en_se_guarda_como_fin_de_dia_chile(monkeypatch):
 
 
 # ── GET preview: el correo ANTES de mandarlo ────────────────────────────────
-def _ruta_preview(usuario_id=ALUMNO_ID):
-    return f"{RUTA}/{usuario_id}/promocion/preview"
+def _ruta_preview(candidato_id=CANDIDATO_ID):
+    return f"{RUTA}/{candidato_id}/promocion/preview"
 
 
 def _params_preview(tipo_beneficio="dias_gratis", cantidad=5, vence_en=None):
@@ -598,7 +682,8 @@ def test_preview_devuelve_el_mismo_correo_que_el_envio_real(monkeypatch):
         "Inactivo", "dias_gratis", 5, vence)
     assert "{{CONTACTO_BOX}}" in html_esperado    # el template deja el pie pendiente
 
-    sesion = _SesionFalsa(usuarios=[_alumno_real()])
+    sesion = _SesionFalsa(candidatos=[_candidato_inactivo()],
+                          usuarios=[_alumno_real()])
     envios = _mock_envio(monkeypatch, (True, 555))
     renders = _mock_render(monkeypatch)
     cliente = _cliente_con(sesion)
@@ -639,7 +724,8 @@ def test_preview_nombra_el_beneficio_elegido(tipo, cantidad, texto, monkeypatch)
     """El correo que se ve es el de ESTA oferta: el beneficio va en asunto y cuerpo."""
     _mock_envio(monkeypatch)
     _mock_render(monkeypatch)
-    cliente = _cliente_con(_SesionFalsa(usuarios=[_alumno_real()]))
+    cliente = _cliente_con(_SesionFalsa(candidatos=[_candidato_inactivo()],
+                                        usuarios=[_alumno_real()]))
 
     r = cliente.get(_ruta_preview(), params=_params_preview(tipo, cantidad))
 
@@ -648,8 +734,31 @@ def test_preview_nombra_el_beneficio_elegido(tipo, cantidad, texto, monkeypatch)
     assert texto in r.json()["html"]
 
 
+def test_preview_funciona_para_un_candidato_sin_cuenta(monkeypatch):
+    """La vista previa NO exige cuenta: usa el nombre del padrón.
+
+    Antes respondía 404 "Alumno no encontrado" para los 459 desertores, así que el
+    admin configurara la oferta a ciegas (o no pudiera configurarla).
+    """
+    _mock_envio(monkeypatch)
+    renders = _mock_render(monkeypatch)
+    candidato = _candidato_inactivo(nombre="Desertor Sin Cuenta",
+                                    correo="desertor@test.com")
+    sesion = _SesionFalsa(candidatos=[candidato], usuarios=[])
+    cliente = _cliente_con(sesion)
+
+    r = cliente.get(_ruta_preview(), params=_params_preview())
+
+    assert r.status_code == 200, r.text
+    assert "Desertor" in r.json()["asunto"]
+    assert renders[0][0] == "Desertor Sin Cuenta"
+    assert sesion.agregados == []
+    assert sesion.commits == 0
+
+
 def test_preview_tipo_de_beneficio_invalido_422(monkeypatch):
-    sesion = _SesionFalsa(usuarios=[_alumno_real()])
+    sesion = _SesionFalsa(candidatos=[_candidato_inactivo()],
+                          usuarios=[_alumno_real()])
     renders = _mock_render(monkeypatch)
     cliente = _cliente_con(sesion)
 
@@ -663,7 +772,8 @@ def test_preview_tipo_de_beneficio_invalido_422(monkeypatch):
 
 @pytest.mark.parametrize("cantidad", [0, -3, "dos"])
 def test_preview_cantidad_invalida_422(cantidad, monkeypatch):
-    sesion = _SesionFalsa(usuarios=[_alumno_real()])
+    sesion = _SesionFalsa(candidatos=[_candidato_inactivo()],
+                          usuarios=[_alumno_real()])
     renders = _mock_render(monkeypatch)
     cliente = _cliente_con(sesion)
 
@@ -673,10 +783,10 @@ def test_preview_cantidad_invalida_422(cantidad, monkeypatch):
     assert renders == []
 
 
-def test_preview_alumno_de_otro_box_404(monkeypatch):
+def test_preview_candidato_de_otro_box_404(monkeypatch):
     renders = _mock_render(monkeypatch)
     envios = _mock_envio(monkeypatch)
-    cliente = _cliente_con(_SesionFalsa(usuarios=[]))
+    cliente = _cliente_con(_SesionFalsa(candidatos=[], usuarios=[]))
 
     r = cliente.get(_ruta_preview(), params=_params_preview())
 
@@ -689,40 +799,77 @@ def test_preview_alumno_de_otro_box_404(monkeypatch):
 # ── PUT: marcar recuperado ──────────────────────────────────────────────────
 def test_put_marca_la_promocion_vigente_como_recuperada(monkeypatch):
     _mock_envio(monkeypatch)
-    promo = _FilaPromo(40, usuario_id=ALUMNO_ID, estado="enviada",
-                       vence_en=EN_10_DIAS)
-    sesion = _SesionFalsa(usuarios=[_alumno_real()], promociones=[promo])
+    promo = _FilaPromo(40, usuario_id=ALUMNO_ID, candidato_id=CANDIDATO_ID,
+                       estado="enviada", vence_en=EN_10_DIAS)
+    sesion = _SesionFalsa(candidatos=[_candidato_inactivo()],
+                          usuarios=[_alumno_real()], promociones=[promo])
     cliente = _cliente_con(sesion)
 
-    r = cliente.put(f"{RUTA}/{ALUMNO_ID}/marcar-recuperado")
+    r = cliente.put(f"{RUTA}/{CANDIDATO_ID}/marcar-recuperado")
 
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["id"] == 40
     assert body["estado"] == "recuperado"
+    assert body["candidato_id"] == CANDIDATO_ID
     assert body["usuario_id"] == ALUMNO_ID
     # El cambio se persiste (commit) sobre la MISMA fila.
     assert promo.estado == "recuperado"
     assert sesion.commits == 1
 
 
-def test_put_sin_promocion_vigente_404(monkeypatch):
+def test_put_marca_recuperado_sin_cuenta_real(monkeypatch):
+    """El candidato sin `usuarios` también se puede marcar: la oferta es del padrón."""
     _mock_envio(monkeypatch)
-    sesion = _SesionFalsa(usuarios=[_alumno_real()], promociones=[])
+    promo = _FilaPromo(41, usuario_id=None, candidato_id=CANDIDATO_ID,
+                       estado="enviada", vence_en=EN_10_DIAS)
+    sesion = _SesionFalsa(candidatos=[_candidato_inactivo()], usuarios=[],
+                          promociones=[promo])
     cliente = _cliente_con(sesion)
 
-    r = cliente.put(f"{RUTA}/{ALUMNO_ID}/marcar-recuperado")
+    r = cliente.put(f"{RUTA}/{CANDIDATO_ID}/marcar-recuperado")
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["candidato_id"] == CANDIDATO_ID
+    assert body["usuario_id"] is None
+    assert promo.estado == "recuperado"
+
+
+def test_put_marca_promocion_historica_por_usuario(monkeypatch):
+    """Una oferta anterior a la 080 (solo `usuario_id`) sigue siendo marcable."""
+    _mock_envio(monkeypatch)
+    promo = _FilaPromo(42, usuario_id=ALUMNO_ID, candidato_id=None,
+                       estado="enviada", vence_en=EN_10_DIAS)
+    sesion = _SesionFalsa(candidatos=[_candidato_inactivo()],
+                          usuarios=[_alumno_real()], promociones=[promo])
+    cliente = _cliente_con(sesion)
+
+    r = cliente.put(f"{RUTA}/{CANDIDATO_ID}/marcar-recuperado")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["usuario_id"] == ALUMNO_ID
+    assert promo.estado == "recuperado"
+
+
+def test_put_sin_promocion_vigente_404(monkeypatch):
+    _mock_envio(monkeypatch)
+    sesion = _SesionFalsa(candidatos=[_candidato_inactivo()],
+                          usuarios=[_alumno_real()], promociones=[])
+    cliente = _cliente_con(sesion)
+
+    r = cliente.put(f"{RUTA}/{CANDIDATO_ID}/marcar-recuperado")
 
     assert r.status_code == 404, r.text
     assert "vigente" in r.json()["detail"].lower()
     assert sesion.commits == 0
 
 
-def test_put_alumno_de_otro_box_404(monkeypatch):
+def test_put_candidato_de_otro_box_404(monkeypatch):
     _mock_envio(monkeypatch)
-    cliente = _cliente_con(_SesionFalsa(usuarios=[], promociones=[]))
+    cliente = _cliente_con(_SesionFalsa(candidatos=[], usuarios=[], promociones=[]))
 
-    r = cliente.put(f"{RUTA}/{ALUMNO_ID}/marcar-recuperado")
+    r = cliente.put(f"{RUTA}/{CANDIDATO_ID}/marcar-recuperado")
 
     assert r.status_code == 404, r.text
     assert "no encontrado" in r.json()["detail"].lower()
@@ -732,9 +879,9 @@ def test_put_alumno_de_otro_box_404(monkeypatch):
 @pytest.mark.parametrize("rol", ["alumno", "coach"])
 @pytest.mark.parametrize("metodo,ruta,kwargs", [
     ("get", RUTA, {}),
-    ("get", f"{RUTA}/{ALUMNO_ID}/promocion/preview", {"params": _params_preview()}),
-    ("post", f"{RUTA}/{ALUMNO_ID}/promocion", {"json": _cuerpo()}),
-    ("put", f"{RUTA}/{ALUMNO_ID}/marcar-recuperado", {}),
+    ("get", f"{RUTA}/{CANDIDATO_ID}/promocion/preview", {"params": _params_preview()}),
+    ("post", f"{RUTA}/{CANDIDATO_ID}/promocion", {"json": _cuerpo()}),
+    ("put", f"{RUTA}/{CANDIDATO_ID}/marcar-recuperado", {}),
 ])
 def test_no_admin_recibe_403(metodo, ruta, kwargs, rol, monkeypatch):
     llamadas = _mock_envio(monkeypatch)

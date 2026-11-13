@@ -233,24 +233,26 @@ export function paginaAlumnos(alumnos, limite = BLOQUE_ALUMNOS) {
 // ── Qué acción ofrece cada fila ────────────────────────────────────────────────
 // OJO (2026-12): la lista son los CANDIDATOS del padrón de BoxMagic. `id` es el id de la
 // cuenta REAL en el SaaS y viene en `null` mientras esa cuenta no exista (crear cuentas
-// es un paso posterior, el día de la migración real). Sin cuenta no hay a quién mandarle
-// el correo ni fila donde colgar la oferta, así que la fila no ofrece acción.
+// es un paso posterior, el día de la migración real). La oferta se cuelga del candidato
+// (migración 080), así que esas cuentas NO son requisito para ofrecer ni para marcar.
+// `tieneCuenta` queda sólo como dato informativo para la fila (mostrar "sin cuenta").
 export function tieneCuenta(alumno) {
     return Boolean(alumno) && alumno.id !== null && alumno.id !== undefined;
 }
 
-// La oferta se configura cuando NO hay una vigente (sin oferta o con la ventana vencida)
-// y el alumno ya tiene cuenta real.
+// La oferta se configura cuando NO hay una vigente (sin oferta o con la ventana vencida).
+// El requisito es el ESTADO, no tener cuenta: los desertores de BoxMagic todavía no
+// tienen login y igual se les manda la oferta a su correo del padrón.
 export function puedeConfigurarPromocion(alumno) {
-    if (!tieneCuenta(alumno)) return false;
+    if (!alumno) return false;
     const estado = alumno.estado;
     return estado === 'sin_contactar' || estado === 'vencida';
 }
 
 // "Recuperado" sólo se marca con una oferta VIGENTE (el backend responde 404 si no la
-// hay), así el panel no ofrece un botón que va a fallar.
+// hay), así el panel no ofrece un botón que va a fallar. Tampoco exige cuenta.
 export function puedeMarcarRecuperado(alumno) {
-    if (!tieneCuenta(alumno)) return false;
+    if (!alumno) return false;
     return alumno.estado === 'promocion_enviada';
 }
 

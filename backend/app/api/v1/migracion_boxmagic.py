@@ -57,20 +57,32 @@ RECUPERACIÓN DE INACTIVOS (Fase 2)
 ----------------------------------
 `GET /recuperacion` lista los CANDIDATOS del padrón con grupo 'recuperacion' (los que
 en BoxMagic están `Inactivo`) y el estado de su oferta. `POST
-/recuperacion/{usuario_id}/promocion` configura una oferta puntual y manda un correo
-DEDICADO a esa oferta, y `PUT /recuperacion/{usuario_id}/marcar-recuperado` cierra el
+/recuperacion/{candidato_id}/promocion` configura una oferta puntual y manda un correo
+DEDICADO a esa oferta, y `PUT /recuperacion/{candidato_id}/marcar-recuperado` cierra el
 ciclo cuando el alumno vuelve.
 
-`GET /recuperacion/{usuario_id}/promocion/preview` (Fase 6) devuelve el ASUNTO y el
+El destinatario es el CANDIDATO del padrón (`candidato_id`, migración 080): los
+desertores de BoxMagic todavía no tienen cuenta y crearla es un paso posterior. Si ese
+correo ya existe en `usuarios`, la oferta se liga TAMBIÉN a la cuenta (`usuario_id`) y
+el correo sale a esa persona; si no, `usuario_id` queda NULL.
+
+`GET /recuperacion/{candidato_id}/promocion/preview` (Fase 6) devuelve el ASUNTO y el
 HTML del correo que mandaría ese POST, para que el admin lo lea antes de confirmar. Es
 de sólo lectura: no escribe en `promociones_recuperacion` ni manda nada.
+
+CORRECCIÓN DEL PADRÓN (ambos paneles)
+------------------------------------
+`PUT /candidatos/{candidato_id}` permite corregir `nombre` y `correo` del padrón (el
+Excel real trae correos truncados/mal escritos). Valida el correo, respeta el UNIQUE
+`(tenant_id, correo)` y BLOQUEA el cambio de correo si el candidato ya tiene una cuenta
+real: ese vínculo es por correo y cambiarlo rompería el LEFT JOIN.
 """
 import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import func
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_admin
@@ -299,10 +311,11 @@ def get_activacion(
 #  Cada candidato se cruza POR CORREO con `usuarios` (LEFT JOIN, ver
 #  `_usuarios_por_correo`):
 #    * CON cuenta real -> se muestran sus datos de contacto/asistencia y sus ofertas
-#      (`promociones_recuperacion.usuario_id`), igual que antes;
-#    * SIN cuenta real -> `ultima_asistencia`/`dias_ausente`/`telefono` en None y estado
-#      `sin_contactar` SIEMPRE (no hay a quién mandarle el correo: el envío sale de
-#      `usuarios`). Es el comportamiento esperado antes de crear las cuentas.
+#      quedan ligadas a los DOS ids (`candidato_id` + `usuario_id`);
+#    * SIN cuenta real -> `ultima_asistencia`/`dias_ausente`/`telefono` en None, pero
+#      la oferta se puede configurar igual: se cuelga del `candidato_id` y el correo
+#      sale con el nombre/correo del padrón (migración 080). Antes se bloqueaba con
+#      404 y el 100% de los envíos fallaba, que es el bug que corrige esta versión.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Estados del alumno en el panel, en el orden en que se publican.
@@ -361,23 +374,143 @@ def _vence_en_chile(valor: datetime) -> datetime:
     return fin_del_dia_chile(valor.date())
 
 
-def _alumno_del_tenant(db: Session, tenant_id: int, usuario_id: int) -> Usuario:
-    """El alumno del box del token o 404 (nunca se opera sobre otra tenant)."""
-    alumno = (
-        db.query(Usuario)
+def _candidato_del_tenant(db: Session, tenant_id: int, candidato_id: int):
+    """El candidato INACTIVO del padrón del box del token, o 404.
+
+    Es el destinatario de la oferta (migración 080): los desertores de BoxMagic no
+    tienen cuenta real, así que no se puede resolver por `usuarios`. El filtro por
+    `grupo` evita ofrecerle una recuperación a alguien del panel de activación.
+    """
+    candidato = (
+        db.query(CandidatoBoxmagic)
         .filter(
-            Usuario.id == usuario_id,
-            Usuario.tenant_id == tenant_id,
-            Usuario.rol == RolUsuario.alumno,
+            CandidatoBoxmagic.id == candidato_id,
+            CandidatoBoxmagic.tenant_id == tenant_id,
+            CandidatoBoxmagic.grupo == GRUPO_RECUPERACION,
         )
         .first()
     )
-    if alumno is None:
+    if candidato is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Alumno no encontrado",
+            detail="Candidato no encontrado",
         )
-    return alumno
+    return candidato
+
+
+def _cuenta_del_candidato(db: Session, tenant_id: int, candidato):
+    """La cuenta REAL del candidato (por correo normalizado), o None si no tiene.
+
+    No todas las filas del padrón tienen `usuarios`: la cuenta se crea el día de la
+    migración real. Cuando existe, la oferta se liga también a `usuario_id`.
+    """
+    return _usuarios_por_correo(db, tenant_id, [candidato.correo]).get(candidato.correo)
+
+
+def _candidato_del_box(db: Session, tenant_id: int, candidato_id: int):
+    """Candidato del padrón del box (de CUALQUIER grupo), o 404.
+
+    La edición del padrón aplica a activación y recuperación; a diferencia de
+    `_candidato_del_tenant`, acá no se filtra por `grupo`.
+    """
+    candidato = (
+        db.query(CandidatoBoxmagic)
+        .filter(
+            CandidatoBoxmagic.id == candidato_id,
+            CandidatoBoxmagic.tenant_id == tenant_id,
+        )
+        .first()
+    )
+    if candidato is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Candidato no encontrado",
+        )
+    return candidato
+
+
+class CandidatoEdicionIn(BaseModel):
+    """Corrección puntual del padrón de BoxMagic (nombre + correo)."""
+
+    nombre: str = Field(..., min_length=1, max_length=150)
+    correo: EmailStr = Field(
+        ..., description="Correo real del candidato (se guarda normalizado)")
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("nombre")
+    @classmethod
+    def _nombre_no_vacio(cls, valor):
+        limpio = " ".join(str(valor or "").split())
+        if not limpio:
+            raise ValueError("El nombre no puede estar vacío")
+        return limpio
+
+    @field_validator("correo")
+    @classmethod
+    def _correo_normalizado(cls, valor):
+        return normalizar_correo(str(valor))
+
+
+@router.put("/candidatos/{candidato_id}")
+def editar_candidato(
+    candidato_id: int,
+    body: CandidatoEdicionIn,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Corrige `nombre` y `correo` de UN candidato del padrón (ambos paneles).
+
+    El Excel real de BoxMagic trae correos truncados/mal escritos; esto permite
+    arreglarlos sin tocar la base a mano. Reglas:
+
+      * el correo se valida con `EmailStr` y se guarda normalizado (sin espacios,
+        minúsculas), igual que el importador;
+      * si el correo nuevo ya pertenece a otro candidato del box -> 400 (respeta
+        `uq_candidatos_boxmagic_tenant_correo`);
+      * si el candidato YA tiene una cuenta real (`usuarios` por correo), cambiar el
+        correo rompería el LEFT JOIN que los vincula -> 400; el nombre sí se puede
+        corregir.
+    """
+    tenant_id = current_user["tenant_id"]
+    candidato = _candidato_del_box(db, tenant_id, candidato_id)
+
+    correo_nuevo = normalizar_correo(str(body.correo))
+    cambia_correo = correo_nuevo != normalizar_correo(candidato.correo)
+
+    if cambia_correo:
+        cuenta = _cuenta_del_candidato(db, tenant_id, candidato)
+        if cuenta is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=("Este candidato ya tiene una cuenta real: no se puede "
+                        "cambiar el correo. Solo puedes editar el nombre."),
+            )
+        repetido = (
+            db.query(CandidatoBoxmagic)
+            .filter(
+                CandidatoBoxmagic.tenant_id == tenant_id,
+                CandidatoBoxmagic.correo == correo_nuevo,
+                CandidatoBoxmagic.id != candidato.id,
+            )
+            .first()
+        )
+        if repetido is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Ya existe un candidato con ese correo",
+            )
+
+    candidato.nombre = body.nombre
+    candidato.correo = correo_nuevo
+    db.commit()
+    db.refresh(candidato)
+
+    return {
+        "candidato_id": candidato.id,
+        "nombre": candidato.nombre,
+        "correo": candidato.correo,
+    }
 
 
 class PromocionRecuperacionIn(BaseModel):
@@ -421,9 +554,9 @@ def get_recuperacion(
     que es la que manda: `sin_contactar` (nunca se le ofreció nada), `promocion_enviada`
     (oferta con ventana abierta), `vencida` (la ventana pasó) o `recuperado` (volvió).
 
-    Un candidato SIN cuenta real cae siempre en `sin_contactar`: no hay `usuario_id` al
-    que colgarle una oferta ni correo del que sacar el destinatario. Es lo esperado
-    antes de la migración real (crear las cuentas es un paso POSTERIOR).
+    Un candidato SIN cuenta real también puede tener oferta: se cuelga de
+    `candidato_id` (migración 080) y el correo sale con el nombre/correo del padrón.
+    `id` sigue siendo la cuenta REAL (None mientras no exista).
     """
     tenant_id = current_user["tenant_id"]
     candidatos = _candidatos(db, tenant_id, GRUPO_RECUPERACION)
@@ -431,26 +564,48 @@ def get_recuperacion(
         db, tenant_id, [candidato.correo for candidato in candidatos])
 
     # UNA sola consulta de ofertas para todo el listado, de la más reciente a la más
-    # vieja: la primera fila de cada alumno es la que define su estado.
+    # vieja: la primera fila de cada candidato es la que define su estado. Se buscan
+    # las ofertas nuevas (por `candidato_id`) y las históricas (por `usuario_id`,
+    # anteriores a la migración 080); el resultado se indexa SIEMPRE por candidato
+    # para que el panel no dependa de cuál de los dos ids traiga la fila.
+    candidato_ids = [candidato.id for candidato in candidatos]
+    candidato_por_usuario_id: dict = {}
+    for candidato in candidatos:
+        cuenta = usuarios.get(candidato.correo)
+        if cuenta is not None:
+            candidato_por_usuario_id[cuenta.id] = candidato.id
+
     promociones: dict = {}
-    ids = [usuario.id for usuario in usuarios.values()]
-    if ids:
+    filtros_destinatario = []
+    if candidato_ids:
+        filtros_destinatario.append(
+            PromocionRecuperacion.candidato_id.in_(candidato_ids))
+    if candidato_por_usuario_id:
+        filtros_destinatario.append(
+            PromocionRecuperacion.usuario_id.in_(list(candidato_por_usuario_id)))
+
+    if filtros_destinatario:
         filas = (
             db.query(PromocionRecuperacion)
             .filter(
                 PromocionRecuperacion.tenant_id == tenant_id,
-                PromocionRecuperacion.usuario_id.in_(ids),
+                or_(*filtros_destinatario),
             )
             .order_by(PromocionRecuperacion.creado_en.desc(),
                       PromocionRecuperacion.id.desc())
             .all()
         )
         for promo in filas:
-            promociones.setdefault(promo.usuario_id, promo)
+            candidato_id = promo.candidato_id
+            if candidato_id is None:
+                candidato_id = candidato_por_usuario_id.get(promo.usuario_id)
+            if candidato_id is not None:
+                promociones.setdefault(candidato_id, promo)
 
     # Última asistencia REAL de las cuentas que existen (una sola consulta, sin N+1).
     # Los días se cuentan con el "hoy" de Chile, igual que `fidelizacion.py`: con la TZ
     # del servidor (UTC) el conteo se corre un día de noche.
+    ids = list(candidato_por_usuario_id)
     ultimas = ultima_asistencia_por_alumno(db, tenant_id, ids) if ids else {}
     hoy = hoy_santiago()
 
@@ -460,7 +615,7 @@ def get_recuperacion(
 
     for candidato in candidatos:
         alumno = usuarios.get(candidato.correo)
-        promo = promociones.get(alumno.id) if alumno is not None else None
+        promo = promociones.get(candidato.id)
         estado = _estado_recuperacion(promo, ahora)
         por_estado[estado] += 1
 
@@ -468,7 +623,8 @@ def get_recuperacion(
         listado.append({
             # Id de la cuenta REAL (None mientras no exista) y del padrón: la fila del
             # panel se identifica por `candidato_id`, y las acciones (oferta / marcar
-            # recuperado) necesitan el `id` de una cuenta real.
+            # recuperado) operan sobre él. `id` solo se usa para mostrar datos que
+            # requieren cuenta (asistencia, teléfono).
             "id": alumno.id if alumno is not None else None,
             "candidato_id": candidato.id,
             "nombre": candidato.nombre,
@@ -489,9 +645,9 @@ def get_recuperacion(
     }
 
 
-@router.get("/recuperacion/{usuario_id}/promocion/preview")
+@router.get("/recuperacion/{candidato_id}/promocion/preview")
 def preview_promocion_recuperacion(
-    usuario_id: int,
+    candidato_id: int,
     tipo_beneficio: str = Query(
         ..., description="dias_gratis | descuento_porcentaje | descuento_monto"),
     cantidad: int = Query(..., ge=1, description="Días, % o monto CLP según el tipo"),
@@ -503,10 +659,15 @@ def preview_promocion_recuperacion(
 ):
     """Vista previa (asunto + HTML) del correo de la oferta, SIN guardar ni enviar nada.
 
+    Funciona para CUALQUIER candidato del padrón, tenga o no cuenta real: el nombre
+    del correo sale de `candidatos_boxmagic`, que es el destinatario de la oferta
+    (migración 080). Antes exigía una cuenta y los 459 desertores no podían ni ver
+    el correo que se les iba a mandar.
+
     Es un GET sin efectos secundarios: NO crea la fila de `promociones_recuperacion`, NO
     registra el envío en `notificaciones_enviadas` y NO llama a ningún método de envío de
-    `email_service`. Sólo lee al alumno (para su nombre) y la configuración del box (para
-    el pie de contacto).
+    `email_service`. Sólo lee al candidato (para su nombre) y la configuración del box
+    (para el pie de contacto).
 
     El copy lo arma la MISMA función que usa el envío real
     (`email_service.render_email_promocion_recuperacion`, documentada como fuente única
@@ -519,8 +680,8 @@ def preview_promocion_recuperacion(
     y no la del payload.
 
     Un tipo de beneficio fuera de `TIPOS_BENEFICIO_PROMOCION` responde 422 (igual que el
-    body del POST) y un `usuario_id` de otro box 404. La fecha pasada NO se rechaza: acá
-    no se crea nada, y el formulario ya la bloquea antes de llegar al POST.
+    body del POST) y un `candidato_id` de otro box 404. La fecha pasada NO se rechaza:
+    acá no se crea nada, y el formulario ya la bloquea antes de llegar al POST.
     """
     tipo = str(tipo_beneficio or "").strip().lower()
     if tipo not in TIPOS_BENEFICIO_PROMOCION:
@@ -531,10 +692,10 @@ def preview_promocion_recuperacion(
         )
 
     tenant_id = current_user["tenant_id"]
-    alumno = _alumno_del_tenant(db, tenant_id, usuario_id)
+    candidato = _candidato_del_tenant(db, tenant_id, candidato_id)
 
     asunto, html = email_service.render_email_promocion_recuperacion(
-        alumno.nombre, tipo, cantidad, _vence_en_chile(vence_en))
+        candidato.nombre, tipo, cantidad, _vence_en_chile(vence_en))
     # El template deja el contacto como placeholder y el envío real lo resuelve en
     # `_enviar`: acá se resuelve igual (con la MISMA sesión del request, ver
     # `contacto_del_box`) para que la vista previa no muestre `{{CONTACTO_BOX}}`.
@@ -542,20 +703,21 @@ def preview_promocion_recuperacion(
     return {"asunto": asunto, "html": html}
 
 
-@router.post("/recuperacion/{usuario_id}/promocion",
+@router.post("/recuperacion/{candidato_id}/promocion",
              status_code=status.HTTP_201_CREATED)
 def crear_promocion_recuperacion(
-    usuario_id: int,
+    candidato_id: int,
     body: PromocionRecuperacionIn,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Configura la oferta de un alumno y le manda el correo DEDICADO a esa oferta.
+    """Configura la oferta de un CANDIDATO del padrón y le manda el correo dedicado.
 
-    ⚠️ Requiere que el alumno YA tenga cuenta real en `usuarios`: la oferta se cuelga de
-    `usuario_id` (FK) y el destinatario del correo sale de esa fila. Antes de la
-    migración real, un candidato del padrón que todavía no tiene cuenta responde 404
-    "Alumno no encontrado": es el estado esperado, no un bug.
+    El destinatario es `candidato_id` (migración 080): los desertores de BoxMagic NO
+    tienen cuenta real todavía, así que la oferta se cuelga del padrón y el correo
+    sale con su nombre/correo. Si ese correo YA existe en `usuarios`, la fila se liga
+    también a `usuario_id` (las dos puertas) para que la oferta siga asociada a la
+    cuenta cuando el alumno vuelva.
 
     La fila se guarda ANTES de mandar el correo: si el envío falla, la oferta existe
     igual (el admin la ve en el panel y puede contactar al alumno a mano) y el
@@ -565,7 +727,8 @@ def crear_promocion_recuperacion(
     la fila del envío) y liga la oferta a su correo cuando sí lo hubo.
     """
     tenant_id = current_user["tenant_id"]
-    alumno = _alumno_del_tenant(db, tenant_id, usuario_id)
+    candidato = _candidato_del_tenant(db, tenant_id, candidato_id)
+    cuenta = _cuenta_del_candidato(db, tenant_id, candidato)
 
     vence_en = _vence_en_chile(body.vence_en)
     if vence_en <= datetime.now(timezone.utc):
@@ -576,7 +739,8 @@ def crear_promocion_recuperacion(
 
     promo = PromocionRecuperacion(
         tenant_id=tenant_id,
-        usuario_id=alumno.id,
+        candidato_id=candidato.id,
+        usuario_id=cuenta.id if cuenta is not None else None,
         tipo_beneficio=body.tipo_beneficio,
         cantidad=body.cantidad,
         vence_en=vence_en,
@@ -592,14 +756,19 @@ def crear_promocion_recuperacion(
     try:
         correo_enviado, notificacion_id = (
             email_service.enviar_email_promocion_recuperacion(
-                {"id": alumno.id, "nombre": alumno.nombre,
-                 "correo": alumno.correo, "tenant_id": tenant_id},
+                # `id` es la cuenta REAL (None si no existe): `notificaciones_enviadas`
+                # tiene FK a `usuarios` y el envío se registra igual con el correo del
+                # padrón en `destinatario_correo`.
+                {"id": cuenta.id if cuenta is not None else None,
+                 "nombre": candidato.nombre,
+                 "correo": candidato.correo,
+                 "tenant_id": tenant_id},
                 body.tipo_beneficio, body.cantidad, vence_en)
         )
     except Exception as e:  # noqa: BLE001 — best-effort: la oferta YA está guardada
         logger.warning(
-            f"[migracion_promocion] no se pudo enviar el correo al alumno "
-            f"{alumno.id}: {e}")
+            f"[migracion_promocion] no se pudo enviar el correo al candidato "
+            f"{candidato.id}: {e}")
         notificacion_id = None
 
     if notificacion_id:
@@ -608,33 +777,42 @@ def crear_promocion_recuperacion(
 
     return {
         **_promocion_json(promo),
-        "usuario_id": alumno.id,
+        "candidato_id": candidato.id,
+        "usuario_id": cuenta.id if cuenta is not None else None,
         "correo_enviado": bool(correo_enviado),
     }
 
 
-@router.put("/recuperacion/{usuario_id}/marcar-recuperado")
+@router.put("/recuperacion/{candidato_id}/marcar-recuperado")
 def marcar_promocion_recuperado(
-    usuario_id: int,
+    candidato_id: int,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_admin),
 ):
-    """Marca como 'recuperado' la promoción VIGENTE del alumno.
+    """Marca como 'recuperado' la promoción VIGENTE del candidato del padrón.
 
-    "Vigente" = la que el alumno todavía puede usar (`estado='enviada'` y
-    `vence_en` futuro); una oferta vencida no se marca como recuperada porque no se
-    puede canjear. Sin oferta vigente -> 404 (no es un error del cliente, es el
-    estado real del dato).
+    "Vigente" = la que todavía puede usar (`estado='enviada'` y `vence_en` futuro); una
+    oferta vencida no se marca como recuperada porque no se puede canjear. Sin oferta
+    vigente -> 404 (no es un error del cliente, es el estado real del dato).
+
+    Busca la oferta por `candidato_id` (nuevas) o por `usuario_id` (históricas, cuando
+    el candidato ya tiene cuenta real). No requiere que exista la cuenta.
     """
     tenant_id = current_user["tenant_id"]
-    alumno = _alumno_del_tenant(db, tenant_id, usuario_id)
+    candidato = _candidato_del_tenant(db, tenant_id, candidato_id)
+    cuenta = _cuenta_del_candidato(db, tenant_id, candidato)
     ahora = datetime.now(timezone.utc)
+
+    filtros_destinatario = [PromocionRecuperacion.candidato_id == candidato.id]
+    if cuenta is not None:
+        filtros_destinatario.append(
+            PromocionRecuperacion.usuario_id == cuenta.id)
 
     promo = (
         db.query(PromocionRecuperacion)
         .filter(
             PromocionRecuperacion.tenant_id == tenant_id,
-            PromocionRecuperacion.usuario_id == alumno.id,
+            or_(*filtros_destinatario),
             PromocionRecuperacion.estado == ESTADO_PROMO_ENVIADA,
             PromocionRecuperacion.vence_en > ahora,
         )
@@ -653,6 +831,7 @@ def marcar_promocion_recuperado(
 
     return {
         **_promocion_json(promo),
-        "usuario_id": alumno.id,
+        "candidato_id": candidato.id,
+        "usuario_id": promo.usuario_id,
     }
 

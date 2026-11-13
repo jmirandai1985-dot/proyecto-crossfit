@@ -3,7 +3,9 @@ Modelo SQLAlchemy para la tabla promociones_recuperacion
 """
 from typing import Final
 
-from sqlalchemy import Column, Integer, String, ForeignKey, Index
+from sqlalchemy import (
+    CheckConstraint, Column, ForeignKey, Index, Integer, String,
+)
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.sql import func
 
@@ -44,16 +46,31 @@ class PromocionRecuperacion(Base):
     El correo NO es obligatorio para que la oferta exista: si el envío falla, la
     fila queda igual (best-effort, como el resto del proyecto) con
     `notificacion_id` en NULL.
+
+    DESTINATARIO (migración 080): la oferta se cuelga del CANDIDATO del padrón
+    (`candidato_id`) porque los desertores de BoxMagic todavía NO tienen cuenta:
+    crearla es un paso posterior. `usuario_id` queda NULL hasta que ese candidato
+    tenga cuenta real (ahí los endpoints la rellenan y la oferta queda ligada a la
+    persona en los dos mundos). Al menos uno de los dos ids tiene que estar, para
+    que ninguna fila quede sin destinatario posible
+    (`ck_promociones_recuperacion_destinatario`).
     """
     __tablename__ = "promociones_recuperacion"
 
     id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey(
         "tenants.id", ondelete="CASCADE"), nullable=False)
-    # El alumno inactivo al que se le ofrece. CASCADE: sin el alumno la oferta no
-    # tiene destinatario posible.
+    # La cuenta REAL del alumno, si ya existe. NULLABLE desde 080: la mayoría de
+    # los candidatos del padrón todavía no tiene cuenta. CASCADE: sin el alumno
+    # la oferta no tiene destinatario posible.
     usuario_id = Column(Integer, ForeignKey(
-        "usuarios.id", ondelete="CASCADE"), nullable=False)
+        "usuarios.id", ondelete="CASCADE"), nullable=True)
+    # El candidato del padrón de BoxMagic al que se le ofrece (migración 080).
+    # Es el destinatario PRINCIPAL ahora; `usuario_id` se rellena cuando ese
+    # correo ya tiene cuenta real. CASCADE como `usuario_id`: si se borra el
+    # candidato, la oferta pierde a quién pertenece.
+    candidato_id = Column(Integer, ForeignKey(
+        "candidatos_boxmagic.id", ondelete="CASCADE"), nullable=True)
     # 'dias_gratis' | 'descuento_porcentaje' | 'descuento_monto'
     # (lista canónica: `TIPOS_BENEFICIO_PROMOCION`).
     tipo_beneficio = Column(String(50), nullable=False)
@@ -79,8 +96,17 @@ class PromocionRecuperacion(Base):
         # para que el `create_all()` de TEST arme exactamente el mismo esquema.
         Index('ix_promociones_recuperacion_tenant_id', 'tenant_id'),
         Index('ix_promociones_recuperacion_usuario_id', 'usuario_id'),
+        # El panel nuevo busca la oferta por candidato del padrón (migración 080).
+        Index('ix_promociones_recuperacion_candidato_id', 'candidato_id'),
+        # Toda oferta tiene destinatario: el candidato del padrón, la cuenta real o
+        # los dos (candidato ya migrado). Mismo nombre que en la migración 080.
+        CheckConstraint(
+            'usuario_id IS NOT NULL OR candidato_id IS NOT NULL',
+            name='ck_promociones_recuperacion_destinatario',
+        ),
     )
 
     def __repr__(self):
         return (f"<PromocionRecuperacion(id={self.id}, usuario_id={self.usuario_id}, "
+                f"candidato_id={self.candidato_id}, "
                 f"{self.tipo_beneficio}={self.cantidad}, estado='{self.estado}')>")

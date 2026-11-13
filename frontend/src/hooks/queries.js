@@ -227,9 +227,10 @@ export const claves = {
     migracionActivacion: ['migracion-boxmagic', 'activacion'],
     migracionRecuperacion: ['migracion-boxmagic', 'recuperacion'],
     // Vista previa del correo de la oferta (sólo lectura). Es el render liso de TRES
-    // datos, así que los tres (y el alumno, por su nombre) van en la clave.
-    previewPromocionRecuperacion: (usuarioId, tipo, cantidad, venceEn) =>
-        ['migracion-boxmagic', 'preview-promocion', usuarioId, tipo, cantidad, venceEn || ''],
+    // datos, así que los tres (y el candidato, por su nombre) van en la clave. Va por
+    // `candidato_id`: no exige que el candidato tenga cuenta real.
+    previewPromocionRecuperacion: (candidatoId, tipo, cantidad, venceEn) =>
+        ['migracion-boxmagic', 'preview-promocion', candidatoId, tipo, cantidad, venceEn || ''],
 };
 
 // ── Colas de revisión del admin (las miran el Dashboard Y Pendientes de revisión) ──
@@ -2635,18 +2636,21 @@ export function useMigracionRecuperacion() {
     });
 }
 
-// Configurar la oferta de UN alumno inactivo y mandarle el correo dedicado.
+// Configurar la oferta de UN candidato inactivo del padrón y mandarle el correo dedicado.
+//
+// Operan por `candidato_id` (migración 080), no por `usuario_id`: los desertores de
+// BoxMagic todavía no tienen cuenta real y la oferta se cuelga igual.
 //
 // La promoción se guarda ANTES de mandar el correo: `correo_enviado: false` en la
 // respuesta NO es un error de la mutación (la oferta existe y el panel la muestra), así
 // que la pantalla tiene que avisarlo a mano en vez de tragárselo. Cualquier 4xx/5xx real
-// (alumno de otro box, tipo inválido, vencimiento en el pasado) sí rechaza la promesa.
+// (candidato de otro box, tipo inválido, vencimiento en el pasado) sí rechaza la promesa.
 export function useConfigurarPromocion() {
     const qc = useQueryClient();
     return useMutation({
-        mutationFn: async ({ usuarioId, payload }) => (
+        mutationFn: async ({ candidatoId, payload }) => (
             await api.post(
-                `/api/v1/migracion-boxmagic/recuperacion/${usuarioId}/promocion`, payload,
+                `/api/v1/migracion-boxmagic/recuperacion/${candidatoId}/promocion`, payload,
             )
         ).data,
         onSuccess: () => qc.invalidateQueries({ queryKey: claves.migracionRecuperacion }),
@@ -2658,8 +2662,8 @@ export function useConfigurarPromocion() {
 export function useMarcarRecuperado() {
     const qc = useQueryClient();
     return useMutation({
-        mutationFn: (usuarioId) => api.put(
-            `/api/v1/migracion-boxmagic/recuperacion/${usuarioId}/marcar-recuperado`,
+        mutationFn: (candidatoId) => api.put(
+            `/api/v1/migracion-boxmagic/recuperacion/${candidatoId}/marcar-recuperado`,
         ).then((r) => r.data),
         onSuccess: () => qc.invalidateQueries({ queryKey: claves.migracionRecuperacion }),
     });
@@ -2669,7 +2673,8 @@ export function useMarcarRecuperado() {
 // promoción"). Es un GET sin efectos secundarios: NO crea la promoción, no registra el
 // envío ni manda nada, y el asunto/HTML los renderiza el BACKEND con la MISMA función del
 // envío real (`email_service.render_email_promocion_recuperacion`), así que lo que el
-// admin lee es exactamente el correo que recibiría el alumno.
+// admin lee es exactamente el correo que recibiría el alumno. Funciona por
+// `candidato_id`: no exige que el candidato tenga cuenta.
 //
 // Debounce (400 ms por defecto): la cantidad es un input libre y sin esto cada tecla
 // pediría un render al servidor. El endpoint sólo se pide cuando están los TRES datos
@@ -2678,13 +2683,13 @@ export function useMarcarRecuperado() {
 // mediodía UTC igual que el payload del POST.
 //
 // La clave NO cuelga de `claves.migracionRecuperacion`: guardar la oferta invalida esa
-// familia y el preview no depende de la oferta guardada, sólo del nombre del alumno y de
-// los tres datos elegidos.
+// familia y el preview no depende de la oferta guardada, sólo del nombre del candidato y
+// de los tres datos elegidos.
 export function usePreviewPromocionRecuperacion(
-    { usuarioId = null, tipo = '', cantidad = '', venceEn = '' } = {},
+    { candidatoId = null, tipo = '', cantidad = '', venceEn = '' } = {},
     { debounceMs = 400 } = {},
 ) {
-    const completo = Boolean(usuarioId) && Boolean(tipo) && Boolean(venceEn)
+    const completo = Boolean(candidatoId) && Boolean(tipo) && Boolean(venceEn)
         && Number.isInteger(Number(cantidad)) && Number(cantidad) >= 1;
     // Lo que se pide de verdad, ya "asentado": cambia recién `debounceMs` después de la
     // última tecla. `null` = no hay nada que pedir (el panel muestra el placeholder).
@@ -2696,16 +2701,16 @@ export function usePreviewPromocionRecuperacion(
             return undefined;
         }
         const temporizador = setTimeout(() => setPedido({
-            usuarioId, tipo, cantidad: Number(cantidad), venceEn,
+            candidatoId, tipo, cantidad: Number(cantidad), venceEn,
         }), debounceMs);
         return () => clearTimeout(temporizador);
-    }, [completo, usuarioId, tipo, cantidad, venceEn, debounceMs]);
+    }, [completo, candidatoId, tipo, cantidad, venceEn, debounceMs]);
 
     return useQuery({
         queryKey: claves.previewPromocionRecuperacion(
-            pedido?.usuarioId, pedido?.tipo, pedido?.cantidad, pedido?.venceEn),
+            pedido?.candidatoId, pedido?.tipo, pedido?.cantidad, pedido?.venceEn),
         queryFn: async () => (await api.get(
-            `/api/v1/migracion-boxmagic/recuperacion/${pedido.usuarioId}/promocion/preview`,
+            `/api/v1/migracion-boxmagic/recuperacion/${pedido.candidatoId}/promocion/preview`,
             {
                 params: {
                     tipo_beneficio: pedido.tipo,

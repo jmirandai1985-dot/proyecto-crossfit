@@ -140,22 +140,26 @@ ok(!puedeMarcarRecuperado(alumno(1, 'sin_contactar')), 'sin oferta no se puede m
 ok(!puedeMarcarRecuperado(alumno(3, 'vencida')), 'una oferta vencida no se marca (no se puede canjear)');
 ok(!puedeMarcarRecuperado(null), 'sin fila no rompe');
 
-// ── 5b. El padrón: `id` es la cuenta REAL y puede venir en null ─────────────
+// ── 5b. El padrón: la oferta va por `candidato_id`, no por la cuenta ────────
 // (2026-12) La lista son los CANDIDATOS de BoxMagic y la mayoría todavía no tiene
-// `Usuario`: `id` viene null y esa fila NO ofrece acciones (no hay a quién mandarle el
-// correo). `candidato_id` es la clave de la fila.
+// `Usuario`: `id` viene null. Aun así la oferta se configura y se marca: el backend la
+// cuelga del padrón (`candidato_id`, migración 080). `tieneCuenta` queda como dato
+// informativo de la fila, NO como requisito de las acciones.
 console.log('== 5b. Candidatos sin cuenta real ==');
 const sinCuenta = (estado) => ({ ...alumno(null, estado), id: null, candidato_id: 201 });
 ok(tieneCuenta(alumno(1, 'sin_contactar')), 'con cuenta real: tieneCuenta true');
 ok(!tieneCuenta(sinCuenta('sin_contactar')), 'sin cuenta: tieneCuenta false');
 ok(!tieneCuenta(null), 'sin fila no rompe');
-ok(!tieneCuenta({ candidato_id: 201 }), 'sin el campo id tampoco ofrece acciones');
-ok(!puedeConfigurarPromocion(sinCuenta('sin_contactar')),
-    'sin cuenta NO se ofrece "Configurar promoción" (el backend daría 404)');
-ok(!puedeConfigurarPromocion(sinCuenta('vencida')), 'sin cuenta y vencida: tampoco');
-ok(!puedeMarcarRecuperado(sinCuenta('promocion_enviada')),
-    'sin cuenta NO se puede marcar recuperado');
+ok(!tieneCuenta({ candidato_id: 201 }), 'sin el campo id no hay cuenta (dato informativo)');
+ok(puedeConfigurarPromocion(sinCuenta('sin_contactar')),
+    'sin cuenta TAMBIÉN se ofrece "Configurar promoción" (la oferta va al padrón)');
+ok(puedeConfigurarPromocion(sinCuenta('vencida')), 'sin cuenta y vencida: también');
+ok(puedeMarcarRecuperado(sinCuenta('promocion_enviada')),
+    'sin cuenta SÍ se puede marcar recuperado');
+ok(!puedeConfigurarPromocion(sinCuenta('promocion_enviada')),
+    'sin cuenta la oferta vigente sigue sin reoferta (manda el estado)');
 ok(puedeConfigurarPromocion(alumno(1, 'sin_contactar')), 'con cuenta sigue ofreciendo configurar');
+ok(!puedeConfigurarPromocion(null), 'sin fila no rompe');
 
 // ── 5c. Buscador por nombre o correo (en vivo, sin backend) ─────────────────
 // La respuesta ya trae la lista completa, así que el buscador filtra en memoria y se
@@ -255,8 +259,16 @@ ok(PANTALLA.includes('modal-promocion-tipo') && PANTALLA.includes('modal-promoci
     && PANTALLA.includes('modal-promocion-vence'),
     'el formulario pide tipo de beneficio, cantidad y fecha de vencimiento');
 ok(PANTALLA.includes('etiquetaCantidad'), 'el rótulo de la cantidad cambia con el tipo elegido');
-// El padrón: la clave de la fila es `candidato_id` y sin cuenta real no hay acciones.
+// El padrón: la clave de la fila es `candidato_id` y las acciones operan sobre él
+// (no sobre `id`, que es null mientras el candidato no tenga cuenta real).
 ok(PANTALLA.includes('candidato_id'), 'la fila se identifica por candidato_id (el padrón)');
+ok(PANTALLA.includes('candidatoId: alumno.candidato_id'),
+    'la oferta se pide por candidato_id (no por usuario_id)');
+ok(PANTALLA.includes('marcarRecuperado.mutateAsync(alumno.candidato_id)'),
+    'marcar recuperado usa el candidato del padrón');
+ok(PANTALLA.includes('configurar-promocion-${alumno.candidato_id}'),
+    'los testids usan candidato_id (nunca "null")');
+ok(!PANTALLA.includes('usuarioId'), 'la pantalla ya no manda usuario_id');
 ok(PANTALLA.includes('buscar-recuperacion'), 'la tabla tiene el buscador por nombre o correo');
 ok(/filtrarAlumnos\(alumnos, \{ estado: estadoFiltro, busqueda \}\)/.test(PANTALLA),
     'el buscador se combina con el estado en el mismo filtro (no filtra inline)');
@@ -296,6 +308,12 @@ ok(!EMOJI.test(PANTALLA), 'la pantalla no tiene emojis ni flechas-icono');
 ok(HOOKS.includes("migracionRecuperacion: ['migracion-boxmagic', 'recuperacion']"),
     'la clave cuelga de migracion-boxmagic (junto al panel de Activación)');
 ok(HOOKS.includes('/api/v1/migracion-boxmagic/recuperacion'), 'el hook pega al endpoint real');
+ok(HOOKS.includes('/recuperacion/${candidatoId}/promocion'),
+    'el POST de la oferta va por candidato_id');
+ok(HOOKS.includes('/recuperacion/${candidatoId}/marcar-recuperado'),
+    'el PUT de marcar recuperado va por candidato_id');
+ok(HOOKS.includes('/recuperacion/${pedido.candidatoId}/promocion/preview'),
+    'el preview va por candidato_id (funciona sin cuenta)');
 ok(HOOKS.includes('staleTime: 30_000'), 'la consulta se refresca a los 30 s como Activación');
 ok(/useConfigurarPromocion[\s\S]{0,600}?invalidateQueries\(\{ queryKey: claves\.migracionRecuperacion \}\)/
     .test(HOOKS), 'configurar la promoción invalida la query de recuperación');
