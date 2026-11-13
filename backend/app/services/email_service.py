@@ -913,6 +913,20 @@ def send_solicitud_prueba_clase(nombre: str, correo: str, password_temporal: str
         "y revisar nuestros planes.</p>"
         f"<p><strong>Tu usuario (correo):</strong> {correo}<br/>"
         f"<strong>Tu contraseña temporal:</strong> {password_temporal}</p>"
+        # Recuadro de ACCIÓN: qué hacer ahora, en 3 pasos. Antes la instrucción quedaba
+        # perdida en el párrafo motivacional y el lead no sabía que debía cambiar la
+        # contraseña ni dónde agendar. Va justo después de las credenciales y antes del
+        # botón (que lo pone `_template`), con estilos inline porque los clientes de
+        # correo no cargan CSS externo.
+        "<div style=\"background-color:#fff7ed;border:1px solid #fdba74;border-left:4px solid #f97316;"
+        "border-radius:8px;padding:20px 24px;margin:24px 0;\">"
+        "<h2 style=\"color:#9a3412;font-size:18px;margin:0 0 12px;\">Tus próximos pasos</h2>"
+        "<ol style=\"color:#3f3f46;font-size:15px;line-height:1.6;margin:0;padding-left:22px;\">"
+        "<li style=\"margin:0 0 10px;\">Entra con tu correo y la contraseña temporal de arriba.</li>"
+        "<li style=\"margin:0 0 10px;\">Te vamos a pedir que la cambies por una tuya (es obligatorio).</li>"
+        "<li style=\"margin:0;\">Dentro verás la pestaña para agendar tu clase de prueba, y más adelante la de planes.</li>"
+        "</ol>"
+        "</div>"
         "<p>Ingresa a la plataforma, revisa los horarios, agenda tu clase de prueba y prepárate para vivir la experiencia real "
         "de Urban. Una vez que tomes tu clase y elijas tu plan, se te habilitarán todas las funciones completas del sistema.</p>"
         "<p>⚠️ <strong>IMPORTANTE (Postdata):</strong> Como este es nuestro primer correo, revisa muy bien tu bandeja de SPAM "
