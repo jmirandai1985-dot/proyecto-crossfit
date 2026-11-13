@@ -33,7 +33,15 @@ const CAT_CONFIG = {
 };
 
 // Borde de color de las tarjetas "Para ti" (mismo patrón visual que los cuadrantes).
-const COLORES_TIP = { verde: '#10B981', naranja: '#F97316', gris: '#6B7280' };
+const COLORES_TIP = {
+    verde: '#10B981',
+    naranja: '#F97316',
+    gris: '#6B7280',
+    rojo: '#EF4444',
+    amarillo: '#F59E0B',
+    azul: '#3B82F6',
+    violeta: '#8B5CF6',
+};
 
 // Tip "objetivo" (tu RM es tu 100%): color índigo, propio de este tipo nuevo.
 const COLOR_OBJETIVO = '#6366F1';
@@ -178,15 +186,41 @@ const PerformanceHub = () => {
         return catsRes;
     }, [rms]);
 
+    // Nivel de clasificación indexado por `movimiento_id` (solo Fuerza/Gimnástico).
+    // Unifica `detalle_fuerza` + `detalle_gimnastico` en un único mapa: lo usan el
+    // acordeón y los tips de evolución (nivel y "a punto de subir").
+    const nivelPorMovimiento = React.useMemo(() => {
+        const g = nivelGeneralQ.data;
+        if (!g) return {};
+        const mapa = {};
+        (g.detalle_fuerza || []).forEach((d) => {
+            if (d?.movimiento_id != null) mapa[d.movimiento_id] = { ...d, eje: 'fuerza' };
+        });
+        (g.detalle_gimnastico || []).forEach((d) => {
+            if (d?.movimiento_id != null) mapa[d.movimiento_id] = { ...d, eje: 'gimnastico' };
+        });
+        return mapa;
+    }, [nivelGeneralQ.data]);
+
     // Fase 2 (Bloque 2): evolución por MOVIMIENTO (no por categoría). Compara el último
     // RM de cada movimiento contra el anterior de ESE MISMO movimiento (mejora real, ya
     // que un RM es siempre el mismo ejercicio). Vive en utils/evolucionRM.js.
+    // Se le inyecta el detalle de nivel de SU eje (`nivel_fuerza`/`nivel_gimnastico`)
+    // para que `tipsEvolucion` pueda avisar "a punto de subir de nivel" con datos reales.
     const evolucion = React.useMemo(
-        () => evolucionPorMovimiento(historialQ.data),
-        [historialQ.data],
+        () => evolucionPorMovimiento(historialQ.data).map((r) => {
+            const detalle = nivelPorMovimiento[r.movimiento_id];
+            if (!detalle) return r;
+            return {
+                ...r,
+                [detalle.eje === 'gimnastico' ? 'nivel_gimnastico' : 'nivel_fuerza']: detalle,
+            };
+        }),
+        [historialQ.data, nivelPorMovimiento],
     );
 
-    // Tips "Para ti" (logro / alerta / comparación) derivados de esa evolución.
+    // Tips "Para ti": logro, alerta, comparación + meseta, racha, salto riesgoso,
+    // proximidad de nivel y desaceleración. Todo rule-based sobre la evolución.
     const tips = React.useMemo(() => tipsEvolucion(evolucion), [evolucion]);
 
     // Tips "objetivo" (tu RM es tu 100%): un objetivo por movimiento de fuerza/gimnástico.
@@ -212,21 +246,6 @@ const PerformanceHub = () => {
         () => agruparMovimientosPorCategoria(historialQ.data),
         [historialQ.data],
     );
-
-    // Nivel de clasificación indexado por `movimiento_id` (solo Fuerza/Gimnástico).
-    // Unifica `detalle_fuerza` + `detalle_gimnastico` en un único mapa para el acordeón.
-    const nivelPorMovimiento = React.useMemo(() => {
-        const g = nivelGeneralQ.data;
-        if (!g) return {};
-        const mapa = {};
-        (g.detalle_fuerza || []).forEach((d) => {
-            if (d?.movimiento_id != null) mapa[d.movimiento_id] = { ...d, eje: 'fuerza' };
-        });
-        (g.detalle_gimnastico || []).forEach((d) => {
-            if (d?.movimiento_id != null) mapa[d.movimiento_id] = { ...d, eje: 'gimnastico' };
-        });
-        return mapa;
-    }, [nivelGeneralQ.data]);
 
     // "Cargando" sólo mientras NO hay dato: al volver a la pantalla se pinta la copia en
     // caché al instante (misma queryKey que las otras pantallas de RMs).

@@ -9,7 +9,8 @@
 //   2. detección de PR (valor actual === máximo del movimiento)
 //   3. días sin testear (anclado a mediodía UTC, calendario de Chile)
 //   4. orden: por fecha del último registro, el más reciente primero
-//   5. tips "Para ti": logro, alerta y comparación de pares conocidos
+//   5. tips "Para ti": logro, alerta y comparación de pares conocidos + los tips
+//      nuevos rule-based (meseta, salto riesgoso, racha, nivel y desaceleración)
 import {
     diasEntre, nombreComparable, evolucionPorMovimiento, tipsEvolucion, objetivosSugeridos,
 } from '../src/utils/evolucionRM.js';
@@ -211,6 +212,176 @@ eq(resBajo[0].diasDesdePR, 7, 'días desde el PR (04-may) = 7 (PR reciente)');
 eq(objBajo.esPR, false, 'objetivosSugeridos propaga esPR = false');
 eq(objBajo.valorMaximo, 80, 'objetivosSugeridos propaga valorMaximo = 80');
 eq(objBajo.diasSinTestear, 3, 'objetivosSugeridos propaga diasSinTestear (08-may → 3)');
+
+// ── 6. Tips nuevos: todos calculados con el histórico real ─────────────────
+console.log('== 6. Tips nuevos (rule-based) ==');
+
+// `ultimos6` sale del mismo histórico (se usa para mesetas/rachas más largas).
+const historialLargo = Array.from({ length: 7 }, (_, i) => (
+    rm(20, 'Back Squat', `2026-01-0${i + 1}`, 100 + i * 2.5)
+));
+const resumenLargo = evolucionPorMovimiento(historialLargo, HOY)[0];
+eq(resumenLargo.ultimos6.length, 6, 'ultimos6 se limita a los últimos 6 tests');
+eq(resumenLargo.ultimos6.at(-1).valor, 115, 'ultimos6 termina en la última marca (115)');
+
+// Fila mínima de resumen para probar cada regla sin depender del resto.
+const resumen = (overrides = {}) => ({
+    movimiento_id: 1,
+    movimiento_nombre: 'Back Squat',
+    categoria: 'fuerza',
+    valorActual: 100,
+    valorAnterior: 95,
+    pctCambio: 5,
+    valorMaximo: 100,
+    esPR: true,
+    diasSinTestear: 5,
+    diasDesdePR: 0,
+    registros: 3,
+    ultimaFecha: '2026-05-01',
+    unidad: 'kg',
+    ultimos3: [],
+    ultimos6: [],
+    ...overrides,
+});
+const serie = (pares) => pares.map(([fecha, valor]) => ({ fecha, valor }));
+
+// 6a. Meseta real: 4 tests iguales en 90 días.
+const mesetaRes = resumen({
+    valorActual: 100, valorAnterior: 100, pctCambio: 0, registros: 4,
+    ultimos6: serie([
+        ['2026-01-01', 100], ['2026-02-01', 100],
+        ['2026-03-01', 100], ['2026-04-01', 100],
+    ]),
+});
+const tipMeseta = tipsEvolucion([mesetaRes]).find((t) => t.tipo === 'meseta');
+ok(tipMeseta, '4 tests iguales disparan la meseta');
+ok(tipMeseta?.detalle.includes('4 tests seguidos'), 'la meseta cuenta los tests reales');
+ok(tipMeseta?.detalle.includes('100 kg'), 'la meseta muestra el RM estancado');
+ok(tipMeseta?.detalle.includes('90 días'), 'la meseta mide el tiempo real sin cambio');
+
+// Tres tests seguidos pero en pocos días NO son una meseta (evita falsos positivos).
+const mesetaCorta = resumen({
+    pctCambio: 0, registros: 3,
+    ultimos6: serie([['2026-01-01', 100], ['2026-01-05', 100], ['2026-01-10', 100]]),
+});
+eq(tipsEvolucion([mesetaCorta]).some((t) => t.tipo === 'meseta'), false,
+    '3 tests en 9 días no son una meseta real');
+
+// 6b. Salto peligrosamente rápido: +15% en 7 días.
+const riesgoRes = resumen({
+    valorActual: 115, valorAnterior: 100, pctCambio: 15, registros: 2,
+    ultimaFecha: '2026-05-08',
+    ultimos6: serie([['2026-05-01', 100], ['2026-05-08', 115]]),
+});
+const tipRiesgo = tipsEvolucion([riesgoRes]).find((t) => t.tipo === 'riesgo');
+ok(tipRiesgo, '+15% en 7 días dispara la alerta de salto riesgoso');
+ok(tipRiesgo?.detalle.includes('15.0%'), 'el riesgo muestra el % real del salto');
+ok(tipRiesgo?.detalle.includes('7 días'), 'el riesgo muestra el tiempo real entre tests');
+ok(tipRiesgo?.detalle.includes('100 kg') && tipRiesgo?.detalle.includes('115 kg'),
+    'el riesgo muestra los dos RM reales');
+
+// El mismo +15% repartido en 3 meses NO es "peligrosamente rápido".
+const riesgoLento = resumen({
+    valorActual: 115, valorAnterior: 100, pctCambio: 15, registros: 2,
+    ultimos6: serie([['2026-02-01', 100], ['2026-05-01', 115]]),
+});
+eq(tipsEvolucion([riesgoLento]).some((t) => t.tipo === 'riesgo'), false,
+    'un +15% en 3 meses no es un salto riesgoso');
+
+// 6c. Racha de consistencia: 3 tests seguidos mejorando, aunque sea poco.
+const rachaRes = resumen({
+    valorActual: 102.5, valorAnterior: 101, pctCambio: 1.49, registros: 3,
+    ultimos6: serie([['2026-03-01', 100], ['2026-04-01', 101], ['2026-05-01', 102.5]]),
+});
+const tipRacha = tipsEvolucion([rachaRes]).find((t) => t.tipo === 'racha');
+ok(tipRacha, '3 tests seguidos mejorando disparan la racha');
+ok(tipRacha?.detalle.includes('3 tests seguidos'), 'la racha cuenta los tests reales');
+ok(tipRacha?.detalle.includes('100 → 101 → 102.5'), 'la racha muestra la serie real');
+
+// 6d. A punto de subir de nivel (detalle real de /nivel-general).
+const nivelRes = resumen({
+    // La última marca BAJÓ (112), pero el nivel se calcula con el mejor RM (118).
+    valorActual: 112,
+    valorMaximo: 118,
+    valorAnterior: 116,
+    pctCambio: -3.45,
+    nivel_fuerza: {
+        nivel: 'Intermedio',
+        siguiente_nivel: 'Avanzado',
+        umbral_actual: 100,
+        umbral_siguiente: 120,
+        valor_faltante: 2,
+    },
+    ultimos6: serie([['2026-04-01', 116], ['2026-05-01', 112]]),
+});
+const tipNivel = tipsEvolucion([nivelRes]).find((t) => t.tipo === 'nivel');
+ok(tipNivel, '118/120 del mejor RM (90%) dispara "a punto de subir de nivel"');
+ok(tipNivel?.detalle.includes('Intermedio a Avanzado'), 'el tip nombra los dos niveles reales');
+ok(tipNivel?.detalle.includes('2 kg'), 'el tip muestra cuánto falta en la unidad real');
+ok(tipNivel?.detalle.includes('90%'), 'el tip muestra el % real del tramo');
+
+// Al 50% del tramo todavía no está "a punto".
+const nivelLejos = resumen({
+    valorActual: 110,
+    valorMaximo: 110,
+    nivel_fuerza: {
+        nivel: 'Intermedio', siguiente_nivel: 'Avanzado',
+        umbral_actual: 100, umbral_siguiente: 120, valor_faltante: 10,
+    },
+    ultimos6: serie([['2026-04-01', 108], ['2026-05-01', 110]]),
+});
+eq(tipsEvolucion([nivelLejos]).some((t) => t.tipo === 'nivel'), false,
+    'al 50% del tramo no avisa que está por subir');
+
+// 6e. Desaceleración: venía +5 kg por test y el último subió +1 kg.
+const decelRes = resumen({
+    valorActual: 106, valorAnterior: 105, pctCambio: 0.95, registros: 3,
+    ultimos6: serie([['2026-03-01', 100], ['2026-04-01', 105], ['2026-05-01', 106]]),
+});
+const tipDecel = tipsEvolucion([decelRes]).find((t) => t.tipo === 'desaceleracion');
+ok(tipDecel, 'la mejora que cae de +5 a +1 dispara la desaceleración');
+ok(tipDecel?.detalle.includes('5 kg'), 'la desaceleración muestra el salto previo real');
+ok(tipDecel?.detalle.includes('1 kg'), 'la desaceleración muestra el último salto real');
+
+// Mejoras que se mantienen NO son desaceleración.
+const sinDecel = resumen({
+    valorActual: 110, valorAnterior: 105, pctCambio: 4.76, registros: 3,
+    ultimos6: serie([['2026-03-01', 100], ['2026-04-01', 105], ['2026-05-01', 110]]),
+});
+eq(tipsEvolucion([sinDecel]).some((t) => t.tipo === 'desaceleracion'), false,
+    'dos saltos iguales no son desaceleración');
+
+// 6f. Variedad: varios tipos pueden convivir en la sección "Para ti".
+const tipos = new Set(tipsEvolucion([
+    riesgoRes, nivelRes, rachaRes, mesetaRes, decelRes,
+]).map((t) => t.tipo));
+['riesgo', 'nivel', 'racha', 'meseta', 'desaceleracion'].forEach((tipo) => {
+    ok(tipos.has(tipo), `convive el tip nuevo "${tipo}"`);
+});
+
+// 6g. Cardio/metabólico: exclusión explícita (decisión cerrada 05/11).
+const cardioRes = resumen({
+    movimiento_id: 13, movimiento_nombre: 'Row 500m', categoria: 'cardio',
+    unidad: 'min', valorActual: 150, valorAnterior: 100, pctCambio: 50,
+    registros: 4, diasSinTestear: 200,
+    ultimos6: serie([
+        ['2026-01-01', 100], ['2026-01-02', 100],
+        ['2026-01-03', 100], ['2026-01-04', 100],
+        ['2026-01-05', 150],
+    ]),
+    nivel_fuerza: {
+        nivel: 'Intermedio', siguiente_nivel: 'Avanzado',
+        umbral_actual: 100, umbral_siguiente: 120, valor_faltante: 2,
+    },
+});
+eq(tipsEvolucion([cardioRes]).length, 0, 'cardio no genera NINGÚN tip');
+const metabolicoRes = resumen({
+    movimiento_id: 14, movimiento_nombre: 'Sled Push', categoria: 'metabolico',
+    unidad: 'kg', valorActual: 150, valorAnterior: 100, pctCambio: 50,
+    registros: 4, diasSinTestear: 200,
+    ultimos6: serie([['2026-02-01', 100], ['2026-05-01', 150]]),
+});
+eq(tipsEvolucion([metabolicoRes]).length, 0, 'metabólico no genera NINGÚN tip');
 
 if (fallos > 0) {
     console.log(`\n${fallos} chequeo(s) fallido(s)`);
