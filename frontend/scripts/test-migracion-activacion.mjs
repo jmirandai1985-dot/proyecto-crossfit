@@ -213,6 +213,33 @@ ok(PANTALLA.includes('padron-activacion-movil') && PANTALLA.includes('md:hidden'
 ok(PANTALLA.includes('hidden md:block'), 'la tabla de escritorio se mantiene desde 768px');
 ok((PANTALLA.match(/bloque\.mostrados\.map/g) || []).length >= 2,
     'la tabla y las tarjetas pintan el MISMO bloque');
+// Edición del padrón (correos truncados del Excel): lápiz en fila y tarjeta + modal.
+const MODAL = readFileSync(
+    new URL('../src/components/EditarCandidatoBoxmagic.jsx', import.meta.url), 'utf8');
+const HOOKS = readFileSync(
+    new URL('../src/hooks/queries.js', import.meta.url), 'utf8');
+ok(PANTALLA.includes("from '../../components/EditarCandidatoBoxmagic'")
+    && PANTALLA.includes('<EditarCandidatoBoxmagic'),
+    'el panel monta el modal de edición del padrón');
+ok(PANTALLA.includes('Pencil') && PANTALLA.includes('Editar'),
+    'la fila/tarjeta tiene el botón Editar con lápiz');
+ok(PANTALLA.includes('editar-candidato-movil-${clave}')
+    && PANTALLA.includes('editar-candidato-${clave}'),
+    'el botón Editar existe en móvil y escritorio');
+ok(PANTALLA.includes('setAlumnoEditar(alumno)'), 'el botón abre ese candidato en el modal');
+ok(PANTALLA.includes('whitespace-normal break-all'),
+    'el correo del padrón se ve completo en mobile (no se recorta)');
+ok(/<th[^>]*>Acción<\/th>/.test(PANTALLA) && PANTALLA.includes('colSpan={5}'),
+    'la tabla de escritorio suma la columna Acción');
+ok(HOOKS.includes('useEditarCandidatoBoxmagic')
+    && HOOKS.includes('/api/v1/migracion-boxmagic/candidatos/${candidatoId}'),
+    'el hook pega al endpoint PUT de candidatos');
+ok(MODAL.includes('modal-editar-candidato-nombre')
+    && MODAL.includes('modal-editar-candidato-correo')
+    && MODAL.includes('modal-editar-candidato-guardar'),
+    'el modal precarga Nombre/Correo y tiene Guardar');
+ok(MODAL.includes('tieneCuenta') && MODAL.includes('disabled={guardando || tieneCuenta}'),
+    'el correo se bloquea en el modal si el candidato ya tiene cuenta real');
 // Regla fija del proyecto: nada de emojis (color, negrita y badges en su lugar).
 const EMOJI = /[\u{1F000}-\u{1FAFF}\u{2190}-\u{21FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/u;
 ok(!EMOJI.test(PANTALLA), 'la pantalla no tiene emojis ni flechas-icono');

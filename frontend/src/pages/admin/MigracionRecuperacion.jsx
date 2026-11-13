@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+import { Pencil } from 'lucide-react';
 import Layout from '../../components/Layout';
 import { KpiCard } from '../../components/kpis/KpiCard';
+import EditarCandidatoBoxmagic from '../../components/EditarCandidatoBoxmagic';
 import {
     useConfigurarPromocion, useMarcarRecuperado, useMigracionRecuperacion,
     usePreviewPromocionRecuperacion,
@@ -304,6 +306,8 @@ const MigracionRecuperacion = () => {
     const limite = paginacion.clave === claveFiltros ? paginacion.limite : BLOQUE_ALUMNOS;
     // Alumno cuya oferta se está configurando (null = formulario cerrado).
     const [alumnoFormulario, setAlumnoFormulario] = useState(null);
+    // Candidato abierto en el modal de corrección del padrón (nombre/correo).
+    const [alumnoEditar, setAlumnoEditar] = useState(null);
     // Fila con el "Marcar como recuperado" en vuelo (para deshabilitar ESE botón).
     const [marcandoId, setMarcandoId] = useState(null);
     // Aviso de la última acción (el marcado no cambia la fila de lugar: se confirma acá).
@@ -536,8 +540,22 @@ const MigracionRecuperacion = () => {
                                 data-testid={`alumno-movil-${clave}`}
                                 className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3"
                             >
-                                <p className="text-sm font-bold text-zinc-100 break-words">{alumno.nombre}</p>
-                                <p className="mt-0.5 text-[12.5px] text-zinc-400 break-all">{alumno.correo}</p>
+                                <div className="flex items-start justify-between gap-2">
+                                    <p className="text-sm font-bold text-zinc-100 break-words">{alumno.nombre}</p>
+                                    <button
+                                        type="button"
+                                        onClick={() => setAlumnoEditar(alumno)}
+                                        aria-label={`Editar el padrón de ${alumno.nombre}`}
+                                        data-testid={`editar-candidato-movil-${clave}`}
+                                        className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2 py-1 text-[11px] font-semibold text-zinc-300 transition hover:border-orange-500 hover:text-orange-400 active:bg-zinc-800 active:scale-[0.98]"
+                                    >
+                                        <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                                        Editar
+                                    </button>
+                                </div>
+                                {/* El correo se ve COMPLETO (break-all): en mobile no se
+                                    recorta ni se trunca, para detectar errores del padrón. */}
+                                <p className="mt-0.5 whitespace-normal break-all text-[12.5px] text-zinc-400">{alumno.correo}</p>
                                 <dl className="mt-3 space-y-2">
                                     <div>
                                         <dt className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
@@ -680,34 +698,46 @@ const MigracionRecuperacion = () => {
                                             )}
                                         </td>
                                         <td className="px-6 py-3 text-sm">
-                                            {configurable && (
+                                            <div className="flex flex-wrap items-center gap-2">
                                                 <button
                                                     type="button"
-                                                    onClick={() => { setAviso(null); setAlumnoFormulario(alumno); }}
-                                                    data-testid={`configurar-promocion-${alumno.candidato_id}`}
-                                                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-orange-600 text-white hover:bg-orange-700 transition-colors"
+                                                    onClick={() => setAlumnoEditar(alumno)}
+                                                    aria-label={`Editar el padrón de ${alumno.nombre}`}
+                                                    data-testid={`editar-candidato-${alumno.candidato_id}`}
+                                                    className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs font-semibold text-zinc-300 transition hover:border-orange-500 hover:text-orange-400 active:bg-zinc-800 active:scale-[0.98]"
                                                 >
-                                                    Configurar promoción
+                                                    <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                                                    Editar
                                                 </button>
-                                            )}
-                                            {marcable && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => marcar(alumno)}
-                                                    disabled={enVuelo}
-                                                    data-testid={`marcar-recuperado-${alumno.candidato_id}`}
-                                                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    {enVuelo ? 'Marcando...' : 'Marcar como recuperado'}
-                                                </button>
-                                            )}
-                                            {!configurable && !marcable && (
-                                                <span className="text-[11.5px] text-zinc-500">
-                                                    {tieneCuenta(alumno)
-                                                        ? '—'
-                                                        : 'Sin cuenta todavía'}
-                                                </span>
-                                            )}
+                                                {configurable && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { setAviso(null); setAlumnoFormulario(alumno); }}
+                                                        data-testid={`configurar-promocion-${alumno.candidato_id}`}
+                                                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-orange-600 text-white hover:bg-orange-700 transition-colors"
+                                                    >
+                                                        Configurar promoción
+                                                    </button>
+                                                )}
+                                                {marcable && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => marcar(alumno)}
+                                                        disabled={enVuelo}
+                                                        data-testid={`marcar-recuperado-${alumno.candidato_id}`}
+                                                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        {enVuelo ? 'Marcando...' : 'Marcar como recuperado'}
+                                                    </button>
+                                                )}
+                                                {!configurable && !marcable && (
+                                                    <span className="text-[11.5px] text-zinc-500">
+                                                        {tieneCuenta(alumno)
+                                                            ? '—'
+                                                            : 'Sin cuenta todavía'}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                     </tr>
                                 );
@@ -753,6 +783,14 @@ const MigracionRecuperacion = () => {
                 <FormularioPromocion
                     alumno={alumnoFormulario}
                     onClose={() => setAlumnoFormulario(null)}
+                />
+            )}
+
+            {/* Corrección del padrón (nombre/correo): compartido con Activación. */}
+            {alumnoEditar && (
+                <EditarCandidatoBoxmagic
+                    alumno={alumnoEditar}
+                    onClose={() => setAlumnoEditar(null)}
                 />
             )}
         </Layout>

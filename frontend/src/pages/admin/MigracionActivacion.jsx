@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+import { Pencil } from 'lucide-react';
 import Layout from '../../components/Layout';
 import { KpiCard } from '../../components/kpis/KpiCard';
+import EditarCandidatoBoxmagic from '../../components/EditarCandidatoBoxmagic';
 import { useMigracionActivacion } from '../../hooks/queries';
 import {
     BLOQUE_ALUMNOS, ETAPAS_ACTIVACION, activadosHoy, badgeEtapa, conteoPorEtapa, filtrarAlumnos,
@@ -14,10 +16,10 @@ import {
  * BoxMagic. Cuando la migración termine se borran, de una sola vez, la sección del menú
  * (`config/menu.js`), las rutas de `App.jsx` y este archivo.
  *
- * SÓLO LEE: todo el cálculo del embudo (en qué etapa está cada alumno y el resumen con
- * los activados de las últimas 24 h) viene resuelto del backend en
- * `GET /api/v1/migracion-boxmagic/activacion`. Acá no se escribe nada ni se toca a
- * ningún alumno: la pantalla es para MIRAR a quién le falta qué.
+ * LEE el embudo (en qué etapa está cada alumno y el resumen con los activados de las
+ * últimas 24 h) del backend en `GET /api/v1/migracion-boxmagic/activacion`. La ÚNICA
+ * escritura es la corrección del padrón (nombre/correo con el lápiz "Editar"), porque
+ * el Excel real puede traer correos truncados; nada toca la cuenta del alumno.
  *
  * Interacción (mismo patrón que Fidelización): las tarjetas son botones que filtran la
  * tabla de abajo, se prenden y se apagan con el mismo clic, y el filtro activo queda a
@@ -38,6 +40,8 @@ const MigracionActivacion = () => {
     // mandó el padrón completo en esta misma respuesta), así que escribir no dispara
     // ninguna request.
     const [busqueda, setBusqueda] = useState('');
+    // Candidato abierto en el modal de corrección del padrón (nombre/correo).
+    const [alumnoEditar, setAlumnoEditar] = useState(null);
     // Cuántos resultados se pintan. Arranca en el primer bloque y "Cargar 25 más" lo
     // agranda (AGREGA filas, no reemplaza las que ya se están mirando). El reset a 25 NO
     // va en un efecto (dispararía un render de más): el estado guarda, junto al límite, la
@@ -285,8 +289,22 @@ const MigracionActivacion = () => {
                                 data-testid={`alumno-movil-${clave}`}
                                 className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3"
                             >
-                                <p className="text-sm font-bold text-zinc-100 break-words">{alumno.nombre}</p>
-                                <p className="mt-0.5 text-[12.5px] text-zinc-400 break-all">{alumno.correo}</p>
+                                <div className="flex items-start justify-between gap-2">
+                                    <p className="text-sm font-bold text-zinc-100 break-words">{alumno.nombre}</p>
+                                    <button
+                                        type="button"
+                                        onClick={() => setAlumnoEditar(alumno)}
+                                        aria-label={`Editar el padrón de ${alumno.nombre}`}
+                                        data-testid={`editar-candidato-movil-${clave}`}
+                                        className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2 py-1 text-[11px] font-semibold text-zinc-300 transition hover:border-orange-500 hover:text-orange-400 active:bg-zinc-800 active:scale-[0.98]"
+                                    >
+                                        <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                                        Editar
+                                    </button>
+                                </div>
+                                {/* El correo se ve COMPLETO (break-all): en mobile no se
+                                    recorta ni se trunca, para detectar errores del padrón. */}
+                                <p className="mt-0.5 whitespace-normal break-all text-[12.5px] text-zinc-400">{alumno.correo}</p>
                                 <dl className="mt-3 space-y-1.5">
                                     <div className="flex items-center justify-between gap-2">
                                         <dt className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Etapa</dt>
@@ -330,6 +348,7 @@ const MigracionActivacion = () => {
                                 <th className="px-6 py-3 text-left text-sm font-medium text-zinc-300">Correo</th>
                                 <th className="px-6 py-3 text-left text-sm font-medium text-zinc-300">Etapa</th>
                                 <th className="px-6 py-3 text-left text-sm font-medium text-zinc-300">Plan</th>
+                                <th className="px-6 py-3 text-left text-sm font-medium text-zinc-300">Acción</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-zinc-800">
@@ -361,11 +380,23 @@ const MigracionActivacion = () => {
                                                 ? <span className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-300">{alumno.plan_comprado}</span>
                                                 : <span className="text-zinc-500">—</span>}
                                         </td>
+                                        <td className="px-6 py-3 text-sm">
+                                            <button
+                                                type="button"
+                                                onClick={() => setAlumnoEditar(alumno)}
+                                                aria-label={`Editar el padrón de ${alumno.nombre}`}
+                                                data-testid={`editar-candidato-${clave}`}
+                                                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs font-semibold text-zinc-300 transition hover:border-orange-500 hover:text-orange-400 active:bg-zinc-800 active:scale-[0.98]"
+                                            >
+                                                <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                                                Editar
+                                            </button>
+                                        </td>
                                     </tr>
                                 );
                             }) : (
                                 <tr>
-                                    <td colSpan={4} className="px-6 py-8 text-center text-sm text-zinc-400">
+                                    <td colSpan={5} className="px-6 py-8 text-center text-sm text-zinc-400">
                                         {alumnos.length === 0
                                             ? 'El padrón de BoxMagic no tiene alumnos de activación cargados todavía.'
                                             : 'Ningún alumno coincide con el filtro.'}
@@ -398,6 +429,15 @@ const MigracionActivacion = () => {
                         </button>
                     )}
                 </div>
+
+                {/* Corrección del padrón: el modal sólo escribe nombre/correo del
+                    candidato (nunca su cuenta real). */}
+                {alumnoEditar && (
+                    <EditarCandidatoBoxmagic
+                        alumno={alumnoEditar}
+                        onClose={() => setAlumnoEditar(null)}
+                    />
+                )}
             </div>
         </Layout>
     );

@@ -1,8 +1,9 @@
 """Panel de control de la ACTIVACIÓN de los alumnos migrados desde BoxMagic.
 
 ⚠️ No confundir con `api/v1/migracion.py` (prefijo `/api/v1/migracion`), que es un
-utillaje viejo para correr ALTER TABLE ad-hoc por HTTP. Este router es de sólo
-lectura y responde bajo `/api/v1/migracion-boxmagic`.
+utillaje viejo para correr ALTER TABLE ad-hoc por HTTP. Este router responde bajo
+`/api/v1/migracion-boxmagic`; es de sólo lectura SALVO la corrección puntual del
+padrón (`PUT /candidatos/{id}`), que sólo escribe `candidatos_boxmagic`.
 
 QUÉ HACE
 --------
@@ -83,6 +84,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_admin
@@ -434,7 +436,8 @@ class CandidatoEdicionIn(BaseModel):
 
     nombre: str = Field(..., min_length=1, max_length=150)
     correo: EmailStr = Field(
-        ..., description="Correo real del candidato (se guarda normalizado)")
+        ..., max_length=150,
+        description="Correo real del candidato (se guarda normalizado)")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -503,7 +506,16 @@ def editar_candidato(
 
     candidato.nombre = body.nombre
     candidato.correo = correo_nuevo
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Carrera con otra alta/edición: el UNIQUE (tenant_id, correo) es la última
+        # palabra. Se devuelve el mismo 400 claro que la pre-consulta.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ya existe un candidato con ese correo",
+        )
     db.refresh(candidato)
 
     return {

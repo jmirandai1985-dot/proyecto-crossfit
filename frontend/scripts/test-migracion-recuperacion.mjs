@@ -302,6 +302,30 @@ ok(PANTALLA.includes('configurar-promocion-movil-') && PANTALLA.includes('marcar
 ok(PANTALLA.includes('Sin cuenta todavía'), 'avisa cuando el candidato todavía no tiene cuenta');
 ok(PANTALLA.includes('Sin historial de asistencia'),
     'no dibuja "null días ausente" cuando el candidato no tiene historial');
+// Edición del padrón (correos truncados del Excel): lápiz en tarjeta/fila + modal.
+const MODAL_EDITAR = readFileSync(
+    new URL('../src/components/EditarCandidatoBoxmagic.jsx', import.meta.url), 'utf8');
+ok(PANTALLA.includes("from '../../components/EditarCandidatoBoxmagic'")
+    && PANTALLA.includes('<EditarCandidatoBoxmagic'),
+    'el panel monta el modal de edición del padrón');
+ok(PANTALLA.includes('Pencil') && PANTALLA.includes('Editar'),
+    'la fila/tarjeta tiene el botón Editar con lápiz');
+ok(PANTALLA.includes('editar-candidato-movil-${clave}')
+    && PANTALLA.includes('editar-candidato-${alumno.candidato_id}'),
+    'el botón Editar existe en móvil y escritorio');
+ok(PANTALLA.includes('setAlumnoEditar(alumno)'), 'el botón abre ese candidato en el modal');
+ok(PANTALLA.includes('whitespace-normal break-all'),
+    'el correo del padrón se ve completo en mobile (no se recorta)');
+ok(HOOKS.includes('useEditarCandidatoBoxmagic')
+    && HOOKS.includes('/api/v1/migracion-boxmagic/candidatos/${candidatoId}'),
+    'el hook pega al endpoint PUT de candidatos');
+ok(MODAL_EDITAR.includes('modal-editar-candidato-nombre')
+    && MODAL_EDITAR.includes('modal-editar-candidato-correo')
+    && MODAL_EDITAR.includes('modal-editar-candidato-guardar'),
+    'el modal precarga Nombre/Correo y tiene Guardar');
+ok(MODAL_EDITAR.includes('tieneCuenta')
+    && MODAL_EDITAR.includes('disabled={guardando || tieneCuenta}'),
+    'el correo se bloquea en el modal si el candidato ya tiene cuenta real');
 // Regla fija del proyecto: nada de emojis (color, negrita y badges en su lugar).
 ok(!EMOJI.test(PANTALLA), 'la pantalla no tiene emojis ni flechas-icono');
 

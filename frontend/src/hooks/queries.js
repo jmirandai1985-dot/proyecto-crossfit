@@ -2636,6 +2636,40 @@ export function useMigracionRecuperacion() {
     });
 }
 
+// Corrección del PADRÓN de BoxMagic (nombre/correo) desde cualquiera de los dos
+// paneles. El backend valida el correo, el UNIQUE por box y bloquea cambiarlo si el
+// candidato ya tiene cuenta real.
+//
+// `onSuccess` parchea la fila en la caché de AMBOS paneles al instante (no se recarga
+// la página) y después invalida la familia para reconciliar datos derivados del correo
+// (por ejemplo, si el correo nuevo ahora cruza con una cuenta real, cambia el `id`, la
+// asistencia o el estado de recuperación).
+export function useEditarCandidatoBoxmagic() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ candidatoId, nombre, correo }) => api.put(
+            `/api/v1/migracion-boxmagic/candidatos/${candidatoId}`,
+            { nombre, correo },
+        ).then((r) => r.data),
+        onSuccess: (data) => {
+            [claves.migracionActivacion, claves.migracionRecuperacion].forEach((queryKey) => {
+                qc.setQueriesData({ queryKey }, (previo) => {
+                    if (!previo || !Array.isArray(previo.alumnos)) return previo;
+                    return {
+                        ...previo,
+                        alumnos: previo.alumnos.map((alumno) => (
+                            alumno.candidato_id === data.candidato_id
+                                ? { ...alumno, nombre: data.nombre, correo: data.correo }
+                                : alumno
+                        )),
+                    };
+                });
+            });
+            qc.invalidateQueries({ queryKey: ['migracion-boxmagic'] });
+        },
+    });
+}
+
 // Configurar la oferta de UN candidato inactivo del padrón y mandarle el correo dedicado.
 //
 // Operan por `candidato_id` (migración 080), no por `usuario_id`: los desertores de
