@@ -45,7 +45,11 @@ webhook con `authorized`) y el `preapproval` en MP con `external_reference=sus:<
 Si MP falla, la fila se borra: nunca queda una suscripción fantasma. Antes de emitir
 una autorización nueva se mira la anterior del mismo plan: si MP la tiene `pending` se
 REUSA su checkout (dos clics no pueden producir dos cobros recurrentes) y si ya está
-`authorized`/`activo` se responde 409.
+`authorized`/`activo` se responde 409. Además, el índice único parcial
+`uq_suscripciones_pendiente_por_alumno_plan` (migración 082) impide que existan DOS
+filas `pendiente` del mismo alumno+plan: si dos altas simultáneas pasan el chequeo de
+reuso, la que pierde el INSERT recibe 409 (`MENSAJE_EN_PROCESO`) sin llegar a crear un
+segundo `preapproval` en MP.
 
 El mapa de ESTE módulo no reusa el de pagos a propósito: en un pago `authorized`
 significa "todavía no hay plata" (`en_proceso`); en un `preapproval` significa "el
@@ -75,7 +79,9 @@ from app.models.notificacion import Notificacion
 from app.models.pago import Pago
 from app.models.plan import Plan
 from app.models.solicitud_plan import SolicitudPlan
-from app.models.suscripcion import EstadoSuscripcion, Suscripcion
+from app.models.suscripcion import (
+    EstadoSuscripcion, Suscripcion, es_suscripcion_pendiente_duplicada,
+)
 from app.models.usuario import Usuario
 from app.services import mercadopago_cliente as mp
 from app.services.aprobacion_planes import ORIGEN_MERCADOPAGO, plan_vigente_usable
@@ -501,6 +507,11 @@ MENSAJE_YA_ACTIVA = ("Ya tienes este plan activo: no necesitas pagarlo de nuevo.
                      "Si quieres renovarlo, escríbele al box.")
 MENSAJE_NO_VERIFICABLE = ("No pudimos verificar tu suscripción anterior en Mercado "
                           "Pago. Revisa tu plan y vuelve a intentarlo en unos minutos.")
+# Carrera del alta (migración 082): otra solicitud del MISMO alumno+plan ya tiene
+# una fila `pendiente` y todavía no alcanzó a guardar su `mp_preapproval_id`.
+MENSAJE_EN_PROCESO = ("Ya hay una suscripción en proceso para este plan. "
+                      "Espera unos segundos y revisa tu suscripción antes de "
+                      "reintentar.")
 
 
 def _abrir_periodo(db: Session, suscripcion: Suscripcion) -> None:
@@ -599,7 +610,12 @@ def crear_suscripcion_mp(db: Session, *, current_user: dict, plan_id: int) -> di
     2. se crea el `preapproval` y se guarda su `id` en la MISMA fila (el webhook lo
        encuentra por `mp_preapproval_id` desde el primer aviso);
     3. si MP falla, la fila se borra: nunca queda una suscripción fantasma que
-       aparezca en el panel del box ni en los reportes.
+       aparezca en el panel del box ni en los reportes;
+    4. entre (1) y (2) hay una llamada HTTP real a MP: si otra solicitud del
+       MISMO alumno+plan ya confirmó su fila `pendiente` y todavía no guardó su
+       `mp_preapproval_id`, el índice único parcial
+       `uq_suscripciones_pendiente_por_alumno_plan` (migración 082) rechaza este
+       INSERT y se responde 409 ANTES de crear un segundo `preapproval`.
 
     La fila nace `pendiente`: NO da acceso (`app.core.estados.da_acceso_hoy` exige
     `activo`). El acceso lo abre el webhook con `authorized`.
@@ -685,7 +701,22 @@ def crear_suscripcion_mp(db: Session, *, current_user: dict, plan_id: int) -> di
         es_compra_emergencia=False,
     )
     db.add(suscripcion)
-    db.commit()  # el id es la referencia que va a MP: tiene que existir ya
+    try:
+        db.commit()  # el id es la referencia que va a MP: tiene que existir ya
+    except IntegrityError as error:
+        # Carrera real (migración 082): otra solicitud del mismo alumno+plan ya
+        # confirmó su fila `pendiente` y todavía está esperando la respuesta de
+        # MP. El índice único parcial rechazó ESTE INSERT, así que esta
+        # solicitud nunca llega a crear un segundo `preapproval`. Es un 409 de
+        # negocio (no un 500): el alumno ya tiene un alta en curso que puede
+        # retomar desde su suscripción.
+        db.rollback()
+        if not es_suscripcion_pendiente_duplicada(error):
+            raise
+        logger.info("MP suscripciones: el alumno %s ya tiene una suscripción "
+                    "'pendiente' del plan %s en proceso; no se crea otra",
+                    alumno_id, plan.id)
+        raise ErrorSuscripcion(MENSAJE_EN_PROCESO, 409) from error
 
     referencia = f"sus:{suscripcion.id}"
     try:
