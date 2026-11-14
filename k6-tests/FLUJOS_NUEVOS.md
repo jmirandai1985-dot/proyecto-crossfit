@@ -14,6 +14,13 @@ la auditoría de `REPORTE_SESION_MANTENIMIENTO.md` (§6). Todos reutilizan el
 | `scenario_g6_bazar_voucher_admin.js` | Admin aprueba el voucher (carrera: N VUs, 1 gana) y rechaza otro con devolución de stock | `PUT /api/v1/pedidos/{id}/estado?nuevo_estado=validado`, `POST /api/v1/pedidos/{id}/rechazar` | admin |
 | `scenario_g7_coach_asistencia.js` | Coach abre su clase de hoy y confirma la asistencia de toda la clase | `GET /api/v1/asistencia/clases-hoy`, `GET .../clases/{id}/alumnos`, `POST .../clases/{id}/confirmar` | coach |
 | `scenario_g8_activar_alumno.js` | Cola de activación: aprobar en carrera, activar dos veces y rechazar | `PUT /api/v1/solicitudes/{id}/aprobar`, `PUT /api/v1/alumnos/{id}/{activar,rechazar}` | admin |
+| `scenario_g9_pago_mercadopago.js` | Checkout recurrente en carrera + webhook firmado reenviado (idempotencia) | `POST /api/v1/pagos/suscripcion`, `POST /api/v1/pagos/webhook/mercadopago` | alumno / nadie (firma HMAC) |
+| `scenario_g10_alumno_nuevo_e2e.js` | Alta pública end-to-end: correo de credenciales + plan "Prueba" de 7 días | `POST /api/v1/alumnos/registro/alumno-nuevo` | público |
+| `scenario_g11_referidos_conversion.js` | Referidos con conversión real: % del invitado, créditos FIFO del invitador y escalera de tramos | `POST /registro/alumno-nuevo`, `POST /referidos/validar-codigo`, `POST /solicitudes/solicitar`, `PUT /solicitudes/{id}/aprobar`, `GET /referidos/mi-progreso` | público + alumno + admin |
+| `scenario_g12_reactivacion.js` | Reactivación: candidato del padrón → oferta → alta → promoción aplicada → "recuperado" | `POST /api/v1/alumnos/registro/alumno-nuevo` (verificación en BD) | público |
+| `scenario_g13_mis_wods.js` | Ciclo de WODs con concurrencia: coach crea/publica/asigna + N alumnos leen pendientes y registran resultado | `POST/PUT /wods/`, `POST /wods/clases/{id}/asignar-wod/{wod}`, `GET /alumnos/me/wods-pendientes`, `POST /alumnos/me/wods/{wod}/resultado` | coach + alumno |
+| `scenario_g14_activacion_e2e.js` | Activación end-to-end: activar → correo → login temporal (sin cookie) → cambio de clave → login real (con cookie) → solicitud de plan | `PUT /alumnos/{id}/activar`, `POST /auth/login`, `POST /auth/cambiar-password-inicial`, `POST /solicitudes/solicitar` | admin + alumno |
+
 
 `lib/config_flujos.js` es el único módulo compartido nuevo: lee el **mismo**
 `load_config.json` y expone `BASE_URL`, `ADMIN_TOKEN`, `COACH_TOKEN`,
@@ -549,5 +556,200 @@ Esa corrida contra un puerto muerto destapó tres cosas ya corregidas:
 
 Referencias: `REPORTE_SESION_MANTENIMIENTO.md` §6 (por qué estos 8 flujos,
 endpoints y códigos verificados) y §2 (TD-2: falta el seed y los verificadores).
+
+
+## 10. Flujos G9–G14 (ampliación del 2026-11-13)
+
+Seis escenarios más, con el **mismo patrón** que G1–G8: `lib/config_flujos.js`,
+`load_config.json` generado por `_seed_load_test.py`, verificación post-test en
+`_verificar_escenarios.py` y thresholds basados en LÍNEA BASE medida (no en un
+SLO inventado). La suite completa queda en **20 escenarios** (A–D, E, F1, F2,
+G1–G14); los 14 anteriores no se modificaron.
+
+| Escenario | Sub-escenarios | Lo que mide de nuevo |
+|---|---|---|
+| `scenario_g9_pago_mercadopago.js` | `intencion` (N VUs sobre el MISMO alumno/plan) + `webhook` (1 VU × 3 reintentos) | idempotencia del alta recurrente y del webhook firmado |
+| `scenario_g10_alumno_nuevo_e2e.js` | 1 | alta pública completa: 201 + correo registrado + Prueba 7 días |
+| `scenario_g11_referidos_conversion.js` | `invitados` (3 VUs) + `compra_invitador` (1 VU, t+30 s) | conversión real, % individual, créditos FIFO y escalera |
+| `scenario_g12_reactivacion.js` | `recuperacion` (N) + `promocion_vencida` (1) | promoción aplicada automáticamente al volver |
+| `scenario_g13_mis_wods.js` | `coach` (1) + `alumnos` (N) | ciclo del WOD de punta a punta sin pisar resultados |
+| `scenario_g14_activacion_e2e.js` | 1 | cookie de sesión: 1er login SIN, 2º login CON |
+
+### 10.1 Claves nuevas en `load_config.json`
+
+Las escribe `_seed_load_test.py` (igual que las de §2). Ninguna rompe a los
+escenarios viejos: `lib/config_flujos.js` las expone con default `null`/`[]` y
+el escenario que las necesita corta con un mensaje explícito.
+
+| Clave | De dónde sale (SELECT) | Para qué |
+|---|---|---|
+| `n_g9` … `n_g14` | constantes del seed (`N_G9`…`N_G14`) | VUs/iteraciones de cada escenario |
+| `alumno_g9` `{alumno_id, correo, token}` | `SELECT id, correo FROM usuarios WHERE correo = '<comprador de prueba de MP>'` (ver §10.3.10) | el alumno de la carrera de `/pagos/suscripcion` |
+| `mp_webhook_secret` | `MERCADOPAGO_WEBHOOK_SECRET` de `backend/.env.test` | firmar el aviso (HMAC) igual que MP |
+| `mp_webhook_notificacion_id` | UUID nuevo en cada seed | clave de idempotencia (`pagos_eventos.notificacion_id`) |
+| `mp_webhook_payment_id` | `GET https://api.mercadopago.com/v1/payments/search` (SÓLO lectura) con el token TEST | `data.id` del aviso: el backend lo RELEE en MP |
+| `mp_webhook_reintentos` | constante (`3`) | cuántas veces se reenvía el MISMO aviso |
+| `correos_g10` | generados (`carga_k6_g10_NN@k6load.com`) | un correo único por VU (el seed **no** crea estos usuarios) |
+| `invitador_g11` `{alumno_id, correo, codigo, token}` | `usuarios` + `codigos_referido` del invitador A | código que usan los invitados |
+| `invitados_g11` `[{alumno_id, correo, token}]` | usuarios `carga_k6_g11inv*` (plan **Prueba**) | convierten el código y compran su primer plan |
+| `correos_g11_alta` | generados (`carga_k6_g11_alta_NN@k6load.com`) | altas reales del flujo G10 dentro de G11 |
+| `tramo_g11_umbral` | `SELECT umbral_referidos FROM tramos_referido WHERE tenant_id = 1 AND activo` | umbral que se espera alcanzado (3) |
+| `candidatos_g12` `[{correo, candidato_id, promocion_id, tipo_beneficio, cantidad}]` | `candidatos_boxmagic` + `promociones_recuperacion` del seed | padrón → oferta `enviada` vigente |
+| `candidato_vencido_g12` `{correo, candidato_id, promocion_id}` | idem, con `vence_en < now()` | control negativo: no debe quedar `recuperado` |
+| `alumnos_g13` `[{alumno_id, correo, token}]` | usuarios `carga_k6_g13a*` con plan de pago | un alumno por VU |
+| `wod_g13_id` / `clase_g13_id` | `wods` (`titulo='K6 G13 WOD'`, publicado) + `clases` de HOY con `wod_id` | WOD pendiente + clase con asistencia |
+| `clase_g13_coach_id` | `clases` de HOY vacía | el coach le asigna el WOD que crea por API |
+| `hoy_chile` | `date` de Chile al momento del seed | fecha del WOD del coach (no la UTC) |
+| `alumnos_g14` `[{alumno_id, correo}]` | usuarios `carga_k6_g14p*` en `pendiente_activacion` | cola de activación propia (sin solicitud) |
+
+`seed.tramos_g11_creados` y `seed.mp_notificacion_id` se guardan en la metadata
+para que la limpieza del PRÓXIMO seed borre exactamente lo que creó éste.
+
+### 10.2 Qué siembra el seed (y qué borra)
+
+Además de lo de §1, `_seed_load_test.py` ahora:
+
+- crea 1 alumno para G9, 1 invitador + 3 invitados para G11, 5 alumnos para G13
+  y 3 `pendiente_activacion` para G14 (todos `carga_k6_*`, con suscripción
+  cuando corresponde);
+- crea el WOD `K6 G13 WOD` (publicado, AMRAP 12) + una clase de HOY con
+  `asistio=True` para los 5 alumnos + una clase vacía para el coach, y
+  `coach_disciplinas` para el coach del seed (sin eso `POST /wods/` da 403);
+- crea los candidatos del padrón con sus promociones `enviada` (uno vencido);
+- **crea la escalera de tramos 1/2/3 para el tenant de TEST** (`tramos_referido`)
+  si esos umbrales faltan — es **dato de prueba**, se documenta acá y se borra
+  en la limpieza por los ids guardados en `seed.tramos_g11_creados`;
+- elige un pago REAL de la cuenta TEST de MP (lectura) para el `data.id` del
+  webhook y genera un `notificacion_id` nuevo;
+- limpia TODO lo anterior en cada corrida (usuarios `carga_k6_*`, candidatos,
+  promociones, tramos y eventos del seed anterior, WODs `K6 G13*`/`G13 K6*`).
+
+Tres ajustes del seed que **no** cambian los escenarios existentes pero sí sus
+datos de prueba (medidos en la corrida completa del 2026-11-13):
+
+- **La clase de G7 lleva 30 alumnos y termina ~5 min antes del seed.** Antes
+  tenía los mismos 500 alumnos y el mismo horario que la clase del QR: (a) el
+  check-in de TODOS respondía `ambiguo` (dos clases en la ventana) y G1 no
+  marcaba a nadie, y (b) `confirmar` hace un UPDATE por reserva y con 500
+  reservas × 5 VUs cada request pasaba el timeout de 60 s de k6. Con 30 (una
+  clase real) y una ventana que ya cerró, G1 marca 20/20 y G7 confirma 30/30.
+  El backend sólo exige el mismo DÍA para marcar, así que G7 sigue siendo válido.
+- **Los WODs de G13 se titulan `G13 K6 …`, no `K6 G13 …`.** El verificador de
+  G2 filtra `titulo LIKE 'K6 %'` y contaba los WODs de G13 como suyos ("1 fuera
+  de draft", "1 vacío").
+- **Códigos de referido para los 500 alumnos** (antes sólo `N_D` = 20): el
+  verificador de G4 exige que cada alumno de `tokens.json` tenga el suyo y con
+  `--alumnos 500` daba "20 vs 500". Generarlos uno por uno con
+  `asignar_codigo_referido` agrega ~2-3 min al seed.
+
+
+### 10.3 Decisiones y límites (leer antes de correr)
+
+1. **Correos de las altas (`k6load.com`, no `load.test`).** El alta pública usa
+   `EmailStr` y pydantic RECHAZA los dominios reservados (`.test`, `.example`):
+   con `@load.test` el endpoint responde 422 antes de llegar al handler. Por eso
+   los correos que pasan por la API usan `@k6load.com`, pero conservan el
+   prefijo `carga_k6_` para que la limpieza los borre.
+2. **IP simulada por VU (`X-Forwarded-For`).** `POST /registro/alumno-nuevo` es
+   `5/hour/IP` y `POST /auth/login` `5/minute/IP` (`app/core/rate_limit.py`).
+   Todos los VUs de k6 salen de 127.0.0.1, así que sin esto el escenario mediría
+   el limitador (a partir del 6º registro todo sería 429). G10–G14 mandan
+   `10.<escenario>.0.<VU>`; uvicorn local confía en 127.0.0.1 (`proxy_headers`
+   default de 0.27) y cada VU cae en su propio bucket. **Escenario A sigue
+   midiendo el límite REAL** (no manda el header).
+3. **G11 no puede seguir con el usuario recién creado.** Con `EMAIL_MODO=noop`
+   el alta NO devuelve `password_provisional` (el correo se "envía" simulado),
+   así que el VU no puede autenticarse como ese alumno. Los pasos de conversión
+   los hace el invitado **sembrado** (plan Prueba, sin compra pagada: el estado
+   exacto de un alumno recién registrado). G11 igual hace el alta real por API
+   (paso 1) y el verificador la comprueba junto con las conversiones.
+4. **La escalera premia al CIERRE del ciclo.** `evaluar_ciclos` corre en el job
+   diario, no en la compra: con el ciclo de A abierto no hay
+   `premios_tramo_ciclo`. El escenario y el verificador comprueban la REGLA
+   (`tramos_referidos_service.umbral_mas_alto(3, tramos)` = SÓLO el tramo 3) y
+   que el ciclo no haya generado 3 premios; no inventan el premio que el job
+   todavía no emitió.
+5. **G9a usa un pago REAL de MP como `data.id`.** El webhook relee
+   `payment().get(id)`: con un id inventado el evento queda `resultado='error'`
+   (pendiente de reconciliación) en vez de cerrar como `desconocido`. La
+   consulta es de SÓLO lectura y la hace el seed (fallback:
+   `MP_PAYMENT_ID_FALLBACK`).
+6. **G9a crea `preapproval`s `pending` en la cuenta TEST de MP** (uno por 200).
+   Es el mismo efecto que un doble clic real; se cancelan desde el panel de MP.
+   No se cobra nada: el checkout no se abre.
+7. **G10–G14 requieren seed fresco.** Borran/crean usuarios con correos y RUT
+   fijos; volver a correrlos sin resembrar da 400 (correo/RUT ya usados) en G10/
+   G11/G12, 409 en G14 y `g13_pendiente_ausente` en G13. Es el mismo criterio
+   que G3/G6/G8.
+8. **`hoy_chile`** existe porque `new Date().toISOString()` da la fecha UTC: una
+   corrida a las 21:00 de Chile crearía el WOD con la fecha del día siguiente.
+9. **G14 limpia el cookie jar** antes de `POST /solicitudes/solicitar`: el 2º
+   login deja la cookie httpOnly y `get_current_user` la prefiere sobre el
+   Bearer; un POST autenticado por cookie exige `X-CSRF-Token` (double-submit).
+   Con el jar limpio se manda el Bearer y no hace falta el CSRF (es el camino
+   que el backend mantiene para clientes/tests: `core/dependencies.py`).
+10. **G9a necesita DOS cosas del entorno de TEST** (sin ellas el endpoint
+    responde 503 fail-closed y no hay carrera que medir):
+    - `MERCADOPAGO_BACK_URL_BASE` con **https** en el proceso del backend. MP
+      exige `back_url` en `POST /preapproval` y `_url_retorno_suscripcion` la
+      omite si no es https (en `.env.test` `FRONTEND_URL` es http://192.168…),
+      así que MP devuelve 400 "back_url is required". Para la corrida de
+      validación se levantó el backend con
+      `MERCADOPAGO_BACK_URL_BASE=https://test.k6load.com`.
+    - Un **comprador de prueba** de la cuenta TEST como `payer_email` del
+      alumno: MP rechaza un correo cualquiera con "Both payer and collector must
+      be real or test users" (y tampoco acepta el correo del propio cobrador).
+      El seed usa `MERCADOPAGO_TEST_BUYER_EMAIL` si está definido; si no, crea
+      UNO con `POST /users/test_user` (sandbox) y lo guarda en
+      `seed.mp_test_user_email` para reusarlo en las corridas siguientes. Por eso
+      el alumno de G9 puede no llevar el prefijo `carga_k6_`: la limpieza lo
+      borra también por el id anotado en `seed.alumno_g9_id`.
+11. **Hallazgo de la primera corrida (documentado, NO corregido acá):**
+    `POST /pagos/suscripcion` no es atómico. Con 5 VUs sobre el mismo alumno y
+    plan, los 5 devolvieron 200 con `suscripcion_id` DISTINTO (6636…6640) y la
+    BD quedó con 5 `suscripciones` **pendientes** y 5 `preapproval` en MP para
+    la misma persona/plan: `_previa_reutilizable` filtra por
+    `mp_preapproval_id IS NOT NULL` y esa columna se escribe recién DESPUÉS de
+    llamar a MP, así que todos leen "no hay previa" (falta un lock o un UNIQUE
+    parcial por alumno+plan). El verificador g9 lo marca como FALLO a propósito:
+    es exactamente lo que el escenario tenía que medir.
+
+
+### 10.4 Cómo correr los 6 nuevos
+
+```powershell
+python k6-tests\_seed_load_test.py --alumnos 500     # F2 usa 500 VUs
+k6 run k6-tests\scenario_g9_pago_mercadopago.js
+k6 run k6-tests\scenario_g10_alumno_nuevo_e2e.js
+k6 run k6-tests\scenario_g11_referidos_conversion.js
+k6 run k6-tests\scenario_g12_reactivacion.js
+k6 run k6-tests\scenario_g13_mis_wods.js
+k6 run k6-tests\scenario_g14_activacion_e2e.js
+python k6-tests\_verificar_escenarios.py g9
+# ... g10, g11, g12, g13, g14 (o `todos` al final de la suite)
+```
+
+⚠️ Como en §9: **sólo TEST**. G9 crea `preapproval`s en la cuenta sandbox de
+MP, G11/G12 crean usuarios y créditos, G14 activa usuarios y cambia contraseñas.
+`mp_webhook_secret` y los JWT de `alumno_g9`/`invitados_g11`/`alumnos_g13`
+viajan en `load_config.json`: no versionar ese archivo.
+
+### 10.5 Orden recomendado para la corrida completa (20 escenarios)
+
+Correr **primero los G\*** (cada uno seguido de su verificador) y dejar los de
+500 VUs (A/B/F1/F2) y el mix (C/D/E) al final. Motivos medidos:
+
+- A/B/F2 saturan el pool de Neon (10+5) y el escenario siguiente empieza a ver
+  `status 0` (timeouts de cliente) aunque la API esté sana: así fallaban G1/G7
+  en la primera corrida completa.
+- C y E aprueban las 20 solicitudes del seed y D/E crean pedidos del bazar: si
+  corren antes, los verificadores de G3/G6 ven "pedidos nuevos" que no son suyos
+  (esperan exactamente los 4 del seed).
+
+Orden usado el 2026-11-13 (una sola semilla, sin resembrar entre escenarios):
+`G1 G2 G3 G4 G5 G6 G7 G8 G9 G10 G11 G12 G13 G14 C D E A B F1 F2`, con
+`python k6-tests/_verificar_escenarios.py gX` inmediatamente después de cada GX.
+
+
 
 
