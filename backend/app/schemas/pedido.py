@@ -21,11 +21,17 @@ class PedidoCreate(PedidoBase):
     prueba de la transferencia en el Bazar. La UI ya lo exigía, pero el backend
     aceptaba pedidos sin comprobante (reproducido en TEST: 201 con
     `voucher_url: null`).
+
+    `variante_id` (migración 083) es la talla elegida. Es OBLIGATORIA cuando el
+    producto tiene `tiene_variantes=True` (400 "Debes elegir una talla" si falta)
+    y se IGNORA en los productos sin tallas, que siguen usando el stock plano.
     """
     tenant_id: int = Field(..., gt=0, description="ID del tenant")
     voucher_url: str = Field(
         ..., min_length=1, max_length=500,
         description="URL del comprobante de pago (obligatorio)")
+    variante_id: Optional[int] = Field(
+        None, gt=0, description="Talla/variante elegida (productos con tallas)")
 
 
 class PedidoUpdate(BaseModel):
@@ -70,6 +76,11 @@ class PedidoResponse(_PedidoTrazaRetiro):
     tenant_id: int
     alumno_id: int
     producto_id: int
+    # Talla del pedido (migración 083): `variante_id` es la fila viva (SET NULL al
+    # borrarla) y `talla` es la COPIA del texto al comprar. El historial muestra
+    # SIEMPRE `talla`.
+    variante_id: Optional[int] = None
+    talla: Optional[str] = None
     cantidad: int
     total: float
     estado: str
@@ -95,6 +106,10 @@ class PedidoListItem(_PedidoTrazaRetiro):
     id: int
     alumno_id: int
     producto_id: int
+    # Talla comprada (083): el panel y "Mis pedidos" la muestran al lado del
+    # producto. `talla` es el snapshot; sobrevive aunque la variante se borre.
+    variante_id: Optional[int] = None
+    talla: Optional[str] = None
     cantidad: int
     total: float
     estado: str

@@ -35,6 +35,14 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
     // posición 0 es la portada (`imagen_url`).
     const [fotos, setFotos] = useState([]);
     const [errors, setErrors] = useState({});
+    // ── Tallas/variantes (migración 083) ──────────────────────────────────
+    // El switch nace APAGADO: los productos existentes siguen usando el stock
+    // plano. Encendido, el stock se maneja por talla (lista compacta de filas
+    // talla + stock) y viaja como `variantes_json` en el POST multipart o como
+    // `variantes` en el PUT JSON. Se valida acá para dar feedback inmediato;
+    // el backend lo vuelve a validar (índice único case-insensitive).
+    const [tieneVariantes, setTieneVariantes] = useState(false);
+    const [variantes, setVariantes] = useState([]);   // [{ talla, stock }]
 
     const esEdicion = !!productoEditar;
     // Bloque 3 (parte A): guardar invalida `['productos']`, el prefijo que comparten el
@@ -60,6 +68,14 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
                         ? String(productoEditar.descuento_pct) : '',
                     activo: productoEditar.activo !== undefined ? productoEditar.activo : true,
                 });
+                // Tallas del producto (083). `productoEditar.stock` ya viene como
+                // la SUMA de las tallas activas, así que sirve de arranque si el
+                // admin apaga el switch y vuelve al stock plano.
+                setTieneVariantes(Boolean(productoEditar.tiene_variantes));
+                setVariantes((productoEditar.variantes || []).map((variante) => ({
+                    talla: variante.talla || '',
+                    stock: String(variante.stock ?? 0),
+                })));
             } else {
                 // Limpiar formulario para nuevo producto
                 setFormData({
@@ -72,6 +88,8 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
                     descuento_pct: '',
                     activo: true,
                 });
+                setTieneVariantes(false);
+                setVariantes([]);
             }
             setErrors({});
 
@@ -155,6 +173,22 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
         });
     };
 
+    // ── Tallas: filas editables del modal (083) ──────────────────────────────
+    const agregarVariante = () => setVariantes((prev) => [...prev, { talla: '', stock: '0' }]);
+
+    const actualizarVariante = (indice, campo, valor) => setVariantes((prev) => prev.map(
+        (variante, posicion) => (posicion === indice ? { ...variante, [campo]: valor } : variante),
+    ));
+
+    const quitarVariante = (indice) => setVariantes(
+        (prev) => prev.filter((_, posicion) => posicion !== indice));
+
+    /** Tallas listas para el backend: texto recortado y stock numérico. */
+    const variantesParaEnviar = () => variantes.map((variante) => ({
+        talla: (variante.talla || '').trim(),
+        stock: parseInt(variante.stock, 10) || 0,
+    }));
+
     const validateForm = () => {
         const newErrors = {};
 
@@ -162,8 +196,35 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
         if (formData.nombre.length > 150) newErrors.nombre = 'Máximo 150 caracteres';
         if (!formData.precio) newErrors.precio = 'Precio requerido';
         if (formData.precio && parseFloat(formData.precio) <= 0) newErrors.precio = 'Precio debe ser mayor a 0';
-        if (formData.stock === '' || formData.stock === undefined) newErrors.stock = 'Stock requerido';
-        if (formData.stock !== '' && parseInt(formData.stock) < 0) newErrors.stock = 'Stock no puede ser negativo';
+        // Con tallas el stock del producto NO se pide: se carga por fila.
+        if (!tieneVariantes) {
+            if (formData.stock === '' || formData.stock === undefined) newErrors.stock = 'Stock requerido';
+            if (formData.stock !== '' && parseInt(formData.stock) < 0) newErrors.stock = 'Stock no puede ser negativo';
+        } else {
+            // Validación de tallas ANTES de enviar (el backend igual la repite):
+            // al menos una, sin vacías, máximo 30 caracteres y sin duplicados
+            // CASE-INSENSITIVE ('S' y 's' son la misma talla).
+            const tallas = variantes.map((variante) => (variante.talla || '').trim());
+            const vistas = new Set();
+            let repetida = null;
+            for (const talla of tallas) {
+                const clave = talla.toLowerCase();
+                if (vistas.has(clave)) { repetida = talla; break; }
+                vistas.add(clave);
+            }
+            if (!tallas.length) {
+                newErrors.variantes = 'Agrega al menos una talla.';
+            } else if (tallas.some((talla) => !talla)) {
+                newErrors.variantes = 'Completa el nombre de cada talla.';
+            } else if (tallas.some((talla) => talla.length > 30)) {
+                newErrors.variantes = 'Máximo 30 caracteres por talla.';
+            } else if (repetida) {
+                newErrors.variantes = `Ya existe la talla '${repetida}' para este producto.`;
+            } else if (variantes.some((variante) => variante.stock === ''
+                || parseInt(variante.stock) < 0)) {
+                newErrors.variantes = 'El stock de cada talla debe ser 0 o más.';
+            }
+        }
         if (formData.stock_minimo !== '' && formData.stock_minimo !== undefined
             && parseInt(formData.stock_minimo) < 0) newErrors.stock_minimo = 'El stock mínimo no puede ser negativo';
         // Días de anuncio en el Inicio del alumno (0 = no anunciar).
@@ -194,7 +255,9 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
                     nombre: formData.nombre,
                     descripcion: formData.descripcion || null,
                     precio: parseFloat(formData.precio),
-                    stock: parseInt(formData.stock),
+                    // Con tallas el stock plano queda en 0 (el real es la suma de
+                    // las tallas, calculada por el backend en la respuesta).
+                    stock: tieneVariantes ? 0 : parseInt(formData.stock),
                     stock_minimo: (formData.stock_minimo === '' || formData.stock_minimo === undefined)
                         ? null : parseInt(formData.stock_minimo),
                     // Días de anuncio en el carrusel del Inicio: el backend crea,
@@ -204,6 +267,11 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
                     descuento_pct: (formData.descuento_pct === '' || formData.descuento_pct === undefined)
                         ? null : parseInt(formData.descuento_pct),
                     activo: formData.activo,
+                    // Tallas (083): con el switch encendido se manda la lista
+                    // COMPLETA (reemplaza el set). Apagado se omite a propósito:
+                    // las tallas quedan guardadas (dormidas) por si se reactiva.
+                    tiene_variantes: tieneVariantes,
+                    ...(tieneVariantes ? { variantes: variantesParaEnviar() } : {}),
                 };
                 // El PUT es JSON y no puede llevar archivos: la galería se manda
                 // aparte. `eliminar` son las fotos guardadas que ya no están en la
@@ -230,7 +298,14 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
                 data.append('nombre', formData.nombre);
                 data.append('descripcion', formData.descripcion || '');
                 data.append('precio', parseFloat(formData.precio));
-                data.append('stock', parseInt(formData.stock));
+                // Con tallas el stock plano va en 0: el stock real son las filas
+                // de `variantes_json` (el POST es multipart y no acepta un Form
+                // anidado, así que la lista viaja serializada).
+                data.append('stock', tieneVariantes ? 0 : parseInt(formData.stock));
+                data.append('tiene_variantes', tieneVariantes);
+                if (tieneVariantes) {
+                    data.append('variantes_json', JSON.stringify(variantesParaEnviar()));
+                }
                 if (formData.stock_minimo !== '' && formData.stock_minimo !== undefined) {
                     data.append('stock_minimo', parseInt(formData.stock_minimo));
                 }
@@ -260,6 +335,8 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
                 activo: true,
             });
             setFotos([]);
+            setTieneVariantes(false);
+            setVariantes([]);
             setErrors({});
 
             if (onSuccess) onSuccess();
@@ -320,20 +397,105 @@ const ModalProducto = ({ isOpen, onClose, onSuccess, productoEditar }) => {
                             {errors.precio && <p className="text-xs text-red-600 mt-1">{errors.precio}</p>}
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Stock *
-                            </label>
-                            <input
-                                type="number"
-                                value={formData.stock}
-                                onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-                                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 ${errors.stock ? 'border-red-500' : 'border-gray-300'}`}
-                                min="0"
-                                placeholder="0"
-                            />
-                            {errors.stock && <p className="text-xs text-red-600 mt-1">{errors.stock}</p>}
+                        {/* Con tallas el stock NO es un número plano: se carga por
+                            fila en el bloque de abajo (083). */}
+                        {tieneVariantes ? (
+                            <div className="flex items-end">
+                                <p className="pb-2 text-xs text-gray-500">
+                                    El stock se carga por talla, más abajo.
+                                </p>
+                            </div>
+                        ) : (
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Stock *
+                                </label>
+                                <input
+                                    type="number"
+                                    value={formData.stock}
+                                    onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
+                                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 ${errors.stock ? 'border-red-500' : 'border-gray-300'}`}
+                                    min="0"
+                                    placeholder="0"
+                                />
+                                {errors.stock && <p className="text-xs text-red-600 mt-1">{errors.stock}</p>}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* ── Tallas/variantes (migración 083) ──
+                        Switch APAGADO por defecto: el producto nace con el stock
+                        plano y el admin agrega tallas cuando las necesita. */}
+                    <div className="rounded-lg border border-gray-200 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                                <label htmlFor="tiene_variantes" className="block text-sm font-medium text-gray-700">
+                                    Este producto tiene tallas
+                                </label>
+                                <p className="mt-0.5 text-xs text-gray-500">
+                                    Maneja el stock por talla (S, M, L, sabores, números…).
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                id="tiene_variantes"
+                                role="switch"
+                                aria-checked={tieneVariantes}
+                                onClick={() => setTieneVariantes((prev) => !prev)}
+                                className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors ${tieneVariantes ? 'border-orange-500 bg-orange-500' : 'border-gray-300 bg-gray-200'}`}
+                            >
+                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${tieneVariantes ? 'translate-x-6' : 'translate-x-1'}`} />
+                            </button>
                         </div>
+
+                        {tieneVariantes && (
+                            <div className="mt-3 space-y-2">
+                                {variantes.length === 0 && (
+                                    <p className="text-xs text-gray-500">Sin tallas todavía. Agrega la primera.</p>
+                                )}
+                                {variantes.map((variante, indice) => (
+                                    <div key={indice} className="flex items-center gap-2">
+                                        <input
+                                            type="text"
+                                            value={variante.talla}
+                                            onChange={(e) => actualizarVariante(indice, 'talla', e.target.value)}
+                                            maxLength="30"
+                                            placeholder="Talla"
+                                            aria-label={`Nombre de la talla ${indice + 1}`}
+                                            className="min-w-0 flex-1 rounded-lg border border-gray-300 px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                        />
+                                        <input
+                                            type="number"
+                                            value={variante.stock}
+                                            onChange={(e) => actualizarVariante(indice, 'stock', e.target.value)}
+                                            min="0"
+                                            placeholder="0"
+                                            aria-label={`Stock de la talla ${indice + 1}`}
+                                            className="w-24 shrink-0 rounded-lg border border-gray-300 px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => quitarVariante(indice)}
+                                            aria-label={`Quitar la talla ${indice + 1}`}
+                                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-red-200 text-red-600 transition-colors hover:bg-red-50"
+                                        >
+                                            ×
+                                        </button>
+                                    </div>
+                                ))}
+                                <button
+                                    type="button"
+                                    onClick={agregarVariante}
+                                    className="w-full rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:border-orange-400 hover:text-orange-600"
+                                >
+                                    + Agregar talla
+                                </button>
+                                {errors.variantes && <p className="text-xs text-red-600">{errors.variantes}</p>}
+                                <p className="text-xs text-gray-500">
+                                    El stock del producto será la suma de sus tallas.
+                                </p>
+                            </div>
+                        )}
                     </div>
 
                     <div>

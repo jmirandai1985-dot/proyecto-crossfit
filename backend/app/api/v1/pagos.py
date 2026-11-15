@@ -146,6 +146,9 @@ def pagar_bazar(
             current_user=current_user,
             producto_id=datos.producto_id,
             cantidad=datos.cantidad,
+            # Talla elegida (migración 083): obligatoria si el producto tiene
+            # variantes; el servicio valida y descuenta ESA fila.
+            variante_id=datos.variante_id,
         )
     except mp.PagoOnlineNoDisponible as error:
         raise _no_disponible(error)

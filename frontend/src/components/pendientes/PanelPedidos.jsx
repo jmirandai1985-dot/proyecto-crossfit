@@ -172,6 +172,11 @@ const PanelPedidos = () => {
                                         </td>
                                         <td className="px-4 py-3 text-sm text-zinc-200">
                                             {p.producto_nombre || `Producto #${p.producto_id}`}
+                                            {/* Talla comprada (migración 083): snapshot del
+                                                texto, sobrevive al borrado de la variante. */}
+                                            {p.talla && (
+                                                <span className="block text-[11px] text-zinc-400">Talla {p.talla}</span>
+                                            )}
                                             {p.cantidad > 1 && (
                                                 <span className="block text-[11px] text-zinc-400">× {p.cantidad}</span>
                                             )}
@@ -265,6 +270,7 @@ const PanelPedidos = () => {
                             <h3 className="font-bold text-zinc-100">
                                 📎 Comprobante del pedido #{comprobante.id}
                                 {comprobante.producto_nombre ? ` · ${comprobante.producto_nombre}` : ''}
+                                {comprobante.talla ? ` · Talla ${comprobante.talla}` : ''}
                             </h3>
                             <button onClick={() => setComprobante(null)}
                                 className="text-zinc-400 hover:text-zinc-300 text-xl font-bold">✕</button>

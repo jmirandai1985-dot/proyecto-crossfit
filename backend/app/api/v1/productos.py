@@ -1,15 +1,21 @@
 """
 Router de endpoints para gestión de Productos
 """
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 from typing import List, Optional
 
 from app.db.database import get_db
-from app.models.producto import Producto, ProductoImagen
+from app.models.producto import (
+    Producto, ProductoImagen, ProductoVariante, es_talla_duplicada,
+)
 from app.schemas.producto import (
     ProductoUpdate, ProductoResponse, ProductoListItem,
-    ProductoImagenResponse, ProductoImagenesOrden,
+    ProductoImagenResponse, ProductoImagenesOrden, ProductoVarianteInput,
 )
 from app.core.dependencies import get_current_admin, get_current_user, require_full_access
 # La subida de imágenes PÚBLICAS vive en un módulo compartido: la usan la foto del
@@ -30,6 +36,137 @@ router = APIRouter(dependencies=[Depends(require_full_access)])
 # puede eliminar. `imagen_url` sigue siendo la portada derivada (orden=0) para
 # que el carrusel "Novedades del box" y las tarjetas no cambien.
 MAX_IMAGENES_PRODUCTO = 5
+
+# Tope de tallas por producto (migración 083). No lo pide el negocio, pero evita
+# que un payload enorme deje la fila del Bazar o el modal sin poder renderizarse.
+MAX_VARIANTES_PRODUCTO = 100
+
+
+# ── Helpers de tallas/variantes (migración 083) ───────────────────────────────
+# El texto de la talla es LIBRE (S/M/L, sabores, numeración) y la unicidad la
+# garantiza el índice FUNCIONAL `uq_producto_variantes_producto_talla` sobre
+# `(producto_id, lower(talla))`. Acá se valida antes para dar el mensaje exacto
+# con el nombre de la talla, y se traduce el IntegrityError como última red.
+def _mensaje_talla_duplicada(talla: Optional[str]) -> str:
+    """Mensaje de negocio del índice único de tallas (el que ve el admin)."""
+    if talla:
+        return f"Ya existe la talla '{talla}' para este producto."
+    return "Ya existe una talla repetida para este producto."
+
+
+def _normalizar_variantes(variantes: Optional[List[ProductoVarianteInput]]) -> List[dict]:
+    """Valida y normaliza la lista de tallas que manda el admin.
+
+    - recorta espacios (el Form y el PUT llegan crudos),
+    - rechaza una talla vacía,
+    - rechaza duplicados CASE-INSENSITIVE antes de tocar la BD: 'S' y 's' son la
+      MISMA talla para el admin, aunque en Postgres sean textos distintos.
+    """
+    normalizadas = []
+    vistas = {}
+    for item in variantes or []:
+        talla = " ".join((item.talla or "").split())
+        if not talla:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La talla no puede estar vacía.",
+            )
+        clave = talla.lower()
+        if clave in vistas:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_mensaje_talla_duplicada(vistas[clave]),
+            )
+        vistas[clave] = talla
+        normalizadas.append({"talla": talla, "stock": int(item.stock or 0)})
+
+    if len(normalizadas) > MAX_VARIANTES_PRODUCTO:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Máximo {MAX_VARIANTES_PRODUCTO} tallas por producto.",
+        )
+    return normalizadas
+
+
+def _parsear_variantes_json(crudo: Optional[str]) -> List[dict]:
+    """Lee `variantes_json` del POST multipart (lista de `{talla, stock}`).
+
+    El POST es multipart por las fotos, así que la lista no puede viajar como
+    Form anidado: el front la serializa y acá se revalida con el schema, igual
+    que un body JSON normal.
+    """
+    if not crudo or not crudo.strip():
+        return []
+    try:
+        datos = json.loads(crudo)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El formato de las tallas no es válido.",
+        )
+    if not isinstance(datos, list):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Las tallas deben venir como una lista.",
+        )
+    try:
+        variantes = [ProductoVarianteInput(**item) for item in datos]
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cada talla necesita un nombre de hasta 30 caracteres y un stock válido.",
+        )
+    return _normalizar_variantes(variantes)
+
+
+def _reemplazar_variantes(db: Session, producto: Producto,
+                          variantes: List[dict]) -> None:
+    """Deja las tallas del producto EXACTAMENTE como la lista recibida.
+
+    Se compara por talla normalizada (`lower`) porque el front manda texto, no
+    ids: se borran las que ya no están, se actualiza el stock de las que siguen y
+    se crean las nuevas. `activo` se conserva en las existentes.
+
+    Borrar una talla NO rompe el historial: `pedidos.variante_id` es ON DELETE
+    SET NULL y `pedidos.talla` ya guardó el texto al momento de comprar (083).
+    """
+    existentes = {v.talla.lower(): v for v in producto.variantes}
+    recibidas = set()
+    for item in variantes:
+        clave = item["talla"].lower()
+        recibidas.add(clave)
+        actual = existentes.get(clave)
+        if actual is None:
+            db.add(ProductoVariante(producto_id=producto.id,
+                                    talla=item["talla"], stock=item["stock"]))
+        else:
+            # Se conserva el texto guardado (el admin pudo escribir "S" y mandar
+            # "s"): sólo se actualiza el stock.
+            actual.stock = item["stock"]
+    for clave, variante in existentes.items():
+        if clave not in recibidas:
+            db.delete(variante)
+
+
+def _talla_en_conflicto(db: Session, producto_id: int,
+                        tallas: List[str]) -> Optional[str]:
+    """Cuál de esas tallas ya existe en la BD (para el 400 del índice único).
+
+    Sólo se usa en el camino de error (carrera entre dos guardados), así que la
+    consulta extra no cuesta nada en el caso normal.
+    """
+    if not tallas:
+        return None
+    existentes = {
+        fila[0] for fila in
+        db.query(func.lower(ProductoVariante.talla))
+          .filter(ProductoVariante.producto_id == producto_id)
+          .all()
+    }
+    for talla in tallas:
+        if talla.lower() in existentes:
+            return talla
+    return None
 
 
 # ── Helpers de galería ────────────────────────────────────────────────────────
@@ -77,7 +214,10 @@ def _asegurar_galeria_legacy(db: Session, producto: Producto) -> None:
 def _producto_del_tenant(db: Session, producto_id: int, tenant_id: int,
                          con_imagenes: bool = False) -> Producto:
     """Busca el producto del box del token (o 404). El tenant NUNCA viene del cliente."""
-    query = db.query(Producto)
+    # Las tallas (083) viajan SIEMPRE en la respuesta (`ProductoResponse`), así
+    # que se cargan de una vez con el producto: sin esto la serialización
+    # dispararía un lazy load por producto.
+    query = db.query(Producto).options(selectinload(Producto.variantes))
     if con_imagenes:
         query = query.options(selectinload(Producto.imagenes))
     producto = query.filter(
@@ -107,6 +247,11 @@ async def crear_producto(
     dias_anuncio: Optional[int] = Form(None),
     descuento_pct: Optional[int] = Form(None),
     activo: bool = Form(True),
+    # Tallas/variantes (migración 083). El POST es multipart por las fotos, así
+    # que la lista no puede ser un Form anidado: el front la serializa a JSON y
+    # acá se revalida con `ProductoVarianteInput` (`_parsear_variantes_json`).
+    tiene_variantes: bool = Form(False),
+    variantes_json: Optional[str] = Form(None),
     # `file` es el campo legacy (041) con UNA foto. `files` permite crear el
     # producto y su galería completa en la MISMA petición: si un archivo falla,
     # no queda un producto a medio crear y el admin no duplica al reintentar.
@@ -123,6 +268,17 @@ async def crear_producto(
     # en la BD). Mismo criterio que alumnos.py: strip al guardar.
     nombre = (nombre or "").strip()
     descripcion = (descripcion or "").strip() or None
+
+    # Las tallas se validan ANTES de subir ninguna foto: un payload inválido no
+    # tiene que dejar archivos huérfanos en el almacenamiento. Con el switch
+    # APAGADO la lista se ignora por completo: el producto nace sin variantes.
+    variantes = _parsear_variantes_json(variantes_json) if tiene_variantes else []
+    if tiene_variantes and not variantes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=("Agrega al menos una talla o desactiva "
+                    "«Este producto tiene tallas»."),
+        )
 
     # El orden recibido ES el orden de la galería: `file` (legacy) primero y
     # luego `files`, que es como lo envía el modal (portada = primera foto).
@@ -151,13 +307,18 @@ async def crear_producto(
         nombre=nombre,
         descripcion=descripcion or None,
         precio=precio,
-        stock=stock,
+        # Con tallas, `productos.stock` queda congelado en 0: el stock real vive
+        # en `producto_variantes` y el número que ve el Bazar es la suma de las
+        # tallas activas (calculada al armar la respuesta). No se mantiene un
+        # total redundante en paralelo (decisión de la 083).
+        stock=0 if tiene_variantes else stock,
         stock_minimo=stock_minimo,
         imagen_url=imagen_url,
         dias_anuncio=max(int(dias_anuncio or 0), 0),
         # Descuento manual (migración 072). None/ausente = sin descuento.
         descuento_pct=descuento_pct,
         activo=activo,
+        tiene_variantes=bool(tiene_variantes),
     )
 
     try:
@@ -166,7 +327,25 @@ async def crear_producto(
         for orden, url in enumerate(urls_guardadas):
             db.add(ProductoImagen(producto_id=db_producto.id,
                                   url=url, orden=orden))
+        # Misma transacción que el producto y la galería: si algo falla no queda
+        # un producto con tallas a medias.
+        for variante in variantes:
+            db.add(ProductoVariante(producto_id=db_producto.id,
+                                    talla=variante["talla"],
+                                    stock=variante["stock"]))
         db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        for url in urls_guardadas:
+            storage.borrar_publico(url)
+        if es_talla_duplicada(error):
+            # En el alta es prácticamente imposible (un producto nuevo no choca
+            # con otra talla), pero se traduce igual a 400 y nunca a un 500.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_mensaje_talla_duplicada(None),
+            )
+        raise
     except Exception:
         db.rollback()
         for url in urls_guardadas:
@@ -174,6 +353,9 @@ async def crear_producto(
         raise
 
     db.refresh(db_producto)
+    # La respuesta incluye el desglose de tallas (083): se carga explícitamente
+    # después del commit para no depender de un lazy load.
+    db.refresh(db_producto, ["variantes"])
 
     # El aviso del carrusel del Inicio sale del MISMO guardado: con días de anuncio
     # (>0) se crea/actualiza; con 0 no se anuncia (y se quita el que hubiera).
@@ -197,7 +379,9 @@ async def subir_imagen_producto(
     """
     # 🔒 SEGURIDAD: tenant_id del token (el producto tiene que ser del mismo box).
     tenant_id = current_user["tenant_id"]
-    producto = db.query(Producto).filter(
+    producto = db.query(Producto).options(
+        selectinload(Producto.variantes)
+    ).filter(
         Producto.id == producto_id,
         Producto.tenant_id == tenant_id
     ).first()
@@ -442,9 +626,10 @@ def listar_productos(
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
 
-    # `selectinload` evita N+1 al serializar la galería de cada producto.
+    # `selectinload` evita N+1 al serializar la galería y las tallas de cada producto.
     query = (db.query(Producto)
-               .options(selectinload(Producto.imagenes))
+               .options(selectinload(Producto.imagenes),
+                        selectinload(Producto.variantes))
                .filter(Producto.tenant_id == tenant_id))
 
     if activo is not None:
@@ -483,6 +668,35 @@ def actualizar_producto(
     update_data = producto_data.model_dump(exclude_unset=True)
     imagen_previa = producto.imagen_url
 
+    # ── Tallas/variantes (migración 083) ─────────────────────────────────────
+    # `variantes` NO es una columna: se saca del setattr genérico y se aplica como
+    # reemplazo del set completo. Se valida ANTES de tocar la fila: un payload con
+    # tallas repetidas no puede dejar el producto a medio guardar.
+    variantes_recibidas = (
+        _normalizar_variantes(producto_data.variantes)
+        if producto_data.variantes is not None else None
+    )
+    update_data.pop("variantes", None)
+    # `tiene_variantes` es NOT NULL en la BD: un null explícito se ignora (equivale
+    # a no mandarlo) en vez de romper el UPDATE.
+    if "tiene_variantes" in update_data and update_data["tiene_variantes"] is None:
+        update_data.pop("tiene_variantes")
+    tiene_variantes_final = update_data.get("tiene_variantes",
+                                            producto.tiene_variantes)
+    if tiene_variantes_final:
+        # Encender el switch sin tallas dejaría el producto "agotado" para
+        # siempre: o hay desglose, o el producto vuelve al stock plano.
+        if variantes_recibidas is not None:
+            sin_tallas = not variantes_recibidas
+        else:
+            sin_tallas = not producto.variantes
+        if sin_tallas:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=("Agrega al menos una talla o desactiva "
+                        "«Este producto tiene tallas»."),
+            )
+
     # Si el payload toca `imagen_url` hay que reflejarlo en la galería. Se
     # asegura la fila legacy ANTES del setattr: después ya no sabríamos cuál era
     # la portada si el valor nuevo es null.
@@ -496,6 +710,10 @@ def actualizar_producto(
 
     for field, value in update_data.items():
         setattr(producto, field, value)
+
+    # Reemplazo del set de tallas (crea / actualiza stock / borra las que faltan).
+    if variantes_recibidas is not None:
+        _reemplazar_variantes(db, producto, variantes_recibidas)
 
     if "imagen_url" in update_data:
         imagenes = _imagenes_ordenadas(db, producto.id)
@@ -521,11 +739,36 @@ def actualizar_producto(
     # ── Alerta de stock bajo: si el producto quedó por ENCIMA del umbral
     #    (el admin repuso stock o subió/desactivó el umbral), se rearma el
     #    ciclo para que la próxima bajada vuelva a alertar al admin.
-    if producto.stock_minimo is not None and producto.stock > producto.stock_minimo:
+    #    Con tallas el stock útil es la SUMA de las tallas: `productos.stock`
+    #    queda congelado para estos productos (083).
+    if producto.tiene_variantes:
+        if variantes_recibidas is not None:
+            stock_actual = sum(v["stock"] for v in variantes_recibidas)
+        else:
+            stock_actual = sum((v.stock or 0) for v in producto.variantes if v.activo)
+    else:
+        stock_actual = producto.stock or 0
+    if producto.stock_minimo is not None and stock_actual > producto.stock_minimo:
         producto.alerta_stock_enviada = False
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        if not es_talla_duplicada(error):
+            raise
+        # Última red del índice único (083): dos guardados simultáneos del mismo
+        # producto. Se busca la talla que ya existe para responder el mensaje
+        # exacto del admin en vez de un 500.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_mensaje_talla_duplicada(_talla_en_conflicto(
+                db, producto_id,
+                [v["talla"] for v in (variantes_recibidas or [])])),
+        )
     db.refresh(producto)
+    # El desglose (y el `stock` derivado de la respuesta) se devuelve fresco.
+    db.refresh(producto, ["variantes"])
 
     # El archivo viejo no se deja huérfano: se borra DESPUÉS de que el cambio
     # quedó guardado, y sólo si ya no lo referencia ninguna foto de la galería.

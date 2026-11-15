@@ -23,10 +23,17 @@ class PagoMembresiaRequest(BaseModel):
 
 
 class PagoBazarRequest(BaseModel):
-    """`POST /pagos/bazar`: qué producto y cuántas unidades."""
+    """`POST /pagos/bazar`: qué producto y cuántas unidades.
+
+    `variante_id` (migración 083) es obligatorio cuando el producto tiene tallas:
+    el stock que se reserva es el de ESA talla, no el total del producto. En los
+    productos sin variantes se ignora, igual que en el pedido manual.
+    """
     producto_id: int = Field(..., gt=0, description="ID del producto")
     cantidad: int = Field(1, gt=0, le=99,
                          description="Unidades (el stock se descuenta al crear)")
+    variante_id: Optional[int] = Field(
+        None, gt=0, description="Talla/variante elegida (si el producto tiene tallas)")
 
 
 class PagoCreacionResponse(BaseModel):

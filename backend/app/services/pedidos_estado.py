@@ -25,7 +25,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.models.pedido import Pedido
-from app.models.producto import Producto
+from app.models.producto import Producto, ProductoVariante
 from app.services import codigos_retiro
 from app.services.notificaciones_panel import notificar_alumno
 from app.utils.santiago import ahora_santiago
@@ -132,6 +132,12 @@ def rechazar_pedido(db: Session, pedido: Pedido, motivo: str, *,
     producto bloqueado: dos rechazos simultáneos no devuelven el stock dos veces.
     El llamador ya validó que el pedido estaba `pendiente` (un pedido cobrado se
     devuelve con un reembolso, no con un rechazo).
+
+    Tallas (migración 083): si el pedido trae `variante_id`, lo que se bloquea y
+    repone es la fila de `producto_variantes` (el stock se descontó de ahí). En un
+    producto con variantes `productos.stock` NUNCA se toca: queda congelado.
+    Los dos caminos de la pasarela que devuelven stock (pago rechazado y
+    expiración de un pago no cobrado) pasan por acá, así que heredan la regla.
     """
     motivo = (motivo or "").strip()
     producto = (
@@ -140,7 +146,18 @@ def rechazar_pedido(db: Session, pedido: Pedido, motivo: str, *,
         .with_for_update()
         .first()
     )
-    if producto is not None:
+    variante = None
+    if pedido.variante_id:
+        variante = (
+            db.query(ProductoVariante)
+            .filter(ProductoVariante.id == pedido.variante_id)
+            .filter(ProductoVariante.producto_id == pedido.producto_id)
+            .with_for_update()
+            .first()
+        )
+    if variante is not None:
+        variante.stock = (variante.stock or 0) + pedido.cantidad
+    elif producto is not None and not producto.tiene_variantes:
         producto.stock = (producto.stock or 0) + pedido.cantidad
     pedido.estado = "rechazado"
     _marcar_origen(db, pedido, origen, None)

@@ -43,6 +43,8 @@ const Bazar = () => {
     const [paso, setPaso] = useState(1); // 1=catálogo, 2=pago
     const [productoSeleccionado, setProductoSeleccionado] = useState(null);
     const [cantidad, setCantidad] = useState(1);
+    // Talla elegida (migración 083). Sólo se usa en productos con tallas.
+    const [tallaId, setTallaId] = useState(null);
     const [archivoVoucher, setArchivoVoucher] = useState(null);
     const [mensaje, setMensaje] = useState({ type: '', text: '' });
 
@@ -95,9 +97,28 @@ const Bazar = () => {
         }
         setProductoSeleccionado(elegido);
         setCantidad(1);
+        setTallaId(null);
         setPaso(2);
         setMensaje({ type: '', text: '' });
     }, [productoPedido, productos]);
+
+    // ── Tallas del producto elegido (migración 083) ──────────────────────────
+    // Sólo las tallas ACTIVAS y con stock: una agotada no se puede elegir. Si
+    // hay una sola opción se selecciona sola (un toque menos en el celular).
+    const tallasDisponibles = useMemo(
+        () => (productoSeleccionado?.variantes || []).filter(
+            (variante) => variante.activo !== false && (variante.stock ?? 0) > 0),
+        [productoSeleccionado],
+    );
+    // Si hay UNA sola talla disponible se considera elegida sin estado extra
+    // (un toque menos en el celular); el chip la muestra activa igual.
+    const tallaElegida = tallasDisponibles.find((variante) => variante.id === tallaId)
+        || (tallasDisponibles.length === 1 ? tallasDisponibles[0] : null);
+
+    // El selector de cantidad se acota al stock de la TALLA elegida, no al total.
+    const stockDisponible = productoSeleccionado?.tiene_variantes
+        ? (tallaElegida?.stock ?? 0)
+        : (productoSeleccionado?.stock ?? 0);
 
     const handleComprar = (producto) => {
         // Sin datos bancarios no hay transferencia posible; con el pago online
@@ -105,6 +126,7 @@ const Bazar = () => {
         if (!configBancaria && !pagoDisponible) return;
         setProductoSeleccionado(producto);
         setCantidad(1);
+        setTallaId(null);
         setPaso(2);
         setMensaje({ type: '', text: '' });
     };
@@ -121,6 +143,11 @@ const Bazar = () => {
             setMensaje({ type: 'error', text: 'Debes seleccionar un comprobante de pago.' });
             return;
         }
+        // Tallas (083): con variantes hay que elegir una ANTES de subir nada.
+        if (productoSeleccionado?.tiene_variantes && !tallaElegida) {
+            setMensaje({ type: 'error', text: 'Elige una talla para continuar.' });
+            return;
+        }
         setMensaje({ type: '', text: '' });
         try {
             // El hook sube el archivo con `privado=1` (carpeta privada, la que corresponde
@@ -131,6 +158,9 @@ const Bazar = () => {
                 tenant_id,
                 alumno_id: usuario_id,
                 producto_id: productoSeleccionado.id,
+                // Talla elegida (null en productos sin tallas): el backend
+                // descuenta el stock de ESA talla y guarda su texto.
+                variante_id: tallaElegida ? tallaElegida.id : null,
                 cantidad,
                 estado: 'pendiente',
                 voucher_url: voucherUrl,
@@ -151,11 +181,17 @@ const Bazar = () => {
      */
     const handlePagarOnline = async () => {
         if (!productoSeleccionado) return;
+        // Tallas (083): el stock que se reserva es el de la talla elegida.
+        if (productoSeleccionado.tiene_variantes && !tallaElegida) {
+            setMensaje({ type: 'error', text: 'Elige una talla para continuar.' });
+            return;
+        }
         setMensaje({ type: '', text: '' });
         setYendoAPagar(true);
         try {
             const pago = await crearPagoOnline.mutateAsync({
                 producto_id: productoSeleccionado.id,
+                variante_id: tallaElegida ? tallaElegida.id : null,
                 cantidad,
             });
             window.location.href = pago.init_point;
@@ -277,15 +313,53 @@ const Bazar = () => {
                             </div>
                         </div>
 
+                        {/* ── Talla (migración 083): chips con las tallas
+                            ACTIVAS y con stock. La cantidad se acota al stock de
+                            la talla elegida, no al total del producto. */}
+                        {productoSeleccionado.tiene_variantes && (
+                            <div className="bg-white rounded-xl border p-4">
+                                <p className="text-sm font-medium text-gray-700">Talla:</p>
+                                {tallasDisponibles.length === 0 ? (
+                                    <p className="mt-2 text-sm text-gray-500">No quedan tallas disponibles.</p>
+                                ) : (
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                        {tallasDisponibles.map((variante) => {
+                                            const activa = tallaElegida?.id === variante.id;
+                                            return (
+                                                <button
+                                                    key={variante.id}
+                                                    type="button"
+                                                    onClick={() => { setTallaId(variante.id); setCantidad(1); }}
+                                                    aria-pressed={activa}
+                                                    className={`rounded-lg border px-3.5 py-2 text-sm font-bold transition-colors ${activa ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-gray-300 bg-white text-gray-700 hover:border-emerald-400'}`}
+                                                >
+                                                    {variante.talla}
+                                                    <span className={`ml-1.5 text-[11px] font-medium ${activa ? 'text-white/80' : 'text-gray-400'}`}>
+                                                        {variante.stock}
+                                                    </span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                                {tallasDisponibles.length > 0 && !tallaElegida && (
+                                    <p className="mt-2 text-xs text-amber-600">Elige una talla para continuar.</p>
+                                )}
+                            </div>
+                        )}
+
                         <div className="flex items-center gap-3 bg-white rounded-xl border p-4">
                             <label className="text-sm font-medium text-gray-700">Cantidad:</label>
                             <select value={cantidad} onChange={e => setCantidad(Number(e.target.value))}
-                                className="px-3 py-2 border rounded-lg text-sm">
-                                {[...Array(Math.min(productoSeleccionado.stock, 10)).keys()].map(i =>
+                                disabled={productoSeleccionado.tiene_variantes && !tallaElegida}
+                                className="px-3 py-2 border rounded-lg text-sm disabled:opacity-50">
+                                {[...Array(Math.min(Math.max(stockDisponible, 1), 10)).keys()].map(i =>
                                     <option key={i + 1} value={i + 1}>{i + 1}</option>
                                 )}
                             </select>
-                            <span className="text-xs text-gray-400">Stock disponible: {productoSeleccionado.stock}</span>
+                            <span className="text-xs text-gray-400">
+                                Stock disponible: {stockDisponible}
+                            </span>
                         </div>
 
                         {/* I3: el bloque va SIEMPRE, con el mismo fallback que SolicitarPlan.

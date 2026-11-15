@@ -172,6 +172,9 @@ const TarjetaPedido = ({
                 <div className="mt-1.5 flex items-center justify-between gap-3">
                     <span className="truncate text-sm text-zinc-400">
                         {pedido.cantidad} × {pedido.producto_nombre || `Producto #${pedido.producto_id}`}
+                        {/* Talla comprada (migración 083): snapshot del texto,
+                            sobrevive al borrado/renombrado de la variante. */}
+                        {pedido.talla ? ` · Talla ${pedido.talla}` : ''}
                     </span>
                     <span className="shrink-0 text-base font-extrabold text-zinc-100">
                         ${(pedido.total || 0).toLocaleString('es-CL')}

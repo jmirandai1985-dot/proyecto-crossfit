@@ -238,7 +238,17 @@ const MisPedidos = () => {
                             <div key={p.id} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <h3 className="font-bold text-gray-800">{productosMap[p.producto_id] || `Producto #${p.producto_id}`}</h3>
+                                        <h3 className="font-bold text-gray-800">
+                                            {productosMap[p.producto_id] || `Producto #${p.producto_id}`}
+                                            {/* Talla comprada (migración 083): el pedido guarda
+                                                el texto al comprar, así que se muestra aunque la
+                                                talla se haya renombrado o borrado después. */}
+                                            {p.talla && (
+                                                <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 align-middle text-xs font-semibold text-gray-600">
+                                                    Talla {p.talla}
+                                                </span>
+                                            )}
+                                        </h3>
                                         <p className="text-sm text-gray-500">Cantidad: {p.cantidad} | Total: <span className="font-semibold text-emerald-600">${(p.total || 0).toLocaleString('es-CL')}</span></p>
                                         <p className="text-xs text-gray-400 mt-1">Pedido #{p.id} — {fmtFechaChile(p.fecha_pedido)}</p>
                                     </div>

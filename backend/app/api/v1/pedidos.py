@@ -14,7 +14,7 @@ from app.db.database import get_db
 from app.models.auditoria import Auditoria
 from app.models.pago import Pago
 from app.models.pedido import Pedido
-from app.models.producto import Producto
+from app.models.producto import Producto, ProductoVariante
 from app.models.usuario import Usuario
 from app.schemas.pedido import (
     PedidoCreate, PedidoUpdate, PedidoResponse, PedidoListItem,
@@ -150,12 +150,40 @@ def crear_pedido(
             detail="El producto no está disponible en el Bazar",
         )
 
-    # Validar stock
-    if producto.stock < pedido_data.cantidad:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Stock insuficiente. Disponible: {producto.stock}, Solicitado: {pedido_data.cantidad}"
-        )
+    # ── Talla/variante (migración 083) ───────────────────────────────────────
+    # Con `tiene_variantes=True` el stock vive en `producto_variantes`: el pedido
+    # TIENE que elegir una talla y el descuento va sobre ESA fila. En un producto
+    # sin tallas se ignora `variante_id` y todo sigue exactamente como antes.
+    variante = None
+    if producto.tiene_variantes:
+        if pedido_data.variante_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Debes elegir una talla",
+            )
+        variante = db.query(ProductoVariante).filter(
+            ProductoVariante.id == pedido_data.variante_id,
+            ProductoVariante.producto_id == producto.id,
+        ).first()
+        if variante is None or not variante.activo:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La talla elegida no está disponible",
+            )
+        # Validar stock de la talla elegida (no el total del producto).
+        if (variante.stock or 0) < pedido_data.cantidad:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(f"Stock insuficiente. Disponible: {variante.stock}, "
+                        f"Solicitado: {pedido_data.cantidad}")
+            )
+    else:
+        # Validar stock (producto sin tallas: comportamiento de siempre)
+        if producto.stock < pedido_data.cantidad:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Stock insuficiente. Disponible: {producto.stock}, Solicitado: {pedido_data.cantidad}"
+            )
 
     # Calcular total
     total = producto.precio * pedido_data.cantidad
@@ -165,6 +193,10 @@ def crear_pedido(
         tenant_id=pedido_data.tenant_id,
         alumno_id=pedido_data.alumno_id,
         producto_id=pedido_data.producto_id,
+        # La talla elegida + su texto como SNAPSHOT (083): el historial muestra
+        # `talla` aunque la variante se renombre o se borre después.
+        variante_id=variante.id if variante is not None else None,
+        talla=variante.talla if variante is not None else None,
         cantidad=pedido_data.cantidad,
         total=total,
         estado=pedido_data.estado,
@@ -175,22 +207,35 @@ def crear_pedido(
     # UPDATE condicional — solo descuenta si hay stock suficiente. Si dos
     # compras concurrentes piden el último ítem, solo una obtiene rowcount=1
     # (la otra ve rowcount=0 → 400), evitando stock negativo.
+    # Con tallas el MISMO patrón se aplica a `producto_variantes`: el producto
+    # nunca descuenta `productos.stock` cuando `tiene_variantes=True`.
     # ── FIX cierre (test de esfuerzo): wrapper de errores de BD ──
     # Bajo contención extrema el UPDATE condicional puede fallar con deadlock
     # o timeout (visto como 500 transitorio en el Escenario D). Se captura y
     # devuelve 503 "Alta demanda" en vez de un 500 genérico.
     try:
-        result = db.execute(
-            update(Producto)
-            .where(Producto.id == producto.id)
-            .where(Producto.tenant_id == pedido_data.tenant_id)
-            .where(Producto.stock >= pedido_data.cantidad)
-            .values(stock=Producto.stock - pedido_data.cantidad)
-        )
+        if variante is not None:
+            result = db.execute(
+                update(ProductoVariante)
+                .where(ProductoVariante.id == variante.id)
+                .where(ProductoVariante.producto_id == producto.id)
+                .where(ProductoVariante.stock >= pedido_data.cantidad)
+                .values(stock=ProductoVariante.stock - pedido_data.cantidad)
+            )
+            disponible = variante.stock
+        else:
+            result = db.execute(
+                update(Producto)
+                .where(Producto.id == producto.id)
+                .where(Producto.tenant_id == pedido_data.tenant_id)
+                .where(Producto.stock >= pedido_data.cantidad)
+                .values(stock=Producto.stock - pedido_data.cantidad)
+            )
+            disponible = producto.stock
         if result.rowcount == 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Stock insuficiente. Disponible: {producto.stock}, Solicitado: {pedido_data.cantidad}"
+                detail=f"Stock insuficiente. Disponible: {disponible}, Solicitado: {pedido_data.cantidad}"
             )
 
         db.add(db_pedido)
@@ -213,6 +258,7 @@ def crear_pedido(
     notificar_admins_del_tenant(
         db, tenant_id, "pedido_nuevo",
         f"Nuevo pedido de {nombre_alumno}: {producto.nombre} "
+        f"{f'({variante.talla}) ' if variante is not None else ''}"
         f"x{pedido_data.cantidad}")
 
     # ── Correo al alumno: confirmación de compra en el Bazar (no bloqueante) ──
@@ -242,12 +288,22 @@ def crear_pedido(
     # el admin reponga por encima del umbral (PUT /productos/{id} lo resetea).
     try:
         db.refresh(producto)  # stock real post-descuento atómico
+        if producto.tiene_variantes:
+            # Con tallas, `productos.stock` queda congelado en 0 y NO debe
+            # disparar la alerta: lo que importa es la suma de las tallas vivas.
+            stock_actual = sum(
+                (v.stock or 0) for v in db.query(ProductoVariante).filter(
+                    ProductoVariante.producto_id == producto.id,
+                    ProductoVariante.activo.is_(True)).all()
+            )
+        else:
+            stock_actual = producto.stock
         if (producto.stock_minimo is not None
-                and producto.stock <= producto.stock_minimo
+                and stock_actual <= producto.stock_minimo
                 and not producto.alerta_stock_enviada):
             from app.services.email_service import send_alerta_stock_bajo
             enviado = send_alerta_stock_bajo(
-                producto.nombre, producto.stock, producto.stock_minimo,
+                producto.nombre, stock_actual, producto.stock_minimo,
                 tenant_id)
             if enviado:
                 producto.alerta_stock_enviada = True
@@ -326,6 +382,11 @@ def _con_nombres(db: Session, pedidos: List[Pedido]) -> List[dict]:
             "id": p.id,
             "alumno_id": p.alumno_id,
             "producto_id": p.producto_id,
+            # Talla comprada (083): el snapshot `talla` es lo que se muestra en
+            # "Mis pedidos" y en el panel; `variante_id` puede quedar NULL si la
+            # talla se borró después.
+            "variante_id": p.variante_id,
+            "talla": p.talla,
             "cantidad": p.cantidad,
             "total": p.total,
             "estado": p.estado,
@@ -689,7 +750,24 @@ def eliminar_pedido(
             .first()
         )
 
-        if producto:
+        # ── Talla/variante (083) ──────────────────────────────────────────
+        # Si el pedido compró una talla, el stock vuelve a ESA fila y nunca a
+        # `productos.stock` (en un producto con variantes ese campo queda
+        # congelado). Si la talla ya se borró (variante_id SET NULL) no hay
+        # dónde devolverlo: el producto sigue viéndose agotado en esa talla.
+        variante = None
+        if pedido.variante_id:
+            variante = (
+                db.query(ProductoVariante)
+                .filter(ProductoVariante.id == pedido.variante_id)
+                .filter(ProductoVariante.producto_id == pedido.producto_id)
+                .with_for_update()
+                .first()
+            )
+
+        if variante is not None:
+            variante.stock = (variante.stock or 0) + pedido.cantidad
+        elif producto is not None and not producto.tiene_variantes:
             producto.stock = (producto.stock or 0) + pedido.cantidad
 
         db.delete(pedido)

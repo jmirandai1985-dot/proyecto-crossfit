@@ -74,12 +74,18 @@ class _FakeDB:
 
 
 def _pedido(estado="pendiente", cantidad=3):
+    # `variante_id`/`talla` existen en el modelo desde la migración 083; acá el
+    # pedido NO trae talla, así que el rechazo devuelve el stock plano.
     return SimpleNamespace(id=7, tenant_id=1, alumno_id=42, producto_id=5,
+                           variante_id=None, talla=None,
                            cantidad=cantidad, estado=estado)
 
 
 def _producto(stock=10):
-    return SimpleNamespace(id=5, nombre="Polera", stock=stock)
+    # `tiene_variantes` (083): en False el rechazo devuelve el stock plano de
+    # `productos`; con tallas el stock volvería a `producto_variantes`.
+    return SimpleNamespace(id=5, nombre="Polera", stock=stock,
+                           tiene_variantes=False)
 
 
 # ── A / B: puro ───────────────────────────────────────────────────────────────

@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 from app.models.pago import ESTADOS_PAGO_ABIERTOS, Pago, PagoEvento
 from app.models.pedido import Pedido
 from app.models.plan import Plan
-from app.models.producto import Producto
+from app.models.producto import Producto, ProductoVariante
 from app.models.solicitud_plan import SolicitudPlan
 from app.models.usuario import Usuario
 from app.services import aprobacion_planes
@@ -350,7 +350,7 @@ def _limpiar_cobro_fallido(db: Session, pago: Pago) -> None:
 
 
 def crear_pago_bazar(db: Session, *, current_user: dict, producto_id: int,
-                     cantidad: int) -> dict:
+                     cantidad: int, variante_id: Optional[int] = None) -> dict:
     """Crea el pedido (reservando stock) + el pago + la preferencia de MP.
 
     El pedido nace `pendiente` y el stock se descuenta ATÓMICAMENTE al crearlo,
@@ -358,6 +358,10 @@ def crear_pago_bazar(db: Session, *, current_user: dict, producto_id: int,
     permitiría que dos alumnos paguen la última polera. Si el pago no llega en
     30 minutos, la expiración lo rechaza y el stock vuelve por el mismo camino
     ya probado (`rechazar_pedido`).
+
+    Tallas (migración 083): si el producto tiene variantes, `variante_id` es
+    obligatorio y lo que se reserva/descuenta es el stock de ESA talla. En un
+    producto sin tallas `variante_id` se ignora, igual que en el pedido manual.
     """
     mp.configuracion()  # fail-fast: apagado / sin credenciales -> no se toca stock
 
@@ -370,7 +374,22 @@ def crear_pago_bazar(db: Session, *, current_user: dict, producto_id: int,
         raise ErrorPago("Producto no encontrado", 404)
     if not producto.activo:
         raise ErrorPago("El producto no está disponible en el Bazar", 400)
-    if (producto.stock or 0) < cantidad:
+
+    variante = None
+    if producto.tiene_variantes:
+        if variante_id is None:
+            raise ErrorPago("Debes elegir una talla", 400)
+        variante = db.query(ProductoVariante).filter(
+            ProductoVariante.id == variante_id,
+            ProductoVariante.producto_id == producto.id,
+        ).first()
+        if variante is None or not variante.activo:
+            raise ErrorPago("La talla elegida no está disponible", 400)
+        if (variante.stock or 0) < cantidad:
+            raise ErrorPago(
+                f"Stock insuficiente. Disponible: {variante.stock}, "
+                f"Solicitado: {cantidad}", 400)
+    elif (producto.stock or 0) < cantidad:
         raise ErrorPago(
             f"Stock insuficiente. Disponible: {producto.stock}, "
             f"Solicitado: {cantidad}", 400)
@@ -384,6 +403,10 @@ def crear_pago_bazar(db: Session, *, current_user: dict, producto_id: int,
         tenant_id=tenant_id,
         alumno_id=alumno_id,
         producto_id=producto.id,
+        # Snapshot de la talla (083): el historial la muestra aunque la variante
+        # se borre después (SET NULL en `variante_id`).
+        variante_id=variante.id if variante is not None else None,
+        talla=variante.talla if variante is not None else None,
         cantidad=cantidad,
         total=float(total),
         estado="pendiente",
@@ -394,17 +417,29 @@ def crear_pago_bazar(db: Session, *, current_user: dict, producto_id: int,
 
     try:
         # Mismo UPDATE condicional que el POST manual: si dos compras piden el
-        # último ítem, sólo una obtiene rowcount=1.
-        resultado = db.execute(
-            update(Producto)
-            .where(Producto.id == producto.id)
-            .where(Producto.tenant_id == tenant_id)
-            .where(Producto.stock >= cantidad)
-            .values(stock=Producto.stock - cantidad)
-        )
+        # último ítem, sólo una obtiene rowcount=1. Con tallas se aplica a la
+        # fila de `producto_variantes` (nunca a `productos.stock`).
+        if variante is not None:
+            resultado = db.execute(
+                update(ProductoVariante)
+                .where(ProductoVariante.id == variante.id)
+                .where(ProductoVariante.producto_id == producto.id)
+                .where(ProductoVariante.stock >= cantidad)
+                .values(stock=ProductoVariante.stock - cantidad)
+            )
+            disponible = variante.stock
+        else:
+            resultado = db.execute(
+                update(Producto)
+                .where(Producto.id == producto.id)
+                .where(Producto.tenant_id == tenant_id)
+                .where(Producto.stock >= cantidad)
+                .values(stock=Producto.stock - cantidad)
+            )
+            disponible = producto.stock
         if resultado.rowcount == 0:
             raise ErrorPago(
-                f"Stock insuficiente. Disponible: {producto.stock}, "
+                f"Stock insuficiente. Disponible: {disponible}, "
                 f"Solicitado: {cantidad}", 400)
         db.add(pedido)
         db.flush()

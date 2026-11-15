@@ -624,12 +624,17 @@ def _reserva(ident, clase_id, alumno_id=42, estado="confirmada",
 
 
 def _pedido(estado="pendiente", cantidad=3):
+    # `variante_id`/`talla` existen en el modelo desde la migración 083 (tallas del
+    # Bazar). Acá el pedido va SIN talla: el DELETE debe devolver el stock plano.
     return {"id": 7, "tenant_id": 1, "alumno_id": 42, "producto_id": 5,
+            "variante_id": None, "talla": None,
             "cantidad": cantidad, "estado": estado}
 
 
 def _producto(stock=10):
-    return {"id": 5, "tenant_id": 1, "nombre": "Polera", "stock": stock}
+    # `tiene_variantes` (083): en False el DELETE devuelve el stock plano.
+    return {"id": 5, "tenant_id": 1, "nombre": "Polera", "stock": stock,
+            "tiene_variantes": False}
 
 
 def _con_sesion(almacen, llamada):
@@ -876,11 +881,17 @@ def test_e3_la_fuente_del_put_ya_no_escribe_el_estado_a_mano():
 
 
 def test_d3_el_delete_bloquea_el_pedido_y_el_producto():
-    """`FOR UPDATE` en las dos filas + stock devuelto con `or 0` (nunca `+=`)."""
+    """`FOR UPDATE` en las filas que se tocan + stock devuelto con `or 0` (nunca `+=`).
+
+    Son TRES bloqueos desde la migración 083: pedido, producto y (si el pedido
+    trae talla) la fila de `producto_variantes`. El stock vuelve a UNA sola de
+    las dos: la talla si existe, y el producto sólo si no maneja variantes.
+    """
     bloque = _bloque(_fuente("app/api/v1/pedidos.py"), "def eliminar_pedido")
-    assert bloque.count("with_for_update()") == 2
+    assert bloque.count("with_for_update()") == 3
     assert "producto.stock or 0" in bloque
     assert "producto.stock +=" not in bloque
+    assert "variante.stock or 0" in bloque
 
 
 
