@@ -35,6 +35,10 @@ from app.utils.santiago import (
     dias_para_vencer,      # días que le quedan al plan (día de Chile, 0 = vence hoy)
     vigente_el_dia,        # el día de vencimiento vale COMPLETO
 )
+# Buscador del padrón: MISMA normalización que Fidelización (`unaccent` no existe en
+# Neon, así que translate()+lower()). `ilike` sólo ignora mayúsculas: "Sebastian" no
+# encontraba "Sebastián".
+from app.utils.busqueda import columna_normalizada, normalizar
 
 router = APIRouter()
 
@@ -396,7 +400,8 @@ def listar_usuarios(
     activo: Optional[bool] = Query(None),
     rol: str = None,
     buscar: Optional[str] = Query(
-        None, description="Filtra por nombre o correo (ILIKE, server-side)"),
+        None, description="Filtra por nombre o correo (server-side, sin mayúsculas "
+                          "ni tildes)"),
     estado: Optional[str] = Query(
         None, description="Filtra por estado: activo | pendiente_activacion | "
                           "rechazado | baja"),
@@ -437,9 +442,12 @@ def listar_usuarios(
         query = query.filter(Usuario.rol == rol)
 
     if buscar and buscar.strip():
-        patron = f"%{buscar.strip()}%"
-        query = query.filter(or_(Usuario.nombre.ilike(patron),
-                                 Usuario.correo.ilike(patron)))
+        # Sin mayúsculas NI tildes: el patrón y la columna se normalizan igual (kpis.py).
+        patron = f"%{normalizar(buscar.strip())}%"
+        query = query.filter(or_(
+            columna_normalizada(Usuario.nombre).like(patron),
+            columna_normalizada(Usuario.correo).like(patron),
+        ))
 
     total = query.count()
     # order_by(id): sin un orden estable, la paginación puede repetir/saltear filas.

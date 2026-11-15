@@ -52,6 +52,9 @@ from app.services import churn_service
 # Se lo previsualiza acá (sin gastarlo) con la MISMA regla que después cobra la
 # solicitud / la preferencia de Mercado Pago.
 from app.services import referidos_service as referidos
+# Buscador del alumno por nombre/correo: MISMA normalización que Fidelización y el
+# padrón (`unaccent` no existe en Neon, así que translate()+lower()).
+from app.utils.busqueda import columna_normalizada, normalizar
 
 router = APIRouter()
 
@@ -360,7 +363,8 @@ def listar_beneficios(
     tipo: Optional[str] = Query(None, pattern=PATRON_TIPOS),
     alumno_id: Optional[int] = Query(None, gt=0),
     q: Optional[str] = Query(None, max_length=80,
-                             description="Nombre o correo del alumno (búsqueda parcial)."),
+                             description="Nombre o correo del alumno (búsqueda parcial, "
+                                         "sin mayúsculas ni tildes)."),
     pagina: int = Query(1, ge=1),
     por_pagina: int = Query(25, ge=1, le=MAX_POR_PAGINA),
     db: Session = Depends(get_db),
@@ -384,9 +388,12 @@ def listar_beneficios(
     if alumno_id:
         consulta = consulta.filter(Beneficio.alumno_id == alumno_id)
     if q and q.strip():
-        patron = f"%{q.strip()}%"
-        consulta = consulta.filter(or_(Usuario.nombre.ilike(patron),
-                                      Usuario.correo.ilike(patron)))
+        # Sin mayúsculas NI tildes: el patrón y la columna se normalizan igual (kpis.py).
+        patron = f"%{normalizar(q.strip())}%"
+        consulta = consulta.filter(or_(
+            columna_normalizada(Usuario.nombre).like(patron),
+            columna_normalizada(Usuario.correo).like(patron),
+        ))
 
     filas = consulta.order_by(Beneficio.created_at.desc(), Beneficio.id.desc()).all()
     items = [_item(beneficio, alumno) for beneficio, alumno in filas]

@@ -16,6 +16,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, get_current_admin
@@ -30,6 +31,7 @@ from app.models.suspension_plan import SuspensionPlan
 from app.models.usuario import Usuario
 from app.services import suspensiones_service
 from app.services.reservas_service import ReembolsoTransitorio
+from app.utils.busqueda import columna_normalizada, normalizar
 from app.utils.santiago import fecha_chile, hoy_santiago
 
 # Mismo prefijo que `wods.py`/`kpis.py`: el router define su prefijo y `main.py` lo
@@ -390,9 +392,9 @@ def listar_suspensiones(
 ):
     """Listado de suspensiones del box (el admin sólo supervisa, no actúa).
 
-    Filtros: búsqueda por nombre/email de alumno, estado calculado en el momento
-    (activa/futura/pasada/cancelada), rango de `fecha_inicio` y, opcionalmente, UN alumno
-    (`usuario_id`, lo usa la ficha para el resumen de solo lectura).
+    Filtros: búsqueda por nombre/email de alumno (sin mayúsculas ni tildes), estado calculado
+    en el momento (activa/futura/pasada/cancelada), rango de `fecha_inicio` y, opcionalmente,
+    UN alumno (`usuario_id`, lo usa la ficha para el resumen de solo lectura).
     """
     tid = current_user["tenant_id"]
     query = (
@@ -401,10 +403,13 @@ def listar_suspensiones(
         .filter(SuspensionPlan.tenant_id == tid,
                 SuspensionPlan.origen == suspensiones_service.ORIGEN_ALUMNO)
     )
-    if buscar:
-        like = f"%{buscar}%"
-        query = query.filter(
-            Usuario.nombre.ilike(like) | Usuario.correo.ilike(like))
+    if buscar and buscar.strip():
+        # Sin mayúsculas NI tildes: el patrón y la columna se normalizan igual (kpis.py).
+        patron = f"%{normalizar(buscar.strip())}%"
+        query = query.filter(or_(
+            columna_normalizada(Usuario.nombre).like(patron),
+            columna_normalizada(Usuario.correo).like(patron),
+        ))
     if desde:
         query = query.filter(SuspensionPlan.fecha_inicio >= desde)
     if hasta:
