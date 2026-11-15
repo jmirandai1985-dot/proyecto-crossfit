@@ -2190,6 +2190,28 @@ export function useCrearSuscripcion() {
     });
 }
 
+// Edición manual de una suscripción EXISTENTE (plan / vencimiento / créditos).
+// `PUT /suscripciones/{id}`: el backend saca el tenant del token y sólo toca los
+// campos que vengan. `id` va fuera del payload para que la pantalla pueda mandar
+// el resto tal cual lo arma el formulario.
+// Invalida el prefijo `['suscripciones']` COMPLETO (a diferencia del alta): la fila
+// editada puede ser la que alimenta "Plan Activo" del padrón, el aviso de plan
+// vigente del comprobante y la puerta de créditos del alumno (`['membresia']`), y
+// las tres tienen que ver el valor nuevo de una vez. `['reportes']` porque el
+// vencimiento mueve las tarjetas de renovación del Dashboard.
+export function useEditarSuscripcion() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ id, ...payload }) =>
+            api.put(`/api/v1/suscripciones/${id}`, payload).then((r) => r.data),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['suscripciones'] });
+            qc.invalidateQueries({ queryKey: ['membresia'] });
+            qc.invalidateQueries({ queryKey: ['reportes'] });
+        },
+    });
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // BLOQUE 2 (MARKETING) — los avisos del carrusel "Novedades del box"
 // ══════════════════════════════════════════════════════════════════════════════

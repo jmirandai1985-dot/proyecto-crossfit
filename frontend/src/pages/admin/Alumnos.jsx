@@ -9,13 +9,13 @@ import FichaAlumnoTabs from '../../components/FichaAlumnoTabs';
 // Vista MÓVIL del padrón (<768px): tarjetas con acordeón. La tabla de escritorio no
 // cambia; las dos vistas comparten los datos y las reglas (`utils/alumnos*`).
 import AlumnosMovil from './AlumnosMovil';
-import { fmtFechaChile, sumarDiasInstante } from '../../utils/fecha';
+import { fmtFechaChile, sumarDiasInstante, toChileFechaStr } from '../../utils/fecha';
 // El comprobante del alumno se pide al endpoint AUTENTICADO (blob): /static/uploads/...
 // se sirve sin token, así que no se puede abrir por URL pública.
 import { useDocumentoAutenticado } from '../../hooks/useDocumentoAutenticado';
 import {
     SIN_DATOS, useAlumnosPaginados, useBeneficiosAlumno, useCrearSuscripcion,
-    useDesactivarUsuario, useGuardarUsuario, usePlanesActivos,
+    useDesactivarUsuario, useEditarSuscripcion, useGuardarUsuario, usePlanesActivos,
     useSolicitudesPlanAlumno, useSuscripcionesActivas, useSuscripcionesAlumno,
 } from '../../hooks/queries';
 // Las reglas del padrón (¿la suscripción está vigente HOY?, badge del estado, params del
@@ -31,6 +31,10 @@ import {
 // Dashboard llega con `?estado=activo`, así la tabla abre YA filtrada en el
 // servidor (no filtra la página actual en el cliente).
 const ESTADOS_PADRON = new Set(['activo', 'pendiente_activacion', 'rechazado', 'baja']);
+
+// Mensaje de éxito de la edición de suscripción. La clase (verde/rojo) se elige por
+// este texto: los errores llegan del backend (`detail`) y nunca coinciden.
+const MSG_EDICION_OK = 'Suscripción actualizada.';
 
 const Alumnos = () => {
     const { tenant_id } = useAuth();
@@ -58,6 +62,14 @@ const Alumnos = () => {
     // plan y avisa al alumno. A mano sólo queda para el pago que llegó por fuera de la
     // app, así que el panel se abre con un clic explícito (`mostrarAprobacionManual`).
     const [mostrarAprobacionManual, setMostrarAprobacionManual] = useState(false);
+    // ── Edición de la suscripción ACTIVA (se hace en el mismo modal del comprobante) ──
+    // "Aprobar Pago" CREA una suscripción; este panel EDITA la que el alumno ya tiene
+    // (plan / vencimiento / créditos) sin darla de baja y volver a crearla.
+    const [editandoSuscripcion, setEditandoSuscripcion] = useState(false);
+    const [formEdicion, setFormEdicion] = useState({
+        plan_id: '', fecha_expiracion: '', creditos_totales: '', creditos_disponibles: '',
+    });
+    const [mensajeEdicion, setMensajeEdicion] = useState('');
     // Error de descarga del comprobante (blob autenticado): se muestra junto al archivo.
     const [avisoComprobante, setAvisoComprobante] = useState('');
     const [editingAlumno, setEditingAlumno] = useState(null);
@@ -112,6 +124,17 @@ const Alumnos = () => {
     // Suscripciones del alumno del comprobante: alimenta el aviso de plan ya vigente.
     const { data: suscripcionesAlumnoData } = useSuscripcionesAlumno(selectedAlumnoVoucher?.id);
 
+    // La suscripción ACTIVA (vigente HOY, la que vence más tarde) del alumno del
+    // comprobante: la usan el aviso de "ya tiene un plan vigente" y el panel de
+    // edición. Sin alumno abierto, `suscripcionesAlumnoData` es undefined => null.
+    const suscripcionActivaAlumno = useMemo(
+        () => suscripcionVigente(suscripcionesAlumnoData),
+        [suscripcionesAlumnoData],
+    );
+    // Alta automática de Mercado Pago: el webhook reescribe la fila, así que la
+    // edición manual queda BLOQUEADA (el backend devuelve 409 si se intenta igual).
+    const suscripcionVinculadaMp = Boolean(suscripcionActivaAlumno?.mp_preapproval_id);
+
     // ── Comprobante REAL del alumno (modal "Voucher" del padrón) ────────────────
     // Antes este modal pintaba un comprobante INVENTADO (TXN y monto fijos) y un
     // selector de plan: el admin creía estar revisando el pago sin haber visto ningún
@@ -149,6 +172,8 @@ const Alumnos = () => {
     const guardarUsuario = useGuardarUsuario();
     const desactivarUsuario = useDesactivarUsuario();
     const crearSuscripcion = useCrearSuscripcion();
+    // Edición manual de la suscripción existente (plan / vencimiento / créditos).
+    const editarSuscripcion = useEditarSuscripcion();
 
     // Ref del <tbody> de la tabla: sirve para scrollear hasta la FILA del alumno cuya
     // ficha se abre (deep-link `?alumno_id=` o "Ver ficha"/nombre de la fila).
@@ -210,17 +235,19 @@ const Alumnos = () => {
     // activa sobre una vigente (doble cobro / doble plan). Best-effort: si la consulta falla
     // no se setea nada y el modal sigue igual (no se bloquea la aprobación).
     useEffect(() => {
-        if (!selectedAlumnoVoucher) return;
-        const vigente = suscripcionVigente(suscripcionesAlumnoData);
-        if (!vigente) return;
+        if (!selectedAlumnoVoucher || !suscripcionActivaAlumno) return;
         setPlanVigenteAlumno({
-            plan_nombre: nombrePlan(planes, vigente.plan_id),
-            fecha_expiracion: vigente.fecha_expiracion,
+            plan_nombre: nombrePlan(planes, suscripcionActivaAlumno.plan_id),
+            fecha_expiracion: suscripcionActivaAlumno.fecha_expiracion,
         });
-    }, [suscripcionesAlumnoData, selectedAlumnoVoucher, planes]);
+    }, [suscripcionActivaAlumno, selectedAlumnoVoucher, planes]);
 
     /** Plan elegido en la aprobación del pago (o `undefined`). */
     const planElegido = planes.find((p) => p.id === parseInt(planSeleccionado));
+
+    /** Plan elegido en la EDICIÓN: define si los créditos aplican (ilimitado = no). */
+    const planEdicion = planes.find((p) => p.id === parseInt(formEdicion.plan_id));
+    const edicionIlimitada = Boolean(planEdicion?.es_ilimitado);
 
     /** Desglose del descuento para un plan (o `null`): lo calcula el backend. */
     const precioConBeneficio = (plan) =>
@@ -278,6 +305,8 @@ const Alumnos = () => {
         setPlanVigenteAlumno(null);
         setConfirmarDuplicado(false);
         setMostrarAprobacionManual(false);
+        setEditandoSuscripcion(false);
+        setMensajeEdicion('');
         setShowVoucherModal(true);
         // El "¿ya tiene un plan ACTIVO?" lo resuelve la consulta `useSuscripcionesAlumno`
         // (arranca al quedar puesto `selectedAlumnoVoucher`) y lo aplica el efecto de
@@ -292,6 +321,61 @@ const Alumnos = () => {
         setConfirmarDuplicado(false);
         setMostrarAprobacionManual(false);
         setAvisoComprobante('');
+        setEditandoSuscripcion(false);
+        setMensajeEdicion('');
+    };
+
+    // ── Edición de la suscripción activa ────────────────────────────────────────
+    // Se precarga con lo que HOY tiene la suscripción: el admin cambia sólo lo que
+    // necesita y el backend audita los campos que REALMENTE cambian.
+    const abrirEdicionSuscripcion = () => {
+        if (!suscripcionActivaAlumno) return;
+        setFormEdicion({
+            plan_id: String(suscripcionActivaAlumno.plan_id ?? ''),
+            // 'YYYY-MM-DD' del día CHILENO de vencimiento (el input no acepta otra cosa).
+            fecha_expiracion: toChileFechaStr(suscripcionActivaAlumno.fecha_expiracion),
+            creditos_totales: suscripcionActivaAlumno.creditos_totales ?? '',
+            creditos_disponibles: suscripcionActivaAlumno.creditos_disponibles ?? '',
+        });
+        setMensajeEdicion('');
+        setEditandoSuscripcion(true);
+    };
+
+    const cancelarEdicionSuscripcion = () => {
+        setEditandoSuscripcion(false);
+        setMensajeEdicion('');
+    };
+
+    const guardarEdicionSuscripcion = async () => {
+        if (!suscripcionActivaAlumno) return;
+        if (!formEdicion.plan_id) {
+            setMensajeEdicion('Debes seleccionar un plan.');
+            return;
+        }
+        if (!formEdicion.fecha_expiracion) {
+            setMensajeEdicion('Debes indicar la fecha de vencimiento.');
+            return;
+        }
+        // Plan ilimitado: los créditos no aplican (NULL, igual que en el alta).
+        const aEntero = (v) => (v === '' || v === null || v === undefined ? null : Number(v));
+        setMensajeEdicion('');
+        try {
+            await editarSuscripcion.mutateAsync({
+                id: suscripcionActivaAlumno.id,
+                plan_id: parseInt(formEdicion.plan_id),
+                // 'YYYY-MM-DD': el backend lo guarda a las 23:59:59 de ese día de Chile.
+                fecha_expiracion: formEdicion.fecha_expiracion,
+                creditos_totales: edicionIlimitada
+                    ? null : aEntero(formEdicion.creditos_totales),
+                creditos_disponibles: edicionIlimitada
+                    ? null : aEntero(formEdicion.creditos_disponibles),
+            });
+            setEditandoSuscripcion(false);
+            setMensajeEdicion(MSG_EDICION_OK);
+        } catch (error) {
+            setMensajeEdicion(error?.response?.data?.detail
+                || 'No se pudo actualizar la suscripción.');
+        }
     };
 
     const handleSubmit = async (e) => {
@@ -801,6 +885,144 @@ const Alumnos = () => {
                                         </>
                                     )}
                                 </div>
+
+                                {/* ── SUSCRIPCIÓN ACTUAL: editar plan/vencimiento/créditos ──
+                                    "Aprobar Pago" CREA otra suscripción; esto EDITA la que
+                                    el alumno ya tiene (sin darla de baja y volver a crearla).
+                                    Una suscripción de pago automático de Mercado Pago no se
+                                    toca desde acá: el webhook de MP la reescribiría. */}
+                                {suscripcionActivaAlumno && (
+                                    <div className="border-t border-zinc-800 pt-4 space-y-3"
+                                        data-testid="panel-editar-suscripcion">
+                                        <div>
+                                            <h3 className="text-sm font-semibold text-zinc-200">
+                                                Suscripción actual
+                                            </h3>
+                                            <p className="text-xs text-zinc-500 mt-1">
+                                                <span className="font-medium text-zinc-300">
+                                                    {nombrePlan(planes, suscripcionActivaAlumno.plan_id)}
+                                                </span>
+                                                {' · '}vence el{' '}
+                                                {fmtFechaChile(suscripcionActivaAlumno.fecha_expiracion)}
+                                                {' · '}
+                                                {suscripcionActivaAlumno.creditos_disponibles == null
+                                                    ? 'créditos ilimitados'
+                                                    : `${suscripcionActivaAlumno.creditos_disponibles} de ${suscripcionActivaAlumno.creditos_totales} créditos`}
+                                            </p>
+                                        </div>
+
+                                        {!editandoSuscripcion && (
+                                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                                <button
+                                                    type="button"
+                                                    onClick={abrirEdicionSuscripcion}
+                                                    disabled={suscripcionVinculadaMp}
+                                                    title={suscripcionVinculadaMp
+                                                        ? 'Vinculada a Mercado Pago, no editable'
+                                                        : 'Editar plan, vencimiento y créditos'}
+                                                    data-testid="abrir-edicion-suscripcion"
+                                                    className="rounded-lg border border-orange-500/60 px-4 py-2 text-sm font-bold uppercase tracking-wide text-orange-400 transition-colors hover:bg-orange-500/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                                                >
+                                                    Editar Suscripción
+                                                </button>
+                                                {suscripcionVinculadaMp && (
+                                                    <p className="text-[11px] text-zinc-500">
+                                                        Vinculada a Mercado Pago, no editable.
+                                                    </p>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {editandoSuscripcion && (
+                                            <div className="space-y-3" data-testid="form-editar-suscripcion">
+                                                <div>
+                                                    <label className="block text-xs text-zinc-500 mb-1">Plan</label>
+                                                    <select
+                                                        value={formEdicion.plan_id}
+                                                        onChange={(e) => setFormEdicion({ ...formEdicion, plan_id: e.target.value })}
+                                                        data-testid="edicion-plan"
+                                                        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                                    >
+                                                        <option value="">-- Elige un plan --</option>
+                                                        {planes.map((p) => (
+                                                            <option key={p.id} value={p.id}>
+                                                                {p.nombre} — ${p.precio_clp?.toLocaleString('es-CL')} / {p.duracion_dias} días
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs text-zinc-500 mb-1">Vence el</label>
+                                                    <input
+                                                        type="date"
+                                                        value={formEdicion.fecha_expiracion}
+                                                        onChange={(e) => setFormEdicion({ ...formEdicion, fecha_expiracion: e.target.value })}
+                                                        data-testid="edicion-fecha-expiracion"
+                                                        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                                    />
+                                                </div>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                    <div>
+                                                        <label className="block text-xs text-zinc-500 mb-1">Créditos totales</label>
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            value={formEdicion.creditos_totales}
+                                                            onChange={(e) => setFormEdicion({ ...formEdicion, creditos_totales: e.target.value })}
+                                                            disabled={edicionIlimitada}
+                                                            placeholder={edicionIlimitada ? 'No aplica (ilimitado)' : 'Ej. 20'}
+                                                            data-testid="edicion-creditos-totales"
+                                                            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs text-zinc-500 mb-1">Créditos disponibles</label>
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            value={formEdicion.creditos_disponibles}
+                                                            onChange={(e) => setFormEdicion({ ...formEdicion, creditos_disponibles: e.target.value })}
+                                                            disabled={edicionIlimitada}
+                                                            placeholder={edicionIlimitada ? 'No aplica (ilimitado)' : 'Ej. 12'}
+                                                            data-testid="edicion-creditos-disponibles"
+                                                            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                                        />
+                                                    </div>
+                                                </div>
+                                                {edicionIlimitada && (
+                                                    <p className="text-[11px] text-zinc-500">
+                                                        El plan elegido es ilimitado: los créditos se guardan vacíos.
+                                                    </p>
+                                                )}
+                                                <div className="flex flex-wrap gap-3 pt-1">
+                                                    <button
+                                                        type="button"
+                                                        onClick={cancelarEdicionSuscripcion}
+                                                        className="px-4 py-2 rounded-lg border border-zinc-700 text-sm font-medium text-zinc-300 transition-colors hover:bg-zinc-800"
+                                                    >
+                                                        Cancelar
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={guardarEdicionSuscripcion}
+                                                        disabled={editarSuscripcion.isPending}
+                                                        data-testid="guardar-edicion-suscripcion"
+                                                        className="px-4 py-2 rounded-lg bg-orange-500 text-sm font-bold uppercase tracking-wide text-white transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        {editarSuscripcion.isPending ? 'Guardando...' : 'Guardar cambios'}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {mensajeEdicion && (
+                                            <p className={`text-sm font-medium ${mensajeEdicion === MSG_EDICION_OK ? 'text-green-500' : 'text-red-400'}`}
+                                                data-testid="mensaje-edicion-suscripcion">
+                                                {mensajeEdicion}
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
 
                                 {/* ── ¿Comprobante pendiente? Primero Pendientes ──────
                                     Si el alumno ya subió un comprobante esperando revisión,

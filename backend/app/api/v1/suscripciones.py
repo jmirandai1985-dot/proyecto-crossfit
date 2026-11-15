@@ -13,7 +13,7 @@ from app.services import churn_service
 from app.services import referidos_service
 from app.services.auditoria_service import registrar_auditoria
 from app.models.plan import Plan
-from app.utils.santiago import hoy_santiago, fin_de_plan_chile   # HOY en Chile (la TZ del proceso es UTC)
+from app.utils.santiago import hoy_santiago, fin_de_plan_chile, fin_del_dia_chile   # HOY en Chile (la TZ del proceso es UTC)
 
 router = APIRouter()
 
@@ -44,6 +44,21 @@ class SuscripcionCreate(BaseModel):
     # (días de Chile) con la MISMA función que la aprobación de una solicitud
     # (`fin_de_plan_chile`). Antes era obligatoria.
     fecha_expiracion: Optional[str] = None
+
+
+class SuscripcionUpdate(BaseModel):
+    """Edición manual de una suscripción (sólo admin).
+
+    Todos los campos son OPCIONALES: se actualiza únicamente lo que venga en el
+    body (`model_dump(exclude_unset=True)` distingue "no vino" de "vino en null").
+    `fecha_expiracion` viaja como ISO: si es una fecha sin hora ('YYYY-MM-DD') se
+    interpreta como el DÍA chileno de vencimiento y se guarda a las 23:59:59 de
+    Chile, la misma regla de `fin_de_plan_chile`.
+    """
+    plan_id: Optional[int] = None
+    fecha_expiracion: Optional[str] = None
+    creditos_totales: Optional[int] = None
+    creditos_disponibles: Optional[int] = None
 
 
 @router.post("/suscripciones", status_code=201)
@@ -222,6 +237,137 @@ def crear_suscripcion(
     churn_service.programar_recalculo(background_tasks, data.tenant_id, data.usuario_id)
 
     return db_sus
+
+
+@router.put("/suscripciones/{suscripcion_id}")
+@limiter.limit(LIMIT_CRITICO)
+def editar_suscripcion(
+    suscripcion_id: int,
+    request: Request,
+    data: SuscripcionUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_admin),
+):
+    """Edita una suscripción YA existente: plan, vencimiento y créditos.
+
+    Se actualiza SÓLO lo que viene en el body (todos los campos son opcionales).
+    Reglas:
+
+      * la suscripción tiene que ser del box del token (404 si no existe allá);
+      * `mp_preapproval_id` no nulo = alta automática de Mercado Pago: 409, porque
+        el webhook de MP volvería a escribir esos campos y la desincronizaría;
+      * si viene `plan_id`, el plan tiene que existir en el MISMO box (404 si no);
+      * el estado final de créditos tiene que ser coherente:
+        `creditos_disponibles <= creditos_totales` (salvo plan ilimitado).
+
+    Queda registrado en `auditoria` con los campos que REALMENTE cambiaron
+    (antes/después). Mismo shape de respuesta que `listar_suscripciones`.
+    """
+    # 🔒 SEGURIDAD: tenant_id SIEMPRE del token JWT (el body no lo trae).
+    tenant_id = current_user["tenant_id"]
+
+    # `FOR UPDATE`: dos ediciones simultáneas de la misma suscripción se
+    # serializan (la segunda espera y ve los valores ya guardados).
+    suscripcion = (
+        db.query(Suscripcion)
+        .filter(Suscripcion.id == suscripcion_id,
+                Suscripcion.tenant_id == tenant_id)
+        .with_for_update()
+        .first()
+    )
+    if suscripcion is None:
+        raise HTTPException(status_code=404, detail="Suscripción no encontrada")
+
+    if suscripcion.mp_preapproval_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=("Esta suscripción está vinculada a un pago automático de "
+                    "Mercado Pago y no se puede editar manualmente."),
+        )
+
+    cambios = data.model_dump(exclude_unset=True)
+
+    # ── Plan resultante: el nuevo (si viene) o el actual. Siempre del MISMO box. ──
+    if "plan_id" in cambios:
+        plan = db.query(Plan).filter(
+            Plan.id == cambios["plan_id"],
+            Plan.tenant_id == tenant_id,
+        ).first()
+        if plan is None:
+            raise HTTPException(status_code=404, detail="Plan no encontrado")
+    else:
+        plan = db.query(Plan).filter(Plan.id == suscripcion.plan_id).first()
+
+    # ── Vencimiento: fecha sola ('YYYY-MM-DD') = día chileno completo ──
+    if "fecha_expiracion" in cambios:
+        valor = cambios["fecha_expiracion"]
+        if not valor:
+            raise HTTPException(status_code=400,
+                                detail="Formato de fecha_expiracion inválido.")
+        try:
+            fecha_exp = datetime.fromisoformat(str(valor).replace('Z', '+00:00'))
+        except Exception:
+            raise HTTPException(status_code=400,
+                                detail="Formato de fecha_expiracion inválido.")
+        if fecha_exp.tzinfo is None:
+            # Sin zona: es un DÍA de Chile (lo que elige el admin en el date picker).
+            # Se guarda a las 23:59:59 de ese día, como `fin_de_plan_chile`.
+            fecha_exp = fin_del_dia_chile(fecha_exp.date())
+        cambios["fecha_expiracion"] = fecha_exp
+
+    # ── Coherencia de créditos sobre el estado FINAL (no sólo el campo que vino) ──
+    totales = cambios.get("creditos_totales", suscripcion.creditos_totales)
+    disponibles = cambios.get("creditos_disponibles", suscripcion.creditos_disponibles)
+    if (plan is not None and not plan.es_ilimitado
+            and totales is not None and disponibles is not None
+            and disponibles > totales):
+        raise HTTPException(
+            status_code=400,
+            detail=("Los créditos disponibles no pueden superar los créditos "
+                    f"totales ({disponibles} > {totales})."),
+        )
+
+    # ── Aplicar SÓLO lo que cambia + auditoría antes/después ──
+    cambios_reales = {}
+    for campo, nuevo in cambios.items():
+        anterior = getattr(suscripcion, campo)
+        if anterior == nuevo:
+            continue
+        cambios_reales[campo] = {
+            "antes": anterior.isoformat() if isinstance(anterior, datetime) else anterior,
+            "despues": nuevo.isoformat() if isinstance(nuevo, datetime) else nuevo,
+        }
+        setattr(suscripcion, campo, nuevo)
+
+    if not cambios_reales:
+        # Nada cambió: se cierra la transacción (suelta el lock) y se devuelve igual.
+        # `refresh` porque el commit expira los atributos y la respuesta los serializa.
+        db.commit()
+        db.refresh(suscripcion)
+        return suscripcion
+
+    registrar_auditoria(
+        db,
+        tenant_id=tenant_id,
+        usuario_id=current_user["usuario_id"],
+        accion="UPDATE",
+        entidad="suscripcion",
+        entidad_id=suscripcion.id,
+        detalle={
+            "usuario_id": suscripcion.usuario_id,
+            "cambios": cambios_reales,
+        },
+    )
+    # `registrar_auditoria` commitea: suscripción y auditoría quedan juntas.
+    db.refresh(suscripcion)
+
+    # El plan vigente / los créditos / el vencimiento cambiaron: se ENCOLA el
+    # recálculo de churn del alumno, igual que el alta (`crear_suscripcion`).
+    churn_service.programar_recalculo(background_tasks, tenant_id,
+                                      suscripcion.usuario_id)
+
+    return suscripcion
 
 
 @router.get("/suscripciones")
