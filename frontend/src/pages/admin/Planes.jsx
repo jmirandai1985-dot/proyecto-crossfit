@@ -10,6 +10,27 @@ const TARJETAS = [
     { key: 'estudiante_f', label: 'Estudiante Femenino', barColor: 'border-l-pink-500', textColor: 'text-pink-400', genero: 'femenino', soloEstudiante: true },
 ];
 
+// Campos numéricos del modal y su default cuando el valor queda vacío o inválido.
+// Mientras se edita se acepta el texto tal cual (incluido `''`): normalizar en el `onChange`
+// con `parseInt(valor) || default` reponía el default en el acto y no dejaba escribir un
+// número nuevo (en "Duración" saltaba a 30 apenas se borraba el campo).
+const CAMPOS_NUMERICOS = { precio_clp: 0, creditos: 0, duracion_dias: 30 };
+
+const aEntero = (valor, porDefecto) => {
+    if (valor === '' || valor === null || valor === undefined) return porDefecto;
+    const numero = parseInt(valor, 10);
+    return Number.isNaN(numero) ? porDefecto : numero;
+};
+
+// Copia del formulario con los 3 numéricos ya convertidos a entero (se usa al guardar).
+const normalizarNumericos = (datos) => {
+    const normalizado = { ...datos };
+    Object.keys(CAMPOS_NUMERICOS).forEach((campo) => {
+        normalizado[campo] = aEntero(normalizado[campo], CAMPOS_NUMERICOS[campo]);
+    });
+    return normalizado;
+};
+
 const Planes = () => {
     const { tenant_id } = useAuth();
     // Bloque 3 (parte A): la lista sale de la caché compartida y las mutaciones invalidan
@@ -44,7 +65,10 @@ const Planes = () => {
     const openEdit = (p) => {
         setEditingId(p.id);
         setFormData({
-            nombre: p.nombre, precio_clp: p.precio_clp, creditos: p.creditos,
+            // `creditos` es la única columna nullable de las tres (NULL = plan sin cupo; la
+            // marca de "ilimitado" vive aparte, en `es_ilimitado`, y no se edita en este modal).
+            // El input muestra '' y, si no se toca, el submit lo normaliza al default (0).
+            nombre: p.nombre, precio_clp: p.precio_clp, creditos: p.creditos ?? '',
             duracion_dias: p.duracion_dias,
             genero: p.genero || 'masculino',
             activo: p.activo ?? true,
@@ -55,13 +79,24 @@ const Planes = () => {
         setShowForm(true);
     };
 
+    // Al perder el foco, un campo vacío o inválido vuelve a su default (30 días / 0 / 0).
+    // Mientras tanto el input muestra el texto que escribe el usuario, sin pisarlo.
+    const normalizarCampo = (campo) => setFormData(prev => ({
+        ...prev,
+        [campo]: aEntero(prev[campo], CAMPOS_NUMERICOS[campo]),
+    }));
+
     const handleSubmit = async (e) => {
         e.preventDefault();
+        // Un submit con Enter puede llegar antes que el `onBlur` del input: se normalizan los
+        // numéricos acá también (campo vacío o inválido -> default de cada uno).
+        const formNormalizado = normalizarNumericos(formData);
+        setFormData(formNormalizado);
         try {
             // `requiere_certificado_estudiante` se DERIVA de `es_estudiante` (fuente única
             // del filtrado de planes estudiantiles); el tenant sólo viaja al crear.
             const payload = {
-                ...formData,
+                ...formNormalizado,
                 requiere_certificado_estudiante: formData.es_estudiante,
                 ...(editingId ? {} : { tenant_id }),
             };
@@ -169,11 +204,11 @@ const Planes = () => {
                                 <div><label className="block text-sm font-medium text-zinc-300 mb-1">Nombre</label>
                                     <input type="text" value={formData.nombre} onChange={e => setFormData({ ...formData, nombre: e.target.value })} required className="w-full border rounded px-3 py-2" /></div>
                                 <div><label className="block text-sm font-medium text-zinc-300 mb-1">Precio ($)</label>
-                                    <input type="number" value={formData.precio_clp} onChange={e => setFormData({ ...formData, precio_clp: parseInt(e.target.value) || 0 })} className="w-full border rounded px-3 py-2" /></div>
+                                    <input type="number" value={formData.precio_clp} onChange={e => setFormData({ ...formData, precio_clp: e.target.value })} onBlur={() => normalizarCampo('precio_clp')} className="w-full border rounded px-3 py-2" /></div>
                                 <div><label className="block text-sm font-medium text-zinc-300 mb-1">Créditos</label>
-                                    <input type="number" value={formData.creditos} onChange={e => setFormData({ ...formData, creditos: parseInt(e.target.value) || 0 })} className="w-full border rounded px-3 py-2" /></div>
+                                    <input type="number" value={formData.creditos} onChange={e => setFormData({ ...formData, creditos: e.target.value })} onBlur={() => normalizarCampo('creditos')} className="w-full border rounded px-3 py-2" /></div>
                                 <div><label className="block text-sm font-medium text-zinc-300 mb-1">Duración (días)</label>
-                                    <input type="number" value={formData.duracion_dias} onChange={e => setFormData({ ...formData, duracion_dias: parseInt(e.target.value) || 30 })} className="w-full border rounded px-3 py-2" /></div>
+                                    <input type="number" value={formData.duracion_dias} onChange={e => setFormData({ ...formData, duracion_dias: e.target.value })} onBlur={() => normalizarCampo('duracion_dias')} className="w-full border rounded px-3 py-2" /></div>
                                 <div><label className="block text-sm font-medium text-zinc-300 mb-1">Género</label>
                                     <select value={formData.genero} onChange={e => setFormData({ ...formData, genero: e.target.value })} className="w-full border rounded px-3 py-2">
                                         <option value="masculino">Masculino</option><option value="femenino">Femenino</option>
