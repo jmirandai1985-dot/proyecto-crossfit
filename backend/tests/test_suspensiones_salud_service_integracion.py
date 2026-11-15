@@ -177,22 +177,6 @@ def test_cancelar_suspension_salud_revierte_exacto(escenario):
     assert exp == escenario["expiracion_original"]
 
 
-def test_admin_salud_no_afecta_saldo_en_ciclo(escenario):
-    db = escenario["db"]
-    ids = escenario["ids"]
-
-    susp = svc.crear_suspension_salud(
-        db, ids["alumno"], ids["admin"],
-        escenario["fecha_inicio"], escenario["fecha_fin"], "licencia médica")
-
-    # La fila es admin_salud: `dias_usados_en_ciclo` la ignora (saldo intacto).
-    assert susp.origen == "admin_salud"
-    from app.models.usuario import Usuario
-    usuario = db.query(Usuario).get(ids["alumno"])
-    ciclo_inicio, ciclo_fin = svc.ciclo_vigente(usuario.created_at, hoy_santiago())
-    assert svc.dias_usados_en_ciclo([susp], ciclo_inicio, ciclo_fin) == 0
-
-
 def test_crear_suspension_salud_rechaza_fecha_invertida(escenario):
     db = escenario["db"]
     ids = escenario["ids"]

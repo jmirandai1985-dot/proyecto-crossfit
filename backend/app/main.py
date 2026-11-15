@@ -335,10 +335,9 @@ app.include_router(auth.router, prefix="/api/v1/auth", tags=["Autenticación"])
 app.include_router(suscripciones.router, prefix="/api/v1",
                    tags=["Suscripciones"])
 # Suspensión de plan: el router define su prefijo `/api/v1` y lleva el path completo
-# (`/alumnos/me/suspension/...` y `/admin/suspensiones...`). Se monta SIN prefijo y
-# ANTES que `historial_alumno`/`alumnos` para que las rutas literales `/me/suspension`
-# se resuelvan antes que cualquier ruta con path param `/{alumno_id}` (misma lección
-# del bug de `wods.py`).
+# (`/admin/suspensiones...` y `/admin/alumnos/{id}/suspension-salud...`). Se monta SIN
+# prefijo extra; se deja ANTES que `historial_alumno`/`alumnos` por consistencia con
+# el resto de los routers con path completo (misma lección del bug de `wods.py`).
 app.include_router(suspensiones.router, tags=["Suspensiones"])
 app.include_router(wods.router, tags=["WODs"])
 app.include_router(solicitudes_planes.router,

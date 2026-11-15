@@ -3,7 +3,6 @@
 Cubre el flujo del admin (crea/cancela suspensión por salud desde la ficha):
   * preview (`?preview=true`): días calculados + nueva fecha + reservas a cancelar;
   * caso feliz: `fecha_expiracion += dias`, cancela SÓLO las reservas del rango;
-  * la suspensión `admin_salud` NO mueve el saldo del alumno (vista alumno);
   * cancelar revierte `fecha_expiracion` EXACTA (sin cupo anual);
   * historial por alumno.
 
@@ -226,25 +225,6 @@ def test_crear_suspension_salud_caso_feliz(escenario, cliente):
     assert estados[ids["reservas"][2]] == "reserved"
 
 
-# ── la admin_salud NO afecta el saldo del alumno ─────────────────────────────
-def test_admin_salud_no_afecta_saldo_alumno(escenario, cliente):
-    ids = escenario["ids"]
-    # El admin crea una suspensión por salud (misma ventana que el caso feliz).
-    resp = cliente.post(
-        f"/api/v1/admin/alumnos/{ids['alumno']}/suspension-salud",
-        json={"fecha_inicio": str(escenario["fecha_inicio"]),
-              "fecha_fin": str(escenario["fecha_fin"])},
-        headers=escenario["token_admin"],
-    )
-    assert resp.status_code == 200, resp.text
-
-    # Vista alumno: el saldo de 14 días/año NO se mueve (la admin_salud no cuenta).
-    r = cliente.get("/api/v1/alumnos/me/suspension/elegibilidad",
-                    headers=escenario["token_alumno"])
-    assert r.status_code == 200, r.text
-    assert r.json()["saldo_disponible"] == 14
-
-
 # ── cancelar (reversión exacta, sin cupo anual) ──────────────────────────────
 def test_cancelar_suspension_salud_revierte_fecha(escenario, cliente):
     ids = escenario["ids"]
@@ -329,61 +309,3 @@ def test_crear_suspension_salud_requiere_admin(escenario, cliente):
     )
     assert resp.status_code == 403
 
-
-# ── Visibilidad al alumno (Parte A): ve las admin_salud pero no las controla ──
-def test_alumno_ve_suspension_salud_en_historial(escenario, cliente):
-    ids = escenario["ids"]
-    creada = cliente.post(
-        f"/api/v1/admin/alumnos/{ids['alumno']}/suspension-salud",
-        json={"fecha_inicio": str(escenario["hoy"]),
-              "fecha_fin": str(escenario["hoy"] + timedelta(days=2)),
-              "motivo": "cirugía"},
-        headers=escenario["token_admin"],
-    )
-    assert creada.status_code == 200, creada.text
-
-    resp = cliente.get("/api/v1/alumnos/me/suspensiones",
-                       headers=escenario["token_alumno"])
-    assert resp.status_code == 200, resp.text
-    items = resp.json()
-    assert len(items) == 1
-    assert items[0]["origen"] == "admin_salud"
-    assert items[0]["estado"] == "activa"
-
-
-def test_alumno_ve_suspension_salud_en_elegibilidad(escenario, cliente):
-    ids = escenario["ids"]
-    creada = cliente.post(
-        f"/api/v1/admin/alumnos/{ids['alumno']}/suspension-salud",
-        json={"fecha_inicio": str(escenario["hoy"]),
-              "fecha_fin": str(escenario["hoy"] + timedelta(days=2))},
-        headers=escenario["token_admin"],
-    )
-    assert creada.status_code == 200, creada.text
-
-    r = cliente.get("/api/v1/alumnos/me/suspension/elegibilidad",
-                    headers=escenario["token_alumno"])
-    assert r.status_code == 200, r.text
-    datos = r.json()
-    # La ve como suspensión activa, con su origen.
-    assert datos["suspension_activa"]["origen"] == "admin_salud"
-    # Pero el saldo de 14 días/año sigue intacto.
-    assert datos["saldo_disponible"] == 14
-
-
-def test_cancelar_self_service_rechaza_admin_salud(escenario, cliente):
-    ids = escenario["ids"]
-    creada = cliente.post(
-        f"/api/v1/admin/alumnos/{ids['alumno']}/suspension-salud",
-        json={"fecha_inicio": str(escenario["hoy"]),
-              "fecha_fin": str(escenario["hoy"] + timedelta(days=2))},
-        headers=escenario["token_admin"],
-    ).json()
-    sid = creada["suspension"]["id"]
-
-    # El alumno NO puede cancelar una de salud por la ruta self-service, aunque
-    # arme el request a mano.
-    resp = cliente.post(f"/api/v1/alumnos/me/suspension/{sid}/cancelar",
-                        headers=escenario["token_alumno"])
-    assert resp.status_code == 400
-    assert "salud" in resp.json()["detail"]

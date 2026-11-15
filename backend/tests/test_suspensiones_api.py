@@ -1,11 +1,11 @@
-"""API de Suspensión de plan: el POST que toca dinero/fechas de vencimiento.
+"""API del listado de Suspensión de plan del ADMIN (sólo lectura).
 
-Cubre el flujo self-service del alumno contra la app real (TestClient):
-  * caso feliz: recalcula `fecha_expiracion`, cancela SÓLO las reservas del rango
-    (estado nuevo `cancelada_por_suspension`) y deja intactas las de fuera;
-  * créditos insuficientes -> 400;
-  * menos de 10 días para vencer -> 400;
-  * pedir más días que el saldo del ciclo -> 400 (defensa en profundidad).
+El autoservicio del alumno (elegibilidad / pedir / cancelar / historial propio) se
+retiró: esos 4 endpoints ya no existen. Lo que queda acá es lo que usan la pantalla
+de supervisión (`/admin/suspensiones`) y la ficha del alumno.
+
+Cubre:
+  * `cancelada_en` viaja en el payload del listado (auditoría de la ficha).
 
 REQUISITO PREVIO: la migración `073_suspensiones_plan` debe estar aplicada en la
 rama TEST (la tabla `suspensiones_plan`), y el servidor/BD apuntando a TEST.
@@ -63,22 +63,18 @@ def _insertar_alumno(db, tenant_id, correo, creado):
 
 @pytest.fixture
 def escenario(db):
-    """Un box propio con alumno, plan, disciplina, clases y reservas.
+    """Un box propio con alumno y membresía activa.
 
     Crea todo desde cero (no depende de datos que ya estén en TEST) y lo borra al
-    final. El alumno queda con un plan limitado de 20 créditos que vence en 30 días,
-    y 3 reservas: dos DENTRO del rango de la suspensión y una FUERA.
+    final. Es el mínimo que necesita el listado de suspensiones del admin.
     """
     sufijo = f"{datetime.now():%Y%m%d%H%M%S%f}"
     hoy = hoy_santiago()
     creado = datetime.combine(hoy - timedelta(days=200), datetime.min.time(),
                               tzinfo=SANTIAGO)
     expiracion = fin_del_dia_chile(hoy + timedelta(days=30))
-    fecha_inicio = hoy + timedelta(days=7)
-    dias = 3
 
-    ids = {"tenant": None, "alumno": None, "plan": None, "disc": None,
-           "horario": None, "suscripcion": None, "clases": [], "reservas": []}
+    ids = {"tenant": None, "alumno": None, "plan": None, "suscripcion": None}
     try:
         ids["tenant"] = db.execute(text("""
             INSERT INTO tenants (nombre, subdomain, public_id, activo, created_at)
@@ -87,15 +83,6 @@ def escenario(db):
              "pub": str(uuid.uuid4())}).scalar()
         t = ids["tenant"]
         ids["alumno"] = _insertar_alumno(db, t, f"susp.{sufijo}@test.local", creado)
-        ids["disc"] = db.execute(text("""
-            INSERT INTO disciplinas (tenant_id, nombre, activo)
-            VALUES (:t, :n, true) RETURNING id"""),
-            {"t": t, "n": f"CrossFit Susp {sufijo}"}).scalar()
-        ids["horario"] = db.execute(text("""
-            INSERT INTO horarios (tenant_id, disciplina_id, dia_semana, hora_inicio,
-                                  hora_fin, activo)
-            VALUES (:t, :d, 1, '19:00', '20:00', true) RETURNING id"""),
-            {"t": t, "d": ids["disc"]}).scalar()
         ids["plan"] = db.execute(text("""
             INSERT INTO planes (tenant_id, nombre, creditos, es_ilimitado, precio_clp,
                                 duracion_dias, activo, es_comercial)
@@ -107,35 +94,12 @@ def escenario(db):
                                        fecha_inicio, fecha_expiracion)
             VALUES (:t, :u, :p, 'activo', 20, 20, now(), :exp) RETURNING id"""),
             {"t": t, "u": ids["alumno"], "p": ids["plan"], "exp": expiracion}).scalar()
-
-        for dia, asistentes in ((fecha_inicio, 1), (fecha_inicio + timedelta(days=2), 1),
-                                (fecha_inicio + timedelta(days=10), 0)):
-            cid = db.execute(text("""
-                INSERT INTO clases (tenant_id, horario_base_id, disciplina_id, fecha,
-                                    hora_inicio, hora_fin, cupo_maximo,
-                                    asistentes_confirmados, cancelada)
-                VALUES (:t, :h, :d, :f, '19:00', '20:00', 20, :a, false) RETURNING id"""),
-                {"t": t, "h": ids["horario"], "d": ids["disc"], "f": dia,
-                 "a": asistentes}).scalar()
-            ids["clases"].append(cid)
-            rid = db.execute(text("""
-                INSERT INTO reservas (tenant_id, clase_id, alumno_id, tokens_gastados,
-                                      suscripcion_id, estado)
-                VALUES (:t, :c, :a, 1, :s, 'reserved') RETURNING id"""),
-                {"t": t, "c": cid, "a": ids["alumno"], "s": ids["suscripcion"]}).scalar()
-            ids["reservas"].append(rid)
         db.commit()
     except Exception:
         db.rollback()
         raise
 
-    token = {"Authorization": "Bearer " + create_access_token({
-        "usuario_id": ids["alumno"], "tenant_id": t, "rol": "alumno",
-        "correo": f"susp.{sufijo}@test.local"})}
-
-    yield {"db": db, "ids": ids, "token": token, "hoy": hoy,
-           "fecha_inicio": fecha_inicio, "dias": dias,
-           "expiracion_original": expiracion}
+    yield {"db": db, "ids": ids, "hoy": hoy}
 
     # ── limpieza (siempre, aunque el test falle) ──
     db.rollback()
@@ -151,238 +115,6 @@ def escenario(db):
         print(f"\n[WARN] no se pudo limpiar el escenario de suspensiones: {e}")
 
 
-def _estados(db, ids_reservas):
-    filas = db.execute(text("SELECT id, estado FROM reservas WHERE id = ANY(:ids)"),
-                       {"ids": ids_reservas}).all()
-    return {f.id: f.estado for f in filas}
-
-
-def test_caso_feliz(escenario, cliente):
-    ids = escenario["ids"]
-    resp = cliente.post(
-        "/api/v1/alumnos/me/suspension",
-        json={"fecha_inicio": str(escenario["fecha_inicio"]),
-              "dias": escenario["dias"]},
-        headers=escenario["token"],
-    )
-    assert resp.status_code == 201, resp.text
-    datos = resp.json()
-    assert datos["suspension"]["dias"] == 3
-    assert datos["suspension"]["reservas_canceladas"] == 2
-    assert len(datos["reservas_canceladas"]) == 2
-
-    db = escenario["db"]
-    db.expire_all()
-
-    # fecha_expiracion += 3 días (misma fórmula para ambos tipos de plan).
-    exp = db.execute(text("SELECT fecha_expiracion FROM suscripciones WHERE id = :i"),
-                     {"i": ids["suscripcion"]}).scalar()
-    assert exp == escenario["expiracion_original"] + timedelta(days=3)
-
-    # Las dos reservas del rango quedaron con el estado NUEVO; la de fuera, intacta.
-    estados = _estados(db, ids["reservas"])
-    assert estados[ids["reservas"][0]] == "cancelada_por_suspension"
-    assert estados[ids["reservas"][1]] == "cancelada_por_suspension"
-    assert estados[ids["reservas"][2]] == "reserved"
-
-    # El aforo de las clases del rango bajó en 1; la de fuera no.
-    aforos = db.execute(text("SELECT id, asistentes_confirmados FROM clases "
-                             "WHERE id = ANY(:ids)"),
-                        {"ids": ids["clases"]}).all()
-    aforo = {c.id: c.asistentes_confirmados for c in aforos}
-    assert aforo[ids["clases"][0]] == 0
-    assert aforo[ids["clases"][1]] == 0
-    assert aforo[ids["clases"][2]] == 0
-
-
-def test_creditos_insuficientes_rechaza(escenario, cliente):
-    ids = escenario["ids"]
-    db = escenario["db"]
-    db.execute(text("UPDATE suscripciones SET creditos_disponibles = 3 WHERE id = :i"),
-               {"i": ids["suscripcion"]})
-    db.commit()
-
-    resp = cliente.post(
-        "/api/v1/alumnos/me/suspension",
-        json={"fecha_inicio": str(escenario["fecha_inicio"]),
-              "dias": escenario["dias"]},
-        headers=escenario["token"],
-    )
-    assert resp.status_code == 400
-    assert resp.json()["detail"] == "No disponible — te quedan solo 3 créditos, necesitas al menos 4"
-
-
-def test_menos_de_10_dias_rechaza(escenario, cliente):
-    ids = escenario["ids"]
-    db = escenario["db"]
-    nueva = fin_del_dia_chile(escenario["hoy"] + timedelta(days=9))
-    db.execute(text("UPDATE suscripciones SET fecha_expiracion = :e WHERE id = :i"),
-               {"e": nueva, "i": ids["suscripcion"]})
-    db.commit()
-
-    resp = cliente.post(
-        "/api/v1/alumnos/me/suspension",
-        json={"fecha_inicio": str(escenario["fecha_inicio"]),
-              "dias": escenario["dias"]},
-        headers=escenario["token"],
-    )
-    assert resp.status_code == 400
-    assert resp.json()["detail"] == "No disponible — faltan 9 días para poder suspender"
-
-
-def test_mas_dias_que_saldo_rechaza(escenario, cliente):
-    ids = escenario["ids"]
-    db = escenario["db"]
-    # Consume 12 de los 14 días del ciclo (deja saldo 2). Se inserta en el PASADO
-    # (no activa hoy) para no chocar con la regla nueva de "no solapar suspensiones".
-    db.execute(text("""
-        INSERT INTO suspensiones_plan (tenant_id, usuario_id, suscripcion_id,
-                                       fecha_inicio, fecha_fin, dias,
-                                       fecha_expiracion_original, reservas_canceladas)
-        VALUES (:t, :u, :s, now() - interval '20 days', now() - interval '8 days',
-                12, now(), 0)"""),
-        {"t": ids["tenant"], "u": ids["alumno"], "s": ids["suscripcion"]})
-    db.commit()
-
-    resp = cliente.post(
-        "/api/v1/alumnos/me/suspension",
-        json={"fecha_inicio": str(escenario["fecha_inicio"]),
-              "dias": escenario["dias"]},
-        headers=escenario["token"],
-    )
-    assert resp.status_code == 400
-    assert "2 día" in resp.json()["detail"]
-
-
-# ── Cancelación de suspensión (fix del abuso en plan ilimitado) ─────────────
-def _crear_suspension_activa(cliente, escenario, dias=3):
-    """Crea una suspensión ACTIVA hoy (fecha_inicio = hoy) y devuelve su id."""
-    resp = cliente.post(
-        "/api/v1/alumnos/me/suspension",
-        json={"fecha_inicio": str(escenario["hoy"]), "dias": dias},
-        headers=escenario["token"],
-    )
-    assert resp.status_code == 201, resp.text
-    return resp.json()["suspension"]["id"]
-
-
-def test_cancelar_suspension_caso_feliz(escenario, cliente):
-    ids = escenario["ids"]
-    expiracion_original = escenario["expiracion_original"]
-
-    sid = _crear_suspension_activa(cliente, escenario, dias=3)
-
-    resp = cliente.post(
-        f"/api/v1/alumnos/me/suspension/{sid}/cancelar",
-        headers=escenario["token"],
-    )
-    assert resp.status_code == 200, resp.text
-
-    db = escenario["db"]
-    db.expire_all()
-
-    # Reversión EXACTA: la fecha vuelve a la original (no un cálculo proporcional).
-    exp = db.execute(text("SELECT fecha_expiracion FROM suscripciones WHERE id = :i"),
-                     {"i": ids["suscripcion"]}).scalar()
-    assert exp == expiracion_original
-
-    fila = db.execute(text("SELECT cancelada, cancelada_en FROM suspensiones_plan "
-                           "WHERE id = :i"), {"i": sid}).one()
-    assert fila.cancelada is True
-    assert fila.cancelada_en is not None
-
-
-def test_cancelar_segunda_vez_en_el_ciclo_rechaza(escenario, cliente):
-    # Primera suspensión + cancelación (consume el cupo anual).
-    sid = _crear_suspension_activa(cliente, escenario, dias=2)
-    r1 = cliente.post(f"/api/v1/alumnos/me/suspension/{sid}/cancelar",
-                      headers=escenario["token"])
-    assert r1.status_code == 200, r1.text
-
-    # Segunda suspensión: el cupo anual ya está usado -> 400.
-    sid2 = _crear_suspension_activa(cliente, escenario, dias=2)
-    r2 = cliente.post(f"/api/v1/alumnos/me/suspension/{sid2}/cancelar",
-                      headers=escenario["token"])
-    assert r2.status_code == 400
-    assert "una vez por ciclo" in r2.json()["detail"]
-
-
-def test_cancelar_suspension_inexistente_404(escenario, cliente):
-    resp = cliente.post("/api/v1/alumnos/me/suspension/999999999/cancelar",
-                        headers=escenario["token"])
-    assert resp.status_code == 404
-
-
-def test_cancelar_suspension_ya_terminada_400(escenario, cliente):
-    ids = escenario["ids"]
-    db = escenario["db"]
-    # Suspensión que YA terminó (fecha_fin < hoy): no se puede cancelar.
-    sid = db.execute(text("""
-        INSERT INTO suspensiones_plan (tenant_id, usuario_id, suscripcion_id,
-                                       fecha_inicio, fecha_fin, dias,
-                                       fecha_expiracion_original, reservas_canceladas)
-        VALUES (:t, :u, :s, now() - interval '10 days', now() - interval '5 days',
-                3, now(), 0)
-        RETURNING id"""),
-        {"t": ids["tenant"], "u": ids["alumno"], "s": ids["suscripcion"]}).scalar()
-    db.commit()
-
-    resp = cliente.post(f"/api/v1/alumnos/me/suspension/{sid}/cancelar",
-                        headers=escenario["token"])
-    assert resp.status_code == 400
-    assert "no está activa hoy" in resp.json()["detail"]
-
-
-# ── Fix de visibilidad: no solapar suspensiones + historial del alumno ───────
-def test_crear_suspension_rechaza_si_ya_hay_una_activa(escenario, cliente):
-    # Primera suspensión activa hoy.
-    _crear_suspension_activa(cliente, escenario, dias=3)
-
-    # Segunda suspensión (mismo día) -> 400, aunque quede saldo.
-    resp = cliente.post(
-        "/api/v1/alumnos/me/suspension",
-        json={"fecha_inicio": str(escenario["hoy"]), "dias": 2},
-        headers=escenario["token"],
-    )
-    assert resp.status_code == 400
-    assert "Ya tienes una suspensión activa" in resp.json()["detail"]
-
-
-def test_historial_de_suspensiones_del_alumno(escenario, cliente):
-    ids = escenario["ids"]
-    db = escenario["db"]
-
-    # Tres suspensiones en estados distintos, insertadas por SQL (bypass del POST,
-    # que hoy impide solapar o pasar de 2 períodos): pasada, activa y cancelada.
-    db.execute(text("""
-        INSERT INTO suspensiones_plan (tenant_id, usuario_id, suscripcion_id,
-                                       fecha_inicio, fecha_fin, dias,
-                                       fecha_expiracion_original, cancelada,
-                                       cancelada_en, reservas_canceladas)
-        VALUES
-          (:t, :u, :s, now() - interval '20 days', now() - interval '15 days', 5,
-           now(), false, NULL, 0),
-          (:t, :u, :s, now() - interval '2 days',  now() + interval '3 days',  3,
-           now(), false, NULL, 0),
-          (:t, :u, :s, now() - interval '5 days',  now() + interval '2 days',  2,
-           now(), true,  now() - interval '1 day', 0)"""),
-        {"t": ids["tenant"], "u": ids["alumno"], "s": ids["suscripcion"]})
-    db.commit()
-
-    resp = cliente.get("/api/v1/alumnos/me/suspensiones", headers=escenario["token"])
-    assert resp.status_code == 200, resp.text
-    items = resp.json()
-
-    estados = [s["estado"] for s in items]
-    assert estados.count("pasada") == 1
-    assert estados.count("activa") == 1
-    assert estados.count("cancelada") == 1
-    # La pasada es la de 5 días; la cancelada lleva su flag en True.
-    assert [s for s in items if s["estado"] == "pasada"][0]["dias"] == 5
-    assert [s for s in items if s["estado"] == "cancelada"][0]["cancelada"] is True
-
-
-# ── El listado del admin expone CUÁNDO se canceló (ficha del alumno) ─────────
 def _insertar_admin(db, tenant_id):
     """Admin del MISMO box: `GET /admin/suspensiones` exige rol administrador."""
     sufijo = uuid.uuid4().hex[:10]
@@ -452,5 +184,4 @@ def test_admin_suspensiones_expone_cancelada_en(escenario, cliente):
 
     assert por_id[vigente]["cancelada"] is False
     assert por_id[vigente]["cancelada_en"] is None
-
 

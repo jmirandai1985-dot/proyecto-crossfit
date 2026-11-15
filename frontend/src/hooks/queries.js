@@ -215,13 +215,7 @@ export const claves = {
     // Descuento vigente del alumno y precio final de cada plan (lo calcula el backend).
     // Cuelga de `['beneficios']`, la familia que ya usa `useMisBeneficios`.
     beneficiosAlumno: (alumnoId, planIds) => ['beneficios', 'alumno', alumnoId, planIds],
-    // ── Suspensión de plan (self-service del alumno + supervisión del admin) ──
-    // La elegibilidad depende del rango pedido (fecha_inicio + dias), así que va en
-    // la clave: al mover el selector del modal se refetch. Sin rango, sólo elegibilidad.
-    elegibilidadSuspension: (fechaInicio, dias) =>
-        ['suspension', 'elegibilidad', fechaInicio || '', dias || ''],
-    // Historial del alumno de SUS propias suspensiones (pestaña "Suspensión").
-    suspensionesAlumno: ['suspension', 'alumno'],
+    // ── Suspensión de plan (supervisión y suspensión por salud, ambas del admin) ──
     // Listado + resumen del admin (pantalla de supervisión de suspensiones).
     suspensionesAdmin: (buscar, estado, desde, hasta) =>
         ['admin', 'suspensiones', buscar || '', estado || '', desde || '', hasta || ''],
@@ -1169,63 +1163,6 @@ export function useCambiarPassword() {
     return useMutation({
         mutationFn: (payload) =>
             api.put('/api/v1/usuarios/cambiar-password', payload).then((r) => r.data),
-    });
-}
-
-// ── Suspensión de plan (self-service del alumno) ─────────────────────────────
-// Elegibilidad + (opcional) previsualización de reservas que se cancelarían. Sin
-// `fechaInicio`/`dias` sólo pide la elegibilidad (el botón la usa para habilitarse).
-export function useElegibilidadSuspension({ fechaInicio, dias } = {}) {
-    return useQuery({
-        queryKey: claves.elegibilidadSuspension(fechaInicio, dias),
-        queryFn: async () => {
-            const params = {};
-            if (fechaInicio) params.fecha_inicio = fechaInicio;
-            if (dias) params.dias = dias;
-            return (await api.get('/api/v1/alumnos/me/suspension/elegibilidad', { params })).data;
-        },
-        staleTime: 15_000,
-    });
-}
-
-// Confirmar la suspensión: extiende la expiración y cancela reservas. Invalida la
-// membresía (cambió `fecha_expiracion`) y las reservas (quedaron canceladas).
-export function useCrearSuspension() {
-    const qc = useQueryClient();
-    return useMutation({
-        mutationFn: (payload) =>
-            api.post('/api/v1/alumnos/me/suspension', payload).then((r) => r.data),
-        onSuccess: () => {
-            qc.invalidateQueries({ queryKey: claves.membresia });
-            qc.invalidateQueries({ queryKey: ['reservas'] });
-            qc.invalidateQueries({ queryKey: ['suspension'] });
-        },
-    });
-}
-
-// Cancelar una suspensión activa (reversión de `fecha_expiracion`). Invalida la
-// membresía (cambió la fecha) y la elegibilidad (cambió `puede_cancelar`).
-export function useCancelarSuspension() {
-    const qc = useQueryClient();
-    return useMutation({
-        mutationFn: (suspensionId) =>
-            api.post(`/api/v1/alumnos/me/suspension/${suspensionId}/cancelar`)
-                .then((r) => r.data),
-        onSuccess: () => {
-            qc.invalidateQueries({ queryKey: claves.membresia });
-            qc.invalidateQueries({ queryKey: ['suspension'] });
-        },
-    });
-}
-
-// Historial de SUS propias suspensiones (pestaña "Suspensión"). Cuelga de
-// `['suspension']` para que crear/cancelar invalide también esta lista.
-export function useMisSuspensiones() {
-    return useQuery({
-        queryKey: claves.suspensionesAlumno,
-        queryFn: async () =>
-            (await api.get('/api/v1/alumnos/me/suspensiones')).data || [],
-        staleTime: 30_000,
     });
 }
 

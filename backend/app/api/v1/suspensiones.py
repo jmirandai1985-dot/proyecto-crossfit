@@ -1,11 +1,13 @@
 """
-Router de Suspensión de plan (self-service del alumno + supervisión del admin).
+Router de Suspensión de plan (supervisión y suspensión por salud, ambas del admin).
 
-La suspensión la pide el alumno SIN aprobación del admin: el admin sólo supervisa
-(pantalla de sólo lectura). Por eso hay DOS familias acá:
+El alumno YA NO puede pedir/cancelar su propia suspensión: los endpoints
+`/alumnos/me/suspension*` se retiraron. Quedan dos familias, ambas de admin:
 
-  * `/alumnos/me/suspension*` — el alumno consulta su elegibilidad y confirma.
-  * `/admin/suspensiones*` — el admin lista y ve los KPIs.
+  * `/admin/suspensiones*` — el admin lista, ve los KPIs y (con `usuario_id`) el
+    historial de un alumno (sólo lectura).
+  * `/admin/alumnos/{id}/suspension-salud*` — el admin crea/cancela una suspensión
+    por salud (sin tope ni cupo).
 
 Las reglas viven en `services/suspensiones_service.py`; este router sólo resuelve
 quién es el usuario, busca su plan vigente y traduce las excepciones del servicio
@@ -19,7 +21,7 @@ from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_current_user, get_current_admin
+from app.core.dependencies import get_current_admin
 from app.core.estados import no_cancelada, vigente_hoy
 from app.core.rate_limit import limiter, LIMIT_CRITICO
 from app.db.database import get_db
@@ -35,14 +37,9 @@ from app.utils.busqueda import columna_normalizada, normalizar
 from app.utils.santiago import fecha_chile, hoy_santiago
 
 # Mismo prefijo que `wods.py`/`kpis.py`: el router define su prefijo y `main.py` lo
-# monta SIN prefijo extra. Las rutas llevan el path completo para poder mezclar
-# `/alumnos/me/...` y `/admin/...` en un solo router sin chocar con path params.
+# monta SIN prefijo extra. Las rutas llevan el path completo (`/admin/suspensiones*`
+# y `/admin/alumnos/{id}/suspension-salud*`) en un solo router.
 router = APIRouter(prefix="/api/v1", tags=["Suspensiones"])
-
-
-class SuspensionCreate(BaseModel):
-    fecha_inicio: date
-    dias: int
 
 
 class SuspensionSaludCreate(BaseModel):
@@ -103,10 +100,10 @@ def _reservas_canceladas_por_suspension(db: Session, tenant_id: int, usuario_id:
                                         fecha_inicio: date, dias: int):
     """Las reservas que acabaron en `cancelada_por_suspension` en el rango pedido.
 
-    Se usa DESPUÉS de `crear_suspension`: en ese momento las reservas del rango ya
-    están con el estado nuevo, así que se filtran por el literal exacto (la
-    previsualización de antes de confirmar usa `_reservas_en_rango`, que mira las
-    VIVAS).
+    Se usa DESPUÉS de `crear_suspension_salud`: en ese momento las reservas del
+    rango ya están con el estado nuevo, así que se filtran por el literal exacto
+    (la previsualización de antes de confirmar usa `_reservas_en_rango`, que mira
+    las VIVAS).
     """
     filas = (
         db.query(Reserva, Clase, Disciplina)
@@ -132,236 +129,6 @@ def _reservas_canceladas_por_suspension(db: Session, tenant_id: int, usuario_id:
         }
         for r, c, d in filas
     ]
-
-
-def _suspensiones_del_ciclo(db: Session, usuario: Usuario) -> list:
-    """Suspensiones del ciclo vigente (por `fecha_inicio`), para saldo y cupo."""
-    hoy = hoy_santiago()
-    ciclo_inicio, ciclo_fin = suspensiones_service.ciclo_vigente(usuario.created_at, hoy)
-    suspensiones = (
-        db.query(SuspensionPlan)
-        .filter(SuspensionPlan.usuario_id == usuario.id,
-                SuspensionPlan.tenant_id == usuario.tenant_id,
-                SuspensionPlan.origen == suspensiones_service.ORIGEN_ALUMNO)
-        .all()
-    )
-    return [s for s in suspensiones if ciclo_inicio <= s.fecha_inicio < ciclo_fin]
-
-
-def _suspension_activa_hoy(db: Session, tenant_id: int, usuario_id: int):
-    """La suspensión no cancelada cuyo rango cubre HOY (o None).
-
-    Incluye AMBOS orígenes (`alumno` y `admin_salud`): el alumno debe VER la de
-    salud como su suspensión activa (aunque no pueda cancelarla). El filtro por
-    `origen='alumno'` para el CUPO vive en el servicio, no acá.
-    """
-    hoy = hoy_santiago()
-    suspensiones = (
-        db.query(SuspensionPlan)
-        .filter(SuspensionPlan.usuario_id == usuario_id,
-                SuspensionPlan.tenant_id == tenant_id,
-                SuspensionPlan.cancelada == False)  # noqa: E712
-        .all()
-    )
-    for s in suspensiones:
-        if fecha_chile(s.fecha_inicio) <= hoy <= fecha_chile(s.fecha_fin):
-            return s
-    return None
-
-
-def _elegibilidad_para(db: Session, usuario: Usuario, suscripcion) -> dict:
-    """Elegibilidad + saldo del ciclo vigente para `usuario`/`suscripcion`."""
-    del_ciclo = _suspensiones_del_ciclo(db, usuario)
-    return suspensiones_service.calcular_elegibilidad(suscripcion, usuario, del_ciclo,
-                                                      hoy_santiago())
-
-
-# ── Alumno: elegibilidad + previsualización de cancelaciones ─────────────────
-@router.get("/alumnos/me/suspension/elegibilidad")
-def elegibilidad_suspension(
-    fecha_inicio: Optional[date] = Query(None),
-    dias: Optional[int] = Query(None),
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """Elegibilidad del alumno y (opcional) las reservas que se cancelarían.
-
-    Sin `fecha_inicio`/`dias` sólo devuelve la elegibilidad; con ambos, agrega la
-    lista de reservas vivas que caen en el rango (para el aviso previo del modal).
-    """
-    uid = current_user["usuario_id"]
-    tid = current_user["tenant_id"]
-    usuario = db.query(Usuario).filter(
-        Usuario.id == uid, Usuario.tenant_id == tid).first()
-    if not usuario:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
-
-    suscripcion = _suscripcion_activa(db, tid, uid)
-    if not suscripcion:
-        return {
-            "elegible": False,
-            "motivo": suspensiones_service.MOTIVO_SIN_PLAN,
-            "saldo_disponible": 0,
-            "dias_para_vencimiento": 0,
-            "periodos_usados": 0,
-            "reservas_a_cancelar": [],
-            "suspension_activa": None,
-            "puede_cancelar": False,
-        }
-
-    resultado = _elegibilidad_para(db, usuario, suscripcion)
-    resultado["reservas_a_cancelar"] = []
-    if fecha_inicio is not None and dias is not None and dias > 0:
-        resultado["reservas_a_cancelar"] = _reservas_en_rango(
-            db, tid, uid, fecha_inicio, dias)
-
-    # ── Cancelación anticipada: suspensión activa hoy + cupo anual ───────────
-    suspension_activa = _suspension_activa_hoy(db, tid, uid)
-    del_ciclo = _suspensiones_del_ciclo(db, usuario)
-    resultado["suspension_activa"] = (
-        {"id": suspension_activa.id,
-         "origen": suspension_activa.origen,
-         "fecha_inicio": str(suspension_activa.fecha_inicio),
-         "fecha_fin": str(suspension_activa.fecha_fin),
-         "dias": suspension_activa.dias}
-        if suspension_activa else None
-    )
-    resultado["puede_cancelar"] = (
-        suspension_activa is not None
-        and suspensiones_service.puede_cancelar(del_ciclo)
-    )
-    return resultado
-
-
-# ── Alumno: confirmar la suspensión ──────────────────────────────────────────
-@router.post("/alumnos/me/suspension", status_code=201)
-@limiter.limit(LIMIT_CRITICO)
-def crear_suspension(
-    request: Request,
-    data: SuspensionCreate,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """Confirma la suspensión: crea el registro, extiende la expiración y cancela.
-
-    Toca dinero/fechas de vencimiento, por eso va con `LIMIT_CRITICO` y toda la
-    lógica dentro de UNA transacción (ver `services/suspensiones_service.py`).
-    """
-    uid = current_user["usuario_id"]
-    tid = current_user["tenant_id"]
-    usuario = db.query(Usuario).filter(
-        Usuario.id == uid, Usuario.tenant_id == tid).first()
-    if not usuario:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
-
-    suscripcion = _suscripcion_activa(db, tid, uid)
-    if not suscripcion:
-        raise HTTPException(status_code=400,
-                            detail=suspensiones_service.MOTIVO_SIN_PLAN)
-
-    try:
-        suspension = suspensiones_service.crear_suspension(
-            db, suscripcion, usuario, data.fecha_inicio, data.dias)
-    except ReembolsoTransitorio:
-        raise HTTPException(status_code=503, detail="Alta demanda, intenta de nuevo")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    reservas_canceladas = _reservas_canceladas_por_suspension(
-        db, tid, uid, data.fecha_inicio, data.dias)
-    return {
-        "suspension": {
-            "id": suspension.id,
-            "fecha_inicio": str(suspension.fecha_inicio),
-            "fecha_fin": str(suspension.fecha_fin),
-            "dias": suspension.dias,
-            "reservas_canceladas": suspension.reservas_canceladas,
-        },
-        "fecha_expiracion": str(suscripcion.fecha_expiracion),
-        "reservas_canceladas": reservas_canceladas,
-    }
-
-
-# ── Alumno: cancelar una suspensión activa (fix del abuso en plan ilimitado) ──
-@router.post("/alumnos/me/suspension/{suspension_id}/cancelar")
-@limiter.limit(LIMIT_CRITICO)
-def cancelar_suspension(
-    suspension_id: int,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """Cancela una suspensión activa y revierte `fecha_expiracion` a la original.
-
-    Toca `fecha_expiracion` (dinero/duración del plan), por eso `LIMIT_CRITICO`.
-    Sólo el dueño de la suspensión puede cancelarla (validado por `usuario_id` del
-    token + `tenant_id`).
-    """
-    uid = current_user["usuario_id"]
-    tid = current_user["tenant_id"]
-
-    suspension = db.query(SuspensionPlan).filter(
-        SuspensionPlan.id == suspension_id,
-        SuspensionPlan.usuario_id == uid,
-        SuspensionPlan.tenant_id == tid,
-    ).first()
-    if not suspension:
-        raise HTTPException(status_code=404, detail="Suspensión no encontrada")
-
-    suscripcion = db.query(Suscripcion).filter(
-        Suscripcion.id == suspension.suscripcion_id,
-        Suscripcion.usuario_id == uid,
-        Suscripcion.tenant_id == tid,
-    ).first()
-    if not suscripcion:
-        raise HTTPException(status_code=404, detail="Suscripción no encontrada")
-
-    try:
-        suscripcion = suspensiones_service.cancelar_suspension(db, suspension, suscripcion)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    return {
-        "suspension_id": suspension.id,
-        "fecha_expiracion": str(suscripcion.fecha_expiracion),
-    }
-
-
-# ── Alumno: historial de SUS propias suspensiones ────────────────────────────
-@router.get("/alumnos/me/suspensiones")
-def mis_suspensiones(
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """Historial del alumno autenticado: período, días, fechas y estado.
-
-    Reusa `_estado_suspension` (misma regla activa/futura/pasada que el admin) y le
-    suma el caso `cancelada` (cuando `suspension.cancelada` es True), para que el
-    alumno vea cuáles canceló sin duplicar la lógica de fechas.
-    """
-    uid = current_user["usuario_id"]
-    tid = current_user["tenant_id"]
-    suspensiones = (
-        db.query(SuspensionPlan)
-        .filter(SuspensionPlan.usuario_id == uid,
-                SuspensionPlan.tenant_id == tid)
-        .order_by(SuspensionPlan.fecha_inicio.desc())
-        .all()
-    )
-    hoy = hoy_santiago()
-    items = []
-    for s in suspensiones:
-        estado = "cancelada" if s.cancelada else _estado_suspension(s, hoy)
-        items.append({
-            "id": s.id,
-            "origen": s.origen,
-            "fecha_inicio": str(s.fecha_inicio),
-            "fecha_fin": str(s.fecha_fin),
-            "dias": s.dias,
-            "estado": estado,
-            "cancelada": bool(s.cancelada),
-        })
-    return items
 
 
 # ── Admin: listado (sólo lectura) + resumen de KPIs ─────────────────────────
