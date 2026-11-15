@@ -22,6 +22,14 @@ class Pedido(Base):
         "usuarios.id", ondelete="CASCADE"), nullable=False)
     producto_id = Column(Integer, ForeignKey(
         "productos.id", ondelete="CASCADE"), nullable=False)
+    # ── Talla/variante del Bazar (migración 083) ─────────────────────────────
+    # `variante_id` apunta a la fila viva (SET NULL: borrar la variante no
+    # puede borrar el pedido) y `talla` es una COPIA del texto al momento de
+    # comprar. El historial de pedidos lee SIEMPRE `talla`, nunca la variante:
+    # renombrar o borrar la talla después no reescribe pedidos pasados.
+    variante_id = Column(Integer, ForeignKey(
+        "producto_variantes.id", ondelete="SET NULL"), nullable=True)
+    talla = Column(String(30), nullable=True)
     cantidad = Column(Integer, nullable=False)
     total = Column(Float, nullable=False)
     # pendiente, validado, entregado
@@ -57,6 +65,9 @@ class Pedido(Base):
         Index('ix_pedidos_tenant_id', 'tenant_id'),
         Index('ix_pedidos_alumno_id', 'alumno_id'),
         Index('ix_pedidos_producto_id', 'producto_id'),
+        # FK de la variante (migración 083). SET NULL al borrar la talla: el
+        # pedido se queda con su snapshot de `talla`.
+        Index('ix_pedidos_variante_id', 'variante_id'),
         Index('ix_pedidos_estado', 'estado'),
         Index('ix_pedidos_fecha_pedido', 'fecha_pedido'),
         # Un codigo de retiro = un solo pedido del box (migracion 044). Los NULL

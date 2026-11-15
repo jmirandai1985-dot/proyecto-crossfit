@@ -52,6 +52,10 @@ Reserva = importlib.import_module("app.models.reserva").Reserva
 # Mis WODs: el `create_all()` del bootstrap de TEST sólo crea los modelos
 # importados. Registrarlo acá garantiza `wod_resultados` en una rama nueva.
 WodResultado = importlib.import_module("app.models.wod_resultado").WodResultado
+# Bazar: tallas/variantes por producto (migración 083). Importar el módulo
+# registra también `productos` y `producto_imagenes` (viven en el mismo archivo).
+ProductoVariante = importlib.import_module(
+    "app.models.producto").ProductoVariante
 
 # ── MODELOS ANALÍTICOS / ML / DATA MARTS ────────────────────────────────────
 # `Base.metadata.create_all()` sólo crea las tablas de los modelos que fueron
