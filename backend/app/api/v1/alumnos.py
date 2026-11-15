@@ -22,7 +22,7 @@ from app.models.plan import Plan
 from app.models.suscripcion import Suscripcion
 from app.models.clase import Clase
 from app.models.reserva import Reserva
-from app.models.wod import Wod
+from app.models.wod import EstadoWod, Wod
 from app.models.wod_resultado import WodResultado
 from app.api.v1.usuarios import hash_password
 from app.core.dependencies import get_current_user, get_current_admin, es_usuario_prueba
@@ -31,7 +31,7 @@ from app.core.dependencies import get_current_user, get_current_admin, es_usuari
 # de la cuenta). Se importa acá y se sigue exponiendo como `alumnos.validar_rut` porque
 # hay consumidores que lo importan desde este módulo (`scripts/seed_ml_data*.py`).
 from app.utils.rut import validar_rut
-from app.utils.santiago import hoy_santiago
+from app.utils.santiago import SANTIAGO, ahora_santiago
 from app.services.auditoria_service import registrar_auditoria
 # D3: peso/género son los insumos del nivel persistido (`usuarios.nivel_*`).
 from app.services.nivel_service import recalcular_nivel
@@ -645,10 +645,10 @@ class RegistrarResultadoWod(BaseModel):
     el WOD.
     """
     modo: Literal["rx", "escalado"]
-    tiempo_segundos: Optional[int] = Field(None, gt=0)
-    rondas: Optional[int] = Field(None, ge=0)
-    reps_extra: Optional[int] = Field(None, ge=0)
-    nota: Optional[str] = Field(None, max_length=500)
+    tiempo_segundos: int | None = Field(None, gt=0)
+    rondas: int | None = Field(None, ge=0)
+    reps_extra: int | None = Field(None, ge=0)
+    nota: str | None = Field(None, max_length=500)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -719,21 +719,38 @@ def _resultado_wod_json(resultado: WodResultado, wod: Wod) -> dict:
     }
 
 
+def _momento_clase(fecha, hora_inicio):
+    """Instante de la clase (fecha + hora, zona Chile) o `None` si falta un dato."""
+    if fecha is None or hora_inicio is None:
+        return None
+    return datetime.combine(fecha, hora_inicio, tzinfo=SANTIAGO)
+
+
+def _wod_publicado(wod) -> bool:
+    """True si el WOD está en estado `publicado` (no borrador)."""
+    estado = getattr(wod.estado, "value", wod.estado)
+    return estado == EstadoWod.publicado.value
+
+
 @router.get("/me/wods-pendientes")
 def mis_wods_pendientes(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """WODs de los últimos 14 días con asistencia real y SIN resultado registrado.
+    """WODs de las últimas 48 HORAS con asistencia real y SIN resultado registrado.
 
-    La asistencia se apoya en `reservas.asistio=True` (la misma fuente de verdad
-    que usa Asistencia). Un WOD puede tener varias clases/reservas: `.distinct()`
-    deja una sola tarjeta por WOD.
+    La ventana se mide desde la FECHA + HORA DE LA CLASE (`clase.fecha` +
+    `clase.hora_inicio`, zona Chile), no desde el día del WOD: una clase de ayer a
+    las 09:00 y otra de ayer a las 18:00 pueden caer en lados distintos del corte
+    de 48 h. La asistencia se apoya en `reservas.asistio=True` (la misma fuente de
+    verdad que usa Asistencia). Un WOD puede tener varias clases/reservas: se deja
+    una sola tarjeta por WOD.
     """
     # 🔒 SEGURIDAD: alumno y tenant SIEMPRE del token JWT.
     alumno_id = current_user.get("usuario_id")
     tenant_id = current_user.get("tenant_id")
-    desde = hoy_santiago() - timedelta(days=14)
+    ahora = ahora_santiago()
+    desde = ahora - timedelta(hours=48)
 
     filas = (
         db.query(
@@ -742,6 +759,9 @@ def mis_wods_pendientes(
             Wod.titulo,
             Wod.wod_principal,
             Wod.tipo_metcon,
+            # Datos de la CLASE: la ventana se calcula con fecha + hora exactas.
+            Clase.fecha.label("clase_fecha"),
+            Clase.hora_inicio.label("clase_hora_inicio"),
         )
         .join(Clase, Clase.wod_id == Wod.id)
         .join(Reserva, Reserva.clase_id == Clase.id)
@@ -759,24 +779,43 @@ def mis_wods_pendientes(
             Reserva.asistio.is_(True),
             Clase.tenant_id == tenant_id,
             Wod.tenant_id == tenant_id,
-            Wod.fecha >= desde,
+            # Un borrador NUNCA se muestra como pendiente, aunque una fila vieja
+            # de `clases.wod_id` lo esté apuntando: capa de defensa extra.
+            Wod.estado == EstadoWod.publicado,
+            # Prefiltro por FECHA (usa el índice y deja pasar las clases del día
+            # del corte); la hora exacta se filtra abajo con `_momento_clase`.
+            Clase.fecha >= desde.date(),
+            Clase.fecha <= ahora.date(),
             WodResultado.id.is_(None),
         )
-        .distinct()
-        .order_by(Wod.fecha.desc(), Wod.id.desc())
+        .order_by(
+            Wod.fecha.desc(),
+            Wod.id.desc(),
+            Clase.fecha.desc(),
+            Clase.hora_inicio.desc(),
+        )
         .all()
     )
 
-    return [
-        {
+    resultado = []
+    vistos = set()
+    for fila in filas:
+        if fila.wod_id in vistos:
+            continue
+        momento = _momento_clase(fila.clase_fecha, fila.clase_hora_inicio)
+        # Ventana cerrada: la clase tiene que haber empezado entre hace 48 h y
+        # ahora. Una clase futura no es "un WOD de los últimos 48 horas".
+        if momento is None or not (desde <= momento <= ahora):
+            continue
+        vistos.add(fila.wod_id)
+        resultado.append({
             "wod_id": fila.wod_id,
             "fecha": fila.fecha.isoformat() if fila.fecha else None,
             "titulo": fila.titulo,
             "wod_principal": fila.wod_principal,
             "tipo_metcon": fila.tipo_metcon,
-        }
-        for fila in filas
-    ]
+        })
+    return resultado
 
 
 @router.post("/me/wods/{wod_id}/resultado")
@@ -804,6 +843,12 @@ def registrar_resultado_wod(
         Wod.id == wod_id, Wod.tenant_id == tenant_id).first()
     if not wod:
         raise HTTPException(status_code=404, detail="WOD no encontrado")
+
+    if not _wod_publicado(wod):
+        raise HTTPException(
+            status_code=403,
+            detail="No puedes registrar un WOD que no está publicado",
+        )
 
     reserva = (
         db.query(Reserva)

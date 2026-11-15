@@ -10,14 +10,15 @@ los filtros se ejerzan de verdad:
   * registrar con `reserva.asistio=True` → 200 y fila en `wod_resultados`;
   * sin asistencia (o sin reserva) → 403 y NO se escribe nada;
   * segundo registro del mismo WOD → actualiza la MISMA fila (UNIQUE + UPSERT);
-  * pendientes excluye el WOD ya registrado, el no asistido y el de hace >14 días;
+  * pendientes excluye el WOD ya registrado, el no asistido y la clase de hace >48 h;
+  * la ventana de 48 h usa FECHA + HORA de la clase (47 h entra, 49 h no);
   * el mismo WOD dictado en dos clases aparece UNA vez y guarda la reserva más reciente;
   * validación de tiempo/rondas según `wods.tipo_metcon`.
 
     cd backend && py -3.12 -m pytest tests/test_mis_wods.py -q --noconftest
 """
 import sys
-from datetime import UTC, datetime, time, timedelta
+from datetime import datetime, time, timedelta
 from pathlib import Path
 
 import pytest
@@ -42,20 +43,24 @@ from app.models.tenant import Tenant
 from app.models.usuario import RolUsuario, Usuario
 from app.models.wod import EstadoWod, Wod
 from app.models.wod_resultado import WodResultado
-from app.utils.santiago import hoy_santiago
+from app.utils.santiago import SANTIAGO
 
 TENANT = 1
 ALUMNO = 10
 OTRO_ALUMNO = 11
-HOY = hoy_santiago()
+# "Ahora" FIJO en Chile: el endpoint lo recibe por monkeypatch, así el corte de
+# 48 h no depende del día/hora en que se corra la suite.
+AHORA = datetime(2026, 11, 13, 12, 0, tzinfo=SANTIAGO)
 
 # WODs del escenario (ids fijos para leer los tests sin sorpresas).
 WOD_FOR_TIME = 101          # dos clases con asistencia (la más reciente manda)
 WOD_AMRAP_CON_RESULTADO = 102
-WOD_VIEJO = 103             # fuera de la ventana de 14 días
+WOD_VIEJO = 103             # clase a 49 h: fuera de la ventana de 48 h
 WOD_SIN_ASISTENCIA = 104    # reserva con asistio=False
 WOD_SIN_RESERVA = 105
 WOD_SIN_TIPO = 106          # tipo_metcon NULL: acepta tiempo o rondas
+WOD_LIMITE_48H = 107        # clase a 47 h: dentro de la ventana (mismo día que 103)
+WOD_BORRADOR = 108          # estado draft: no debe verse NI registrarse
 
 TABLAS = [
     Tenant.__table__, Usuario.__table__, Disciplina.__table__,
@@ -64,15 +69,26 @@ TABLAS = [
 ]
 
 
-def _wod(id_, fecha, titulo, tipo_metcon, principal="Trabajo prescrito"):
+def _fecha_hora(horas_atras):
+    """(fecha, hora) de Chile de un momento relativo a `AHORA`."""
+    momento = AHORA - timedelta(hours=horas_atras)
+    return momento.date(), momento.time().replace(second=0, microsecond=0)
+
+
+def _wod(id_, horas_atras, titulo, tipo_metcon, principal="Trabajo prescrito",
+         estado=EstadoWod.publicado):
+    fecha, _ = _fecha_hora(horas_atras)
     return Wod(id=id_, tenant_id=TENANT, fecha=fecha, titulo=titulo,
                wod_principal=principal, tipo_metcon=tipo_metcon,
-               estado=EstadoWod.publicado, activo=True)
+               estado=estado, activo=True)
 
 
-def _clase(id_, wod_id, fecha):
+def _clase(id_, wod_id, horas_atras):
+    fecha, hora_inicio = _fecha_hora(horas_atras)
+    hora_fin = (datetime.combine(fecha, hora_inicio, tzinfo=SANTIAGO)
+                + timedelta(hours=1)).time()
     return Clase(id=id_, tenant_id=TENANT, horario_base_id=1, disciplina_id=1,
-                 fecha=fecha, hora_inicio=time(9), hora_fin=time(10),
+                 fecha=fecha, hora_inicio=hora_inicio, hora_fin=hora_fin,
                  cupo_maximo=20, asistentes_confirmados=0, cancelada=False,
                  wod_id=wod_id)
 
@@ -80,7 +96,7 @@ def _clase(id_, wod_id, fecha):
 def _reserva(id_, clase_id, alumno_id, asistio, horas_atras):
     return Reserva(
         id=id_, tenant_id=TENANT, clase_id=clase_id, alumno_id=alumno_id,
-        fecha_reserva=datetime.now(UTC) - timedelta(hours=horas_atras),
+        fecha_reserva=AHORA - timedelta(hours=horas_atras),
         asistio=asistio, tokens_gastados=0, estado="reserved",
     )
 
@@ -105,34 +121,42 @@ def _sembrar(db):
                        hora_inicio=time(9), hora_fin=time(10),
                        cupo_maximo=20, activo=True))
     db.add_all([
-        _wod(WOD_FOR_TIME, HOY - timedelta(days=1), "Fran", "FOR TIME",
+        _wod(WOD_FOR_TIME, 27, "Fran", "FOR TIME",
              "21-15-9 Thrusters + Pull-ups"),
-        _wod(WOD_AMRAP_CON_RESULTADO, HOY - timedelta(days=2), "AMRAP 12",
+        _wod(WOD_AMRAP_CON_RESULTADO, 40, "AMRAP 12",
              "AMRAP", "12 min: 10 wall balls + 10 box jumps"),
-        _wod(WOD_VIEJO, HOY - timedelta(days=20), "WOD viejo", "FOR TIME"),
-        _wod(WOD_SIN_ASISTENCIA, HOY - timedelta(days=2), "No fui", "AMRAP"),
-        _wod(WOD_SIN_RESERVA, HOY - timedelta(days=3), "Sin reserva", "FOR TIME"),
-        _wod(WOD_SIN_TIPO, HOY - timedelta(days=4), "Libre", None,
-             "Sin tipo de metcon"),
+        # 49 h vs 47 h: MISMO día calendario (Nov 11), distinto lado del corte.
+        _wod(WOD_VIEJO, 49, "WOD viejo", "FOR TIME"),
+        _wod(WOD_LIMITE_48H, 47, "Justo dentro", "FOR TIME"),
+        _wod(WOD_SIN_ASISTENCIA, 5, "No fui", "AMRAP"),
+        _wod(WOD_SIN_RESERVA, 10, "Sin reserva", "FOR TIME"),
+        _wod(WOD_SIN_TIPO, 2, "Libre", None, "Sin tipo de metcon"),
+        _wod(WOD_BORRADOR, 3, "Borrador", "FOR TIME",
+             "Nunca publicado", estado=EstadoWod.draft),
     ])
     db.add_all([
-        _clase(201, WOD_FOR_TIME, HOY - timedelta(days=3)),
-        _clase(202, WOD_FOR_TIME, HOY - timedelta(days=1)),
-        _clase(203, WOD_AMRAP_CON_RESULTADO, HOY - timedelta(days=2)),
-        _clase(204, WOD_VIEJO, HOY - timedelta(days=20)),
-        _clase(205, WOD_SIN_ASISTENCIA, HOY - timedelta(days=2)),
-        _clase(206, WOD_SIN_RESERVA, HOY - timedelta(days=3)),
-        _clase(207, WOD_SIN_TIPO, HOY - timedelta(days=4)),
+        # WOD_FOR_TIME se dictó dos veces (09:00 y 18:00 del mismo día).
+        _clase(201, WOD_FOR_TIME, 27),
+        _clase(202, WOD_FOR_TIME, 18),
+        _clase(203, WOD_AMRAP_CON_RESULTADO, 40),
+        _clase(204, WOD_VIEJO, 49),
+        _clase(205, WOD_SIN_ASISTENCIA, 5),
+        _clase(206, WOD_SIN_RESERVA, 10),
+        _clase(207, WOD_SIN_TIPO, 2),
+        _clase(208, WOD_LIMITE_48H, 47),
+        _clase(209, WOD_BORRADOR, 3),
     ])
     db.add_all([
         # Mismo WOD en dos clases: la reserva 302 es la MÁS RECIENTE.
-        _reserva(301, 201, ALUMNO, True, 72),
+        _reserva(301, 201, ALUMNO, True, 30),
         _reserva(302, 202, ALUMNO, True, 1),
-        _reserva(303, 203, ALUMNO, True, 30),
-        _reserva(304, 204, ALUMNO, True, 20),       # fuera de los 14 días
-        _reserva(305, 205, ALUMNO, False, 5),       # no asistió
-        _reserva(306, 207, ALUMNO, True, 10),       # WOD sin tipo
-        _reserva(307, 201, OTRO_ALUMNO, True, 72),  # asistencia de OTRO alumno
+        _reserva(303, 203, ALUMNO, True, 35),
+        _reserva(304, 204, ALUMNO, True, 49),       # clase fuera de 48 h
+        _reserva(305, 205, ALUMNO, False, 4),       # no asistió
+        _reserva(306, 207, ALUMNO, True, 1),        # WOD sin tipo
+        _reserva(307, 201, OTRO_ALUMNO, True, 30),  # asistencia de OTRO alumno
+        _reserva(308, 208, ALUMNO, True, 47),       # 47 h: dentro de la ventana
+        _reserva(309, 209, ALUMNO, True, 3),        # borrador con asistencia real
     ])
     # Este WOD ya tiene resultado: no debe volver a "pendiente".
     db.add(WodResultado(
@@ -144,8 +168,13 @@ def _sembrar(db):
 
 
 @pytest.fixture()
-def entorno():
-    """App real del router + SQLite en memoria con un escenario sembrado."""
+def entorno(monkeypatch):
+    """App real del router + SQLite en memoria con un escenario sembrado.
+
+    `ahora_santiago` se fija a `AHORA` para que la ventana de 48 h sea determinista
+    y el test pueda comparar 47 h (entra) contra 49 h (no entra) del mismo día.
+    """
+    monkeypatch.setattr(alumnos, "ahora_santiago", lambda: AHORA)
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -230,6 +259,18 @@ def test_sin_asistencia_no_puede_registrar_403(entorno):
         WodResultado.alumno_id == ALUMNO,
         WodResultado.wod_id.in_([WOD_SIN_ASISTENCIA, WOD_SIN_RESERVA]),
     ).count() == 0
+
+
+def test_no_puede_registrar_resultado_de_wod_borrador(entorno):
+    """Cinturón y tirantes: con asistencia real, un draft tampoco se registra."""
+    cliente, db = entorno
+
+    r = _post_resultado(cliente, WOD_BORRADOR, modo="rx", tiempo_segundos=845)
+
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"] == "No puedes registrar un WOD que no está publicado"
+    assert db.query(WodResultado).filter_by(
+        alumno_id=ALUMNO, wod_id=WOD_BORRADOR).count() == 0
 
 
 def test_registrar_dos_veces_actualiza_la_misma_fila(entorno):
@@ -318,6 +359,7 @@ def test_pendientes_trae_asistidos_sin_resultado(entorno):
 
     assert WOD_FOR_TIME in ids
     assert WOD_SIN_TIPO in ids
+    assert WOD_LIMITE_48H in ids
     # El mismo WOD dictado en dos clases aparece UNA sola vez.
     assert ids.count(WOD_FOR_TIME) == 1
 
@@ -330,14 +372,37 @@ def test_pendientes_excluye_el_wod_ya_registrado(entorno):
     assert WOD_AMRAP_CON_RESULTADO not in ids
 
 
-def test_pendientes_excluye_sin_asistencia_y_fuera_de_ventana(entorno):
+def test_pendientes_excluye_un_wod_borrador(entorno):
+    """Aunque tenga clase, reserva y asistencia real, un draft no se muestra."""
+    cliente, _ = entorno
+
+    ids = _ids_pendientes(cliente)
+
+    assert WOD_BORRADOR not in ids
+
+
+def test_pendientes_excluye_sin_asistencia_o_sin_reserva(entorno):
     cliente, _ = entorno
 
     ids = _ids_pendientes(cliente)
 
     assert WOD_SIN_ASISTENCIA not in ids
     assert WOD_SIN_RESERVA not in ids
-    assert WOD_VIEJO not in ids
+
+
+def test_pendientes_ventana_48_horas_usa_fecha_y_hora_de_la_clase(entorno):
+    """47 h entra y 49 h no, aunque las dos clases caigan el MISMO día.
+
+    Es el cambio de esta fase: la ventana ya no se mide por el DÍA del WOD (14
+    días), sino por la fecha + hora exacta de la clase (48 h). Un filtro por fecha
+    solamente incluiría las dos.
+    """
+    cliente, _ = entorno
+
+    ids = _ids_pendientes(cliente)
+
+    assert WOD_LIMITE_48H in ids, "47 h desde la clase sigue dentro de la ventana"
+    assert WOD_VIEJO not in ids, "49 h desde la clase ya queda fuera"
 
 
 def test_pendientes_devuelve_la_prescripcion_para_el_formulario(entorno):

@@ -178,8 +178,44 @@ def test_c06_asignar_wod_a_clase():
     assert len(
         crossfit_classes) > 0, "Debe haber al menos una clase de CrossFit hoy"
     Shared.clase_asignada_id = crossfit_classes[0]["id"]
-    # Asignar WOD a la clase
     token = get_coach_token(coach_id=COACH_ID)
+
+    # ── Nueva regla: un WOD en borrador NO se puede asignar ──────────────────
+    # El test [5] lo dejó en `draft`. Lo fijamos explícitamente para que este
+    # bloque sea robusto aunque se corra fuera de orden.
+    r_draft = requests.put(
+        f"{BASE}/wods/{Shared.wod_creado_id}",
+        params={"tenant_id": TENANT_ID,
+                "disciplina_id": Shared.disciplina_crossfit_id or 1},
+        json={"estado": "draft"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r_draft.status_code == 200, \
+        f"Status {r_draft.status_code}: {r_draft.text[:200]}"
+
+    r_rechazo = requests.post(
+        f"{BASE}/wods/clases/{Shared.clase_asignada_id}/asignar-wod/{Shared.wod_creado_id}",
+        params={"tenant_id": TENANT_ID},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r_rechazo.status_code == 400, \
+        f"Un WOD draft no se asigna; status {r_rechazo.status_code}: {r_rechazo.text[:200]}"
+    assert "no ha sido publicado" in r_rechazo.json().get("detail", "")
+    print("  WOD draft → 400 al intentar asignarlo (bloqueado correctamente)")
+
+    # Publicar y recién después asignar (el flujo real).
+    r_publicar = requests.put(
+        f"{BASE}/wods/{Shared.wod_creado_id}",
+        params={"tenant_id": TENANT_ID,
+                "disciplina_id": Shared.disciplina_crossfit_id or 1},
+        json={"estado": "publicado"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r_publicar.status_code == 200, \
+        f"Status {r_publicar.status_code}: {r_publicar.text[:200]}"
+    assert r_publicar.json().get("estado") == "publicado"
+
+    # Asignar WOD a la clase
     r = requests.post(
         f"{BASE}/wods/clases/{Shared.clase_asignada_id}/asignar-wod/{Shared.wod_creado_id}",
         params={"tenant_id": TENANT_ID},

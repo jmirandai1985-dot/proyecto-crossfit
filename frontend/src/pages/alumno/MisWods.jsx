@@ -527,7 +527,7 @@ const MisWods = () => {
                                         Pendientes de registrar
                                     </h2>
                                     <p className="text-sm text-gray-500">
-                                        WODs de los últimos 14 días a los que asististe.
+                                        WODs de las últimas 48 horas a los que asististe.
                                     </p>
                                 </div>
                                 {pendientes.length > 0 && (

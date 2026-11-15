@@ -753,8 +753,8 @@ export function useIntensidadRelativa() {
 }
 
 // ── Mis WODs: resultado REAL vs. lo prescrito ────────────────────────────────
-// Pendientes = WODs de los últimos 14 días con `reserva.asistio=True` y todavía
-// sin resultado. El backend acota por JWT: no hay que mandar el alumno.
+// Pendientes = WODs cuya CLASE empezó en las últimas 48 horas y todavía no tiene
+// resultado. El backend acota por JWT y usa fecha + hora de la clase (zona Chile).
 export function useWodsPendientes() {
     return useQuery({
         queryKey: claves.wodsPendientes,
