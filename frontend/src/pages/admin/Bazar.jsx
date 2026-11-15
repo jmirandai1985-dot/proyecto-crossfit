@@ -177,67 +177,94 @@ const Bazar = ({ sinLayout = false }) => {
     const activosFiltrados = productosFiltrados.filter(p => p.activo);
     const inactivosFiltrados = productosFiltrados.filter(p => !p.activo);
 
+    // Resumen compacto de tallas para la fila (migración 083): "S: 3 · M: 5 · L: 0".
+    // Sólo tallas activas; en productos sin variantes devuelve null y el badge
+    // sigue mostrando "N uds. · estado" como siempre.
+    const resumenTallas = (p) => {
+        if (!p.tiene_variantes) return null;
+        const activas = (p.variantes || []).filter((v) => v.activo !== false);
+        if (activas.length === 0) return null;
+        return activas.map((v) => `${v.talla}: ${v.stock ?? 0}`).join(' · ');
+    };
+
+    // Fila de producto. MÓVIL (<768px, breakpoint `md`): DOS líneas — (1) imagen + nombre/
+    // descripción + precio y (2) badge de stock con su mínimo/alerta + las 3 acciones. Desde
+    // `md` (≥768px) los `md:` devuelven la MISMA fila de una sola línea de siempre.
+    // Antes era una única línea `flex` con casi todos los bloques `shrink-0`: en el celular
+    // la suma superaba el ancho, sólo el nombre podía encogerse (flex-1 min-w-0) y los
+    // botones de editar/desactivar quedaban cortados fuera de la pantalla.
     const renderFila = (p) => (
-        <div key={p.id} className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-800/30 transition-colors">
-            <ImagenProducto
-                url={p.imagen_url}
-                alt={p.nombre}
-                className="w-10 h-10 rounded-xl object-cover shrink-0"
-                respaldo={(
-                    <span className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${INITIAL_BG[p.id % INITIAL_BG.length]}`}>
-                        {getInitials(p.nombre)}
+        <div key={p.id} className="flex flex-col gap-2 px-4 py-3 md:flex-row md:items-center md:gap-3 hover:bg-zinc-800/30 transition-colors">
+            {/* Línea 1 (móvil): imagen + nombre/descripción + precio. En md+ es el tramo
+                izquierdo de la fila única: el grupo toma el espacio libre (md:flex-1) y dentro
+                el nombre sigue siendo lo único que se recorta (truncate), igual que antes. */}
+            <div className="flex items-center gap-3 min-w-0 md:flex-1">
+                <ImagenProducto
+                    url={p.imagen_url}
+                    alt={p.nombre}
+                    className="w-10 h-10 rounded-xl object-cover shrink-0"
+                    respaldo={(
+                        <span className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${INITIAL_BG[p.id % INITIAL_BG.length]}`}>
+                            {getInitials(p.nombre)}
+                        </span>
+                    )}
+                />
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-bold text-zinc-100 truncate">{p.nombre}</span>
+                        {p.dias_anuncio > 0 && (
+                            <span className="text-[10px] font-bold text-blue-400 whitespace-nowrap shrink-0">Anunciado · {p.dias_anuncio} día{p.dias_anuncio === 1 ? '' : 's'}</span>
+                        )}
+                    </div>
+                    {p.descripcion && <div className="text-[12px] text-zinc-500 truncate">{p.descripcion}</div>}
+                </div>
+                <div className="text-sm font-semibold text-zinc-100 shrink-0">{formatPrecio(p.precio)}</div>
+            </div>
+            {/* Línea 2 (móvil): stock a la izquierda y acciones a la derecha (space-between).
+                En md+ este grupo vuelve a ser un bloque más de la fila única; `md:shrink-0`
+                conserva el comportamiento de antes (el que cede ancho es el nombre, nunca el
+                badge ni los botones) y su gap-3 respeta la separación original. */}
+            <div className="flex items-center justify-between gap-3 md:shrink-0">
+                <div className="min-w-0 md:shrink-0">
+                    <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${TONOS[estadoStock(p).key]}`}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
+                        {resumenTallas(p) || `${p.stock || 0} uds. · ${estadoStock(p).label}`}
                     </span>
-                )}
-            />
-            <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-bold text-zinc-100 truncate">{p.nombre}</span>
-                    {p.dias_anuncio > 0 && (
-                        <span className="text-[10px] font-bold text-blue-400 whitespace-nowrap shrink-0">Anunciado · {p.dias_anuncio} día{p.dias_anuncio === 1 ? '' : 's'}</span>
+                    {p.stock_minimo != null ? (
+                        <div className={`mt-0.5 text-[10.5px] ${p.alerta_stock_enviada ? 'text-amber-400' : 'text-zinc-500'}`}>
+                            mínimo: {p.stock_minimo}{p.alerta_stock_enviada ? ' · alerta enviada' : ''}
+                        </div>
+                    ) : (
+                        <div className="mt-0.5 text-[10.5px] text-zinc-500">sin mínimo</div>
                     )}
                 </div>
-                {p.descripcion && <div className="text-[12px] text-zinc-500 truncate">{p.descripcion}</div>}
-            </div>
-            <div className="text-sm font-semibold text-zinc-100 shrink-0">{formatPrecio(p.precio)}</div>
-            <div className="shrink-0">
-                <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${TONOS[estadoStock(p).key]}`}>
-                    <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
-                    {p.stock || 0} uds. · {estadoStock(p).label}
-                </span>
-                {p.stock_minimo != null ? (
-                    <div className={`mt-0.5 text-[10.5px] ${p.alerta_stock_enviada ? 'text-amber-400' : 'text-zinc-500'}`}>
-                        mínimo: {p.stock_minimo}{p.alerta_stock_enviada ? ' · alerta enviada' : ''}
-                    </div>
-                ) : (
-                    <div className="mt-0.5 text-[10.5px] text-zinc-500">sin mínimo</div>
-                )}
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                    onClick={() => handleEditarProducto(p)}
-                    title="Editar"
-                    className="w-8 h-8 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-zinc-400 hover:border-orange-500 hover:text-orange-500 transition-colors"
-                >
-                    ✎
-                </button>
-                {!p.activo && (
+                <div className="flex items-center gap-1.5 shrink-0">
                     <button
-                        onClick={() => handleReactivarProducto(p.id)}
-                        disabled={reactivandoId === p.id}
-                        title="Reactivar (vuelve a ser visible en el Bazar del alumno)"
-                        aria-label="Reactivar producto"
-                        className="h-8 px-2.5 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-[11px] font-bold text-zinc-400 hover:border-green-500 hover:text-green-500 transition-colors disabled:opacity-50"
+                        onClick={() => handleEditarProducto(p)}
+                        title="Editar"
+                        className="w-8 h-8 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-zinc-400 hover:border-orange-500 hover:text-orange-500 transition-colors"
                     >
-                        {reactivandoId === p.id ? 'Reactivando…' : '↺ Reactivar'}
+                        ✎
                     </button>
-                )}
-                <button
-                    onClick={() => handleEliminarProducto(p.id)}
-                    title="Desactivar" aria-label="Desactivar producto"
-                    className="w-8 h-8 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-zinc-400 hover:border-red-500 hover:text-red-500 transition-colors"
-                >
-                    🗑
-                </button>
+                    {!p.activo && (
+                        <button
+                            onClick={() => handleReactivarProducto(p.id)}
+                            disabled={reactivandoId === p.id}
+                            title="Reactivar (vuelve a ser visible en el Bazar del alumno)"
+                            aria-label="Reactivar producto"
+                            className="h-8 px-2.5 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-[11px] font-bold text-zinc-400 hover:border-green-500 hover:text-green-500 transition-colors disabled:opacity-50"
+                        >
+                            {reactivandoId === p.id ? 'Reactivando…' : '↺ Reactivar'}
+                        </button>
+                    )}
+                    <button
+                        onClick={() => handleEliminarProducto(p.id)}
+                        title="Desactivar" aria-label="Desactivar producto"
+                        className="w-8 h-8 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center text-zinc-400 hover:border-red-500 hover:text-red-500 transition-colors"
+                    >
+                        🗑
+                    </button>
+                </div>
             </div>
         </div>
     );
