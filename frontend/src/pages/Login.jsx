@@ -103,7 +103,7 @@ const Login = () => {
                     {/* Logo e identidad */}
                     <div className="text-center mb-8">
                         <img src="/imgs/logo.png" alt="Urban Training Box"
-                            className="h-[60px] w-auto object-contain mx-auto mb-4" />
+                            className="h-[110px] w-auto object-contain mx-auto mb-4" />
                         <h1 className="text-white font-bold text-[20px]">Urban Training Box</h1>
                         <p className="text-gray-300 text-[13px] mt-1">Plataforma de Gestión</p>
                     </div>
