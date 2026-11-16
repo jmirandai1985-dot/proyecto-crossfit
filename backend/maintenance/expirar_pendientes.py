@@ -13,6 +13,9 @@ el botón "Cancelar" (`POST /pagos/{id}/cancelar`), que cierra al toque.
 Qué hace (UNA transacción, idempotente):
   * Membresía (30 min): pago abierto viejo → `expirado` + solicitud `pending` → `expirada`.
     ⚠️ NO se notifica al alumno al expirar (mejora futura: aviso en su campana).
+  * Membresía `iniciado` (30 min): el alumno nunca hizo nada en MP; se cierra
+    igual (housekeeping) y la solicitud oculta pasa a `expirada`. El admin nunca
+    la vio; NO es lo que mantiene limpia su cola.
   * Bazar (30 min): pago abierto viejo → `expirado` + pedido `pendiente` → `rechazado`
     + stock devuelto UNA sola vez (vía `RETURNING`).
 
@@ -42,7 +45,7 @@ SQL_EXPIRAR = f"""
 WITH vencidos AS (
     SELECT id, concepto, referencia_id
     FROM pagos
-    WHERE estado IN ('pendiente', 'en_proceso')
+    WHERE estado IN ('iniciado', 'pendiente', 'en_proceso')
       AND (
           (concepto = 'membresia' AND created_at <= now() - interval '{MINUTOS_MEMBRESIA} minutes')
           OR
@@ -61,7 +64,7 @@ FROM pagos p
 WHERE s.id = p.referencia_id
   AND p.concepto = 'membresia'
   AND p.estado = 'expirado'
-  AND s.estado = 'pending';
+  AND s.estado IN ('iniciado', 'pending');
 
 WITH rechazados AS (
     UPDATE pedidos pe
@@ -87,14 +90,14 @@ WHERE pr.id = s.producto_id;
 SQL_CONTEO = f"""
 SELECT
   (SELECT count(*) FROM pagos
-   WHERE estado IN ('pendiente', 'en_proceso')
+   WHERE estado IN ('iniciado', 'pendiente', 'en_proceso')
      AND ((concepto = 'membresia' AND created_at <= now() - interval '{MINUTOS_MEMBRESIA} minutes')
        OR (concepto = 'bazar' AND created_at <= now() - interval '{MINUTOS_BAZAR} minutes'))) AS pagos,
   (SELECT count(*) FROM solicitudes_planes s
    JOIN pagos p ON p.referencia_id = s.id AND p.concepto = 'membresia'
-   WHERE p.estado IN ('pendiente', 'en_proceso')
+   WHERE p.estado IN ('iniciado', 'pendiente', 'en_proceso')
      AND p.created_at <= now() - interval '{MINUTOS_MEMBRESIA} minutes'
-     AND s.estado = 'pending') AS solicitudes,
+     AND s.estado IN ('iniciado', 'pending')) AS solicitudes,
   (SELECT count(*) FROM pedidos pe
    JOIN pagos p ON p.referencia_id = pe.id AND p.concepto = 'bazar'
    WHERE p.estado IN ('pendiente', 'en_proceso')

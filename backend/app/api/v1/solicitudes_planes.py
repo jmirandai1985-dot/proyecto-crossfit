@@ -2,41 +2,53 @@
 Router de endpoints para Solicitudes de Planes (flujo admin)
 """
 import logging
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
-from sqlalchemy import update
-from sqlalchemy.orm import Session
 from typing import Optional
 
-from app.db.database import get_db
-from app.models.solicitud_plan import SolicitudPlan
-from app.models.plan import Plan
-from app.models.pago import Pago
-from app.models.usuario import Usuario
-from app.models.notificacion import Notificacion
-from app.schemas.solicitud import SolicitudPlanCreate
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from sqlalchemy import update
+from sqlalchemy.orm import Session
+
 from app.core.dependencies import get_current_admin, get_current_user
+
 # Servido de comprobantes (voucher de plan / certificado de estudiante): la
 # resolución del path dentro de su carpeta base, el media type real y la respuesta
 # viven en un helper común (mismo guard para ambos documentos).
 from app.core.documentos_privados import (
-    puede_ver_documento, respuesta_documento,
+    puede_ver_documento,
+    respuesta_documento,
 )
-from app.core.rate_limit import limiter, LIMIT_CRITICO
-from app.services.auditoria_service import registrar_auditoria
-# F2: el descuento vigente del alumno se aplica al SOLICITAR un plan. La aritmética (`desglose`)
-# y el ciclo de vida del beneficio (`vigente`/`usar`) viven en su servicio, no acá.
-from app.services import beneficios_service as beneficios
-# F3b: el descuento del programa de referidos tiene que conocerse ANTES de cobrar
-# (el alumno transfiere el precio final, no el de lista). El servicio es el mismo
-# que después CONVIERTE el referido al aprobar: una sola regla para las dos cosas.
-from app.services import referidos_service as referidos
-# Avisos del PANEL (la campana): un solo módulo decide A QUIÉN y CÓMO se avisa
-# (best-effort: un aviso nunca tumba la solicitud). Ver docs/NOTIFICACIONES_PANEL.md.
-from app.services.notificaciones_panel import notificar_admins_del_tenant
+from app.core.rate_limit import LIMIT_CRITICO, limiter
+from app.db.database import get_db
+from app.models.notificacion import Notificacion
+from app.models.pago import Pago
+from app.models.plan import Plan
+from app.models.solicitud_plan import SolicitudPlan
+from app.models.usuario import Usuario
+from app.schemas.solicitud import SolicitudPlanCreate
+
 # La aprobación (suscripción + ingreso + auditoría + correo) vive en UN servicio:
 # el webhook de Mercado Pago llama a la MISMA función con `actor_id=None`. Ver
 # `services/aprobacion_planes.py`.
 from app.services import aprobacion_planes
+
+# F2: el descuento vigente del alumno se aplica al SOLICITAR un plan. La aritmética (`desglose`)
+# y el ciclo de vida del beneficio (`vigente`/`usar`) viven en su servicio, no acá.
+from app.services import beneficios_service as beneficios
+
+# F3b: el descuento del programa de referidos tiene que conocerse ANTES de cobrar
+# (el alumno transfiere el precio final, no el de lista). El servicio es el mismo
+# que después CONVIERTE el referido al aprobar: una sola regla para las dos cosas.
+from app.services import referidos_service as referidos
+from app.services.auditoria_service import registrar_auditoria
+
+# Avisos del PANEL (la campana): un solo módulo decide A QUIÉN y CÓMO se avisa
+# (best-effort: un aviso nunca tumba la solicitud). Ver docs/NOTIFICACIONES_PANEL.md.
+from app.services.notificaciones_panel import notificar_admins_del_tenant
+
+# El guard de "solicitud en curso" es el MISMO para transferencia y tarjeta:
+# mira la solicitud `pending` y también un checkout online `iniciado` que
+# todavía no generó ningún webhook (ver `services/pagos.py`).
+from app.services.pagos import MENSAJE_PAGO_EN_CURSO, bloqueo_solicitud_en_curso
 
 router = APIRouter()
 
@@ -119,15 +131,17 @@ def solicitar_plan(
     if not plan:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
 
-    # Verificar que no tenga una solicitud pending
-    existing = db.query(SolicitudPlan).filter(
-        SolicitudPlan.alumno_id == data.alumno_id,
-        SolicitudPlan.tenant_id == data.tenant_id,
-        SolicitudPlan.estado == "pending"
-    ).first()
-    if existing:
+    # Verificar que no tenga una solicitud/pago EN CURSO. Además de la
+    # `pending` histórica, cuenta un checkout online `iniciado` de menos de 30
+    # min: si no, el alumno podría abrir una transferencia mientras tiene la
+    # pasarela a medio camino (y el admin vería dos intenciones de compra).
+    motivo = bloqueo_solicitud_en_curso(
+        db, tenant_id=data.tenant_id, alumno_id=data.alumno_id)
+    if motivo == "solicitud_pendiente":
         raise HTTPException(
             status_code=400, detail="Ya tienes una solicitud pendiente")
+    if motivo == "pago_en_curso":
+        raise HTTPException(status_code=400, detail=MENSAJE_PAGO_EN_CURSO)
 
     # ── F2: el descuento VIGENTE del alumno se aplica a ESTA compra ──
     # El precio de lista se conserva como snapshot (`precio_clp_snapshot`, P0-4) y la solicitud
@@ -234,12 +248,15 @@ def listar_solicitudes_pendientes(
 
     `solo_con_voucher=True` es el filtro de la cola "Pendientes → Solicitudes" del admin:
     sólo trae las `pending` que TIENEN comprobante (transferencia, requieren validación
-    manual). Las `pending` SIN voucher son pagos ONLINE (Mercado Pago) que se resuelven
-    solos vía webhook o expiran a los 30 min (`expirar_pendientes`, services/pagos.py): no
-    requieren acción del admin y no deben listarse en esa cola. Sin el flag se devuelve
-    TODO, por compatibilidad con los consumidores que necesitan ver también la intención
-    de pago online (p. ej. la pestaña "Solicitudes" del admin, que la explica con su
-    badge del estado real del pago).
+    manual). Las `pending` SIN voucher son pagos ONLINE (Mercado Pago) que YA tuvieron
+    al menos un aviso real de MP y se resuelven solos vía webhook o expiran a los 30 min
+    (`expirar_pendientes`, services/pagos.py): no requieren acción del admin y no deben
+    listarse en esa cola. Sin el flag se devuelve TODO, por compatibilidad con los
+    consumidores que necesitan ver también el estado del pago online (p. ej. la pestaña
+    "Solicitudes" del admin, que la explica con su badge del estado real del pago).
+
+    Las solicitudes en `iniciado` NO aparecen con ni sin el flag: son la intención
+    previa al primer webhook (el alumno todavía no hizo nada en Mercado Pago).
     """
     # 🔒 SEGURIDAD: tenant_id del token; el query param se ignora.
     tenant_id = current_user["tenant_id"]
@@ -353,6 +370,10 @@ def listar_solicitudes_de_alumno(
     solicitudes = db.query(SolicitudPlan).filter(
         SolicitudPlan.alumno_id == alumno_id,
         SolicitudPlan.tenant_id == current_user["tenant_id"],
+        # `iniciado` es una intención de pago online que todavía no tuvo ningún
+        # aviso de MP: no es una solicitud que el admin deba ver (ni el alumno
+        # como historial). Aparece recién cuando el webhook la abre/cierra.
+        SolicitudPlan.estado != "iniciado",
     ).order_by(SolicitudPlan.created_at.desc()).limit(50).all()
 
     # Los planes se traen de una vez (una solicitud vieja puede apuntar a un plan

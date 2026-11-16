@@ -1059,8 +1059,8 @@ export function useCrearPagoMembresia() {
         mutationFn: (payload) =>
             api.post('/api/v1/pagos/membresia', payload).then((r) => r.data),
         onSuccess: () => {
-            // Nace una solicitud `pending` (origen mercadopago): la cola del admin
-            // y el plan del alumno se refrescan con el mismo prefijo de siempre.
+            // Nace una solicitud `iniciado` (OCULTA) + su pago: la cola del admin
+            // NO cambia hasta que Mercado Pago mande el primer webhook real.
             qc.invalidateQueries({ queryKey: ['solicitudes'] });
             qc.invalidateQueries({ queryKey: claves.membresia });
         },

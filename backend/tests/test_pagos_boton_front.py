@@ -142,13 +142,13 @@ def test_j_la_pantalla_de_retorno_permite_cancelar_un_pago_abierto():
     """El alumno que VUELVE sin haber pagado tiene que poder cerrar la intención.
 
     Mercado Pago no genera ningún pago cuando el alumno abandona el checkout, así
-    que no hay webhook: la solicitud queda `pending` y el guard "ya tienes una
-    solicitud pendiente" le impide comprar otra vez. Mientras el pago siga
-    abierto, la pantalla de retorno ofrece "Cancelar".
+    que no hay webhook: la solicitud queda `iniciado` (oculta para el admin) y el
+    guard de "pago en curso" le impide comprar otra vez por 30 min. Mientras el
+    pago siga abierto, la pantalla de retorno ofrece "Cancelar".
     """
     r = _fuente(RESULTADO)
     assert "useCancelarPago" in r
-    assert "['pendiente', 'en_proceso'].includes(pago.estado)" in r, \
+    assert "['iniciado', 'pendiente', 'en_proceso'].includes(pago.estado)" in r, \
         "el botón sólo puede aparecer con el pago todavía abierto"
     assert 'data-testid="cancelar-pago"' in r
     assert "navigate(volverA)" in r, \

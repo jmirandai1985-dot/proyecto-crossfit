@@ -21,7 +21,13 @@ sigue contando el ingreso por `pedidos.estado` (ESTADOS_PAGO_BAZAR), sin
 transacción nueva.
 """
 from sqlalchemy import (
-    Boolean, CheckConstraint, Column, ForeignKey, Index, Integer, String,
+    Boolean,
+    CheckConstraint,
+    Column,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
 from sqlalchemy.sql import func
@@ -33,6 +39,7 @@ from app.db.database import Base
 # (`estado_desde_mp`) y se prueba sin red en
 # `tests/test_pagos_mercadopago_estados.py`.
 ESTADOS_PAGO = (
+    "iniciado",      # checkout pedido a MP, SIN ningún aviso real todavía
     "pendiente",     # preferencia creada, MP todavía no dijo nada
     "en_proceso",    # in_process / authorized
     "aprobado",      # approved: la plata existe
@@ -44,7 +51,14 @@ ESTADOS_PAGO = (
 
 # Estados desde los que un pago todavía puede cambiar. `aprobado` sólo puede
 # pasar a `reembolsado` (contracargo); `reembolsado` es final.
-ESTADOS_PAGO_ABIERTOS = ("pendiente", "en_proceso", "rechazado", "cancelado")
+#
+# `iniciado` es el único que NO ve el admin: existe desde el clic en "Pagar con
+# tarjeta" (para poder pedirle el `init_point` a MP), pero la solicitud recién
+# se hace visible cuando llega el PRIMER webhook real de Mercado Pago. Si el
+# alumno cierra la pestaña o vuelve con el botón atrás del teléfono, no hay
+# aviso de MP y no hay nada que el admin tenga que mirar.
+ESTADOS_PAGO_ABIERTOS = ("iniciado", "pendiente", "en_proceso", "rechazado",
+                         "cancelado")
 
 
 
@@ -104,8 +118,8 @@ class Pago(Base):
             "monto_clp > 0",
             name="ck_pagos_monto_positivo"),
         CheckConstraint(
-            "estado IN ('pendiente', 'en_proceso', 'aprobado', 'rechazado', "
-            "'cancelado', 'reembolsado', 'expirado')",
+            "estado IN ('iniciado', 'pendiente', 'en_proceso', 'aprobado', "
+            "'rechazado', 'cancelado', 'reembolsado', 'expirado')",
             name="ck_pagos_estado"),
     )
 

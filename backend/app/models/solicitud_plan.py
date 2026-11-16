@@ -1,8 +1,9 @@
 ﻿"""
 Modelo de Solicitud de Plan (pendiente de aprobación admin)
 """
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.sql import func
+
 from app.db.database import Base
 
 
@@ -13,7 +14,14 @@ class SolicitudPlan(Base):
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
     alumno_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
     plan_id = Column(Integer, ForeignKey("planes.id"), nullable=False)
-    # pending, approved, rejected
+    # pending, approved, rejected, en_cola, expirada, iniciado
+    #
+    # `iniciado` = el alumno tocó "Pagar con tarjeta" y el backend ya le pidió
+    # el `init_point` a Mercado Pago, pero TODAVÍA no llegó ningún webhook: la
+    # fila existe para no duplicar datos, pero NO está en la cola del admin
+    # (todas las consultas de pendientes filtran `estado == 'pending'`). Pasa a
+    # `pending` con el PRIMER aviso real de MP (o a `rejected` si ese aviso es
+    # un rechazo/cancelación).
     estado = Column(String(20), default="pending", nullable=False)
     voucher_url = Column(Text, nullable=True)
     certificado_estudiante_url = Column(Text, nullable=True)

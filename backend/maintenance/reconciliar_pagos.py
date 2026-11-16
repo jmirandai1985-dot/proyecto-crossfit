@@ -11,11 +11,15 @@ pagó podría quedarse sin plan y nadie se enteraría. Este job hace dos cosas:
    **30 min** una solicitud de membresía sale de la cola de pendientes. Sin esto,
    un pedido abandonado deja stock bloqueado para siempre. El umbral vive en
    `services/pagos.py` (`MINUTOS_BAZAR` / `MINUTOS_MEMBRESIA`): acá NO se repite.
-2. **Reconcilia** los pagos `pendiente`/`en_proceso` con más de 15 min: le
-   pregunta a MP por `external_reference` y, si hay un pago real, lo aplica con
-   la MISMA función del webhook (`services/pagos.aplicar_pago`). El evento
+2. **Reconcilia** los pagos `iniciado`/`pendiente`/`en_proceso` con más de 15 min:
+   le pregunta a MP por `external_reference` y, si hay un pago real, lo aplica
+   con la MISMA función del webhook (`services/pagos.aplicar_pago`). El evento
    sintético se registra en `pagos_eventos` (`notificacion_id = reconciliacion-<id>`),
    así que un webhook que llegue tarde después no duplica nada.
+
+   `iniciado` es el caso que más necesita esta red: el checkout existe pero el
+   primer aviso de MP puede haberse perdido. Si MP no tiene ningún pago (el
+   alumno nunca hizo nada), no se aplica nada y el pago sigue invisible.
 
 SEGURIDAD
 ---------
@@ -51,7 +55,7 @@ def expirar(db, aplicar: bool) -> dict:
     """Cierra los pagos vencidos (o sólo los cuenta, en dry-run)."""
     ahora = ahora_santiago()
     abiertos = db.query(Pago).filter(
-        Pago.estado.in_(("pendiente", "en_proceso"))).all()
+        Pago.estado.in_(("iniciado", "pendiente", "en_proceso"))).all()
     candidatos = {"bazar": 0, "membresia": 0}
     for pago in abiertos:
         if pago.created_at is None:
@@ -80,7 +84,8 @@ def reconciliar(db, aplicar: bool) -> dict:
     """Busca en MP los pagos que nunca recibieron webhook."""
     corte = ahora_santiago() - timedelta(minutes=MINUTOS_ANTES_DE_RECONCILIAR)
     pendientes = db.query(Pago).filter(
-        or_(Pago.estado == "pendiente", Pago.estado == "en_proceso"),
+        or_(Pago.estado == "iniciado", Pago.estado == "pendiente",
+            Pago.estado == "en_proceso"),
         Pago.created_at <= corte,
     ).order_by(Pago.created_at).limit(LIMITE_POR_CORRIDA).all()
 

@@ -51,6 +51,7 @@ def box():
     Una CON comprobante (transferencia) y otra SIN voucher (`origen_pago='mercadopago'`),
     como las deja el checkout online antes de redirigir a Mercado Pago.
     """
+    from app.models.pago import Pago  # noqa: F401 - registra `pagos` para la FK
     from app.models.plan import Plan
     from app.models.solicitud_plan import SolicitudPlan
 

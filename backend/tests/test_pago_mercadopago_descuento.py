@@ -24,7 +24,10 @@ RESTAURA aunque el test falle.
 
     cd backend && py -3.12 -m pytest tests/test_pago_mercadopago_descuento.py -q -s
 """
+import hashlib
+import hmac
 import sys
+import time
 import uuid
 from datetime import datetime
 from decimal import Decimal
@@ -37,9 +40,9 @@ BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from app.core.config import is_test_db_url, settings                    # noqa: E402
-from app.core.security import create_access_token                       # noqa: E402
-from app.services import mercadopago_cliente as mp                      # noqa: E402
+from app.core.config import is_test_db_url, settings  # noqa: E402
+from app.core.security import create_access_token  # noqa: E402
+from app.services import mercadopago_cliente as mp  # noqa: E402
 
 TENANT_ID = 1
 PRECIO_LISTA = 50000
@@ -408,17 +411,31 @@ def _solicitud_de(db, solicitud_id: int):
     return db.execute(text("""
         SELECT id, alumno_id, plan_id, estado, voucher_url,
                precio_clp_snapshot, precio_final_clp, descuento_pct,
-               beneficio_id, origen_pago, pago_id
+               beneficio_id, origen_pago, pago_id, comentario_admin
         FROM solicitudes_planes WHERE id = :s"""), {"s": solicitud_id}).first()
 
 
 def _ultima_tx(db, usuario_id: int):
-    """La última transacción de membresía del alumno: (monto, suscripción)."""
+    """La última transacción de membresía del alumno: (monto, suscripción).
+
+    Se busca por la REFERENCIA del dinero, no por el texto de `descripcion`:
+    desde `5bd0764` la descripción muestra el NOMBRE del alumno y este helper
+    seguía buscando `usuario #<id>`, así que devolvía `None` aunque la
+    transacción existiera. La aprobación inmediata referencia la SUSCRIPCIÓN y
+    la que queda en cola referencia la SOLICITUD: hay que cubrir las dos.
+    """
     db.rollback()
-    return db.execute(text(
-        "SELECT monto, referencia_id FROM transacciones_financieras "
-        "WHERE descripcion LIKE :d ORDER BY id DESC LIMIT 1"),
-        {"d": f"%(usuario #{usuario_id})%"}).first()
+    return db.execute(text("""
+        SELECT t.monto, t.referencia_id
+        FROM transacciones_financieras t
+        WHERE (t.referencia_tipo = 'suscripcion'
+               AND t.referencia_id IN (
+                   SELECT id FROM suscripciones WHERE usuario_id = :u))
+           OR (t.referencia_tipo = 'solicitud_plan'
+               AND t.referencia_id IN (
+                   SELECT id FROM solicitudes_planes WHERE alumno_id = :u))
+        ORDER BY t.id DESC LIMIT 1
+    """), {"u": usuario_id}).first()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -480,17 +497,20 @@ def test_mp_cobra_el_precio_con_descuento_de_referido(
     assert pago is not None, "el pago tiene que quedar guardado"
     assert pago.monto_clp == PRECIO_CON_CREDITO
     assert pago.concepto == "membresia"
-    assert pago.estado == "pendiente"
+    assert pago.estado == "iniciado", (
+        "el clic no es un cobro: el pago queda 'iniciado' (invisible para el "
+        "admin) hasta el primer webhook real de MP")
     assert pago.referencia_tipo == "solicitud_plan"
     assert pago.preference_id, "sin preference_id el alumno no puede pagar"
     assert preferencia["external_reference"] == pago.external_reference
     assert preferencia["back_urls"]["success"].endswith(
         f"/alumno/pago/resultado/{cobro['pago_id']}")
 
-    # La solicitud NACE con el precio final congelado y sin voucher.
+    # La solicitud NACE OCULTA (`iniciado`), con el precio final congelado y sin
+    # voucher: recién el primer webhook la hace visible para el admin.
     solicitud = _solicitud_de(db, pago.referencia_id)
     assert solicitud is not None
-    assert solicitud.estado == "pending"
+    assert solicitud.estado == "iniciado"
     assert solicitud.origen_pago == "mercadopago"
     assert solicitud.voucher_url is None, "el cobro lo prueba MP, no un archivo"
     assert solicitud.precio_clp_snapshot == PRECIO_LISTA
@@ -515,12 +535,14 @@ def test_mp_cobra_el_precio_con_descuento_de_referido(
     print(f"[A credito] estado={credito.estado} (intacto tras crear el cobro)")
 
     # ── 5. Al aprobarse, la caja registra LO COBRADO (sin re-descontar) ──
-    # El cobro online lo confirma el webhook de MP (`pagos.estado='aprobado'`)
-    # ANTES de poder aprobar: una solicitud online con el pago pendiente se
-    # rechaza con 409 (guard `PagoOnlineNoConfirmado`). Simulamos la confirmación
-    # en la BD para ejercitar el camino de aprobación que convierte el referido.
+    # El cobro online lo confirma el webhook de MP: deja `pagos.estado='aprobado'`
+    # y ABRE la solicitud oculta (`iniciado` -> `pending`) en el mismo aviso.
+    # Simulamos esos dos efectos en la BD para ejercitar el camino de aprobación
+    # que convierte el referido.
     db.execute(text("UPDATE pagos SET estado = 'aprobado', pagado_en = now() "
                     "WHERE id = :p"), {"p": cobro["pago_id"]})
+    db.execute(text("UPDATE solicitudes_planes SET estado = 'pending' "
+                    "WHERE id = :s"), {"s": solicitud.id})
     db.commit()
 
     aprobada = _aprobar(cliente, admin_headers, solicitud.id)
@@ -582,3 +604,124 @@ def test_mp_cobra_precio_de_lista_sin_referido(
     print(f"[C paga online] lista={PRECIO_LISTA} "
           f"unit_price={preferencia['items'][0]['unit_price']} (sin descuento)")
 
+# ═════════════════════════════════════════════════════════════════════════════
+# 3. El clic NO es una solicitud visible y el guard frena los intentos en curso
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_el_clic_no_entra_en_la_cola_y_bloquea_otro_intento(
+        cliente, db, admin_headers, escenario, mercadopago_falso):
+    """Reproduce el abandono REAL: el backend crea pago+solicitud `iniciado` para
+    pedir el `init_point`, pero el admin NO ve nada y el alumno no puede abrir
+    cinco checkouts en paralelo. A los 30 min el intento se libera solo."""
+    c = _crear_usuario(cliente, admin_headers, escenario, "Abandono MP")
+    plan = _crear_plan(db, escenario)
+    _quitar_modo_prueba(db, c["id"])
+
+    respuesta = _pagar_online(cliente, c, plan)
+    assert respuesta.status_code == 200, respuesta.text
+    pago = _pago_de(db, respuesta.json()["pago_id"])
+    solicitud = _solicitud_de(db, pago.referencia_id)
+    assert pago.estado == "iniciado"
+    assert solicitud.estado == "iniciado"
+
+    # La cola del admin (la que pinta el badge "Esperando pago") NO la trae.
+    cola = cliente.get(BASE_SOLICITUDES + "/pendientes",
+                       headers=admin_headers).json()
+    assert all(fila["id"] != solicitud.id for fila in cola), \
+        "un clic sin ningún aviso de MP no puede aparecer en la cola del admin"
+
+    # Lo que ve PagoResultado si el alumno vuelve: el pago sigue abierto.
+    detalle = cliente.get(f"{BASE_PAGOS}/{pago.id}", headers=_headers(c)).json()
+    assert detalle["estado"] == "iniciado"
+    assert detalle["aplicado"] is False
+
+    # Segundo clic y transferencia en paralelo: los dos rechazados.
+    segundo = _pagar_online(cliente, c, plan)
+    assert segundo.status_code == 400, segundo.text
+    assert "pago en curso" in segundo.json()["detail"]
+    transferencia = _solicitar(cliente, c, plan)
+    assert transferencia.status_code == 400, transferencia.text
+    assert "pago en curso" in transferencia.json()["detail"]
+
+    # Pasados los 30 min el guard se libera y el intento viejo se cierra.
+    db.execute(text("UPDATE pagos SET created_at = now() - interval '31 minutes' "
+                    "WHERE id = :p"), {"p": pago.id})
+    db.commit()
+    tercero = _pagar_online(cliente, c, plan)
+    assert tercero.status_code == 200, tercero.text
+    assert _pago_de(db, pago.id).estado == "expirado"
+    assert _solicitud_de(db, solicitud.id).estado == "expirada"
+    print(f"[abandono] pago {pago.id} y solicitud {solicitud.id} no aparecieron "
+          "en la cola y se cerraron a los 30 min")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 4. PRIMER webhook: abre la solicitud; un rechazo la cierra y libera el reintento
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _firma_webhook(payment_id, request_id, secreto="secreto"):
+    ts = str(int(time.time()))
+    manifest = f"id:{payment_id};request-id:{request_id};ts:{ts};"
+    firma = hmac.new(secreto.encode(), manifest.encode(),
+                     hashlib.sha256).hexdigest()
+    return {"x-request-id": request_id, "x-signature": f"ts={ts},v1={firma}"}
+
+
+def _webhook(cliente, pago, status, status_detail, monkeypatch):
+    detalle = {
+        "id": 9876543210,
+        "status": status,
+        "status_detail": status_detail,
+        "transaction_amount": float(pago.monto_clp),
+        "external_reference": pago.external_reference,
+        "payment_method_id": "visa",
+        "payment_type_id": "credit_card",
+    }
+    monkeypatch.setattr(mp, "leer_pago", lambda payment_id: detalle)  # noqa: ARG005
+    request_id = str(uuid.uuid4())
+    return cliente.post(
+        f"{BASE_PAGOS}/webhook/mercadopago?data.id=9876543210&type=payment",
+        json={"id": str(uuid.uuid4()), "type": "payment",
+              "data": {"id": "9876543210"}},
+        headers=_firma_webhook("9876543210", request_id))
+
+
+def test_primer_webhook_abre_y_el_rechazo_cierra_la_solicitud(
+        cliente, db, admin_headers, escenario, mercadopago_falso, monkeypatch):
+    c = _crear_usuario(cliente, admin_headers, escenario, "Webhook MP")
+    plan = _crear_plan(db, escenario)
+    _quitar_modo_prueba(db, c["id"])
+    respuesta = _pagar_online(cliente, c, plan)
+    assert respuesta.status_code == 200, respuesta.text
+    pago = _pago_de(db, respuesta.json()["pago_id"])
+    solicitud = _solicitud_de(db, pago.referencia_id)
+
+    # Primer aviso real = pendiente: recién ahora el admin la ve.
+    primero = _webhook(cliente, pago, "pending", "pending_contingency",
+                       monkeypatch)
+    assert primero.status_code == 200, primero.text
+    assert primero.json() == {"status": "aplicado"}, primero.text
+    assert _solicitud_de(db, solicitud.id).estado == "pending"
+    assert _pago_de(db, pago.id).estado == "pendiente"
+    cola = cliente.get(BASE_SOLICITUDES + "/pendientes",
+                       headers=admin_headers).json()
+    fila = next((f for f in cola if f["id"] == solicitud.id), None)
+    assert fila is not None and fila["pago_estado"] == "pendiente"
+
+    # Segundo aviso = rechazo: sale de la cola y el alumno puede reintentar.
+    segundo = _webhook(cliente, pago, "rejected", "cc_rejected_other_reason",
+                       monkeypatch)
+    assert segundo.status_code == 200, segundo.text
+    assert segundo.json() == {"status": "aplicado"}, segundo.text
+    solicitud_cerrada = _solicitud_de(db, solicitud.id)
+    assert solicitud_cerrada.estado == "rejected"
+    assert "rechazó" in solicitud_cerrada.comentario_admin
+    assert _pago_de(db, pago.id).estado == "rechazado"
+    cola = cliente.get(BASE_SOLICITUDES + "/pendientes",
+                       headers=admin_headers).json()
+    assert all(f["id"] != solicitud.id for f in cola), \
+        "un rechazo real no puede dejar la solicitud pendiente para siempre"
+    reintento = _solicitar(cliente, c, plan)
+    assert reintento.status_code == 201, reintento.text
+    print(f"[webhook] solicitud {solicitud.id}: iniciado -> pending -> rejected; "
+          "reintento permitido")

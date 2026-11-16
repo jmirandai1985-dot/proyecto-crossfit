@@ -17,27 +17,29 @@ Reglas que este módulo hace cumplir (y que no viven en el endpoint):
   admins para que devuelvan el dinero o repongan stock (medios "en efectivo" se
   acreditan días después; por eso el Bazar los excluye de la preferencia).
 
-El webhook NUNCA crea solicitudes ni pedidos: sólo cambia el estado de algo que ya
-existe y está vinculado por `pago_id`. Un evento fuera de orden es inocuo.
+El webhook NUNCA crea solicitudes ni pedidos: la solicitud de una membresía ya
+existe en `iniciado` (oculta) desde el clic y el primer aviso real de MP la
+ABRE (`pending`) o la CIERRA (`rejected`); el resto es cambiar el estado de algo
+vinculado por `pago_id`. Un evento fuera de orden es inocuo.
 """
 import logging
 import uuid
+from datetime import timedelta
 from typing import Optional
 
 from sqlalchemy import update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.pago import ESTADOS_PAGO_ABIERTOS, Pago, PagoEvento
+from app.models.pago import Pago, PagoEvento
 from app.models.pedido import Pedido
 from app.models.plan import Plan
 from app.models.producto import Producto, ProductoVariante
 from app.models.solicitud_plan import SolicitudPlan
 from app.models.usuario import Usuario
-from app.services import aprobacion_planes
+from app.services import aprobacion_planes, pedidos_estado
 from app.services import beneficios_service as beneficios
 from app.services import mercadopago_cliente as mp
-from app.services import pedidos_estado
 from app.services import referidos_service as referidos
 from app.services.notificaciones_panel import notificar_admins_del_tenant
 from app.utils.santiago import ahora_santiago
@@ -48,15 +50,23 @@ CONCEPTO_MEMBRESIA = "membresia"
 CONCEPTO_BAZAR = "bazar"
 
 # ── Cuándo se cierra un cobro ABANDONADO ─────────────────────────────────────
-# Si el alumno no completa el checkout, Mercado Pago NO genera ningún pago que
-# rechazar: no hay webhook y el backend no se entera. Lo único que queda es
-# cerrar la intención:
+# Hay dos abandonos distintos y este módulo los trata distinto a propósito:
+#
+# 1. **El alumno nunca hizo nada en Mercado Pago** (cerró la pestaña o volvió con
+#    el botón atrás del teléfono antes de meter un dato). No hay webhook: el pago
+#    queda `iniciado` y la solicitud oculta, y el admin NO ve nada. No hace falta
+#    cron para este caso; el guard de intentos en curso se libera solo a los 30
+#    min (`_payment_intent_vigente`) y el siguiente intento limpia la fila vieja.
+#
+# 2. **Sí hubo un aviso real de MP y el alumno abandonó a mitad de camino** (dejó
+#    el formulario a medio llenar, pagó en efectivo, etc.). Ahí la solicitud ya es
+#    `pending` (visible) y hay que cerrarla:
 #   • el botón "Cancelar" de la pantalla de retorno (`POST /pagos/{id}/cancelar`)
 #     para el alumno que SÍ vuelve a la app;
 #   • esta expiración automática para el que nunca vuelve.
 # Los dos conceptos usan el MISMO criterio (30 min), porque los dos reservan algo
-# que otro alumno no puede usar: el Bazar descuenta stock y la membresía deja una
-# solicitud `pending` que bloquea el guard "ya tienes una solicitud pendiente".
+# que otro alumno no puede usar: el Bazar descuenta stock y la membresía bloquea
+# el guard "ya tienes una solicitud pendiente".
 # ⚠️ El cron de producción (`render.yaml`, job `box-crossfit-expirar-pendientes`)
 # corre cada HORA: con 30 min de umbral, el cierre efectivo ocurre dentro de la
 # hora siguiente a vencer (hasta ~60 min). El botón Cancelar es el camino rápido.
@@ -68,7 +78,18 @@ COMENTARIO_EXPIRADA = f"Expirada: pago online no completado en {MINUTOS_MEMBRESI
 COMENTARIO_CANCELADO_ALUMNO = "Cancelado por el alumno antes de completar el pago"
 # Estados desde los que un pago todavía se puede cancelar desde la app: si el
 # webhook ya dijo `aprobado`, la plata existe y no se deshace desde acá.
-ESTADOS_PAGO_CANCELABLES = ("pendiente", "en_proceso")
+# `iniciado` entra: el alumno puede volver a PagoResultado antes del primer
+# webhook y cerrar el intento con el botón "Cancelar pago".
+ESTADOS_PAGO_CANCELABLES = ("iniciado", "pendiente", "en_proceso")
+# Estados de MP con los que la solicitud oculta se CIERRA en vez de abrirse: el
+# alumno sí hizo algo real en la pasarela, pero no hay nada que cobrar ni que el
+# admin deba aprobar. `reembolsado` sin aprobación previa también cae acá.
+ESTADOS_WEBHOOK_QUE_CIERRAN = ("rechazado", "cancelado", "reembolsado")
+# Mensaje del guard cuando ya hay un checkout online abierto sin webhook.
+MENSAJE_PAGO_EN_CURSO = (
+    "Ya tienes un pago en curso. Termínalo o espera "
+    f"{MINUTOS_MEMBRESIA} minutos antes de intentar otra vez."
+)
 
 
 class ErrorPago(Exception):
@@ -83,6 +104,104 @@ class ErrorPago(Exception):
         super().__init__(detalle)
         self.detalle = detalle
         self.status_code = status_code
+
+
+# ── Guard de "solicitud en curso" (membresía) ────────────────────────────────
+# Dos cosas distintas bloquean abrir OTRO checkout/solicitud para el mismo
+# alumno: una solicitud `pending` (transferencia enviada u online ya avisada por
+# MP) o un pago `iniciado` con menos de 30 min (checkout abierto sin ningún
+# aviso todavía). El umbral es el MISMO de la expiración: el guard se libera por
+# tiempo, sin depender de un cron.
+def iniciado_vigente(pago, *, ahora=None,
+                     minutos: int = MINUTOS_MEMBRESIA) -> bool:
+    """¿Este pago `iniciado` todavía reserva el guard de intentos en curso?
+
+    Puro (sin DB): un pago de membresía en `iniciado` con `created_at` dentro de
+    la ventana de `minutos`. Un `created_at` NULL no reserva nada (se considera
+    viejo): es preferible dejar pasar un intento a bloquear al alumno para
+    siempre por una fila sin fecha.
+    """
+    if pago is None or pago.concepto != CONCEPTO_MEMBRESIA:
+        return False
+    if pago.estado != "iniciado" or pago.created_at is None:
+        return False
+    ahora = ahora or ahora_santiago()
+    return pago.created_at > ahora - timedelta(minutes=minutos)
+
+
+def _payment_intent_vigente(db: Session, *, tenant_id: int, alumno_id: int,
+                            ahora=None,
+                            minutos: int = MINUTOS_MEMBRESIA):
+    """Pago `iniciado` de membresía que todavía cuenta como intento en curso."""
+    candidatos = db.query(Pago).filter(
+        Pago.tenant_id == tenant_id,
+        Pago.usuario_id == alumno_id,
+        Pago.concepto == CONCEPTO_MEMBRESIA,
+        Pago.estado == "iniciado",
+    ).order_by(Pago.created_at.desc()).all()
+    for pago in candidatos:
+        if iniciado_vigente(pago, ahora=ahora, minutos=minutos):
+            return pago
+    return None
+
+
+def bloqueo_solicitud_en_curso(db: Session, *, tenant_id: int,
+                               alumno_id: int, ahora=None) -> Optional[str]:
+    """Motivo por el que no se puede abrir otra solicitud/checkout, o `None`.
+
+    Devuelve `"solicitud_pendiente"` (mensaje histórico) o `"pago_en_curso"`
+    (hay un checkout online iniciado y fresco, sin webhook todavía). Lo usan el
+    endpoint de transferencia y el de "Pagar con tarjeta": una sola regla para
+    los dos caminos.
+    """
+    pendiente = db.query(SolicitudPlan.id).filter(
+        SolicitudPlan.alumno_id == alumno_id,
+        SolicitudPlan.tenant_id == tenant_id,
+        SolicitudPlan.estado == "pending",
+    ).first()
+    if pendiente is not None:
+        return "solicitud_pendiente"
+    if _payment_intent_vigente(
+            db, tenant_id=tenant_id, alumno_id=alumno_id,
+            ahora=ahora) is not None:
+        return "pago_en_curso"
+    return None
+
+
+def _cerrar_iniciados_vencidos(db: Session, *, tenant_id: int, alumno_id: int,
+                               ahora=None,
+                               minutos: int = MINUTOS_MEMBRESIA) -> int:
+    """Cierra los checkouts `iniciado` que ya pasaron el umbral (housekeeping).
+
+    No hace falta para que el admin deje de verlos (nunca los vio): es para que
+    un alumno que abandona cinco veces no acumule filas. Se ejecuta cuando el
+    alumno vuelve a intentar; el cron de expiración también los levanta.
+    """
+    candidatos = db.query(Pago).filter(
+        Pago.tenant_id == tenant_id,
+        Pago.usuario_id == alumno_id,
+        Pago.concepto == CONCEPTO_MEMBRESIA,
+        Pago.estado == "iniciado",
+    ).all()
+    viejos = [pago.id for pago in candidatos
+              if not iniciado_vigente(pago, ahora=ahora, minutos=minutos)]
+    if not viejos:
+        return 0
+
+    db.execute(
+        update(Pago)
+        .where(Pago.id.in_(viejos))
+        .where(Pago.estado == "iniciado")
+        .values(estado="expirado")
+    )
+    db.execute(
+        update(SolicitudPlan)
+        .where(SolicitudPlan.pago_id.in_(viejos))
+        .where(SolicitudPlan.estado == "iniciado")
+        .values(estado="expirada", comentario_admin=COMENTARIO_EXPIRADA)
+    )
+    db.commit()
+    return len(viejos)
 
 
 def _datos_pagador(db: Session, usuario_id: int) -> tuple[str, str]:
@@ -127,11 +246,12 @@ def _marcar_beneficio_usado(db: Session, alumno_id: int, beneficio_id: int,
 
 def _avisar_solicitud_online(db: Session, *, solicitud: SolicitudPlan,
                              nombre_plan: str) -> None:
-    """Campana del admin: hay una solicitud nueva (aunque no tenga comprobante).
+    """Campana del admin: el PRIMER webhook real hizo visible la solicitud.
 
-    El admin no ve un voucher que revisar, pero sí tiene que vigilar el pago: si
-    MP lo rechaza, la solicitud queda `pending` hasta que el alumno reintente o
-    expire.
+    No se manda al crear la preferencia (el alumno todavía no hizo nada en MP):
+    se manda cuando `_promover_solicitud_webhook` la pasa de `iniciado` a
+    `pending`. El admin no tiene un voucher que revisar, pero sí un cobro que
+    vigilar.
     """
     try:
         alumno = db.query(Usuario).filter(
@@ -163,16 +283,19 @@ def _avisar_pedido_online(db: Session, *, tenant_id: int, alumno_id: int,
 
 def crear_pago_membresia(db: Session, *, current_user: dict, plan_id: int,
                          certificado_estudiante_url: Optional[str] = None) -> dict:
-    """Crea la solicitud + la fila `pagos` + la preferencia de Checkout Pro.
+    """Crea la solicitud OCULTA + el pago `iniciado` + la preferencia de MP.
 
-    Valida lo mismo que el flujo manual (plan del box, sin otra solicitud
-    pendiente) y congela el precio con la aritmética existente: el descuento
-    vigente (F2) se aplica acá y ese número es el que se cobra y el que después
-    registra la transacción.
+    El clic en "Pagar con tarjeta" no puede ensuciar la cola del admin: hasta que
+    Mercado Pago no avise algo REAL (webhook), el alumno no hizo nada en la
+    pasarela. Por eso la solicitud nace `iniciado` y el pago también: la fila
+    existe (el backend necesita `referencia_id` para el webhook) pero ninguna
+    consulta de pendientes la trae. El primer aviso de MP la abre
+    (`_promover_solicitud_webhook`) o la cierra si fue rechazada/cancelada.
 
-    La solicitud NACE `pending` y SIN comprobante (`origen_pago='mercadopago'`):
-    el admin verá el badge "Pagado online" en vez de un voucher inexistente. Si
-    MP confirma el pago, el webhook la aprueba con `activar_plan`.
+    Valida lo mismo que el flujo manual (plan del box, sin otra solicitud en
+    curso) y congela el precio con la aritmética existente: el descuento vigente
+    (F2) se aplica acá y ese número es el que se cobra y el que después registra
+    la transacción.
     """
     # Fail-fast ANTES de tocar la base: si la pasarela está apagada no se crea
     # una solicitud huérfana que después hay que rechazar a mano.
@@ -186,14 +309,19 @@ def crear_pago_membresia(db: Session, *, current_user: dict, plan_id: int,
     if not plan:
         raise ErrorPago("Plan no encontrado", 404)
 
-    # Misma regla que POST /solicitudes/solicitar: una sola solicitud pendiente.
-    existente = db.query(SolicitudPlan).filter(
-        SolicitudPlan.alumno_id == alumno_id,
-        SolicitudPlan.tenant_id == tenant_id,
-        SolicitudPlan.estado == "pending",
-    ).first()
-    if existente:
+    # Housekeeping: los checkouts que ya pasaron los 30 min no bloquean ni se
+    # acumulan (no hay cron dedicado para la intención invisible).
+    _cerrar_iniciados_vencidos(db, tenant_id=tenant_id, alumno_id=alumno_id)
+
+    # Una sola solicitud pendiente (flujo manual) y un solo checkout online EN
+    # CURSO. Sin lo segundo, cinco clics abrirían cinco preferencias en paralelo
+    # antes de que cualquiera genere webhook.
+    motivo = bloqueo_solicitud_en_curso(
+        db, tenant_id=tenant_id, alumno_id=alumno_id)
+    if motivo == "solicitud_pendiente":
         raise ErrorPago("Ya tienes una solicitud pendiente", 400)
+    if motivo == "pago_en_curso":
+        raise ErrorPago(MENSAJE_PAGO_EN_CURSO, 400)
 
     # ── F2: el descuento VIGENTE se aplica a ESTA compra ──
     # La aritmética la hace el servicio de beneficios (un % calculado en dos
@@ -243,7 +371,9 @@ def crear_pago_membresia(db: Session, *, current_user: dict, plan_id: int,
         tenant_id=tenant_id,
         alumno_id=alumno_id,
         plan_id=plan.id,
-        estado="pending",
+        # OCULTA: la cola del admin sólo filtra `pending`, y esta fila pasa a
+        # `pending` recién con el primer webhook real de MP.
+        estado="iniciado",
         # Sin voucher: el cobro lo prueba Mercado Pago, no un archivo.
         voucher_url=None,
         certificado_estudiante_url=certificado_estudiante_url or None,
@@ -266,7 +396,7 @@ def crear_pago_membresia(db: Session, *, current_user: dict, plan_id: int,
         referencia_tipo="solicitud_plan",
         referencia_id=solicitud.id,
         monto_clp=monto,
-        estado="pendiente",
+        estado="iniciado",
         # UUID: el id secuencial de la fila no se filtra a un tercero.
         external_reference=str(uuid.uuid4()),
     )
@@ -280,13 +410,12 @@ def crear_pago_membresia(db: Session, *, current_user: dict, plan_id: int,
     # vivo (no se pierde un beneficio por un checkout que nunca existió).
     resultado = _crear_preferencia(db, pago, titulo=f"Plan {plan.nombre}")
 
-    # ── Efectos secundarios del flujo manual, ahora para el pago online ──
-    # 1. El beneficio (F2) se marca usado: si no, el mismo descuento se podría
-    #    aplicar a otra compra.
+    # ── Efecto secundario del flujo manual, ahora para el pago online ──
+    # El beneficio (F2) se marca usado al iniciar la compra: si no, el mismo
+    # descuento se podría aplicar a otra compra. La campana del admin NO se
+    # manda acá: se manda cuando el primer webhook hace visible la solicitud.
     if descuento.get("beneficio_id"):
         _marcar_beneficio_usado(db, alumno_id, descuento["beneficio_id"], lista)
-    # 2. La campana del admin: la solicitud existe y el pago hay que vigilarlo.
-    _avisar_solicitud_online(db, solicitud=solicitud, nombre_plan=plan.nombre)
 
     return resultado
 
@@ -332,8 +461,8 @@ def _limpiar_cobro_fallido(db: Session, pago: Pago) -> None:
 
     Es el caso "MP no respondió al crear la preferencia": no existe `init_point`,
     así que nadie puede pagar. Sin esta limpieza el alumno quedaría con una
-    solicitud `pending` (y no podría ni mandar el voucher) o con el stock del
-    Bazar reservado por un cobro imposible.
+    solicitud `iniciado`/`pending` (y no podría ni mandar el voucher) o con el
+    stock del Bazar reservado por un cobro imposible.
 
     Best-effort: si falla, el job de expiración (30 min) lo cierra igual.
     """
@@ -354,14 +483,14 @@ def _limpiar_cobro_fallido(db: Session, pago: Pago) -> None:
             db.execute(
                 update(SolicitudPlan)
                 .where(SolicitudPlan.id == pago.referencia_id)
-                .where(SolicitudPlan.estado == "pending")
+                .where(SolicitudPlan.estado.in_(("iniciado", "pending")))
                 .values(estado="rejected",
                         comentario_admin="No se pudo iniciar el pago online")
             )
         db.execute(
             update(Pago)
             .where(Pago.id == pago.id)
-            .where(Pago.estado == "pendiente")
+            .where(Pago.estado.in_(("iniciado", "pendiente")))
             .values(estado="cancelado")
         )
         db.commit()
@@ -720,9 +849,76 @@ def _aplicar_beneficio(db: Session, pago: Pago) -> None:
                  "repon el stock a mano."))
 
 
+def _comentario_cierre_mp(detalle: dict) -> str:
+    """Comentario corto para el historial cuando MP rechaza/cancela el cobro."""
+    estado = mp.estado_desde_mp(detalle.get("status"))
+    sufijo = str(detalle.get("status_detail") or "").strip()
+    base = {
+        "rechazado": "Mercado Pago rechazó el pago",
+        "cancelado": "Cancelado en Mercado Pago",
+        "reembolsado": "Reembolsado en Mercado Pago",
+    }.get(estado, "Pago no completado en Mercado Pago")
+    return (f"{base} ({sufijo})" if sufijo else base)[:500]
+
+
+def _promover_solicitud_webhook(db: Session, pago: Pago,
+                                detalle: dict) -> Optional[str]:
+    """Abre o cierra la solicitud OCULTA con el PRIMER aviso real de MP.
+
+    El clic en "Pagar con tarjeta" deja la solicitud en `iniciado` (invisible).
+    Este es el único lugar que la hace visible:
+
+      * aviso `aprobado`/`pendiente`/`en_proceso` ⇒ `iniciado` → `pending` (el
+        admin la ve con el badge del estado REAL del pago);
+      * aviso `rechazado`/`cancelado`/`reembolsado` ⇒ `iniciado` (o `pending`
+        si antes hubo un aviso intermedio) → `rejected`: no hay nada que el
+        admin deba aprobar y el alumno puede volver a intentar. Sin esto un
+        rechazo dejaba la solicitud `pending` para siempre y el guard
+        "ya tienes una solicitud pendiente" le impedía reintentar.
+
+    Devuelve `"pending"` SÓLO cuando la fila recién se hizo visible (para
+    mandar la campana del admin una única vez), `"rejected"` cuando la cerró, o
+    `None` si no había nada que cambiar (p. ej. un webhook repetido).
+
+    Un estado de MP desconocido no se toca: no se puede inventar visibilidad
+    con un dato que no se entiende.
+    """
+    if pago.concepto != CONCEPTO_MEMBRESIA or not pago.referencia_id:
+        return None
+
+    estado = mp.estado_desde_mp(detalle.get("status"))
+    if estado is None:
+        return None
+
+    if estado in ESTADOS_WEBHOOK_QUE_CIERRAN:
+        cerrada = db.execute(
+            update(SolicitudPlan)
+            .where(SolicitudPlan.id == pago.referencia_id)
+            .where(SolicitudPlan.tenant_id == pago.tenant_id)
+            .where(SolicitudPlan.estado.in_(("iniciado", "pending")))
+            .values(estado="rejected",
+                    comentario_admin=_comentario_cierre_mp(detalle))
+        )
+        return "rejected" if cerrada.rowcount else None
+
+    abierta = db.execute(
+        update(SolicitudPlan)
+        .where(SolicitudPlan.id == pago.referencia_id)
+        .where(SolicitudPlan.tenant_id == pago.tenant_id)
+        .where(SolicitudPlan.estado == "iniciado")
+        .values(estado="pending")
+    )
+    return "pending" if abierta.rowcount else None
+
+
 def procesar_notificacion(db: Session, evento: PagoEvento,
                           detalle: dict) -> str:
     """Aplica el pago real (ya releído de MP) y cierra el evento.
+
+    Antes de aplicar el cobro se abre/cierra la solicitud oculta: el primer
+    aviso REAL de Mercado Pago es lo que la hace visible para el admin (o la
+    cierra si el medio fue rechazado). La campana del admin se manda DESPUÉS de
+    aplicar, para no avisar de un pago que terminó en error.
 
     Si `_aplicar_beneficio` falla (BD, código de retiro, etc.), el evento queda
     con `procesado_en = NULL` y el `resultado` en `error`: la reconciliación lo
@@ -739,10 +935,24 @@ def procesar_notificacion(db: Session, evento: PagoEvento,
 
     evento.pago_id = pago.id
     evento.tenant_id = pago.tenant_id
+    promocion = _promover_solicitud_webhook(db, pago, detalle)
     evento.resultado = aplicar_pago(db, pago, detalle)
     evento.procesado_en = ahora_santiago()
     db.commit()
+
+    if promocion == "pending":
+        # Best-effort: el aviso de campana no puede tumbar un pago ya aplicado.
+        solicitud = db.query(SolicitudPlan).filter(
+            SolicitudPlan.id == pago.referencia_id).first()
+        if solicitud is not None:
+            plan = db.query(Plan.nombre).filter(
+                Plan.id == solicitud.plan_id).first()
+            _avisar_solicitud_online(
+                db, solicitud=solicitud,
+                nombre_plan=plan[0] if plan else "tu plan")
+
     return evento.resultado
+
 
 
 def estado_publico(db: Session, pago: Pago) -> dict:
@@ -779,21 +989,21 @@ def cancelar_pago(db: Session, pago: Pago, *,
     """Cierra un checkout ABANDONADO por el propio alumno (o el admin).
 
     El caso que resuelve: el alumno tocó "Pagar con tarjeta", el backend creó la
-    solicitud `pending` + el pago `pendiente`, y volvió a la app SIN meter los
+    solicitud `iniciado` + el pago `iniciado`, y volvió a la app SIN meter los
     datos de la tarjeta. Mercado Pago no generó ningún pago, así que no hay
-    webhook que rechace nada y hay que cerrarlo desde acá: la solicitud sigue
-    viva en "Pendientes > Solicitudes" (badge "Esperando pago") y el guard "ya
-    tienes una solicitud pendiente" le impide generar otra.
+    webhook que rechace nada y hay que cerrarlo desde acá: la solicitud está
+    oculta (el admin no la ve), pero el guard de "pago en curso" le impide
+    generar otra durante 30 minutos.
 
     Reglas:
 
-    * **CAS (`UPDATE ... WHERE estado IN (pendiente, en_proceso)`)**: si el
-      webhook aprobó el pago mientras el alumno volvía a la app, el UPDATE no
+    * **CAS (`UPDATE ... WHERE estado IN (iniciado, pendiente, en_proceso)`)**: si
+      el webhook aprobó el pago mientras el alumno volvía a la app, el UPDATE no
       toca ninguna fila y se lanza `ErrorPago` (409). Un cobro confirmado NO se
       cancela desde acá: se devuelve con un reembolso en Mercado Pago.
     * **Membresía** → la `SolicitudPlan` asociada pasa a `rejected` (el MISMO
       valor que usa el rechazo por webhook, ver `_limpiar_cobro_fallido`) y sólo
-      si seguía `pending`: un admin pudo haberla aprobado en paralelo.
+      si seguía `iniciado`/`pending`: un admin pudo haberla aprobado en paralelo.
     * **Bazar** → el pedido se rechaza por el camino ya probado
       (`pedidos_estado.rechazar_pedido`), que devuelve el stock reservado.
 
@@ -825,7 +1035,7 @@ def cancelar_pago(db: Session, pago: Pago, *,
             update(SolicitudPlan)
             .where(SolicitudPlan.id == pago.referencia_id)
             .where(SolicitudPlan.tenant_id == pago.tenant_id)
-            .where(SolicitudPlan.estado == "pending")
+            .where(SolicitudPlan.estado.in_(("iniciado", "pending")))
             .values(estado="rejected", comentario_admin=comentario)
         )
     elif pago.concepto == CONCEPTO_BAZAR:
@@ -879,6 +1089,10 @@ def expirar_pendientes(db: Session, *, minutos_bazar: int = MINUTOS_BAZAR,
       pendientes del admin (no se crea basura que nadie va a aprobar). ⚠️ NO se
       notifica al alumno al expirar (mejora futura: avisar en su campana para
       que pueda volver a intentar el pago).
+    * **Membresía `iniciado` (30 min)**: el alumno nunca hizo nada en MP; la
+      solicitud nunca fue visible. Se cierra igual como `expirada` para no
+      acumular filas; NO es lo que mantiene limpia la cola del admin (esa fila
+      jamás entró).
 
     Un pago aprobado DESPUÉS de esto no revive nada: lo detecta `aplicar_pago`
     y avisa a los admins (ver `_aplicar_beneficio`). Eso incluye un medio
@@ -891,7 +1105,7 @@ def expirar_pendientes(db: Session, *, minutos_bazar: int = MINUTOS_BAZAR,
     """
     ahora = ahora_santiago()
     abiertos = db.query(Pago).filter(
-        Pago.estado.in_(("pendiente", "en_proceso"))).all()
+        Pago.estado.in_(("iniciado", "pendiente", "en_proceso"))).all()
 
     contadores = {"expirados": 0, "pedidos_rechazados": 0,
                   "solicitudes_expiradas": 0}
@@ -904,7 +1118,7 @@ def expirar_pendientes(db: Session, *, minutos_bazar: int = MINUTOS_BAZAR,
         cerrado = db.execute(
             update(Pago)
             .where(Pago.id == pago.id)
-            .where(Pago.estado.in_(("pendiente", "en_proceso")))
+            .where(Pago.estado.in_(("iniciado", "pendiente", "en_proceso")))
             .values(estado="expirado")
         )
         if cerrado.rowcount == 0:
@@ -931,7 +1145,7 @@ def expirar_pendientes(db: Session, *, minutos_bazar: int = MINUTOS_BAZAR,
             cambiadas = db.execute(
                 update(SolicitudPlan)
                 .where(SolicitudPlan.id == pago.referencia_id)
-                .where(SolicitudPlan.estado == "pending")
+                .where(SolicitudPlan.estado.in_(("iniciado", "pending")))
                 .values(estado="expirada",
                         comentario_admin=COMENTARIO_EXPIRADA)
             )

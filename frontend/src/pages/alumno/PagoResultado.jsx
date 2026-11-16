@@ -11,10 +11,10 @@ import { useCancelarPago, usePago } from '../../hooks/queries';
  * esté resuelto, porque el webhook puede tardar de 1 a 30 segundos. Si el alumno
  * cierra el navegador sin llegar acá, el pago se aplica igual.
  *
- * Mientras el pago siga ABIERTO (`pendiente`/`en_proceso`) se ofrece "Cancelar":
- * el caso del alumno que vuelve sin haber metido la tarjeta, donde Mercado Pago
- * no generó ningún pago que rechazar (`POST /pagos/{id}/cancelar` cierra la
- * solicitud y libera el guard "ya tienes una solicitud pendiente"). El que NO
+ * Mientras el pago siga ABIERTO (`iniciado`/`pendiente`/`en_proceso`) se ofrece
+ * "Cancelar": el caso del alumno que vuelve sin haber metido la tarjeta, donde
+ * Mercado Pago no generó ningún pago que rechazar (`POST /pagos/{id}/cancelar`
+ * cierra la solicitud oculta y libera el guard de intentos en curso). El que NO
  * vuelve lo cierra la expiración automática a los 30 min.
  *
  * La URL es `/alumno/pago/resultado/:pagoId`: Mercado Pago agrega sus propios
@@ -22,6 +22,11 @@ import { useCancelarPago, usePago } from '../../hooks/queries';
  * cualquiera puede visitar esta URL a mano.
  */
 const MENSAJES = {
+    iniciado: {
+        icono: '💳',
+        titulo: 'Pago no iniciado',
+        detalle: 'Todavía no recibimos ningún aviso de Mercado Pago. Puedes cancelar este intento y volver a intentarlo.',
+    },
     aprobado: {
         icono: '✅',
         titulo: '¡Pago aprobado!',
@@ -77,10 +82,12 @@ const PagoResultado = () => {
     const info = pago ? MENSAJES[pago.estado] : null;
     // Aprobado pero el negocio todavía no se aplicó: el webhook está en camino.
     const activando = pago?.estado === 'aprobado' && !pago.aplicado;
-    // Sólo se puede cancelar lo que sigue abierto. Si el webhook lo aprobó
-    // mientras el alumno volvía, el backend responde 409 y NO deshace el cobro.
+    // Sólo se puede cancelar lo que sigue abierto: `iniciado` (el alumno volvió
+    // antes del primer webhook), `pendiente` o `en_proceso`. Si el webhook lo
+    // aprobó mientras el alumno volvía, el backend responde 409 y NO deshace el
+    // cobro.
     const cancelable = Boolean(
-        pago && ['pendiente', 'en_proceso'].includes(pago.estado));
+        pago && ['iniciado', 'pendiente', 'en_proceso'].includes(pago.estado));
 
     const handleCancelar = async () => {
         setErrorCancelar('');

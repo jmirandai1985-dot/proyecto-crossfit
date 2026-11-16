@@ -7,10 +7,11 @@ de estado, no la consulta real.
     un minuto después) y no vence antes; un concepto sin expiración nunca vence.
   * Membresía y Bazar comparten el MISMO criterio (minutos): una intención de
     pago abandonada no puede bloquear al alumno ni reservar stock.
-  * `expirar_pendientes` sólo mira pagos abiertos (`pendiente`/`en_proceso`): un
-    pago `aprobado` no entra a la lista, así que no expira.
-  * La solicitud pasa a `expirada` sólo si seguía `pending`; una ya `rejected`
-    no se toca.
+  * `expirar_pendientes` mira pagos abiertos (`iniciado`/`pendiente`/`en_proceso`):
+    un pago `aprobado` no entra a la lista, así que no expira. `iniciado` es el
+    checkout que nunca tuvo ningún aviso de MP: se cierra por housekeeping.
+  * La solicitud pasa a `expirada` si seguía `iniciado` o `pending`; una ya
+    `rejected` no se toca.
   * Un pago aprobado DESPUÉS de expirar avisa a los admins (no se pierde plata).
 
 Correr (aislado):
@@ -20,8 +21,6 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-
-import pytest
 
 _BACKEND = Path(__file__).resolve().parents[1]
 if str(_BACKEND) not in sys.path:
@@ -131,8 +130,9 @@ class _FakeDBExpirar:
             return _FakeResult(1)
         if stmt.table.name == "solicitudes_planes":
             self.solicitud_valores.append(valores)
-            # Simula el `WHERE ... estado = 'pending'` del UPDATE.
-            if self._solicitud is not None and self._solicitud.estado == "pending":
+            # Simula el `WHERE ... estado IN ('iniciado', 'pending')` del UPDATE.
+            if (self._solicitud is not None
+                    and self._solicitud.estado in ("iniciado", "pending")):
                 self._solicitud.estado = valores.get("estado", self._solicitud.estado)
                 self._solicitud.comentario_admin = valores.get("comentario_admin")
                 return _FakeResult(1)
@@ -159,6 +159,21 @@ def test_solicitud_pendiente_pasados_30_min_se_marca_expirada(monkeypatch):
     assert solicitud.estado == "expirada"
     assert solicitud.comentario_admin == "Expirada: pago online no completado en 30 min"
     assert db.pago_valores and db.pago_valores[0].get("estado") == "expirado"
+
+
+def test_solicitud_iniciada_pasados_30_min_se_marca_expirada(monkeypatch):
+    """El checkout que nunca tuvo aviso de MP también se cierra (housekeeping).
+    La fila era invisible para el admin, pero no se acumula para siempre."""
+    monkeypatch.setattr(servicio_pagos, "ahora_santiago", lambda: AHORA)
+    pago = _pago(estado="iniciado", creado=AHORA - timedelta(minutes=31))
+    solicitud = _solicitud(estado="iniciado")
+    db = _FakeDBExpirar([pago], solicitud)
+
+    resultado = servicio_pagos.expirar_pendientes(db)
+
+    assert resultado["expirados"] == 1
+    assert resultado["solicitudes_expiradas"] == 1
+    assert solicitud.estado == "expirada"
 
 
 def test_antes_de_30_min_no_se_toca_nada(monkeypatch):
@@ -188,10 +203,11 @@ def test_solicitud_ya_rechazada_no_se_toca(monkeypatch):
 
 
 def test_ya_pagada_no_expira_porque_el_filtro_solo_mira_abiertos():
-    """El `abiertos` se arma con `estado IN (pendiente, en_proceso)`: un pago
-    `aprobado` (ya pagado) no entra a la lista y por lo tanto no expira."""
+    """El `abiertos` se arma con `estado IN (iniciado, pendiente, en_proceso)`:
+    un pago `aprobado` (ya pagado) no entra a la lista y por lo tanto no expira."""
     fuente = (_BACKEND / "app" / "services" / "pagos.py").read_text(encoding="utf-8")
-    assert 'Pago.estado.in_(("pendiente", "en_proceso"))' in fuente
+    assert ('Pago.estado.in_(("iniciado", "pendiente", "en_proceso"))'
+            in fuente)
 
 
 # ── Pago aprobado DESPUÉS de expirar: avisa a los admins ──────────────────────
@@ -230,6 +246,9 @@ def test_el_cron_sql_replica_los_mismos_umbrales_que_el_servicio():
     assert "interval '{MINUTOS_MEMBRESIA} minutes'" in fuente
     assert "interval '{MINUTOS_BAZAR} minutes'" in fuente
     assert "hours" not in fuente
+    # El cron también cierra los `iniciado` (checkout sin ningún aviso de MP).
+    assert "estado IN ('iniciado', 'pendiente', 'en_proceso')" in fuente
+    assert "s.estado IN ('iniciado', 'pending')" in fuente
     # El comentario que ve el admin es el MISMO de la app.
     assert "COMENTARIO_EXPIRADA = f\"Expirada: pago online no completado en " in fuente
     assert (servicio_pagos.COMENTARIO_EXPIRADA

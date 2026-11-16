@@ -32,7 +32,7 @@ _BACKEND = Path(__file__).resolve().parents[1]
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
-from app.services import pagos as servicio_pagos          # noqa: E402
+from app.services import pagos as servicio_pagos  # noqa: E402
 
 
 def _pago(concepto="membresia", estado="pendiente", referencia_id=10,
@@ -98,8 +98,9 @@ class _FakeDB:
             return _FakeResult(0)
         if tabla == "solicitudes_planes":
             self.solicitud_valores.append(valores)
-            # Simula `WHERE estado = 'pending'`.
-            if self.solicitud is not None and self.solicitud.estado == "pending":
+            # Simula `WHERE estado IN ('iniciado', 'pending')`.
+            if (self.solicitud is not None
+                    and self.solicitud.estado in ("iniciado", "pending")):
                 self.solicitud.estado = valores.get("estado", self.solicitud.estado)
                 self.solicitud.comentario_admin = valores.get("comentario_admin")
                 return _FakeResult(1)
@@ -149,6 +150,22 @@ def test_cancelar_un_pago_en_proceso_tambien_se_cancela():
 
     assert pago.estado == "cancelado"
     assert solicitud.estado == "rejected"
+
+
+def test_cancelar_un_pago_iniciado_cierra_la_solicitud_oculta():
+    """El alumno volvió ANTES de que MP mandara ningún aviso: la solicitud está
+    en `iniciado` (invisible) y el pago también. Cancelar debe cerrar las dos y
+    liberar el guard de intentos en curso."""
+    pago = _pago(estado="iniciado")
+    solicitud = _solicitud(estado="iniciado")
+    db = _FakeDB(pago, solicitud=solicitud)
+
+    resultado = servicio_pagos.cancelar_pago(db, pago)
+
+    assert resultado == {"estado": "cancelado"}
+    assert pago.estado == "cancelado"
+    assert solicitud.estado == "rejected"
+    assert solicitud.comentario_admin == servicio_pagos.COMENTARIO_CANCELADO_ALUMNO
 
 
 # ── Lo que NO se puede cancelar ───────────────────────────────────────────────
